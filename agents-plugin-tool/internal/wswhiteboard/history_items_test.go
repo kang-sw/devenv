@@ -115,13 +115,12 @@ func TestHistoryRichDetailIsContentDrivenAndStatic(t *testing.T) {
 		row := func(id int) string {
 			return regexpHistoryArticle(out, fmt.Sprintf("item-%d", id))
 		}
-		wantAll(t, row(1), `data-key="item:1"`, `class="ans"`, `>ok</div>`)
-		wantNone(t, row(1), `class="quote"`)
+		wantNone(t, row(1), `<details`, `sbody`, `class="quote"`)
 		wantAll(t, row(2), `<table`, `<pre`, `<strong>Useful HTML</strong>`, "keep details", "The second option preserves every useful detail.", `data-key="item:2"`)
 		wantNone(t, row(2), `data-opt=`, `aria-pressed=`, `role="button"`)
 		wantAll(t, row(3), `data-key="item:3"`, `class="ctx md">title-like`)
-		wantAll(t, row(4), `data-key="item:4"`, `class="ans"`, `>ok</div>`)
-		wantNone(t, row(4), `ctx md`)
+		wantNone(t, row(3), `class="ans"`, `>ok</div>`)
+		wantNone(t, row(4), `<details`, `sbody`, `ctx md`)
 	}
 }
 

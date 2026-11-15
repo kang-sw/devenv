@@ -81,10 +81,13 @@ func (d itemData) HistoryAnswerTime() string {
 	return d.AnsweredAt
 }
 
-// Keep the complete free answer in the disclosure, since its summary chip
-// is single-line and may be clipped. Picked options render fully via opts.
+// Keep substantive free answers in the disclosure, since their summary chip
+// may be clipped. Plain ok needs no duplicate; picked options render via opts.
 func (d itemData) HistoryReading() string {
 	if !d.Void() {
+		if d.PickedOption() == nil && strings.EqualFold(strings.TrimSpace(d.Answer), "ok") {
+			return ""
+		}
 		return d.Reading()
 	}
 	return ""
