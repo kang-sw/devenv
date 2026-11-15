@@ -260,6 +260,7 @@
   "js.files.root.dropped": "保存的根目录不可用，已显示会话根目录",
   "js.files.root.label": "浏览根目录",
   "js.files.root.placeholder": "文件夹的绝对路径",
+  "js.files.root.filter": "搜索工作树",
   "js.files.root.refused": "无法在此浏览该文件夹",
   "js.files.root.session": "回到会话根目录",
   "js.files.st.a": "已添加",

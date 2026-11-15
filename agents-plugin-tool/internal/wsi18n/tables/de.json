@@ -260,6 +260,7 @@
   "js.files.root.dropped": "Die gespeicherte Wurzel ist nicht verfügbar; die Sitzungswurzel wird gezeigt",
   "js.files.root.label": "Wurzel zum Durchsuchen",
   "js.files.root.placeholder": "Absoluter Ordnerpfad",
+  "js.files.root.filter": "Worktrees durchsuchen",
   "js.files.root.refused": "Dieser Ordner kann hier nicht durchsucht werden",
   "js.files.root.session": "Zurück zur Sitzungswurzel",
   "js.files.st.a": "Hinzugefügt",

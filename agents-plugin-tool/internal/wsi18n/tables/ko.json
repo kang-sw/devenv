@@ -260,6 +260,7 @@
   "js.files.root.dropped": "저장된 루트를 쓸 수 없어 세션 루트를 보여 줍니다",
   "js.files.root.label": "탐색 루트",
   "js.files.root.placeholder": "폴더의 절대 경로",
+  "js.files.root.filter": "워크트리 검색",
   "js.files.root.refused": "이 폴더는 여기서 볼 수 없습니다",
   "js.files.root.session": "세션 루트로 돌아가기",
   "js.files.st.a": "추가됨",

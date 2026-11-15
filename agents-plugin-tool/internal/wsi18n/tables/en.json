@@ -260,6 +260,7 @@
   "js.files.root.dropped": "The saved root is not available; showing the session root",
   "js.files.root.label": "Browsing root",
   "js.files.root.placeholder": "Absolute folder path",
+  "js.files.root.filter": "Search worktrees",
   "js.files.root.refused": "This folder can't be browsed here",
   "js.files.root.session": "Back to the session root",
   "js.files.st.a": "Added",

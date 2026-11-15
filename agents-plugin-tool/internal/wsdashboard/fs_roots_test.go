@@ -67,6 +67,55 @@ func TestFSRootsSessionFirstAndWorktreeFields(t *testing.T) {
 	}
 }
 
+func TestFSRootsPooledField(t *testing.T) {
+	for _, poolName := range []string{"configured-pool", filepath.Join(".ws-worktrees", "repo")} {
+		t.Run(poolName, func(t *testing.T) {
+			src := &fsRootsSource{}
+			f := startPageFixture(t, lanMode, func(o *DaemonOptions) { o.Worktrees = src })
+			local, _ := fsViewers(t, f)
+			pool := filepath.Join(t.TempDir(), poolName)
+			pooled := filepath.Join(pool, "worker")
+			detached := filepath.Join(pool, "nested", "detached")
+			outside := filepath.Join(pool+"-other", "worker")
+			for _, path := range []string{pooled, detached, outside} {
+				if err := os.MkdirAll(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			src.read = func(string, []Registration) (RepoWorktrees, error) {
+				return RepoWorktrees{Pools: []string{pool}, Worktrees: []RepoWorktree{
+					{Path: f.project, Branch: "main"},
+					{Path: pooled, Branch: "topic"},
+					{Path: outside, Branch: "outside"},
+					{Path: detached, Detached: true},
+				}}, nil
+			}
+			rec := serve(f.d, local, http.MethodGet, "/s/livesession/fs/worktrees", "")
+			var a fsRootsAnswer
+			if err := json.Unmarshal(rec.Body.Bytes(), &a); rec.Code != http.StatusOK || err != nil {
+				t.Fatalf("roots = %d %s (%v)", rec.Code, rec.Body.String(), err)
+			}
+			want := []fsRootChoice{
+				{Path: filepath.ToSlash(f.project), Branch: "main"},
+				{Path: filepath.ToSlash(pooled), Branch: "topic", Pooled: true},
+				{Path: filepath.ToSlash(outside), Branch: "outside"},
+				{Path: filepath.ToSlash(detached), Detached: true, Pooled: true},
+			}
+			if !reflect.DeepEqual(a.Roots, want) || strings.Count(rec.Body.String(), `"pooled":true`) != 2 {
+				t.Fatalf("pooled roots = %s, want %+v", rec.Body.String(), want)
+			}
+			// The session root may itself be in the pool, even if Git omits it.
+			src.read = func(string, []Registration) (RepoWorktrees, error) {
+				return RepoWorktrees{Pools: []string{filepath.Dir(f.project)}}, nil
+			}
+			rec = serve(f.d, local, http.MethodGet, "/s/livesession/fs/worktrees", "")
+			if err := json.Unmarshal(rec.Body.Bytes(), &a); err != nil || len(a.Roots) != 1 || !a.Roots[0].Pooled {
+				t.Fatalf("pooled session root = %s (%v)", rec.Body.String(), err)
+			}
+		})
+	}
+}
+
 func TestFSRootsRefuseBeforeEnumeration(t *testing.T) {
 	src := &fsRootsSource{read: func(string, []Registration) (RepoWorktrees, error) {
 		return RepoWorktrees{}, errors.New("must not enumerate")

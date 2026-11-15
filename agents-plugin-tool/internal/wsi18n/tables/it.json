@@ -260,6 +260,7 @@
   "js.files.root.dropped": "La radice salvata non è disponibile; viene mostrata la radice della sessione",
   "js.files.root.label": "Radice di navigazione",
   "js.files.root.placeholder": "Percorso assoluto della cartella",
+  "js.files.root.filter": "Cerca alberi di lavoro",
   "js.files.root.refused": "Questa cartella non può essere sfogliata qui",
   "js.files.root.session": "Torna alla radice della sessione",
   "js.files.st.a": "Aggiunto",

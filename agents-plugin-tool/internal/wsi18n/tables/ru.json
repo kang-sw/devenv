@@ -260,6 +260,7 @@
   "js.files.root.dropped": "Сохранённый корень недоступен; показан корень сеанса",
   "js.files.root.label": "Корень просмотра",
   "js.files.root.placeholder": "Абсолютный путь к папке",
+  "js.files.root.filter": "Поиск рабочих деревьев",
   "js.files.root.refused": "Эту папку здесь просмотреть нельзя",
   "js.files.root.session": "Вернуться к корню сеанса",
   "js.files.st.a": "Добавлен",
