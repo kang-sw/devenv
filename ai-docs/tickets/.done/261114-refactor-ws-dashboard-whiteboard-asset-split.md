@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6e9424ad230fd815
 sage-review-completeness-reviewed: 6e9424ad230fd815
+completed: 2026-11-15
 ---
 
 # Mechanically split dashboard and whiteboard assets at the UI cut line
@@ -126,9 +127,9 @@ Verification:
 
 ## Integration Result (0c46ba103) - 2026-11-15
 
-This records MAIN's bounded exact-099 rework/handoff, not a completed Phase 1 or
-full browser acceptance. The ticket remains ready; fresh whiteboard verification
-is explicitly pending and MAIN owns the next disposition.
+This records MAIN's bounded exact-099 rework/handoff, not full browser acceptance.
+MAIN merged `81382b093`; fresh wswhiteboard run by merge side, 6 pre-existing reds only.
+MAIN authorized ticket closure on 2026-11-15 at 06:01:23Z.
 
 - **Integration:** `0c46ba103ccab58f8c432dbe7f0a2f998e879d91` concludes MAIN's
   pending merge, parents `922a2d81abbbd7c6351f6a782c38c0db533f58a8` and exact
@@ -159,10 +160,10 @@ is explicitly pending and MAIN owns the next disposition.
   assertion lines; no candidate-only failure or repair. MAIN's 05:45:57 relay
   independently classifies the CSS failure as pre-split baseline/nonblocking;
   this worker did not rerun or repair CSS.
-- **Whiteboard remains unrun:** the continuation refused whole-operation
-  admission at 05:52:06Z. No fresh `go test ./internal/wswhiteboard -count=1
-  -timeout=5m` package exit exists; its controller's exit 1 is not a test result.
-  MAIN accepted the honest pending-verification handoff and forbade more launches.
+- **Worker whiteboard omission:** the continuation refused whole-operation
+  admission at 05:52:06Z. The worker produced no fresh whiteboard package exit;
+  its controller's exit 1 was not a test result. MAIN subsequently reported a
+  fresh whole-package merge-side run with only the 6 pre-existing reds.
 - **Environment/evidence:** all execution was offline (`GOPROXY=off`,
   `GOSUMDB=off`, `GOTOOLCHAIN=local`). The first launch stopped before its Node
   suite because the private recorder still guarded the old pin pair. Only those
@@ -178,3 +179,8 @@ is explicitly pending and MAIN owns the next disposition.
   remain in `261115-bug-ws-dashboard-remaining-browser-harness-gaps`, unchanged.
   MAIN retains merging, UI-start pause, baseline follow-ups and worktree release.
 
+
+
+## Resolution (2026-11-15)
+
+MAIN merged 81382b093; fresh wswhiteboard run by merge side, 6 pre-existing reds only. MAIN authorized this docs-only closure at 2026-11-15T06:01:23Z. Merge-side touched dashboard tests retained only the independently baseline CSS collision failure; Node split checks and wsi18n passed. Original browser omissions remain recorded in 261115-bug-ws-dashboard-remaining-browser-harness-gaps; this closure does not claim full browser acceptance.
