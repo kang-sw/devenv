@@ -564,6 +564,105 @@ SSH, daemon operation, push or merge is authorized. UI acceptance and the worker
 ceiling fixtures are deferred, not passing evidence. The ticket remains `ready/`
 without a whole-Phase 2 Result; independent lite review precedes head handoff.
 
+#### Edition (0cb28bb9a) - 2026-11-15
+
+**Phase 2a server contract and scoped verification — UI deferred to Claude mockup pass.**
+
+The authorized root-lead slice landed through `0cb28bb9a`, following the private
+selection store in `fc40c36d9` and launch/control spine in `3ac89f37c`.
+**worker current-parent ceiling deferred pending (1177)** remains in force;
+this records partial delivery only, not a Phase 2 Result or permission to resume
+worker application. Independent review and final handoff evidence follow.
+
+Stable server contract for the Claude-owned UI pass:
+
+- `GET /support/choices` adds optional per-harness `permission_levels` with the
+  ordered enum only for registered supported lead/settings selection paths.
+  Existing `lead`, `available` and native `permission_modes` stay separate.
+  This is not worker support; worker State omits all three common fields.
+- `POST /agents/leads/permission` requires `root`, `harness` and a nonempty
+  `permission_level`. Optional existing launch choices are `model`, `effort`
+  and `plugin_isolation`. Explicit `full` also requires
+  `permission_full_ack:true`. It returns HTTP 201 with ordinary State.
+- `POST /agents/<id>/settings/permission` requires `permission_level`, takes
+  optional `model`, `effort` and `permission_full_ack`, and returns HTTP 200
+  with State. Validation precedes mutation; accepted selection/settings run
+  in one existing conversation-loop action. Worker selection is refused
+  without mutation. No worker creation route is added.
+- Both selection routes require the existing trusted local/own-Origin gate:
+  nonlocal viewers receive 404 and local clients without own Origin receive
+  403. Only that server control owner supplies user authority; an
+  acknowledgement boolean is not authority. Missing/invalid level, missing
+  full acknowledgement, null/nonboolean acknowledgement, unknown fields and
+  invalid model/effort receive 400 before writes. New variants deliberately
+  do not combine `permission_mode` with common intent, avoiding ambiguous
+  competing selectors. Legacy native URLs remain the native-mode interface.
+- Selection-bearing requests on legacy creation/settings URLs receive 400
+  instead of silently losing intent. Legacy calls with no common fields retain
+  their defaults and native behavior. On a session with an explicit common
+  selection, native changes cannot bypass user-only raises; an explicit raise
+  to full must use the acknowledged selection route. The public Runner
+  `SetPermissionLevel` seam permits authorized lowering only. No MCP argument
+  or tool schema is changed in this slice.
+- Lead State adds computed `permission_level`, `permission_source` (`explicit`
+  or `legacy-derived`) and `permission_enforcement`. Missing native observation
+  is `advisory`, never `enforced`; observed Claude `plan` makes read-only at
+  most `partial`. Pi remains `advisory` with no fabricated native mode.
+  Explicit Claude mappings are `plan`, `acceptEdits`, `bypassPermissions`;
+  Pi retains its native setup. Omission keeps Claude `auto` and writes no
+  selection. Each actual root-lead launch/reattach reads current selection
+  through existing process/key ownership; no parent ceiling is stored.
+- The one-line nudge is emitted through the existing Runner diagnostic log at
+  launch and when Claude reports a changed mode. Worker starts receive a
+  diagnostic about their unchanged legacy loadout and deferred common posture;
+  an unclassified legacy surface is labelled unresolved, not a granted level.
+  Worker tools, native modes, controls, capability checks and lineage are
+  unchanged. No user-visible UI warning or sandbox proof is claimed here.
+
+UI obligations remain unimplemented: obtain fresh positive per-harness support
+before a selection-bearing request and after reconnect/server replacement;
+require an available lead-capable harness; keep native controls usable when
+common support is absent; send explicit intent only to the selection variants;
+never retry a refused selection on a legacy URL. Warn before full selection,
+allow cancellation without a request, and set acknowledgement only on confirmed
+submission. Present intent, native observation and conservative enforcement
+separately; absent observation is pending/unknown evidence. Do not infer worker
+support from lead choices. The server-swap fixture models a caller against the
+exact old router; it does not establish production UI/client behavior.
+
+Compatibility evidence is scoped **T0**: the selection writer/reader in
+`internal/wsagent/permission_store.go` replaces only private `permission.json`,
+retains unknown members and rejects corrupt existing selections. The pinned
+`90eacda7e4956aded76cfc092d20c41e76d2cc1a` Record, registration and label bodies
+are compared byte-for-byte to Git before isolated execution. Fourteen old-write
+checkpoints retain exact selection bytes; the current reader recovers the
+lowered value and a later authorized update retains unknown members. CLI homes
+without `agent.json`, hosted retention and expired-directory deletion are
+covered. Exact old HTTP dispatch returns the documented 405/404 statuses with
+zero creation/settings calls and no session files after valid JSON/trusted-gate
+prerequisites. Optional State/choices members do not change stored typed shapes;
+legacy native-call and extension-mode anchors pass. These fixtures do not prove
+old-binary permission enforcement, Windows runtime behavior or arbitrary-version
+compatibility. Pinned writer fixtures use Unix replacement helpers and leave
+optional current Profile/TurnResult aliases unpopulated.
+
+Verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^TestPermission'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -v -count=1 -run '^(TestClaudeArgsAllOffByDefault|TestPiArgsAllOffByDefault|TestLeadControlRoutesTakeTheTrustedGate|TestLeadControlRoutesThroughTheDaemonsGate|TestLeadResumesInTheModeTheHarnessReports|TestPiHeldParentSnapshotNeverInventedOnReattach|TestRecordUnknownMembersRoundTrip|TestRegisteredPermissionModeCreateLeadAdmission|TestRegisteredPermissionModeSetAdmission)$'
+```
+
+Both nonempty selectors passed (4.632 s and 0.836 s respectively); no baseline
+failure appeared in these runs. Earlier leaf fixture corrections concerned a
+whitespace-sensitive JSON assertion, an absent worker profile and a missing
+fake ws-mcp attachment, not relaxed runtime expectations. The initial runtime
+commit was refused solely for an Edition heading suffix; the heading format
+was corrected and `tickets.verify` passed before commit. No broad suite,
+provider/harness launch, UI acceptance, network, SSH, daemon operation, push or
+merge ran. The existing phase plans, owner decisions and prior Results remain
+unchanged.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch
