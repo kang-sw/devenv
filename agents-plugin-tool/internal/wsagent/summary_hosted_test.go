@@ -76,12 +76,18 @@ func hostedSummaryRecords(t *testing.T, h *leadHarness, id string) []wslive.Ring
 }
 
 func TestSummaryHostedFinalPrecedesNativeEndAndQuietReplayNeverWrites(t *testing.T) {
-	h := newLeadHarness(t).start()
+	host := &summarySnapshotHost{}
+	h := newLeadHarness(t)
+	h.opts.LiveHost = host
+	h.start()
 	id := h.lead(BackendPi, LeadOptions{}).ID
 	h.send(id, "one")
 	holder := h.holder(id)
 	h.holders.out(holder, `{"type":"agent_start"}`, hostedCapabilitiesLine(t, []string{wslive.ReasoningSummaryCapability}), hostedSummaryLine(t, hostedSummaryFixture()))
-	eventually(t, "live summary", func() bool { return h.snapshot(id).Lead.ReasoningSummary != nil })
+	eventually(t, "live summary", func() bool {
+		snap, ok := host.snapshot(wsdashboard.SessionDir(h.dir, id))
+		return ok && snap.Lead.ReasoningSummary != nil
+	})
 	for _, r := range h.ring(id) {
 		if r.SummaryHistory != nil {
 			t.Fatal("widget committed a turn before native settlement")

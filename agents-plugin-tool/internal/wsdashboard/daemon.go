@@ -467,6 +467,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	// The runner takes its change hook before the first request can reach
 	// it.
 	if d.agents != nil {
+		if lh, ok := d.agents.(AgentLiveHost); ok {
+			lh.SetLiveHost(d)
+		}
 		if eh, ok := d.agents.(AgentEndpointHost); ok {
 			eh.SetEndpoint(endpointURL(d.endpoint, ""))
 		}

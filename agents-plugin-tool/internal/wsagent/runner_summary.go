@@ -52,6 +52,13 @@ func (w *liveWriter) withOwner(write func() error) error {
 		}
 		defer release()
 	}
+	if owner, ok := w.slot.(wsdashboard.LiveSlotOwner); ok {
+		release, owned := owner.LockOwner()
+		if !owned {
+			return fmt.Errorf("hosted live snapshot slot ownership changed")
+		}
+		defer release()
+	}
 	return write()
 }
 

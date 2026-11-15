@@ -37,6 +37,12 @@ type AgentEndpointHost interface {
 	SetEndpoint(baseURL string)
 }
 
+// AgentLiveHost is an optional AgentHost whose native lead snapshots are
+// delivered in RAM. The daemon binds it before Start; no wire protocol changes.
+type AgentLiveHost interface {
+	SetLiveHost(LiveHost)
+}
+
 // AgentRoutePrefix is where the daemon mounts AgentHost.Handler.
 const AgentRoutePrefix = "/agents"
 

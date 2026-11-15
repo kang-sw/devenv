@@ -51,8 +51,16 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
   summary prefix, labeled with the actual aborted/failed status (or an actually
   exposed incomplete status), never a fabricated completion. Never synthesize
   missing summary text.
-- Compatibility tier: **T0 additive**, redesigned under MAIN's 2026-11-15
-  04:44:47 disposition; no T2 behavior or new owner question is selected.
+- Compatibility target: **T0 additive**. MAIN's 04:44:47 capability remedy
+  remains selected; owner 957/technical 961 supersede the old review's tier
+  vocabulary, not the legacy-preservation fix. Apply the directional manual at
+  `cd0eeda3b281522d4b40febdeef3f3119529fcb0`: T0 ignores additions and preserves
+  writes; T1 is display-only unknown/default behavior without writes; T2 needs
+  an actual old overwrite followed by proven new-version reconstruction from
+  retained raw/append-only data. T0–T2 permit patches. T3 blocks the old side
+  through a real connection/read/write boundary and needs a minor plus explicit
+  approval; T4 cannot read old history and never ships without migration that
+  lowers its effect. No T3/T4 mechanism is selected here.
   The new native Pi bundle explicitly advertises the optional hosted status
   field `capabilities: ["reasoning_summary_v1"]`, only on supported host
   VERSION 1.5.2. This process-local opt-in, never the presence of
@@ -61,7 +69,22 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
   They retain exactly the old hosted reason values and answer-check suppression.
   The hello/protocol version, event kinds, tools and legacy terminal path stay
   unchanged. If this additive gating cannot carry the change, stop rather than
-  introduce breaking semantics.
+  introduce a protocol/schema boundary.
+- MAIN's technical call **967** selects RAM/live projection only for optional
+  `reasoningSummary` until the real immutable `summaryHistory` turn commit.
+  **Every mutable on-disk snapshot excludes the live field**, including both
+  MCP live/finish writes and the native runner's record snapshot writer. The
+  native runner uses the existing in-process HostedSlot projection for display;
+  ordinary in-memory JSON stays complete. No hello/protocol/snapshot schema or
+  `schema_version` change, sidecar checkpoint, or volatile-cache policy exception
+  is introduced. An old binary therefore never encounters this new live field
+  on disk and has nothing new to drop or rewrite.
+- Explicit 967 consequence: daemon restart/swap **mid-turn blanks the in-flight
+  live summary until the next admissible summary event**. It is not reconstructed
+  from a mutable snapshot or from an unrelated completed turn. Committed history
+  remains available from its immutable ring record. The earlier permission/test
+  for an old typed snapshot round-trip dropping the live field is superseded,
+  not relabeled T2. Do not claim ring recovery restores that live field.
 - Build-tool provenance: the repair regenerated the bundle with an existing
   read-only cached esbuild **0.28.1**, because the bounded cached lookup did not
   locate pinned 0.28.2 under the no-install boundary. Runtime/SDK pins, lockfile,
@@ -302,9 +325,11 @@ recreate a closed turn. Quiet replay remains non-writing. Old readers ignore
 optional data on a legitimate turn; old writers append different immutable
 files without stripping prior bytes. Preserve 50-record live paging, 2000-file
 disk pruning and cursors. A pruned/absent record never authorizes resurrection.
-Snapshot reconstruction may drop unknown live data: snapshots are not retained
-summary authority, and overlapping todo audit/compatibility work is not assumed
-implemented.
+Decision 967 excludes optional live data from every mutable disk snapshot;
+only RAM/live delivery carries it before natural commit. Restart/swap can blank
+that in-flight projection until a new event, never by recovering it from history.
+Immutable ring records alone are retained-summary authority, and overlapping todo
+audit/compatibility work is not assumed implemented.
 
 ## Approved UI Reference
 
@@ -662,8 +687,11 @@ Required verification before claiming implementation success:
 - Read a new summary-bearing natural turn with an old reader, append using an
   old writer, and compare original bytes before a new reader recovers it.
   Exercise 50-record paging/2000-file pruning, no pruned-record resurrection,
-  and older snapshot reconstruction dropping live data without changing ring
-  authority. Static tolerant parsing alone is insufficient T0 proof.
+  and both production snapshot writers never emitting the live field on disk,
+  while keeping it in RAM/live delivery. Reopen must start without that volatile
+  field; the next summary event may repopulate it. Do not round-trip a new live
+  field through an old typed snapshot writer or call ring history its recovery.
+  Static tolerant parsing alone is insufficient T0 proof.
 - Capture actual conversation UI at 1280 and 360 and compare side by side with
   the unchanged approved screenshots: live, ordinary fallback and retained
   below-answer collapsed/expanded summary. Add no subagent surface or inferred

@@ -153,6 +153,9 @@ type Options struct {
 	// this daemon's exit cut off. Closing the conversation reports nothing.
 	// It runs on the conversation's loop and must not block on the runner.
 	Report func(TurnReport)
+	// LiveHost is the daemon's in-memory snapshot hand-off. The daemon sets
+	// it before Start; nil keeps the legacy file-only projection.
+	LiveHost wsdashboard.LiveHost
 	// ChildCheck, when not nil, is asked before each call of the token
 	// route (children.go): an error refuses the call with its text (no
 	// usable Pi, say).
@@ -244,6 +247,9 @@ func NewRunner(opts Options) *Runner {
 	}
 	return r
 }
+
+// SetLiveHost binds the daemon's RAM projection before Start.
+func (r *Runner) SetLiveHost(host wsdashboard.LiveHost) { r.opts.LiveHost = host }
 
 // Start loads every conversation record from the session registry, with no
 // process (lazy resume), and starts serving them. notify is called after
@@ -466,6 +472,11 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	// starts for it.
 	foreign := c.foreignRow
 	if !foreign {
+		if rec.Lead && r.opts.LiveHost != nil {
+			if slot, ok := r.opts.LiveHost.OpenHostedSlot(dir); ok {
+				c.live.slot = slot
+			}
+		}
 		c.live.writeSnapshot()
 	}
 	if rec.HolderID != "" && !foreign && (rec.Lead || rec.Backend == BackendPi) {
@@ -1465,6 +1476,7 @@ func (c *conv) steer() {
 func (c *conv) loop() {
 	defer c.r.wg.Done()
 	defer close(c.done)
+	defer c.live.closeSlot()
 	beat := time.NewTicker(c.r.opts.heartbeat)
 	defer beat.Stop()
 	// Settle the predecessor before inbox signals (including nested reports)

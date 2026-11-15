@@ -347,6 +347,7 @@ type liveWriter struct {
 	beforeSnapshot func()
 	owner          func() (func(), bool)
 	wake           func()
+	slot           wsdashboard.HostedSlot
 	// Only an observed holder agent_start supplies this real identity.
 	summarySource     string
 	summaryNaturalEnd bool
@@ -467,12 +468,36 @@ func (w *liveWriter) writeSnapshot() {
 	if w.beforeSnapshot != nil {
 		w.beforeSnapshot()
 	}
-	raw, err := json.Marshal(w.st.Snapshot(w.now().UnixMilli()))
+	snap := w.st.Snapshot(w.now().UnixMilli())
+	w.publishSnapshot(snap)
+	raw, err := json.Marshal(snap.ForDisk())
 	if err == nil {
 		err = w.withOwner(func() error { return writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644) })
 	}
 	if err != nil {
 		fmt.Fprintf(w.log, "agent %s: snapshot write: %v\n", w.st.ReplyID(), err)
+	}
+}
+
+// publishSnapshot retains the full projection only in the daemon's live slot.
+// Hold the registration/conversation fence, not the slot mutex: Publish owns it.
+func (w *liveWriter) publishSnapshot(snap wslive.Snapshot) {
+	if w.slot == nil {
+		return
+	}
+	if w.owner != nil {
+		release, ok := w.owner()
+		if !ok {
+			return
+		}
+		defer release()
+	}
+	w.slot.Publish(snap)
+}
+
+func (w *liveWriter) closeSlot() {
+	if w.slot != nil {
+		w.slot.Close()
 	}
 }
 
