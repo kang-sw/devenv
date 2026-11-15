@@ -30,14 +30,21 @@ authority only; its narrative and the permission brief supply supporting evidenc
 
 ## Execution Boundary (2026-11-15)
 
-Phase 1 documentation is recorded below. MAIN **2026-11-15 09:23:25 and
-09:23:59** withdrew its 09:22:10 go-now instruction: Decision 19, EXEC4 option
-(a), holds Decision 14 / Phase 2 admission work until CSI
-(`261114-refactor-ws-common-session-interface`) Phase 1 merges. Then refresh
-this lane onto its admission sites; do not create a parallel admission rewrite.
-The briefly dispatched Phase 2 worker stopped before any runtime/admission edit.
-Permission Phase 2 remains the prerequisite for worker-profile Phase 1 and
-agent-card dispatch. Phases 3–5 remain outside the current authorization.
+MAIN **2026-11-15 16:45:17Z** authorizes **Phase 1 documentation only** on
+this retained lane. CSI (`261114-refactor-ws-common-session-interface`)
+Phase 1 has merged; the source audit below refreshes the contract onto its
+registry/admission sites. Permission Phase 2 runtime now waits for **CSI Phase 2
+to land and a new MAIN dispatch**. CSI adoption supplies implementation seams,
+not permission policy or execution authority. Leave this ticket in `ready/`.
+
+This dispatch supersedes the earlier scheduling boundary in Decision 14:
+MAIN 09:23:25 / 09:23:59 withdrew the brief 09:22:10 go-now instruction and
+held admission work for CSI Phase 1. The stopped worker made no runtime edit.
+The owner decisions below remain unchanged. Permission Phase 2 remains the
+prerequisite for worker-profile Phase 1 and agent-card dispatch; Phases 2–5
+are outside this documentation run. Only this ticket may change; source reads,
+document assertions, ticket validation and independent lite review are the
+verification scope.
 
 ## Decisions
 
@@ -228,12 +235,19 @@ behavior from a future implementation target, not completed compatibility tests.
 
 ## Prior Art and Source Evidence
 
-- `internal/wsagent/profile.go:74–135,292–305`: capability defaults are off;
+Current-source references in this section and the translation table are under
+`agents-plugin-tool/`, audited at **b59c76212329c0d613769191e804ae5eb86f8117**.
+The directional matrix in Decisions instead retains its historical
+**90eacda7e4956aded76cfc092d20c41e76d2cc1a** snapshot. Neither source inspection
+nor an existing test body is an executed permission-feature fixture.
+
+- `internal/wsagent/profile.go:76–138,293–315`: capability defaults are off;
   lead profiles load the user's setup and exclude capability fields;
-  `permission_mode` is native Claude state, absent mode defaults to `auto`.
-  `runner.go:630–645` clears it for non-Claude leads. These are current facts,
-  not a selected common-level default or a `Pi = full` policy.
-- `internal/wsagent/claude.go:102–130,134–210,264–318`: leads pass native mode
+  `permission_mode` is native state, absent mode defaults to `auto`.
+  `runner.go:683–698` now clears it when the resolved backend registration has
+  no native permission modes (production Pi), not by a fixed non-Claude check.
+  These are current facts, not a common-level default or a `Pi = full` policy.
+- `internal/wsagent/claude.go:102–133,135–210,267–321`: leads pass native mode
   and stdio prompts; workers isolate settings and use `dontAsk` plus tool/MCP
   allowlists, with init validation. This proves current launch wiring, not
   that `plan = read-only` or `acceptEdits = workdir-write` with filesystem
@@ -247,14 +261,15 @@ behavior from a future implementation target, not completed compatibility tests.
 - `agents-plugin-pi/src/execute-gateway.ts:1–103`: the ws-built approval flow
   distinguishes gated execute-workers from general workers and also has
   ungated lead execution paths. It is not universal Pi sandbox enforcement.
-- `internal/wsagent/runner.go:2126–2127` passes `WS_MCP_ALLOWED_TOOLS`;
-  `internal/mcp/server.go:714–717,5685–5693` enforces tool admission. Existing
-  capability narrowing compares tools and exact MCP server definitions
-  (`internal/wsagent/profile.go:433–459`); it does not compare permission levels.
-- `internal/wsagent/http.go:127–146,199–207` retains trusted local/own-origin
-  controls; `runner.go:926–944` currently changes native modes only for Claude
-  leads. A trusted-route check is not proof that an arbitrary request came
-  from a human; the selected warning/gate contract does not claim otherwise.
+- `internal/wsagent/runner.go:2218–2219` passes `WS_MCP_ALLOWED_TOOLS`;
+  `internal/mcp/server.go:730–732,5665–5667,5689–5696` enforces tool admission.
+  Existing capability narrowing compares tools and exact MCP server definitions
+  (`internal/wsagent/profile.go:445–466`); it does not compare permission levels.
+- `internal/wsagent/http.go:127–146,205–214` retains trusted local/own-origin
+  controls; `runner.go:984–1005` accepts native mode changes only for leads
+  whose registration declares modes (production Claude). A trusted-route check
+  is not proof that an arbitrary request came from a human; the selected
+  warning/gate contract does not claim otherwise.
 - `261114-refactor-ws-common-session-interface`, Decisions 2/7 and Phase 1:
   labels are not permission proofs; backend descriptors belong at the current
   registry boundary; do not map Claude strings onto another harness by
@@ -263,38 +278,99 @@ behavior from a future implementation target, not completed compatibility tests.
 ### Launch, recovery and UI seams
 
 - `Backend.Start` / `StartSpec` / `LeadSpec` (`internal/wsagent/backend.go:21–82`),
-  `Runner.backend` (`runner.go:743–757`) and computed State (`runner.go:1053–1146`)
-  are the implementation owners. Native `permission_mode` can change from
-  accepted harness reports (`runner.go:2695–2705`); it is not immutable intent.
-- The label sidecar pattern is `internal/wsdashboard/label_route.go:21–31,75–105`.
-  Permission state shares the session directory's existing lifetime. Reopen
-  retains it (`internal/wsagent/handoff.go:231–288`); pruning can delete an
-  expired session directory (`internal/wsdashboard/registry.go:331–385`).
-  Stop/Restart and native start paths are `runner.go:875–897,2067–2077,2202–2244`.
-  Reattach uses a capability snapshot (`runner.go:2339–2350`), not a stored
-  permission ceiling; fixtures cover changed/missing snapshots
-  (`internal/wsagent/profile_spawn_test.go:202–293`).
+  registry-backed `Runner.backend` / `startBackend` (`runner.go:801–816`) and
+  computed State (`runner.go:1115–1209`) remain the implementation owners.
+  Native `permission_mode` can change from accepted harness reports
+  (`runner.go:2795–2806`); it is not immutable intent. Current `LeadOptions`
+  (`runner.go:566–575`), `SpawnSpec` (`spawn.go:66–90`) and `StartSpec` have no
+  common permission input yet.
+- The label sidecar pattern is `internal/wsdashboard/label_route.go:21–31,75–106`.
+  The planned permission sidecar shares the session directory's lifetime.
+  Existing Reopen rewrites only the record and keeps that directory
+  (`internal/wsagent/handoff.go:231–288`); permission retention remains a
+  fixture target, not implemented reopen behavior. Pruning can delete an
+  expired session directory (`internal/wsdashboard/registry.go:331–388`),
+  except the runner-owned agent and handed-off Pi conversation cases its body preserves.
+  Stop/Restart are `runner.go:936–955`; restart delegates to `startProcess`
+  (`runner_recovery.go:224–238`), which dispatches to `startWorker`/`startLead`
+  (`runner.go:2138–2159,2294–2334`). Reattach uses a capability snapshot
+  (`runner.go:2431–2457`), not a permission ceiling; fixtures cover
+  changed/missing snapshots (`internal/wsagent/profile_spawn_test.go:202–293`).
 - UI reuse is `leadRows` / `rpLeadMake`
-  (`internal/wsdashboard/assets/dashboard-leads.js:73–110,120–184`) and
-  `WsRail.leadBody` (`internal/wsdashboard/assets/rail.js:609–619`).
+  (`internal/wsdashboard/assets/dashboard-leads.js:85–134,142–220`) and
+  `WsRail.leadBody` (`internal/wsdashboard/assets/rail.js:653–663`).
   Extend choices/State rather than adding another launch owner. Worker posture,
   `owning_lead`, `intro`, `worker.bootstrap`, default `/agents/workers`, explicit
   `/agents/workers/permission` and `/support/choices.worker` remain sibling-owned
   Phase 1 consumers after permission Phase 2, not producers needed by it.
 
+### CSI handoff source audit (2026-11-15)
+
+**VERIFIED — snapshot and ancestry.** Retained branch
+`impl/develop/foyer-cause-shore` was refreshed by
+`55ef92679a2d7c0edc510f224bc146056d6dbbd0`, whose parents are documentation head
+`b07aad292dedb86266d69bc3bf581f653bfa2fb5` and source snapshot
+`b59c76212329c0d613769191e804ae5eb86f8117`. The latter includes both
+`59a283670` and CSI Phase 1 merge `41ffdd22e`; only this permission ticket
+differs between that source snapshot and the refreshed head. No further sync
+is part of this run. EXEC4's map reported against `1cead26bf` was a discovery
+hint; the sites below were read at the actual snapshot instead.
+
+Paths in this table are relative to `agents-plugin-tool/`. **Contract target**
+means later Phase 2 work, not code delivered by CSI or this audit.
+
+| VERIFIED current site | Current fact and permission consumer boundary |
+|---|---|
+| `internal/wsagent/registration.go:10–28`; `internal/wsagent/runner.go:109–115`; `cmd/ws-mcp/dashboard.go:263–268` | Runtime-only `BackendRegistration{Backend,LeadProfile,PermissionModes}` lives in `wsagent.Options.Backends` (not a type named `RunnerOptions`). `BackendRegistrations()` copies metadata; production registers only Claude/Pi, with native modes only for Claude. **Contract target:** reuse this registry and `Backend.Start`, not a parallel descriptor/admission map. Native `PermissionModes` is not common `permission_levels` support or enforcement evidence. |
+| `internal/wsagent/registration.go:54–84`; `internal/mcp/agent_backends.go:7–14`; `internal/wsagent/profile.go:219–247,293–315,470–500` | Profile validation/schema consume the runner registry; standalone readers retain builtin fallback. Historical Pi reads still accept `LeadPermissionModes`, while Pi launch ignores them. Keep the strict stored Profile unchanged; transient common input/sidecar remain separate targets. |
+| `internal/wsagent/builtin.go:64–76`; `internal/wsagent/runner.go:596–657`; `internal/wsagent/handoff.go:81–102`; `internal/wsagent/registration.go:114–117`; `internal/wsdashboard/session_hire.go:157–161` | `LeadProfileFor` supplies lead eligibility to create, takeover and `AdmitsLead`/hiring. `create` resolves/validates the actual override backend before minting. Its validation uses `Profile.validate`'s registered lead check, not a second permission predicate. **Contract target:** add common admission through these owners without altering identity, hiring authority or worker-sibling ownership. |
+| `internal/wsagent/runner.go:606–614,683–698,984–1005,3323–3349`; `internal/wsagent/backend.go:182–237`; `internal/wsagent/registration.go:95–111` | Native-mode admission uses the registry and retains Pi's historical input validation. Empty registered modes clear the launch mode and refuse runtime mode control. Optional controls remain per process; unsupported settings retain stop/lazy-resume fallback. Typed categories wrap existing error text/status. **Contract target:** common user-only raises and durable lowering must also cover native-mode changes, without inventing Pi native modes or replacing existing control/failure semantics. |
+| `internal/wsagent/support.go:218–229,248–252,415–443,650–651`; `internal/wsdashboard/assets/dashboard-leads.js:42–67,85–134,142–220`; `internal/wsdashboard/assets/rail.js:653–663` | Choices add optional `lead` and native `permission_modes`; UI consumes them with historical Claude/Pi fallback. `leadChoices` currently caches choices. None is a positive common-level signal. **Contract target:** add separate `permission_levels`, fresh preflight after replacement/reconnect and selection-only URLs, while preserving these legacy controls. Worker routes/dialog composition remain sibling-owned. |
+| `internal/mcp/session_context.go:9–98` | `sessionAccess{mode}` / `resolveSession` share adoption, not process launch or permission state. Parent/root/scope come from key-store lookup; display nesting and conversation `ParentRef` are not authority selectors. **Contract target:** resolve actual current authority-parent permission without storing a ceiling or treating reporting/grouping as authority. The parent-to-current-selection lookup and missing-parent errors are unimplemented fixture obligations, not guarantees of this resolver. |
+| `internal/mcp/server.go:2296–2307,2399–2407,2445–2452`; `internal/mcp/workflow_manual.go:328–330,427–440`; `internal/mcp/playbook_tools.go:1012–1029` | Lookup, hosted bootstrap, re-login, manual adoption and child mint use the core. Rendering/validation, owner rebinding and delivery remain at their existing callers. A future card bootstrap wraps this core; no card store, selector, key scope or input owner is introduced here. CSI Phase 2 moves remaining consumers but cannot authorize permission runtime work. |
+
+**VERIFIED historical provenance; INFERRED consequences, not executed fixtures.**
+Re-read the full pinned router dispatch and the Record, registration and label
+writer bodies at `90eacda7e4956aded76cfc092d20c41e76d2cc1a`, separately from
+current source. The directional matrix's old native-mode/admission coordinates
+remain historical, not current edit sites. Its Record read/write shorthand
+`record.go:278–301` stops before the final write: the complete functions are
+`279–292` and `294–303`, with the destination at `302`. The pinned fixture table
+below already uses `279–302`; retain the closing line too when copying bodies.
+
+- Record uses `recordPath` (`internal/wsagent/record.go:258`) and private atomic
+  replacement (`307–336`); registration writes/removes only its own file
+  (`internal/wsdashboard/registry.go:282–329`, with `SessionDir:229–231`).
+  Label set/clear is `internal/wsdashboard/label_route.go:93–106`, using
+  `internal/wsdashboard/endpoint.go:97–123` for private replacement. These
+  destinations leave a sibling selection file untouched by source inspection;
+  exact byte retention, new-reader reopen and unknown-member updates remain
+  the unexecuted fixtures below, including CLI homes without an agent record.
+- Pinned POST dispatch (`internal/wsagent/http.go:112–231`) implies 405 for
+  `/agents/leads/permission` and `/agents/workers`, and 404 for
+  `/agents/<id>/settings/permission` and `/agents/workers/permission`, after
+  JSON-body and trusted-gate prerequisites pass. Each unsupported branch ends
+  before creation/settings calls. This is source reasoning, not an HTTP run.
+- Pinned/current pruning (`internal/wsdashboard/registry.go:347–388`) removes
+  an expired ordinary directory wholesale, while preserving its runner-owned
+  agent-record and terminal-Pi exceptions. Sidecar retention ends with deletion;
+  old launch enforcement does not follow from byte retention. Existing tests
+  named below are regression anchors, not new sidecar or sandbox coverage.
+
 ### Claude/Pi translation contract
 
-This table is a technical selection, not proof that flags provide a sandbox.
+**Contract target, unimplemented at the audited snapshot.** This table is a
+technical selection, not proof that flags provide a sandbox.
 `full` never adds a tool, server, plugin or ws capability to a fixed worker.
 Build an effective launch copy rather than writing a narrowed loadout back to
 Profile config. Preserve existing unexpected-tool/server/plugin checks.
 
 | Path | Explicit `read-only` | Explicit `workdir-write` | Explicit user `full` | Actual observation / conservative quality |
 |---|---|---|---|---|
-| Claude lead | Native `plan`; keep the existing native integration/approval owner. | Native `acceptEdits`; no inferred root/network sandbox. | Native `bypassPermissions`, only after trusted user confirmation. | Inspect init/reported mode via existing `active_mode` events (`claude.go:232–237,849,1040`; `backend.go:297–300`). Read-only is at most `partial`; workdir-write and full are `advisory` without broader enforcement evidence. If actual mode differs or is absent, report it and nudge; do not kill solely for the common-intent mismatch. |
-| Claude worker | Keep `dontAsk`; intersect native Tools/rules with existing Read/Grep/Glob entries, recompute `--tools`/`--allowedTools` from that copy. Keep ws_tools/servers within existing capabilities. | Keep fixed Tools/rules, ws_tools/servers and `dontAsk`. | Same fixed capability loadout and `dontAsk`; no bypass or extra tool. | Existing init verifies actual tool/server/plugin surface and `dontAsk` (`claude.go:264–318`). Read-only is `partial` when read-family narrowing is observed; allowed MCP/plugin behavior is not proven read-only. Workdir-write/full are `advisory`, not root-confined. Existing capability mismatch refusal stays. |
-| Pi lead | Preserve the existing lead setup; advise read-only intent rather than claim global tool mediation. | Preserve setup; advise working-directory intent, no native sandbox flag. | Preserve setup; no invented native permission mode. | `piLeadArgs` has no permission control (`pi.go:345–367`); ws extension has ungated paths (`execute-gateway.ts:1–103`). All three are `advisory`; inspect available actual loadout evidence without treating visibility as confinement. |
-| Pi worker | Intersect native Tools with existing read/grep/find/ls entries; keep ws_tools/servers within capability allowlists. | Keep fixed capability loadout; no new sandbox/network promise. | Same fixed capability loadout; never add native bash/edit/write or MCP access absent from the profile. | Compare actual declared tools/updates using existing checks (`pi.go:156–207,255–290`). Read-only is `partial` when narrowed tools are observed, because MCP/extension effects remain outside that proof. Workdir-write/full are `advisory`. Pi unenforceability always launches with the nudge. |
+| Claude lead | Native `plan`; keep the existing native integration/approval owner. | Native `acceptEdits`; no inferred root/network sandbox. | Native `bypassPermissions`, only after trusted user confirmation. | Inspect init/reported mode via existing `active_mode` events (`internal/wsagent/claude.go:236–241,873–875,1061–1071`; `internal/wsagent/backend.go:297–300`). Read-only is at most `partial`; workdir-write and full are `advisory` without broader enforcement evidence. If actual mode differs or is absent, report it and nudge; do not kill solely for the common-intent mismatch. |
+| Claude worker | Keep `dontAsk`; intersect native Tools/rules with existing Read/Grep/Glob entries, recompute `--tools`/`--allowedTools` from that copy. Keep ws_tools/servers within existing capabilities. | Keep fixed Tools/rules, ws_tools/servers and `dontAsk`. | Same fixed capability loadout and `dontAsk`; no bypass or extra tool. | Existing init verifies actual tool/server/plugin surface and `dontAsk` (`internal/wsagent/claude.go:267–321`). Read-only is `partial` when read-family narrowing is observed; allowed MCP/plugin behavior is not proven read-only. Workdir-write/full are `advisory`, not root-confined. Existing capability mismatch refusal stays. |
+| Pi lead | Preserve the existing lead setup; advise read-only intent rather than claim global tool mediation. | Preserve setup; advise working-directory intent, no native sandbox flag. | Preserve setup; no invented native permission mode. | `piLeadArgs` has no permission control (`internal/wsagent/pi.go:345–367`); ws extension has ungated paths (`agents-plugin-pi/src/execute-gateway.ts:1–103`, repository-relative). All three are `advisory`; inspect available actual loadout evidence without treating visibility as confinement. |
+| Pi worker | Intersect native Tools with existing read/grep/find/ls entries; keep ws_tools/servers within capability allowlists. | Keep fixed capability loadout; no new sandbox/network promise. | Same fixed capability loadout; never add native bash/edit/write or MCP access absent from the profile. | Compare actual declared tools/updates using existing checks (`internal/wsagent/pi.go:156–207,255–290`). Read-only is `partial` when narrowed tools are observed, because MCP/extension effects remain outside that proof. Workdir-write/full are `advisory`. Pi unenforceability always launches with the nudge. |
 
 For legacy omission, keep native flags/tools unchanged and do not create a
 sidecar. Derive Claude lead `plan` → read-only, `bypassPermissions` → full,
@@ -392,8 +468,11 @@ compatibility matrix, all five phases and source-backed fixture selectors.
 
 ### Phase 2: Implement and verify Claude/Pi permission controls
 
-Depends on this ticket's landed Phase 1, not the future foundation or adapter
-Results under owner 1050's exception. Implement selection persistence, transient
+Execution is held by the current Execution Boundary: CSI Phase 2 must land and
+MAIN must dispatch anew. Owner 1050's bounded policy exception is unchanged;
+landing CSI is not itself permission to run this phase. Build on this ticket's
+Phase 1 contract and the landed registry/admission owners audited above, not
+another admission path. Implement selection persistence, transient
 launch input, support preflight, lead/settings selection routes, computed State,
 the Claude/Pi mapping table, and reusable permission controls through existing
 Runner/UI owners. Include backend admission for existing worker start/control
