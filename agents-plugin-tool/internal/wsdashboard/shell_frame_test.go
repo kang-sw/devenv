@@ -310,14 +310,14 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestShellHotkeyForwarderLeavesCtrlKeysToEditors pins the shell document's
-// keydown forwarder (dashboard.js shShellInit): Ctrl+K and Ctrl+Space open
-// the shown frame's palette except from an editor target (tracker.js
-// qShortcut's rule), and `/` skips any typing target. Runs under node when
+// TestShellHotkeyForwarderLeavesSearchKeysToTerminals pins the shell
+// document's keydown forwarder (dashboard.js shShellInit): Ctrl+K, Ctrl+Space
+// and Cmd+K open the shown frame's palette except from a terminal target
+// (tracker.js qShortcut's rule), and `/` skips any typing target. Runs under node when
 // it is installed.
-func TestShellHotkeyForwarderLeavesCtrlKeysToEditors(t *testing.T) {
+func TestShellHotkeyForwarderLeavesSearchKeysToTerminals(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
-	fwd := regexp.MustCompile(`(?s)stay with editors by qShortcut's target rule\.\n(    doc\.addEventListener\("keydown", function \(e\) \{.*?\n    \}\);\n)`).FindStringSubmatch(js)
+	fwd := regexp.MustCompile(`(?s)stay with a terminal by qShortcut's target rule\.\n(    doc\.addEventListener\("keydown", function \(e\) \{.*?\n    \}\);\n)`).FindStringSubmatch(js)
 	if fwd == nil {
 		t.Fatal("dashboard.js holds no shell keydown forwarder")
 	}
@@ -330,10 +330,15 @@ function fire(e, sel) { searched = 0; e.preventDefault = function () {}; e.targe
 function check(what, got, want) { if (got !== want) bad.push(what + ": got " + got + ", want " + want); }
 check("Ctrl+K on the body opens", fire({ ctrlKey: true, key: "k" }, "body"), 1);
 check("Ctrl+Space on the body opens", fire({ ctrlKey: true, key: " ", code: "Space" }, "body"), 1);
-check("Ctrl+K in a textarea is left to it", fire({ ctrlKey: true, key: "k" }, "textarea"), 0);
-check("Ctrl+Space in a textarea is left to it", fire({ ctrlKey: true, key: " ", code: "Space" }, "textarea"), 0);
-check("Ctrl+K in a contenteditable is left to it", fire({ ctrlKey: true, key: "k" }, "ce"), 0);
+check("Cmd+K on the body opens", fire({ metaKey: true, key: "k" }, "body"), 1);
+check("Cmd+Space is left to the system", fire({ metaKey: true, key: " ", code: "Space" }, "body"), 0);
+check("Ctrl+K in a textarea opens", fire({ ctrlKey: true, key: "k" }, "textarea"), 1);
+check("Ctrl+Space in a textarea opens", fire({ ctrlKey: true, key: " ", code: "Space" }, "textarea"), 1);
+check("Cmd+K in an input opens", fire({ metaKey: true, key: "k" }, "input"), 1);
+check("Ctrl+K in a contenteditable opens", fire({ ctrlKey: true, key: "k" }, "ce"), 1);
 check("Ctrl+K in the terminal is left to it", fire({ ctrlKey: true, key: "k" }, ".xterm"), 0);
+check("Cmd+K in the terminal is left to it", fire({ metaKey: true, key: "k" }, ".xterm"), 0);
+check("Cmd+/ does nothing", fire({ metaKey: true, key: "/" }, "body"), 0);
 check("/ on the body opens", fire({ key: "/" }, "body"), 1);
 check("/ in a textarea types", fire({ key: "/" }, "textarea"), 0);
 check("/ in an input types", fire({ key: "/" }, "input"), 0);
