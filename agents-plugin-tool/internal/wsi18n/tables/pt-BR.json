@@ -1,4 +1,5 @@
 {
+  "js.capsule.topics": "Tópicos",
   "js.usage.heading": "Uso do plano",
   "js.usage.close": "Fechar uso do plano",
   "js.usage.legend": "Legenda do gráfico de uso",
@@ -376,6 +377,7 @@
   "js.wb.state.researching": "Em pesquisa",
   "js.wb.state.discussing": "Em discussão",
   "js.wb.state.implementing": "Em implementação",
+  "js.wb.state.estimate": "Estimativa: {0} min",
   "js.wb.state.eta": "Duração estimada: {0} min · {1} min decorridos",
   "js.board.filter.label": "Filtrar por estado do tópico",
   "js.board.filter.all": "Todos",
@@ -385,6 +387,7 @@
   "js.board.filter.implement": "Em implementação",
   "js.board.filter.wait": "Aguardando",
   "js.board.filter.closed": "Fechados",
+  "js.board.filter.cards": "Cartões",
   "js.term.new": "Novo terminal",
   "js.term.new.title": "Abrir um terminal neste computador",
   "js.term.pop.label": "Abrir um terminal em",

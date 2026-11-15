@@ -68,7 +68,7 @@ function CustomEvent(type,init){this.type=type;Object.assign(this,init||{});}
 E.prototype.dispatchEvent=function(e){if(e.type==='wbhistoryload')navigationGeometry(this,'load');e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null){(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});}if(e.type==='wbhistoryload'){loads++;check('load root',e.detail.root===this,true);}return true;};
 fire=function(e,type){e.dispatchEvent(new CustomEvent(type,{bubbles:true}));};
 function keepDouble(n,opt,phase){navigationGeometry(n,phase);var k={node:n,opt:opt,phase:phase,applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;}
-window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){if(opt&&opt.capture===false)return {visible:function(){return keepVisible;}};return keepDouble(n,opt,'keep');},jump:function(n,opt){return keepDouble(n,opt,'jump');},snapshot:function(){}};
+window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){if(opt&&opt.capture===false)return {scroller:n.closest('.test-scroller')||root,visible:function(){return keepVisible;}};return keepDouble(n,opt,'keep');},jump:function(n,opt){return keepDouble(n,opt,'jump');},snapshot:function(){}};
 function visible(h,ratio){var w=h._wbHistoryWatch,was=w.ratio;w.ratio=ratio;w.opt.onChange({visible:ratio>0});if(was>0&&!ratio)w.opt.onOut();}
 function ResizeObserver(fn){this.fn=fn;}
 ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
@@ -358,6 +358,32 @@ visible(h,1);visible(h,0);check('editing defers collapse',h._wbHistorySteps,2);
 document.activeElement=null;document.on.focusout[0]();timers.splice(0).forEach(function(fn){fn();});flush();check('focusout retries collapse',h._wbHistorySteps,1);
 click(h.querySelector('.history-older'));flush();h.closest('.topic').setAttribute('data-max','');visible(h,1);visible(h,0);check('maximized topic does not collapse',h._wbHistorySteps,2);
 var before=bound;window.wbBindBoard(root);check('host hook retained',bound,before+1);
+// Initial admission batches row writes before result geometry and scans
+// each scroller only once, independent of how many histories it contains.
+var batchHistories=[];
+for(var i=0;i<8;i++)batchHistories.push(board(logs(1,100)));
+root=new E('div');
+for(var column=0;column<2;column++){
+  var scroller=new E('div',{'class':'test-scroller'});root.appendChild(scroller);
+  batchHistories.slice(column*4,column*4+4).forEach(function(h){scroller.appendChild(h.closest('.topic'));});
+}
+var batchKeeps=keeps.length,prefixWrites=0,resultReads=0;
+var setAttribute=E.prototype.setAttribute,rect=E.prototype.getBoundingClientRect;
+E.prototype.setAttribute=function(key,value){if(key==='data-wb-history-before')prefixWrites++;return setAttribute.call(this,key,value);};
+E.prototype.getBoundingClientRect=function(){
+  if(prefixWrites){
+    check('all initial prefix writes precede result geometry',prefixWrites,8*70);
+    resultReads++;
+  }
+  return rect.call(this);
+};
+window.wbHistory.init(document);
+E.prototype.setAttribute=setAttribute;E.prototype.getBoundingClientRect=rect;
+check('one initial reading capture per scroller',keeps.length-batchKeeps,2);
+check('each initial result is measured once',resultReads,8);
+check('batched admission preserves cuts, heights and Older',batchHistories.map(function(h){return [first(h),h._wbHistoryHeight,h.querySelector('.history-older').hidden,h.querySelectorAll('[data-wb-history-before]').length];}),Array.from({length:8},function(){return ['e71',600,false,70];}));
+window.wbHistory.init(document);
+check('already bound init never captures again',keeps.length-batchKeeps,2);
 check('every ordinary history capture applies exactly once',keeps.filter(function(k){return k.phase==='keep';}).every(function(k){return k.applied===1;}),true);
 if(bad.length)throw Error(bad.join('\n'));
 `

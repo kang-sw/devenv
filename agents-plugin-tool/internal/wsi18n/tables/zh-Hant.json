@@ -1,4 +1,5 @@
 {
+  "js.capsule.topics": "主題",
   "js.usage.heading": "方案用量",
   "js.usage.close": "關閉方案用量",
   "js.usage.legend": "用量圖表圖例",
@@ -376,6 +377,7 @@
   "js.wb.state.researching": "研究中",
   "js.wb.state.discussing": "討論中",
   "js.wb.state.implementing": "實作中",
+  "js.wb.state.estimate": "估計 {0} 分鐘",
   "js.wb.state.eta": "預計 {0} 分鐘 · 已用 {1} 分鐘",
   "js.board.filter.label": "話題狀態篩選",
   "js.board.filter.all": "全部",
@@ -385,6 +387,7 @@
   "js.board.filter.implement": "實作中",
   "js.board.filter.wait": "等待中",
   "js.board.filter.closed": "已關閉",
+  "js.board.filter.cards": "卡片",
   "js.term.new": "新增終端機",
   "js.term.new.title": "在這台電腦上開啟終端機",
   "js.term.pop.label": "在以下位置開啟終端機",

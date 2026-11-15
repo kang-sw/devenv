@@ -1,4 +1,4 @@
-  // --- conversation entries: merged by key, never re-rendered ----------------
+  // --- conversation entries: merged by key ----------------------------------
   // Each entry element carries data-entry, its ring entry name; names sort in
   // time order. Only the entries container is searched: held bubbles in the
   // convlive region carry data-entry too (their inbox id) and are not
@@ -9,25 +9,32 @@
   function entryKeys(box) {
     if (!box.wsKeys) {
       box.wsKeys = Object.create(null);
-      Array.prototype.forEach.call(box.children, function (c) { var k = c.getAttribute("data-entry"); if (k) box.wsKeys[k] = true; });
+      Array.prototype.forEach.call(box.children, function (c) { var k = c.getAttribute("data-entry"); if (k) box.wsKeys[k] = c; });
     }
     return box.wsKeys;
   }
   function resetEntries(box) { box.textContent = ""; box.wsKeys = Object.create(null); }
   // mergeEntries inserts each node of src whose name box lacks at its sorted
-  // place and returns the inserted nodes, in order; an entry already shown
-  // is kept as it is.
+  // place and returns inserted/replaced nodes, in order. Existing entries
+  // stay put unless their mail-wake presentation changes: a hidden mail
+  // marker must replace its row (and restore it when the association expires).
   function mergeEntries(box, src) {
     var have = entryKeys(box), added = [];
     Array.prototype.slice.call(src.children).forEach(function (n) {
       var k = n.getAttribute("data-entry");
-      if (!k || have[k]) return;
-      // New entries are usually the newest (live) or the oldest (history),
-      // so walk back from the end only past entries that sort after k.
-      var c = box.lastElementChild;
-      while (c && (c.getAttribute("data-entry") || "") > k) c = c.previousElementSibling;
-      box.insertBefore(n, c ? c.nextSibling : box.firstChild);
-      have[k] = true;
+      if (!k) return;
+      var old = have[k];
+      if (old) {
+        if (old.getAttribute("data-mail-wake") === n.getAttribute("data-mail-wake")) return;
+        box.replaceChild(n, old);
+      } else {
+        // New entries are usually the newest (live) or the oldest (history),
+        // so walk back from the end only past entries that sort after k.
+        var c = box.lastElementChild;
+        while (c && (c.getAttribute("data-entry") || "") > k) c = c.previousElementSibling;
+        box.insertBefore(n, c ? c.nextSibling : box.firstChild);
+      }
+      have[k] = n;
       added.push(n);
       restoreOpen(n);
       fmtTimes(n);
@@ -264,6 +271,7 @@
       if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
+      bindCapsuleNotes();
       if (window.wbAgo) window.wbAgo(page);
       mermaid(page);
       if (kept) kept.h.apply();

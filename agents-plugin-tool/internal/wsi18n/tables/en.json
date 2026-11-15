@@ -1,4 +1,5 @@
 {
+  "js.capsule.topics": "Topics",
   "js.usage.heading": "Plan usage",
   "js.usage.close": "Close plan usage",
   "js.usage.legend": "Usage chart legend",
@@ -376,6 +377,7 @@
   "js.wb.state.researching": "Researching",
   "js.wb.state.discussing": "Discussing",
   "js.wb.state.implementing": "Implementing",
+  "js.wb.state.estimate": "Estimate {0} min",
   "js.wb.state.eta": "ETA {0} min · {1} min elapsed",
   "js.board.filter.label": "Topic state filter",
   "js.board.filter.all": "All",
@@ -385,6 +387,7 @@
   "js.board.filter.implement": "Implementing",
   "js.board.filter.wait": "Waiting",
   "js.board.filter.closed": "Closed",
+  "js.board.filter.cards": "Cards",
   "js.term.new": "New terminal",
   "js.term.new.title": "Open a terminal on this computer",
   "js.term.pop.label": "Open a terminal in",

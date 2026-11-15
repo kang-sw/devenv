@@ -90,7 +90,7 @@ test('cleanup revalidates each PID/creation identity immediately before its sign
   assert.deepEqual(signals, [[100, 'SIGTERM']]);
   assert.equal(signalIfCurrent(child, () => [child], () => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); }), false);
 });
-test('Windows packaging consumes only the pinned cached x64 zip and runtime allowlist, without a custom icon', async () => {
+test('Windows packaging consumes only the pinned cached x64 zip and ships the approved brand icons', async () => {
   const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-test-'));
   let staged;
   try {
@@ -102,10 +102,16 @@ test('Windows packaging consumes only the pinned cached x64 zip and runtime allo
       assert.equal(options.arch, 'x64');
       assert.equal(options.electronVersion, pkg.devDependencies.electron);
       assert.equal(options.electronZipDir, nested);
-      assert.equal(options.icon, undefined);
+      assert.equal(options.icon, path.join(options.dir, 'icons/icon.ico'));
       assert.equal(options.appBundleId, 'dev.werkschaft.desktop');
       staged = options.dir;
-      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'endpoint.js', 'main.js', 'package.json', 'policy.js']);
+      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'endpoint.js', 'icons', 'main.js', 'package.json', 'policy.js', 'titlebar-preload.js', 'titlebar-renderer.js', 'titlebar.html', 'titlebar.js']);
+      assert.deepEqual(fs.readdirSync(path.join(staged, 'icons')).sort(), ['icon.ico', 'icon.png']);
+      for (const file of ['icon.png', 'icon.ico']) {
+        assert.deepEqual(fs.readFileSync(path.join(staged, 'icons', file)), fs.readFileSync(path.resolve(__dirname, '../icons', file)));
+      }
+      assert.match(fs.readFileSync(path.join(staged, 'titlebar.html'), 'utf8'), /src="icons\/icon.png"/);
+      assert.match(fs.readFileSync(path.join(staged, 'main.js'), 'utf8'), /icon: path.join\(__dirname, 'icons\/icon.ico'\)/);
       const stagedPackage = JSON.parse(fs.readFileSync(path.join(staged, 'package.json')));
       assert.equal(stagedPackage.version, pkg.version);
       assert.equal(stagedPackage.author, 'kang-sw');

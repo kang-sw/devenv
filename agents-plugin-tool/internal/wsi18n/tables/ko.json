@@ -1,4 +1,5 @@
 {
+  "js.capsule.topics": "주제",
   "js.usage.heading": "플랜 사용량",
   "js.usage.close": "플랜 사용량 닫기",
   "js.usage.legend": "사용량 차트 범례",
@@ -376,6 +377,7 @@
   "js.wb.state.researching": "연구 중",
   "js.wb.state.discussing": "논의 중",
   "js.wb.state.implementing": "구현 중",
+  "js.wb.state.estimate": "예상 {0}분",
   "js.wb.state.eta": "ETA {0}분 · {1}분 경과",
   "js.board.filter.label": "토픽 상태 필터",
   "js.board.filter.all": "전체",
@@ -385,6 +387,7 @@
   "js.board.filter.implement": "진행 중",
   "js.board.filter.wait": "대기 중",
   "js.board.filter.closed": "종료",
+  "js.board.filter.cards": "카드",
   "js.term.new": "새 터미널",
   "js.term.new.title": "이 컴퓨터에서 터미널 열기",
   "js.term.pop.label": "터미널을 열 위치",
