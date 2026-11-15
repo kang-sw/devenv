@@ -26,13 +26,15 @@ const SCALE = 2;
 const MAX_W = 1600;
 const QUALITY = 0.8;
 const ACCENT = '#e8552f';
+// The folder the add-workspace step types (the fixture makes it).
+const WS_PATH = '~/projects/web-shop';
 // The window the whole-page steps (board, answer) are shot in.
 const NARROW = { width: 1120, height: 720 };
 
 // The callouts, per language.
 const CALL = {
-  ko: { list: '세션 목록', plus: '새 세션', start: '시작', send: '입력 후 Enter', card: '보드 업데이트', board: '화이트보드', pick: '선택', sendAns: '전송', files: '파일', gear: '설정' },
-  en: { list: 'Sessions', plus: 'New', start: 'Start', send: 'Type, then Enter', card: 'Board update', board: 'Whiteboard', pick: 'Pick', sendAns: 'Send', files: 'Files', gear: 'Settings' }
+  ko: { list: '세션 목록', wsAdd: '워크스페이스 추가', wsPath: '폴더 경로', wsGo: '추가', plus: '새 세션', start: '시작', send: '입력 후 Enter', card: '보드 업데이트', board: '화이트보드', pick: '선택', sendAns: '전송', files: '파일', gear: '설정' },
+  en: { list: 'Sessions', wsAdd: 'Add workspace', wsPath: 'Folder path', wsGo: 'Add', plus: 'New', start: 'Start', send: 'Type, then Enter', card: 'Board update', board: 'Whiteboard', pick: 'Pick', sendAns: 'Send', files: 'Files', gear: 'Settings' }
 }[lang];
 
 const on = '#frames iframe.on';
@@ -62,7 +64,9 @@ async function rectOf(page, sel, inFrame) {
 }
 
 // mark draws a ring around each box and its callout beside it, in the top
-// page over everything (the shell's frame among it).
+// page over everything (the shell's frame among it). A mark's top, when
+// set, places its callout at that height instead, keeping it off what lies
+// between.
 async function mark(page, marks) {
   await page.evaluate(([marks, accent]) => {
     document.querySelectorAll('.guide-mark').forEach(el => el.remove());
@@ -98,7 +102,7 @@ async function mark(page, marks) {
         case 'inside': x = r.x + r.width - t.width - 12; y = r.y + r.height - t.height - 12; break;
       }
       tag.style.left = x + 'px';
-      tag.style.top = y + 'px';
+      tag.style.top = (m.top ?? y) + 'px';
     }
   }, [marks, ACCENT]);
 }
@@ -178,7 +182,29 @@ async function capture(browser, theme) {
   await mark(page, [{ box: await rectOf(page, '#railbtn'), label: CALL.list, side: 'right', pad: 5 }]);
   await save(page, theme, 'open', { x: 0, y: 0, width: 420, height: 60 });
 
-  // 2. A worktree row's + opens the new-session popover; Start spawns.
+  // 2. The + on the session list's header opens the add-workspace popover:
+  // type the project folder's path, and Add. The callouts for the path and
+  // Add sit under the popover, off the preview of what Add will add.
+  await openRail(page);
+  const wsAdd = '#rail .rhd .radd[data-add="ws"]';
+  await page.locator(wsAdd).click();
+  const wsPop = '.rpop:not([hidden])';
+  await page.locator(wsPop + ' .spq').waitFor({ state: 'visible' });
+  await page.locator(wsPop + ' .spq').fill(WS_PATH);
+  await page.locator(wsPop + ' .spres code').waitFor({ state: 'visible' });
+  await settle(page, 400);
+  const wpop = await rectOf(page, wsPop);
+  const wrail = await rectOf(page, '#rail');
+  await mark(page, [
+    { box: await rectOf(page, wsAdd), label: CALL.wsAdd, n: '1', side: 'right', pad: 3 },
+    { box: await rectOf(page, wsPop + ' .spq'), label: CALL.wsPath, n: '2', side: 'below', pad: 3, top: wpop.y + wpop.height + 8 },
+    { box: await rectOf(page, wsPop + ' .pbtn.go'), label: CALL.wsGo, n: '3', side: 'below', pad: 3, top: wpop.y + wpop.height + 8 }
+  ]);
+  const wsRight = Math.max(wrail.x + wrail.width + 2, wpop.x + wpop.width + 8);
+  await save(page, theme, 'workspace', { x: 0, y: 0, width: Math.round(Math.min(1440, wsRight)), height: Math.round(Math.min(900, wpop.y + wpop.height + 48)) });
+  await closeRail(page);
+
+  // 3. A worktree row's + opens the new-session popover; Start spawns.
   await openRail(page);
   const wt = '#rail .rwt[data-g$="my-app-login"]';
   await page.locator(wt + ' .wthd').hover();
@@ -193,7 +219,7 @@ async function capture(browser, theme) {
   const railBox = await rectOf(page, '#rail');
   await save(page, theme, 'new', { x: 0, y: 0, width: Math.round(railBox.x + railBox.width + 2), height: Math.round(Math.min(900, pop.y + pop.height + 16)) });
 
-  // 3. Start opens the new session; ask for the whiteboard in its
+  // 4. Start opens the new session; ask for the whiteboard in its
   // message box.
   await page.locator('.rpop:not([hidden]) .pbtn.go').click();
   await shows(page, '/s/' + fresh);
@@ -207,7 +233,7 @@ async function capture(browser, theme) {
   const top3 = Math.round(comp.y - 150);
   await save(page, theme, 'ask', { x: 0, y: top3, width: Math.round(comp.x + comp.width + 16), height: 900 - top3 });
 
-  // 4. The agent's board: the update card in the conversation, and the
+  // 5. The agent's board: the update card in the conversation, and the
   // board beside it. A narrower window keeps the whole page legible at the
   // guide's column width.
   await page.setViewportSize({ width: NARROW.width, height: NARROW.height });
@@ -223,7 +249,7 @@ async function capture(browser, theme) {
   ]);
   await save(page, theme, 'board', { x: 0, y: 44, width: NARROW.width, height: bottom4 - 44 });
 
-  // 5. Answer: pick an option, which stages it on the message box, and
+  // 6. Answer: pick an option, which stages it on the message box, and
   // send.
   await frame.locator('[data-opt="a"]').first().click();
   await frame.locator('#cchips .achip').waitFor();
@@ -238,7 +264,7 @@ async function capture(browser, theme) {
   await page.goto(base + '/s/' + main);
   await shows(page, '/s/' + main);
 
-  // 6. Files: the tab above the conversation shows the worktree.
+  // 7. Files: the tab above the conversation shows the worktree.
   const ftab = 'button[data-ctab="files"]';
   await frame.locator(ftab).click();
   await frame.locator(ftab + '[aria-pressed="true"]').waitFor();
@@ -248,7 +274,7 @@ async function capture(browser, theme) {
   const top6 = Math.round(tab.y - 14);
   await save(page, theme, 'files', { x: 0, y: top6, width: 612, height: 250 });
 
-  // 7. Settings: the gear at the bottom of the session list.
+  // 8. Settings: the gear at the bottom of the session list.
   await page.goto(base + '/');
   await page.frameLocator(on).locator('.dlanding').waitFor();
   await openRail(page);

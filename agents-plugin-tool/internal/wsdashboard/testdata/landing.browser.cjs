@@ -79,14 +79,14 @@ async function landing(page) {
 }
 
 // root: the lockup over the illustrated how-to with nothing behind them,
-// both centred across, seven titled steps each with one loaded screenshot of
+// both centred across, eight titled steps each with one loaded screenshot of
 // the theme shown (the other theme's never fetched) that fits the column,
 // and a page that scrolls down but never across.
 function root(r, what, theme) {
   assert.equal(r.guide, true, what + ': no how-to');
-  assert.equal(r.steps, 7, what + ': how-to steps');
-  assert.deepEqual(r.titles, Array(7).fill(true), what + ': untitled step');
-  assert.deepEqual(r.shown, Array(7).fill(1), what + ': screenshots shown per step');
+  assert.equal(r.steps, 8, what + ': how-to steps');
+  assert.deepEqual(r.titles, Array(8).fill(true), what + ': untitled step');
+  assert.deepEqual(r.shown, Array(8).fill(1), what + ': screenshots shown per step');
   assert.deepEqual([...new Set(r.themes)], [theme], what + ': screenshot theme');
   assert.ok(r.loaded, what + ': a screenshot did not load');
   assert.ok(r.fits, what + ': a screenshot overflows the column');
@@ -141,6 +141,7 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     assert.deepEqual([r.dark, r.light], [true, false], 'dark theme shows the light-ink lockup');
     root(r, 'root dark', 'dark');
     await fullShot(page, 'root-dark-1440.png');
+    if (shots) await page.frameLocator(on).locator('.dstep[data-step="workspace"]').screenshot({ path: path.join(shots, 'step-workspace-dark.png') });
 
     // Picking a session opens it; picking it again closes its view and
     // shows the landing at /, and the row is no longer marked.
@@ -182,6 +183,7 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     assert.deepEqual([r.dark, r.light], [false, true], 'light theme shows the dark-ink lockup');
     root(r, 'root light', 'light');
     await fullShot(page, 'root-light-1440.png');
+    if (shots) await page.frameLocator(on).locator('.dstep[data-step="workspace"]').screenshot({ path: path.join(shots, 'step-workspace-light.png') });
     await openRail(page);
     await page.locator('#rail .rs[data-rid="livesession"] .rl').click();
     await shows(page, '/s/livesession');

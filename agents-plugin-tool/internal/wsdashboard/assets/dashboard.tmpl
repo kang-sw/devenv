@@ -367,6 +367,7 @@ are in the page; the stylesheet shows the ones for the page's theme. Its id
 keeps an earlier /#guide address landing on the same page. */}}
 {{define "landing"}}<div class="dlanding" id="guide"><div class="dlogo" role="img" aria-label="Werkschaft">{{.Assets.Logo}}</div><article class="dguide" aria-labelledby="dguide-h"><header><h2 id="dguide-h">{{t "index.guide.title"}}</h2><p>{{t "index.guide.lead"}}</p></header><ol>
 <li class="dstep" data-step="open"><h3>{{t "index.guide.open"}}</h3><p>{{t "index.guide.open.sub"}}</p><figure class="dshot">{{guideshot "open" (t "index.guide.open")}}</figure></li>
+<li class="dstep" data-step="workspace"><h3>{{t "index.guide.workspace"}}</h3><p>{{t "index.guide.workspace.sub"}}</p><figure class="dshot">{{guideshot "workspace" (t "index.guide.workspace")}}</figure></li>
 <li class="dstep" data-step="new"><h3>{{t "index.guide.new"}}</h3><p>{{t "index.guide.new.sub"}}</p><figure class="dshot">{{guideshot "new" (t "index.guide.new")}}</figure></li>
 <li class="dstep" data-step="ask"><h3>{{t "index.guide.board"}}</h3><p>{{t "index.guide.board.sub"}}</p><figure class="dshot">{{guideshot "ask" (t "index.guide.board")}}</figure></li>
 <li class="dstep" data-step="board"><h3>{{t "index.guide.view"}}</h3><p>{{t "index.guide.view.sub"}}</p><figure class="dshot">{{guideshot "board" (t "index.guide.view")}}</figure></li>
