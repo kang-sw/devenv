@@ -589,19 +589,6 @@
         }
       }
     },
-    "261114-feat-ws-dashboard-worktree-view": {
-      "registered_at": "2026-11-14T14:32:38Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec5/worktree-view-prep",
-        "phase": "closed",
-        "touched_at": "2026-11-15T06:57:51Z",
-        "impl": {
-          "branch": "impl/exec5/worktree-view-prep/comic-kite-fruit"
-        }
-      }
-    },
     "261114-feat-ws-hosted-antigravity-acp-adapter": {
       "registered_at": "2026-11-14T08:45:52Z"
     },
