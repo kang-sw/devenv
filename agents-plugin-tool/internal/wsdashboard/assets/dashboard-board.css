@@ -253,10 +253,10 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
   .board-state-radio { padding-inline: 7px; gap: 4px; }
   .board-action { padding-inline: 8px; gap: 5px; }
   .board-action kbd { display: none; }
-  .board-tools { gap: 5px; }
-}
-@container board-toolbar (max-width: 760px) {
+  /* Compact action labels with the eight-segment filter, so live boards
+     with Files do not wrap the filter onto a second row at medium widths. */
   .board-action .board-label { display: none; }
+  .board-tools { gap: 5px; }
 }
 @container board-toolbar (max-width: 360px) {
   .board-tools { gap: 3px; padding-inline: 5px; }
