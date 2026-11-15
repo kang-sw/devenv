@@ -414,7 +414,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 				r.skipUnknown(tag)
 			}
 		case Container:
-			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings) {
+			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings, cmd.Label()) {
 				return false
 			}
 		}
@@ -766,10 +766,10 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 				if strings.HasPrefix(tagName, group.Prefix) && !strings.HasSuffix(rest[:end], "/>") {
 					start := t.i
 					if spec, known := group.lookup(tagName); known && spec.Kind == Container {
-						// Use the grammar's ordinary field reader: a raw field may
-						// contain literal command/group closes as well as openings.
+						// Use the ordinary field boundaries, but attribute diagnostics
+						// to the rejected group: skipped commands have no position.
 						cmd := Command{Tag: tagName, Line: t.lineAt(start - end)}
-						if !t.readFields(&cmd, group.fieldTags(spec), nil, false) {
+						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, label+" skipped <"+tagName+">") {
 							return "", false
 						}
 					} else if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
@@ -984,8 +984,9 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
 }
 
 // readFields reads a container command's field tags (fields, full tags) up
-// to its closing tag, decoding the bodies of the tags in decode.
-func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool) bool {
+// to its closing tag, decoding the bodies of the tags in decode. label names
+// the command or the rejected group that owns skipped field diagnostics.
+func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool, label string) bool {
 	closing := "</" + cmd.Tag + ">"
 	for {
 		t.skipSpace()
@@ -998,7 +999,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 			return true
 		}
 		if t.s[t.i] != '<' {
-			t.skipText("inside " + cmd.Label() + " outside its field tags")
+			t.skipText("inside " + label + " outside its field tags")
 			continue
 		}
 		if t.strayClosing() {
@@ -1020,21 +1021,21 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		}
 		line := t.lineAt(tag.at)
 		if !known {
-			t.p.Add("%s: unknown field <%s> (fields: %s)", cmd.Label(), tag.name, strings.Join(fields, ", "))
+			t.p.Add("%s: unknown field <%s> (fields: %s)", label, tag.name, strings.Join(fields, ", "))
 			t.skipUnknown(tag)
 			if t.fatal {
 				return false
 			}
 			continue
 		}
-		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", cmd.Label(), tag.name), tag.attrs, nil)
+		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", label, tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
 			var openings []string
 			if refuseOpenings {
 				openings = fields
 			}
-			body, ok := t.readBody(tag.name, tag.at, decode[tag.name], openings, cmd.Label())
+			body, ok := t.readBody(tag.name, tag.at, decode[tag.name], openings, label)
 			if !ok {
 				return false
 			}

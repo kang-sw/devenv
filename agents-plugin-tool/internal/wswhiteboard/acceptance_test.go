@@ -223,6 +223,27 @@ func TestCommandAcceptanceRejectedGroupFieldBoundaries(t *testing.T) {
 	}
 }
 
+func TestCommandAcceptanceRejectedGroupFieldDiagnostic(t *testing.T) {
+	prefix := `<wb:topic name="prefix"><wb:body>keep</wb:body></wb:topic>`
+	rejected := `<wb:topic name="outer">junk<wb:add class="technical"><wb:title typo="x">T</wb:title></wb:add></wb:topic>`
+	expected := &State{}
+	want := mustApply(t, expected, prefix)
+	s := &State{}
+	out, p := Apply(s, prefix+rejected, testEnv())
+	gotState, _ := json.Marshal(s)
+	wantState, _ := json.Marshal(expected)
+	if out.Unpartitioned || out.Accepted != want.Accepted || string(gotState) != string(wantState) || !reflect.DeepEqual(out.Effects, want.Effects) {
+		t.Fatalf("rejected group changed prefix acceptance: %+v %v", out, p)
+	}
+	if want := "<wb:failed>\n" + rejected + "\n</wb:failed>"; out.Failed != want {
+		t.Fatalf("failed tree: %s; want %s", out.Failed, want)
+	}
+	diagnostics := strings.Join(p, "\n")
+	if !strings.Contains(diagnostics, `<wb:topic> (line 1) skipped <wb:add> field <wb:title>: unknown attribute typo (it takes none)`) || strings.Contains(diagnostics, "command 0") {
+		t.Fatalf("skipped field diagnostic: %s", diagnostics)
+	}
+}
+
 func TestCommandAcceptanceUnsplittableNeverAppliesPrefix(t *testing.T) {
 	for _, suffix := range []string{`<wb:topic name="t"><wb:body>unterminated`, `<wb:topic name="t"><wb:body>closed</wb:body>`, `<wb:answer id="1" value="broken>`, `<wb:topic name="t"><wb:edit><wb:old>no end`, `<wb:topic name="a"><wb:topic name="b"><wb:topic name="c"/></wb:topic><wb:floor id="999"/></wb:topic>`} {
 		s := &State{}
