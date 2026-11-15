@@ -134,4 +134,4 @@ Mod authoring traps the spike hit:
   statusline.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 다음 단계가 구체적이지 않은 연구 메모.
+Triage 2026-11-15 (owner (1057)): DROP - A research note whose next steps are not concrete.

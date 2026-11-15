@@ -43,4 +43,4 @@ the task.
 - Is the first-update case the same cause as the panel-insert case?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 첫 업데이트 때 50ms 정도 롱태스크가 가끔 생기는 미세 성능 잔여분. 원인 후보만 있음.
+Triage 2026-11-15 (owner (1057)): DROP - Minor leftover performance issue where a roughly 50 ms long task occasionally occurs on the first update; only candidate causes known.

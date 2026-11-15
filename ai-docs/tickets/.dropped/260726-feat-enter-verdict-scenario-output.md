@@ -354,4 +354,4 @@ Verification:
 | 7 | plan_depth axis has an unreachable enum value the fragment table will encode | minor | autonomous |
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 출력 문구 다듬기라 추측성이고 재정립 방향과 맞지 않음.
+Triage 2026-11-15 (owner (1057)): DROP - Output wording polish is speculative and does not fit the refounded direction.

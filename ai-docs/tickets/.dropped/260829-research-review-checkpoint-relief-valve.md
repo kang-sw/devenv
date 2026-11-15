@@ -216,4 +216,4 @@ severity calibration, the no-second-file mechanism, and the signal choice —
   merge primitive; confirm the composition stays checkpoint-driven.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 가상의 페르소나를 가정한 설계 탐색이라 구체적 트리거가 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A design exploration assuming a hypothetical persona, with no concrete trigger.

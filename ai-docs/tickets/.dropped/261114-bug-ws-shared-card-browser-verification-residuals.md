@@ -64,4 +64,4 @@ it corresponds to actual user-visible behavior before selecting a repair and
 verification plan. Preserve the original assertions and historical evidence.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 분류 안 된 테스트 실패 기록 보관용; 실행할 일 없음.
+Triage 2026-11-15 (owner (1057)): DROP - An archive of an unclassified test failure; nothing to execute.

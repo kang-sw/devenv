@@ -116,4 +116,4 @@ little gain.
 ### Rejected Alternatives
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 지금은 급하지 않다고 결론 난 보류 메모.
+Triage 2026-11-15 (owner (1057)): DROP - A deferred note concluding it is not urgent now.

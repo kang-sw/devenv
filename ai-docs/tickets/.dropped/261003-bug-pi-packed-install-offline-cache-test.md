@@ -28,4 +28,4 @@ Scope and remedy remain unsettled. Preserve the distinction between an
 uncached dependency and a runtime compatibility regression when investigating.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 오프라인 환경에서만 나는 테스트 실패라 원인도 해결책도 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A test failure that only occurs offline, with neither cause nor fix known.

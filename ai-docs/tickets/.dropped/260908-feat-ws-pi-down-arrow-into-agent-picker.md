@@ -100,4 +100,4 @@ supported API when the pinned host is upgraded; do not assume all later Pi
 versions have the same gap.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 키 입력 편의 하나이고 확장 API 제약이 있어 우선순위가 낮음.
+Triage 2026-11-15 (owner (1057)): DROP - A single key-input convenience with extension API constraints, so low priority.

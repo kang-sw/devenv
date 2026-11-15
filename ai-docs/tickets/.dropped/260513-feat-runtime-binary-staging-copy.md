@@ -67,4 +67,4 @@ Suggested verification:
 - Cleanup failure does not prevent final MCP startup.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 데몬 호스트 프록시 런처 작업으로 대체되어 더 이상 필요 없음; 261110-feat-ws-mcp-daemon-hosted-proxy-launcher.
+Triage 2026-11-15 (owner (1057)): DROP - Superseded by the daemon-hosted proxy launcher work; no longer needed; 261110-feat-ws-mcp-daemon-hosted-proxy-launcher.

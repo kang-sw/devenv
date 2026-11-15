@@ -17,4 +17,4 @@ The rendered review procedure and the Pi spawn enforcement should agree so the d
 Determine whether review playbooks should declare and receive a generated artifact path automatically or whether `lead-review` must explicitly generate and bind it. Update the authoritative procedure and tests so all partition reviewer dispatches satisfy the exactly-one-file requirement on their first attempt.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - Pi 리뷰어 쓰기 범위 안내 누락 중복 티켓; 261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate ticket about missing Pi reviewer write-scope guidance; 261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract.

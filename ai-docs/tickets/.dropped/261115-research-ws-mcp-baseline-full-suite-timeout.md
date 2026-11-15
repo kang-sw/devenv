@@ -40,4 +40,4 @@ None selected. Inspect complete timing and timeout stacks, fixture/child lifetim
 No causal or implementation alternative is settled. Baseline timeout alone does not establish that the committed-effects candidate is independent of the earlier candidate timeout or that its slowdown is acceptable.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 한 번 본 풀 스위트 10분 타임아웃 기록. 원인도 다음 단계도 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A one-off record of a 10-minute full-suite timeout; neither cause nor next step.

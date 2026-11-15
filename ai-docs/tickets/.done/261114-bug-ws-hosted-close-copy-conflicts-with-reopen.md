@@ -59,4 +59,4 @@ against existing guarded routes. Exact replacement text and any broader scope
 remain unselected; this idea authorizes no implementation.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 닫기 설명 문구가 '레일에서 다시 열 수 있음'으로 이미 고쳐짐; 2fa254bb2.
+Triage 2026-11-15 (owner (1057)): DONE - The close description text was already fixed to say it can be reopened from the rail; 2fa254bb2.

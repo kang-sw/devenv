@@ -51,4 +51,4 @@ Update `mcp-tools`, `plugin-runtime`, and related mental-model docs before
 promoting this child to `ready`.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - exec 도구가 아직 런타임에 없고 앞선 에픽도 안 만들어져 마무리할 대상이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - The exec tool is not in the runtime yet and the preceding epic was never built, so there is nothing to finish.

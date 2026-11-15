@@ -63,4 +63,4 @@ over prose, and which of them guard a defect that has already recurred once.
   passes without the thing it is checking for actually being present.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 테스트 가드를 말바꿈으로 피할 수 있다는 가정 얘기라 실제 문제가 아님.
+Triage 2026-11-15 (owner (1057)): DROP - Assumes test guards can be bypassed by rewording, which is not an actual problem.

@@ -90,4 +90,4 @@ candidate/visual coverage explicitly. Retain failed evidence and report any
 remaining omissions without a manufactured green verdict.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 브라우저 테스트 하네스의 여러 잔여 실패를 묶은 막연한 목록. 구체적 다음 단계 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A vague list bundling several remaining browser test harness failures, with no concrete next step.

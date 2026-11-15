@@ -43,4 +43,4 @@ ordering is what makes a refusal a no-op), so any change here needs the
 `internal/wsdoc` mutation tests green on both a >= 2.42 and a < 2.42 git.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 옛 git(2.42 미만)에서만 생기고, 이미 부분 변경 알림으로 완화돼 있음.
+Triage 2026-11-15 (owner (1057)): DROP - Only happens on old git (below 2.42) and is already eased by the partial-change notice.

@@ -40,4 +40,4 @@ None selected. Trace the fixture and session/host discovery path statically befo
 No implementation alternative is settled. Process presence is not evidence of a model request, and disappearance is not proof that no external action occurred. Do not suppress the observation or weaken acceptance to label the candidate merge-ready.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 테스트 중 codex 자식 프로세스 관찰 메모. 원인 티켓과 중복; 261115-bug-ws-dashboard-fixture-real-home-plan-usage-probe.
+Triage 2026-11-15 (owner (1057)): DROP - An observation note about a codex child process during tests; duplicates the cause ticket; 261115-bug-ws-dashboard-fixture-real-home-plan-usage-probe.

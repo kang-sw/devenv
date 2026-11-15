@@ -67,4 +67,4 @@ worked as a stopgap, since its contract matches the source.
   repository's manuals?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 마이너 올림 시 구버전 플러그인이 막히는 건 이미 알려진 정책(T3 경계)이라 별도 조치 불필요.
+Triage 2026-11-15 (owner (1057)): DROP - Older plugins being blocked on a minor bump is the already known policy (T3 boundary); no separate action needed.

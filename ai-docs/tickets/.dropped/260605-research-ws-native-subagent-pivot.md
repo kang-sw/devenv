@@ -953,4 +953,4 @@ The dashboard code, documentation domain, and board were removed under
 `archive/ws-dashboard` tag. The ws/wsflow plugin surface remains unaffected.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 방향 논의 기록일 뿐이고 이후 작업으로 이미 반영·대체됨.
+Triage 2026-11-15 (owner (1057)): DROP - A record of a direction discussion, already reflected in and superseded by later work.

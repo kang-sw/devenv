@@ -45,4 +45,4 @@ fixture setup correction from a product bug; preserve native ownership,
 cleanup evidence and independent fatal guards.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 테스트 픽스처가 사라지는 현상 기록뿐; 원인 불명.
+Triage 2026-11-15 (owner (1057)): DROP - Only a record of test fixtures disappearing; cause unknown.

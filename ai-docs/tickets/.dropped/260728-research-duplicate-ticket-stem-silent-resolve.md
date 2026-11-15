@@ -60,4 +60,4 @@ implementation.
   directly by creating both files.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 비정상 상황이고 안전한 쪽으로 처리되며 의도된 설계임.
+Triage 2026-11-15 (owner (1057)): DROP - An abnormal situation that is handled safely and is intended design.

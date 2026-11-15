@@ -33,4 +33,4 @@ stabilization and shipping come first.
   extension is expected to be T0; confirm at promotion.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 지금은 --no-extensions로 막혀 있어 실제 문제 없는 예방책.
+Triage 2026-11-15 (owner (1057)): DROP - A precaution with no real problem, since --no-extensions already prevents it.

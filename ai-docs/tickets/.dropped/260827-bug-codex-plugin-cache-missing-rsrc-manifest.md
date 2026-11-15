@@ -31,4 +31,4 @@ Verification: after a source update and cache refresh, `playbook.print` and
 `playbook.render` both resolve a shipped rsrc playbook successfully.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - Codex 캐시가 오래된 사용자 환경 문제이고 재현·수정 방향이 불분명함.
+Triage 2026-11-15 (owner (1057)): DROP - A problem in user environments with a stale Codex cache; reproduction and fix direction are unclear.

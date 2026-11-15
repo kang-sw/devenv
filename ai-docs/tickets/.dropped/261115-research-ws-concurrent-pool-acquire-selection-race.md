@@ -36,4 +36,4 @@ Inspect pool selection, lease reservation and cross-call synchronization before 
 No product alternatives were settled. Deleting the lock or assuming pins from a pooled path was not used as recovery.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 같은 병렬 acquire 경쟁 문제의 중복 조사 티켓; 261115-bug-ws-worktree-acquire-concurrent-pool-claim.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate research ticket about the same parallel acquire race; 261115-bug-ws-worktree-acquire-concurrent-pool-claim.

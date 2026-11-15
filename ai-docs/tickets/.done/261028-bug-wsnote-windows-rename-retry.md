@@ -55,4 +55,4 @@ existing `replace_file_windows_test.go` files. Native-Windows verification
 follows `ai-docs/manuals/windows-dogfood.md`.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - wsnote가 이제 재시도가 있는 wsstate.AtomicReplaceFile을 씀; edf30f571.
+Triage 2026-11-15 (owner (1057)): DONE - wsnote now uses wsstate.AtomicReplaceFile, which has retry; edf30f571.

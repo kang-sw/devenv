@@ -154,4 +154,4 @@ existing sessions remain unchanged.
   silently choosing a new protocol/store role is not authorized.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 설계 연구 기록이며 구현 착수 근거가 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A design research record with no basis to start implementation.

@@ -30,4 +30,4 @@ identical to an earlier green run, which blocks the ship CI gate until a rerun.
   to settle before judging.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 간헐 테스트 실패 기록으로 다른 flake 티켓과 겹침; 261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout.
+Triage 2026-11-15 (owner (1057)): DROP - A record of an intermittent test failure that overlaps another flake ticket; 261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout.

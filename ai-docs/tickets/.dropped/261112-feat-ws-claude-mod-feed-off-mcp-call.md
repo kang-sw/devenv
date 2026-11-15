@@ -42,4 +42,4 @@ about 0.2 s cadence, matching the Claude mod's dashboard intake cadence
 - If (615) shows alarms without ws, this ticket is dropped.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 가설이 확인 안 됐고 flush 간격을 늘려 이미 완화함; 03894ce7c.
+Triage 2026-11-15 (owner (1057)): DROP - The hypothesis was never confirmed and was already eased by lengthening the flush interval; 03894ce7c.

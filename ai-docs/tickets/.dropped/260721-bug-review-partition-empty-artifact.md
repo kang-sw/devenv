@@ -29,4 +29,4 @@ accepting the partition result.
   missing or empty?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 한 번 본 현상이고 재현·구체적 수정 방향이 없는 질문 목록뿐임.
+Triage 2026-11-15 (owner (1057)): DROP - A one-off observation with no reproduction or concrete fix direction, only a list of questions.

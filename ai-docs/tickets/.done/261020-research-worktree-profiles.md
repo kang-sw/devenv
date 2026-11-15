@@ -265,4 +265,4 @@ Source reading only; nothing was executed.
   prevent per-profile layering.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 워크트리 프로파일이 구현되어 병합됨; 5ccd39178.
+Triage 2026-11-15 (owner (1057)): DONE - Worktree profiles are implemented and merged; 5ccd39178.

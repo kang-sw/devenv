@@ -76,4 +76,4 @@ compatibility choice through MAIN before promotion or implementation; no new
 dependency on the existing common-interface implementation is introduced.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 좁은 수정안은 clerk 역할 설계로 대체됨; 261114-research-ws-clerk-session-role.
+Triage 2026-11-15 (owner (1057)): DROP - The narrow fix was superseded by the clerk role design; 261114-research-ws-clerk-session-role.

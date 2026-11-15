@@ -63,4 +63,4 @@ machinery (`injectSkepticalPosture`, `injectBootstrapStalenessWarning`,
   the lead gets after `ferrule`-ing that root.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 서브모듈 감지 안내는 추측성 개선이고 구체적 문제 사례가 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Submodule detection guidance is a speculative improvement with no concrete problem case.

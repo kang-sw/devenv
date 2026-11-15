@@ -34,4 +34,4 @@ behavior change" for prose surfaces), and does that reading change shipped
 reviewer text (an observable workflow behavior change that needs approval)?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 정책 논의일 뿐 구체적인 다음 작업이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Only a policy discussion with no concrete next work.

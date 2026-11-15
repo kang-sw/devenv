@@ -33,4 +33,4 @@ change:
   ready ticket.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 실제로 닿을 수 있는지 불확실한 추측성 경쟁 조건.
+Triage 2026-11-15 (owner (1057)): DROP - A speculative race condition with uncertain reachability.

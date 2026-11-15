@@ -24,4 +24,4 @@ repair the same skip lasted one call.
   else.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 드문 경우에 경고만 늦게 나오는 사소한 문제.
+Triage 2026-11-15 (owner (1057)): DROP - A minor issue where a warning appears late in rare cases.

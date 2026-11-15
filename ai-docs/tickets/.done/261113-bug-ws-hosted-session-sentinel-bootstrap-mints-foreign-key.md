@@ -26,4 +26,4 @@ every tool refuse a non-hosted key as `workflow_manual` does.
 - What compatibility tier applies at promotion?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 호스팅 세션은 workflow_manual에서 다른 키를 거부하도록 이미 고쳐짐; ff312f485.
+Triage 2026-11-15 (owner (1057)): DONE - Hosted sessions already reject other keys in workflow_manual; ff312f485.

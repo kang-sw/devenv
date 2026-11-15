@@ -138,4 +138,4 @@ does not require serializing partitions. That does not settle the open questions
 above; it changes what the fallback costs.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 한 번 생긴 사고 기록이고 구체적인 다음 단계가 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A record of a one-time incident with no concrete next step.

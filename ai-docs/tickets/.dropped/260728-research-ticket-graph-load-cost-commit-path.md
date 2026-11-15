@@ -117,4 +117,4 @@ acceptable.
   above on evidence, not deferred.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 측정상 빠르고 문제가 없어 할 일이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Measured fast with no problem, so there is nothing to do.

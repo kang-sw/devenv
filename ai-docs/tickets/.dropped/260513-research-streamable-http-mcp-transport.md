@@ -75,4 +75,4 @@ The conservative migration shape is probably:
   is the real long-term target.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 조사 질문만 있고 다음 할 일이 없으며 데몬 방식으로 방향이 바뀜.
+Triage 2026-11-15 (owner (1057)): DROP - Only an investigation question with no next step; direction moved to the daemon approach.

@@ -38,4 +38,4 @@ Non-authoritative: investigate a standard lead-supplied immutable-source/history
 None. Treating current checkout contents as the requested immutable commit was not used as a workaround.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 탐색 에이전트에 git 읽기 도구가 없다는 관찰. 의도된 제한이고 조치 없음.
+Triage 2026-11-15 (owner (1057)): DROP - An observation that the exploration agent has no git read tool; an intended limit with no action.

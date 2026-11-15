@@ -33,4 +33,4 @@ count is the request's starting value: the stream carries no honest rate.
 - "Nothing restarts" test assertions use a 100 ms sleep.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 조사 메모일 뿐이고 구체적인 다음 작업이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A research note with no concrete next work.

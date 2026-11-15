@@ -72,4 +72,4 @@ mid-session, run `/mcp` (reconnect), not just `/reload-plugins`, to pick up the
 rebuilt binary. Deprioritized in `idea/`; not requesting promotion.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 호스트 동작에 대한 관찰 기록이라 우리가 고칠 게 없음.
+Triage 2026-11-15 (owner (1057)): DROP - An observation about host behavior, so there is nothing for us to fix.

@@ -25,4 +25,4 @@ the worker to infer a native fallback. No implementation or API choice is
 settled by this capture.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 같은 문제(충돌 병합 마무리 불가)의 중복 티켓; 261115-bug-ws-git-commit-cannot-conclude-merge.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate ticket for the same problem (a conflicted merge cannot be completed); 261115-bug-ws-git-commit-cannot-conclude-merge.

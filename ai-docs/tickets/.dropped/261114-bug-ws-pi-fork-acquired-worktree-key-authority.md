@@ -47,4 +47,4 @@ approval. Root-mediated operations are the observed workaround, not a settled
 permanent design.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - Pi 포크가 받은 키를 거부당하는 같은 문제의 중복; 261114-bug-pi-fork-descendant-key-authority-rejected.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate of the same problem: a Pi fork's acquired key being rejected; 261114-bug-pi-fork-descendant-key-authority-rejected.

@@ -69,4 +69,4 @@ None selected or proposed by this documentation-only capture.
   model for the specific session or child.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 모델 증거 백필 검증 연구 메모. 일정도 구체 작업도 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A research note on verifying model evidence backfill; no schedule or concrete work.

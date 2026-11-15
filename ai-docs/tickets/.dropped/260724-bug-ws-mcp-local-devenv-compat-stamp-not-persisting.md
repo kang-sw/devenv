@@ -58,4 +58,4 @@ failure the user asked about. Diagnosis confidence ~0.8 that the forced build vs
 Not yet reduced to a deterministic repro.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 로컬 개발 런처의 동일 마이너 허용 수정으로 증상이 완화됨, 개발 전용 이슈; 16dc6239d.
+Triage 2026-11-15 (owner (1057)): DROP - Symptom eased by the same-minor allowance fix in the local dev launcher; development-only issue; 16dc6239d.

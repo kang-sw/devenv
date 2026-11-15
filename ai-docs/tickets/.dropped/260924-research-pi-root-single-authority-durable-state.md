@@ -46,4 +46,4 @@ The side-channel inventory in `260923-research-pi-parent-child-loopback-control-
 ### Rejected Alternatives
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 결정이 없는 조사 메모라 다음 할 일이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A research note with no decision, so there is no next step.

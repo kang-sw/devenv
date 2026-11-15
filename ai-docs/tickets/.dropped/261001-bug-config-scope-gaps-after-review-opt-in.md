@@ -34,4 +34,4 @@ Gap 1 moved to `261001-feat-config-repo-scope-and-tune-weight-guidance`
 (its Decision 11); gaps 2 and 3 remain here.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 큰 갭은 다른 티켓으로 옮겨졌고 남은 건 사소함.
+Triage 2026-11-15 (owner (1057)): DROP - The large gaps moved to other tickets and what remains is minor.

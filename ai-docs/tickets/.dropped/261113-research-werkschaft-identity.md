@@ -121,4 +121,4 @@ bright band in GitHub dark mode.
 - **Mark candidate detaching the last `W` stroke**: read as `W/S`.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 브랜딩 결정 기록일 뿐 구현할 작업이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Only a branding decision record with nothing to implement.
