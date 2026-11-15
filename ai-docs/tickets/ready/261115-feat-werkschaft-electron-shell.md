@@ -503,6 +503,42 @@ Verification for this review-fix round only:
   live Electron acceptance. This is the requested lite-review fix, not a new
   implementation phase or an additional independent review pass.
 
+#### Edition (eff3ced5b) - 2026-11-15
+
+Fixed the two Critical findings from the final lead delta-review round:
+
+- Navigation cancellation now requires the **observed Stay outcome of the
+  still-current load**, not merely `ERR_ABORTED` / `errno: -3`. Retry and
+  same-origin popup attempts carry distinct identities; a superseded
+  rejection cannot restore a stale origin/title or load the connection page.
+  Non-Stay aborts retain the genuine-failure path. An unrelated X-close Stay
+  cannot mark a pending navigation as Stay. The preceding Stay preservation
+  regressions remain in force.
+- Smoke cleanup anchors ownership to the identity captured from each launched
+  child (PID, parent, creation time and launch boundary), not a later PID-only
+  discovery. Children/grandchildren must be created no earlier than their
+  parent and the recorded root. A reused root PID invalidates new adoption.
+  Windows creation identities use UTC tick strings to preserve CIM's full
+  100 ns precision; macOS retains its existing second-precision `ps`
+  identities. Both daemon and remaining-process signals revalidate PID and
+  creation identity immediately before each signal. No image-name kill is
+  used.
+
+Verification: headless `npm test` passed all **29 tests**, including non-Stay
+and Leave aborts, late popup failures after Retry pins origin B, retained
+Stay behavior, unrelated close vetoes, stale-parent/PID reuse, creation-order
+checks, legitimate grandchildren and identity mismatch between cleanup
+signals. Offline `npm run build` produced the unsigned darwin-arm64 app;
+only the pre-existing optional `.icon` warning remains. `git diff --check`
+passed. The local process scan found no remaining test/build/app/fixture
+processes in this worktree; no processes were signalled.
+
+This round did not access Windows or launch Electron/any GUI on the Mac.
+Live smoke verification remains deferred to the next owner-authorized Windows
+run. No protocol/API, dependency, dashboard/daemon source, frozen phase plan
+or later phase changed. This records the final requested review fixes, not a
+new phase or an additional independent review pass.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
