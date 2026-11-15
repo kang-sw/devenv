@@ -252,6 +252,7 @@
   "js.files.tab.new": "Nouvel onglet",
   "js.files.tabs": "Onglets de l’explorateur",
   "js.files.up": "Dossier parent",
+  "js.files.home": "Dossier racine",
   "js.files.back": "Précédent",
   "js.files.forward": "Suivant",
   "js.files.path": "Chemin dans la racine (Ctrl/Cmd+L)",

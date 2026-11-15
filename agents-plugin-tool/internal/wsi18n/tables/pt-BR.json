@@ -252,6 +252,7 @@
   "js.files.tab.new": "Nova aba",
   "js.files.tabs": "Abas do explorador",
   "js.files.up": "Pasta superior",
+  "js.files.home": "Pasta raiz",
   "js.files.back": "Voltar",
   "js.files.forward": "Avançar",
   "js.files.path": "Caminho dentro da raiz (Ctrl/Cmd+L)",

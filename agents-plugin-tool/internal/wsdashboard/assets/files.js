@@ -472,7 +472,7 @@
       b.addEventListener("click", function () { navigate(parts.slice(0, i + 1).join("/")); });
       ui.crumbs.appendChild(b);
     });
-    ui.up.disabled = !dir;
+    ui.up.disabled = ui.home.disabled = !dir;
     var hist = history();
     ui.back.disabled = !hist || hist.index === 0;
     ui.forward.disabled = !hist || hist.index >= hist.paths.length - 1;
@@ -1242,6 +1242,9 @@
     ctl.appendChild(ui.back); ctl.appendChild(ui.forward);
     ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
     ctl.appendChild(ui.up);
+    ui.home = iconBtn("house", wsT("js.files.home")); ui.home.classList.add("fhome");
+    ui.home.addEventListener("click", function () { if (dir) navigate(""); });
+    ctl.appendChild(ui.home);
     ui.location = mk("div", "flocation");
     ui.rootBtn = mk("button", "fcrumb fcrumb-root fchange-root"); ui.rootBtn.type = "button";
     ui.rootBtn.setAttribute("aria-label", wsT("js.files.root.change"));

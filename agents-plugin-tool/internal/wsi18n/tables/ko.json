@@ -252,6 +252,7 @@
   "js.files.tab.new": "새 탭",
   "js.files.tabs": "탐색기 탭",
   "js.files.up": "상위 폴더",
+  "js.files.home": "루트 폴더",
   "js.files.back": "뒤로",
   "js.files.forward": "앞으로",
   "js.files.path": "루트 안의 경로 (Ctrl/Cmd+L)",

@@ -174,8 +174,8 @@ async function pathBarChecks() {
   async function atPath(request, dir) { await answer(request, Object.assign(listing('/paths/' + dir, [{ name: 'kept.go' }], true), { dir })); }
   check('path controls start with no history and up disabled at root', [p.at('.fback').disabled, p.at('.fforward').disabled, p.at('.fback').nextSibling === p.at('.fforward')], [true, true, true]);
   var barButtons = p.at('.fbar-ctl').children.filter(n => n.tagName === 'BUTTON');
-  check('back and forward precede existing up', barButtons.map(n => n.title), ['js.files.back', 'js.files.forward', 'js.files.up']);
-  check('up disabled at root', barButtons[2].disabled, true);
+  check('back and forward precede existing up, home follows it', barButtons.map(n => n.title), ['js.files.back', 'js.files.forward', 'js.files.up', 'js.files.home']);
+  check('up and home disabled at root', [barButtons[2].disabled, barButtons[3].disabled], [true, true]);
   p.at('.fcrumb-trail').click();
   check('trail empty space edits in place with a relative path', [p.at('.fcrumb-trail').hidden, p.at('.fpath').hidden, p.at('.fpath').value, doc.activeElement === p.at('.fpath')], [true, false, '', true]);
   p.at('.fpath').value = 'cancelled'; key(p.at('.fpath'), 'Escape');

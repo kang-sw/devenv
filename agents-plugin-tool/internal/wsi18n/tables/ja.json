@@ -252,6 +252,7 @@
   "js.files.tab.new": "新しいタブ",
   "js.files.tabs": "エクスプローラーのタブ",
   "js.files.up": "親フォルダー",
+  "js.files.home": "ルートフォルダー",
   "js.files.back": "戻る",
   "js.files.forward": "進む",
   "js.files.path": "ルート内のパス (Ctrl/Cmd+L)",

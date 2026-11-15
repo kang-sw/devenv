@@ -13,8 +13,11 @@
 .dash.history .top { flex: none; }
 /* Session cards and files, without the session's conversation or agents. */
 .fattachment .btn[hidden] { display: none; }
-.dgrid.worktree { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; gap: 0 12px;
-  grid-template-columns: minmax(300px, 4fr) minmax(0, 7fr); grid-template-rows: auto minmax(0, 1fr); }
+/* The session page's two-column rule. The worktree page reads the same
+   variables, so its Files panel is exactly as wide as the session's left panel. */
+.dgrid { --dgrid-cols: minmax(320px, 5fr) minmax(0, 7fr); --dgrid-gap: 16px; }
+.dgrid.worktree { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap);
+  grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(0, 1fr); }
 .dgrid.worktree > * { min-width: 0; }
 .dgrid.worktree > .thead { grid-column: 1; grid-row: 1; border-radius: var(--wb-radius) var(--wb-radius) 0 0; box-shadow: var(--wb-shadow); }
 .dgrid.worktree > .fpane { grid-column: 1; grid-row: 2; display: flex; border-top-left-radius: 0; border-top-right-radius: 0; }
@@ -49,7 +52,7 @@
 .dash.live .top { flex: none; }
 /* Empty selection keeps a full main panel even while the rail overlays. */
 :root[data-mode="index"] .dgrid { flex: 1 1 0; min-width: 0; min-height: 0; }
-.dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
+.dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap); --sa: 250fr; --sb: 750fr;
   grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
   grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
 .dgrid.live > * { min-width: 0; min-height: 0; }
@@ -82,7 +85,7 @@
 .splitter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { background: var(--wb-primary); }
 @media (min-width: 760px) {
-  .dgrid.live[data-layout="split"] { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+  .dgrid.live[data-layout="split"] { grid-template-columns: var(--dgrid-cols); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
     grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
   .dgrid.live[data-layout="split"] > .tabbar { display: none; }
   .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
@@ -92,7 +95,7 @@
   .dgrid.live[data-layout="split"][data-ctab="files"] > .convo { display: none; }
 }
 @media (min-width: 1100px) {
-  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: var(--dgrid-cols); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
     grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
   .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
   .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
@@ -315,14 +318,15 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .fpicker .fdot { opacity: .5; }
 .froot-choices { min-width: 0; max-width: 65%; margin-left: auto; font: 11px var(--wb-mono); background: var(--wb-muted); color: inherit; border: 0; border-radius: 5px; padding: 3px; }
 .fattachment .pr { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
-@container (max-width: 480px) {
-  .fworkspace { grid-template-columns: 110px minmax(0, 1fr); }
-  .fentry, .fdetail-head { grid-template-columns: 18px minmax(0, 1fr); }
-  .fentry .ftype, .fdetail-head .ftype { display: none; }
-}
-@container (max-width: 340px) {
+/* Below 640px the folder tree would leave both panes truncating names, so a
+   narrow pane drops the tree and the list takes the full width. */
+@container (width < 640px) {
   .fworkspace { grid-template-columns: minmax(0, 1fr); }
   .fworkspace > .ftree { display: none; }
+}
+@container (max-width: 480px) {
+  .fentry, .fdetail-head { grid-template-columns: 18px minmax(0, 1fr); }
+  .fentry .ftype, .fdetail-head .ftype { display: none; }
 }
 /* Explorer-only compact header; other card kinds keep the shared header. */
 .bcard[data-kind="explorer"] .bc-hd { height: 28px; min-height: 28px; box-sizing: border-box; padding: 2px 6px 2px 10px; gap: 6px; }
