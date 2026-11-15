@@ -94,6 +94,7 @@
   // Each owner gets its own DOM, requests, search token and storage adapter.
   function create(node, options) {
   var el = node, h = options || {}, rid = h.rid || doc.documentElement.getAttribute("data-rid") || "";
+  var directoriesOnly = !!h.directoriesOnly, routeBase = h.routeBase || "/s/" + rid + "/", rootPending = false;
   var gen = 0, rootAttempt = 0, previewAttempt = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
@@ -181,7 +182,7 @@
   function switchTab(index) {
     if (destroyed || !tabs[index] || index === active) return;
     snapshot();
-    gen++; rootAttempt++; navAttempt++;
+    gen++; rootAttempt++; navAttempt++; rootPending = false;
     clearSearch(); closeMenu(false); closePop(false);
     active = index;
     var t = tabs[active], s = t.state, live = t.live;
@@ -211,8 +212,12 @@
   }
   function location() { return { root: rootAbs, dir: dir }; }
   function selection() {
-    if (!info) return null;
+    if (!info || (directoriesOnly && rootPending)) return null;
     var p = sel === null ? dir : sel, sep = info.sep || "/";
+    if (directoriesOnly) {
+      var parent = lists[parentRel(p)];
+      if (!lists[dir] || (p !== dir && !(parent && parent.entries.some(function (e) { return joinRel(parentRel(p), e.name) === p && opens(e); })))) return null;
+    }
     return { root: info.root, session: !!info.session, path: p || ".", absolute: p ? absPath(info.abs || info.root, sep, p.split("/").join(sep)) : info.abs || info.root };
   }
   function notify(type) {
@@ -226,7 +231,7 @@
       ui.selected.appendChild(mk("b", "", value.path.split("/").pop()));
       ui.selected.appendChild(mk("span", "", "  " + value.path));
     }
-    if (!value) return;
+    if (!value && !directoriesOnly) return;
     subscribers[type].slice().forEach(function (fn) { fn(value, api); });
     if (h[type === "selection" ? "onSelection" : "onNavigate"]) h[type === "selection" ? "onSelection" : "onNavigate"](value, api);
   }
@@ -272,12 +277,17 @@
   function fsGet(route, params, signal) {
     var qs = Object.keys(params).filter(function (k) { return params[k] !== "" && params[k] != null; })
       .map(function (k) { return k + "=" + encodeURIComponent(params[k]); }).join("&");
-    return fetch("/s/" + rid + "/fs/" + route + "?" + qs, { credentials: "same-origin", cache: "no-store", signal: signal }).then(function (r) {
+    return fetch(routeBase + "fs/" + route + "?" + qs, { credentials: "same-origin", cache: "no-store", signal: signal }).then(function (r) {
       if (r.ok) return r.json();
       return r.text().then(function (t) { throw { status: r.status, text: (t || "").trim() }; });
     });
   }
-  function listDir(dir, root) { return fsGet("list", { dir: dir, root: root === undefined ? rootAbs : root }); }
+  function listDir(dir, root) {
+    return fsGet("list", { dir: dir, root: root === undefined ? rootAbs : root }).then(function (a) {
+      // The picker never puts files, symlinks or vanished folders into any view.
+      return directoriesOnly ? Object.assign({}, a, { entries: (a.entries || []).filter(opens) }) : a;
+    });
+  }
 
   // --- View toggles, per root ------------------------------------------------
   function viewMap() {
@@ -285,7 +295,7 @@
   }
   function readView() {
     var v = info ? viewMap()[info.root] : null;
-    view = { ign: !!(v && v.ign), dot: !!(v && v.dot) };
+    view = directoriesOnly ? { ign: true, dot: false } : { ign: !!(v && v.ign), dot: !!(v && v.dot) };
     ui.vIgn.checked = view.ign;
     ui.vDot.checked = view.dot;
   }
@@ -295,7 +305,8 @@
 
   // --- the root --------------------------------------------------------------
   function paintHead() {
-    ui.rootBtn.disabled = !local();
+    ui.rootBtn.disabled = directoriesOnly || !local();
+    if (ui.roots && info) ui.roots.value = rootAbs;
     var name = info ? info.name || info.root : "";
     ui.root.textContent = name;
     ui.root.title = info ? info.root : "";
@@ -358,7 +369,7 @@
     status(wsT("js.files.loading"));
     listDir("").then(function (a) { if (g === gen) useRoot(a, restore); }, function (err) {
       if (g !== gen) return;
-      if (rootAbs) {
+      if (rootAbs && !directoriesOnly) {
         rootAbs = "";
         save(ROOT_KEY + rid, null);
         toast(wsT("js.files.root.dropped"));
@@ -376,9 +387,12 @@
     // A candidate must not invalidate the active tree until accepted:
     // refusal still leaves its initial load and expansions usable.
     var attempt = ++rootAttempt;
-    listDir("", path).then(function (a) { if (attempt !== rootAttempt) return; closePop(false); useRoot(a); }, function (err) {
+    if (directoriesOnly) { rootPending = true; notify("navigation"); }
+    listDir("", path).then(function (a) { if (attempt !== rootAttempt) return; rootPending = false; closePop(false); useRoot(a); }, function (err) {
       if (attempt !== rootAttempt) return;
+      rootPending = false;
       ui.rErr.textContent = err && err.status === 404 ? wsT("js.files.root.refused") : wsT("js.files.failed");
+      if (directoriesOnly) { paintHead(); notify("navigation"); toast(ui.rErr.textContent); }
     });
   }
 
@@ -408,6 +422,7 @@
     d.title = r.path;
     if (opens(e)) d.setAttribute("aria-expanded", String(r.open));
     if (e.ign) d.classList.add("ign");
+    if (directoriesOnly && e.name.charAt(0) === ".") d.classList.add("fdot");
     if (e.st) d.classList.add("gm");
     if (e.gone) d.classList.add("gone");
     if (sel === r.path) d.classList.add("sel");
@@ -482,13 +497,13 @@
   }
   function directoryEntry(e, folder, column) {
     var p = joinRel(folder, e.name), selected = sel === p || (column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
-    var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : ""));
+    var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : "") + (directoriesOnly && e.name.charAt(0) === "." ? " fdot" : ""));
     row.setAttribute("data-entry", p); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(selected)); row.tabIndex = 0;
     var ic = mk("span", "fi");
     ic.innerHTML = licon(e.dir ? "folder" : e.link ? "file-symlink" : kindIcon(e.name));
     if (viewMode === "gallery" && !e.dir && !e.link && !e.gone && kindIcon(e.name) === "image") {
       var img = mk("img", "fthumb"); img.alt = e.name; img.loading = "lazy";
-      img.src = "/s/" + rid + "/fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
+      img.src = routeBase + "fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
     } else row.appendChild(ic);
     row.appendChild(mk("span", "fn", e.name));
     if (viewMode === "details") row.appendChild(mk("span", "ftype", e.dir ? wsT("js.files.folder") : e.name.indexOf(".") >= 0 ? e.name.split(".").pop().toUpperCase() : wsT("js.files.file")));
@@ -604,6 +619,7 @@
     });
   }
   function preview(path, line) {
+    if (directoriesOnly) return;
     if (!window.WsPreview) return;
     var o = {}, g = gen, navigation = navAttempt, attempt = ++previewAttempt;
     if (rootAbs) o.root = rootAbs;
@@ -733,6 +749,7 @@
   // terminal.js), and the two copy entries. A deleted entry offers only the
   // copy entries.
   function openMenu(r, x, y) {
+    if (directoriesOnly) return;
     closeMenu(false);
     closePop(false);
     var e = r.e, path = r.path, l = lists[r.dir], items = [];
@@ -870,6 +887,7 @@
   // Invalidate immediately, before debounce: even a fetch that ignores abort
   // cannot repaint or leave actionable results for a superseded query/mode.
   function search(now) {
+    if (directoriesOnly) return;
     clearTimeout(timer);
     abort();
     searchResult = null;
@@ -968,6 +986,7 @@
   function build() {
     el.textContent = "";
     el.setAttribute("data-fm", mode);
+    el.classList.toggle("fpicker", directoriesOnly);
     var bar = mk("div", "fbar");
     ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
     ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
@@ -991,8 +1010,19 @@
     [ui.collapse, ui.refresh, ui.viewBtn].forEach(function (b) { head.appendChild(b); });
     ui.openCard = iconBtn("external-link", wsT("js.files.open.card"));
     ui.openCard.classList.add("fopen-card");
+    ui.openCard.hidden = directoriesOnly;
+    ui.viewBtn.hidden = directoriesOnly;
     ui.openCard.addEventListener("click", function () { if (h.openCard) h.openCard(location()); else openCard(location()); });
     head.appendChild(ui.openCard);
+    if (directoriesOnly && h.roots) {
+      ui.roots = mk("select", "froot-choices");
+      ui.roots.setAttribute("aria-label", wsT("js.files.root.label"));
+      [h.roots.home].concat(h.roots.volumes || []).filter(function (p, i, all) { return p && all.indexOf(p) === i; }).forEach(function (path) {
+        var option = mk("option", "", h.roots.host + " · " + path); option.value = path; ui.roots.appendChild(option);
+      });
+      ui.roots.addEventListener("change", function () { applyRoot(ui.roots.value); });
+      bar.appendChild(ui.roots);
+    }
     bar.appendChild(head); el.appendChild(bar);
 
     var searchRow = mk("div", "fsrow"), row = mk("div", "fsr");
@@ -1004,6 +1034,7 @@
     [ui.mName, ui.mText].forEach(function (b) { b.type = "button"; seg.appendChild(b); });
     row.appendChild(seg);
 
+    row.hidden = directoriesOnly;
     var si = mk("span", "fi");
     si.innerHTML = licon("search");
     row.appendChild(si);
@@ -1210,7 +1241,7 @@
     listen(doc, "keydown", function (e) {
       var pane = e.target.closest && e.target.closest(".fpane"), sheet = doc.querySelector(".bcard[data-max] .fpane, .fpane[data-max]");
       if ((pane && pane !== el) || (sheet && sheet !== el) || (!pane && !sheet)) return;
-      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || editable(e.target) || !shows(el)) return;
+      if (directoriesOnly || e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || editable(e.target) || !shows(el)) return;
       e.preventDefault();
       closeMenu(false);
       ui.q.focus();
@@ -1327,6 +1358,9 @@
   // Each owner's load/save adapter isolates root, View and tabs records.
   // Options also include location {root,dir}, send(path), openCard(location),
   // onSelection/onNavigate(payload, api), and attachment(slot, api) -> disposer.
+  // A directoriesOnly consumer supplies roots {host,home,volumes}, an initial
+  // location and an absolute routeBase (e.g. /s/host0/) when outside a session.
+  // It has no file search/preview/actions and may notify null while loading.
   // on(type, listener) returns an unsubscribe; selection/navigation carry
   // {root,session,path,absolute}. setAttachment replaces/disposes the slot.
   // Existing root and bounded View records remain readable.

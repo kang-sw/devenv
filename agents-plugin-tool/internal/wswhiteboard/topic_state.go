@@ -272,6 +272,15 @@ func applyTopicState(p *problems, work *State, cmd command, topicOf topicResolve
 	} else if hasOwner || hasETA {
 		p.Add("%s: owner and eta_minutes apply only to implementing", cmd.Label())
 	}
+	on, hasOn := cmd.Attr("on")
+	var targets []string
+	if hasOn {
+		if value != StateWaiting {
+			p.Add("%s: on applies only to waiting", cmd.At("on"))
+		} else if topicOK {
+			targets = normalizeWaitingOn(p, work, cmd, topic, on)
+		}
+	}
 	if !topicOK || !valueOK {
 		return
 	}
@@ -290,6 +299,13 @@ func applyTopicState(p *problems, work *State, cmd command, topicOf topicResolve
 	if prior.State != nil && prior.State.Value == value {
 		if value == StateImplementing && (prior.State.Run.Owner != owner || prior.State.Run.ETAMinutes != eta) {
 			p.Add("%s: implementing owner/ETA differs; change ETA with wb:eta, or explicitly exit/re-enter to replace the executor", cmd.Label())
+		}
+		if value == StateWaiting && !slices.Equal(work.waitingDeclarations()[topic].Targets, targets) {
+			if _, ok := stateTimestamp(now); !ok {
+				p.Add("%s: server time is outside UTC RFC3339Nano bounds", cmd.Label())
+				return
+			}
+			work.appendEntry(topic, Entry{Kind: EntrySystem, Text: "waiting on changed: " + strings.Join(targets, " "), WaitingOn: waitingPayload(targets)}, now)
 		}
 		return
 	}
@@ -315,6 +331,10 @@ func applyTopicState(p *problems, work *State, cmd command, topicOf topicResolve
 		r.Run = &TopicRun{ID: fmt.Sprintf("e%d", work.EntrySeq+1), StartedAt: start, Owner: owner, InitialETAMinutes: eta, ETAMinutes: eta}
 	}
 	work.appendStateEvent(topic, r, "Topic state: "+stateTransitionText(r), now)
+	if value == StateWaiting && len(targets) > 0 {
+		doc := work.topicDoc(topic)
+		doc.Entries[len(doc.Entries)-1].WaitingOn = waitingPayload(targets)
+	}
 }
 
 func runElapsed(run *TopicRun, now time.Time) int64 {

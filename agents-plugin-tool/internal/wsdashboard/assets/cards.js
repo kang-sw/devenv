@@ -250,13 +250,14 @@
     if (window.ResizeObserver) new window.ResizeObserver(resizeStateFilter).observe(toolbar);
     return root;
   }
-  function selectFilter(value, focus, dismiss) {
+  function selectFilter(value, focus, dismiss, after) {
     var run = function () {
       stateFilter = value;
       opt.save(opt.key + ".state-filter", value);
       countTopics();
       if (dismiss) stateUI.close(true);
       else if (focus) focus.focus({ preventScroll: true });
+      if (after) after();
     };
     // Let Overview finish restoring its anchor before visibility changes.
     if (opt.toolbar && opt.toolbar.filter) opt.toolbar.filter(run); else run();
@@ -613,6 +614,15 @@
     var sec = originTopic(node && node.closest && node.closest("section.topic[data-topic]"));
     var r = sec && topics[topicName(sec)];
     if (r && r.folded) foldUnit(topicUnit(sec), false);
+  }
+  // Topic dependency navigation resets only a filter that hides its target.
+  // Overview may restore asynchronously, so geometry waits for that restoration.
+  function revealTopic(node, after) {
+    var sec = originTopic(node && node.closest && node.closest("section.topic[data-topic]"));
+    if (!sec) return;
+    var reveal = function () { unfoldTopic(sec); if (after) after(); };
+    if (sec.hasAttribute("data-state-filtered")) selectFilter("all", null, false, reveal);
+    else reveal();
   }
   function openBefore(c, origin) {
     var n = originTopic(origin), u = n && unitOf(n);
@@ -1449,6 +1459,7 @@
     // fetched closed page) their pin buttons.
     decorate: function () { if (board) decorate(); },
     unfoldTopic: unfoldTopic,
+    revealTopic: revealTopic,
     is: isCard
   };
 })();

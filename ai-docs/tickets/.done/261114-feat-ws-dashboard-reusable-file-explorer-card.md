@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 25d26d143ec11825
 sage-review-completeness-reviewed: 25d26d143ec11825
+completed: 2026-11-15
 ---
 
 # Deliver the reusable stateful file explorer card
@@ -464,6 +465,52 @@ daemon host, never requests file previews, and that Select feeds the existing
 add-workspace preview/add flow while Cancel changes nothing; that remote
 viewers see only the existing paste input; `TestFiles|TestFS` and workspace
 route neighbours plus `./internal/wsi18n`; side-by-side against frame 08.
+
+### Result (69c3d2880) - 2026-11-15
+
+- Completed Phase 4, the last phase. Local viewers get one Browse entry beside
+  the existing rail workspace paste input. The popover's current implementation
+  is in `dashboard.js`, not `rail.js`; only its entry and picker lifecycle were
+  extended, leaving `rail.js` and the parallel compact explorer chrome alone.
+- Browse discovers `/s/host0/fs/roots` and mounts `WsFiles.create` with an
+  absolute `/s/host0/` route base, explicit home/volume roots labeled with the
+  daemon host, and a directories-only option. The same core renders the picker;
+  dot folders are translucent, ignored folders remain visible, and files,
+  symlinks and vanished entries are omitted from every view. File search,
+  previews, gallery media reads and host actions are suppressed in this mode.
+- Select/Cancel replace the browse attachment slot. Select supplies the absolute
+  host path to the existing preview/add flow without submitting Add itself;
+  Cancel changes neither pasted text nor preview state. Pending root choices
+  cannot select against stale labels. Refused shortcuts preserve the prior
+  root; an anchor failure never falls back to an implicit session root.
+- The local shell loads the core and its card helpers before the consumer.
+  Remote viewers retain paste/add without Browse. The temporary picker supplies
+  no load/save adapter, so existing Files-tab, toolbar and card-ID browser
+  records are unchanged. Popover close and Escape destroy the instance;
+  late discovery/list answers cannot resurrect it. No new endpoint, filesystem
+  mutation, permission, protocol or shared-store change (T0 dashboard assets).
+- Verification passed:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run 'TestFiles|TestFS|TestCards|TestToolbar|TestBoardToolbar|TestLocalBrowse|TestWorkspace|TestWorktreeAddRoute|TestAddWorktreeDefaultFolder|TestSessionPageOffersTheRailAddButtons|TestSessionURLServes|TestIndexServes|TestSharedCard|TestFullscreenPanel' -count=1 -timeout=3m`
+    (8.750s). Production-JS cases cover filtering, attachment/preview/add wiring,
+    local/remote gating, pending/refused roots, stale discovery/listings,
+    teardown and Windows drive-root separators; existing route/path guards pass.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -count=1`
+    (1.223s); Browse and Select folder are translated in all 11 tables.
+  - Node syntax checks for both changed production JS files and both fixtures,
+    `gofmt -d` on `files_test.go`, and `git diff --check` passed.
+  - The first focused run exposed the fake DOM's inability to parse spaces
+    inside attribute selectors in the new fixture. Replaced those fixture
+    lookups with entry-list matching; subsequent focused runs passed.
+- Followed the lead's explicit branch vouch and did not execute the route's
+  canonical-branch action. With child agents disabled, performed a brief
+  logic/state self-review of per-owner cleanup, nonpersistent picker state,
+  absolute path selection, root-choice races and unchanged server guards.
+  No independent-review pass is claimed. Frame 08 was read as design reference;
+  browser/screenshot/reference rounds were omitted under the owner's fast-UI
+  rule, with the owner's on-screen check after merge remaining acceptance.
+- Owned-process `ps` scan found no worker-started server, browser or test
+  processes remaining; no cleanup was required. No shared daemon rebuild or
+  restart, push or merge. All four phases now have Results.
 
 ## Sage Review Round 1 (2026-11-15)
 

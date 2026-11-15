@@ -67,11 +67,48 @@ func TestFilesExplorerInstances(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	files, _ := json.Marshal(mustAsset(t, "files.js"))
 	preview, _ := json.Marshal(mustAsset(t, "preview.js"))
+	var picker strings.Builder
+	for _, name := range []string{"rpWsBrowse", "rpWsMake"} {
+		fn := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(mustAsset(t, "dashboard.js"))
+		if fn == "" {
+			t.Fatalf("dashboard.js holds no %s", name)
+		}
+		picker.WriteString(fn)
+	}
+	pickerJSON, _ := json.Marshal(picker.String())
+	pickerFixture, err := os.ReadFile("testdata/files-workspace-picker.test.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture, err := os.ReadFile("testdata/files-explorer.test.cjs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PREVIEW = "+string(preview)+";\n"+cardsDOM+string(fixture))
+	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PREVIEW = "+string(preview)+", PICKER = "+string(pickerJSON)+";\n"+cardsDOM+string(pickerFixture)+string(fixture))
+}
+
+func TestFilesWorkspacePickerShellAssets(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		page, err := renderShellPage(shellPageData{Lang: "en", SysOpen: local, Src: "/?frame=1"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(page, "window.WsFiles = {"); got != local {
+			t.Errorf("local=%v explorer loaded=%v", local, got)
+		}
+		if local {
+			cards := strings.Index(page, "window.WsCards = {")
+			files := strings.Index(page, "window.WsFiles = {")
+			script := strings.Index(page, "The dashboard page script")
+			if cards < 0 || files < cards || script < files {
+				t.Error("shell must load card helpers, explorer, then the popover consumer")
+			}
+		}
+	}
+	css := mustAsset(t, "dashboard.css")
+	if !strings.Contains(css, ".fpicker .fdot { opacity: .5; }") || !strings.Contains(css, ".fworkspace-picker > .fpane { display: flex; height: 100%; }") {
+		t.Error("picker requires translucent hidden directories and a bounded shared pane")
+	}
 }
 
 func TestFilesExplorerColumnLayout(t *testing.T) {
