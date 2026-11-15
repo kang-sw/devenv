@@ -324,7 +324,7 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .wb-hitem.announced { --wb-haccent: var(--wb-ck-ok); }
 .wb-hitem.wb-hassumed { --wb-haccent: var(--wb-accent-assumed); }
 .wb-hitem.void { --wb-haccent: var(--wb-muted-fg); }
-.wb-hitem .wb-htext { display: grid; grid-template-columns: auto 20px minmax(0, 1fr); align-items: start; gap: 7px; width: 100%; line-height: 24px; }
+.wb-hitem .wb-htext { display: grid; grid-template-columns: auto 20px minmax(0, 1fr) minmax(0, auto); align-items: start; gap: 7px; width: 100%; line-height: 24px; }
 .wb-hitem details.sx > summary::before { align-self: flex-start; margin-top: 8px; }
 .wb-htime { color: var(--wb-muted-fg); font: 10px/24px var(--wb-mono); white-space: nowrap; }
 .wb-hunknown { font: 10px/1.4 var(--wb-sans); max-width: 7em; white-space: normal; padding-top: 5px; }
@@ -335,15 +335,15 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .wb-hmain > b { font-weight: 500; }
 .wb-hitem.void .wb-hmain > b { text-decoration: line-through; color: var(--wb-muted-fg); }
 .wb-hstatus:has(.pick) { background: none; padding: 0; }
-/* Answers share the title's available width, not a capped trailing column. */
-.wb-hstatus { display: inline; padding: 0 6px; border-radius: 5px; line-height: 20px; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; box-decoration-break: clone; background: color-mix(in srgb, var(--wb-haccent) 13%, transparent); color: var(--wb-haccent); }
-.wb-hstatus .pick { display: inline; box-decoration-break: clone; }
+/* The complete answer belongs to the disclosure, not a multiline chip. */
+.wb-hstatus { display: block; min-width: 0; max-width: min(24em, 35vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 5px; line-height: 20px; margin-top: 2px; font-size: 10px; font-weight: 600; background: color-mix(in srgb, var(--wb-haccent) 13%, transparent); color: var(--wb-haccent); }
+.wb-hstatus .pick { display: inline; white-space: nowrap; }
 .wb-hitem .sbody { margin-left: 68px; padding-left: 12px; border-left: 1px solid color-mix(in srgb, var(--wb-haccent) 45%, transparent); }
 .wb-hitem .quote { margin: 7px 0 0; padding-left: 9px; border-left: 2px solid var(--wb-haccent); white-space: pre-wrap; overflow-wrap: anywhere; }
 .wb-hanswer-at { margin-top: 6px; color: var(--wb-muted-fg); font-size: 10px; overflow-wrap: anywhere; }
 @media (max-width: 560px) {
-  .wb-hitem .wb-htext { display: block; position: relative; padding-left: 26px; line-height: 22px; }
-  .wb-hitem .wb-htime { display: inline; max-width: none; line-height: inherit; padding-top: 0; margin-right: 5px; }
+  .wb-hitem .wb-htext { grid-template-columns: minmax(0, 1fr) minmax(0, auto); position: relative; padding-left: 26px; line-height: 22px; }
+  .wb-hitem .wb-htime { grid-column: 1 / -1; max-width: none; line-height: inherit; padding-top: 0; }
   .wb-hmark { position: absolute; left: 0; top: 0; }
   .wb-hmain { display: inline; }
   .wb-hitem .sbody { margin-left: 29px; padding-left: 10px; }
