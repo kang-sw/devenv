@@ -154,3 +154,69 @@ Verification:
   dashboard theme recolors the bar and the overlay controls; the X-close
   confirmation from the Electron ticket still runs. Screenshots are kept as
   evidence outside the repository.
+
+### Result (c8609cb1b) - 2026-11-15
+
+Implementation landed; **Windows interactive acceptance remains incomplete**.
+This is an implementation checkpoint, not a claim that Phase 1 passed its
+live verification. The ticket remains in `ready/` at the caller's direction.
+
+Delta:
+- `919520109` adds Windows-only hidden chrome and Windows-drawn overlay
+  controls, a bundled bar view with icon/hamburger/centered document title,
+  and a sibling dashboard view below it. Native macOS/Linux window options
+  remain unchanged. Empty bar space is draggable; icon/menu/title are not.
+- Dashboard navigation, title, zoom, theme and unload handling bind through
+  `dashboardContents`. Closing the Windows window explicitly runs the
+  dashboard view's beforeunload path before completing native window close.
+- The bar alone receives a narrow state/menu preload, in a separate
+  in-memory session restricted to bundled resources. Menu requests verify
+  sender/main-frame identity. The dashboard retains isolation, sandbox,
+  disabled Node/webview and no preload. No dashboard assets changed.
+- Dashboard theme-color maps to bar/overlay colors with contrast selection
+  and nativeTheme fallback. Hamburger and bare Alt share the native P8 menu.
+  Packaging now includes every bar runtime file and its icon.
+- `c8609cb1b` is the single authorized fix round: explicitly initialize the
+  inert BrowserWindow owner document with about:blank, deny its navigation
+  and popups, and keep its title separate from the dashboard. It also fixes
+  acceptance input targeting to use Electron's PID rather than its cmd
+  wrapper. The owner-document diagnosis is not yet confirmed by live success.
+
+Verification:
+- Mac: `npm test` passed 39/39; offline `npm run build` passed for
+  darwin-arm64, retaining only the existing optional `.icon` warning.
+  `node --check test/titlebar-smoke.cjs` and `git diff --check` passed.
+  No Electron, built app, smoke script or GUI ran on the Mac.
+- Windows: one isolated clone, one `npm ci --no-audit --no-fund`, and one
+  explicit `node node_modules/electron/install.js`; caches stayed under the
+  unique verification folder. On both heads, `npm test` passed 39/39 and
+  offline win32-x64 packaging passed. The source-built fixture used its own
+  cache and an OS-assigned port, never the shared daemon or port 29417.
+- First console-session run on `919520109`: Playwright timed out at 60
+  seconds after attaching Node and Chrome debuggers; no UI assertion
+  completed. Its source waits for every attached page to initialize, while
+  the new owner webContents had no committed document; the fix above
+  addresses that lifecycle gap.
+- The one authorized rerun on `c8609cb1b` did not reach the runner:
+  Task Scheduler returned `0xC0000142` (3221225794) starting the command.
+  No second smoke log, Electron process or screenshot was produced.
+  No further attempt was made.
+- Evidence remains ignored under
+  `agents-plugin-tool/desktop-electron/dist/evidence/windows/tb/` (summary,
+  initial launch/build logs, scheduler result and owned-process scans).
+  The exact scheduled task and unique Windows verification folder were
+  deleted after an empty scoped CIM scan; the Mac bundle was deleted.
+  The final Mac owned executable scan was also empty.
+
+Unverified: visible chrome and centering, live title propagation,
+menu/Alt/keyboard reachability and individual P8 actions, drag/double-click,
+Windows controls and snap hover, live theme repaint, physical X-close
+confirmation and real pasted-image draft preservation. No interactive
+screenshots exist. The owner-copy rebuild/shortcut update was skipped because
+its prerequisite core checks did not pass; that folder was not accessed.
+
+Decisions: retain the caller's explicit `exec4/titlebar-impl` branch rather
+than the route's nested branch suggestion; skip child delegation and independent
+review under the caller's override (the lead owns one lite review). Do not
+retry beyond the single authorized fix round. A fresh Windows acceptance run
+requires renewed lead authorization; this checkpoint does not close the phase.
