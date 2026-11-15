@@ -388,13 +388,22 @@ func TestHiringPendingSurvivesRestartAndExpiryClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Publish the future heartbeat before advancing the fixture clock, so
-	// the background reconciler cannot observe a transient ended requester.
+	// Publish the future heartbeat and advance the fixture clock as one step
+	// under hireMu. Ordering alone is not enough: a background hireLoop pass
+	// could read the old registration before the write and the clock after
+	// the jump, and then withdraw the request as "requester session has
+	// ended". settleHires holds hireMu across its read and its verdict, so
+	// every pass sees both values old or both new.
+	d.hireMu.Lock()
 	reg.HeartbeatAt = advanced.UTC().Format(time.RFC3339)
-	if err = WriteRegistration(f.dir, reg); err != nil {
+	err = WriteRegistration(f.dir, reg)
+	if err == nil {
+		clock.Store(advanced.UnixMilli())
+	}
+	d.hireMu.Unlock()
+	if err != nil {
 		t.Fatal(err)
 	}
-	clock.Store(advanced.UnixMilli())
 	d.settleHires()
 	assertHireMail(t, d, p, "expired")
 }
