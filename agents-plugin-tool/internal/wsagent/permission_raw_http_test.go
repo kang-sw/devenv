@@ -6,11 +6,19 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPermissionHTTPRawBodiesZeroWrites(t *testing.T) {
-	h := permissionHarness(t).start()
+	h := permissionHarness(t)
+	// This test compares the entire file tree, including atomic-write temp
+	// files. The harness's 50ms heartbeat writes snapshot.json independently
+	// of HTTP requests; defer it so only request-caused writes are observed.
+	h.opts.heartbeat = time.Hour
+	h.start()
 	st := h.lead(BackendClaude, LeadOptions{})
+	wait(t, "the initial holder scan", h.runner.rejoined)
+	h.mailSettled(st.ID)
 	for _, target := range []struct{ name, path string }{
 		{"create", "/agents/leads/permission"},
 		{"settings", "/agents/" + st.ID + "/settings/permission"},
@@ -33,7 +41,19 @@ func TestPermissionHTTPRawBodiesZeroWrites(t *testing.T) {
 				if res.Code != http.StatusBadRequest {
 					t.Fatalf("raw %q: %d %s", body.raw, res.Code, res.Body.String())
 				}
-				if !reflect.DeepEqual(before, permissionHTTPFiles(t, h.dir)) || h.keys.n != keys || len(h.runner.List()) != 1 || len(h.holders.opList()) != 0 {
+				after := permissionHTTPFiles(t, h.dir)
+				if !reflect.DeepEqual(before, after) || h.keys.n != keys || len(h.runner.List()) != 1 || len(h.holders.opList()) != 0 {
+					for path, content := range before {
+						if got, ok := after[path]; !ok || got != content {
+							t.Logf("changed %s: before=%q after=%q present=%v", path, content, got, ok)
+						}
+					}
+					for path, content := range after {
+						if _, ok := before[path]; !ok {
+							t.Logf("added %s: %q", path, content)
+						}
+					}
+					t.Logf("keys before=%d after=%d conversations=%d holder ops=%v", keys, h.keys.n, len(h.runner.List()), h.holders.opList())
 					t.Fatalf("raw %q mutated files, keys, conversations or holders", body.raw)
 				}
 				if got := h.state(st.ID); got.PermissionMode != st.PermissionMode || got.PermissionLevel != st.PermissionLevel || got.Model != st.Model || got.Effort != st.Effort {

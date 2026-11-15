@@ -287,7 +287,11 @@ func(r *Runner) serveToken(http.ResponseWriter,*http.Request,string){panic("unex
  {"/agents/leads/permission",405},{"/agents/id/settings/permission",404},
  {"/agents/workers",405},{"/agents/workers/permission",404},
  } {
-  body:="{\"root\":\""+dir+"\",\"harness\":\"claude\",\"permission_level\":\"full\",\"permission_full_ack\":true}"
+  // Marshal paths rather than concatenating them: Windows temp directories
+  // contain backslashes, which must be escaped in a valid JSON string.
+  raw,err:=json.Marshal(map[string]any{"root":dir,"harness":"claude","permission_level":"full","permission_full_ack":true})
+  if err!=nil {t.Fatal(err)}
+  body:=string(raw)
   req:=httptest.NewRequest("POST","http://127.0.0.1:8123"+tc.path,strings.NewReader(body))
   req.Header.Set("Content-Type","application/json")
   req.Header.Set("Origin","http://127.0.0.1:8123")
@@ -295,7 +299,7 @@ func(r *Runner) serveToken(http.ResponseWriter,*http.Request,string){panic("unex
   // Exercise the exact permissive decoder with a valid selection payload.
   var payload leadRequest
   check:=httptest.NewRequest("POST","http://127.0.0.1:8123",strings.NewReader(body))
-  if !decode(httptest.NewRecorder(),check,&payload)||payload.Harness!="claude" {t.Fatal("valid decode prerequisite missing")}
+  if !decode(httptest.NewRecorder(),check,&payload)||payload.Harness!="claude"||payload.Root!=dir {t.Fatal("valid decode prerequisite missing")}
   w:=httptest.NewRecorder();r.serve(w,req)
   if w.Code!=tc.status {t.Fatalf("%s: %d %s",tc.path,w.Code,w.Body.String())}
  }
