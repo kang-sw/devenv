@@ -467,7 +467,14 @@
       "registered_at": "2026-11-14T06:03:03Z"
     },
     "261114-refactor-ws-common-session-interface": {
-      "registered_at": "2026-11-14T11:13:55Z"
+      "registered_at": "2026-11-14T11:13:55Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T08:37:36Z"
+      }
     },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
