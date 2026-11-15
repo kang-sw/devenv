@@ -202,20 +202,7 @@ func (d *Daemon) handleRailAdmission(w http.ResponseWriter, r *http.Request) {
 		// Durable rejections outlive forgotten repositories and pool changes. Copy
 		// only the committed rejected rows this same render actually displays.
 		if reply.Prompt != "" {
-			var visible []railAdmissionRecord
-			for _, ws := range view.Workspaces {
-				for _, wt := range ws.RejectedWorktrees() {
-					root, path := wt.AdmissionRepository, wt.AdmissionPath
-					if root == "" {
-						root = ws.Path
-					}
-					if path == "" {
-						path = wt.Path
-					}
-					visible = append(visible, railAdmissionRecord{Repository: root, Path: path, Origin: wt.Origin, State: "rejected", Branch: wt.Branch})
-				}
-			}
-			reply.Prompt = railRejectedPrompt(visible)
+			reply.Prompt = view.RejectedPrompt()
 		}
 		region, e := renderRailRegion(view, lang)
 		if e == nil {

@@ -323,6 +323,20 @@ returned RC0 at `9479185e73`, whose Go tree is identical to A; MAIN was notified
 This supersedes the pending MCP Observed test statement above. Activation and
 bundle follow-up remain pending as recorded; no checks were rerun for this update.
 
+#### Edition (7ad4a0627) - 2026-11-15
+
+`model-evidence/` is no longer additive-only. Once it holds more than 2256
+records, `AppendObserved` prunes it after a new write. It deletes per-agent
+repeats (records that are not the first, a model change or the latest)
+whose At and file mtime are both more than 1 h older than that agent's
+newest record, at most once per directory per process every 10 min.
+Current and History stay identical. Compatibility is T0: old binaries never
+prune, and they read a pruned directory with the same `summarizeObserved`.
+Limitation: a late out-of-order arrival inside a pruned span could re-date a
+change, which the 1 h guard mitigates. Earlier: 882368a83 and 589de6809
+replaced the per-load record stat sweep in `ObservedCache` with a
+directory-stat gate, a name diff and a 15 s forced sweep.
+
 ### Phase 2: Approved compact session hover and current-agent model provenance
 
 MAIN's explicit 2026-11-15 03:33:37Z execution grant supersedes the original

@@ -121,6 +121,10 @@ func TestWhiteboardPlaybookStreamGuidanceProductModes(t *testing.T) {
 				"Existing topic-only and topic/item mentions remain valid",
 				"{{p3}}",
 				"Authoritative topic folders remain after the session key expires",
+				"| `wb:topic` | `name`, `label?`, `tickets?` |",
+				"none with `label` or `tickets`",
+				"Linked tickets: `tickets=\"<stem> <stem>\"` on `wb:topic` links the space-separated ticket stems the topic tracks, replacing its whole list; `tickets=\"\"` clears it.",
+				"When a topic defers work or leaves a follow-up as a ticket, link that ticket with `tickets=` in the same update",
 			} {
 				if !strings.Contains(flat, want) {
 					t.Fatalf("%s guidance lacks %q", namespace, want)
@@ -128,7 +132,8 @@ func TestWhiteboardPlaybookStreamGuidanceProductModes(t *testing.T) {
 			}
 			for _, gone := range []string{
 				"<wb:recap>", "Topic recap:", "the board clears with the session key", "{{.McpNamespace}}", "{{.SkillNamespace}}",
-				"Linked tickets:", "`tickets?`", "tickets=", "OK this draft and I'll proceed", "A topic can have content or entries without items.",
+				"OK this draft and I'll proceed", "A topic can have content or entries without items.",
+				"marks the topic as live work",
 				"ETA changes within a run are not available.", "board_notice",
 			} {
 				if strings.Contains(body, gone) {

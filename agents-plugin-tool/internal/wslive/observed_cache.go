@@ -6,27 +6,75 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+)
+
+const (
+	// observedResweep bounds how long a load may trust the evidence
+	// directory's own stat: past it, the next load stats every record again.
+	observedResweep = 15 * time.Second
+	// observedRacyWindow is how recent a directory mtime may be, relative to
+	// the sweep that recorded it, and still be distrusted: an entry added on a
+	// filesystem with coarse timestamps can keep the directory mtime equal.
+	observedRacyWindow = 2 * time.Second
 )
 
 // ObservedCache retains immutable decoded evidence and its derived model
-// histories. Each load lists the directory and stats each record, following
-// symlinks. SameFile, size, mode and mtime detect replacements and child edits
-// even when the directory's own stat is unchanged. The zero value is ready.
-// Like FolderCache, in-place writes preserving the entire identity are outside
-// this cache's contract; no TTL or recent-write exclusion is used.
+// histories. Evidence files are write-once (AppendObserved links a synced temp
+// file into place and skips an existing name), so every legitimate change
+// adds or removes a directory entry and moves the directory's mtime. A load
+// therefore trusts the directory's own stat while it is unchanged and its
+// mtime is older than the racy window (observedRacyWindow) of the stat that
+// recorded it. Otherwise it lists the directory, reuses each known name
+// without a stat, and stats and reads only new names; a vanished name drops.
+// A full sweep, which stats every record (following symlinks) and re-reads
+// one whose SameFile, size, mode or mtime moved, runs at least every
+// observedResweep and whenever the directory stat is unusable: it bounds the
+// staleness of an in-place child edit, a same-name replacement, or a
+// coarse-mtime collision. The prior per-load full sweep cost one stat per
+// record on every snapshot read, which a long session's thousands of records
+// made the dashboard's dominant cost. The zero value is ready.
 type ObservedCache struct {
 	mu       sync.Mutex
 	sessions map[string]*observedSlot
 	opens    atomic.Int64
-	// open is an instance-local test seam; set before the first Load.
+	// open, stat and now are instance-local test seams; set before the first
+	// Load.
 	open func(string) (*os.File, error)
+	stat func(string) (os.FileInfo, error)
+	now  func() time.Time
 }
 
 type observedSlot struct {
 	mu       sync.Mutex
 	files    map[string]observedFile
 	evidence *ObservedEvidence
+	// dirInfo is the evidence directory's stat taken before the last listing,
+	// dirAt the clock reading before that stat, and sweptAt the clock reading
+	// before the last full sweep.
+	dirInfo        os.FileInfo
+	dirAt, sweptAt time.Time
 }
+
+// sweepDue reports that a load at clock now must stat every record.
+func (s *observedSlot) sweepDue(now time.Time) bool {
+	d := now.Sub(s.sweptAt)
+	return s.evidence == nil || s.dirInfo == nil || d < 0 || d >= observedResweep
+}
+
+// trusted reports that the slot's last listing still describes the directory
+// now stat'ed as info at clock now.
+func (s *observedSlot) trusted(info os.FileInfo, now time.Time) bool {
+	prev := s.dirInfo
+	if s.sweepDue(now) || info == nil || !info.IsDir() || info.ModTime().IsZero() {
+		return false
+	}
+	if !info.ModTime().Before(s.dirAt.Add(-observedRacyWindow)) {
+		return false
+	}
+	return os.SameFile(prev, info) && prev.Size() == info.Size() && prev.Mode() == info.Mode() && prev.ModTime().Equal(info.ModTime())
+}
+
 type observedFile struct {
 	info   os.FileInfo
 	record ObservedRecord
@@ -66,11 +114,35 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	c.mu.Unlock()
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
-	entries, err := os.ReadDir(filepath.Join(dir, ObservedDirName))
+	stat := c.stat
+	if stat == nil {
+		stat = os.Stat
+	}
+	clock := time.Now
+	if c.now != nil {
+		clock = c.now
+	}
+	evidenceDir := filepath.Join(dir, ObservedDirName)
+	now := clock()
+	dirInfo, dirErr := os.Stat(evidenceDir)
+	if dirErr == nil && slot.trusted(dirInfo, now) {
+		return slot.evidence
+	}
+	entries, err := os.ReadDir(evidenceDir)
 	if err != nil {
 		slot.files = nil
 		slot.evidence = nil
+		slot.dirInfo = nil
 		return nil
+	}
+	full := slot.sweepDue(now) || dirErr != nil
+	// An unusable directory stat leaves nothing to trust: every load sweeps.
+	slot.dirInfo, slot.dirAt = nil, now
+	if dirErr == nil {
+		slot.dirInfo = dirInfo
+	}
+	if full {
+		slot.sweptAt = now
 	}
 	files := make(map[string]observedFile, len(entries))
 	changed := slot.evidence == nil
@@ -78,8 +150,12 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		path := filepath.Join(dir, ObservedDirName, entry.Name())
-		info, err := os.Stat(path)
+		if prev, ok := slot.files[entry.Name()]; ok && !full {
+			files[entry.Name()] = prev
+			continue
+		}
+		path := filepath.Join(evidenceDir, entry.Name())
+		info, err := stat(path)
 		if err != nil {
 			changed = true
 			continue

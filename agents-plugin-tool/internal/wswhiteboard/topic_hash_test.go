@@ -52,19 +52,33 @@ func TestTopicHashCoversTheRenderedSection(t *testing.T) {
 	if hash(newPageData(view, a, true), quiet) == base {
 		t.Errorf("data-th unchanged when only the section's class (quiet) changed")
 	}
+	live := topic
+	live.Live = true
+	if hash(newPageData(view, a, true), live) != base {
+		t.Error("ticket-derived live metadata changed data-th; it renders no glow")
+	}
 	linked := topic
-	linked.Live = true
 	linked.Tickets = []TicketBadge{{Stem: "261112-feat-live", Name: "feat-live", Status: TicketTodo}}
-	if hash(newPageData(view, a, true), linked) != base {
-		t.Error("hidden ticket badges and live metadata changed data-th")
+	if hash(newPageData(view, a, true), linked) == base {
+		t.Error("data-th unchanged when the topic gained its linked-ticket icon")
 	}
 	mustApply(t, st, `<wb:topic name="one" tickets="261112-feat-live"/>`)
 	linkedView := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Tickets: fakeTickets{"261112-feat-live": TicketTodo}})
 	if !linkedView.Topics[0].Live || len(linkedView.Topics[0].Tickets) != 1 {
 		t.Fatal("linked topic lost internal ticket metadata")
 	}
-	if hash(newPageData(linkedView, a, true), linkedView.Topics[0]) != base {
-		t.Error("a tickets-only update changed the rendered topic hash")
+	linkedHash := hash(newPageData(linkedView, a, true), linkedView.Topics[0])
+	if linkedHash == base {
+		t.Error("a tickets-only update left the rendered topic hash unchanged")
+	}
+	doneView := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Tickets: fakeTickets{"261112-feat-live": TicketDone}})
+	if hash(newPageData(doneView, a, true), doneView.Topics[0]) == linkedHash {
+		t.Error("a linked ticket's status change left the rendered topic hash unchanged")
+	}
+	mustApply(t, st, `<wb:topic name="one" tickets=""/>`)
+	clearedView := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	if hash(newPageData(clearedView, a, true), clearedView.Topics[0]) != base {
+		t.Error("clearing a topic's tickets did not restore its no-ticket hash")
 	}
 	closed := topic
 	closed.Closed = true
