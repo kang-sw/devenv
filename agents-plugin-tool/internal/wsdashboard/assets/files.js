@@ -179,6 +179,9 @@
     var plus = iconBtn("plus", wsT("js.files.tab.new")); plus.classList.add("ftab-new");
     plus.addEventListener("click", function () { newTab({ root: rootAbs, dir: dir, view: viewMode }); });
     ui.tabs.appendChild(plus);
+    // One tab: the stylesheet hides its chip and the bar is one row led by +.
+    // Two or more: the tabs take their own row above the address row.
+    ui.bar.classList.toggle("fbar-multi", tabs.length > 1);
   }
   function switchTab(index) {
     if (destroyed || !tabs[index] || index === active) return;
@@ -472,7 +475,7 @@
       b.addEventListener("click", function () { navigate(parts.slice(0, i + 1).join("/")); });
       ui.crumbs.appendChild(b);
     });
-    ui.up.disabled = !dir;
+    ui.up.disabled = ui.home.disabled = !dir;
     var hist = history();
     ui.back.disabled = !hist || hist.index === 0;
     ui.forward.disabled = !hist || hist.index >= hist.paths.length - 1;
@@ -1230,7 +1233,7 @@
     el.textContent = "";
     el.setAttribute("data-fm", mode);
     el.classList.toggle("fpicker", directoriesOnly);
-    var bar = mk("div", "fbar");
+    var bar = ui.bar = mk("div", "fbar");
     ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
     ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
     var ctl = mk("div", "fbar-ctl"); bar.appendChild(ctl);
@@ -1242,6 +1245,9 @@
     ctl.appendChild(ui.back); ctl.appendChild(ui.forward);
     ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
     ctl.appendChild(ui.up);
+    ui.home = iconBtn("house", wsT("js.files.home")); ui.home.classList.add("fhome");
+    ui.home.addEventListener("click", function () { if (dir) navigate(""); });
+    ctl.appendChild(ui.home);
     ui.location = mk("div", "flocation");
     ui.rootBtn = mk("button", "fcrumb fcrumb-root fchange-root"); ui.rootBtn.type = "button";
     ui.rootBtn.setAttribute("aria-label", wsT("js.files.root.change"));

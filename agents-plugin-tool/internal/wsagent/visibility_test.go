@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,7 +10,107 @@ import (
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsholder"
 )
+
+// Match Manager.Stop: an existing holder is unknown until its first scan.
+// The general fake can stop an unscanned holder, which masks this crash window.
+type archiveScanHolders struct{ *fakeHolders }
+
+func (f archiveScanHolders) Stop(id string) error {
+	f.mu.Lock()
+	h := f.holders[id]
+	unknown := h == nil || !h.known
+	f.mu.Unlock()
+	if unknown {
+		return wsholder.ErrUnknownHolder
+	}
+	return f.fakeHolders.Stop(id)
+}
+
+func TestArchivedLeadRetainsHolderFenceThroughFirstScanStopFailure(t *testing.T) {
+	h := newLeadHarness(t)
+	h.opts.Holders = archiveScanHolders{h.holders}
+	h.start()
+	id := h.lead(BackendClaude, LeadOptions{}).ID
+	h.send(id, "first")
+	holder := h.holder(id)
+	h.holders.out(holder, turnLines("sess-1", "u1", "done")...)
+	h.idle(id)
+	h.runner.Close()
+	// Crash after the sidecar commit but before the holder stopped, or an
+	// older runtime that ignores the retained sidecar and starts the process.
+	if err := wsdashboard.WriteSessionHidden(h.dir, id, true); err != nil {
+		t.Fatal(err)
+	}
+	h.holders.restart()
+	h.holders.set(func() { h.holders.stopErr = errors.New("stop refused") })
+	entered, release := h.gateScan()
+	defer release()
+	h.start()
+	wait(t, "gated archive scan", entered)
+	if got := h.record(id).HolderID; got != holder {
+		t.Fatalf("archive forgot unscanned holder: got %q, want %q", got, holder)
+	}
+	if _, err := h.runner.SetHidden(id, true); !isConflict(err) {
+		t.Fatalf("hide during scan = %v, want retryable conflict", err)
+	}
+	// An existing Stop control must not turn pre-scan ErrUnknownHolder into
+	// evidence the restored process is gone either.
+	if _, err := h.runner.Stop(id); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.record(id).HolderID; got != holder {
+		t.Fatalf("pre-scan Stop forgot holder: %q", got)
+	}
+	release()
+	eventually(t, "failed archive stop after scan", func() bool {
+		return strings.Contains(h.state(id).Error, "stop refused") && h.holders.opCount("stop "+holder) > 0
+	})
+	h.quiesce(id)
+	if got := h.record(id).HolderID; got != holder {
+		t.Fatalf("stop failure lost holder %q: %q", holder, got)
+	}
+	if _, err := h.runner.SetHidden(id, false); err != nil {
+		t.Fatal(err)
+	}
+	h.send(id, "must not duplicate")
+	h.quiesce(id)
+	if h.holders.opCount("launch") != 1 || h.record(id).HolderID != holder {
+		t.Fatalf("unhide bypassed retained-holder fence: %v, %+v", h.holders.opList(), h.record(id))
+	}
+	// Once a real stop succeeds, the ordinary queued-input path may resume.
+	h.holders.set(func() { h.holders.stopErr = nil })
+	h.runner.InboxChanged(id)
+	eventually(t, "resume after successful holder stop", func() bool { return h.holders.opCount("launch") == 2 })
+	if h.holder(id) == holder {
+		t.Fatal("resumed on the failed old holder")
+	}
+}
+
+func TestArchivedLeadHideStopFailureRestoresVisibilityAndRetainsFence(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id := h.lead(BackendClaude, LeadOptions{}).ID
+	h.send(id, "first")
+	holder := h.holder(id)
+	h.holders.out(holder, turnLines("sess-1", "u1", "done")...)
+	h.idle(id)
+	h.holders.set(func() { h.holders.stopErr = errors.New("stop refused") })
+	out := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/hide", nil)
+	if out.status != http.StatusInternalServerError || !strings.Contains(out.body, "not archived") {
+		t.Fatalf("actual holder-stop failure = %d %s", out.status, out.body)
+	}
+	if hidden, err := wsdashboard.ReadSessionHidden(h.dir, id); err != nil || hidden {
+		t.Fatalf("failed archive visibility = %v, %v", hidden, err)
+	}
+	if st := h.state(id); st.Hidden || st.Lifecycle != wsdashboard.SessionAsleep {
+		t.Fatalf("failed archive state = %+v", st)
+	}
+	h.send(id, "must not duplicate")
+	if h.holders.opCount("launch") != 1 || h.record(id).HolderID != holder {
+		t.Fatalf("failed stop lost holder fence: %v, %+v", h.holders.opList(), h.record(id))
+	}
+}
 
 func TestArchivedLeadPassiveInputAndMailStayQueued(t *testing.T) {
 	for _, kind := range []string{"message", "mail"} {

@@ -155,7 +155,7 @@ func TestPiSendRevivalDiscardsAnAbandonedHeldTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := h.backend.waitProc(t, 2)
-	if text := p.nextSent(t); text != "new task" {
+	if text := p.nextSent(t); text != h.envelope("new task") {
 		t.Fatalf("revived turn = %q", text)
 	}
 	if h.record(worker.ID).HeldTurn != nil || h.state(child.ID).Status != StatusClosed {
@@ -197,7 +197,7 @@ func TestPiTokenSendRevivesClosedChildAndRefusesMissingFile(t *testing.T) {
 	if code != http.StatusOK || json.Unmarshal([]byte(body), &st) != nil || st.ID != child.ID || st.Status == StatusClosed {
 		t.Fatalf("revived child = %d %s", code, body)
 	}
-	if text := h.backend.waitProc(t, 2).nextSent(t); text != "continue" {
+	if text := h.backend.waitProc(t, 2).nextSent(t); text != h.envelope("continue") {
 		t.Fatalf("resumed prompt = %q", text)
 	}
 }

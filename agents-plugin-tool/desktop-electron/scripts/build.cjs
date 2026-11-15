@@ -3,11 +3,33 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const pkg = require('../package.json');
+const SUMS = 'Werkschaft-desktop-SHA256SUMS';
 
-async function build({ platform = process.platform, arch = process.arch, cache, packageApp } = {}) {
+// The release assets the updater reads: Werkschaft-<platform>-<arch>.zip and
+// a sha256sum-format SUMS file. macOS ditto keeps the framework symlinks;
+// Windows 10+ ships bsdtar, which writes a zip for a .zip name with -a.
+function archive({ out, platform, arch, host = process.platform, run = execFileSync, env = process.env }) {
+  const folder = `Werkschaft-${platform}-${arch}`;
+  const zip = path.join(out, `${folder}.zip`);
+  fs.rmSync(zip, { force: true });
+  const source = platform === 'darwin' ? path.join(out, folder, 'Werkschaft.app') : path.join(out, folder);
+  if (host === 'win32') {
+    run(path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', zip, '-C', path.dirname(source), path.basename(source)]);
+  } else run('/usr/bin/ditto', ['-c', '-k', '--keepParent', source, zip]);
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex');
+  // Builds of each platform run on their own machine: replace only this line.
+  const sums = path.join(out, SUMS);
+  const kept = fs.existsSync(sums) ? fs.readFileSync(sums, 'utf8').split(/\r?\n/)
+    .filter(line => line.trim() && !line.endsWith(`  ${path.basename(zip)}`)) : [];
+  fs.writeFileSync(sums, [...kept, `${hash}  ${path.basename(zip)}`].join('\n') + '\n');
+  return { zip, sums, hash };
+}
+
+async function build({ platform = process.platform, arch = process.arch, cache, packageApp, out = path.join(root, 'dist'), run } = {}) {
   if (!['darwin', 'win32'].includes(platform)) throw new Error('This slice packages darwin and win32 only');
   if (platform === 'win32') arch = 'x64';
   const version = pkg.devDependencies.electron;
@@ -23,7 +45,7 @@ async function build({ platform = process.platform, arch = process.arch, cache, 
   try {
     const source = path.join(stage, 'app');
     fs.mkdirSync(source);
-    for (const file of ['main.js', 'endpoint.js', 'policy.js', 'connection.html',
+    for (const file of ['main.js', 'endpoint.js', 'policy.js', 'connection.html', 'update.js', 'dashboard-preload.js',
       'titlebar.js', 'titlebar.html', 'titlebar-preload.js', 'titlebar-renderer.js']) {
       fs.copyFileSync(path.join(root, file), path.join(source, file));
     }
@@ -49,14 +71,16 @@ async function build({ platform = process.platform, arch = process.arch, cache, 
     }
     packageApp ||= (await import('@electron/packager')).packager;
     const outputs = await packageApp({
-      dir: source, out: path.join(root, 'dist'), name: 'Werkschaft',
+      dir: source, out, name: 'Werkschaft',
       platform, arch, electronVersion: version,
       electronZipDir: zipDir, appBundleId: 'dev.werkschaft.desktop',
       appVersion: pkg.version, buildVersion: pkg.version,
       icon, overwrite: true, prune: false, osxSign: false, osxNotarize: false,
     });
     console.log(outputs.join('\n'));
+    const { zip, sums } = archive({ out, platform, arch, run });
+    console.log(`${zip}\n${sums}`);
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
 }
 if (require.main === module) build().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { build };
+module.exports = { build, archive, SUMS };

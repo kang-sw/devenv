@@ -117,6 +117,31 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
 - MAIN (682): audit's exact foundation producer is this ticket's Phase 2;
   current-state adoption is not a new store format — bearing: constrains.
 
+## Blocked (2026-11-15)
+
+Held until after the v0.50.0 tag (MAIN, 2026-11-15): Phase 1 rewires session
+resolution, re-login and hosted bootstrap with no user-visible gain for that
+ship, so it waits rather than adding pre-ship risk.
+
+- Phase 1 head `32e15bb73` is ready; merge it after v0.50.0. Branch
+  `impl/exec4/csi-design/suing-usage-cold`: `306474cb0` implementation,
+  `53c2e52f0` Phase 1 `### Result`, `32e15bb73` sync onto the envelope test
+  head `034c99100` (resolved `internal/wsagent/support_test.go`: frozen
+  harness clock plus the `BackendRegistration` map). Do not rebase it before
+  the merge decision.
+- The settled `ready/` version of this ticket (Decisions 8-19, Phase 1
+  verification list) is not on `develop`; it rides on that branch (ticket
+  commit `19573be27`). This `todo/` copy predates it.
+- Verified on `32e15bb73` (offline, `-count=1`): the ticket's focused
+  `internal/mcp` and `internal/wsdashboard` runs, `internal/wsinbox`, and full
+  `internal/wsagent` pass except the then-stale Pi bundle check (since fixed on
+  `develop` by `a76ddc028`) and the intermittent
+  `TestLeadHandedToATerminalIsLetGo`; full `cmd/ws-mcp` showed one flake
+  (`TestHostedConnectionSeeingALANChangeReplacesTheDaemon`) that passes with
+  `-count=3`. Compatibility is T0.
+- Per Decision 19, permission-profile D14 waits for this merge; its owner gets
+  the admission entrypoints when it lands.
+
 ## Phases
 
 ### Phase 1: Establish the minimum shared access contract

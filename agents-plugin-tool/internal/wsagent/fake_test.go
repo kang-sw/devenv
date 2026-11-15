@@ -390,7 +390,11 @@ func newHarness(t *testing.T, profiles map[string]string) *harness {
 	if err := os.WriteFile(filepath.Join(h.root, "agent.md"), []byte("Answer questions about this project."), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Freeze delivery timestamps, but keep registration freshness relative to
+	// the real clock used by the dashboard and live-adapter assertions.
+	now := time.Now()
 	h.config = Options{
+		Now:      func() time.Time { return now },
 		Dir:      h.dir,
 		Backends: map[string]Backend{suiteBackend: h.backend},
 		Keys:     h.keys,

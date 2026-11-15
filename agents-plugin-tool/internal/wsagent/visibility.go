@@ -17,6 +17,9 @@ func (c *conv) setHidden(hidden bool) error {
 	if !c.rec.Lead {
 		return badRequest("archive applies to a hosted lead session only")
 	}
+	if hidden && c.rec.HolderID != "" && !c.r.scanDone() {
+		return conflict("the session is rejoining its holder; archive again after the holder scan")
+	}
 	unlock, ok := c.lockRow()
 	if !ok {
 		return conflict("the session is not owned by the dashboard")
@@ -40,6 +43,7 @@ func (c *conv) setHidden(hidden bool) error {
 			if restore := wsdashboard.WriteSessionHidden(c.r.opts.Dir, c.rec.ReplyID, false); restore == nil {
 				c.setStatus(func() { c.hidden = false })
 			}
+			c.r.notify(c.rec.ReplyID, c.rec.Root)
 			return fmt.Errorf("the session was not archived: %w", err)
 		}
 	} else {

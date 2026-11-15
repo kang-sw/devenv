@@ -53,16 +53,17 @@ async function metrics(card) {
       ok(one.radius === '0px', `pane container radius ${one.radius}`);
       ok(one.margin === '0px', `pane container margin ${one.margin}`);
       ok(one.barLeftGap <= 4.5, `tab bar has no card inset: ${one.barLeftGap}`);
-      ok(one.tabs.length === 1 && one.bar.height <= 31 && one.ctl && one.ctl.top < one.tabs[0].bottom, `single row with 1 tab: bar ${one.bar.height}`);
+      // A lone tab shows no chip: + leads the single row (its chip box collapses to 0).
+      ok(one.tabs.length === 1 && one.tabs[0].width === 0 && one.bar.height <= 31 && one.ctl && one.ctl.top < one.plus.bottom, `single row with 1 tab: bar ${one.bar.height}`);
 
       await card.locator('.fentry[data-entry="devenv-explorer-workspace"]').dblclick();
-      await card.locator('.ftab-select .fn', { hasText: 'devenv-explorer-workspace' }).first().waitFor();
-      // Narrower card: add tabs until 12 exist, then force the card to 900 px.
+      await card.locator('.ftab-select .fn', { hasText: 'devenv-explorer-workspace' }).first().waitFor({ state: 'attached' }); // a lone tab's chip is hidden
+      // Narrower card: add tabs until 12 exist, then force the card to 800 px (the 1440 board column is 826 px).
       for (let i = 1; i < 12; i++) await card.locator('.ftab-new').click();
       await wt.locator('.bcard[data-kind="explorer"] .ftab').nth(11).waitFor();
-      const w900 = await card.evaluate(el => { const host = el.closest('.bcard'); host.style.width = '900px'; host.style.maxWidth = '900px'; return el.getBoundingClientRect().width; });
+      const w800 = await card.evaluate(el => { const host = el.closest('.bcard'); host.style.width = '800px'; host.style.maxWidth = '800px'; return el.getBoundingClientRect().width; });
       const w = {};
-      for (const [name, width] of [['tabs12', 900], ['tabs12-420', 420]]) {
+      for (const [name, width] of [['tabs12', 800], ['tabs12-420', 420]]) {
         await card.evaluate((el, px) => { const host = el.closest('.bcard'); host.style.width = px + 'px'; host.style.maxWidth = px + 'px'; }, width);
         await tab.waitForTimeout(150);
         const m = await metrics(card);
@@ -80,7 +81,7 @@ async function metrics(card) {
         ok(m.ctl.right <= m.card.right + 0.5, `${name}: button array inside the card`);
       }
       assert.deepEqual(errors, []);
-      results[theme] = { one, w900, tabs12: w['tabs12'], tabs12_420: w['tabs12-420'] };
+      results[theme] = { one, w800, tabs12: w['tabs12'], tabs12_420: w['tabs12-420'] };
       await context.close();
     }
     const json = JSON.stringify(results, null, 2);
