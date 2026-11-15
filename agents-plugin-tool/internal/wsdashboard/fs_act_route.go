@@ -181,14 +181,23 @@ func (d *Daemon) handleFSAct(w http.ResponseWriter, r *http.Request, replyID str
 		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return
 	}
-	if d.index == nil || !ValidReplyID(replyID) {
-		http.Error(w, "unknown session", http.StatusNotFound)
-		return
-	}
-	s, ok := d.index.Session(replyID)
-	if !ok || s.Project == "" {
-		http.Error(w, "unknown session", http.StatusNotFound)
-		return
+	var root string
+	if replyID == LocalBrowseAnchor {
+		if crossSiteFetch(r) {
+			http.Error(w, "cross-origin request refused", http.StatusForbidden)
+			return
+		}
+	} else {
+		if d.index == nil || !ValidReplyID(replyID) {
+			http.Error(w, "unknown session", http.StatusNotFound)
+			return
+		}
+		s, ok := d.index.Session(replyID)
+		if !ok || s.Project == "" {
+			http.Error(w, "unknown session", http.StatusNotFound)
+			return
+		}
+		root = s.Project
 	}
 	var req fsActRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, openBodyLimit)).Decode(&req); err != nil {
@@ -199,8 +208,8 @@ func (d *Daemon) handleFSAct(w http.ResponseWriter, r *http.Request, replyID str
 		http.Error(w, `action must be "open" or "reveal"`, http.StatusBadRequest)
 		return
 	}
-	root := s.Project
-	if req.Root != "" {
+	if req.Root != "" || replyID == LocalBrowseAnchor {
+		var ok bool
 		if root, ok = browseRootParam(req.Root); !ok {
 			http.Error(w, "root must be an absolute folder", http.StatusBadRequest)
 			return

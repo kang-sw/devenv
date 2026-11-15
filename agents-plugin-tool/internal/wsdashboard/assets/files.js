@@ -2,7 +2,7 @@
   // The file explorer (window.WsFiles): independent card, conversation-tab
   // and toolbar-sheet browsers over the guarded read-only fs routes. Each
   // inner tab owns its root/directory, selection, view mode and scroll.
-  // The lazy tree stays beside the directory view; files open in the
+  // The lazy tree stays beside non-column directory views; files open in the
   // board's preview slot (preview.js).
   //
   // The page script owns the tab switch and hands the module its pieces
@@ -18,7 +18,7 @@
   var doc = document, cards = window.WsCards;
   if (!cards) return;
   var VIEW_KEY = "ws.dashboard.files.view", ROOT_KEY = "ws.dashboard.files.root.", VIEW_MAX = 24;
-  var TABS_KEY = "ws.dashboard.files.tabs.", viewModes = ["details", "list", "icon", "gallery"], cardHooks = {};
+  var TABS_KEY = "ws.dashboard.files.tabs.", viewModes = ["details", "list", "icon", "gallery", "column"], cardHooks = {};
   // NAME_WAIT and TEXT_WAIT are the search debounces in ms; INDENT a tree
   // level's indent in px.
   var NAME_WAIT = 120, TEXT_WAIT = 300, INDENT = 14;
@@ -97,10 +97,11 @@
   var gen = 0, rootAttempt = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
-  var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null;
+  var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null, searchResult = null, searchPaused = false;
   var treeTop = 0, hitsTop = 0, pop = null, popFrom = null, menu = null, menuFrom = null;
   var ui = {}, api, tabs = [], active = -1, tabSeq = 0, dir = "", viewMode = "details", contentTop = 0, navAttempt = 0;
   var subscribers = { selection: [], navigation: [] }, detachAttachment = null;
+  var columnLeft = 0, columnScroll = {}, columnLoads = {};
 
   function licon(name) { return cards.icon(name); }
   function mk(tag, cls, text) {
@@ -133,8 +134,10 @@
   // Tabs retain live trees separately; only the small browser record is persisted.
   function snapshot() {
     if (!tabs[active]) return;
-    tabs[active].state = { root: rootAbs, dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, view: viewMode };
-    tabs[active].live = { lists: lists, open: open, cur: cur, info: info };
+    tabs[active].state = { root: rootAbs, dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, view: viewMode,
+      columnLeft: columnLeft, columnScroll: Object.assign({}, columnScroll) };
+    tabs[active].live = { lists: lists, open: open, cur: cur, info: info,
+      search: { q: ui.q.value, mode: mode, caseOn: caseOn, regexOn: regexOn, result: searchResult, scroll: hitsTop } };
   }
   function persistTabs() {
     if (destroyed || !started) return;
@@ -150,7 +153,8 @@
     var state = location || { root: rootAbs, dir: dir, view: viewMode };
     tabs.push({ id: ++tabSeq, state: { root: local() && typeof state.root === "string" ? state.root : "", dir: cleanLocation(state.dir),
       selection: state.selection == null ? null : cleanLocation(state.selection), scroll: +state.scroll || 0, treeScroll: +state.treeScroll || 0,
-      view: viewModes.indexOf(state.view) >= 0 ? state.view : "details" } });
+      view: viewModes.indexOf(state.view) >= 0 ? state.view : "details", columnLeft: +state.columnLeft || 0,
+      columnScroll: state.columnScroll && typeof state.columnScroll === "object" ? Object.assign({}, state.columnScroll) : {} } });
     if (!background) switchTab(tabs.length - 1);
     else { paintTabs(); persistTabs(); }
   }
@@ -170,7 +174,7 @@
     ui.tabs.appendChild(plus);
   }
   function switchTab(index) {
-    if (destroyed || !tabs[index]) return;
+    if (destroyed || !tabs[index] || index === active) return;
     snapshot();
     gen++; rootAttempt++; navAttempt++;
     clearSearch(); closeMenu(false); closePop(false);
@@ -178,6 +182,7 @@
     var t = tabs[active], s = t.state, live = t.live;
     rootAbs = s.root; dir = s.dir; sel = s.selection; cur = sel;
     contentTop = s.scroll; treeTop = s.treeScroll; viewMode = s.view;
+    columnLeft = s.columnLeft; columnScroll = Object.assign({}, s.columnScroll);
     ui.tree.scrollTop = treeTop;
     lists = live ? live.lists : {}; open = live ? live.open : {}; info = live ? live.info : null;
     if (live && info) { readView(); paintHead(); render(); notify("navigation"); }
@@ -187,6 +192,7 @@
       paintHead(); renderDirectory(); notify("navigation");
       loadRoot(true);
     }
+    restoreSearch(live && live.search);
     paintTabs(); persistTabs();
   }
   function closeTab(index) {
@@ -223,15 +229,25 @@
     ui.copy.addEventListener("click", function () { var s = selection(); if (s && h.copy) h.copy(s.session ? s.path : s.absolute); });
     notify("selection");
   }
-  function navigate(path) {
+  function navigate(path, selected, focusPath) {
     if (destroyed) return;
     path = cleanLocation(path);
     clearSearch();
     var g = gen, attempt = ++navAttempt;
     function accept(a) {
       if (g !== gen || attempt !== navAttempt) return;
-      lists[path] = a; dir = path; sel = cur = null; contentTop = 0;
-      render(); persistTabs(); paintTabs(); notify("navigation");
+      lists[path] = a; dir = path; sel = cur = selected == null ? null : selected; contentTop = 0;
+      render();
+      if (viewMode === "column" && focusPath != null) {
+        focusColumn(focusPath);
+        if (selected === path) {
+          var columns = ui.directory.querySelectorAll(".fcolumn");
+          if (columns.length) columns[columns.length - 1].scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+        columnLeft = ui.directory.scrollLeft;
+      }
+      persistTabs(); paintTabs(); notify("navigation");
+      if (selected != null) notify("selection");
     }
     if (lists[path]) accept(lists[path]);
     else listDir(path).then(accept, function () { if (g === gen && attempt === navAttempt) toast(wsT("js.files.failed")); });
@@ -275,10 +291,13 @@
   // useRoot makes a listing of a root's top folder the tree's root, with a
   // fresh tree.
   function useRoot(a, restore) {
-    var saved = restore ? { dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop } : null;
+    var saved = restore ? { dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, columnLeft: columnLeft, columnScroll: columnScroll } : null;
     gen++; navAttempt++;
     clearTimeout(timer);
     abort();
+    searchResult = null;
+    ui.hits.textContent = "";
+    hitsTop = 0;
     rootAbs = a.session ? "" : a.root;
     save(ROOT_KEY + rid, rootAbs || null);
     info = a;
@@ -286,6 +305,7 @@
     open = {};
     sel = cur = null;
     treeTop = 0; dir = ""; contentTop = 0;
+    columnLeft = saved ? saved.columnLeft : 0; columnScroll = saved ? saved.columnScroll : {}; columnLoads = {};
     readView();
     paintHead();
     render();
@@ -393,10 +413,11 @@
   // had the focus, the focus on the current row.
   function render() {
     var t = ui.tree, had = t.contains(doc.activeElement), top = shows(t) ? t.scrollTop : treeTop;
-    rows = info ? flatRows(lists, open, view) : [];
+    // The side tree navigates folders; files belong to the directory pane.
+    rows = info ? flatRows(lists, open, view).filter(function (r) { return r.more || r.e.dir; }) : [];
     var nav = navRows();
-    if (sel !== null && !rowOf(sel) && !(lists[dir] && (lists[dir].entries || []).some(function (e) { return joinRel(dir, e.name) === sel; }))) sel = null;
-    if (cur === null || !rowOf(cur)) cur = sel !== null ? sel : nav.length ? nav[0].path : null;
+    if (sel !== null && sel !== dir && !rowOf(sel) && !(lists[dir] && (lists[dir].entries || []).some(function (e) { return joinRel(dir, e.name) === sel; }))) sel = null;
+    if (cur === null || !rowOf(cur)) cur = sel !== null && rowOf(sel) ? sel : nav.length ? nav[0].path : null;
     var frag = doc.createDocumentFragment();
     rowEls = {};
     rows.forEach(function (r) {
@@ -413,47 +434,122 @@
   }
   function renderDirectory() {
     var top = contentTop, listing = lists[dir], box = ui.directory;
+    var focused = box.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-entry") : null;
     box.textContent = ""; box.setAttribute("data-view", viewMode);
     ui.modes.forEach(function (b, i) { b.setAttribute("aria-pressed", String(viewMode === viewModes[i])); });
+    ui.workspace.setAttribute("data-view", viewMode);
+    // Layout hides the sidebar independently of search's tree/hits visibility.
+    ui.tree.inert = viewMode === "column";
+    box.setAttribute("role", viewMode === "column" ? "group" : "listbox");
+    if (viewMode === "column") { renderColumns(focused); return; }
     if (viewMode === "details") {
       var hd = mk("div", "fdetail-head");
       hd.appendChild(mk("span", "fn", wsT("js.files.column.name")));
       hd.appendChild(mk("span", "ftype", wsT("js.files.column.type"))); box.appendChild(hd);
     }
     var entries = listing ? (listing.entries || []).filter(function (e) { return showsEntry(e, view); }) : [];
-    entries.forEach(function (e) {
-      var p = joinRel(dir, e.name), row = mk("div", "fentry" + (sel === p ? " sel" : "") + (e.ign ? " ign" : ""));
-      row.setAttribute("data-entry", p); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(sel === p)); row.tabIndex = 0;
-      var ic = mk("span", "fi");
-      ic.innerHTML = licon(e.dir ? "folder" : e.link ? "file-symlink" : kindIcon(e.name));
-      if (viewMode === "gallery" && !e.dir && !e.link && !e.gone && kindIcon(e.name) === "image") {
-        var img = mk("img", "fthumb"); img.alt = e.name; img.loading = "lazy";
-        img.src = "/s/" + rid + "/fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
-      } else row.appendChild(ic);
-      row.appendChild(mk("span", "fn", e.name));
-      if (viewMode === "details") row.appendChild(mk("span", "ftype", e.dir ? wsT("js.files.folder") : e.name.indexOf(".") >= 0 ? e.name.split(".").pop().toUpperCase() : wsT("js.files.file")));
-      row.title = p;
-      function choose() {
-        sel = p;
-        Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (n) {
-          var on = n.getAttribute("data-entry") === sel;
-          n.classList.toggle("sel", on); n.setAttribute("aria-selected", String(on));
-        });
-        Object.keys(rowEls).forEach(function (path) {
-          rowEls[path].classList.toggle("sel", path === sel); rowEls[path].setAttribute("aria-selected", String(path === sel));
-        });
-        persistTabs(); notify("selection");
-      }
-      row.addEventListener("click", choose);
-      row.addEventListener("dblclick", function () { if (opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); });
-      row.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); choose(); if (opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); } });
-      row.addEventListener("auxclick", function (ev) { if (ev.button === 1 && opens(e)) { ev.preventDefault(); newTab({ root: rootAbs, dir: p, view: viewMode }, true); } });
-      row.addEventListener("contextmenu", function (ev) { ev.preventDefault(); choose(); openMenu({ e: e, path: p, dir: dir }, ev.clientX, ev.clientY); });
-      box.appendChild(row);
-    });
+    entries.forEach(function (e) { box.appendChild(directoryEntry(e, dir)); });
     if (listing && !entries.length) box.appendChild(mk("div", "fnote", wsT("js.files.empty")));
     if (listing && listing.more) box.appendChild(mk("div", "fnote", wsT("js.files.more")));
-    box.scrollTop = top;
+    box.scrollLeft = 0; box.scrollTop = top;
+  }
+  function directoryEntry(e, folder, column) {
+    var p = joinRel(folder, e.name), selected = sel === p || (column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
+    var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : ""));
+    row.setAttribute("data-entry", p); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(selected)); row.tabIndex = 0;
+    var ic = mk("span", "fi");
+    ic.innerHTML = licon(e.dir ? "folder" : e.link ? "file-symlink" : kindIcon(e.name));
+    if (viewMode === "gallery" && !e.dir && !e.link && !e.gone && kindIcon(e.name) === "image") {
+      var img = mk("img", "fthumb"); img.alt = e.name; img.loading = "lazy";
+      img.src = "/s/" + rid + "/fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
+    } else row.appendChild(ic);
+    row.appendChild(mk("span", "fn", e.name));
+    if (viewMode === "details") row.appendChild(mk("span", "ftype", e.dir ? wsT("js.files.folder") : e.name.indexOf(".") >= 0 ? e.name.split(".").pop().toUpperCase() : wsT("js.files.file")));
+    if (column && opens(e)) {
+      var ch = mk("span", "fcolumn-chevron"); ch.innerHTML = licon("chevron-right"); row.appendChild(ch);
+    }
+    row.title = p;
+    function choose() {
+      if (column && (opens(e) || folder !== dir)) { navigate(opens(e) ? p : folder, p, p); return; }
+      sel = p;
+      Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (n) {
+        var path = n.getAttribute("data-entry"), on = path === sel || (column && (dir === path || dir.indexOf(path + "/") === 0));
+        n.classList.toggle("sel", on); n.setAttribute("aria-selected", String(on));
+      });
+      Object.keys(rowEls).forEach(function (path) {
+        rowEls[path].classList.toggle("sel", path === sel); rowEls[path].setAttribute("aria-selected", String(path === sel));
+      });
+      persistTabs(); notify("selection");
+    }
+    row.addEventListener("click", choose);
+    row.addEventListener("dblclick", function () { if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); });
+    row.addEventListener("keydown", function (ev) {
+      if (column && columnKey(ev, row, choose)) return;
+      if (ev.key === "Enter") { ev.preventDefault(); choose(); if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); }
+    });
+    row.addEventListener("auxclick", function (ev) { if (ev.button === 1 && opens(e)) { ev.preventDefault(); newTab({ root: rootAbs, dir: p, view: viewMode }, true); } });
+    row.addEventListener("contextmenu", function (ev) { ev.preventDefault(); choose(); openMenu({ e: e, path: p, dir: folder }, ev.clientX, ev.clientY); });
+    return row;
+  }
+  function columnDirs() {
+    var chain = [""], path = "";
+    dir.split("/").forEach(function (part) { if (part) { path = joinRel(path, part); chain.push(path); } });
+    return chain;
+  }
+  function focusColumn(path) {
+    var all = ui.directory.querySelectorAll(".fentry");
+    Array.prototype.some.call(all, function (row) {
+      if (row.getAttribute("data-entry") !== path) return false;
+      row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest", inline: "nearest" }); return true;
+    });
+  }
+  function renderColumns(focused) {
+    var box = ui.directory;
+    columnDirs().forEach(function (folder) {
+      var col = mk("div", "fcolumn"), listing = lists[folder], pending = columnLoads[folder];
+      col.setAttribute("data-column", folder); col.setAttribute("role", "listbox");
+      col.setAttribute("aria-label", folder || (info && (info.name || info.root)) || wsT("js.files.root.session"));
+      var entries = listing ? (listing.entries || []).filter(function (e) { return showsEntry(e, view); }) : [];
+      entries.forEach(function (e) { col.appendChild(directoryEntry(e, folder, true)); });
+      if (!listing) {
+        col.appendChild(mk("div", "fnote", wsT(pending && pending.gen === gen && pending.error ? "js.files.failed" : "js.files.loading")));
+        if (info && (!pending || pending.gen !== gen)) {
+          var request = { gen: gen }; columnLoads[folder] = request;
+          listDir(folder).then(function (a) {
+            if (request.gen !== gen) return;
+            lists[folder] = a;
+            if (viewMode === "column") renderDirectory();
+          }, function () {
+            if (request.gen !== gen) return;
+            request.error = true;
+            if (viewMode === "column") renderDirectory();
+          });
+        }
+      } else {
+        if (!entries.length) col.appendChild(mk("div", "fnote", wsT("js.files.empty")));
+        if (listing.more) col.appendChild(mk("div", "fnote", wsT("js.files.more")));
+      }
+      box.appendChild(col); col.scrollTop = +columnScroll[folder] || 0;
+      col.addEventListener("scroll", function () { if (shows(col)) { columnScroll[folder] = col.scrollTop; persistTabs(); } });
+    });
+    box.scrollTop = 0; box.scrollLeft = columnLeft;
+    if (focused != null) focusColumn(focused);
+  }
+  function columnKey(ev, row, choose) {
+    if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || !/^Arrow(Up|Down|Left|Right)$/.test(ev.key)) return false;
+    ev.preventDefault();
+    var col = row.parentNode, all = Array.prototype.slice.call(col.querySelectorAll(".fentry")), i = all.indexOf(row), target;
+    if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+      target = all[Math.max(0, Math.min(all.length - 1, i + (ev.key === "ArrowUp" ? -1 : 1)))];
+      if (target) { target.click(); focusColumn(target.getAttribute("data-entry")); }
+    } else {
+      var cols = Array.prototype.slice.call(ui.directory.querySelectorAll(".fcolumn")), next = cols[cols.indexOf(col) + (ev.key === "ArrowLeft" ? -1 : 1)];
+      if (next) {
+        target = next.querySelector('.fentry[aria-selected="true"]') || next.querySelector(".fentry");
+        if (target) focusColumn(target.getAttribute("data-entry"));
+      } else if (ev.key === "ArrowRight") choose();
+    }
+    return true;
   }
   function moveTo(path) {
     if (!rowEls[path]) return;
@@ -515,7 +611,9 @@
   // listed afresh when it opens next.
   function refresh() {
     if (!lists[""]) { loadRoot(); return; }
-    var g = gen, dirs = Object.keys(lists).filter(function (d) { return d === "" || d === dir || open[d]; });
+    columnLoads = {};
+    var chain = viewMode === "column" ? columnDirs() : [];
+    var g = gen, dirs = Object.keys(lists).filter(function (d) { return d === "" || d === dir || open[d] || chain.indexOf(d) >= 0; });
     Object.keys(lists).forEach(function (d) { if (dirs.indexOf(d) < 0) delete lists[d]; });
     Promise.all(dirs.map(function (d) {
       return listDir(d).then(function (a) { return [d, a, null]; }, function (err) { return [d, null, err || {}]; });
@@ -665,6 +763,23 @@
     ui.q.setAttribute("aria-label", ui.q.placeholder);
     if (ui.q.value) search(true);
   }
+  // Search state stays live on its inner tab, never in another owner's
+  // browser record. Pending work is restarted on return, not reused across tabs.
+  function restoreSearch(s) {
+    caseOn = !!(s && s.caseOn); regexOn = !!(s && s.regexOn);
+    ui.caseBtn.setAttribute("aria-pressed", String(caseOn));
+    ui.regexBtn.setAttribute("aria-pressed", String(regexOn));
+    setMode(s && s.mode);
+    ui.q.value = s ? s.q : "";
+    searchResult = s && s.result;
+    if (!query().trim()) return;
+    if (!searchResult) { search(true); return; }
+    showHits();
+    if (mode === "name") drawNames(searchResult.items || []);
+    else drawMatches(searchResult);
+    hitsTop = s.scroll || 0;
+    ui.hits.scrollTop = hitsTop;
+  }
   function abort() {
     if (ctrl && ctrl.c) ctrl.c.abort();
     ctrl = null;
@@ -689,15 +804,22 @@
     clearTimeout(timer);
     abort();
     ui.q.value = "";
+    searchResult = null;
     ui.hits.textContent = "";
     showTree();
+    hitsTop = 0;
   }
-  // search runs the search box's query after its debounce (now: at once).
-  // A newer query aborts the request of an older one; the results shown
-  // stay until the new ones are here. An empty query shows the tree again.
+  // Invalidate immediately, before debounce: even a fetch that ignores abort
+  // cannot repaint or leave actionable results for a superseded query/mode.
   function search(now) {
     clearTimeout(timer);
-    if (!query().trim()) { abort(); ui.hits.textContent = ""; showTree(); return; }
+    abort();
+    searchResult = null;
+    ui.hits.textContent = "";
+    hitsTop = 0;
+    if (!query().trim()) { showTree(); return; }
+    if (searchPaused) return;
+    showHits();
     timer = setTimeout(runSearch, now ? 0 : mode === "name" ? NAME_WAIT : TEXT_WAIT);
   }
   function runSearch() {
@@ -710,6 +832,7 @@
     p.then(function (a) {
       if (ctrl !== tok) return;
       ctrl = null;
+      searchResult = a;
       if (m === "name") drawNames(a.items || []);
       else drawMatches(a);
     }, function (err) {
@@ -735,6 +858,7 @@
     ui.hits.appendChild(frag);
     var first = ui.hits.querySelector(".hit");
     if (first) first.tabIndex = 0;
+    hitsTop = 0;
     ui.hits.scrollTop = 0;
   }
   function drawNames(items) {
@@ -839,8 +963,9 @@
     ui.hits.hidden = true;
     var modes = mk("div", "fview-modes"); ui.modes = [];
     viewModes.forEach(function (value) {
-      var labels = [wsT("js.files.view.details"), wsT("js.files.view.list"), wsT("js.files.view.icon"), wsT("js.files.view.gallery")];
-      var b = mk("button", "", labels[viewModes.indexOf(value)]); b.type = "button";
+      var labels = [wsT("js.files.view.details"), wsT("js.files.view.list"), wsT("js.files.view.icon"), wsT("js.files.view.gallery"), wsT("js.files.view.column")];
+      var label = labels[viewModes.indexOf(value)], b = mk("button", value === "column" ? "fview-column" : "", value === "column" ? "\u25a5" : label); b.type = "button";
+      if (value === "column") { b.title = label; b.setAttribute("aria-label", label); }
       b.addEventListener("click", function () { viewMode = value; renderDirectory(); persistTabs(); });
       modes.appendChild(b); ui.modes.push(b);
     }); el.appendChild(modes);
@@ -981,7 +1106,12 @@
       if (to) moveTo(to.path);
     });
     ui.tree.addEventListener("scroll", function () { if (info && shows(ui.tree)) { treeTop = ui.tree.scrollTop; persistTabs(); } });
-    ui.directory.addEventListener("scroll", function () { if (info && lists[dir] && shows(ui.directory)) { contentTop = ui.directory.scrollTop; persistTabs(); } });
+    ui.directory.addEventListener("scroll", function () {
+      if (!info || !lists[dir] || !shows(ui.directory)) return;
+      if (viewMode === "column") columnLeft = ui.directory.scrollLeft;
+      else contentTop = ui.directory.scrollTop;
+      persistTabs();
+    });
     ui.tree.addEventListener("auxclick", function (e) {
       var d = e.target.closest && e.target.closest(".fr[data-path]"), r = d && rowOf(d.getAttribute("data-path"));
       if (e.button === 1 && r && opens(r.e)) { e.preventDefault(); newTab({ root: rootAbs, dir: r.path, view: viewMode }, true); }
@@ -1047,6 +1177,7 @@
     // browser may use one), later it restores the scroll and refreshes.
     shown: function () {
       if (destroyed) return;
+      searchPaused = false;
       paintHead();
       if (!started) {
         started = true;
@@ -1060,12 +1191,16 @@
       }
       if (!ui.tree.hidden) ui.tree.scrollTop = treeTop;
       else ui.hits.scrollTop = hitsTop;
+      if (query().trim() && !searchResult) search(true);
       refresh();
     },
-    // hidden is called when the pane leaves the view: an open menu or
-    // popover closes.
+    // Leaving a window pauses only its own search; returning restarts any
+    // unfinished query. Other visible explorers keep their requests.
     hidden: function () {
       if (destroyed) return;
+      searchPaused = true;
+      clearTimeout(timer);
+      abort();
       closeMenu(false);
       closePop(false);
       persistTabs();

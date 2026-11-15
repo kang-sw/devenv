@@ -49,18 +49,19 @@
     return "?path=" + encodeURIComponent(d.path) + (d.root ? "&root=" + encodeURIComponent(d.root) : "") + (d.line ? "&text=1" : "");
   }
 
-  // OPAQUE are the extensions no preview shows: a link to such a file keeps
-  // the link menu on a plain click, and the explorer still opens the card,
-  // in its "not viewable" state. Every other file is asked of the server.
+  // OPAQUE keeps link handling unchanged, including outside-root PDFs. An
+  // explorer explicitly asks the guarded preview route, whose pdf answer
+  // alone opts a card into the native viewer.
   var OPAQUE = {};
   ("zip gz tgz bz2 xz zst 7z rar tar jar war pdf doc docx xls xlsx ppt pptx odt ods odp exe dll so dylib a o obj bin dat db sqlite class pyc wasm iso dmg img deb rpm msi apk " +
     "ttf otf woff woff2 eot mp3 wav flac aac m4a mov avi mkv wmv psd heic tif tiff").split(" ").forEach(function (x) { OPAQUE[x] = true; });
   function takes(path) { return !OPAQUE[ext(path)]; }
 
-  var ICON = { image: "image", video: "film", frame: "file-code", markdown: "file-text", diff: "file-diff", text: "file-text", none: "file" };
+  var ICON = { image: "image", video: "film", pdf: "file-text", frame: "file-code", markdown: "file-text", diff: "file-diff", text: "file-text", none: "file" };
   function badge(v) {
     if (v.kind === "image") return wsT("js.preview.kind.image");
     if (v.kind === "video") return wsT("js.preview.kind.video");
+    if (v.kind === "pdf") return wsT("js.preview.kind.pdf");
     if (v.kind === "frame") return wsT("js.preview.kind.frame");
     if (v.kind === "markdown") return wsT("js.preview.kind.markdown");
     if (v.kind === "diff") return wsT("js.preview.kind.diff");
@@ -136,6 +137,43 @@
     box.appendChild(mark);
     card.body.scrollTop = Math.max(0, (line - 1) * LINE - Math.round(card.body.clientHeight / 3));
   }
+  // Token text is never HTML. Reject a lexer-normalized/mismatched answer
+  // rather than changing the source (and content-search line offsets).
+  function codeText(v) {
+    var pre = mk("pre", "pv-txt"), lines = v.highlighted_lines, text = v.text || "";
+    if (!Array.isArray(lines) || lines.map(function (line) { return (line || []).map(function (p) { return p.s; }).join(""); }).join("\n") !== text) {
+      pre.textContent = text;
+      return pre;
+    }
+    pre.className += " chroma";
+    lines.forEach(function (line, i) {
+      if (i) pre.appendChild(mk("span", "", "\n"));
+      (line || []).forEach(function (p) { pre.appendChild(mk("span", p.c ? "t-" + p.c : "", p.s)); });
+    });
+    return pre;
+  }
+  function pdfView(card, v) {
+    var box = mk("div", "pv-pdf"), link = mk("a", "btn pv-pdf-open", wsT("js.preview.pdf.open"));
+    link.href = v.src;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    // Keep an unobtrusive escape hatch inside the preview even when the
+    // browser advertises a viewer but a policy/plugin failure leaves it blank.
+    box.appendChild(link);
+    if (window.navigator && window.navigator.pdfViewerEnabled === true) {
+      var frame = mk("iframe");
+      frame.title = card.data.path;
+      frame.setAttribute("referrerpolicy", "no-referrer");
+      frame.addEventListener("error", function () {
+        if (frame.parentNode === box) box.removeChild(frame);
+        box.removeAttribute("data-viewer");
+      });
+      frame.src = v.src;
+      box.setAttribute("data-viewer", "");
+      box.appendChild(frame);
+    }
+    return box;
+  }
   function draw(card, v) {
     var d = card.data, box;
     // Monospace text views are code, regardless of the HTML/SVG source flag;
@@ -156,6 +194,8 @@
       vid.preload = "metadata";
       vid.src = v.src;
       box.appendChild(vid);
+    } else if (v.kind === "pdf") {
+      box = pdfView(card, v);
     } else if (v.kind === "frame") {
       // allow-scripts without allow-same-origin: the document runs in an
       // opaque origin, apart from the dashboard page, its cookie, and its
@@ -183,7 +223,7 @@
       box = mk("div", "pv-txtbox");
       if (v.source) box.appendChild(mk("div", "pv-cap", wsT("js.preview.source.note")));
       var wrap = mk("div", "pv-lines");
-      wrap.appendChild(mk("pre", "pv-txt", v.text));
+      wrap.appendChild(codeText(v));
       box.appendChild(wrap);
       fill(card, box);
       if (d.line) jump(card, wrap, d.line);

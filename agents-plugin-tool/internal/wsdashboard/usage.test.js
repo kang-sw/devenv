@@ -21,14 +21,16 @@ function environment(now = Date.UTC(2026, 10, 15)) {
     }
   }
   const button = new Element('button'); button.className = 'usage-toggle';
-  const rail = new Element('aside'); rail.appendChild(button);
+  const gear = new Element('button'); gear.className = 'settings-toggle'; gear.textContent = 'Settings';
+  const footer = new Element('div'); footer.className = 'rfoot'; footer.appendChild(gear); footer.appendChild(button);
+  const rail = new Element('aside'); rail.appendChild(footer);
   const doc = { hidden: false, events: {}, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), addEventListener(key, fn) { this.events[key] = fn; } };
   const calls = [], ticks = [];
   let payload = { entries: [], warnPercent: 80, critPercent: 95 }, fail = false;
   const window = { setInterval(fn, ms) { ticks.push({ fn, ms }); }, fetch(url, options) { calls.push({ url, options }); return fail ? Promise.reject(new Error('fake failure')) : Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); } };
   class Clock extends Date { static now() { return now; } }
   vm.runInNewContext(fs.readFileSync(__dirname + '/assets/usage.js', 'utf8'), { window, Date: Clock });
-  return { window, rail, doc, button, calls, ticks, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
+  return { window, rail, doc, button, gear, footer, calls, ticks, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function nodes(root, tagOrClass) {
@@ -88,6 +90,34 @@ test('compact cards reuse crossing geometry, continuous endpoint gradients and e
   assert.ok(pop.el.textContent.includes('<safe-source>'));
 });
 
+test('legend and current-time guide explain the chart without advancing stale observations', async () => {
+  const { env, pop } = await chartFixture({ stale: true });
+  const legend = pop.el.querySelector('.usage-chart-legend');
+  for (const label of ['Observed usage', 'Ideal burn, not prediction', 'Latest observation', 'No record (estimated)']) assert.ok(legend.textContent.includes(label), label);
+  for (const kind of ['actual', 'ideal', 'point', 'estimated']) assert.equal(legend.querySelector('.usage-swatch-' + kind).attributes['aria-hidden'], 'true');
+  const start = Date.UTC(2026, 10, 15), duration = 5 * 3600000;
+  const assertGuide = now => {
+    const chart = pop.el.querySelector('.usage-chart'), guide = chart.querySelector('.usage-now');
+    assert.equal(nodes(chart, '.usage-point').length, 2);
+    assert.equal(chart.querySelector('.usage-point-current').attributes.cx, String(24 + .4 * 246));
+    assert.equal(nodes(chart, '.usage-actual').at(-1).attributes.x2, String(24 + .4 * 246));
+    const x = Number(guide.attributes.x1);
+    assert.ok(Math.abs(x - (24 + (now - start) / duration * 246)) < 1e-9);
+    assert.equal(guide.attributes.x2, guide.attributes.x1);
+    assert.equal(guide.attributes['stroke-dasharray'], '2 3');
+    assert.equal(nodes(guide, 'title')[0].textContent, 'Current time; not an observation');
+    assert.equal(chart.querySelector('.usage-now-label').textContent, 'Now');
+  };
+  assertGuide(start + .4 * duration + 42 * 60000);
+  env.now(start + .8 * duration); env.ticks[0].fn(); await flush();
+  assertGuide(start + .8 * duration);
+  assert.equal(nodes(pop.el, '.usage-chart-legend').length, 1); // redraw never duplicates the key
+  for (const now of [start - 1, start, start + duration - 1]) {
+    env.now(now); env.ticks[0].fn(); await flush();
+    assert.equal(nodes(pop.el, '.usage-now').length, now < start ? 0 : 1);
+  }
+});
+
 test('baseline equality is muted, below-baseline charts have no excess fill, and short intervals are solid', async () => {
   for (const percents of [[20, 40], [10, 20], [40, 60]]) {
     const { env, pop, payload } = await chartFixture({ percents });
@@ -115,7 +145,7 @@ test('missing, empty and unavailable history are truthful current-only fallbacks
 test('unknown resets have isolated real dots without baseline, gradients or connected lines', async () => {
   const { pop } = await chartFixture({ resetKnown: false });
   assert.equal(nodes(pop.el, '.usage-point').length, 2);
-  for (const selector of ['.usage-ideal', '.usage-actual', 'linearGradient', 'polygon']) assert.equal(nodes(pop.el, selector).length, 0);
+  for (const selector of ['.usage-ideal', '.usage-actual', '.usage-now', '.usage-now-label', 'linearGradient', 'polygon']) assert.equal(nodes(pop.el, selector).length, 0);
   assert.match(pop.el.textContent, /Resets unknown/);
   assert.match(pop.el.textContent, /reset unknown, isolated observations only/);
 });
@@ -297,6 +327,47 @@ test('history composes into the single coalesced viewer request', async () => {
   assert.equal(env.calls[1].url, '/rail/usage?history=1&refresh=1');
   assert.equal(env.calls[1].options.cache, 'no-store');
   await flush();
+});
+
+test('footer redraw and sync preserve the sibling settings gear', async () => {
+  const at = Date.UTC(2026, 10, 15), env = environment(at);
+  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const unchanged = () => {
+    assert.deepEqual(env.footer.children, [env.gear, env.button]);
+    assert.equal(env.gear.textContent, 'Settings');
+    assert.equal(env.gear.className, 'settings-toggle');
+  };
+  unchanged(); // empty usage still leaves settings reachable
+  env.set({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent: 38, asOf: at, resetsAt: at + 86400000 }] }] });
+  env.ticks[0].fn(); await flush();
+  assert.equal(env.button.querySelector('.usage-number').textContent, '38%');
+  unchanged();
+  env.button.textContent = ''; mounted.sync();
+  assert.equal(env.button.querySelector('.usage-number').textContent, '38%');
+  unchanged();
+  env.set({ entries: [] }); env.ticks[0].fn(); await flush();
+  assert.equal(env.button.textContent, 'Plan usage');
+  unchanged();
+});
+
+test('compact footer keeps percent, period and pace inline with wrapping rather than clipping', () => {
+  const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');
+  const rule = selector => {
+    const start = css.indexOf(selector + ' {');
+    assert.ok(start >= 0, selector);
+    return css.slice(start, css.indexOf('}', start) + 1);
+  };
+  assert.match(rule('.rail .rfoot'), /flex-wrap: wrap/);
+  const toggle = rule('.rail .usage-toggle');
+  for (const part of ['flex: 1 1 180px', 'min-width: 0', 'flex-wrap: wrap', 'justify-content: flex-end', 'margin-left: auto']) assert.ok(toggle.includes(part), part);
+  for (const selector of ['.usage-harness', '.usage-columns']) assert.match(rule(selector), /flex-wrap: wrap/);
+  const column = rule('.usage-column');
+  assert.match(column, /display: inline-flex/);
+  assert.doesNotMatch(column, /flex-direction: column/);
+  assert.match(rule('.usage-number'), /11px\/1\.2/);
+  assert.match(rule('.usage-pace'), /10px\/1\.2/);
+  assert.match(rule('.usage-key'), /9px\/1\.2/);
+  assert.doesNotMatch(css, /overflow:\s*hidden|text-overflow:\s*ellipsis/);
 });
 
 test('empty login state and hidden-page cadence', async () => {

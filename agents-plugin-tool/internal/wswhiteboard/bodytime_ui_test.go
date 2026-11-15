@@ -177,7 +177,7 @@ class E {
   closest() { return this.topic || null; }
   getBoundingClientRect() { return this.rect || { left: 0, top: 0, right: 120, bottom: 20, width: 120, height: 20 }; }
 }
-const header = new E(), activity = new E(), body = new E('doc-body'), parent = new E();
+const header = new E('tdoc'), activity = new E(), body = new E('doc-body'), parent = new E();
 body.parentNode = parent;
 body.rect = { left: 10, top: 10, right: 310, bottom: 210, width: 300, height: 200 };
 body.topic = { querySelector: () => header };
@@ -185,7 +185,7 @@ let comments = [], timers = [], observed = 0, loads = [];
 const doc = {
   body: new E(), activeElement: { id: 'keep-focus' },
   querySelector: () => header,
-  querySelectorAll: sel => sel === 'time.tago[data-at]' ? [activity] : [header, ...doc.body.children.filter(e => e.attrs['data-body-age'] !== undefined)],
+  querySelectorAll: sel => sel === 'time.tago[data-at]' ? [activity] : doc.body.children.filter(e => e.attrs['data-body-age'] !== undefined),
   createElement: () => new E(),
   createTreeWalker: () => { let i = 0; return { nextNode: () => comments[i++] || null }; }
 };
@@ -224,7 +224,7 @@ assert.equal(s.wbBodyTimeText(atMinutes(-10)), '본문 방금 갱신');
 assert.equal(s.wbAgoText(now - 730*86400000), '730일 전');
 header.setAttribute('data-body-at', atMinutes(5));
 s.wbAgo(doc);
-assert.equal(header.textContent, '본문 5분 전 갱신');
+assert.equal(header.textContent, '', 'body age metadata is not rendered in the topic header');
 assert.notEqual(activity.textContent, header.textContent);
 vm.runInContext(shipped, s);
 assert.equal(timers.length, 1, 'board reruns must not accumulate timers');
@@ -252,7 +252,7 @@ const focus = doc.activeElement;
 for (const hit of layer.children) {
   const before = JSON.stringify(hit.style);
   hit.events.pointerenter();
-  assert.equal(layer.wbTip.textContent, header.textContent);
+  assert.equal(layer.wbTip.textContent, '본문 5분 전 갱신');
   assert.equal(layer.wbTip.hidden, false);
   assert.equal(layer.wbTip.attrs.role, 'tooltip');
   assert.equal(hit.attrs.tabindex, undefined);
@@ -261,12 +261,13 @@ for (const hit of layer.children) {
   assert.equal(layer.wbTip.hidden, true);
 }
 assert.equal(doc.activeElement, focus);
-// Refresh an already visible tooltip on the same timer as the header.
+// Refresh an already visible tooltip on the same timer as the board clock.
 layer.children[0].events.pointerenter();
 header.setAttribute('data-body-at', atMinutes(6));
 layer.wbTip.setAttribute('data-body-at', atMinutes(6));
 timers[0]();
-assert.equal(header.textContent, layer.wbTip.textContent);
+assert.equal(header.textContent, '', 'body age metadata is not rendered in the topic header');
+assert.equal(layer.wbTip.textContent, '본문 6분 전 갱신');
 // Isolated frame reads local metadata, never topic activity or a parent.
 body.topic = null;
 header.attrs = {};

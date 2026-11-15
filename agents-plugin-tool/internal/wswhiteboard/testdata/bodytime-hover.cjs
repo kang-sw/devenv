@@ -175,15 +175,15 @@ async function run() {
       // Missing selectors/timestamps/marks are a structural failure, not a cue
       // to adapt the test by redesigning or silently skipping a case.
       assert.equal(await page.locator('.topic').count(), 4, 'fixture topic contract');
-      assert.equal(await page.locator('.body-age').count(), 4, 'distinct body header contract');
+      assert.equal(await page.locator('.tdoc[data-body-at]').count(), 4, 'distinct body metadata contract');
       assert.equal(await page.locator('.tbar > time.tago').count(), 4, 'activity remains separately present and first');
       assert.equal(await page.locator('iframe.doc-frame').count(), mode === 'framed' ? 4 : 0);
       await page.locator('#probe-focus').focus();
       for (const [topic, want] of Object.entries(expected).filter(([topic]) => !canary || topic === 'unknown')) {
         const card = page.locator(`.topic[data-topic="${topic}"]`);
-        const header = card.locator('.body-age');
-        await assert.doesNotReject(() => header.waitFor({ state: 'visible' }));
-        assert.equal(await header.textContent(), want);
+        const metadata = card.locator('.tdoc[data-body-at]');
+        await assert.doesNotReject(() => metadata.waitFor({ state: 'attached' }));
+        assert.equal(await card.locator('.tbar .body-age').count(), 0, 'body age is not rendered in the topic header');
         assert.notEqual(await card.locator('.tbar > time.tago').textContent(), want);
         let scope = card;
         if (mode === 'framed') {

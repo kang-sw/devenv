@@ -317,6 +317,53 @@ mode switch name/content; cancellation on tab switch; existing search route
 tests unchanged; side-by-side against the search areas of frames 01 and 05
 (the change-tracking list of frame 05 is excluded).
 
+### Result (e49b89db4) - 2026-11-15
+
+- Completed Phase 2 search logic only, reusing the existing search box,
+  name/content buttons, `/fs/find`, `/fs/search`, and preview path. Search
+  uses the active inner tab's browsing root; content hits retain their line
+  number when opening previews. No endpoint, root permission, protocol,
+  shared-store, or filesystem mutation change (T0 dashboard assets).
+- Each tab's live state retains its query, mode, case/regex options, completed
+  answers and result scroll. These are not added to browser storage; existing
+  card-ID persistence/cleanup and legacy records remain unchanged. Returning
+  to an unfinished query restarts it under that tab's root.
+- Input and mode changes invalidate pending answers immediately, before the
+  debounce expires, and remove superseded actionable results. Switching or
+  closing a tab and hiding or closing a window cancel only that owner's
+  unfinished search. Late successes and failures are discarded even without
+  AbortController; closing a background tab leaves the active request alone.
+- Controlled-promise production-JS regressions cover two windows sharing one
+  session, concurrent requests across two roots/tabs, state/scroll restore,
+  name/content and option switching, preview root/line routing, debounce
+  races, Escape, hidden-window resume, background/active-tab close, and
+  destroyed-window cleanup.
+- Verification passed:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run '^TestFilesExplorerInstances$' -count=1`
+    (0.930s).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run 'TestFiles|TestFS|TestCards|TestBoard|TestToolbar|TestSharedCard|TestFullscreenPanel' -skip '^Test(BoardCardPlacement|BoardHistoryClosedPagingSkipsMaterializedTopics|BoardHistoryHooksSurroundSSESwap)$' -count=1`
+    (16.782s). The three skips are the pre-existing board assertions documented
+    in Phase 1; existing search-route and guarded-path tests are unchanged.
+  - Node syntax checks for both edited JS files and `git diff --check` passed.
+    No UI strings changed, so `./internal/wsi18n` was not rerun.
+  - Ticket verification passed with a sage-review-freshness advisory, accepted
+    because this update appends only a Result and leaves the settled plan
+    unchanged.
+- The lead explicitly limited this phase to logic/tests after owner feedback
+  on Phase 1 spacing. Search markup and card chrome are unchanged; the compact
+  layout is deferred to the separate UI follow-up using its forthcoming
+  mockup. Screenshot/reference rounds were omitted under the owner's fast-UI
+  rule; the owner's on-screen check after merge remains acceptance.
+- Per the no-agent headless override, performed only a brief logic/state
+  self-review (no independent-review claim): request ownership and teardown,
+  tab restore, existing card-ID persistence, preview root/line selection,
+  unchanged mention relative/absolute behavior, and unchanged route guards.
+  No outstanding logic/state finding was identified.
+- Owned-process `ps` scan found no lingering server, browser or test processes
+  started by this worker; none required stopping. No shared daemon rebuild or
+  restart, push, or merge. Phases 3-4 remain unimplemented and the ticket stays
+  in `ready/`.
+
 ### Phase 3: Code syntax highlighting and PDF preview
 
 Depends on Phase 1. Implement the two settled mechanisms in `## Decisions`:
@@ -341,6 +388,56 @@ chromium-headless-shell has no PDF viewer, and that the fallback appears when
 the viewer is absent - if no full-Chromium channel is available, record the
 render check as not run instead of passing it; side-by-side against the PDF layout of frame 04 and the code
 highlighting of frame 07 (the quick-look overlay itself is excluded).
+
+### Result (576d1ad1b) - 2026-11-15
+
+- Delivered Phase 3 only. Text preview answers optionally include
+  `highlighted_lines` using the existing `highlightLines` Chroma path and
+  `GitPiece` tokens. The shared preview renderer uses the existing `--hl-*`
+  styles without new rows or controls. Unknown languages, files above the
+  256 KiB highlighting cap, and lexer-normalized text retain plain source;
+  token rendering uses text nodes and preserves blank lines and line jumps.
+- PDF answers carry `kind: pdf` and the guarded raw URL. Raw PDF reads retain
+  `browseRoot`/`openContained`, byte ranges, nosniff, and existing root rules;
+  only PDF uses the native-viewer CSP without the image sandbox. Image/video
+  headers and HTML/SVG capability sandboxing are unchanged (T0).
+- The shared preview area contains the same-origin native PDF frame and a
+  localized open/download escape link, with no extra toolbar or row. Missing
+  viewer support shows only the link; a frame error removes the frame. The
+  link remains available even if a browser advertises a viewer but fails to
+  render. PDF stays opaque to other link consumers, and gallery file tiles
+  remain unchanged. No `files.js` edits were needed: its existing preview
+  delegation already reaches this renderer.
+- Verification passed:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run 'TestFS|TestFiles|TestCards|TestImage|TestToolbar|TestBoardToolbar|TestOutsidePreviewCardRemintsOnEveryLoad|TestOutsideLinkClickPath|TestDesktopPathClick|TestFullscreenPanel|TestFileView' -count=1 -timeout=3m`
+    (6.498s), including production-JS highlighting/fallback tests, PDF
+    containment and symlink refusal for local/LAN viewers, explicit-root
+    local/cross-site guards, range reads, unchanged media headers, and
+    existing capability/HTML/SVG regressions.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -count=1`
+    (1.813s); both PDF labels are present in all 11 language tables.
+  - The single full-Chromium attempt passed:
+    `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local WS_PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright go test ./internal/wsdashboard -run '^TestFSPDFBrowser$' -count=1 -v -timeout=1m`
+    (4.567s). The new-headless `chromium` channel's native viewer reported
+    `loadState_: success` and one page using the real raw response's bytes and
+    headers on an owned loopback listener. Disabling `pdfViewerEnabled`
+    exposed the fallback link without a frame request. No screenshots.
+  - Node syntax checks for the renderer and both new fixtures, gofmt, and
+    `git diff --check` passed.
+- The initial focused run exposed a test-fixture mistake: two new tests used
+  `fsViewers` without LAN mode, so its token read failed before exercising
+  behavior. Corrected those fixture setups; subsequent focused runs passed.
+- Lead authorization explicitly retained the assigned Phase 3 branch after
+  the route's canonical-branch safety stop. With child agents disabled, brief
+  self-review covered unchanged root/open guards, PDF-only CSP selection,
+  token/source fidelity, detached-frame errors, and existing per-card
+  persistence/cleanup and mention-path delegation. No independent-review
+  pass is claimed. Screenshot/reference comparisons were omitted under the
+  owner's fast-UI principle; on-screen acceptance remains with the owner.
+- Owned-process scan after verification found no remaining worker-started
+  server/browser/test processes; fixtures closed their listener and browser.
+  No shared daemon rebuild/restart, push, merge, or ticket closure. The ticket
+  stays in `ready/`; Phase 4 is untouched.
 
 ### Phase 4: Directories-only workspace-picker consumer
 

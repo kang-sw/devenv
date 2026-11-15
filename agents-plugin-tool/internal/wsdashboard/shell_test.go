@@ -66,10 +66,8 @@ func TestSessionURLServesTheShellAroundItsFramedPage(t *testing.T) {
 	}
 }
 
-// The index's URL serves the shell too, its first frame the index with
-// ?frame=1. The index keeps its own header, so the shell's top shows only
-// its rail button (sh-own) and its head slot stays empty; the framed index lays
-// its sessions out beside a placeholder for the rail.
+// The root serves the ordinary shell with no selected session. Its frame
+// keeps the session geometry but has an empty main panel and header.
 func TestIndexServesTheShellAroundItsFramedPage(t *testing.T) {
 	f := startPageFixture(t)
 	code, shell := get(t, f.base+"/")
@@ -77,7 +75,7 @@ func TestIndexServesTheShellAroundItsFramedPage(t *testing.T) {
 		t.Fatalf("GET / = %d", code)
 	}
 	for _, want := range []string{
-		`data-mode="shell" data-shell="1" data-rid=""`, `class="top sh-own"`,
+		`data-mode="shell" data-shell="1" data-rid=""`, `class="top"`,
 		`<aside id="rail" class="rail"`, `data-region="rail"`, `id="railbtn"`,
 		`<iframe class="sframe on" src="/?frame=1"`, "window.WsShell", "window.WsRail",
 	} {
@@ -100,14 +98,14 @@ func TestIndexServesTheShellAroundItsFramedPage(t *testing.T) {
 		t.Fatalf("GET /?frame=1 = %d", code)
 	}
 	for _, want := range []string{
-		`data-mode="index"`, `data-frame="1"`, `class="dwrap"`, `id="railbtn"`,
-		`class="rail rail-ph"`, `<main class="ixmain">`, `data-region="sessions"`, "window.WsShell",
+		`data-mode="index" data-rid=""`, `data-frame="1"`, `class="dwrap"`, `id="railbtn"`,
+		`class="rail rail-ph"`, `<main id="grid" class="dgrid"></main>`, "window.WsShell",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the framed index lacks %q", want)
 		}
 	}
-	for _, not := range []string{`data-region="rail"`, `<aside id="rail"`, `data-shell="1"`, `dwrap narrow`} {
+	for _, not := range []string{`data-region="rail"`, `<aside id="rail"`, `data-shell="1"`, `dwrap narrow`, `data-region="sessions"`, `<h1>ws dashboard</h1>`} {
 		if strings.Contains(page, not) {
 			t.Errorf("the framed index holds %q", not)
 		}

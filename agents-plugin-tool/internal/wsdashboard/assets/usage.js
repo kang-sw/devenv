@@ -134,10 +134,10 @@
       if (delta === null || delta === 0) return "var(--wb-muted-fg)";
       return "color-mix(in srgb, var(--wb-muted-fg), var(" + (delta > 0 ? "--wb-fail" : "--wb-ok") + ") " + Math.min(100, Math.abs(delta)) + "%)";
     }
-    function drawChart(entry, w, old) {
+    function drawChart(entry, w, old, now) {
       var geometry = trend(entry, w, data.history), id = "usage-chart-" + (++chartSerial);
       var chart = svgNode("svg", { "class": "usage-chart", viewBox: "0 0 288 113", role: "img", "aria-label": label(w.kind) + " observed cumulative usage; " + (geometry.knownReset ? "dashed baseline is ideal burn, not prediction" : "reset unknown, isolated observations only") });
-      chart.appendChild(svgNode("title", {}, label(w.kind) + ": " + Math.round(w.percent) + "%; " + age(geometry.at, Date.now()) + (old ? "; stale, pace at last observation" : "")));
+      chart.appendChild(svgNode("title", {}, label(w.kind) + ": " + Math.round(w.percent) + "%; " + age(geometry.at, now) + (old ? "; stale, pace at last observation" : "")));
       [12, 50, 88].forEach(function (y) { chart.appendChild(svgNode("line", { "class": "usage-grid", x1: 24, x2: 270, y1: y, y2: y })); });
       chart.appendChild(svgNode("text", { x: 0, y: 15 }, "100"));
       chart.appendChild(svgNode("text", { x: 5, y: 91 }, "0"));
@@ -150,6 +150,13 @@
         ideal.appendChild(svgNode("title", {}, "Ideal burn: even usage over the known reset window")); chart.appendChild(ideal);
         chart.appendChild(svgNode("text", { x: 24, y: 106 }, timeLabel(geometry.start)));
         chart.appendChild(svgNode("text", { x: 270, y: 106, "text-anchor": "end" }, timeLabel(geometry.reset)));
+        // Wall-clock context only; never extend the observed series to now.
+        if (now >= geometry.start && now <= geometry.reset) {
+          var nowX = 24 + (now - geometry.start) / (geometry.reset - geometry.start) * 246;
+          var guide = svgNode("line", { "class": "usage-now", x1: nowX, x2: nowX, y1: 12, y2: 88, "stroke-dasharray": "2 3" });
+          guide.appendChild(svgNode("title", {}, "Current time; not an observation")); chart.appendChild(guide);
+          chart.appendChild(svgNode("text", { "class": "usage-now-label", x: nowX, y: 10, "text-anchor": "middle" }, "Now"));
+        }
       }
       var defs = svgNode("defs"); chart.appendChild(defs);
       geometry.segments.forEach(function (s, i) {
@@ -179,7 +186,7 @@
       if (old) head.appendChild(clock());
       card.appendChild(head);
       card.appendChild(el("div", "usage-meta", "Resets " + (w.resetsAt ? new Date(w.resetsAt).toLocaleString() : "unknown")));
-      var chart = drawChart(entry, w, old); card.appendChild(chart.el);
+      var chart = drawChart(entry, w, old, now); card.appendChild(chart.el);
       var observed = age(at, now) + (old ? "; stale, pace at last observation" : "");
       card.appendChild(el("div", "usage-observed usage-meta", observed));
       card.setAttribute("aria-label", label(w.kind) + ": " + Math.round(w.percent) + "%; pace " + comparison + "; " + observed);
@@ -234,6 +241,13 @@
       var header = el("div", "usage-heading"); header.appendChild(el("b", "", "Plan usage"));
       var close = el("button", "usage-close", "✕"); close.type = "button"; close.setAttribute("aria-label", "Close plan usage");
       close.addEventListener("click", onClose); header.appendChild(close); box.appendChild(header);
+      var legend = el("div", "usage-chart-legend");
+      [["actual", "Observed usage"], ["ideal", "Ideal burn, not prediction"], ["point", "Latest observation"], ["estimated", "No record (estimated)"]].forEach(function (item) {
+        var key = el("span");
+        var swatch = el("i", "usage-swatch usage-swatch-" + item[0]); swatch.setAttribute("aria-hidden", "true");
+        key.appendChild(swatch); key.appendChild(el("span", "", item[1])); legend.appendChild(key);
+      });
+      box.appendChild(legend);
       box.appendChild(el("div", "usage-details")); popover = box;
       return { el: box, open: function () { shown = true; drawPopover(); refresh(true); }, close: function () { shown = false; }, focus: function () { box.focus(); } };
     }

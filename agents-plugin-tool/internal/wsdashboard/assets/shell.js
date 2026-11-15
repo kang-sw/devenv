@@ -50,6 +50,8 @@
   //     sync    {}                    send the header, layout, and title
   //                                   again (the shell's script started)
   //     theme   {theme}               another page picked the theme
+  //     settings {layout, input}      shell's current choices, independent
+  //                                   of whether browser persistence works
   var LIMIT = 5;
   var KINDS = {
     head: { html: "?string", qs: "string", pad: "number", top: "number" },
@@ -60,6 +62,7 @@
     scroll: { y: "number" },
     hash: { hash: "string" },
     theme: { theme: "string" },
+    settings: { layout: "string", input: "string" },
     shown: { shown: "boolean" },
     search: {},
     menu: {},
