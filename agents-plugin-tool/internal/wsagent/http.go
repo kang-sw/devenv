@@ -26,6 +26,11 @@ import (
 //	POST /agents/leads            {root, harness, model?, effort?,
 //	                              permission_mode?} spawns one
 //	POST /agents/<id>/settings    also takes permission_mode
+//	POST /agents/leads/permission {root, harness, permission_level,
+//	                              permission_full_ack?, model?, effort?}
+//	POST /agents/<id>/settings/permission
+//	                              {permission_level, permission_full_ack?,
+//	                              model?, effort?} (leads only)
 //	POST /agents/<id>/approvals/<request-id>
 //	                              {behavior: "allow"|"deny", message?}
 //	                              answers a waiting tool permission prompt
@@ -69,6 +74,7 @@ const leadsRoute = "leads"
 const requestBodyLimit = 256 << 10
 
 type createRequest struct {
+	permissionRequest
 	Profile string `json:"profile"`
 	Root    string `json:"root"`
 }
@@ -77,7 +83,31 @@ type sendRequest struct {
 	Text string `json:"text"`
 }
 
+// Raw fields distinguish omission from null, including on legacy URLs.
+type permissionRequest struct {
+	Level json.RawMessage `json:"permission_level"`
+	Ack   json.RawMessage `json:"permission_full_ack"`
+}
+
+func (p permissionRequest) present() bool { return len(p.Level) != 0 || len(p.Ack) != 0 }
+
+func (p permissionRequest) selection() (PermissionLevel, bool, error) {
+	var level PermissionLevel
+	if len(p.Level) == 0 || string(p.Level) == "null" || json.Unmarshal(p.Level, &level) != nil || level.rank() == 0 {
+		return "", false, badRequest("permission_level must be read-only, workdir-write or full")
+	}
+	var ack bool
+	if len(p.Ack) != 0 && (string(p.Ack) == "null" || json.Unmarshal(p.Ack, &ack) != nil) {
+		return "", false, badRequest("permission_full_ack must be a boolean")
+	}
+	if level == PermissionFull && !ack {
+		return "", false, badRequest("full permission requires permission_full_ack")
+	}
+	return level, ack, nil
+}
+
 type settingsRequest struct {
+	permissionRequest
 	Model  *string `json:"model"`
 	Effort *string `json:"effort"`
 	// PermissionMode is a claude lead session's only.
@@ -85,6 +115,7 @@ type settingsRequest struct {
 }
 
 type leadRequest struct {
+	permissionRequest
 	Root            string `json:"root"`
 	Harness         string `json:"harness"`
 	Model           string `json:"model"`
@@ -134,7 +165,7 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 		}
 		return st
 	}
-	if req.Method == http.MethodPost && (id == leadsRoute || leadMove(action) || (r.IsLead(id) && leadControl(action))) {
+	if req.Method == http.MethodPost && (id == leadsRoute || action == "settings/permission" || leadMove(action) || (r.IsLead(id) && leadControl(action))) {
 		if !local {
 			http.Error(w, "unknown agent route", http.StatusNotFound)
 			return
@@ -152,19 +183,35 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 		}
 		writeAnswer(w, http.StatusOK, map[string]any{"conversations": list}, nil)
 	case id == leadsRoute:
-		if req.Method != http.MethodPost || action != "" {
+		if req.Method != http.MethodPost || (action != "" && action != "permission") {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var body leadRequest
-		if !decode(w, req, &body) {
+		if !decodePermissionRequest(w, req, &body, action == "permission", "root", "harness", "model", "effort", "plugin_isolation") {
 			return
 		}
-		st, err := r.CreateLead(body.Harness, body.Root, LeadOptions{Model: body.Model, Effort: body.Effort, PermissionMode: body.PermissionMode, PluginIsolation: body.PluginIsolation})
+		opts := LeadOptions{Model: body.Model, Effort: body.Effort, PermissionMode: body.PermissionMode, PluginIsolation: body.PluginIsolation}
+		if action == "permission" {
+			level, ack, err := body.selection()
+			if err != nil {
+				writeAnswer(w, 0, nil, err)
+				return
+			}
+			opts.PermissionLevel, opts.PermissionFullAck, opts.permissionUser = level, ack, true
+		} else if body.present() {
+			writeAnswer(w, 0, nil, badRequest("permission selection requires /agents/leads/permission"))
+			return
+		}
+		st, err := r.CreateLead(body.Harness, body.Root, opts)
 		writeAnswer(w, http.StatusCreated, view(st), err)
 	case id == "" && req.Method == http.MethodPost:
 		var body createRequest
 		if !decode(w, req, &body) {
+			return
+		}
+		if body.present() {
+			writeAnswer(w, 0, nil, badRequest("common worker permission selection is deferred"))
 			return
 		}
 		st, err := r.Create(body.Profile, body.Root)
@@ -199,14 +246,40 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 	case action == "close":
 		st, err := r.CloseConversation(id)
 		writeAnswer(w, http.StatusOK, view(st), err)
+	case action == "settings/permission":
+		var body settingsRequest
+		if !decodePermissionRequest(w, req, &body, true, "model", "effort") {
+			return
+		}
+		level, ack, err := body.selection()
+		if err == nil && body.Model != nil && *body.Model != "" && !modelPattern.MatchString(*body.Model) {
+			err = badRequest("invalid model")
+		}
+		if err == nil && body.Effort != nil && *body.Effort != "" && !effortPattern.MatchString(*body.Effort) {
+			err = badRequest("invalid effort")
+		}
+		var st State
+		if err == nil {
+			st, err = r.act(id, func(c *conv) error {
+				if err := c.setPermissionLevel(level, true, ack); err != nil {
+					return err
+				}
+				return c.setSettings(body.Model, body.Effort)
+			})
+		}
+		writeAnswer(w, http.StatusOK, view(st), err)
 	case action == "settings":
 		var body settingsRequest
 		if !decode(w, req, &body) {
 			return
 		}
+		if body.present() {
+			writeAnswer(w, 0, nil, badRequest("permission selection requires settings/permission"))
+			return
+		}
 		st, err := r.SetSettings(id, body.Model, body.Effort)
 		if err == nil && body.PermissionMode != nil {
-			st, err = r.SetPermissionMode(id, *body.PermissionMode)
+			st, err = r.setPermissionMode(id, *body.PermissionMode, local && own)
 		}
 		writeAnswer(w, http.StatusOK, view(st), err)
 	case action == "handoff":
@@ -280,6 +353,39 @@ func decode(w http.ResponseWriter, req *http.Request, v any) bool {
 	}
 	if strings.TrimSpace(string(raw)) == "" {
 		return true
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		http.Error(w, "malformed JSON body: "+err.Error(), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// Only selection variants reject unknown fields; legacy native decoding stays permissive.
+func decodePermissionRequest(w http.ResponseWriter, req *http.Request, v any, strict bool, fields ...string) bool {
+	var raw json.RawMessage
+	if !decode(w, req, &raw) {
+		return false
+	}
+	if len(raw) == 0 {
+		raw = json.RawMessage(`{}`)
+	}
+	if strict {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil || obj == nil {
+			http.Error(w, "selection requires a JSON object", http.StatusBadRequest)
+			return false
+		}
+		allowed := map[string]bool{"permission_level": true, "permission_full_ack": true}
+		for _, field := range fields {
+			allowed[field] = true
+		}
+		for key, value := range obj {
+			if !allowed[key] || string(value) == "null" {
+				http.Error(w, "unknown or null selection field: "+key, http.StatusBadRequest)
+				return false
+			}
+		}
 	}
 	if err := json.Unmarshal(raw, v); err != nil {
 		http.Error(w, "malformed JSON body: "+err.Error(), http.StatusBadRequest)

@@ -226,6 +226,8 @@ type SupportHarness struct {
 	Efforts         []string      `json:"efforts"`
 	Lead            bool          `json:"lead,omitempty"`
 	PermissionModes []string      `json:"permission_modes,omitempty"`
+	// PermissionLevels advertises lead/settings selection only, not workers.
+	PermissionLevels []PermissionLevel `json:"permission_levels,omitempty"`
 }
 
 // harnesses resolves the support profiles into the harness list, in
@@ -248,6 +250,7 @@ func (s *Support) harnesses() []SupportHarness {
 		reg := s.opts.Runner.opts.Backends[h.Harness]
 		h.Lead = reg.LeadProfile != ""
 		h.PermissionModes = append([]string(nil), reg.PermissionModes...)
+		h.PermissionLevels = s.leadPermissionLevels(h.Harness)
 		switch backend := reg.Backend; {
 		case err != nil:
 			h.Error = err.Error()
@@ -410,6 +413,16 @@ type ChoicesAnswer struct {
 	Last Selection `json:"last"`
 }
 
+func (s *Support) leadPermissionLevels(backend string) []PermissionLevel {
+	var levels []PermissionLevel
+	for _, level := range LeadPermissionLevels() {
+		if s.opts.Runner.supportsLeadPermission(backend, level) {
+			levels = append(levels, level)
+		}
+	}
+	return levels
+}
+
 // Choices lists the harnesses with their models and efforts, and the
 // selection a new conversation starts with.
 func (s *Support) Choices(ctx context.Context) ChoicesAnswer {
@@ -428,6 +441,7 @@ func (s *Support) Choices(ctx context.Context) ChoicesAnswer {
 	for _, name := range names {
 		reg := s.opts.Runner.opts.Backends[name]
 		h := SupportHarness{Harness: name, Available: reg.Backend != nil, Lead: true, PermissionModes: append([]string(nil), reg.PermissionModes...), Models: []ModelChoice{}, Efforts: []string{}}
+		h.PermissionLevels = s.leadPermissionLevels(name)
 		if !h.Available {
 			h.Error = fmt.Sprintf("backend %q is not available in this daemon", name)
 		}
