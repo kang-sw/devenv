@@ -15,6 +15,7 @@ type inputHeader struct {
 	Excerpt string      `json:"excerpt"`
 	ChipIDs []string    `json:"chip_ids"`
 	Clock   string      `json:"-"`
+	Stamp   string      `json:"-"`
 	Chips   []inputChip `json:"-"`
 }
 
@@ -146,7 +147,8 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 				}
 				if h.Excerpt != "" || len(h.ChipIDs) > 0 {
 					if h.SentAt > 0 {
-						h.Clock = time.UnixMilli(h.SentAt).In(loc).Format("15:04")
+						sent := time.UnixMilli(h.SentAt).In(loc)
+						h.Clock, h.Stamp = sent.Format("15:04"), sent.Format("2006-01-02 15:04")
 					}
 					r.Inputs = append(r.Inputs, h)
 				}
