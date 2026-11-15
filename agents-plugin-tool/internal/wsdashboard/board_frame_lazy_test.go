@@ -310,7 +310,8 @@ function check(what, ok) { if (!ok) bad.push(what); }
 var raf = [], queries = 0, themes = 0;
 var main = {wbScrollOwner:true}, pins = {wbScrollOwner:true};
 var boardHeightHeld = new Map(), boardHeightChanges = new Map();
-function boardFrameExposed() { return false; }
+var exposed = false;
+function boardFrameExposed() { return exposed; }
 function boardPendingBadge() {}
 function requestAnimationFrame(fn) { raf.push(fn); return raf.length; }
 function num(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
@@ -385,6 +386,16 @@ frameMessage({ source: frames[11].contentWindow, data: { wbDoc: "height", docKey
 raf.shift()();
 check("a bands-mounted frame's first height that changes it lands once", frames[10].wbLanded === true && !frames[10].wbFirst);
 check("one landing at the height it stood at marks nothing", frames[11].style.height === "112px" && !frames[11].wbLanded && !frames[11].wbFirst);
+exposed = true;
+frames[12].closest = frames[13].closest = function () { return {}; };
+frames[12].style.height = frames[13].style.height = "";
+frames[12].wbFirst = frames[13].wbFirst = true;
+frames[13].wbKeep = true;
+frameMessage({ source: frames[12].contentWindow, data: { wbDoc: "height", docKey: "entry:e12", height: 320 } });
+frameMessage({ source: frames[13].contentWindow, data: { wbDoc: "height", docKey: "entry:e13", height: 420 } });
+raf.shift()();
+check("initial visible hydration is not a pending external update", frames[12].style.height === "320px" && !boardHeightHeld.has(frames[12]));
+check("a swapped visible frame still defers its first height", frames[13].style.height === "" && boardHeightHeld.get(frames[13]) === 420);
 if (bad.length) console.log(bad.join("\n"));
 `)
 }

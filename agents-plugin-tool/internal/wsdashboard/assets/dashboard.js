@@ -4376,7 +4376,11 @@
       if (f.isConnected === false) { batch.delete(f); return; }
       var changed = Math.abs(Math.ceil(h) - (parseFloat(f.style.height) || 0)) >= 1;
       var t = f.closest("section.topic[data-topic]");
-      if (changed && !f.wbHeightRelease && t && boardFrameExposed(f)) {
+      // Initial hydration has no previous rendered body to defer. A swapped
+      // frame carries wbKeep even before its first height, so external
+      // visible updates still wait for the shared pending-change release.
+      var initial = f.wbFirst && !f.wbKeep && !f.style.height;
+      if (changed && !initial && !f.wbHeightRelease && t && boardFrameExposed(f)) {
         if (boardHeightHeld.get(f) !== h) boardHeightChanges.set(f, (boardHeightChanges.get(f) || 0) + 1);
         boardHeightHeld.set(f, h); batch.delete(f); return;
       }
