@@ -274,3 +274,71 @@ Verification:
   (`board_notice_test.go`, `whiteboard_nudges_test.go` patterns).
 - `wsi18n` completeness tests; wsflow mirror drift tests.
 - Acceptance: owner's on-screen check after merge and swap.
+
+### Result (3fadb5362) - 2026-11-15
+
+Implemented the Phase 1 contract in `3fadb5362` on
+`impl/exec4/waiting-on/area-drift-dwarf`. The ticket remains in `ready/` by
+owner instruction; the lead owns the one lite review, integration and the
+owner's post-merge on-screen acceptance.
+
+- Added strict waiting-only `on` normalization, whole-list replacement and
+  clearing, dependency-only same-state entries, raw Entry codec/clone support,
+  and a shared readiness projection in `wswhiteboard/waiting_on.go`.
+- Added dependency/derived-owner/readiness chips, board-local reverse
+  disclosures, escaped topic anchors and filter-aware navigation. Lifecycle
+  values, badge children and state-filter order remain unchanged. Unloaded
+  closed targets stay plain resolved text.
+- Reused daemon reconciliation and the existing folder-lock/liveness/mailbox
+  path with a lazy worktree-local ticket resolver. Separate reply-id-scoped
+  unblocked receipts dedupe each declaration across restart and reblocking;
+  enqueue-before-receipt failure semantics still permit duplicates after failure
+  rather than silently losing the nudge.
+- Updated every language table, canonical guidance and product-mode guidance
+  tests; regenerated the canonical manifest and wsflow mirror, then copied
+  the canonical whiteboard and manifest to Pi. Guidance includes old-daemon
+  retry without `on`.
+
+Decisions:
+- Preserve the existing embed budget rather than raise it. Scoped verification
+  found a 247842-byte stress embed: the new styles/anchors add overhead, and
+  upstream explorer client strings had exhausted the old headroom. Extend
+  the existing `ScriptExcept` pattern to multiple prefixes and omit unused
+  `js.files.*` strings from static whiteboard pages. The unchanged budget
+  assertion passes; the dashboard still receives its complete client table.
+- Child agents, independent review and fresh-reader audit were omitted under
+  the owner's binding override. The lead will run one lite review on the
+  implementation range. No browser, screenshot, full suite, shared daemon,
+  `develop` merge, push or ticket closure was performed.
+
+Verification (all commands run from `agents-plugin-tool/` with
+`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`; full command output read):
+
+```text
+go test ./internal/wswhiteboard -run '^(TestWaitingOn.*|TestTopicState.*|TestBoardNotice.*|TestBoardNotify.*|TestRenderPageEmbedSizeBudget|TestDashboardTopicBodyUsesWholeCardFold|TestPagesLeaveOutTheTrackerStrings)$' -count=1 -timeout=180s
+PASS (12.260s): normalization/refusal/no-op/clear, resolution and owner derivation, unchanged lifecycle/hourly epoch, raw provenance/clone, historical schema-2 committed/pending byte preservation, receipt/restart/fault/mailbox ordering, full/embed/region/closed-window rendering, escaping, reverse counts, badge reconciliation and unchanged embed budget.
+go test ./internal/wsdashboard -run '^(TestWaitingOnTopic(FilterReveal|FragmentBridge)|TestBoardStateFilter|TestBoardTopicRevealUsesFoldOwner|TestBoardEntryFrameBridgeStaysNarrow)$' -count=1 -v
+PASS (1.175s): production JavaScript through the Node DOM harness; filter reset waits for Overview restoration, ready remains waiting, foreign/missing targets cannot navigate, existing panel/item bridge and fold owner remain intact. No browser run.
+go test ./internal/wsi18n -run '^(TestEvery.*|TestOtherTables.*|TestPlaceholdersMatchEnglish|TestPluralKeysComeInPairs|TestScriptExcept.*|TestSubsetScriptHoldsOnlyThePrefixKeys)$' -count=1 -v
+PASS (1.084s): key usage/completeness, all language tables/placeholders and single/multiple/empty exclusion contracts.
+WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run '^TestGenerateRealManifest$'
+PASS (0.418s).
+WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run '^TestRegenerateWsflowRsrcMirror$'
+PASS (0.253s); canonical whiteboard and manifest then copied to Pi.
+go test ./internal/wsrsrc -run '^(TestWsflowRsrcMirrorUpToDate|TestPiMirrorUpToDate|TestShippedManifestUpToDate)$' -count=1 -v
+PASS (0.245s).
+go test ./internal/mcp -run '^(TestWaitingOnNudge.*|TestWhiteboardNudge.*|TestWhiteboardPlaybookStreamGuidanceProductModes|TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost|TestWhiteboardPlaybookReadAppendsCommandSyntax)$' -count=1 -timeout=120s
+PASS (5.398s): lazy injected resolver, actual local ready-to-done ticket move without a page/update, restart/reblock/redeclaration, existing alive-lead gates/timers/mailbox delivery, and ws/wsflow playbook rendering.
+```
+
+An initial new codec assertion incorrectly expected whitespace to survive
+`json.Marshal`; corrected it to compare the encoder's compact payload, without
+weakening clone or committed-log byte checks. The initial embed-budget failure
+was fixed in implementation as described above, not by changing its threshold.
+`git diff --check` passed. Ticket guardrails passed with a Sage freshness
+advisory, accepted because this update only appends implementation evidence and
+preserves the approved plan and Decisions; no design re-review was run.
+An owned descendant-process scan under Pi PID 30409
+found zero remaining test/build/daemon processes; no process was signaled and
+this worker launched no daemon. No unresolved implementation finding; lead
+review and owner visual acceptance remain intentionally pending.

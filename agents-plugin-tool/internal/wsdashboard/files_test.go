@@ -66,6 +66,7 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 func TestFilesExplorerInstances(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	files, _ := json.Marshal(mustAsset(t, "files.js"))
+	preview, _ := json.Marshal(mustAsset(t, "preview.js"))
 	var picker strings.Builder
 	for _, name := range []string{"rpWsBrowse", "rpWsMake"} {
 		fn := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(mustAsset(t, "dashboard.js"))
@@ -83,7 +84,7 @@ func TestFilesExplorerInstances(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PICKER = "+string(pickerJSON)+";\n"+cardsDOM+string(pickerFixture)+string(fixture))
+	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PREVIEW = "+string(preview)+", PICKER = "+string(pickerJSON)+";\n"+cardsDOM+string(pickerFixture)+string(fixture))
 }
 
 func TestFilesWorkspacePickerShellAssets(t *testing.T) {
@@ -107,6 +108,69 @@ func TestFilesWorkspacePickerShellAssets(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	if !strings.Contains(css, ".fpicker .fdot { opacity: .5; }") || !strings.Contains(css, ".fworkspace-picker > .fpane { display: flex; height: 100%; }") {
 		t.Error("picker requires translucent hidden directories and a bounded shared pane")
+	}
+}
+
+func TestFilesExplorerPathBarLayout(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		`.fcrumb-trail[hidden], .fpath[hidden] { display: none; }`,
+		`.fpath { flex: 1 1 auto; min-width: 0; width: 0; height: 24px; box-sizing: border-box;`,
+		`.fback .li { transform: rotate(180deg); }`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("path bar stylesheet lacks %q", want)
+		}
+	}
+}
+
+func TestExplorerSidebarTone(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for selector, want := range map[string][]string{
+		`.li`:                              {"width: 14px", "height: 14px", "stroke-width: 1.75"},
+		`.ibtn`:                            {"color: color-mix(in srgb, var(--wb-muted-fg) 82%, transparent)"},
+		`.ibtn:hover`:                      {"color: var(--wb-fg)"},
+		`.ibtn .li`:                        {"width: 14px", "height: 14px"},
+		`.fpane .fr .ch .li`:               {"width: 12px", "height: 12px", "stroke-width: 2"},
+		`.ftab-close.ibtn .li`:             {"width: 11px", "height: 11px"},
+		`.fattachment .btn .li`:            {"width: 12px", "height: 12px"},
+		`.flocation`:                       {"flex: 1 1 0"},
+		`.fcrumb-root, .fcrumb.last`:       {"flex: none"},
+		`.fbar`:                            {"background: var(--l2-side)"},
+		`.ffooter`:                         {"background: var(--l2-side)"},
+		`.fworkspace > .ftree`:             {"padding: 0 4px 8px", "font-size: 11.5px", "background: var(--l2-side)"},
+		`.ftree-head`:                      {"position: sticky", "top: 0", "height: 28px", "margin: 0 -4px 2px", "background: var(--l2-side)"},
+		`.fdetail-head`:                    {"height: 28px", "margin: 0 0 2px", "background: var(--l2-band)"},
+		`.fdirectory`:                      {"padding: 0 0 6px", "repeating-linear-gradient", "var(--l2-zebra)", "0 30px", "no-repeat local"},
+		`.fentry, .fdetail-head`:           {"border-bottom: 1px solid transparent"},
+		`.fentry`:                          {"border-radius: 0", "padding: 0 12px"},
+		`.fentry.sel`:                      {"var(--wb-primary) 24%, var(--wb-card)"},
+		`.fpane .fr.cur`:                   {"var(--wb-fg) 8%, transparent"},
+		`.fpane .fr.cur .fn`:               {"color: var(--wb-fg)", "font-weight: 600"},
+		`.fpane .fr.cur .fi`:               {"color: var(--wb-primary)"},
+		`.fentry.sel .fn`:                  {"color: var(--wb-fg)", "font-weight: 600"},
+		`.fentry.sel .fi`:                  {"color: var(--wb-primary)"},
+		`.fcount`:                          {"display: flex", "grid-column: 1 / -1", "height: 26px", "var(--wb-muted-fg) 70%"},
+		`:root[data-theme="light"] .fpane`: {"var(--wb-bg) 75%", "var(--wb-fg) 3%, var(--wb-card)", "var(--wb-fg) 3%, transparent"},
+	} {
+		rule := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(selector) + ` \{[^}]+\}`).FindString(css)
+		for _, value := range want {
+			if !strings.Contains(rule, value) {
+				t.Errorf("%s lacks %q", selector, value)
+			}
+		}
+	}
+	for _, value := range []string{"--l2-side: color-mix(in srgb, var(--wb-bg) 62%, var(--wb-card))", "--l2-band: color-mix(in srgb, var(--wb-fg) 4%, var(--wb-card))", "--l2-zebra: color-mix(in srgb, var(--wb-fg) 2.2%, transparent)"} {
+		if !strings.Contains(css, value) {
+			t.Errorf("dark sidebar tone lacks %q", value)
+		}
+	}
+	button := regexp.MustCompile(`(?m)^\.ibtn \{[^}]+\}`).FindString(css)
+	if strings.Contains(button, "opacity:") {
+		t.Error("icon buttons must use muted color, not opacity")
+	}
+	if strings.Contains(css, ".lk ") || strings.Contains(css, ".l2 ") {
+		t.Error("explorer styling must not depend on mockup look classes")
 	}
 }
 

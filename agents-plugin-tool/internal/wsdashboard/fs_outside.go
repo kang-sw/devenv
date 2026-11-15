@@ -456,6 +456,7 @@ func (d *Daemon) handleFSOutside(w http.ResponseWriter, r *http.Request, replyID
 	ext := strings.ToLower(filepath.Ext(rel))
 	_, image := imageType(rel)
 	_, video := videoType(rel)
+	_, audio := audioType(rel)
 	switch {
 	case framedFile(rel):
 		a.Kind = "frame"
@@ -467,6 +468,8 @@ func (d *Daemon) handleFSOutside(w http.ResponseWriter, r *http.Request, replyID
 		a.Kind, a.Src = "image", d.capabilityURL(fsOutCapRoutePart, capability, replyID, rel)
 	case video:
 		a.Kind, a.Src = "video", d.capabilityURL(fsOutCapRoutePart, capability, replyID, rel)
+	case audio:
+		a.Kind, a.Src = "audio", d.capabilityURL(fsOutCapRoutePart, capability, replyID, rel)
 	case info.Size() > fileViewMax:
 		a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 	default:
@@ -478,7 +481,7 @@ func (d *Daemon) handleFSOutside(w http.ResponseWriter, r *http.Request, replyID
 		case len(data) > fileViewMax:
 			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		case !viewableText(data):
-			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.binary")
+			a.Kind, a.Reason, a.ReasonCode = "none", wsi18n.T(lang, "file.reason.binary"), "binary"
 		case ext == ".md" || ext == ".markdown":
 			// No link rule: a relative link or image stays path text.
 			a.Kind, a.HTML = "markdown", string(wswhiteboard.RenderText(string(data), wswhiteboard.TextTargets{}))

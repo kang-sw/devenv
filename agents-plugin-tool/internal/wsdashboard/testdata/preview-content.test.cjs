@@ -56,5 +56,29 @@ async function open(path, answer, options) {
   card = await open('main.go', { kind: 'text', text: 'current' });
   frame.on.error();
   check('late PDF event cannot replace another preview', find(card.body, 'PRE').textContent, 'current');
+  wsT = function (key, reason) { return key === 'js.preview.none' ? key + ':' + reason : key; };
+  root.setAttribute('data-sysopen', '');
+  for (var kind of ['video', 'audio']) {
+    var mediaAnswer = { kind, src: '/s/rid1/fs/raw?path=media' };
+    card = await open('media', mediaAnswer);
+    var player = find(card.body, kind.toUpperCase());
+    check(kind + ' uses native controls and metadata only', [player.src, player.controls, player.preload], [mediaAnswer.src, true, 'metadata']);
+    check(kind + ' has kind badge and sizing category', [card.head.badge, card.el.attrs['data-preview-kind']], ['js.preview.kind.' + kind, kind]);
+    player.on.error();
+    check(kind + ' error uses existing localized none fallback', [card.body.children[0].className, card.body.children[0].children[0].textContent, card.el.attrs['data-preview-kind'], card.head.icon], ['pv-none', 'js.preview.none:js.preview.media.unsupported', 'none', 'file']);
+    check(kind + ' error still offers native open', find(card.body, 'BUTTON').textContent, 'js.preview.openext');
+    card = await open('current.txt', { kind: 'text', text: 'current' });
+    player.on.error();
+    check(kind + ' late error cannot replace current preview', find(card.body, 'PRE').textContent, 'current');
+    card = await open('media', mediaAnswer);
+    player = find(card.body, kind.toUpperCase());
+    // Starting another load invalidates the old player even before its answer.
+    replies.push({ kind: 'text', text: 'reloaded' });
+    kinds.preview.open(card);
+    player.on.error();
+    check(kind + ' pending reload ignores old error', card.body.children[0].className, kind === 'video' ? 'pv-vid' : 'pv-audio');
+    for (var i = 0; i < 8; i++) await Promise.resolve();
+    check(kind + ' reload completes normally', find(card.body, 'PRE').textContent, 'reloaded');
+  }
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });

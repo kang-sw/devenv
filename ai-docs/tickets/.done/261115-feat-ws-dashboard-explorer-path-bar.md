@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 0b17123e5fe73613
 sage-review-design-reviewed: 0b17123e5fe73613
+completed: 2026-11-15
 ---
 
 # Explorer path bar with back, forward and up
@@ -60,6 +61,8 @@ buttons and no editable input.
   (905). Source: owner (908)=a; reconciliation granted by MAIN 2026-11-15.
 - Settled 2026-11-15 by MAIN acknowledgement of the announced and technical
   calls (no owner policy question).
+- **Compatibility: T0.** Dashboard assets and localization only; no route,
+  protocol, shared-store, or persisted-history change.
 
 ## Constraints
 
@@ -119,3 +122,33 @@ instances (the browser shortcut untouched outside them); `TestFiles`
 neighbours and `./internal/wsi18n` for new strings. Look and placement go to
 the owner's visual check (owner UI principle) instead of a side-by-side
 capture.
+
+### Result (e8b1b1107) - 2026-11-15
+
+- Implemented the in-place breadcrumb editor, Enter/Esc/blur handling,
+  instance-scoped Ctrl/Cmd+L, and compact back/forward controls before up.
+  Reused existing button/input classes with three small layout rules.
+- History belongs to each live inner tab, truncates the forward branch after
+  new navigation, omits duplicate canonical destinations, resets on accepted
+  root changes, and is never serialized. Typed paths and history destinations
+  go through the guarded listing route before changing the current directory;
+  stale tab/root/navigation responses are ignored.
+- Preserved the existing root popover and route permissions. Absolute child
+  paths inside the root work; the exact absolute root remains refused by the
+  existing strict `relativeInside` guard (use an empty path or `.`). Added a
+  route regression test for this boundary rather than changing route behavior.
+- Verification passed with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+  `go test ./internal/wsdashboard -run 'TestFS|TestFiles|TestExplorer' -count=1`
+  and `go test ./internal/wsi18n -count=1` from `agents-plugin-tool/`.
+  JavaScript syntax checks for `assets/files.js` and
+  `testdata/files-explorer.test.cjs`, plus `git diff --check`, passed.
+  Controlled-promise tests cover editing/cancel/blur, raw typed paths,
+  refusals preserving listing/selection/scroll, cache bypass, canonical
+  history, per-tab/instance/storage isolation, shortcut scoping, root reset,
+  stale responses, and teardown; Go tests retain real route access checks.
+- Brief lite self-review covered correctness, security boundaries, test
+  integrity, and cleanup with no remaining findings. Independent review was
+  omitted under the lead's explicit no-subagent rule. Browser/screenshot
+  rounds were omitted under the owner UI principle; the owner's visual
+  acceptance is pending. No daemon rebuild/restart, process kill, push, or
+  merge was performed.

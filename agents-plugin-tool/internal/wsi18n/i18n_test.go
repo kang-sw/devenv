@@ -136,6 +136,21 @@ func TestSubsetScriptHoldsOnlyThePrefixKeys(t *testing.T) {
 	}
 }
 
+func TestScriptExceptMultiplePrefixes(t *testing.T) {
+	js := string(ScriptExcept("en", "js.tk.", "js.files."))
+	if !strings.Contains(js, `"js.ago"`) || !strings.Contains(js, "window.wsTn") {
+		t.Fatal("multiple exclusions lost used client strings")
+	}
+	for _, prefix := range []string{`"js.tk.`, `"js.files.`} {
+		if strings.Contains(js, prefix) {
+			t.Fatal("retained excluded prefix", prefix)
+		}
+	}
+	if string(ScriptExcept("en")) != string(Script("en")) {
+		t.Fatal("no exclusions must retain the full client table")
+	}
+}
+
 func TestScriptExceptLeavesOutOnlyThePrefixKeys(t *testing.T) {
 	for _, prefixes := range [][]string{{"js.img."}, {"js.img.", "js.files."}} {
 		js := string(ScriptExcept("en", prefixes...))
