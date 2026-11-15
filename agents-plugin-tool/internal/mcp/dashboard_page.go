@@ -489,7 +489,7 @@ func (src *DashboardSessionSource) loadReplies() (wsmailbox.ReplyStore, bool) {
 	if err != nil {
 		return wsmailbox.ReplyStore{}, false
 	}
-	replies, err := src.replies.Load(path, wsmailbox.LoadReplyStore)
+	replies, err := src.replies.LoadIdentity(path, wsmailbox.LoadReplyStore)
 	if err != nil {
 		return wsmailbox.ReplyStore{}, false
 	}
@@ -531,7 +531,7 @@ func (src *DashboardSessionSource) contactsFrom(reg wsdashboard.Registration, re
 		}
 		stores[scope] = nil
 		if path, err := wsmailbox.PathForScope(scope, reg.Project); err == nil {
-			if store, err := src.scopes.Load(path, wsmailbox.Load); err == nil {
+			if store, err := src.scopes.LoadIdentity(path, wsmailbox.Load); err == nil {
 				stores[scope] = &store
 			}
 		}

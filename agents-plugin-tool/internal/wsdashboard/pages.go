@@ -870,6 +870,13 @@ func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
 	return r.snapshots.Snapshot(r.dir, replyID)
 }
 
+// Refresh stamps need only snapshot freshness, not retained evidence overlays.
+// The parsed snapshot is stat-identity checked; expiry is still judged now.
+func (r pageReader) adapterPresent(replyID string, now time.Time) bool {
+	p, err := r.snapshots.read(wslive.SnapshotPath(SessionDir(r.dir, replyID)))
+	return err == nil && adapterPresent(&p.snap, now)
+}
+
 func (r pageReader) readPage(s Session) (PageContent, bool, error) {
 	if ls, ok := r.source.(LangPageSource); ok {
 		return ls.ReadPageLang(s.Registration, r.lang)
@@ -1039,7 +1046,7 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 	h := newStampHash()
 	for _, id := range in.ids {
 		s, ok := r.index.Session(id)
-		present := ok && adapterPresent(r.readSnapshot(id), now)
+		present := ok && r.adapterPresent(id, now)
 		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x01", id, ok, s.Rev, ok && s.Registration.Live(now), present)
 	}
 	StampWatched(h, in.watch)
@@ -1090,7 +1097,7 @@ func (r pageReader) indexStamp() (string, bool) {
 		}
 		reg := s.Registration
 		fmt.Fprintf(h, "%s\x00%d\x00%t\x00%t\x00%t\x01", reg.ReplyID, s.Rev, reg.Live(now),
-			adapterPresent(r.readSnapshot(reg.ReplyID), now), now.Sub(reg.LastSeen()) <= endedSessionWindow)
+			r.adapterPresent(reg.ReplyID, now), now.Sub(reg.LastSeen()) <= endedSessionWindow)
 	}
 	return sumHex(h), true
 }

@@ -218,8 +218,12 @@ func summarizeObserved(records map[string]ObservedRecord) map[string]*ObservedMo
 func OverlayObserved(snap *Snapshot, records []ObservedRecord) {
 	st := NewState("")
 	st.SeedObserved(records)
+	overlayObserved(snap, st.observed)
+}
+
+func overlayObserved(snap *Snapshot, models map[string]*ObservedModel) {
 	overlay := func(id string, dst **ObservedModel) {
-		if v := st.observed[id]; v != nil && (*dst == nil || v.Current.At >= (*dst).Current.At) {
+		if v := models[id]; v != nil && (*dst == nil || v.Current.At >= (*dst).Current.At) {
 			*dst = v
 		}
 	}
@@ -228,7 +232,7 @@ func OverlayObserved(snap *Snapshot, records []ObservedRecord) {
 	for id, o := range snap.ObservedAgents {
 		histories[id] = o
 	}
-	for id, o := range st.observed {
+	for id, o := range models {
 		if id != "" && (histories[id] == nil || o.Current.At >= histories[id].Current.At) {
 			histories[id] = o
 		}
@@ -311,17 +315,10 @@ func ReadObserved(dir string) ([]ObservedRecord, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		f, err := os.Open(filepath.Join(dir, ObservedDirName, entry.Name()))
-		if err != nil {
-			continue
+		r, valid, err := readObservedRecord(filepath.Join(dir, ObservedDirName, entry.Name()), os.Open)
+		if err == nil && valid {
+			records = append(records, r)
 		}
-		raw, err := io.ReadAll(io.LimitReader(f, 4097))
-		_ = f.Close()
-		var r ObservedRecord
-		if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &r) != nil {
-			continue
-		}
-		records = append(records, r)
 	}
 	st.SeedObserved(records)
 	out := make([]ObservedRecord, 0, len(st.observations))
@@ -330,4 +327,16 @@ func ReadObserved(dir string) ([]ObservedRecord, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return observationKey(out[i]) < observationKey(out[j]) })
 	return out, nil
+}
+
+func readObservedRecord(path string, open func(string) (*os.File, error)) (ObservedRecord, bool, error) {
+	f, err := open(path)
+	if err != nil {
+		return ObservedRecord{}, false, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 4097))
+	_ = f.Close()
+	var r ObservedRecord
+	valid := err == nil && len(raw) <= 4096 && json.Unmarshal(raw, &r) == nil
+	return r, valid, err
 }
