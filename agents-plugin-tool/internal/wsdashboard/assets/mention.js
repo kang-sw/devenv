@@ -75,6 +75,7 @@
   // anchor is the viewport position of the character at index at in the
   // textarea, measured on a hidden copy laid out alike.
   function anchor(input, at) {
+    if (input.wsc) return input.wsc.anchor(at);
     var cs = getComputedStyle(input), d = doc.createElement("div"), mark = doc.createElement("span");
     ["boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
       "fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing", "lineHeight", "textTransform", "wordSpacing", "tabSize"].forEach(function (k) { d.style[k] = cs[k]; });
@@ -144,7 +145,7 @@
     }
     // sync follows the text and caret: opens, refilters, or closes.
     function sync() {
-      var tok = doc.activeElement === input && input.selectionStart === input.selectionEnd && token(input.value, input.selectionStart);
+      var tok = (doc.activeElement === input || input.wsc && doc.activeElement === input.wsc.editor) && input.selectionStart === input.selectionEnd && token(input.value, input.selectionStart);
       if (!tok) { close(); return; }
       var keep = st && st.start === tok.start;
       // The rows of the last answer stay up while the next is asked for;
@@ -247,7 +248,7 @@
     }
     // key handles a keydown while the popup shows; true when it took it.
     function key(e) {
-      if (!shown()) return false;
+      if (e.isComposing || e.keyCode === 229 || !shown()) return false;
       var k = e.key;
       if (k === "ArrowDown" || k === "ArrowUp") { e.preventDefault(); move(k === "ArrowDown" ? 1 : -1); return true; }
       if (k === "Enter" || (k === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey)) {
@@ -265,7 +266,9 @@
       }
       return false;
     }
-    input.addEventListener("input", sync);
+    input.addEventListener("input", function (e) { if (!e.isComposing) sync(); });
+    input.addEventListener("compositionstart", close);
+    input.addEventListener("compositionend", sync);
     input.addEventListener("blur", close);
     // A caret moved by a click or the arrow keys may leave the token.
     function follow() { if (st) sync(); }
@@ -284,7 +287,10 @@
       var o = e.target.closest && e.target.closest("[data-i]"), i = o ? +o.getAttribute("data-i") : -1;
       if (i >= 0 && st && i !== st.idx) { st.idx = i; draw(); }
     });
-    return { key: key, close: close, sync: sync };
+    return { key: key, close: close, sync: sync, destroy: function () {
+      close(); window.removeEventListener("resize", place);
+      if (pop.parentNode) pop.parentNode.removeChild(pop);
+    } };
   }
 
   // paint fills layer, a box laid out like the textarea and drawn behind it,

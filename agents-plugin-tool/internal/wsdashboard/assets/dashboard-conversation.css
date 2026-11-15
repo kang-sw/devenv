@@ -216,7 +216,16 @@
 @keyframes ibadge-rise { from { opacity: 0; transform: translateY(40%); } }
 @media (prefers-reduced-motion: reduce) { .ibadge:not([hidden]), .sbadge, .ibadge.busy .istop { animation: none; } }
 .crow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
-.composer textarea { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
+.wsc-backing { display: none !important; }
+.wsc-editor { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.wsc-editor:empty::before { content: attr(data-placeholder); color: var(--wb-muted-fg); pointer-events: none; }
+.wsc-editor:focus { outline: 1.5px solid var(--wb-primary); }
+.wsc-backing[hidden] + .wsc-editor { display: none; }
+.wsc-editor[aria-disabled="true"] { opacity: .6; cursor: default; }
+.wsc-capsule { display: inline; white-space: nowrap; font-size: 12px; line-height: 1.5; padding: 0 6px; border-radius: 5px; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 28%, transparent); }
+.wsc-skill { font: 11.5px/1.5 var(--wb-mono); }
+.composer textarea, .composer textarea + .wsc-editor { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
+.composer textarea + .wsc-editor { box-sizing: border-box; overflow: auto; }
 .composer textarea:focus { outline: 1.5px solid var(--wb-primary); }
 /* the message box over its mention layer: the layer is laid out like the
    textarea (same font, padding, and wrapping) and drawn behind it with
@@ -294,7 +303,11 @@
 /* A board note's image chips: a row right after its note, aligned with it,
    hidden while the note is closed. */
 .nimgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.note[hidden] + .nimgs { display: none; }
+.note + .wsc-editor { width: 100%; box-sizing: border-box; margin-top: 8px; font: inherit; line-height: 1.4; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; }
+.note + .wsc-editor:focus { outline: none; border-bottom-color: var(--wb-primary); }
+.arow > .note + .wsc-editor, .ckrow > .note + .wsc-editor { flex-basis: 100%; width: auto; margin: 0 10px 8px 34px; }
+.srow .note + .wsc-editor { flex-basis: 100%; margin-top: 4px; }
+.note[hidden] + .nimgs, .note[hidden] + .wsc-editor + .nimgs { display: none; }
 .arow > .nimgs, .ckrow > .nimgs { flex-basis: 100%; margin: 0 10px 8px 34px; }
 .srow > .nimgs { flex-basis: 100%; margin-top: 4px; }
 .tophead > .nimgs { margin: 0 10px 6px; }
@@ -325,8 +338,8 @@
 .srow .stext > .sentmark { margin-right: 6px; }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
 /* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back. Ack rows (.arow) and check rows (.ckrow) dim alike; .aline is the agents panel's row wrapper, not a board item. */
-.card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input, .ckrow.sent-sent .why, .ckrow.sent-sent input { opacity: .4; transition: opacity .15s; }
-.card.sent-held > .cbody > :not(.note), .arow.sent-held .why, .arow.sent-held input, .ckrow.sent-held .why, .ckrow.sent-held input { opacity: .65; transition: opacity .15s; }
+.card.sent-sent > .cbody > :not(.note):not(.wsc-editor), .arow.sent-sent .why, .arow.sent-sent input, .ckrow.sent-sent .why, .ckrow.sent-sent input { opacity: .4; transition: opacity .15s; }
+.card.sent-held > .cbody > :not(.note):not(.wsc-editor), .arow.sent-held .why, .arow.sent-held input, .ckrow.sent-held .why, .ckrow.sent-held input { opacity: .65; transition: opacity .15s; }
 .card.sent-sent .cbar .head .title, .arow.sent-sent .head .title, .ckrow.sent-sent .head .title { opacity: .7; transition: opacity .15s; }
 .card.sent-held .cbar .head .title, .arow.sent-held .head .title, .ckrow.sent-held .head .title { opacity: .85; transition: opacity .15s; }
 .card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .card:is(.sent-sent, .sent-held):focus-within .cbar .head .title, .arow:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title), .ckrow:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title) { opacity: 1; }

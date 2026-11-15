@@ -141,7 +141,7 @@ func TestReasoningSummaryHistoryImmutableTurnAssociationAndAttempts(t *testing.T
 		t.Fatal("duplicate turn key or expanded retained default")
 	}
 	// Earlier reply/turn markup is byte-identical after the late natural commit.
-	a := conversation(wslive.Lead{}, ring[:3], nil, nil, sessionLookup{}, replyMarkdown("/proj", "self"))
+	a := conversation(wslive.Lead{}, ring[:3], nil, nil, sessionLookup{}, replyMarkdown("/proj", "self"), "self")
 	a.Lang = "en"
 	assets, err := loadDashboardAssets()
 	if err != nil {

@@ -14,9 +14,8 @@ import (
 // also carry dashboard inbox input, so their origin cannot demote user turns.
 func (e ConvEntry) ChildReport() bool { return e.Kind == "wake" && e.Cause == "subagent_report" }
 
-// Mail wakes cannot be paired by text, peer or nearby claim time: history
-// drops the envelope's sent timestamp/identity, so repetition and reclaimed
-// claims remain indistinguishable. Keep independent compact diagnostics.
+// Wakes without an unambiguous display association keep compact diagnostics.
+// Repeated/reclaimed records lack shared delivery identity and stay separate.
 func (e ConvEntry) MailWake() bool { return e.Kind == "wake" && e.Cause == "mail" }
 
 var peerLeadFirstLine = regexp.MustCompile(`^\[(?:ws|wsflow) note: from a peer lead session \((?:(?:claude|codex|pi), )?not a worker\), with the same authority as yours\]$`)
