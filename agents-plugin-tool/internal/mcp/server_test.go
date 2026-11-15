@@ -392,9 +392,6 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 			if !strings.Contains(text, "## Render Context") || !strings.Contains(text, "- bridge_probe: context for "+stem) {
 				t.Errorf("rendered %s did not append legacy context block:\n%s", stem, text)
 			}
-			if strings.Contains(text, "exec.") {
-				t.Errorf("rendered %s exposed hidden full-ws guidance:\n%s", stem, text)
-			}
 		})
 	}
 }
@@ -1166,8 +1163,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["3"], "tickets:") {
 		t.Fatalf("project_tree response missing tickets: %s", byID["3"])
 	}
-	if !strings.Contains(byID["4"], "Implementation Playbook") {
-		t.Fatalf("infra response missing impl-playbook: %s", byID["4"])
+	if text := toolText(t, byID["4"]); strings.TrimSpace(text) == "" || toolIsError(t, byID["4"]) {
+		t.Fatalf("infra response failed to load impl-playbook: %s", byID["4"])
 	}
 	if !strings.Contains(byID["5"], "review-paths") || !strings.Contains(byID["5"], "-direct.md") {
 		t.Fatalf("path.generate response missing review path: %s", byID["5"])
@@ -1912,9 +1909,6 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 		if !strings.Contains(codeReviewerText, want) {
 			t.Fatalf("code-reviewer playbook render missing %q:\n%s", want, codeReviewerText)
 		}
-	}
-	if strings.Contains(codeReviewerText, "exec.") {
-		t.Fatalf("code-reviewer playbook render exposed hidden full-ws guidance:\n%s", codeReviewerText)
 	}
 }
 

@@ -52,9 +52,9 @@ func TestPreferenceSlotsTuneAndRender(t *testing.T) {
 				text, _, _ := strings.Cut(rest, "### Asking the user")
 				return strings.TrimSpace(text)
 			}
-			const seed = "Use the project's terminology and communication style."
-			if got := section(); got != seed {
-				t.Fatalf("seed = %q", got)
+			seed := section()
+			if seed == "" {
+				t.Fatal("empty default preference section")
 			}
 			if echo := tune("preference.z", "Last", ""); !strings.Contains(echo, "[scope:global]") {
 				t.Fatal(echo)

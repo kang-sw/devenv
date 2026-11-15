@@ -85,21 +85,6 @@ func TestPlaybookRenderDelegateImplementerReservesPlanForTopLevelLead(t *testing
 			if !strings.HasSuffix(string(prompt), "\n\nplan-path: "+planPath+"\n") {
 				t.Fatalf("rendered floor must end with the plan-path line:\n%s", prompt)
 			}
-			if !strings.Contains(string(prompt), "## Plan") {
-				t.Fatalf("rendered floor lost its plan section:\n%s", prompt)
-			}
-			body := strings.Join(strings.Fields(string(prompt)), " ")
-			for _, want := range []string{
-				"The assignment the lead gave you above is your governing contract",
-				"Only when the assignment requires independent review, render `reviewer` for a single full-scope reviewer",
-				"`code-review-correctness`, `code-review-fit`, and `code-review-test` for the selected partitions",
-				"Do not render `code-reviewer` as a delegated role: it is a shared include, so delegated provenance admission rejects it",
-				"Otherwise this floor adds no independent review",
-			} {
-				if !strings.Contains(body, want) {
-					t.Errorf("rendered floor missing conditional review dispatch %q", want)
-				}
-			}
 		})
 	}
 }

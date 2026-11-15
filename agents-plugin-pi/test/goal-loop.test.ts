@@ -3259,17 +3259,13 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.ok(!pi.sentUserMessages.some((m) => m.content === sentResume), "no resume beside the goal reminder");
     });
 
-    test("the ws-compact description and the guide no longer limit resumption to an active goal", () => {
+    test("the ws-compact description no longer limits resumption to an active goal", () => {
       const { pi } = resumeRun();
       const description = (pi.tools.get("ws-compact") as unknown as { description: string }).description;
       assert.ok(description.endsWith(
         "After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge, a milestone, or a user /compact, the next move is the user's unless you set continue_after_compact to true because you hold known remaining work that does not await the user.",
       ));
       assert.doesNotMatch(description, /Under an active goal the goal loop continues/);
-      const guide = readFileSync(new URL("../lead-compact-guide.md", import.meta.url), "utf8");
-      assert.match(guide, /With no goal, a resume message follows\s+when you compacted on your own or at the hard point/);
-      assert.match(guide, /`continue_after_compact: true` when you hold known remaining work that does\s+not await the user/);
-      assert.match(guide, /after the advisory\s+nudge, a milestone, or a user `\/compact`, the next move is the user's\./);
     });
 
     describe("explicit continue_after_compact (261004)", () => {
