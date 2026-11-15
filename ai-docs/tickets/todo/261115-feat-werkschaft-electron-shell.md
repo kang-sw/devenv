@@ -47,7 +47,7 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
 | P15 | User agent ends in `Werkschaft/<version>`; the dashboard and board frames use it for desktop file-link behavior (click → link menu, Cmd/Ctrl-click → preview) | `desktop/src/main.rs:22-30,160`, `internal/wsdashboard/assets/dashboard.js:3127-3154,3285-3304,4227-4243`, `internal/wswhiteboard/assets/doc-frame.js:135-152,186-191` | Keep the same UA token so the dashboard needs no change |
 | P16 | "Open with system" is daemon HTTP (`open`, `fs/act` open/reveal), not shell IPC | `internal/wsdashboard/assets/dashboard.js:3206-3246`, `internal/wsdashboard/fs_act_route.go` | Works unchanged; verify from the Electron window |
 | P17 | X-close destroys the window without consulting `beforeunload`; closing never stops the daemon | `desktop/src/main.rs:96-202` | Closing still never stops the daemon; X-close now honors `beforeunload` (see Decisions) |
-| P18 | No single-instance handling (Tauri Phase 2 scope) | `desktop/src/main.rs:100-101` | See (848) |
+| P18 | No single-instance handling (Tauri Phase 2 scope) | `desktop/src/main.rs:100-101` | See (857) |
 | P19 | Identity: product `Werkschaft`, version `0.1.0`, bundle id `dev.werkschaft.desktop`, `.app` target, temporary `icons/icon.png` | `desktop/tauri.conf.json:3-5,23-27` | Same identity and icon |
 | P20 | Pinned, frozen build: `scripts/build-slot.py --allocated` builds an unsigned debug `.app` offline with owned-process cleanup | `desktop/scripts/build-slot.py` | An offline, pinned, unsigned `.app` build with the same owned-process discipline |
 | P21 | Security: no invoke handler, plugins, preload or global API; empty capability; page gets zero native command authority; connection-page CSP `default-src 'none'` | `desktop/src/main.rs:100-101,217-233`, `desktop/tauri.conf.json:9-20` | Same zero-authority posture (see Decisions) |
@@ -101,7 +101,7 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
 - **Offline build environment.** Builds and tests run with
   `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` and npm offline
   (`npx --offline`, `npm ci --offline`). Nothing in this ticket fetches from
-  the network silently; the one-time Electron download is settled by (844).
+  the network silently; the one-time Electron download is settled by (853).
 - Never touch the shared daemon or port 29417. Launch tests against an
   isolated daemon fixture or a stub endpoint and health server on a free port
   with its own `WS_CACHE_HOME`.
@@ -112,15 +112,15 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
   daemon HTTP routes (P16) carry the existing coupling. A needed dashboard
   change returns to the lead first.
 - Architecture Rule 2: the Electron sources stay inside `agents-plugin-tool/`
-  (placement in (845)).
+  (placement in (854)).
 - Before editing under `agents-plugin-tool/`, read
   `ai-docs/manuals/shipped-surface-boundary.md`.
 
 ## Open Decision Queue
 
-Last ID used: (849)
+Last ID used: (858)
 
-(844) [open] [policy] How the one-time Electron download is fetched, pinned and cached.
+(853) [open] [policy] How the one-time Electron download is fetched, pinned and cached.
 - Context: no Electron binary or npm package exists on this machine (the npx
   cache holds only `@electron` helpers and `electron-to-chromium`). Electron
   and the packager need one networked install; afterwards builds are offline.
@@ -139,24 +139,24 @@ Last ID used: (849)
 > version and integrity hash, and Electron's own cache keeps later builds
 > offline. The worker does not fetch; it stops if the binary is absent.
 
-(845) [technical] [open] A new sibling directory `agents-plugin-tool/desktop-electron/` over sharing `agents-plugin-tool/desktop/` - the Tauri crate stays in place until parity, and separate directories keep two independent `package.json` / lockfiles and build outputs apart; removal of the Tauri directory later is a clean delete.
+(854) [technical] [open] A new sibling directory `agents-plugin-tool/desktop-electron/` over sharing `agents-plugin-tool/desktop/` - the Tauri crate stays in place until parity, and separate directories keep two independent `package.json` / lockfiles and build outputs apart; removal of the Tauri directory later is a clean delete.
 
-(846) [technical] [open] Plain `@electron/packager` over `electron-builder` or Electron Forge - an unsigned `.app` needs only packaging; packager has the smallest dependency tree to fetch once and keep offline, while builder/Forge add installers, publishers and auto-update machinery this ticket excludes.
+(855) [technical] [open] Plain `@electron/packager` over `electron-builder` or Electron Forge - an unsigned `.app` needs only packaging; packager has the smallest dependency tree to fetch once and keep offline, while builder/Forge add installers, publishers and auto-update machinery this ticket excludes.
 
-(847) [technical] [open] Main-process TypeScript-free plain JavaScript (CommonJS) over a TypeScript build step - the shell is a few hundred lines; a compile step adds an offline toolchain dependency for no runtime benefit.
+(856) [technical] [open] Main-process TypeScript-free plain JavaScript (CommonJS) over a TypeScript build step - the shell is a few hundred lines; a compile step adds an offline toolchain dependency for no runtime benefit.
 
-(848) [open] [policy] Whether single-instance launch/focus lands in this ticket.
+(857) [open] [policy] Whether single-instance launch/focus lands in this ticket.
 - Context: the Tauri shell has none (P18); it is approved scope deferred to
   that ticket's Phase 2. Electron offers it as one call
   (`app.requestSingleInstanceLock` plus focusing the existing window).
 - Alternative a: include it in Phase 1 (a second launch focuses the
   existing window).
 - Alternative b: strict parity now; leave it to the reliability phase in
-  (849).
+  (858).
 > Recommend a: it is already approved scope, costs a few lines, and avoids
 > two Werkschaft windows racing the same endpoint.
 
-(849) [open] [policy] Where the Tauri ticket's unimplemented Phases 2-4 go.
+(858) [open] [policy] Where the Tauri ticket's unimplemented Phases 2-4 go.
 - Context: `261113-feat-werkschaft-thin-tauri-shell` still lists Phase 2
   (daily-use reliability, single instance, reconnect after restart, safe
   missing-daemon start), Phase 3 (Windows/WebView2 and zip delivery) and
@@ -174,8 +174,8 @@ Last ID used: (849)
 
 ### Phase 1: Electron macOS shell at verified Tauri parity, with X-close confirmation
 
-Build the Electron shell in the directory settled by (845) with the
-packaging settled by (846), meeting every row P1-P21 of the parity
+Build the Electron shell in the directory settled by (854) with the
+packaging settled by (855), meeting every row P1-P21 of the parity
 inventory and the Decisions above. Keep the user agent token
 `Werkschaft/<version>` so the dashboard's desktop file-link behavior works
 unchanged. Package an unsigned macOS `.app` with the same identity and icon
