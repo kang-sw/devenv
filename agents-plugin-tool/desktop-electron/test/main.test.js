@@ -15,25 +15,14 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   const { start } = require('../main');
   endpoint.discover = original;
   const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0' });
-  class Window extends EventEmitter {
+  let focusedContents = null;
+  const renderers = [];
+  class Base extends EventEmitter {
     constructor(options) {
-      super(); this.options = options; this.title = options.title; this.loads = [];
-      this.webContents = Object.assign(new EventEmitter(), {
-        setUserAgent: agent => { this.agent = agent; }, getUserAgent: () => 'Chromium',
-        setWindowOpenHandler: handler => { this.popup = handler; },
-        loadURL: async url => { this.loads.push(url); this.currentURL = url; this.webContents.emit('did-navigate', {}, url); },
-        loadFile: async file => { this.loads.push(file); this.currentURL = file; this.webContents.emit('did-navigate', {}, pathToFileURL(file).href); },
-        setZoomFactor: zoom => { this.zoom = zoom; },
-      });
+      super(); this.options = options; this.title = options.title; this.focused = true;
       this.children = [];
       this.contentView = { addChildView: view => this.children.push(view) };
-      this.webContents.send = (channel, value) => { this.state = { channel, value }; };
-      this.webContents.focus = () => { this.contentFocused = true; };
-      this.webContents.isDestroyed = () => !!this.destroyed;
-      this.webContents.close = options => { this.closeOptions = options; };
-      this.webContents.session = { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest: handler => { this.request = handler; } } };
-      this.webContents.mainFrame = {};
-      Window.current = this;
+      Base.current = this;
     }
     getTitle() { return this.title; }
     getContentSize() { return [1280, 860]; }
@@ -41,11 +30,42 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     setMenuBarVisibility(value) { this.menuVisible = value; }
     close() { this.emit('close', { preventDefault() {} }); }
     isDestroyed() { return false; }
+    isFocused() { return this.focused; }
     setTitle(title) { this.title = title; }
     isMinimized() { return true; }
     restore() { this.restored = true; }
     show() { this.shown = true; }
-    focus() { this.focused = true; }
+    focus() {
+      this.focused = true;
+      // BrowserWindow's primary contents gets focus unless a child already has it.
+      if (this.webContents && !this.children.some(view => view.webContents.isFocused())) this.webContents.focus();
+      this.emit('focus');
+    }
+  }
+  class Window extends Base {
+    constructor(options) {
+      super(options); this.loads = [];
+      const loaded = url => {
+        this.webContents.emit('did-navigate', {}, url);
+        this.webContents.emit('did-finish-load');
+      };
+      this.webContents = Object.assign(new EventEmitter(), {
+        setUserAgent: agent => { this.agent = agent; }, getUserAgent: () => 'Chromium',
+        setWindowOpenHandler: handler => { this.popup = handler; },
+        loadURL: async url => { this.loads.push(url); this.currentURL = url; loaded(url); },
+        loadFile: async file => { this.loads.push(file); this.currentURL = file; loaded(pathToFileURL(file).href); },
+        setZoomFactor: zoom => { this.zoom = zoom; },
+        focus: () => { focusedContents = this.webContents; },
+        isFocused: () => focusedContents === this.webContents,
+        isDestroyed: () => !!this.destroyed,
+        close: options => { this.closeOptions = options; },
+        send: (channel, value) => { this.state = { channel, value }; },
+        session: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest: handler => { this.request = handler; } } },
+        mainFrame: {},
+      });
+      renderers.push(this.webContents);
+      if (new.target === Window) this.webContents.focus();
+    }
   }
   const session = { defaultSession: {
     setPermissionRequestHandler(handler) { this.request = handler; },
@@ -54,21 +74,28 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   } };
   const views = [];
   class View extends Window {
-    constructor(options) { const current = Window.current; super(options); Window.current = current; views.push(this); }
+    constructor(options) { const current = Base.current; super(options); Base.current = current; views.push(this); }
     setBounds(bounds) { this.bounds = bounds; }
   }
   const ipcMain = new EventEmitter(), nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: false });
-  let template, response = 0, popups = 0;
+  let template, response = 0, popups = 0, menuCallback, onDialog;
   const opened = [];
-  start({ app, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
-    Menu: { buildFromTemplate: t => Object.assign(t, { popup() { popups++; } }), setApplicationMenu: t => { template = t; } },
+  start({ app, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
+    Menu: { buildFromTemplate: t => Object.assign(t, { popup(options) {
+      assert.equal(options.window, Base.current);
+      popups++; menuCallback = options.callback; focusedContents = null;
+    } }), setApplicationMenu: t => { template = t; } },
     shell: { openExternal: async url => { opened.push(url); } },
-    dialog: { showMessageBoxSync: () => response },
+    dialog: { showMessageBoxSync: (parent) => { assert.equal(parent, Base.current); onDialog?.(); return response; } },
   }, platform);
   await tick();
-  const window = Window.current;
+  const window = Base.current;
   const menus = Object.fromEntries(template.flatMap(item => item.submenu || []).filter(item => item.id).map(item => [item.id, item]));
-  return { app, window, views, ipcMain, nativeTheme, popups: () => popups, menus, session: session.defaultSession, opened, choose: n => { response = n; } };
+  return { app, window, views, renderers, Window, Base, ipcMain, nativeTheme, popups: () => popups,
+    focusedContents: () => focusedContents, clearFocus: () => { focusedContents = null; },
+    dismissMenu: () => { const callback = menuCallback; menuCallback = null; callback(); },
+    onDialog: fn => { onDialog = fn; },
+    menus, session: session.defaultSession, opened, choose: n => { response = n; } };
 }
 test('native window, menus, authority, close veto and single-instance focus', async () => {
   const f = await fixture(), w = f.window;
@@ -397,12 +424,18 @@ test('platform switch keeps native construction on macOS/Linux and isolates Wind
   for (const platform of ['darwin', 'linux', 'win32']) {
     const f = await fixture(undefined, platform), w = f.window;
     const isolation = { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false };
-    assert.deepEqual(w.options.webPreferences, isolation);
     if (platform !== 'win32') {
+      assert.equal(w.constructor, f.Window);
       assert.deepEqual(w.options, { title: 'Werkschaft — Connecting…', width: 1280, height: 860, minWidth: 760, minHeight: 520, webPreferences: isolation });
       assert.equal(f.views.length, 0);
+      assert.equal(f.renderers.length, 1);
+      assert.equal(w.listenerCount('focus'), 0);
       continue;
     }
+    assert.equal(w.constructor, f.Base);
+    assert.equal('webContents' in w, false, 'BaseWindow has no owner renderer');
+    assert.equal('webPreferences' in w.options, false);
+    assert.equal(f.renderers.length, 2, 'only dashboard and bar contents are created');
     assert.equal(w.options.titleBarStyle, 'hidden');
     assert.deepEqual(w.options.titleBarOverlay, { color: '#f3f3f3', symbolColor: '#000000', height: 36 });
     const [dashboard, bar] = f.views, wc = dashboard.webContents;
@@ -411,8 +444,6 @@ test('platform switch keeps native construction on macOS/Linux and isolates Wind
     assert.deepEqual(w.children, [dashboard, bar]);
     assert.deepEqual(dashboard.bounds, { x: 0, y: 36, width: 1280, height: 824 });
     assert.deepEqual(bar.bounds, { x: 0, y: 0, width: 1280, height: 36 });
-    assert.deepEqual(w.loads, ['about:blank'], 'the inert owner must have a committed document for CDP initialization');
-    assert.deepEqual(w.popup({ url: 'https://example.com' }), { action: 'deny' });
     assert.deepEqual(dashboard.loads, ['http://127.0.0.1:39418/']);
     assert.equal(dashboard.agent, 'Chromium Werkschaft/0.1.0');
     assert.equal(path.basename(bar.options.webPreferences.preload), 'titlebar-preload.js');
@@ -439,6 +470,93 @@ test('platform switch keeps native construction on macOS/Linux and isolates Wind
     wc.emit('destroyed');
     assert(completed);
   }
+});
+test('Windows startup focuses the dashboard and bare Alt routes through focused contents without a click', async () => {
+  for (const unavailable of [false, true]) {
+    const f = await fixture(async () => {
+      if (unavailable) throw new Error('Endpoint unavailable');
+      return 'http://127.0.0.1:39418/';
+    }, 'win32');
+    const wc = f.views[0].webContents;
+    assert.equal(f.focusedContents(), wc, 'first did-finish-load must focus the dashboard or connection page');
+    for (const type of ['keyDown', 'keyUp']) {
+      const focused = f.focusedContents();
+      assert(focused, 'keyboard input must have a destination before any click');
+      focused.emit('before-input-event', { preventDefault() {} }, { key: 'Alt', type });
+    }
+    assert.equal(f.popups(), 1);
+    f.dismissMenu();
+    assert.equal(f.focusedContents(), wc);
+  }
+});
+test('Windows activation and second instance restore dashboard focus without stealing bar interaction', async () => {
+  const f = await fixture(undefined, 'win32'), [dashboard, bar] = f.views;
+  f.clearFocus();
+  f.window.focus();
+  assert.equal(f.focusedContents(), dashboard.webContents);
+  f.clearFocus();
+  f.app.emit('second-instance');
+  assert(f.window.restored && f.window.shown);
+  assert.equal(f.focusedContents(), dashboard.webContents);
+  bar.webContents.focus();
+  f.window.focus();
+  assert.equal(f.focusedContents(), bar.webContents, 'activation must retain hamburger keyboard navigation');
+  f.window.focused = false;
+  f.clearFocus();
+  dashboard.webContents.emit('did-finish-load');
+  assert.equal(f.focusedContents(), null, 'later loads must not steal focus from another application');
+  f.window.focus();
+  assert.equal(f.focusedContents(), dashboard.webContents);
+});
+test('Windows first load preserves bar interaction until the next activation', async () => {
+  let finish;
+  const f = await fixture(() => new Promise(resolve => { finish = resolve; }), 'win32');
+  const [dashboard, bar] = f.views;
+  assert.equal(f.focusedContents(), null, 'dashboard has not loaded');
+  bar.webContents.focus();
+  finish('http://127.0.0.1:39418/');
+  await tick();
+  assert.equal(f.focusedContents(), bar.webContents);
+  f.clearFocus();
+  f.window.focus();
+  assert.equal(f.focusedContents(), dashboard.webContents);
+});
+test('Windows popup and dialog focus is restored only after each interaction closes', async () => {
+  const f = await fixture(undefined, 'win32'), [dashboard, bar] = f.views;
+  const { MENU } = require('../titlebar');
+  const frame = bar.webContents.mainFrame;
+  frame.url = pathToFileURL(path.resolve(__dirname, '../titlebar.html')).href;
+  bar.webContents.focus();
+  f.ipcMain.emit(MENU, { sender: bar.webContents, senderFrame: frame });
+  assert.equal(f.popups(), 1);
+  f.window.focus();
+  assert.equal(f.focusedContents(), null, 'activation during a native popup must not steal its focus');
+  f.dismissMenu();
+  assert.equal(f.focusedContents(), dashboard.webContents);
+  bar.webContents.focus();
+  f.onDialog(() => {
+    f.clearFocus();
+    f.window.focus();
+    assert.equal(f.focusedContents(), null, 'activation during a native dialog must not steal its focus');
+    bar.webContents.focus();
+  });
+  dashboard.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must retain the veto'); } });
+  assert.equal(f.focusedContents(), dashboard.webContents, 'dialog close must not strand focus in the bar');
+  // A popup dismissed while another app is active must not grab OS focus.
+  f.ipcMain.emit(MENU, { sender: bar.webContents, senderFrame: frame });
+  f.window.focused = false;
+  f.dismissMenu();
+  assert.equal(f.focusedContents(), null);
+});
+test('Windows owner closure explicitly releases both view contents', async () => {
+  const f = await fixture(undefined, 'win32');
+  let closed = 0;
+  for (const view of f.views) view.webContents.close = () => { closed++; };
+  f.window.emit('closed');
+  assert.equal(closed, 2);
+  f.window.isDestroyed = () => true;
+  f.window.close = () => { assert.fail('view cleanup must not close a destroyed owner'); };
+  f.views[0].webContents.emit('destroyed');
 });
 test('title changes and connection failure titles remain correct on both content layouts', async () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
@@ -467,10 +585,13 @@ test('bar authority accepts only its bundled main frame; Alt and hamburger share
   assert.equal(f.popups(), 0);
   f.ipcMain.emit(MENU, { sender: bar.webContents, senderFrame: frame });
   assert.equal(f.popups(), 1);
-  assert(dashboard.contentFocused);
+  f.dismissMenu();
+  assert.equal(f.focusedContents(), dashboard.webContents);
   for (const view of [dashboard, bar]) {
+    view.webContents.focus();
     view.webContents.emit('before-input-event', { preventDefault() {} }, { key: 'Alt', type: 'keyDown' });
     view.webContents.emit('before-input-event', { preventDefault() {} }, { key: 'Alt', type: 'keyUp' });
+    f.dismissMenu();
   }
   assert.equal(f.popups(), 3);
   for (const url of ['https://example.com/', 'file:///etc/passwd', frame.url + '?x']) {

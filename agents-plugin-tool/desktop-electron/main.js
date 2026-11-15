@@ -5,7 +5,7 @@ const { discover } = require('./endpoint');
 const { nextZoom, destination } = require('./policy');
 const { HEIGHT, colors, createBar } = require('./titlebar');
 
-function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
+function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
   app.setName('Werkschaft');
   if (!app.requestSingleInstanceLock()) { app.quit(); return; }
   let window, pin = null, connecting = false, title = 'Werkschaft — Connecting…';
@@ -24,10 +24,12 @@ function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu
     // The remote dashboard never receives a preload or renderer authority.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
-    window = new BrowserWindow({
+    const Window = platform === 'win32' ? BaseWindow : BrowserWindow;
+    window = new Window({
       title, width: 1280, height: 860, minWidth: 760, minHeight: 520,
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false },
-      ...(platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { ...colors(null, nativeTheme.shouldUseDarkColors), height: HEIGHT } } : {}),
+      ...(platform === 'win32'
+        ? { titleBarStyle: 'hidden', titleBarOverlay: { ...colors(null, nativeTheme.shouldUseDarkColors), height: HEIGHT } }
+        : { webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false } }),
     });
     const dashboardView = platform === 'win32' ? new WebContentsView({ webPreferences: {
       contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false,
@@ -35,10 +37,21 @@ function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu
     // All page behavior uses this accessor, regardless of who owns the content.
     const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
     const wc = dashboardContents();
-    let bar, applicationMenu;
-    function openMenu() {
+    let bar, applicationMenu, menuOpen = false, dialogOpen = false;
+    function focusDashboard(afterInteraction = false) {
+      if (!dashboardView || window.isDestroyed() || wc.isDestroyed() || !window.isFocused()) return;
+      if (menuOpen || dialogOpen || (!afterInteraction && bar?.view.webContents.isFocused())) return;
       wc.focus();
-      applicationMenu.popup({ window, x: 32, y: HEIGHT });
+    }
+    function openMenu() {
+      if (menuOpen) return;
+      menuOpen = true;
+      // Native edit roles must target the page, not the hamburger document.
+      wc.focus();
+      applicationMenu.popup({ window, x: 32, y: HEIGHT, callback: () => {
+        menuOpen = false;
+        focusDashboard(true);
+      } });
     }
     if (dashboardView) {
       bar = createBar({ window, WebContentsView, ipcMain, nativeTheme, openMenu });
@@ -51,6 +64,9 @@ function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu
       };
       layout();
       window.on('resize', layout);
+      window.on('focus', () => focusDashboard());
+      wc.once('did-finish-load', () => focusDashboard());
+      window.on('closed', () => { if (!wc.isDestroyed()) wc.close(); });
       window.setMenuBarVisibility(false);
       // Bare Alt opens the same menu as the hamburger, from either view.
       for (const contents of [wc, bar.view.webContents]) {
@@ -72,12 +88,12 @@ function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu
     window.on('close', event => {
       closing = true;
       if (dashboardView && !wc.isDestroyed()) {
-        // BrowserWindow.close does not run a sibling view's beforeunload.
+        // BaseWindow.close does not run its views' beforeunload.
         event.preventDefault();
         wc.close({ waitForBeforeUnload: true });
       }
     });
-    if (dashboardView) wc.on('destroyed', () => window.close());
+    if (dashboardView) wc.on('destroyed', () => { if (!window.isDestroyed()) window.close(); });
     function beginNavigation() {
       const attempt = { loading: false, stayed: false };
       navigation = attempt;
@@ -111,22 +127,11 @@ function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
       if (details.resourceType === 'mainFrame' && details.url === connectionURL) return callback({});
-      if (dashboardView && details.webContentsId === window.webContents.id && details.url === 'about:blank') return callback({});
       const action = destination(details.url, pin, details.resourceType === 'mainFrame');
       if (action === 'dashboard' || action === 'frame') return callback({});
       callback({ cancel: true });
       if (action === 'external') openExternal(details.url);
     });
-    if (dashboardView) {
-      // Initialize the inert owner document as well as both sibling views.
-      // An unnavigated owner leaves CDP's page initialization pending forever.
-      const host = window.webContents;
-      host.on('page-title-updated', event => event.preventDefault());
-      host.on('will-navigate', event => event.preventDefault());
-      host.on('will-attach-webview', event => event.preventDefault());
-      host.setWindowOpenHandler(() => ({ action: 'deny' }));
-      host.loadURL('about:blank');
-    }
     const guard = (event, url, isMainFrame) => {
       const action = destination(url, pin, isMainFrame);
       if (action === 'dashboard' || action === 'frame') return;
@@ -147,11 +152,15 @@ function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu
       // Capture the load before the synchronous native dialog: a newer attempt
       // must never inherit an older load's Stay (or an unrelated X-close veto).
       const attempt = !closing && navigation?.loading ? navigation : null;
-      const leave = dialog.showMessageBoxSync(window, {
-        type: 'question', buttons: ['Stay', 'Leave'], defaultId: 0, cancelId: 0,
-        title: 'Leave Werkschaft?', message: 'Leave this page?',
-        detail: 'Changes you made may not be saved.', noLink: true,
-      });
+      let leave;
+      dialogOpen = true;
+      try {
+        leave = dialog.showMessageBoxSync(window, {
+          type: 'question', buttons: ['Stay', 'Leave'], defaultId: 0, cancelId: 0,
+          title: 'Leave Werkschaft?', message: 'Leave this page?',
+          detail: 'Changes you made may not be saved.', noLink: true,
+        });
+      } finally { dialogOpen = false; focusDashboard(true); }
       closing = false;
       // Electron's preventDefault here means ignore the page's veto, not stay.
       if (leave === 1) event.preventDefault();

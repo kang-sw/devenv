@@ -39,8 +39,8 @@ async function physical(action, args = []) {
     '-Action', action, '-OwnedPid', String(await main(() => process.pid)), ...args.map(String)], { encoding: 'utf8' });
 }
 const main = (fn, value) => application.evaluate(fn, value);
-const state = () => main(({ BrowserWindow }) => {
-  const w = BrowserWindow.getAllWindows()[0];
+const state = () => main(({ BaseWindow }) => {
+  const w = BaseWindow.getAllWindows()[0];
   return { title: w.getTitle(), bounds: w.getBounds(), maximized: w.isMaximized() };
 });
 async function capture(name) {
@@ -75,8 +75,8 @@ async function capture(name) {
     await bar.locator('#menu').waitFor();
     assert(await bar.locator('img').evaluate(img => img.complete && img.naturalWidth > 0));
     assert.equal(await bar.locator('#title').textContent(), await dashboard.title());
-    const layout = await main(({ BrowserWindow }) => {
-      const w = BrowserWindow.getAllWindows()[0];
+    const layout = await main(({ BaseWindow }) => {
+      const w = BaseWindow.getAllWindows()[0];
       const original = w.setTitleBarOverlay.bind(w);
       w.setTitleBarOverlay = value => { global.tbOverlay = value; original(value); };
       return { visible: w.isMenuBarVisible(),
@@ -88,7 +88,21 @@ async function capture(name) {
     assert.equal(layout.views[0].prefs.contextIsolation, true); assert.equal(layout.views[0].prefs.sandbox, true);
     assert.equal(layout.views[0].prefs.nodeIntegration, false);
     checks.push('bar visible with icon, hamburger and centered document title; native menu hidden; isolated dashboard sibling below bar');
+    // Launch, then Alt without clicking: do this before the first input action.
+    await main(({ Menu, BaseWindow, webContents }) => {
+      const w = BaseWindow.getAllWindows()[0];
+      if (webContents.getFocusedWebContents() !== w.contentView.children[0].webContents) throw new Error('Dashboard must have initial focus');
+      const menu = Menu.getApplicationMenu(), original = menu.popup.bind(menu);
+      global.tbMenuOpens = 0;
+      menu.popup = options => { global.tbMenuOpens++; original(options); };
+    });
     await capture('initial');
+    await physical('keys', ['-Keys', '%']);
+    await until(() => main(() => global.tbMenuOpens === 1), 'launch, then Alt without clicking');
+    await capture('startup-alt-menu'); await physical('keys', ['-Keys', '{ESC}']);
+    await until(() => main(({ BaseWindow, webContents }) => webContents.getFocusedWebContents() ===
+      BaseWindow.getAllWindows()[0].contentView.children[0].webContents), 'dashboard focus after startup Alt menu');
+    checks.push('launch, then physical Alt opens the menu without clicking; dismissal returns focus to dashboard');
     await dashboard.evaluate(() => { document.title = 'Titlebar acceptance — Board'; });
     await until(async () => (await state()).title === 'Titlebar acceptance — Board', 'native title');
     await until(async () => await bar.locator('#title').textContent() === 'Titlebar acceptance — Board', 'bar title');
@@ -96,16 +110,11 @@ async function capture(name) {
 
     // Native menu reachability and OS-injected Alt. The popup is Windows-owned,
     // so capture it on screen, not through a renderer screenshot.
-    await main(({ Menu }) => {
-      const menu = Menu.getApplicationMenu(), original = menu.popup.bind(menu);
-      global.tbMenuOpens = 0;
-      menu.popup = options => { global.tbMenuOpens++; original(options); };
-    });
     await bar.locator('#menu').click();
-    await until(() => main(() => global.tbMenuOpens === 1), 'hamburger popup');
+    await until(() => main(() => global.tbMenuOpens === 2), 'hamburger popup');
     await capture('hamburger-menu'); await physical('keys', ['-Keys', '{ESC}']);
     await physical('keys', ['-Keys', '%']);
-    await until(() => main(() => global.tbMenuOpens >= 2), 'Alt popup');
+    await until(() => main(() => global.tbMenuOpens >= 3), 'Alt popup');
     await capture('alt-menu'); await physical('keys', ['-Keys', '{ESC}']);
     const menu = await main(({ Menu }) => {
       const items = menu => menu.items.map(i => ({ label: i.label, role: i.role, id: i.id, accelerator: i.accelerator, enabled: i.enabled,
@@ -114,7 +123,7 @@ async function capture(name) {
     });
     fs.writeFileSync(path.join(evidence, 'menu.json'), JSON.stringify(menu, null, 2));
     for (const label of ['File', 'Edit', 'View', 'Window', 'Help', 'Connection']) assert(menu.some(i => i.label.replaceAll('&', '') === label));
-    const zoom = () => main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children[0].webContents.getZoomFactor());
+    const zoom = () => main(({ BaseWindow }) => BaseWindow.getAllWindows()[0].contentView.children[0].webContents.getZoomFactor());
     await physical('keys', ['-Keys', '^=']);
     await until(async () => Math.abs(await zoom() - 1.1) < 0.001, 'physical zoom accelerator');
     await physical('keys', ['-Keys', '^0']);
@@ -145,12 +154,12 @@ async function capture(name) {
     await until(async () => !(await state()).maximized, 'Windows restore control');
     before = await state();
     await physical('click', ['-X', before.bounds.x + before.bounds.width - 115, '-Y', before.bounds.y + 18]);
-    await until(() => main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()), 'Windows minimize control');
-    await main(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.restore(); w.focus(); });
+    await until(() => main(({ BaseWindow }) => BaseWindow.getAllWindows()[0].isMinimized()), 'Windows minimize control');
+    await main(({ BaseWindow }) => { const w = BaseWindow.getAllWindows()[0]; w.restore(); w.focus(); });
     checks.push('Windows-drawn maximize, restore and minimize controls work');
     } catch (error) {
       unverified.push('Physical gestures/control automation incomplete (not retried): ' + error.message);
-      await main(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.restore(); w.unmaximize(); w.focus(); });
+      await main(({ BaseWindow }) => { const w = BaseWindow.getAllWindows()[0]; w.restore(); w.unmaximize(); w.focus(); });
     }
     unverified.push('Windows 11 snap-layout hover flyout not asserted.');
 
@@ -175,7 +184,7 @@ async function capture(name) {
     before = await state();
     await physical('click', ['-X', before.bounds.x + before.bounds.width - 23, '-Y', before.bounds.y + 18]);
     await until(() => main(() => global.tbDialogs.length === 1), 'X close confirmation');
-    assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+    assert.equal(await main(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
     await capture('close-stay');
     checks.push('physical Windows X reaches dashboard beforeunload confirmation; Stay retains window');
     unverified.push('Close guard is a test-injected dashboard listener; real pasted-image guard was not armed in this focused run.');
