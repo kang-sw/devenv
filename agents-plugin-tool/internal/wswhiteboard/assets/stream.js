@@ -41,6 +41,7 @@
   }
   function admitted(h) {
     if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
+    if (window.wbAgo) window.wbAgo(h);
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
   }
@@ -273,6 +274,7 @@
     h._wbHistoryFilling = false;
   }
   function init(root) {
+    if (window.wbAgo) window.wbAgo(root || document);
     var fresh = [];
     histories(root).forEach(function (h) {
       if (h._wbHistoryBound) {
