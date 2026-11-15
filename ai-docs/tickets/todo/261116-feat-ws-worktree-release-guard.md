@@ -35,3 +35,18 @@ Behavior on that head:
   (`0c5f1b43a`).
 - Run the scoped mcp tests (`-run 'Worktree|Release|Acquire'`), never the
   full package. Then go through the merge flow and swap the daemon.
+
+#### Result
+
+- Rebased `172b6bbe3` onto develop `223572421` as `bb2c53eec` (3 commits) with
+  no conflicts; `0c5f1b43a` (acquire stale-branch facts) touched other hunks of
+  `server.go` and `worktree_tools.go` and does not overlap the release path.
+- Verified on w5090 (`sys_lock remote run`, from the rebased tree) in
+  `agents-plugin-tool`: `go build ./...`, `go vet ./...`,
+  `GOOS=windows go vet ./...`, and the scoped
+  `go test ./internal/mcp/ -run "Worktree|Release|Acquire" -count=1`. All
+  passed (mcp scoped run: ok, 30.5s). The full package was not run, per the
+  phase plan.
+- Merged into develop as `9a3938498`.
+- Daemon swap (`python3 scripts/dev.py rerun daemon`): pending. The auto-mode
+  permission classifier denied the command for the worker; the lead runs it.
