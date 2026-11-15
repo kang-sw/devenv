@@ -10,10 +10,9 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
-// These are presentation projections of existing ring fields, not provenance
-// inferred from report prose or a new producer/store contract.
-func (e ConvEntry) ChildReport() bool     { return e.Kind == "wake" && e.Cause == "subagent_report" }
-func (e ConvEntry) UnresolvedInput() bool { return e.Kind == "user" && e.Origin == "whiteboard" }
+// Child reports require a typed wake cause. Whiteboard-origin user records
+// also carry dashboard inbox input, so their origin cannot demote user turns.
+func (e ConvEntry) ChildReport() bool { return e.Kind == "wake" && e.Cause == "subagent_report" }
 
 // Mail wakes cannot be paired by text, peer or nearby claim time: history
 // drops the envelope's sent timestamp/identity, so repetition and reclaimed
