@@ -5,6 +5,7 @@ related:
   260730-research-ws-dashboard-drop-for-orca: the decision this research revisits; read its accepted costs
   261106-epic-ws-dashboard-serve-daemon: current daemon; Non-Scope (241 b) on browser permission approval
   261108-feat-ws-tracker-support-agent-chat: the headless Claude/Pi runner this research would generalize
+dropped: 2026-11-15
 ---
 
 # Foundations for the dashboard agent host
@@ -286,3 +287,8 @@ To investigate:
 - A research ticket limited to headless lead sessions and the permission
   boundary ((538) a). Keeping CLI-created sessions as the only kind
   ((538) c).
+
+
+## Resolution (2026-11-15)
+
+Folded into 261110-epic-ws-dashboard-agent-host by the 2026-11-15 todo triage (owner approved (1119)=a).

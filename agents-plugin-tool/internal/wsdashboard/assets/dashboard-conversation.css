@@ -420,14 +420,17 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 
 /* Conversation density: only lead chat, owner messages and whiteboard-update
    cards get generous vertical room. Mail, subagent, notification, tool and
-   turn-footer rows sit tight together and are dimmed; hover or opening one
-   restores full contrast. */
-.conv { gap: 2px; }
+   turn-footer rows sit close together (0.2em above and below, in em so it
+   scales with the row's font) and are dimmed; hover or opening one restores
+   full contrast. A centred pill (compaction, notice, ui line) takes a full
+   line of room above and below. */
+.conv { gap: 0; }
+.conv > * { margin-block: .2em; }
 .msg.fromlead, .msg.user, .wbeffects.wbupdate { margin-block: 8px; }
+.sysline { margin-block: 1em; }
 .mailline, .mail-notification, .toolsline, .turnline, .sysline, .wake-divider, .wake-card, .input-record { opacity: .68; transition: opacity .12s; }
 .mailline:hover, .mailline[open], .mail-notification:hover, .mail-notification[open], .toolsline:hover, .toolsline[open], .wake-card:hover, .input-record:hover { opacity: 1; }
 .mailline > summary.conv-row, .mailline > .conv-row, .mail-notification .conv-row, .toolsline > summary.conv-row { padding-block: 1px; line-height: 1.4; }
 .toolsline .tsum { row-gap: 0; line-height: 1.15; }
 .toolsline .tsl, .toolsline .tsn { line-height: 1.15; }
 .mailline .arr { color: var(--wb-primary); }
-.turnline { margin-top: 0; }

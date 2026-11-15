@@ -2,6 +2,7 @@
 title: Synchronize history deep-link arrival with the capsule offset
 related:
   261114-feat-ws-whiteboard-compact-floating-toolbar: 'discovery evidence; Lane A2 executes after 652 merges'
+dropped: 2026-11-15
 ---
 
 # Synchronize history deep-link arrival with the capsule offset
@@ -38,3 +39,8 @@ Read `ai-docs/manuals/shipped-surface-boundary.md` and `ai-docs/manuals/release-
 ### Phase 1: Synchronize deep-link offset and verify arrival
 
 Ground the ordering race in `navigate()` in `agents-plugin-tool/internal/wswhiteboard/assets/stream.js` and capsule offset publication in `assets/rail.js`. Apply the smallest supported synchronization correction after 652 integration. Extend the existing harness/test contract so the forced-first-IO-zero `p1` summary is exposed and owns its center after materialization and late height changes. Verify adapter/document scrollers and ordinary navigation without that precondition, preserve existing keep ownership and cancellation, run applicable package/browser checks and independent lite review. Record exact tested source pins and evidence; do not fold unrelated pill or Web-popover fixes into this ticket.
+
+
+## Resolution (2026-11-15)
+
+Folded into 261114-feat-ws-whiteboard-compact-floating-toolbar by the 2026-11-15 todo triage (owner approved (1119)=a); the fix ships with that ticket's toolbar finishing work.

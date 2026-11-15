@@ -13,6 +13,7 @@ related-mental-model:
   - plugin-runtime
 sage-review-design: completed
 sage-review-design-reviewed: 4cd1ca769f0d6eb8
+dropped: 2026-11-15
 ---
 
 # Pi adapter: shared subagent conversation view — owner audit window and owner steering built on the ask overlay
@@ -210,3 +211,8 @@ its exact behavior is implementation-ready.
   makes the adapter's own obsolete.
 - Deferred: replacing the lead's main window; mechanical lead/owner conflict
   resolution; report re-routing to the owner; removal of the `/done` alias.
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.

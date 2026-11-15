@@ -4,6 +4,7 @@ sage-review-design: required
 related:
   261110-feat-ws-dashboard-file-preview: "existing read-only Files-tab and board-card evidence"
   261110-feat-ws-dashboard-terminal: "existing shared board-card framework context"
+completed: 2026-11-15
 ---
 
 # Reusable stateful file explorer cards
@@ -158,3 +159,8 @@ picker authoring.
   the required side-by-side result/reference comparison during implementation
   acceptance; and any future backend surface until its additive semantics are
   separately settled without rewriting existing root or API semantics.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): all four children are in .done.

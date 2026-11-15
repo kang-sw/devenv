@@ -11,6 +11,7 @@ related:
   260924-feat-pi-agent-channel-approval-decisions: derived child - approval decisions (A5)
   260924-feat-pi-agent-channel-subtree-state: derived child - subtree snapshot (A6)
   260924-feat-pi-agent-channel-usage-rollup: derived child - cumulative usage (A9)
+dropped: 2026-11-15
 ---
 
 # Investigate a Pi parent-child control channel with a pluggable transport
@@ -222,3 +223,8 @@ A delegated, provider-free prototype ran in a separate worktree. Its code is spi
 - Reusing Pi's `extension_ui_request` sub-protocol or its slash commands as the transport. There is no public response path, and the approach conflates user UI with internal transport.
 - Keeping the existing file protocols as a parallel fallback next to the channel. That would mean maintaining two paths. A reserved file backend behind the same abstraction replaces this option.
 - Moving `ownership.json` onto the channel or funnelling it to the root within this research. It is durable restart and deletion-protection state, and its lock guards against cross-session retention, which an intra-tree channel cannot reach.
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.

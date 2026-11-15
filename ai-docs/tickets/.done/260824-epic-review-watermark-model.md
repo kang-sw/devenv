@@ -8,6 +8,7 @@ related:
   260829-research-review-watermark-multi-maintainer-model: source of the 2026-08-29 multi-maintainer re-adjustment (canary, no-squash, taxonomy, two backends, ④ tag-keying)
   260829-research-review-checkpoint-relief-valve: source of the 2026-08-30 slice-coverage calibration draft decision (two-altitude distinction + raw-vs-slice-covered nudge severity, no second marker file); full valve design stays in that research
 sage-review-design: completed
+completed: 2026-11-15
 ---
 
 # Time-series watermark review model — altitude-calibrated review keyed to mainstream integration
@@ -349,3 +350,8 @@ research-only.
   its cross-child spine (two-altitude distinction + slice-coverage nudge
   calibration, see the Slice-coverage calibration decision above) is drafted into
   this epic pending sage design vetting.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): children 260824-*/260828-* are all in .done.

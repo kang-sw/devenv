@@ -4,6 +4,7 @@ sage-review-design: required
 related:
   261110-feat-ws-tracker-superior-settable-status-and-new-statuses: "sibling tracker follow-up from the same week; not a child"
   261110-feat-ws-tracker-item-move-reparent: "manual reorder within a priority level would live there if ever asked for"
+completed: 2026-11-15
 ---
 
 # Tracker: features from the first team introduction feedback
@@ -56,3 +57,8 @@ manager side and partly about performance reviews.
 - Deferred: historical metrics for performance review (throughput, cycle
   time). (614) a scoped the balance view to the current load first, so these
   need their own discussion.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): children self-assign, workload-balance and daemon-event-hook are all in .done.

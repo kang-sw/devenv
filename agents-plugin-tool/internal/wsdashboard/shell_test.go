@@ -99,7 +99,7 @@ func TestIndexServesTheShellAroundItsFramedPage(t *testing.T) {
 	}
 	for _, want := range []string{
 		`data-mode="index" data-rid=""`, `data-frame="1"`, `class="dwrap"`, `id="railbtn"`,
-		`class="rail rail-ph"`, `<main id="grid" class="dgrid"></main>`, "window.WsShell",
+		`class="rail rail-ph"`, `<main id="grid" class="dgrid"><div class="dlanding" id="guide">`, "window.WsShell",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the framed index lacks %q", want)

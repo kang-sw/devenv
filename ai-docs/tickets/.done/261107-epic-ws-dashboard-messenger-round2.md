@@ -3,6 +3,7 @@ title: "ws dashboard round 2: the session page as a messenger-style substitute f
 related:
   261106-epic-ws-dashboard-serve-daemon: predecessor epic; its hand checks may still be open
 sage-review-design: required
+completed: 2026-11-15
 ---
 
 # ws dashboard round 2: the session page as a messenger-style substitute for the terminal
@@ -96,3 +97,8 @@ session page usable as the primary conversation surface for a lead session:
 - Dropped: the user abandons the page as a conversation surface.
 - Deferred: native image blocks in the injected prompt (instead of file
   paths); page-side permission handling.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): all nine children are in .done.

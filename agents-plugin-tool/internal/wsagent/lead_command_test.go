@@ -218,7 +218,7 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	h := newLeadHarness(t).start()
 	id, holder := h.runLead("one")
 	key := h.record(id).WSKey
-	eventually(t, "the first turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one"}) })
+	eventually(t, "the first turn", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one")) })
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
 	h.sync(id, holder)
 
@@ -232,9 +232,9 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	}
 	h.holders.out(holder, replyLine("u1", "first"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the text before the command", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"one", "before\n\nFrom a@x: ping"})
+		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), h.envelope("before") + "\n\nFrom a@x: ping"})
 	})
-	wantQueue := []QueuedInput{{Command: &wsinbox.Command{Name: "compact", Args: "keep the names"}, After: 1}, {Text: "after", After: 1}}
+	wantQueue := []QueuedInput{{Command: &wsinbox.Command{Name: "compact", Args: "keep the names"}, After: 1}, {Text: h.envelope("after"), After: 1}}
 	eventually(t, "the rest to be queued", func() bool {
 		rec := h.record(id)
 		return len(rec.Mail) == 0 && sameJSON(t, rec.Queued, mustJSON(t, wantQueue))
@@ -254,7 +254,7 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	eventually(t, "the running turn to be back", func() bool { st := h.state(id); return st.Process && st.Status == StatusRunning })
 	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the command alone", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"one", "before\n\nFrom a@x: ping", "/compact keep the names"})
+		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), h.envelope("before") + "\n\nFrom a@x: ping", "/compact keep the names"})
 	})
 	h.sync(id, holder)
 	if got := h.userInputs(holder); len(got) != 3 {
@@ -262,7 +262,7 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	}
 	h.holders.out(holder, turnLines("sess-1", "u3", "compacted")...)
 	eventually(t, "the text after the command", func() bool {
-		return slices.Equal(h.userInputs(holder)[3:], []string{"after"})
+		return slices.Equal(h.userInputs(holder)[3:], h.envelopes("after"))
 	})
 	eventually(t, "the queue to empty", func() bool { return len(h.record(id).Queued) == 0 })
 	h.holders.out(holder, turnLines("sess-1", "u4", "done")...)
@@ -285,12 +285,12 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	}
 	h.holders.out(holder, turnLines("sess-1", "u6", "cost")...)
 	eventually(t, "the message with the mail", func() bool {
-		return slices.Equal(h.userInputs(holder)[5:], []string{"/cost", "four\n\nFrom b@x: more"})
+		return slices.Equal(h.userInputs(holder)[5:], []string{"/cost", h.envelope("four") + "\n\nFrom b@x: more"})
 	})
 	h.holders.out(holder, turnLines("sess-1", "u7", "four")...)
 	h.idle(id)
 
-	want := []string{"one", "before", "/compact keep the names", "after", "three", "/cost", "four"}
+	want := []string{h.envelope("one"), h.envelope("before"), "/compact keep the names", h.envelope("after"), h.envelope("three"), "/cost", h.envelope("four")}
 	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, want) {
 		t.Fatalf("ring user entries = %q, want %q", got, want)
 	}
@@ -303,7 +303,7 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 func TestLeadQueuedInputDropsWithTheConversation(t *testing.T) {
 	h := newLeadHarness(t).start()
 	id, holder := h.runLead("one")
-	eventually(t, "the first turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one"}) })
+	eventually(t, "the first turn", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one")) })
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
 	h.sync(id, holder)
 	h.send(id, "two")
@@ -339,7 +339,7 @@ func TestLeadQueuedInputDropsWithTheConversation(t *testing.T) {
 func TestLeadStopKeepsTheQueueWithoutARestart(t *testing.T) {
 	h := newLeadHarness(t).start()
 	id, holder := h.runLead("one")
-	eventually(t, "the first turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one"}) })
+	eventually(t, "the first turn", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one")) })
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
 	h.sync(id, holder)
 	h.send(id, "two")
@@ -407,7 +407,7 @@ func TestPiLeadCommands(t *testing.T) {
 	if n := len(h.holders.inputs(holder, "steer")) + len(h.holders.inputs(holder, "follow_up")); n != 0 {
 		t.Fatalf("a command is never steered: %d lines", n)
 	}
-	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, []string{"hello", "/review the tests", "/compact keep the names"}) {
+	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, []string{h.envelope("hello"), "/review the tests", "/compact keep the names"}) {
 		t.Fatalf("ring user entries = %q", got)
 	}
 }

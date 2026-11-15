@@ -4,6 +4,9 @@ const { pathToFileURL } = require('node:url');
 const { discover } = require('./endpoint');
 const { nextZoom, destination } = require('./policy');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
+const { createUpdater } = require('./update');
+const UPDATE = Object.freeze({ check: 'werkschaft:update-check', download: 'werkschaft:update-download',
+  skip: 'werkschaft:update-skip', restart: 'werkschaft:update-restart', subscribe: 'werkschaft:update-subscribe', status: 'werkschaft:update-status' });
 
 function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
   app.setName('Werkschaft');
@@ -21,19 +24,39 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
   app.on('window-all-closed', () => app.quit());
 
   app.whenReady().then(() => {
-    // The remote dashboard never receives a preload or renderer authority.
+    // The update status waits here until the attached dashboard subscribes.
+    let updatePending = null, updateTarget = null;
+    const sendUpdate = status => {
+      updatePending = status;
+      if (updateTarget && !updateTarget.isDestroyed()) { updateTarget.send(UPDATE.status, status); updatePending = null; }
+    };
+    const updater = createUpdater({ version: app.getVersion(), packaged: app.isPackaged,
+      userData: app.getPath('userData'), platform, send: sendUpdate });
+    // A stage left by a reboot or unclean exit: swap it in and relaunch.
+    try { if (updater.applyOnLaunch()) { app.quit(); return; } }
+    catch (error) { console.error(`Update apply at launch failed: ${error.message}`); }
+    // "Restart now" quits through the normal path (the page may still veto)
+    // and relaunches; a plain full quit applies without relaunching. Either
+    // way only the shell exits: it is attach-only and never stops the daemon.
+    let relaunch = false;
+    app.on('will-quit', () => {
+      try { updater.applyOnQuit(relaunch); } catch (error) { console.error(`Update apply at quit failed: ${error.message}`); }
+    });
+    // The dashboard's only preload is the update bridge (dashboard-preload.js);
+    // its IPC is accepted from the pinned dashboard origin only. No permissions.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     const Window = platform === 'win32' ? BaseWindow : BrowserWindow;
+    const dashboardPreload = path.join(__dirname, 'dashboard-preload.js');
     window = new Window({
       title, width: 1280, height: 860, minWidth: 760, minHeight: 520,
       ...(platform === 'win32'
         ? { icon: path.join(__dirname, 'icons/icon.ico'), titleBarStyle: 'hidden',
           titleBarOverlay: { ...colors(null, nativeTheme.shouldUseDarkColors), height: HEIGHT } }
-        : { webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false } }),
+        : { webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false, preload: dashboardPreload } }),
     });
     const dashboardView = platform === 'win32' ? new WebContentsView({ webPreferences: {
-      contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false,
+      contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false, preload: dashboardPreload,
     } }) : null;
     // All page behavior uses this accessor, regardless of who owns the content.
     const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
@@ -222,6 +245,28 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (navigation === attempt) navigation = null;
       }
     }
+    const fromDashboard = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
+      !!pin && destination(event.senderFrame.url, pin) === 'dashboard';
+    wc.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
+      if (isMainFrame && !inPlace) updateTarget = null;
+    });
+    ipcMain.on(UPDATE.subscribe, event => {
+      if (!fromDashboard(event)) return;
+      updateTarget = wc;
+      if (updatePending) sendUpdate(updatePending);
+      else wc.send(UPDATE.status, { state: 'phase', phase: updater.phase() });
+    });
+    ipcMain.on(UPDATE.check, event => { if (fromDashboard(event)) updater.check(true); });
+    ipcMain.on(UPDATE.download, event => { if (fromDashboard(event)) updater.download(); });
+    ipcMain.on(UPDATE.skip, (event, version) => { if (fromDashboard(event)) updater.skip(version); });
+    ipcMain.on(UPDATE.restart, event => {
+      if (!fromDashboard(event) || !updater.canRestart()) return;
+      relaunch = true;
+      // A vetoed close leaves the app running; a later plain quit must not relaunch.
+      setTimeout(() => { relaunch = false; }, 15000).unref?.();
+      app.quit();
+    });
+    updater.schedule();
     function zoomBy(step) {
       zoom = nextZoom(zoom, step);
       wc.setZoomFactor(zoom);

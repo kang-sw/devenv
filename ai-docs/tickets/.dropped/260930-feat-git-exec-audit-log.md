@@ -1,5 +1,6 @@
 ---
 title: Git execution audit log to attribute stale index.lock files
+dropped: 2026-11-15
 ---
 
 # Git execution audit log to attribute stale index.lock files
@@ -201,3 +202,8 @@ Verification expectations:
   its error response.
 - `ws-mcp --help` names the lookup command and the log directory.
   `ws-mcp git lock-audit --help` prints the procedure.
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.

@@ -4,6 +4,7 @@ related:
   261107-epic-ws-dashboard-messenger-round2: the dashboard and its pull-down drawer the tracker opens from
   261107-feat-ws-dashboard-pull-down-drawer: the drawer frame tracker stores register into
 sage-review-design: required
+completed: 2026-11-15
 ---
 
 # ws team tracker: agent-first shared stores (team and personal) on git, opened from the dashboard
@@ -227,3 +228,8 @@ repository sized for 50-60 people, reached from the dashboard.
   elsewhere.
 - Deferred: multiple leads within one repository; host-side enforcement as a
   default; users without ws.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): all eleven children are in .done.

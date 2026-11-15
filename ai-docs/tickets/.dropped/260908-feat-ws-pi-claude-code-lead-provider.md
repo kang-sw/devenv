@@ -6,6 +6,7 @@ related:
   260907-bug-ws-pi-fork-first-call-prompt-cache-miss: a Claude-backed fork replays Pi's history into a new claude process; the Anthropic-side cache hit across processes (spike) is what keeps that affordable
 spec:
   - pi-adapter-runtime
+dropped: 2026-11-15
 ---
 
 # Claude Code provider for Pi: `claude-code/<model>` backed by the Agent SDK, Pi tools reflected as parked MCP handlers
@@ -320,3 +321,8 @@ the `index.ts` registration, and the spec section
 (with the research spike, the Phase plan, and the finding) is kept for the
 record. The ticket stays in `todo/`: it is not dropped, only parked, and
 becomes actionable again only if the billing/classification state changes.
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.
