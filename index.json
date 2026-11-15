@@ -52,19 +52,6 @@
     "260913-bug-ticket-guardrails-dont-enforce-category-enum": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260913-bug-ws-pi-spawn-delegation-metadata-second-write-rejection": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:47:27Z",
-        "impl": {
-          "branch": "impl/develop/shiny-drift-exert"
-        }
-      }
-    },
     "260915-bug-ticket-move-parallel-index-lock-contention": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -373,17 +360,7 @@
       "registered_at": "2026-11-14T12:12:39Z"
     },
     "261114-chore-ws-tracker-start-date-docs-and-query-output": {
-      "registered_at": "2026-11-13T16:03:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T09:02:08Z",
-        "impl": {
-          "branch": "impl/develop/baked-cure-defog"
-        }
-      }
+      "registered_at": "2026-11-13T16:03:50Z"
     },
     "261114-epic-ws-common-session-foundation": {
       "registered_at": "2026-11-14T11:13:55Z"
@@ -504,9 +481,6 @@
     },
     "261114-ws-dashboard-reusable-file-explorer-card": {
       "registered_at": "2026-11-14T13:05:40Z"
-    },
-    "261115-bug-launcher-proxy-tests-read-root-devenv-marker": {
-      "registered_at": "2026-11-15T05:28:26Z"
     },
     "261115-bug-live-summary-registration-fixture-init": {
       "registered_at": "2026-11-15T02:41:33Z"
