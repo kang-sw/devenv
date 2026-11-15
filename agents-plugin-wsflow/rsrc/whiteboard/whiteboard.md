@@ -60,6 +60,11 @@ its item as the work changes. Close a topic only after the user's final
 answer, so unfinished work stays visible. These ask and summary obligations
 remain lead judgment alongside the machine state.
 
+A one-off report that asks the user nothing (a status breakdown, an
+investigation summary) is created and closed in the same batch: the report is
+a panel and the `wb:close` result is its one-line conclusion. A report that
+carries an ask stays open until the answer arrives, then closes.
+
 Approval of a concrete deliverable is execution authority: start the approved
 build or change rather than ask permission again. A request to build or change
 something is work to execute, not a technical item or confirmation check that
