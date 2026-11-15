@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 57b4cb2aadc86f84
 sage-review-completeness-reviewed: 57b4cb2aadc86f84
+completed: 2026-11-16
 ---
 
 # Dashboard stream renders only what changed, per topic and per row
@@ -696,3 +697,137 @@ operation was performed by this worker. MAIN owns integration/delivery.
 Apply the same pattern to `panels`, keeping panel disclosure state.
 Verify bytes per panels change against the baseline rows and the existing
 panels/region tests.
+
+### Result (4d78c6071) - 2026-11-15
+
+Implemented **Phase 5 only** on fresh exact base
+`f7fa9b5aae0786891b77eef42d7334b70b192922`. Production spine:
+`6d14ee027719f8d244d6e5a568b39632d9ba102e`; complete implementation/test
+head: `4d78c6071db8f733474e7929e02a03479b211377`. Shared session renders
+now decompose the existing native top-level `details.panel` cards by their
+stable IDs, hash complete rendered HTML and ship changed cards plus order
+on opted-in `panelrows=1` connections as `panel-rows`. Nested agenda folds
+remain content of their card, not separate transport rows. Shell, order,
+membership or uncertain markup changes conservatively use full regions.
+Source panels still render; no template, CSS, design, visible markup or
+other-package change was made.
+
+Immutable canonical inputs stay separate from formatted/reader-mutated DOM.
+Stable deltas parse and replace changed cards only, retaining unchanged cards,
+descendants and unrelated frame nodes/windows. Existing `restoreOpen` restores
+nested reader folds; `drawerSync` retains the native always-open top-level
+policy; changed-card scroll/focus restore after drawer layout, before outer
+pane scroll restoration. Top-level card summaries deliberately do not toggle;
+nested keyed agenda summaries retain user-open/user-closed state. No new
+UI affordance or lifecycle owner was introduced.
+
+**Compatibility, directional T0.** New daemon -> old page: only the explicit
+per-connection flag allocates panel state (`agents-plugin-tool/internal/wsdashboard/sse.go:474-477`);
+legacy pages retain full regions. New page -> old daemon: the additive flag
+is ignored and the new page still accepts full panels events
+(`assets/dashboard-stream.js:387-391`, under the same package). First opted-in
+sends are full even with `h=current`; failed writes do not advance hashes or
+baselines (`sse.go:655-705`). Invalid deltas close/reconnect for a mandatory
+full baseline (`assets/dashboard-stream.js:395-404`). No store, MCP tool,
+hello, manifest or API semantics changed; no migration/recovery is needed.
+Old tabs that banner rather than reload retain usable full delivery.
+
+**Measurements.** Same saved disposable in-process daemon/SSE fixture and
+method before/after, with isolated home/config/cache/session directories,
+explicit daemon Home and ephemeral loopback. Four native panel cards contain
+32 task rows, 16 agenda roots with nested steps, 36 ticket cards in three lanes
+and 32 mailbox rows. After two seconds idle, exactly 32 serial one-card task-07
+pending/wip toggles run at 1 Hz. No shared board or daemon was contacted.
+
+| Measure | Before -> after |
+|---|---:|
+| Initial panels HTML / full SSE bytes | 24,738 / 40,201 -> unchanged |
+| Change events | 32 full regions -> 32 panel-row deltas |
+| Change SSE bytes, including framing | 1,286,432 -> 308,064 (**76.05% less**) |
+| Bytes per change | 40,201 -> 9,627 |
+| Idle process CPU / wall seconds | 0.001127 / 2.003254 -> 0.000322 / 2.002722 |
+| Change process CPU / wall seconds | 0.237709 / 32.365693 -> 0.192570 / 32.354096 |
+| Mean mutation-to-received-event wall latency | 7.512463ms -> 6.941522ms |
+| Total sampled / cumulative stream CPU | 0.18s / 0.06s -> 0.16s / 0.04s |
+
+VERIFIED: wire volume falls and initial payload is unchanged. Low-total-CPU
+single samples do **not** establish CPU or latency improvement. Source templates
+still render; decomposition adds work (`splitPanelRows`, 0.01s sampled).
+Process CPU includes fixture driving/source rendering, reads, runtime/GC and
+profiling; mutation-to-event latency is not pure render wall time, which was
+not separately instrumented. Historical live panels (2x117KB/34s and
+5x291KB/45s), plus 70-106% daemon CPU, are different workloads, not remeasured.
+Evidence: `/tmp/panels-phase5-evidence/summary.md`, unchanged `fixture-scratch.go`
+and `overlay.json`, `{before,after}/{measure.json,change.pprof,change-top.txt}`,
+`before/baseline.log` and `after/candidate.log`. No production inputs changed
+after those paired runs.
+
+**Visual/structural gate.** Actual source/DOM and active shell iframe were
+inspected before choosing the crop. Uncontaminated BEFORE captures preceded
+all repository edits; AFTER uses the identical fixture/setup/assets. Both are
+1440x900, en-US/UTC/fixed Date.now, with initial drawer state set before load.
+Capture performs no scrolling, interaction, element screenshot or DOM masking.
+Image-only rectangle: `x=16,y=50,width=1408,height=620`.
+
+- Compared `/tmp/panels-phase5-evidence/after/viewport-dark-panels.png` vs
+  `/tmp/panels-phase5-evidence/before/viewport-dark-panels.png`: **match**.
+- Compared `/tmp/panels-phase5-evidence/after/viewport-light-panels.png` vs
+  `/tmp/panels-phase5-evidence/before/viewport-light-panels.png`: **match**.
+- Each crop pair is byte-identical, **0 / 872,960 differing pixels**. Exact
+  ordered `structure-{dark,light}.json` files are also byte-identical between
+  before/after, including key, kind, exact outerHTML, open states and geometry.
+  Normalization: **none**. MAIN independently opened crops and compared bytes.
+- Native row order/kind: `p-todo`, `p-agenda`, `p-tickets`, `p-mailbox`, all
+  `DETAILS.panel`, all top-level open. Chips are `4/32`, `16`, `32`, `32 unread`;
+  the fixture ticket chip is 32 while its three twelve-card lanes contain 36.
+  All 16 agenda roots are initially open; all 16 nested steps closed. The
+  visible first root/step summaries are at viewport y=95 / 114.390625.
+- Full views: `{before,after}/viewport-{dark,light}-1440.png`. Method and exact
+  hashes/coordinates: `capture.cjs`, `compare.py`, `after/{comparison.log,parity.json}`
+  under the same evidence root. No rejected variants were created.
+
+**Verification.** Every Go invocation used `GOPROXY=off GOSUMDB=off
+GOTOOLCHAIN=local`, `-count=1` and scoped `-run`. Exact commands and complete
+outputs are in `/tmp/panels-phase5-evidence/tests/leaf/`; the worker read full
+focused/race/final supplemental outputs.
+
+- **93 focused tests** passed (124.727s): panels/drawer, entries/history,
+  stream/cache/region/client, all row/topic regressions and cached panel/tree/
+  entry Chromium. Exact `TestBoardKeepWiring`,
+  `TestHiddenFrameHoldsItsUpdatesUntilShown` and
+  `TestBoardHistoryHooksSurroundSSESwap` passed with substantive assertions kept.
+- **Five panel server race cases** passed (23.850s), including shared immutable
+  units, complete HTML/hash parity, SSE/WebSocket/legacy/current-hash sends,
+  failed-write baselines and uncertain recovery. **13 supplemental tests**
+  passed (25.001s), covering final panel Chromium and WebSocket/assets/transient
+  reads/session-shell paths. Final test-only browser additions do not change
+  covered server/race inputs or production inputs.
+- Chromium executes production validators/mergers against **24 malformed
+  payloads**, verifies atomic rejection before live mutation and changed-only
+  parsing, then user-opens an initially closed nested step, user-closes another
+  nested root and changes that SAME agenda card. Both folds, changed-card
+  focus/scroll/geometry, unchanged card/descendant identity, nonempty frame sets
+  and contentWindow identity with zero reloads survive. Hidden multi-card
+  accumulation, shell fallback, drawer lifecycle, invalid reconnect and
+  same-hash mandatory first full passed; no page errors.
+- One added test initially expected a native top-level summary click to close
+  its card. Diagnosis found the existing deliberate preventDefault policy
+  before correction. The final test retains the click/assertion, explicitly
+  perturbs native `open=false`, then verifies streamed `drawerSync` repairs the
+  top-level policy without overriding nested reader folds. No production
+  defect, weakened assertion, increased timeout or repeated root-cause failure.
+  Failed output and diagnosis are retained in `tests/leaf/`.
+- Independent one-pass lite review: **clean, no findings**. Report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@97ab43fd/review-paths/8d64a7ec-01-panels-phase5-lite.md`.
+  Reviewer independently read Git/source/tests/full logs; it did not rerun tests,
+  pixel/structure checks or measurements. No re-review was allocated or run.
+- `git diff --check` passed. Ticket verification covers this Result/closure;
+  the non-blocking Sage freshness advisory is accepted because only evidence
+  is appended, not a change to settled design/constraints/phase plans.
+
+All prior Results and phase plans are unchanged. **All five phases are complete;
+the ticket is closed to `.done/`.** No unresolved implementation or review
+finding. Pure-render wall instrumentation, live-daemon claims, full dashboard/
+MCP/module suites, external network/install/download, provider/harness launch,
+Windows SSH, shared-runtime mutation/signals, merge/rebase/push/CI were omitted
+as required. MAIN owns integration/delivery; the implementation lane is retained.
