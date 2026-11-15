@@ -210,10 +210,10 @@ Verification:
   processes only. Record exact commands, outcomes and deferred platform/live
   rollout boundaries in the Result before claiming the ticket complete.
 
-### Result (c9b8171f6) - 2026-11-16
+### Result (10c2345f8) - 2026-11-16
 
 Implemented on `exec5/native-pi-payload`, based on `28cf9c7bc`; product commit
-`c9b8171f65ddcd54d81b2b82d249f175d65af7cf`. The generated bundle and both
+`10c2345f87d70e954b18897e70ed80676503e1c5`. The generated bundle and both
 payloads were committed once. No installed cache, user configuration, live
 session, shared daemon, marketplace manifest, version or protocol was changed.
 Independent review is requested from EXEC5 and remains pending; this Result
@@ -408,13 +408,13 @@ DryRun), independent review, real marketplace activation and live rollout
 remain unrun. EXEC5 owns independent review; live snapshot/cache/daemon/session
 replacement remains separately owner-gated. The ticket stays in `ready/`.
 
-#### Edition (5a2f1e305) - 2026-11-16
+#### Edition (d9a8b9093) - 2026-11-16
 
 EXEC5 review round 1 on the rebased branch (`ea80c8103`; original implementation
-and Result are now `d7e3ab812` and `d45b057fd`). Source fixes:
-`fc5686f98c203c9610465116db38fe7d0aaa1901`. Last product commit, containing the
+and Result are now `10c2345f8` and `1b12c1398`). Source fixes:
+`dc136790ca118a887d093d5b5158151676d3a98a`. Last product commit, containing the
 round's **single** bundle/payload regeneration:
-`5a2f1e305d2c56f30a8cda96fc82b9f18698526f`. The preceding Result is unchanged.
+`d9a8b9093d3301271ae86f1022878310a289169e`. The preceding Result is unchanged.
 
 - **I1 VERIFIED.** `StalePayload` separates source drift from archive invalidity.
   With an existing source sibling, `--prefer-source` validates first, keeps a
@@ -561,6 +561,54 @@ behavior (`pi_lead.go:125-137`). The pre-ticket `ea80c8103` reader at
 No hard boundary was hit. Native Windows/PowerShell, the opt-in real npm install
 lane, live marketplace activation and rollout remain unrun. Re-review is handed
 to EXEC5; the ticket remains `ready/` and the original live-rollout gate remains.
+
+#### Edition (4f6834b3f) - 2026-11-16
+
+Round 2 fixes N1/N2 in `4f6834b3f878c16e3125c8096097dbdb8307e613`; earlier
+Result/Edition text is unchanged. No archive or bundle regeneration ran.
+
+- **N1 VERIFIED.** `ignored_path` (`agents-plugin/bin/ws-pi-payload.py:34`) is
+  the shared rule for source scans, the existing producer copy loop and owner
+  overlays: OS junk, `__pycache__/`, `.pyc`/`.pyo`, `.swp` and backup `~` names.
+  `bin/` was verified to contain only the overlaid launcher and removed from
+  the added-input scan. The external consumer's historical input hash is now
+  provenance only: it is outside the archive, so consumer-only fixes need no
+  native rebuild. All actual producer/native/bundle inputs remain gated.
+  `test_native_pi_payload.py:160` plants bytecode under both bin and src plus
+  the other junk forms, proves source validation and local-first materialization
+  succeed without stderr warnings, and exercises the actual producer copy/ZIP
+  loops to prove junk is omitted. npm is mocked and generation stops before
+  validation/publication; no production artifact is replaced by that test.
+- **N2 VERIFIED (injected PermissionError; native Windows unrun).** Cleanup at
+  `ws-pi-payload.py:239-243` is best effort, as is removal of temporarily locked
+  stale stages. `test_native_pi_payload.py:208` denies both cleanup attempts,
+  proves the valid published entry is still returned, then removes the lock
+  and proves safe-age cleanup reaps the leftovers on the next invocation.
+  N3/N4/N5 were not addressed.
+
+Verification used isolated HOME/USERPROFILE, WS cache/config and npm cache under
+`/tmp/exec5/native-pi/round2/`, with no network or dependency tooling:
+
+- `python3 -B -m unittest discover -s agents-plugin/tests`: **153 tests, OK
+  (2 existing Windows skips)**; wsflow equivalent: **22 tests, OK (2 existing
+  Windows skips)**. Existing unclosed-stream ResourceWarnings are non-failing.
+- `go test -count=1 ./internal/wsagent -run 'Pi'` from `agents-plugin-tool`, with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` and existing offline Go caches:
+  **ok, 91.184s**.
+- Both `python3 -I -B <pkg>/bin/ws-pi-payload.py --plugin <pkg> --check-source
+  "$PWD"` gates passed with Node/npm absent from PATH; `cmp` of manifest, ZIP
+  and materializer between packages passed.
+- Both ZIPs were captured using `git show HEAD:<pkg>/native-pi/payload.zip`
+  before committing (HEAD was `3a00b956d`), then compared with `cmp`: **identical**.
+  Both manifests also compare identical to the pre-round manifest blob.
+- Targeted verbose junk and locked-cleanup regressions passed individually
+  (**2.722s**, **3.204s**); `git diff --check` passed. Logs are in the round2
+  scratch directory. All earlier ticket text remains a byte-identical prefix.
+
+Payload unchanged: **19,074,902-byte ZIP + 1,275,049-byte manifest = 20,349,951
+bytes/package**; repository payload delta this round is **0 bytes**. T0;
+no hard boundary hit. Native Windows/PowerShell and live rollout remain unrun;
+final review remains with EXEC5 and the ticket stays `ready/`.
 
 ## Owner Decisions (2026-11-16)
 
