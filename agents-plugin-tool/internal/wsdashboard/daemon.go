@@ -137,6 +137,8 @@ type DaemonOptions struct {
 	// ackDelay replaces ackCheckDelay, so a test drives the answer check;
 	// zero is ackCheckDelay.
 	ackDelay time.Duration
+	// hireNow is a fixture clock for proposal expiry.
+	hireNow func() time.Time
 }
 
 // MailWaker receives the daemon's mailbox wake signals (DaemonOptions.MailWake).
@@ -250,6 +252,11 @@ type Daemon struct {
 	// layout holds the rail's shared row order, tree, and stars
 	// (rail_layout.go).
 	layout *railLayoutStore
+	// hireMu serializes proposal decisions, flag changes, and rail nesting.
+	hireMu   sync.Mutex
+	hireNow  func() time.Time
+	hireWake chan struct{}
+	hireDone chan struct{}
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
@@ -378,6 +385,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		files:           newFileListCache(),
 		support:         opts.Support,
 		holders:         opts.Holders,
+		hireNow:         opts.hireNow,
+		hireWake:        make(chan struct{}, 1),
+		hireDone:        make(chan struct{}),
 		stop:            make(chan struct{}),
 		done:            make(chan struct{}),
 		endpoint: Endpoint{
@@ -456,6 +466,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	// The runner takes its change hook before the first request can reach
 	// it.
 	if d.agents != nil {
+		if lh, ok := d.agents.(AgentLiveHost); ok {
+			lh.SetLiveHost(d)
+		}
 		if eh, ok := d.agents.(AgentEndpointHost); ok {
 			eh.SetEndpoint(endpointURL(d.endpoint, ""))
 		}
@@ -478,8 +491,11 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			d.Close()
 		}
 	}()
+	go d.hireLoop()
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
+	} else {
+		d.pokeHires()
 	}
 	go d.web.run(webSweepEvery)
 	// The holder scans start only now, under the single-instance lock: a
@@ -567,6 +583,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 	d.stats.WakeSession.Add(1)
 	d.broker.wake(replyID)
 	d.acks.poke(replyID)
+	d.pokeHires()
 }
 
 // agentChanged is the agent runner's write hook, called from the
@@ -591,6 +608,7 @@ func (d *Daemon) poll(interval time.Duration) {
 		interval = DefaultPollInterval
 	}
 	d.index.Refresh()
+	d.pokeHires()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -599,6 +617,7 @@ func (d *Daemon) poll(interval time.Duration) {
 			return
 		case <-ticker.C:
 			d.index.Refresh()
+			d.pokeHires()
 		}
 	}
 }
@@ -622,6 +641,9 @@ func (d *Daemon) Done() <-chan struct{} { return d.done }
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
 		close(d.stop)
+		if d.hireDone != nil {
+			<-d.hireDone
+		}
 		if d.leadNudges != nil {
 			d.leadNudges.Close()
 		}
@@ -698,6 +720,8 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/w/", d.handleWorktreePage)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	mux.HandleFunc(railLayoutRoute, d.handleRailLayout)
+	mux.HandleFunc(hireRoute, d.handleSessionHire)
+	mux.HandleFunc(hireRoute+"/", d.handleSessionHire)
 	mux.HandleFunc(railEventsRoute, d.handleRailEvents)
 	mux.HandleFunc("/rail/memos", d.handleMemos)
 	mux.HandleFunc("/rail/usage", d.handlePlanUsage)

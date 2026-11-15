@@ -335,6 +335,12 @@ type Event struct {
 	// boundaries and user messages itself; a backend never sends
 	// turn_start, turn_end, user, or reset.
 	Live *wslive.Event
+	// ReasoningSummary is a validated lead-only widget projection, never an
+	// extension-supplied lifecycle/usage/key command.
+	ReasoningSummary *wslive.ReasoningSummary
+	// summaryCapability is the hosted bundle's explicit process-local opt-in,
+	// consumed by piMapper, never stored or inferred from a summary payload.
+	summaryCapability *bool
 	// Card is a tracker card the lead showed: a successful tracker.show call
 	// of the attached ws-mcp whose result opens with its card line.
 	Card *wslive.CardRef
@@ -349,8 +355,9 @@ type Event struct {
 	SessionID string
 	// TurnEnd ends the running turn; TurnError describes a turn that ended
 	// in an error (a refusal, an interrupt).
-	TurnEnd   bool
-	TurnError string
+	TurnEnd    bool
+	TurnError  string
+	TurnReason string
 	// CompactRequested (with TurnEnd): the ending turn carried a successful
 	// compaction lever call (a *__request_compaction tool call whose result
 	// is not an error) and was not interrupted. The runner holds queued

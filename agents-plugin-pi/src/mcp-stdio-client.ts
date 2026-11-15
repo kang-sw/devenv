@@ -24,6 +24,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { serializeMcpRequest } from "./reasoning-summary-transport.ts";
 
 export interface McpToolInfo {
   name: string;
@@ -211,6 +212,10 @@ export class McpStdioClient {
   private readonly registry = new PendingRequestRegistry();
   private readonly lineBuffer: JsonRpcLineBuffer;
   private closed = false;
+  private connectionToken: object = {};
+
+  /** Changes on every observed launcher connection-loss error, including another tool's call. */
+  get connectionIdentity(): object { return this.connectionToken; }
 
   constructor(
     command: string,
@@ -271,6 +276,7 @@ export class McpStdioClient {
   }
 
   private handleMessage(msg: JsonRpcResponse): void {
+    if (msg.error?.code === -32000) this.connectionToken = {};
     if (this.registry.settle(msg)) return;
     console.error(`[ws-mcp] unmatched or unexpected message on stdout: ${JSON.stringify(msg)}`);
   }
@@ -297,7 +303,17 @@ export class McpStdioClient {
         },
       );
       const payload = { jsonrpc: "2.0" as const, id, method, params };
-      this.proc.stdin.write(`${JSON.stringify(payload)}\n`, (err) => {
+      let line: string;
+      try {
+        // Allocate first: the real ID's serialized bytes belong to the hard frame budget.
+        line = serializeMcpRequest(payload);
+      } catch (error) {
+        this.registry.cancel(id);
+        onSettle();
+        reject(error);
+        return; // zero bytes written; the unused pending ID is gone
+      }
+      this.proc.stdin.write(line, (err) => {
         // The 'exit'/'error' handler owns the rejection so a dead launcher
         // reports its exit code, not a scheduling-dependent `write EPIPE`.
         // The write error rejects only as a bounded fallback when neither

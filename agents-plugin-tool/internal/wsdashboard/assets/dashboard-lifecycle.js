@@ -110,6 +110,7 @@
       answers: b ? boardRead(readAnswers) : {},
       chips: chipList(),
       bmentions: bmentions.slice(),
+      closeRequests: closeRequests.map(function (r) { return { topic: r.topic, reason: r.reason }; }),
       wpicks: wpicks.slice(),
       wconsoles: wconsoles.slice(),
       refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
@@ -168,6 +169,10 @@
       if (cchips && Array.isArray(d.chips)) {
         d.chips.forEach(function (c) { if (c && c.id && !chips[c.id]) { putChip(c); setItem(c.id, c); } });
         syncChips();
+      }
+      if (cchips && !closeRequests.length && validCloseRequests(d.closeRequests).length) {
+        closeRequests = validCloseRequests(d.closeRequests);
+        renderChips();
       }
       if (cchips && !bmentions.length && validMentions(d.bmentions).length) {
         bmentions = validMentions(d.bmentions);

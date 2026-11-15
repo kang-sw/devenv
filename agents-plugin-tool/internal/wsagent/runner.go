@@ -153,6 +153,9 @@ type Options struct {
 	// this daemon's exit cut off. Closing the conversation reports nothing.
 	// It runs on the conversation's loop and must not block on the runner.
 	Report func(TurnReport)
+	// LiveHost is the daemon's in-memory snapshot hand-off. The daemon sets
+	// it before Start; nil keeps the legacy file-only projection.
+	LiveHost wsdashboard.LiveHost
 	// ChildCheck, when not nil, is asked before each call of the token
 	// route (children.go): an error refuses the call with its text (no
 	// usable Pi, say).
@@ -180,12 +183,18 @@ type Runner struct {
 	quit   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
+	// Separate from mu: held through summary mutation/write fencing without
+	// blocking the runner's ordinary List/Get or spawn snapshot reads.
+	summaryMu     sync.Mutex
+	summaryOwners map[string]*conv
 	// closedRows caches immutable closed states under mu, until reopened.
 	// Handed-off snapshots still belong to a terminal and are not cached.
 	closedRows map[string]State
 	// resumeMu serializes Pi child revival with close cascades without
 	// holding mu over store writes or conversation startup.
 	resumeMu sync.Mutex
+	// hireMu serializes idempotent owner-approved creation retries.
+	hireMu sync.Mutex
 	// scanned is closed once the holder manager's first scan returned, or
 	// at Start when there is no manager (scanDone); scanOnce closes it.
 	scanned  chan struct{}
@@ -240,6 +249,9 @@ func NewRunner(opts Options) *Runner {
 	}
 	return r
 }
+
+// SetLiveHost binds the daemon's RAM projection before Start.
+func (r *Runner) SetLiveHost(host wsdashboard.LiveHost) { r.opts.LiveHost = host }
 
 // Start loads every conversation record from the session registry, with no
 // process (lazy resume), and starts serving them. notify is called after
@@ -418,6 +430,17 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		done:       make(chan struct{}),
 		settleC:    make(chan struct{}),
 	}
+	if rec.Lead {
+		r.summaryMu.Lock()
+		if r.summaryOwners == nil {
+			r.summaryOwners = map[string]*conv{}
+		}
+		r.summaryOwners[rec.ReplyID] = c
+		r.summaryMu.Unlock()
+		c.live.owner = c.lockSummaryWriter
+		c.live.wake = func() { r.notify(rec.ReplyID, rec.Root) }
+		c.live.summaryStore().SetWake(c.live.wake)
+	}
 	c.live.beforeSnapshot = c.seedSpawnRows
 	c.observations = c.live.st.ObservedResponses("")
 	own := c.live.st.Snapshot(r.opts.Now().UnixMilli())
@@ -457,6 +480,11 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	// starts for it.
 	foreign := c.foreignRow
 	if !foreign {
+		if rec.Lead && r.opts.LiveHost != nil {
+			if slot, ok := r.opts.LiveHost.OpenHostedSlot(dir); ok {
+				c.live.slot = slot
+			}
+		}
 		c.live.writeSnapshot()
 	}
 	if rec.HolderID != "" && !foreign && (rec.Lead || rec.Backend == BackendPi) {
@@ -520,6 +548,9 @@ func endedError(rec Record) error {
 // LeadOptions are a lead conversation's spawn choices; an empty one takes
 // the profile's value (the harness default when it has none).
 type LeadOptions struct {
+	// HireRequestID and HireLabel are set only by CreateHireLead, never HTTP.
+	HireRequestID   string
+	HireLabel       string
 	Model           string
 	Effort          string
 	PermissionMode  string
@@ -653,6 +684,11 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return State{}, err
+	}
+	if lead != nil && lead.HireRequestID != "" {
+		if err := wsdashboard.MarkHired(r.opts.Dir, rec.ReplyID, lead.HireRequestID, lead.HireLabel); err != nil {
+			return State{}, err
+		}
 	}
 	if err := writeRecord(dir, rec); err != nil {
 		return State{}, err
@@ -1207,11 +1243,13 @@ func closedState(rec Record) State {
 // act through do(), and tell the loop of an inbox change through
 // signalInbox().
 type conv struct {
-	r     *Runner
-	dir   string
-	inbox string
-	live  *liveWriter
-	reqs  chan func()
+	r             *Runner
+	dir           string
+	inbox         string
+	live          *liveWriter
+	summaryGap    bool
+	summaryReason string
+	reqs          chan func()
 	// inboxC (one slot) tells the loop the inbox changed (signalInbox).
 	inboxC chan struct{}
 	done   chan struct{}
@@ -1477,6 +1515,7 @@ func (c *conv) steer() {
 func (c *conv) loop() {
 	defer c.r.wg.Done()
 	defer close(c.done)
+	defer c.live.closeSlot()
 	beat := time.NewTicker(c.r.opts.heartbeat)
 	defer beat.Stop()
 	// Settle the predecessor before inbox signals (including nested reports)
@@ -2627,6 +2666,7 @@ func (c *conv) handle(ev Event) {
 	case ev.ReplayDone:
 		c.replayDone(ev.ReplayLost)
 	case ev.ReplayGap:
+		c.summaryGap = true
 		if c.replaying {
 			c.replayGap, c.replayBoundary = true, false
 		}
@@ -2634,6 +2674,8 @@ func (c *conv) handle(ev Event) {
 		if ev.SessionID != c.rec.SessionID {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
 		}
+	case ev.ReasoningSummary != nil:
+		c.summaryProjection(ev, quiet)
 	case ev.Live != nil:
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactStart {
 			// The requested compaction started: its own turn holds kick
@@ -2670,6 +2712,7 @@ func (c *conv) handle(ev Event) {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, ev.Fatal)
 		c.stopProcess("")
 	case ev.TurnStart:
+		c.summaryStart(ev)
 		if quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq {
 			return
 		}
@@ -2686,7 +2729,11 @@ func (c *conv) handle(ev Event) {
 			c.holdForLever(ev.CompactRequested && !c.interruptAsked)
 			c.interruptAsked = false
 		}
+		c.summaryReason = ev.TurnReason
+		c.live.summaryNaturalEnd = true
 		c.endTurn(ev.TurnError, quiet)
+		c.live.summaryNaturalEnd = false
+		c.live.summarySource, c.summaryReason, c.summaryGap = "", "", false
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
 	case ev.ApprovalDone != "":
@@ -2806,7 +2853,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	ran := c.turn
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
-		c.apply(wslive.Event{Kind: wslive.KindTurnEnd}, quiet)
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd, Reason: c.summaryReason}, quiet)
 	}
 	c.turnSettled(turnErr, quiet)
 	if c.replaying && c.rec.Parent != nil {

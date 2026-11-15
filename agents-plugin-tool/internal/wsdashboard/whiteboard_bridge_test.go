@@ -86,7 +86,7 @@ targets.p9.history = true; targets.p9.folded = true; boardJump("p9");
 check("history navigation delegates positioning to shared keep", jumps, ["p1", "p9", "item-3"]);
 check("containing disclosures open before navigation", fold.open, true);
 var count = calls.length, revealCount = reveals.length;
-["#p1", "e7", "p0", "p01", "p1 div", "item-3,body", "item-3[x]", "https://evil/p1", "../p1", "__proto__", null, 7].forEach(boardJump);
+["#p1", "e07", "p0", "p01", "p1 div", "item-3,body", "item-3[x]", "https://evil/p1", "../p1", "__proto__", null, 7].forEach(boardJump);
 check("non-allowlisted IDs never enter the history loader", calls.length, count);
 check("non-allowlisted IDs never unfold a topic", reveals.length, revealCount);
 boardJump("item-4"); boardJump("p404"); boardJump("p777");

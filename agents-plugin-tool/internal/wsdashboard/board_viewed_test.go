@@ -1,9 +1,14 @@
 package wsdashboard
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
+	"golang.org/x/net/html"
 )
 
 func viewedHarness(t *testing.T) string {
@@ -160,6 +165,98 @@ var nextHistory=topic("large","newHistory",[]);nextHistory.templates=[{content:{
 var liveHistory=topic("large","history",[panel("p9","live9",true)]);
 check("materialized history panel uses immutable template source",boardRenderBlockers(liveHistory,history,nextHistory).length===1);
 process.stdout.write(bad.join("\n"));`)
+}
+
+// Use production article identities: only the second question is exposed.
+func TestBoardViewedTimelineQuestionIdentity(t *testing.T) {
+	type article struct {
+		Attrs map[string]string `json:"attrs"`
+		HTML  string            `json:"html"`
+	}
+	render := func(st *wswhiteboard.State) []article {
+		t.Helper()
+		regions, err := wswhiteboard.RenderRegions(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, Location: time.UTC}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, err := html.Parse(strings.NewReader(string(regions.Board)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var articles []article
+		var walk func(*html.Node)
+		walk = func(n *html.Node) {
+			if n.Type == html.ElementNode && n.Data == "article" {
+				attrs := map[string]string{}
+				for _, attr := range n.Attr {
+					attrs[attr.Key] = attr.Val
+				}
+				if strings.Contains(attrs["class"], "timeline-ask") {
+					var out strings.Builder
+					if err := html.Render(&out, n); err != nil {
+						t.Fatal(err)
+					}
+					articles = append(articles, article{attrs, out.String()})
+				}
+			}
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				walk(c)
+			}
+		}
+		walk(root)
+		if len(articles) != 2 {
+			t.Fatalf("want two question articles, got %d", len(articles))
+		}
+		return articles
+	}
+	for _, eventless := range []bool{false, true} {
+		name := "coalesced"
+		if eventless {
+			name = "eventless"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := &wswhiteboard.State{}
+			env := wswhiteboard.Env{Now: time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)}
+			_, problems := wswhiteboard.Apply(st, `<wb:topic name="t"><wb:log>context</wb:log></wb:topic>`, env)
+			if len(problems) > 0 {
+				t.Fatal(problems)
+			}
+			_, problems = wswhiteboard.Apply(st, `<wb:topic name="t"><wb:add class="technical"><wb:title>first</wb:title></wb:add><wb:add class="policy"><wb:title>second</wb:title><wb:option>A</wb:option><wb:option>B</wb:option></wb:add></wb:topic>`, env)
+			if len(problems) > 0 {
+				t.Fatal(problems)
+			}
+			if eventless {
+				st.Topics[0].Entries = nil
+			} else if len(st.Topics[0].Entries) == 0 || !strings.HasPrefix(st.Topics[0].Entries[len(st.Topics[0].Entries)-1].Text, "Items added: ") {
+				t.Fatal("fixture must coalesce the two question creation events")
+			}
+			before := render(st)
+			st.Items[1].Title = "second changed"
+			after := render(st)
+			data, err := json.Marshal([][]article{before, after, render(st)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runNode(t, name+" question identity", viewedHarness(t)+`var snapshots = `+string(data)+`;
+function questions(rows, exposed) {
+  return rows.map(function(r, i) {
+    var n=panel(r.attrs.id || '', r.html, exposed && i===1);
+    n.getAttribute=function(k){return r.attrs[k] || null;};return n;
+  });
+}
+var old=topic('t','old',questions(snapshots[0]));
+var next=topic('t','next',questions(snapshots[1]));
+var live=topic('t','old',questions(snapshots[0],true));
+check('fixture changes only the second question',old.panels[0].outerHTML===next.panels[0].outerHTML && old.panels[1].outerHTML!==next.panels[1].outerHTML);
+check('secondary question key cannot alias a durable entry',old.panels[1].getAttribute('data-entry')==='ask:2');
+check('every question has a nonempty distinct data-entry',old.panels.every(function(p){return !!p.getAttribute('data-entry');}) && new Set(old.panels.map(function(p){return p.getAttribute('data-entry');})).size===2);
+check('rerenders retain question keys',JSON.stringify(old.panels.map(boardPanelKey))===JSON.stringify(next.panels.map(boardPanelKey)) && JSON.stringify(next.panels.map(boardPanelKey))===JSON.stringify(questions(snapshots[2]).map(boardPanelKey)));
+check('unchanged first question is not a substitute for the exposed second',boardRenderBlockers(live,old,next)[0]===live.panels[1]);
+live.panels[1].exposed=false;
+check('second question leaving releases its update',boardRenderBlockers(live,old,next).length===0);
+process.stdout.write(bad.join("\n"));`)
+		})
+	}
 }
 
 // A scroll re-stages only when a release can follow, never per frame.

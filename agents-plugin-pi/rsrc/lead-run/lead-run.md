@@ -163,8 +163,8 @@ either stop, the next (e) or (f) goes to the user.
 
 Resume through the host's continuation mechanism. When it has none, or the
 agent is gone, re-spawn with the same task block plus one line:
-`Resume: branch <branch> at <head>; your last report is in the ticket's
-### Result and the branch log.`
+`Resume: branch <branch> at <head>; your last report is in the ticket's ### Result
+and the branch log.`
 
 ## Parallel route (opt-in)
 

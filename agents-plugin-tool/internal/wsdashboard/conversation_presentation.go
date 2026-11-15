@@ -2,13 +2,11 @@ package wsdashboard
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
-	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // Child reports require a typed wake cause. Whiteboard-origin user records
@@ -74,13 +72,13 @@ func (e ConvEntry) MailPreview() string {
 }
 
 type conversationEffectRow struct {
-	Kind, Target, ID, Text, Class string
-	Options                       []string
+	Kind, Target, ID, Text string
 }
 
 type conversationEffectTopic struct {
 	Name, Label, Target string
 	Rows                []conversationEffectRow
+	Items               []conversationEffectRow
 }
 
 type conversationEffectCard struct {
@@ -139,14 +137,7 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			if effect.ID > 0 && effect.ID <= 999999 {
 				row.Target = "item-" + strconv.Itoa(effect.ID)
 			}
-			switch effect.Field {
-			case "title":
-				row.Text = effect.After
-			case "class":
-				row.Class = effect.After
-			case "options":
-				_ = json.Unmarshal([]byte(effect.After), &row.Options)
-			}
+
 		case "topic":
 			if effect.Field == "label" && effect.After != "" {
 				topic.Label = effect.After
@@ -158,25 +149,17 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 }
 
 func effectRow(topic *conversationEffectTopic, kind, id string) *conversationEffectRow {
-	for i := range topic.Rows {
-		if topic.Rows[i].Kind == kind && topic.Rows[i].ID == id {
-			return &topic.Rows[i]
+	rows := &topic.Rows
+	if kind == "item" {
+		rows = &topic.Items
+	}
+	for i := range *rows {
+		if (*rows)[i].Kind == kind && (*rows)[i].ID == id {
+			return &(*rows)[i]
 		}
 	}
-	topic.Rows = append(topic.Rows, conversationEffectRow{Kind: kind, ID: id})
-	return &topic.Rows[len(topic.Rows)-1]
-}
-
-// Panel inspection stays on the board. Other transitions retain escaped
-// before/after diagnostics independently of the update card's fold state.
-func (e ConvEntry) WhiteboardDetails() []wswhiteboard.Effect {
-	var out []wswhiteboard.Effect
-	for _, effect := range e.WhiteboardChanges() {
-		if effect.Kind != "panel" {
-			out = append(out, effect)
-		}
-	}
-	return out
+	*rows = append(*rows, conversationEffectRow{Kind: kind, ID: id})
+	return &(*rows)[len(*rows)-1]
 }
 
 func firstEffectLine(text string) string {

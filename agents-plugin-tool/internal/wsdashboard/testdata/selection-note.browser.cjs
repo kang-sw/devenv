@@ -24,7 +24,7 @@ async function select(page, start, end = start) {
         const el = tab.locator('iframe.sframe.on');
         await el.waitFor({ state: 'visible' });
         page = await (await el.elementHandle()).contentFrame();
-        await page.locator('#ctext').waitFor();
+        await page.locator('#ctext + .wsc-editor').waitFor({ state: 'visible' });
       }
       async function goSession(id) { await tab.goto(base + '/s/' + id); await activePage(); }
       tab.on('pageerror', e => errors.push(e.message));
@@ -35,7 +35,8 @@ async function select(page, start, end = start) {
       // Use the existing board tab control at narrow widths.
       if (!(await page.locator('#quote-first').isVisible())) await page.locator('[data-tab="board"]').first().click();
       const pop = view.locator('[data-wbmention-pop]'), input = view.getByRole('textbox', { name: 'Note about this selection (optional)' });
-      const attach = view.locator('[data-wbmention]'), chips = view.locator('#cchips .mchip'), composer = view.locator('#ctext');
+      const attach = view.locator('[data-wbmention]'), chips = view.locator('#cchips .mchip');
+      const composer = view.locator('#ctext + .wsc-editor'), backing = view.locator('#ctext');
       // A native pointer selection, followed by input focus that collapses it.
       await page.locator('#quote-first').click({ clickCount: 3 });
       await input.waitFor({ state: 'visible' });
@@ -70,7 +71,7 @@ async function select(page, start, end = start) {
       await attach.click();
       assert.equal(await chips.count(), 1);
       const firstText = 'Selected text:\n[review] (3) e7\n> First immutable quote\n\nNote:\nfirst note';
-      assert.equal(await composer.inputValue(), firstText, 'source update and changed selection never retarget captured quote');
+      assert.equal(await backing.inputValue(), firstText, 'source update and changed selection never retarget captured quote');
       assert.equal(sent.length, 0, 'attachment is not send');
       // Reset the source, then capture two immutable entries in DOM order.
       await fetch(updates + '?reset=1');
@@ -79,7 +80,7 @@ async function select(page, start, end = start) {
       await input.fill('one note for both'); await attach.click();
       assert.equal(await chips.count(), 3);
       const secondText = 'Selected text:\n[review] (3) e7\n> First immutable quote\n\n[review] e8\n> Second immutable quote\n\nNote:\none note for both';
-      assert.equal(await composer.inputValue(), firstText + '\n\n' + secondText);
+      assert.equal(await backing.inputValue(), firstText + '\n\n' + secondText);
       // The production sandbox bridge dispatches a real selection report.
       // Its untrusted payload may not claim different topic/entry provenance.
       const frameEl = page.locator('iframe.doc-frame').first();
@@ -105,18 +106,18 @@ async function select(page, start, end = start) {
       assert.equal(await chips.count(), 4);
       const thirdText = 'Selected text:\n[Plan] (4) e9\n> Sandbox selection text\n\nNote:\nsandbox note';
       let text = firstText + '\n\n' + secondText + '\n\n' + thirdText;
-      assert.equal(await composer.inputValue(), text);
+      assert.equal(await backing.inputValue(), text);
       // Keyboard selection and the legacy empty-note attachment.
       await page.locator('#quote-next').scrollIntoViewIfNeeded();
       // Establish a native document selection before extending it with keys;
       // programmatic collapse on a non-editable paragraph is not a caret.
       await page.locator('#quote-next').click({ clickCount: 2, position: { x: 10, y: 10 } });
-      await tab.keyboard.press('Shift+End');
+      for (let i = 0; i < ' immutable quote'.length; i++) await tab.keyboard.press('Shift+ArrowRight');
       await input.waitFor({ state: 'visible' });
       assert.equal(await input.inputValue(), '');
       await attach.click();
       assert.equal(await chips.count(), 5);
-      assert.equal(await composer.inputValue(), text, 'empty note adds no ordinary text');
+      assert.equal(await backing.inputValue(), text, 'empty note adds no ordinary text');
       // Repeated action cannot duplicate an attachment.
       await attach.dispatchEvent('click');
       assert.equal(await chips.count(), 5);
@@ -126,12 +127,12 @@ async function select(page, start, end = start) {
       assert.equal(await page.locator('#ctext').inputValue(), '');
       assert.equal(await page.locator('#cchips .mchip').count(), 0);
       await goSession('livesession');
-      assert.equal(await composer.inputValue(), text);
+      assert.equal(await backing.inputValue(), text);
       assert.equal(await chips.count(), 5);
       text = text.replace('first note', 'edited first note');
       await composer.fill(text);
       await tab.reload(); await activePage();
-      assert.equal(await composer.inputValue(), text, 'ordinary edits survive draft restore');
+      assert.equal(await backing.inputValue(), text, 'ordinary edits survive draft restore');
       assert.equal(await chips.count(), 5);
       assert.equal(sent.length, 0);
       await page.locator('#csend').click();

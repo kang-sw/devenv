@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -91,12 +90,12 @@ func TestConversationPresentationPeerNoteIsDisplayOnly(t *testing.T) {
 	}
 	ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: "mail", Direction: "recv", Peer: "peer@machine", HistoryKey: "h", Title: "preview"})}
 	html := presentationHTML(t, ring, PageContent{MailBodies: map[string]string{"h": note + "\npreview <b>not HTML</b>"}}, nil)
-	for _, want := range []string{`class="src peer-lead"`, "Peer lead", note, "preview &lt;b&gt;not HTML&lt;/b&gt;", `data-key="mail-` + ring[0].Name, `data-key="mail-details-` + ring[0].Name} {
+	for _, want := range []string{`class="src peer-lead"`, "Peer lead", note, "preview &lt;b&gt;not HTML&lt;/b&gt;", `data-key="mail-` + ring[0].Name, `class="row-details"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q: %s", want, html)
 		}
 	}
-	if strings.Count(html, note) != 1 || strings.Contains(html, `class="delivery-details mail-delivery" open`) {
+	if strings.Count(html, note) != 1 || strings.Count(html, "<details") != 1 || strings.Contains(html, "Delivery details") {
 		t.Fatal("raw note lost/duplicated or diagnostics expanded by default")
 	}
 	if strings.Contains(html, "<b>not HTML") {
@@ -216,17 +215,17 @@ func TestConversationPresentationWhiteboardFoldAndTargets(t *testing.T) {
 		wswhiteboard.Effect{Kind: "item", Topic: "plan", ID: 42, Field: "options", After: `["a: first","b: <script>literal</script>"]`},
 	)
 	card := e.WhiteboardCard()
-	if len(card.Topics[0].Rows) != 3 || card.Topics[0].Rows[1].Text != "recap <b>literal</b>" || !reflect.DeepEqual(card.Topics[0].Rows[2].Options, []string{"a: first", "b: <script>literal</script>"}) {
+	if len(card.Topics[0].Rows) != 2 || card.Topics[0].Rows[1].Text != "recap <b>literal</b>" || len(card.Topics[0].Items) != 1 || card.Topics[0].Items[0].Target != "item-42" {
 		t.Fatalf("bad projection: %+v", card)
 	}
 	ring := []wslive.RingRecord{ringRecord(1, e.RingEntry)}
 	html := presentationHTML(t, ring, PageContent{}, nil)
-	for _, want := range []string{`<article class="wbeffects wbupdate"`, `data-wb-topic="topic-706c616e"`, `data-wb-element="e7"`, `data-wb-jump="p2"`, `data-wb-jump="item-42"`, "recap &lt;b&gt;literal&lt;/b&gt;", "b: &lt;script&gt;literal&lt;/script&gt;", "Answer on board"} {
+	for _, want := range []string{`<article class="wbeffects wbupdate"`, `data-wb-topic="topic-706c616e"`, `data-wb-element="e7"`, `data-wb-jump="p2"`, `data-wb-jump="item-42"`, "recap &lt;b&gt;literal&lt;/b&gt;", `class="wbupdate-items"`, `>(42)</a>`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q: %s", want, html)
 		}
 	}
-	for _, bad := range []string{"SECRET PANEL PAYLOAD", "second line", "<html>", "<img", "<iframe", "<script>", "srcdoc="} {
+	for _, bad := range []string{"SECRET PANEL PAYLOAD", "second line", "<html>", "<img", "<iframe", "<script>", "srcdoc=", "Answer on board", "question?", "b: &lt;script&gt;literal&lt;/script&gt;", "wbeffect-details", "wbeffect-values"} {
 		if strings.Contains(html, bad) {
 			t.Errorf("panel payload or interpreted markup %q: %s", bad, html)
 		}

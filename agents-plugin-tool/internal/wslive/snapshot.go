@@ -281,7 +281,9 @@ type Activity struct {
 // Lead is the snapshot's root entry.
 type Lead struct {
 	Activity
-	Observed *ObservedModel `json:"observed,omitempty"`
+	// ReasoningSummary is lead-only; never part of shared subagent Activity.
+	ReasoningSummary *ReasoningSummary `json:"reasoningSummary,omitempty"`
+	Observed         *ObservedModel    `json:"observed,omitempty"`
 	// LastTurnOutput is the last completed turn's own response evidence;
 	// absent if that turn supplied none. It is not a heartbeat-derived rate.
 	LastTurnOutput *ModelObservation `json:"lastTurnOutput,omitempty"`
