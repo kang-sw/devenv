@@ -568,7 +568,7 @@
     box.scrollLeft = 0; box.scrollTop = top;
   }
   function directoryEntry(e, folder, column) {
-    var p = joinRel(folder, e.name), selected = sel === p || (column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
+    var p = joinRel(folder, e.name), selected = sel === p || !!(column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
     var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : "") + (directoriesOnly && e.name.charAt(0) === "." ? " fdot" : ""));
     row.setAttribute("data-entry", p); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(selected)); row.tabIndex = 0;
     var ic = mk("span", "fi");
@@ -587,7 +587,7 @@
       if (column && (opens(e) || folder !== dir)) { navigate(opens(e) ? p : folder, p, p); return; }
       sel = p;
       Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (n) {
-        var path = n.getAttribute("data-entry"), on = path === sel || (column && (dir === path || dir.indexOf(path + "/") === 0));
+        var path = n.getAttribute("data-entry"), on = path === sel || !!(column && (dir === path || dir.indexOf(path + "/") === 0));
         n.classList.toggle("sel", on); n.setAttribute("aria-selected", String(on));
       });
       Object.keys(rowEls).forEach(function (path) {
