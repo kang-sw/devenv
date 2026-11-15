@@ -92,7 +92,7 @@ type Record struct {
 	// delivered as a turn, each as the text the model reads.
 	Mail []string `json:"mail,omitempty"`
 	// Queued holds what a drain took from the inbox and no turn has sent
-	// yet, oldest first: a slash command runs as a turn of its own, so the
+	// yet, in drain order: a slash command runs as a turn of its own, so the
 	// messages and commands drained after it wait here across turn ends,
 	// although the inbox already shows them received.
 	Queued []QueuedInput `json:"queued,omitempty"`

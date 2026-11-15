@@ -49,7 +49,7 @@ func TestDashboardInboxDrainDescriptionIsAdapterOnly(t *testing.T) {
 	if !strings.HasPrefix(desc, "Adapter-only:") {
 		t.Fatalf("description = %q", desc)
 	}
-	for _, want := range []string{"an agent never calls it", "atomically claims", "oldest first", "can no longer be merged into or cancelled"} {
+	for _, want := range []string{"an agent never calls it", "atomically claims", "oldest first", "promoted to steering first", "can no longer be cancelled or steered"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description lacks %q: %s", want, desc)
 		}
@@ -68,17 +68,18 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 	}
 
 	sendBoard(t, dir, "first", wsinbox.Chip{ID: "3", Answer: "b"})
-	sendBoard(t, dir, "second") // merges into the held entry as its own paragraph
+	sendBoard(t, dir, "second") // its own held entry, after the first
 	names, _ := wsinbox.Names(dir)
-	if len(names) != 1 {
+	if len(names) != 2 {
 		t.Fatalf("held = %v", names)
 	}
 	rec, _ := wsinbox.Held(dir)
-	id := rec[0].ID()
-	sent := time.UnixMilli(rec[0].Entry.SentAt).UTC().Format(time.RFC3339)
+	line := func(r wsinbox.Record) string {
+		return "message " + r.ID() + " " + time.UnixMilli(r.Entry.SentAt).UTC().Format(time.RFC3339) + "\n"
+	}
 
 	out := callToolWithKey(t, f.server, 5, f.keyA, dashboardInboxDrainTool, nil)
-	want := "drained 1\nmessage " + id + " " + sent + "\n<wb:answers>\n3=b\n</wb:answers>\n\nfirst\n\nsecond\n\n"
+	want := "drained 2\n" + line(rec[0]) + "<wb:answers>\n3=b\n</wb:answers>\n\nfirst\n\n" + line(rec[1]) + "second\n\n"
 	if out != want {
 		t.Fatalf("drain text = %q, want %q", out, want)
 	}

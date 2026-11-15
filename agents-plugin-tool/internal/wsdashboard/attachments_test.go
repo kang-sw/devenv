@@ -103,20 +103,19 @@ func TestMessageRouteAttachesSniffedImages(t *testing.T) {
 		t.Fatalf("delivered text = %q, want %q", got, want)
 	}
 
-	// An image alone is a message.
-	if _, merged := f.send(t, `{"images":`+imagesJSON("x.png", pngBytes)+`}`); !merged {
-		t.Fatal("image-only send did not merge")
+	// An image alone is a message, held as its own entry.
+	if _, merged := f.send(t, `{"images":`+imagesJSON("x.png", pngBytes)+`}`); merged {
+		t.Fatal("image-only send merged")
 	}
-	if held := f.held(t); len(held[0].Entry.Images) != 5 {
-		t.Fatalf("merged images = %d, want 5", len(held[0].Entry.Images))
+	if held := f.held(t); len(held) != 2 || len(held[0].Entry.Images) != 4 || len(held[1].Entry.Images) != 1 {
+		t.Fatalf("held = %+v, want the image-only send as its own entry", held)
 	}
 }
 
-// TestConcurrentSendsRenumberIntoTheHeldEntry: sends racing into one held
-// entry each number their own image #1, and the merges under the inbox lock
-// renumber every later one to continue the earlier ones, so the held entry
-// numbers its images 1..n and each send's marker names its own image.
-func TestConcurrentSendsRenumberIntoTheHeldEntry(t *testing.T) {
+// TestConcurrentSendsEachKeepTheirOwnEntry: racing sends each number their
+// own image #1 and each is held as its own entry, so every entry keeps that
+// numbering and its marker names its own image.
+func TestConcurrentSendsEachKeepTheirOwnEntry(t *testing.T) {
 	f := startPageFixture(t)
 	f.send(t, `{"text":"base [Image #1]","images":`+numberedImagesJSON(1)+`}`)
 	const senders = 5
@@ -133,36 +132,33 @@ func TestConcurrentSendsRenumberIntoTheHeldEntry(t *testing.T) {
 	}
 	wg.Wait()
 	held := f.held(t)
-	if len(held) != 1 {
-		t.Fatalf("held = %d entries, want one merged entry", len(held))
+	if len(held) != senders+1 {
+		t.Fatalf("held = %d entries, want %d", len(held), senders+1)
 	}
-	e := held[0].Entry
-	if len(e.Images) != senders+1 || len(e.Parts) != senders+1 {
-		t.Fatalf("merged entry = %+v", e)
-	}
-	for i, n := range e.ImageNums {
-		if n != i+1 {
-			t.Fatalf("image numbers = %v, want 1..%d", e.ImageNums, senders+1)
+	seen := map[string]bool{}
+	for i, r := range held {
+		e := r.Entry
+		if len(e.Images) != 1 || len(e.ImageNums) != 1 || e.ImageNums[0] != 1 || len(e.Parts) != 1 {
+			t.Fatalf("held[%d] = %+v, want one part and one image numbered 1", i, e)
 		}
-	}
-	// A merge appends one part and one image, so part i names exactly the
-	// image at index i: its own send's upload.
-	for i, p := range e.Parts {
 		var nums []int
-		wsinbox.ImageMarkers(p, func(_, _, n int) { nums = append(nums, n) })
-		if len(nums) != 1 || nums[0] != i+1 {
-			t.Errorf("part %d = %q names %v, want [%d]", i, p, nums, i+1)
+		wsinbox.ImageMarkers(e.Parts[0], func(_, _, n int) { nums = append(nums, n) })
+		if len(nums) != 1 || nums[0] != 1 {
+			t.Errorf("held[%d] part %q names %v, want [1]", i, e.Parts[0], nums)
 		}
+		if seen[e.Images[0]] {
+			t.Errorf("held[%d] shares image %s with another entry", i, e.Images[0])
+		}
+		seen[e.Images[0]] = true
 	}
-	if !strings.Contains(e.Text(), "Image #"+strconv.Itoa(senders+1)+": ") {
-		t.Fatalf("delivered text lacks the last numbered line: %q", e.Text())
+	if held[0].Entry.Parts[0] != "base [Image #1]" {
+		t.Fatalf("held[0] = %q, want the first send", held[0].Entry.Parts[0])
 	}
 }
 
 // TestMessageRouteRefusesBadImages: a mislabeled file is sniffed and
-// refused with 415, bad base64 is 400, and the count and size caps are 413,
-// the merged entry's cap included; a refused request writes no file and
-// holds nothing.
+// refused with 415, bad base64 is 400, and the count and size caps are 413;
+// a refused request writes no file and holds nothing.
 func TestMessageRouteRefusesBadImages(t *testing.T) {
 	f := startPageFixture(t)
 	nine := []string{}
@@ -214,24 +210,6 @@ func TestMessageRouteRefusesBadImages(t *testing.T) {
 		t.Fatalf("a refused send left %d new files", after-before)
 	}
 
-	// The merged cap: six held, three more refused before any file is
-	// written; two more fill the entry to eight.
-	six := []string{}
-	for i := 0; i < 6; i++ {
-		six = append(six, "p.png", pngBytes)
-	}
-	f.send(t, `{"text":"six","images":`+imagesJSON(six...)+`}`)
-	code, raw := f.postMessage(t, `{"images":`+imagesJSON("a.png", pngBytes, "b.png", pngBytes, "c.png", pngBytes)+`}`)
-	if code != http.StatusRequestEntityTooLarge || !strings.Contains(raw, "9 images") {
-		t.Fatalf("send over the merged cap = %d (%s), want 413", code, raw)
-	}
-	if names := f.attachments(t); len(names) != 6 {
-		t.Fatalf("the refused merge left %d files, want 6", len(names))
-	}
-	if _, merged := f.send(t, `{"images":`+imagesJSON("a.png", pngBytes, "b.png", pngBytes)+`}`); !merged {
-		t.Fatal("send up to the cap did not merge")
-	}
-
 	// A text-only body is still refused above the text-only limit.
 	long := strings.Repeat("x", inboxBodyLimit+10)
 	if code, _ := f.postMessage(t, `{"text":"`+long+`"}`); code != http.StatusBadRequest {
@@ -239,35 +217,38 @@ func TestMessageRouteRefusesBadImages(t *testing.T) {
 	}
 }
 
-// TestImageCapSkipsASteeredEntry: a steered entry takes no merge, so a
-// later send's images are capped against the new entry it starts, not
-// against the steered one's images.
-func TestImageCapSkipsASteeredEntry(t *testing.T) {
+// TestImageCapIsPerMessage: a send never joins a held entry, so its images
+// are capped on their own: a full message held, steered or not, does not
+// count against the next one.
+func TestImageCapIsPerMessage(t *testing.T) {
 	f := startPageFixture(t)
 	full := []string{}
 	for i := 0; i < wsinbox.MaxImages; i++ {
 		full = append(full, "p.png", pngBytes)
 	}
 	id, _ := f.send(t, `{"text":"full","images":`+imagesJSON(full...)+`}`)
+	if _, merged := f.send(t, `{"text":"next","images":`+imagesJSON(full...)+`}`); merged {
+		t.Fatal("a send merged into the held entry")
+	}
 	if code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusOK {
 		t.Fatalf("steer = %d: %s", code, raw)
 	}
+	if _, merged := f.send(t, `{"text":"third","images":`+imagesJSON(full...)+`}`); merged {
+		t.Fatal("a send merged into a held entry")
+	}
 	held := f.held(t)
-	if len(held) != 1 || !held[0].Entry.Steer || len(held[0].Entry.Images) != wsinbox.MaxImages {
-		t.Fatalf("held after steer = %+v", held)
-	}
-	// Counting the steered entry would refuse this as 16 images.
-	if _, merged := f.send(t, `{"text":"next","images":`+imagesJSON(full...)+`}`); merged {
-		t.Fatal("a send merged into the steered entry")
-	}
-	held = f.held(t)
-	if len(held) != 2 || !held[0].Entry.Steer || held[1].Entry.Steer || len(held[0].Entry.Images) != wsinbox.MaxImages || len(held[1].Entry.Images) != wsinbox.MaxImages {
+	if len(held) != 3 || !held[0].Entry.Steer || held[1].Entry.Steer || held[2].Entry.Steer {
 		t.Fatalf("held = %+v", held)
 	}
-	// The new entry is the merge target now, and it is full.
-	code, raw := f.postMessage(t, `{"images":`+imagesJSON("one.png", pngBytes)+`}`)
+	for i, r := range held {
+		if len(r.Entry.Images) != wsinbox.MaxImages {
+			t.Fatalf("held[%d] carries %d images, want %d", i, len(r.Entry.Images), wsinbox.MaxImages)
+		}
+	}
+	// One message over the cap is still refused.
+	code, raw := f.postMessage(t, `{"images":`+imagesJSON(append(full, "one.png", pngBytes)...)+`}`)
 	if code != http.StatusRequestEntityTooLarge || !strings.Contains(raw, "9 images") {
-		t.Fatalf("send over the new entry's cap = %d (%s), want 413", code, raw)
+		t.Fatalf("send over the cap = %d (%s), want 413", code, raw)
 	}
 }
 

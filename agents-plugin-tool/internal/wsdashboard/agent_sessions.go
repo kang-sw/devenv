@@ -188,8 +188,8 @@ func HashLiveStores(h io.Writer, stateDir, replyID string, now time.Time) time.T
 // so a heartbeat rewrite is no change while a writer that stopped is one;
 // the ring and the board-answer inbox (held and drained) are hashed by their
 // entry names, since an entry file is never rewritten, so held and drained
-// names tell a send (a new held name, or a merge replacing one) and a drain
-// apart.
+// names tell a send (a new held name), a steer (a name replaced), and a
+// drain apart.
 func (c *SnapshotCache) HashLiveStores(h io.Writer, stateDir, replyID string, now time.Time) time.Time {
 	sessionDir := SessionDir(stateDir, replyID)
 	var updatedAt time.Time

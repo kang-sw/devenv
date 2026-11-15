@@ -168,12 +168,14 @@ under `<cache root>/dashboard/`:
   held messages the user sent from the page, one file each; `drained/` keeps
   the newest 50 as sent records. The adapter-only `dashboard.inbox_drain` tool
   drains it, and `mailbox wait --board-inbox` also wakes on it (peek only). A
-  message promoted to steering is rewritten with `steer: true` and is no
-  longer a merge target; `dashboard.inbox_drain steer_only: true` claims only
+  message promoted to steering is rewritten with `steer: true` and a fresh
+  name, so it joins the end of the steer queue; a full drain claims the
+  steered messages first, in the order promoted, then the rest, oldest first.
+  `dashboard.inbox_drain steer_only: true` claims only
   those, and `mailbox wait --board-steer` wakes only on one (the wait an
   adapter arms mid-turn; exclusive with `--board-inbox`). An interrupt entry
   (`interrupt: true`, only its creation time as `sentAt`) asks the adapter to
-  stop the running turn; it is never a message (no merge, no image cap, no
+  stop the running turn; it is never a message (no image cap, no
   held bubble; cancel and steer refuse it).
   `dashboard.inbox_drain interrupt_only: true` claims only those (each
   record `interrupt: true`; exclusive with `steer_only`), the steer-only
@@ -184,14 +186,14 @@ under `<cache root>/dashboard/`:
   args}`) is one slash command the page sent, only to a session whose
   snapshot lists `commands`, only from a browser on this machine (403 to any
   other viewer, a LAN token holder included), and only with a name that
-  list holds (400 otherwise): it is never merged with another entry (a send
-  after one starts a new entry), steer refuses it, and a drain returns it in
-  order with a `command` field, where the adapter splits its batch and runs
+  list holds (400 otherwise): steer refuses it, and a drain returns it in
+  its place among the unsteered messages with a `command` field (steered
+  messages drain ahead of it), where the adapter splits its batch and runs
   it natively. A hosted backend passes a plain message verbatim and runs a
   leading-slash line as a command, so a message from any viewer not on this
   machine whose text, trimmed of leading whitespace, starts with `/` is
   refused too (403); a slash later in the text is held as usual.
-  A board item's sent mark comes from these records (newest chip per item,
+  A board item's sent mark comes from these records (the newest send's chip per item,
   held over drained; a chip sent before the item's latest re-ask marks
   nothing). A drained note-only chip (a note, no value) sent before the
   start of the session's newest settled turn clears its item's mark, so the
@@ -504,16 +506,18 @@ viewer on this machine (404 to any other, token or not) and an `Origin`
 equal to the daemon's own, and the page offers the items only to such a
 viewer. The live layout's
 composer sends: `POST /s/<reply-id>/message {text, chips, topics, images,
-refs, refNums}` holds the message in the session's inbox (merged into a still-held
-one that is not steered). `images` are new uploads `{name, data, n}` (base64,
+refs, refNums}` holds the message in the session's inbox as its own held
+message; sends never merge. `images` are new uploads `{name, data, n}` (base64,
 sniffed as PNG/JPEG/GIF/WebP, at most 8 per held message), `refs` name files
 a cancel returned, and `refNums` numbers them; the daemon writes the uploads
 into the inbox's `attachments/` directory. The text names image `n` with an
 `[Image #n]` marker, and the delivered message is the `<wb:answers>` block
 of the board answers and topic notes (`wsinbox.AnswerBlock`), then the text,
-then one `Image #n: <absolute path>` line per image; a send that merges renumbers its
-images and markers to continue the held message's, under the daemon's inbox
-lock. The page still reads the older `[image: <path>]` lines. `POST
+then one `Image #n: <absolute path>` line per image. Numbers are per
+message, as the draft numbered them: a turn that delivers several held
+messages joins their texts, so the same `Image #n` can name a different
+image in each, and each `[Image #n]` marker means the image of its own
+message's lines. The page still reads the older `[image: <path>]` lines. `POST
 /s/<reply-id>/cancel {id}` takes a held one back, answering `{text, chips,
 topics, images, nums}`, and `POST
 /s/<reply-id>/steer {id}` promotes a held one to steering, answering the
@@ -522,7 +526,7 @@ adapter claims a steered message at the session's next tool boundary instead
 of at the turn end. `POST /s/<reply-id>/interrupt` (body ignored) takes back
 every held message, steered or not, and writes an interrupt entry in one step
 under the inbox lock, answering `{held: [{id, text, chips, topics, images, nums}]}`
-oldest first, each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
+in queue order (steered first, then the rest), each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
 and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `full:` line names
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
 answered, and the page path otherwise.
