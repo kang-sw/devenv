@@ -862,6 +862,9 @@
     "261115-feat-ws-whiteboard-topic-state-badge": {
       "registered_at": "2026-11-15T02:04:07Z"
     },
+    "261115-feat-ws-whiteboard-topic-waiting-on": {
+      "registered_at": "2026-11-15T03:33:00Z"
+    },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
       "lease": {
