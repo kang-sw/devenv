@@ -34,7 +34,7 @@ function listing(root, entries, session) { return { root, name: root.split('/').
 function event(n, type, extra) { var e = Object.assign({ target: n, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {} }, extra); n.fire(type, e); return e; }
 function key(n, key) { return event(n, 'keydown', { key }); }
 function slash(n) { var e = { target: n, key: '/', preventDefault() { this.defaultPrevented = true; } }; doc.listeners.keydown.slice().forEach(f => f(e)); }
-var doc = new Doc(), win = { WsCards: { icon: () => '' }, AbortController, innerWidth: 1200, innerHeight: 900, listeners: {}, addEventListener: El.prototype.addEventListener, removeEventListener: El.prototype.removeEventListener };
+var doc = new Doc(), win = { WsCards: { icon: name => '<svg><use href="#l-' + name + '"/></svg>' }, AbortController, innerWidth: 1200, innerHeight: 900, listeners: {}, addEventListener: El.prototype.addEventListener, removeEventListener: El.prototype.removeEventListener };
 new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, k => k, k => k, fetchControlled, AbortController, later, cancel);
 function explorer(rid, local = true, options = {}) {
   var el = doc.body.appendChild(new El('section', doc)); el.className = 'fpane';
@@ -43,7 +43,7 @@ function explorer(rid, local = true, options = {}) {
   var instance = win.WsFiles.create(el, Object.assign({ rid, local, load: k => store[k], save: (k, v) => store[k] = v }, options));
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
-function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd button')[0].click(); x.at('.fpin').value = path; x.at('.fgo .pr').click(); }
+function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-root').click(); x.at('.fpin').value = path; x.at('.fgo .pr').click(); }
 (async function () {
   // Candidate-root refusal must not cancel legitimate active-root work.
   var race = explorer('race'); race.instance.shown();
@@ -68,17 +68,20 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   a.instance.shown(); b.instance.shown();
   await answer(take('beta', 'list'), listing('/beta', undefined, true));
   await answer(take('alpha', 'list'), listing('/alpha', undefined, true));
+  check('root tabs use folder names, never the return-to-session action label', [a.at('.ftab-select .fn').textContent, b.at('.ftab-select .fn').textContent], ['alpha', 'beta']);
+  check('search mode chip is inside the field and name mode hides content options', [a.at('.fsr .fseg') === a.at('.fseg'), a.at('.fopts').hidden, b.at('.fopts').hidden], [true, true, true]);
+  check('compact navigation and tools share the tab row', [!!a.at('.fbar .ftabs'), !!a.at('.fbar .flocation'), a.all('.fbar .fhd button').length], [true, true, 4]);
   check('out-of-order independent roots', [a.at('.froot').textContent, b.at('.froot').textContent], ['alpha', 'beta']);
   event(a.at('[data-path="src"]'), 'unused');
   event(a.tree, 'click', { target: a.at('[data-path="src"]') });
   await answer(take('alpha', 'list', 'src'), listing('/alpha/src', [{ name: 'a.go' }]));
   event(a.at('[data-entry="src/a.go"]'), 'click');
   check('expansion and selection stay local', [a.instance.selection().path, b.instance.selection().path, b.at('[data-path="src"]').getAttribute('aria-expanded')], ['src/a.go', '.', 'false']);
-  a.all('.fhd button')[3].click();
+  a.all('.fhd button')[2].click();
   var ign = a.all('.fpop input')[0]; ign.checked = true; event(ign, 'change');
   check('view and storage isolated', [!!a.at('[data-path="ignored"]'), !!b.at('[data-path="ignored"]'), Object.keys(a.store).length > 0, Object.keys(b.store).some(k => k.includes('.view'))], [true, false, true, false]);
   key(a.at('.fpop'), 'Escape');
-  check('popover Escape returns owner focus', doc.activeElement === a.all('.fhd button')[3], true);
+  check('popover Escape returns owner focus', doc.activeElement === a.all('.fhd button')[2], true);
   event(a.tree, 'contextmenu', { target: a.at('[data-path="src"]'), clientX: 20, clientY: 30 });
   check('row menu opens', !!doc.querySelector('.fmenu'), true);
   key(doc.querySelector('.fmenu'), 'Escape');
@@ -91,6 +94,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   await answer(take('alpha', 'list', ''), listing('/alpha', undefined, true));
   check('reopen refresh preserves expansion selection and scroll', [a.tree.scrollTop, b.tree.scrollTop, !!a.at('[data-entry="src/a.go"]'), a.instance.selection().path], [73, 19, true, 'src/a.go']);
   a.all('.fseg button')[1].click(); a.all('.fopts button').forEach(n => n.click());
+  check('only content mode shows Aa and regex options', [a.at('.fopts').hidden, b.at('.fopts').hidden, a.all('.fopts button').length], [false, true, 2]);
   a.q.value = 'needle'; event(a.q, 'input'); await timers(); var old = take('alpha', 'search');
   b.q.value = 'beta'; event(b.q, 'input'); await timers(); var br = take('beta', 'find');
   check('mode query options independent', [a.el.getAttribute('data-fm'), b.el.getAttribute('data-fm'), old.url.searchParams.get('case'), old.url.searchParams.get('regex'), br.url.searchParams.get('q')], ['content', 'name', '1', '1', 'beta']);
@@ -121,7 +125,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   slash(b.tree); check('surviving owner shortcut works', doc.activeElement === b.q, true);
   var remote = explorer('remote', false); remote.store['ws.dashboard.files.root.remote'] = '/unauthorized'; remote.instance.shown();
   var rr = take('remote', 'list');
-  check('remote UI cannot offer change-root or restore local root', [remote.all('.fhd button')[0].hidden, rr.url.searchParams.has('root')], [true, false]);
+  check('remote UI cannot offer change-root or restore local root', [remote.at('.fchange-root').disabled, rr.url.searchParams.has('root')], [true, false]);
   await answer(rr, listing('/remote', undefined, true));
   event(b.tree, 'click', { target: b.at('[data-path="src"]') });
   var lateDir = take('beta', 'list', 'src');
@@ -133,6 +137,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   var core = explorer('core', true, { send: p => sent.push(p), copy: p => copied.push(p), openCard: p => opened.push(p) });
   core.instance.on('navigation', p => events.push(['nav', p.path]));
   core.instance.on('selection', p => events.push(['sel', p.path]));
+  check('footer exposes attachment and copy actions before a selection is available', [core.all('.ffooter .fattachment button').length, core.at('.fselection').textContent, core.all('.fattachment button').map(n => n.disabled)], [2, '', [true, true]]);
   core.instance.shown();
   await answer(take('core', 'list', ''), listing('/core', [{ name: 'src', dir: true }, { name: 'photo space.png' }, { name: 'report.pdf' }, { name: 'unsafe.svg' }, { name: 'linked.png', link: true }] , true));
   check('side tree lists only folders while the directory pane keeps files', [core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), core.all('.fentry').map(n => n.getAttribute('data-entry'))], [['src'], ['src', 'photo space.png', 'report.pdf', 'unsafe.svg', 'linked.png']]);
@@ -148,6 +153,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   check('middle-click folder opens background tab without request or navigation', [core.all('.ftab-select').length, core.all('.ftab-select')[0].getAttribute('aria-selected'), core.instance.location().dir, requests.filter(r => !r.taken && r.url.pathname === '/s/core/fs/list').length], [2, 'true', '', 0]);
   event(core.all('.fentry').find(n => n.getAttribute('data-entry') === 'photo space.png'), 'click');
   core.all('.fattachment button')[0].click(); core.all('.fattachment button')[1].click();
+  check('footer follows the selected path and retains both labeled actions', [core.at('.fselection b').textContent, core.at('.fselection').title, core.all('.fattachment button').map(n => n.textContent)], ['photo space.png', '/core/photo space.png', ['js.files.send', 'js.files.copy']]);
   check('browse actions emit session-relative path and selection event', [sent, copied, events.some(e => e[0] === 'sel' && e[1] === 'photo space.png')], [['photo space.png'], ['photo space.png'], true]);
   core.all('.fview-modes button')[3].click();
   check('gallery side tree still lists only folders', core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), ['src']);
@@ -159,6 +165,9 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   await answer(take('core', 'list', ''), listing('/core', undefined, true));
   await answer(take('core', 'list', 'src'), listing('/core/src', [{ name: 'child.go' }], true));
   check('background tab activates at its folder', core.instance.location(), { root: '', dir: 'src' });
+  check('current side-tree folder is highlighted and breadcrumb names each segment', [core.at('[data-path="src"]').classList.contains('cur'), core.at('[data-path="src"]').getAttribute('aria-current'), core.at('.fcrumb-root .froot').textContent, core.at('.fcrumb-trail .fcrumb').textContent], [true, 'location', 'core', 'src']);
+  core.at('.fcrumb-trail .fcrumb').click();
+  check('breadcrumb keeps directory navigation reachable', core.instance.location().dir, 'src');
   check('expanded side tree omits nested files but the directory pane keeps them', [core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), !!core.at('[data-entry="src/child.go"]')], [['src'], true]);
   core.all('.fview-modes button')[1].click(); core.at('.fopen-card').click();
   check('open-as-card forwards active directory', opened, [{ root: '', dir: 'src' }]);
@@ -183,7 +192,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   function entry(path) { return columns.at('[data-entry="' + path + '"]'); }
   function columnPaths() { return columns.all('.fcolumn').map(n => n.getAttribute('data-column')); }
   columns.all('.fview-modes button')[4].click();
-  check('column switcher is compact and accessible', [columns.all('.fview-modes button')[4].textContent, columns.all('.fview-modes button')[4].getAttribute('aria-label'), columns.all('.fview-modes button')[4].getAttribute('aria-pressed')], ['\u25a5', 'js.files.view.column', 'true']);
+  check('column switcher is compact and accessible', [columns.all('.fview-modes button')[4].html.includes('#l-columns-3'), columns.all('.fview-modes button')[4].getAttribute('aria-label'), columns.all('.fview-modes button')[4].getAttribute('aria-pressed')], [true, 'js.files.view.column', 'true']);
   check('column mode begins at root with files and folders, sidebar inert', [columnPaths(), columns.all('.fcolumn .fentry').map(n => n.getAttribute('data-entry')), columns.at('.fworkspace').getAttribute('data-view'), columns.tree.inert], [[''], ['src', 'docs', 'README.md', 'linked', 'gone'], 'column', true]);
   entry('src').click();
   await answer(take('columns', 'list', 'src'), columnSrc);
@@ -250,6 +259,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   legacy.instance.shown(); var lr = take('legacy', 'list', '');
   check('legacy root record still loads', lr.url.searchParams.get('root'), '/other');
   await answer(lr, listing('/other', [{ name: 'ignored.png', ign: true }]));
+  check('changed-root tab uses the actual folder name', legacy.at('.ftab-select .fn').textContent, 'other');
   check('legacy view record still loads', !!legacy.at('[data-entry="ignored.png"]'), true);
   event(legacy.at('[data-entry="ignored.png"]'), 'click'); legacy.all('.fattachment button')[0].click(); legacy.all('.fattachment button')[1].click();
   check('outside-root send and copy use absolute host path', [sent.slice(-1), copied.slice(-1)], [['/other/ignored.png'], ['/other/ignored.png']]);
@@ -301,6 +311,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   left.q.value = 'needle.*'; event(left.q, 'input'); await timers(); var alternateSearch = take('search-tabs', 'search');
   check('active tab root scopes content search with its own options', [alternateSearch.url.searchParams.get('root'), alternateSearch.url.searchParams.get('case'), alternateSearch.url.searchParams.get('regex')], ['/alternate', '1', '1']);
   left.all('.ftab-select')[0].click(); await timers(); var resumedOriginal = take('search-tabs', 'find');
+  check('restoring name mode hides content options again', left.at('.fopts').hidden, true);
   check('returning tab restores its query mode and options, not another tab or window', [left.q.value, left.el.getAttribute('data-fm'), left.all('.fopts button').map(n => n.getAttribute('aria-pressed')), resumedOriginal.url.searchParams.has('root'), alternateSearch.options.signal.aborted, parallelSearch.options.signal.aborted], ['original', 'name', ['false', 'false'], false, true, false]);
   await answer(alternateSearch, { files: [{ path: 'late-alternate.go', matches: [{ line: 3, hit: 'needle' }] }] });
   await answer(resumedOriginal, { items: [{ path: 'original.go' }] });

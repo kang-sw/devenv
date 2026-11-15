@@ -13,7 +13,7 @@ async function workspacePickerChecks() {
   check('every discovered root is labeled with its daemon host', picker.all('.froot-choices option').map(n => [n.value, n.textContent]), [[roots.home, 'daemon-host · /home/me'], ['/Volumes/Data', 'daemon-host · /Volumes/Data']]);
   check('picker omits files and guarded entries, including ignored directories', [picker.all('.fentry').map(n => n.getAttribute('data-entry')), picker.all('.fr[data-path]').map(n => n.getAttribute('data-path'))], [['project space', '.hidden', 'ignored'], ['project space', '.hidden', 'ignored']]);
   check('hidden directories are marked in both core views', [picker.at('[data-entry=".hidden"]').classList.contains('fdot'), picker.at('[data-path=".hidden"]').classList.contains('fdot')], [true, true]);
-  check('picker has no file search, root override or open-as-card entry', [picker.at('.fsr').hidden, picker.at('.fseg').hidden, picker.all('.fhd button')[0].hidden, picker.at('.fopen-card').hidden], [true, true, true, true]);
+  check('picker has no file search, root override or open-as-card entry', [picker.at('.fsr').hidden, picker.at('.fsr').contains(picker.at('.fseg')), picker.at('.fchange-root').disabled, picker.at('.fopen-card').hidden], [true, true, true, true]);
   var before = requests.length;
   picker.all('.fview-modes button')[3].click();
   event(entry(picker.el, 'project space'), 'click');

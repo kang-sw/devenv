@@ -162,7 +162,12 @@
   function paintTabs() {
     ui.tabs.textContent = "";
     tabs.forEach(function (t, i) {
-      var wrap = mk("span", "ftab"), b = mk("button", "ftab-select", t.state.dir.split("/").pop() || t.state.root.split(/[\\/]/).pop() || wsT("js.files.root.session"));
+      var rootInfo = t.live && t.live.info || (t.state.root === rootAbs ? info : null);
+      var rootName = rootInfo ? rootInfo.name || rootInfo.root : t.state.root.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+      var wrap = mk("span", "ftab"), b = mk("button", "ftab-select");
+      var ic = mk("span", "fi"); ic.innerHTML = licon(i === active ? "folder-open" : "folder");
+      b.appendChild(ic);
+      b.appendChild(mk("span", "fn", t.state.dir.split("/").pop() || rootName || wsT("js.files.loading")));
       b.type = "button"; b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(i === active));
       b.addEventListener("click", function () { switchTab(i); });
       var x = iconBtn("x", wsT("js.files.tab.close")); x.classList.add("ftab-close");
@@ -170,7 +175,7 @@
       x.addEventListener("click", function () { closeTab(i); });
       wrap.appendChild(b); wrap.appendChild(x); ui.tabs.appendChild(wrap);
     });
-    var plus = mk("button", "ibtn ftab-new", "+"); plus.type = "button"; plus.title = wsT("js.files.tab.new"); plus.setAttribute("aria-label", plus.title);
+    var plus = iconBtn("plus", wsT("js.files.tab.new")); plus.classList.add("ftab-new");
     plus.addEventListener("click", function () { newTab({ root: rootAbs, dir: dir, view: viewMode }); });
     ui.tabs.appendChild(plus);
   }
@@ -219,6 +224,13 @@
     var value = selection();
     if (ui.send) ui.send.disabled = !value || !h.send;
     if (ui.copy) ui.copy.disabled = !value || !h.copy;
+    ui.selected.textContent = "";
+    ui.selected.title = value ? value.absolute : "";
+    if (value) {
+      ui.selected.appendChild(mk("span", "", wsT("js.files.selected") + " "));
+      ui.selected.appendChild(mk("b", "", value.path.split("/").pop()));
+      ui.selected.appendChild(mk("span", "", "  " + value.path));
+    }
     if (!value && !directoriesOnly) return;
     subscribers[type].slice().forEach(function (fn) { fn(value, api); });
     if (h[type === "selection" ? "onSelection" : "onNavigate"]) h[type === "selection" ? "onSelection" : "onNavigate"](value, api);
@@ -227,8 +239,10 @@
     if (detachAttachment) detachAttachment();
     detachAttachment = null; ui.attachment.textContent = ""; ui.send = ui.copy = null;
     if (mount) { detachAttachment = mount(ui.attachment, api) || null; return; }
-    ui.send = mk("button", "btn pr", wsT("js.files.send"));
-    ui.copy = mk("button", "btn", wsT("js.files.copy"));
+    ui.send = mk("button", "btn pr");
+    ui.copy = mk("button", "btn");
+    ui.send.innerHTML = licon("paperclip"); ui.send.appendChild(mk("span", "", wsT("js.files.send")));
+    ui.copy.innerHTML = licon("copy"); ui.copy.appendChild(mk("span", "", wsT("js.files.copy")));
     [ui.send, ui.copy].forEach(function (b) { b.type = "button"; ui.attachment.appendChild(b); });
     ui.send.addEventListener("click", function () { var s = selection(); if (s && h.send) h.send(s.session ? s.path : s.absolute); });
     ui.copy.addEventListener("click", function () { var s = selection(); if (s && h.copy) h.copy(s.session ? s.path : s.absolute); });
@@ -291,12 +305,24 @@
 
   // --- the root --------------------------------------------------------------
   function paintHead() {
-    ui.rootBtn.hidden = directoriesOnly || !local();
+    ui.rootBtn.disabled = directoriesOnly || !local();
     if (ui.roots && info) ui.roots.value = rootAbs;
-    ui.root.textContent = info ? info.name || info.root : "";
+    var name = info ? info.name || info.root : "";
+    ui.root.textContent = name;
     ui.root.title = info ? info.root : "";
     ui.root.classList.toggle("alt", !!rootAbs);
-    ui.location.textContent = dir ? "/" + dir : "/";
+    ui.crumbRoot.textContent = name;
+    ui.rootBtn.title = (local() ? wsT("js.files.root.change") + " · " : "") + (info ? info.root : "");
+    ui.crumbs.textContent = "";
+    var parts = dir ? dir.split("/") : [];
+    parts.forEach(function (part, i) {
+      ui.crumbs.appendChild(mk("span", "fcrumb-sep", "/"));
+      var b = mk("button", "fcrumb" + (i === parts.length - 1 ? " last" : ""), part);
+      b.type = "button";
+      b.title = parts.slice(0, i + 1).join("/");
+      b.addEventListener("click", function () { navigate(parts.slice(0, i + 1).join("/")); });
+      ui.crumbs.appendChild(b);
+    });
     ui.up.disabled = !dir;
   }
   // useRoot makes a listing of a root's top folder the tree's root, with a
@@ -400,6 +426,7 @@
     if (e.st) d.classList.add("gm");
     if (e.gone) d.classList.add("gone");
     if (sel === r.path) d.classList.add("sel");
+    if (dir === r.path) { d.classList.add("cur"); d.setAttribute("aria-current", "location"); }
     var ch = mk("span", "ch");
     if (opens(e)) ch.innerHTML = licon("chevron-right");
     d.appendChild(ch);
@@ -776,6 +803,7 @@
     el.setAttribute("data-fm", mode);
     ui.mName.setAttribute("aria-pressed", String(mode === "name"));
     ui.mText.setAttribute("aria-pressed", String(mode === "content"));
+    ui.opts.hidden = mode !== "content";
     ui.q.placeholder = mode === "name" ? wsT("js.files.find.name") : wsT("js.files.find.content");
     ui.q.setAttribute("aria-label", ui.q.placeholder);
     if (ui.q.value) search(true);
@@ -929,27 +957,33 @@
     el.textContent = "";
     el.setAttribute("data-fm", mode);
     el.classList.toggle("fpicker", directoriesOnly);
+    var bar = mk("div", "fbar");
+    ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
+    ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
+    bar.appendChild(mk("span", "fbar-sep"));
+    ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
+    bar.appendChild(ui.up);
+    ui.location = mk("div", "flocation");
+    ui.rootBtn = mk("button", "fcrumb fcrumb-root fchange-root"); ui.rootBtn.type = "button";
+    ui.rootBtn.setAttribute("aria-label", wsT("js.files.root.change"));
+    ui.crumbRoot = mk("span", "froot"); ui.rootBtn.appendChild(ui.crumbRoot);
+    var down = mk("span", "fi"); down.innerHTML = licon("chevron-down"); ui.rootBtn.appendChild(down);
+    ui.root = ui.crumbRoot;
+    if (h.rootSlot) { ui.root = mk("span", "froot"); h.rootSlot.appendChild(ui.root); }
+    ui.location.appendChild(ui.rootBtn);
+    ui.crumbs = mk("span", "fcrumb-trail"); ui.location.appendChild(ui.crumbs); bar.appendChild(ui.location);
     var head = mk("div", "fhd");
-    ui.root = mk("span", "froot");
-    (h.rootSlot || head).appendChild(ui.root);
-    ui.rootBtn = iconBtn("folder-input", wsT("js.files.root.change"));
     ui.collapse = iconBtn("chevrons-down-up", wsT("js.files.collapse"));
     ui.refresh = iconBtn("refresh-cw", wsT("js.files.refresh"));
     ui.viewBtn = iconBtn("sliders-horizontal", wsT("js.files.view"));
     [ui.rootBtn, ui.viewBtn].forEach(function (b) { b.setAttribute("aria-haspopup", "dialog"); b.setAttribute("aria-expanded", "false"); });
-    [ui.rootBtn, ui.collapse, ui.refresh, ui.viewBtn].forEach(function (b) { head.appendChild(b); });
+    [ui.collapse, ui.refresh, ui.viewBtn].forEach(function (b) { head.appendChild(b); });
     ui.openCard = iconBtn("external-link", wsT("js.files.open.card"));
     ui.openCard.classList.add("fopen-card");
     ui.openCard.hidden = directoriesOnly;
     ui.viewBtn.hidden = directoriesOnly;
     ui.openCard.addEventListener("click", function () { if (h.openCard) h.openCard(location()); else openCard(location()); });
     head.appendChild(ui.openCard);
-    el.appendChild(head);
-    ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
-    ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); el.appendChild(ui.tabs);
-    var nav = mk("div", "fnav");
-    ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
-    ui.location = mk("span", "flocation"); nav.appendChild(ui.up); nav.appendChild(ui.location); el.appendChild(nav);
     if (directoriesOnly && h.roots) {
       ui.roots = mk("select", "froot-choices");
       ui.roots.setAttribute("aria-label", wsT("js.files.root.label"));
@@ -957,19 +991,19 @@
         var option = mk("option", "", h.roots.host + " · " + path); option.value = path; ui.roots.appendChild(option);
       });
       ui.roots.addEventListener("change", function () { applyRoot(ui.roots.value); });
-      nav.appendChild(ui.roots);
+      bar.appendChild(ui.roots);
     }
+    bar.appendChild(head); el.appendChild(bar);
 
+    var searchRow = mk("div", "fsrow"), row = mk("div", "fsr");
     var seg = mk("div", "fseg");
     seg.setAttribute("role", "group");
     seg.setAttribute("aria-label", wsT("js.files.mode"));
     ui.mName = mk("button", "", wsT("js.files.mode.name"));
     ui.mText = mk("button", "", wsT("js.files.mode.content"));
     [ui.mName, ui.mText].forEach(function (b) { b.type = "button"; seg.appendChild(b); });
-    el.appendChild(seg);
-    seg.hidden = directoriesOnly;
+    row.appendChild(seg);
 
-    var row = mk("div", "fsr");
     row.hidden = directoriesOnly;
     var si = mk("span", "fi");
     si.innerHTML = licon("search");
@@ -979,12 +1013,12 @@
     ui.q.spellcheck = false;
     ui.q.setAttribute("autocomplete", "off");
     row.appendChild(ui.q);
-    var opts = mk("span", "fopts");
+    var opts = ui.opts = mk("span", "fopts");
     ui.caseBtn = iconBtn("case-sensitive", wsT("js.files.case"));
     ui.regexBtn = iconBtn("regex", wsT("js.files.regex"));
     [ui.caseBtn, ui.regexBtn].forEach(function (b) { b.setAttribute("aria-pressed", "false"); opts.appendChild(b); });
     row.appendChild(opts);
-    el.appendChild(row);
+    searchRow.appendChild(row);
 
     ui.tree = mk("div", "flist ftree");
     ui.tree.setAttribute("role", "tree");
@@ -994,19 +1028,22 @@
     ui.hits.setAttribute("aria-label", wsT("js.files.results"));
     ui.hits.hidden = true;
     var modes = mk("div", "fview-modes"); ui.modes = [];
+    modes.setAttribute("role", "group"); modes.setAttribute("aria-label", wsT("js.files.view"));
+    var modeIcons = ["rows-3", "list", "layout-grid", "images", "columns-3"];
     viewModes.forEach(function (value) {
       var labels = [wsT("js.files.view.details"), wsT("js.files.view.list"), wsT("js.files.view.icon"), wsT("js.files.view.gallery"), wsT("js.files.view.column")];
-      var label = labels[viewModes.indexOf(value)], b = mk("button", value === "column" ? "fview-column" : "", value === "column" ? "\u25a5" : label); b.type = "button";
-      if (value === "column") { b.title = label; b.setAttribute("aria-label", label); }
+      var label = labels[viewModes.indexOf(value)], b = iconBtn(modeIcons[viewModes.indexOf(value)], label);
       b.addEventListener("click", function () { viewMode = value; renderDirectory(); persistTabs(); });
       modes.appendChild(b); ui.modes.push(b);
-    }); el.appendChild(modes);
+    }); searchRow.appendChild(modes); el.appendChild(searchRow);
     ui.workspace = mk("div", "fworkspace");
     ui.directory = mk("div", "fdirectory"); ui.directory.setAttribute("role", "listbox");
     ui.directory.setAttribute("aria-label", wsT("js.files.directory"));
     ui.workspace.appendChild(ui.tree); ui.workspace.appendChild(ui.directory);
     el.appendChild(ui.workspace); el.appendChild(ui.hits);
-    ui.attachment = mk("div", "fattachment"); el.appendChild(ui.attachment);
+    var footer = mk("div", "ffooter");
+    ui.selected = mk("span", "fselection"); footer.appendChild(ui.selected);
+    ui.attachment = mk("div", "fattachment"); footer.appendChild(ui.attachment); el.appendChild(footer);
 
     ui.viewPop = mk("div", "fpop");
     ui.viewPop.setAttribute("role", "dialog");
@@ -1029,7 +1066,8 @@
     ui.rootPop.setAttribute("role", "dialog");
     ui.rootPop.setAttribute("aria-label", wsT("js.files.root.label"));
     ui.rootPop.hidden = true;
-    ui.rootPop.appendChild(mk("div", "lb", wsT("js.files.root.label")));
+    var rootLabel = mk("div", "lb"); rootLabel.innerHTML = licon("folder-input");
+    rootLabel.appendChild(mk("span", "", wsT("js.files.root.label"))); ui.rootPop.appendChild(rootLabel);
     ui.rIn = mk("input", "fpin");
     ui.rIn.type = "text";
     ui.rIn.spellcheck = false;
