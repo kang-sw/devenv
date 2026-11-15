@@ -445,7 +445,17 @@
       "registered_at": "2026-11-15T10:16:07Z"
     },
     "261115-feat-ws-dashboard-board-topic-transport": {
-      "registered_at": "2026-11-15T07:28:41Z"
+      "registered_at": "2026-11-15T07:28:41Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T18:28:18Z",
+        "impl": {
+          "branch": "impl/develop/copy-equal-wound"
+        }
+      }
     },
     "261115-feat-ws-dashboard-conversation-rendering-consolidation": {
       "registered_at": "2026-11-14T22:47:31Z"
