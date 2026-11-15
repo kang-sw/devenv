@@ -1,0 +1,11 @@
+Error: page script: Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag.
+    at _Page.<anonymous> (/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/approved-002/driver.cjs:254:34)
+    at _Page._callHandler (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:11603:33)
+    at _Page.emit (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:11593:16)
+    at Proxy.<anonymous> (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:57270:24)
+    at Proxy._callHandler (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:11603:33)
+    at Proxy.emit (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:11593:16)
+    at Connection.dispatch (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:58877:25)
+    at /Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:57833:18
+    at Proxy.<anonymous> (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:57864:51)
+    at Proxy._callHandler (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:11603:33)

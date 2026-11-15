@@ -1,0 +1,260 @@
+{
+  "tracked": [
+    {
+      "pid": 42081,
+      "ppid": 42068,
+      "started": "Sun Nov 15 10:05:22 2026",
+      "command": "(git)"
+    },
+    {
+      "pid": 43005,
+      "ppid": 42068,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go test -c ./internal/wsdashboard -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline.test"
+    },
+    {
+      "pid": 43073,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 43097,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 43104,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b146/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b146=> -p github.com/kang-sw/devenv/internal/wsi18n -lang=go1.23 -complete -buildid 5LBVxsuPpyEcLYccENe0/5LBVxsuPpyEcLYccENe0 -goversion go1.26.2 -c=9 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b146/importcfg -embedcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b146/embedcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline-source/agents-plugin-tool/internal/w"
+    },
+    {
+      "pid": 43111,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b153/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b153=> -p github.com/kang-sw/devenv/internal/wsinbox -lang=go1.23 -complete -buildid kjWCftpDIBRJ8vS4ZvnG/kjWCftpDIBRJ8vS4ZvnG -goversion go1.26.2 -c=5 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b153/importcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline-source/agents-plugin-tool/internal/wsinbox/answers.go /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/"
+    },
+    {
+      "pid": 43121,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b137/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b137=> -p github.com/kang-sw/devenv/internal/wsholder -lang=go1.23 -complete -buildid mkGVvcwm-yTS7eSqSXh_/mkGVvcwm-yTS7eSqSXh_ -goversion go1.26.2 -c=9 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b137/importcfg -embedcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b137/embedcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline-source/agents-plugin-tool/internal"
+    },
+    {
+      "pid": 43127,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b157/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b157=> -p github.com/kang-sw/devenv/internal/wsstate -lang=go1.23 -complete -buildid med5_S6Cv82K51yYsYgO/med5_S6Cv82K51yYsYgO -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b157/importcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline-source/agents-plugin-tool/internal/wsstate/generated_paths.go /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/"
+    },
+    {
+      "pid": 43181,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b161/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b161=> -p github.com/kang-sw/devenv/internal/wswhiteboard -lang=go1.23 -complete -buildid 3vcVnt_k4lXOBIDfWOgr/3vcVnt_k4lXOBIDfWOgr -goversion go1.26.2 -c=7 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b161/importcfg -embedcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b161/embedcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline-source/agents-plugin-tool/inte"
+    },
+    {
+      "pid": 43216,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:30 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 43228,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:31 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile @/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/args2511183813"
+    },
+    {
+      "pid": 43338,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:33 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -atomic -bool -buildtags -directive -errorsas -ifaceassert -nilfunc -printf -slog -stringintconv -tests /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b123/vet.cfg"
+    },
+    {
+      "pid": 43376,
+      "ppid": 43005,
+      "started": "Sun Nov 15 10:05:33 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/link -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b001/wsdashboard.test -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b001/importcfg.link -X=runtime.godebugDefault=containermaxprocs=0,cryptocustomrand=1,decoratemappings=0,gotestjsonbuildtext=1,httpcookiemaxnum=0,multipathtcp=0,randseednop=0,rsa1024min=0,tlsmlkem=0,tlssecpmlkem=0,tlssha1=1,updatemaxprocs=0,urlmaxqueryparams=0,urlstrictcolons=0,x509rsacrt=0,x509sha256skid=0,x509usepolicies=0 -buildmode=pie -buildid=kvGuWzOKia0vdWTaepZQ/qODVTY0ogOGK7lfm69u_/RRqrtKE-HDD1JBETH4qo/kvGuWzOKia0vdWTaepZQ -X testing.testBinary=1 -extld=cc /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build2755981911/b001/_pkg_.a"
+    },
+    {
+      "pid": 43622,
+      "ppid": 42068,
+      "started": "Sun Nov 15 10:05:34 2026",
+      "command": "/Applications/Xcode.app/Contents/Developer/usr/bin/git archive --format=tar --output=/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result.tar a57290575bf57b506e05f6b8180c67cf56c87f65 agents-plugin-tool"
+    },
+    {
+      "pid": 43646,
+      "ppid": 42068,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go test -c ./internal/wsdashboard -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result.test"
+    },
+    {
+      "pid": 43666,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 43668,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 43670,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 43674,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 43675,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b128/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b128=> -p github.com/kang-sw/devenv/internal/wsgit -lang=go1.23 -complete -buildid yHrohqdjAM2VRlCU5Fzr/yHrohqdjAM2VRlCU5Fzr -goversion go1.26.2 -c=12 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b128/importcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result-source/agents-plugin-tool/internal/wsgit/executable.go /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/as"
+    },
+    {
+      "pid": 43676,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 43678,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 43679,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 43680,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(go)"
+    },
+    {
+      "pid": 43687,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 43702,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 43703,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 43704,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:35 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b154/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b154=> -p github.com/kang-sw/devenv/internal/wslive -lang=go1.23 -complete -buildid ixFe9WhAxorxbb82f7qF/ixFe9WhAxorxbb82f7qF -goversion go1.26.2 -c=16 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b154/importcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result-source/agents-plugin-tool/internal/wslive/host.go /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets"
+    },
+    {
+      "pid": 43709,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:36 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 44089,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:38 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -atomic -bool -buildtags -directive -errorsas -ifaceassert -nilfunc -printf -slog -stringintconv -tests /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b123/vet.cfg"
+    },
+    {
+      "pid": 44091,
+      "ppid": 43646,
+      "started": "Sun Nov 15 10:05:38 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/link -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b001/wsdashboard.test -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b001/importcfg.link -X=runtime.godebugDefault=containermaxprocs=0,cryptocustomrand=1,decoratemappings=0,gotestjsonbuildtext=1,httpcookiemaxnum=0,multipathtcp=0,randseednop=0,rsa1024min=0,tlsmlkem=0,tlssecpmlkem=0,tlssha1=1,updatemaxprocs=0,urlmaxqueryparams=0,urlstrictcolons=0,x509rsacrt=0,x509sha256skid=0,x509usepolicies=0 -buildmode=pie -buildid=R-x4OEljYzU_wwnhI1vH/K9hW5S39eKUb3nxgZ2JZ/rLFif8dlc0D_eIlParzh/R-x4OEljYzU_wwnhI1vH -X testing.testBinary=1 -extld=cc /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3588409393/b001/_pkg_.a"
+    },
+    {
+      "pid": 44124,
+      "ppid": 42068,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(go)"
+    },
+    {
+      "pid": 44135,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 44136,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 44137,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 44138,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 44139,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 44140,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 44142,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 44158,
+      "ppid": 44124,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -json /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3912037429/b001/vet.cfg"
+    },
+    {
+      "pid": 44349,
+      "ppid": 42068,
+      "started": "Sun Nov 15 10:05:39 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go vet ./internal/wsdashboard"
+    },
+    {
+      "pid": 44546,
+      "ppid": 44349,
+      "started": "Sun Nov 15 10:05:40 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -json /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build3666329082/b001/vet.cfg"
+    }
+  ],
+  "actions": [],
+  "errors": [],
+  "final_ps": [],
+  "elapsed_seconds": 19.114
+}

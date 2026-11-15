@@ -1,0 +1,36 @@
+{
+  "baseline": "72df121fcadb5e4e027b84c15474e402f9adfc34",
+  "current": "48764f937",
+  "scope": "outer panel geometry only",
+  "runs": [
+    {
+      "mode": "baseline",
+      "width": 1800,
+      "replacements": [
+        {
+          "path": "internal/wsdashboard/assets/dashboard.js",
+          "count": 1
+        },
+        {
+          "path": "internal/wsdashboard/assets/dashboard.css",
+          "count": 1
+        },
+        {
+          "path": "internal/wswhiteboard/assets/stream.js",
+          "count": 1
+        },
+        {
+          "path": "internal/wswhiteboard/assets/page.css",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "checks": [],
+  "blocked": [],
+  "processes": [],
+  "failure": {
+    "message": "page.waitForFunction: Timeout 8000ms exceeded.",
+    "stack": "page.waitForFunction: Timeout 8000ms exceeded.\n    at mount (/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool/internal/wsdashboard/testdata/viewed-panels.browser.cjs:160:14)\n    at async /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool/internal/wsdashboard/testdata/viewed-panels.browser.cjs:196:19"
+  }
+}

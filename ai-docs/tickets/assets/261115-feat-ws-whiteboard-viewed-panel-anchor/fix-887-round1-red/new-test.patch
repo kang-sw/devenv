@@ -1,0 +1,56 @@
+diff --git a/agents-plugin-tool/internal/wsdashboard/board_viewed_test.go b/agents-plugin-tool/internal/wsdashboard/board_viewed_test.go
+index f244e7190..3e33140a4 100644
+--- a/agents-plugin-tool/internal/wsdashboard/board_viewed_test.go
++++ b/agents-plugin-tool/internal/wsdashboard/board_viewed_test.go
+@@ -15,6 +15,51 @@ func viewedHarness(t *testing.T) string {
+ 	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFrameExposed", "boardFlushViewed")
+ }
+ 
++func TestBoardViewedCrossTopicInsertion(t *testing.T) {
++	runNode(t, "cross-topic insertion", viewedHarness(t)+`
++function must(what, ok) { if (!ok) throw new Error(what); }
++var oldA=topic("A","a1",[panel("pA","unchanged A")],100);
++var oldB=topic("B","b1",[panel("pB","unchanged B")],100);
++var liveA=topic("A","a1",[panel("pA","unchanged A",true)],100);
++var liveB=topic("B","b1",[panel("pB","unchanged B",true)],100);
++liveA.exposed=liveB.exposed=true;
++liveA.scroller=liveB.scroller=main;
++main.panels=liveA.panels.concat(liveB.panels);
++main.panels.forEach(function(p){p.scroller=main;});
++setLive([liveA,liveB]);
++var appended=panel("pNew","new 40px panel");appended.height=40;
++var nextA=topic("A","a2",[panel("pA","unchanged A"),appended],140);
++var previous=input([oldA,oldB]),incoming=input([nextA,oldB]);
++boardRendered=previous;boardOffered={previous:previous,input:incoming};
++// Literal model geometry: A spans [-99,1), B spans [1,101), and
++// the reading line at 1 belongs to B. A still has one exposed pixel.
++var scroll=99,before=geometry([oldA,oldB],scroll),readingLine=1;
++must("fixture has one exposed pixel of A and reading reference B",
++  Math.min(before.A+100,200)-Math.max(before.A,0)===1 &&
++  before.B===readingLine && before.B+100>readingLine);
++must("fixture appends only a new 40px panel without rewriting existing bytes/order",
++  nextA.panels[0].outerHTML===oldA.panels[0].outerHTML &&
++  nextA.panels[1]===appended && appended.height===40 &&
++  nextA.height-oldA.height===40 && incoming.topics.B===oldB &&
++  incoming.order.join()===previous.order.join());
++var staged=boardStageInput(incoming);
++// This must fail on the old product BEFORE any reference-B correction.
++// Correcting B alone would hide its shift while displacing exposed A.
++must("cross-topic insertion must be staged before reference-B correction",
++  staged.topics.A===oldA && staged.topics.B===oldB && !!boardPending.A);
++boardRecordPending();boardPendingBadge();
++must("cross-topic insertion uses the existing one-change A pending badge",
++  boardBadge && !boardBadge.hidden && boardBadge.textContent==="최신 변경 1건 반영 · A");
++var rendered=project([oldA,oldB],[staged.topics.A,staged.topics.B],[oldA,oldB]);
++var uncorrected=geometry(rendered,scroll),delta=uncorrected.B-before.B;
++var after=geometry(rendered,scroll+delta);
++must("both exposed panels remain fixed with the sole correction anchored to B",
++  after.A===-99 && after.B===1 && delta===0);
++must("staging leaves the offered canonical insertion immutable",
++  incoming.topics.A===nextA && nextA.panels.length===2 && topicSeen(nextA)==="a2");
++`)
++}
++
+ func TestBoardViewedRenderingAndRelease(t *testing.T) {
+ 	runNode(t, "viewed rendering release", viewedHarness(t)+`
+ var oldA=topic("A","a1",[panel("p1","old1"),panel("p2","same2")]);

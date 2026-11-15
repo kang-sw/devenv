@@ -1,0 +1,76 @@
+{
+  "tracked": [
+    {
+      "pid": 84843,
+      "ppid": 84717,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "/Applications/Xcode.app/Contents/Developer/usr/bin/git archive --format=tar --output=/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/approved-001/baseline.tar 5585844a794a031a770ce4171c5e05daf1bd3353 agents-plugin-tool"
+    },
+    {
+      "pid": 85047,
+      "ppid": 84717,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "go test -c ./internal/wsdashboard -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/approved-001/baseline.test"
+    },
+    {
+      "pid": 85064,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 85066,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 85069,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 85073,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 85076,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 85077,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:14 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 85083,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:15 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build1575675031/b161/_pkg_.a -trimpath /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build1575675031/b161=> -p github.com/kang-sw/devenv/internal/wswhiteboard -lang=go1.23 -complete -buildid IvkPHoYawc_nekQiwByM/IvkPHoYawc_nekQiwByM -goversion go1.26.2 -c=6 -shared -nolocalimports -importcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build1575675031/b161/importcfg -embedcfg /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build1575675031/b161/embedcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/approved-001/baseline-source/agents-plugin-tool/inter"
+    },
+    {
+      "pid": 85092,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:15 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 85094,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:15 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 85101,
+      "ppid": 85047,
+      "started": "Sun Nov 15 09:58:15 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -atomic -bool -buildtags -directive -errorsas -ifaceassert -nilfunc -printf -slog -stringintconv -tests /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/go-build1575675031/b161/vet.cfg"
+    }
+  ]
+}
