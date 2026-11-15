@@ -496,8 +496,15 @@
       if (status !== 200) toast(archErr(act, status, s));
     });
   }
-  // archErr is the message for a refused archive or unarchive.
-  function archErr(act, status, text) { return act === "hide" && status === 409 ? wsT("js.rail.archive.busy") : leadErr(status, text); }
+  // archErr is the message for a refused archive or unarchive. A 409 archive
+  // is the runner's retryable "holder scan pending"; a 500 one is a holder
+  // that refused to stop, after the runner rolled visibility back. Either
+  // way the row stays where it was, and nothing retries.
+  function archErr(act, status, text) {
+    if (act === "hide" && status === 409) return wsT("js.rail.archive.busy");
+    if (act === "hide" && status === 500) return wsT("js.rail.archive.failed");
+    return leadErr(status, text);
+  }
   // railForget takes the bar's stored workspace off the list.
   function railForget(btn) {
     var bar = btn.closest(".rws"), path = bar ? bar.getAttribute("data-ws") || "" : "", nm = bar && bar.querySelector(".nm");

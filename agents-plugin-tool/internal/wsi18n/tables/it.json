@@ -1881,6 +1881,7 @@
   "js.rail.deletes": "eliminata tra {0}",
   "js.rail.deletes.due": "eliminata a breve",
   "js.rail.archive.busy": "La sessione è ancora in verifica e non può ancora essere archiviata. Riprova tra un momento.",
+  "js.rail.archive.failed": "Impossibile archiviare: la sessione non si è fermata, quindi resta com'era.",
   "js.lead.close": "Chiudi",
   "js.lead.close.note": "Termina la conversazione e il processo e interrompe i risvegli via e-mail. Può essere riaperta dalla barra laterale.",
   "js.lead.close.confirm": "Chiudere questa sessione? Il suo processo termina e la conversazione non può essere continuata.",

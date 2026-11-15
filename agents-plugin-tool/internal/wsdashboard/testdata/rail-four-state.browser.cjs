@@ -108,6 +108,13 @@ async function behaviour(browser) {
     await page.locator('#wstoasts .wstoast', { hasText: '아직 세션 확인 중이라 보관할 수 없습니다' }).waitFor();
     await page.waitForTimeout(1200);
     assert.equal(await where(page, 'assettidy'), 'live', 'a refused archive leaves the row in place');
+    // A 500 archive (the holder refused to stop; the runner rolled back)
+    // likewise leaves the row put with a short message, and no retry.
+    await page.locator(row('renderer')).hover();
+    await page.locator(row('renderer') + ' .drarch').click();
+    await page.locator('#wstoasts .wstoast', { hasText: '세션을 멈추지 못해 보관하지 못했습니다' }).waitFor();
+    await page.waitForTimeout(1200);
+    assert.equal(await where(page, 'renderer'), 'live', 'a failed archive leaves the row in place');
 
     // The row menu's archive entry, then its unarchive entry.
     await page.mouse.move(5, 5);

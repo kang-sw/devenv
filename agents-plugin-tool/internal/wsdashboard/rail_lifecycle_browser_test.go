@@ -21,10 +21,13 @@ import (
 // /agents/<id>/hide|unhide writes the dashboard's real visibility sidecar
 // (WriteSessionHidden) and re-registers the row asleep, as the runner's
 // SetHidden does. The id busyID answers hide with the runner's retryable
-// 409. The runner's own gates are covered in internal/wsagent.
+// 409 (holder scan pending), and failID with its 500 for a holder that
+// refused to stop, after which the runner has rolled visibility back, so
+// nothing is written. The runner's own gates are covered in internal/wsagent.
 type fourStateAgents struct {
 	dir    string
 	busyID string
+	failID string
 	mu     sync.Mutex
 	notify func(replyID, project string)
 	posts  []string
@@ -56,7 +59,11 @@ func (a *fourStateAgents) Handler() http.Handler {
 		notify := a.notify
 		a.mu.Unlock()
 		if action == "hide" && id == a.busyID {
-			http.Error(w, "the session holder is still being scanned; try again", http.StatusConflict)
+			http.Error(w, "the session is rejoining its holder; archive again after the holder scan", http.StatusConflict)
+			return
+		}
+		if action == "hide" && id == a.failID {
+			http.Error(w, "the session was not archived: the holder did not stop", http.StatusInternalServerError)
 			return
 		}
 		if err := WriteSessionHidden(a.dir, id, action == "hide"); err != nil {
@@ -169,8 +176,8 @@ func seedFourStateRail(t *testing.T, dir, devenv, game string) []fourStateSessio
 // TestRailFourStateBrowser drives the real rail in Chromium against a
 // disposable daemon on an ephemeral port: the fold row's tri-state radio,
 // archive moving a row into the archived fold and staying there across a
-// reload, unarchive returning it asleep, a 409 archive leaving the row put
-// with its message, and the row menu's archive entry. With
+// reload, unarchive returning it asleep, a 409 or 500 archive leaving the
+// row put with its message, and the row menu's archive entry. With
 // WS_FOUR_STATE_SHOTS set to an absolute directory it also saves the
 // mockup-matched screenshots there (1440px and 700px, dark and light).
 func TestRailFourStateBrowser(t *testing.T) {
@@ -197,7 +204,7 @@ func TestRailFourStateBrowser(t *testing.T) {
 		}
 	}
 	seedFourStateRail(t, dir, devenv, game)
-	agents := &fourStateAgents{dir: dir, busyID: "assettidy"}
+	agents := &fourStateAgents{dir: dir, busyID: "assettidy", failID: "renderer"}
 	d := startIndexedDaemon(t, dir, newPageFake(), time.Hour, func(o *DaemonOptions) {
 		o.Port = 0
 		o.LAN = false
@@ -225,13 +232,15 @@ func TestRailFourStateBrowser(t *testing.T) {
 	if err != nil || hidden {
 		t.Errorf("reviewer sidecar hidden = %v, %v; want unarchived at the end", hidden, err)
 	}
-	if hidden, _ := ReadSessionHidden(dir, "assettidy"); hidden {
-		t.Error("a refused (409) archive wrote the sidecar")
+	for _, id := range []string{"assettidy", "renderer"} {
+		if hidden, _ := ReadSessionHidden(dir, id); hidden {
+			t.Errorf("a refused (409/500) archive of %s wrote the sidecar", id)
+		}
 	}
 	agents.mu.Lock()
 	posts := strings.Join(agents.posts, ",")
 	agents.mu.Unlock()
-	if strings.Count(posts, "assettidy/hide") != 1 {
-		t.Errorf("posts = %s; want exactly one refused archive and no retry", posts)
+	if strings.Count(posts, "assettidy/hide") != 1 || strings.Count(posts, "renderer/hide") != 1 {
+		t.Errorf("posts = %s; want exactly one of each refused archive and no retry", posts)
 	}
 }

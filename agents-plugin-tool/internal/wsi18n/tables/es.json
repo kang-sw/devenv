@@ -1881,6 +1881,7 @@
   "js.rail.deletes": "se elimina en {0}",
   "js.rail.deletes.due": "se elimina pronto",
   "js.rail.archive.busy": "La sesión aún se está comprobando y todavía no se puede archivar. Inténtalo de nuevo en un momento.",
+  "js.rail.archive.failed": "No se pudo archivar: la sesión no se detuvo, así que queda como estaba.",
   "js.lead.close": "Cerrar",
   "js.lead.close.note": "Termina la conversación y el proceso, y detiene las activaciones por correo. Se puede volver a abrir desde el raíl.",
   "js.lead.close.confirm": "¿Cerrar esta sesión? Su proceso termina y la conversación no se puede continuar.",

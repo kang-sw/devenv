@@ -1881,6 +1881,7 @@
   "js.rail.deletes": "{0} 후 삭제",
   "js.rail.deletes.due": "곧 삭제",
   "js.rail.archive.busy": "아직 세션 확인 중이라 보관할 수 없습니다. 잠시 후 다시 시도하세요.",
+  "js.rail.archive.failed": "세션을 멈추지 못해 보관하지 못했습니다. 세션은 그대로 둡니다.",
   "js.lead.close": "닫기",
   "js.lead.close.note": "대화와 프로세스를 종료하고 메일 깨우기를 중지합니다. 레일에서 다시 열 수 있습니다.",
   "js.lead.close.confirm": "이 세션을 닫을까요? 프로세스가 종료되고 대화를 이어갈 수 없습니다.",

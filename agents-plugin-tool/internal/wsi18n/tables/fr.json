@@ -1881,6 +1881,7 @@
   "js.rail.deletes": "supprimée dans {0}",
   "js.rail.deletes.due": "supprimée bientôt",
   "js.rail.archive.busy": "La session est encore en cours de vérification et ne peut pas encore être archivée. Réessayez dans un instant.",
+  "js.rail.archive.failed": "Archivage impossible : la session ne s'est pas arrêtée, elle reste telle quelle.",
   "js.lead.close": "Fermer",
   "js.lead.close.note": "Termine la conversation et le processus, et arrête les réveils par e-mail. Elle peut être rouverte depuis le rail.",
   "js.lead.close.confirm": "Fermer cette session ? Son processus s'arrête et la conversation ne peut pas être poursuivie.",

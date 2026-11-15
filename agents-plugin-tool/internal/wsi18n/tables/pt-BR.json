@@ -1881,6 +1881,7 @@
   "js.rail.deletes": "excluída em {0}",
   "js.rail.deletes.due": "excluída em breve",
   "js.rail.archive.busy": "A sessão ainda está sendo verificada e ainda não pode ser arquivada. Tente de novo em instantes.",
+  "js.rail.archive.failed": "Não foi possível arquivar: a sessão não parou, então continua como estava.",
   "js.lead.close": "Fechar",
   "js.lead.close.note": "Encerra a conversa e o processo e interrompe os acionamentos por e-mail. Ela pode ser reaberta pela barra lateral.",
   "js.lead.close.confirm": "Fechar esta sessão? O processo é encerrado e a conversa não pode ser continuada.",

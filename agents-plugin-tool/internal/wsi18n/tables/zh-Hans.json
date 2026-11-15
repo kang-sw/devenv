@@ -1881,6 +1881,7 @@
   "js.rail.deletes": "{0}后删除",
   "js.rail.deletes.due": "即将删除",
   "js.rail.archive.busy": "仍在检查会话，暂时无法归档。请稍后再试。",
+  "js.rail.archive.failed": "未能停止会话，因此无法归档。会话保持原样。",
   "js.lead.close": "关闭",
   "js.lead.close.note": "结束对话和进程，并停止邮件唤醒。可从轨道重新打开。",
   "js.lead.close.confirm": "关闭此会话？其进程将结束，对话无法继续。",

@@ -303,7 +303,7 @@
           P.redraw();
           return;
         }
-        var msg = action === "hide" && st === 409 ? wsT("js.rail.archive.busy") : leadErr(st, s);
+        var msg = action === "hide" || action === "unhide" ? archErr(action, st, s) : leadErr(st, s);
         if (P.live(gen)) failed = msg;
         else toast(msg);
         P.redraw();
