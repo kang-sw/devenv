@@ -470,19 +470,6 @@
     "261114-bug-ws-concurrent-worktree-acquire-pool-collision": {
       "registered_at": "2026-11-14T13:29:12Z"
     },
-    "261114-bug-ws-dashboard-busy-board-read-gone": {
-      "registered_at": "2026-11-14T12:18:46Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec4/busy-board-read-gone",
-        "phase": "closed",
-        "touched_at": "2026-11-15T00:11:41Z",
-        "impl": {
-          "branch": "impl/exec4/busy-board-read-gone/wrist-snuff-visor"
-        }
-      }
-    },
     "261114-bug-ws-dashboard-conversation-send-follow-bottom": {
       "registered_at": "2026-11-14T11:36:43Z"
     },
@@ -703,7 +690,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-14T23:55:56Z",
         "impl": {
           "branch": "impl/develop/swarm-easel-clay"
