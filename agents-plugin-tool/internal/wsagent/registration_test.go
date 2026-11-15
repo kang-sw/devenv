@@ -10,6 +10,37 @@ import (
 	"testing"
 )
 
+func TestPermissionModesLegacyFallback(t *testing.T) {
+	registry := map[string]BackendRegistration{
+		BackendClaude: {PermissionModes: []string{"review"}},
+		BackendPi:     {PermissionModes: []string{"pi-native"}},
+		"fixture":     {PermissionModes: []string{"run"}},
+		"empty":       {PermissionModes: []string{}},
+	}
+	for _, tt := range []struct {
+		name, backend string
+		registries    []map[string]BackendRegistration
+		want          []string
+	}{
+		{"standalone claude", BackendClaude, nil, LeadPermissionModes},
+		{"standalone pi", BackendPi, nil, LeadPermissionModes},
+		{"standalone extension", "fixture", nil, nil},
+		{"registered claude", BackendClaude, []map[string]BackendRegistration{registry}, []string{"review"}},
+		{"registered pi retains legacy modes", BackendPi, []map[string]BackendRegistration{registry}, LeadPermissionModes},
+		{"registered extension", "fixture", []map[string]BackendRegistration{registry}, []string{"run"}},
+		{"empty extension modes", "empty", []map[string]BackendRegistration{registry}, []string{}},
+		{"absent extension", "absent", []map[string]BackendRegistration{registry}, nil},
+		{"nil registry claude", BackendClaude, []map[string]BackendRegistration{nil}, nil},
+		{"nil registry pi", BackendPi, []map[string]BackendRegistration{nil}, LeadPermissionModes},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := permissionModes(tt.backend, tt.registries); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("permissionModes(%q) = %v; want %v", tt.backend, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRegisteredBackendAdmission(t *testing.T) {
 	backends := map[string]BackendRegistration{"fixture": {Backend: &fakeBackend{}, LeadProfile: "fixture-lead", PermissionModes: []string{"review"}}}
 	for _, raw := range []string{`{"backend":"fixture"}`, `{"backend":"fixture","lead":true,"permission_mode":"review"}`} {

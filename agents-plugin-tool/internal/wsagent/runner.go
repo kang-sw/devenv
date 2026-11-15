@@ -609,10 +609,6 @@ func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, erro
 		return State{}, categorized(ErrInvalidProfile, badRequest("effort %q must be a lowercase word", opts.Effort))
 	}
 	modes := permissionModes(strings.TrimSpace(backend), []map[string]BackendRegistration{r.opts.Backends})
-	// Existing Pi callers may send a Claude mode; it remains ignored.
-	if strings.TrimSpace(backend) == BackendPi {
-		modes = LeadPermissionModes
-	}
 	if opts.PermissionMode != "" && !slices.Contains(modes, opts.PermissionMode) {
 		return State{}, categorized(ErrInvalidProfile, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(modes, ", ")))
 	}
@@ -1011,8 +1007,8 @@ func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
 
 func (r *Runner) setPermissionMode(id, mode string, user bool) (State, error) {
 	modes := LeadPermissionModes
-	if rec, ok := r.recordOf(id); ok && rec.Backend != BackendPi {
-		modes = r.opts.Backends[rec.Backend].PermissionModes
+	if rec, ok := r.recordOf(id); ok {
+		modes = permissionModes(rec.Backend, []map[string]BackendRegistration{r.opts.Backends})
 	}
 	if !slices.Contains(modes, mode) {
 		return State{}, categorized(ErrInvalidProfile, badRequest("permission_mode %q must be one of %s", mode, strings.Join(modes, ", ")))

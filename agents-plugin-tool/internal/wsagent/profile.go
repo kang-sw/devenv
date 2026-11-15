@@ -294,12 +294,7 @@ func (p Profile) validate(registries ...map[string]BackendRegistration) error {
 		if !p.Lead {
 			return fmt.Errorf("permission_mode applies to a lead profile only (lead: true)")
 		}
-		// Legacy Pi profiles accepted these values and ignored them at launch.
-		// Preserve that read contract; registered extensions use their own list.
 		modes := permissionModes(p.Backend, registries)
-		if p.Backend == BackendPi {
-			modes = LeadPermissionModes
-		}
 		if !slices.Contains(modes, p.PermissionMode) {
 			return fmt.Errorf("permission_mode %q must be one of %s", p.PermissionMode, strings.Join(modes, ", "))
 		}
