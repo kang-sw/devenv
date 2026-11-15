@@ -20,7 +20,7 @@ for (const origin of allowed) {
   const u = new URL(origin);
   assert(u.hostname === '127.0.0.1' && u.port && u.port !== '29417' && u.origin === origin, 'exact disposable origin');
 }
-const evidence = { baseline: pair[0], result: pair[1], scope: 'outer panel geometry; no opaque child DOM reads', checks: [], observations: [], documents: [], requests: [], completed: false };
+const evidence = { baseline: pair[0], result: pair[1], scope: 'outer panel geometry; no opaque child DOM reads', checks: [], observations: [], documents: [], requests: [], serviceWorkers: [], completed: false };
 let server, browser, active, closing, monitor, trackingError, sequence = 0;
 const owned = new Map(), frameIDs = new WeakMap();
 function save(name, data) {
@@ -28,6 +28,10 @@ function save(name, data) {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n'); fs.renameSync(tmp, dest);
 }
 function persist() { save('results.json', evidence); save('document-ledger.json', evidence.documents); }
+function captureServiceWorkers(run) {
+  run.serviceWorkers.remaining = run.context.serviceWorkers().map(worker => worker.url());
+  persist();
+}
 function frameIdentity(frame) {
   if (!frame) return null;
   if (!frameIDs.has(frame)) frameIDs.set(frame, ++sequence);
@@ -59,6 +63,7 @@ async function cleanup() {
   closing = (async () => {
     const errors = [];
     clearInterval(monitor);
+    try { if (active) captureServiceWorkers(active); } catch (e) { errors.push(e.stack); }
     try { track(); } catch (e) { errors.push(e.stack); }
     try { if (browser) await bounded(browser.close(), 4000, 'browser close cap'); } catch (e) { errors.push(e.stack); }
     try { if (server) await bounded(server.close(), 4000, 'browser server close cap'); } catch (e) { errors.push(e.stack); }
@@ -190,7 +195,7 @@ async function emit(run, variant) {
 }
 async function mount(info, mode, width, label) {
   if (trackingError) throw trackingError;
-  const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'reduce', locale: 'en-US', serviceWorkers: 'block' });
+  const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'reduce', locale: 'en-US', serviceWorkers: 'allow' });
   context.setDefaultTimeout(8000); context.setDefaultNavigationTimeout(8000);
   let reject;
   const run = { info, mode, width, name: mode + '-' + width + '-' + label, context, error: null,
@@ -198,6 +203,23 @@ async function mount(info, mode, width, label) {
   run.fatal.catch(() => {});
   const fail = e => { if (!run.error) { run.error = e; reject(e); } };
   run.fail = fail; active = run;
+  run.serviceWorkers = { run: run.name, attempts: [], events: [], remaining: [] };
+  evidence.serviceWorkers.push(run.serviceWorkers); persist();
+  await context.exposeBinding('__wsViewedServiceWorkerAttempt', ({ frame }, scriptURL) => {
+    run.serviceWorkers.attempts.push({ frame: frameIdentity(frame), scriptURL });
+    persist();
+  });
+  context.on('serviceworker', worker => { run.serviceWorkers.events.push(worker.url()); persist(); });
+  // Preserve opaque frames' native restriction without Playwright's Navigator read.
+  await context.addInitScript(() => {
+    if (self.origin === 'null') return;
+    const container = navigator.serviceWorker;
+    if (!container) return;
+    Object.getPrototypeOf(container).register = async function(scriptURL) {
+      await globalThis.__wsViewedServiceWorkerAttempt(typeof scriptURL === 'string' ? scriptURL : { type: typeof scriptURL });
+      throw new Error('Service worker registration is forbidden in the viewed fixture');
+    };
+  });
   await context.route('**/*', async route => {
     const request = route.request();
     try {
@@ -312,6 +334,10 @@ async function mount(info, mode, width, label) {
 }
 async function closeRun(run) {
   await guard(run, Promise.all([...run.responseJobs]));
+  captureServiceWorkers(run);
+  check(run.name + ' no service worker registration attempts', run.serviceWorkers.attempts.length === 0, run.serviceWorkers.attempts);
+  check(run.name + ' no service worker creations', run.serviceWorkers.events.length === 0, run.serviceWorkers.events);
+  check(run.name + ' no remaining service workers', run.serviceWorkers.remaining.length === 0, run.serviceWorkers.remaining);
   await run.context.close(); if (active === run) active = null;
 }
 async function height(run, id, increment, wrong = false) {

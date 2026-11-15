@@ -30,6 +30,11 @@ func TestBoardViewedFixture(t *testing.T) {
 	if stopPath == "" || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(pin) {
 		t.Fatal("stop file and full source pin are required")
 	}
+	// Keep the rail's account-usage probe away from the caller's credentials.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 	// Never opt into a developer tree or an installed daemon. Port 0 and both
 	// temporary directories are local to this test process.
 	SetDevAssets(nil)
