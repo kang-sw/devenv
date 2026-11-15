@@ -658,7 +658,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "feat/unified-history-task3",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T01:43:08Z",
         "impl": {
           "branch": "impl/feat/unified-history-task3/flask-churn-crib"
@@ -719,16 +719,6 @@
     },
     "261115-bug-pi-lead-local-devenv-swaps-shared-daemon": {
       "registered_at": "2026-11-15T02:07:48Z"
-    },
-    "261115-bug-pi-nonmain-process-mints-top-level-lead-key": {
-      "registered_at": "2026-11-15T04:30:02Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T04:55:59Z"
-      }
     },
     "261115-bug-pi-print-mode-empty-after-subagent-push": {
       "registered_at": "2026-11-14T23:55:38Z"
