@@ -16,8 +16,7 @@ import (
 
 // The index's main panel is the landing: both lockup variants inline (the
 // light-ink one for dark, the dark-ink one for light) over the how-to, in
-// the viewer's language; the stylesheet shows one variant per theme and the
-// how-to only when the landing is the hash target (/#guide).
+// the viewer's language, and the stylesheet shows one variant per theme.
 func TestIndexShowsTheLandingLogoAndGuide(t *testing.T) {
 	f := startPageFixture(t)
 	code, page := get(t, f.base+"/?frame=1")
@@ -73,7 +72,6 @@ func TestIndexShowsTheLandingLogoAndGuide(t *testing.T) {
 		`:root:not([data-theme="light"]) .dlogo-d { display: block; }`,
 		`:root[data-theme="dark"] .dlogo-d { display: block; }`,
 		`:root[data-theme="dark"] .dlogo-l { display: none; }`,
-		`.dlanding:target .dguide { display: block; }`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("the stylesheet lacks the theme rule %q", want)
@@ -83,8 +81,8 @@ func TestIndexShowsTheLandingLogoAndGuide(t *testing.T) {
 
 // Chromium acceptance over disposable fixture sessions: the landing's
 // lockup is centred with the variant for each theme, and a second click
-// (or Enter) on the open session's rail row closes its view, to /#guide and
-// the how-to, while a click on another row opens it as before. With
+// (or Enter) on the open session's rail row closes its view, back to / and
+// the landing, while a click on another row opens it as before. With
 // WS_LANDING_SHOTS set (an absolute directory) it also saves screenshots.
 func TestLandingGuideBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {

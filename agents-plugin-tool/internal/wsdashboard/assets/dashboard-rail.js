@@ -330,8 +330,8 @@
       // shell keeps its page (and the memo pad's state) and shows the
       // session's frame (the shell's link clicks, below). Picking the open
       // session again closes its view (the session keeps running) and goes
-      // to the index's guide (/#guide, the landing with its how-to); a
-      // modified click keeps the link's own behaviour.
+      // to the index, whose landing holds the how-to; a modified click
+      // keeps the link's own behaviour.
       var pick = t.closest && t.closest("a[href]");
       if (pick) {
         var prow = pick.closest(".rs");
@@ -339,7 +339,7 @@
           e.preventDefault();
           if (!shell) { saveDraft(); if (memoPad) memoPad.remember(); }
           railOpen(false);
-          go("/#guide");
+          go("/");
           return;
         }
         if (!shell) { saveDraft(); if (memoPad) memoPad.remember(); }

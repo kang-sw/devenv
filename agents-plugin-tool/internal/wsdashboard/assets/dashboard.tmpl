@@ -357,12 +357,12 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 </body></html>
 {{end}}
 
-{{/* The landing: what the index's main panel shows with no session open.
-At / it is the Werkschaft lockup alone at the panel's centre, with no card
-behind it; both theme variants are inline (Assets.Logo) and the stylesheet
-shows the one for the page's theme. At /#guide, where a second click on the
-open session's rail row goes (dashboard-rail.js), the landing is the hash
-target and shows a short how-to under the lockup (:target, no script). */}}
+{{/* The landing: what the index's main panel shows with no session open,
+at / and after a second click on the open session's rail row closes its
+view (dashboard-rail.js). The Werkschaft lockup over a short how-to, with
+no card behind them; both lockup variants are inline (Assets.Logo) and the
+stylesheet shows the one for the page's theme. Its id keeps an earlier
+/#guide address landing on the same page. */}}
 {{define "landing"}}<div class="dlanding" id="guide"><div class="dlogo" role="img" aria-label="Werkschaft">{{.Assets.Logo}}</div><section class="dguide" aria-labelledby="dguide-h"><h2 id="dguide-h">{{t "index.guide.title"}}</h2><ol><li><b>{{t "index.guide.new"}}</b><span>{{t "index.guide.new.sub"}}</span></li><li><b>{{t "index.guide.pick"}}</b><span>{{t "index.guide.pick.sub"}}</span></li><li><b>{{t "index.guide.board"}}</b><span>{{t "index.guide.board.sub"}}</span></li><li><b>{{t "index.guide.answer"}}</b><span>{{t "index.guide.answer.sub"}}</span></li><li><b>{{t "index.guide.files"}}</b><span>{{t "index.guide.files.sub"}}</span></li></ol></section></div>{{end}}
 
 {{define "r-sessions"}}<div class="totals"><span class="chip">{{t "index.live" .Live}}</span><span class="chip">{{t "index.working" .Busy}}</span></div>{{range .Projects}}<section class="project"><div class="pbar"><span class="pname">{{.Name}}</span><span class="ppath">{{.Path}}</span><span class="chip">{{len .Sessions}}</span></div>{{range .Sessions}}{{template "srow" .}}{{end}}{{if .Ended}}<div class="endedhead">{{t "head.ended"}}</div>{{range .Ended}}{{template "srow" .}}{{end}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{t "index.hidden" .}}</div>{{end}}</section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}{{end}}
