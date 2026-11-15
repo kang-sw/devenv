@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1e0e04773285b042
 sage-review-completeness-reviewed: 1e0e04773285b042
+completed: 2026-11-15
 ---
 
 # Pi spawn performs a redundant delegation-metadata write that may fail after allocation
@@ -67,3 +68,13 @@ Verification uses the existing focused harness for `test/agent-storage.test.ts` 
 - Run the touched allocation/spawn regressions and existing bounded diagnostic tests; read full output and reject empty selections. Run applicable narrow TypeScript/package checks without starting live sessions.
 
 Record the actual fix and verification under Result, explicitly preserving the unverified status of the historical warning's cause. No follow-up investigation or warning-suppression scope is implied.
+
+### Result (eaa7469fc) - 2026-11-15
+
+- Added an optional trailing `DelegationPolicy` argument to `allocateAgentHome()` and included it in the initial descriptor. `spawnAgent()` passes its normalized policy into allocation and no longer mutates the returned descriptor or issues the immediate delegation-only update. The synchronous registration boundary and existing writer, locks, cleanup, diagnostics, readers and later updates remain unchanged. Regenerated `agents-plugin-pi/dist/index.js`.
+- Before editing, offline rename instrumentation on the existing `spawn admission preserves omitted legacy authority` fixture confirmed the original sequence for both scoped and unrestricted children: write 1 omitted delegation and write 2 added it. The historical warning's underlying cause and its causal connection to that second write remain unverified; no live reproduction or warning suppression was attempted.
+- Added allocation and spawn regressions that inspect initial JSON and returned authority before later writes, preserve allocation without delegation, require exactly one write before registration/start, retain legitimate lifecycle updates, and inject initial rename failure to prove rejection with zero registrations/starts and channel, lock and temporary-file cleanup.
+- Verification: the bounded `node --test --test-reporter spec --test-name-pattern` selection in `test/agent-storage.test.ts` and `test/spawner.test.ts` passed 14/14, with zero failures or skips. It covered the new regressions, existing scoped/legacy admission and narrowing, bounded diagnostics, session path safety, Explore mode compatibility and ownership rename retry fixtures. The initial seven-test subset also passed 7/7. All runs unset `WS_PI_SPAWN_ROLE`, `WS_PI_EXPLORE_MODE`, `WS_PI_DELEGATION_POLICY` and `WS_PI_LEAD_MEMORY_LOG`.
+- Checks: `node --check` passed for all four changed TypeScript files and the generated bundle; `node scripts/bundle.mjs` and `git diff --check` passed. No package TypeScript type-check script is configured. Existing cached dependencies were linked into the ignored local dependency directory; cached esbuild 0.28.1 produced only the intended source changes and bundle input-hash update. No install, download, network, shared-runtime operation, broad test sweep or live Pi/provider launch ran.
+- Independent one-pass Lite review of `320a12c51..eaa7469fc` was clean, with no findings. The review inspected the source, tests and corresponding generated bundle code; it did not independently rerun tests/build or establish full binary bundle equivalence. Findings: `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@2b250898/review-paths/e87c23f2-01-metadata-first-write-lite.md`.
+- Decisions: retain the existing fourth `exploreMode` argument and add delegation fifth, preserving unrelated callers and T0 storage compatibility. The small storage-test leaf ran directly after the implementer playbook render was refused by an existing capability-ceiling mismatch; no ceiling changes, delegation retry, extra investigation or new idea ticket followed. Independent implementation review remained available and completed through the permitted scoped reviewer path.
