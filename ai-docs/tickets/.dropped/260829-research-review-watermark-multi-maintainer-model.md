@@ -213,4 +213,4 @@ harmless.
   Cross-Child Decisions need a formal `#### Edition`-style revision once accepted.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 다중 관리자 모델 연구이고 이 저장소 상황과 맞지 않으며 할 일이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Research on a multi-maintainer model that does not match this repository's situation; no action.

@@ -112,4 +112,4 @@ this is a design tension between "broad recall via thread-widening" and
 (none yet — this ticket is diagnostic, not a design proposal)
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 순위 정밀도 측정 메모이고 임베딩 도입 여부만 열려 있어 구체적 할 일이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A ranking-precision measurement note where only whether to adopt embeddings is open; no concrete action.

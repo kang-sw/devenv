@@ -31,4 +31,4 @@ Found by the empty-board-render fix (merged aa3c2634f, 2026-11-14).
   offset should change.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 래퍼 클래스가 wb-oq-top으로 바뀌어 .top 충돌이 없어짐 (page-sticky.css).
+Triage 2026-11-15 (owner (1057)): DONE - The wrapper class was renamed to wb-oq-top, so the .top collision is gone (page-sticky.css).

@@ -24,4 +24,4 @@ MAIN reported on 2026-11-15 at 01:20:29 UTC that `go test ./internal/wsdashboard
 When separately scheduled, reproduce the focused failure and trace `mode` through the rail implementation and node harness. Record the exact revision, command, complete output and actual exit code; identify which side violates its expected execution context. Report the evidence and proposed correction before implementation. This idea ticket does not settle a production-versus-harness fix or authorize one.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 테스트 fixture 에 mode 전역이 없던 문제를 9474c5ec9 에서 고침; 9474c5ec9.
+Triage 2026-11-15 (owner (1057)): DONE - Fixed in 9474c5ec9: the test fixture lacked a mode global; 9474c5ec9.

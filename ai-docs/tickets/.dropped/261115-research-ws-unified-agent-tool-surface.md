@@ -672,4 +672,4 @@ Verdict: agy - partial: all file/shell/web tools can be removed via a custom
 agent, but `manage_task` remains and MCP tools sit behind `call_mcp_tool`.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 도구 표면 통합 대 하네스별 적응 비교 연구. 구체적 다음 단계 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A comparison study of unified tool surface versus per-harness adaptation; no concrete next step.

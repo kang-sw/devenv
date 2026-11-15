@@ -60,4 +60,4 @@ execute, including whether the fix belongs in fact population (ticket-time),
 worker verification (run-time), or a standing test (CI-time) — or a pair of them.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 한 번의 검증 누락 사례이고 구체적 수정안이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A single case of a missed verification with no concrete fix proposal.

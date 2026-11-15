@@ -1895,6 +1895,7 @@
   "composer.cmd.remove": "コマンドを外す",
   "entry.command.terminal": "テキスト出力なし: ターミナルで開きます",
   "entry.board.nudge": "ボード通知 · {0}: {1}",
+  "entry.board.nudge.batch": "ボード通知 · {0} {1}件: {2}",
   "entry.board.nudge.overdue": "期限超過",
   "entry.board.nudge.unblocked": "ブロック解除",
   "entry.board.nudge.hourly": "毎時の確認",

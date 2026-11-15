@@ -48,4 +48,4 @@ implementation. This idea neither authorizes a fix nor promises restoration of
 artifacts whose prior existence/location has not been independently established.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 과거 agenda 의 보존 메모를 풀이 모르고 재사용했다는 추측성 관찰. 삭제 증거도 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A speculative observation that the pool reused a past agenda's preservation note without knowing it; no evidence of deletion.

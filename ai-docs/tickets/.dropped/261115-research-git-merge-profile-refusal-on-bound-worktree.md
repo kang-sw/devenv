@@ -37,4 +37,4 @@ None.
 
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - git.merge 가 프로필에서 거부된 한 건의 조사 메모. 의도된 제한인지도 불명.
+Triage 2026-11-15 (owner (1057)): DROP - A single research note about git.merge being refused by a profile; unclear whether it is an intended limit.

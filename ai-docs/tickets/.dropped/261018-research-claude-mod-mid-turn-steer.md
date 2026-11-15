@@ -155,4 +155,4 @@ Mod API declarations: the bundled plugin-authoring skill's
 - `$.session.send` to self: refused by the runtime.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 실행용 기능 티켓이 이미 만들어져 연구 노트는 불필요; 3c9b423cc.
+Triage 2026-11-15 (owner (1057)): DROP - The actionable feature ticket already exists, so the research note is unnecessary; 3c9b423cc.

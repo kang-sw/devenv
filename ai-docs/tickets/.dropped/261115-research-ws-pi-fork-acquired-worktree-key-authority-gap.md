@@ -36,4 +36,4 @@ None selected. Inspect the fork key lineage, acquired worker-key ownership, and 
 No product alternatives were settled. Bypassing the creation primitive, modifying the shared root, and blind retries were not used as recovery actions.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - Pi fork 가 얻은 워크트리 키를 거부당한 한 건. 권한 경계일 가능성이 높고 조치 불명.
+Triage 2026-11-15 (owner (1057)): DROP - A single case of a Pi fork's acquired worktree key being rejected; likely a permission boundary and the action is unclear.

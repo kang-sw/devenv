@@ -34,4 +34,4 @@ A native keyboard selection may legitimately cross immutable entries and yield o
 - Retrying diagnosis, changing expected five to six, or relaxing the assertion in the merge-first acceptance unit: outside the confirmed authority.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 선택 캡슐 개수 관련 연구 기록; 다음 할 일 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A research record about selection capsule counts; no next step.

@@ -26,4 +26,4 @@ UI-T5's obsolete badge predicates are repaired separately; that source change do
 Define a minimal, explicitly authorized path to run the existing shared-controls/shared-actions coverage at 1800px and 420px with coherent renderer fixtures and exited-terminal prerequisites. Account for preparation/build reuse, fixture ownership, cancellation and final process evidence within a cumulative budget. Coordinate the terminal-specific work with the related existing ticket; this ticket owns orchestration/readiness rather than duplicating that diagnosis. Preserve pending coverage and distinguish diagnostic partial runs from completed acceptance. No runtime work is authorized by this capture.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 공유 카드 브라우저 하네스에 시간 제한/재사용이 없다는 테스트 인프라 불평. 구체적 결함 아님.
+Triage 2026-11-15 (owner (1057)): DROP - A test-infrastructure complaint that the shared card browser harness has no time limit or reuse, not a concrete defect.

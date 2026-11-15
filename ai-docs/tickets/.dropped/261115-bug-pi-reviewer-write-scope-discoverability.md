@@ -22,4 +22,4 @@ This is an interface discoverability finding, not evidence that the existing rev
 Verify the reviewer-specific spawn validation against the tool schema, rendered review prompts and Pi lead routing guidance. Propose the smallest consistent discoverability correction and regression coverage so a caller can construct the required bounded dispatch before its first attempt. Settle any observable behavior or protocol change before implementation.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - Pi 리뷰어 쓰기 범위 안내 누락 중복 티켓; 261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate ticket about missing Pi reviewer write-scope guidance; 261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract.

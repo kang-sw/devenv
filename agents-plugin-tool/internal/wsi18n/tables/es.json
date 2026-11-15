@@ -1895,6 +1895,7 @@
   "composer.cmd.remove": "quitar el comando",
   "entry.command.terminal": "sin salida de texto: se abre en la terminal",
   "entry.board.nudge": "Aviso del tablero · {0}: {1}",
+  "entry.board.nudge.batch": "Aviso del tablero · {0} · {1} mensajes: {2}",
   "entry.board.nudge.overdue": "Plazo vencido",
   "entry.board.nudge.unblocked": "Desbloqueado",
   "entry.board.nudge.hourly": "Revisión horaria",

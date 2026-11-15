@@ -37,4 +37,4 @@ Record only. Do not execute this phase from the idea inventory. Define and
 settle the implementation and verification contract if the owner resumes it.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 큰 파일 분할 메모뿐 구체 계획 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Only a large-file split note with no concrete plan.

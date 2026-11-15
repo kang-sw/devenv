@@ -1895,6 +1895,7 @@
   "composer.cmd.remove": "명령 제거",
   "entry.command.terminal": "텍스트 출력 없음: 터미널에서 열립니다",
   "entry.board.nudge": "보드 알림 · {0}: {1}",
+  "entry.board.nudge.batch": "보드 알림 · {0} {1}건: {2}",
   "entry.board.nudge.overdue": "기한 초과",
   "entry.board.nudge.unblocked": "차단 해제",
   "entry.board.nudge.hourly": "정기 확인",

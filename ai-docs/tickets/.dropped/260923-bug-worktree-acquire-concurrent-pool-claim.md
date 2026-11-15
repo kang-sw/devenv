@@ -20,4 +20,4 @@ During a three-ticket parallel `lead-run` batch on 2026-09-23, three simultaneou
 Investigate the pool claim race and settle its synchronization and verification contract before promoting this idea to an actionable ticket. Preserve existing branch ownership and pool hygiene safety checks.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 동시 worktree 획득 충돌 중복 티켓; 261115-bug-ws-worktree-acquire-concurrent-pool-claim.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate ticket about concurrent worktree acquire conflicts; 261115-bug-ws-worktree-acquire-concurrent-pool-claim.

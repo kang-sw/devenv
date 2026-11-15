@@ -44,4 +44,4 @@ key. Consider fixing it together with the fork-lineage ticket, since both
 capture the bootstrap key.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 키 교체 시 메일박스 대기자를 다시 거는 코드가 이미 있음; index.ts:1110 onDefaultKeyAdopted.
+Triage 2026-11-15 (owner (1057)): DONE - Code that re-arms the mailbox waiter on key replacement already exists; index.ts:1110 onDefaultKeyAdopted.

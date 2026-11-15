@@ -55,4 +55,4 @@ No overwrite, replacement allocation, or verification rerun was performed.
 - None settled. Do not infer permission for blind overwrites or automatic retries.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - path.generate 경로가 이미 존재해 xb 열기가 실패한 조사 메모. 구체적 결함 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A research note where an existing path.generate path made the xb open fail; no concrete defect.

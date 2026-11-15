@@ -48,4 +48,4 @@ None selected.
 None.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 같은 문제를 다룬 중복 티켓; 260927-bug-code-reviewer-spawn-requires-undocumented-write-scope.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate ticket about the same problem; 260927-bug-code-reviewer-spawn-requires-undocumented-write-scope.

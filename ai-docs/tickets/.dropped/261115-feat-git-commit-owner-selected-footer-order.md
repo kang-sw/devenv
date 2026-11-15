@@ -22,4 +22,4 @@ Dogfood: an owner required commit messages to end in `## AI Context` bullets, wi
 After owner approval, choose the smallest explicit contract that preserves current defaults, permits the owner's required final context section, and makes omission versus suppression clear. Cover structured and automatically inferred ticket updates, plus co-author trailers. Settle compatibility before changing any tool argument; this idea authorizes no API or behavior change yet.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 푸터 순서 지정 요청인데 핵심은 빈 updated_tickets 억제 문제와 같음; 261115-research-git-commit-empty-ticket-updates.
+Triage 2026-11-15 (owner (1057)): DROP - A request to set footer order whose core is the same as the empty updated_tickets suppression problem; 261115-research-git-commit-empty-ticket-updates.

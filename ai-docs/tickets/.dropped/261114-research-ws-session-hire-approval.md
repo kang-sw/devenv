@@ -229,4 +229,4 @@ conversation. They are not settled defaults.
   or reinterpreting existing identity gates to force T0, is not approved.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 구현 티켓이 따로 만들어져 대체됨; 261115-feat-ws-session-hire-approval.
+Triage 2026-11-15 (owner (1057)): DROP - Superseded by a separately created implementation ticket; 261115-feat-ws-session-hire-approval.

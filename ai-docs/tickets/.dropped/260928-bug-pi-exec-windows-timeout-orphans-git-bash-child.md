@@ -44,4 +44,4 @@ native Windows. The gap is newly reachable.
   `where bash.exe` lookup.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 윈도우에서 재현 없이 소스 읽고 추측한 문제.
+Triage 2026-11-15 (owner (1057)): DROP - A problem guessed from reading source on Windows without reproduction.

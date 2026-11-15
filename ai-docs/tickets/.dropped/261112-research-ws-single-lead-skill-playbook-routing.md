@@ -65,4 +65,4 @@ open:
 ### Rejected Alternatives
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 약한 의견 수준의 설계 구상, 결정된 게 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A weak-opinion design sketch with nothing decided.

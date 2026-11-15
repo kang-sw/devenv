@@ -43,4 +43,4 @@ daemon is untouched.
   replacing session) instead of happening silently?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 같은 데몬 자동 교체 문제이고 (714)=a 설계가 이를 해결함; 261114-bug-ws-shared-daemon-restarts-without-a-swap.
+Triage 2026-11-15 (owner (1057)): DROP - The same daemon auto-replace problem, and the design in decision (714)=a resolves it; 261114-bug-ws-shared-daemon-restarts-without-a-swap.

@@ -49,4 +49,4 @@ successful local-read controls; do not claim a review pass from unavailable
 source evidence.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 리뷰어 로컬 증거 부족 이야기로 같은 계열 티켓과 중복이고 결함이 아닌 권한 한계 관찰; 261115-research-ws-pi-explore-pinned-git-evidence-gap.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicates a ticket in the same family about reviewer local evidence gaps, and is a permission-limit observation rather than a defect; 261115-research-ws-pi-explore-pinned-git-evidence-gap.

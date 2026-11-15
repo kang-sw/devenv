@@ -38,4 +38,4 @@ Depends on the typed quota error state with its reset time, which
 Settle the open questions before promotion.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 다른 도구를 참고한 아이디어일 뿐 지금 범위 밖이고 당장의 문제가 아님.
+Triage 2026-11-15 (owner (1057)): DROP - An idea borrowed from another tool, outside current scope and not an immediate problem.

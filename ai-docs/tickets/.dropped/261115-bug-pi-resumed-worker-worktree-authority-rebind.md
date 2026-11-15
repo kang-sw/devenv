@@ -34,4 +34,4 @@ released original worktree and newly acquired checkout. No runtime behavior or
 compatibility tier is selected by this idea capture.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 의도된 권한 경계일 수 있고, 새 워크트리로 교체 spawn 하면 우회 가능해서 구체적 결함이 아님.
+Triage 2026-11-15 (owner (1057)): DROP - Possibly an intended permission boundary, and spawning a replacement in a new worktree works around it, so not a concrete defect.

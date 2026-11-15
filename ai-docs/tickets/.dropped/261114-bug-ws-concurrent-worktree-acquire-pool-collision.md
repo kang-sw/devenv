@@ -37,4 +37,4 @@ from an actually occupied branch in diagnostics. No implementation or
 verification result is recorded by this capture.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 동시 worktree 획득 충돌 중복 티켓; 261115-bug-ws-worktree-acquire-concurrent-pool-claim.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate ticket about concurrent worktree acquire conflicts; 261115-bug-ws-worktree-acquire-concurrent-pool-claim.

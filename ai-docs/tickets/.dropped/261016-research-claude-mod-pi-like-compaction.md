@@ -153,4 +153,4 @@ Read from the engine's own declaration file for Claude Code 2.1.293
   again: double cost and an extra lossy pass.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 연구에서 실제 기능 티켓이 이미 파생되어 이 노트는 더 할 일이 없음; 2313d684d.
+Triage 2026-11-15 (owner (1057)): DROP - The research already spawned the actual feature ticket, so this note has nothing more to do; 2313d684d.

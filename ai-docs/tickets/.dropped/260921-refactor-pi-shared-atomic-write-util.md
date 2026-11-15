@@ -33,4 +33,4 @@ instead. Defer if the shared helper cannot be placed without introducing an
 import cycle; capture the module-layout question rather than forcing it.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 동작은 맞고 중복만 있는 정리 작업이라 지금 할 이유가 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Behavior is correct and this is only a duplication cleanup, so there is no reason to do it now.

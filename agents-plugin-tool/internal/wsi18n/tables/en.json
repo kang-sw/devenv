@@ -1895,6 +1895,7 @@
   "composer.cmd.remove": "remove the command",
   "entry.command.terminal": "no text output: it opens in the terminal",
   "entry.board.nudge": "Board nudge · {0}: {1}",
+  "entry.board.nudge.batch": "Board nudge · {0} · {1} messages: {2}",
   "entry.board.nudge.overdue": "Overdue",
   "entry.board.nudge.unblocked": "Unblocked",
   "entry.board.nudge.hourly": "Hourly check-in",

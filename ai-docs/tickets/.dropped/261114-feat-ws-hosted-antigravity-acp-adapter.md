@@ -95,4 +95,4 @@ After the owner resumes Antigravity work and required account/access is availabl
 This phase remains deferred and depends on the settled Phase 1 result, landed `261114-refactor-ws-common-session-interface#phase2` under the existing foundation extension map, and separately authorized implementation/account access. Documentation preparation does not relax any of those gates. Implement the chosen public control path through the existing hosted runner boundary, with capability/error/permission mapping, identity/input ownership and holder recovery. Verify protocol fixtures, Pi/Claude regression behavior and separately authorized account-backed acceptance. Record source integration and live delivery independently. No exact API, transport choice or runtime grant is inferred from this placeholder phase.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 계정이 없어 미룬 먼 미래 작업.
+Triage 2026-11-15 (owner (1057)): DROP - Far-future work deferred because no account is available.

@@ -1895,6 +1895,7 @@
   "composer.cmd.remove": "убрать команду",
   "entry.command.terminal": "нет текстового вывода: открывается в терминале",
   "entry.board.nudge": "Напоминание доски · {0}: {1}",
+  "entry.board.nudge.batch": "Напоминание доски · {0} · {1} сообщений: {2}",
   "entry.board.nudge.overdue": "Просрочено",
   "entry.board.nudge.unblocked": "Разблокировано",
   "entry.board.nudge.hourly": "Ежечасная проверка",

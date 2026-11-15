@@ -30,4 +30,4 @@ The root then allocated one report path through `ws/path.generate` and retried w
 Make the enforced reviewer report grant discoverable before dispatch and reconcile who allocates the report path. Add focused coverage for missing, multiple and exactly-one report grants, plus the documented lead-to-reviewer handoff. Preserve generic non-reviewer spawn behavior. Settle the concrete surface after investigation rather than assuming that every spawn must require a scope.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 리뷰어 spawn 쓰기 범위 안내 부족. 같은 내용의 다른 티켓과 중복; 261115-bug-pi-reviewer-write-scope-discoverability.
+Triage 2026-11-15 (owner (1057)): DROP - Reviewer spawn write-scope guidance is lacking; duplicate of another ticket with the same content; 261115-bug-pi-reviewer-write-scope-discoverability.

@@ -139,4 +139,4 @@ subdirectory.
   (`prompt.context` / `prompt.attachment` invalidation untried)?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 매뉴얼 주입과 중복 읽기 제거 기능이 이미 병합됨; 839c014d7.
+Triage 2026-11-15 (owner (1057)): DONE - The manual injection and duplicate-read removal feature is already merged; 839c014d7.

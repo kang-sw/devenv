@@ -36,4 +36,4 @@ whose behavior for an orphaned plugin tool is unprobed.
   pointer ("push is bound automatically; no call needed")?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 핫 리로드 때 한 번 생긴 현상이고 새 세션에서는 재현되지 않음.
+Triage 2026-11-15 (owner (1057)): DROP - A one-off event during hot reload that does not reproduce in a new session.

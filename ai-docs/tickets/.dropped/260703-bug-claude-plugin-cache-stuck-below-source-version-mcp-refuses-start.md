@@ -102,4 +102,4 @@ Research Direction #3 (a pre-session source-vs-installed self-check) remains the
 option if this is ever revisited, but nothing here asks to.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 개발 환경에서만 생기는 알려진 한계로 이미 정리됨.
+Triage 2026-11-15 (owner (1057)): DROP - A known development-environment-only limitation, already settled.

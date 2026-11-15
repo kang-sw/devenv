@@ -34,4 +34,4 @@ Deferred idea: preserve the requested behavior above. Define implementation and
 verification details only when the owner resumes and authorizes this work.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 같은 기능의 todo 티켓이 따로 있음; 261114-feat-ws-whiteboard-center-reference-scroll.
+Triage 2026-11-15 (owner (1057)): DROP - A separate todo ticket for the same feature exists; 261114-feat-ws-whiteboard-center-reference-scroll.

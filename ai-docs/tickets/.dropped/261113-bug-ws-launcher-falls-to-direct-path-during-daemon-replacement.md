@@ -48,4 +48,4 @@ refusal whatever the actual reason.
   same gap or surfaces an error to the host.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 원인이 추정일 뿐이고 재시도 병합으로 상당 부분 완화됨.
+Triage 2026-11-15 (owner (1057)): DROP - The cause is only a guess and the retry merge largely eased it.

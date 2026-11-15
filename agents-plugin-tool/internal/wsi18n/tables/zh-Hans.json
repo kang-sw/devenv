@@ -1895,6 +1895,7 @@
   "composer.cmd.remove": "移除命令",
   "entry.command.terminal": "无文本输出：它在终端中打开",
   "entry.board.nudge": "看板提醒 · {0}：{1}",
+  "entry.board.nudge.batch": "看板提醒 · {0} {1}条：{2}",
   "entry.board.nudge.overdue": "已逾期",
   "entry.board.nudge.unblocked": "已解除阻塞",
   "entry.board.nudge.hourly": "每小时检查",

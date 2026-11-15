@@ -102,4 +102,4 @@ disclosures, and fresh content with retained document identity under unrelated
 updates. No implementation Result or separate EXEC3 fix is claimed.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 패널 프레임 재로드 문제와 같은 원인의 중복; 261114-bug-ws-dashboard-panel-frames-reload-on-topic-update.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate with the same cause as the panel frame reload problem; 261114-bug-ws-dashboard-panel-frames-reload-on-topic-update.

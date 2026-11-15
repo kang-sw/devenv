@@ -1895,6 +1895,7 @@
   "composer.cmd.remove": "retirer la commande",
   "entry.command.terminal": "aucune sortie texte : elle s'ouvre dans le terminal",
   "entry.board.nudge": "Rappel du tableau · {0} : {1}",
+  "entry.board.nudge.batch": "Rappel du tableau · {0} · {1} messages : {2}",
   "entry.board.nudge.overdue": "En retard",
   "entry.board.nudge.unblocked": "Débloqué",
   "entry.board.nudge.hourly": "Vérification horaire",

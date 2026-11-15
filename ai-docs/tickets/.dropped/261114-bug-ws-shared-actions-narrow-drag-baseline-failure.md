@@ -44,4 +44,4 @@ Define a focused regression check with raw before/after order and native hit
 ownership; do not infer root cause from the failing conjunction alone.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 브라우저 테스트 하나가 develop에서도 실패; 원인 불명이라 조치할 게 없음.
+Triage 2026-11-15 (owner (1057)): DROP - One browser test also fails on develop; cause unknown, so there is nothing to act on.

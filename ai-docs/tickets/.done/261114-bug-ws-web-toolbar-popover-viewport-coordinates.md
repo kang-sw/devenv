@@ -34,4 +34,4 @@ Preserve existing availability, Enter/Escape behavior, opener focus, URL/path ha
 Ground a minimal coordinate-space correction in production source. Retain full viewport/column containment assertions and verify top/floating, desktop/narrow and document/board scrollers, real keyboard opening/dismissal and opener focus. Compare the terminal menu as a regression boundary without replacing its independently owned anchor constants. Capture fresh before/after evidence; this idea ticket is not implementation-ready.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - 웹 팝오버 좌표를 슬롯 기준으로 바꾸는 수정이 이미 들어감; 4d302c5a5.
+Triage 2026-11-15 (owner (1057)): DONE - The fix that anchors web popover coordinates to the slot is already in; 4d302c5a5.

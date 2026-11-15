@@ -40,4 +40,4 @@ verbs and were deliberately left out of ④'s scope:
 - Scope guard: this does NOT reopen ④'s settled MCP tool-surface rename.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 이름 통일은 미관 목적의 열린 질문이라 급한 이유가 없음.
+Triage 2026-11-15 (owner (1057)): DROP - Name unification is an open cosmetic question with no urgency.

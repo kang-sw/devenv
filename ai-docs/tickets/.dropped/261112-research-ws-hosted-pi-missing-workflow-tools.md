@@ -239,4 +239,4 @@ Owner answers 2026-11-13 (session whiteboard item IDs).
 - Implementation: `261113-feat-ws-pi-mini-lead-profile`.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 원인을 못 밝힌 관찰 메모, 재현·수정 방향 없음.
+Triage 2026-11-15 (owner (1057)): DROP - An observation note whose cause was never found, with no reproduction or fix direction.

@@ -27,4 +27,4 @@ contradicts the release result.
   caller's lease, so neither surface shows it afterwards?
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 한 번 본 현상이고 원인도 불분명하며 재현 방법이 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A one-off observation with unclear cause and no way to reproduce.

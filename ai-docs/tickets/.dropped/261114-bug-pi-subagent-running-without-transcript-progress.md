@@ -47,4 +47,4 @@ product defect solely from elapsed time. Any implementation requires normal
 scope and approval gates.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 원인 증거 없는 일회성 정지 관찰.
+Triage 2026-11-15 (owner (1057)): DROP - A one-off hang observation with no evidence of cause.

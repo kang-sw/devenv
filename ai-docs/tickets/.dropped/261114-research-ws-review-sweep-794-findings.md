@@ -55,4 +55,4 @@ Repair results, test evidence, precise runtime incidence and the final repair-in
 No new product alternative was rejected. Counting duplicated regression-test obligations as extra product defects, claiming a two-minute guaranteed outage, or treating a ledger-only prefix as substantive product clearance would exceed the evidence.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 리뷰 결과 정리 기록; 일부는 이미 고쳐졌고 따로 할 일 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A review-findings summary; some items are already fixed and nothing else to do.

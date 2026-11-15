@@ -95,4 +95,4 @@ briefly contend for the port/endpoint file during the handoff (inferred).
 Compatibility if pursued: launcher-local, T0.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 프로세스가 몰리는 원리를 설명한 조사 노트, 고칠 항목 없음.
+Triage 2026-11-15 (owner (1057)): DROP - An investigation note explaining why processes pile up; nothing to fix.

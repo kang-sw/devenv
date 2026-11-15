@@ -31,4 +31,4 @@ Only a full Claude restart picks the new serve up.
   needed for the MCP serve to change.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - -dev 빌드를 같은 버전의 릴리스보다 높게 보도록 고침; 19c583b46.
+Triage 2026-11-15 (owner (1057)): DONE - Fixed so a -dev build ranks higher than a release of the same version; 19c583b46.

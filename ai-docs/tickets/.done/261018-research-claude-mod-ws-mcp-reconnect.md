@@ -132,4 +132,4 @@ would no longer hold on Claude.
 - `$.mcp.connect` as the reconnect: it never restarts a dead server.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - MCP 재연결 레버 기능이 이미 병합됨; 54aec2085.
+Triage 2026-11-15 (owner (1057)): DONE - The MCP reconnect lever feature is already merged; 54aec2085.

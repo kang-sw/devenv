@@ -256,4 +256,4 @@ right?" approval to the lead over the existing socket channel.
 - https://docs.typesafe.ai/introduction/coding-agents
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 구현 계획이 없는 조사 메모.
+Triage 2026-11-15 (owner (1057)): DROP - A research note with no implementation plan.

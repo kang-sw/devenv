@@ -15,4 +15,4 @@ title: "Dashboard iframe shell gives no feedback when a framed page never loads"
 Open question: What load-failure feedback and retry behavior should the shell provide? Details to re-derive.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 세부 내용도 없고 사소한 추정뿐인 티켓.
+Triage 2026-11-15 (owner (1057)): DROP - A ticket with no detail and only a minor guess.

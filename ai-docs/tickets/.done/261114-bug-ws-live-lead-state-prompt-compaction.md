@@ -142,4 +142,4 @@ VERIFIED: `final-classification.md` records the comparison and limits; `final-cl
 The ticket remains in `idea/`, without a Result, status move, or closure. Root must read this documentation delta and authorize the one logical commit; integration, ticket disposition, and rollout remain MAIN-owned. Source review and fixture verification do not establish historical incident causation, permanent deadlock, installed-runtime/source equivalence, compaction's causal role, live/browser acceptance, or rollout success. Conversation-history refusal visibility remains deferred to the related notice-design ticket.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DONE - Pi 활동 상태 보존 수정이 이미 들어감; 1a82ac034.
+Triage 2026-11-15 (owner (1057)): DONE - The fix preserving Pi activity state is already in; 1a82ac034.

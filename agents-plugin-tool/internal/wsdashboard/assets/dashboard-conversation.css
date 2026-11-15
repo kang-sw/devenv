@@ -125,6 +125,7 @@
 .mailline > summary:hover { background: color-mix(in srgb, var(--wb-muted) 80%, transparent); }
 .mailline .arr { font-weight: 800; flex: none; }
 .mailline.recv .arr { color: var(--wb-primary); }
+.mailline .mail-icon { width: 13px; height: 13px; flex: none; align-self: center; color: var(--wb-primary); }
 .mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: none; }
 .mailline a.mpeer { color: var(--wb-primary); }
 .mailline a.mpeer:hover { text-decoration: underline; }
@@ -134,11 +135,13 @@
 .mailline .mbody { margin: 2px 8px 4px 22px; padding: 7px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Display-only conversation projections; board/composer component rules stay with their owners. */
-.mail-notification, .input-record, .wake-card.child-report { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
+.mail-notification, .input-record { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
 .input-record { border-style: dashed; }
 .input-record .bub { white-space: pre-wrap; overflow-wrap: anywhere; }
-.mail-notification .wake-head, .input-record .wake-head, .child-report .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
-.mail-notification .wake-head .t, .input-record .wake-head .t, .child-report .wake-head .t { margin-left: auto; }
+.mail-notification .wake-head, .input-record .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
+.mail-notification .wake-head .t, .input-record .wake-head .t { margin-left: auto; }
+.mailline.child-report { min-width: 0; }
+.mailline.child-report .mfirst { margin-left: 0; }
 .child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
 .delivery-details { min-width: 0; margin-top: 3px; font-size: 11px; color: var(--wb-muted-fg); }
 .delivery-details > summary { width: fit-content; max-width: 100%; padding: 3px 0; cursor: pointer; overflow-wrap: anywhere; }

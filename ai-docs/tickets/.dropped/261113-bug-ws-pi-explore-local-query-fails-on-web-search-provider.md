@@ -14,4 +14,4 @@ A Pi lead session called the explore tool for a purely LOCAL repository investig
 - A local question should not depend on web search being available.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 재현 안 된 한 번의 보고, 구체적 단서 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A one-off report that did not reproduce, with no concrete lead.

@@ -36,4 +36,4 @@ visibility and its storage/privacy policy remain unchosen; this ticket does
 not authorize a logging design or changes to the cosmetic failure policy.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 원인을 모르는 상태의 진단 요청이라 실행할 게 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A diagnosis request with unknown cause, so there is nothing to execute.

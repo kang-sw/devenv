@@ -31,4 +31,4 @@ Constraint: CI coverage must not drop; a test moved behind a flag still runs
 in CI.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 느린 테스트 문제는 git 조회 티켓과 CI 속도 티켓에서 다룸; 261110-chore-ws-mcp-ci-windows-rest-shard-speed.
+Triage 2026-11-15 (owner (1057)): DROP - The slow-test problem is covered by the git lookup ticket and the CI speed ticket; 261110-chore-ws-mcp-ci-windows-rest-shard-speed.

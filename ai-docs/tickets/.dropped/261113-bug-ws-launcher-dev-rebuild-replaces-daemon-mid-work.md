@@ -74,4 +74,4 @@ local rerun was lock-blocked. Broader remote Python discovery: 136 tests,
 2 skips, one infrastructure error (neutrality test requires excluded `.git`).
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 데몬이 저절로 교체되는 같은 원인의 중복; 261114-bug-ws-shared-daemon-restarts-without-a-swap.
+Triage 2026-11-15 (owner (1057)): DROP - Duplicate with the same cause: the daemon replacing itself; 261114-bug-ws-shared-daemon-restarts-without-a-swap.

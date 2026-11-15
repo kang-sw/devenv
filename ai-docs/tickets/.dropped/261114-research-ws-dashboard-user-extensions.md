@@ -208,4 +208,4 @@ backend".
   derived ticket needs the reasons.
 
 ## Resolution
-Triage 2026-11-15 (owner (1057)): DROP - 확장 기능 연구 기록; 구현 계획 없음.
+Triage 2026-11-15 (owner (1057)): DROP - A research record about extensions; no implementation plan.
