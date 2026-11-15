@@ -141,7 +141,14 @@
       "registered_at": "2026-10-28T11:45:02Z"
     },
     "261029-bug-ws-mcp-git-lookup-per-spawn-slow-path-head": {
-      "registered_at": "2026-10-29T08:57:09Z"
+      "registered_at": "2026-10-29T08:57:09Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T09:58:28Z"
+      }
     },
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
