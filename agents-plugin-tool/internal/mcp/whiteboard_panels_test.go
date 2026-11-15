@@ -447,24 +447,29 @@ func TestWhiteboardMailboxPanel(t *testing.T) {
 	}
 }
 
-// TestWhiteboardFilePageHidesTopicTickets pins UI-only hiding for resolved
-// and missing ticket stems: topic content stays visible and stored links
-// remain queryable, without a linked-ticket slot or ticket-derived glow.
-func TestWhiteboardFilePageHidesTopicTickets(t *testing.T) {
+// TestWhiteboardFilePageResolvesTopicTickets pins the file page's ticket
+// icon: each linked stem's popover row carries the status of the directory
+// holding it at render time, unknown for a stem no directory holds, and the
+// topic gets no ticket-derived glow.
+func TestWhiteboardFilePageResolvesTopicTickets(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	writeTicket(t, f.root, "ready", "261101-feat-go", "Go")
 	writeTicket(t, f.root, ".dropped", "261101-bug-gone", "Gone")
 	f.update(t, `<wb:topic name="t" tickets="261101-feat-go 261101-bug-gone 261101-chore-nowhere"><wb:log>working</wb:log></wb:topic>`)
 	page := f.fullPage(t)
-	for _, want := range []string{`data-topic="t"`, `<span class="tname">t</span>`, `data-kind="agent"`, "working"} {
+	for _, want := range []string{
+		`data-topic="t"`, `<span class="tname">t</span>`, `data-kind="agent"`, "working",
+		`<span class="dw wbtk">`, `<span class="bd">3</span>`,
+		`<span class="row open" data-ticket="261101-feat-go" data-status="ready">`,
+		`<span class="row dropped" data-ticket="261101-bug-gone" data-status="dropped">`,
+		`<span class="row unknown" data-ticket="261101-chore-nowhere" data-status="unknown">`,
+	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the file page lacks %q", want)
 		}
 	}
-	for _, pattern := range []string{`class="[^"]*\b(?:ttix|wbtk)\b`, `<section class="topic[^"]*\blive\b`} {
-		if regexp.MustCompile(pattern).MatchString(page) {
-			t.Errorf("the file page renders a ticket slot or ticket-derived glow matching %q", pattern)
-		}
+	if regexp.MustCompile(`<section class="topic[^"]*\blive\b`).MatchString(page) {
+		t.Error("the file page renders a ticket-derived topic glow")
 	}
 	resp := f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t", "depth": "topics"}})
 	if text := toolText(t, resp); isToolError(resp) || !strings.Contains(text, "tickets: 261101-feat-go 261101-bug-gone 261101-chore-nowhere") {

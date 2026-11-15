@@ -86,7 +86,7 @@ batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:eta`, `wb:close`; none with `label` |
+| `wb:topic` | `name`, `label?`, `tickets?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:eta`, `wb:close`; none with `label` or `tickets` |
 | `wb:body` | none | current content, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
 | `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
@@ -136,6 +136,15 @@ Markdown up to the closing tag.
   first, then a stemless topic's name, then a stemmed topic's label, so an
   old title still reaches an adopted topic. Stems and labels are one
   namespace: a stem or label another topic already uses is refused.
+- Linked tickets: `tickets="<stem> <stem>"` on `wb:topic` links the
+  space-separated ticket stems the topic tracks, replacing its whole list;
+  `tickets=""` clears it. The topic bar shows one ticket icon listing each
+  stem with its current status. Linking changes no recency, reopens no
+  closed topic, and logs nothing, so it may be sent alone as
+  `<wb:topic name="..." tickets="..."/>`. When a topic defers work or
+  leaves a follow-up as a ticket, link that ticket with `tickets=` in the
+  same update, so the deferred work stays reachable from the board after
+  the topic closes.
 - `wb:state` is an empty command inside `wb:topic`, with `value` one of
   `discussing`, `waiting`, `researching`, `implementing`, or `awaiting-confirmation`.
   Entering `implementing` requires `owner` (the responsible executor) and
