@@ -94,19 +94,6 @@
     "261028-bug-pi-agent-batch-summary-language-drift": {
       "registered_at": "2026-10-28T11:45:02Z"
     },
-    "261029-bug-ws-mcp-git-lookup-per-spawn-slow-path-head": {
-      "registered_at": "2026-10-29T08:57:09Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T16:29:12Z",
-        "impl": {
-          "branch": "impl/develop/thaw-doily-plus"
-        }
-      }
-    },
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
@@ -184,19 +171,6 @@
     },
     "261113-feat-ws-dashboard-harness-auth-slots": {
       "registered_at": "2026-11-13T08:05:31Z"
-    },
-    "261113-feat-ws-dashboard-session-four-state-lifecycle": {
-      "registered_at": "2026-11-13T10:12:43Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:54:09Z",
-        "impl": {
-          "branch": "impl/develop/baggy-cake-oak"
-        }
-      }
     },
     "261113-feat-ws-tracker-calendar-multi-day-spans": {
       "registered_at": "2026-11-13T13:42:45Z"
@@ -379,7 +353,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T16:45:36Z",
         "impl": {
           "branch": "impl/develop/suing-usage-cold"
