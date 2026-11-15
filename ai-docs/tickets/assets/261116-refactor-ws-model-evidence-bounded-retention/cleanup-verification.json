@@ -1,0 +1,30 @@
+{
+  "all_modifications_within_ticket_evidence": true,
+  "cleanup_not_independently_reviewed": true,
+  "closed_ticket_blob": "85c0a6913457effc8b3274fc870ce79b348c9e54",
+  "go_tests_rerun": false,
+  "historical_manifest_cleanup_lead_owned": true,
+  "history_rewritten": false,
+  "original_artifact_files_scanned": 29,
+  "original_delivery_head": "01d14188534b2e26fe49840f162b61c3eec96b86",
+  "original_public_artifact_bytes": 2642794,
+  "private_archive": "/tmp/ws-retention-module-choosing-tartar/precleanup-01d141885",
+  "private_manifest_directory": "/tmp/ws-retention-module-choosing-tartar/private-manifests",
+  "private_runtime_identifier_leaks": 0,
+  "production_and_tests_tree": "b234bbef971f5f9f0dd73b297ff1ce196b85c498",
+  "public_bytes_before_this_record": 39603,
+  "public_files_before_this_record": 10,
+  "public_payload_pattern_matches": 0,
+  "public_per_file_source_metadata_rows": 0,
+  "raw_archive_file_count": 44,
+  "review_and_final_command_logs_byte_identical": true,
+  "scan_categories": [
+    "bearer_credential",
+    "conversation_envelope",
+    "conversation_role",
+    "credential_value",
+    "private_key",
+    "prompt_or_message_payload",
+    "provider_key"
+  ]
+}

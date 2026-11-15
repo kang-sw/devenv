@@ -1,0 +1,283 @@
+UTC: 2026-11-15T19:07:23Z
+cwd: /Users/kang-sw/.ws-worktrees/devenv/corporate-predator-shrug/agents-plugin-tool
+command: go test -race ./internal/wslive -count=1 -v
+environment: {"CLAUDE_CONFIG_DIR": "/tmp/ws-retention-module-choosing-tartar/claude", "CODEX_HOME": "/tmp/ws-retention-module-choosing-tartar/codex", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GOCACHE": "/tmp/ws-retention-module-choosing-tartar/go-build", "GOENV": "off", "GOFLAGS": "-mod=readonly -buildvcs=false", "GOMODCACHE": "/tmp/ws-retention-module-choosing-tartar/gomodcache", "GOPROXY": "off", "GOSUMDB": "off", "GOTELEMETRY": "off", "GOTOOLCHAIN": "local", "GOVCS": "*:off", "GOWORK": "off", "HOME": "/tmp/ws-retention-module-choosing-tartar/home", "LANG": "en_US.UTF-8", "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", "TEMP": "/tmp/ws-retention-module-choosing-tartar/tmp", "TMP": "/tmp/ws-retention-module-choosing-tartar/tmp", "TMPDIR": "/tmp/ws-retention-module-choosing-tartar/tmp", "WS_CACHE_HOME": "/tmp/ws-retention-module-choosing-tartar/ws-cache", "WS_CONFIG_HOME": "/tmp/ws-retention-module-choosing-tartar/ws-config", "XDG_CACHE_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-cache", "XDG_CONFIG_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-config", "XDG_DATA_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-data", "XDG_RUNTIME_DIR": "/tmp/ws-retention-module-choosing-tartar/runtime", "XDG_STATE_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-state"}
+runner_pid: 36926
+command_root_pid: 36927
+=== RUN   TestAgentActiveTimeAndSeed
+--- PASS: TestAgentActiveTimeAndSeed (0.00s)
+=== RUN   TestPiAgentAuthoritativeActiveTime
+--- PASS: TestPiAgentAuthoritativeActiveTime (0.00s)
+=== RUN   TestCommandsEventReplacesTheList
+--- PASS: TestCommandsEventReplacesTheList (0.00s)
+=== RUN   TestCommandEventWritesACommandLine
+--- PASS: TestCommandEventWritesACommandLine (0.00s)
+=== RUN   TestOptionalKindsNameTheCommandKinds
+--- PASS: TestOptionalKindsNameTheCommandKinds (0.00s)
+=== RUN   TestNoticeFollowsTheReplyItEnds
+--- PASS: TestNoticeFollowsTheReplyItEnds (0.00s)
+=== RUN   TestHostStateInTheSnapshot
+--- PASS: TestHostStateInTheSnapshot (0.00s)
+=== RUN   TestFailedCompactionKeepsItsError
+--- PASS: TestFailedCompactionKeepsItsError (0.00s)
+=== RUN   TestObservedCacheUnchangedOpensAndProjection
+--- PASS: TestObservedCacheUnchangedOpensAndProjection (0.02s)
+=== RUN   TestObservedCacheDirectoryGate
+--- PASS: TestObservedCacheDirectoryGate (0.01s)
+=== RUN   TestObservedCacheMatchesUncachedValidationAndOverlay
+--- PASS: TestObservedCacheMatchesUncachedValidationAndOverlay (0.05s)
+=== RUN   TestObservedCacheConcurrentSnapshots
+--- PASS: TestObservedCacheConcurrentSnapshots (0.02s)
+=== RUN   TestObservedCacheIncrementalCanonicalParity
+--- PASS: TestObservedCacheIncrementalCanonicalParity (0.01s)
+=== RUN   TestObservedPruneKeepsVisibleModels
+=== RUN   TestObservedPruneKeepsVisibleModels/one_agent
+=== RUN   TestObservedPruneKeepsVisibleModels/agents
+--- PASS: TestObservedPruneKeepsVisibleModels (3.82s)
+    --- PASS: TestObservedPruneKeepsVisibleModels/one_agent (0.88s)
+    --- PASS: TestObservedPruneKeepsVisibleModels/agents (2.94s)
+=== RUN   TestObservedPruneSurvivesChildReplay
+--- PASS: TestObservedPruneSurvivesChildReplay (2.73s)
+=== RUN   TestObservedPruneBoundsShortLivedAgentsAndFreshReplay
+--- PASS: TestObservedPruneBoundsShortLivedAgentsAndFreshReplay (6.20s)
+=== RUN   TestObservedPruneToleratesFailedDeletes
+--- PASS: TestObservedPruneToleratesFailedDeletes (1.00s)
+=== RUN   TestObservedPruneOnlyOnNewAppendWithoutThreshold
+--- PASS: TestObservedPruneOnlyOnNewAppendWithoutThreshold (0.72s)
+=== RUN   TestObservedPruneConcurrentReads
+--- PASS: TestObservedPruneConcurrentReads (2.70s)
+=== RUN   TestObservedPruneRunsOncePerIntervalPerDirectory
+--- PASS: TestObservedPruneRunsOncePerIntervalPerDirectory (1.93s)
+=== RUN   TestObservedPruneLateDifferentModelRedatesReturn
+--- PASS: TestObservedPruneLateDifferentModelRedatesReturn (0.09s)
+=== RUN   TestObservedRetentionRecentEightMembership
+=== RUN   TestObservedRetentionRecentEightMembership/size-00
+=== RUN   TestObservedRetentionRecentEightMembership/size-01
+=== RUN   TestObservedRetentionRecentEightMembership/size-02
+=== RUN   TestObservedRetentionRecentEightMembership/size-03
+=== RUN   TestObservedRetentionRecentEightMembership/size-04
+=== RUN   TestObservedRetentionRecentEightMembership/size-05
+=== RUN   TestObservedRetentionRecentEightMembership/size-06
+=== RUN   TestObservedRetentionRecentEightMembership/size-07
+=== RUN   TestObservedRetentionRecentEightMembership/size-08
+=== RUN   TestObservedRetentionRecentEightMembership/size-09
+=== RUN   TestObservedRetentionRecentEightMembership/size-10
+=== RUN   TestObservedRetentionRecentEightMembership/size-11
+=== RUN   TestObservedRetentionRecentEightMembership/size-12
+=== RUN   TestObservedRetentionRecentEightMembership/ties-use-observation-key-not-file-or-input-order
+=== RUN   TestObservedRetentionRecentEightMembership/changes-and-agent-independence
+--- PASS: TestObservedRetentionRecentEightMembership (0.79s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-00 (0.00s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-01 (0.01s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-02 (0.01s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-03 (0.02s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-04 (0.02s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-05 (0.03s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-06 (0.04s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-07 (0.04s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-08 (0.05s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-09 (0.06s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-10 (0.06s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-11 (0.06s)
+    --- PASS: TestObservedRetentionRecentEightMembership/size-12 (0.07s)
+    --- PASS: TestObservedRetentionRecentEightMembership/ties-use-observation-key-not-file-or-input-order (0.08s)
+    --- PASS: TestObservedRetentionRecentEightMembership/changes-and-agent-independence (0.24s)
+=== RUN   TestObservedRetentionInOrderAppendOracle
+--- PASS: TestObservedRetentionInOrderAppendOracle (0.29s)
+=== RUN   TestObservedRetentionProtectedFiles
+--- PASS: TestObservedRetentionProtectedFiles (0.10s)
+=== RUN   TestObservedRetentionProtectedSymlinkChanges
+=== RUN   TestObservedRetentionProtectedSymlinkChanges/duplicate-winner-false
+=== RUN   TestObservedRetentionProtectedSymlinkChanges/duplicate-winner-true
+--- PASS: TestObservedRetentionProtectedSymlinkChanges (0.33s)
+    --- PASS: TestObservedRetentionProtectedSymlinkChanges/duplicate-winner-false (0.16s)
+    --- PASS: TestObservedRetentionProtectedSymlinkChanges/duplicate-winner-true (0.17s)
+=== RUN   TestObservedResponseOrderReplayAndReset
+--- PASS: TestObservedResponseOrderReplayAndReset (0.00s)
+=== RUN   TestObservedValidationRateAndRedaction
+--- PASS: TestObservedValidationRateAndRedaction (0.00s)
+=== RUN   TestObservedLastTurnRateAndSnapshotOwnership
+--- PASS: TestObservedLastTurnRateAndSnapshotOwnership (0.00s)
+=== RUN   TestObservedDurableHistorySurvivesLegacySnapshotWriters
+=== RUN   TestObservedDurableHistorySurvivesLegacySnapshotWriters/mcp.liveSession.fire
+=== RUN   TestObservedDurableHistorySurvivesLegacySnapshotWriters/mcp.liveSession.finish
+=== RUN   TestObservedDurableHistorySurvivesLegacySnapshotWriters/wsagent.liveWriter.writeSnapshot
+--- PASS: TestObservedDurableHistorySurvivesLegacySnapshotWriters (0.03s)
+    --- PASS: TestObservedDurableHistorySurvivesLegacySnapshotWriters/mcp.liveSession.fire (0.00s)
+    --- PASS: TestObservedDurableHistorySurvivesLegacySnapshotWriters/mcp.liveSession.finish (0.01s)
+    --- PASS: TestObservedDurableHistorySurvivesLegacySnapshotWriters/wsagent.liveWriter.writeSnapshot (0.00s)
+=== RUN   TestReasoningSummaryValidation
+=== RUN   TestReasoningSummaryValidation/unsafe_request
+=== RUN   TestReasoningSummaryValidation/missing_attempt
+=== RUN   TestReasoningSummaryValidation/dangling_active_attempt
+=== RUN   TestReasoningSummaryValidation/private_provider
+=== RUN   TestReasoningSummaryValidation/false_byte_count
+=== RUN   TestReasoningSummaryValidation/false_prefix
+=== RUN   TestReasoningSummaryValidation/unknown_status
+=== RUN   TestReasoningSummaryValidation/duplicate_part
+=== RUN   TestReasoningSummaryValidation/aggregate_attempts
+--- PASS: TestReasoningSummaryValidation (0.00s)
+    --- PASS: TestReasoningSummaryValidation/unsafe_request (0.00s)
+    --- PASS: TestReasoningSummaryValidation/missing_attempt (0.00s)
+    --- PASS: TestReasoningSummaryValidation/dangling_active_attempt (0.00s)
+    --- PASS: TestReasoningSummaryValidation/private_provider (0.00s)
+    --- PASS: TestReasoningSummaryValidation/false_byte_count (0.00s)
+    --- PASS: TestReasoningSummaryValidation/false_prefix (0.00s)
+    --- PASS: TestReasoningSummaryValidation/unknown_status (0.00s)
+    --- PASS: TestReasoningSummaryValidation/duplicate_part (0.00s)
+    --- PASS: TestReasoningSummaryValidation/aggregate_attempts (0.00s)
+=== RUN   TestReasoningSummaryFreshnessAndRealEnd
+--- PASS: TestReasoningSummaryFreshnessAndRealEnd (0.00s)
+=== RUN   TestReasoningSummaryLeadOnlyAndAttemptPreservation
+--- PASS: TestReasoningSummaryLeadOnlyAndAttemptPreservation (0.00s)
+=== RUN   TestRingViewIsTheNewestRingCap
+--- PASS: TestRingViewIsTheNewestRingCap (0.02s)
+=== RUN   TestRingTrimsAtTheHistoryCap
+--- PASS: TestRingTrimsAtTheHistoryCap (0.53s)
+=== RUN   TestRingPagesByCursor
+--- PASS: TestRingPagesByCursor (0.00s)
+=== RUN   TestValidRingName
+--- PASS: TestValidRingName (0.00s)
+=== RUN   TestRingReadSkipsJunkAndToleratesUnknownFields
+--- PASS: TestRingReadSkipsJunkAndToleratesUnknownFields (0.00s)
+=== RUN   TestRingIsOwnerOnly
+--- PASS: TestRingIsOwnerOnly (0.00s)
+=== RUN   TestSnapshotForDiskExcludesOnlyLiveReasoningSummary
+--- PASS: TestSnapshotForDiskExcludesOnlyLiveReasoningSummary (0.00s)
+=== RUN   TestSpawnAliasesShareRetentionAndCannotReviveAnEvictedLifecycle
+--- PASS: TestSpawnAliasesShareRetentionAndCannotReviveAnEvictedLifecycle (0.00s)
+=== RUN   TestCompletedSpawnAliasPairsUseOneFinishedHistorySlot
+--- PASS: TestCompletedSpawnAliasPairsUseOneFinishedHistorySlot (0.00s)
+=== RUN   TestSpawnRowsMergeNativeDuplicatesInEitherArrivalOrder
+--- PASS: TestSpawnRowsMergeNativeDuplicatesInEitherArrivalOrder (0.00s)
+=== RUN   TestLeadRootCarriesTurnFieldsAndTotals
+--- PASS: TestLeadRootCarriesTurnFieldsAndTotals (0.00s)
+=== RUN   TestBatchCapsBoundTheSnapshot
+--- PASS: TestBatchCapsBoundTheSnapshot (0.00s)
+=== RUN   TestStreamingToolCallShowsNameAndChars
+--- PASS: TestStreamingToolCallShowsNameAndChars (0.00s)
+=== RUN   TestTreeRetainsRunningAndLastFiveFinished
+--- PASS: TestTreeRetainsRunningAndLastFiveFinished (0.00s)
+=== RUN   TestAgentKindRoundTrips
+--- PASS: TestAgentKindRoundTrips (0.00s)
+=== RUN   TestSeedFinishedKeepsEndedAgentsOnly
+--- PASS: TestSeedFinishedKeepsEndedAgentsOnly (0.00s)
+=== RUN   TestLateEventsDoNotRecreateEvictedAgents
+--- PASS: TestLateEventsDoNotRecreateEvictedAgents (0.00s)
+=== RUN   TestPermissionWaitShowsToolAndPreview
+--- PASS: TestPermissionWaitShowsToolAndPreview (0.00s)
+=== RUN   TestSessionKeysNeverReachTheSnapshot
+--- PASS: TestSessionKeysNeverReachTheSnapshot (0.00s)
+=== RUN   TestReplyStreamsThenMovesToRing
+--- PASS: TestReplyStreamsThenMovesToRing (0.04s)
+=== RUN   TestOriginTags
+--- PASS: TestOriginTags (0.00s)
+=== RUN   TestResetClearsTreeAndUnknownKindsFail
+--- PASS: TestResetClearsTreeAndUnknownKindsFail (0.00s)
+=== RUN   TestReaderIgnoresUnknownFields
+--- PASS: TestReaderIgnoresUnknownFields (0.00s)
+=== RUN   TestStaleSnapshotReading
+--- PASS: TestStaleSnapshotReading (0.00s)
+=== RUN   TestRejectedPermissionCreatesNoAgent
+--- PASS: TestRejectedPermissionCreatesNoAgent (0.00s)
+=== RUN   TestStatusEventReplacesUsage
+--- PASS: TestStatusEventReplacesUsage (0.00s)
+=== RUN   TestStatusUnknownContextAndBadFigures
+--- PASS: TestStatusUnknownContextAndBadFigures (0.00s)
+=== RUN   TestCompactionShowsThenSettlesIntoRing
+--- PASS: TestCompactionShowsThenSettlesIntoRing (0.00s)
+=== RUN   TestCompactionLostEndSettles
+--- PASS: TestCompactionLostEndSettles (0.00s)
+=== RUN   TestCompactionPermissionWinsAndBadEventsFail
+--- PASS: TestCompactionPermissionWinsAndBadEventsFail (0.00s)
+=== RUN   TestCardFollowsTheReplyItEnds
+--- PASS: TestCardFollowsTheReplyItEnds (0.00s)
+=== RUN   TestSubagentTelemetryRoundTripsAndKeepsAbsentFields
+--- PASS: TestSubagentTelemetryRoundTripsAndKeepsAbsentFields (0.00s)
+=== RUN   TestBatchViewJSONIsUnchangedByTelemetry
+--- PASS: TestBatchViewJSONIsUnchangedByTelemetry (0.00s)
+=== RUN   TestSummaryCommitFreezesRetriesAndNeverRecounts
+--- PASS: TestSummaryCommitFreezesRetriesAndNeverRecounts (0.00s)
+=== RUN   TestSummaryCommitCapacityNeverEvictsAcceptedCandidate
+--- PASS: TestSummaryCommitCapacityNeverEvictsAcceptedCandidate (0.00s)
+=== RUN   TestSummaryImmutableCommitRefusesOverwrite
+--- PASS: TestSummaryImmutableCommitRefusesOverwrite (0.00s)
+=== RUN   TestSummaryHistoricalReaderWriterPreservesOriginalBytes
+    summary_compat_test.go:61: historical writer fixture output:
+        ok  	github.com/kang-sw/devenv/internal/wslive	0.456s
+    summary_compat_test.go:101: historical mapper fixture output:
+        === RUN   TestSummaryOldDaemonNewBundleWidget
+        === RUN   TestSummaryOldDaemonNewBundleWidget/aborted
+        === RUN   TestSummaryOldDaemonNewBundleWidget/error
+        === RUN   TestSummaryOldDaemonNewBundleWidget/length
+        === RUN   TestSummaryOldDaemonNewBundleWidget/aborted-native-abort
+        === RUN   TestSummaryOldDaemonNewBundleWidget/error-native-abort
+        === RUN   TestSummaryOldDaemonNewBundleWidget/length-native-abort
+        --- PASS: TestSummaryOldDaemonNewBundleWidget (0.08s)
+            --- PASS: TestSummaryOldDaemonNewBundleWidget/aborted (0.02s)
+            --- PASS: TestSummaryOldDaemonNewBundleWidget/error (0.01s)
+            --- PASS: TestSummaryOldDaemonNewBundleWidget/length (0.01s)
+            --- PASS: TestSummaryOldDaemonNewBundleWidget/aborted-native-abort (0.01s)
+            --- PASS: TestSummaryOldDaemonNewBundleWidget/error-native-abort (0.01s)
+            --- PASS: TestSummaryOldDaemonNewBundleWidget/length-native-abort (0.01s)
+        PASS
+        ok  	github.com/kang-sw/devenv/internal/wsagent	0.908s
+--- PASS: TestSummaryHistoricalReaderWriterPreservesOriginalBytes (5.15s)
+=== RUN   TestSummaryPagingPruningAndNoResurrection
+--- PASS: TestSummaryPagingPruningAndNoResurrection (0.41s)
+=== RUN   TestSummaryHistoryValidationUsesRetainedIdentityAndBounds
+--- PASS: TestSummaryHistoryValidationUsesRetainedIdentityAndBounds (0.00s)
+=== RUN   TestStatusTaskCounts
+--- PASS: TestStatusTaskCounts (0.00s)
+=== RUN   TestHostSplitCountsPreserveAggregate
+--- PASS: TestHostSplitCountsPreserveAggregate (0.00s)
+=== RUN   TestToolsRowFlushesBeforeTheNextConversationEntry
+--- PASS: TestToolsRowFlushesBeforeTheNextConversationEntry (0.00s)
+=== RUN   TestToolsRowOrderAtTurnBoundaries
+--- PASS: TestToolsRowOrderAtTurnBoundaries (0.00s)
+=== RUN   TestToolsRowIsTheLeadsAndCountsEachBatchOnce
+--- PASS: TestToolsRowIsTheLeadsAndCountsEachBatchOnce (0.00s)
+=== RUN   TestToolsRowCountsCallsPerTool
+--- PASS: TestToolsRowCountsCallsPerTool (0.00s)
+=== RUN   TestToolsRowIsBounded
+--- PASS: TestToolsRowIsBounded (0.00s)
+=== RUN   TestToolsEntryRoundTripsThroughTheRing
+--- PASS: TestToolsEntryRoundTripsThroughTheRing (0.00s)
+=== RUN   TestToolsRowIsExactWithPerCallData
+--- PASS: TestToolsRowIsExactWithPerCallData (0.00s)
+=== RUN   TestCallArgsReachTheRingEntry
+--- PASS: TestCallArgsReachTheRingEntry (0.00s)
+=== RUN   TestBatchCallsAndUsageAreBounded
+--- PASS: TestBatchCallsAndUsageAreBounded (0.00s)
+=== RUN   TestFinishedBatchesPastTheWindowCountOnce
+--- PASS: TestFinishedBatchesPastTheWindowCountOnce (0.00s)
+=== RUN   TestToolsRowTreatsAZeroStartAsUnknown
+--- PASS: TestToolsRowTreatsAZeroStartAsUnknown (0.00s)
+=== RUN   TestEveryArgsPreviewIsMasked
+--- PASS: TestEveryArgsPreviewIsMasked (0.04s)
+=== RUN   TestUIFollowsTheReplyItEnds
+--- PASS: TestUIFollowsTheReplyItEnds (0.00s)
+=== RUN   TestUIRingReplaysUnchanged
+--- PASS: TestUIRingReplaysUnchanged (0.00s)
+=== RUN   TestWakeKindsAndTurn
+--- PASS: TestWakeKindsAndTurn (0.31s)
+=== RUN   TestWakeAfterOriginlessStartBeforeWork
+--- PASS: TestWakeAfterOriginlessStartBeforeWork (0.00s)
+=== RUN   TestWakeDoesNotClaimPersonOrRunningTurn
+--- PASS: TestWakeDoesNotClaimPersonOrRunningTurn (0.00s)
+=== RUN   TestWhiteboardEffectsBoundsAndShape
+--- PASS: TestWhiteboardEffectsBoundsAndShape (0.08s)
+=== RUN   TestWhiteboardEffectsRetainsFirstWorstCaseEffect
+--- PASS: TestWhiteboardEffectsRetainsFirstWorstCaseEffect (0.01s)
+=== RUN   TestWhiteboardEffectsTypedVariants
+--- PASS: TestWhiteboardEffectsTypedVariants (0.00s)
+=== RUN   TestWhiteboardEffectsRejectsAmbiguousUnsupportedOrUnbounded
+--- PASS: TestWhiteboardEffectsRejectsAmbiguousUnsupportedOrUnbounded (0.00s)
+=== RUN   TestWhiteboardEffectsPinnedOldDiskReader
+--- PASS: TestWhiteboardEffectsPinnedOldDiskReader (0.00s)
+PASS
+ok  	github.com/kang-sw/devenv/internal/wslive	28.991s
+exit_code: 0
+recorded_root_after_wait_ps_exit: 1
+recorded_root_after_wait_ps_output:
+PID evidence covers only the recorded command root, not unenumerated descendants.

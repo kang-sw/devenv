@@ -1,0 +1,20 @@
+Historical final-source/private-copy proof; raw complete output is privately archived.
+VERIFIED unchanged original assertion: prune changed the visible models: [107, 109] -> [106, 108] 1ccd151a6a8568f23217ef496bf4543bf661d65eeadd381847cf393065573db8
+VERIFIED unchanged original assertion: cached overlay of the pruned directory differs [127, 129] -> [125, 127] ffb9eeafcb8e850bd01601cc971288ff621048b1639dcdc195fc5d5a12a7dd5c
+VERIFIED unchanged original assertion: replay changed the visible models [147, 149] -> [145, 147] ab7645da2cc3d6e9dff51430fcf60da0a1a1e8c2632ad2b91444f2e6b0799105
+VERIFIED unchanged original assertion: second prune changed the visible models [151, 153] -> [149, 151] 86b768239215619d68b09a9b7760f3e82f3f58fc8756422e0cff67ee9966edb1
+VERIFIED unchanged original assertion: prune with failed deletes changed the visible models [212, 214] -> [222, 224] 78162fca85c5bcd7515aef9bf739e9158d99596e2b64ee6b26eaee5a7d0e7146
+VERIFIED unchanged original assertion: prune under concurrent reads changed the visible models [291, 293] -> [293, 295] 4d5cd6faa7b1be84f8cb2499939393c4a25ab3d5771e0eea89b3e01478589ee3
+VERIFIED private seed bytes/mode/mtime: 3848 files
+VERIFIED retained subset bytes/mode/mtime: 1101 files
+VERIFIED actual deleted count: 2747
+VERIFIED all-agent Current/History equality: True
+VERIFIED all per-agent eligible bounds: 141
+source_sha256: agents-plugin-tool/internal/wslive/observed_prune.go 29a995752dbe2e386f78c9795941db4d81701ff20d1dece4c1789045521a11a6
+source_sha256: agents-plugin-tool/internal/wslive/observed_prune_test.go b515a4bfcfea90cf3cf2fb037953e2493ace87f984e44fbc516195a4a4c921a0
+source_sha256: agents-plugin-tool/internal/wslive/observed_retention_test.go 91d74f67eef138554447b1f5eccf61857578a24398a5deda5e3f7a1ad194fa0d
+source_sha256: agents-plugin-tool/internal/wslive/observed.go d86beaea387f6b3a4005bed605a29cb5abf76d89b2fcb1515c44f24def90f589
+source_sha256: agents-plugin-tool/internal/wslive/observed_cache.go 3f5d03e59ce0b34a0f399616c099a2cee23a854539744f0202757ac2c68b3044
+Recorded PID scope: 30 prior roots absent; verifier and runner were active during their own check.
+Command root was absent after wait; the later final Git check also recorded both verifier/runner roots absent.
+No claim covers unenumerated descendants. No process was signalled.

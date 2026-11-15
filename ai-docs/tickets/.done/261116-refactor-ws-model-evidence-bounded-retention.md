@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: dab7c9899d7d02ef
 sage-review-design-reviewed: dab7c9899d7d02ef
+completed: 2026-11-16
 ---
 
 # Bound model-evidence retention to first, change points and the most recent N
@@ -236,3 +237,64 @@ Verification:
   only on the private copy; compare before/after counts and Current/History.
   Never mutate or prune the source/live directory. Historical Background
   measurements remain unverified until this fresh baseline is recorded.
+
+### Result (7bee94167) - 2026-11-16
+
+VERIFIED: Phase 1 landed in `7bee94167`, `745f81c06` and `fb5739515`.
+Per-agent retention is first + every model change + recent eight, including
+latest. Both age guards and the directory threshold are removed. New-file
+append triggering, the ten-minute process-local throttle and best-effort
+removal remain; the bound applies only after an eligible successful pass.
+No public API, configuration, record shape or architecture changed.
+
+Decisions remain **MAIN decision under (1170)=a**, not new owner answers.
+Technical safety refinements preserve static reader equivalence: retain a
+duplicate identity's winner as well as its protected losers, and include
+readable regular-target symlinks in canonical ordering while never deleting
+the links or targets. The accepted R1 Y/X/Y test asserts the retained return
+at t5 versus the unpruned t2, with Current still Y@t12. No age fallback was
+introduced.
+
+VERIFIED verification (complete commands, environments and outputs under
+`ai-docs/tickets/assets/261116-refactor-ws-model-evidence-bounded-retention/`):
+
+- `go test -race ./internal/wslive -count=1 -v` passed on final source;
+  `validated-wslive-race.log` is the final full-package evidence.
+- Exactly five focused dashboard/MCP/runner observed-store tests passed;
+  the explicit `-run` filter and full output are in
+  `final-focused-consumers.log`. No full suite outside wslive ran.
+- `final-proofs.log` and `verification-proofs.log` prove all six original
+  `7ad4a0627` equivalence assertion blocks byte-identical, with hashes and
+  original/current line ranges; their final race tests passed. Old
+  age/threshold/count checks were updated separately, not called
+  unchanged-green. The historical/current summarizer is byte-identical.
+- Final read-only enumeration captured 12 directories / 12,450 regular JSON
+  files. The largest captured directory, `sweatradartakingoverwrite`, supplied
+  **3,848 -> 1,101 files**, **2,747 actual deletions**, on its isolated private
+  copy only. All **141 agents** retained equal Current/History; uncached
+  overlay and the already-warm cache also matched. Every per-agent bound
+  passed. `final-copy-manifest.json` retains full provenance;
+  `final-measurement.json` retains per-agent counts/digests, and
+  `final-private-copy-prune.log` records executable deletion/equality checks.
+- The final unpruned private seed and retained copy match captured bytes,
+  modes and mtimes (`final-proofs.log`). The source/live directory was never
+  pruned or written by this worker. An earlier 3,888-file capture passed,
+  then a later source file disappeared during read-only restoration; that
+  failure is retained, not retried or attributed to a writer. A fresh final
+  capture replaced it. The ticket's historical figures remain unverified.
+- All commands used isolated home/config/cache/runtime/temp roots and
+  offline Go. Recorded command-root PIDs were absent after wait; scope and
+  final PID checks are in `final-proofs.log`. No unenumerated-descendant
+  absence is claimed. Full failing logs and diagnoses remain in `README.md`.
+
+VERIFIED independent review: the route allocated one-pass Lite review. A
+fresh xlarge reviewer checked correctness, settled contract/T0 and test
+integrity at `07e23055b879747b3015fa81d736b2e6f301c393`; no Critical,
+Important or Minor finding remained (`independent-review.md`). T0's
+identical-retained-input interpretation is source-backed inference, not a
+claim that deleted evidence can be recovered.
+
+omitted: Shared runtime/rebuild operations, CI, integration, push, full
+MCP/dashboard/project suites and lease/worktree release were prohibited or
+MAIN-owned. No linked visual reference required a comparison. Branch and
+private fixtures are retained for MAIN's merge report.

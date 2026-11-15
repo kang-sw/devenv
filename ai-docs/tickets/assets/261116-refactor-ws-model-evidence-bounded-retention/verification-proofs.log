@@ -1,0 +1,87 @@
+Historical assertion/fold proof; raw complete output is privately archived.
+{
+  "original_assertions_unchanged": [
+    {
+      "assertion": "prune changed the visible models:",
+      "original_lines": [
+        107,
+        109
+      ],
+      "current_lines": [
+        106,
+        108
+      ],
+      "sha256": "1ccd151a6a8568f23217ef496bf4543bf661d65eeadd381847cf393065573db8",
+      "block": "\t\t\tif !reflect.DeepEqual(gotModels, wantModels) || !reflect.DeepEqual(gotSnap, wantSnap) {\n\t\t\t\tt.Fatalf(\"prune changed the visible models:\\n%+v\\n%+v\", gotModels, wantModels)\n\t\t\t}\n"
+    },
+    {
+      "assertion": "cached overlay of the pruned directory differs",
+      "original_lines": [
+        127,
+        129
+      ],
+      "current_lines": [
+        125,
+        127
+      ],
+      "sha256": "ffb9eeafcb8e850bd01601cc971288ff621048b1639dcdc195fc5d5a12a7dd5c",
+      "block": "\t\t\tif !reflect.DeepEqual(snap, wantSnap) {\n\t\t\t\tt.Fatal(\"cached overlay of the pruned directory differs\")\n\t\t\t}\n"
+    },
+    {
+      "assertion": "replay changed the visible models",
+      "original_lines": [
+        147,
+        149
+      ],
+      "current_lines": [
+        145,
+        147
+      ],
+      "sha256": "ab7645da2cc3d6e9dff51430fcf60da0a1a1e8c2632ad2b91444f2e6b0799105",
+      "block": "\tif gotModels, gotSnap := visibleModels(t, dir); !reflect.DeepEqual(gotModels, wantModels) || !reflect.DeepEqual(gotSnap, wantSnap) {\n\t\tt.Fatal(\"replay changed the visible models\")\n\t}\n"
+    },
+    {
+      "assertion": "second prune changed the visible models",
+      "original_lines": [
+        151,
+        153
+      ],
+      "current_lines": [
+        149,
+        151
+      ],
+      "sha256": "86b768239215619d68b09a9b7760f3e82f3f58fc8756422e0cff67ee9966edb1",
+      "block": "\tif gotModels, gotSnap := visibleModels(t, dir); !reflect.DeepEqual(gotModels, wantModels) || !reflect.DeepEqual(gotSnap, wantSnap) {\n\t\tt.Fatal(\"second prune changed the visible models\")\n\t}\n"
+    },
+    {
+      "assertion": "prune with failed deletes changed the visible models",
+      "original_lines": [
+        212,
+        214
+      ],
+      "current_lines": [
+        222,
+        224
+      ],
+      "sha256": "78162fca85c5bcd7515aef9bf739e9158d99596e2b64ee6b26eaee5a7d0e7146",
+      "block": "\tif got, _ := visibleModels(t, dir); !reflect.DeepEqual(got, want) {\n\t\tt.Fatal(\"prune with failed deletes changed the visible models\")\n\t}\n"
+    },
+    {
+      "assertion": "prune under concurrent reads changed the visible models",
+      "original_lines": [
+        291,
+        293
+      ],
+      "current_lines": [
+        293,
+        295
+      ],
+      "sha256": "4d5cd6faa7b1be84f8cb2499939393c4a25ab3d5771e0eea89b3e01478589ee3",
+      "block": "\tif _, got := visibleModels(t, dir); !reflect.DeepEqual(got, want) {\n\t\tt.Fatal(\"prune under concurrent reads changed the visible models\")\n\t}\n"
+    }
+  ],
+  "historical_revision": "4dc1e7c35",
+  "summarizeObserved_byte_identical": true,
+  "summarizer_sha256": "878d01110b218e15ae93277e64890515c172424e8426c98ee687d38f7bb37824"
+}
+Initial captured-original check: 3888 files matched at 19:04 UTC; later disappearance remains unattributed.
