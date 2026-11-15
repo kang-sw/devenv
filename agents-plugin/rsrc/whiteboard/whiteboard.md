@@ -201,6 +201,7 @@ Markdown up to the closing tag.
 - `id` on `wb:add`: omitted, the server mints one past the highest ID it has
   minted, adopted, or been floored to; a number adopts an ID from outside the
   board, such as a ticket queue's. An ID the store holds is refused.
+- Options and recommendations are policy-only: use `class="policy"` for a choice, rather than attaching choices to a confirmation check or informational item.
 - `wb:option`: one per option, lettered a, b, c by position; a `wb:patch`
   carrying any `wb:option` replaces and re-letters the whole list, so send
   `wb:recommend` with it. `wb:recommend`: an option letter, optionally

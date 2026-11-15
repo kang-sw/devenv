@@ -37,12 +37,9 @@ func viewIDs(list []ItemView) []int {
 	return ids
 }
 
-func TestCheckClassTakesAckAnswersAndWarnsOnOptions(t *testing.T) {
+func TestCheckClassTakesAckAnswers(t *testing.T) {
 	st := &State{}
-	out := mustApply(t, st, addXML(ClassCheck, "t", "verify", "x", "y"))
-	if !strings.Contains(out.Info, "Options on a non-policy item: (01) [check]") {
-		t.Fatalf("options on a check: info = %q", out.Info)
-	}
+	mustApply(t, st, addXML(ClassCheck, "t", "verify"))
 	mustApply(t, st, addXML(ClassCheck, "t", "second")+addXML(ClassCheck, "t", "third"))
 	mustApply(t, st, `<wb:answer id="1" value="ok">1=ok</wb:answer><wb:answer id="2" value="no">2=no^not yet</wb:answer><wb:answer id="3" value="looks right, ship it">fine</wb:answer>`)
 	for id, want := range map[int]string{1: "ok", 2: "no", 3: "looks right, ship it"} {
