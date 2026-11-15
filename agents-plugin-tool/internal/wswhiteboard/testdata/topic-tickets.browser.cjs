@@ -95,8 +95,9 @@ async function run(browser, theme, width) {
     await p.keyboard.press('Escape');
     await p.mouse.move(0, 0);
     await p.locator('.topic[data-topic="one"] .dw.wbtk .dbtn').hover();
-    await p.waitForTimeout(250);
     const hover = p.locator('.topic[data-topic="one"] .dw.wbtk .pop');
+    // Hover opens on a debounced browser task, not the driver's clock.
+    await hover.waitFor({ state: 'visible' });
     if (!(await hover.isVisible())) fail.push(`${tag}: hover does not open the popover`);
     else assert.deepEqual(await hover.locator('.row').evaluateAll((rows) => rows.map((r) => [r.className, r.querySelector('.nm').textContent, r.querySelector('.st').textContent])), [['row open', '261114-feat-history-fold-rule', '열림 · todo']], tag);
     console.log(tag, JSON.stringify({ one: m.one.icon, three: m.three.icon, pop: pop.box }));
