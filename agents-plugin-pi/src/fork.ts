@@ -17,6 +17,7 @@ import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx, type ModelCata
 import {
   REPORT_TO_LEAD_TOOL_NAME,
   inheritModelFromToolCtx,
+  leadParentPolicy,
   spawnAgent,
   storageContextFromToolCtx,
   type ResolvedModelInfo,
@@ -231,6 +232,7 @@ export function buildForkSpawnCtx(
     forkSourceEntries: opts.forkSourceEntries,
     explicitTools: opts.explicitTools,
     parentSessionKey: bridge.defaultSessionKeyRef.current,
+    parentPolicy: leadParentPolicy(bridge),
     spawnRole: "fork",
     forkContext: opts.forkContext,
     onModelResolved: opts.onModelResolved,

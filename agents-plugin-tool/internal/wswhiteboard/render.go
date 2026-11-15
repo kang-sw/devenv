@@ -30,8 +30,33 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
+
+// All consumers (standalone, dashboard and topic-body frames) use this same
+// byte-for-byte stylesheet assembly, preserving its cascade and frame hashes.
+var pageStyleFiles = []string{
+	"page.css",
+	"page-items.css",
+	"page-stream.css",
+	"page-panels.css",
+	"page-sticky.css",
+}
+
+func readPageSource(read func(string) ([]byte, error), name string) ([]byte, error) {
+	if name != "page.css" {
+		return read(name)
+	}
+	var source bytes.Buffer
+	for _, file := range pageStyleFiles {
+		raw, err := read(file)
+		if err != nil {
+			return nil, err
+		}
+		source.Write(raw)
+	}
+	return source.Bytes(), nil
+}
 
 type pageAssets struct {
 	// tmpl is the English template set; tmpls holds one per language, each
@@ -146,7 +171,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 			return ""
 		}
 		var data []byte
-		data, err = read(name)
+		data, err = readPageSource(read, name)
 		return string(data)
 	}
 	svgView := get("svg-view.js")

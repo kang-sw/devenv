@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
+const { readAssetSource } = require('./asset-source.cjs');
 const vm = require("node:vm");
-const source = fs.readFileSync("assets/dashboard.js", "utf8");
+const source = readAssetSource('wsdashboard', 'dashboard.js');
 const start = source.indexOf("  function hdTerms(seq) {");
 const end = source.indexOf("  function hdFail(msg) {", start);
 assert(start > 0 && end > start);

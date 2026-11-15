@@ -353,8 +353,12 @@ type liveWriter struct {
 func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer) *liveWriter {
 	st := wslive.NewState(key)
 	st.SetAdapter(adapter)
+	if records, err := wslive.ReadObserved(dir); err == nil {
+		st.SeedObserved(records)
+	}
 	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
 		st.SeedFinished(prev)
+		st.SeedLastTurn(prev)
 		if u := prev.Usage; u != nil {
 			_, _ = st.Apply(wslive.Event{Kind: wslive.KindStatus, Context: u.Context, Cost: u.Cost, Limits: u.Limits}, now().UnixMilli())
 		}
@@ -379,7 +383,10 @@ func (w *liveWriter) apply(ev wslive.Event) bool {
 // were written under an earlier daemon, and the snapshot is written once
 // the replay ends.
 func (w *liveWriter) applyQuiet(ev wslive.Event) {
-	_, _ = w.st.Apply(ev, w.now().UnixMilli())
+	res, err := w.st.Apply(ev, w.now().UnixMilli())
+	if err == nil {
+		w.writeObserved(res.Observed)
+	}
 }
 
 // card applies a tracker card reference the lead showed, as apply does.
@@ -419,6 +426,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 		fmt.Fprintf(w.log, "agent %s: drop %s event: %v\n", w.st.ReplyID(), kind, err)
 		return false
 	}
+	w.writeObserved(res.Observed)
 	if len(res.Ring) > 0 {
 		if err := wslive.AppendRing(wslive.RingDir(w.dir), res.Ring); err != nil {
 			fmt.Fprintf(w.log, "agent %s: ring write: %v\n", w.st.ReplyID(), err)
@@ -446,6 +454,12 @@ func (w *liveWriter) endAgents() {
 func (w *liveWriter) setAdapter(name string) {
 	w.st.SetAdapter(name)
 	w.writeSnapshot()
+}
+
+func (w *liveWriter) writeObserved(records []wslive.ObservedRecord) {
+	if err := wslive.AppendObserved(w.dir, records); err != nil {
+		fmt.Fprintf(w.log, "agent %s: model evidence write: %v\n", w.st.ReplyID(), err)
+	}
 }
 
 func (w *liveWriter) writeSnapshot() {
