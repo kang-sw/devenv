@@ -7306,6 +7306,55 @@
   // preview while the user types (debounced; a stale answer is dropped).
   // "Add" is off while the input is empty or the latest preview refuses it;
   // a preview still on its way leaves it on, as the add reads the path again.
+  function rpWsBrowse(P, inp, preview, from) {
+    if (P.picker || P.busy || !root.hasAttribute("data-sysopen") || !window.WsFiles) return;
+    var D = P.picker = { instance: null }, gen = P.gen;
+    var dl = D.el = mk("dialog", "fworkspace-picker");
+    dl.setAttribute("aria-label", wsT("js.rail.ws.browse"));
+    var pane = dl.appendChild(mk("section", "fpane"));
+    var note = pane.appendChild(mk("div", "fnote", wsT("js.files.loading")));
+    var row = pane.appendChild(mk("div", "fattachment"));
+    row.appendChild(rpBtn("btn", wsT("js.rail.cancel"))).addEventListener("click", function () { D.close(true); });
+    D.close = function (focus) {
+      if (P.picker !== D) return;
+      P.picker = null;
+      if (D.instance) D.instance.destroy();
+      dl.close(); dl.remove();
+      if (focus) from.focus();
+    };
+    dl.addEventListener("cancel", function (e) { e.preventDefault(); D.close(true); });
+    P.el.appendChild(dl);
+    dl.showModal();
+    fetch("/s/host0/fs/roots", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("roots refused");
+      return r.json();
+    }).then(function (roots) {
+      if (P.picker !== D || P.gen !== gen) return;
+      var start = roots.home || (roots.volumes || [])[0];
+      if (!start) throw new Error("no browse roots");
+      D.instance = window.WsFiles.create(pane, {
+        rid: "host0", routeBase: "/s/host0/", local: true, directoriesOnly: true,
+        roots: roots, location: { root: start, dir: "" }, toast: toast,
+        attachment: function (slot, api) {
+          var select = slot.appendChild(rpBtn("btn pr", wsT("js.rail.ws.select")));
+          select.disabled = true;
+          var cancel = slot.appendChild(rpBtn("btn", wsT("js.rail.cancel")));
+          function sync() { select.disabled = !api.selection(); }
+          var offNav = api.on("navigation", sync), offSel = api.on("selection", sync);
+          select.addEventListener("click", function () {
+            var chosen = api.selection();
+            if (!chosen || !rpLive(P, gen) || P.busy) return;
+            inp.value = chosen.absolute;
+            D.close(false); preview(); inp.focus();
+          });
+          cancel.addEventListener("click", function () { D.close(true); });
+          return function () { offNav(); offSel(); };
+        }
+      });
+      D.instance.shown();
+    }).catch(function () { if (P.picker === D && P.gen === gen) note.textContent = wsT("js.files.failed"); });
+  }
+
   function rpWsMake() {
     var P = { seq: 0, gen: 0, timer: 0, ok: null, busy: false };
     var el = P.el = rpPop(wsT("js.rail.ws.title"));
@@ -7314,6 +7363,8 @@
     var lbl = sec.appendChild(mk("label", "splbl", wsT("js.rail.ws.label")));
     var line = sec.appendChild(mk("div", "spline"));
     var inp = line.appendChild(rpInput("spq mono"));
+    var browse = root.hasAttribute("data-sysopen") && window.WsFiles ? line.appendChild(rpBtn("pbtn", wsT("js.rail.ws.browse"))) : null;
+    if (browse) browse.addEventListener("click", function () { rpWsBrowse(P, inp, preview, browse); });
     var go = line.appendChild(rpBtn("pbtn go", wsT("js.rail.ws.add")));
     var res = sec.appendChild(mk("div", "spres"));
     inp.id = rpId();
@@ -7329,7 +7380,10 @@
     }
     function hint() { show("", [mk("span", "spnote", wsT("js.rail.ws.hint"))]); }
     function bad(text) { show("bad", [mk("span", "k", text)]); }
-    function sync() { go.disabled = P.busy || !inp.value.trim() || P.ok === false; }
+    function sync() {
+      go.disabled = P.busy || !inp.value.trim() || P.ok === false;
+      if (browse) browse.disabled = P.busy;
+    }
     function preview() {
       var text = inp.value, n = ++P.seq;
       clearTimeout(P.timer);
@@ -7376,7 +7430,8 @@
     go.addEventListener("click", submit);
     P.open = function () { P.gen++; inp.value = ""; P.ok = null; P.busy = false; hint(); sync(); };
     P.focus = function () { inp.focus(); };
-    P.close = function () { P.seq++; clearTimeout(P.timer); };
+    P.back = function () { if (!P.picker) return false; P.picker.close(true); return true; };
+    P.close = function () { P.seq++; clearTimeout(P.timer); if (P.picker) P.picker.close(false); };
     return P;
   }
 

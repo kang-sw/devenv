@@ -1613,6 +1613,8 @@
   "js.rail.ws.hint": "Collez tel quel le chemin de la barre d'adresse de l'explorateur de fichiers ou de « Copier en tant que chemin d'accès »",
   "js.rail.ws.will": "Sera ajouté",
   "js.rail.ws.add": "Ajouter",
+  "js.rail.ws.browse": "Parcourir",
+  "js.rail.ws.select": "Sélectionner le dossier",
   "js.rail.wt.title": "Ajouter un worktree",
   "js.rail.wt.branch": "Branche",
   "js.rail.wt.new": "Nouvelle branche",

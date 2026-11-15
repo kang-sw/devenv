@@ -1164,6 +1164,12 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .fattachment { display: inline-flex; flex: none; align-items: center; gap: 6px; }
 .fattachment .btn { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); font: 600 11px var(--wb-sans); white-space: nowrap; }
 .fattachment .btn .li { width: 12px; height: 12px; }
+.fworkspace-picker { width: min(900px, calc(100vw - 32px)); height: min(640px, calc(100dvh - 48px)); padding: 0; border: 1px solid var(--wb-line); border-radius: var(--wb-radius); background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); }
+.fworkspace-picker::backdrop { background: #0006; }
+.fworkspace-picker > .fpane { display: flex; height: 100%; }
+.fpicker [hidden] { display: none !important; }
+.fpicker .fdot { opacity: .5; }
+.froot-choices { min-width: 0; max-width: 65%; margin-left: auto; font: 11px var(--wb-mono); background: var(--wb-muted); color: inherit; border: 0; border-radius: 5px; padding: 3px; }
 .fattachment .pr { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
 @container (max-width: 480px) {
   .fworkspace { grid-template-columns: 110px minmax(0, 1fr); }

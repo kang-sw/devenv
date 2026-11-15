@@ -379,6 +379,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-ro
   check('closed window aborts request and drops late answer without affecting peer', [closingWindow.options.signal.aborted, left.el.children.length, !!right.at('[data-path="surviving.go"]')], [true, 0, true]);
   right.q.value = 'cancel-before-start'; event(right.q, 'input'); right.instance.destroy(); await timers();
   check('destroy cancels pending debounce', requests.filter(r => !r.taken && r.url.pathname === '/s/search-tabs/fs/find').length, 0);
+  await workspacePickerChecks();
   check('extended core leaves no global handlers or timers', [doc.listeners.keydown.length, win.listeners.resize.length, pendingTimers.size], [0, 0, 0]);
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });
