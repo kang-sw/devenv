@@ -1,0 +1,189 @@
+<!doctype html>
+<!-- Mockup (not approved): arrival flow of hosted-session hire requests.
+     Three frames: A arrival (chip + toast), B queue (3 pending, opened from
+     the chip), C the modal opened from the queue with the root fixed to the
+     requester's worktree. Static HTML; render at 1600x980. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Session hire arrival flow - mockup</title>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --fg: #1d2129; --muted: #eef0f3; --muted-fg: #636b78;
+  --line: #dde1e7; --primary: #2457c5; --ok: #1d7348; --fail: #c0262d; --warn: #c27a00; --warn-ink: #a35f00;
+  --shadow-hi: 0 12px 40px rgb(0 0 0 / .22), 0 2px 8px rgb(0 0 0 / .08);
+  --sans: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; width: 1600px; height: 980px; font: 13px/1.45 var(--sans); color: var(--fg); background: #e3e6eb; padding: 16px; overflow: hidden; }
+.frames { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 440px 488px; gap: 20px 16px; height: 100%; }
+.frame { position: relative; background: var(--bg); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgb(0 0 0 / .12); }
+.frame.c { grid-column: span 2; }
+.tag { position: absolute; top: 8px; right: 10px; z-index: 5; font: 700 11px/1 var(--sans); color: #fff; background: #3b4250; padding: 5px 8px; border-radius: 999px; }
+.top { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--card); border-bottom: 1px solid var(--line); font-weight: 700; }
+.top .crumb { color: var(--muted-fg); font-weight: 500; }
+.top .sp { flex: 1; }
+.hirebadge { display: inline-flex; align-items: center; gap: 6px; font: 700 11.5px/1 var(--sans); color: #fff; background: var(--warn-ink); padding: 6px 9px; border-radius: 999px; }
+.body { display: grid; grid-template-columns: 270px 1fr; height: calc(100% - 38px); }
+.rail { background: var(--card); border-right: 1px solid var(--line); padding: 8px; }
+.rh { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted-fg); padding: 5px 8px; }
+.row { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.dot.idle { background: #a9b0bb; }
+.nm { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h { font: 600 10.5px/1 var(--mono); color: var(--muted-fg); background: var(--muted); padding: 3px 5px; border-radius: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; font: 700 10.5px/1 var(--sans); padding: 3px 6px; border-radius: 999px; }
+.chip.hire { color: #fff; background: var(--warn-ink); }
+.chip.hire.pulse { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 35%, transparent); }
+.chip.root { color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.row.child { margin-left: 18px; position: relative; }
+.row.child::before { content: ""; position: absolute; left: -10px; top: 0; bottom: 50%; width: 8px; border-left: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); border-bottom-left-radius: 6px; }
+.row.ghost { margin-left: 18px; border: 1.5px dashed color-mix(in srgb, var(--warn) 60%, transparent); color: var(--warn-ink); font-style: italic; padding: 4px 8px; font-size: 12px; }
+.row.ghost .nm { font-weight: 500; }
+.main { position: relative; padding: 14px; }
+.convo { background: var(--card); border-radius: 10px; height: 100%; padding: 14px 16px; color: var(--muted-fg); }
+.toast { position: absolute; right: 16px; bottom: 16px; width: 330px; background: #1f2430; color: #f3f5f8; border-radius: 10px; padding: 11px 13px; box-shadow: var(--shadow-hi); display: grid; gap: 4px; }
+.toast .t1 { font-weight: 700; display: flex; gap: 6px; align-items: center; }
+.toast .t1 .x { margin-left: auto; opacity: .6; font-weight: 400; }
+.toast .t2 { color: #c6ccd6; font-size: 12px; }
+.toast .t3 { display: flex; gap: 8px; margin-top: 4px; }
+.toast .lnk { color: #9fc1ff; font-weight: 700; }
+.toast .dim { color: #8e96a3; font-size: 11.5px; margin-left: auto; }
+.pop { position: absolute; left: 196px; top: 92px; width: 400px; background: var(--card); border-radius: 10px; box-shadow: var(--shadow-hi); overflow: hidden; z-index: 4; }
+.pop .ph { padding: 10px 12px; font-weight: 700; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.pop .ph .s { color: var(--muted-fg); font-weight: 500; font-size: 12px; margin-left: auto; }
+.req { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.req:last-child { border-bottom: 0; }
+.req.sel { background: color-mix(in srgb, var(--primary) 7%, transparent); box-shadow: inset 3px 0 0 var(--primary); }
+.req .who { font-weight: 700; }
+.req .who span { font-weight: 500; color: var(--muted-fg); }
+.req .why { grid-column: 1; color: var(--muted-fg); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.req .exp { grid-row: span 2; align-self: center; font: 600 11px/1 var(--mono); color: var(--warn-ink); background: color-mix(in srgb, var(--warn) 12%, transparent); padding: 5px 7px; border-radius: 6px; }
+.req .exp.soon { color: #fff; background: var(--warn-ink); }
+.scrim { position: absolute; inset: 0; background: rgb(20 24 31 / .38); }
+.modal { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 620px; background: var(--card); border-radius: 12px; box-shadow: var(--shadow-hi); overflow: hidden; }
+.mh { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); }
+.mh .title { font-size: 15px; font-weight: 700; flex: 1; }
+.mh .pager { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-fg); }
+.mh .pager b { color: var(--fg); }
+.mh .pager .ar { width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; }
+.mh .exp { font: 600 11.5px/1 var(--mono); color: var(--warn-ink); background: color-mix(in srgb, var(--warn) 12%, transparent); padding: 5px 8px; border-radius: 6px; }
+.mb { padding: 10px 16px 2px; display: grid; gap: 9px; }
+.whoL { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.whoL .k { color: var(--muted-fg); }
+code { font: 12px var(--mono); background: var(--muted); padding: 2px 6px; border-radius: 5px; }
+.lab { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted-fg); margin-bottom: 3px; }
+.reason { font-size: 13px; padding: 8px 11px; border-radius: 8px; background: var(--muted); }
+.ctx { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; font-weight: 600; font-size: 12.5px; display: flex; gap: 8px; }
+.ctx::before { content: "\25B8"; color: var(--muted-fg); }
+.ctx .n { color: var(--muted-fg); font-weight: 500; margin-left: auto; font-size: 11.5px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 10px; }
+.field label { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted-fg); margin-bottom: 3px; }
+.ctl { height: 30px; white-space: nowrap; overflow: hidden; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; }
+.ctl.sel::after { content: "\25BE"; margin-left: auto; color: var(--muted-fg); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; height: 30px; }
+.seg span { padding: 0 12px; display: flex; align-items: center; font-weight: 600; color: var(--muted-fg); }
+.seg span.on { background: var(--primary); color: #fff; }
+.fixed { display: flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 8px; background: var(--muted); }
+.fixed .lock { width: 14px; height: 14px; flex: none; color: var(--muted-fg); }
+.fixed .p { font: 12px var(--mono); }
+.fixed .w { margin-left: auto; font-size: 11.5px; color: var(--muted-fg); }
+.mf { display: flex; align-items: center; gap: 8px; padding: 10px 16px 12px; }
+.mf .in { flex: 1; height: 32px; border: 1px solid var(--line); border-radius: 7px; padding: 0 10px; display: flex; align-items: center; color: var(--muted-fg); font-size: 12.5px; }
+.btn { height: 32px; padding: 0 13px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); font: 600 13px var(--sans); display: inline-flex; align-items: center; }
+.btn.rej { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 45%, var(--line)); }
+.btn.ok { background: var(--primary); color: #fff; border-color: var(--primary); }
+.note { position: absolute; left: 14px; bottom: 12px; max-width: 360px; font-size: 11.5px; color: #fff; background: rgb(20 24 31 / .72); padding: 7px 9px; border-radius: 7px; }
+.cap { position: absolute; left: 14px; bottom: 12px; max-width: 520px; font-size: 11.5px; color: var(--muted-fg); }
+</style>
+</head>
+<body>
+<div class="frames">
+
+  <!-- A: arrival -->
+  <div class="frame">
+    <span class="tag">A - a request arrives</span>
+    <div class="top"><span>ws dashboard</span><span class="crumb">devenv</span><span class="sp"></span><span class="hirebadge">1 hire request</span></div>
+    <div class="body">
+      <aside class="rail">
+        <div class="rh">Sessions</div>
+        <div class="row"><span class="dot"></span><span class="nm">MAIN</span><span class="chip root">root</span><span class="h">claude</span></div>
+        <div class="row"><span class="dot"></span><span class="nm">EXEC5 - explorer</span><span class="chip root">root</span><span class="chip hire pulse">hire 1</span><span class="h">claude</span></div>
+        <div class="row ghost"><span class="nm">pending: pdf preview spike</span></div>
+        <div class="row child"><span class="dot idle"></span><span class="nm">css look pass</span><span class="h">pi</span></div>
+        <div class="row"><span class="dot idle"></span><span class="nm">wiki clerk</span><span class="h">claude</span></div>
+      </aside>
+      <section class="main">
+        <div class="convo">Owner is typing in MAIN's composer; nothing steals focus.</div>
+        <div class="toast">
+          <div class="t1">Hire request from EXEC5<span class="x">&times;</span></div>
+          <div class="t2">pdf preview spike &middot; "Need a parallel session to spike PDF preview..."</div>
+          <div class="t3"><span class="lnk">Review</span><span class="dim">toast hides after 8 s; chip stays</span></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- B: queue -->
+  <div class="frame">
+    <span class="tag">B - three pending, opened from a chip</span>
+    <div class="top"><span>ws dashboard</span><span class="crumb">devenv</span><span class="sp"></span><span class="hirebadge">3 hire requests</span></div>
+    <div class="body">
+      <aside class="rail">
+        <div class="rh">Sessions</div>
+        <div class="row"><span class="dot"></span><span class="nm">MAIN</span><span class="chip root">root</span><span class="chip hire">hire 1</span><span class="h">claude</span></div>
+        <div class="row ghost"><span class="nm">pending: release notes</span></div>
+        <div class="row"><span class="dot"></span><span class="nm">EXEC5 - explorer</span><span class="chip root">root</span><span class="chip hire">hire 2</span><span class="h">claude</span></div>
+        <div class="row ghost"><span class="nm">pending: pdf preview spike</span></div>
+        <div class="row ghost"><span class="nm">pending: i18n sweep</span></div>
+        <div class="row child"><span class="dot idle"></span><span class="nm">css look pass</span><span class="h">pi</span></div>
+      </aside>
+      <section class="main"><div class="convo"></div></section>
+    </div>
+    <div class="pop">
+      <div class="ph">Hire requests<span class="s">oldest first &middot; all requesters</span></div>
+      <div class="req"><div class="who">MAIN <span>&middot; release notes</span></div><span class="exp soon">03:12</span><div class="why">Draft the 0.51 release notes from the merged tickets while I run the gate.</div></div>
+      <div class="req sel"><div class="who">EXEC5 <span>&middot; pdf preview spike</span></div><span class="exp">27:41</span><div class="why">Need a parallel session to spike PDF preview in the file explorer...</div></div>
+      <div class="req"><div class="who">EXEC5 <span>&middot; i18n sweep</span></div><span class="exp">29:05</span><div class="why">Fill the missing locale keys for the explorer strings across 11 tables.</div></div>
+    </div>
+    <div class="cap">The top-bar badge and each requester's chip open the same queue; a chip opens it scrolled to that requester's requests.</div>
+  </div>
+
+  <!-- C: modal -->
+  <div class="frame c">
+    <span class="tag">C - modal opened from the queue; root fixed to the requester's worktree</span>
+    <div class="top"><span>ws dashboard</span><span class="crumb">devenv</span><span class="sp"></span><span class="hirebadge">3 hire requests</span></div>
+    <div class="body">
+      <aside class="rail">
+        <div class="rh">Sessions</div>
+        <div class="row"><span class="dot"></span><span class="nm">MAIN</span><span class="chip root">root</span><span class="chip hire">hire 1</span><span class="h">claude</span></div>
+        <div class="row"><span class="dot"></span><span class="nm">EXEC5 - explorer</span><span class="chip root">root</span><span class="chip hire">hire 2</span><span class="h">claude</span></div>
+      </aside>
+      <section class="main">
+        <div class="convo"></div>
+        <div class="scrim"></div>
+        <div class="modal" role="dialog" aria-label="Session hire request">
+          <div class="mh"><span class="title">Session hire request</span><span class="pager"><span class="ar">&lsaquo;</span><b>2</b> of 3<span class="ar">&rsaquo;</span></span><span class="exp">expires in 27:41</span></div>
+          <div class="mb">
+            <div class="whoL"><span class="k">from</span><b>EXEC5 - explorer</b><code>id:caretakeraerosolpod</code><span class="k">claude &middot; opus</span></div>
+            <div><div class="lab">Reason</div><div class="reason">Need a parallel session to spike PDF preview in the file explorer while I keep the multi-select work moving. Small, isolated, report by mail.</div></div>
+            <div class="ctx">Recovery context (sent back to the requester)<span class="n">2,184 chars</span></div>
+            <div class="grid">
+              <div class="field"><label>Harness</label><div class="seg"><span>Claude</span><span class="on">Pi</span></div></div>
+              <div class="field"><label>Model</label><div class="ctl sel mono">gpt-6.1-sol</div></div>
+              <div class="field"><label>Effort</label><div class="ctl sel">high</div></div>
+            </div>
+            <div class="field"><label>Label</label><div class="ctl">pdf preview spike</div></div>
+            <div><div class="lab">Worktree</div><div class="fixed"><svg class="lock" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span class="p">/Users/owner/.ws-worktrees/devenv/explorer</span><span class="w">same worktree as EXEC5</span></div></div>
+          </div>
+          <div class="mf"><span class="in">Reason (sent to EXEC5 on reject)</span><span class="btn rej">Reject</span><span class="btn ok">Approve &amp; create</span></div>
+        </div>
+      </section>
+    </div>
+    <div class="note">Approve creates the session nested under EXEC5 in the rail (the same nesting the owner can drag); the queue then advances to 3 of 3.</div>
+  </div>
+
+</div>
+</body>
+</html>
