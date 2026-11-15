@@ -30,7 +30,10 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
   (`agents-plugin-pi/src/mailbox-waiter.ts` ~1224, `adapter-label.ts` ~49-68)
   drain JSON, join the entries' `.text` with blank lines under one leading
   `[user message from ... whiteboard]` label; the daemon-hosted runner joins
-  drained text the same way (`wsagent/runner.go` ~1831-1933).
+  drained inbox text with reports and mail using blank lines, without that
+  adapter label (`agents-plugin-tool/internal/wsagent/runner.go#L1837-L1844`,
+  `agents-plugin-tool/internal/wsagent/runner.go#L1880-L1884`,
+  `agents-plugin-tool/internal/wsagent/runner.go#L1918-L1933`).
 - The one text assembly point every delivery path shares is
   `wsinbox.Entry.Text()` (`wsinbox/inbox.go` ~325-367): answers block,
   mentions, picks, consoles, text paragraphs, image lines; a slash command
@@ -43,9 +46,10 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
   one bubble with one clock (`wsdashboard/assets/dashboard.tmpl` `entry`,
   ~296). An outer wrapper would defeat every anchored parser unless the view
   unwraps first.
-- The shipped whiteboard playbook says a message "opens with `<wb:answers>`"
-  (`agents-plugin/rsrc/whiteboard/whiteboard.md` ~389, ~402-438; mirrored in
-  `agents-plugin-wsflow/` and `agents-plugin-pi/`).
+- The shipped whiteboard playbook says a dashboard message "opens with the user's board answers as a"
+  "`<wb:answers>` block" (`agents-plugin/rsrc/whiteboard/whiteboard.md#L402-L404`;
+  byte-identical in `agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md` and
+  `agents-plugin-pi/rsrc/whiteboard/whiteboard.md`).
 
 ## Decisions
 
@@ -65,30 +69,103 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
   ("11/14 23:50"). Hover always shows the full date, time and offset (MAIN
   reading of c's hover, announced). Rejected: a alone, b (always full date
   and time), c with no cut-over.
+- **Envelope built once in `wsinbox.Entry.Text()`** (technical, acked by
+  MAIN): Claude, Pi, the hosted runner and the MCP drain all deliver the
+  same envelope. Rejected: per-adapter wrapping (double-wrap risk, divergent
+  paths).
+- **The adapter label stays outside the envelopes** (technical, acked): the
+  leading `[user message from ... whiteboard]` label precedes the envelopes,
+  one per delivered batch, because Claude and Pi provenance detection matches
+  that exact leading label (commit `2fb9b65f`). Rejected: a label inside each
+  envelope.
+- **Commands bare, steering wrapped, empty entries absent** (technical,
+  acked; the empty-entry clause auto-confirmed from fact population): a
+  slash-command entry stays its bare typed line (commit `34c00c56`, hosts run
+  it as is); a steered message is wrapped like any other item, with no marker;
+  an entry whose text is empty (a textless interrupt control record) yields
+  no envelope. Rejected: wrapping commands.
+- **Daemon instant, browser offset** (technical, acked): the instant is the
+  daemon's existing `SentAt`; the browser adds a new optional request field,
+  the offset in minutes east of UTC from `-new Date().getTimezoneOffset()`,
+  validated to the real-world range (-720..+840) and stored as an optional
+  inbox-entry field. Rejected: a browser wall-clock time (skew could reorder
+  or backdate messages).
+- **Fallback zone** (technical, acked): an entry without a stored offset
+  renders `at` in the daemon host's local zone. The hover's full value shows
+  the offset actually used, so a legacy entry is visibly in the host zone
+  (MAIN note). Rejected: UTC; omitting `at`.
+- **Reversible delimiter escaping** (technical, acked; reversibility
+  auto-confirmed from fact population): only the closing-delimiter sequence
+  is escaped. In the envelope body, a literal `</ws:user` becomes
+  `&lt;/ws:user`, and any existing `(&amp;)*&lt;/ws:user` run gains one more
+  `&amp;` level, so the view's unescape (drop one level) restores the exact
+  text, including literal entity input. The rest of the body is
+  byte-identical to today's text. Rejected: leaving it raw (forged block
+  boundaries); escaping every `<` (changes all delivered text).
+- **Envelope-first block split, nothing dropped** (technical, acked;
+  mixed-batch clause auto-confirmed from fact population): the conversation
+  view unwraps envelopes first, makes one block per envelope, then runs the
+  existing answers, mentions, picks and image parsers per block. Text outside
+  any envelope (the adapter label is stripped as today; hosted-runner report
+  or mail text joined into the same turn; legacy unwrapped history) renders
+  as its own plain block in its original order. A malformed or unterminated
+  envelope falls back to the whole turn as plain text, as the existing
+  parsers already do (commit `562bfeb9`). Rejected: a strict parser that
+  drops malformed input.
+- **Tolerant playbook wording** (technical, acked): the ws, wsflow and Pi
+  copies of the whiteboard playbook say each dashboard message is a
+  `<ws:user at=...>` block whose content opens with `<wb:answers>` when
+  present, and that older messages may arrive unwrapped. Rejected: editing
+  only the opening sentence.
+- **Compatibility tier T0** (technical, acked): optional additive request
+  and inbox fields, an unchanged drain `text` shape, and dashboard assets that
+  ship with their daemon. `Normalize` and every inbox rewrite (steer, held
+  merge, cancel, drain) copy the new field; the known minor-mismatch caveat
+  that an older binary merging into a held entry drops a new optional field
+  is accepted as for mentions (commit `e0964b73`). Rejected: T2.
+- **Asset edits wait for the asset-split move map** (announced, acked):
+  `261114-refactor-ws-dashboard-whiteboard-asset-split` is a prerequisite;
+  the conversation-rendering ticket is a coordinate edge. Implementation
+  dispatch waits for a MAIN signal.
 
-## Open Decision Queue
-Last ID: none minted (items below await MAIN's board IDs)
-
-(u1) [open] [technical] The envelope is built once in `wsinbox.Entry.Text()`, so Claude, Pi, the hosted runner and the drain all deliver it, over per-adapter wrapping - one shared formatter cannot double-wrap and keeps every delivery path identical.
-(u2) [open] [technical] The adapters' leading `[user message from ... whiteboard]` label stays outside and before the envelopes, one per delivered batch, over a label inside each envelope - provenance detection in Claude and Pi matches that exact leading label (`dashboard.ts` ~135-149, `adapter-label.ts` ~49-59).
-(u3) [open] [technical] A slash-command entry stays a bare command line, unwrapped, over wrapping it - the command must reach the host as its own line to run; steering/interrupt entries are wrapped like any other item (no marker, per the owner).
-(u4) [open] [technical] The instant comes from the daemon's existing `SentAt` and only the offset comes from the browser (new optional request field, minutes east of UTC, from `-new Date().getTimezoneOffset()`, stored as an optional inbox-entry field) over a browser-supplied wall-clock time - the daemon clock stays the single ordering clock, and a skewed browser clock cannot reorder or backdate messages.
-(u5) [open] [technical] An entry without a stored offset (written before this change, or a client that omits it) renders `at` in the daemon host's local zone, over UTC or omitting `at` - every delivered item keeps one well-formed attribute, and the host zone is the best available guess for a local user.
-(u6) [open] [technical] A literal `</ws:user` inside user text is escaped as `&lt;/ws:user` in the envelope body and unescaped by the conversation view, over leaving it raw or escaping every `<` - only that sequence can break the envelope, and the rest of the body stays byte-identical to today's text.
-(u7) [open] [technical] The conversation view unwraps envelopes first, splits one user turn into one block per envelope, then runs the existing answers/mentions/picks/images parsers per block; text with no envelope (history, older daemons) is one block as today, and a malformed or unterminated envelope falls back to showing the turn as plain text, over a strict parser that drops it - history keeps rendering and nothing user-sent disappears.
-(u8) [open] [technical] The shipped whiteboard playbook (ws, wsflow, Pi copies, per `wsflow-mirroring.md`) says each whiteboard message is a `<ws:user at=...>` block whose content opens with `<wb:answers>` when present, and that older messages may be unwrapped, over only editing the opening sentence - the tolerant wording keeps a newer playbook correct against an older daemon.
-(u9) [open] [technical] Compatibility tier T0: the new request and inbox fields are optional and additive, the drain `text` field keeps its shape, dashboard assets ship with the daemon that serves them, and (u5)/(u7)/(u8) cover the mixed-version text skew, over treating the delivered-text change as T2 - no MCP argument, store schema or event type changes non-additively. The worker audits that inbox rewrites (steering marshal, `wsinbox/inbox.go` ~626-744) preserve the new field.
-(u10) [open] [announced] Dashboard asset edits wait for the asset-split move map (`261114-refactor-ws-dashboard-whiteboard-asset-split`, recorded as prerequisite) - that ticket asks every consumer to use its landed move map; the conversation-rendering ticket is a coordinate edge, not a blocker, since it already waits on the same split.
 ## Constraints
 
-- Manuals: `ai-docs/manuals/shipped-surface-boundary.md` (playbook and
-  dashboard assets ship downstream), `ai-docs/manuals/skill-authoring.md`
-  and `ai-docs/manuals/wsflow-mirroring.md` (playbook edit and mirrors),
-  `ai-docs/manuals/release-compatibility.md` (inbox entry and request fields).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - Owner run rules: offline env `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`;
   never the full `./internal/wsdashboard` package, only `-run`; never the
   shared dashboard daemon or port 29417 (isolated daemons with their own
   `WS_CACHE_HOME` on free ports); end with an owned process scan.
+
+## Prior Decisions
+
+- 261115-feat-ws-whiteboard-topic-close-request (2026-11-15, Decisions): "delivered as `<wb:close-request topic="<stem>">reason</wb:close-request>` inside the `<ws:user>` envelope" — bearing: constrains
+- fdc0392d (2026-11-15, commit): "Saved-history mode has entries and board regions, no composer/live inbox/activity regions, and cannot overwrite saved composer drafts." — bearing: constrains
+- 66d13443 (2026-11-14, commit): "One ParseWebElements (picks then consoles) rather than two parsers: the grammar fixes the order and a caller always wants both plus the rest." — bearing: constrains
+- ed6510b9 (2026-11-14, commit): "Capsules reuse achip/mchip; only the selector clipping and a warn-colored edge for console blocks are new CSS." — bearing: supports
+- 562bfeb9 (2026-11-12, commit): "Any malformed line, a missing close, or text glued to the close falls back to the whole text as before." — bearing: constrains
+- e0964b73 (2026-11-12, commit): "Caveat: during a minor mismatch an older binary that merges into a held entry drops the new optional field." — bearing: constrains
+- 34c00c56 (2026-11-12, commit): "Entry.Text() of a command entry is its typed line, so a host that runs a bare \"/name args\" message (hosted Claude) takes it as is." — bearing: constrains
+- 2fb9b65f (2026-11-06, commit): "Origin: user message text opening with WHITEBOARD_MESSAGE_LABEL (\"[user message from the ws whiteboard]\") is tagged whiteboard with the label stripped" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsinbox/inbox.go; wsdashboard/inbox_routes.go, pageview_inbox.go and assets/dashboard.js, dashboard.tmpl under the same internal root; agents-plugin/rsrc/whiteboard/whiteboard.md and wsflow/Pi mirrors; wsi18n tables. |
+| scope.surface | public-interface | Phase 1 changes model-facing delivered text via Entry.Text() and the dashboard message request; agents-plugin-tool/internal/mcp/dashboard_inbox.go#L93-L119 exposes that text to adapters. |
+| scope.new_public_symbol | yes | New model-facing ws:user token and at attribute; no new MCP tool is proposed. |
+| scope.new_type_contract | yes | Proposed optional browser offset request/inbox field plus one minute-precision, offset-bearing envelope per item; field spelling and final grammar remain open in u4/u6/u7/u9. |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsinbox/inbox_test.go, command_test.go, answers_test.go; internal/mcp/dashboard_inbox_test.go; internal/wsdashboard/inbox_routes_test.go and conversation_markdown_test.go; internal/wsi18n/keys_test.go; internal/wsrsrc/pi_mirror_test.go and wsflow_mirror_test.go. No tests run for fact population. |
+| complexity.reuse_points | confirmed | Read Entry.Text/Normalize/Send/Steer in agents-plugin-tool/internal/wsinbox/inbox.go#L331-L382 and #L688-L751; leading parsers in pageview_inbox.go#L101-L118; existing fmtTime/tickTimes in assets/dashboard.js#L35-L124 under internal/wsdashboard; mirror guards read. |
+| complexity.side_effect_risk | high | One shared serializer feeds Claude, Pi, MCP and hosted delivery; hosted batches may also contain unenveloped reports/mail (agents-plugin-tool/internal/wsagent/runner.go#L1880-L1884). |
+| risk.correctness | high | Splitting a single stable conversation entry into blocks must preserve answer/image ownership, legacy text and batch order; current split mutates one ConvEntry in place (agents-plugin-tool/internal/wsdashboard/pageview_inbox.go#L106-L118). |
+| risk.fit | moderate | Reuses existing capsule/template/time mechanisms, but the asset-split move map is not landed and conversation-rendering consolidation is ready but unimplemented; consume the split map before asset work. |
+| risk.test | high | Existing assertions pin bare delivered text and one user bubble; envelope, escaping, mixed bundles, offset fallback and live 59/60-minute rollover require new cases. Scoped search for ws:user in wsinbox/wsdashboard and adapter-label/mailbox-waiter returned no matches. |
+| risk.security_or_contract | high | Untrusted delimiter/entity text must round-trip without forged blocks or lost content; Normalize reconstructs known Entry fields (agents-plugin-tool/internal/wsinbox/inbox.go#L377-L382), so optional-field preservation and T0 compatibility are not established by an additive field alone. |
 
 ## Phases
 

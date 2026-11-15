@@ -1,10 +1,10 @@
 ---
 title: Topic card x button attaches a close-topic request to the composer
 related:
-  261115-feat-ws-dashboard-user-message-envelope: prerequisite; close requests are delivered inside its ws:user envelope
+  261115-feat-ws-dashboard-user-message-envelope: prerequisite; close requests are delivered inside its ws:user envelope (pending 261115-feat-ws-dashboard-user-message-envelope)
   261115-feat-ws-whiteboard-topic-state-badge: coordinate; both edit the topic header action row (page.tmpl, page.css, cards.js decorate order)
-  261114-refactor-ws-dashboard-whiteboard-asset-split: prerequisite; consume its landed move map before touching dashboard assets
-  261115-feat-ws-dashboard-conversation-rendering-consolidation: coordinate; the delivered close-request capsule renders in the user bubble it rewrites
+  261114-refactor-ws-dashboard-whiteboard-asset-split: prerequisite; consume its landed move map before touching dashboard assets (pending 261114-refactor-ws-dashboard-whiteboard-asset-split)
+  261115-feat-ws-dashboard-conversation-rendering-consolidation: coordinate; the delivered close-request capsule renders in the user bubble it rewrites (pending 261115-feat-ws-dashboard-conversation-rendering-consolidation)
 ---
 
 # Topic card x button attaches a close-topic request to the composer
@@ -22,9 +22,13 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
 - Topic header: `wswhiteboard/assets/page.tmpl` ~46 renders
   `section.topic[data-topic]` > `.tophead` > `.tbar` (name, age, freshness,
   answer/ack chips, settled controls, `.tnote-toggle`); a closed topic has the
-  `.closed` class. The legacy document disclosure already sits in the
-  absolute top-right corner with reserved header padding
-  (`wswhiteboard/assets/page.css` ~580-586).
+  `.closed` class. The legacy document disclosure sits in the absolute
+  top-right corner with reserved header padding only on non-framed pages;
+  the dashboard's DocFramed renderer uses a plain `.tdoc` div and omits both
+  the disclosure and `.has-doc` padding marker
+  (`agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L40-L46`,
+  `agents-plugin-tool/internal/wswhiteboard/assets/page.css#L584-L586`,
+  `agents-plugin-tool/internal/wswhiteboard/render.go#L717-L733`).
 - `wsdashboard/assets/cards.js` `decorate()` (~523-543) inserts the pin,
   fold, raise and maximize/restore buttons before the note pen and re-applies
   them after board replacement; `ibtn()` (~85-92) sets title and aria-label.
@@ -65,29 +69,90 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
   reason field, like a topic note; the tag body is that capsule's reason, and
   an empty reason sends an empty body. Rejected: b (topic-only capsule, the
   composer body as the shared reason).
+- **Structured `closeRequests` field, server-side serialization**
+  (technical, acked by MAIN): the request carries an optional
+  `closeRequests: [{topic, reason}]`; `wsinbox.Entry.Text()` serializes each as
+  `<wb:close-request topic="...">reason</wb:close-request>` after mentions,
+  with `wb:mention` attribute and body escaping, inside the envelope. A send
+  holding only close requests (empty composer text) is valid content.
+  Rejected: the browser writing the tag into the free text (precedent: commit
+  `e0964b73`, mentions are structured).
+- **Dedupe by topic stem** (technical, acked): pressing x on a topic already
+  attached focuses that capsule's reason field instead of adding a second.
+  Rejected: ignoring the press; replacing the capsule.
+- **Header placement** (technical, acked; premise corrected by fact
+  population): `cards.js` `decorate()` adds the x as the rightmost `.tbar`
+  action, after the note pen, with a localized title and aria-label, shown
+  wherever the other header actions show (pinned, folded, fullscreen; not in
+  Overview one-line rows), on the dashboard only (commit `01088661`:
+  `decorate` runs only there). The dashboard's framed renderer has no legacy
+  document disclosure, so no corner collision applies. Rejected: an
+  absolutely positioned corner button.
+- **Focus without a tab switch** (technical, acked; focus target refined by
+  fact population after (892)=a): pressing x attaches the capsule and focuses
+  its reason field in the composer, without switching tabs, since the
+  composer is present on the board tab. Rejected: switching to the
+  conversation tab; focusing the composer's main text box (the reason lives
+  in the capsule).
+- **Stale requests are delivered** (technical, acked): a capsule whose
+  topic closes or disappears before send stays attached and is delivered;
+  the playbook tells the agent to treat an already-closed or unknown topic as
+  a no-op it reports briefly. Rejected: silently dropping it in the browser.
+- **Agent semantics** (technical, acked): the playbook's Answers section
+  defines `<wb:close-request>` as the user's request to close that topic. The
+  agent closes it through its normal whiteboard update path unless the topic
+  still has open work it must not abandon, in which case it replies in that
+  topic with why it did not close. The board-watching detection line lists
+  the new tag (commit `a6b955cc` defines that signal). Rejected: asking the
+  user to confirm first.
+- **Delivered capsule rendering** (technical, acked): the request renders in
+  the user bubble as a capsule (topic name, reason when present) through the
+  existing capsule template. Rejected: showing the raw tag.
+- **Compatibility tier T0** (technical, acked): an optional additive
+  request and inbox field plus a new delivered tag; `Normalize` and every
+  inbox rewrite copy the field, with the accepted minor-mismatch caveat of
+  commit `e0964b73`. Rejected: T2.
+- **Header coordination with the badge lane** (announced, acked):
+  `261115-feat-ws-whiteboard-topic-state-badge` edits the same `.tbar` region
+  and `decorate()` order; whichever lands second rebases onto the other and
+  keeps both the badges and the x.
 
-## Open Decision Queue
-Last ID: none minted (items below await MAIN's board IDs)
-
-(c1) [open] [technical] Close requests travel as a structured optional request field (`closeRequests: [{topic, reason}]`) serialized to `<wb:close-request>` by `wsinbox.Entry.Text()` after mentions, with the same attribute/body escaping as `wb:mention`, over the browser writing the tag into the free text - matches how mentions and topic notes travel, keeps one serializer, and lets held/draft state and the conversation view treat it as an attachment.
-(c2) [open] [technical] Dedupe is keyed by topic stem: pressing x on a topic already attached focuses its capsule's reason field ((892)=a) instead of adding a second, over silently ignoring the press or replacing it - the owner asked for no duplicates, and focusing keeps the press visibly answered.
-(c3) [open] [technical] The x is added by `cards.js` `decorate()` as the rightmost header action, beside the document disclosure without overlapping it, with a localized title/aria-label, shown wherever the other header actions show (pinned, folded, fullscreen; not inside Overview one-line rows), dashboard only (the standalone whiteboard page has no composer), over an absolutely positioned corner button - reuses the action row's reconciliation after board replacement and stays coherent with the badge lane's header ordering.
-(c4) [open] [technical] Pressing x focuses the composer text box without switching tabs, over switching to the conversation tab - the composer is present on the board tab, so a tab switch would move the user away from the board they are closing topics on.
-(c5) [open] [technical] A capsule whose topic becomes closed or disappears before send stays attached and is delivered; the playbook tells the agent to treat an already-closed or unknown topic as a no-op it reports briefly, over silently dropping it in the browser - nothing the user attached vanishes, and the agent already sees the board state.
-(c6) [open] [technical] The playbook defines `<wb:close-request>` as the user's request to close that topic: the agent closes it through its normal whiteboard update path unless the topic still has open work it must not abandon, in which case it replies in that topic with the reason it did not close; the board-watching detection line (~389) lists the new tag, over a request the agent must confirm back first - the user already decided by pressing x, and the reply covers the exception.
-(c7) [open] [technical] The delivered request renders in the user bubble as a capsule (topic name, reason when present) through the conversation view's existing capsule template, over showing the raw tag - consistent with mention capsules; the renderer work lands wherever the rendering-consolidation ticket has left the bubble template.
-(c8) [open] [technical] Compatibility tier T0: an optional additive request/inbox field and a new delivered tag; dashboard assets ship with the daemon; an older agent with an older playbook still sees self-describing text, over T2 - no existing field, argument or event changes. The worker audits that inbox rewrites preserve the new field.
-(c9) [open] [announced] Header edits coordinate with `261115-feat-ws-whiteboard-topic-state-badge` (EXEC1's lane, ready): whichever lands second rebases onto the other's header markup and keeps both the badges and the x - both tickets edit the same `.tbar` region and `decorate()` order, which the badge ticket requires to keep existing header actions.
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - No client-side topic close; the agent performs any close.
-- Manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
-  `ai-docs/manuals/skill-authoring.md`, `ai-docs/manuals/wsflow-mirroring.md`,
-  `ai-docs/manuals/release-compatibility.md`.
 - Owner run rules: offline env `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`;
   never the full `./internal/wsdashboard` package, only `-run`; never the
   shared dashboard daemon or port 29417 (isolated daemons with their own
   `WS_CACHE_HOME` on free ports); end with an owned process scan.
+
+## Prior Decisions
+
+- 261114-feat-ws-dashboard-shared-card-actions (2026-11-14, commit 20e647c3): "Adopt the server-rendered topic header/body/badges in place: shared fold and raise operate on its view record, never invoke topic workflow close, and leave inner disclosure owners unchanged." — bearing: constrains
+- 01088661 (2026-11-14, commit): "topic buttons are added by cards.js decorate, which only runs on the dashboard." — bearing: supports
+- 562bfeb9 (2026-11-12, commit): "Message route accepts `topics`; cancel/interrupt answers return `topics` (never null)" — bearing: constrains
+- e0964b73 (2026-11-12, commit): "Mentions are a structured wsinbox.Entry.Mentions field (topic, id, text) rendered into the message by Entry.Text(), not markup the browser writes into the typed text" — bearing: supports
+- a6b955cc (2026-11-12, commit): "Watching signal is an OR: current message starts with the whiteboard label `[user message from the {{.McpNamespace}} whiteboard]`, or carries a `<wb:answers>` block / `<wb:mention>` elements" — bearing: constrains
+- 3ddae0e1 (2026-11-10, commit): "User whiteboard (598) ok: topic notes get a composer chip with x-clear and click-to-focus; send format unchanged." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | Phase 1 spans agents-plugin-tool/internal/wsdashboard/assets/cards.js and dashboard.js, wsinbox/inbox.go, conversation rendering, wsi18n/tables/*.json and agents-plugin/rsrc/whiteboard/whiteboard.md plus wsflow/Pi mirrors. Consume the pending asset-split move map before editing. |
+| scope.surface | public-interface | Proposed optional closeRequests HTTP/inbox field and delivered wb:close-request tag cross the browser, daemon, conversation view and agent/playbook boundary; current request is agents-plugin-tool/internal/wsdashboard/inbox_routes.go#L82-L104. |
+| scope.new_public_symbol | unknown | An optional exported Entry field is expected, but c1 is open and no Go field/type or new exported helper name is settled. |
+| scope.new_type_contract | yes | Proposed closeRequests: [{topic, reason}] and wb:close-request tag body carrying each capsule's reason; owner (892)=a is recorded in c896bd117, while c1/c8 remain open. |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsinbox/mentions_test.go, wsdashboard/cards_test.go, topicnote_chip_test.go, inbox_routes_test.go, pageview_inbox_test.go, wsi18n/keys_test.go and wsrsrc/{wsflow_mirror,pi_mirror}_test.go provide adjacent tests; no new test file is mandated. Static inspection only; no tests run. |
+| complexity.reuse_points | confirmed | Read decorate/ibtn (agents-plugin-tool/internal/wsdashboard/assets/cards.js#L85-L92, #L523-L548), renderChips/sendMessage and draft read/restore (assets/dashboard.js#L1581-L1640, #L2518-L2559, #L8826-L8900), Entry.Text/MentionBlock and achips/splitUserEntries. Both whiteboard playbook mirrors compare byte-identical. |
+| complexity.side_effect_risk | moderate | Header reconciliation, focus, async send completion and persisted drafts share existing state owners; serialization and steering rewrite persistent inbox entries (agents-plugin-tool/internal/wsinbox/inbox.go#L380-L382, #L692-L749). No browser-side workflow close is authorized. |
+| risk.correctness | high | Empty-reason attachment-only sends must count as content, dedupe must survive draft/send/refresh races, and all normalize/cancel/steer/drain paths must preserve requests; existing Normalize constructs a fresh Entry (agents-plugin-tool/internal/wsinbox/inbox.go#L378-L382). Envelope Phase 1 is unlanded. |
+| risk.fit | moderate | Reuse renderer-owned topic nodes, dashboard-only decorate and the shared server serializer; c3 assumes a neighboring document disclosure absent from the dashboard (agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L40-L46). Header-badge and asset-split coordination remains outstanding. |
+| risk.test | high | Adjacent Node/Go fixtures do not prove the new attachment lifecycle, capsule reason focus or responsive header geometry; Phase 1 leaves exact focused commands and browser fixtures to promotion, and the envelope/split/conversation consumers are still pending. |
+| risk.security_or_contract | high | New user-request markup can prompt workflow closure: preserve topic/reason escaping, session-bound attachments, no-op/open-work semantics and inbox rewrite fields; T0 is proposed in c8, not yet settled. Existing escaping is agents-plugin-tool/internal/wsinbox/mentions.go#L43-L63. |
 
 ## Phases
 
