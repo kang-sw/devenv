@@ -281,8 +281,8 @@ Markdown up to the closing tag.
   exact edit anchor; a topic-only discovery query does not print it.
 - Current content and panel payloads take block Markdown with inline HTML,
   never a full HTML document: inline SVG, or canvas 2D drawn by an inline
-  script, with no external `src`, `href`, or fetch. Served payloads run in
-  isolated sandboxes. Put a standalone document in a
+  script, with no external `src`, `href`, or fetch. An image in either is
+  written `![alt](path)`. Served payloads run in isolated sandboxes. Put a standalone document in a
   `{{.McpNamespace}}/path.generate` file and link it from the board; mockup
   sources use the tracked location below.
 - HTML in a body: a line that starts with a block tag such as `<div>` or

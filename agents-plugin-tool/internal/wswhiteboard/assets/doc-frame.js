@@ -77,7 +77,10 @@
   // decodes; with no answer (a LAN viewer, a missing file, a refused fetch)
   // or a broken image the path text stays. A request lost to a host that was
   // not yet listening is asked again when the host asks for the height.
-  var relays = Array.prototype.slice.call(d.querySelectorAll("span.img-text[data-relay]"));
+  // A raw <img> the author typed with such a path comes with no src and the
+  // same data-relay (wswhiteboard rawImageTag); it keeps its own attributes
+  // and takes the image as its src.
+  var relays = Array.prototype.slice.call(d.querySelectorAll("span.img-text[data-relay], img[data-relay]"));
   function askRelays() {
     relays.forEach(function (s, i) {
       if (!s.wbRelayed) post({ wbDoc: "img", id: i, href: s.getAttribute("data-relay") });
@@ -87,6 +90,12 @@
     var s = typeof m.id === "number" ? relays[m.id] : null, b = m.blob;
     if (!s || s.wbRelayed || !s.parentNode || !window.Blob || !(b instanceof Blob) || !/^image\//.test(b.type)) return;
     s.wbRelayed = true;
+    if (s.tagName === "IMG") {
+      var ir = new FileReader();
+      ir.onload = function () { s.src = ir.result; };
+      ir.readAsDataURL(b);
+      return;
+    }
     var alt = s.cloneNode(true);
     Array.prototype.forEach.call(alt.querySelectorAll("a, code"), function (c) { c.parentNode.removeChild(c); });
     var r = new FileReader();
