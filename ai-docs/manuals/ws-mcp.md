@@ -186,12 +186,15 @@ under `<cache root>/dashboard/`:
   args}`) is one slash command the page sent, only to a session whose
   snapshot lists `commands`, only from a browser on this machine (403 to any
   other viewer, a LAN token holder included), and only with a name that
-  list holds (400 otherwise): steer refuses it, and a drain returns it in
-  its place among the unsteered messages with a `command` field (steered
-  messages drain ahead of it), where the adapter splits its batch and runs
-  it natively. A hosted backend passes a plain message verbatim and runs a
-  leading-slash line as a command, so a message from any viewer not on this
-  machine whose text, trimmed of leading whitespace, starts with `/` is
+  list holds (400 otherwise). Steering converts it to a steered text
+  message containing its typed slash-command line, so the agent reads it
+  mid-turn instead of the adapter running it natively. Left unsteered, a
+  drain returns it in its place among the unsteered messages with a
+  `command` field (steered messages drain ahead of it), where the adapter
+  splits its batch and runs it natively. A hosted backend passes a plain
+  message verbatim and runs a leading-slash line as a command, so a message
+  from any viewer not on this machine whose text, trimmed of leading
+  whitespace, starts with `/` is
   refused too (403); a slash later in the text is held as usual.
   A board item's sent mark comes from these records (the newest send's chip per item,
   held over drained; a chip sent before the item's latest re-ask marks
@@ -916,11 +919,20 @@ conversation:
   background task count (`background_tasks_changed`, subagents included)
   is in the state and `host.backgroundTasks`; a subagent the lead's Agent
   call started takes its effort from an `effort-<level>` subagent type and
-  its model and context size from its own assistant lines. The stream
-  gives no output rate (no partial messages: each block arrives whole,
-  with the request's starting output count). Idle stop is the profile's
-  `idle_timeout_seconds` (a Claude lead 600, a Pi lead off) and waits for
-  the background task count to be zero.
+  its model and context size from its own assistant lines. Idle stop is
+  the profile's `idle_timeout_seconds` (a Claude lead 600, a Pi lead off)
+  and waits for the background task count to be zero.
+- **Streaming.** A hosted Claude lead starts with
+  `--include-partial-messages`. The `stream_event` mapper accumulates text
+  deltas into the reply so far, emitting at most once per 100 ms within a
+  block; `message_start` and `content_block_start` reset the partial text
+  and throttle. The whole assistant text block supplies the final reply.
+  Subagent stream events and non-text deltas supply no partial reply.
+  The lead's holder uses `--ring-skip` to keep matching tool-input,
+  thinking, and signature delta lines out of its ring and client stream.
+  It skips only whole stdout lines that fit one record and match from the
+  line's start; split or unmatched lines stay. Skipped lines consume no
+  sequence number.
 - **Access.** Spawn, settings, stop, restart, close, and an approval answer take the
   trusted gate (`wsdashboard.TrustedWrite`): 404 to any viewer that is not a
   browser on this machine, 403 without the daemon's own `Origin`. A LAN
@@ -957,9 +969,18 @@ mounted when `cmd/ws-mcp/dashboard.go` passes it, with store roots read from
 the daemon's own tracker host). Routes, behind the same guard and POST rule
 as `/agents`, an unknown store 404: `GET /support/choices` (`{harnesses:
 [{harness, profile, available, error?, models: [{id, thinking?}],
-efforts}], last}`: the harness is each support profile's backend resolved
-through the global and builtin layers; unavailable when the daemon lacks the
-backend or its binary is not on PATH; Claude's models are the CLI's
+efforts, lead?, permission_modes?}], last}`: optional `lead` is a bool
+marking admission as a hosted lead, and optional `permission_modes` is that
+harness's list of modes; both fields belong to each harness entry. Support
+profiles' backends resolve through the global and builtin layers, with
+duplicate backends listed once; registered lead-capable backends not already
+listed are appended in backend-name order, with an empty `profile`.
+`BackendRegistration` is the runtime-only descriptor pairing a backend
+implementation with its optional `LeadProfile` and `PermissionModes`;
+process controls remain instance-owned and choice listing comes from the
+backend's `ChoiceLister` implementation. A harness is unavailable when the
+daemon lacks the backend or, for a `ChoiceLister`, its executable is not on
+PATH; Claude's models are the CLI's
 version-less aliases `opus`, `sonnet`, `haiku`, `fable` and its efforts the
 Claude levels, Pi's models come from `pi --offline --no-approve
 --list-models` (`provider/model`, cached five minutes) and its efforts from
