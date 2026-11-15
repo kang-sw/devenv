@@ -9,6 +9,8 @@ func TestBoardStateFilter(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	runNode(t, "board state filter", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
 var store = {}, A, B, C, D, legacy, closed, tail;
+var filterOrder = ["all", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed"];
+var filterLabels = ["all", "discuss", "wait", "implement", "confirm", "closed"].map(function (key) { return "js.board.filter." + key; });
 function stateTopic(name, state, isClosed) {
   var t = topic(name, 100, isClosed);
   if (state) t.setAttribute("data-state", state);
@@ -22,6 +24,10 @@ function served() {
 }
 boot(store, served, { wide: true });
 function radio(value, pop) { return page.W.toolbar().querySelector((pop ? ".board-state-pop" : ".board-state-inline") + ' [data-filter="' + value + '"]'); }
+[".board-state-inline", ".board-state-pop"].forEach(function (group) {
+  var radios = page.W.toolbar().querySelectorAll(group + ' [role="radio"]');
+  check(group + " exact lifecycle order and label keys", radios.map(function (n) { return [n.getAttribute("data-filter"), n.querySelector(".board-state-label").textContent]; }), filterOrder.map(function (value, i) { return [value, filterLabels[i]]; }));
+});
 function counts() { return page.W.toolbar().querySelectorAll('.board-state-inline [role="radio"]').map(function (n) { return n.querySelector(".board-state-count").textContent; }); }
 function choose(value) { radio(value).fire("click", {}); }
 function shown() { return [A, B, C, D, legacy, closed].filter(function (n) { return !n.hasAttribute("data-state-filtered"); }).map(function (n) { return n.getAttribute("data-topic"); }); }
@@ -42,20 +48,23 @@ check("filtering never moves or persists topic placement", [page.board.childNode
 choose("waiting");
 var replacement = stateTopic("d", "discussing"); D = replacement;
 swap([A, B, C, D, legacy, closed, tail]);
-check("refresh re-evaluates selected state and zero counts", [shown(), counts(), radio("waiting").getAttribute("aria-checked")], [[], ["13", "1", "2", "1", "0", "8"], "true"]);
+check("refresh re-evaluates selected state and zero counts", [shown(), counts(), radio("waiting").getAttribute("aria-checked")], [[], ["13", "2", "0", "1", "1", "8"], "true"]);
 choose("closed"); C = stateTopic("c", null, true);
 swap([A, B, D, legacy, C, closed, tail]);
-check("close removes operational state and increments closed", [counts(), C.hasAttribute("data-state-filtered")], [["13", "1", "2", "0", "0", "9"], false]);
+check("close removes operational state and increments closed", [counts(), C.hasAttribute("data-state-filtered")], [["13", "2", "0", "0", "1", "9"], false]);
 var closedPage = mk("div.closed-page", {}, [stateTopic("older", null, true), more(2, 6)]);
 page.board.insertBefore(closedPage, tail); page.board.removeChild(tail); page.W.decorate();
-check("history load preserves total and selected lifecycle", [counts(), closedPage.firstChild.hasAttribute("data-state-filtered")], [["13", "1", "2", "0", "0", "9"], false]);
+check("history load preserves total and selected lifecycle", [counts(), closedPage.firstChild.hasAttribute("data-state-filtered")], [["13", "2", "0", "0", "1", "9"], false]);
 boot(store, served);
 check("reload restores selection independent of cards", [radio("closed").getAttribute("aria-checked"), shown()], ["true", ["old"]]);
-var prevented = false;
-radio("closed").fire("keydown", { key: "ArrowRight", preventDefault: function(){prevented=true;}, stopPropagation: function(){} });
-check("radio arrow wraps, selects and persists", [radio("all").getAttribute("aria-checked"), store["cards.state-filter"], prevented], ["true", "all", true]);
-radio("all").fire("keydown", { key: "End", preventDefault: function(){}, stopPropagation: function(){} });
-check("End selects closed", radio("closed").getAttribute("aria-checked"), "true");
+[false, true].forEach(function (pop) {
+  choose("discussing");
+  [["ArrowRight", "waiting"], ["ArrowDown", "implementing"], ["ArrowLeft", "waiting"], ["ArrowUp", "discussing"], ["Home", "all"], ["ArrowLeft", "closed"], ["ArrowRight", "all"], ["End", "closed"], ["ArrowDown", "all"], ["ArrowUp", "closed"]].forEach(function (step) {
+    var selected = filterOrder.filter(function (value) { return radio(value, pop).getAttribute("aria-checked") === "true"; })[0], prevented = false;
+    radio(selected, pop).fire("keydown", { key: step[0], preventDefault: function(){prevented=true;}, stopPropagation: function(){} });
+    check("keyboard lifecycle " + pop + " " + step[0] + " to " + step[1], [radio(step[1]).getAttribute("aria-checked"), radio(step[1], true).getAttribute("aria-checked"), store["cards.state-filter"], prevented], ["true", "true", step[1], true]);
+  });
+});
 store["cards.state-filter"] = "invented"; boot(store, served);
 check("invalid persisted filter is all, never inferred", [shown().length, radio("all").getAttribute("aria-checked")], [6, "true"]);
 boot({}, function(){return [];});

@@ -73,7 +73,7 @@
   var pins = null, col = null, colOn = false, boardw = 0, zone = null;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
-  var filterValues = ["all", "awaiting-confirmation", "discussing", "implementing", "waiting", "closed"];
+  var filterValues = ["all", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed"];
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -183,7 +183,7 @@
   function buildStateFilter() {
     var root = mk("div", "board-state-filter"), inline = mk("div", "board-state-inline");
     var trigger = mk("button", "board-action board-state-trigger"), pop = mk("div", "tpop board-state-pop");
-    var labels = [wsT("js.board.filter.all"), wsT("js.board.filter.confirm"), wsT("js.board.filter.discuss"), wsT("js.board.filter.implement"), wsT("js.board.filter.wait"), wsT("js.board.filter.closed")];
+    var labels = [wsT("js.board.filter.all"), wsT("js.board.filter.discuss"), wsT("js.board.filter.wait"), wsT("js.board.filter.implement"), wsT("js.board.filter.confirm"), wsT("js.board.filter.closed")];
     var label = wsT("js.board.filter.label");
     stateFilter = opt.load(opt.key + ".state-filter");
     if (filterValues.indexOf(stateFilter) < 0) stateFilter = "all";
