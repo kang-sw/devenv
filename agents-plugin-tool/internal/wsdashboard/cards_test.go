@@ -431,6 +431,7 @@ function boot(store, served, o) {
   new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible" }; }, function () {});
   page.W = win.WsCards;
   page.W.register("k", { open: function (c) { c.title({ name: c.data.name }); c.el.card = c.data.name; } });
+  (o.kinds || []).forEach(function (kind) { page.W.register(kind, { open: function () {} }); });
   page.W.mount(page.board, {
     toolbar: o.toolbar,
     key: "cards", load: function (k) { return store[k] || null; }, save: function (k, v) { if (v === null) delete store[k]; else store[k] = v; },
