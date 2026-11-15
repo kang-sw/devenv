@@ -35,6 +35,8 @@ async function select(page, start, end = start) {
       // Use the existing board tab control at narrow widths.
       if (!(await page.locator('#quote-first').isVisible())) await page.locator('[data-tab="board"]').first().click();
       const pop = view.locator('[data-wbmention-pop]'), input = view.getByRole('textbox', { name: 'Note about this selection (optional)' });
+      const val = l => l.evaluate(e => ('value' in e) ? e.value : e.textContent);
+      const bundles = view.locator('#cchips .selection-bundle');
       const attach = view.locator('[data-wbmention]'), chips = view.locator('#cchips .mchip');
       const composer = view.locator('#ctext + .wsc-editor'), backing = view.locator('#ctext');
       // A native pointer selection, followed by input focus that collapses it.
@@ -67,11 +69,13 @@ async function select(page, start, end = start) {
       await select(page, '#quote-next');
       await fetch(updates);
       await page.locator('#quote-updated').waitFor({ state: 'visible' });
-      assert.equal(await input.inputValue(), 'first note', 'source update keeps note');
+      assert.equal(await val(input), 'first note', 'source update keeps note');
       await attach.click();
       assert.equal(await chips.count(), 1);
-      const firstText = 'Selected text:\n[review] (3) e7\n> First immutable quote\n\nNote:\nfirst note';
-      assert.equal(await backing.inputValue(), firstText, 'source update and changed selection never retarget captured quote');
+      assert.equal(await bundles.count(), 1);
+      assert.equal(await backing.inputValue(), '', 'a selection never writes into the composer text');
+      assert.equal(await bundles.nth(0).locator('.mchip').getAttribute('data-wb-entry'), 'e7', 'source update and changed selection never retarget captured quote');
+      assert.match(await bundles.nth(0).innerText(), /First immutable quote[\s\S]*first note/);
       assert.equal(sent.length, 0, 'attachment is not send');
       // Reset the source, then capture two immutable entries in DOM order.
       await fetch(updates + '?reset=1');
@@ -79,8 +83,10 @@ async function select(page, start, end = start) {
       await select(page, '#quote-first', '#quote-next');
       await input.fill('one note for both'); await attach.click();
       assert.equal(await chips.count(), 3);
-      const secondText = 'Selected text:\n[review] (3) e7\n> First immutable quote\n\n[review] e8\n> Second immutable quote\n\nNote:\none note for both';
-      assert.equal(await backing.inputValue(), firstText + '\n\n' + secondText);
+      assert.equal(await bundles.count(), 2, 'one push, one bundle, even across two entries');
+      assert.equal(await bundles.nth(1).locator('.mchip').count(), 2);
+      assert.match(await bundles.nth(1).innerText(), /one note for both/);
+      assert.equal(await backing.inputValue(), '');
       // The production sandbox bridge dispatches a real selection report.
       // Its untrusted payload may not claim different topic/entry provenance.
       const frameEl = page.locator('iframe.doc-frame').first();
@@ -104,9 +110,10 @@ async function select(page, start, end = start) {
       await tab.setViewportSize({ width: width - 10, height: 900 });
       await attach.click();
       assert.equal(await chips.count(), 4);
-      const thirdText = 'Selected text:\n[Plan] (4) e9\n> Sandbox selection text\n\nNote:\nsandbox note';
-      let text = firstText + '\n\n' + secondText + '\n\n' + thirdText;
-      assert.equal(await backing.inputValue(), text);
+      assert.equal(await bundles.count(), 3);
+      assert.match(await bundles.nth(2).innerText(), /Sandbox selection text[\s\S]*sandbox note/);
+      assert.equal(await backing.inputValue(), '');
+      let text = '';
       // Keyboard selection and the legacy empty-note attachment.
       await page.locator('#quote-next').scrollIntoViewIfNeeded();
       // Establish a native document selection before extending it with keys;
@@ -114,9 +121,10 @@ async function select(page, start, end = start) {
       await page.locator('#quote-next').click({ clickCount: 2, position: { x: 10, y: 10 } });
       for (let i = 0; i < ' immutable quote'.length; i++) await tab.keyboard.press('Shift+ArrowRight');
       await input.waitFor({ state: 'visible' });
-      assert.equal(await input.inputValue(), '');
+      assert.equal(await val(input), '');
       await attach.click();
       assert.equal(await chips.count(), 5);
+      assert.equal(await bundles.count(), 4);
       assert.equal(await backing.inputValue(), text, 'empty note adds no ordinary text');
       // Repeated action cannot duplicate an attachment.
       await attach.dispatchEvent('click');
@@ -129,23 +137,24 @@ async function select(page, start, end = start) {
       await goSession('livesession');
       assert.equal(await backing.inputValue(), text);
       assert.equal(await chips.count(), 5);
-      text = text.replace('first note', 'edited first note');
+      assert.equal(await bundles.count(), 4);
+      text = 'typed beside the groups';
       await composer.fill(text);
       await tab.reload(); await activePage();
       assert.equal(await backing.inputValue(), text, 'ordinary edits survive draft restore');
       assert.equal(await chips.count(), 5);
       assert.equal(sent.length, 0);
       await page.locator('#csend').click();
-      await page.waitForFunction(() => document.querySelector('#ctext').value === '' && !document.querySelector('#cchips .mchip'));
+      await page.waitForFunction(() => document.querySelector('#ctext').value === '' && !document.querySelector('#cchips .selection-bundle'));
       assert.equal(sent.length, 1);
-      assert.equal(sent[0].text, text);
-      assert.deepEqual(sent[0].mentions, [
-        { topic: 'review', text: 'First immutable quote', id: '3', entry: 'e7' },
-        { topic: 'review', text: 'First immutable quote', id: '3', entry: 'e7' },
-        { topic: 'review', text: 'Second immutable quote', entry: 'e8' },
-        { topic: 'Plan', text: 'Sandbox selection text', id: '4', entry: 'e9' },
-        { topic: 'review', text: 'Second immutable quote', entry: 'e8' }
-      ]);
+      assert.deepEqual(sent[0].mentions || [], [], 'sources travel inside their selection groups');
+      const groups = [...sent[0].text.matchAll(/<wb:selection>\n([\s\S]*?)<\/wb:selection>/g)].map(m => m[1]);
+      assert.equal(groups.length, 4, 'one selection element per push');
+      assert.match(groups[0], /<wb:mention topic="review" id="3" entry="e7">First immutable quote<\/wb:mention>\n<wb:comment>first note<\/wb:comment>/);
+      assert.match(groups[1], /entry="e7">First immutable quote<\/wb:mention>\n<wb:mention topic="review" entry="e8">Second immutable quote<\/wb:mention>\n<wb:comment>one note for both<\/wb:comment>/);
+      assert.match(groups[2], /<wb:mention topic="Plan" id="4" entry="e9">Sandbox selection text<\/wb:mention>\n<wb:comment>sandbox note<\/wb:comment>/);
+      assert.match(groups[3], /entry="e8">[^<]*<\/wb:mention>\n<wb:comment><\/wb:comment>/);
+      assert.equal(sent[0].text.replace(/<wb:selection>[\s\S]*?<\/wb:selection>\s*/g, '').trim(), text, 'typed text stays outside the groups');
       // Plain selection dismissal still follows selection collapse/Escape.
       await select(page, '#quote-next'); await input.waitFor({ state: 'visible' });
       await tab.keyboard.press('Escape'); assert.equal(await pop.isVisible(), false);
