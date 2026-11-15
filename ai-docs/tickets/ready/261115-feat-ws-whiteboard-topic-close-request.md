@@ -215,3 +215,15 @@ runs one lite review afterwards); browser/Chromium checks, screenshots and
 visual comparison (the owner's post-merge visual check is acceptance under
 UI-fast policy). Responsive visual fit remains INFERRED, not browser-verified.
 The ticket remains in `ready/` for the lead; it was not closed or moved.
+
+#### Edition (f3f57c33c) - 2026-11-15
+
+Fixed both lite-review findings: held-message restoration preserves current
+capsule identity so successful in-flight requests are not resent, while stem
+dedupe, reason precedence, edits and remove/re-add intents remain intact.
+Close-only drafts, including empty reasons, now prevent automatic asset and
+mode reloads. VERIFIED: both regressions fail before the fixes and pass after;
+the 89 approved named dashboard tests and two targeted stream tests pass
+offline through the existing Node/Go harnesses. No browser or daemon was run;
+visual behavior remains INFERRED. The accepted T0 old-binary mismatch caveat
+is unchanged. The ticket remains ready for lead-owned integration.
