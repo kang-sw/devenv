@@ -185,11 +185,15 @@
   // lands at the drag's end.
   // Two owners, not two views onto one explorer. Keep the tab's existing
   // storage keys; the toolbar uses the same records in its own namespace.
-  if (live && fpane && window.WsFiles) {
+  if ((live || worktree) && fpane && window.WsFiles) {
     var fileHooks = {
-      rid: rid, post: post, toast: toast, copy: copyText, load: load, save: save,
+      rid: cardIdentity, post: worktree ? browsePost : post, toast: toast, copy: copyText,
+      routeBase: worktree ? "/s/host0/" : undefined,
+      location: worktree ? { root: worktree, dir: "" } : undefined,
+      load: function (k) { return load(worktree && k === "ws.dashboard.files.view" ? k + "." + cardIdentity : k); },
+      save: function (k, v) { save(worktree && k === "ws.dashboard.files.view" ? k + "." + cardIdentity : k, v); },
       local: function () { return root.hasAttribute("data-sysopen"); },
-      send: attachExplorerPath,
+      send: worktree ? null : attachExplorerPath,
       openCard: function (location) {
         // Dismiss before constructing/revealing the new card, not afterward.
         window.WsCards.dismissFiles();
@@ -201,8 +205,8 @@
     function createFiles(node, rootSlot, toolbar) {
       return window.WsFiles.create(node, Object.assign({}, fileHooks, {
         rootSlot: rootSlot,
-        load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : load,
-        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : save
+        load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : fileHooks.load,
+        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : fileHooks.save
       }));
     }
     filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false);
@@ -229,8 +233,8 @@
     return n > 0 && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");
   }
   if (cardBoard) {
-    if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: post, toast: toast });
-    if (window.WsTerm) window.WsTerm.setup({ post: post, toast: toast });
+    if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: worktree ? browsePost : post, toast: toast });
+    if (window.WsTerm) window.WsTerm.setup({ post: worktree ? browsePost : post, toast: toast });
     // The composer's chips come later in this script: the hooks are hoisted
     // functions, and cchips is not yet assigned here.
     if (window.WsWeb) window.WsWeb.setup($("cchips") ? { post: post, toast: toast, rid: rid, addPick: addWebPick, addConsole: addWebConsole } : { post: post, toast: toast, rid: rid });
@@ -243,12 +247,12 @@
       dbody.appendChild(bpcol);
     }
     window.WsCards.mount(cardBoard, {
-      key: "ws.dashboard.cards." + rid, load: load, save: save,
+      key: "ws.dashboard.cards." + cardIdentity, load: load, save: save,
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
         filter: function (run) { if (window.WsOverview) window.WsOverview.filter(run); else run(); },
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
-        files: filesSheet
+        files: worktree ? null : filesSheet
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
@@ -280,10 +284,20 @@
         if (h) swap("board", h.hash, h.html, true);
       }
     });
+    if (worktree) {
+      var tools = window.WsCards.toolbar().querySelector(".board-tools"), explorer = doc.createElement("button");
+      q(".board-overview, .board-state-filter", tools).forEach(function (n) { n.remove(); });
+      explorer.type = "button"; explorer.className = "board-action board-explorer";
+      explorer.innerHTML = window.WsCards.icon("folder-open");
+      var label = doc.createElement("span"); label.className = "board-label";
+      label.textContent = wsT("js.worktree.explorer"); explorer.appendChild(label);
+      explorer.addEventListener("click", function () { window.WsFiles.open({ root: worktree, dir: "" }); });
+      tools.insertBefore(explorer, tools.querySelector(".board-search"));
+    }
     // wbForm creates wbHistory near the end of page startup. Mount overview
     // after that, not here while only the card framework exists.
     function mountBoardOverview() {
-      if (!window.WsOverview || !window.wbHistory) return;
+      if (worktree || !window.WsOverview || !window.wbHistory) return;
       window.WsOverview.mount({
       rid: rid, board: cardBoard, toolbar: window.WsCards.toolbar(), pins: window.WsCards.pinList(),
       keep: window.wbHistory.place, place: window.WsCards.overview, toast: toast, rail: railKey,

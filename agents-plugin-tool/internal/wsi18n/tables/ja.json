@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "トピック",
+  "worktree.page": "ワークツリー",
+  "worktree.local": "ローカルのみ",
+  "js.worktree.explorer": "新しいエクスプローラー",
   "js.usage.heading": "プラン使用量",
   "js.usage.close": "プラン使用量を閉じる",
   "js.usage.legend": "使用量グラフの凡例",

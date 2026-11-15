@@ -330,7 +330,6 @@
   // shRid marks the session the shell shows (rid, the rail's viewed row,
   // the memo pad's workspace).
   function shRid(id) {
-    if (id === rid) return;
     rid = id;
     root.setAttribute("data-rid", id);
     railMarks();
@@ -590,6 +589,7 @@
     setLayout(load(LAYOUT_KEY));
     setInput(load(INPUT_KEY));
   }
+  if (worktree) revealPanes();
   if (live) {
     setSplit(savedSplit());
     setTab("convo");
