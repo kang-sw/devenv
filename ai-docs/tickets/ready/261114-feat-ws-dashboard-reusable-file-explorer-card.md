@@ -1,0 +1,337 @@
+---
+title: "Deliver the reusable stateful file explorer card"
+parent: 261114-epic-ws-dashboard-file-explorer
+blocked-by: 261114-refactor-ws-dashboard-file-explorer-instance-isolation
+related:
+  261114-refactor-ws-dashboard-file-explorer-instance-isolation: "explicit prerequisite: first technical slice that isolates reusable explorer instances"
+  261110-feat-ws-dashboard-file-preview: "existing read-only Files-tab and preview behavior"
+  261110-feat-ws-dashboard-terminal: "existing shared board-card framework context"
+  261114-refactor-ws-dashboard-whiteboard-asset-split: "prerequisite: implementation starts after this split lands (it moves dashboard.js and dashboard.css)"
+  261114-feat-ws-dashboard-worktree-view: "consumer; shares the deferred Phase 4 session-less browsing decision"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: b86a55e92e9f640a
+sage-review-completeness-reviewed: b86a55e92e9f640a
+---
+
+# Deliver the reusable stateful file explorer card
+
+## Background
+
+The dashboard needs an owner-approved reusable file explorer card rather than
+one singleton Files surface. This first user-facing slice builds on isolated
+instances and captures the approved common card behavior. The epic continues
+to represent the other approved explorer scope without assigning delivery
+order here.
+
+The approved tracked visual reference is [mockup.html](../assets/261114-epic-ws-dashboard-file-explorer/mockup.html).
+Owner visual check 759 is APPROVED with the new design axis. Before ready
+promotion, the approved tracked reference must be linked and verification must
+require a side-by-side result/reference comparison; implementation acceptance
+performs that comparison.
+
+## Decisions
+
+- The first user-facing delivery includes internal tabs with middle-click
+  opening an inner background tab, details/list/icon/gallery view modes,
+  per-window filename and content search with split search targeting the active
+  pane, float and fullscreen presentation, and reuse from the conversation
+  Files tab.
+- The explorer remains read-only. Its operations are opening and previewing,
+  searching, copying a path, and sending a path reference to chat; it does not
+  modify the filesystem.
+- Each explorer card stores its own browser state in browser storage. This is
+  additive T0 browser behavior and does not create daemon or shared-store
+  authority. The tracked visual asset and control-attachment UI are additive
+  T0 content; an additive endpoint is T0 only when necessary. No existing root
+  or API semantic rewrite is authorized.
+- Code syntax highlighting and PDF preview are required in this first
+  user-facing delivery.
+- **PDF preview: browser-native viewer over the existing guarded raw path.**
+  `/fs/raw` additionally serves `application/pdf` behind the same
+  `browseRoot`/`openContained` guards, with a PDF-specific Content Security
+  Policy that permits the browser's built-in viewer (the image `sandbox` policy
+  blocks it); the card shows it in a same-origin frame. When the viewer is
+  unavailable, the card falls back to a download/open link rather than a blank
+  frame. Gallery mode shows a PDF as a file-type tile, not a rendered
+  thumbnail. Compatibility: T0 (additive content type on an existing route;
+  image and video behavior unchanged). Rejected: vendoring pdf.js - a new
+  dependency for uniform rendering and thumbnails, not worth the approval cost
+  when the native viewer covers preview.
+- **Code highlighting: server-side chroma through an optional preview field.**
+  The `/fs/preview` text answer gains an optional highlighted-lines field
+  produced by the existing chroma path that already highlights diffs
+  (`highlightLines` in `gitdiff.go`), under its 256 KiB cap; above the cap, or
+  for an unknown language, the preview stays plain text. The explorer colours
+  it with the existing `--hl-*` tokens, so code and diff look the same. Old
+  clients ignore the field. Compatibility: T0 (additive optional answer field).
+  Rejected: a vendored client-side highlighter - a new dependency duplicating
+  what chroma already does.
+- **Explorer board card and its entry point (886=a).** Register an explorer
+  board-card kind beside the existing preview, terminal and web kinds. The
+  conversation Files tab header and the toolbar-sheet header each gain an
+  "Open as card" action that opens a new explorer card at that instance's
+  current location. Multiple explorer cards may coexist. Each card's browser
+  state is keyed by its card ID and removed when the card closes. The toolbar
+  Files button keeps its current sheet behavior. Rejected: the toolbar Files
+  button opening a new card per click with the sheet as that card's fullscreen
+  state (repurposes an existing entry point), and a single toolbar-toggled
+  card (no multiplicity, contradicts per-card state and frame 01's two cards).
+- **Four sequential phases, not one.** P1 card core, P2 search, P3 code
+  highlighting and PDF preview, P4 workspace-picker consumer. Rejected: one
+  phase - fact population graded it high on every risk row, and the picker's
+  open mechanism must not block the card core.
+- **Search scope is the active pane (761=a).** Each window searches its own
+  active pane/inner tab. This ticket delivers single-pane search that honors
+  the rule; the later split dual-pane child inherits it and owns the second
+  pane.
+- **The workspace-picker mechanism is deferred (P4 gated).** How the picker
+  browses without a session and how it learns the daemon host label, home and
+  local-volume roots is settled together with the worktree-view session-anchor
+  question, leaning toward one additive local-viewer-only route that serves
+  both. Rejected for now: a session-only picker reusing the page's reply-id
+  (no home/volume shortcuts and unusable from the rail popover), and a
+  picker-specific route decided ahead of the worktree page. P4 does not start
+  until that decision is recorded in this ticket.
+- Existing normal Files guarded roots remain the access boundary. The
+  separately approved workspace picker is local-viewer-only, directories-only,
+  may browse home and local-volume roots labeled with the daemon host, and is
+  not blanket file-content root widening. Do not add new symlink permissions.
+- The reusable explorer core exposes selection/navigation events and a
+  swappable bottom attachment slot. Browse cards offer `Send to session` and
+  `Copy path`. The workspace picker uses the same core, hides files, shows
+  directories only, and has a Select/Cancel row with hidden entries
+  translucent. No separate picker UI is authorized.
+- Technical event names and store fields remain the implementer's technical
+  choice within the boundaries above; no renderer library is added.
+- The approved tracked visual reference is an acceptance authority. Before
+  ready promotion, it must remain linked and verification must require a
+  side-by-side result/reference comparison; implementation acceptance performs
+  that comparison.
+
+## Constraints
+
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Reuse the isolated explorer component for the conversation Files tab rather
+  than creating a second Files-tab-specific contract.
+- Do not add filesystem mutation, widen normal Files roots, add new shared
+  persistence, or introduce unapproved storage fields, endpoints, dependencies,
+  renderer libraries, API names, budgets, or root permissions.
+- Preserve the existing read-only `/fs` list, preview, raw, find, and search
+  authority and its local/remote guarded-root behavior. Browse-root validation
+  is discoverable in `fs_routes.go` through `browseRootParam` and `containedDir`;
+  the separately approved local-viewer, directories-only workspace picker is
+  not blanket file-content root widening. Host-action and capability checks
+  remain in `fs_act_route.go`, with narrow outside-linked-file grants in
+  `fs_outside.go`; do not add new symlink permissions.
+- Keep any further unresolved mechanism choice as an unnumbered gap for the
+  lead; do not write it as a settled decision.
+- Out of scope: enabling the PDF viewer inside the Electron shell. The
+  Electron shell must enable its built-in PDF plugin for native preview there;
+  that belongs to the Electron shell lane, and this ticket only guarantees the
+  download/open fallback when the viewer is missing.
+- Out of scope until P4's mechanism is recorded: any session-less browsing
+  route, home/volume root discovery, and the rail add-workspace popover. The
+  rail and bottom-left strip are also being changed by a parallel settings and
+  home-removal ticket; P4 coordinates through the lead before touching them.
+- Implementation starts only after
+  `261114-refactor-ws-dashboard-whiteboard-asset-split` lands, on the lead's
+  start signal; that split moves `dashboard.js` and `dashboard.css`, so file
+  paths cited here for those two files are pre-split and must be re-located
+  through its move map.
+
+## Prior Art
+
+- The singleton `#files` ownership no longer exists: `WsFiles.create(node, options)`
+  (`agents-plugin-tool/internal/wsdashboard/assets/files.js#L94`, exported at
+  `#L880`) builds one closure per owner, and `createFiles` in
+  `agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L716-L740`
+  makes the conversation Files tab instance and a lazily built toolbar-sheet
+  instance, each with its own `load`/`save` adapter (the toolbar's keys prefixed
+  `ws.dashboard.toolbar.`). `cards.js` still holds the toolbar Files action and
+  maximize path (`cards.js#L121-L128`, `#L853-L949`), and browser state
+  helpers are `load`/`save` in `dashboard.js#L30-L31`. (landed by
+  `261114-refactor-ws-dashboard-file-explorer-instance-isolation`)
+- Existing filesystem authority is evidenced by the `/fs` list, preview, raw,
+  find, and search surfaces. Browse-root validation is discoverable in
+  `fs_routes.go` through `browseRootParam` and `containedDir`; the separately
+  approved workspace picker is local-viewer-only and directories-only, not
+  blanket file-content root widening. Host-action and capability checks remain in
+  `fs_act_route.go`, with narrow outside-linked-file grants in `fs_outside.go`.
+- Existing Files-tab and read-only preview behavior is recorded in
+  `261110-feat-ws-dashboard-file-preview`.
+
+## Prior Decisions
+
+- 261114-epic-ws-dashboard-file-explorer (2026-11-14, Cross-Child Decisions): "Explorer instances are isolated. No child may restore the current singleton as the state owner for all explorer cards." — bearing: supports
+- 261114-epic-ws-dashboard-file-explorer (2026-11-14, Cross-Child Decisions): "No child may introduce an unconfirmed implementation mechanism or persist an unconfirmed decision as settled. Exact event names, renderer libraries, and store fields remain technical choices" — bearing: constrains
+- 261110-feat-ws-dashboard-file-preview (2026-11-10, Decisions): "No highlighting in Phase 1; `.diff` and `.patch` render through `gitdiff.go`. ... chroma already a dependency (`gitdiff.go#L698-L732`), so highlighting needs no vendoring" — bearing: supports
+- 261112-feat-ws-dashboard-outside-root-file-card (2026-11-12, Decisions): "the explorer's `root=` reads and the 261109 inline outside-image route stay as they are: the existing preview and raw routes read an outside root today through the explorer's `root=` parameter" — bearing: constrains
+- 7f890500 (2026-11-10, commit): "Change root is a `root` query parameter gated by localViewer and crossSiteFetch under the files route's abs-mode path rules; no capability is minted there, so HTML and SVG answer as source text" — bearing: constrains
+- 7f890500 (2026-11-10, commit): "The capability response sandboxes itself (CSP \"sandbox allow-scripts\"), not only the card's iframe attribute: the same URL opened in a tab of its own would otherwise run workspace HTML in the daemon's origin." — bearing: constrains
+- 261114-feat-ws-dashboard-worktree-view (2026-11-14, Decisions): "Consume the reusable explorer component owned by `261114-feat-ws-dashboard-reusable-file-explorer-card`... The worktree page is another consumer, not a competing explorer or workspace-picker UI." — bearing: constrains
+- 541fe405 (2026-11-14, commit): "Retain target-level dropdown/menu/search Escape consumption and the document-level sheet Escape handler; dismiss the Files sheet before an existing preview/card reveal... No files.js or explorer-control redesign" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | assets/files.js (explorer core), assets/dashboard.js (createFiles owners), assets/cards.js (maximize/toolbar), assets/dashboard.css (.fpane rules), fs_routes.go (PDF/highlight preview answer), assets/preview.js (OPAQUE pdf), i18n json, mockup reference |
+| scope.surface | cross-module | window.WsFiles.create options and returned shown/hidden/destroy consumed by dashboard.js and cards.js; possible additive /fs preview kind or route consumed by preview.js |
+| scope.new_public_symbol | yes | new selection/navigation events and attachment slot on the WsFiles instance, and a new explorer board-card kind registered with WsCards (886=a); event names left to the implementer |
+| scope.new_type_contract | yes | new event payloads, attachment-slot contract, per-card store record, and any fsPreviewAnswer kind for PDF/highlighted text; none specified yet |
+| scope.test_surface | new-files | existing files_test.go, cards_test.go, fs_routes_test.go, testdata/files-explorer.test.cjs cover the current explorer; tabs, view modes, split search, picker and PDF/highlight need new fixtures |
+| complexity.reuse_points | confirmed | read files.js create closure, dashboard.js createFiles, cards.js Files maximize, fs_routes.go browseRoot/handleFSPreview/handleFSRaw, and gitdiff.go highlightLines (chroma already in go.mod) |
+| complexity.side_effect_risk | high | tabs, view modes, split search, float/fullscreen and attachment slot rework a 881-line module shared by the Files tab and toolbar sheet; a PDF route touches the sandboxed image-CSP serving path |
+| risk.correctness | high | per-tab and per-pane async search/listing state must stay independent across instances and tabs; split search targets the active pane |
+| risk.fit | high | INFERRED: even split into four phases, P1 alone spans tabs, four view modes, per-card storage, the attachment slot and presentation across files.js, dashboard.js createFiles and cards.js; PDF/highlight mechanisms are now settled (Decisions) and the picker mechanism is gated in P4 |
+| risk.test | high | no mounted-multi-tab, view-mode, or PDF/highlight fixtures exist; browser/side-by-side acceptance is required |
+| risk.security_or_contract | high | PDF serving needs a new content type behind browseRoot (raw serves only image and video types today) and the directories-only picker widens browsing toward home and volumes for local viewers while normal Files roots must stay guarded |
+
+## Phases
+
+Mockup frames cited below are the numbered frames of the approved
+[mockup.html](../assets/261114-epic-ws-dashboard-file-explorer/mockup.html).
+Every phase's acceptance includes a side-by-side comparison of a result capture
+against the cited frames, at matching viewport, theme and state; elements those
+frames show that belong to later epic children (change tracking, Git badges
+and diff tab, worktree switching, dual pane, column view, quick-look, path
+bar, favorites/recent entries, ticket status badges and board links, the
+composer drag-drop zone, keyboard navigation) are not implemented here and
+are excluded from the comparison by name; existing controls the frames show
+(back/up navigation, host open/reveal where local permission allows) stay as
+they are today. "Window" in this ticket means one explorer instance (a card,
+the Files tab or the toolbar sheet), not a browser window. Every phase also keeps the existing `/fs` root guards,
+read-only behavior and the existing Files-tab and toolbar-sheet entry points
+working. Tests run offline (`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`),
+`./internal/wsdashboard` only with a `-run` filter, plus `./internal/wsi18n`
+for new strings.
+
+### Phase 1: Card core - tabs, view modes, per-card state, attachment slot, presentation
+
+Extend the `WsFiles.create` instance (no singleton, no second Files-tab
+contract) into the reusable card core:
+
+- Explorer board card (886=a): a new board-card kind that mounts the core;
+  "Open as card" in the Files tab and toolbar-sheet headers opens a new card
+  at the current location; several cards coexist; the toolbar Files button is
+  unchanged.
+
+- Inner tabs: each tab has its own root/directory, selection and scroll; a
+  middle-click on a folder opens it in a new background inner tab without
+  switching to it. Other tab controls (new, close) follow frame 01.
+- The existing lazy tree stays as the folder sidebar shown in frames 01/03,
+  not as a view mode; tree and column views as modes remain the later child.
+- View modes per tab: details, list, icon and gallery. Gallery shows image
+  previews through the existing raw route and other files as file-type tiles.
+- Per-card browser state: tabs, active tab, view mode and per-tab location
+  persist through the instance's own `load`/`save` adapter, so the Files tab,
+  the toolbar sheet and every explorer card never overwrite each other. An
+  explorer card's state is keyed by its card ID and removed when the card
+  closes. Existing Files-tab and toolbar stored records keep loading.
+- Selection/navigation events and a swappable bottom attachment slot on the
+  instance. The browse attachment offers `Send to session`, which attaches an
+  `@path` mention (the composer's existing mention form, `mention.js`) to the
+  current session's composer and never sends it, and `Copy path`. The slot contract must be able to
+  host the later picker's Select/Cancel row without changing the core.
+- Fullscreen presentation reuses the existing maximize sheet (1920px cap and
+  extend). Float is new: a floating variant of that sheet (frame 01's floated
+  card, about 1100px) that keeps the card's state. The conversation Files tab
+  mounts the same core.
+- Details settled from review: float is offered on explorer cards (the card
+  header, as in the mockup); the Files tab and toolbar sheet keep fullscreen
+  only. "Open as card" starts at the source instance's active inner tab
+  directory, and from the toolbar sheet it dismisses the sheet before
+  revealing the new card (Prior Decision 541fe405). Explorer cards restore on
+  reload through the existing board-card persistence like the other kinds.
+  `Send to session` targets the active conversation's composer and writes a
+  session-relative `@path` when the instance root is the session root, an
+  absolute path otherwise.
+
+Verification: "Open as card" from both headers opens a card at the current
+location; two explorer cards plus the Files tab hold independent tabs, modes
+and storage; closing a card removes its stored state; the toolbar Files button
+still opens the sheet; "Open as card" from the sheet leaves the new card
+visible; an explorer card survives reload;
+middle-click background-tab behavior; storage round-trip and pre-existing
+record compatibility; attachment events and both browse actions; float and
+fullscreen entry/exit; Files-tab and toolbar-sheet regression
+(`TestFiles|TestToolbar|TestBoardToolbar|TestFS` plus the files-explorer JS
+fixture); side-by-side against frames 01, 03 and the gallery layout of 04.
+
+### Phase 2: Per-window name and content search on the active pane
+
+Depends on Phase 1. Each window's search box searches by name or content
+through the existing `/fs/find` and `/fs/search` routes, scoped to that
+window's active pane/inner tab root. Results open files through the existing
+preview path. Switching tabs or windows never shows or cancels another
+window's search; in-flight requests of a closed or switched tab are dropped
+without overwriting the new state.
+
+Verification: concurrent searches in two windows and two tabs stay isolated;
+mode switch name/content; cancellation on tab switch; existing search route
+tests unchanged; side-by-side against the search areas of frames 01 and 05
+(the change-tracking list of frame 05 is excluded).
+
+### Phase 3: Code syntax highlighting and PDF preview
+
+Depends on Phase 1. Implement the two settled mechanisms in `## Decisions`:
+
+- `/fs/preview` adds the optional highlighted-lines field from the existing
+  chroma path within its 256 KiB cap; the explorer's preview renders it with
+  the `--hl-*` tokens and falls back to plain text when the field is absent.
+- `/fs/raw` serves `application/pdf` under the existing guards with a
+  PDF-specific CSP; the card frames it same-origin and shows a download/open
+  fallback when the viewer is unavailable. `/fs/preview` answers a PDF inside
+  the root with an additive `pdf` kind carrying its raw URL (T0: a new enum
+  value; the dashboard's JS is served by the same daemon), so preview cards
+  render it; preview.js keeps PDF opaque wherever no such answer exists
+  (outside-root links and other consumers unchanged). Image and video raw responses,
+  their CSP, and HTML/SVG capability sandboxing stay unchanged.
+
+Verification: Go tests for the preview field (present, capped, unknown
+language), PDF content type and CSP, refusal outside the root and through
+symlinks, and unchanged image/video headers; a browser check that a PDF
+renders, run on the full-Chromium (new headless) channel because
+chromium-headless-shell has no PDF viewer, and that the fallback appears when
+the viewer is absent - if no full-Chromium channel is available, record the
+render check as not run instead of passing it; side-by-side against the PDF layout of frame 04 and the code
+highlighting of frame 07 (the quick-look overlay itself is excluded).
+
+### Phase 4: Directories-only workspace-picker consumer [gated]
+
+Gated: does not start until the picker browsing mechanism (session-less
+anchor, host label, home and local-volume roots) is recorded in
+`## Decisions` together with the worktree-view session-anchor decision.
+Then the picker mounts the same core with directories only, hidden entries
+translucent, files omitted, and a Select/Cancel row in the attachment slot,
+local-viewer only; no separate picker UI. The edit that clears the gate must
+add concrete verification checks here before P4 starts; they include a
+side-by-side against frame 08.
+
+## Sage Review Round 1 (2026-11-15)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Explorer board-card kind and its entry point are unspecified | important | missing |
+| 2 | The existing lazy tree's fate is unstated | important | autonomous |
+| 3 | Side-by-side exclusion list misses some later-child elements | minor | autonomous |
+| 4 | How preview.js learns a file is a PDF | minor | autonomous |
+| 5 | Float has no existing mechanism | minor | autonomous |
+| 6 | Send to session names a send path that does not exist | minor | autonomous |
+| 7 | The asset-split gate is prose only | minor | autonomous |
+| 8 | The P3 headless PDF render check may not be runnable as written | minor | autonomous |
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Asset-split prerequisite is not in frontmatter | minor |
+| 2 | Window is used without definition | minor |
+| 3 | PDF viewer-unavailable detection and the headless Chromium acceptance | minor |
+| 4 | Phase 3 preview.js PDF condition is loosely worded | minor |
+| 5 | Tab lifecycle and card entry points are only implied by the mockup | minor |
+| 6 | Duplicated mockup-authority statement | minor |
