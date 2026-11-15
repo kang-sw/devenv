@@ -56,11 +56,14 @@ claude plugin install ws@kang-sw-devenv
 `.claude-plugin/marketplace.json` also lists `wsflow` for manual
 installation.
 
-Both workflow packages carry `native-pi/manifest.json`, `native-pi/payload.zip`
-and `bin/ws-pi-payload.py`. Package-only Claude/Codex caches and local snapshots
-retain this prepared native Pi closure; installation/update needs no npm or
-network to prepare it. Native loading materializes a verified content-addressed
-copy in the ws cache and uses the running Pi host's SDK.
+Both workflow packages carry `native-pi/closure.zip` (pruned third-party
+dependencies), its `closure-manifest.json`, small plain files under
+`native-pi/first-party/` with `first-party-manifest.json`, and
+`bin/ws-pi-payload.py`. First-party edits do not rewrite the dependency archive.
+Package-only Claude/Codex caches and local snapshots retain this prepared native
+Pi package; installation/update needs no npm or network to prepare it. Native
+loading assembles a verified content-addressed entry with the owner's resources
+and uses the running Pi host's SDK.
 
 After changing Pi sources or payload inputs, producers regenerate from the
 repository root (Node/npm required only here):

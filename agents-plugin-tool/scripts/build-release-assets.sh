@@ -21,9 +21,10 @@ for product in agents-plugin agents-plugin-wsflow; do
   python3 "$repo_dir/$product/bin/ws-pi-payload.py" \
     --plugin "$repo_dir/$product" --check-source "$repo_dir"
 done
-for artifact in native-pi/manifest.json native-pi/payload.zip bin/ws-pi-payload.py; do
+for artifact in native-pi/closure-manifest.json native-pi/closure.zip native-pi/first-party-manifest.json bin/ws-pi-payload.py; do
   cmp "$repo_dir/agents-plugin/$artifact" "$repo_dir/agents-plugin-wsflow/$artifact"
 done
+diff -r "$repo_dir/agents-plugin/native-pi/first-party" "$repo_dir/agents-plugin-wsflow/native-pi/first-party"
 
 dist_dir=$tool_dir/dist
 rm -rf "$dist_dir"

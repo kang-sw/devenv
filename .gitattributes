@@ -12,7 +12,10 @@
 agents-plugin-pi/dist/** linguist-generated=true -diff
 
 # Producer-built native Pi closures; review the canonical Pi sources instead.
-agents-plugin/native-pi/manifest.json linguist-generated=true -diff
-agents-plugin-wsflow/native-pi/manifest.json linguist-generated=true -diff
-agents-plugin/native-pi/payload.zip binary linguist-generated=true
-agents-plugin-wsflow/native-pi/payload.zip binary linguist-generated=true
+agents-plugin/native-pi/closure-manifest.json linguist-generated=true -diff
+agents-plugin-wsflow/native-pi/closure-manifest.json linguist-generated=true -diff
+agents-plugin/native-pi/closure.zip binary linguist-generated=true
+agents-plugin-wsflow/native-pi/closure.zip binary linguist-generated=true
+# Small generated first-party text keeps ordinary text diff/delta behavior.
+agents-plugin*/native-pi/first-party/** linguist-generated=true
+agents-plugin*/native-pi/first-party-manifest.json linguist-generated=true

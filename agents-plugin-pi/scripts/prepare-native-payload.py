@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Producer-only: build a clean production closure and commit-ready native archives.
-
-Run after npm run bundle. Consumers and release checks use ws-pi-payload.py,
-which requires neither Node/npm nor network. Versions come only from the Pi
-package manifest and its lock; development/peer packages never enter the recipe.
-"""
+"""Producer-only: deterministic pruned dependencies plus small first-party files."""
 import argparse
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import posixpath
+import re
 import shutil
 import subprocess
 import sys
@@ -21,50 +18,154 @@ REPO = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("payload", REPO / "agents-plugin/bin/ws-pi-payload.py")
 payload = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(payload)
+production_recipe = payload.production_recipe
+PRUNE_RULE_VERSION = 2
+NON_RUNTIME_DIRS = {"docs", "doc", "examples", "example", "test", "tests", "__tests__", "benchmark", "benchmarks", ".github"}
+MEDIA = {".mp4", ".mov", ".webm", ".png", ".gif", ".jpg", ".jpeg", ".svg", ".ico", ".webp"}
 
 
-def production_recipe(pkg, lock):
-    records = lock["packages"]
-    selected = {}
-    pending = [("", name) for name in pkg["dependencies"]]
+def legal_file(name):
+    # Notices survive even inside otherwise excluded documentation/test trees.
+    return bool(re.search(r"(^|[^a-z])(licen[cs]es?|unlicense|notices?|copying|copyright|authors?|contributors?|patents?|legal|acknowledg[em]*ents?|third.party|[al]?gpl|gfdl|ofl|bsd|mit|apache)([^a-z]|$)", name.lower()))
+
+
+def prune_rule(name, drop_src):
+    """Reviewed exclusions, ONLY for a dependency package-relative filename.
+
+    Every rule is limited further by the caller to files that are neither
+    manifest targets nor literal relative runtime resources. Declared types
+    exports therefore survive the declaration rule rather than being hidden
+    package-specific exceptions. Legal files and package.json always win.
+    """
+    p = PurePosixPath(name)
+    if p.name.lower() == "package.json" or any(legal_file(part) for part in p.parts):
+        return None
+    # Presentation media outside compiled runtime asset directories is not code.
+    if p.suffix.lower() in MEDIA and not {"dist", "lib"}.intersection(p.parts[:-1]):
+        return "media"
+    # Human/development trees are unnecessary unless a runtime target uses them.
+    if NON_RUNTIME_DIRS.intersection(part.lower() for part in p.parts[:-1]):
+        return "documentation/test directories"
+    # Keep redistribution notices, but not other Markdown prose.
+    if p.suffix.lower() in {".md", ".markdown"}:
+        return "markdown"
+    # Debug maps do not participate in runtime loading.
+    if p.name.endswith(".map"):
+        return "source maps"
+    # Unreferenced declarations are compile-time inputs, not JavaScript runtime.
+    if p.name.endswith((".d.ts", ".d.mts", ".d.cts")):
+        return "type declarations"
+    # TypeScript incremental build caches have no consumer runtime role.
+    if p.name.endswith(".tsbuildinfo"):
+        return "build metadata"
+    # Only packages with compiled output and no runtime path into src qualify.
+    if drop_src and "src" in p.parts[:-1]:
+        return "redundant src"
+    return None
+
+
+def prune_dependencies(stage, lock):
+    files = payload.tree(stage / "node_modules", ignore_junk=True)
+    files = {"node_modules/" + name: sha for name, sha in files.items()}
+    roots = sorted((p for p in lock["packages"] if p), key=lambda p: (-len(p), p))
+    manifests = {root: json.loads((stage / root / "package.json").read_text()) for root in roots}
+    declared = set()
+    for root, pkg in manifests.items():
+        declared.update(payload.package_targets(pkg, root, files))
+    protected = set(declared)
+    source_candidates = {root for root in roots
+                         if ((stage / root / "dist").is_dir() or (stage / root / "lib").is_dir())
+                         and not any(p.startswith(root + "/src/") for p in declared)}
+    def code(name):
+        return PurePosixPath(name).suffix in {".js", ".mjs", ".cjs", ".ts", ".css"} and not name.endswith((".d.ts", ".d.mts", ".d.cts"))
+    pending = []
+    for name in files:
+        root = next(r for r in roots if name.startswith(r + "/"))
+        parts = PurePosixPath(name[len(root) + 1:]).parts[:-1]
+        if code(name) and not NON_RUNTIME_DIRS.intersection(parts) and not (root in source_candidates and "src" in parts):
+            pending.append(name)
+    pending.extend(name for name in declared if code(name))
+    # Follow runtime imports transitively, including into otherwise removable
+    # source/docs trees. Dead source imports cannot keep their own tree alive.
+    scanned = set()
     while pending:
-        parent, name = pending.pop()
-        scope = parent
-        while True:
-            candidate = (scope + "/" if scope else "") + "node_modules/" + name
-            if candidate in records:
-                break
-            if not scope:
-                raise ValueError(f"dependency absent from canonical lock: {parent}: {name}")
-            scope = scope.rsplit("/node_modules/", 1)[0] if "/node_modules/" in scope else ""
-        if candidate in selected:
+        name = pending.pop()
+        if name in scanned:
             continue
-        record = dict(records[candidate])
-        for field in ("inBundle", "dev", "devOptional"):
-            record.pop(field, None)
-        if record.get("link") or not record.get("resolved", "").startswith("https://registry.npmjs.org/"):
-            raise ValueError(f"non-registry dependency: {candidate}")
-        if name.startswith(("@earendil-works/pi-", "@mariozechner/pi-")):
-            raise ValueError(f"production graph contains host Pi package: {name}")
-        selected[candidate] = record
-        pending.extend((candidate, dep) for dep in {**record.get("dependencies", {}), **record.get("optionalDependencies", {})})
-    manifest = {"name": "ws-native-pi-production", "version": "1.0.0", "private": True, "dependencies": pkg["dependencies"]}
-    return manifest, {"name": manifest["name"], "version": manifest["version"], "lockfileVersion": 3, "packages": {"": manifest, **dict(sorted(selected.items()))}}
+        scanned.add(name)
+        text = (stage / name).read_text(errors="replace")
+        for value in re.findall(r'''["'`]([^"'`\\\n]+)["'`]''', text):
+            if not value.startswith(("./", "../")) and "." not in PurePosixPath(value).name:
+                continue
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(name), value.split("?")[0].split("#")[0]))
+            for candidate in (target, target + ".js", target + ".json", target + ".ts", target + "/index.js"):
+                if candidate in files:
+                    protected.add(candidate)
+                    if code(candidate) and candidate not in scanned:
+                        pending.append(candidate)
+    drop_src = {root: root in source_candidates and not any(p.startswith(root + "/src/") for p in protected)
+                for root in roots}
+    removed = {rule: {"files": 0, "bytes": 0} for rule in ("media", "documentation/test directories", "markdown", "source maps", "type declarations", "build metadata", "redundant src")}
+    narrowed = []
+    for name in sorted(files):
+        root = next(r for r in roots if name.startswith(r + "/"))
+        rule = prune_rule(name[len(root) + 1:], drop_src[root])
+        if rule is None:
+            continue
+        if name in protected:
+            narrowed.append({"file": name, "rule": rule, "reason": "declared or literal runtime reference"})
+            continue
+        path = stage / name
+        entry = removed.setdefault(rule, {"files": 0, "bytes": 0})
+        entry["files"] += 1
+        entry["bytes"] += path.stat().st_size
+        path.unlink()
+    remaining = {"node_modules/" + p: h for p, h in payload.tree(stage / "node_modules", ignore_junk=True).items()}
+    # Every manifest target must still resolve AFTER pruning; fail before publish.
+    for root, pkg in manifests.items():
+        after = payload.package_targets(pkg, root, remaining)
+        if not payload.package_targets(pkg, root, files).issubset(after):
+            raise ValueError(f"pruning removed a runtime target: {root}")
+    if not protected.issubset(remaining):
+        raise ValueError("pruning removed a literal runtime resource")
+    mandatory = {name for name in files if PurePosixPath(name).name.lower() == "package.json"
+                 or any(legal_file(part) for part in PurePosixPath(name).parts)}
+    if not mandatory.issubset(remaining):
+        raise ValueError("pruning removed redistribution notices or a package manifest")
+    return removed, narrowed
 
 
 def check_bundle_paths(pi, repo):
     bundle = (pi / "dist/index.js").read_bytes()
-    # esbuild labels must not capture a producer checkout/home or a temporary
-    # dependency installation. Check before any download or artifact replacement.
     for path in (repo.resolve(), Path.home().resolve(), (pi / "node_modules").resolve()):
         if str(path).encode() in bundle:
             raise ValueError(f"native Pi bundle contains a producer path: {path}; run npm run bundle")
 
 
-def generate(repo, offline=False, npm_cache=None):
+def bundle_hash(pi):
+    files = payload.tree(pi / "src", ignore_junk=True)
+    names = ["src/" + p for p in files if p.endswith((".ts", ".mjs"))]
+    names += ["src/eff_large_wordlist.txt", "package-lock.json", "scripts/bundle.mjs"]
+    value = payload.digest("".join(f"{p}\n{payload.digest((pi / p).read_bytes())}\n" for p in sorted(names)).encode())
+    if (pi / "dist/index.js").read_bytes().splitlines()[0] != f"// ws-pi-bundle-inputs: sha256-{value}".encode():
+        raise ValueError("FIRST-PARTY source bundle is stale; run npm run bundle")
+    return value
+
+
+def write_zip(path, stage, files):
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for rel in sorted(files):
+            payload.safe_path(rel)
+            info = zipfile.ZipInfo(rel, (2020, 1, 1, 0, 0, 0))
+            info.external_attr = 0o100644 << 16
+            z.writestr(info, (stage / rel).read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+
+
+def generate(repo, offline=False, npm_cache=None, report=None):
     repo = repo.resolve()
     pi = repo / "agents-plugin-pi"
     check_bundle_paths(pi, repo)
+    input_hash = bundle_hash(pi)
     pkg = json.loads((pi / "package.json").read_text())
     recipe, lock = production_recipe(pkg, json.loads((pi / "package-lock.json").read_text()))
     with tempfile.TemporaryDirectory(prefix="ws-native-pi-") as tmp:
@@ -73,10 +174,7 @@ def generate(repo, offline=False, npm_cache=None):
         deps.mkdir()
         (deps / "package.json").write_text(json.dumps(recipe))
         (deps / "package-lock.json").write_text(json.dumps(lock))
-        env = dict(os.environ)
-        for name in list(env):
-            if name.lower().startswith("npm_config_") or name in ("NODE_OPTIONS", "NODE_PATH"):
-                env.pop(name)
+        env = {k: v for k, v in os.environ.items() if not k.lower().startswith("npm_config_") and k not in ("NODE_OPTIONS", "NODE_PATH")}
         for name, folder in (("HOME", "home"), ("USERPROFILE", "home"), ("WS_CACHE_HOME", "cache"), ("WS_CONFIG_HOME", "config"), ("npm_config_cache", "npm-cache")):
             path = temp / folder
             path.mkdir(exist_ok=True)
@@ -85,60 +183,62 @@ def generate(repo, offline=False, npm_cache=None):
             env["npm_config_cache"] = str(npm_cache.resolve())
         env["npm_config_userconfig"] = os.devnull
         flags = ["--ignore-scripts", "--legacy-peer-deps", "--bin-links=false", "--no-audit", "--no-fund"] + (["--offline"] if offline else [])
-        # Normalize npm's virtual-root bookkeeping in the real cwd (not an
-        # aliased /tmp --prefix). Reject any resulting version/graph drift.
         subprocess.run(["npm", "install", "--package-lock-only", *flags], cwd=deps, env=env, check=True)
         normalized = json.loads((deps / "package-lock.json").read_text())
-        if {p: v.get("version") for p, v in normalized["packages"].items() if p} != {p: v.get("version") for p, v in lock["packages"].items() if p}:
+        if payload.normalized_lock(normalized, pkg["dependencies"]) != payload.normalized_lock(lock, pkg["dependencies"]):
             raise ValueError("npm changed the canonical production dependency graph")
         subprocess.run(["npm", "ci", "--omit=dev", *flags], cwd=deps, env=env, check=True)
-        stage = temp / "package"
-        stage.mkdir()
-        inputs = {}
-        def copy(source, destination):
-            if source.is_dir():
-                for rel in payload.tree(source, ignore_junk=True):
-                    copy(source / rel, destination / rel)
-            else:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
-                rel = source.relative_to(repo).as_posix()
-                if payload.drift_input(rel):
-                    inputs[rel] = payload.digest(source.read_bytes())
-        for name in ("src", "dist", "scripts", "bin", "rsrc", "package.json", "package-lock.json", "runtime.json", "config-manifest.json", "dashboard-config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"):
-            copy(pi / name, stage / name)
-        copy(repo / "agents-plugin/skills", stage / "skills")
-        for rel in ("agents-plugin/bin/ws-pi-payload.py",):
-            inputs[rel] = payload.digest((repo / rel).read_bytes())
-        shutil.copytree(deps / "node_modules", stage / "node_modules", ignore=shutil.ignore_patterns(*payload.OS_JUNK))
-        (stage / "node_modules/.package-lock.json").unlink(missing_ok=True)
-        (stage / "production-lock.json").write_text(json.dumps(normalized, sort_keys=True, indent=2) + "\n")
-        files = payload.tree(stage, ignore_junk=True)
+        (deps / "node_modules/.package-lock.json").unlink(missing_ok=True)
+        removed, narrowed = prune_dependencies(deps, normalized)
         native = temp / "native-pi"
         native.mkdir()
-        with zipfile.ZipFile(native / "payload.zip", "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-            for rel in files:
-                payload.safe_path(rel)
-                info = zipfile.ZipInfo(rel, (2020, 1, 1, 0, 0, 0))
-                info.compress_type = zipfile.ZIP_DEFLATED
-                info.external_attr = 0o100644 << 16
-                z.writestr(info, (stage / rel).read_bytes())
-        manifest = {"schema_version": 1, "archive_sha256": payload.digest((native / "payload.zip").read_bytes()), "dependencies": pkg["dependencies"], "inputs": dict(sorted(inputs.items())), "files": files}
-        (native / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+        closure_files = {"node_modules/" + p: h for p, h in payload.tree(deps / "node_modules", ignore_junk=True).items()}
+        write_zip(native / "closure.zip", deps, closure_files)
+        closure = {"schema_version": 1, "key": payload.closure_key(normalized, pkg["dependencies"], PRUNE_RULE_VERSION),
+                   "prune_version": PRUNE_RULE_VERSION, "dependencies": pkg["dependencies"],
+                   "production_lock": payload.normalized_lock(normalized, pkg["dependencies"]),
+                   "archive_sha256": payload.digest((native / "closure.zip").read_bytes()), "files": closure_files}
+        (native / "closure-manifest.json").write_bytes(payload.canonical(closure) + b"\n")
+        first = native / "first-party"
+        for name in payload.FIRST_PARTY_FILES:
+            target = first / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if name == "package.json":
+                runtime_pkg = {**pkg, "pi": {**pkg["pi"], "extensions": ["./dist/index.js"]}}
+                target.write_bytes(payload.canonical(runtime_pkg) + b"\n")
+            elif name == "bundle-inputs.json":
+                target.write_bytes(payload.canonical({"schema_version": 1, "sha256": input_hash}) + b"\n")
+            else:
+                shutil.copyfile(pi / name, target)
+        inputs = {}
+        for root in ("src", "scripts", "dist"):
+            for rel, sha in payload.tree(pi / root, ignore_junk=True).items():
+                inputs[f"agents-plugin-pi/{root}/{rel}"] = sha
+        for name in ("package.json", "package-lock.json", "config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"):
+            inputs[f"agents-plugin-pi/{name}"] = payload.digest((pi / name).read_bytes())
+        small = {"schema_version": 1, "closure_key": closure["key"], "bundle_input_hash": input_hash,
+                 "files": payload.tree(first), "inputs": dict(sorted(inputs.items()))}
+        (native / "first-party-manifest.json").write_text(json.dumps(small, sort_keys=True, indent=2) + "\n")
         fixture = temp / "fixture"
         fixture.mkdir()
         shutil.copytree(native, fixture / "native-pi")
         payload.validate(fixture)
-        # Validate everything before replacing either previously usable artifact.
+        # Same key MUST mean identical archive and closure manifest bytes. A
+        # policy/content change without a prune-version bump is a producer error.
         for product in ("agents-plugin", "agents-plugin-wsflow"):
             dest = repo / product / "native-pi"
-            ready = repo / product / ".native-pi-prepared"
-            if ready.exists():
-                shutil.rmtree(ready)
-            shutil.copytree(native, ready)
-            old = repo / product / ".native-pi-previous"
+            prior = dest / "closure-manifest.json"
+            if prior.exists() and json.loads(prior.read_text())["key"] == closure["key"]:
+                for name in ("closure.zip", "closure-manifest.json"):
+                    if (dest / name).read_bytes() != (native / name).read_bytes():
+                        raise ValueError("same closure key produced different bytes; bump PRUNE_RULE_VERSION for a policy change")
+        for product in ("agents-plugin", "agents-plugin-wsflow"):
+            dest = repo / product / "native-pi"
+            ready, old = repo / product / ".native-pi-prepared", repo / product / ".native-pi-previous"
             if old.exists():
-                raise ValueError(f"previous native payload backup exists: {old}")
+                raise ValueError(f"previous native backup exists: {old}")
+            shutil.rmtree(ready, ignore_errors=True)
+            shutil.copytree(native, ready)
             if dest.exists():
                 dest.rename(old)
             try:
@@ -147,16 +247,24 @@ def generate(repo, offline=False, npm_cache=None):
                 if old.exists():
                     old.rename(dest)
                 raise
-            if old.exists():
-                shutil.rmtree(old)
-        shutil.copyfile(repo / "agents-plugin/bin/ws-pi-payload.py", repo / "agents-plugin-wsflow/bin/ws-pi-payload.py")
-        print(f"Prepared identical native Pi archives: {len(files)} files, {len(lock['packages']) - 1} production dependencies, {(native / 'payload.zip').stat().st_size} compressed bytes")
+            shutil.rmtree(old, ignore_errors=True)
+        sizes = sorted(((name, (deps / name).stat().st_size) for name in closure_files), key=lambda x: (-x[1], x[0]))
+        result = {"closure_key": closure["key"], "zip_bytes": (native / "closure.zip").stat().st_size,
+                  "closure_manifest_bytes": (native / "closure-manifest.json").stat().st_size,
+                  "first_party_bytes": sum(p.stat().st_size for p in first.rglob("*") if p.is_file()),
+                  "first_party_manifest_bytes": (native / "first-party-manifest.json").stat().st_size,
+                  "closure_files": len(closure_files), "closure_unpacked_bytes": sum(size for _, size in sizes),
+                  "first_party_files": len(small["files"]), "removed": removed, "narrowed": narrowed, "largest": sizes[:15]}
+        if report:
+            report.write_text(json.dumps(result, indent=2) + "\n")
+        print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=REPO)
     parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--npm-cache", type=Path, help="Producer-owned isolated npm cache (also enables warmed --offline generation)")
+    parser.add_argument("--npm-cache", type=Path)
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    generate(args.repo, args.offline, args.npm_cache)
+    generate(args.repo, args.offline, args.npm_cache, args.report)

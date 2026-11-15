@@ -59,21 +59,17 @@ func TestPiPreparedPackageOnlyStaleBundleUsesBridge(t *testing.T) {
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(base, "config"))
 	owner := filepath.Join(base, "plugin")
 	copyPiOwner(t, filepath.Join("..", "..", "..", "agents-plugin"), owner)
-	// Keep ZIP/hash inventory internally consistent while making the bundle's
-	// source hash stale. This must be archive invalidity, not source drift.
-	script := `import hashlib, json, sys, zipfile
+	// Keep the plain-file checksum inventory consistent while making the bundle
+	// header stale. This is prepared-file invalidity, not checkout source drift.
+	script := `import hashlib, json, sys
 from pathlib import Path
 p = Path(sys.argv[1]) / "native-pi"
-m = json.loads((p / "manifest.json").read_text())
-with zipfile.ZipFile(p / "payload.zip") as z:
-    files = {n: z.read(n) for n in z.namelist()}
-files["src/index.ts"] += b"\n// changed after bundle\n"
-with zipfile.ZipFile(p / "payload.zip", "w", compression=zipfile.ZIP_DEFLATED) as z:
-    for name, data in files.items():
-        z.writestr(name, data)
-m["files"]["src/index.ts"] = hashlib.sha256(files["src/index.ts"]).hexdigest()
-m["archive_sha256"] = hashlib.sha256((p / "payload.zip").read_bytes()).hexdigest()
-(p / "manifest.json").write_text(json.dumps(m))
+m = json.loads((p / "first-party-manifest.json").read_text())
+bundle = p / "first-party/dist/index.js"
+lines = bundle.read_bytes().split(b"\n", 1)
+bundle.write_bytes(b"// ws-pi-bundle-inputs: sha256-" + b"0" * 64 + b"\n" + lines[1])
+m["files"]["dist/index.js"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+(p / "first-party-manifest.json").write_text(json.dumps(m))
 `
 	if out, err := exec.Command(python, "-I", "-c", script, owner).CombinedOutput(); err != nil {
 		t.Fatalf("fixture: %v: %s", err, out)

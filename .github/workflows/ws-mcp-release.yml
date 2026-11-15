@@ -105,9 +105,10 @@ jobs:
           for product in agents-plugin agents-plugin-wsflow; do
             python3 "../$product/bin/ws-pi-payload.py" --plugin "../$product" --check-source ..
           done
-          for artifact in native-pi/manifest.json native-pi/payload.zip bin/ws-pi-payload.py; do
+          for artifact in native-pi/closure-manifest.json native-pi/closure.zip native-pi/first-party-manifest.json bin/ws-pi-payload.py; do
             cmp "../agents-plugin/$artifact" "../agents-plugin-wsflow/$artifact"
           done
+          diff -r ../agents-plugin/native-pi/first-party ../agents-plugin-wsflow/native-pi/first-party
 
       - name: Build release assets
         run: |

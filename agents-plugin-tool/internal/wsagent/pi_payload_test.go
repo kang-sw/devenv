@@ -40,7 +40,7 @@ func copyPiOwner(t *testing.T, source, dest string) {
 // local-first is valid only while the prepared payload matches these sources.
 func copyPiSourceInputs(t *testing.T, owner, repo string) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(owner, "native-pi", "manifest.json"))
+	raw, err := os.ReadFile(filepath.Join(owner, "native-pi", "first-party-manifest.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 					}
 				}
 				// Invalid local output takes the visible bridge path, never the sibling.
-				piLeadFile(t, filepath.Join(owner, "native-pi", "payload.zip"), "broken")
+				piLeadFile(t, filepath.Join(owner, "native-pi", "closure.zip"), "broken")
 				spec := StartSpec{Root: base, Cwd: base, Dir: filepath.Join(base, "fallback"), Lead: &LeadSpec{PluginIsolation: "isolated", Env: map[string]string{EnvHostedSessionKey: "test-key"}}}
 				warning := ""
 				spec.Lead.PluginWarning = func(text string) { warning = text }

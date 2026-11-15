@@ -54,17 +54,16 @@ class NativePiPayloadTests(unittest.TestCase):
         return dest
 
     def test_both_archives_and_materializers_agree(self):
-        for name in ("native-pi/manifest.json", "native-pi/payload.zip", "bin/ws-pi-payload.py"):
+        for name in ("native-pi/closure-manifest.json", "native-pi/closure.zip", "native-pi/first-party-manifest.json", "bin/ws-pi-payload.py"):
             self.assertEqual((REPO / "agents-plugin" / name).read_bytes(), (REPO / "agents-plugin-wsflow" / name).read_bytes())
         for product in ("agents-plugin", "agents-plugin-wsflow"):
             with self.subTest(product=product):
-                manifest = PAYLOAD.check_source(REPO / product, REPO)
-                self.assertEqual(manifest["dependencies"], json.loads((REPO / "agents-plugin-pi/package.json").read_text())["dependencies"])
-                # The historical external-consumer hash remains provenance only;
-                # the archive and its actual producer/native inputs stay gated.
-                self.assertTrue(all(PAYLOAD.drift_input(name) for name in manifest["inputs"]
-                                    if name != "agents-plugin/bin/ws-pi-payload.py"))
-                self.assertFalse(any(PAYLOAD.ignored_path(name) for name in manifest["files"]))
+                manifests = PAYLOAD.check_source(REPO / product, REPO)
+                self.assertEqual(manifests["closure"]["dependencies"], json.loads((REPO / "agents-plugin-pi/package.json").read_text())["dependencies"])
+                self.assertTrue(all(PAYLOAD.drift_input(name) for name in manifests["first"]["inputs"]))
+                self.assertFalse(any(PAYLOAD.ignored_path(name) for name in manifests["closure"]["files"]))
+                self.assertTrue(all(name.startswith("node_modules/") for name in manifests["closure"]["files"]))
+                self.assertEqual(PAYLOAD.tree(REPO / "agents-plugin/native-pi/first-party"), PAYLOAD.tree(REPO / "agents-plugin-wsflow/native-pi/first-party"))
 
     def test_materialized_owner_bytes_and_offline_reuse(self):
         for product, identity in (("agents-plugin", "ws"), ("agents-plugin-wsflow", "wsflow")):
@@ -104,7 +103,7 @@ class NativePiPayloadTests(unittest.TestCase):
 
     def source_fixture(self):
         repo = self.root / "repo"
-        manifest = json.loads((REPO / "agents-plugin/native-pi/manifest.json").read_text())
+        manifest = json.loads((REPO / "agents-plugin/native-pi/first-party-manifest.json").read_text())
         for name in manifest["inputs"]:
             target = repo / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -187,17 +186,18 @@ class NativePiPayloadTests(unittest.TestCase):
 
         def fake_npm(args, cwd, **kwargs):
             if args[1] == "ci":
-                (cwd / "node_modules").mkdir()
+                with zipfile.ZipFile(owner / "native-pi/closure.zip") as archive:
+                    archive.extractall(cwd)
 
         def inspect_archive(fixture):
             # Exercise the actual producer copy/archive loops, then stop before
             # validation/publication: fake npm intentionally installs no deps.
-            with zipfile.ZipFile(fixture / "native-pi/payload.zip") as archive:
-                names = set(archive.namelist())
-            self.assertIn("src/index.ts", names)
-            self.assertIn("bin/ws-mcp-launcher.py", names)
+            small = json.loads((fixture / "native-pi/first-party-manifest.json").read_text())
+            names = set(PAYLOAD.tree(fixture / "native-pi/first-party"))
+            self.assertIn("src/web-search-helper.mjs", names)
+            self.assertNotIn("src/index.ts", names)
             self.assertTrue(all(name not in names for name in junk))
-            self.assertFalse(any(PAYLOAD.ignored_path(name) for name in names))
+            self.assertFalse(any(PAYLOAD.ignored_path(name) for name in names | set(small["inputs"])))
             raise RuntimeError("producer copy inspected")
 
         with patch.object(PRODUCER.subprocess, "run", side_effect=fake_npm), \
@@ -223,6 +223,31 @@ class NativePiPayloadTests(unittest.TestCase):
             os.utime(path, (old, old))
         self.assertEqual(PAYLOAD.materialize(owner, cache), entry)
         self.assertEqual(list(cache.glob(".native-pi-stage-*")), [])
+
+    def test_closure_and_first_party_staleness_have_distinct_gates(self):
+        repo = self.source_fixture()
+        owner = repo / "agents-plugin"
+        pkg = repo / "agents-plugin-pi/package.json"
+        lock = repo / "agents-plugin-pi/package-lock.json"
+        for path, label in ((pkg, "package.json dependencies"), (lock, "package-lock.json production closure")):
+            original = path.read_bytes()
+            value = json.loads(original)
+            if path == pkg:
+                value["dependencies"]["jiti"] = "9.9.9"
+            else:
+                value["packages"]["node_modules/jiti"]["version"] = "9.9.9"
+            path.write_text(json.dumps(value))
+            with self.assertRaisesRegex(PAYLOAD.StalePayload, "CLOSURE stale:.*" + label):
+                PAYLOAD.check_source(owner, repo)
+            path.write_bytes(original)
+        source = repo / "agents-plugin-pi/src/index.ts"
+        source.write_bytes(source.read_bytes() + b"\n// changed source\n")
+        with self.assertRaisesRegex(PAYLOAD.StalePayload, "FIRST-PARTY stale: agents-plugin-pi/src/index.ts"):
+            PAYLOAD.check_source(owner, repo)
+        first = owner / "native-pi/first-party/dist/index.js"
+        first.write_bytes(b"corrupt")
+        with self.assertRaisesRegex(ValueError, "FIRST-PARTY file checksum"):
+            PAYLOAD.validate(owner)
 
     def test_materializer_schema_namespaces_entries(self):
         owner = self.owner()
@@ -267,7 +292,7 @@ class NativePiPayloadTests(unittest.TestCase):
         result = subprocess.run([*args, "--allow-stale-source"], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("WARNING:", result.stderr)
-        (owner / "native-pi/payload.zip").write_bytes(b"corrupt")
+        (owner / "native-pi/closure.zip").write_bytes(b"corrupt")
         result = subprocess.run([*args, "--allow-stale-source"], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("checksum mismatch", result.stderr)
@@ -333,7 +358,7 @@ class NativePiPayloadTests(unittest.TestCase):
                 self.assertFalse((cache / "ws/stale-destination-file").exists())
                 changed.write_bytes(unchanged)
                 before = PAYLOAD.tree(cache)
-                archive = repo / "agents-plugin/native-pi/payload.zip"
+                archive = repo / "agents-plugin/native-pi/closure.zip"
                 original = archive.read_bytes()
                 archive.write_bytes(b"broken")
                 result = subprocess.run(argv, env=self.env, capture_output=True, text=True, timeout=60)

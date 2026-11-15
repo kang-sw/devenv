@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Validate and stage the prepared native Pi package, using only the stdlib.
-
-The archive is producer-built. No package manager or lifecycle script runs here.
-A content-addressed, fully verified directory is published only after extraction.
-"""
+"""Offline validation/assembly of the dependency closure and small native files."""
 import argparse
+import ast
+import fnmatch
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -16,38 +14,42 @@ import time
 import uuid
 import zipfile
 
-MATERIALIZER_SCHEMA = 2
+MATERIALIZER_SCHEMA = 3
 STAGE_MAX_AGE = 3600
 OS_JUNK = {".DS_Store", "Thumbs.db"}
 OVERLAY_TREES = ("rsrc", "skills")
 OVERLAY_FILES = ("runtime.json", "dashboard-config-manifest.json", "bin/ws-mcp-launcher.py")
+FIRST_PARTY_FILES = ("dist/index.js", "dist/eff_large_wordlist.txt", "src/web-search-helper.mjs",
+                     "src/helper-host.mjs", "package.json", "config-manifest.json",
+                     "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md",
+                     "bundle-inputs.json")
+REFERENCE_FIELDS = ("main", "module", "exports", "bin", "browser", "imports")
 
 
 class StalePayload(ValueError):
-    """A valid archive no longer matches its producer source inputs."""
-
-
-def overlaid(name):
-    return name in OVERLAY_FILES or any(name == root or name.startswith(root + "/") for root in OVERLAY_TREES)
-
-
-def ignored_path(name):
-    # One policy for source scanning, producer copying and owner overlays.
-    return any(part in OS_JUNK or part == "__pycache__" or part.endswith((".pyc", ".pyo", ".swp", "~"))
-               for part in PurePosixPath(name).parts)
-
-
-def drift_input(name):
-    if ignored_path(name):
-        return False
-    # The consumer is outside the archive. Its recorded hash is provenance,
-    # not native-closure freshness; consumer fixes need no payload regeneration.
-    prefix = "agents-plugin-pi/"
-    return name.startswith(prefix) and not overlaid(name[len(prefix):])
+    """Valid prepared files that differ from the producer checkout."""
 
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def ignored_path(name):
+    return any(part in OS_JUNK or part == "__pycache__" or part.endswith((".pyc", ".pyo", ".swp", "~"))
+               for part in PurePosixPath(name).parts)
+
+
+def overlaid(name):
+    return name in OVERLAY_FILES or any(name == r or name.startswith(r + "/") for r in OVERLAY_TREES)
+
+
+def drift_input(name):
+    prefix = "agents-plugin-pi/"
+    return not ignored_path(name) and name.startswith(prefix) and not overlaid(name[len(prefix):])
 
 
 def tree(root, ignore_junk=False, allow_runtime=False, expected_dirs=None):
@@ -80,82 +82,190 @@ def safe_path(name):
     p = PurePosixPath(name)
     if not name or p.is_absolute() or p.as_posix() != name or ".." in p.parts or "\\" in name or ":" in name:
         raise ValueError(f"invalid payload path: {name!r}")
-    forbidden = {".runtime", ".local-devenv-runtime", ".git", ".cache", "__pycache__", ".bin", ".package-lock.json"}
-    if forbidden.intersection(p.parts) or name.endswith((".node", ".pyc")):
+    if {".runtime", ".local-devenv-runtime", ".git", ".cache", "__pycache__", ".bin", ".package-lock.json"}.intersection(p.parts) or name.endswith((".node", ".pyc", ".pyo")):
         raise ValueError(f"forbidden payload path: {name}")
-    return p
+
+
+def production_recipe(pkg, lock):
+    records, selected = lock["packages"], {}
+    pending = [("", name) for name in pkg["dependencies"]]
+    while pending:
+        parent, name = pending.pop()
+        scope = parent
+        while True:
+            candidate = (scope + "/" if scope else "") + "node_modules/" + name
+            if candidate in records:
+                break
+            if not scope:
+                raise ValueError(f"dependency absent from canonical lock: {parent}: {name}")
+            scope = scope.rsplit("/node_modules/", 1)[0] if "/node_modules/" in scope else ""
+        if candidate in selected:
+            continue
+        record = dict(records[candidate])
+        for field in ("inBundle", "dev", "devOptional"):
+            record.pop(field, None)
+        if record.get("link") or not record.get("resolved", "").startswith("https://registry.npmjs.org/"):
+            raise ValueError(f"non-registry dependency: {candidate}")
+        if name.startswith(("@earendil-works/pi-", "@mariozechner/pi-")):
+            raise ValueError(f"production graph contains host Pi package: {name}")
+        selected[candidate] = record
+        pending.extend((candidate, dep) for dep in {**record.get("dependencies", {}), **record.get("optionalDependencies", {})})
+    manifest = {"name": "ws-native-pi-production", "version": "1.0.0", "private": True, "dependencies": pkg["dependencies"]}
+    return manifest, {"name": manifest["name"], "version": manifest["version"], "lockfileVersion": 3,
+                      "packages": {"": manifest, **dict(sorted(selected.items()))}}
+
+
+def normalized_lock(lock, dependencies):
+    # npm's root name/private/requires bookkeeping is not dependency content.
+    return {"lockfileVersion": 3, "packages": {"": {"dependencies": dependencies},
+            **{p: v for p, v in sorted(lock["packages"].items()) if p}}}
+
+
+def closure_key(lock, dependencies, version):
+    return digest(canonical([normalized_lock(lock, dependencies), dependencies, version]))
+
+
+def package_targets(pkg, root, files):
+    """All local files declared by runtime manifest fields, including types conditions.
+
+    Bare imports/browser mappings may name external packages or Node builtins;
+    relative mappings and legacy main/module/bin paths must resolve locally.
+    Wildcards protect every existing matching file, not a guessed single entry.
+    """
+    local = {name[len(root) + 1:] for name in files if name.startswith(root + "/")}
+    targets = set()
+    def resolve(value, field):
+        if not isinstance(value, str) or not value or value.startswith(("node:", "#")):
+            return
+        relative = value.startswith("./")
+        if field in ("imports", "browser") and not relative and value not in local:
+            return
+        value = value.removeprefix("./")
+        if value.startswith("../") or value.startswith("/"):
+            raise ValueError(f"invalid runtime target: {root}: {field}={value}")
+        if "*" in value:
+            matches = {name for name in local if fnmatch.fnmatchcase(name, value)}
+            if not matches:
+                raise ValueError(f"runtime target has no files: {root}: {field}={value}")
+            targets.update(root + "/" + n for n in matches)
+            return
+        for name in (value, value + ".js", value + ".json", value + "/index.js"):
+            if name in local:
+                targets.add(root + "/" + name)
+                return
+        raise ValueError(f"runtime target missing: {root}: {field}={value}")
+    def visit(value, field):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if field == "browser" and (key.startswith("./") or key in local):
+                    resolve(key, field)
+                visit(child, field)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, field)
+        else:
+            resolve(value, field)
+    for field in REFERENCE_FIELDS:
+        if field in pkg:
+            visit(pkg[field], "browser-entry" if field == "browser" and isinstance(pkg[field], str) else field)
+    return targets
+
+
+def read_manifests(plugin):
+    native = plugin / "native-pi"
+    closure = json.loads((native / "closure-manifest.json").read_text())
+    first = json.loads((native / "first-party-manifest.json").read_text())
+    if closure.get("schema_version") != 1 or first.get("schema_version") != 1:
+        raise ValueError("unsupported native Pi split manifest")
+    return native, closure, first
 
 
 def validate(plugin):
-    native = plugin / "native-pi"
-    manifest = json.loads((native / "manifest.json").read_text())
-    if manifest.get("schema_version") != 1:
-        raise ValueError("unsupported native Pi payload manifest")
-    archive = native / "payload.zip"
-    if digest(archive.read_bytes()) != manifest["archive_sha256"]:
-        raise ValueError("native Pi payload archive checksum mismatch")
-    files = manifest["files"]
-    required = {"package.json", "package-lock.json", "production-lock.json", "dist/index.js", "dist/eff_large_wordlist.txt", "src/index.ts", "src/web-search-helper.mjs", "scripts/bundle.mjs", "runtime.json", "config-manifest.json", "dashboard-config-manifest.json", "bin/ws-mcp-launcher.py", "rsrc/manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md", "node_modules/pi-web-access/index.ts", "node_modules/pi-web-access/LICENSE", "node_modules/jiti/package.json"}
-    if not required.issubset(files) or not any(p.startswith("skills/") and p.endswith("SKILL.md") for p in files):
-        raise ValueError("native Pi payload is incomplete")
+    native, closure, first = read_manifests(plugin)
+    archive = native / "closure.zip"
+    if digest(archive.read_bytes()) != closure["archive_sha256"]:
+        raise ValueError("CLOSURE archive checksum mismatch")
+    if closure_key(closure["production_lock"], closure["dependencies"], closure["prune_version"]) != closure["key"]:
+        raise ValueError("CLOSURE key mismatch")
+    files = closure["files"]
     with zipfile.ZipFile(archive) as z:
         if len(z.infolist()) != len(files) or set(z.namelist()) != set(files):
-            raise ValueError("native Pi payload inventory mismatch")
+            raise ValueError("CLOSURE inventory mismatch")
         for info in z.infolist():
             safe_path(info.filename)
-            if stat.S_ISLNK(info.external_attr >> 16) or info.is_dir():
-                raise ValueError(f"non-file payload member: {info.filename}")
+            if not info.filename.startswith("node_modules/") or stat.S_ISLNK(info.external_attr >> 16) or info.is_dir():
+                raise ValueError(f"non-dependency/file CLOSURE member: {info.filename}")
             if digest(z.read(info)) != files[info.filename]:
-                raise ValueError(f"native Pi payload file checksum mismatch: {info.filename}")
+                raise ValueError(f"CLOSURE file checksum mismatch: {info.filename}")
             if info.filename.endswith("package.json"):
                 pkg = json.loads(z.read(info))
                 if pkg.get("name", "").startswith(("@earendil-works/pi-", "@mariozechner/pi-")):
-                    raise ValueError(f"payload contains host Pi package: {info.filename}")
-        pkg = json.loads(z.read("package.json"))
-        if pkg["dependencies"] != manifest["dependencies"]:
-            raise ValueError("native Pi dependency declaration mismatch")
-        lock = json.loads(z.read("production-lock.json"))
-        for rel, record in lock["packages"].items():
-            if not rel:
+                    raise ValueError(f"CLOSURE contains host Pi package: {info.filename}")
+        for root, record in closure["production_lock"]["packages"].items():
+            if not root:
                 continue
-            path = rel + "/package.json"
-            if path not in files or json.loads(z.read(path))["version"] != record["version"]:
-                raise ValueError(f"native Pi production dependency missing or wrong version: {rel}")
+            pkg = json.loads(z.read(root + "/package.json"))
+            if pkg["version"] != record["version"]:
+                raise ValueError(f"CLOSURE production dependency wrong version: {root}")
+            package_targets(pkg, root, files)
         web = json.loads(z.read("node_modules/pi-web-access/package.json"))
-        if web.get("name") != "pi-web-access" or web["version"] != pkg["dependencies"]["pi-web-access"]:
-            raise ValueError("native Pi search package mismatch")
-        inputs = [p for p in files if p.startswith("src/") and p.endswith((".ts", ".mjs"))]
-        inputs += ["src/eff_large_wordlist.txt", "package-lock.json", "scripts/bundle.mjs"]
-        current = digest("".join(f"{p}\n{files[p]}\n" for p in sorted(inputs)).encode())
-        if z.read("dist/index.js").splitlines()[0] != f"// ws-pi-bundle-inputs: sha256-{current}".encode():
-            raise ValueError("native Pi bundle is stale")
-    return manifest
+        if web.get("name") != "pi-web-access" or web["version"] != closure["dependencies"]["pi-web-access"]:
+            raise ValueError("CLOSURE search package mismatch")
+        for required in ("node_modules/pi-web-access/index.ts", "node_modules/pi-web-access/LICENSE", "node_modules/jiti/package.json"):
+            if required not in files:
+                raise ValueError(f"CLOSURE incomplete: {required}")
+    if first["closure_key"] != closure["key"]:
+        raise ValueError("FIRST-PARTY closure reference mismatch")
+    if tree(native / "first-party") != first["files"] or not set(FIRST_PARTY_FILES).issubset(first["files"]):
+        raise ValueError("FIRST-PARTY file checksum/inventory mismatch")
+    pkg = json.loads((native / "first-party/package.json").read_text())
+    if pkg["dependencies"] != closure["dependencies"]:
+        raise ValueError("FIRST-PARTY dependency declaration mismatch")
+    header = (native / "first-party/dist/index.js").read_bytes().splitlines()[0]
+    if header != f"// ws-pi-bundle-inputs: sha256-{first['bundle_input_hash']}".encode():
+        raise ValueError("FIRST-PARTY bundle is stale")
+    recorded = json.loads((native / "first-party/bundle-inputs.json").read_text())
+    if recorded != {"schema_version": 1, "sha256": first["bundle_input_hash"]}:
+        raise ValueError("FIRST-PARTY bundle input record mismatch")
+    return {"closure": closure, "first": first}
 
 
 def check_source(plugin, repo):
-    manifest = validate(plugin)
-    hint = f"regenerate in {repo / 'agents-plugin-pi'}: npm run bundle && python3 scripts/prepare-native-payload.py"
-    for rel, expected in manifest["inputs"].items():
-        if not drift_input(rel):
-            continue
-        path = repo / rel
-        if not path.is_file() or digest(path.read_bytes()) != expected:
-            raise StalePayload(f"native Pi distribution is stale: {rel}; {hint}")
-    # piBundleInputHash covers src TS/MJS, the wordlist, lock and bundle script.
-    # Also gate added distribution/build inputs, but never owner overlays/junk.
-    # bin contains only the owner-overlaid launcher, so it has no added inputs.
-    roots = ["agents-plugin-pi/src", "agents-plugin-pi/scripts", "agents-plugin-pi/dist"]
-    for root in roots:
-        for rel in tree(repo / root, ignore_junk=True):
-            full = f"{root}/{rel}"
-            if drift_input(full) and full not in manifest["inputs"]:
-                raise StalePayload(f"native Pi distribution input added: {full}; {hint}")
-    return manifest
+    manifests = validate(plugin)
+    closure, first = manifests["closure"], manifests["first"]
+    pi = repo / "agents-plugin-pi"
+    hint = f"regenerate in {pi}: npm run bundle && python3 scripts/prepare-native-payload.py"
+    pkg = json.loads((pi / "package.json").read_text())
+    if pkg["dependencies"] != closure["dependencies"]:
+        raise StalePayload(f"CLOSURE stale: agents-plugin-pi/package.json dependencies; {hint}")
+    source_lock = json.loads((pi / "package-lock.json").read_text())
+    try:
+        _, lock = production_recipe(pkg, source_lock)
+    except ValueError as exc:
+        raise StalePayload(f"CLOSURE stale: agents-plugin-pi/package-lock.json production closure ({exc}); {hint}") from exc
+    version = None
+    for node in ast.parse((pi / "scripts/prepare-native-payload.py").read_text()).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PRUNE_RULE_VERSION" for t in node.targets):
+            version = ast.literal_eval(node.value)
+    changed = None
+    if normalized_lock(lock, pkg["dependencies"]) != closure["production_lock"]:
+        changed = "agents-plugin-pi/package-lock.json production closure"
+    elif version != closure["prune_version"]:
+        changed = "agents-plugin-pi/scripts/prepare-native-payload.py PRUNE_RULE_VERSION"
+    if changed:
+        raise StalePayload(f"CLOSURE stale: {changed}; {hint}")
+    for rel, expected in first["inputs"].items():
+        if drift_input(rel) and (not (repo / rel).is_file() or digest((repo / rel).read_bytes()) != expected):
+            raise StalePayload(f"FIRST-PARTY stale: {rel}; {hint}")
+    for root in ("src", "scripts", "dist"):
+        for rel in tree(pi / root, ignore_junk=True):
+            full = f"agents-plugin-pi/{root}/{rel}"
+            if drift_input(full) and full not in first["inputs"]:
+                raise StalePayload(f"FIRST-PARTY input added: {full}; {hint}")
+    return manifests
 
 
 def cleanup_stages(cache):
-    # Only our UUID stages and the previous mkdtemp naming scheme are eligible.
-    # One hour exceeds the 300s extraction budget, protecting active producers.
     pattern = re.compile(r"^\.native-pi-(?:stage-[0-9a-f]{32}|[a-z0-9_]{8})$")
     cutoff = time.time() - STAGE_MAX_AGE
     for path in cache.iterdir():
@@ -164,12 +274,12 @@ def cleanup_stages(cache):
                 if path.stat().st_mtime < cutoff:
                     shutil.rmtree(path)
             except OSError:
-                pass  # Removed concurrently or temporarily locked; retry later.
+                pass
 
 
 def cache_matches(dest, expected):
     try:
-        directories = {str(parent) for name in expected for parent in PurePosixPath(name).parents if str(parent) != "."}
+        directories = {str(p) for name in expected for p in PurePosixPath(name).parents if str(p) != "."}
         return dest.is_dir() and tree(dest, allow_runtime=True, expected_dirs=directories) == expected
     except (OSError, ValueError):
         return False
@@ -178,9 +288,9 @@ def cache_matches(dest, expected):
 def materialize(plugin, cache, manifest=None):
     cache.mkdir(parents=True, exist_ok=True)
     cleanup_stages(cache)
-    manifest = manifest if manifest is not None else validate(plugin)
-    # Replace whole owner trees, including deletions, rather than merging stale
-    # archive resources into a package's current curated inventory.
+    manifests = manifest if manifest is not None else validate(plugin)
+    closure, first = manifests["closure"], manifests["first"]
+    native = plugin / "native-pi"
     overlay = {}
     for root in OVERLAY_TREES:
         overlay.update({f"{root}/{p}": h for p, h in tree(plugin / root, ignore_junk=True).items()})
@@ -189,40 +299,37 @@ def materialize(plugin, cache, manifest=None):
     identity = json.loads((plugin / "runtime.json").read_text())["plugin"]
     if identity not in ("ws", "wsflow"):
         raise ValueError("unsupported native Pi workflow owner")
-    key = digest(json.dumps([MATERIALIZER_SCHEMA, manifest["archive_sha256"], identity, overlay], sort_keys=True).encode())
+    key = digest(canonical([MATERIALIZER_SCHEMA, closure["key"], digest(canonical(first)), identity, overlay]))
     dest = cache / key
-    owner_bytes = (json.dumps({"plugin": identity}) + "\n").encode("utf-8")
-    expected = {p: h for p, h in manifest["files"].items() if not overlaid(p)}
-    expected.update(overlay)
-    expected["workflow-owner.json"] = digest(owner_bytes)
+    owner_bytes = (json.dumps({"plugin": identity}) + "\n").encode()
+    expected = {**closure["files"], **first["files"], **overlay, "workflow-owner.json": digest(owner_bytes)}
     if cache_matches(dest, expected):
         return dest
     stage = cache / (".native-pi-stage-" + uuid.uuid4().hex)
     stage.mkdir(mode=0o700)
     ready, previous = stage / "ready", stage / "previous"
-    ready.mkdir()
+    ready.mkdir(mode=0o700)
     try:
-        with zipfile.ZipFile(plugin / "native-pi/payload.zip") as z:
+        with zipfile.ZipFile(native / "closure.zip") as z:
             for info in z.infolist():
-                if overlaid(info.filename):
-                    continue
                 path = ready / info.filename
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(z.read(info))
-        for rel in overlay:
-            path = ready / rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(plugin / rel, path)
+        for base, inventory in ((native / "first-party", first["files"]), (plugin, overlay)):
+            for rel in inventory:
+                path = ready / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(base / rel, path)
         (ready / "workflow-owner.json").write_bytes(owner_bytes)
         if tree(ready) != expected:
             raise ValueError("native Pi staging verification failed")
         if cache_matches(dest, expected):
-            return dest  # Another materializer published the same valid entry.
+            return dest
         if dest.exists() or dest.is_symlink():
             try:
                 dest.rename(previous)
             except FileNotFoundError:
-                pass  # A concurrent repair already moved the corrupt entry.
+                pass
         try:
             ready.rename(dest)
         except OSError:
@@ -238,8 +345,6 @@ def materialize(plugin, cache, manifest=None):
             try:
                 shutil.rmtree(stage)
             except OSError:
-                # A published entry remains usable even if antivirus/open handles
-                # delay cleanup. cleanup_stages retries abandoned stages later.
                 pass
 
 
@@ -248,8 +353,8 @@ def main():
     parser.add_argument("--plugin", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--check-source", type=Path)
     parser.add_argument("--materialize", type=Path)
-    parser.add_argument("--prefer-source", action="store_true", help="Select a sibling only when this valid payload is stale against its source")
-    parser.add_argument("--allow-stale-source", action="store_true", help="Installer warning instead of failure for source drift only")
+    parser.add_argument("--prefer-source", action="store_true")
+    parser.add_argument("--allow-stale-source", action="store_true")
     args = parser.parse_args()
     plugin = args.plugin.resolve()
     try:
@@ -270,7 +375,7 @@ def main():
             validate(plugin)
     except StalePayload as exc:
         if args.check_source and args.allow_stale_source:
-            print(f"WARNING: {exc}; continuing with the validated prepared payload", file=sys.stderr)
+            print(f"WARNING: {exc}; continuing with validated prepared files", file=sys.stderr)
         else:
             parser.exit(2, f"native Pi payload unavailable: {exc}\n")
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
