@@ -466,6 +466,38 @@ compatibility matrix, all five phases and source-backed fixture selectors.
   live launches, providers, network/install, shared-runtime operations and broad
   tests were outside this authorized documentation slice. The ticket stays ready.
 
+#### Edition (c4975ad76) - 2026-11-15
+
+- Completed the newly dispatched Phase 1 documentation audit only. Recorded
+  exact source snapshot `b59c76212329c0d613769191e804ae5eb86f8117` and refresh
+  merge `55ef92679`, verified both parents and CSI Phase 1 ancestry, and
+  refreshed current source citations onto the landed registry/adoption owners.
+- Preserved the entire Decisions section and prior Phase 1 plan/Result
+  verbatim. MAIN 16:45:17Z restricts execution to documentation; Phase 2 now
+  waits for CSI Phase 2 landing **and** a new MAIN dispatch. This scheduling
+  restriction does not amend owner (998)–(1004)/(1050) permission policy.
+- Personally read the cited current sites and pinned `90eacda7e` router/writer
+  bodies. Recorded source facts separately from future contract requirements
+  and unexecuted fixtures. Corrected the Record writer's historical range
+  shorthand without rewriting its preserved directional matrix; no old-write,
+  HTTP refusal, current-parent or confinement acceptance is claimed.
+- Verification: offline `python3 /tmp/permission-doc-assertions.py` passed
+  unchanged Decisions/history, five phases, scope/intent assertions, exact
+  ancestry/ticket-only diff, 66 current source-site assertions across 22 files,
+  28 pinned source assertions and 12 fixture anchors in both snapshots.
+  Its initial UI-coordinate assertion failed because two new citations
+  missed the function declarations; source diagnosis corrected both citations
+  before the passing run. `git diff --check` and `tickets.verify` passed.
+  The sage-freshness advisory is accepted for evidence refresh and MAIN's
+  execution restriction only; no owner policy or permission behavior changed.
+- One fresh independent lite review of `55ef92679..c4975ad76` found no
+  correctness, security-contract or documentary test-integrity findings.
+  No re-review ran under the one-pass allocation. Unresolved: none.
+- Deferred/omitted: runtime edits, executable acceptance fixtures, providers,
+  harness launches, installation/download/network/SSH, daemon operations,
+  broad tests/CI, push, merge and ticket closure. The ticket remains `ready/`;
+  Phases 2–5 remain unimplemented and outside this dispatch.
+
 ### Phase 2: Implement and verify Claude/Pi permission controls
 
 Execution is held by the current Execution Boundary: CSI Phase 2 must land and
