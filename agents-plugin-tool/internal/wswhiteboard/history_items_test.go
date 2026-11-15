@@ -165,7 +165,7 @@ func TestHistoryAnswersUseSingleLineChipsAndCompleteDisclosure(t *testing.T) {
 	}
 	wantAll(t, string(css),
 		`grid-template-columns: var(--h-av, 18px) var(--h-time, 38px) minmax(0, 1fr) minmax(0, auto);`,
-		`.wb-hstatus { display: block; min-width: 0; max-width: min(24em, 35vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`,
+		`.wb-hstatus { display: block; min-width: 0; max-width: 10em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`,
 		`.wb-hstatus .pick { display: inline; white-space: nowrap; background: none;`,
 		`.wb-hitem details.sx > summary::before { position: absolute; left: -11px; top: 6px; }`,
 		`.pick { display: inline-flex;`,

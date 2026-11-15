@@ -342,7 +342,7 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .wb-hitem.void .wb-hmain > b { text-decoration: line-through; color: var(--wb-muted-fg); }
 .wb-hstatus:has(.pick) { background: none; padding: 0; }
 /* The complete answer belongs to the disclosure, not a multiline chip. */
-.wb-hstatus { display: block; min-width: 0; max-width: min(24em, 35vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; line-height: 20px; font-size: 10.5px; font-weight: 500; color: var(--wb-haccent); }
+.wb-hstatus { display: block; min-width: 0; max-width: 10em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; line-height: 20px; font-size: 10.5px; font-weight: 500; color: var(--wb-haccent); }
 .wb-hstatus .pick { display: inline; white-space: nowrap; background: none; box-shadow: none; padding: 0; margin: 0; font-size: inherit; font-weight: inherit; }
 .wb-hstatus .pick .k { margin-right: 4px; }
 .wb-hitem .sbody { margin-left: calc(var(--h-av, 18px) / 2); padding-left: calc(var(--h-av, 18px) / 2 + var(--h-gap, 8px)); border-left: 1px solid color-mix(in srgb, var(--wb-haccent) 35%, transparent); }
