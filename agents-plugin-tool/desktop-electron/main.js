@@ -3,7 +3,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { discover } = require('./endpoint');
 const { nextZoom, destination } = require('./policy');
-const { HEIGHT, colors, createBar } = require('./titlebar');
+const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 
 function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
   app.setName('Werkschaft');
@@ -28,7 +28,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     window = new Window({
       title, width: 1280, height: 860, minWidth: 760, minHeight: 520,
       ...(platform === 'win32'
-        ? { titleBarStyle: 'hidden', titleBarOverlay: { ...colors(null, nativeTheme.shouldUseDarkColors), height: HEIGHT } }
+        ? { icon: path.join(__dirname, 'icons/icon.ico'), titleBarStyle: 'hidden',
+          titleBarOverlay: { ...colors(null, nativeTheme.shouldUseDarkColors), height: HEIGHT } }
         : { webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false } }),
     });
     const dashboardView = platform === 'win32' ? new WebContentsView({ webPreferences: {
@@ -81,8 +82,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           }
         });
       }
-      wc.on('did-change-theme-color', (_event, color) => bar.setTheme(color));
-      wc.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) bar.setTheme(null); });
+      trackDashboardTheme(wc, color => bar.setTheme(color));
     }
     let navigation, closing = false, retained = { pin, title };
     window.on('close', event => {
