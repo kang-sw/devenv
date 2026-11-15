@@ -74,6 +74,7 @@ function interrupt(reason) {
   const hard = setTimeout(() => { killOwnedBrowser(); process.exit(1); }, 11000);
   cleanup().finally(() => { clearTimeout(hard); process.exit(1); });
 }
+const probeDeadline = performance.now() + 330000;
 const watchdog = setTimeout(() => interrupt('body-time probe exceeded its 330s finite budget'), 330000);
 process.once('SIGTERM', () => interrupt('body-time probe received SIGTERM'));
 process.once('SIGINT', () => interrupt('body-time probe received SIGINT'));
@@ -89,8 +90,45 @@ function hostGeometry() {
   };
 }
 
+// Read-only browser evidence. Coordinates in a frame stay in that frame's
+// own document; the host receiver is measured separately, without parent access.
+async function hoverSnapshot(page, hit, point, errors, errorTimeline, iframe) {
+  const frame = iframe ? await iframe.evaluate(el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.x + el.clientLeft, y: r.y + el.clientTop, width: r.width, height: r.height };
+  }) : null;
+  const localPoint = point ? { x: point.x - (frame ? frame.x : 0), y: point.y - (frame ? frame.y : 0) } : null;
+  const local = await hit.evaluate((el, localPoint) => {
+    const rect = n => { if (!n) return null; const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; };
+    const describe = n => n ? { tag: n.tagName, id: n.id, classes: n.className,
+      capsule: !!n.closest('.wb-cap'), rect: rect(n) } : null;
+    const receiver = localPoint ? document.elementFromPoint(localPoint.x, localPoint.y) : null;
+    const layer = el.parentElement, tip = layer.wbTip;
+    return { performanceMs: performance.now(), marker: rect(el.querySelector('.wb-chg-bar')), hit: rect(el),
+      body: rect(layer.previousElementSibling), point: localPoint, receiver: describe(receiver),
+      receivesPoint: !!receiver && (receiver === el || el.contains(receiver)),
+      viewport: [innerWidth, innerHeight], scroll: [scrollX, scrollY],
+      tip: tip ? { hidden: tip.hidden, display: getComputedStyle(tip).display, text: tip.textContent, rect: rect(tip) } : null };
+  }, localPoint);
+  const host = await page.evaluate(point => {
+    const receiver = point ? document.elementFromPoint(point.x, point.y) : null;
+    const r = receiver && receiver.getBoundingClientRect();
+    return { performanceMs: performance.now(), viewport: [innerWidth, innerHeight], scroll: [scrollX, scrollY],
+      receiver: receiver ? { tag: receiver.tagName, id: receiver.id, classes: receiver.className,
+        capsule: !!receiver.closest('.wb-cap'), rect: [r.x, r.y, r.width, r.height] } : null };
+  }, point);
+  return { monotonicNs: process.hrtime.bigint().toString(), point, frame, local, host,
+    pageErrors: errors.slice(), errorTimeline: errorTimeline.slice() };
+}
+function retainHover(row) {
+  const fd = syncFS.openSync(path.join(captures, 'hover-timeline.jsonl'), 'a');
+  try { syncFS.writeSync(fd, JSON.stringify(row) + '\n'); syncFS.fsyncSync(fd); }
+  finally { syncFS.closeSync(fd); }
+}
+
 async function run() {
   await fs.mkdir(captures, { recursive: true });
+  await fs.mkdir(path.join(captures, 'canary'), { recursive: true });
   for (const name of ['unframed.html', 'framed.html']) await fs.access(path.join(fixture, name));
   server = http.createServer(async (req, res) => {
     try {
@@ -120,13 +158,19 @@ async function run() {
   receipt('browser_registered', owner);
   browserProcess.once('exit', (code, signal) => receipt('browser_child_exit', { pid: browserProcess.pid, code, signal }));
   browser = await chromium.connect(browserServer.wsEndpoint(), { timeout: 15000 });
-  const results = [];
-  for (const width of [1280, 800, 360]) {
-    for (const mode of ['unframed', 'framed']) {
+  const results = [], canaryResults = [];
+  const scenarios = [{ width: 360, mode: 'unframed', canary: true },
+    ...[1280, 800, 360].flatMap(width => ['unframed', 'framed'].map(mode => ({ width, mode, canary: false })))];
+  for (const { width, mode, canary } of scenarios) {
+      if (!canary) assert.equal(canaryResults.length, 1, 'mandatory canary passed before matrix');
+      const captureDir = canary ? path.join(captures, 'canary') : captures;
       const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });
       page.setDefaultTimeout(5000);
-      const errors = [];
-      page.on('pageerror', err => errors.push(String(err)));
+      const errors = [], errorTimeline = [];
+      page.on('pageerror', err => {
+        errors.push(String(err));
+        errorTimeline.push({ monotonicNs: process.hrtime.bigint().toString(), error: String(err) });
+      });
       await page.goto(`http://127.0.0.1:${server.address().port}/${mode}.html`, { waitUntil: 'networkidle', timeout: 15000 });
       // Missing selectors/timestamps/marks are a structural failure, not a cue
       // to adapt the test by redesigning or silently skipping a case.
@@ -135,7 +179,7 @@ async function run() {
       assert.equal(await page.locator('.tbar > time.tago').count(), 4, 'activity remains separately present and first');
       assert.equal(await page.locator('iframe.doc-frame').count(), mode === 'framed' ? 4 : 0);
       await page.locator('#probe-focus').focus();
-      for (const [topic, want] of Object.entries(expected)) {
+      for (const [topic, want] of Object.entries(expected).filter(([topic]) => !canary || topic === 'unknown')) {
         const card = page.locator(`.topic[data-topic="${topic}"]`);
         const header = card.locator('.body-age');
         await assert.doesNotReject(() => header.waitFor({ state: 'visible' }));
@@ -169,11 +213,22 @@ async function run() {
             scroll: [scrollX, scrollY, document.documentElement.scrollWidth, document.documentElement.scrollHeight, body.scrollLeft, body.scrollTop, body.scrollWidth, body.scrollHeight],
             focus: [document.activeElement.tagName, document.activeElement.id] };
         });
-        for (let i = 0; i < 4; i++) {
-          await bounded((async () => {
+        for (const i of canary ? [3] : [0, 1, 2, 3]) {
           const hit = hits.nth(i), bar = hit.locator('.wb-chg-bar');
+          const identity = { lane: canary ? 'canary' : 'matrix', width, mode, topic, mark: i };
+          const caseDeadline = performance.now() + 60000;
+          let point = null;
+          const trace = async phase => {
+            const row = { ...identity, phase, ...await hoverSnapshot(page, hit, point, errors, errorTimeline,
+              mode === 'framed' ? card.locator('iframe.doc-frame') : null) };
+            retainHover(row);
+            return row;
+          };
+          await bounded((async () => {
+          try {
           if (mode === 'framed') await card.locator('iframe.doc-frame').scrollIntoViewIfNeeded();
           await hit.scrollIntoViewIfNeeded();
+          if (mode === 'unframed') await hit.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
           await page.mouse.move(width - 2, 2);
           // Let frame size and fonts settle before the measured hover.
           await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
@@ -185,9 +240,17 @@ async function run() {
           assert.equal(await scope.locator('.wb-chg-layer').evaluate(el => getComputedStyle(el).opacity), topic === 'stale-years' ? '0.35' : '1');
           assert.equal(rest.width, i < 2 ? 2 : 8);
           if (i >= 2) assert.equal(rest.height, 2);
-          if (i === 0) await page.screenshot({ path: path.join(captures, `${width}-${mode}-${topic}-rest.png`) });
+          if (i === 0 || canary) await page.screenshot({ path: path.join(captureDir, `${width}-${mode}-${topic}-rest.png`) });
+          // Keep the exact original transparent-edge point, not a painted-line
+          // shortcut. A single receiver assertion diagnoses coverage, not age.
+          point = { x: hitBefore.x + 1, y: hitBefore.y + Math.min(6, hitBefore.height / 2) };
+          const beforeHover = await trace('before-hover');
+          const productOcclusion = mode === 'unframed' && width === 360 && beforeHover.local.receiver && beforeHover.local.receiver.capsule;
+          assert.ok(beforeHover.local.receivesPoint,
+            `${productOcclusion ? 'PRODUCT OCCLUSION: ' : ''}transparent gutter point must reach intended hit: ${JSON.stringify(beforeHover.local.receiver)}`);
           // Hit its outer transparent gutter, not only the 2px painted line.
           await page.mouse.move(hitBefore.x + 1, hitBefore.y + Math.min(6, hitBefore.height / 2));
+          await trace('after-move');
           const tip = mode === 'framed' ? scope.locator('.wb-chg-tip') : page.locator('.wb-chg-tip:not([hidden])');
           await tip.waitFor({ state: 'visible' });
           assert.equal(await tip.textContent(), want, 'header/gutter same value');
@@ -204,10 +267,37 @@ async function run() {
           assert.deepEqual(await localState(), bodyBefore, 'body no reflow/anchor/scroll/focus');
           const tipBox = await tip.boundingBox();
           assert.ok(tipBox.width > 0 && tipBox.height > 0, 'tooltip visible');
-          await page.screenshot({ path: path.join(captures, `${width}-${mode}-${topic}-hover-${i}.png`) });
+          await page.screenshot({ path: path.join(captureDir, `${width}-${mode}-${topic}-hover-${i}.png`) });
+          await trace('hover-verified');
           await page.mouse.move(width - 2, 2);
           await tip.waitFor({ state: 'hidden' });
-          results.push({ width, mode, topic, mark: i, text: want, rest, hover, hit: hitBefore });
+          (canary ? canaryResults : results).push({ width, mode, topic, mark: i, text: want, rest, hover, hit: hitBefore });
+          } catch (err) {
+            // One evidence attempt inside the unchanged case/browser budgets;
+            // diagnostics never replace the first failure or consume cleanup.
+            try {
+            const budget = Math.min(2000, caseDeadline - performance.now(), probeDeadline - performance.now());
+            if (budget > 0) {
+              const evidenceDeadline = performance.now() + budget;
+              try {
+                await bounded((async () => {
+                  await trace('failure');
+                  if (performance.now() >= evidenceDeadline) throw Error('failure snapshot exhausted evidence budget');
+                  await page.screenshot({ path: path.join(captureDir, `${width}-${mode}-${topic}-failure-${i}.png`),
+                    timeout: Math.max(1, evidenceDeadline - performance.now()) });
+                })(), budget, 'single failure evidence');
+              } catch (evidenceError) {
+                retainHover({ ...identity, phase: 'failure-evidence-incomplete', point, error: String(err),
+                  evidenceError: String(evidenceError), pageErrors: errors.slice(), errorTimeline: errorTimeline.slice() });
+              }
+            } else {
+              retainHover({ ...identity, phase: 'failure-evidence-omitted-budget', point, error: String(err),
+                pageErrors: errors.slice(), errorTimeline: errorTimeline.slice() });
+            }
+            receipt('hover_case_failure', { ...identity, point, error: String(err), retry: false });
+            } catch (diagnosticError) { console.error('failure evidence retention failed:', diagnosticError); }
+            throw err;
+          }
           })(), 60000, `${width}/${mode}/${topic}/${i}`);
         }
         // Preserve the established inline recap/log DOM and first-line placement.
@@ -228,11 +318,16 @@ async function run() {
         assert.ok(Math.abs(inline.textTop - inline.timeTop) < 6, 'recap text follows on first line');
       }
       assert.deepEqual(errors, [], 'no browser script errors');
+      if (canary) {
+        assert.equal(canaryResults.length, 1, 'mandatory end-deletion canary completed');
+        await fs.writeFile(path.join(captureDir, 'geometry.json'), JSON.stringify(canaryResults, null, 2));
+        receipt('canary_pass', { width, mode, topic: 'unknown', mark: 3, hover_cases: 1, captures: 2 });
+      }
       await page.close();
-    }
   }
+  assert.equal(canaryResults.length, 1, 'mandatory canary completed');
   assert.equal(results.length, 96, 'finite matrix completed');
   await fs.writeFile(path.join(captures, 'geometry.json'), JSON.stringify(results, null, 2));
-  console.log(`PASS: ${results.length} hover cases, 120 rest/hover captures; ${captures}`);
+  console.log(`PASS: mandatory canary (1 hover, 2 captures) then ${results.length} matrix hover cases, 120 matrix rest/hover captures; ${captures}`);
 }
 run().catch(err => { receipt('probe_failure', { error: String(err) }); console.error(err); process.exitCode = 1; }).finally(cleanup);
