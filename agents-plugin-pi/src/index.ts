@@ -251,6 +251,7 @@ import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { MISSING_HOSTED_KEY_WARNING, hostedMode, unconfirmedHostedWarning, type HostedMode } from "./hosted-session.ts";
 import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
+import { ownModelObservations } from "./model-observation.ts";
 import { countBackgroundTasks } from "./background-tasks.ts";
 import { createHostedDashboardEvents } from "./hosted-dashboard-events.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
@@ -958,6 +959,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         agents: () => dashboardAgentEntries(feedRegistry),
         // Cost and cache rate come from the TUI footer's estimate; without a footer only context is sent.
         status: () => dashboardStatus(ctx.getContextUsage(), ctx.model?.contextWindow, agentFooterLifecycle.usage()),
+        observations: () => ownModelObservations(ctx.sessionManager.getBranch(), ctx.sessionManager.getHeader()),
         taskCounts: countBackgroundTasks,
       });
       dashboardFeed = feed;
