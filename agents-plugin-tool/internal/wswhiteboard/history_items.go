@@ -18,6 +18,10 @@ func historyTransition(e EntryView, item ItemView) bool {
 		if strings.HasPrefix(e.Text, prefix+"answered [") {
 			return true
 		}
+	case StatusCommented:
+		if strings.HasPrefix(e.Text, prefix+"user commented [") {
+			return true
+		}
 	case StatusAssumed:
 		if strings.HasPrefix(e.Text, prefix+"assumed [") {
 			return true

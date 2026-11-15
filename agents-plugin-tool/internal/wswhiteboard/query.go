@@ -448,12 +448,14 @@ func writeDetails(sb *strings.Builder, item Item, fields []string, quoted map[[2
 }
 
 // writeSummary writes an item's detail lines at depth summary: an open
-// item's full ask, an answered or assumed item's one decoded answer line,
-// and nothing for a withdrawn or superseded one.
+// item's full ask, an answered or assumed item's decoded answer, a commented
+// item's note and lead handoff, and nothing for withdrawn/superseded items.
 func writeSummary(sb *strings.Builder, item Item, quoted map[[2]string]int) {
 	switch item.Status {
 	case StatusOpen:
 		writeDetails(sb, item, nil, quoted)
+	case StatusCommented:
+		writeIndented(sb, "    ", "user commented, lead's move: "+Plain(item.AnswerQuote))
 	case StatusAnswered, StatusAssumed:
 		line := "answer: " + decodedAnswer(item)
 		if item.Status == StatusAssumed {

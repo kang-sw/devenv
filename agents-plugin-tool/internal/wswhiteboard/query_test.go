@@ -234,7 +234,7 @@ func TestQueryRefusesBadPayloads(t *testing.T) {
 		`{"topic":5}`:                     {"payload.topic: must be a string or a list of strings; got number"},
 		`{"topic":[1]}`:                   {"payload.topic[0]: must be a string; got number"},
 		`{"topic":[]}`:                    {"payload.topic: must list at least one value"},
-		`{"status":"done"}`:               {"payload.status: must be one of open, answered, assumed, withdrawn, superseded"},
+		`{"status":"done"}`:               {"payload.status: must be one of open, answered, assumed, commented, withdrawn, superseded"},
 		`{"status":{"a":1}}`:              {"payload.status: must be a string or a list of strings; got object"},
 		`{"status":["open","done"]}`:      {"payload.status[1]: must be one of"},
 		`{"depth":"deep"}`:                {"payload.depth: must be one of topics, items, summary, full"},

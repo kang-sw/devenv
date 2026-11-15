@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 39fb2abec55d50e8
 sage-review-completeness-reviewed: 39fb2abec55d50e8
+completed: 2026-11-16
 ---
 
 # whiteboard.update: one malformed command throws away a large batch
@@ -127,6 +128,55 @@ new field/schema/event kind, or further product choice stops back to the lead.
 | New writer stores `commented` in schema 2; old reader displays it; old writer saves unrelated changes | Item.Status is a string and quote/time are existing fields (`agents-plugin-tool/internal/wswhiteboard/store.go#L118-L151`). Load validates identity/topic, not status (`agents-plugin-tool/internal/wswhiteboard/folders.go#L384-L411`). Clone preserves those known fields, metadata save copies entire Items, and archive eviction only drops IsSettled (`agents-plugin-tool/internal/wswhiteboard/store.go#L357-L377`, `agents-plugin-tool/internal/wswhiteboard/store.go#L577-L604`; `agents-plugin-tool/internal/wswhiteboard/folders.go#L582-L641`, `agents-plugin-tool/internal/wswhiteboard/folders.go#L689-L704`). Old waiting counts require `open`; history defaults to an answered label and recent-settled/query summary omit the unknown semantics (`agents-plugin-tool/internal/wswhiteboard/store.go#L164-L175`; `agents-plugin-tool/internal/wswhiteboard/history_render.go#L41-L55`; `agents-plugin-tool/internal/wswhiteboard/view.go#L914-L946`; `agents-plugin-tool/internal/wswhiteboard/query.go#L386-L400`, `agents-plugin-tool/internal/wswhiteboard/query.go#L453-L466`). | Read both old statuses and `commented` in unchanged schema 2; after an old unrelated write, recover the identical status, quote and time directly from topic metadata, not reconstructed events (`agents-plugin-tool/internal/wswhiteboard/folders.go#L306-L323`, `agents-plugin-tool/internal/wswhiteboard/folders.go#L476-L490`). Old display/query degradation is accepted; no incidental normalization or data loss. Old explicit re-ask, valid answer, withdraw/supersede are intended transitions, not damage to resurrect: patch starts from the whole previous Item, re-ask clears answers, withdrawal keeps history; answer replaces it deliberately (`agents-plugin-tool/internal/wswhiteboard/store.go#L1053-L1059`, `agents-plugin-tool/internal/wswhiteboard/store.go#L1110-L1134`, `agents-plugin-tool/internal/wswhiteboard/store.go#L935-L969`). | **T1**, same-schema status-string addition with preservation. No new Item fields: fixed-struct rewrites would drop them. No T2 recovery claim from append-only logs. |
 | New server receives legacy calls; old caller reads mixed-success text | Existing MCP success/error envelopes carry one text item; error sets `isError: true` (`agents-plugin-tool/internal/mcp/server.go#L4395-L4415`). Old Pi surfaces that first text on error without retrying (`agents-plugin-pi/src/bridge.ts#L1188-L1193`); launcher reconnect replays initialization, reports lost sent calls, and forwards only unsent requests (`agents-plugin/bin/ws-mcp-launcher.py#L1645-L1663`). Existing successful calls remain accepted; all-success output retains IDs, links and summaries (`agents-plugin-tool/internal/mcp/whiteboard_tools.go#L308-L334`). | Keep the envelope and legacy arguments. Any recoverable command failure uses the existing error envelope, but its **first text** states accepted effects and failed commands truthfully, with the complete failed tree and retry instruction. Only all-failed may say "nothing was applied". New caller to old server gets whole-batch refusal/no failed tree, not partial success (`agents-plugin-tool/internal/mcp/whiteboard_tools.go#L257-L292`). Output is not durable retry state: after uncertainty, inspect committed state; reopening cannot reconstruct a lost response. | **T0** for legacy transport/calls under the evidenced no-automatic-machine-replay path. No promise that blindly replaying an entire mixed batch is safe. |
 | New partial-apply writer; old numeric sequence/browser reader and subsequent writer | Seq is the existing render number; Apply increments it once, BeginRender also advances it, and successful commands share its mark (`agents-plugin-tool/internal/wswhiteboard/store.go#L568-L575`, `agents-plugin-tool/internal/wswhiteboard/store.go#L637-L643`, `agents-plugin-tool/internal/wswhiteboard/store.go#L749-L755`). Folder session State retains it; replay publishes session metadata last and load recovers pending intent first (`agents-plugin-tool/internal/wswhiteboard/folders.go#L49-L56`, `agents-plugin-tool/internal/wswhiteboard/folders.go#L582-L594`, `agents-plugin-tool/internal/wswhiteboard/folders.go#L727-L819`, `agents-plugin-tool/internal/wswhiteboard/folders.go#L306-L323`). `wbStamp` emits that number and old JS reloads on inequality (`agents-plugin-tool/internal/mcp/whiteboard_tools.go#L508-L521`; `agents-plugin-tool/internal/wswhiteboard/assets/live.js#L18-L55`). | Preserve numeric fields, accepted-call +1, shared marks, LastEmbedSeq and batch-start baseline semantics. An old write advances the same fields; new reopen uses the persisted values, with no alternative reconstruction. Failed-only calls leave all unchanged; accepted no-ops/empty calls keep existing behavior (`agents-plugin-tool/internal/wswhiteboard/store_test.go#L755-L770`). Publish accepted state once after durable commit; repair publication without replaying mutations. | **T0** for retained one-call stamp and durable publication contract, independently of the T1 status display. |
+
+### Verified compatibility settlement (2026-11-15)
+
+**Highest tier: T1.** Old source is `8cd2566ecc6ba0eb33e9ad0a16f5fc1adb2e195c`;
+new implementation is `df5a4bb47` (core `bd5d9762f`). Paths below are relative
+to `agents-plugin-tool/internal/` unless stated otherwise.
+
+- **Schema-2 status, T1:** new `wswhiteboard/store.go:1030-1055` writes
+  `commented`, empty Answer, verbatim AnswerQuote and AnsweredAt in existing
+  Item fields. Old `store.go:118-151,361-377` reads/clones those same fields;
+  old `folders.go:384-411,582-641,689-704` reads whole Items and serializes
+  them into topic metadata without status normalization. Old
+  `store.go:357-358,575-604` evicts only answered/withdrawn/superseded, so archive
+  pressure retains comments. New `folders.go:306-323,384-411,476-490` reopens
+  those metadata Items directly, not by reconstructing notes from logs.
+  `TestCommandAcceptanceDirectionalOldSourceReopen` verifies exact comment,
+  options, ID and time preservation after unrelated and archive-pressure old
+  writes, all old statuses/history, and authoritative old re-ask/letter/
+  withdrawal/supersession transitions. The old page's fallback `answered`
+  label (`history_render.go:41-53`) and omitted comment summary/count semantics
+  are display degradation, not overwritten data.
+- **Legacy calls and first-text results, T0 within the approved behavior:**
+  MCP arguments/envelope remain unchanged (`mcp/server.go:4395-4415`);
+  new `mcp/whiteboard_tools.go:272-350,354-375` returns applied effects and
+  complete failed payloads through that envelope, including committed
+  publication errors. The old source driver refuses an empty value through
+  old `wswhiteboard/store.go:920-927` without changing folder bytes. Legacy
+  nonempty calls pass on the new server. Pi surfaces the first error text
+  without retry (`agents-plugin-pi/src/bridge.ts:1189-1192`); the launcher fails
+  sent requests with unknown outcome and replays initialization, not mutations
+  (`agents-plugin/bin/ws-mcp-launcher.py:1622-1654`). No lost response is
+  reconstructed on reopen.
+- **Sequence/publication, T0:** old `wswhiteboard/store.go:568-575,637-643`
+  and new `store.go:613-646,656-657,815-827` retain one numeric sequence per
+  accepted call, no advance on all-failed input, and shared accepted marks.
+  The old-write/new-reopen fixture preserves Seq and LastEmbedSeq directly.
+  Existing folder intent/replay (`folders.go:582-594,727-819`) remains the
+  only durable transaction; accepted-only effects are observed after commit
+  (`mcp/whiteboard_tools.go:284-285`) and render bookkeeping/publication reuse
+  `whiteboard_tools.go:552,604-630`. Fault/sequence fixtures verify one intent,
+  accepted-only events, unchanged all-failed bytes, and empty-command repair
+  without duplicate mutations or conversation projection.
+
+No schema, persisted field, event kind, MCP argument, or version boundary was
+added. The reproducible source driver is
+`wswhiteboard/testdata/compat-old/main.go`; build it inside an archive of the
+old source and pass its absolute executable path as
+`WS_WHITEBOARD_COMPAT_OLD` to run the directional fixture. This verification
+used `/tmp/exec4/wbrc-old-source-fixture`; both full and race runs supplied it.
 
 ## Implementation contract
 
@@ -288,3 +338,68 @@ and `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`. Full MCP/dashboard/all-package
 runs and long tests need separate lead authorization. Read the full selected
 outputs and recheck the tier table against actual writes/reopen before claiming
 these targets met.
+
+### Result (df5a4bb47) - 2026-11-15
+
+Implemented Phase 1 in `bd5d9762f` and `df5a4bb47`.
+
+- Commands now accept independently in input order; failed mutations, events,
+  IDs/counters, body origins, defaults, summaries and effects roll back locally.
+  Failed scope metadata blocks its children; failed known targets block later
+  closes of those topics even after a correction/adoption. Existing
+  answer-after-close protection remains.
+- Rejections retain complete source payloads and scopes in `<wb:failed>`.
+  Rejected commands/fields honor CDATA boundaries; uncertain boundaries,
+  including nested groups, refuse the whole input without applying a prefix.
+  Corrected failed-only retries do not duplicate accepted panels, logs or IDs.
+- Exact empty policy values record `commented` through existing Item and
+  system-entry fields. Queries, history/timeline, full/served projections and
+  compact embeds distinguish a comment from an answer/assumption; waiting
+  counts exclude it and archive eviction retains it. Repeated comments are
+  semantic no-ops; re-ask, choice, withdrawal and supersession use existing
+  authoritative transitions.
+- Accepted work uses the existing single durable intent and publication path.
+  Mixed outcomes preserve the MCP envelope and put truthful applied/failed
+  information in its first text. Confirmed publication failures identify
+  committed work and render-only repair; uncertain commitment requires
+  inspection. Conversation projection stays best effort, not replayable.
+- Technical boundary choices: preserve the existing whole-call refusal for an
+  invalid stored embed-directory prerequisite; do not silently select another
+  output directory. Treat nested groups as unpartitionable instead of guessing
+  which closing tag owns a command. Keep the old whole-batch parser entry point
+  unchanged for other consumers. The only template change is the necessary
+  comment status label; no dashboard files, JS/CSS or playbooks changed.
+
+Verification passed with the absolute owned module cwd, isolated HOME/config/
+runtime/temp, warm Go caches, and `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+
+```text
+go test ./internal/wswhiteboard ./internal/wsxmlcmd -count=1
+go test ./internal/mcp -run 'Whiteboard' -count=1
+go test -race ./internal/wswhiteboard -run 'CommandAcceptance|PolicyComment|FolderConcurrent|FolderCache|FolderRecovery|BodyTimeActualBatch|TopicUpdateDefault' -count=1
+go test -race ./internal/mcp -run 'Whiteboard(CommandAcceptance|EffectsDurableIntent|PublicationDirectory)' -count=1
+go build ./...
+go vet ./internal/wsxmlcmd ./internal/wswhiteboard ./internal/mcp
+git diff --check
+```
+
+The directional test used the real old-source driver built in the archived
+baseline, including archive-pressure and deliberate old transition saves; its
+T1/T0 settlement is recorded above. New source fixtures cover all five matrix
+parts in `acceptance_test.go`, `acceptance_folders_test.go`,
+`mcp/whiteboard_acceptance_test.go` and the extended effects/publication suites.
+Full command outputs were read; final logs are `/tmp/exec4/wbrc-final-*`.
+Initial failures were diagnosed before fixes: obsolete batch-atomic test
+expectations, creation-event attribution after default insertion, a missing
+compact comment label, and fixture-only format/fault-stage setup errors.
+All final selected runs passed; no repeated-root failure remained.
+
+Independent review was deliberately omitted under the lead's binding assignment
+(no subagents); the lead performs it after the worker report. No full MCP or
+dashboard test package, shared daemon operation, Electron, push or merge ran.
+The owner's playbook pass and separate UI lane remain outside this ticket.
+
+
+## Resolution (2026-11-16)
+
+Phase 1 completes the ticket's implementation scope: command-local acceptance and complete retries, policy comments, accepted-only durable publication, and the five-part verification matrix. Highest compatibility tier T1 is verified against the pinned pre-feature source. Independent review remains with the lead under the explicit worker assignment; playbook polish and the separate UI lane are excluded. The sage-review freshness advisory is accepted because the added text records implementation/verification evidence without changing the approved Decisions or Phase 1 plan.

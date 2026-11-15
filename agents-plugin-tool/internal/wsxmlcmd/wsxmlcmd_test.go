@@ -300,6 +300,50 @@ func TestGroupRules(t *testing.T) {
 	}
 }
 
+func TestParseOrderedRejectedGroupContainerFields(t *testing.T) {
+	prefix := `<tr:drop id="1"/>`
+	rejected := `<tr:in name="outer">junk<tr:set><tr:name></tr:set></tr:in><tr:in name="literal"><![CDATA[</tr:name></tr:set><tr:in>]]></tr:name></tr:set></tr:in>`
+	suffix := `<tr:drop id="2"/>`
+	p := &Problems{}
+	cmds, complete := ParseOrdered(p, groupGrammar, prefix+rejected+suffix)
+	if !complete || len(p.List) != 1 || len(cmds) != 3 {
+		t.Fatalf("field payload escaped rejected group: complete=%v commands=%+v problems=%v", complete, cmds, p.List)
+	}
+	if cmds[0].Source != prefix || cmds[1].Source != rejected || cmds[2].Source != suffix || len(cmds[1].Scope.Problems) != 1 {
+		t.Fatalf("lost source boundaries/diagnostics: %+v", cmds)
+	}
+}
+
+func TestParseOrderedRejectedGroupTruncation(t *testing.T) {
+	for _, suffix := range []string{
+		`<!--`,
+		`<![CDATA[`,
+		`<div title='`,
+		`<tr:set><!--`,
+		`<tr:set><![CDATA[`,
+		`<tr:set><tr:name attr="`,
+		`<tr:set><tr:name><![CDATA[`,
+		`<tr:set><tr:name></tr:set><tr:in name="literal">`,
+	} {
+		t.Run(suffix, func(t *testing.T) {
+			done := make(chan bool, 1)
+			go func() {
+				p := &Problems{}
+				_, complete := ParseOrdered(p, groupGrammar, `<tr:drop id="1"/><tr:in name="outer">junk`+suffix)
+				done <- !complete && len(p.List) > 0
+			}()
+			select {
+			case refused := <-done:
+				if !refused {
+					t.Fatal("truncated group was not refused")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("ParseOrdered did not return")
+			}
+		})
+	}
+}
+
 // extraGrammar is groupGrammar with an optional extra group attribute.
 var extraGrammar = Grammar{
 	Prefix:   "tr:",

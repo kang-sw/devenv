@@ -37,7 +37,7 @@ func TestWhiteboardTopicStateResearchingResponseAndRestart(t *testing.T) {
 		}
 	}
 	before := whiteboardTreeForTest(t, f.pageDir())
-	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="research"><wb:log>Rollback</wb:log><wb:eta minutes="8" reason="invalid research extension"/></wb:topic>`})
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="research"><wb:eta minutes="8" reason="invalid research extension"/></wb:topic>`})
 	if !isToolError(resp) || !strings.Contains(toolText(t, resp), "ETA requires known implementing state") {
 		t.Fatalf("research ETA refusal: %s", resp)
 	}
@@ -104,7 +104,7 @@ func TestWhiteboardTopicStateCutoverAndAtomicRefusal(t *testing.T) {
 		t.Fatalf("state did not follow legacy cutover: %s", log)
 	}
 	before := whiteboardTreeForTest(t, f.pageDir())
-	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="recap only"><wb:log>Must roll back</wb:log><wb:state value="implementing" owner="different" eta_minutes="1"/></wb:topic>`})
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="recap only"><wb:state value="implementing" owner="different" eta_minutes="1"/></wb:topic>`})
 	if !isToolError(resp) || !strings.Contains(toolText(t, resp), "implementing owner/ETA differs") {
 		t.Fatalf("expected atomic state refusal: %s", resp)
 	}
