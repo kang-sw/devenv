@@ -38,11 +38,13 @@ const (
 // items still wait on the user. An assumed item carries the lead's reading of
 // a vague reply: it takes a settle order and the page shows it among the
 // settled items, but it is not IsSettled, so archive eviction never drops it
-// and the user's later words still land on its ID.
+// and the user's later words still land on its ID. A commented policy item
+// likewise rotates without eviction, but records user input without a choice.
 const (
 	StatusOpen       = "open"
 	StatusAnswered   = "answered"
 	StatusAssumed    = "assumed"
+	StatusCommented  = "commented"
 	StatusWithdrawn  = "withdrawn"
 	StatusSuperseded = "superseded"
 )
@@ -62,7 +64,7 @@ const (
 
 var (
 	classValues       = []string{ClassPolicy, ClassTechnical, ClassAnnounced, ClassCheck}
-	statusValues      = []string{StatusOpen, StatusAnswered, StatusAssumed, StatusWithdrawn, StatusSuperseded}
+	statusValues      = []string{StatusOpen, StatusAnswered, StatusAssumed, StatusCommented, StatusWithdrawn, StatusSuperseded}
 	patchStatusValues = []string{StatusOpen, StatusWithdrawn, StatusSuperseded}
 	// fullDocumentPattern detects a whole HTML document where a topic body
 	// takes markdown with inline HTML; fullDocument applies it to the raw
@@ -261,10 +263,9 @@ type State struct {
 	Seq int `json:"seq"`
 	// SettleSeq is the last settle order handed out.
 	SettleSeq int `json:"settle_seq,omitempty"`
-	// AnswerSeq is the render sequence of the last applied wb:answer that
-	// is not an assumption: the board's mark of the user having answered
-	// something. Zero before any such answer and on a board stored before
-	// the field; LastAnswerSeq derives a stand-in for the latter.
+	// AnswerSeq is the render sequence of the last actual user input recorded
+	// by wb:answer (a choice or policy comment, not an assumption). Zero
+	// before such input and on older boards; LastAnswerSeq derives a fallback.
 	AnswerSeq int    `json:"answer_seq,omitempty"`
 	Items     []Item `json:"items,omitempty"`
 	// ClosedTopics lists the closed topics in close order, the most recently
@@ -308,13 +309,19 @@ type Env struct {
 
 // Outcome is what an accepted update did.
 type Outcome struct {
+	// Accepted counts accepted commands, including semantic no-ops. Failed
+	// contains complete retry payloads; Unpartitioned forbids applying a prefix.
+	Accepted      int
+	Failed        string
+	Unpartitioned bool
 	// Effects holds typed semantic transitions, in command order. It is
-	// meaningful only after the enclosing store commits, never on refusal.
+	// meaningful only after the enclosing store commits. Failed commands
+	// contribute no effects, even when other commands commit.
 	Effects []Effect
 	// Summaries are transient net-per-topic result lines, in first-touch order.
 	// Like Effects, they describe applied work only after the store commits.
 	Summaries []string
-	// IDs holds the ID of every wb:add command, in command order.
+	// IDs holds the ID of every accepted wb:add command, in command order.
 	IDs []int
 	// Withdrawn holds the ID of every item a wb:close withdrew, in command
 	// order.
@@ -539,15 +546,15 @@ func (s *State) settle(item *Item) {
 // Settled 0; it ranks as newer than every settle order (several such items
 // by Changed), since sorting it as the oldest would collapse it at once.
 func (s *State) settleOrder(item Item) int {
-	if item.Settled == 0 && item.Status == StatusAssumed {
+	if item.Settled == 0 && (item.Status == StatusAssumed || item.Status == StatusCommented) {
 		return s.SettleSeq + item.Changed
 	}
 	return item.Settled
 }
 
 // LastAnswerSeq is the render sequence of the board's most recent user
-// answer. A board stored before AnswerSeq existed has none recorded; the
-// newest change among its answered items stands in, which can only be later
+// input. A board stored before AnswerSeq existed has none recorded; the
+// newest change among its answered/commented items stands in, which can only be later
 // than the real answer (a patch bumps Changed), never earlier.
 func (s *State) LastAnswerSeq() int {
 	if s.AnswerSeq > 0 {
@@ -555,7 +562,7 @@ func (s *State) LastAnswerSeq() int {
 	}
 	last := 0
 	for _, item := range s.Items {
-		if item.Status == StatusAnswered {
+		if item.Status == StatusAnswered || item.Status == StatusCommented {
 			last = max(last, item.Changed)
 		}
 	}
@@ -600,33 +607,42 @@ func (s *State) evictArchive() {
 	s.Items = kept
 }
 
-// Apply validates commands, one whiteboard.update command string (see
-// commands.go), and applies it to state. Commands apply in the order written
-// against a working copy; any problem leaves state untouched and every
-// problem is returned. An accepted batch advances the render sequence once;
-// the caller renders afterwards.
+// Apply accepts soundly delimited commands independently, in input order.
+// Failed commands roll back completely. One accepted call shares one sequence
+// and one persistence boundary; an unpartitionable input never applies a prefix.
 func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	p := &problems{}
-	cmds := parseCommands(p, commands)
-	work, out, updates := applyCommands(state, cmds, env, p, nil)
-	if len(p.List) > 0 {
-		return Outcome{}, p.List
+	cmds, complete := wsxmlcmd.ParseOrdered(p, grammar, commands)
+	if !complete {
+		// Diagnose the identifiable prefix on a private copy, never granting
+		// permission to commit it when a later boundary is uncertain.
+		validation := &problems{}
+		applyCommands(state, cmds, env, validation, nil)
+		for _, problem := range validation.List {
+			if !slices.Contains(p.List, problem) {
+				p.List = append(p.List, problem)
+			}
+		}
+		return Outcome{Unpartitioned: true}, p.List
 	}
+	p = &problems{}
+	work, out, updates := applyCommands(state, cmds, env, p, nil)
 	// Plan on the ordinary ordered transaction first: a same-batch explicit
 	// declaration suppresses the default, without making state-before-creation
 	// valid. Replay only batches needing defaults, before committing either
 	// copy, so close/reset history observes the default at creation time.
 	if defaults := updates.defaults(); len(defaults) > 0 {
+		p = &problems{}
 		work, out, updates = applyCommands(state, cmds, env, p, defaults)
-		if len(p.List) > 0 {
-			return Outcome{}, p.List
-		}
+	}
+	if out.Accepted == 0 && len(p.List) > 0 {
+		return out, p.List
 	}
 	out.Summaries = updates.summaries(state, work)
 	// work is already a deep private copy, including when state is a shared
 	// cache read. Commit only to this caller's header, never the cache's.
 	*state = *work
-	return out, nil
+	return out, p.List
 }
 
 func applyCommands(state *State, cmds []command, env Env, p *problems, defaults map[int]bool) (*State, Outcome, *topicUpdates) {
@@ -649,6 +665,9 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	// when the batch reaches the group so all its commands act on one
 	// topic; "" when the group's name or label was refused.
 	keys := map[*wsxmlcmd.Scope]string{}
+	blocked := map[*wsxmlcmd.Scope]bool{}
+	failedTopics := map[string]bool{}
+	var failed []command
 	topicOf := func(cmd command) (string, bool) {
 		name, ok := cmd.Scoped()
 		if !ok {
@@ -663,74 +682,125 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	}
 
 	for index, cmd := range cmds {
+		// Helpers replace entry payloads rather than mutating them; copy the
+		// mutable containers, not every large body/panel, for command rollback.
+		before := effectSnapshot(work)
+		beforeUpdates := updates.clone()
+		beforeOrigins := cloneOrigins(origins)
+		cp := &problems{List: append([]string(nil), cmd.Problems...)}
 		if cmd.IsGroup() {
-			key := applyGroup(p, work, origins, cmd)
+			cp.List = append(cp.List, cmd.Scope.Problems...)
+		} else if blocked[cmd.Scope] {
+			cp.Add("%s: topic metadata/scope failed; correct the group first", cmd.Label())
+		}
+		topics := commandTopics(work, cmd, topicOf)
+		id, withdrawn := 0, []int(nil)
+		key := ""
+		if len(cp.List) == 0 && cmd.Tag == "wb:close" {
+			for _, topic := range topics {
+				if failedTopics[topic] {
+					cp.Add("%s: an earlier command for topic %q failed; close it in a later call after correction", cmd.Label(), topic)
+				}
+			}
+		}
+		if len(cp.List) == 0 && cmd.IsGroup() {
+			key = applyGroup(cp, work, origins, cmd)
 			keys[cmd.Scope] = key
 			updates.group(previous, work, cmd, key)
-			updates.created(previous, work, key, index, defaults[index], env.Now, p)
-			out.Effects = append(out.Effects, semanticEffects(previous, work)...)
-			previous = effectSnapshot(work)
+			updates.created(previous, work, key, index, defaults[index], env.Now, cp)
+		} else if len(cp.List) == 0 {
+			p := cp
+			switch cmd.Tag {
+			case "wb:add":
+				id = applyAdd(p, work, cmd, topicOf, mark, env.Now)
+			case "wb:answer":
+				applyAnswer(p, work, cmd, mark, env.Now, closedBy)
+			case "wb:patch":
+				applyPatch(p, work, cmd, mark, env.Now)
+			case "wb:body":
+				applyBody(p, work, origins, cmd, topicOf, mark, env.Now)
+			case "wb:edit":
+				applyEdit(p, work, origins, cmd, topicOf, mark, env.Now)
+			case "wb:panel":
+				applyPanel(p, work, cmd, topicOf, env.Now)
+			case "wb:log":
+				applyLog(p, work, cmd, topicOf, env.Now)
+			case "wb:state":
+				applyTopicState(p, work, cmd, topicOf, env.Now)
+			case "wb:eta":
+				applyTopicETA(p, work, cmd, topicOf, env.Now)
+			case "wb:close":
+				withdrawn = applyClose(p, work, cmd, topicOf, mark, env.Now)
+			case "wb:floor":
+				if floor, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok && floor > work.Counter {
+					work.Counter = floor
+				}
+			case "wb:embed-dir":
+				dir, present := cmd.Attr("path")
+				switch {
+				case !present:
+					p.Add("%s: required (\"\" clears it)", cmd.At("path"))
+				case dir == "":
+					work.EmbedDir = ""
+				case !env.IsAbs(dir):
+					p.Add("%s: must be an absolute path; got %q", cmd.At("path"), dir)
+				case !env.IsDir(dir):
+					p.Add("%s: %s is not an existing directory (the server never creates it)", cmd.At("path"), dir)
+				default:
+					work.EmbedDir = dir
+				}
+			}
+		}
+		if !cmd.IsGroup() && len(cp.List) == 0 {
+			updates.touchCommand(before, cmd, topicOf)
+			for _, topic := range topics {
+				updates.created(previous, work, topic, index, defaults[index], env.Now, cp)
+				if cmd.Tag == "wb:state" {
+					updates.byKey[topic].explicit = true
+				}
+			}
+		}
+		if len(cp.List) > 0 {
+			work, updates, origins = before, beforeUpdates, beforeOrigins
+			if cmd.IsGroup() {
+				blocked[cmd.Scope] = true
+			}
+			for _, topic := range topics {
+				failedTopics[topic] = true
+			}
+			p.List = append(p.List, cp.List...)
+			failed = append(failed, cmd)
 			continue
 		}
-		topics := updates.touchCommand(work, cmd, topicOf)
-		switch cmd.Tag {
-		case "wb:add":
-			before := len(work.Items)
-			id := applyAdd(p, work, cmd, topicOf, mark, env.Now)
-			if len(work.Items) > before {
-				item := work.Items[len(work.Items)-1]
-				entries := work.topicDoc(item.Topic).Entries
-				created[entries[len(entries)-1].ID] = item
+		if cmd.IsGroup() {
+			// Adoption moves the guard with the topic identity, not its label.
+			if label, ok := cmd.Scope.Extra("label"); ok && failedTopics[label] && before.topicKnown(label) && !work.topicKnown(label) {
+				failedTopics[key] = true
 			}
+			if !cmd.Scope.HasExtra() {
+				continue
+			}
+		}
+		out.Accepted++
+		if cmd.Tag == "wb:add" {
 			out.IDs = append(out.IDs, id)
-		case "wb:answer":
-			applyAnswer(p, work, cmd, mark, env.Now, closedBy)
-		case "wb:patch":
-			applyPatch(p, work, cmd, mark, env.Now)
-		case "wb:body":
-			applyBody(p, work, origins, cmd, topicOf, mark, env.Now)
-		case "wb:edit":
-			applyEdit(p, work, origins, cmd, topicOf, mark, env.Now)
-		case "wb:panel":
-			applyPanel(p, work, cmd, topicOf, env.Now)
-		case "wb:log":
-			applyLog(p, work, cmd, topicOf, env.Now)
-		case "wb:state":
-			applyTopicState(p, work, cmd, topicOf, env.Now)
-		case "wb:eta":
-			applyTopicETA(p, work, cmd, topicOf, env.Now)
-		case "wb:close":
-			withdrawn := applyClose(p, work, cmd, topicOf, mark, env.Now)
-			for _, id := range withdrawn {
-				closedBy[id] = cmd.Label()
+			item := work.Items[len(work.Items)-1]
+			entries := work.topicDoc(item.Topic).Entries
+			for j := len(entries) - 1; j >= 0; j-- {
+				entry := entries[j]
+				if entry.ItemID == id && strings.HasPrefix(entry.Text, fmt.Sprintf("Item {{%d}} added [", id)) {
+					created[entry.ID] = item
+					break
+				}
 			}
-			out.Withdrawn = append(out.Withdrawn, withdrawn...)
-		case "wb:floor":
-			if floor, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok && floor > work.Counter {
-				work.Counter = floor
-			}
-		case "wb:embed-dir":
+		}
+		if cmd.Tag == "wb:embed-dir" {
 			embedDir = true
-			dir, present := cmd.Attr("path")
-			switch {
-			case !present:
-				p.Add("%s: required (\"\" clears it)", cmd.At("path"))
-			case dir == "":
-				work.EmbedDir = ""
-			case !env.IsAbs(dir):
-				p.Add("%s: must be an absolute path; got %q", cmd.At("path"), dir)
-			case !env.IsDir(dir):
-				p.Add("%s: %s is not an existing directory (the server never creates it)", cmd.At("path"), dir)
-			default:
-				work.EmbedDir = dir
-			}
 		}
-		for _, topic := range topics {
-			updates.created(previous, work, topic, index, defaults[index], env.Now, p)
-			if cmd.Tag == "wb:state" {
-				updates.byKey[topic].explicit = true
-			}
+		for _, id := range withdrawn {
+			closedBy[id] = cmd.Label()
 		}
+		out.Withdrawn = append(out.Withdrawn, withdrawn...)
 		effects := semanticEffects(previous, work)
 		updates.recordKinds(cmd, effects)
 		out.Effects = append(out.Effects, effects...)
@@ -738,10 +808,13 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	}
 	if !embedDir && work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {
 		p.Add("embed_dir %s (stored for this session) is no longer an existing directory; send <wb:embed-dir path=\"...\"/> with the host's current folder, or path=\"\" to clear it", work.EmbedDir)
+		// Rendering cannot proceed with this stored prerequisite. No mutation
+		// has committed: retain the whole call for correction, not a partial tree.
+		return state.clone(), Outcome{Unpartitioned: true}, newTopicUpdates(state)
 	}
-
-	if len(p.List) > 0 {
-		return work, Outcome{}, updates
+	out.Failed = failedCommands(failed, keys)
+	if out.Accepted == 0 && len(p.List) > 0 {
+		return work, out, updates
 	}
 	coalesceCreated(work, created)
 	// Capture command/coalescing changes before archive maintenance: eviction
@@ -759,7 +832,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 // replaces its result and keeps its place in the close order. Every item of
 // the topic still open is withdrawn, as a patch to withdrawn would (settled
 // now, answer fields kept as history); a later reopen of the topic does not
-// restore them. An assumed item already reads as settled and stays assumed.
+// restore them. Assumed and commented items keep their status and history.
 // It returns the withdrawn IDs.
 func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, mark int, now time.Time) []int {
 	topic, topicOK := topicOf(cmd)
@@ -917,7 +990,13 @@ func applyAdd(p *problems, work *State, cmd command, topicOf topicResolver, mark
 // before that close rather than to reopen the item.
 func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time, closedBy map[int]string) {
 	ids := answerIDs(p, cmd)
-	answer, answerOK := wsxmlcmd.RequiredAttr(p, cmd, "value")
+	answer, answerOK := cmd.Attr("value")
+	if !answerOK {
+		p.Add("%s: required (\"\" records a policy comment)", cmd.At("value"))
+	}
+	if answerOK && answer != "" {
+		answerOK = wsxmlcmd.NonEmpty(p, cmd.At("value"), answer)
+	}
 	quote := cmd.Body
 	quoteOK := wsxmlcmd.NonEmpty(p, cmd.Label()+" body (the user's verbatim words)", quote)
 	assumed, _ := wsxmlcmd.BoolAttr(p, cmd, "assumed")
@@ -941,13 +1020,21 @@ func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time,
 			p.Add("%s: is %s; patch its status to open before answering it", label, item.Status)
 			continue
 		}
-		if item.Class == ClassPolicy && len(item.Options) > 0 && optionLetter(answer, len(item.Options)) == "" {
+		comment := answer == "" && item.Class == ClassPolicy
+		if answer == "" && !comment {
+			p.Add("%s: empty value is only for a policy comment", label)
+			continue
+		}
+		if !comment && item.Class == ClassPolicy && len(item.Options) > 0 && optionLetter(answer, len(item.Options)) == "" {
 			p.Add("%s: a policy answer value starts with its option letter (%s); got %q", label, letterRange(len(item.Options)), answer)
 			continue
 		}
 		status := StatusAnswered
 		if assumed {
 			status = StatusAssumed
+		}
+		if comment {
+			status = StatusCommented
 		}
 		if item.Status == status && item.Answer == answer && item.AnswerQuote == quote {
 			continue
@@ -958,7 +1045,10 @@ func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time,
 		item.Changed = mark
 		work.settle(item)
 		item.Status = status
-		if assumed {
+		if comment {
+			work.AnswerSeq = mark
+			work.eventItem(item.Topic, item.ID, now, "Item {{%d}} user commented [%s], lead's move; owner quote: %q", item.ID, item.Class, quote)
+		} else if assumed {
 			work.eventItem(item.Topic, item.ID, now, "Item {{%d}} assumed [%s]: %s; owner quote: %q", item.ID, item.Class, answer, quote)
 		} else {
 			work.AnswerSeq = mark

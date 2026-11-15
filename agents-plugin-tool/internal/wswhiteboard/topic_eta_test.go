@@ -115,11 +115,7 @@ func TestTopicETAGrammarBoundsAndAtomicity(t *testing.T) {
 	for _, command := range invalid {
 		t.Run(fmt.Sprintf("invalid-%q", command), func(t *testing.T) {
 			s := etaBoard(t)
-			before := s.clone()
-			_, p := Apply(s, `<wb:topic name="Work"><wb:log>must roll back</wb:log></wb:topic>`+command, Env{Now: stateNow.Add(time.Minute)})
-			if len(p) == 0 || !reflect.DeepEqual(before, s) {
-				t.Fatalf("non-atomic refusal: %v", p)
-			}
+			mixedAt(t, s, `<wb:topic name="Work"><wb:log>accepted</wb:log></wb:topic>`+command, `<wb:topic name="Work"><wb:log>accepted</wb:log></wb:topic>`, stateNow.Add(time.Minute))
 		})
 	}
 	for _, minutes := range []int64{41, maxETAMinutes} {

@@ -117,15 +117,11 @@ func TestSemanticEffectsNoopsRefusalAndSettings(t *testing.T) {
 			t.Fatalf("semantic noop %q: %+v", commands, out.Effects)
 		}
 	}
-	before := s.clone()
-	out, problems := Apply(s, `<wb:topic name="same"><wb:log>This must not commit</wb:log></wb:topic><wb:patch id="999"/>`, testEnv())
-	if len(problems) == 0 || len(out.Effects) != 0 || !reflect.DeepEqual(before, s) {
-		t.Fatalf("refusal leaked effects/state: %+v %v", out, problems)
-	}
+	mixed(t, s, `<wb:topic name="same"><wb:log>Accepted</wb:log></wb:topic><wb:patch id="999"/>`, `<wb:topic name="same"><wb:log>Accepted</wb:log></wb:topic>`)
 	env := testEnv()
 	env.IsDir = func(string) bool { return true }
 	env.IsAbs = func(string) bool { return true }
-	out, problems = Apply(s, `<wb:embed-dir path="/external"/>`, env)
+	out, problems := Apply(s, `<wb:embed-dir path="/external"/>`, env)
 	if len(problems) != 0 {
 		t.Fatal(problems)
 	}

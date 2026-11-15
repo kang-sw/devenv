@@ -76,8 +76,8 @@ func TestWhiteboardPublicationDirectoryAndMermaidFailuresRepairWithoutDuplicateE
 			if view := board.TopicStates()["publication"]; view.State == nil || view.State.Value != wswhiteboard.StateDiscussing || view.Diagnostic != nil {
 				t.Fatalf("committed default lost: %+v", view)
 			}
-			if len(whiteboardSummaryLines(toolText(t, resp))) != 0 {
-				t.Fatal("publication failure claimed success summaries")
+			if len(whiteboardSummaryLines(toolText(t, resp))) != 1 || !strings.Contains(toolText(t, resp), "applied: 1 accepted commands committed") {
+				t.Fatal("publication failure omitted the committed work")
 			}
 			if got := f.stamp(t); got != beforeStamp {
 				t.Fatalf("failed publication advanced the stamp: %q -> %q", beforeStamp, got)

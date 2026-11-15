@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNonPolicyOptionsAddRefusesBatch(t *testing.T) {
+func TestNonPolicyOptionsAddRefusesCommandOnly(t *testing.T) {
 	for _, class := range []string{ClassTechnical, ClassAnnounced, ClassCheck} {
 		for name, fields := range map[string]string{
 			"options":        `<wb:option>x</wb:option><wb:option>y</wb:option>`,
@@ -19,13 +19,13 @@ func TestNonPolicyOptionsAddRefusesBatch(t *testing.T) {
 				commands := addXML(ClassPolicy, "t", "valid first", "x", "y") +
 					fmt.Sprintf(`<wb:topic name="t"><wb:add class=%q><wb:title>invalid</wb:title>%s</wb:add></wb:topic>`, class, fields) +
 					`<wb:patch id="1"><wb:why>valid later</wb:why></wb:patch>`
-				wantProblems(t, refused(t, st, commands), `use class="policy" for a pick`)
+				wantProblems(t, mixed(t, st, commands, addXML(ClassPolicy, "t", "valid first", "x", "y")+`<wb:patch id="1"><wb:why>valid later</wb:why></wb:patch>`), `use class="policy" for a pick`)
 			})
 		}
 	}
 }
 
-func TestNonPolicyOptionsPatchRefusesBatch(t *testing.T) {
+func TestNonPolicyOptionsPatchRefusesCommandOnly(t *testing.T) {
 	for _, class := range []string{ClassTechnical, ClassAnnounced, ClassCheck} {
 		for name, patch := range map[string]string{
 			"set options":        `<wb:patch id="1"><wb:option>x</wb:option></wb:patch>`,
@@ -42,7 +42,7 @@ func TestNonPolicyOptionsPatchRefusesBatch(t *testing.T) {
 				st.Items[1].Options = []string{"x", "y"}
 				st.Items[2].Recommendation = "a"
 				commands := `<wb:patch id="1"><wb:why>valid first</wb:why></wb:patch>` + patch + addXML(ClassCheck, "t", "valid later")
-				wantProblems(t, refused(t, st, commands), `use class="policy" for a pick`)
+				wantProblems(t, mixed(t, st, commands, `<wb:patch id="1"><wb:why>valid first</wb:why></wb:patch>`+addXML(ClassCheck, "t", "valid later")), `use class="policy" for a pick`)
 			})
 		}
 	}

@@ -226,9 +226,100 @@ func TestBoardHistoryHooksSurroundSSESwap(t *testing.T) {
 	}
 	js := whiteboardBridgeFunctions(t, string(data), "swap")
 	capture, morph := strings.Index(js, "captureBoardHistory()"), strings.Index(js, "morphBoard(el, html")
-	materialize, disclosure := strings.Index(js, "window.wbHistory.restore(n, history)"), strings.Index(js, "restoreOpen(n)")
-	outerScroll := strings.Index(js, "restoreScroll(scroll)")
-	if capture < 0 || capture >= morph || materialize < morph || materialize >= disclosure || outerScroll <= disclosure || strings.Count(js, "window.wbHistory.restore(") != 1 {
-		t.Fatal("SSE swaps must capture before morph and restore history once before disclosures and outer scrolling")
+	if capture < 0 || morph <= capture {
+		t.Fatal("SSE swaps must capture history before the board morph")
 	}
+	// Tree rows also restore disclosures. Scope this ordering check to the
+	// board branch rather than mistaking a tree restoration for the board's.
+	board := js[morph:]
+	materialize, disclosure := strings.Index(board, "window.wbHistory.restore(n, history)"), strings.Index(board, "restoreOpen(n)")
+	outerScroll := strings.Index(board, "restoreScroll(scroll)")
+	if materialize < 0 || materialize >= disclosure || outerScroll <= disclosure || strings.Count(js, "window.wbHistory.restore(") != 1 {
+		t.Fatal("SSE swaps must restore history once before board disclosures and outer scrolling")
+	}
+
+	// Execute the actual dispatcher too: each inserted board root must receive
+	// its captured pages before disclosures/frames and the final owner apply.
+	// Tree deltas and full fallbacks must use their own lifecycle, never history.
+	runNode(t, "board and tree swap ordering", `
+var bad = [], log = [];
+function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
+var main = {scrollTop:400, wbScrollOwner:true}, pins = {scrollTop:500, wbScrollOwner:true}, outer = {scrollTop:40}, treePane = {scrollTop:80};
+var oldMain = {name:"old-main", scroller:main}, oldPin = {name:"old-pin", scroller:pins};
+var boxes = [{name:"board", firstElementChild:oldMain}, {name:"pins", firstElementChild:oldPin}];
+var topic = {name:"topic"}, pinTopic = {name:"pin-topic"}, row = {name:"row"};
+function box(name) { return {name:name, getAttribute:function(){return "old";}, setAttribute:function(){log.push("hash:"+name);}}; }
+var boardEl = box("board"), treeEl = box("tree");
+Object.defineProperty(treeEl, "innerHTML", {set:function(){log.push("tree-replace");}});
+var focus = {isConnected:true, focus:function(opt){check("tree focus avoids scrolling",opt,{preventScroll:true});doc.activeElement=focus;log.push("focus");}};
+var doc = {activeElement:focus, scrollingElement:outer};
+var window = {wbHistory:{
+  capture:function(b){log.push("capture:"+b.name);return [{key:b.name,first:"e7"}];},
+  keep:function(n,opt){
+    if(opt && opt.capture===false)return {scroller:n.scroller};
+    var top=n.scroller.scrollTop;log.push("keep:"+n.name);
+    return {apply:function(){
+      check("numeric restoration leaves the owner alone "+n.name,n.scroller.scrollTop,0);
+      check("outer scroll is restored before owner apply",outer.scrollTop,40);
+      n.scroller.scrollTop=top;log.push("apply:"+n.name);
+    }};
+  },
+  sweep:function(){log.push("sweep");},
+  init:function(n){log.push("init:"+n.name);},
+  restore:function(n,h){check("both board boxes supply history",h,[{key:"board",first:"e7"},{key:"pins",first:"e7"}]);log.push("history:"+n.name);}
+}};
+function boardBoxes(){return boxes;}
+function region(name){return name==="board"?boardEl:treeEl;}
+function $(){return main;}
+function q(){return [];}
+var boardPending={}, boardFrozen=[], boardPagedEdits=["paged"], boardLatest=null, boardRendered=null, boardOffered=null;
+var boardHomeWrites=new WeakSet(), ctext=null, mpend=null, live=false, TL_REGIONS={};
+var treeRendered={html:"previous"}, mergeRows=true;
+function editing(){return false;}
+function reducedMotion(){return true;}
+function boardInputFull(html){return html;}
+function boardStageInput(html){return html;}
+function readAnswers(){return "answers";}
+function frameHeights(){return "heights";}
+function boardRead(fn){return fn();}
+function scrollState(){return [[main,main.scrollTop],[pins,pins.scrollTop],[outer,outer.scrollTop],[treePane,treePane.scrollTop]];}
+function morphBoard(el,html,frozen,paged){
+  check("morph uses the staged input and pending pages",[el===boardEl,html,frozen,paged],[true,"board-html",[],["paged"]]);
+  main.scrollTop=pins.scrollTop=outer.scrollTop=0;log.push("morph");return [topic,pinTopic];
+}
+function watchBoard(n){log.push("watch:"+n.name);}
+function bandBoard(n){log.push("band:"+n.name);}
+function restoreOpen(n){log.push("open:"+n.name);}
+function fmtTimes(n){log.push("times:"+n.name);}
+function sweepOutImgs(n){log.push("images:"+n.name);}
+function setFrameHeights(n,h){check("captured heights",h,"heights");log.push("heights:"+n.name);}
+function mountFrames(n){log.push("frames:"+n.name);}
+function writeAnswers(n,a){check("captured answers",a,"answers");log.push("answers:"+n.name);}
+function indexFrames(){} function bindCapsuleNotes(){} function mermaid(){} function syncChips(){} function applySent(){}
+function boardRecordPending(){log.push("pending");}
+function boardPendingBadge(){} function boardHoldIndicators(){}
+function treeInputFull(html){log.push("tree-full");return {html:html};}
+function treeInputHTML(input){return input.html;}
+function mergeTreeRows(el,previous,next){
+  check("tree merge uses its canonical baseline",previous,treeRendered);
+  doc.activeElement=null;treePane.scrollTop=0;log.push("tree-merge");return mergeRows?[row]:null;
+}
+function drawerWait(){log.push("wait");} function agSwapped(){log.push("agents");}
+`+whiteboardBridgeFunctions(t, string(data), "swap", "captureBoardHistory", "boardKeep", "restoreScroll")+`
+var numericRestore=restoreScroll;
+restoreScroll=function(s){log.push("scroll");numericRestore(s);};
+swap("board","new-board","board-html",true);
+var prepared=function(name){return ["init:","history:","open:","times:","images:","heights:","frames:","answers:"].map(function(s){return s+name;});};
+check("board lifecycle ordering and exactly-once owner corrections",log,
+  ["capture:board","capture:pins","keep:old-main","keep:old-pin","morph","sweep","watch:topic","watch:pin-topic","band:topic","band:pin-topic"]
+  .concat(prepared("topic"),prepared("pin-topic"),["hash:board","scroll","apply:old-main","apply:old-pin","pending"]));
+check("both reader owners are restored",[main.scrollTop,pins.scrollTop,outer.scrollTop],[400,500,40]);
+check("paged edits are consumed once",boardPagedEdits,[]);
+log=[];swap("tree","row-delta",{html:"delta"});
+check("tree row lifecycle never captures board history",log,["tree-merge","open:row","times:row","images:row","hash:tree","focus","scroll","wait","agents"]);
+check("tree pane and retained focus survive the row swap",[treePane.scrollTop,doc.activeElement===focus],[80,true]);
+log=[];mergeRows=false;swap("tree","full-fallback","full-html");
+check("full tree fallback restores disclosures before scrolling without board history",log,["tree-full","tree-merge","tree-replace","open:tree","times:tree","images:tree","hash:tree","focus","scroll","wait","agents"]);
+check("full fallback keeps canonical input, pane and focus",[treeRendered.html,treePane.scrollTop,doc.activeElement===focus],["full-html",80,true]);
+process.stdout.write(bad.join("\n"));`)
 }

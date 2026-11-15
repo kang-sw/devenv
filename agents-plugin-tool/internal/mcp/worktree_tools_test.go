@@ -164,6 +164,196 @@ func TestProvisionWorktreeCreateNew(t *testing.T) {
 	}
 }
 
+// assertWorktreeFacts checks both wire forms, including absence versus false/0.
+func assertWorktreeFacts(t *testing.T, res worktreeAcquireResult, want map[string]any) {
+	t.Helper()
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(res.text(), "\n")
+	for _, key := range []string{"head", "target_branch_existed", "ahead_of_base", "behind_base"} {
+		value, present := want[key]
+		actual, exists := got[key]
+		if exists != present || !reflect.DeepEqual(actual, value) {
+			t.Errorf("JSON %s = %v (present %t), want %v (present %t): %s", key, actual, exists, value, present, data)
+		}
+		var matches []string
+		for _, line := range lines {
+			if strings.HasPrefix(line, key+": ") {
+				matches = append(matches, line)
+			}
+		}
+		if !present {
+			if len(matches) != 0 {
+				t.Errorf("absent fact %s rendered in text: %v", key, matches)
+			}
+		} else if !reflect.DeepEqual(matches, []string{fmt.Sprintf("%s: %v", key, value)}) {
+			t.Errorf("text %s lines = %v, want value %v", key, matches, value)
+		}
+	}
+}
+
+func TestWorktreeAcquireCheckoutFacts(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		existing, reuse bool
+		omitTarget      bool
+		ahead, behind   int
+		baseRef         string
+	}{
+		{name: "fresh"},
+		{name: "fresh branch in reused worktree", reuse: true},
+		{name: "retained divergent branch", existing: true, reuse: true, ahead: 2, behind: 3},
+		{name: "relative base resolved in caller", existing: true, reuse: true, ahead: 1, behind: 2, baseRef: "HEAD"},
+		{name: "existing ahead only", existing: true, reuse: true, ahead: 1},
+		{name: "existing behind only", existing: true, behind: 1},
+		{name: "existing equal to base", existing: true},
+		{name: "direct base", omitTarget: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, initial := worktreeFixture(t)
+			ctx := context.Background()
+			runner := wsgit.ExecRunner{}
+			profile := builtinProfile(t, worktreeProfileFull)
+			pool := acquireTempDir(t)
+			branch := "impl/test/facts"
+			wantHead := initial
+			var reusedPath string
+			if tc.reuse {
+				seedBranch := "impl/test/seed"
+				if tc.existing {
+					seedBranch = branch
+				}
+				seed, err := provisionWorktree(ctx, runner, nil, root, initial, seedBranch, profile, pool)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < tc.ahead; i++ {
+					runGit(t, seed.Path, "commit", "--allow-empty", "-m", fmt.Sprintf("target %d", i))
+				}
+				if tc.existing {
+					wantHead = strings.TrimSpace(string(runGitOutput(t, seed.Path, "rev-parse", "HEAD")))
+				}
+				if _, err := releaseWorktree(ctx, runner, nil, seed.Path, pool, builtinProfileLookup(t)); err != nil {
+					t.Fatal(err)
+				}
+				reusedPath = seed.Path
+			} else if tc.existing {
+				runGit(t, root, "branch", branch)
+			}
+			for i := 0; i < tc.behind; i++ {
+				runGit(t, root, "commit", "--allow-empty", "-m", fmt.Sprintf("base %d", i))
+			}
+			runGit(t, root, "branch", "facts-base")
+			if tc.omitTarget {
+				branch = ""
+			}
+			baseRef := tc.baseRef
+			if baseRef == "" {
+				baseRef = "facts-base"
+			}
+			res, err := acquireWorktree(ctx, runner, nil, root, baseRef, branch, profile, pool, "parent", func(string) (string, error) {
+				return "facts-worker", nil
+			})
+			if err != nil {
+				t.Fatalf("acquire: %v", err)
+			}
+			want := map[string]any{"head": wantHead, "ahead_of_base": float64(tc.ahead), "behind_base": float64(tc.behind)}
+			if !tc.omitTarget {
+				want["target_branch_existed"] = tc.existing
+			}
+			assertWorktreeFacts(t, res, want)
+			if res.Reused != tc.reuse || (tc.reuse && res.Path != reusedPath) {
+				t.Fatalf("pool reuse changed: %+v, want reused=%t path=%q", res, tc.reuse, reusedPath)
+			}
+			if head := strings.TrimSpace(string(runGitOutput(t, res.Path, "rev-parse", "HEAD"))); head != wantHead {
+				t.Errorf("HEAD moved: %s, want %s", head, wantHead)
+			}
+			if tc.existing && tc.behind > 0 {
+				if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], branch) || !strings.Contains(res.Warnings[0], fmt.Sprintf("%d commits behind", tc.behind)) || !strings.Contains(res.Warnings[0], "not reset") {
+					t.Errorf("stale branch warning = %v", res.Warnings)
+				}
+				if !strings.Contains(res.text(), "warning: "+res.Warnings[0]+"\n") {
+					t.Errorf("stale branch warning absent from text: %s", res.text())
+				}
+			} else if len(res.Warnings) != 0 {
+				t.Errorf("unexpected warnings: %v", res.Warnings)
+			}
+		})
+	}
+}
+
+func TestWorktreeAcquireCheckoutFactFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, output, warning string
+		match                 func([]string) bool
+		headMissing           bool
+	}{
+		{name: "head read", warning: "head", headMissing: true, match: func(args []string) bool {
+			return reflect.DeepEqual(args, []string{"rev-parse", "--verify", "HEAD^{commit}"})
+		}},
+		{name: "base read", warning: "resolve base", match: func(args []string) bool {
+			return len(args) > 2 && args[0] == "rev-parse" && args[2] == "--end-of-options"
+		}},
+		{name: "counts read", warning: "ahead_of_base/behind_base", match: func(args []string) bool { return args[0] == "rev-list" }},
+		{name: "counts shape", output: "1", warning: "invalid commit counts", match: func(args []string) bool { return args[0] == "rev-list" }},
+		{name: "counts number", output: "x 0", warning: "invalid commit counts", match: func(args []string) bool { return args[0] == "rev-list" }},
+		{name: "counts negative", output: "0 -1", warning: "invalid commit counts", match: func(args []string) bool { return args[0] == "rev-list" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, base := worktreeFixture(t)
+			injected, hygieneDone := false, false
+			runner := acquireRunnerFunc(func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+				if tc.match(args) {
+					if !hygieneDone {
+						t.Fatal("facts must be read after hygiene")
+					}
+					injected = true
+					if tc.output != "" {
+						return []byte(tc.output), nil
+					}
+					return nil, fmt.Errorf("injected fact failure")
+				}
+				out, err := (wsgit.ExecRunner{}).RunGit(ctx, dir, args...)
+				if err == nil && reflect.DeepEqual(args, noSubmoduleRecurse("-c", "core.longPaths=true", "clean", "-ffdx")) {
+					hygieneDone = true
+				}
+				return out, err
+			})
+			ctx := context.Background()
+			res, err := acquireWorktree(ctx, runner, nil, root, base, "impl/test/failure", builtinProfile(t, worktreeProfileFull), acquireTempDir(t), "parent", func(string) (string, error) {
+				return "facts-worker", nil
+			})
+			if err != nil {
+				t.Fatalf("fact failure must not fail acquire: %v", err)
+			}
+			if !injected {
+				t.Fatal("fact failure was not exercised")
+			}
+			want := map[string]any{"target_branch_existed": false}
+			if !tc.headMissing {
+				want["head"] = base
+			}
+			assertWorktreeFacts(t, res, want)
+			if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], tc.warning) {
+				t.Errorf("failure warning = %v, want %q", res.Warnings, tc.warning)
+			}
+			if res.WorkerKey != "facts-worker" || wtBranch(t, res.Path) != "impl/test/failure" {
+				t.Fatalf("fact failure left an unusable worktree: %+v", res)
+			}
+			lease, err := readWorktreeLease(ctx, wsgit.ExecRunner{}, res.Path)
+			if err != nil || lease == nil || lease.WorkerKey != res.WorkerKey {
+				t.Fatalf("fact failure prevented lease publication: %+v, %v", lease, err)
+			}
+		})
+	}
+}
+
 // TestProvisionWorktreeInTreeOverrideRegistersExclude pins the in-tree
 // exclude-registration path (registerPoolExclude), now reachable only via an
 // explicit in-tree worktree_pool override since the builtin default moved
@@ -509,6 +699,7 @@ func TestWorktreeAcquireReleaseDispatch(t *testing.T) {
 	if acq.WorkerKey == "" || acq.Path == "" {
 		t.Fatalf("acquire returned empty path/worker_key: %+v", acq)
 	}
+	assertWorktreeFacts(t, acq, map[string]any{"head": base, "target_branch_existed": false, "ahead_of_base": float64(0), "behind_base": float64(0)})
 	entry, ok := s.sessions.lookup(acq.WorkerKey)
 	if !ok {
 		t.Fatalf("worker_key %q not registered", acq.WorkerKey)
@@ -547,6 +738,19 @@ func TestWorktreeAcquireReleaseDispatch(t *testing.T) {
 	}
 	if b := wtBranch(t, acq2.Path); b != "HEAD" {
 		t.Fatalf("path-released worktree not detached: %q", b)
+	}
+	// Default dispatch keeps the existing envelope and adds the same facts.
+	textResp := callToolOnce(t, s, 5, "worktree.acquire", map[string]any{
+		"session_key": leadKey, "base": base, "profile": "full", "target_branch": "impl/test/beta",
+	})
+	if toolIsError(t, textResp) {
+		t.Fatalf("text acquire failed: %s", textResp)
+	}
+	text := toolText(t, textResp)
+	for _, line := range []string{"path: " + acq2.Path, "head: " + base, "target_branch_existed: true", "ahead_of_base: 0", "behind_base: 0"} {
+		if !strings.Contains("\n"+text, "\n"+line+"\n") {
+			t.Errorf("default acquire text missing %q: %s", line, text)
+		}
 	}
 }
 
@@ -769,6 +973,8 @@ func TestWorktreeAcquireHousekeepingDispatch(t *testing.T) {
 	if err := json.Unmarshal([]byte(toolText(t, resp)), &acq); err != nil {
 		t.Fatalf("unmarshal acquire: %v\n%s", err, resp)
 	}
+	baseHead := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "develop")))
+	assertWorktreeFacts(t, acq, map[string]any{"head": baseHead, "ahead_of_base": float64(0), "behind_base": float64(0)})
 	if acq.Profile != worktreeProfileHousekeeping {
 		t.Fatalf("acquire did not report the housekeeping profile: %+v", acq)
 	}

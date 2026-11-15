@@ -179,7 +179,7 @@ func TestBodyTimeActualBatchAndNeutralUpdates(t *testing.T) {
 	if view.Topics[0].UpdatedAt == view.Topics[0].BodyUpdatedAt {
 		t.Fatal("overall activity substituted for body time")
 	}
-	refused(t, st, topicXML("t", "refused mutation")+`<wb:answer id="999" value="ok"/>`)
+	refused(t, st, topicXML("t", "<html>refused mutation</html>")+`<wb:answer id="999" value="ok"/>`)
 	assertBodyTime(t, st.Topics[0], before.ChangedAt)
 }
 
