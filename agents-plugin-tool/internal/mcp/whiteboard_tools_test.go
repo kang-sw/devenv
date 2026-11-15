@@ -666,8 +666,9 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon"} {
 		bodies.WriteString(`<wb:topic name="` + name + `"><wb:body>notes on ` + name + "</wb:body></wb:topic>\n")
 	}
-	if text := f.update(t, bodies.String()); strings.Contains(text, "info: ") {
-		t.Fatalf("fresh topics must not nudge:\n%s", text)
+	const warning = `discussing_without_open_items: "alpha", "beta", "delta", "epsilon", "gamma"`
+	if text := f.update(t, bodies.String()); resultLine(t, text, "info: ") != warning {
+		t.Fatalf("fresh topics must retain the structural warning without a stale nudge:\n%s", text)
 	}
 	// Seed an aged board under a fresh key: committed entry timestamps are
 	// immutable, and aging only current content no longer makes a topic stale.
@@ -688,8 +689,8 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 	}
 	text := f.update(t, ``)
 	want := "5 of 5 open topics unchanged for 60+ min (alpha, beta, gamma, delta, epsilon); if finished, close them with wb:close and a one-line result."
-	if got := resultLine(t, text, "info: "); got != want {
-		t.Fatalf("info line = %q\nwant        %q", got, want)
+	if got := resultLine(t, text, "info: "); got != want+" "+warning {
+		t.Fatalf("info line = %q\nwant        %q", got, want+" "+warning)
 	}
 	for _, path := range []string{resultLine(t, text, "full: "), resultLine(t, text, "embed: ")} {
 		page, err := os.ReadFile(filepath.Join(f.root, path))
@@ -700,8 +701,8 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 			t.Fatalf("%s renders the nudge", path)
 		}
 	}
-	if text := f.update(t, ``); strings.Contains(text, "info: ") {
-		t.Fatalf("a second update within the hour must not nudge:\n%s", text)
+	if text := f.update(t, ``); resultLine(t, text, "info: ") != warning {
+		t.Fatalf("a second update within the hour must retain only the structural warning:\n%s", text)
 	}
 }
 

@@ -1,10 +1,13 @@
 package wswhiteboard
 
 import (
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeTickets resolves stems from a map; a stem it lacks is not found.
@@ -58,7 +61,7 @@ func TestTopicTicketsRoundTrip(t *testing.T) {
 }
 
 // TestTopicWithOnlyTicketsPersists pins that a topic whose only content is
-// its linked tickets is kept (dropTopicDoc), and dropped once they clear.
+// its linked tickets is kept, including its default state history after clearing.
 func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="links" tickets="261112-feat-a"/>`)
@@ -78,9 +81,20 @@ func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 			t.Errorf("%s: tickets-only topic missing or ticket slot rendered", name)
 		}
 	}
+	want := []Entry{{ID: "e1", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)}}
 	mustApply(t, st, `<wb:topic name="links" tickets=""/>`)
-	if st.topicKnown("links") {
-		t.Fatal("a topic left with nothing persisted")
+	if !st.topicKnown("links") || topicTickets(st, "links") != nil || st.EntrySeq != 1 || !reflect.DeepEqual(entries(t, st, "links"), want) {
+		t.Fatalf("clearing tickets lost or changed default history: %+v", st)
+	}
+	if view := st.TopicStates()["links"]; view.State == nil || view.State.Value != StateDiscussing || view.State.Entry != "e1" || view.Diagnostic != nil {
+		t.Fatalf("clearing tickets lost default authority: %+v", view)
+	}
+
+	// Literal pre-default metadata has no history to retain once tickets clear.
+	legacy := &State{Topics: []TopicDoc{{Name: "links", Tickets: []string{"261112-feat-a"}}}}
+	mustApply(t, legacy, `<wb:topic name="links" tickets=""/>`)
+	if legacy.topicKnown("links") || len(legacy.Topics) != 0 || legacy.EntrySeq != 0 || len(legacy.TopicStates()) != 0 {
+		t.Fatalf("legacy empty topic persisted or gained history: %+v", legacy)
 	}
 }
 
