@@ -206,6 +206,7 @@ func TestSelectionOrdinaryPrefixDiscovery(t *testing.T) {
 		`<wb:mention topic="t">literal [Image #1]</wb:mention>` + "\n<wb:comment>memo [Image #1]</wb:comment>\n[Image #1]\n</wb:selection>\n</wb:selection>"
 	s := Selection{Mentions: []Mention{{Topic: "u", Text: "source [Image #1]"}}, Comment: "memo [Image #1]", Images: []int{1}}
 	valid := selectionBlock(t, s)
+	image := filepath.Join(t.TempDir(), "one.png")
 	for _, prefix := range []string{"1 < 2\n\n", "a<b\n\n", "ordinary < unclosed '\n\n"} {
 		t.Run(prefix, func(t *testing.T) {
 			text := prefix + failed
@@ -233,7 +234,7 @@ func TestSelectionOrdinaryPrefixDiscovery(t *testing.T) {
 				if _, err := Normalize(Entry{Parts: []string{combined}}); !errors.Is(err, ErrInvalid) {
 					t.Errorf("ordinary prefix bypassed attached-image validation: %v", err)
 				}
-				out, err := Normalize(Entry{Parts: []string{combined}, Images: []string{"/one.png"}, ImageNums: []int{1}})
+				out, err := Normalize(Entry{Parts: []string{combined}, Images: []string{image}, ImageNums: []int{1}})
 				if err != nil || len(out.Parts) != 1 || out.Parts[0] != combined || !reflect.DeepEqual(out.ImageNums, []int{1}) {
 					t.Errorf("prefixed group/sibling changed content or numbering: %+v, %v", out, err)
 				}
@@ -275,7 +276,7 @@ func TestSelectionBlockRejectsInvalidStructuredInput(t *testing.T) {
 func TestNormalizeSelectionsUsesOnlyExistingPartsAndLimits(t *testing.T) {
 	s := Selection{Mentions: []Mention{{Topic: "t", Entry: "e1", Text: " exact source "}}, Comment: " memo ", Images: []int{2}}
 	block := selectionBlock(t, s)
-	e, err := Normalize(Entry{Parts: []string{"before\n" + block + "\nafter"}, Images: []string{"/a.png"}, ImageNums: []int{2}})
+	e, err := Normalize(Entry{Parts: []string{"before\n" + block + "\nafter"}, Images: []string{filepath.Join(t.TempDir(), "a.png")}, ImageNums: []int{2}})
 	if err != nil || e.Parts[0] != "before\n"+block+"\nafter" || e.Mentions != nil || SchemaVersion != 1 {
 		t.Fatalf("normalized selection = %+v, %v", e, err)
 	}

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -75,8 +76,14 @@ func (f commitMergeFixture) mergeFile(t *testing.T) string {
 }
 
 func TestCommitMergeAdmitsExactIncomingContent(t *testing.T) {
+	unusualName := "space and\nnewline.txt"
+	if runtime.GOOS == "windows" {
+		// Windows forbids newlines in filenames; retain spaces and Git's
+		// quoted-path handling with a legal non-ASCII name instead.
+		unusualName = "space and ünicode.txt"
+	}
 	f := newCommitMergeFixture(t, nil, func(root string) {
-		mustWriteGitTestFixture(t, root, "space and\nnewline.txt", "unusual incoming name\n")
+		mustWriteGitTestFixture(t, root, unusualName, "unusual incoming name\n")
 	})
 	mustWriteGitTestFixture(t, f.root, "unrelated.txt", "unstaged and retained\n")
 	// The structured record must not depend on a user's cleanup configuration.
@@ -90,7 +97,7 @@ func TestCommitMergeAdmitsExactIncomingContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPaths := []string{"added.txt", "conflict.txt", "incoming.txt", "space and\nnewline.txt"}
+	wantPaths := []string{"added.txt", "conflict.txt", "incoming.txt", unusualName}
 	sort.Strings(verified)
 	if !reflect.DeepEqual(verified, wantPaths) {
 		t.Fatalf("verified = %q, want %q", verified, wantPaths)
