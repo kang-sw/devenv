@@ -259,14 +259,97 @@
     return inserted;
   }
 
+  // Panel transport rows are the existing top-level cards, not the nested
+  // agenda disclosures. Canonical inputs never include reader folds, formatted
+  // times, drawer styles or scroll offsets from the live DOM.
+  var PANEL_SLOT = /<!--ws-panel-row-(\d+)-->/g;
+  function panelRowKey(n) { return n.matches("details.panel") && /^p-.+/.test(n.id) ? n.id : null; }
+  function panelInputFull(html) {
+    if (typeof html !== "string" || html.indexOf("<!--ws-panel-row-") >= 0) return null;
+    var box = doc.createElement("div"), rows = Object.create(null), order = [];
+    box.innerHTML = html;
+    if (Array.from(box.childNodes).some(function (n) { return n.nodeType !== 1 && n.nodeType !== 8 && (n.nodeType !== 3 || n.textContent.trim()); })) return null;
+    if (Array.from(box.children).some(function (n) {
+      var key = panelRowKey(n);
+      if (!key || rows[key] || n.querySelector(".panel")) return true;
+      rows[key] = { html: n.outerHTML }; order.push(key);
+      n.replaceWith(doc.createComment("ws-panel-row-" + (order.length - 1)));
+      return false;
+    })) return null;
+    return { shell: box.innerHTML, order: order, rows: rows };
+  }
+  function panelRowNode(html, key) {
+    if (typeof html !== "string" || html.indexOf("<!--ws-panel-row-") >= 0) return null;
+    var box = doc.createElement("div"); box.innerHTML = html;
+    var n = box.firstElementChild;
+    return box.childNodes.length === 1 && n && panelRowKey(n) === key && !n.querySelector(".panel") ? n : null;
+  }
+  function panelInputPatch(base, ev) {
+    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !treeSame(base.order, ev.order) || !Array.isArray(ev.rows)) return null;
+    var rows = Object.create(null), changed = Object.create(null);
+    Object.keys(base.rows).forEach(function (key) { rows[key] = base.rows[key]; });
+    if (ev.rows.some(function (r) {
+      if (!r || typeof r.key !== "string" || !rows[r.key] || changed[r.key] || typeof r.hash !== "string") return true;
+      var n = panelRowNode(r.html, r.key);
+      if (!n) return true;
+      changed[r.key] = true; rows[r.key] = { html: n.outerHTML };
+      return false;
+    })) return null;
+    return { shell: base.shell, order: base.order, rows: rows };
+  }
+  function panelInputHTML(input) {
+    return typeof input === "string" ? input : input.shell.replace(PANEL_SLOT, function (_, i) { return input.rows[input.order[+i]].html; });
+  }
+  function mergePanelRows(root, previous, next) {
+    if (!previous || !next || previous.shell !== next.shell || !treeSame(previous.order, next.order)) return null;
+    var live = Object.create(null), updates = [], nodes = Array.from(root.children);
+    if (nodes.length !== previous.order.length || nodes.some(function (n, i) {
+      var key = panelRowKey(n);
+      if (key !== previous.order[i]) return true;
+      live[key] = n; return false;
+    })) return null;
+    if (next.order.some(function (key) {
+      if (previous.rows[key].html === next.rows[key].html) return false;
+      var n = panelRowNode(next.rows[key].html, key);
+      if (!n) return true;
+      updates.push(n); return false;
+    })) return null;
+    updates.forEach(function (n) { live[n.id].replaceWith(n); });
+    return updates;
+  }
+  // Cards are themselves scrollers on wide screens. Preserve their offsets
+  // after drawerSync lays out replacements, and remap a changed card's focused
+  // keyed disclosure without touching an unchanged card's content/frame nodes.
+  function panelReaderState(root) {
+    var active = doc.activeElement, focus = null;
+    if (active && root.contains(active)) {
+      var card = active.closest("details.panel"), anchor = active.closest("[data-key]") || card, path = [], n = active;
+      if (card && anchor) {
+        while (n !== anchor) { path.unshift(Array.prototype.indexOf.call(n.parentElement.children, n)); n = n.parentElement; }
+        focus = { old: active, card: card.id, key: anchor.getAttribute("data-key"), path: path, tag: active.tagName, href: active.getAttribute("href") };
+      }
+    }
+    return { cards: Array.from(root.children).map(function (n) { return { key: n.id, top: n.scrollTop, left: n.scrollLeft }; }), focus: focus };
+  }
+  function restorePanelReader(root, state) {
+    var cards = Array.from(root.children);
+    state.cards.forEach(function (s) { var n = cards.find(function (c) { return c.id === s.key; }); if (n) { n.scrollTop = s.top; n.scrollLeft = s.left; } });
+    var f = state.focus;
+    if (!f || f.old.isConnected) return;
+    var card = cards.find(function (c) { return c.id === f.card; }), n = card;
+    if (card && f.key) n = q("[data-key]", card).find(function (d) { return d.getAttribute("data-key") === f.key; });
+    f.path.forEach(function (i) { n = n && n.children[i]; });
+    if (n && n.tagName === f.tag && n.getAttribute("href") === f.href) n.focus({ preventScroll: true });
+  }
+
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
   function connect(withoutBoard) {
     if (!window.WebSocket) return;
-    var boardInput = null, railInput = null, treeInput = null, entryInput = null;
+    var boardInput = null, railInput = null, treeInput = null, entryInput = null, panelInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" || worktree ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : "") + (shell || (!framed && mode !== "index") ? "&railrows=1" : "") + (!shell && !worktree && mode !== "index" ? "&treerows=1&entryrows=1" : ""), {
+    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : "") + (shell || (!framed && mode !== "index") ? "&railrows=1" : "") + (!shell && !worktree && mode !== "index" ? "&treerows=1&entryrows=1&panelrows=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -275,7 +358,7 @@
         trackerLost();
         setTimeout(connect, 3000);
       },
-      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, "tree-rows": onTreeRows, "entry-rows": onEntryRows, tracker: onTracker, gone: onGone }
+      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, "tree-rows": onTreeRows, "entry-rows": onEntryRows, "panel-rows": onPanelRows, tracker: onTracker, gone: onGone }
     });
     function onRegion(ev) {
       if (!ev) return;
@@ -303,7 +386,21 @@
         entryInput = entryInputFull(ev.html);
         if (entryInput) ev = { name: "entries", hash: ev.hash, html: entryInput };
       }
+      if (ev.name === "panels") {
+        panelInput = panelInputFull(ev.html);
+        if (panelInput) ev = { name: "panels", hash: ev.hash, html: panelInput };
+      }
       receiveRegion(ev);
+    }
+    function onPanelRows(ev) {
+      var next = panelInputPatch(panelInput, ev);
+      if (!next) {
+        st.close(); connected(false);
+        setTimeout(connect, 0);
+        return;
+      }
+      panelInput = next;
+      receiveRegion({ name: "panels", hash: ev.hash, html: next });
     }
     function onEntryRows(ev) {
       var next = entryInputPatch(entryInput, ev);
