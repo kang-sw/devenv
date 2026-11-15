@@ -33,6 +33,9 @@ var cssModules = []struct {
 // those modules may both define it. A new module joining the class is a new
 // collision and fails.
 var allowedCSSOverlaps = map[string]string{
+	"wsc-backing dashboard,memo":        "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
+	"wsc-capsule dashboard,memo":        "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
+	"wsc-editor dashboard,memo":         "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
 	"rtext dashboard,whiteboard":        "overview clamps the existing whiteboard recap, scoped to data-overview",
 	"trecap dashboard,whiteboard":       "overview clamps the existing whiteboard recap, scoped to data-overview",
 	"tnote dashboard,whiteboard":        "overview hides existing whiteboard note fields without changing their state",
@@ -224,6 +227,38 @@ func TestWhiteboardPillEdgesCannotMatchHeaderTop(t *testing.T) {
 		if regexp.MustCompile(`\.oq-wrap\.(?:top|bot)\b`).MatchString(source) || strings.Contains(source, `w.className = "oq-wrap " + edge`) {
 			t.Errorf("%s retains an unnamespaced pill edge", name)
 		}
+	}
+}
+
+func TestMemoUsesSharedEditorStyles(t *testing.T) {
+	dashboard, err := dashboardTestAsset("assets/dashboard.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	memo, err := dashboardTestAsset("assets/memo.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`.wsc-backing { display: none !important; }`,
+		`.wsc-editor:empty::before`, `.wsc-editor:focus`, `.wsc-editor[aria-disabled="true"]`,
+		`.wsc-capsule { display: inline; white-space: normal; box-decoration-break: clone; -webkit-box-decoration-break: clone; overflow-wrap: anywhere;`,
+	} {
+		if !strings.Contains(string(dashboard), want) {
+			t.Errorf("missing shared editor atom %q", want)
+		}
+	}
+	for _, want := range []string{
+		`.memo-pad textarea, .memo-pad textarea + [contenteditable] {`,
+		`.memo-pad textarea + [contenteditable] { max-height: 240px; overflow: auto; }`,
+		`.memo-pad [hidden], .memo-pad textarea[hidden] + [contenteditable] { display: none; }`,
+	} {
+		if !strings.Contains(string(memo), want) {
+			t.Errorf("missing memo editor layout %q", want)
+		}
+	}
+	if strings.Contains(string(memo), ".wsc-") {
+		t.Error("memo duplicates shared editor atom ownership")
 	}
 }
 

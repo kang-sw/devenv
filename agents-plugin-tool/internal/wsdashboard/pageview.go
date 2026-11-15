@@ -458,13 +458,17 @@ type ConvEntry struct {
 	HTML template.HTML
 	// Images are a user message's attached images, taken out of its text.
 	Images []AttachmentView
+	// Content keeps grouped source/memo/image display in message order;
+	// nil retains the legacy Text rendering path.
+	Content []SelectionContentPart
 	// Answers are the lines of the answer block a user message starts with,
 	// taken out of its text; the bubble shows them as capsules.
 	Answers []wsinbox.AnswerLine
 	// Mentions are the mention elements after that block (or opening the
 	// message), taken out of its text and shown as capsules after the
 	// answer capsules.
-	Mentions []wsinbox.Mention
+	Mentions      []wsinbox.Mention
+	CloseRequests []wsinbox.CloseRequest
 	// Picks and Consoles are the web card's pick and console elements after
 	// the mentions, taken out of its text and shown as capsules after them.
 	Picks    []wsinbox.Pick

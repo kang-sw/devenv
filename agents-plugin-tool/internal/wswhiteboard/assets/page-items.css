@@ -277,7 +277,7 @@ html:not([data-ck-hide]) .ckhide { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }
 /* Completed checks moved to HISTORY with the same hide control. Assumed
    correction rows and explicitly undated legacy rows remain visible. */
-html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not(.void):not(:has(.wb-hunknown)) { display: none; }
+html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not([data-check-live]):not(.void):not(:has(.wb-hunknown)) { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:nth-child(1 of .ckrow[data-id]) { border-top: 0; }
 
 /* settled: collapsed tonal chip */
@@ -342,6 +342,10 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .wb-hitem .sbody { margin-left: 68px; padding-left: 12px; border-left: 1px solid color-mix(in srgb, var(--wb-haccent) 45%, transparent); }
 .wb-hitem .quote { margin: 7px 0 0; padding-left: 9px; border-left: 2px solid var(--wb-haccent); white-space: pre-wrap; overflow-wrap: anywhere; }
 .wb-hanswer-at { margin-top: 6px; color: var(--wb-muted-fg); font-size: 10px; overflow-wrap: anywhere; }
+/* Anchored questions already show their time above the row and omit its cell. */
+@media (min-width: 561px) {
+  .wb-hitem .wb-htext:not(:has(.wb-htime)) { grid-template-columns: 20px minmax(0, 1fr) minmax(0, auto); }
+}
 @media (max-width: 560px) {
   .wb-hitem .wb-htext { grid-template-columns: minmax(0, 1fr) minmax(0, auto); position: relative; padding-left: 26px; line-height: 22px; }
   .wb-hitem .wb-htime { grid-column: 1 / -1; max-width: none; line-height: inherit; padding-top: 0; }

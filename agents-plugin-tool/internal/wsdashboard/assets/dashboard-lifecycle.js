@@ -102,14 +102,17 @@
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
+    var prefix = selectionPrefix(bselections);
+    var shift = function (r) { return Object.assign({}, r, { start: r.start + prefix.length, end: r.end + prefix.length }); };
     var d = {
-      text: ctext ? ctext.value : "",
-      capsules: ctext && ctext.wsc ? ctext.wsc.snapshot() : [],
+      text: prefix + (ctext ? ctext.value : ""),
+      capsules: ctext && ctext.wsc ? ctext.wsc.snapshot().map(shift) : [],
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
-      mentions: mentions.map(function (m) { return { start: m.start, end: m.end, text: m.text }; }),
+      mentions: mentions.map(function (m) { return shift({ start: m.start, end: m.end, text: m.text }); }),
       answers: b ? boardRead(readAnswers) : {},
       chips: chipList(),
       bmentions: bmentions.slice(),
+      closeRequests: closeRequests.map(function (r) { return { topic: r.topic, reason: r.reason }; }),
       wpicks: wpicks.slice(),
       wconsoles: wconsoles.slice(),
       refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
@@ -117,7 +120,7 @@
       open: open,
       tab: live ? grid.getAttribute("data-tab") || "" : ""
     };
-    if (ctext && d.text) d.sel = [ctext.selectionStart, ctext.selectionEnd];
+    if (ctext && d.text) d.sel = [ctext.selectionStart + prefix.length, ctext.selectionEnd + prefix.length];
     return d;
   }
   function saveDraft() {
@@ -142,6 +145,22 @@
     restoring = true;
     try {
       var lost = Array.isArray(d.lost) ? d.lost : [], named = "";
+      // Keep bundles in existing text storage. Extract before stripping lost
+      // markers so quoted source and memo markers are never touched.
+      var split = splitSelectionText(typeof d.text === "string" ? d.text : "");
+      d.text = split.text;
+      d.mentions = selectionRanges(d.mentions, split.cuts);
+      d.capsules = selectionRanges(d.capsules, split.cuts);
+      if (Array.isArray(d.sel)) {
+        var caret = selectionRanges([{ start: d.sel[0], end: d.sel[1] }], split.cuts)[0];
+        d.sel = caret ? [caret.start, caret.end] : [0, 0];
+      }
+      if (!bselections.length) bselections = split.groups.map(function (s) {
+        s.images = s.images.filter(function (n) { return lost.indexOf(n) < 0; });
+        return s;
+      });
+      bselections.forEach(function (s) { named += "\n" + s.images.map(marker).join(" "); });
+      if (cchips) renderChips();
       // A lost image's marker leaves the notes as it leaves the text; what
       // the restored notes still name may bring a reference image back.
       var unlost = function (note) { return typeof note === "string" && note ? WsRail.stripMarkers(note, [], lost).text : note; };
@@ -168,6 +187,10 @@
       if (cchips && Array.isArray(d.chips)) {
         d.chips.forEach(function (c) { if (c && c.id && !chips[c.id]) { putChip(c); setItem(c.id, c); } });
         syncChips();
+      }
+      if (cchips && !closeRequests.length && validCloseRequests(d.closeRequests).length) {
+        closeRequests = validCloseRequests(d.closeRequests);
+        renderChips();
       }
       if (cchips && !bmentions.length && validMentions(d.bmentions).length) {
         bmentions = validMentions(d.bmentions);

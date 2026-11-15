@@ -17,7 +17,7 @@ func TestWakeEntryMarkup(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(set[regionEntries].HTML)
-	for _, want := range []string{`class="wake-divider"`, `class="mailline recv child-report"`, `Child report`, `class="wake-caption"`, `class="wake-body"`, `data-key="wake-`, `class="turnline wake-turn"`, `↳ lead turn · 4 tool calls`, `full &lt;script&gt;not markup&lt;/script&gt;`} {
+	for _, want := range []string{`class="mailline recv agent-note"`, `class="mailline recv child-report"`, `Child report`, `class="wake-caption"`, `class="wake-body"`, `data-key="wake-`, `class="turnline wake-turn"`, `↳ lead turn · 4 tool calls`, `full &lt;script&gt;not markup&lt;/script&gt;`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %s: %s", want, html)
 		}

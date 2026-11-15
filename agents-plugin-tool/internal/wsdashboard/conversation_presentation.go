@@ -2,13 +2,11 @@ package wsdashboard
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
-	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // Child reports require a typed wake cause. Whiteboard-origin user records
@@ -18,6 +16,30 @@ func (e ConvEntry) ChildReport() bool { return e.Kind == "wake" && e.Cause == "s
 // Wakes without an unambiguous display association keep compact diagnostics.
 // Repeated/reclaimed records lack shared delivery identity and stay separate.
 func (e ConvEntry) MailWake() bool { return e.Kind == "wake" && e.Cause == "mail" }
+
+// AgentBadge, AgentPreview and AgentExpands feed the shared agent row frame
+// (child reports and subagent/background notifications).
+func (e ConvEntry) AgentBadge() string {
+	if e.ChildReport() {
+		return wsi18n.T(e.Lang, "entry.childreport")
+	}
+	return ""
+}
+
+func (e ConvEntry) AgentPreview() string {
+	if e.Caption != "" {
+		return e.Caption
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(e.Text), "\n")
+	if line == "" && !e.ChildReport() {
+		return e.Cause
+	}
+	return line
+}
+
+func (e ConvEntry) AgentExpands() bool {
+	return e.ChildReport() || e.Text != "" || (e.Cause != "subagent_done" && e.Cause != "subagent_failed" && e.Cause != "background_exit")
+}
 
 func (e ConvEntry) BoardNudgeSummary() string {
 	reasons, topics := e.boardNudge()
@@ -74,18 +96,17 @@ func (e ConvEntry) MailPreview() string {
 }
 
 type conversationEffectRow struct {
-	Kind, Target, ID, Text, Class string
-	Options                       []string
+	Kind, Target, ID, Text string
 }
 
 type conversationEffectTopic struct {
 	Name, Label, Target string
 	Rows                []conversationEffectRow
+	Items               []conversationEffectRow
 }
 
 type conversationEffectCard struct {
 	Topics []conversationEffectTopic
-	Folded bool
 }
 
 var conversationEntryID = regexp.MustCompile(`^e[1-9][0-9]*$`)
@@ -96,7 +117,7 @@ var conversationPanelID = regexp.MustCompile(`^p[1-9][0-9]*$`)
 // their payloads, even as an in-chat escaped preview.
 func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 	changes := e.WhiteboardChanges()
-	card := conversationEffectCard{Folded: len(changes) > 0}
+	card := conversationEffectCard{}
 	for _, effect := range changes {
 		index := -1
 		for i := range card.Topics {
@@ -114,9 +135,6 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			index = len(card.Topics) - 1
 		}
 		topic := &card.Topics[index]
-		if effect.Kind != "log" || effect.Topic == "" {
-			card.Folded = false
-		}
 		switch effect.Kind {
 		case "log":
 			target := ""
@@ -139,44 +157,28 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			if effect.ID > 0 && effect.ID <= 999999 {
 				row.Target = "item-" + strconv.Itoa(effect.ID)
 			}
-			switch effect.Field {
-			case "title":
-				row.Text = effect.After
-			case "class":
-				row.Class = effect.After
-			case "options":
-				_ = json.Unmarshal([]byte(effect.After), &row.Options)
-			}
+
 		case "topic":
 			if effect.Field == "label" && effect.After != "" {
 				topic.Label = effect.After
 			}
 		}
 	}
-	card.Folded = card.Folded && len(card.Topics) == 1
 	return card
 }
 
 func effectRow(topic *conversationEffectTopic, kind, id string) *conversationEffectRow {
-	for i := range topic.Rows {
-		if topic.Rows[i].Kind == kind && topic.Rows[i].ID == id {
-			return &topic.Rows[i]
+	rows := &topic.Rows
+	if kind == "item" {
+		rows = &topic.Items
+	}
+	for i := range *rows {
+		if (*rows)[i].Kind == kind && (*rows)[i].ID == id {
+			return &(*rows)[i]
 		}
 	}
-	topic.Rows = append(topic.Rows, conversationEffectRow{Kind: kind, ID: id})
-	return &topic.Rows[len(topic.Rows)-1]
-}
-
-// Panel inspection stays on the board. Other transitions retain escaped
-// before/after diagnostics independently of the update card's fold state.
-func (e ConvEntry) WhiteboardDetails() []wswhiteboard.Effect {
-	var out []wswhiteboard.Effect
-	for _, effect := range e.WhiteboardChanges() {
-		if effect.Kind != "panel" {
-			out = append(out, effect)
-		}
-	}
-	return out
+	*rows = append(*rows, conversationEffectRow{Kind: kind, ID: id})
+	return &(*rows)[len(*rows)-1]
 }
 
 func firstEffectLine(text string) string {
