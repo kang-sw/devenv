@@ -217,6 +217,70 @@ Verification boundary for the future worker (not run during ticket capture):
   to prove frozen assets were not changed; tests reading old badges are not
   evidence of completed researching UI.
 
+### Result (b17c08bb3) - 2026-11-15
+
+- Phase 1 landed in `824f0ec1e` (text/locales) and `b17c08bb3`
+  (backend/contracts), based on the handed-off `40a2f44e4` tree including
+  asset split `81382b093`. This is partial backend/text delivery, not complete
+  researching UI support. Phase 2 remains for the next handoff; no rendering
+  assets, scripts or frozen render fixtures changed.
+- Added `StateResearching` with independently optional top-level `owner` and
+  `eta_minutes` in immutable records and derived state/query projections.
+  These reuse existing text/numeric validation without creating a run or
+  deadline. Identical declarations are no-ops; changed informational attributes
+  append a state event, and omission clears them. Net summaries compare these
+  fields, including metadata-only changes and net cancellation. This follows
+  declarative replacement rather than inventing research execution machinery.
+- Explicit same-batch research overrides preserve the discussing default
+  without intermediate default history. Close/reopen and adoption preserve
+  lifecycle/history semantics. Exiting implementing retains its completed run
+  in history; explicitly entering implementing after research starts a fresh
+  clock. Research ETA extensions and timed research records are rejected.
+- Existing warning, stale and notice implementations already have the settled
+  scopes; regression coverage pins researching without an open ask, not
+  substituting for implementing, state-independent stale thresholds/activity,
+  no hourly/overdue activation and inclusion in eligible hourly bodies.
+- Updated the canonical playbook and generated wsflow/Pi copies/manifests.
+  Added state/filter labels in all 11 locales, Korean `연구 중`. The strict
+  unused-key test permits exactly `js.wb.state.researching` and
+  `js.board.filter.researching` temporarily; Phase 2 must remove that allowance
+  when real consumers land. The documented T0 skew residual and wrapup/Git
+  interaction remain accepted and unchanged.
+- Verification used offline Go environment `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local`. Worker checks also used isolated
+  `WS_CACHE_HOME=/tmp/ws-researching-phase1-worker/cache` and
+  `WS_CONFIG_HOME=/tmp/ws-researching-phase1-worker/config`:
+  - `go test -p=1 ./internal/wswhiteboard -count=1 -timeout=240s -run
+    '^(TestTopicState|TestTopicETA|TestTopicUpdate|TestBoardNotice|TestStaleNudge)'`
+    passed (5.018s), including raw replay and actual historical-writer checks.
+  - `go test -p=1 ./internal/mcp -count=1 -timeout=240s -run '^TestWhiteboard'`
+    passed (62.240s).
+  - Text leaf verified `go test ./internal/wsi18n -count=1`;
+    `go test ./internal/wsrsrc -count=1 -run
+    'Test(ShippedManifestUpToDate|WsflowRsrcMirrorUpToDate|PiMirrorUpToDate)$'`;
+    `go test ./internal/mcp -count=1 -run
+    '^TestWhiteboardPlaybookStreamGuidanceProductModes$'`; and
+    `python3 -m unittest discover agents-plugin-wsflow/tests` (24 tests,
+    2 skipped). All passed; generator diffs contained only expected resources.
+  - `git diff --check` passed; the range's path list confirms the Phase 1
+    rendering boundary. Full worker outputs were read in
+    `/tmp/ws-researching-phase1-worker/{model-scoped,mcp-whiteboard,whiteboard}.log`.
+- The full `go test -p=1 ./internal/wswhiteboard -count=1 -timeout=240s`
+  run was **not green**: it had only the six historical reds documented by
+  `e33f77521` and `2de77962f` on this captured baseline: five stale rendering
+  fixtures (`TestServedBoardFramesEveryBodySeparately`,
+  `TestDashboardTopicBodyUsesWholeCardFold`, `TestRenderPageTopicBodyPlacement`,
+  `TestRenderPageContentOnlyTopic`, `TestRenderPageEmbedOmitsCurrentBody`) and
+  `TestRenderPageEmbedSizeBudget`. Embed measured 247276 bytes versus the
+  246415-byte threshold (historical 247192 plus 84 locale-key bytes). No added
+  backend failures were observed. These are not claims about later develop
+  `be9673139`; no baseline synchronization or render-fixture repair was done.
+- Independent one-pass lite review was clean over
+  `40a2f44e4..b17c08bb3`; no fixes or re-review were needed. Findings artifact:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@2530e43b/review-paths/10c95de2-01-researching-phase1-lite.md`.
+  No providers, downloads, credentials, browser/runtime/harness execution,
+  shared-daemon changes, plugin installation/reload, push or merge occurred.
+
 ### Phase 2: Complete badge and dashboard rendering after 793
 
 Depends on Phase 1's landed Result and
