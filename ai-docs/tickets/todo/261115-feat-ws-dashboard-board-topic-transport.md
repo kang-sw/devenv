@@ -85,16 +85,16 @@ measurements against the shared daemon (raw: `/tmp/exec5/perf/`,
 
 ## Open Decision Queue
 
-Last ID: (999)
+Last ID: (1034)
 
-(995) [open] [technical] Per-topic render cache keyed by topic revision (from C's cached board read) over re-rendering the whole board and splitting - only the per-topic render removes the O(topics) server cost that splitting keeps.
-(996) [open] [technical] Lazy topics as server placeholders with key+hash, fetched by a per-topic GET (or a stream request) when near the viewport, over shipping all topics as inert templates - templates still cost the 8-9MB transfer and parse.
-(997) [open] [policy] How many topics the initial load renders eagerly.
+(1031) [open] [technical] Per-topic render cache keyed by topic revision (from C's cached board read) over re-rendering the whole board and splitting - only the per-topic render removes the O(topics) server cost that splitting keeps.
+(1032) [open] [technical] Lazy topics as server placeholders with key+hash, fetched by a per-topic GET (or a stream request) when near the viewport, over shipping all topics as inert templates - templates still cost the 8-9MB transfer and parse.
+(1030) [open] [policy] How many topics the initial load renders eagerly.
 - Context: the reader usually looks at the newest topics; deep links and search jumps can target any topic.
 - Alternative: a fixed first-N (e.g. 12) plus the deep-link target; or viewport-driven only (measure after first paint).
 > Recommend first-N plus any deep-link/search target, N as a code constant tuned by measurement; viewport-only delays first paint of anything below the fold.
-(998) [open] [technical] Extend the same hash-per-unit approach to `tree`, `entries`, `panels` and the shell `rail` (row-level units) in later phases rather than in Phase 1 - the board is ~80% of bytes; one surface at a time keeps each phase verifiable.
-(999) [open] [technical] Verification bar: before/after on a ~112-topic fixture for frame HTML bytes, first-stream bytes, per-change bytes, server render time per change, and Chromium reload time and longest task, plus the existing stream/topic tests - these are the baseline rows above.
+(1033) [open] [technical] Extend the same hash-per-unit approach to `tree`, `entries`, `panels` and the shell `rail` (row-level units) in later phases rather than in Phase 1 - the board is ~80% of first-load bytes; one surface at a time keeps each phase verifiable. MAIN note: the rail stream (7.7MB per 32s per open shell) is the largest steady cost, so rail row units are the first follow-up phase candidate.
+(1034) [open] [technical] Verification bar: before/after on a ~112-topic fixture for frame HTML bytes, first-stream bytes, per-change bytes, server render time per change, and Chromium reload time and longest task, plus the existing stream/topic tests - these are the baseline rows above.
 
 ## Constraints
 
@@ -111,4 +111,4 @@ Render board topics as independent units cached by topic revision; the
 frame HTML and the first `topics=1` stream event carry only the eager
 topics plus placeholders; the rest load on demand; board changes render and
 ship only the changed topics. Verify against the baseline table above with
-the (999) bar.
+the (1034) bar.
