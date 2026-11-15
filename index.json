@@ -969,7 +969,14 @@
       "registered_at": "2026-11-14T18:03:05Z"
     },
     "261115-research-ws-pi-fork-acquired-worktree-key-authority-gap": {
-      "registered_at": "2026-11-14T22:45:50Z"
+      "registered_at": "2026-11-14T22:45:50Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "docs/exec3-dedupe-1051",
+        "phase": "closed",
+        "touched_at": "2026-11-15T08:04:07Z"
+      }
     },
     "261115-research-ws-unified-agent-tool-surface": {
       "registered_at": "2026-11-15T01:19:29Z"
