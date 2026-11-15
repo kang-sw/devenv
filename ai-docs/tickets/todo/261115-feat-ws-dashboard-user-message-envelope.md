@@ -57,6 +57,14 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
   sending browser's, not a fixed `+09:00`; one wrapper per item; the scope is
   answers, freeform text and attachments, with `<wb:answers>` nested inside
   unchanged; the conversation view parses the blocks; no steer marker.
+- **(889)=c, owner's words:** "60분까지는 n분 전으로, 그 외에는 a로 가죠."
+  (Up to 60 minutes, "n minutes ago"; beyond that, format a.) Each block's
+  time shows a relative "n분 전" (localized) while it is under 60 minutes
+  old, refreshed live each minute; from 60 minutes on it shows format a:
+  time only for today ("11:29"), date and time on other days
+  ("11/14 23:50"). Hover always shows the full date, time and offset (MAIN
+  reading of c's hover, announced). Rejected: a alone, b (always full date
+  and time), c with no cut-over.
 
 ## Open Decision Queue
 Last ID: none minted (items below await MAIN's board IDs)
@@ -71,13 +79,6 @@ Last ID: none minted (items below await MAIN's board IDs)
 (u8) [open] [technical] The shipped whiteboard playbook (ws, wsflow, Pi copies, per `wsflow-mirroring.md`) says each whiteboard message is a `<ws:user at=...>` block whose content opens with `<wb:answers>` when present, and that older messages may be unwrapped, over only editing the opening sentence - the tolerant wording keeps a newer playbook correct against an older daemon.
 (u9) [open] [technical] Compatibility tier T0: the new request and inbox fields are optional and additive, the drain `text` field keeps its shape, dashboard assets ship with the daemon that serves them, and (u5)/(u7)/(u8) cover the mixed-version text skew, over treating the delivered-text change as T2 - no MCP argument, store schema or event type changes non-additively. The worker audits that inbox rewrites (steering marshal, `wsinbox/inbox.go` ~626-744) preserve the new field.
 (u10) [open] [announced] Dashboard asset edits wait for the asset-split move map (`261114-refactor-ws-dashboard-whiteboard-asset-split`, recorded as prerequisite) - that ticket asks every consumer to use its landed move map; the conversation-rendering ticket is a coordinate edge, not a blocker, since it already waits on the same split.
-(889) [open] [policy] How each block shows its time in the conversation view.
-- Owner item minted by MAIN, 2026-11-15; not pre-settled here.
-- a: today shows time only, other days add the date, hover shows the full timestamp with the offset.
-- b: always the full date and time.
-- c: relative ("5 min ago"), absolute on hover.
-> MAIN's recommendation: a.
-
 ## Constraints
 
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md` (playbook and
@@ -96,8 +97,9 @@ Last ID: none minted (items below await MAIN's board IDs)
 Pending the queue above. Expected scope: browser offset field in
 `sendMessage()`; optional inbox field; envelope in `Entry.Text()`;
 envelope-first split in `pageview_inbox.go` and the `entry` template;
-playbook wording in the three copies; i18n only if the time display adds
-strings.
+playbook wording in the three copies; per-block time display per (889)
+with localized relative-time strings in every `wsi18n` table and a
+minute refresh.
 
 Verification (to be finalized at promotion):
 - `wsinbox` unit tests: one envelope per entry with the browser offset,
@@ -107,4 +109,8 @@ Verification (to be finalized at promotion):
 - Conversation view tests: a bundled turn renders three blocks, each with
   its answer capsules intact; an unwrapped legacy turn renders as today; a
   malformed envelope renders as plain text.
+- Time display tests per (889): 59 minutes old shows the relative form,
+  60 minutes shows the clock; today shows time only, an older day adds the
+  date; hover carries the full timestamp with offset; the relative label
+  advances on the minute refresh. `wsi18n` completeness tests pass.
 - Playbook mirror tests pass for the ws, wsflow and Pi copies.

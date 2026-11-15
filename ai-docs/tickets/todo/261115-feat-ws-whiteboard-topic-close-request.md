@@ -61,11 +61,16 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
   hidden on closed topics; a request is removable before send; no client-side
   close.
 
+- **(892)=a, owner:** each close-request capsule carries its own optional
+  reason field, like a topic note; the tag body is that capsule's reason, and
+  an empty reason sends an empty body. Rejected: b (topic-only capsule, the
+  composer body as the shared reason).
+
 ## Open Decision Queue
 Last ID: none minted (items below await MAIN's board IDs)
 
 (c1) [open] [technical] Close requests travel as a structured optional request field (`closeRequests: [{topic, reason}]`) serialized to `<wb:close-request>` by `wsinbox.Entry.Text()` after mentions, with the same attribute/body escaping as `wb:mention`, over the browser writing the tag into the free text - matches how mentions and topic notes travel, keeps one serializer, and lets held/draft state and the conversation view treat it as an attachment.
-(c2) [open] [technical] Dedupe is keyed by topic stem: pressing x on a topic already attached focuses its capsule (and its reason input, if any) instead of adding a second, over silently ignoring the press or replacing it - the owner asked for no duplicates, and focusing keeps the press visibly answered.
+(c2) [open] [technical] Dedupe is keyed by topic stem: pressing x on a topic already attached focuses its capsule's reason field ((892)=a) instead of adding a second, over silently ignoring the press or replacing it - the owner asked for no duplicates, and focusing keeps the press visibly answered.
 (c3) [open] [technical] The x is added by `cards.js` `decorate()` as the rightmost header action, beside the document disclosure without overlapping it, with a localized title/aria-label, shown wherever the other header actions show (pinned, folded, fullscreen; not inside Overview one-line rows), dashboard only (the standalone whiteboard page has no composer), over an absolutely positioned corner button - reuses the action row's reconciliation after board replacement and stays coherent with the badge lane's header ordering.
 (c4) [open] [technical] Pressing x focuses the composer text box without switching tabs, over switching to the conversation tab - the composer is present on the board tab, so a tab switch would move the user away from the board they are closing topics on.
 (c5) [open] [technical] A capsule whose topic becomes closed or disappears before send stays attached and is delivered; the playbook tells the agent to treat an already-closed or unknown topic as a no-op it reports briefly, over silently dropping it in the browser - nothing the user attached vanishes, and the agent already sees the board state.
@@ -73,12 +78,6 @@ Last ID: none minted (items below await MAIN's board IDs)
 (c7) [open] [technical] The delivered request renders in the user bubble as a capsule (topic name, reason when present) through the conversation view's existing capsule template, over showing the raw tag - consistent with mention capsules; the renderer work lands wherever the rendering-consolidation ticket has left the bubble template.
 (c8) [open] [technical] Compatibility tier T0: an optional additive request/inbox field and a new delivered tag; dashboard assets ship with the daemon; an older agent with an older playbook still sees self-describing text, over T2 - no existing field, argument or event changes. The worker audits that inbox rewrites preserve the new field.
 (c9) [open] [announced] Header edits coordinate with `261115-feat-ws-whiteboard-topic-state-badge` (EXEC1's lane, ready): whichever lands second rebases onto the other's header markup and keeps both the badges and the x - both tickets edit the same `.tbar` region and `decorate()` order, which the badge ticket requires to keep existing header actions.
-(892) [open] [policy] Where the optional close reason is written.
-- Owner item minted by MAIN, 2026-11-15.
-- a: each close-request capsule has its own small reason field; the tag body carries that capsule's reason.
-- b: the capsule carries only the topic; the composer's normal text body is the shared reason for every request in that send, and tags are sent empty.
-> MAIN's recommendation: a.
-
 ## Constraints
 
 - No client-side topic close; the agent performs any close.
@@ -95,7 +94,8 @@ Last ID: none minted (items below await MAIN's board IDs)
 ### Phase 1: Header x, close-request capsule, delivery and playbook
 
 Pending the queue above and the envelope ticket's Phase 1. Expected scope:
-`decorate()` button and i18n keys; capsule state, dedupe, removal, draft
+`decorate()` button and i18n keys; capsule state with its own reason
+field ((892)=a), dedupe, removal, draft
 persistence and send field in `dashboard.js`; optional inbox field and
 `Entry.Text()` serialization; bubble capsule; playbook Answers definition in
 the ws, wsflow and Pi copies.
