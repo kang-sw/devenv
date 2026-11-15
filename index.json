@@ -846,6 +846,9 @@
     "261115-feat-ws-whiteboard-topic-close-request": {
       "registered_at": "2026-11-15T02:43:44Z"
     },
+    "261115-feat-ws-whiteboard-topic-interleaved-timeline": {
+      "registered_at": "2026-11-15T03:11:31Z"
+    },
     "261115-feat-ws-whiteboard-topic-state-badge": {
       "registered_at": "2026-11-15T02:04:07Z",
       "lease": {
