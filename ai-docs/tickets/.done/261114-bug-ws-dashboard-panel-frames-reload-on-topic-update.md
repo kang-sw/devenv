@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 35f0cd6b31540316
 sage-review-design-reviewed: 35f0cd6b31540316
+completed: 2026-11-15
 ---
 
 # Dashboard: topic updates can reload panel frames, restarting their scripts
@@ -94,6 +95,13 @@ checked with nothing maximized.
   Rejected: changing code before the browser reproduction - the
   Node DOM model cannot show native script continuity.
 
+- (F5) Compatibility tier: T0, browser-only. The new guard reads the
+  existing `data-doc-key` in `dashboard-board.js` (`frameGraftable`, lines
+  564–574); `frameKeep` still reads the existing key/document pair
+  (lines 513–524), and `mountFrame` still copies sandbox/srcdoc before
+  connection (`dashboard-frames.js`, lines 33–51). No protocol, API,
+  persisted shape, or old/new binary read/write behavior changes.
+
 ## Phases
 
 ### Phase 1: Reproduce in Chromium and keep panel frames
@@ -112,6 +120,67 @@ the keep path per F1, without breaking `TestBoardKeepsUnchangedEntryFrames`.
 Verify: the new browser test, `go test ./internal/wsdashboard -run
 'BoardKeeps|FrameReuse|BoardTopic'` (focused, never the whole
 package), with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`.
+
+### Result (353df3cab) - 2026-11-15
+
+Native Chromium reproduced the remaining panel-only regression: its first
+panel restarted on an unrelated log added to its own topic. Body+panel
+reuse already worked. `frameGraftable` now accepts only an actual
+`topic:` body frame, leaving the first panel on the existing
+`frameKeep` / `frameKept` path. The key-plus-document identity, fresh
+panel overwrite, sandbox-before-connect ordering, body double buffer,
+no-`moveBefore` fallback, and viewport eviction rules are unchanged.
+
+Added `TestBoardPanelFrameReuseBrowser` and its browser driver over
+`startPageFixture`, real renderer output and the complete dashboard IIFE.
+It reads a native frame-local incrementing counter plus a per-load token;
+the token detects reloads even if a new counter has caught up. Both topics
+stay in view. The Node regression also checks the first panel and sibling
+in a bodyless topic, including changed bytes under the same entry key.
+
+Counter summary (ticks before → after; a retained token means no restart):
+
+| Topic shape | Change | Before fix | After fix |
+|---|---|---|---|
+| Body + panel | Own-topic log | 5 → 9, retained | 5 → 9, retained |
+| Body + panel | Other-topic log | 9 → 19, retained | 9 → 20, retained |
+| Body + panel | Own-panel overwrite | 19 → 5, fresh | 20 → 5, fresh |
+| Panels only | Own-topic log | 9 → 5, **unexpected fresh token** | 9 → 19, retained |
+| Panels only | Other-topic log | 5 → 9, retained | 5 → 9, retained |
+| Panels only | Own-panel overwrite | 15 → 6, fresh | 34 → 5, fresh |
+
+Other-topic panel overwrites also retained the unaffected panel in both
+shapes. Thus this is a fix, not closure as already fixed by 277615827.
+
+Verification:
+
+- `cd agents-plugin-tool && GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local
+  WS_PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright
+  PLAYWRIGHT_BROWSERS_PATH=/Users/kang-sw/Library/Caches/ms-playwright
+  go test ./internal/wsdashboard -run 'BoardKeeps|FrameReuse|BoardTopic'
+  -count=1 -v`: all 12 focused tests passed (12.822 s), including the native
+  Chromium test and `TestBoardKeepsUnchangedEntryFrames`.
+- Same offline/browser environment, `go test ./internal/wsdashboard -run
+  '^TestBoardPanelFrameReuseBrowser$' -count=3 -v`: all three passed
+  (5.700 s), each covering all eight continuity/overwrite observations.
+- Raw counters/output: `/tmp/exec5/frames/reproduction-counters.log`,
+  `/tmp/exec5/frames/verification.log`, and
+  `/tmp/exec5/frames/browser-repeat.log`.
+- Lite correctness/test-integrity review was performed locally because the
+  caller prohibited subagents; no Critical or Important findings. This is
+  not an independent review. Record: `/tmp/exec5/frames/review.md`.
+
+Harness decisions: enter the shell's active session iframe and wait for
+hidden `#ctext` by attachment. Viewed protection may stage changes across
+exposed panels, so the driver applies the existing latest-changes control
+before asserting the update; it never scrolls a topic away to evade staging.
+Initial shell-navigation failures and the first Viewed-held update timeout
+occurred before counter assertions; the lead authorized the navigation
+retry. All runtime checks used disposable Go fixtures, isolated home/cache
+roots and loopback ephemeral ports. No shared-daemon action, installation,
+version/API change, merge, push, scratch test, or profile was involved.
+
+Unresolved: none.
 
 ## Constraints
 
