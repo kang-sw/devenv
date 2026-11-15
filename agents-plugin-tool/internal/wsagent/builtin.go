@@ -37,6 +37,20 @@ var SupportWSTools = []string{"tracker.query", "tracker.update", "tracker.show",
 // outside the list is refused). Pi has no subagent tool and gets none.
 var SupportClaudeTools = []string{"Agent"}
 
+// Search answer profiles use only harness-native read tools. The answer
+// service caps overrides and scopes Claude's rules at launch.
+const (
+	SearchAnswerProfileClaude = "search-answer-claude"
+	SearchAnswerProfilePi     = "search-answer-pi"
+)
+
+func searchAnswerTools(backend string) []string {
+	if backend == BackendClaude {
+		return []string{"Read", "Grep", "Glob"}
+	}
+	return []string{"read", "grep", "find", "ls"}
+}
+
 // Lead profiles: one builtin profile per harness for the hosted lead
 // sessions the dashboard spawns (Profile.Lead). A project or global
 // definition of the same name replaces one whole, as for any profile.
@@ -154,6 +168,17 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		panic(err)
 	}
 	out[ProfilePrefix+PiMiniLeadProfile] = raw
+	for name, backend := range map[string]string{SearchAnswerProfileClaude: BackendClaude, SearchAnswerProfilePi: BackendPi} {
+		raw, err := json.Marshal(Profile{
+			Description: fmt.Sprintf("Search answer agent (%s): reads the session board snapshot and project files; no shell, write, or network tools. Project-root confinement is best effort, not a sandbox.", backend),
+			Backend:     backend,
+			Tools:       searchAnswerTools(backend),
+		})
+		if err != nil {
+			panic(err)
+		}
+		out[ProfilePrefix+name] = raw
+	}
 	for name, p := range map[string]Profile{
 		LeadProfileClaude: {Backend: BackendClaude, PermissionMode: DefaultLeadPermissionMode},
 		LeadProfilePi:     {Backend: BackendPi},

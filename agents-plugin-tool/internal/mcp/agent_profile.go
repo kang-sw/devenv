@@ -8,8 +8,8 @@ import (
 // agentProfileKnobEntry is the config registry template for one
 // agent.profile.<name> key, generated per key like worktreeProfileKnobEntry.
 // Its value is a structured object (wsagent.Profile), so config.tune routes
-// it to the resolver's structured writer; session scope is refused. No
-// profile is built in.
+// it to the resolver's structured writer; session scope is refused. Builtin
+// profiles supply the floor, replaced whole by higher-scope definitions.
 func agentProfileKnobEntry(name string) configKeyEntry {
 	return configKeyEntry{
 		Key:        wsagent.ProfilePrefix + name,
@@ -39,7 +39,7 @@ func agentProfileTuningKnob(resolver *wsconfig.Resolver) (configKeyEntry, tuning
 	knob := tuningKnob{
 		ID:          entry.Key,
 		Kind:        "agent_profile",
-		Description: "One agent profile per key: a named headless agent conversation the dashboard daemon's agent runner starts from the working root it is asked to run in. The value is a whole profile object (value_schema); a higher scope replaces a lower scope's profile of the same name, with no field merge. Nothing is built in and every capability defaults off: backend (claude or pi) is the only required field, and the built-in tools, ws tools, MCP servers, plugins, and skills the agent may use are each an explicit allowlist. repo scope is the committed .ws-workflow/config.json of that working root, so a repository can carry the profiles its own conversations need. current lists every resolved profile with the scope and file it came from.",
+		Description: "One agent profile per key: a named headless agent conversation the dashboard daemon's agent runner starts from the working root it is asked to run in. The value is a whole profile object (value_schema); a higher scope replaces a lower scope's profile of the same name, with no field merge. Builtin support, worker, lead, and read-only search-answer profiles supply the floor. In a user-defined profile every capability defaults off: backend (claude or pi) is the only required field, and the built-in tools, ws tools, MCP servers, plugins, and skills the agent may use are each an explicit allowlist. repo scope is the committed .ws-workflow/config.json of that working root, so a repository can carry the profiles its own conversations need. current lists every resolved profile with the scope and file it came from.",
 		Writer:      tuningWriter{Tool: entry.WriterTool, FixedArguments: map[string]string{"key": entry.Key}},
 		Reset: &tuningWriter{
 			Tool:           entry.ResetTool,

@@ -321,6 +321,56 @@ timeout and cancel with no surviving process; per-session supersede and the
 daemon-wide cap; remote viewer 404 and bad Origin 403 on creation and on the
 stream.
 
+#### Checkpoint - 2026-11-15 (unfinished)
+
+Phase 1 source and fake-backend tests are checkpointed on
+`impl/exec4/search-drawer-impl/boil-rants-plant`; this is not a Result and
+Phase 1 remains unfinished. Phase 2 has not started.
+
+- Added both builtin profiles, capped project-root profile resolution,
+  private per-question Runner instances with frozen checked definitions,
+  read-only board snapshot files, supersede/cancel/timeout cleanup, the
+  two-process admission cap, and `/search-answers/<session>` routes.
+  Private runner records live outside the public session registry so generic
+  agent reads and shared page streams cannot reveal answer content. The
+  current answer alone stays in memory; browser history belongs to Phase 2.
+- The creation and cancel routes require TrustedWrite. State and SSE reads
+  require loopback and reject a supplied bad Origin; absent Origin is allowed
+  for same-origin EventSource compatibility. SSE emits the existing
+  `region {name,hash,html}` shape with escaped answer text and status metadata,
+  outside the shared region cache.
+- Offline targeted wsagent answer/builtin tests passed in the final invocation
+  (`go test ./internal/wsagent ./internal/mcp -run
+  '^(TestSearchAnswer|TestDashboardSearchAnswer|TestBuiltin|TestAgentProfile)'
+  -count=1 -timeout=90s`), but the combined invocation failed in
+  `TestDashboardSearchAnswerSnapshotRetainedHistory`: its assertion expects
+  exactly three topic entries, incorrectly excluding generated system entries
+  that the snapshot correctly retains. The earlier invocation included this
+  same assertion but its output was truncated at a separate builtin-count
+  failure. Re-running it before diagnosing the snapshot assertion constitutes
+  non-convergence, stop (f); no further fix or retry was attempted.
+- Initial test-only compile mismatches (Config.Path and Event.Error), a fake
+  crash-liveness assertion (fake exit closes Events without setting the Close
+  flag), and the additive builtin count assertion were corrected. No failing
+  implementation contract was weakened.
+- Required baselines were run and match only the owner-declared failures:
+  `go test ./internal/wsi18n -count=1` lacks js.card.width.extend/normal in
+  the nine non-English tables; `go test ./internal/wsdashboard -run
+  '^TestOutsidePreview' -count=1 -timeout=60s` fails only the known
+  TestOutsidePreviewCardRemintsOnEveryLoad removeAttribute TypeError.
+  Neither baseline was modified. All Go commands used GOPROXY=off,
+  GOSUMDB=off, GOTOOLCHAIN=local.
+- Logs: `/tmp/equity-tableful-absinthe-tests/{service,i18n,outside-preview}.log`.
+  No i18n keys were added. The isolated daemon test bound an OS-selected port;
+  no shared daemon, port 29417, or real model was used.
+- Remaining acceptance: correct the snapshot test to count/filter authored
+  entries while also checking retained system history; run broader neighbour
+  and race tests and the command build; investigate actual Claude Grep/Glob
+  path-rule enforcement (only supplied launch flags are established so far).
+  The launch comment and builtin descriptions state best effort, not a
+  sandbox. Independent review is deferred to the lead under the run's explicit
+  adaptation; no review verdict is claimed.
+
 ### Phase 2: Search drawer and keyboard contract
 
 Move the palette from the modal `<dialog>` into the search sheet of the
