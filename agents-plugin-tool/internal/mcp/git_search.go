@@ -712,7 +712,7 @@ func (s *Server) handleGitSearch(ctx context.Context, id json.RawMessage, args m
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	if _, found := s.sessions.lookup(key); !found {
+	if _, found := s.lookupSession(key); !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
 	roots, ignored := s.gitSearchRoots(key)

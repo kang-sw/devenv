@@ -23,7 +23,7 @@ type sessionContext struct {
 }
 
 type sessionAccess struct {
-	mode   string // lookup, bootstrap, relogin, manual, or mint
+	mode   string // identity, lookup, bootstrap, relogin, manual, or mint
 	key    string
 	root   string // already canonicalized by the caller, preserving its error order
 	scope  toolRole
@@ -35,6 +35,13 @@ type sessionAccess struct {
 // it without acquiring a second authority source. Mint callers retain their
 // existing timing (manual renders and validates before it mints).
 func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
+	// Already-keyed consumers retain exact matching and lookup's activity touch.
+	// Unlike adoption, they neither normalize the key nor inspect hosted entry
+	// or harness metadata. In particular, a missing key never adopts the host.
+	if in.mode == "identity" {
+		entry, found := s.sessions.lookup(in.key)
+		return contextForEntry(in.key, entry, found), nil
+	}
 	in.key, in.parent = strings.TrimSpace(in.key), strings.TrimSpace(in.parent)
 	hosted := s.hostedSessionKey() // validates registration.host_pid once
 	switch in.mode {
@@ -94,4 +101,15 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 		}
 	}
 	return out, nil
+}
+
+func contextForEntry(key string, entry sessionEntry, found bool) sessionContext {
+	return sessionContext{key: key, root: entry.root, canonicalRoot: entry.root, scope: entry.scope, parent: entry.parent, found: found}
+}
+
+// lookupSession adapts existing identity-only consumers to the shared resolver
+// without widening their reads or changing their refusal and error ordering.
+func (s *Server) lookupSession(key string) (sessionEntry, bool) {
+	resolved, _ := s.resolveSession(sessionAccess{mode: "identity", key: key})
+	return sessionEntry{root: resolved.root, scope: resolved.scope, parent: resolved.parent}, resolved.found
 }

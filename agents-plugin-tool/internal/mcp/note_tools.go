@@ -58,7 +58,7 @@ func (r repoNoteStore) SetVisible(keys []string, visible bool) error {
 // layer which does not itself need a root:
 //   - "worktree", "clone", and "repo" all route through resolveToolRoot, the
 //     same root-resolution path every other root-aware tool uses.
-//   - "machine" looks the key up directly via s.sessions.lookup — it cannot
+//   - "machine" looks the key up via s.lookupSession — it cannot
 //     reuse resolveToolRoot (which would require a resolvable root the
 //     machine layer does not need) or requireLeadSessionKey (lead-only; note.*
 //     is reachable by any scope, mirroring todo.*/agenda.*).
@@ -84,7 +84,7 @@ func (s *Server) resolveNoteStoreForLayer(toolName string, layer wsnote.Layer, a
 		if key == "" {
 			return nil, fmt.Errorf("%s: session_key is required", toolName)
 		}
-		if _, found := s.sessions.lookup(key); !found {
+		if _, found := s.lookupSession(key); !found {
 			return nil, fmt.Errorf("%s: unknown_session: session key not found; "+
 				"if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call", toolName)
 		}

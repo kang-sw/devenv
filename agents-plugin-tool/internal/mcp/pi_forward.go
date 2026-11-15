@@ -140,7 +140,7 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 	if strings.TrimSpace(key) == "" {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session_key is required", tool))
 	}
-	if _, found := s.sessions.lookup(strings.TrimSpace(key)); !found {
+	if _, found := s.lookupSession(strings.TrimSpace(key)); !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}
 	switch tool {

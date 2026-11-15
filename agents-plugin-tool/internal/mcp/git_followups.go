@@ -47,7 +47,7 @@ func (s *Server) requireRootLeadForFollowups(arguments map[string]any) error {
 	if key == "" {
 		return fmt.Errorf("git.commit refused: followups require the session_key of a root lead session; nothing was committed")
 	}
-	entry, found := s.sessions.lookup(key)
+	entry, found := s.lookupSession(key)
 	if !found {
 		return fmt.Errorf("git.commit refused: followups require a root lead session, and this session key is unknown; nothing was committed")
 	}
