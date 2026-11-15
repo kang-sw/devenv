@@ -101,6 +101,61 @@ function root(r, what, theme) {
   assert.ok(r.width <= 420.5 && r.width >= Math.min(220, r.gridWidth) - 0.5, what + ': lockup width ' + r.width);
 }
 
+// span reads the landing's scroll box against the window (the shown frame
+// fills it): its edges, the window's size, and the right edge of the
+// standing rail's placeholder (0 while the rail overlays), with the box
+// scrolled partway so a screenshot shows the scrollbar's thumb.
+async function span(page) {
+  return page.frameLocator(on).locator('body').evaluate(() => {
+    const box = document.querySelector('.dlanding');
+    box.scrollTop = Math.round((box.scrollHeight - box.clientHeight) / 3);
+    const b = box.getBoundingClientRect();
+    const ph = document.querySelector('.rail-ph');
+    const rail = ph && getComputedStyle(ph).position !== 'fixed' ? ph.getBoundingClientRect().right : 0;
+    return { left: b.left, right: b.right, bottom: b.bottom, vw: document.documentElement.clientWidth, vh: innerHeight, rail, sbar: box.offsetWidth - box.clientWidth };
+  });
+}
+
+// spans: the scroll box runs from the standing rail's right edge (the
+// window's left edge while the rail overlays) to the window's right and
+// bottom edges, so its scrollbar sits at the window's right edge.
+function spans(s, what) {
+  assert.ok(Math.abs(s.right - s.vw) < 0.5, what + ': scroll box right edge ' + s.right + ' vs window ' + s.vw);
+  assert.ok(Math.abs(s.bottom - s.vh) < 0.5, what + ': scroll box bottom edge ' + s.bottom + ' vs window ' + s.vh);
+  assert.ok(s.rail ? s.left > s.rail - 0.5 && s.left - s.rail < 20 : Math.abs(s.left) < 0.5, what + ': scroll box left edge ' + s.left + ' vs rail ' + s.rail);
+}
+
+// wheel turns the wheel over the main area at x, away from the column, and
+// reports whether the landing scrolled.
+async function wheel(page, x) {
+  const box = page.frameLocator(on).locator('.dlanding');
+  const before = await box.evaluate(el => el.scrollTop);
+  await page.mouse.move(x, 600);
+  await page.mouse.wheel(0, 400);
+  await page.waitForTimeout(250);
+  return (await box.evaluate(el => el.scrollTop)) > before;
+}
+
+// barShot saves the landing scrolled partway with its scrollbar shown,
+// which headless Chromium hides by default, in a browser of its own so the
+// checks measure the same layout with or without shots.
+async function barShot(scheme, width, name) {
+  if (!shots) return;
+  const b = await chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
+  try {
+    const c = await b.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, locale: 'ko-KR' });
+    const page = await c.newPage();
+    await page.goto(base + '/');
+    await page.frameLocator(on).locator('.dlanding').waitFor();
+    await loaded(page);
+    await span(page);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(shots, name) });
+  } finally {
+    await b.close();
+  }
+}
+
 async function openRail(page) {
   await page.locator('#railbtn').click();
   await page.locator('#rail').evaluate(el => new Promise(r => {
@@ -142,6 +197,10 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     root(r, 'root dark', 'dark');
     await fullShot(page, 'root-dark-1440.png');
     if (shots) await page.frameLocator(on).locator('.dstep[data-step="workspace"]').screenshot({ path: path.join(shots, 'step-workspace-dark.png') });
+    let s = await span(page);
+    await barShot('dark', 1440, 'landing-dark-1440.png');
+    spans(s, 'root dark 1440');
+    assert.ok(await wheel(page, 1420), 'root dark 1440: the wheel at the right edge does not scroll the landing');
 
     // Picking a session opens it; picking it again closes its view and
     // shows the landing at /, and the row is no longer marked.
@@ -213,14 +272,34 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     await page.goto(base + '/');
     root(await landing(page), 'root dark 700', 'dark');
     await fullShot(page, 'root-dark-700.png');
+    s = await span(page);
+    await barShot('dark', 700, 'landing-dark-700.png');
+    spans(s, 'root dark 700');
     // An earlier /#guide address lands on the same page.
     await page.goto(base + '/#guide');
     await shows(page, '/', '#guide');
     root(await landing(page), '/#guide', 'dark');
     await c.close();
 
+    // Wide, the rail standing: the scroll box spans the main area to the
+    // window's right edge, so the wheel scrolls the landing right of the
+    // column too, while the column keeps its width and its centre in the
+    // page's main panel (root's checks).
+    for (const theme of ['dark', 'light']) {
+      ({ c, page } = await ctx(theme, 2560));
+      await page.goto(base + '/');
+      r = await landing(page);
+      s = await span(page);
+      await barShot(theme, 2560, 'landing-' + theme + '-2560.png');
+      root(r, 'root ' + theme + ' 2560', theme);
+      spans(s, 'root ' + theme + ' 2560');
+      assert.ok(s.rail > 0, 'root ' + theme + ' 2560: the rail does not stand');
+      assert.ok(await wheel(page, 2500), 'root ' + theme + ' 2560: the wheel near the right edge does not scroll the landing');
+      await c.close();
+    }
+
     assert.deepEqual(errors, []);
-    console.log('PASS: illustrated landing per theme at / and 700px, only the shown theme fetched; reselect closes the view to /; other rows open as before');
+    console.log('PASS: illustrated landing per theme at / and 700px, its scroll box spanning the main area to the window edge at 700, 1440 and 2560, only the shown theme fetched; reselect closes the view to /; other rows open as before');
   } finally {
     await browser.close();
   }
