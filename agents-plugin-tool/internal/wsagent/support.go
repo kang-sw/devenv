@@ -251,22 +251,28 @@ func (s *Support) harnesses() []SupportHarness {
 		h.Lead = reg.LeadProfile != ""
 		h.PermissionModes = append([]string(nil), reg.PermissionModes...)
 		h.PermissionLevels = s.leadPermissionLevels(h.Harness)
-		switch backend := reg.Backend; {
-		case err != nil:
+		if err != nil {
 			h.Error = err.Error()
-		case backend == nil:
-			h.Error = fmt.Sprintf("backend %q is not available in this daemon", h.Harness)
-		default:
-			h.Available = true
-			if cl, ok := backend.(ChoiceLister); ok {
-				if _, err := lookPath(cl.Executable()); err != nil {
-					h.Available, h.Error = false, fmt.Sprintf("%s is not installed: %v", cl.Executable(), err)
-				}
-			}
+		} else {
+			h.Available, h.Error = supportBackendAvailability(h.Harness, reg.Backend)
 		}
 		out = append(out, h)
 	}
 	return out
+}
+
+// supportBackendAvailability checks registration and, for choice listers, the
+// executable. Backends without a choice lister need only be registered.
+func supportBackendAvailability(name string, backend Backend) (bool, string) {
+	if backend == nil {
+		return false, fmt.Sprintf("backend %q is not available in this daemon", name)
+	}
+	if cl, ok := backend.(ChoiceLister); ok {
+		if _, err := lookPath(cl.Executable()); err != nil {
+			return false, fmt.Sprintf("%s is not installed: %v", cl.Executable(), err)
+		}
+	}
+	return true, ""
 }
 
 // listChoices fills each available harness's models and efforts, from the
@@ -440,16 +446,9 @@ func (s *Support) Choices(ctx context.Context) ChoicesAnswer {
 	sort.Strings(names)
 	for _, name := range names {
 		reg := s.opts.Runner.opts.Backends[name]
-		h := SupportHarness{Harness: name, Available: reg.Backend != nil, Lead: true, PermissionModes: append([]string(nil), reg.PermissionModes...), Models: []ModelChoice{}, Efforts: []string{}}
+		h := SupportHarness{Harness: name, Lead: true, PermissionModes: append([]string(nil), reg.PermissionModes...), Models: []ModelChoice{}, Efforts: []string{}}
 		h.PermissionLevels = s.leadPermissionLevels(name)
-		if !h.Available {
-			h.Error = fmt.Sprintf("backend %q is not available in this daemon", name)
-		}
-		if cl, ok := reg.Backend.(ChoiceLister); ok {
-			if _, err := lookPath(cl.Executable()); err != nil {
-				h.Available, h.Error = false, fmt.Sprintf("%s is not installed: %v", cl.Executable(), err)
-			}
-		}
+		h.Available, h.Error = supportBackendAvailability(name, reg.Backend)
 		hs = append(hs, h)
 	}
 	s.listChoices(ctx, hs)

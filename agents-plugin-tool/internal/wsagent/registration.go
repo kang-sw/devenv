@@ -54,7 +54,12 @@ func profileBackends(registries []map[string]BackendRegistration) []string {
 	return names
 }
 
+// permissionModes preserves legacy Pi values accepted on reads and ignored at
+// launch. Registered extensions use their own modes, not the Pi fallback.
 func permissionModes(backend string, registries []map[string]BackendRegistration) []string {
+	if backend == BackendPi {
+		return LeadPermissionModes
+	}
 	if len(registries) > 0 {
 		return registries[0][backend].PermissionModes
 	}
@@ -72,9 +77,6 @@ func profilePermissionModes(registries []map[string]BackendRegistration) []strin
 	seen := map[string]bool{}
 	for _, name := range profileBackends(registries) {
 		choices := permissionModes(name, registries)
-		if name == BackendPi {
-			choices = LeadPermissionModes // retain the historical Pi read contract
-		}
 		for _, mode := range choices {
 			if !seen[mode] {
 				seen[mode] = true
