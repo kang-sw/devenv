@@ -200,3 +200,45 @@ Verification (to be finalized at promotion):
   date; hover carries the full timestamp with offset; the relative label
   advances on the minute refresh. `wsi18n` completeness tests pass.
 - Playbook mirror tests pass for the ws, wsflow and Pi copies.
+
+### Result (697c95084) - 2026-11-15
+
+- VERIFIED: `Entry.Text()` emits one minute-precision, offset-bearing envelope
+  per nonempty item; commands remain bare and interrupt controls remain empty.
+  The optional `utcOffsetMinutes` request/inbox field distinguishes missing
+  offsets from UTC, validates -720..840, and survives normalize, steer, cancel,
+  resend and drain. The daemon still owns the send instant.
+- VERIFIED: the corrected nested-entity grammar round-trips literal delimiters,
+  existing entity levels, the reported collision pair and 512 mixed-token
+  combinations. Other body bytes and the nested capsule grammar are preserved.
+- VERIFIED: envelope-first conversation projection keeps one stable ring/stream
+  key while rendering each item as an independent existing-style user bubble.
+  Answers, mentions, picks, consoles and image numbering stay item-local;
+  outside report/mail text remains ordered plain text, legacy content retains
+  its parsers, and malformed envelopes remain wholly plain. Nested attachment
+  availability participates in cache invalidation.
+- VERIFIED: each envelope's clock uses localized minutes below 60, then its
+  sender-zone clock (with month/day outside today); hover retains the full
+  timestamp and offset. The existing page tick refreshes the minute label.
+  All 11 locale tables and the ws/wsflow/Pi guidance are updated; resource
+  manifests are regenerated and all three resource trees are byte-identical.
+- Decisions: use `UserBlocks` under the existing entry key rather than expand
+  the ring slice, preserving stream/history identity and avoiding edits to
+  `pages.go` or mail/wake presentation. Edit the landed owning asset fragments;
+  keep the two-queue inbox and both TypeScript adapters unchanged. T0 follows
+  the accepted optional-field policy and existing minor-mismatch caveat: no
+  route, MCP argument, drain JSON member or store schema version was added.
+- Verification: full `wsinbox`, `wsi18n` and `wsrsrc` passed; 15 dashboard inbox
+  MCP tests passed, including three-item ordered delivery. The named dashboard
+  selection passed 96/99 initially; its stale composer request expectation
+  was corrected for the optional field and passed on its scoped rerun. The
+  two remaining, untouched tests
+  `TestWhiteboardEffectsRoutesReadSavedHistoryWithoutAnAdapter` and
+  `TestWhiteboardEffectsOlderThanLiveCapRemainReachableOffline` also fail on
+  archived base `ce22992e6` at the same assertions; they are baseline findings,
+  not fixed here. All new envelope/offset/batch/cache/time tests and the CSS
+  collision test passed. Wsflow package checks passed (24 tests, two skips),
+  resource-tree comparisons and diff whitespace checks passed.
+- Omitted by the caller: child agents and independent review (one later lite
+  review belongs to the lead), browsers/screenshots, daemon/runtime actions,
+  the full dashboard suite, and ticket closure. The ticket stays in `ready/`.
