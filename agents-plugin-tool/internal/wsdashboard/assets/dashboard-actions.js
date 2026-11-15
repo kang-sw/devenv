@@ -9,6 +9,10 @@
     if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); return; }
     u = t.closest("[data-unmchip]");
     if (u) { bmentions.splice(+u.getAttribute("data-unmchip"), 1); renderChips(); return; }
+    u = t.closest("[data-unselection]");
+    if (u) { dropSelection(+u.getAttribute("data-unselection")); return; }
+    u = t.closest("[data-selection-edit]");
+    if (u) { editSelection(+u.getAttribute("data-selection-edit")); return; }
     u = t.closest("[data-unwpick]");
     if (u) { wpicks.splice(+u.getAttribute("data-unwpick"), 1); renderChips(); return; }
     u = t.closest("[data-unwcon]");
