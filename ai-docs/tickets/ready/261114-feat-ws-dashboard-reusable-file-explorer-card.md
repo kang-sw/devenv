@@ -7,11 +7,12 @@ related:
   261110-feat-ws-dashboard-file-preview: "existing read-only Files-tab and preview behavior"
   261110-feat-ws-dashboard-terminal: "existing shared board-card framework context"
   261114-refactor-ws-dashboard-whiteboard-asset-split: "prerequisite: implementation starts after this split lands (it moves dashboard.js and dashboard.css)"
-  261114-feat-ws-dashboard-worktree-view: "consumer; shares the deferred Phase 4 session-less browsing decision"
+  261114-feat-ws-dashboard-worktree-view: "consumer; shares the session-less browsing anchor with Phase 4"
+  261115-feat-ws-dashboard-local-browse-anchor: "prerequisite of Phase 4 only: the host anchor and root discovery the picker browses through"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: b86a55e92e9f640a
-sage-review-completeness-reviewed: b86a55e92e9f640a
+sage-review-design-reviewed: 25d26d143ec11825
+sage-review-completeness-reviewed: 25d26d143ec11825
 ---
 
 # Deliver the reusable stateful file explorer card
@@ -85,14 +86,13 @@ performs that comparison.
   active pane/inner tab. This ticket delivers single-pane search that honors
   the rule; the later split dual-pane child inherits it and owns the second
   pane.
-- **The workspace-picker mechanism is deferred (P4 gated).** How the picker
-  browses without a session and how it learns the daemon host label, home and
-  local-volume roots is settled together with the worktree-view session-anchor
-  question, leaning toward one additive local-viewer-only route that serves
-  both. Rejected for now: a session-only picker reusing the page's reply-id
+- **The workspace picker browses through the host anchor (894=a).** The
+  picker uses the daemon-owned host anchor and the server-side root discovery
+  delivered by `261115-feat-ws-dashboard-local-browse-anchor` (local viewer
+  only), which also serves the worktree page. P4 starts only after that
+  ticket lands. Rejected: a session-only picker reusing the page's reply-id
   (no home/volume shortcuts and unusable from the rail popover), and a
-  picker-specific route decided ahead of the worktree page. P4 does not start
-  until that decision is recorded in this ticket.
+  picker-specific route decided ahead of the worktree page.
 - Existing normal Files guarded roots remain the access boundary. The
   separately approved workspace picker is local-viewer-only, directories-only,
   may browse home and local-volume roots labeled with the daemon host, and is
@@ -131,10 +131,11 @@ performs that comparison.
   Electron shell must enable its built-in PDF plugin for native preview there;
   that belongs to the Electron shell lane, and this ticket only guarantees the
   download/open fallback when the viewer is missing.
-- Out of scope until P4's mechanism is recorded: any session-less browsing
-  route, home/volume root discovery, and the rail add-workspace popover. The
-  rail and bottom-left strip are also being changed by a parallel settings and
-  home-removal ticket; P4 coordinates through the lead before touching them.
+- The session-less anchor and root discovery belong to
+  `261115-feat-ws-dashboard-local-browse-anchor`, not to this ticket. The rail
+  and bottom-left strip are also being changed by a parallel settings and
+  home-removal ticket; P4 coordinates through the lead before touching the
+  rail add-workspace popover.
 - Implementation starts only after
   `261114-refactor-ws-dashboard-whiteboard-asset-split` lands, on the lead's
   start signal; that split moves `dashboard.js` and `dashboard.css`, so file
@@ -185,7 +186,7 @@ performs that comparison.
 | complexity.reuse_points | confirmed | read files.js create closure, dashboard.js createFiles, cards.js Files maximize, fs_routes.go browseRoot/handleFSPreview/handleFSRaw, and gitdiff.go highlightLines (chroma already in go.mod) |
 | complexity.side_effect_risk | high | tabs, view modes, split search, float/fullscreen and attachment slot rework a 881-line module shared by the Files tab and toolbar sheet; a PDF route touches the sandboxed image-CSP serving path |
 | risk.correctness | high | per-tab and per-pane async search/listing state must stay independent across instances and tabs; split search targets the active pane |
-| risk.fit | high | INFERRED: even split into four phases, P1 alone spans tabs, four view modes, per-card storage, the attachment slot and presentation across files.js, dashboard.js createFiles and cards.js; PDF/highlight mechanisms are now settled (Decisions) and the picker mechanism is gated in P4 |
+| risk.fit | high | INFERRED: even split into four phases, P1 alone spans tabs, four view modes, per-card storage, the attachment slot and presentation across files.js, dashboard.js createFiles and cards.js; PDF/highlight mechanisms are settled (Decisions) and P4 depends on the separately ticketed host anchor (894=a) |
 | risk.test | high | no mounted-multi-tab, view-mode, or PDF/highlight fixtures exist; browser/side-by-side acceptance is required |
 | risk.security_or_contract | high | PDF serving needs a new content type behind browseRoot (raw serves only image and video types today) and the directories-only picker widens browsing toward home and volumes for local viewers while normal Files roots must stay guarded |
 
@@ -299,16 +300,31 @@ the viewer is absent - if no full-Chromium channel is available, record the
 render check as not run instead of passing it; side-by-side against the PDF layout of frame 04 and the code
 highlighting of frame 07 (the quick-look overlay itself is excluded).
 
-### Phase 4: Directories-only workspace-picker consumer [gated]
+### Phase 4: Directories-only workspace-picker consumer
 
-Gated: does not start until the picker browsing mechanism (session-less
-anchor, host label, home and local-volume roots) is recorded in
-`## Decisions` together with the worktree-view session-anchor decision.
-Then the picker mounts the same core with directories only, hidden entries
-translucent, files omitted, and a Select/Cancel row in the attachment slot,
-local-viewer only; no separate picker UI. The edit that clears the gate must
-add concrete verification checks here before P4 starts; they include a
-side-by-side against frame 08.
+Depends on Phase 1 and on `261115-feat-ws-dashboard-local-browse-anchor`
+having landed.
+
+- The picker mounts the same core through the host anchor, starting from the
+  discovered roots (home and local volumes, labeled with the daemon host). It
+  shows directories only, files omitted, hidden entries translucent (757=b),
+  and puts a Select/Cancel row in the attachment slot; no separate picker UI.
+  The popover lives in the shell document, not a session page, so the picker
+  loads the explorer script and styles there and gives the core an absolute
+  `/s/<anchor>/` route base instead of page-relative paths.
+- It is offered only to local viewers, as a browse alternative beside the
+  existing local-folder paste input of the rail add-workspace popover (755/756
+  rationale: paste stays the remote and fallback path). Select hands the chosen
+  folder to that popover's existing preview/add flow; Cancel closes the picker
+  and leaves the popover as it was.
+- Coordinate the popover change through the lead first (see `## Constraints`).
+
+Verification: browser checks that the picker lists only directories with
+hidden entries translucent, starts at the discovered roots labeled with the
+daemon host, never requests file previews, and that Select feeds the existing
+add-workspace preview/add flow while Cancel changes nothing; that remote
+viewers see only the existing paste input; `TestFiles|TestFS` and workspace
+route neighbours plus `./internal/wsi18n`; side-by-side against frame 08.
 
 ## Sage Review Round 1 (2026-11-15)
 
