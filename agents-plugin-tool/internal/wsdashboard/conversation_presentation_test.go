@@ -113,7 +113,7 @@ func TestConversationPresentationSourceLabelsRequireTypedCause(t *testing.T) {
 		ringRecord(4, wslive.RingEntry{Kind: "wake", Cause: "monitor", Text: "[child report] is not proof"}),
 	}
 	html := presentationHTML(t, ring, PageContent{}, nil)
-	for _, want := range []string{`class="msg user" data-entry="` + ring[0].Name, `class="msg user" data-entry="` + ring[1].Name, "owner text\n\n[child report]\nreport &lt;script&gt;not HTML&lt;/script&gt;", `class="wake-card child-report"`, "Child report", "known report &lt;b&gt;literal&lt;/b&gt;"} {
+	for _, want := range []string{`class="msg user" data-entry="` + ring[0].Name, `class="msg user" data-entry="` + ring[1].Name, "owner text\n\n[child report]\nreport &lt;script&gt;not HTML&lt;/script&gt;", `class="mailline recv child-report"`, "Child report", "known report &lt;b&gt;literal&lt;/b&gt;"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q: %s", want, html)
 		}
