@@ -887,6 +887,11 @@ func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
 	return r.snapshots.Snapshot(r.dir, replyID)
 }
 
+// readSnapshotWithoutObserved serves consumers that do not render model history.
+func (r pageReader) readSnapshotWithoutObserved(replyID string) *wslive.Snapshot {
+	return r.snapshots.snapshotWithoutObserved(r.dir, replyID)
+}
+
 // Refresh stamps need only snapshot freshness, not retained evidence overlays.
 // The parsed snapshot is stat-identity checked; expiry is still judged now.
 func (r pageReader) adapterPresent(replyID string, now time.Time) bool {
@@ -927,6 +932,7 @@ func (r pageReader) servedWithError(replyID string) (Session, PageContent, bool,
 // a caller asks for it, and once per lookup.
 func (r pageReader) lookup() sessionLookup {
 	snaps := map[string]*wslive.Snapshot{}
+	observed := map[string]*wslive.Snapshot{}
 	return sessionLookup{
 		session: func(id string) (Session, bool) {
 			if r.index == nil {
@@ -937,8 +943,16 @@ func (r pageReader) lookup() sessionLookup {
 		snapshot: func(id string) *wslive.Snapshot {
 			snap, read := snaps[id]
 			if !read {
-				snap = r.readSnapshot(id)
+				snap = r.readSnapshotWithoutObserved(id)
 				snaps[id] = snap
+			}
+			return snap
+		},
+		observed: func(id string) *wslive.Snapshot {
+			snap, read := observed[id]
+			if !read {
+				snap = r.readSnapshot(id)
+				observed[id] = snap
 			}
 			return snap
 		},
@@ -1029,6 +1043,7 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 				return lookup.get(id)
 			},
 			snapshot: lookup.snap,
+			observed: lookup.observedSnap,
 		}
 		inputs.watch = append(inputs.watch, in.AttachDir)
 		inputs.contacts = len(page.Contacts) > 0
@@ -1149,7 +1164,7 @@ func (r pageReader) indexView() IndexView {
 			if s.Unlisted {
 				continue
 			}
-			inputs = append(inputs, indexInput{Session: s, Snapshot: r.readSnapshot(s.ReplyID)})
+			inputs = append(inputs, indexInput{Session: s, Snapshot: r.readSnapshotWithoutObserved(s.ReplyID)})
 		}
 	}
 	return buildIndexView(inputs, r.clock(), r.version)

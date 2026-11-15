@@ -326,7 +326,7 @@ func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, local bool
 	if len(req.Images) > 0 || len(req.Refs) > 0 {
 		return http.StatusBadRequest, "a slash command carries no images"
 	}
-	snap := d.pages().readSnapshot(replyID)
+	snap := d.pages().readSnapshotWithoutObserved(replyID)
 	if snap == nil || len(snap.Commands) == 0 {
 		return http.StatusConflict, "this session's host adapter runs no slash commands from the dashboard"
 	}

@@ -343,7 +343,7 @@ func (d *Daemon) outsideReplyLinks(s Session) []string {
 			}
 		}
 	}
-	if snap := d.snapshots.Snapshot(d.dir, reg.ReplyID); snap != nil && snap.Lead.Reply != nil {
+	if snap := d.snapshots.snapshotWithoutObserved(d.dir, reg.ReplyID); snap != nil && snap.Lead.Reply != nil {
 		render.streaming(snap.Lead.Reply.Text)
 	}
 	return links

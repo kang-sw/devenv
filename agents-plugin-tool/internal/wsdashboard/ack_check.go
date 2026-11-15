@@ -228,7 +228,7 @@ func (d *Daemon) checkAnswers(replyID string) {
 	if !ok || s.Agent || !s.HasBoard {
 		return
 	}
-	snap := d.pages().readSnapshot(replyID)
+	snap := d.pages().readSnapshotWithoutObserved(replyID)
 	if !adapterPresent(snap, time.Now()) || !leadIdle(snap.Lead) {
 		return
 	}

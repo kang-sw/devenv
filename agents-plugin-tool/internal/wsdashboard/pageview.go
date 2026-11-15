@@ -539,6 +539,9 @@ type pageInputs struct {
 type sessionLookup struct {
 	session  func(replyID string) (Session, bool)
 	snapshot func(replyID string) *wslive.Snapshot
+	// observed is needed only by non-compact peer child hovers. Counts and
+	// compact peer rows use snapshot, which need not sweep retained history.
+	observed func(replyID string) *wslive.Snapshot
 }
 
 // get returns a session this daemon serves.
@@ -555,6 +558,13 @@ func (l sessionLookup) snap(replyID string) *wslive.Snapshot {
 		return nil
 	}
 	return l.snapshot(replyID)
+}
+
+func (l sessionLookup) observedSnap(replyID string) *wslive.Snapshot {
+	if l.observed != nil {
+		return l.observed(replyID)
+	}
+	return l.snap(replyID)
 }
 
 // adapterPresent is wslive.AdapterPresent on an already read snapshot.
@@ -845,6 +855,9 @@ func peerGroup(contacts []Contact, project string, lookup sessionLookup, now tim
 					if row.Compact {
 						row.Lead = LeadView{Lead: snap.Lead}
 					} else {
+						if observed := lookup.observedSnap(row.ReplyID); observed != nil {
+							snap = observed
+						}
 						row.Lead = leadView(snap.Lead)
 						// One level deep: the peer's own agents, never its peers.
 						row.Agents = agentTree(snap.Agents, lookup)

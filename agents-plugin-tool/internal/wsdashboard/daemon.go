@@ -568,7 +568,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
 		if session, ok := d.index.Session(replyID); ok {
 			if session.Harness == "claude" {
-				d.planUsage.pushClaude(d.snapshots.Snapshot(d.dir, replyID))
+				d.planUsage.pushClaude(d.snapshots.snapshotWithoutObserved(d.dir, replyID))
 			}
 		} else {
 			d.entries.drop(replyID)
