@@ -21,7 +21,58 @@
     var elapsed = Math.max(0, Math.min(1, (at - (w.resetsAt - duration)) / duration));
     return Math.round(w.percent - elapsed * 100);
   }
-  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, mount: function (doc, rail) {
+  // Pure chart geometry. Crossing points and gap interpolation are visual
+  // only: points contains real observations, never an origin or extrapolation.
+  function trend(entry, w, history) {
+    var duration = w.kind === "five_hour" ? 5 * 3600000 : 7 * 86400000;
+    var at = observation(w, entry), reset = w.resetsAt || 0, start = reset - duration;
+    var knownReset = reset > 0, samples = [], points = [], segments = [];
+    var valid = function (s) { return s.asOf > 0 && Number.isFinite(s.percent) && s.percent >= 0 && s.percent <= 100; };
+    var identity = function (s) { return [s.source, s.resetsAt || 0, s.asOf].join("|"); };
+    var indices = Object.create(null);
+    function upsert(s) {
+      var key = identity(s);
+      if (indices[key] !== undefined) samples[indices[key]] = s;
+      else { indices[key] = samples.length; samples.push(s); }
+    }
+    if (history && history.schema_version === 1 && history.status === "ok" && Array.isArray(history.samples)) {
+      history.samples.forEach(function (s) {
+        if (s.harness === entry.harness && s.kind === w.kind && valid(s) && s.asOf <= at) upsert(s);
+      });
+    }
+    var current = { harness: entry.harness, kind: w.kind, source: entry.source || "", resetsAt: reset, asOf: at, percent: w.percent };
+    if (valid(current)) upsert(current);
+    samples.sort(function (a, b) {
+      return a.asOf - b.asOf || (identity(a) < identity(b) ? -1 : identity(a) > identity(b) ? 1 : 0);
+    });
+    function visible(s) { return (s.resetsAt || 0) === reset && (!knownReset || s.asOf >= start && s.asOf <= reset); }
+    function geometry(s) {
+      var elapsed = knownReset ? Math.max(0, Math.min(1, (s.asOf - start) / duration)) : null;
+      return { asOf: s.asOf, percent: s.percent, elapsed: elapsed, delta: knownReset ? s.percent - elapsed * 100 : null,
+        x: knownReset ? 24 + elapsed * 246 : 147, y: 88 - s.percent * .76,
+        current: identity(s) === identity(current) };
+    }
+    samples.forEach(function (s, i) {
+      if (!visible(s)) return;
+      var b = geometry(s); points.push(b);
+      var previous = samples[i - 1];
+      // Inspect adjacent observations BEFORE selecting a reset/source. Otherwise
+      // an intervening identity could disappear and reconnect A -> B -> A.
+      if (!knownReset || !previous || !visible(previous) || !s.source || previous.source !== s.source ||
+          previous.asOf >= s.asOf || previous.percent > s.percent) return;
+      var a = geometry(previous), estimated = s.asOf - previous.asOf > 10 * 60000;
+      function segment(left, right) { segments.push({ a: left, b: right, estimated: estimated, above: (left.delta + right.delta) / 2 > 0 }); }
+      if (a.delta * b.delta < 0) {
+        var fraction = -a.delta / (b.delta - a.delta);
+        var cross = geometry({ asOf: a.asOf + (b.asOf - a.asOf) * fraction, percent: a.percent + (b.percent - a.percent) * fraction });
+        cross.delta = 0; cross.current = false;
+        segment(a, cross); segment(cross, b);
+      } else segment(a, b);
+    });
+    return { knownReset: knownReset, start: knownReset ? start : null, reset: reset, at: at, points: points, segments: segments };
+  }
+  var chartSerial = 0;
+  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, mount: function (doc, rail) {
     var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, popover = null, shown = false, place = function () {};
     function el(tag, cls, text) {
       var n = doc.createElement(tag); n.className = cls || "";
@@ -73,6 +124,81 @@
         button.appendChild(group);
       });
     }
+    function svgNode(tag, attrs, text) {
+      var n = doc.createElementNS("http://www.w3.org/2000/svg", tag);
+      Object.keys(attrs || {}).forEach(function (key) { n.setAttribute(key, String(attrs[key])); });
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+    function tint(delta) {
+      if (delta === null || delta === 0) return "var(--wb-muted-fg)";
+      return "color-mix(in srgb, var(--wb-muted-fg), var(" + (delta > 0 ? "--wb-fail" : "--wb-ok") + ") " + Math.min(100, Math.abs(delta)) + "%)";
+    }
+    function drawChart(entry, w, old, now) {
+      var geometry = trend(entry, w, data.history), id = "usage-chart-" + (++chartSerial);
+      var chart = svgNode("svg", { "class": "usage-chart", viewBox: "0 0 288 113", role: "img", "aria-label": label(w.kind) + " observed cumulative usage; " + (geometry.knownReset ? "dashed baseline is ideal burn, not prediction" : "reset unknown, isolated observations only") });
+      chart.appendChild(svgNode("title", {}, label(w.kind) + ": " + Math.round(w.percent) + "%; " + age(geometry.at, now) + (old ? "; stale, pace at last observation" : "")));
+      [12, 50, 88].forEach(function (y) { chart.appendChild(svgNode("line", { "class": "usage-grid", x1: 24, x2: 270, y1: y, y2: y })); });
+      chart.appendChild(svgNode("text", { x: 0, y: 15 }, "100"));
+      chart.appendChild(svgNode("text", { x: 5, y: 91 }, "0"));
+      function timeLabel(at) {
+        var date = new Date(at);
+        return w.kind === "five_hour" ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString([], { month: "numeric", day: "numeric" });
+      }
+      if (geometry.knownReset) {
+        var ideal = svgNode("path", { "class": "usage-ideal", d: "M24 88L270 12", "stroke-dasharray": "4 4" });
+        ideal.appendChild(svgNode("title", {}, "Ideal burn: even usage over the known reset window")); chart.appendChild(ideal);
+        chart.appendChild(svgNode("text", { x: 24, y: 106 }, timeLabel(geometry.start)));
+        chart.appendChild(svgNode("text", { x: 270, y: 106, "text-anchor": "end" }, timeLabel(geometry.reset)));
+        // Wall-clock context only; never extend the observed series to now.
+        if (now >= geometry.start && now <= geometry.reset) {
+          var nowX = 24 + (now - geometry.start) / (geometry.reset - geometry.start) * 246;
+          var guide = svgNode("line", { "class": "usage-now", x1: nowX, x2: nowX, y1: 12, y2: 88, "stroke-dasharray": "2 3" });
+          guide.appendChild(svgNode("title", {}, "Current time; not an observation")); chart.appendChild(guide);
+          chart.appendChild(svgNode("text", { "class": "usage-now-label", x: nowX, y: 10, "text-anchor": "middle" }, "Now"));
+        }
+      }
+      var defs = svgNode("defs"); chart.appendChild(defs);
+      geometry.segments.forEach(function (s, i) {
+        if (s.above) chart.appendChild(svgNode("polygon", { "class": "usage-excess", points: s.a.x + "," + s.a.y + " " + s.b.x + "," + s.b.y + " " + s.b.x + "," + (88 - s.b.elapsed * 76) + " " + s.a.x + "," + (88 - s.a.elapsed * 76), fill: "var(--wb-fail)", opacity: .09 }));
+        var gradientId = id + "-segment-" + i;
+        var gradient = svgNode("linearGradient", { id: gradientId, gradientUnits: "userSpaceOnUse", x1: s.a.x, y1: s.a.y, x2: s.b.x, y2: s.b.y });
+        gradient.appendChild(svgNode("stop", { offset: "0%", "stop-color": tint(s.a.delta) }));
+        gradient.appendChild(svgNode("stop", { offset: "100%", "stop-color": tint(s.b.delta) })); defs.appendChild(gradient);
+        var line = svgNode("line", { "class": "usage-actual", x1: s.a.x, y1: s.a.y, x2: s.b.x, y2: s.b.y, stroke: "url(#" + gradientId + ")", "stroke-width": 2.3 });
+        if (s.estimated) line.setAttribute("stroke-dasharray", "4 3");
+        line.appendChild(svgNode("title", {}, s.estimated ? "no record (estimated)" : "Observed usage interval")); chart.appendChild(line);
+      });
+      geometry.points.forEach(function (p) {
+        var point = svgNode("circle", { "class": "usage-point" + (p.current ? " usage-point-current" : ""), cx: p.x, cy: p.y, r: p.current ? 4 : 2.5, fill: old && p.current ? "var(--wb-muted-fg)" : tint(p.delta) });
+        point.appendChild(svgNode("title", {}, new Date(p.asOf).toLocaleString() + ": " + p.percent + "%" + (p.current ? "; current observation" : "") + (old && p.current ? "; stale" : ""))); chart.appendChild(point);
+      });
+      return { el: chart, geometry: geometry };
+    }
+    function windowCard(entry, w, now) {
+      var at = observation(w, entry), old = stale(at, now), delta = at ? pace(w, old ? at : now) : null;
+      var comparison = delta === null ? "—" : (delta > 0 ? "+" : delta < 0 ? "−" : "") + Math.abs(delta) + "%";
+      var card = el("article", "usage-window-card" + (old ? " usage-stale" : ""));
+      var head = el("div", "usage-window");
+      head.appendChild(el("span", "usage-window-name", label(w.kind)));
+      head.appendChild(el("b", "usage-number", Math.round(w.percent) + "%"));
+      head.appendChild(el("span", "usage-pace" + (delta > 0 ? " over" : delta < 0 ? " under" : ""), "(" + comparison + ")"));
+      if (old) head.appendChild(clock());
+      card.appendChild(head);
+      card.appendChild(el("div", "usage-meta", "Resets " + (w.resetsAt ? new Date(w.resetsAt).toLocaleString() : "unknown")));
+      var chart = drawChart(entry, w, old, now); card.appendChild(chart.el);
+      var observed = age(at, now) + (old ? "; stale, pace at last observation" : "");
+      card.appendChild(el("div", "usage-observed usage-meta", observed));
+      card.setAttribute("aria-label", label(w.kind) + ": " + Math.round(w.percent) + "%; pace " + comparison + "; " + observed);
+      var history = data.history, note;
+      if (!history || history.schema_version !== 1 || history.status === "unavailable") note = "History unavailable";
+      else if (history.status === "empty") note = "No history recorded";
+      else note = chart.geometry.points.length > 1 ? "Recorded observations only" : "No earlier history";
+      if (chart.geometry.points.length <= 1) note += chart.geometry.points.length ? "; current observation only" : "; no observation available";
+      if (!chart.geometry.knownReset) note += "; reset unknown, isolated observations only";
+      card.appendChild(el("div", "usage-history-state usage-meta", note));
+      return card;
+    }
     function drawPopover() {
       if (!popover || !shown) return;
       var list = popover.querySelector(".usage-details"); list.textContent = "";
@@ -84,14 +210,8 @@
         if (entry.plan) head.appendChild(el("span", "usage-plan", entry.plan));
         row.appendChild(head);
         var windows = active(entry, Date.now());
-        windows.sort(function (a, b) { return b.percent - a.percent; }).forEach(function (w) {
-          var line = el("div", "usage-window " + level(w.percent, data.warnPercent, data.critPercent));
-          line.appendChild(el("span", "", label(w.kind)));
-          line.appendChild(el("b", "", Math.round(w.percent) + "%"));
-          row.appendChild(line);
-          var reset = w.resetsAt ? new Date(w.resetsAt).toLocaleString() : "unknown";
-          row.appendChild(el("div", "usage-meta", "Resets " + reset));
-          row.appendChild(el("div", "usage-meta", age(w.asOf || entry.asOf, Date.now())));
+        windows.sort(function (a, b) { return (a.kind === "five_hour" ? 0 : 1) - (b.kind === "five_hour" ? 0 : 1); }).forEach(function (w) {
+          row.appendChild(windowCard(entry, w, Date.now()));
         });
         if (entry.status || !windows.length) row.appendChild(el("p", "usage-status", entry.status || "usage unavailable"));
         if (!windows.length && entry.asOf) row.appendChild(el("div", "usage-meta", age(entry.asOf, Date.now())));
@@ -102,7 +222,7 @@
     }
     function refresh(force) {
       if (pending) return pending;
-      pending = window.fetch("/rail/usage" + (force ? "?refresh=1" : ""), { credentials: "same-origin", cache: "no-store", headers: force ? { "X-WS-Usage-Refresh": "1" } : {} }).then(function (r) {
+      pending = window.fetch("/rail/usage?history=1" + (force ? "&refresh=1" : ""), { credentials: "same-origin", cache: "no-store", headers: force ? { "X-WS-Usage-Refresh": "1" } : {} }).then(function (r) {
         if (!r.ok) throw new Error("usage unavailable");
         return r.json();
       }).then(function (next) {
@@ -121,6 +241,13 @@
       var header = el("div", "usage-heading"); header.appendChild(el("b", "", "Plan usage"));
       var close = el("button", "usage-close", "✕"); close.type = "button"; close.setAttribute("aria-label", "Close plan usage");
       close.addEventListener("click", onClose); header.appendChild(close); box.appendChild(header);
+      var legend = el("div", "usage-chart-legend");
+      [["actual", "Observed usage"], ["ideal", "Ideal burn, not prediction"], ["point", "Latest observation"], ["estimated", "No record (estimated)"]].forEach(function (item) {
+        var key = el("span");
+        var swatch = el("i", "usage-swatch usage-swatch-" + item[0]); swatch.setAttribute("aria-hidden", "true");
+        key.appendChild(swatch); key.appendChild(el("span", "", item[1])); legend.appendChild(key);
+      });
+      box.appendChild(legend);
       box.appendChild(el("div", "usage-details")); popover = box;
       return { el: box, open: function () { shown = true; drawPopover(); refresh(true); }, close: function () { shown = false; }, focus: function () { box.focus(); } };
     }

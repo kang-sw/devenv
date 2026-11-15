@@ -152,7 +152,7 @@ type TopicView struct {
 	// numbering of bodyUnits.
 	DocMarks []BlockMark
 	// BodyUpdatedAt is the locally validated actual body mutation time,
-	// shared by the header and both gutter render paths. Empty means unknown;
+	// shared by the body metadata and both gutter render paths. Empty means unknown;
 	// ChangedAt alone (possibly a legacy backfill) never supplies this value.
 	BodyUpdatedAt string
 	// DocStale marks the body's change marks as no longer fresh: an item of

@@ -67,6 +67,9 @@ function frag() {}
 function railKey() {}
 function railPopOpen() {}
 function setTheme() {}
+var settings = [];
+function setLayout(v) { settings.push(["layout", v]); }
+function setInput(v) { settings.push(["input", v]); }
 var times = 0, tickSets = null;
 function fmtTime() { times++; }
 function pace() {}
@@ -86,6 +89,10 @@ var s = sockets[0];
 check("a framed session page streams without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1");
 s.onopen({});
 function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }
+fromShell({ wsShell: "settings", layout: "tabs", input: "mod" }, otherWin);
+check("another window cannot change settings", settings, []);
+fromShell({ wsShell: "settings", layout: "tabs", input: "mod" });
+check("shell settings apply without consulting storage", settings, [["layout", "tabs"], ["input", "mod"]]);
 fromShell({ wsShell: "search" }, otherWin);
 check("another window cannot open search", searchOpens, 0);
 fromShell({ wsShell: "search" });
@@ -210,7 +217,7 @@ var doc = { title: "a - ws dashboard",
 function $(id) { return id === "frames" ? framesBox : null; }
 var attrs = {};
 var root = { setAttribute: function (k, v) { attrs[k] = v; }, removeAttribute: function (k) { delete attrs[k]; }, hasAttribute: function (k) { return k in attrs; }, style: { setProperty: function () {} } };
-var shell = true, framed = false, rid = "a", headHeld = null, log = [];
+var shell = true, framed = false, rid = "a", headHeld = null, log = [], layoutMode = "tabs", inputMode = "mod";
 function region() { return null; }
 function labelEditing() { return false; }
 function labelEnd() {}
@@ -252,7 +259,7 @@ func TestShellSwitchesFramesThroughItsGlue(t *testing.T) {
 	runNode(t, "shell glue", shellGlueHarness+mustAsset(t, "shell.js")+"\n(function () {\n"+glue+init+`
 first.contentDocument.readyState = "complete";
 shShellInit();
-check("the first frame is taken by its path despite a query, loaded, and asked to sync", [shOn && shOn.el === first, shOn && shOn.loaded, first.got], [true, true, ["sync"]]);
+check("the first frame is taken by its path despite a query, loaded, and asked to sync", [shOn && shOn.el === first, shOn && shOn.loaded, first.got], [true, true, ["sync", "settings"]]);
 from(first.contentWindow, { wsShell: "head", html: "<b>a</b>", qs: "", pad: 0, top: 40 });
 check("the shown frame's head is shown", log, ["swap:head:<b>a</b>"]);
 log = [];
@@ -272,7 +279,7 @@ check("a plain click on a session link is taken", click("/s/b"), true);
 var b = frameOf("/s/b");
 check("a new frame loads hidden while the shown one stays", [pushed, live(), on(), attrs["data-rid"]], [["/s/b"], ["/s/a", "/s/b"], ["/s/a?frame=1"], "b"]);
 b.load();
-check("once loaded it shows; each frame is told", [on(), first.got, b.got], [["/s/b?frame=1"], ["sync", "shown:false"], ["shown:true"]]);
+check("once loaded it shows; each frame is told", [on(), first.got, b.got], [["/s/b?frame=1"], ["sync", "settings", "shown:false"], ["settings", "shown:true"]]);
 check("a modified click and another route are left to the browser", [click("/s/c", { ctrlKey: true }), click("/tracker/x"), click("https://example.com/")], [false, false, false]);
 
 from(first.contentWindow, { wsShell: "nav", href: "/s/c" });
@@ -281,7 +288,7 @@ from(b.contentWindow, { wsShell: "nav", href: "/s/c" });
 from(b.contentWindow, { wsShell: "nav", href: "/s/d" });
 var c = frameOf("/s/c"), d = frameOf("/s/d");
 c.load();
-check("a frame superseded before it showed is told it is hidden", [c.got, on()], [["shown:false"], ["/s/b?frame=1"]]);
+check("a frame superseded before it showed is told it is hidden", [c.got, on()], [["settings", "shown:false"], ["/s/b?frame=1"]]);
 d.load();
 check("the last pick shows", on(), ["/s/d?frame=1"]);
 first.load();

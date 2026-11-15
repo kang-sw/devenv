@@ -1,0 +1,171 @@
+'use strict';
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { discover } = require('./endpoint');
+const { nextZoom, destination } = require('./policy');
+
+function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
+  app.setName('Werkschaft');
+  if (!app.requestSingleInstanceLock()) { app.quit(); return; }
+  let window, pin = null, connecting = false, title = 'Werkschaft — Connecting…';
+  let zoom = 1;
+  const focus = () => {
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  };
+  app.on('second-instance', focus);
+  app.on('activate', focus);
+  app.on('window-all-closed', () => app.quit());
+
+  app.whenReady().then(() => {
+    // No preload, IPC handlers, webview, Node, or permissions for any document.
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    window = new BrowserWindow({
+      title, width: 1280, height: 860, minWidth: 760, minHeight: 520,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false },
+    });
+    const wc = window.webContents;
+    let navigation, closing = false, retained = { pin, title };
+    window.on('close', () => { closing = true; });
+    function beginNavigation() {
+      const attempt = { loading: false, stayed: false };
+      navigation = attempt;
+      return attempt;
+    }
+    const isCurrent = attempt => navigation === attempt && !window.isDestroyed();
+    wc.setUserAgent(`${wc.getUserAgent()} Werkschaft/${app.getVersion()}`);
+    wc.on('page-title-updated', event => { event.preventDefault(); window.setTitle(title); });
+    wc.on('will-attach-webview', event => event.preventDefault());
+    const openExternal = url => {
+      // Classification is repeated at the authority boundary; never open a scheme
+      // merely because a caller thinks it was already validated.
+      if (destination(url, pin) !== 'external') return;
+      shell.openExternal(url).catch(() => console.error('Could not open the external link in the system browser'));
+    };
+    // Initial iframe src loads do not reliably emit will-frame-navigate.
+    // Enforce the pin at the network boundary too, including redirect hops.
+    const connectionURL = pathToFileURL(path.join(__dirname, 'connection.html')).href;
+    wc.on('did-navigate', (_event, url) => {
+      const target = navigation?.commitTarget;
+      // Rollback belongs to the committed document, never another attempt's
+      // provisional pin/title. A late promise settlement cannot advance it.
+      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : url === connectionURL)) retained = target;
+    });
+    session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
+      if (details.resourceType === 'mainFrame' && details.url === connectionURL) return callback({});
+      const action = destination(details.url, pin, details.resourceType === 'mainFrame');
+      if (action === 'dashboard' || action === 'frame') return callback({});
+      callback({ cancel: true });
+      if (action === 'external') openExternal(details.url);
+    });
+    const guard = (event, url, isMainFrame) => {
+      const action = destination(url, pin, isMainFrame);
+      if (action === 'dashboard' || action === 'frame') return;
+      event.preventDefault();
+      if (action === 'external') openExternal(url);
+    };
+    // Frame navigation and redirects need their own hooks: will-navigate covers
+    // only the main frame, and checking just the initial URL misses redirects.
+    wc.on('will-frame-navigate', event => guard(event, event.url, event.isMainFrame));
+    wc.on('will-redirect', event => guard(event, event.url, event.isMainFrame));
+    wc.setWindowOpenHandler(({ url }) => {
+      const action = destination(url, pin);
+      if (action === 'dashboard') navigate(url);
+      else if (action === 'external') openExternal(url);
+      return { action: 'deny' };
+    });
+    wc.on('will-prevent-unload', event => {
+      // Capture the load before the synchronous native dialog: a newer attempt
+      // must never inherit an older load's Stay (or an unrelated X-close veto).
+      const attempt = !closing && navigation?.loading ? navigation : null;
+      const leave = dialog.showMessageBoxSync(window, {
+        type: 'question', buttons: ['Stay', 'Leave'], defaultId: 0, cancelId: 0,
+        title: 'Leave Werkschaft?', message: 'Leave this page?',
+        detail: 'Changes you made may not be saved.', noLink: true,
+      });
+      closing = false;
+      // Electron's preventDefault here means ignore the page's veto, not stay.
+      if (leave === 1) event.preventDefault();
+      else if (attempt && isCurrent(attempt)) attempt.stayed = true;
+    });
+    function setTitle(value) { title = value; if (!window.isDestroyed()) window.setTitle(title); }
+    function navigationFailed(attempt) {
+      pin = null;
+      const failureTitle = 'Werkschaft — Navigation failed — ⌘R to retry';
+      setTitle(failureTitle);
+      attempt.commitTarget = { pin: null, title: failureTitle };
+      return wc.loadFile(path.join(__dirname, 'connection.html')).catch(() => {});
+    }
+    async function navigate(url, attempt = beginNavigation()) {
+      if (!isCurrent(attempt)) return;
+      attempt.commitTarget = { pin: `${new URL(url).origin}/`, title: 'Werkschaft' };
+      attempt.loading = true;
+      try { await wc.loadURL(url); }
+      catch (error) {
+        if (!isCurrent(attempt)) return;
+        // ERR_ABORTED alone also means supersession or policy cancellation. Only
+        // this still-current load's observed Stay may restore the retained page.
+        if (attempt.stayed && (error.code === 'ERR_ABORTED' || error.errno === -3)) {
+          pin = retained.pin;
+          setTitle(retained.title);
+        } else await navigationFailed(attempt);
+      } finally {
+        attempt.loading = false;
+        if (navigation === attempt) navigation = null;
+      }
+    }
+    async function connect() {
+      if (connecting || window.isDestroyed()) return;
+      const attempt = beginNavigation();
+      connecting = true;
+      setTitle('Werkschaft — Connecting…');
+      try {
+        let url;
+        try { url = await discover(); }
+        catch (error) {
+          if (!isCurrent(attempt)) return;
+          pin = null;
+          const failureTitle = `Werkschaft — ${error.message} — ⌘R to retry`;
+          setTitle(failureTitle);
+          attempt.commitTarget = { pin: null, title: failureTitle };
+          await wc.loadFile(path.join(__dirname, 'connection.html'));
+          return;
+        }
+        if (!isCurrent(attempt)) return;
+        pin = url;
+        setTitle('Werkschaft');
+        await navigate(url, attempt);
+      } catch { if (isCurrent(attempt)) await navigationFailed(attempt); }
+      finally {
+        connecting = false;
+        if (navigation === attempt) navigation = null;
+      }
+    }
+    function zoomBy(step) {
+      zoom = nextZoom(zoom, step);
+      wc.setZoomFactor(zoom);
+    }
+    const menu = [
+      { role: 'appMenu' },
+      { label: 'File', submenu: [{ role: 'close' }] },
+      { role: 'editMenu' },
+      { label: 'View', submenu: [
+        { role: 'togglefullscreen' }, { type: 'separator' },
+        { id: 'zoom_reset', label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoomBy('reset') },
+        { id: 'zoom_in', label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoomBy('in') },
+        { id: 'zoom_in_shifted', label: 'Zoom In', accelerator: 'CmdOrCtrl+Shift+=', click: () => zoomBy('in') },
+        { id: 'zoom_out', label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => zoomBy('out') },
+      ] },
+      { role: 'windowMenu' }, { role: 'help', submenu: [] },
+      { label: 'Connection', submenu: [{ id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: connect }] },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(menu));
+    connect();
+  });
+}
+if (require.main === module) start(require('electron'));
+module.exports = { start };

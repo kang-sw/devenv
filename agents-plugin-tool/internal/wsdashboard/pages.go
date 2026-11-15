@@ -582,6 +582,8 @@ func renderRegionElement(host regionHost, name string) template.HTML {
 type sessionPageData struct {
 	SessionView
 	Assets pageAssetsData
+	// LAN is used only by standalone local Settings, never a shared region.
+	LAN *LANAccess
 	// SysOpen offers the link menu's "open with system" item: the
 	// page was asked for by a browser on this machine. It is outside every
 	// region, since regions are shared by every viewer's stream.
@@ -604,16 +606,18 @@ func (p sessionPageData) regionByName(name string) renderedRegion { return p.reg
 // shellPageData is the iframe shell (the "shell" template): the session
 // rail and the top header, which stay across navigations, over the frames
 // the dashboard's pages load in (shell.js, dashboard.js). RID is the
-// session it opens on, empty on the index; Src is the first frame's path,
+// session it opens on, empty at the root; Src is the first frame's path,
 // Title the tab's title until that frame names one. Its regions are the
 // rail and, on a session, the opening session's head; later heads come
-// from the frames. OwnHead marks a first page that keeps its own header
-// (the index), beside which the shell shows only its rail button.
+// from the frames. Settings and its local-only LAN block are outside those
+// regions, so no shared stream ever discloses the token.
 type shellPageData struct {
 	Lang, LangPref, Theme string
 	Assets                pageAssetsData
 	SysOpen, OwnHead      bool
 	RID, Src, Title       string
+	Version               string
+	LAN                   *LANAccess
 	regions               regionSet
 }
 
@@ -622,8 +626,8 @@ func (p shellPageData) regionByName(name string) renderedRegion { return p.regio
 type indexPageData struct {
 	IndexView
 	Assets pageAssetsData
-	// LAN is the LAN access block, set only for a local viewer in LAN mode.
-	// It is outside every region, so no SSE update ever carries the token.
+	// LAN is only used if rendering standalone local Settings. The root's
+	// framed response gets none; the owning shell has the local-only block.
 	LAN *LANAccess
 	// Local marks a page asked for by a browser on this machine, like
 	// sessionPageData.SysOpen.
@@ -1070,8 +1074,9 @@ func (d *Daemon) pagesIn(lang string) pageReader {
 	return r
 }
 
-// handleIndex serves /: the iframe shell, which loads the index in a frame
-// of its own, or with ?frame=1 the index as the shell frames it.
+// handleIndex serves / as an empty-selection session layout. The shell
+// owns the rail and Settings; its frame has an empty main panel, not a
+// missing-session finding or a silently chosen session.
 func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -1085,16 +1090,12 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lang, pref := requestLang(r)
-	view := d.pagesIn(lang).indexView()
-	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
-	regions, err := renderIndexRegions(view)
+	view := IndexView{Version: d.endpoint.Version, Lang: lang, LangPref: pref, Theme: requestTheme(r)}
+	html, err := renderIndexPage(view, nil, nil, localViewer(r), true)
 	if err == nil {
-		var html string
-		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r), localViewer(r), true); err == nil {
-			admitShellFrame(w, frameAncestorsSelf)
-			writeHTML(w, html)
-			return
-		}
+		admitShellFrame(w, frameAncestorsSelf)
+		writeHTML(w, html)
+		return
 	}
 	fmt.Fprintf(d.log, "dashboard: render index: %v\n", err)
 	http.Error(w, "render failed", http.StatusInternalServerError)
@@ -1109,6 +1110,13 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 // routes, and the shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
+	// The host anchor is not a session, including at the page's redirect
+	// path. Refuse before any session handler or method-specific response.
+	if replyID, sub, _ := strings.Cut(rest, "/"); replyID == LocalBrowseAnchor &&
+		!strings.HasPrefix(sub, "fs/") && sub != "terminals" && !strings.HasPrefix(sub, "terminals/") {
+		http.NotFound(w, r)
+		return
+	}
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
 		d.handleInboxWrite(w, r, replyID, sub)
 		return
@@ -1248,10 +1256,10 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 // serveShell serves the iframe shell whose first frame loads src: the
 // session rail, rendered as its stream renders it (railPageSource), and the
 // top header, holding view's head when the shell opens on a session; with
-// no view (the index) the first page keeps its own header.
+// no view, the root has an empty header and no selected session.
 func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *SessionView, src string) {
 	lang, pref := requestLang(r)
-	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), OwnHead: view == nil, Src: src, Title: "ws dashboard"}
+	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "ws dashboard", Version: d.endpoint.Version, LAN: d.lanAccessFor(r)}
 	if view != nil {
 		page.RID = view.ReplyID
 		page.Title = view.Label
