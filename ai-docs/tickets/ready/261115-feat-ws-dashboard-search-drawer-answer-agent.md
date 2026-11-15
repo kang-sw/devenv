@@ -421,6 +421,41 @@ product-code change was needed on resume.
   this Result claims no review verdict. Phase 2 remains unfinished, so the
   ticket stays in ready/.
 
+#### Edition (54260ec29) - 2026-11-15
+
+Fixed exactly the Critical and Important findings from the independent lite
+review of `bd316e89a..92b96d89f`:
+
+- **Critical — readable credentials:** `question/snapshot/board.json` is now
+  the only material in the extra read grant. Read/Grep/Glob permission entries
+  name only the project root and that snapshot subtree, while credential-bearing
+  runner state stays in the sibling `question/runner/` tree. Terminal cleanup
+  still removes their common question directory. The regression launches a
+  question, checks exact permission entries, scans both granted trees for
+  `agent.json` and the minted session key, and checks deletion of both siblings.
+- **Important — ineffective freeze test:** an internal test-only hook gates
+  execution after the ceiling check but before the private runner resolves.
+  While gated, the test replaces the winning repo override with a same-backend
+  `read,bash` definition, releases the gate, and requires the checked `read`
+  definition at launch. The previous lower-priority global edit is gone.
+- Negative control: temporarily omitting the fixed-profile assignment made
+  `TestSearchAnswerOverrideLaunchFrozen` fail with
+  `tools=[read bash] backend=pi model=custom effort=low`. Freezing was restored
+  before final acceptance; no mutation probe remains in the committed source.
+- Passing final verification from `agents-plugin-tool/`:
+  `go test -race ./internal/wsagent ./internal/mcp -run
+  '^(TestSearchAnswer|TestDashboardSearchAnswer|TestBuiltin|TestAgentProfile|TestClaudeArgs|TestPiArgs|TestClaudeBackendStart$|TestPiBackendStart$|TestCloseEscalates$|TestFatalKillsTheChild$|TestExitedChildIsNotHeldByAGrandchildsStderr$)'
+  -count=1`. This includes both new/revised regressions. Focused regression
+  checks, `git diff --check`, and gofmt checks also passed.
+- Full output: `/tmp/scouts-sandbag-viselike-reviewfix/{regressions,freeze-disabled,acceptance}.log`.
+  All Go commands used GOPROXY=off, GOSUMDB=off, GOTOOLCHAIN=local and isolated
+  cache/config homes. The owned-process scan found no matching test/answer
+  processes. No shared daemon, port 29417, real model, full dashboard package,
+  child agent, merge or push was used. No i18n keys changed.
+- This is the existing Phase 1 review-fix round, not a new phase or review
+  sweep. Frozen Result text and Phase 2 remain unchanged; the previously
+  recorded best-effort Claude boundary limitation is not reclassified as proof.
+
 ### Phase 2: Search drawer and keyboard contract
 
 Move the palette from the modal `<dialog>` into the search sheet of the
