@@ -203,6 +203,7 @@ var mode = "session", rid = "rid1", worktree = "", hiddenRegions = {}, modeHash 
 function held() { return ""; }
 function trackerLost() {}
 function trackerNudge() {}
+function boardSaveReload() { log.push("save-board"); }
 function swap() {}
 function tlHold() {}
 function syncBadge() {}
@@ -226,13 +227,13 @@ check("the same assets do nothing", log, []);
 s.msg("assets", {});
 check("a daemon naming none does nothing", log, []);
 s.msg("assets", { id: "bbb" });
-check("other assets reload", log, ["reload"]);
+check("other assets save before reloading", log, ["save-board", "reload"]);
 log = [];
 s.msg("assets", { id: "bbb" });
 check("a second reload for the same assets banners instead", log, ["banner:js.banner.updated"]);
 log = [];
 s.msg("assets", { id: "ccc" });
-check("newer assets reload again", log, ["reload"]);
+check("newer assets reload again", log, ["save-board", "reload"]);
 log = [];
 ctext.value = "draft";
 s.msg("assets", { id: "ddd" });
@@ -252,11 +253,26 @@ closeRequests = [];
 check("removing the last close request releases the draft guard", holdsDraft(), false);
 s.msg("assets", { id: "close-assets" });
 modeChanged("live");
-check("assets and modes can reload after removing the request", log, ["reload", "reload"]);
+check("assets and modes can reload after removing the request", log, ["save-board", "reload", "reload"]);
 log = [];
 mine = null;
 s.msg("assets", { id: "eee" });
 check("a page rendered without an identity does nothing", log, []);
+log = [];
+mine = "aaa";
+shell = true;
+var shFrames = [{ el: { contentWindow: { wsSaveBoardReload: function () { log.push("save-frame"); } } } }, { el: { contentWindow: { wsSaveBoardReload: function () { log.push("save-inactive"); } } } }];
+var shOn = shFrames[0];
+s.msg("assets", { id: "fff" });
+check("shell saves only its active frame before reload", log, ["save-board", "save-frame", "reload"]);
+log = [];
+shOn = { el: {} };
+s.msg("assets", { id: "ggg" });
+check("shell tolerates an unavailable active frame", log, ["save-board", "reload"]);
+log = [];
+shOn = null;
+s.msg("assets", { id: "hhh" });
+check("shell tolerates no active frame", log, ["save-board", "reload"]);
 process.stdout.write(bad.join("\n"));
 })();
 `)
