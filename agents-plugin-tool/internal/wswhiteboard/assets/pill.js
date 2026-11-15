@@ -59,10 +59,12 @@
   // The buttons are built once, so a redraw never drops a focused one.
   var KINDS = ["open", "ans", "nt"];
   function wrapper(edge) {
-    var w = host.querySelector(".oq-wrap." + edge);
+    // Edge modifiers must not share the page header's bare .top class.
+    var modifier = edge === "top" ? "wb-oq-top" : "wb-oq-bot";
+    var w = host.querySelector(".oq-wrap." + modifier);
     if (!w) {
       w = d.createElement("div");
-      w.className = "oq-wrap " + edge;
+      w.className = "oq-wrap " + modifier;
       var p = d.createElement("div");
       p.className = "oq-pill";
       p.hidden = true;

@@ -7,9 +7,9 @@ const { pathToFileURL } = require('node:url');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [mockup, output] = process.argv.slice(2);
 assert.ok(mockup && output, 'pass the approved mockup HTML and output directory');
-const assets = path.resolve(__dirname, '../assets');
-const css = [path.resolve(__dirname, '../../wswhiteboard/assets/page.css'), path.join(assets, 'dashboard.css'), path.join(assets, 'usage.css')].map(p => fs.readFileSync(p, 'utf8')).join('\n');
-const scripts = ['rail.js', 'usage.js', 'dashboard.js'].map(p => fs.readFileSync(path.join(assets, p), 'utf8'));
+const { readAssetSource } = require('./asset-source.cjs');
+const css = [readAssetSource('wswhiteboard', 'page.css'), readAssetSource('wsdashboard', 'dashboard.css'), readAssetSource('wsdashboard', 'usage.css')].join('\n');
+const scripts = ['rail.js', 'usage.js', 'dashboard.js'].map(p => readAssetSource('wsdashboard', p));
 const at = Date.UTC(2026, 10, 15);
 function entries(variant) {
   const observed = variant === 'stale' ? at - 42 * 60000 : at;

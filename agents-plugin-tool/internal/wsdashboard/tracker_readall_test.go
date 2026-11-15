@@ -15,7 +15,7 @@ import (
 // announced by tkReadAll itself, since done's caller (tkReload) does. The
 // cases execute under node when it is installed.
 func TestTrackerTkReadAllRendersEachStoreAsItArrives(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

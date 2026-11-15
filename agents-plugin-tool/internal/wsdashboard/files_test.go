@@ -111,6 +111,27 @@ func TestFilesWorkspacePickerShellAssets(t *testing.T) {
 	}
 }
 
+func TestFilesExplorerRootPopoverLayout(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for selector, values := range map[string][]string{
+		`.froot-pop .froot-list`:       {"max-height: 300px", "overflow-y: auto"},
+		`.froot-pop .froot-row`:        {"height: 26px", "display: flex"},
+		`.froot-pop .froot-filter`:     {"height: 26px", "var(--wb-muted)", "var(--wb-fg)"},
+		`.froot-pop .froot-branch`:     {"text-overflow: ellipsis", "direction: rtl", "var(--wb-mono)", "var(--wb-muted-fg)"},
+		`.froot-pop .froot-branch bdi`: {"direction: ltr", "unicode-bidi: isolate"},
+	} {
+		rule := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(selector) + ` \{[^}]+\}`).FindString(css)
+		for _, value := range values {
+			if !strings.Contains(rule, value) {
+				t.Errorf("%s lacks %q", selector, value)
+			}
+		}
+	}
+	if regexp.MustCompile(`(?m)^\.fi[\s.{:]`).MatchString(css) {
+		t.Error("root choices must not override the explorer's fi icons")
+	}
+}
+
 func TestFilesExplorerPathBarLayout(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{

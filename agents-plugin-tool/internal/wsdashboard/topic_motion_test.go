@@ -19,7 +19,7 @@ import (
 // at the first frame (startMotion, TestBoardMotionStartsAtFirstFrame).
 // The cases execute under node when it is installed.
 func TestBoardTopicMotion(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +38,12 @@ func TestBoardTopicMotion(t *testing.T) {
 	if !strings.Contains(js, "        var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });\n") {
 		t.Error("swap does not grow the inserted topics after preparing them")
 	}
-	if !strings.Contains(js, "        if (kept) kept.h.apply();\n        startMotion(moves.concat(slideBoard(el, before, kept && window.wbHistory.keeping(kept.h.scroller) ? boardTop : null)));\n") {
-		t.Error("swap does not compensate the scroll, then slide the board (in screen terms while kept), and start both at the first frame")
+	if !strings.Contains(js, "        startMotion(moves.concat(slideBoard(el, before, boardTop)));\n") {
+		t.Error("swap does not start both animations at the first frame")
+	}
+	swap := dashboardFuncs(t, "swap")
+	if strings.Count(swap, "kept.h.apply()") != 1 || strings.Index(swap, "kept.h.apply()") < strings.Index(swap, "restoreScroll(scroll);") {
+		t.Error("swap must correct exactly once after its synchronous changes, not inside animation setup")
 	}
 	runNode(t, "board topic motion", `
 var bad = [];
@@ -99,6 +103,7 @@ slideBoard(board, { "t:Up": { h: 50, y: 230 }, "t:Down": { h: 70, y: 0 } }, 80);
 check("in screen terms, a topic held in place does not slide", down.anims, []);
 check("in screen terms, the topic that moved slides from its old screen spot", up.anims, [[[{ transform: "translateY(410px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }]]);
 
+var boardFrozen = [];
 function decide(board, still, rm) {
   var el = {};
   function reducedMotion() { return rm; }
@@ -110,6 +115,8 @@ check("a live board swap reads spots", decide(true, undefined, false), "heights"
 check("a deferred swap is still", decide(true, true, false), null);
 check("reduced motion is still", decide(true, undefined, true), null);
 check("another region reads none", decide(false, undefined, false), null);
+boardFrozen = [{}];
+check("external updates cannot animate through frozen visible geometry", decide(true, undefined, false), null);
 process.stdout.write(bad.join("\n"));
 `)
 }

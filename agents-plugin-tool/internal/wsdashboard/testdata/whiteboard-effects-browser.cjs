@@ -78,6 +78,7 @@ async function until(check, message) {
         }, 'active production session frame reaches ' + mode);
       }
       async function shot(name) {
+        if (process.env.WS_BOARD_ACCEPTANCE_LOGIC_ONLY === '1') return;
         await tab.screenshot({ path: path.join(output, `${width}-${name}.png`), fullPage: true });
       }
       async function showTab(name) {
@@ -90,20 +91,21 @@ async function until(check, message) {
         assert.equal(await page.locator('#composer, #ctext, #apbox, #r-tree, #r-convlive, #r-ctx, #r-cmds, #r-sline').count(), 0, 'saved history contains no fabricated live controls/activity');
       }
       async function effectsKeys() {
-        return page.locator('details.wbeffects[data-entry]').evaluateAll(nodes => nodes.map(e => e.getAttribute('data-entry')));
+        return page.locator('.wbeffects[data-entry]').evaluateAll(nodes => nodes.map(e => e.getAttribute('data-entry')));
       }
       async function arrived(update, beforeKeys, expand) {
         assert(update.key && !beforeKeys.includes(update.key), 'append returns a genuinely new effects ring key');
-        const fresh = page.locator(`details.wbeffects[data-entry="${update.key}"]`);
+        const fresh = page.locator(`.wbeffects[data-entry="${update.key}"]`);
         await fresh.waitFor({ state: 'attached' });
-        assert.equal(await fresh.count(), 1, 'new carrier renders as its own effects disclosure');
-        assert.equal(await fresh.locator('.wbeffect-values').count(), 2, 'new valid carrier is decoded, not omitted or shown as fallback');
+        assert.equal(await fresh.count(), 1, 'new carrier renders as its own update card');
+        assert.equal(await fresh.locator('.wbeffect-values').count(), 1, 'log diagnostics remain inspectable; panel payload is not imported');
+        assert(!(await fresh.textContent()).includes('PANEL-PAYLOAD-ONLY'), 'panel payload stays on the board');
         assert.equal(await fresh.locator('.wbeffect-fallback, script, img, iframe, strong').count(), 0);
-        assert((await fresh.locator('pre').allTextContents()).includes(update.payload), 'newly arriving hostile payload remains exact literal text');
+        assert((await fresh.locator('pre').allTextContents()).includes(update.payload), 'newly arriving hostile log remains exact literal text');
         assert.equal(await page.evaluate(() => typeof window.effectsAttack), 'undefined', 'new effects payload never executes');
         if (expand) {
-          await fresh.locator('summary').click();
-          assert.equal(await fresh.evaluate(e => e.open), true, 'new effects carrier is expandable');
+          await fresh.locator('.wbeffect-details > summary').click();
+          assert.equal(await fresh.locator('.wbeffect-details').evaluate(e => e.open), true, 'change diagnostics expand independently of the card');
         }
       }
       async function waitStored(draft) {
@@ -125,17 +127,18 @@ async function until(check, message) {
         await active('history');
         await savedOnly();
         await showTab('convo');
-        const effect = () => page.locator(`details.wbeffects[data-entry="${keys.focus}"]`);
-        const fallback = () => page.locator(`details.wbeffects[data-entry="${keys.fallback}"]`);
+        const effect = () => page.locator(`.wbeffects[data-entry="${keys.focus}"]`);
+        const fallback = () => page.locator(`.wbeffects[data-entry="${keys.fallback}"]`);
         await effect().waitFor({ state: 'attached' });
-        await effect().locator('summary').click();
+        await effect().locator('.wbeffect-details > summary').click();
         await effect().evaluate(e => { e.effectsBrowserIdentity = 'original-effect-node'; });
-        assert.equal(await effect().evaluate(e => e.open), true);
+        assert.equal(await effect().locator('.wbeffect-details').evaluate(e => e.open), true);
         const values = await effect().locator('pre').allTextContents();
-        assert(values.some(s => s.includes('<img src=x onerror="window.effectsAttack=1">') && s.includes('**plain text**')), 'valid payload stays literal, including HTML and Markdown syntax');
+        assert(values.some(s => s.includes('<img src=x onerror="window.effectsAttack=1">') && s.includes('**plain text**')), 'valid log stays literal, including HTML and Markdown syntax');
         assert.equal(await effect().locator('script, img, iframe, strong').count(), 0, 'effects never execute/render panel HTML or Markdown');
         assert.equal(await page.evaluate(() => typeof window.effectsAttack), 'undefined');
-        await fallback().locator('summary').click();
+        assert((await effect().textContent()).includes('Panel recap only'), 'panel has a recap');
+        assert(!(await effect().textContent()).includes('PANEL-PAYLOAD-ONLY'), 'panel body has no in-chat expansion');
         assert((await fallback().textContent()).includes('Details unavailable or unsupported'));
         assert((await fallback().locator('.wbeffect-fallback').textContent()).includes('"v":99'));
         assert.equal(await fallback().locator('img, script, iframe, .wbeffect-values').count(), 0, 'unsupported envelope is escaped fallback, not invented effects');
@@ -145,7 +148,7 @@ async function until(check, message) {
         const refresh = await action('append');
         await page.getByText(refresh.marker, { exact: true }).waitFor({ state: 'attached' });
         await arrived(refresh, savedKeys, true);
-        assert.equal(await effect().evaluate(e => e.open && e.effectsBrowserIdentity === 'original-effect-node'), true, 'real stream refresh preserves expanded node');
+        assert.equal(await effect().evaluate(e => e.querySelector('.wbeffect-details').open && e.effectsBrowserIdentity === 'original-effect-node'), true, 'real stream refresh preserves expanded diagnostics and node');
         assert.equal(await page.getByText('old-history-marker', { exact: true }).count(), 0, 'old marker is outside initial ring window');
         const older = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/effectsession/history' && r.status() === 200);
         await page.locator('#convo').evaluate(e => { e.scrollTop = 0; e.dispatchEvent(new Event('scroll')); });
@@ -154,7 +157,7 @@ async function until(check, message) {
         assert(historyBody.html.includes('old-history-marker'), 'production history handler supplies older records');
         await page.getByText('old-history-marker', { exact: true }).waitFor({ state: 'attached' });
         assert(history.length > 0, 'real older-history paging occurred');
-        assert.equal(await effect().evaluate(e => e.open && e.effectsBrowserIdentity === 'original-effect-node'), true, 'paging retains expansion and existing entry identity');
+        assert.equal(await effect().evaluate(e => e.querySelector('.wbeffect-details').open && e.effectsBrowserIdentity === 'original-effect-node'), true, 'paging retains diagnostics expansion and existing entry identity');
         await effect().scrollIntoViewIfNeeded();
         await shot('expanded-after-refresh-and-history');
 

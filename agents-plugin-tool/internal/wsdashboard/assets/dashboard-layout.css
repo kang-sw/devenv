@@ -1,0 +1,336 @@
+/* ===== session layout =====
+   live: one grid whose children are the tab bar, the tree, the splitter, the
+   conversation, the composer, and the board column (the panels are in the
+   drawer). The base rules are the tabs view; the split view overrides them
+   for an explicit "split" on any screen wider than a phone, and for "auto"
+   (or no choice) on a wide screen. Every pane scrolls on its own inside a grid that fills the
+   viewport. The tree and the conversation share their column at a fixed
+   ratio: --sa and --sb are fr shares the page script sets from the saved
+   splitter position, so neither pane resizes with its content; the px floors
+   keep either from collapsing on a short window. */
+/* Saved lead history has its own layout, not a synthetic live adapter. */
+.dash.history .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+.dash.history .top { flex: none; }
+.dgrid.history { flex: 1 1 0; min-height: 0; display: grid; gap: 10px 16px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+.dgrid.history > * { min-width: 0; min-height: 0; }
+.dgrid.history > .tabbar { grid-column: 1 / -1; }
+.dgrid.history > .convo, .dgrid.history > .bcol { grid-column: 1; grid-row: 2; overflow: auto; }
+.dgrid.history > .bcol { overflow-anchor: none; }
+.dgrid.history[data-tab="board"] > .convo, .dgrid.history:not([data-tab="board"]) > .bcol { display: none; }
+@media (min-width: 1100px) {
+  .dgrid.history { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(0, 1fr); }
+  .dgrid.history > .tabbar { display: none; }
+  .dgrid.history[data-tab] > .convo, .dgrid.history[data-tab] > .bcol { display: block; grid-row: 1; }
+  .dgrid.history > .bcol { grid-column: 2; }
+}
+.wbeffects { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 8px; min-width: 0; }
+.wbeffects > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.wbeffects > summary time { margin-left: auto; flex: none; }
+.wbeffects > ol { margin: 10px 0 0; padding-left: 20px; }
+.wbeffects li { margin: 8px 0; min-width: 0; }
+.wbeffect-id { overflow-wrap: anywhere; }
+.wbeffect-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.wbeffect-values pre, .wbeffect-fallback { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; padding: 6px; background: var(--wb-muted); }
+.wbeffect-note { color: var(--wb-muted-fg); font-size: 12px; }
+@media (max-width: 640px) { .wbeffect-values { grid-template-columns: minmax(0, 1fr); } }
+.dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+.dash.live .top { flex: none; }
+/* Empty selection keeps a full main panel even while the rail overlays. */
+:root[data-mode="index"] .dgrid { flex: 1 1 0; min-width: 0; min-height: 0; }
+.dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+  grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
+.dgrid.live > * { min-width: 0; min-height: 0; }
+.dgrid.live > .tabbar { grid-area: tabbar; margin-bottom: 10px; }
+.dgrid.live > .r-tree { grid-area: tree; overflow: auto; }
+.dgrid.live > .splitter { grid-area: split; }
+.dgrid.live > .convo { grid-area: convo; overflow: auto; }
+.dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
+/* One shared release control for staged rendering, placement and heights.
+   Fixed outside the board flow so the badge itself changes no reading geometry. */
+.board-viewed-pending { position: fixed; z-index: 90; bottom: max(16px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); max-width: min(680px, calc(100vw - 32px)); padding: 10px 16px; border: 1px solid var(--wb-primary); border-radius: 24px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 4px 18px #0003; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-viewed-pending[hidden] { display: none; }
+.board-viewed-pending:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
+/* Owned board scrollers use permanent manual anchoring (wbHistory.keep). */
+.dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
+.dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
+/* The conversation panel's header (chead) carries its own tabs (ctabs):
+   "Conversation | Files". Under the Files tab the Files pane takes the
+   conversation's place below the header, while the conversation is hidden
+   (never removed), so its scroll and pin survive; the agents tree, the
+   splitter, and the composer stay. The header shows the conversation's
+   counts under one tab and the Files pane's root under the other. In the
+   one-column view the header shows with the conversation, under its tab. */
+.dgrid.live > .chead { grid-area: chead; }
+.dgrid.live > .fpane { grid-area: convo; display: none; }
+.dgrid.live[data-tab="board"] > .chead { display: none; }
+.dgrid.live[data-ctab="files"]:not([data-tab="board"]) > .fpane { display: flex; }
+.dgrid.live[data-ctab="files"] > .convo { display: none; }
+.splitter { position: relative; cursor: row-resize; touch-action: none; outline: 0; }
+.splitter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
+.splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { background: var(--wb-primary); }
+@media (min-width: 760px) {
+  .dgrid.live[data-layout="split"] { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
+  .dgrid.live[data-layout="split"] > .tabbar { display: none; }
+  .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
+  .dgrid.live[data-layout="split"] > .bcol { grid-area: board; }
+  .dgrid.live[data-layout="split"] > .chead { display: flex; }
+  .dgrid.live[data-layout="split"][data-ctab="files"] > .fpane { display: flex; }
+  .dgrid.live[data-layout="split"][data-ctab="files"] > .convo { display: none; }
+}
+@media (min-width: 1100px) {
+  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
+  .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
+  .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
+  .dgrid.live:not([data-layout="tabs"]) > .bcol { grid-area: board; }
+  .dgrid.live:not([data-layout="tabs"]) > .chead { display: flex; }
+  .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .fpane { display: flex; }
+  .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .convo { display: none; }
+}
+@media (max-width: 640px) {
+  .dwrap { padding: 8px 10px; }
+}
+
+/* the conversation panel's header with its tabs, and its Files pane
+   (files.js). The header is the panel's top: the conversation or the Files
+   pane below it squares its own top corners. The region's own title bar
+   (r-entries) stays hidden on a live page; its counts are moved into the
+   header (dashboard.js syncChead). */
+.chead { position: static; padding: 0 8px 0 4px; border-radius: var(--wb-radius) var(--wb-radius) 0 0; box-shadow: var(--wb-shadow); min-width: 0; }
+.dgrid.live > .convo, .dgrid.live > .fpane { border-top-left-radius: 0; border-top-right-radius: 0; }
+.dgrid.live > .convo .r-entries > .thead { display: none; }
+.chead .csum, .chead .fsum { margin-left: auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
+.chead .csum > .sum { margin-left: 0; }
+.dgrid[data-ctab="files"] > .chead .csum, .dgrid:not([data-ctab="files"]) > .chead .fsum { display: none; }
+.chead .fsum .froot { flex: 0 1 auto; font-size: 11.5px; color: var(--wb-muted-fg); }
+.chead .fsum .froot.alt { color: var(--wb-primary); }
+.ctabs { display: flex; gap: 2px; align-items: stretch; align-self: stretch; flex: none; }
+.ctabs button { border: 0; background: transparent; height: 30px; padding: 0 8px; font: inherit; font-size: 13px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
+.ctabs button:hover { color: var(--wb-fg); }
+.ctabs button[aria-pressed="true"] { color: var(--wb-fg); border-bottom-color: var(--wb-primary); }
+.ctabs button:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.fpane { position: relative; flex-direction: column; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; font-size: 12.5px; }
+/* The independent toolbar explorer shares the card sheet's scrim.
+   Keep its toggle and row menu reachable. */
+.fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+/* The old sheet removed the tab pane and its label from their slots.
+   Conceal their paint under the scrim without disturbing the new owner's
+   layout or state; otherwise the tab shadow protrudes beside the sheet. */
+body:has(.fpane[data-max]) .dgrid.live > .fpane,
+body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }
+.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
+.board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
+.board-toolbar[data-files] .board-files, .board-toolbar[data-files] .sheet-width { pointer-events: auto; }
+body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
+@media (max-width: 640px) { .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
+@media (min-width: 641px) {
+  .bcard[data-max] .bc-in, section.topic[data-max], details.entry-panel[data-max], .fpane[data-max] { left: var(--sheet-inset, 16px); right: var(--sheet-inset, 16px); }
+}
+.fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
+.fbar { display: flex; align-items: center; gap: 4px; flex: none; min-width: 0; height: 30px; box-sizing: border-box; padding: 0 6px 0 4px; border-bottom: 1px solid var(--wb-line); background: var(--l2-side); }
+.fbar-sep { flex: none; width: 1px; height: 16px; margin: 0 3px; background: var(--wb-line); }
+.fhd { display: inline-flex; flex: none; align-items: center; gap: 1px; }
+.fbar > .ibtn, .fhd .ibtn { width: 24px; height: 24px; }
+.froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.froot.alt { color: var(--wb-primary); }
+.fseg { display: inline-flex; flex: none; gap: 1px; padding: 2px; border-radius: 5px; background: color-mix(in srgb, var(--wb-fg) 7%, transparent); }
+.fseg button { height: 18px; border: 0; padding: 0 7px; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: 700 10.5px var(--wb-sans); cursor: pointer; }
+.fseg button[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow); }
+.fsrow { display: flex; align-items: center; gap: 8px; flex: none; height: 34px; box-sizing: border-box; padding: 3px 6px; border-bottom: 1px solid var(--wb-line); }
+.fsr { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; height: 26px; box-sizing: border-box; padding: 0 3px; border-radius: 7px; background: var(--wb-muted); }
+.fsr > .fi .li { width: 14px; height: 14px; }
+.fsr:focus-within { outline: 1.5px solid var(--wb-primary); }
+.fq { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--wb-fg); font: 11.5px var(--wb-mono); outline: none; padding: 0; }
+.fq::placeholder { color: var(--wb-muted-fg); opacity: .8; }
+.fopts { display: none; gap: 1px; }
+.fpane[data-fm="content"] .fopts { display: inline-flex; }
+.fopts[hidden] { display: none; }
+.fopts .ibtn { width: 20px; height: 20px; }
+.fopts .ibtn[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
+.flist { flex: 1; min-height: 0; overflow: auto; padding: 2px 4px 8px; outline: none; }
+.flist[hidden] { display: none; }
+.fpane .fr { display: flex; align-items: center; gap: 5px; height: 22px; padding-right: 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; min-width: 0; outline: none; }
+.fpane .fr:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); }
+.fpane .fr:focus-visible { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.fpane .fr.sel { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.fpane .fr .ch { width: 12px; height: 12px; flex: none; display: inline-flex; color: var(--wb-muted-fg); }
+.fpane .fr .ch .li { width: 12px; height: 12px; stroke-width: 2; transition: transform .12s; }
+.fpane .fr[aria-expanded="true"] > .ch .li { transform: rotate(90deg); }
+.fpane .fr .fn { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fpane .fr.ign { opacity: .5; font-style: italic; }
+.fpane .fr.gm .fn { color: var(--wb-warn-ink); }
+.fpane .fr.cur { background: color-mix(in srgb, var(--wb-fg) 8%, transparent); }
+.fpane .fr.cur .fn { color: var(--wb-fg); font-weight: 600; }
+.fpane .fr.cur .fi { color: var(--wb-primary); }
+.fpane .fr.gone .fn { text-decoration: line-through; }
+.fpane .fr.gone { cursor: default; }
+.fpane .fr.fmore { cursor: default; color: var(--wb-muted-fg); font-style: italic; }
+.fpane .fr.fmore:hover { background: transparent; }
+.gmk { margin-left: auto; padding-left: 6px; flex: none; font: 800 10.5px var(--wb-mono); color: var(--wb-warn-ink); }
+.gmk.dot::before { content: ""; display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
+.fhits .fr .fn { font-family: var(--wb-mono); font-size: 11.5px; }
+.fnote { padding: 10px 8px; color: var(--wb-muted-fg); }
+.hf { display: flex; align-items: center; gap: 5px; height: 24px; margin-top: 4px; padding: 0 6px; border-radius: 6px; font-weight: 700; min-width: 0; cursor: pointer; outline: none; }
+.hf .fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 11.5px var(--wb-mono); }
+.hc { flex: none; font-size: 10.5px; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.hl { display: flex; gap: 8px; padding: 1px 6px 1px 4px; border-radius: 5px; font: 11.5px/1.6 var(--wb-mono); color: var(--wb-muted-fg); cursor: pointer; min-width: 0; outline: none; }
+.hl .ln { flex: none; width: 34px; text-align: right; opacity: .7; }
+.hl .tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.hl mark { background: color-mix(in srgb, var(--wb-warn) 28%, transparent); color: var(--wb-fg); border-radius: 2px; }
+.hf:hover, .hl:hover { background: var(--wb-muted); }
+.hf:focus-visible, .hl:focus-visible, .fhits .fr:focus-visible { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.hnote { padding: 8px 6px; font-size: 11px; color: var(--wb-muted-fg); }
+.hnote.err { color: var(--wb-fail); font-family: var(--wb-mono); white-space: pre-wrap; }
+.fpop { position: absolute; z-index: 20; top: 40px; right: 8px; width: 240px; max-width: calc(100% - 16px); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
+.fpop[hidden] { display: none; }
+.froot-pop { width: 336px; }
+.froot-pop > .lb { display: flex; align-items: center; gap: 5px; }
+.froot-pop .froot-current { margin-bottom: 6px; }
+.froot-pop .froot-filter { display: block; width: 100%; box-sizing: border-box; height: 26px; margin-bottom: 6px; padding: 0 8px; border: 0; border-radius: 6px; outline: none; background: var(--wb-muted); color: var(--wb-fg); font: 12px var(--wb-sans); }
+.froot-pop .froot-filter::placeholder { color: var(--wb-muted-fg); }
+.froot-pop .froot-filter:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.froot-pop .froot-list { max-height: 300px; overflow-y: auto; scrollbar-width: thin; margin-bottom: 6px; }
+.froot-pop .froot-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; box-sizing: border-box; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); font: 12px var(--wb-sans); text-align: left; cursor: pointer; }
+.froot-pop .froot-row:hover, .froot-pop .froot-row:focus-visible { background: var(--wb-muted); }
+.froot-pop .froot-row:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1.5px; }
+.froot-pop .froot-row.froot-row-current { background: color-mix(in srgb, var(--wb-primary) 14%, transparent); font-weight: 700; }
+.froot-pop .froot-check { width: 14px; flex: none; color: var(--wb-primary); }
+.froot-pop .froot-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.froot-pop .froot-branch { flex: 0 1 46%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; direction: rtl; color: var(--wb-muted-fg); font: 11px var(--wb-mono); }
+.froot-pop .froot-branch bdi { direction: ltr; unicode-bidi: isolate; }
+.froot-pop .froot-separator { height: 1px; background: var(--wb-line); margin: 5px 4px; }
+.froot-pop .froot-current[hidden], .froot-pop .froot-filter[hidden], .froot-pop .froot-list[hidden] { display: none; }
+.fpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
+.fpop .opt { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+.fpop .opt:hover { background: var(--wb-muted); }
+.fpop .opt input { margin: 0; }
+.fpin { width: 100%; font: 12px var(--wb-mono); padding: 5px 8px; border-radius: 6px; border: 0; background: var(--wb-muted); color: var(--wb-fg); outline: none; }
+.fpin:focus { outline: 1.5px solid var(--wb-primary); }
+.ferr { color: var(--wb-fail); font-size: 11.5px; margin: 6px 4px 0; }
+.ferr:empty { display: none; }
+.fgo { margin-top: 10px; display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.fgo .btn { font-size: 12px; font-weight: 700; color: var(--wb-fg); height: 26px; }
+.fgo .btn.pr { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.lmenu .msep { height: 1px; background: var(--wb-line); margin: 3px 4px; }
+@media (prefers-reduced-motion: reduce) { .fpane .fr .ch .li { transition: none; } }
+
+/* Explorer cards and both page-owned browsers share the same inner core. */
+.fpane { container-type: inline-size; --l2-side: color-mix(in srgb, var(--wb-bg) 62%, var(--wb-card)); --l2-band: color-mix(in srgb, var(--wb-fg) 4%, var(--wb-card)); --l2-zebra: color-mix(in srgb, var(--wb-fg) 2.2%, transparent); }
+:root[data-theme="light"] .fpane { --l2-side: color-mix(in srgb, var(--wb-bg) 75%, var(--wb-card)); --l2-band: color-mix(in srgb, var(--wb-fg) 3%, var(--wb-card)); --l2-zebra: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
+.fpane:focus-within { outline: 1px solid color-mix(in srgb, var(--wb-primary) 28%, var(--wb-line)); outline-offset: -1px; }
+.fcard { display: flex; height: 100%; border-radius: 0; box-shadow: none; }
+.ftabs { display: flex; align-self: stretch; align-items: flex-end; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 40%; overflow-x: auto; scrollbar-width: none; padding-top: 3px; }
+.ftabs::-webkit-scrollbar { display: none; }
+.ftab { display: inline-flex; flex: 0 0 auto; align-items: center; min-width: 0; max-width: 170px; height: 100%; box-sizing: border-box; padding: 0 2px 0 9px; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
+.ftab:has(.ftab-select[aria-selected="true"]) { background: var(--wb-muted); border-bottom-color: var(--wb-primary); }
+.ftab-select { display: inline-flex; align-items: center; gap: 4px; min-width: 0; border: 0; padding: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
+.ftab-select .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftab-select .li { width: 12px; height: 12px; opacity: .8; }
+.ftab-select[aria-selected="true"] { color: var(--wb-fg); }
+.ftab-close.ibtn { width: 18px; height: 18px; }
+.ftab-close.ibtn .li { width: 11px; height: 11px; }
+.ftab-new.ibtn { width: 22px; height: 22px; align-self: center; }
+.ftab-close:disabled { visibility: hidden; }
+.flocation, .fcrumb-trail { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.flocation { flex: 1 1 0; }
+.fcrumb-root, .fcrumb.last { flex: none; }
+.fcrumb-trail[hidden], .fpath[hidden] { display: none; }
+.fpath { flex: 1 1 auto; min-width: 0; width: 0; height: 24px; box-sizing: border-box; padding: 2px 6px; font: inherit; }
+.fback .li { transform: rotate(180deg); }
+.fcrumb { flex: 0 1 auto; min-width: 2ch; border: 0; padding: 2px 4px; border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcrumb:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.fcrumb-root { display: inline-flex; align-items: center; gap: 3px; max-width: 160px; font-weight: 700; color: var(--wb-fg); }
+.fcrumb-root .froot { font: inherit; }
+.fcrumb-root .li { width: 11px; height: 11px; opacity: .65; }
+.fcrumb-root:disabled { cursor: default; }
+.fcrumb-root:disabled .fi { display: none; }
+.fcrumb.last { color: var(--wb-fg); }
+.fcrumb-sep { flex: none; opacity: .4; padding: 0 1px; }
+.fview-modes { display: inline-flex; flex: none; gap: 1px; padding: 2px; border-radius: 7px; background: var(--wb-muted); }
+.fview-modes .ibtn { width: 24px; height: 22px; }
+.fview-modes .ibtn[aria-pressed="true"] { opacity: 1; background: var(--wb-card); color: var(--wb-primary); box-shadow: var(--wb-shadow); }
+.fworkspace { display: grid; grid-template-columns: 184px minmax(0, 1fr); flex: 1 1 0; min-height: 0; overflow: hidden; }
+.fworkspace[hidden] { display: none; }
+.fworkspace > .ftree { min-width: 0; padding: 0 4px 8px; border-right: 1px solid var(--wb-line); font-size: 11.5px; background: var(--l2-side); }
+.ftree-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: 28px; box-sizing: border-box; margin: 0 -4px 2px; padding: 0 10px; font: 700 10.5px var(--wb-sans); color: var(--wb-muted-fg); border-bottom: 1px solid var(--wb-line); background: var(--l2-side); }
+.fdirectory { min-width: 0; overflow: auto; padding: 0 0 6px; background: repeating-linear-gradient(to bottom, transparent 0 22px, var(--l2-zebra) 22px 44px) 0 30px / 100% calc(100% - 30px) no-repeat local; }
+.fmarquee { position: fixed; pointer-events: none; z-index: calc(var(--z-modal) + 3); border: 1px solid color-mix(in srgb, var(--wb-primary) 50%, transparent); background: color-mix(in srgb, var(--wb-primary) 10%, transparent); }
+.fentry, .fdetail-head { display: grid; grid-template-columns: 16px minmax(0, 1fr) 80px; align-items: center; gap: 6px; height: 22px; box-sizing: border-box; padding: 0 6px; border-bottom: 1px solid transparent; font: 11px var(--wb-mono); }
+.fdetail-head { position: sticky; top: 0; z-index: 1; height: 28px; margin: 0 0 2px; padding: 0 12px; border-bottom-color: var(--wb-line); background: var(--l2-band); color: var(--wb-muted-fg); font: 700 10.5px var(--wb-sans); }
+.fentry .fi .li, .ftree .fi .li { width: 14px; height: 14px; }
+.flist.fhits { padding: 4px 8px 8px; }
+.fdetail-head .fn { grid-column: 2; }
+.fentry { cursor: pointer; border-radius: 0; padding: 0 12px; }
+.fentry .fn, .fentry .ftype { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fentry .ftype { color: var(--wb-muted-fg); font-size: 10px; }
+.fentry:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); }
+.fentry.sel { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
+.fentry.sel .fn { color: var(--wb-fg); font-weight: 600; }
+.fentry.sel .fi { color: var(--wb-primary); }
+.fcount { display: flex; align-items: center; grid-column: 1 / -1; height: 26px; padding: 0 6px 0 28px; font: 10.5px var(--wb-sans); color: color-mix(in srgb, var(--wb-muted-fg) 70%, transparent); }
+.fentry.ign { opacity: .5; }
+.fentry:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
+.fworkspace[data-view="column"] { grid-template-columns: minmax(0, 1fr); }
+.fworkspace[data-view="column"] > .ftree { display: none; }
+.fdirectory[data-view="column"] { display: flex; padding: 0; overflow-x: auto; overflow-y: hidden; }
+.fcolumn { flex: 0 0 224px; box-sizing: border-box; min-width: 0; overflow-y: auto; padding: 4px; border-right: 1px solid var(--wb-line); }
+.fcolumn:last-child { border-right: 0; flex: 1 0 224px; }
+.fcolumn .fentry { grid-template-columns: 18px minmax(0, 1fr) 14px; border: 0; }
+.fcolumn .fentry .fn { grid-column: 2; }
+.fcolumn-chevron { display: inline-flex; color: var(--wb-muted-fg); }
+.fcolumn-chevron .li { width: 14px; height: 14px; }
+.fdirectory[data-view="list"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); align-content: start; gap: 3px; }
+.fdirectory[data-view="list"] .fentry { display: flex; border: 0; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); align-content: start; gap: 8px; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) .fentry { display: flex; flex-direction: column; justify-content: center; text-align: center; border: 0; height: auto; padding: 9px 5px; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) .fentry .fi .li { width: 32px; height: 32px; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) .fentry .fn { max-width: 100%; }
+.fdirectory[data-view="gallery"] { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.fdirectory[data-view="gallery"] .fi { align-items: center; justify-content: center; height: 100px; }
+.fthumb { display: block; width: 100%; height: 100px; object-fit: contain; background: var(--wb-bg); border-radius: 5px; }
+.ffooter { display: flex; align-items: center; gap: 6px; flex: none; height: 30px; box-sizing: border-box; padding: 0 6px 0 10px; border-top: 1px solid var(--wb-line); min-width: 0; background: var(--l2-side); }
+.fselection { flex: 1 1 auto; min-width: 0; font: 11px var(--wb-mono); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fselection b { color: var(--wb-fg); font-weight: 600; }
+.fattachment { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.fattachment .btn { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); font: 600 11px var(--wb-sans); white-space: nowrap; }
+.fattachment .btn .li { width: 12px; height: 12px; }
+.fworkspace-picker { width: min(900px, calc(100vw - 32px)); height: min(640px, calc(100dvh - 48px)); padding: 0; border: 1px solid var(--wb-line); border-radius: var(--wb-radius); background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); }
+.fworkspace-picker::backdrop { background: #0006; }
+.fworkspace-picker > .fpane { display: flex; height: 100%; }
+.fpicker [hidden] { display: none !important; }
+.fpicker .fdot { opacity: .5; }
+.froot-choices { min-width: 0; max-width: 65%; margin-left: auto; font: 11px var(--wb-mono); background: var(--wb-muted); color: inherit; border: 0; border-radius: 5px; padding: 3px; }
+.fattachment .pr { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+@container (max-width: 480px) {
+  .fworkspace { grid-template-columns: 110px minmax(0, 1fr); }
+  .fentry, .fdetail-head { grid-template-columns: 18px minmax(0, 1fr); }
+  .fentry .ftype, .fdetail-head .ftype { display: none; }
+}
+@container (max-width: 340px) {
+  .fworkspace { grid-template-columns: minmax(0, 1fr); }
+  .fworkspace > .ftree { display: none; }
+}
+/* Explorer-only compact header; other card kinds keep the shared header. */
+.bcard[data-kind="explorer"] .bc-hd { height: 28px; min-height: 28px; box-sizing: border-box; padding: 2px 6px 2px 10px; gap: 6px; }
+.bcard[data-kind="explorer"] .bc-hd .ibtn { width: 22px; height: 22px; }
+/* Float is a transient explorer-only sheet, using the same node and scrim. */
+.bcard[data-kind="explorer"][data-float] .bc-in { top: max(52px, 10vh); bottom: 8vh; }
+.bcard[data-kind="explorer"][data-float] .bc-max { display: inline-grid; }
+.bcard[data-kind="explorer"][data-float] .bc-float { display: none; }
+body:has(.bcard[data-kind="explorer"][data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
+
+/* board-first page: no live layer; the board in one readable column that
+   the page scrolls. As in the live board column, topicResized owns band
+   height compensation: native document anchoring must not add it again. */
+:root[data-mode="board"] { overflow-anchor: none; }
+.dgrid.board { display: block; max-width: 900px; margin: 0 auto; }
+@media (min-width: 1600px) { .dgrid.board { margin: 0; } }
+
+/* A changed topic's next body frame loads over the frame it replaces,
+   unseen and out of the layout, until it has loaded and drawn (the page
+   script's board morph, frameGraft). */
+.doc-body.framed { position: relative; z-index: var(--z-cards); }
+iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; }
+

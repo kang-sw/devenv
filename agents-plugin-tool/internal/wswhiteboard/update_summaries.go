@@ -155,10 +155,13 @@ func summaryState(view TopicStateView) string {
 	value := struct {
 		Value      string
 		Run        *TopicRun
+		Owner      string
+		ETAMinutes int64
 		Diagnostic *StateDiagnostic
 	}{Diagnostic: view.Diagnostic}
 	if view.State != nil {
 		value.Value, value.Run = view.State.Value, view.State.Run
+		value.Owner, value.ETAMinutes = view.State.Owner, view.State.ETAMinutes
 	}
 	data, _ := json.Marshal(value)
 	return string(data)

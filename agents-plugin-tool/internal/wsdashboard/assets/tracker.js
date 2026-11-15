@@ -150,9 +150,14 @@
 // opts:
 //   header           the page header element; the drawer hangs from its bottom edge
 //   qsSlot           an element in the header for the search-palette button
-//   searchRows(update) optional host rows: {group (0..4), kind, title, text?,
-//                    hint?, id?, topic?, href?, at?}; session labels (the palette's
-//                    strip), then topics, bodies, items, answers (its board slot).
+//   searchHost       optional {parent, setOpen(bool), contains(target)} sheet host;
+//                    the returned API's openSearch/closeSearch follows host switches
+//   searchState      optional {load(), save({query, slot})} browser persistence
+//   searchAsk(text)  optional answer action for Enter without an arrow selection
+//   searchAnswerMount(element) optional host-owned answer pane and transport
+//   searchRows(update) optional host rows: {group (1..4), kind, title, text?,
+//                    hint?, id?, topic?, at?}: topics, bodies, items and answers.
+//                    Legacy group-0 session rows are ignored.
 //                    Read on open; update(rows) may replace them as older board
 //                    pages load.
 //   searchPick(row, o) opens a selected host row; o.keep (Ctrl+Enter) leaves the
@@ -168,7 +173,6 @@
 //   fileOpen(name, dir)   opens file name of absolute directory dir in the host's
 //                    default app
 //   fileLocal()      -> whether the browser is on the host's machine (path mode)
-//   fileScope()      -> the name of the folder the file slots search, for its label
 //   pageParent       where the store page node goes; while a store page shows, the
 //                    body carries the class tk-paged and the host's CSS hides its
 //                    own conversation column and session drawer
@@ -6105,7 +6109,7 @@
   function leavePage() { history.pushState(null, '', location.pathname + location.search); applyRoute(); }
 
   // One palette: five result slots (board, files, content, tracker, tracker
-  // content) and a jump/command strip (sessions, stores, actions). The host
+  // content), with an optional host-owned answer column. The host
   // supplies the board rows and their picker (O.searchRows, O.searchPick) and
   // the file hooks (O.fileFind, O.fileSearch, O.fileList, O.filePreview,
   // O.fileOpen), so the renderer never reaches a page's file routes itself.
@@ -6119,11 +6123,9 @@
   // QMAX caps the rows a slot draws and navigates; QTNOTE_CAP the tracker content hits per store
   var QDEBOUNCE = 80, QMAX = 100, QTNOTE_CAP = 8;
   function qSlot0() { return { rows: [], state: 'idle', stale: false, more: false, err: '', ms: 0, t0: 0, wait: 0 }; }
-  // cur is the view the keys move in: a slot, 'all' (the narrow layout's first tab), or
-  // 'jump' (the strip; prev is the view it was entered from). sel maps a view to the key of
-  // its selected row, so a late batch never moves the cursor. q is the last query, kept for
-  // the page's lifetime so a reopen restores it.
-  var qs = { open: false, back: null, rows: [], q: '', gen: 0, timer: 0, ctl: [], step: 'narrow', cur: 'all', prev: null, sel: {}, jump: [], path: null, S: {} };
+  // cur is a result slot or the narrow layout's 'all' tab. Selection is a
+  // row key so async batches cannot move an explicitly armed result.
+  var qs = { open: false, back: null, rows: [], q: '', gen: 0, timer: 0, ctl: [], step: 'narrow', cur: 'all', sel: {}, path: null, S: {} };
   QSLOTS.forEach(function (k) { qs.S[k] = qSlot0(); });
   // Fuzzy subsequence score. Try each first match so a scattered early match
   // cannot hide a compact later one. Long prose needs a reasonably dense span.
@@ -6186,50 +6188,29 @@
     hits.sort(function (a, b) { return b.score - a.score || a.order - b.order; });
     return hits.map(function (x) { return x.row; });
   }
-  // The strip: the host's session rows (group 0), the stores, and the store's actions, in
-  // that order with no query, else the fuzzy matches best first.
-  function qStrip(t) {
-    var out = [];
-    qs.rows.forEach(function (x) { if (x.group === 0) out.push({ kind: 'session', title: x.title, href: x.href, row: x }); });
-    order.forEach(function (n) {
-      var st = vss[n] ? vss[n].store : { label: '' };
-      out.push({ kind: 'store', store: n, title: n, label: st.label || '', text: n + ' ' + (st.label || '') });
-    });
-    if (X.qsActions && VS) (X.qsActions(ui.store, VS, t.toLowerCase()) || []).forEach(function (x) { out.push({ kind: 'action', key: x.key, icon: x.icon, title: x.title, hint: x.hint, tag: x.tag }); });
-    if (!t) return out;
-    var hits = [];
-    out.forEach(function (x, i) { var m = qScore(x.text || x.title, t); if (m) hits.push({ row: x, score: m.score, order: i }); });
-    hits.sort(function (a, b) { return b.score - a.score || a.order - b.order; });
-    return hits.map(function (x) { return x.row; });
-  }
   function qKeyOf(k, r) {
     if (k === 'board') return r.kind + ':' + (r.id || r.topic || r.title);
-    if (k === 'jump') return r.kind + ':' + (r.href || r.store || r.key || r.title);
     return r.key;
   }
-  // qView lists what a view navigates, as {slot, row, key}: one slot's rows, the narrow
-  // layout's "all" tab (each slot's top 3), or the strip's chips.
+  // qView lists one slot's rows or each slot's top three in the 'all' tab.
   function qView(v) {
-    if (v === 'jump') return qs.jump.map(function (r) { return { slot: 'jump', row: r, key: qKeyOf('jump', r) }; });
     var out = [];
     (v === 'all' ? QSLOTS : [v]).forEach(function (k) {
       qs.S[k].rows.slice(0, v === 'all' ? 3 : QMAX).forEach(function (r) { out.push({ slot: k, row: r, key: k + '|' + qKeyOf(k, r) }); });
     });
     return out;
   }
-  // qIdx is the selected row of view v: the row whose key it last selected while that row
-  // remains, else the first.
+  // Only arrow movement arms a result. Late batches keep that key, never
+  // silently select a replacement when the selected row disappeared.
   function qIdx(v) {
-    var list = qView(v), i = 0;
-    for (var j = 0; j < list.length; j++) if (list[j].key === qs.sel[v]) { i = j; break; }
-    if (list[i]) qs.sel[v] = list[i].key;
-    return i;
+    var list = qView(v);
+    for (var j = 0; j < list.length; j++) if (list[j].key === qs.sel[v]) return j;
+    return -1;
   }
+  function qSave() { if (O.searchState) O.searchState.save({ query: qs.q, slot: qs.cur }); }
   function qFixCur() {
     var ord = QORDER[qs.step];
-    if (ord.indexOf(qs.prev) < 0) qs.prev = ord[0];
-    if (qs.cur === 'jump' && !qs.jump.length) qs.cur = qs.prev;
-    if (qs.cur !== 'jump' && ord.indexOf(qs.cur) < 0) qs.cur = ord[0];
+    if (ord.indexOf(qs.cur) < 0) { qs.cur = ord[0]; qs.sel = {}; }
   }
   // qAbsPath mirrors the daemon's root check (fs_routes.go browseRootParam): an absolute
   // POSIX path or a Windows drive path. A network path (//host, \\host), a device
@@ -6283,7 +6264,7 @@
     clearTimeout(qs.timer); qs.timer = 0;
   }
   function qDone(rows) { var s = qSlot0(); s.rows = rows; s.state = 'done'; return s; }
-  // qRun starts a generation for the input's text: the local slots and the strip answer at
+  // qRun starts a generation for the input's text: the local slots answer at
   // once, the async slots after QDEBOUNCE.
   function qRun() {
     var q = $('tkqin').value, t = q.trim(), gen = ++qs.gen, now = Date.now();
@@ -6292,7 +6273,6 @@
     qs.q = q; qs.sel = {}; qs.path = qPathOf(t);
     // path rows ({name, dir}) and found files ({path}) draw differently: never keep one as the other's stale rows
     if (!!qs.path !== wasPath) qs.S.files = qSlot0();
-    qs.jump = qStrip(t);
     qs.S.board = qDone(qBoard(qs.rows, t));
     qs.S.tracker = qDone(qTracker(t));
     var on = { files: !!t && !!(qs.path ? O.fileList : O.fileFind), content: !!t && !qs.path && !!O.fileSearch, tnote: !!t && !!AD.search && order.length > 0 };
@@ -6305,13 +6285,13 @@
     qRender();
     if (on.files || on.content || on.tnote) qs.timer = setTimeout(function () { qs.timer = 0; if (gen === qs.gen) qFetch(gen, t, on); }, QDEBOUNCE);
   }
-  // qLocal re-ranks the local slots and the strip for the same query, after the host's rows
+  // qLocal re-ranks the local slots for the same query, after the host's rows
   // changed (an older board page loaded); the async slots are left as they are.
   function qLocal() {
     var t = $('tkqin').value.trim();
-    qs.jump = qStrip(t);
     qs.S.board = qDone(qBoard(qs.rows, t));
     qs.S.tracker = qDone(qTracker(t));
+    qs.sel = {};
     qRender();
   }
   function qFetch(gen, t, on) {
@@ -6420,20 +6400,12 @@
   function qRender() {
     if (!qs.open) return;
     qFixCur();
-    var d = $('tkqpop'), list = $('tkqlist'), st = qs.step, v = qs.cur === 'jump' ? qs.prev : qs.cur, ji = qs.cur === 'jump' ? qIdx('jump') : -1, h = '', keep = {};
-    var si = qs.cur === 'jump' ? -1 : qIdx(qs.cur), selE = qs.cur === 'jump' ? null : qView(qs.cur)[si];
+    qSave();
+    var d = $('tkqpop'), list = $('tkqlist'), st = qs.step, v = qs.cur, h = '', keep = {};
+    var si = qIdx(qs.cur), selE = qView(qs.cur)[si];
     function on(k, i) { return !!selE && selE.slot === k && selE.row === qs.S[k].rows[i]; }
     function rows(k, max) { var i = -1; for (var j = 0; j < Math.min(max, qs.S[k].rows.length); j++) if (on(k, j)) i = j; return qList(k, max, i); }
     d.setAttribute('data-step', st);
-    var sc = qs.path ? wsT("js.tk.qs.scopepath", qs.path.dir) : O.fileScope && O.fileScope() ? wsT("js.tk.qs.scope", O.fileScope()) : '';
-    $('tkqscope').textContent = sc ? '\uD83D\uDCC1 ' + sc : '';
-    $('tkqscope').hidden = !sc;
-    $('tkqjump').innerHTML = qs.jump.length ? '<span class="tk-qjl">' + wsT("js.tk.qs.strip") + '</span>' + qs.jump.map(function (r, i) {
-      var badge = r.kind === 'session' ? wsT("js.tk.qs.sessions") : r.kind === 'store' ? wsT("js.tk.qs.stores") : esc(r.tag || wsT("js.tk.qs.actions")), sub = r.kind === 'store' ? r.label : r.kind === 'action' ? r.hint : '';
-      return '<span class="tk-qchip' + (i === ji ? ' on' : '') + '" role="option" id="tkqopt-jump-' + i + '" aria-selected="' + (i === ji) + '"' + attr('qs', 'jump') + attr('qi', i) + '><span class="qk">' + badge + '</span><b>' + esc(r.title) + '</b>' +
-        (sub ? '<span class="muted">' + esc(sub) + '</span>' : '') + '</span>';
-    }).join('') + '<kbd>Alt+0</kbd>' : '';
-    $('tkqjump').hidden = !qs.jump.length;
     $('tkqtabs').hidden = st !== 'narrow';
     if (st === 'narrow') $('tkqtabs').innerHTML = QORDER.narrow.map(function (k) {
       var s = qs.S[k], a = k === v, n = k === 'all' || s.state === 'idle' || s.state === 'err' ? '' : s.stale ? '…' : s.rows.length + (s.more ? '+' : '');
@@ -6464,54 +6436,47 @@
     Array.prototype.forEach.call(list.querySelectorAll('.tk-qpane[data-pane]'), function (p) { var sx = p.querySelector('.tk-qscroll'); if (sx) keep[p.getAttribute('data-pane')] = sx.scrollTop; });
     list.innerHTML = h;
     Array.prototype.forEach.call(list.querySelectorAll('.tk-qpane[data-pane]'), function (p) { var sx = p.querySelector('.tk-qscroll'), y = keep[p.getAttribute('data-pane')]; if (sx && y) sx.scrollTop = y; });
-    var cur = qs.cur === 'jump' ? 'tkqopt-jump-' + ji : selE ? 'tkqopt-' + selE.slot + '-' + qs.S[selE.slot].rows.indexOf(selE.row) : '';
+    var cur = selE ? 'tkqopt-' + selE.slot + '-' + qs.S[selE.slot].rows.indexOf(selE.row) : '';
     $('tkqin').setAttribute('aria-activedescendant', cur && $(cur) ? cur : '');
     var o = cur && $(cur);
     if (o && o.scrollIntoView) o.scrollIntoView({ block: 'nearest' });
   }
-  // a pointer over a row of the view the keys move in selects it, without a redraw
-  function qHover(o) {
-    var k = o.getAttribute('data-qs'), i = Number(o.getAttribute('data-qi')), v = qs.cur, r = k === 'jump' ? qs.jump[i] : qs.S[k] && qs.S[k].rows[i];
-    if (!r || (k === 'jump' ? v !== 'jump' : v !== 'all' && v !== k)) return;
-    var key = k === 'jump' ? qKeyOf('jump', r) : k + '|' + qKeyOf(k, r);
-    if (qs.sel[v] === key) return;
-    qs.sel[v] = key;
-    Array.prototype.forEach.call($('tkqpop').querySelectorAll('.qopt.on, .tk-qchip.on'), function (x) { x.classList.remove('on'); x.setAttribute('aria-selected', 'false'); });
-    o.classList.add('on'); o.setAttribute('aria-selected', 'true');
-    $('tkqin').setAttribute('aria-activedescendant', o.id);
-  }
+  // Hover is CSS-only: it never arms Enter to open a result.
+  function qHover(o) {}
   function qOpen() {
     if (qs.open) return;
     qs.open = true; qs.back = document.activeElement;
     qs.rows = O.searchRows ? O.searchRows(function (rows) { if (qs.open) { qs.rows = rows; qLocal(); } }) : [];
     var d = $('tkqpop');
-    d.hidden = false; d.showModal(); $('tkqs').setAttribute('aria-expanded', 'true');
+    d.hidden = false;
+    if (O.searchHost) O.searchHost.setOpen(true);
+    $('tkqs').setAttribute('aria-expanded', 'true');
     qs.step = qStepOf(d.getBoundingClientRect ? d.getBoundingClientRect().width : 0);
-    // each opening starts on the step's first view; only the query is restored
-    qs.cur = QORDER[qs.step][0]; qs.prev = null;
+    if (!qs.loaded && O.searchState) {
+      var saved = O.searchState.load() || {};
+      qs.q = typeof saved.query === 'string' ? saved.query : '';
+      qs.cur = saved.slot || qs.cur;
+    }
+    qs.loaded = true;
     $('tkqin').value = qs.q; qRun(); $('tkqin').focus();
     if ($('tkqin').select) $('tkqin').select();
   }
   function qClose() {
     if (!qs.open) return;
     qs.open = false; qAbort(); qs.gen++;
-    $('tkqpop').close(); $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    if (O.searchHost) O.searchHost.setOpen(false);
     var b = qs.back; qs.back = null;
     if (b && b.isConnected) b.focus({ preventScroll: true }); else $('tkqs').focus({ preventScroll: true });
   }
   // Esc clears a query first and closes the palette on an empty one.
   function qEsc() { if ($('tkqin').value) { $('tkqin').value = ''; qRun(); } else qClose(); }
   function qTab(dir) {
-    var ord = QORDER[qs.step], i = ord.indexOf(qs.cur === 'jump' ? qs.prev : qs.cur);
+    var ord = QORDER[qs.step], i = ord.indexOf(qs.cur);
     for (var n = 0; n < ord.length; n++) {
       i = (i + dir + ord.length) % ord.length;
-      if (ord[i] === 'all' || qs.S[ord[i]].rows.length) { qs.cur = ord[i]; qRender(); return; }
+      if (ord[i] === 'all' || qs.S[ord[i]].rows.length) { qs.cur = ord[i]; qs.sel = {}; qRender(); return; }
     }
-  }
-  function qEnterJump() {
-    if (!qs.jump.length) return;
-    if (qs.cur !== 'jump') qs.prev = qs.cur;
-    qs.cur = 'jump'; qRender();
   }
   // a tracker content hit opens its item window at the comment; a store with no loaded view
   // takes the item link's route (#/<store>/<item>), which loads it and opens the item
@@ -6534,16 +6499,7 @@
       if (O.filePreview) O.filePreview(r.name, { root: p.dir });
       return;
     }
-    if (k === 'jump' && keep && r.kind === 'session') { window.open(r.href, '_blank', 'noopener'); $('tkqin').focus(); return; }
-    if (k === 'jump') keep = false;
     if (!keep) qClose();
-    if (k === 'jump') {
-      if (r.kind === 'session') { if (O.searchPick) O.searchPick(r.row); }
-      else if (r.kind === 'action') { if (X.dialogs && X.dialogs[r.key]) openDialog(r.key, {}); else if (X.action) X.action(r.key, null, H); }
-      else if (ui.page !== r.store) location.hash = '#/' + encodeURIComponent(r.store);
-      else $('tkqs').focus();
-      return;
-    }
     if (k === 'board') { if (ui.win) closeItemWindow(); if (O.searchPick) O.searchPick(r, { keep: !!keep }); }
     else if (k === 'tracker') { if (!openItemWindow(r.store, r.item, { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem")); }
     else if (k === 'tnote') qOpenHit(r);
@@ -6553,38 +6509,39 @@
   // qKey: the input's keys. The focus stays in the input; Alt+digit is matched on e.code,
   // since macOS Option changes e.key.
   function qKey(e) {
-    var k = e.key, v = qs.cur, d = /^Digit([0-5])$/.exec(e.code || '');
+    if (e.isComposing || e.keyCode === 229) return;
+    var k = e.key, v = qs.cur, d = /^Digit([1-5])$/.exec(e.code || '');
     // AltGr (Ctrl+Alt on Windows) types characters on some layouts; it stays typing
-    if (e.altKey && !e.ctrlKey && d) { e.preventDefault(); if (d[1] === '0') qEnterJump(); else { qs.cur = QSLOTS[d[1] - 1]; qRender(); } return; }
+    if (e.altKey && !e.ctrlKey && d) { e.preventDefault(); qs.cur = QSLOTS[d[1] - 1]; qs.sel = {}; qRender(); return; }
     if (k === 'Tab') { e.preventDefault(); qTab(e.shiftKey ? -1 : 1); return; }
-    if (v === 'jump' && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
-      e.preventDefault();
-      if (k === 'ArrowDown') { qs.cur = qs.prev; qRender(); return; }
-      var j = qIdx('jump') + (k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0);
-      j = Math.max(0, Math.min(qs.jump.length - 1, j));
-      qs.sel.jump = qKeyOf('jump', qs.jump[j]); qRender();
-      return;
-    }
     if (k === 'ArrowDown' || k === 'ArrowUp') {
       e.preventDefault();
       var list = qView(v), i = qIdx(v);
-      if (k === 'ArrowUp' && i === 0) { qEnterJump(); return; }
       if (!list.length) return;
-      i = Math.max(0, Math.min(list.length - 1, i + (k === 'ArrowDown' ? 1 : -1)));
+      i = i < 0 ? 0 : Math.max(0, Math.min(list.length - 1, i + (k === 'ArrowDown' ? 1 : -1)));
       qs.sel[v] = list[i].key; qRender();
       return;
     }
-    if (k === 'Enter') { e.preventDefault(); qPick(v, qIdx(v), e.ctrlKey || e.metaKey); return; }
+    if (k === 'Enter') {
+      e.preventDefault();
+      if (!$('tkqin').value.trim()) return;
+      var selected = qIdx(v);
+      if (selected >= 0) qPick(v, selected, e.ctrlKey || e.metaKey);
+      else if (!e.ctrlKey && !e.metaKey && O.searchAsk) O.searchAsk($('tkqin').value.trim());
+      return;
+    }
     if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); qEsc(); }
   }
   // Editors keep their own keys: a terminal card (its .xterm helper textarea),
   // the composer, and any textarea or contenteditable never lose Ctrl+K or
   // Ctrl+Space to the palette; / also stays typed in inputs and selects.
+  // Ctrl+K, Ctrl+Space and Cmd+K open it from anywhere but a terminal, which
+  // keeps its own keys; '/' only outside a text field.
   function qShortcut(e) {
-    if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey) return false;
-    var t = e.target && e.target.closest ? e.target : null;
-    if (e.ctrlKey) return !e.shiftKey && (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k') &&
-      !(t && t.closest('.xterm, textarea, [contenteditable]:not([contenteditable="false"])'));
+    if (e.isComposing || e.keyCode === 229 || e.altKey) return false;
+    var t = e.target && e.target.closest ? e.target : null, k = (e.key || '').toLowerCase() === 'k';
+    if (e.ctrlKey || e.metaKey) return !e.shiftKey && (e.metaKey ? !e.ctrlKey && k : k || e.code === 'Space' || e.key === ' ') &&
+      !(t && t.closest('.xterm'));
     return e.key === '/' && !(t && t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
   }
 
@@ -6734,15 +6691,15 @@
     // the range and label pickers' discard capsule: outside the menu, which clips its children
     b.appendChild(el('button', { type: 'button', class: 'tk tk-mcap', id: 'tkcap', hidden: '' }, '<svg class="i"><use href="#tki-trash"/></svg><span>' + wsT("js.tk.menu.discard") + '</span>'));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
-      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
-    b.appendChild(el('dialog', { class: 'tk tk-palette', id: 'tkqpop', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
+      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-controls="tkqpop" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
+    (O.searchHost ? O.searchHost.parent : b).appendChild(el('section', { class: 'tk tk-palette dr-search-palette', id: 'tkqpop', role: 'region', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
       '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '</label>' +
       '<div class="tk-qrow"><input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
-      '<span class="tk-qscope" id="tkqscope" hidden></span></div>' +
-      '<div class="tk-qjump" id="tkqjump" role="listbox" aria-label="' + wsT("js.tk.qs.strip") + '" hidden></div>' +
-      '<div class="tk-qtabs" id="tkqtabs" role="tablist" hidden></div>' +
-      '<div class="tk-qgrid" id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></div>' +
-      '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span>'));
+      '</div>' +
+      '<div class="tk-qmain' + (O.searchAsk ? ' with-answer' : '') + '"><section id="tkqanswer" class="tk-qanswer"' + (O.searchAsk ? '' : ' hidden') + '></section><div class="tk-qresults"><div class="tk-qtabs" id="tkqtabs" role="tablist" hidden></div>' +
+      '<div class="tk-qgrid" id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></div></div></div>' +
+      '<span class="tk-qhint">' + (O.searchAsk ? wsT("js.search.askhint") + ' · ' : '') + wsT("js.tk.qs.hint") + '</span>'));
+    if (O.searchAnswerMount) O.searchAnswerMount($('tkqanswer'));
   }
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
   // changes, and keys stay the host's.
@@ -6791,7 +6748,7 @@
 
     document.addEventListener('click', function (e) {
       var t = e.target;
-      if (qs.open && (t === $('tkqpop') || !(t.closest && t.closest('#tkqpop, #tkqs')))) qClose();
+      if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs')) && !(O.searchHost && O.searchHost.contains(t))) qClose();
       if (mentionBox(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
       else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
       // a click outside the menu closes it; a click on its own opener toggles it shut (menuOutside)
@@ -6802,10 +6759,10 @@
       var qo = t.closest('[data-qi]'), qh = t.closest('#tkqpop [data-qslot]');
       if (qo) {
         var qk = qo.getAttribute('data-qs'), qi = Number(qo.getAttribute('data-qi'));
-        qPickEntry({ slot: qk, row: qk === 'jump' ? qs.jump[qi] : qs.S[qk] && qs.S[qk].rows[qi] }, e.ctrlKey || e.metaKey);
+        qPickEntry({ slot: qk, row: qs.S[qk] && qs.S[qk].rows[qi] }, e.ctrlKey || e.metaKey);
         return;
       }
-      if (qh) { qs.cur = qh.getAttribute('data-qslot'); qRender(); $('tkqin').focus(); return; }
+      if (qh) { qs.cur = qh.getAttribute('data-qslot'); qs.sel = {}; qRender(); $('tkqin').focus(); return; }
       var h = t.closest('.tk-handle[data-handle]');
       if (h) { openStore(h.getAttribute('data-handle')); return; }
       var fb = t.closest('.tk-fold[data-fold]');
@@ -7074,8 +7031,6 @@
     }, true);
     // Esc from the input is its keydown's (qKey); a close request from elsewhere in the
     // dialog clears then closes the same way, and one the browser forced closes it
-    $('tkqpop').addEventListener('cancel', function (e) { e.preventDefault(); qEsc(); });
-    $('tkqpop').addEventListener('close', function () { if (qs.open) qClose(); });
     // the list keeps the focus in the input: a click picks or switches without taking it
     $('tkqpop').addEventListener('mousedown', function (e) { if (e.target !== $('tkqin') && e.target.closest('[data-qi], [data-qslot]')) e.preventDefault(); });
     $('tkqin').addEventListener('input', function (e) { if (!e.isComposing) qRun(); });
@@ -7218,6 +7173,7 @@
       refresh: function () { render(); },
       openStore: openStore,
       openSearch: qOpen,
+      closeSearch: qClose,
       closeStore: function () { if (ui.open) collapse(); },
       openItemWindow: openItemWindow,
       leavePage: leavePage,
@@ -7258,4 +7214,7 @@
   }
 
   window.WsTracker = { mount: mount };
+  // searchKey is the palette's shortcut test (qShortcut), for a host that
+  // must recognize the key before mount installs the palette's listener.
+  window.WsTracker.searchKey = qShortcut;
 })();

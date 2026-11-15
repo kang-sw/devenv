@@ -39,7 +39,7 @@ function topic(state='implementing'){
 var n=topic();
 function eta(){return n.querySelector('.eta');}
 function tick(at){now=at;timers[0].fn();}
-function expected(minutes,over){assert.equal(eta().textContent,'ETA 30분 · '+minutes+'분 경과'+(over?' (+'+over+')':''));assert.equal(eta().classList.contains('over'),!!over);}
+function expected(minutes,over){assert.equal(eta().textContent,'ETA 30분 · '+minutes+'분 경과'+(over?' (+'+over+')':''));assert.equal(eta().classList.contains('wb-state-over'),!!over);}
 `
 
 func TestTopicStateBadgeClockAndReconciliation(t *testing.T) {
@@ -52,7 +52,7 @@ func TestTopicStateBadgeClockAndReconciliation(t *testing.T) {
 		t.Fatal("node required for badge clock contract")
 	}
 	script := stateBadgeDOM + `
-const deps=n.appendChild(new E('topic-deps'));deps.appendChild(new E('dep')).textContent='topic:blocker';
+const deps=n.querySelector('.tlead').appendChild(new E('dw'));deps.appendChild(new E('dbtn amber'));deps.appendChild(new E('pop')).textContent='topic:blocker';
 ` + string(data) + `
 expected(0,0);
 assert.equal(n.querySelector('.own').textContent,'<img src=x onerror=attack()>');
@@ -60,10 +60,11 @@ assert.equal(n.querySelector('.own').children.length,0,'owner is text, not marku
 for(const [delta,min,over] of [[-1,0,0],[0,0,0],[30*60000-1,29,0],[30*60000,30,0],[31*60000-1,30,0],[31*60000,31,1],[47*60000,47,17]]) {tick(start+delta);expected(min,over);}
 const run=n.getAttribute('data-state-run'),started=n.getAttribute('data-state-started-at');
 n.setAttribute('data-state-eta-minutes','60');n.setAttribute('data-state-deadline-at',new Date(start+60*60000).toISOString());window.wbAgo(n);
-assert.equal(eta().textContent,'ETA 60분 · 47분 경과');assert.equal(eta().classList.contains('over'),false);
+assert.equal(eta().textContent,'ETA 60분 · 47분 경과');assert.equal(eta().classList.contains('wb-state-over'),false);
 assert.equal(n.getAttribute('data-state-run'),run);assert.equal(n.getAttribute('data-state-started-at'),started);
 for(const state of ['awaiting-confirmation','waiting','discussing']) {n.setAttribute('data-state',state);window.wbAgo(document);assert.equal(n.querySelector('.stb').textContent,wsT('js.wb.state.'+state));assert.equal(eta(),null);assert.equal(n.querySelector('.own'),null);}
-assert.equal(n.querySelector('.topic-deps'),deps,'badge transitions preserve dependency row');
+assert.equal(n.querySelector('.dw'),deps,'badge transitions preserve dependency button and popover');
+assert.equal(deps.querySelector('.dbtn').className,'dbtn amber');
 assert.equal(deps.textContent,'topic:blocker');
 n.setAttribute('data-state','implementing');n.setAttribute('data-state-run','e2');n.setAttribute('data-state-started-at',new Date(now).toISOString());n.setAttribute('data-state-deadline-at',new Date(now+60*60000).toISOString());window.wbAgo(n);assert.equal(eta().textContent,'ETA 60분 · 0분 경과');
 for(const [key,bad] of [['started-at',''],['started-at','not-a-date'],['started-at','2026-02-30T00:00:00Z'],['deadline-at',''],['deadline-at','bad'],['deadline-at',new Date(now+60000).toISOString()],['eta-minutes','NaN'],['eta-minutes','0'],['eta-minutes','1.5'],['run',''],['owner','']]) {const k='data-state-'+key,old=n.getAttribute(k);n.setAttribute(k,bad);window.wbAgo(n);assert.equal(eta(),null,'invalid '+key+' '+bad);n.setAttribute(k,old);window.wbAgo(n);assert(eta());}

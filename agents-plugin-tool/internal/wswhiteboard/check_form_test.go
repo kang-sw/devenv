@@ -128,7 +128,7 @@ var as = byId("item-6");
 check("the assumed check has a pen and no box", [!!as.querySelector("button.note-toggle"), as.querySelector("label.ck > input")], [true, null]);
 click(as.querySelector("button.note-toggle"));
 type(as.querySelector("textarea.note"), "wait, no");
-check("the assumed check sends a note alone", reply(), "01=a\n06=^wait, no\n02=ok");
+check("the assumed check sends a note alone in board order", reply(), "01=a\n02=ok\n06=^wait, no");
 check("answered checks carry no answer control", [byId("item-4").getAttribute("data-id"), byId("item-5").getAttribute("data-id")], [null, null]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
@@ -143,8 +143,8 @@ process.stdout.write(bad.join("\n"));`
 // TestCheckHideToggleKeepsItsStateOnTheRoot runs answers.js and form.js over
 // the check board and pins the hide toggle: on by default (data-ck-hide="1"
 // on <html>, the button pressed), which the stylesheet turns into hiding the
-// rows without data-id, the answered 04 and 05 and never the open 03 or the
-// assumed 06; a press turns it off and stores "0" in localStorage; a rerun of
+// completed HISTORY rows 04 and 05. Open 03 stays in the checklist and assumed
+// 06 keeps its correction control in HISTORY. A press stores "0"; a rerun of
 // the script (a dashboard board swap) keeps the stored state, syncs a freshly
 // rendered button, and leaves a button an earlier run wired toggling the
 // shared state; and the embed never touches storage. The cases execute under
@@ -184,8 +184,11 @@ process.stdout.write(bad.join("\n"));`
 check("before the script runs nothing is set", state(), null);
 run();
 check("on by default", [state(), pressed(), stored], ["1", ["true"], {}]);
-check("the rows the stylesheet hides are the answered ones", ids(".topic .checks .ckrow:not([data-id])"), ["item-4", "item-5"]);
-check("open and assumed rows stay", ids(".topic .checks .ckrow[data-id]"), ["item-3", "item-6"]);
+check("completed checks leave the live checklist", ids(".topic .checks .ckrow:not([data-id])"), []);
+check("the history filter targets the completed checks", ids(".topic .wb-hitem.check:not([data-id]):not(.void)"), ["item-4", "item-5"]);
+check("the open check stays in the live checklist", ids(".topic .checks .ckrow[data-id]"), ["item-3"]);
+check("the assumed history check keeps its correction control", ids(".topic .wb-hitem.check[data-id]"), ["item-6"]);
+check("the withdrawn history check stays outside the answered filter", ids(".topic .wb-hitem.check.void"), ["item-7"]);
 var first = document.querySelector("button.ckhide");
 click(first);
 check("a press turns it off and stores it", [state(), pressed(), stored["ws.wb.checks.hideAnswered"]], ["0", ["false"], "0"]);

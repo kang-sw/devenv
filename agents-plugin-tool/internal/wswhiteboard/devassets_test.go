@@ -87,6 +87,15 @@ func TestDevAssetsShowEditsOnTheNextRender(t *testing.T) {
 		t.Error("a css edit does not reach the static page")
 	}
 
+	editAsset(t, path("page-sticky.css"), "{", "{/*devcssfragment*/")
+	assets, err = PageAssets()
+	if err != nil || !strings.Contains(string(assets.CSS), "devcssfragment") {
+		t.Fatalf("a css fragment edit is not served: %v", err)
+	}
+	if page, _ := RenderPage(devView()); !strings.Contains(page, "devcssfragment") {
+		t.Error("a css fragment edit does not reach the static page")
+	}
+
 	editAsset(t, path("page.tmpl"), `{{define "board"}}`, `{{define "board"}}<i>devboard</i>`)
 	regions, err := RenderRegions(devView())
 	if err != nil || !strings.Contains(string(regions.Board), "<i>devboard</i>") {
@@ -124,6 +133,27 @@ func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	}
 	if _, err := RenderPage(devView()); err != nil {
 		t.Errorf("the fixed template still fails: %v", err)
+	}
+}
+
+func TestDevAssetsRequireStyleFragments(t *testing.T) {
+	path := devTree(t)
+	for _, name := range pageStyleFiles {
+		raw, err := os.ReadFile(path(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path(name)); err != nil {
+			t.Fatal(err)
+		}
+		_, assetErr := PageAssets()
+		_, pageErr := RenderPage(devView())
+		if err := os.WriteFile(path(name), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if assetErr == nil || pageErr == nil {
+			t.Errorf("missing fragment %s served assets or a page: %v, %v", name, assetErr, pageErr)
+		}
 	}
 }
 
