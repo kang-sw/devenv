@@ -811,10 +811,11 @@
   // markers would read as arguments). Backspace in an empty box, or the
   // capsule's x, removes the selection.
   //
-  // A cancel or interrupt that returns a command restores it as the
-  // selection (restoreHeld): its arguments go to the message box when nothing
-  // else lands there; else they stay on the capsule (cmdSel.args a string),
-  // which sends them as they are and leaves the box's text for a later send.
+  // A cancel or interrupt that returns a command restores it (restoreHeld):
+  // when nothing else lands in the message box, as a fresh pick's inline
+  // capsule at offset zero followed by its arguments; else as the separate
+  // selection holding them (cmdSel.args a string), which sends them as they
+  // are and leaves the box's text for a later send.
   var ccmd = $("ccmd"), cmdSel = null, slash = null, ctextHint = ctext ? ctext.getAttribute("placeholder") || "" : "";
   function commandList() {
     var r = region("cmds");
@@ -1393,6 +1394,7 @@
     renderChips();
     if (cmd) {
       if (ctext.value.trim()) setCommand(cmd.name, cmd.args || "");
+      else if (ctext.wsc) restoreInlineCommand(cmd);
       else { ctext.value = cmd.args || ""; grow(); clearMentions(); setCommand(cmd.name); }
     }
     if (astext) noteWarn(wsT("js.cmd.astext"));
@@ -1413,6 +1415,16 @@
       n.dispatchEvent(new Event("input", { bubbles: true }));
     });
     return stray;
+  }
+  // restoreInlineCommand writes a returned command into the empty box as a
+  // fresh pick leaves it: the skill capsule at offset zero, one space, then
+  // its arguments, with the caret at the end.
+  function restoreInlineCommand(cmd) {
+    var v = cmd.name + " " + (cmd.args || "");
+    ctext.value = v;
+    ctext.wsc.restore([{ start: 0, end: cmd.name.length, kind: "skill", id: cmd.name, label: cmd.name }]);
+    ctext.setSelectionRange(v.length, v.length);
+    grow(); clearMentions();
   }
   function cancelHeld(btn) {
     btn.disabled = true;
