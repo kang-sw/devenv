@@ -34,7 +34,13 @@ func TestDashboardSearchAnswerSnapshotRetainedHistory(t *testing.T) {
 			t.Errorf("snapshot missing %s: %s", want, data)
 		}
 	}
-	if len(board.ClosedTopics) != 1 || board.ClosedTopics[0] != "closed" || len(board.Topics[0].Entries) != 3 {
+	nonSystemEntries := 0
+	for _, entry := range board.Topics[0].Entries {
+		if entry.Kind != "system" {
+			nonSystemEntries++
+		}
+	}
+	if len(board.ClosedTopics) != 1 || board.ClosedTopics[0] != "closed" || nonSystemEntries != 3 {
 		t.Fatalf("incomplete history: %+v", board)
 	}
 	if strings.Contains(string(data), f.key) {
