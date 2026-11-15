@@ -632,6 +632,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 
 func applyCommands(state *State, cmds []command, env Env, p *problems, defaults map[int]bool) (*State, Outcome, *topicUpdates) {
 	work := state.clone()
+	statesBefore := state.TopicStates()
 	updates := newTopicUpdates(state)
 	origins := bodyOrigins{}
 	for _, doc := range state.Topics {
@@ -753,7 +754,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
-	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.structuralWarnings())
+	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
 	return work, out, updates
 }
 
