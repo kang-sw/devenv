@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 138a59b788b2e322
 sage-review-completeness-reviewed: 138a59b788b2e322
+completed: 2026-11-16
 ---
 
 # tickets.move stages a ticket move into a worker's impl/* branch on an occupied root
@@ -158,3 +159,56 @@ unoccupied-root normal moves through MCP; retain existing category, dependency,
 sparse-scope, review and move-atomicity tests. Run affected `internal/mcp` and
 `internal/wsdoc` tests and `cd agents-plugin-tool && go test ./...` using only
 local temporary repositories. This draft records no implementation or pass.
+
+### Result (49f1994d6) - 2026-11-15
+
+- Reused the prerequisite's `guardOccupiedRoot` in the MCP `tickets.move`
+  dispatcher before sage configuration and ownership refresh, then re-observed
+  HEAD immediately before the wsdoc writer. Parent-less callers receive the
+  existing branch-specific housekeeping refusal; a nonempty session parent
+  retains the authorized worker flow, including absent parent records and
+  leases. No occupant identity is inferred, and arbitrary external Git
+  processes are not serialized.
+- Regression coverage landed in `cbec661bf`, with guard integration and both
+  inspection-failure boundaries in `49f1994d6`. MCP regressions snapshot all
+  working-tree and Git-admin file bytes across tracked/untracked upward and
+  downward refusals, pre-populated worker indexes, rootless branches and
+  missing/stale leases. They check absent destination directories, normal
+  staged moves, ready posture normalization, parented lead/delegate callers,
+  detached/non-impl checkouts, config/ownership ordering and the caller-local
+  Git environment. The leaf's initial shim failure was a test-setup error
+  (omitting Git's `-C <root>` prefix); only argument matching was corrected
+  before its scoped run passed. No implementation was changed to fit a test.
+- VERIFIED from `agents-plugin-tool/`, with complete command outputs read:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|TicketsMoveOccupiedRoot|MoveCloseGuard$|IndexAbsentVerbsAnswerPlainOK$|ServeStdioTicketsMove|ServeStdioOpenDecisionQueueRefusals$)' -count=1 -timeout=4m`
+    passed (`ok`, 19.161s).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdoc -run '^Test(TicketsMove|ScopeBlockedMutationIsANoOpOnSageBearingTicket$|GitMoveFailureCarriesNoNoticeWithoutAScope$|ScopedGitMoveFailureNoticeAssertsOnlyThisCallsWrites$|TicketScopeGateIsInertWithoutSparseCheckout$|BlockedByPromotion|SageGateReady|TicketVerifyReadySagePostureGuardrail$)' -count=1 -timeout=4m`
+    passed (`ok`, 2.199s).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^TestRepoScope(AppliesAtTicketMutatorsAndWorktreePool|MalformedFileFailsLoud)$/(move|tickets.move)$' -count=1 -timeout=4m`
+    passed (`ok`, 1.103s).
+  - `git diff --check` and `gofmt -l` on both changed Go files were clean.
+- Independent one-pass Lite review of
+  `76d8f7971a5c3bb3dcad7d5cad63e58ede00b0ab..49f1994d6fb81b034a5a4e89b13340cdf12937fb`
+  was clean, with no findings. The fresh reviewer inspected the complete diff,
+  contracts, guard and regressions; it did not execute tests. Full report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@d3adad41/review-paths/424d92e0-01-tickets-move-occupied-lite.md`.
+- Decisions: enforcement stays at the MCP session boundary, not in wsdoc,
+  because it already owns root, parent and caller-bound Git context. This
+  avoids a second occupancy predicate and preserves the dependency direction.
+  T0 remains intact: `server.go:1999-2031` adds only the approved unsafe-case
+  refusal around the unchanged options; `wsdoc/tickets_mutate.go:171-298,929-946`
+  still writes ordinary ticket Markdown and Git index entries. No wire
+  argument, required lease, shared schema or version gate changed; reopening
+  either version reads the same original or normally moved ticket.
+- Omitted by MAIN's explicit dispatch restriction, superseding the phase's
+  broad-suite request: full `internal/mcp`, `internal/wsdashboard`, and
+  repository/module suites, including `go test ./...`. Only offline scoped
+  `-run` commands against local temporary repositories were authorized and
+  run. The POSIX inspection shim is skipped on Windows; no Windows, live
+  runtime, daemon, CI, install/download, push or merge verification was run.
+  Unresolved: none under this verification boundary.
+
+
+## Resolution (2026-11-16)
+
+Completed the approved T0 tickets.move guard reuse, scoped offline regressions, and clean independent Lite review. Ticket verification passed with a Sage freshness warning; accepted because the diff adds only implementation/verification evidence and does not alter the approved decisions or phase plan. MAIN's explicit scoped-only verification boundary supersedes the phase's full-suite request. Implementation branch is retained for lead-owned integration.
