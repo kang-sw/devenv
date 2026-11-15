@@ -247,6 +247,7 @@ test("source registration uses host VERSION without SDK upgrade or private think
   assert.match(source, /import \{ VERSION, type ExtensionAPI/);
   assert.match(source, /sessionRole === undefined \? createReasoningSummaryObserver\(VERSION\)/);
   assert.match(source, /reasoningSummaryObserver\?\.retire\(\)/);
+  assert.match(source, /reasoningSummaryCapable: VERSION === "1\.5\.2"/);
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.devDependencies["@earendil-works/pi-coding-agent"], "0.84.4");
 });

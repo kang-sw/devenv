@@ -338,6 +338,9 @@ type Event struct {
 	// ReasoningSummary is a validated lead-only widget projection, never an
 	// extension-supplied lifecycle/usage/key command.
 	ReasoningSummary *wslive.ReasoningSummary
+	// summaryCapability is the hosted bundle's explicit process-local opt-in,
+	// consumed by piMapper, never stored or inferred from a summary payload.
+	summaryCapability *bool
 	// Card is a tracker card the lead showed: a successful tracker.show call
 	// of the attached ws-mcp whose result opens with its card line.
 	Card *wslive.CardRef

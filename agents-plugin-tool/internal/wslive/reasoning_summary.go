@@ -89,19 +89,30 @@ func ValidateReasoningSummary(s *ReasoningSummary) error {
 	if s == nil || s.V != 1 || !summaryProducerPattern.MatchString(s.Producer) || !summaryPositive(s.Turn) || !summaryPositive(s.Revision) {
 		return fmt.Errorf("invalid reasoning summary identity")
 	}
-	if len(s.Requests) > SummaryAttemptCap {
+	if err := validateSummaryAttempts(s.Requests, s.ActiveRequest, s.Truncated); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(s)
+	if err != nil || len(raw) > SummaryEnvelopeBytes {
+		return fmt.Errorf("reasoning summary exceeds serialized envelope")
+	}
+	return nil
+}
+
+func validateSummaryAttempts(requests []SummaryAttempt, activeRequest *SummaryPair, truncated bool) error {
+	if len(requests) > SummaryAttemptCap {
 		return fmt.Errorf("reasoning summary exceeds aggregate attempt bound")
 	}
 	parts, textBytes := 0, 0
 	var previous SummaryPair
-	active := s.ActiveRequest == nil
-	for _, a := range s.Requests {
+	active := activeRequest == nil
+	for _, a := range requests {
 		pair := SummaryPair{a.Request, a.Attempt}
 		if !summaryPositive(a.Request) || !summaryPositive(a.Attempt) || a.Request < previous.Request || (a.Request == previous.Request && a.Attempt <= previous.Attempt) {
 			return fmt.Errorf("invalid reasoning summary attempt order")
 		}
 		previous = pair
-		if s.ActiveRequest != nil && pair == *s.ActiveRequest {
+		if activeRequest != nil && pair == *activeRequest {
 			active = true
 		}
 		if !((a.Provider == "openai" && a.API == "openai-responses") || (a.Provider == "openai-codex" && a.API == "openai-codex-responses")) || a.Model == "" || len(a.Model) > ModelRunes*4 || utf8.RuneCountInString(a.Model) > ModelRunes || !utf8.ValidString(a.Model) || !summaryStatus(a.Status) {
@@ -111,21 +122,40 @@ func ValidateReasoningSummary(s *ReasoningSummary) error {
 		for _, p := range a.Parts {
 			parts++
 			textBytes += len(p.Text)
-			if !summaryIndex(p.Output) || !summaryIndex(p.Part) || p.Output < output || (p.Output == output && p.Part <= part) || !utf8.ValidString(p.Text) || !summaryIndex(p.ObservedBytes) || p.RetainedBytes != int64(len(p.Text)) || p.ObservedBytes < p.RetainedBytes || (p.ObservedBytes != p.RetainedBytes && !p.Truncated) || !summaryStatus(p.Status) || (p.Truncated && (!a.Truncated || !s.Truncated)) {
+			if !summaryIndex(p.Output) || !summaryIndex(p.Part) || p.Output < output || (p.Output == output && p.Part <= part) || !utf8.ValidString(p.Text) || !summaryIndex(p.ObservedBytes) || p.RetainedBytes != int64(len(p.Text)) || p.ObservedBytes < p.RetainedBytes || (p.ObservedBytes != p.RetainedBytes && !p.Truncated) || !summaryStatus(p.Status) || (p.Truncated && (!a.Truncated || !truncated)) {
 				return fmt.Errorf("invalid reasoning summary part")
 			}
 			output, part = p.Output, p.Part
 		}
-		if a.Truncated && !s.Truncated {
+		if a.Truncated && !truncated {
 			return fmt.Errorf("missing aggregate truncation")
 		}
 	}
 	if !active || parts > SummaryPartCap || textBytes > SummaryTextBytes {
 		return fmt.Errorf("reasoning summary exceeds bounds or has dangling active attempt")
 	}
-	raw, err := json.Marshal(s)
+	return nil
+}
+
+// ValidateSummaryHistory applies the same source, ordering and byte bounds to
+// retained requests without inventing live producer/turn metadata for them.
+func ValidateSummaryHistory(h *SummaryHistory) error {
+	if h == nil || h.V != 1 || len(h.Commit) != sha256.Size*2 {
+		return fmt.Errorf("invalid reasoning summary history identity")
+	}
+	if _, err := hex.DecodeString(h.Commit); err != nil {
+		return fmt.Errorf("invalid reasoning summary history commit")
+	}
+	truncated := false
+	for _, attempt := range h.Requests {
+		truncated = truncated || attempt.Truncated
+	}
+	if err := validateSummaryAttempts(h.Requests, nil, truncated); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(h)
 	if err != nil || len(raw) > SummaryEnvelopeBytes {
-		return fmt.Errorf("reasoning summary exceeds serialized envelope")
+		return fmt.Errorf("reasoning summary history exceeds serialized envelope")
 	}
 	return nil
 }

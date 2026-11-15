@@ -1,11 +1,12 @@
 /** Hosted leads cannot use intake: the runner owns their snapshot. Send only
  * extension-observed wakes, task counts and eligible lead summaries on its reserved RPC widget instead.
- * Older runners ignore this widget, so no new intake kind/field reaches them.
+ * Older runners ignore the additive summary/capability fields and keep their
+ * existing wake/count handling; no new intake kind is introduced.
  */
 import { onBackgroundTasksChanged } from "./background-tasks.ts";
 import { defaultSchedule, FLUSH_INTERVAL_MS, PENDING_EVENT_CAP } from "./dashboard-feed.ts";
 import { dashboardWakeMessages, type DashboardWake } from "./dashboard-wake.ts";
-import type { ReasoningSummary } from "./reasoning-summary.ts";
+import { REASONING_SUMMARY_CAPABILITY, type ReasoningSummary } from "./reasoning-summary.ts";
 import { hostedSummaryLine } from "./reasoning-summary-transport.ts";
 
 export const HOSTED_EVENTS_WIDGET_KEY = "ws-dashboard-events";
@@ -14,6 +15,8 @@ export interface HostedDashboardEventsOptions {
   setWidget: (key: string, lines: string[]) => void;
   taskCounts: () => { timed: number; monitors: number };
   reasoningSummary?: () => ReasoningSummary | undefined;
+  // Explicit process-local opt-in; omitted by legacy bundles, false on unsupported hosts.
+  reasoningSummaryCapable?: boolean;
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => () => void;
 }
@@ -25,6 +28,7 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
   let pending: DashboardWake[] = [];
   let seen = new WeakSet<object>();
   let lastCounts: string | undefined;
+  let capabilityDirty = false;
   let lastFlush: number | undefined;
   let cancel: (() => void) | undefined;
   let unsubscribe: (() => void) | undefined;
@@ -36,16 +40,22 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
     lastFlush = now();
     try {
       const counts = options.taskCounts();
-      const status = JSON.stringify({ kind: "status", background: counts.timed, monitors: counts.monitors });
+      const status = JSON.stringify({
+        kind: "status", background: counts.timed, monitors: counts.monitors,
+        ...(options.reasoningSummaryCapable === undefined ? {} : {
+          capabilities: options.reasoningSummaryCapable ? [REASONING_SUMMARY_CAPABILITY] : [],
+        }),
+      });
       const lines = pending.map((wake) => JSON.stringify(wake));
-      if (status !== lastCounts) lines.push(status);
+      if (status !== lastCounts || capabilityDirty) lines.push(status);
       if (lines.length) options.setWidget(HOSTED_EVENTS_WIDGET_KEY, lines);
       pending = [];
       lastCounts = status;
+      capabilityDirty = false;
     } catch {
       // A stale context retains existing wake/count behavior until another mark.
     }
-    if (!summaryDirty) return;
+    if (!summaryDirty || !options.reasoningSummaryCapable) return;
     try {
       const summary = options.reasoningSummary?.();
       const line = summary && hostedSummaryLine(summary);
@@ -74,6 +84,7 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
     pending = [];
     seen = new WeakSet();
     lastCounts = undefined;
+    capabilityDirty = false;
     lastFlush = undefined;
     summaryDirty = false;
     lastSummary = undefined;
@@ -83,6 +94,7 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
     start() {
       stop();
       stopped = false;
+      capabilityDirty = options.reasoningSummaryCapable !== undefined;
       unsubscribe = onBackgroundTasksChanged(dirty);
       dirty();
     },
@@ -90,7 +102,13 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
     leadEvent(event: unknown) {
       if (stopped) return;
       const e = event as { type?: unknown; message?: unknown } | undefined;
+      if (e?.type === "agent_start") {
+        capabilityDirty = options.reasoningSummaryCapable !== undefined;
+        dirty();
+        return;
+      }
       if (e?.type === "agent_settled") {
+        capabilityDirty = options.reasoningSummaryCapable !== undefined;
         cancel?.();
         cancel = undefined;
         summaryDirty = true;

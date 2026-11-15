@@ -174,7 +174,20 @@ func piHostedEvents(raw json.RawMessage) []Event {
 			if ev.Background != nil && ev.Monitors != nil && *ev.Background >= 0 && *ev.Monitors >= 0 {
 				n := *ev.Background + *ev.Monitors
 				if n >= *ev.Background { // reject overflow
-					out = append(out, Event{BackgroundTasks: &n, Background: ev.Background, Monitors: ev.Monitors})
+					status := Event{BackgroundTasks: &n, Background: ev.Background, Monitors: ev.Monitors}
+					// Old bundles omit capabilities. An explicit empty list revokes
+					// support; malformed optional metadata cannot break legacy counts.
+					var hello struct {
+						Capabilities []string `json:"capabilities"`
+					}
+					if json.Unmarshal([]byte(line), &hello) == nil && hello.Capabilities != nil && len(hello.Capabilities) <= 16 {
+						capable := false
+						for _, capability := range hello.Capabilities {
+							capable = capable || capability == wslive.ReasoningSummaryCapability
+						}
+						status.summaryCapability = &capable
+					}
+					out = append(out, status)
 				}
 			}
 		}

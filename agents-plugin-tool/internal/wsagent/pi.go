@@ -681,6 +681,9 @@ type piMapper struct {
 	messages       int
 	turnErr        string
 	turnReason     string
+	// Explicit opt-in from this process's native bundle. Legacy bundles keep
+	// their reasonless hosted ends and existing answer-check behavior.
+	summaryCapable bool
 	lastStatsAt    int64
 	// Receipt-time streaming span, excluding request and tool latency. A
 	// missing/burst-flushed stream has no usable rate.
@@ -933,16 +936,18 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		case "setWidget":
 			if l.WidgetKey == piEventsWidgetKey && m.spec.Lead != nil {
 				out := piHostedEvents(l.WidgetLines)
-				if len(line)+1 > wslive.SummaryFrameBytes {
-					kept := out[:0]
-					for _, ev := range out {
-						if ev.ReasoningSummary == nil {
-							kept = append(kept, ev)
-						}
+				kept := out[:0]
+				for _, ev := range out {
+					if ev.summaryCapability != nil {
+						m.summaryCapable = *ev.summaryCapability && len(line)+1 <= wslive.SummaryFrameBytes
+						ev.summaryCapability = nil
 					}
-					out = kept
+					if ev.ReasoningSummary != nil && (!m.summaryCapable || len(line)+1 > wslive.SummaryFrameBytes) {
+						continue
+					}
+					kept = append(kept, ev)
 				}
-				return out
+				return kept
 			}
 			if l.WidgetKey == piAgentsWidgetKey {
 				return piAgentEvents(l.WidgetLines)
@@ -1084,7 +1089,10 @@ func (m *piMapper) endTurn(now int64, turnErr string) []Event {
 	if ev := m.batches.finish(now, true); ev != nil {
 		out = append(out, *ev)
 	}
-	reason := m.turnReason
+	reason := ""
+	if m.summaryCapable {
+		reason = m.turnReason
+	}
 	m.turnErr, m.turnReason = "", ""
 	return append(out, Event{TurnEnd: true, TurnError: turnErr, TurnReason: reason})
 }

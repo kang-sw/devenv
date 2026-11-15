@@ -51,9 +51,17 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
   summary prefix, labeled with the actual aborted/failed status (or an actually
   exposed incomplete status), never a fabricated completion. Never synthesize
   missing summary text.
-- Intended compatibility: **T0 additive**. Preserve existing protocol/API
-  semantics; a mechanism requiring T2, a protocol change, or a minor bump must
-  stop and return to MAIN for explicit owner approval, not silently proceed.
+- Compatibility tier: **T0 additive**, redesigned under MAIN's 2026-11-15
+  04:44:47 disposition; no T2 behavior or new owner question is selected.
+  The new native Pi bundle explicitly advertises the optional hosted status
+  field `capabilities: ["reasoning_summary_v1"]`, only on supported host
+  VERSION 1.5.2. This process-local opt-in, never the presence of
+  summary text, gates hosted summaries and new aborted/error/incomplete reasons.
+  Old bundles omit the field; unsupported new bundles send an empty list.
+  They retain exactly the old hosted reason values and answer-check suppression.
+  The hello/protocol version, event kinds, tools and legacy terminal path stay
+  unchanged. If this additive gating cannot carry the change, stop rather than
+  introduce breaking semantics.
 - The lead selected the minimal receiver-owned contract below to resolve the
   three fact-population technical gaps: exact eligible summary sources,
   identity/freshness ordering, and immutable natural-turn persistence. Source
@@ -76,6 +84,15 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
   field is automatically compatible. No new event kind, schema/protocol version
   or MCP tool is selected. No client receipt stage, response acknowledgement
   line, extra source closed-turn queue or saved badge is part of this contract.
+- MAIN's same disposition permits recording the known invisible idle-reconnect
+  gap rather than expanding transport in this fix round. The launcher can
+  replace its daemon socket without an in-flight error or a client-visible
+  identity change; terminal summary acceptance can then survive until the next
+  visible response/error. Initial negotiation and observed loss remain gated,
+  but unconditional revocation before the next send across that hidden boundary
+  is **not certified**. Existing old receivers ignore optional fields; this is
+  not permission to change hello/protocol semantics or claim a runtime pairing
+  was tested. The existing idle-reconnect follow-up remains outside this ticket.
 - Priority remains 649 / TASK3 / TASK4 / TASK5 / 675. Independent parallel
   worktree capture is authorized; this ordering is not a blanket serial capture
   wait. MAIN owns develop merges and all global question IDs.
@@ -163,10 +180,12 @@ closed-turn/retired-producer watermarks across ordinary reset, and disable stale
 source closures. A UUID or higher revision grants no session authority.
 
 - Gate both live/final fields on terminal intake's successful
-  `accepts: reasoning_summary_v1`; off/error/reconnect revokes acceptance. The
-  field capability is advertised only with complete receiver ownership,
+  `accepts: reasoning_summary_v1`; off/error/observed reconnect revokes acceptance.
+  Invisible idle reconnect has the explicitly recorded limitation in Decisions.
+  The field capability is advertised only with complete receiver ownership,
   framing/admission and commit support; unsupported standalone/file-only intake
-  remains legacy. Old adapters omit fields; old daemons receive none.
+  remains legacy. Old adapters omit fields; old daemons receive none under
+  initial/observed negotiation, subject to the recorded hidden-reconnect gap.
 - From connection open, track canonical intake operations at ingress, including
   pre-v1 legacy calls and the completion of their write side effects. This
   lightweight tracking does not change legacy scheduling or unrelated tools.
@@ -195,8 +214,14 @@ source closures. A UUID or higher revision grants no session authority.
   application. It cannot end a turn without its real start or alter counts,
   duration, origin or existing reason. Only the ordinary feed's existing
   uncertain-delivery requeue remains; there is no new disk-ack source queue.
-- Hosted mode keeps intake disabled. Send only the validated lead projection
-  through string-array `ws-dashboard-events`; construct a fresh internal event
+- Hosted mode keeps intake disabled. The new bundle adds the optional
+  `capabilities: ["reasoning_summary_v1"]` declaration to its existing `status`
+  widget, renewed at real turn boundaries before final projection/native
+  settlement. Only that explicit process-local opt-in enables hosted summaries
+  and new natural-end reasons; omission/empty support preserves legacy reasons
+  and answer-check behavior. Old receivers ignore the additive field. Send only
+  the validated lead projection through string-array `ws-dashboard-events`;
+  construct a fresh internal event
   accepting no reset/turn/batches/usage/key authority. Coalesce progress and
   synchronously flush the final bounded projection in the extension's settled
   handler before the native settled record. The runner attaches it internally

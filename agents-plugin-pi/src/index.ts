@@ -987,6 +987,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         setWidget: (key, lines) => { ctx.ui.setWidget(key, lines); },
         taskCounts: countBackgroundTasks,
         reasoningSummary: () => sessionSummary?.projection(),
+        reasoningSummaryCapable: VERSION === "1.5.2",
       });
       hostedDashboardEvents.start();
     }
