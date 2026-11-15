@@ -241,6 +241,9 @@ check("a query the shell does not pass on", S.framed(U("/s/abc123?x=1"), O), nul
 check("a session's sub-route", S.framed(U("/s/abc123/file?path=a"), O), null);
 check("a malformed reply-id", S.framed(U("/s/ABC"), O), null);
 check("the index", [S.framed(U("/#/team"), O), S.framed(U("/?frame=1"), O)], [{ path: "/", hash: "#/team", rid: "" }, { path: "/", hash: "", rid: "" }]);
+check("Unix worktree has no session identity", S.framed(U("/w/Users/me/work%20tree?frame=1"), O), { path: "/w/Users/me/work%20tree", hash: "", rid: "" });
+check("Windows worktree preserves its drive", S.framed(U("/w/C:/work/repo#file"), O), { path: "/w/C:/work/repo", hash: "#file", rid: "" });
+check("worktrees keep the shell origin and query guards", [S.framed(new URL("http://evil:1/w/home/me"), O), S.framed(U("/w/home/me?root=other"), O), S.framed(U("/w/"), O)], [null, null, null]);
 check("a route the shell does not frame", S.framed(U("/tracker/stores/x/view"), O), null);
 check("src", S.src({ path: "/s/abc123", hash: "#files" }), "/s/abc123?frame=1#files");
 var t = S.touch([], "a");

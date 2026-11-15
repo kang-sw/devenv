@@ -55,6 +55,11 @@
     var r = region("rail");
     if (!r || !WsRail) return;
     WsRail.marks(r, railSets, rid);
+    var selectedPath = location.pathname.indexOf("/w/") === 0 ? decodeURIComponent(location.pathname.slice(3)) : "";
+    q(".wthd", r).forEach(function (hd) {
+      var path = hd.closest(".rwt").getAttribute("data-g").replace(/\\/g, "/").replace(/^\//, "");
+      hd.classList.toggle("worktree-selected", !!selectedPath && path === selectedPath);
+    });
     if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
     if (usageGutter) usageGutter.sync();
@@ -661,6 +666,17 @@
     });
   }
   if (railEl && WsRail) {
+    function openWorktree(e) {
+      if (!root.hasAttribute("data-sysopen") || e.defaultPrevented || rdragged || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (e.type === "keydown" && e.key !== "Enter") return;
+      var hd = e.target.closest && e.target.closest(".wthd");
+      if (!hd || e.target.closest("button, a") || (e.type === "keydown" && e.target !== hd)) return;
+      var path = hd.closest(".rwt").getAttribute("data-g").replace(/\\/g, "/").replace(/^\//, "");
+      go("/w/" + path.split("/").map(encodeURIComponent).join("/").replace(/^([A-Za-z])%3A/, "$1:"));
+      e.preventDefault();
+    }
+    railEl.addEventListener("click", openWorktree);
+    railEl.addEventListener("keydown", openWorktree);
     railEl.addEventListener("pointerdown", rdStart);
     doc.addEventListener("pointermove", rdMove);
     doc.addEventListener("pointerup", rdEnd);

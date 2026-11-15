@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Argomenti",
+  "worktree.page": "albero di lavoro",
+  "worktree.local": "solo locale",
+  "js.worktree.explorer": "Nuovo esploratore",
   "js.usage.heading": "Utilizzo del piano",
   "js.usage.close": "Chiudi utilizzo del piano",
   "js.usage.legend": "Legenda del grafico di utilizzo",
@@ -481,6 +484,7 @@
   "js.rel.d": "{0} g",
   "js.rel.h": "{0} h",
   "js.rel.m": "{0} min",
+  "js.user.minutes": "{0} min fa",
   "js.rel.now": "ora",
   "js.rel.s": "{0} s",
   "js.send.empty": "Niente da inviare: scrivi un messaggio, rispondi alla lavagna o allega un'immagine.",

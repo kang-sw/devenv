@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "주제",
+  "worktree.page": "워크트리",
+  "worktree.local": "이 PC에서만",
+  "js.worktree.explorer": "새 탐색기",
   "js.usage.heading": "플랜 사용량",
   "js.usage.close": "플랜 사용량 닫기",
   "js.usage.legend": "사용량 차트 범례",
@@ -481,6 +484,7 @@
   "js.rel.d": "{0}일",
   "js.rel.h": "{0}시간",
   "js.rel.m": "{0}분",
+  "js.user.minutes": "{0}분 전",
   "js.rel.now": "지금",
   "js.rel.s": "{0}초",
   "js.send.empty": "보낼 내용이 없습니다: 메시지를 쓰거나, 보드에 답하거나, 이미지를 첨부하세요.",

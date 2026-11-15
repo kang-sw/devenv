@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "トピック",
+  "worktree.page": "ワークツリー",
+  "worktree.local": "ローカルのみ",
+  "js.worktree.explorer": "新しいエクスプローラー",
   "js.usage.heading": "プラン使用量",
   "js.usage.close": "プラン使用量を閉じる",
   "js.usage.legend": "使用量グラフの凡例",
@@ -481,6 +484,7 @@
   "js.rel.d": "{0}日",
   "js.rel.h": "{0}時間",
   "js.rel.m": "{0}分",
+  "js.user.minutes": "{0}分前",
   "js.rel.now": "今",
   "js.rel.s": "{0}秒",
   "js.send.empty": "送信する内容がありません: メッセージを書くか、ボードに回答するか、画像を添付してください。",

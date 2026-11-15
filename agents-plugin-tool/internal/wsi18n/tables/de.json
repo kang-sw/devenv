@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Themen",
+  "worktree.page": "Worktree",
+  "worktree.local": "nur lokal",
+  "js.worktree.explorer": "Neuer Explorer",
   "js.usage.heading": "Tarifnutzung",
   "js.usage.close": "Tarifnutzung schließen",
   "js.usage.legend": "Legende zum Nutzungsdiagramm",
@@ -481,6 +484,7 @@
   "js.rel.d": "{0} T",
   "js.rel.h": "{0} h",
   "js.rel.m": "{0} min",
+  "js.user.minutes": "vor {0} Min.",
   "js.rel.now": "jetzt",
   "js.rel.s": "{0} s",
   "js.send.empty": "Nichts zu senden: Schreibe eine Nachricht, beantworte das Board oder hänge ein Bild an.",

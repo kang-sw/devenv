@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Sujets",
+  "worktree.page": "arbre de travail",
+  "worktree.local": "local uniquement",
+  "js.worktree.explorer": "Nouvel explorateur",
   "js.usage.heading": "Utilisation du forfait",
   "js.usage.close": "Fermer l’utilisation du forfait",
   "js.usage.legend": "Légende du graphique d’utilisation",
@@ -481,6 +484,7 @@
   "js.rel.d": "{0} j",
   "js.rel.h": "{0} h",
   "js.rel.m": "{0} min",
+  "js.user.minutes": "il y a {0} min",
   "js.rel.now": "maintenant",
   "js.rel.s": "{0} s",
   "js.send.empty": "Rien à envoyer : écrivez un message, répondez au tableau ou joignez une image.",

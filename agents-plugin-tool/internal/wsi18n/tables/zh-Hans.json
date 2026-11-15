@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "主题",
+  "worktree.page": "工作树",
+  "worktree.local": "仅限本机",
+  "js.worktree.explorer": "新建文件浏览器",
   "js.usage.heading": "套餐用量",
   "js.usage.close": "关闭套餐用量",
   "js.usage.legend": "用量图表图例",
@@ -481,6 +484,7 @@
   "js.rel.d": "{0}天",
   "js.rel.h": "{0}小时",
   "js.rel.m": "{0}分",
+  "js.user.minutes": "{0}分钟前",
   "js.rel.now": "刚刚",
   "js.rel.s": "{0}秒",
   "js.send.empty": "没有可发送的内容：请输入消息、回答白板或附加图片。",
