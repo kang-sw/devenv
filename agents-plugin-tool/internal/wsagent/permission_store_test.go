@@ -278,10 +278,36 @@ func permissionLegacyPackage(t *testing.T, source string) string {
 	return dir
 }
 
-func TestPermissionSidecarOldWriteNewReopen(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("pinned fixture uses the Unix replacement helper")
+// Keep the pinned platform helpers in separate, build-constrained files. The
+// declaration extractor intentionally omits file-level build tags, so putting
+// the Unix declarations into legacy_test.go would run the wrong code on Windows.
+// A separate wsstate package also preserves its private retry helpers' namespace.
+func permissionLegacyWriterPackage(t *testing.T, source string) string {
+	t.Helper()
+	dir := permissionLegacyPackage(t, source)
+	files := map[string]string{
+		"replace_other_test.go": "//go:build !windows\n\npackage permissionlegacy\nimport \"os\"\n" +
+			permissionLegacyDeclarations(t, "wsagent/replace_file_other.go", "replaceFile"),
+		"replace_windows_test.go": "//go:build windows\n\npackage permissionlegacy\nimport (\"errors\"; \"os\"; \"syscall\"; \"time\"; \"golang.org/x/sys/windows\")\n" +
+			permissionLegacyDeclarations(t, "wsagent/replace_file_windows.go", "replaceFile", "isTransientReplaceError"),
+		"legacyatomic/replace_other.go": "//go:build !windows\n\npackage legacyatomic\nimport \"os\"\n" +
+			permissionLegacyDeclarations(t, "wsstate/replace_file_unix.go", "AtomicReplaceFile"),
+		"legacyatomic/replace_windows.go": "//go:build windows\n\npackage legacyatomic\nimport (\"errors\"; \"time\"; \"golang.org/x/sys/windows\")\n" +
+			permissionLegacyDeclarations(t, "wsstate/replace_file_windows.go", "AtomicReplaceFile", "retryTransient", "isTransientReplaceError"),
 	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestPermissionSidecarOldWriteNewReopen(t *testing.T) {
 	source := `package permissionlegacy
 import (
  "bytes"
@@ -298,6 +324,7 @@ import (
  "time"
  current "github.com/kang-sw/devenv/internal/wsagent"
  "github.com/kang-sw/devenv/internal/wsinbox"
+ wsstate "github.com/kang-sw/devenv/permissionlegacy/legacyatomic"
 )
 // Optional capability and turn payloads are not exercised by this writer fixture.
 type Profile = current.Profile
@@ -313,20 +340,16 @@ const (
 )
 var replyIDPattern = regexp.MustCompile("^[a-z0-9]{1,64}$")
 var errRegistrationMismatch = errors.New("registration identity mismatch")
-// Preserve the old namespaced call while executing its pinned Unix helper.
-var wsstate = struct { AtomicReplaceFile func(string,string) error }{AtomicReplaceFile}
 `
 	source += permissionLegacyDeclarations(t, "wsagent/record.go", "Record", "UnmarshalJSON", "MarshalJSON", "PendingReport", "ParentRef", "QueuedInput", "recordPath", "readRecord", "writeRecord", "writeFileAtomic")
 	source += permissionLegacyDeclarations(t, "wsagent/children.go", "steeredReport")
-	source += permissionLegacyDeclarations(t, "wsagent/replace_file_other.go", "replaceFile")
-	source += permissionLegacyDeclarations(t, "wsstate/replace_file_unix.go", "AtomicReplaceFile")
 	source += permissionLegacyDeclarations(t, "wsdashboard/registry.go", "Registration", "ValidReplyID", "SessionDir", "ReadRegistration", "WriteRegistration", "RemoveRegistration", "PruneRegistrations", "LastSeen", "agentRecordEnd", "terminalConversation", "retired", "readAgentRecordEnd")
 	source += permissionLegacyDeclarations(t, "wsdashboard/label_route.go", "labelRecord", "writeSessionLabel")
 	source += permissionLegacyDeclarations(t, "wsdashboard/endpoint.go", "writePrivateFile")
 	source += permissionLegacyHarness
 	// Only the isolated fixture package is compiled; no dashboard test package,
 	// provider, server or harness is started.
-	harness := permissionLegacyPackage(t, source)
+	harness := permissionLegacyWriterPackage(t, source)
 	root := t.TempDir()
 	cases := []string{"record", "registration", "remove", "labelset", "labelclear", "hosted", "expired", "deleted"}
 	seed := []byte("{\n  \"permission_level\": \"read-only\", \"future\": {\"keep\":[1,true,\"x\"]}\n}\n")
