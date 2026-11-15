@@ -132,6 +132,27 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		d := &result.Diagnostics[len(result.Diagnostics)-1]
 		d.Command, d.RawOutput = args, output
 	}
+	blocked := func() (implMergeResult, error) {
+		result.Status = "policy_blocked"
+		if releaseTarget {
+			return result, nil
+		}
+		return result, fmt.Errorf("%s", result.Diagnostics[0].Reason)
+	}
+	checkOccupied := func() bool {
+		if err := guardOccupiedRoot(ctx, runner, root, branch, mergeRoot); err != nil {
+			var occupied *occupiedRootError
+			if errors.As(err, &occupied) {
+				// Non-release dispatch returns only the error reason, so keep the
+				// housekeeping route in the reason as well as the resolution.
+				add("occupied_root", occupied.Error(), occupied.resolution())
+			} else {
+				gitFailure("occupied_root_inspection", "Cannot inspect checkout occupancy", "", err, "symbolic-ref", "--quiet", "HEAD")
+			}
+			return false
+		}
+		return true
+	}
 	if isImpl && target != "" && target != mergeRoot {
 		add("target_mismatch", fmt.Sprintf("target %q does not match encoded root %q", target, mergeRoot), "Use the encoded root as the target assertion, or select the intended impl branch.")
 	}
@@ -173,6 +194,11 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		} else {
 			result.TargetOID = oid
 		}
+	}
+	// Even a read-only status may refresh the index. Refuse another worker's
+	// checkout before that first status, not just before the eventual switch.
+	if !checkOccupied() {
+		return blocked()
 	}
 	checkWorktree := func() {
 		args := []string{"status", "--porcelain=v1", "--untracked-files=all"}
@@ -294,13 +320,6 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 			}
 		}
 	}
-	blocked := func() (implMergeResult, error) {
-		result.Status = "policy_blocked"
-		if releaseTarget {
-			return result, nil
-		}
-		return result, fmt.Errorf("%s", result.Diagnostics[0].Reason)
-	}
 	if len(result.Diagnostics) > 0 {
 		return blocked()
 	}
@@ -316,6 +335,9 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 	}
 	checkTips()
 	if len(result.Diagnostics) > 0 {
+		return blocked()
+	}
+	if !checkOccupied() {
 		return blocked()
 	}
 	if out, err := run("switch", "--no-guess", "--", mergeRoot); err != nil {
