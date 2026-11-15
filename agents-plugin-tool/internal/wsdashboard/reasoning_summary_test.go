@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -155,6 +156,46 @@ func TestReasoningSummaryHistoryImmutableTurnAssociationAndAttempts(t *testing.T
 	paged := renderSummaryRegions(t, nil, ring[3:], newEntryCache())
 	if !strings.Contains(string(paged[regionEntries].HTML), `data-key="summary-turn-`+ring[3].Name+`"`) {
 		t.Fatal("paging changed details key")
+	}
+}
+
+func TestReasoningSummaryPreservesUserRolesAndUnifiedHistoryKeys(t *testing.T) {
+	input := wsinbox.Entry{Parts: []string{"ordinary <words>"}, Chips: []wsinbox.Chip{{ID: "781", Answer: "ok", Note: "keep visible"}}}.Text()
+	for _, origin := range []string{wslive.OriginWhiteboard, wslive.OriginTerminal, ""} {
+		t.Run("origin="+origin, func(t *testing.T) {
+			cache := newEntryCache()
+			ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingUser, Origin: origin, Text: input}), ringRecord(2, wslive.RingEntry{Kind: wslive.RingReply, Text: "Existing answer"})}
+			original, _ := json.Marshal(ring)
+			before := renderSummaryRegions(t, nil, ring, cache)
+			baseline := string(before[regionEntries].HTML)
+			userStart := strings.Index(baseline, `<div class="msg user"`)
+			replyStart := strings.Index(baseline, `<div class="msg fromlead"`)
+			if userStart < 0 || replyStart <= userStart || !strings.Contains(baseline, `<span class="achip"><b>(781)</b> ok`) || !strings.Contains(baseline, "ordinary &lt;words&gt;") || strings.Contains(baseline, "input-record") {
+				t.Fatalf("user role, answer chip or escaped text lost: %s", baseline)
+			}
+			s := rendererSummary()
+			live := renderSummaryRegions(t, s, ring, cache)
+			if before[regionEntries].Hash != live[regionEntries].Hash || string(live[regionEntries].HTML) != baseline {
+				t.Fatal("RAM summary changed summary-free user/reply markup")
+			}
+			s.ActiveRequest = nil
+			s.Requests[0].Status = wslive.SummaryComplete
+			s.Requests[0].Parts[0].Status = wslive.SummaryComplete
+			ring = append(ring, ringRecord(3, wslive.RingEntry{Kind: wslive.RingTurn, Done: 1, SummaryHistory: &wslive.SummaryHistory{V: 1, Commit: strings.Repeat("a", 64), Requests: s.Requests}}))
+			after := string(renderSummaryRegions(t, nil, ring, cache)[regionEntries].HTML)
+			key := `data-key="summary-turn-` + ring[2].Name + `"`
+			if !strings.Contains(after, baseline[userStart:replyStart]) || strings.Index(after, key) < strings.Index(after, "Existing answer") || strings.Count(after, key) != 1 || strings.Count(after, `data-entry="`+ring[2].Name+`"`) != 1 || cache.buildCount() != 3 {
+				t.Fatalf("natural history rewrote cached input/reply or lost its own immutable key: %s", after)
+			}
+			paged := string(renderSummaryRegions(t, nil, ring[2:], newEntryCache())[regionEntries].HTML)
+			if !strings.Contains(paged, key) || strings.Contains(paged, "msg user") {
+				t.Fatal("history paging changed summary identity or recreated input")
+			}
+			retained, _ := json.Marshal(ring[:2])
+			if string(retained) != string(original) {
+				t.Fatal("summary insertion mutated earlier immutable records")
+			}
+		})
 	}
 }
 
