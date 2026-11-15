@@ -67,7 +67,8 @@ document.on={};document.addEventListener=function(type,fn){(document.on[type]||(
 function CustomEvent(type,init){this.type=type;Object.assign(this,init||{});}
 E.prototype.dispatchEvent=function(e){if(e.type==='wbhistoryload')navigationGeometry(this,'load');e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null){(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});}if(e.type==='wbhistoryload'){loads++;check('load root',e.detail.root===this,true);}return true;};
 fire=function(e,type){e.dispatchEvent(new CustomEvent(type,{bubbles:true}));};
-window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){navigationGeometry(n,'keep');var k={node:n,opt:opt,applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;}};
+function keepDouble(n,opt,phase){navigationGeometry(n,phase);var k={node:n,opt:opt,applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;}
+window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){return keepDouble(n,opt,'keep');},jump:function(n,opt){return keepDouble(n,opt,'jump');}};
 function visible(h,ratio){var w=h._wbHistoryWatch,was=w.ratio;w.ratio=ratio;w.opt.onChange({visible:ratio>0});if(was>0&&!ratio)w.opt.onOut();}
 function ResizeObserver(fn){this.fn=fn;}
 ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
@@ -266,13 +267,13 @@ check('Older reveals undated prefix in stored nonnumeric order',legacyOrder(),[[
 var legacyVisibleSnapshot=window.wbHistory.capture(document),legacyCuts=h._wbHistoryChunks.slice();
 h=legacyRepost();window.wbHistory.restore(document,legacyVisibleSnapshot);flush();
 check('reload preserves exact legacy cuts and visible order',[h._wbHistoryChunks,legacyOrder()],[legacyCuts,[['item-9',true,true,false],['item-2',true,true,false]]]);
-// Navigation keeps its original allowlist, fold opening and keep lifetime.
+// Navigation keeps its allowlist/fold opening and uses the explicit owner.
 h=start(logs(51,100),[panel(1,200)+logs(2,50)]);
 check('unknown target refused',window.wbHistory.loadTarget(document,'p999'),null);
 check('selector injection refused',window.wbHistory.loadTarget(document,'p1"] script'),null);
 var target=window.wbHistory.loadTarget(document,'p1');flush();
 check('known panel opens and becomes visible',[target.id,target.open,first(h)],['p1',true,'e1']);
-check('navigation uses shared keep offset',keeps.at(-1).opt.offset,12);
+check('navigation uses explicit jump offset',keeps.at(-1).opt.offset,12);
 keeps.at(-1).opt.onEnd();check('keep end clears target',h._wbHistoryTarget,null);
 // A host reveals through its fold owner before the loader's first layout,
 // including reentrant admission hooks and inert closed-topic initialization.
@@ -297,7 +298,7 @@ function guardTopic(h){
   check(kind+' rejected IDs never reveal, load or bind',[navigationOrder,loads,bound,h.querySelectorAll('template[data-history-page]').length],[[],loadCount,bindCount,pages]);
   var target=window.wbHistory.loadTarget(document,'p1',unfoldForNavigation);flush();
   check(kind+' reveals through callback before first geometry',navigationOrder[0],'owner');
-  ['rect','flash','keep'].forEach(function(phase){check(kind+' exercises '+phase,navigationOrder.includes(phase),true);});
+  ['rect','flash','jump'].forEach(function(phase){check(kind+' exercises '+phase,navigationOrder.includes(phase),true);});
   if(kind==='page')['bind','load'].forEach(function(phase){check('page exercises admission '+phase,navigationOrder.includes(phase),true);});
   check(kind+' opens the known target without unrelated fold changes',[target.id,target.open,topic.querySelector('.unrelated').open,sibling.getAttribute('data-size')],['p1',true,false,'fold']);
   navigationGuard=false;keeps.at(-1).opt.onEnd();
@@ -313,7 +314,7 @@ check('unknown inert target cannot reveal or admit',window.wbHistory.loadTarget(
 check('unknown inert topic stays inert',[navigationOrder,!!root.querySelector('template[data-history-topic]')],[[],true]);
 var deferredTarget=window.wbHistory.loadTarget(document,'p1',unfoldForNavigation);flush();
 check('inert topic owner runs before init geometry',navigationOrder[0],'owner');
-['rect','bind','load','flash','keep'].forEach(function(phase){check('inert topic exercises '+phase,navigationOrder.includes(phase),true);});
+['rect','bind','load','flash','jump'].forEach(function(phase){check('inert topic exercises '+phase,navigationOrder.includes(phase),true);});
 check('inert target becomes live and opens without unrelated disclosure',[deferredTarget.isConnected,deferredTarget.open,deferredTarget.closest('.topic').querySelector('.unrelated').open,!!root.querySelector('template[data-history-topic]')],[true,true,false,false]);
 navigationGuard=false;keeps.at(-1).opt.onEnd();
 var revealedSnapshot=window.wbHistory.capture(document),ownerCalls=navigationOrder.filter(function(p){return p==='owner';}).length;

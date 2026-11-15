@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>834b mockup - board toolbar state filter</title>
+<style>
+/* Theme variables: wswhiteboard/assets/page.css :root + dark block, scoped to a frame class so light and dark render side by side. */
+.th-light {
+  --wb-bg: #f3f3f0; --wb-fg: #1b1d21; --wb-card: #ffffff; --wb-muted: #e9e8e3; --wb-muted-fg: #5f646b;
+  --wb-primary: #2b62d9; --wb-topic: #2c3038; --wb-on-topic: #ffffff;
+  --wb-policy: #b25000; --wb-on-policy: #ffffff; --wb-technical: #2457c5; --wb-on-technical: #ffffff;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --st-confirm: #1d7348; --st-discuss: #b25000; --st-impl: #2457c5; --st-wait: #6b6f78;
+  color-scheme: light;
+}
+.th-dark {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff; --wb-topic: #2a2d33; --wb-on-topic: #e4e5e8;
+  --wb-policy: #5b3a1c; --wb-on-policy: #f6d9bd; --wb-technical: #26385e; --wb-on-technical: #d2dcf6;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --st-confirm: #6cc39a; --st-discuss: #e0a36c; --st-impl: #7aa2ff; --st-wait: #a2a6ad;
+  color-scheme: dark;
+}
+.th-light, .th-dark { --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent); background: var(--wb-bg); color: var(--wb-fg); }
+* { box-sizing: border-box; }
+body { margin: 0; background: #888; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; width: 1340px; }
+button { font: inherit; color: inherit; }
+.li { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- copied verbatim: wsdashboard/assets/dashboard.css:776-800 (board toolbar) ---- */
+.board-toolbar { flex: none; position: sticky; top: var(--toolbar-top, 0px); z-index: 4; min-width: 0; height: var(--toolbar-reserved, auto); margin-bottom: 10px; pointer-events: none; }
+.board-toolbar-face { container: board-toolbar / inline-size; position: relative; min-width: 0; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); pointer-events: auto; }
+.board-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 8px; }
+.board-action { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.board-action .li { width: 14px; height: 14px; flex: none; }
+.board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
+.board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
+.board-action kbd { font: 600 10.5px ui-monospace, Menlo, monospace; color: var(--wb-muted-fg); border: 1px solid var(--wb-line); border-radius: 4px; padding: 0 4px; }
+.board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
+@container board-toolbar (max-width: 540px) {
+  .board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }
+  .board-action:not(.board-overview) { padding-inline: 8px; }
+}
+/* dashboard.css:802-812 folder popover, reused by V2 */
+.tpop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; box-sizing: border-box; max-width: calc(100vw - 16px); overflow: auto; background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
+.tpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
+
+/* ---- proposed: the state filter sits right-aligned, the existing count follows it ---- */
+.sf { margin-left: auto; position: relative; display: flex; flex: none; }
+.sf + .board-count { margin-left: 2px; }
+.sf [data-s="all"] { --c: var(--wb-fg); } .sf [data-s="confirm"] { --c: var(--st-confirm); } .sf [data-s="discuss"] { --c: var(--st-discuss); }
+.sf [data-s="impl"] { --c: var(--st-impl); } .sf [data-s="wait"] { --c: var(--st-wait); }
+.sd { width: 7px; height: 7px; border-radius: 50%; background: var(--c); flex: none; }
+[data-s="wait"] > .sd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
+[data-s="all"] > .sd { display: none; }
+.sn { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; opacity: .72; }
+
+/* V1: segmented radio group, same 30px track as a board-action */
+.seg { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 2px; border-radius: 8px; background: var(--wb-muted); }
+.seg button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.seg button:hover { color: var(--wb-fg); }
+.seg button[aria-checked="true"] { background: color-mix(in srgb, var(--c) 15%, var(--wb-card)); color: color-mix(in srgb, var(--c) 78%, var(--wb-fg)); border-color: color-mix(in srgb, var(--c) 38%, transparent); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.seg button[data-s="all"][aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); border-color: var(--wb-line); }
+.seg button[aria-checked="true"] .sn { opacity: .9; }
+/* narrow board: unselected segments keep only dot + count; the chosen one keeps its label */
+@container board-toolbar (max-width: 1000px) {
+  .seg button:not([aria-checked="true"]):not([data-s="all"]) .sl { display: none; }
+  .seg button:not([aria-checked="true"]) { padding-inline: 7px; gap: 4px; }
+}
+
+/* V2: one pill, radio popover */
+.sbtn .sl b { font-weight: 800; }
+.sbtn .term-arrow { font-size: 10px; opacity: .8; }
+.sbtn.on { background: color-mix(in srgb, var(--c) 18%, var(--wb-card)); color: color-mix(in srgb, var(--c) 80%, var(--wb-fg)); border-color: color-mix(in srgb, var(--c) 42%, transparent); }
+.sbtn .clr { display: inline-flex; width: 16px; height: 16px; margin-right: -5px; align-items: center; justify-content: center; border-radius: 50%; font-size: 12px; line-height: 1; opacity: .75; }
+.sbtn .clr:hover { background: color-mix(in srgb, currentColor 18%, transparent); opacity: 1; }
+.spop { left: auto; right: 0; width: 232px; }
+.sopts { display: grid; gap: 2px; }
+.sopt { display: flex; align-items: center; gap: 9px; border: 0; background: transparent; text-align: left; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.sopt:hover, .sopt.hv { background: var(--wb-muted); }
+.sopt .rd { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
+.sopt[aria-checked="true"] .rd { box-shadow: inset 0 0 0 1.5px var(--wb-primary), inset 0 0 0 4px var(--wb-card), inset 0 0 0 8px var(--wb-primary); }
+.sopt .sl { font-weight: 700; flex: 1 1 auto; }
+.sopt[data-s="all"] > .sd { display: inline-block; background: linear-gradient(90deg, var(--st-confirm) 0 25%, var(--st-discuss) 25% 50%, var(--st-impl) 50% 75%, var(--st-wait) 75%); }
+
+/* V3: compact dot segments behind a filter icon; labels live in the tooltip */
+.dseg { display: inline-flex; align-items: center; gap: 1px; height: 30px; padding: 2px 2px 2px 8px; border-radius: 8px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.dseg > .li { width: 13px; height: 13px; margin-right: 4px; }
+.dseg button { display: inline-flex; align-items: center; gap: 5px; height: 26px; min-width: 32px; justify-content: center; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font-size: 12px; font-weight: 700; cursor: pointer; }
+.dseg button .sd { width: 8px; height: 8px; }
+.dseg button:hover { background: color-mix(in srgb, var(--wb-fg) 7%, transparent); }
+.dseg button[aria-checked="true"] { background: var(--c); color: var(--wb-card); }
+.dseg button[aria-checked="true"] .sd { background: var(--wb-card); }
+.dseg button[data-s="all"][aria-checked="true"] { background: var(--wb-fg); color: var(--wb-card); }
+
+/* topic cards (wswhiteboard page.css look) with B's state badge */
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; }
+.chip.policy { background: var(--wb-policy); color: var(--wb-on-policy); }
+.chip.ok { background: var(--wb-technical); color: var(--wb-on-technical); }
+.chip .li { width: 12px; height: 12px; }
+.topic { position: relative; background: var(--wb-card); border-radius: 12px; box-shadow: var(--wb-shadow); margin-bottom: 8px; overflow: hidden; }
+.tbar { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.tname { margin-right: auto; font-size: 14px; font-weight: 700; }
+.tago { font-size: 11.5px; opacity: .7; font-variant-numeric: tabular-nums; }
+.tsub { padding: 5px 12px; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+.tsub .rat { font-size: 10.5px; color: var(--wb-muted-fg); }
+.evi { display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; vertical-align: text-bottom; margin-right: 5px; background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.stb { --c: #b9bdc6; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
+.stb .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.stb.confirm { --c: #7fd6a8; } .stb.discuss { --c: #ffb36b; } .stb.impl { --c: #8db8ff; } .stb.wait .d { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.stb .own { font: 10.5px ui-monospace, Menlo, monospace; }
+.eta { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; color: #cfd3da; background: rgb(127 127 127 / .26); }
+.eta.over { color: #ffd2cd; background: rgb(255 110 96 / .34); font-weight: 800; }
+.hidden-note { display: flex; align-items: center; gap: 8px; margin: 2px 2px 0; font-size: 12px; color: var(--wb-muted-fg); }
+.hidden-note a { color: var(--wb-primary); font-weight: 600; cursor: pointer; }
+
+/* mockup chrome */
+.variant { padding: 14px 20px 18px; background: #d9d9d4; }
+.variant + .variant { border-top: 4px solid #888; }
+.vhead { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; color: #1b1d21; }
+.vhead .tag { font: 800 12px ui-monospace, Menlo, monospace; padding: 1px 8px; border-radius: 6px; background: #1b1d21; color: #fff; }
+.vhead h2 { margin: 0; font-size: 15px; }
+.vhead p { margin: 0; font-size: 12px; color: #444; }
+.shot { padding: 10px; border-radius: 10px; margin-bottom: 12px; }
+.shot:last-child { margin-bottom: 0; }
+.wlabel { font: 700 11px ui-monospace, Menlo, monospace; color: var(--wb-muted-fg); margin: 0 0 6px 2px; }
+.frame { position: relative; }
+.f1280 { width: 1280px; } .f900 { width: 900px; }
+.board { padding-top: 2px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="l-chevrons-down-up" viewBox="0 0 24 24"><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></symbol>
+  <symbol id="l-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></symbol>
+  <symbol id="l-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="l-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol>
+  <symbol id="l-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+  <!-- not in the bundled lucide subset yet: upstream lucide list-filter -->
+  <symbol id="l-list-filter" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></symbol>
+  <symbol id="i-ask" viewBox="0 0 16 16"><path d="M6 6.2a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="8" cy="12.3" r=".6" fill="currentColor"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.1L13 4.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+</svg>
+<div id="root"></div>
+<script>
+var S = [
+  { k: "all", l: "전체", n: 22 },
+  { k: "confirm", l: "확인 대기", n: 2 },
+  { k: "discuss", l: "논의 중", n: 3 },
+  { k: "impl", l: "구현 중", n: 4 },
+  { k: "wait", l: "대기", n: 3 }
+];
+// today's order (latest update first); s = state key or null (legacy)
+var TOPICS = [
+  { l: "메일박스 깨우기 지연", s: "impl", own: "MAIN", eta: 60, el: 15, at: "14:29", line: "wait 재무장 경로에 타이머 누수 확인 — 수정 패치 테스트 중" },
+  { l: "에이전트 effort 표기", s: null, at: "14:28", acks: 1, line: "819 머지됨: effort 를 모델 말줄임 밖 별도 통계 칸으로 분리" },
+  { l: "대화 패널: 입력 시 맨 아래로", s: "impl", own: "EXEC3", eta: 30, el: 47, at: "14:18", line: "스크롤 앵커 경합 재현됨, 원인 추적 중" },
+  { l: "Claude 바이너리 출처 검증", s: "discuss", at: "14:00", asks: 1, line: "서명 검증 실패 시 세션을 막을지 경고만 할지 결정해 주세요" },
+  { l: "기록 헤더: 항상 펼침·더보기 한 줄", s: "confirm", at: "13:49", asks: 1, line: "구현 완료 — 실제 보드에서 헤더 펼침과 더보기 한 줄 동작 확인 부탁드립니다" },
+  { l: "모델 표시 위치", s: "discuss", at: "13:35", asks: 1, line: "A(카드 머리 오른쪽) 와 B(통계 줄 첫 칸) 중 선택이 필요합니다" },
+  { l: "설치 패키지: 검증 범위 결정", s: "discuss", at: "13:10", asks: 1, line: "wsflow 검증을 스모크로 한정할지 전체 스위트로 돌릴지 결정 필요" },
+  { l: "선택 멘션: 옆에서 메모를 함께 입력", s: "wait", at: "12:30", asks: 1, line: "멘션 팝오버 시안 확정 대기 — EXEC 슬롯이 비면 착수" },
+  { l: "토픽 상태 기능 (TASK 5)", s: "impl", own: "EXEC2", eta: 90, el: 62, at: "12:20", line: "Phase 2 wb:state 문법 파서 작성 중 — 경계값 테스트 12/20 통과" },
+  { l: "파일 탭 → 고급 파일 탐색기 카드", s: "impl", own: "EXEC1", eta: 45, el: 20, at: "12:10", line: "트리 가상화 붙이는 중 — 1만 개 파일에서 스크롤 60fps 확인" },
+  { l: "데스크톱 앱: 경로 클릭 → 동작 메뉴", s: "confirm", at: "11:55", asks: 1, line: "807 머지 완료 — 앱에서 경로 클릭 시 메뉴가 뜨는지 확인 부탁드립니다" },
+  { l: "화이트보드 중앙 기준 스크롤", s: "wait", at: "11:30", asks: 1, line: "티켓 261114 todo 등록, 토픽 상태 기능 머지 후 착수 예정" },
+  { l: "다크 테마 스크롤바 대비", s: "wait", at: "09:30", asks: 1, line: "대비 기준(4.5:1 vs 3:1) 답변 후 진행" }
+];
+var NAME = { confirm: "확인 대기", discuss: "논의 중", impl: "구현 중", wait: "대기" };
+function li(n) { return '<svg class="li" aria-hidden="true"><use href="#l-' + n + '"/></svg>'; }
+function act(cls, icon, label, extra) { return '<button type="button" class="board-action ' + cls + '" title="' + label + '">' + li(icon) + '<span class="board-label">' + label + "</span>" + (extra || "") + "</button>"; }
+function baseTools() {
+  return act("board-overview", "chevrons-down-up", "한 눈에 보기") +
+    '<span class="board-term-slot">' + act("tnew", "square-terminal", "새 터미널", '<span class="term-arrow" aria-hidden="true">▾</span>') + "</span>" +
+    '<span class="board-web-slot">' + act("wnew", "globe", "웹 페이지") + "</span>" +
+    act("board-search", "search", "검색", "<kbd>Ctrl K</kbd>") + act("board-files", "folder-open", "파일");
+}
+function count() { return '<span class="board-count">진행 중 22 · 종료 61</span>'; }
+function v1(sel) {
+  return '<div class="sf" role="radiogroup" aria-label="토픽 상태 필터"><div class="seg">' + S.map(function (s) {
+    return '<button type="button" role="radio" data-s="' + s.k + '" aria-checked="' + (s.k === sel) + '" title="' + s.l + " " + s.n + '"><span class="sd"></span><span class="sl">' + s.l + '</span><span class="sn">' + s.n + "</span></button>";
+  }).join("") + "</div></div>";
+}
+function v2(sel, open) {
+  var cur = S.filter(function (s) { return s.k === sel; })[0];
+  var h = '<div class="sf"><button type="button" class="board-action sbtn' + (sel !== "all" ? " on" : "") + '" data-s="' + sel + '" aria-haspopup="true" aria-expanded="' + !!open + '">';
+  h += sel === "all" ? li("list-filter") + '<span class="sl">상태: <b>전체</b></span><span class="sn">' + cur.n + "</span>" : '<span class="sd"></span><span class="sl"><b>' + cur.l + '</b></span><span class="sn">' + cur.n + "</span>";
+  h += sel === "all" ? '<span class="term-arrow">▾</span>' : '<span class="clr" title="필터 해제">×</span>';
+  h += "</button>";
+  if (open) {
+    h += '<div class="tpop spop" role="dialog"><div class="lb">토픽 상태로 거르기</div><div class="sopts" role="radiogroup">' + S.map(function (s) {
+      return '<button type="button" class="sopt' + (s.k === "discuss" ? " hv" : "") + '" role="radio" data-s="' + s.k + '" aria-checked="' + (s.k === sel) + '"><span class="rd"></span><span class="sd"></span><span class="sl">' + s.l + '</span><span class="sn">' + s.n + "</span></button>";
+    }).join("") + "</div></div>";
+  }
+  return h + "</div>";
+}
+function v3(sel) {
+  return '<div class="sf" role="radiogroup" aria-label="토픽 상태 필터"><div class="dseg">' + li("list-filter") + S.map(function (s) {
+    return '<button type="button" role="radio" data-s="' + s.k + '" aria-checked="' + (s.k === sel) + '" title="' + s.l + " " + s.n + '">' + (s.k === "all" ? "전체 " : '<span class="sd"></span>') + '<span class="sn">' + s.n + "</span></button>";
+  }).join("") + "</div></div>";
+}
+function card(t) {
+  var b = "";
+  if (t.s === "impl") b = '<span class="stb impl"><span class="d"></span>구현 중 · <span class="own">' + t.own + '</span></span><span class="eta' + (t.el > t.eta ? " over" : "") + '">ETA ' + t.eta + "분 · " + t.el + "분 경과" + (t.el > t.eta ? " (+" + (t.el - t.eta) + ")" : "") + "</span>";
+  else if (t.s) b = '<span class="stb ' + t.s + '"><span class="d"></span>' + NAME[t.s] + "</span>";
+  return '<section class="topic"><div class="tbar"><span class="tname">' + t.l + "</span>" + b + '<span class="tago">' + t.at + "</span>" +
+    (t.asks ? '<span class="chip policy"><svg class="li"><use href="#i-ask"/></svg>' + t.asks + "</span>" : "") +
+    (t.acks ? '<span class="chip ok"><svg class="li"><use href="#i-check"/></svg>' + t.acks + "</span>" : "") +
+    '</div><div class="tsub"><span class="rat"><span class="evi">L</span>' + t.at + "</span> — " + t.line + "</div></section>";
+}
+function cards(sel, max) {
+  var list = sel === "all" ? TOPICS.slice(0, max) : TOPICS.filter(function (t) { return t.s === sel; });
+  var h = list.map(card).join("");
+  if (sel !== "all") h += '<div class="hidden-note">' + NAME[sel] + " " + list.length + "개만 표시 · 나머지 " + (22 - list.length) + "개 숨김 <a>전체 보기</a></div>";
+  return h;
+}
+function frame(id, theme, width, filter, sel, max) {
+  return '<div class="shot th-' + theme + '"><div class="wlabel">' + theme + " · " + width + 'px</div><div class="frame f' + width + '" id="' + id + '"><div class="board-toolbar"><div class="board-toolbar-face"><div class="board-tools">' +
+    baseTools() + filter + count() + '</div></div></div><div class="board">' + cards(sel, max) + "</div></div></div>";
+}
+var V = [
+  { id: "v1", name: "V1 · 인라인 세그먼트 라디오 (추천)", note: "One click, every count visible. Under ~1000px board width the unselected segments drop their label (dot + count) and the chosen one keeps it. Shown with 논의 중 selected.",
+    f1280: function () { return v1("discuss"); }, f900: function () { return v1("discuss"); }, sel1280: "discuss", sel900: "discuss" },
+  { id: "v2", name: "V2 · 단일 알약 + 라디오 팝오버", note: "Smallest footprint; looks like 새 터미널 ▾ and reuses its .tpop popover. 1280: popover open on 전체. 900: closed with 논의 중 applied (tinted pill, × clears).",
+    f1280: function () { return v2("all", true); }, f900: function () { return v2("discuss", false); }, sel1280: "all", sel900: "discuss" },
+  { id: "v3", name: "V3 · 아이콘 + 색 점 압축 세그먼트", note: "Narrowest inline form; state names only in tooltips, so the dot colors must be learned. 1280: 전체. 900: 구현 중 selected.",
+    f1280: function () { return v3("all"); }, f900: function () { return v3("impl"); }, sel1280: "all", sel900: "impl" }
+];
+var html = "";
+V.forEach(function (v) {
+  html += '<section class="variant" id="' + v.id + '"><div class="vhead"><span class="tag">' + v.id.toUpperCase() + "</span><h2>" + v.name + "</h2><p>" + v.note + "</p></div>";
+  ["light", "dark"].forEach(function (th) {
+    html += '<div class="pair" id="' + v.id + "-" + th + '">' + frame(v.id + "-" + th + "-1280", th, 1280, v.f1280(), v.sel1280, 4) + frame(v.id + "-" + th + "-900", th, 900, v.f900(), v.sel900, 3) + "</div>";
+  });
+  html += "</section>";
+});
+document.getElementById("root").innerHTML = html;
+// live demo: radios switch the filter in place
+document.addEventListener("click", function (e) {
+  var r = e.target.closest(".seg [role=radio], .dseg [role=radio]");
+  if (!r) return;
+  r.parentNode.querySelectorAll("[role=radio]").forEach(function (x) { x.setAttribute("aria-checked", String(x === r)); });
+  var fr = r.closest(".frame"); fr.querySelector(".board").innerHTML = cards(r.dataset.s, fr.classList.contains("f900") ? 3 : 4);
+});
+</script>
+</body>
+</html>

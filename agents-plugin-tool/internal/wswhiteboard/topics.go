@@ -87,7 +87,7 @@ var ticketStemPattern = regexp.MustCompile(`^\d{6}-[\w-]+$`)
 // label they are metadata: no recency change, no reopen, no event. A group
 // with tickets and no command must name a known topic unless it links at
 // least one stem, which makes a new topic persist.
-func applyGroup(p *problems, work *State, cmd command) string {
+func applyGroup(p *problems, work *State, origins bodyOrigins, cmd command) string {
 	scope := cmd.Scope
 	raw, hasTickets := scope.Extra("tickets")
 	var stems []string
@@ -97,7 +97,7 @@ func applyGroup(p *problems, work *State, cmd command) string {
 	}
 	key := ""
 	if _, labelled := scope.Extra("label"); labelled {
-		key = applyLabel(p, work, cmd, len(stems) > 0)
+		key = applyLabel(p, work, origins, cmd, len(stems) > 0)
 	} else if scope.Value != "" {
 		key = work.resolveTopic(scope.Value)
 		if scope.Commands == 0 && len(stems) == 0 && !work.topicKnown(key) {
@@ -150,7 +150,7 @@ func (s *State) setTopicTickets(topic string, stems []string) {
 // it to the stem, or else starts a new stemmed topic, which an empty group
 // cannot do since a topic with nothing in it does not persist, unless the
 // group links tickets (linking).
-func applyLabel(p *problems, work *State, cmd command, linking bool) string {
+func applyLabel(p *problems, work *State, origins bodyOrigins, cmd command, linking bool) string {
 	scope := cmd.Scope
 	name := scope.Value
 	label, _ := scope.Extra("label")
@@ -182,6 +182,7 @@ func applyLabel(p *problems, work *State, cmd command, linking bool) string {
 		}
 		if !work.stemmed(label) && work.topicKnown(label) {
 			work.renameTopic(label, name)
+			origins.rename(label, name)
 			break
 		}
 		if taken(name) {

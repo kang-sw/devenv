@@ -71,7 +71,9 @@
   // board's width beside the column as the user dragged it (0: the
   // stylesheet's).
   var pins = null, col = null, colOn = false, boardw = 0, zone = null;
-  var toolbar = null, counts = null, overviewOn = false;
+  var toolbar = null, overviewOn = false;
+  var stateFilter = "all", stateUI = null;
+  var filterValues = ["all", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed"];
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -125,8 +127,7 @@
       if (actions.files.el) files.setAttribute("aria-controls", actions.files.el.id);
       files.setAttribute("aria-expanded", "false");
     }
-    counts = mk("span", "board-count");
-    row.appendChild(counts);
+    row.appendChild(buildStateFilter());
     var face = mk("div", "board-toolbar-face");
     face.appendChild(row);
     toolbar.appendChild(face);
@@ -135,7 +136,7 @@
   // height: no scroll writer, replacement controls, or transient measuring DOM.
   function floatToolbar() {
     if (!window.ResizeObserver) return;
-    var face = toolbar.firstChild, row = face.firstChild, countHeight = counts.getBoundingClientRect().height, scrollBox = null;
+    var face = toolbar.firstChild, row = face.firstChild, scrollBox = null;
     function style(n, key, value) {
       if (n.style.getPropertyValue(key) !== value) n.style.setProperty(key, value);
     }
@@ -143,7 +144,7 @@
       if (!face.getClientRects().length || !face.getBoundingClientRect().width) return;
       var s = scroller(board) || doc.scrollingElement, main = s === doc.scrollingElement;
       // Document boards share the viewport with the fixed drawer handles.
-      // Keep both the face and its counts below them, rather than raising the
+      // Keep the face below them, rather than raising the
       // toolbar over unrelated controls or changing horizontal action boxes.
       var inset = 0;
       if (main) Array.prototype.forEach.call(doc.querySelectorAll(".tk-handle, .gh, .dr-handle"), function (n) {
@@ -155,17 +156,14 @@
       var top = main ? inset : s.getBoundingClientRect().top + s.clientTop;
       var floating = board.getBoundingClientRect().top < top;
       toolbar.toggleAttribute("data-floating", floating);
-      if (!floating) countHeight = counts.getBoundingClientRect().height;
-      var rows = {}, actionRows = {};
+      var rows = {};
       Array.prototype.forEach.call(row.children, function (n) {
         var r = n.getBoundingClientRect();
         if (!r.height) return;
         var key = Math.round((r.top + r.bottom) * 2) / 4;
-        var action = n !== counts;
-        rows[key] = Math.max(rows[key] || 0, action ? 30 : countHeight);
-        if (action) actionRows[key] = true;
+        rows[key] = 30;
       });
-      toolbar.toggleAttribute("data-wrapped-actions", Object.keys(actionRows).length > 1);
+      toolbar.toggleAttribute("data-wrapped-actions", Object.keys(rows).length > 1);
       var keys = Object.keys(rows), reserved = 16 + Math.max(0, keys.length - 1) * 6;
       keys.forEach(function (key) { reserved += rows[key]; });
       style(toolbar, "--toolbar-reserved", (floating ? reserved : face.getBoundingClientRect().height) + "px");
@@ -182,20 +180,152 @@
     new window.ResizeObserver(update).observe(face);
     update();
   }
+  function buildStateFilter() {
+    var root = mk("div", "board-state-filter"), inline = mk("div", "board-state-inline");
+    var trigger = mk("button", "board-action board-state-trigger"), pop = mk("div", "tpop board-state-pop");
+    var labels = [wsT("js.board.filter.all"), wsT("js.board.filter.discuss"), wsT("js.board.filter.wait"), wsT("js.board.filter.implement"), wsT("js.board.filter.confirm"), wsT("js.board.filter.closed")];
+    var label = wsT("js.board.filter.label");
+    stateFilter = opt.load(opt.key + ".state-filter");
+    if (filterValues.indexOf(stateFilter) < 0) stateFilter = "all";
+    stateUI = { root: root, inline: inline, trigger: trigger, pop: pop, labels: labels, radios: [], totals: {} };
+    trigger.type = "button";
+    trigger.hidden = true;
+    trigger.setAttribute("aria-label", label);
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.setAttribute("aria-expanded", "false");
+    pop.hidden = true;
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", label);
+    pop.appendChild(mk("div", "lb", label));
+    var options = mk("div", "board-state-options");
+    [inline, options].forEach(function (group, g) {
+      group.setAttribute("role", "radiogroup");
+      group.setAttribute("aria-label", label);
+      if (!g) group.innerHTML = licon("list-filter");
+      filterValues.forEach(function (value, i) {
+        var b = mk("button", g ? "board-state-option" : "board-state-radio");
+        b.type = "button";
+        b.setAttribute("role", "radio");
+        b.setAttribute("data-filter", value);
+        if (g) b.appendChild(mk("span", "board-state-ring"));
+        b.appendChild(mk("span", "board-state-dot"));
+        b.appendChild(mk("span", "board-state-label", labels[i]));
+        b.appendChild(mk("span", "board-state-count"));
+        b.addEventListener("click", function () { selectFilter(value, b, !!g); });
+        b.addEventListener("keydown", function (e) {
+          var index = filterValues.indexOf(stateFilter), next;
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (index + 1) % filterValues.length;
+          else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (index + filterValues.length - 1) % filterValues.length;
+          else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = filterValues.length - 1;
+          if (next === undefined) return;
+          e.preventDefault(); e.stopPropagation();
+          selectFilter(filterValues[next], group.querySelector('[data-filter="' + filterValues[next] + '"]'), false);
+        });
+        group.appendChild(b);
+        stateUI.radios.push(b);
+      });
+    });
+    pop.appendChild(options);
+    root.appendChild(inline); root.appendChild(trigger); root.appendChild(pop);
+    function close(back) {
+      pop.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+      if (back) trigger.focus({ preventScroll: true });
+    }
+    stateUI.close = close;
+    trigger.addEventListener("click", function () {
+      if (!pop.hidden) { close(false); return; }
+      pop.hidden = false; trigger.setAttribute("aria-expanded", "true");
+      placeStatePop();
+      options.querySelector('[data-filter="' + stateFilter + '"]').focus({ preventScroll: true });
+    });
+    pop.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
+    });
+    root.addEventListener("focusout", function (e) { if (e.relatedTarget && !root.contains(e.relatedTarget)) close(false); });
+    doc.addEventListener("click", function (e) { if (!root.contains(e.target)) close(false); });
+    doc.addEventListener("scroll", placeStatePop, { capture: true, passive: true });
+    window.addEventListener("resize", resizeStateFilter);
+    if (window.ResizeObserver) new window.ResizeObserver(resizeStateFilter).observe(toolbar);
+    return root;
+  }
+  function selectFilter(value, focus, dismiss) {
+    var run = function () {
+      stateFilter = value;
+      opt.save(opt.key + ".state-filter", value);
+      countTopics();
+      if (dismiss) stateUI.close(true);
+      else if (focus) focus.focus({ preventScroll: true });
+    };
+    // Let Overview finish restoring its anchor before visibility changes.
+    if (opt.toolbar && opt.toolbar.filter) opt.toolbar.filter(run); else run();
+  }
+  function placeStatePop() {
+    if (!stateUI || stateUI.pop.hidden) return;
+    var r = stateUI.trigger.getBoundingClientRect(), pop = stateUI.pop;
+    var width = Math.min(232, window.innerWidth - 16), top = Math.min(r.bottom + 8, Math.max(8, window.innerHeight - 80));
+    pop.style.width = width + "px";
+    pop.style.left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8)) + "px";
+    pop.style.top = top + "px";
+    pop.style.maxHeight = Math.max(0, window.innerHeight - top - 8) + "px";
+  }
+  function resizeStateFilter() {
+    if (!stateUI) return;
+    var width = toolbar.getBoundingClientRect().width;
+    if (!width) return;
+    var narrow = width < 540, ui = stateUI, active = doc.activeElement;
+    if (ui.inline.hidden !== narrow) {
+      var transfer = active && (ui.inline.contains(active) || active === ui.trigger || ui.pop.contains(active));
+      ui.close(false);
+      ui.inline.hidden = narrow;
+      ui.trigger.hidden = !narrow;
+      if (transfer) (narrow ? ui.trigger : ui.inline.querySelector('[data-filter="' + stateFilter + '"]')).focus({ preventScroll: true });
+    }
+    placeStatePop();
+  }
+  function filtered(n, hide) {
+    if (hide) n.setAttribute("data-state-filtered", ""); else n.removeAttribute("data-state-filtered");
+  }
   function countTopics() {
-    if (!counts) return;
-    var open = 0, closed = 0, seen = new Set();
+    if (!stateUI || !pins) return;
+    var totals = {}, seen = new Set();
+    filterValues.forEach(function (v) { totals[v] = 0; });
     [board, pins].forEach(function (box) {
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (n) {
-        var name = n.getAttribute("data-topic");
+        var closed = n.classList.contains("closed"), state = n.getAttribute("data-state"), name = n.getAttribute("data-topic");
+        filtered(n, stateFilter !== "all" && (closed ? stateFilter !== "closed" : stateFilter === "closed" || stateFilter !== state));
         if (seen.has(name)) return;
         seen.add(name);
-        if (n.classList.contains("closed")) closed++; else open++;
+        totals.all++;
+        if (closed) totals.closed++;
+        else if (filterValues.indexOf(state) > 0 && state !== "closed") totals[state]++;
       });
     });
     var more = board.querySelector("button.closed-more[data-closed-more]");
-    if (more) closed += Math.max(0, +more.getAttribute("data-closed-more") || 0);
-    counts.textContent = wsT("js.board.toolbar.count", open, closed);
+    if (more) {
+      var remaining = Math.max(0, +more.getAttribute("data-closed-more") || 0);
+      totals.closed += remaining; totals.all += remaining;
+    }
+    Array.prototype.forEach.call(board.querySelectorAll(".closed-more"), function (n) { filtered(n, stateFilter !== "all" && stateFilter !== "closed"); });
+    stateUI.totals = totals;
+    stateUI.radios.forEach(function (b) {
+      var value = b.getAttribute("data-filter"), checked = value === stateFilter;
+      var label = stateUI.labels[filterValues.indexOf(value)] + " " + totals[value];
+      b.setAttribute("aria-checked", String(checked));
+      b.setAttribute("tabindex", checked ? "0" : "-1");
+      b.setAttribute("aria-label", label); b.title = label;
+      b.querySelector(".board-state-count").textContent = String(totals[value]);
+    });
+    var i = filterValues.indexOf(stateFilter), trigger = stateUI.trigger;
+    trigger.setAttribute("data-filter", stateFilter);
+    trigger.innerHTML = licon("list-filter");
+    trigger.appendChild(mk("span", "board-state-dot"));
+    trigger.appendChild(mk("span", "board-state-label", stateUI.labels[i]));
+    trigger.appendChild(mk("span", "board-state-count", String(totals[stateFilter])));
+    trigger.appendChild(mk("span", "term-arrow", "▾"));
+    trigger.setAttribute("aria-label", wsT("js.board.filter.label") + ": " + stateUI.labels[i] + " " + totals[stateFilter]);
+    resizeStateFilter();
   }
   function topicName(n) {
     return n && n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
@@ -601,6 +731,7 @@
     c.pinBtn.setAttribute("aria-pressed", String(!!c.pinned));
     c.foldBtn.setAttribute("aria-expanded", String(!c.folded));
     c.body.style.height = (c.h || (typeof c.k.base === "function" ? c.k.base(c) : c.k.base) || BASE) + "px";
+    if (maxed === c) sizeSheet(c);
     c.foldEl.textContent = "";
     var f = c.folded && c.k.folded ? c.k.folded(c) : null;
     if (f) c.foldEl.appendChild(f);
@@ -715,13 +846,80 @@
   // board keeps its height meanwhile. Nothing is moved, so a frame or a
   // video keeps running through maximize and back. One thing is large at a
   // time: a card, or a board node (sheet: a topic, or a topic's panel).
-  function maximize(c) {
-    if (c && window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(function () { maximize(c); }); return; }
-    if (maxed === c) return;
+  // Category identity belongs to the owning renderer, never to incidental
+  // nested media. Capture column geometry before any node becomes fixed.
+  function sheetWidth(c) {
+    var kind = c.kind, host, n = c.el;
+    if (c.files || kind === "terminal") {
+      host = c.files ? doc.getElementById("convo") : n;
+      if (!c.files) {
+        while (host && host !== board && host !== col) host = host.parentNode;
+        if (!host) host = board;
+      }
+      var w = host && host.getBoundingClientRect().width;
+      return w > 0 && isFinite(w) ? w : c.files ? 1280 : 960;
+    }
+    if (!(c instanceof Card)) return 1440; // a topic or its entry panel
+    if (kind === "preview") kind = n.getAttribute("data-preview-kind");
+    var widths = { text: 1280, markdown: 1280, code: 1440, diff: 1760,
+      web: 1600, frame: 1600, image: 1600, video: 1600, topic: 1440,
+      panel: 1440, approval: 1024, system: 1024 };
+    return Object.prototype.hasOwnProperty.call(widths, kind) ? widths[kind] : 1920;
+  }
+  function clearSheetWidth(c) {
+    if (c.widthBtn && c.widthBtn.parentNode) c.widthBtn.parentNode.removeChild(c.widthBtn);
+    if (c.el) c.el.style.removeProperty("--sheet-inset");
+    delete c.widthBtn;
+    delete c.normalWidth;
+    delete c.extended;
+  }
+  function sizeSheet(c) {
+    if (!c || !c.el) return;
+    // Preview responses may arrive after maximize; their renderer identity
+    // can change, but Files/Terminal keep the original column snapshot.
+    if (c.kind === "preview") c.normalWidth = sheetWidth(c);
+    var normal = Math.min(c.normalWidth, 1920), wide = window.innerWidth > 640 && window.innerWidth - 32 > normal;
+    c.el.style.setProperty("--sheet-inset", (c.extended ? 16 : Math.max(16, (window.innerWidth - normal) / 2)) + "px");
+    if (!c.widthBtn) {
+      c.widthBtn = ibtn("sheet-width", "maximize-2", "");
+      c.widthBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        c.extended = !c.extended;
+        sizeSheet(c);
+        if (c instanceof Card) c.sized();
+      });
+    }
+    // Reattach after a renderer replaces only the head, or the whole node.
+    var before = c.files ? c.back : c instanceof Card ? c.minBtn : sheetBtn(c.el, "d-min");
+    if (before && (c.widthBtn.nextSibling !== before || c.widthBtn.parentNode !== before.parentNode)) {
+      var focused = doc.activeElement === c.widthBtn;
+      before.parentNode.insertBefore(c.widthBtn, before);
+      if (focused) c.widthBtn.focus({ preventScroll: true });
+    }
+    c.widthBtn.hidden = !wide || c.el.hasAttribute("data-float");
+    c.widthBtn.setAttribute("aria-pressed", String(!!c.extended));
+    var label = c.extended ? wsT("js.card.width.normal") : wsT("js.card.width.extend");
+    c.widthBtn.title = label;
+    c.widthBtn.setAttribute("aria-label", label);
+  }
+  window.addEventListener("resize", function () { sizeSheet(maxed); });
+  function maximize(c, floating) {
+    if (c && window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(function () { maximize(c, floating); }); return; }
+    var floatOn = !!(floating && c instanceof Card && c.kind === "explorer");
+    if (maxed === c) {
+      if (c && c.el.hasAttribute("data-float") !== floatOn) {
+        if (floatOn) c.el.setAttribute("data-float", ""); else c.el.removeAttribute("data-float");
+        c.normalWidth = floatOn ? 1100 : sheetWidth(c);
+        c.extended = false;
+        sizeSheet(c); c.sized();
+      }
+      return;
+    }
     if (maxed) {
       var was = maxed;
       maxed = null;
       scrim.hidden = true;
+      clearSheetWidth(was);
       if (was.files) {
         was.el.removeAttribute("data-max");
         was.el.style.removeProperty("--files-top");
@@ -732,6 +930,7 @@
         if (was.back.isConnected) was.back.focus({ preventScroll: true });
       } else if (was instanceof Card) {
         was.el.removeAttribute("data-max");
+        was.el.removeAttribute("data-float");
         was.el.style.height = "";
         was.sized();
         if (was.maxBtn.isConnected) was.maxBtn.focus();
@@ -743,6 +942,8 @@
       }
     }
     if (!c) return;
+    c.normalWidth = floatOn ? 1100 : sheetWidth(c);
+    c.extended = false;
     if (!scrim) {
       scrim = mk("div", "bc-scrim");
       scrim.addEventListener("click", function () { maximize(null); });
@@ -758,6 +959,7 @@
       toolbar.setAttribute("data-files", "");
       c.back.setAttribute("aria-expanded", "true");
       c.owner.shown();
+      sizeSheet(c);
       var filter = c.el.querySelector(".fq");
       if (filter) filter.focus({ preventScroll: true });
       return;
@@ -771,6 +973,8 @@
     }
     c.el.style.height = c.el.getBoundingClientRect().height + "px";
     c.el.setAttribute("data-max", "");
+    if (floatOn) c.el.setAttribute("data-float", "");
+    sizeSheet(c);
     c.sized();
     c.minBtn.focus();
   }
@@ -806,7 +1010,9 @@
     var n = sheetNode(t);
     if (t.el && t.el !== n) shrinkNode(t);
     t.el = n;
-    if (!n || n.hasAttribute("data-max")) return;
+    if (!n) return;
+    sizeSheet(t);
+    if (n.hasAttribute("data-max")) return;
     if (t.topic) {
       if (!t.scroll) {
         t.scroll = [];
@@ -819,6 +1025,7 @@
     n.setAttribute("data-max", "");
   }
   function shrinkNode(t) {
+    t.el.style.removeProperty("--sheet-inset");
     t.el.removeAttribute("data-max");
     if (!t.topic && t.el.parentNode) t.el.parentNode.style.height = "";
   }
@@ -1214,6 +1421,9 @@
       return c;
     },
     list: function (kind) { return cards.filter(function (c) { return !kind || c.kind === kind; }); },
+    // Explorer float shares the sheet lifecycle; it never owns another card node.
+    float: function (c) { if (c instanceof Card && c.kind === "explorer" && cards.indexOf(c) >= 0) maximize(c, true); },
+    dismissFiles: function () { if (maxed && maxed.files) maximize(null); },
     // weave and settle are the board morph's two steps (dashboard.js
     // morphBoard): weave takes the nodes the board wants and returns the
     // placement, {pins, board} (the pin list's nodes and the board

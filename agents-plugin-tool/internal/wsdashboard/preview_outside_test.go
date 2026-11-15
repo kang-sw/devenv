@@ -22,6 +22,7 @@ function El(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.at
 El.prototype.appendChild = function (c) { this.children.push(c); c.parentNode = this; return c; };
 El.prototype.removeChild = function (c) { this.children.splice(this.children.indexOf(c), 1); };
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
+El.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 El.prototype.hasAttribute = function (k) { return k in this.attrs; };
 El.prototype.addEventListener = function (k, f) { this.on[k] = f; };
@@ -77,11 +78,12 @@ function fetch(url, o) {
 var kinds = {}, list = [], placements = [];
 function Card(kind, data) {
   this.kind = kind; this.data = data; this.pinned = false; this.body = new El("div"); this.saves = 0;
+  this.el = new El("div");
   this.body.clientHeight = 100;
 }
 Card.prototype.title = function (t) { this.head = t; };
 Card.prototype.actions = function (a) { this.acts = a; };
-["fold", "show", "close"].forEach(function (k) { Card.prototype[k] = function () {}; });
+["fold", "show", "close", "paint"].forEach(function (k) { Card.prototype[k] = function () {}; });
 Card.prototype.bump = function (origin) { placements.push(["bump", origin]); };
 Card.prototype.save = function () { this.saves++; };
 var window = { WsCards: {
@@ -106,12 +108,15 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   check("the card's record", card.data, { path: abs, out: true });
   var fr = find(card.body, "IFRAME");
   check("the frame", fr && [fr.src, fr.attrs.sandbox], ["/s/rid1/fs/ocap/CAP1/page.html", "allow-scripts"]);
+  check("the frame's fullscreen category", card.el.getAttribute("data-preview-kind"), "frame");
   check("the card's title", [card.head.name, card.head.sub], ["page.html", abs]);
 
   // A restored card, and a reopened one, post again: no capability is kept.
   answers.push({ kind: "frame", frame: "/s/rid1/fs/ocap/CAP2/page.html" });
   kinds.preview.open(card);
+  check("a restored load clears the previous fullscreen category", card.el.getAttribute("data-preview-kind"), null);
   await settle();
+  check("the restored frame's fullscreen category", card.el.getAttribute("data-preview-kind"), "frame");
   answers.push({ kind: "frame", frame: "/s/rid1/fs/ocap/CAP3/page.html" });
   window.WsPreview.open(abs, { out: true, origin: origin });
   await settle();
@@ -143,6 +148,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   await settle();
   check("an image's load", calls, [{ url: "/s/rid1/fs/outside", method: "POST", body: JSON.stringify({ path: "C:\\away\\shot.png" }) }]);
   check("the image", find(card.body, "IMG").src, "/s/rid1/fs/ocap/CAP4/shot.png");
+  check("the image's fullscreen category", card.el.getAttribute("data-preview-kind"), "image");
   posts = [];
   card.acts[0].run(card);
   check("open a Windows path", posts[0].body, { path: "shot.png", action: "open", root: "C:\\away\\" });
@@ -150,6 +156,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   window.WsPreview.open("/away/notes.md", { out: true });
   await settle();
   check("markdown", find(card.body, "ARTICLE").innerHTML, "<h1>Title</h1>");
+  check("markdown's fullscreen category", card.el.getAttribute("data-preview-kind"), "markdown");
 
   // A refusal says the file is no longer available; any other failure and
   // a file missing under the root keep their own notes.
@@ -157,6 +164,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   window.WsPreview.open(abs, { out: true });
   await settle();
   check("a refused mint", [card.body.textContent, find(card.body, "IFRAME"), find(card.body, "BUTTON")], ["js.preview.gone", null, null]);
+  check("a refused mint leaves no stale fullscreen category", card.el.getAttribute("data-preview-kind"), null);
   answers.push({ status: 403 });
   kinds.preview.open(card);
   await settle();
@@ -176,6 +184,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   var matched = window.WsPreview.open("docs/a.md", { origin: origin, line: 12 });
   await settle();
   check("matching pinned reuse never repositions or persists origin", [matched === card, card.pinned, placements.length === before, card.data], [true, true, true, { path: "docs/a.md", line: 12 }]);
+  check("monospace text's fullscreen category", card.el.getAttribute("data-preview-kind"), "code");
   answers.push({ kind: "text", text: "x" });
   var other = window.WsPreview.open("docs/a.md", { out: true });
   await settle();
