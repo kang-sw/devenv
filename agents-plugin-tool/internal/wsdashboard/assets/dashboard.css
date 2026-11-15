@@ -93,7 +93,6 @@
 .host.sse.stopped .dot { background: var(--wb-muted-fg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
 .top:has(.host.sse) > #sse { display: none; }
 .dash.index .sse { margin-left: auto; }
-.gearwrap { position: relative; }
 .gear { height: 28px; width: 32px; padding: 0; }
 .gear .i { width: 17px; height: 17px; }
 .gmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: 270px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; display: grid; gap: 3px; }
@@ -109,8 +108,8 @@
 .gmenu .gh { padding: 0 4px; }
 .gmenu .gn { font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; }
 
-/* LAN access block: the index page shows it to this machine only */
-.lanbox { margin: 0 0 12px; padding: 8px 14px; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); font-size: 13px; line-height: 1.5; }
+/* LAN access block: Settings shows it to this machine only. */
+.lanbox { min-width: 0; overflow-wrap: anywhere; margin: 0 0 12px; padding: 8px 14px; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); font-size: 13px; line-height: 1.5; }
 .lanbox .lanurl { display: block; margin: 4px 0; font-size: 12px; overflow-wrap: anywhere; user-select: all; }
 .lanbox .lannote { display: block; font-size: 11.5px; color: var(--wb-muted-fg); }
 
@@ -738,6 +737,10 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .pv-img img { max-width: 100%; height: auto; display: block; }
 .pv-vid { height: 100%; background: #0e0f12; display: grid; }
 .pv-vid video { width: 100%; height: 100%; min-height: 0; display: block; }
+.pv-pdf { position: relative; height: 100%; min-height: 240px; display: grid; place-items: center; background: var(--wb-muted); }
+.pv-pdf iframe { width: 100%; height: 100%; min-height: 240px; border: 0; display: block; }
+.pv-pdf-open { color: var(--wb-fg); background: var(--wb-bg); padding: 5px 10px; }
+.pv-pdf[data-viewer] .pv-pdf-open { position: absolute; right: 12px; bottom: 12px; z-index: 1; }
 .pv-sand { height: 100%; display: flex; flex-direction: column; }
 .pv-cap { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); padding: 3px 10px; border-bottom: 1px dashed color-mix(in srgb, var(--wb-fg) 22%, transparent); }
 .pv-sand iframe { flex: 1 1 0; min-height: 0; width: 100%; border: 0; background: #fff; display: block; }
@@ -932,6 +935,8 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 @media (max-width: 640px) { .wbeffect-values { grid-template-columns: minmax(0, 1fr); } }
 .dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.live .top { flex: none; }
+/* Empty selection keeps a full main panel even while the rail overlays. */
+:root[data-mode="index"] .dgrid { flex: 1 1 0; min-width: 0; min-height: 0; }
 .dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
   grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
   grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
@@ -1203,7 +1208,12 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
   .dr-body details.panel { flex: none; overflow: hidden; }
   .dr-body details.panel > summary { position: static; }
 }
-/* the settings card: the gear menu's items, laid flat in the card */
+/* Settings uses the rail's fixed, viewport-bounded popover. */
+.settings-pop { width: 300px; }
+.settings-pop:focus { outline: none; }
+.settings-toggle { flex: none; }
+/* A click on the framed main panel dismisses Settings in its owning shell. */
+:root[data-shell]:has(.settings-pop:not([hidden])) .frames { pointer-events: none; }
 .gmenu.gcard { position: static; width: auto; box-shadow: none; padding: 0; background: transparent; }
 /* the pooled-worktree card: leased rows first, then idle ones by profile */
 #wtcount[hidden] { display: none; }
@@ -2300,7 +2310,7 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
 :root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }
 .rail[data-premark] > .r-rail { visibility: hidden; }
 :root[data-shell] .dwrap > .top.sh-own > :not(.back) { display: none; }
-:root[data-frame]:not([data-mode="index"]) .dwrap > .top > *, :root[data-frame] .dwrap > .top > .back { visibility: hidden; }
+:root[data-frame] .dwrap > .top > * { visibility: hidden; }
 .ixmain { min-width: 0; max-width: 1080px; }
 body.tk-paged .ixmain { display: none; }
 :root[data-frame] .dash.index { --tkml: 0px; --tkmaxw: initial; }

@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e961a4dbdbc60d5d
 sage-review-completeness-reviewed: e961a4dbdbc60d5d
+completed: 2026-11-15
 ---
 
 # Session-less local browsing anchor for the workspace picker and the worktree page
@@ -217,3 +218,43 @@ LAN every-route sweep), with each OS volume branch exercised through the seam
 on fixture directories and an unreadable volume skipped; a browser check that
 the holders card lists an anchor terminal as anchor-owned with its folder. The picker
 consumer (card ticket Phase 4) and the worktree page build on this phase.
+
+### Result (02b75478c) - 2026-11-15
+
+- Delivered the reserved `LocalBrowseAnchor = "host0"`, with dispatch-level bare
+  404s outside files and terminals, explicit validated file roots, no session
+  preview capabilities, and path-only terminal creation under the existing local
+  viewer and same-origin boundary. Foreign Origin and cross-site metadata are
+  refused; real-session routes retain their behavior and folder JSON shape.
+- Discovery is `GET /s/host0/fs/roots`, returning `{host, home, volumes}` with
+  `Cache-Control: no-store`. The injectable directory-reader seam covers macOS
+  volumes, Linux mounts including WSL drive directories, Windows drive letters,
+  and unreadable-volume refusal on fixture directories from one host.
+- Anchor terminal lists accept optional `?folder=<absolute-directory>`, match
+  the cleaned cwd exactly, and return `anchor:true` with `folders:{path:...}`
+  when filtered or `folders:{}` otherwise. Anchor terminals never become real
+  sessions' orphans. Holder-id attach/close trust is unchanged; real-holder tests
+  cover cwd, nested-folder exclusion, genuine orphan preservation, and survival
+  across isolated fixture-daemon restart. The shared dashboard daemon was not
+  rebuilt, restarted, or otherwise touched.
+- The only client change is an unfiltered anchor list and localized host-owned
+  group in the holders card, retaining the existing folder text and actions.
+  `files.js`, `cards.js`, and explorer CSS are untouched.
+- Verification, from `agents-plugin-tool/` (all passing):
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run 'TestLocalBrowse|TestFS|TestTerminal|TestFiles|TestHolders|TestLANModeGuardsEveryRoute|TestSessionPageFindingSpinnerUntilRegistered|TestSessionPageFramesOnlyItsOwnOrigin' -count=1 -timeout=5m`
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -race ./internal/wsdashboard -run 'TestLocalBrowse|TestFSLocalBrowse|TestFSActLocalBrowse|TestTerminalLocalBrowse|TestHoldersLocalBrowse|TestLANModeGuardsEveryRoute' -count=1 -v -timeout=5m` (no skipped tests).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -count=1 -timeout=2m`
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsmailbox ./internal/wskey -run 'TestReplyIDDeterministicWithoutPersistence|TestWordPoolCount|TestDeriveFull' -count=1 -timeout=2m`
+  - `node --check internal/wsdashboard/assets/dashboard.js` and `git diff --check`.
+- Review: one careful security/logic self-review covered every requested guard;
+  no unresolved findings. Independent review was replaced by self-review on the
+  caller's explicit no-agent instruction. Owner on-screen acceptance remains
+  after merge; screenshots and browser proof rounds were explicitly excluded.
+  A Go-driven Node regression verifies the holders label, literal folder text,
+  and stale-response suppression instead.
+- Compatibility: T0. No store, protocol, or existing API semantics changed.
+
+
+## Resolution (2026-11-15)
+
+The single Phase 1 is implemented and verified in 02b75478c. Security guard, per-OS discovery, exact-folder terminal isolation, real-holder restart, localization, and minimal holders-card client tests pass. The implementation remains on impl/develop/untie-calm-nanny for lead-owned integration; owner on-screen UI acceptance follows merge.
