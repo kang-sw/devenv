@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsgit"
 )
@@ -24,12 +23,8 @@ import (
 // owns. The discriminator is the session record's parent — a top-level lead key
 // has an empty parent — so the caller injects this only for a parent-less key.
 func occupiedRootAnnouncement(runner wsgit.Runner, root string) string {
-	out, err := runner.RunGit(context.Background(), root, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil {
-		return ""
-	}
-	branch := strings.TrimSpace(string(out))
-	if !strings.HasPrefix(branch, "impl/") {
+	branch, err := occupiedRootBranch(context.Background(), runner, root)
+	if err != nil || branch == "" {
 		return ""
 	}
 	if parent, _, ok := parseImplBranchRoot(branch); ok && parent != "" {
