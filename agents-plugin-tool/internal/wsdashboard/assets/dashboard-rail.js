@@ -11,6 +11,7 @@
   // in over the page, and Esc, the scrim, or picking a session closes it.
   // The arrow stays a link to the sessions index for a modified click.
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
+  var railHoverUpdates = region("rail") && WsRail ? WsRail.hoverUpdates(region("rail")) : null;
   var memoPad = railEl && $("memo-pad") && window.WsMemo ? window.WsMemo.mount(doc, railEl, $("memo-pad"), function (open) { railOpen(open === true); }) : null;
   var railStore = { load: load, save: save }, railSets = WsRail ? WsRail.state(railStore) : null;
   var colSet = railSets && railSets.collapsed, kidSet = railSets && railSets.kids;
