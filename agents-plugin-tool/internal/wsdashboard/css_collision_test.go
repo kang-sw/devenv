@@ -1,11 +1,12 @@
 package wsdashboard
 
 import (
-	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // The dashboard page inlines several module stylesheets into one document, so
@@ -182,7 +183,15 @@ func cssClasses(css, root string) map[string]bool {
 func TestCSSClassesDoNotCollideAcrossModules(t *testing.T) {
 	owners := map[string][]string{}
 	for _, m := range cssModules {
-		b, err := os.ReadFile(m.path)
+		var b []byte
+		var err error
+		if m.name == "whiteboard" {
+			var assets wswhiteboard.SharedAssets
+			assets, err = wswhiteboard.PageAssets()
+			b = []byte(assets.CSS)
+		} else {
+			b, err = dashboardTestAsset(m.path)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

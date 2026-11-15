@@ -7,7 +7,7 @@ import (
 )
 
 func TestDependencyPopoverCSSScope(t *testing.T) {
-	data, err := os.ReadFile("../wswhiteboard/assets/page.css")
+	data, err := os.ReadFile("../wswhiteboard/assets/page-items.css")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -130,6 +130,7 @@ import { labelAdapterContent, labelAdapterText } from "./adapter-label.ts";
 import { withItemSummaryIds, withSummaryId } from "./summary-id.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
 import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.ts";
+import { modelObservation, retainModelObservation, type ModelObservation } from "./model-observation.ts";
 import { closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "./agent-batches.ts";
 import { observeAgentView, scheduleAgentViewPublish, type AgentViewModel } from "./agent-view.ts";
 
@@ -658,6 +659,8 @@ export interface RpcAgentRecord {
   lastOutputAt?: number;
   /** In-memory visible-output decode rate for this launch; replaced on every (re)start, never persisted. */
   outputRate?: OutputRateTracker;
+  /** Completed output evidence, separate from RPC-state observedModel/effort. */
+  modelObservations?: ModelObservation[];
   /** Epoch-ms stamp of the last lead-issued prompt, retained for attribution, not activity display. */
   lastLeadPromptAt?: number;
   /**
@@ -3359,6 +3362,8 @@ export function attachEventListener(
       if (e.type === "message_end" && outputRate.rate() !== before) triggerAgentWidgetRefresh();
     }
     if (e.type === "message_end") {
+      const observed = modelObservation(e.message, outputRate.sampleRate?.());
+      if (observed) record.modelObservations = retainModelObservation(record.modelObservations, observed);
       const text = assistantMessageText(e.message);
       if (text !== undefined) {
         record.lastText = text;

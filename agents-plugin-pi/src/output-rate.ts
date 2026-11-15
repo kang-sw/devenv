@@ -26,6 +26,8 @@ export interface OutputRateTracker {
   observe(event: unknown, now?: number): void;
   /** Token-weighted tokens per second over the window, or `undefined` before the first eligible message. */
   rate(): number | undefined;
+  /** The unchanged window rate only when the latest response added an eligible sample. */
+  sampleRate?(): number | undefined;
 }
 
 type BlockKind = "visible" | "thinking";
@@ -47,10 +49,12 @@ export function createOutputRateTracker(): OutputRateTracker {
   let visibleMs = 0, thinkingMs = 0;
   let window: Sample[] = [];
   let windowModel: string | undefined;
+  let sampled = false;
 
   const resetMessage = () => { open = new Map(); visibleMs = 0; thinkingMs = 0; };
 
   const finish = (message: unknown) => {
+    sampled = false;
     const m = message as { role?: unknown; stopReason?: unknown; provider?: unknown; model?: unknown; usage?: { output?: unknown; reasoning?: unknown } } | undefined;
     const openKinds = new Set([...open.values()].map((block) => block.kind));
     const visible = visibleMs, thinking = thinkingMs;
@@ -67,6 +71,7 @@ export function createOutputRateTracker(): OutputRateTracker {
     if (ms < OUTPUT_RATE_MIN_SPAN_MS || tokens < OUTPUT_RATE_MIN_TOKENS) return;
     const model = `${String(m?.provider ?? "")}/${String(m?.model ?? "")}`;
     if (model !== windowModel) { window = []; windowModel = model; }
+    sampled = true;
     window.push({ tokens, ms });
     if (window.length > OUTPUT_RATE_WINDOW) window.shift();
   };
@@ -76,7 +81,7 @@ export function createOutputRateTracker(): OutputRateTracker {
       const e = event as { type?: unknown; message?: { role?: unknown }; assistantMessageEvent?: { type?: unknown; contentIndex?: unknown } } | undefined;
       if (e?.type === "message_start" || e?.type === "message_end") {
         if (e.message?.role !== "assistant") return;
-        if (e.type === "message_start") resetMessage(); else finish(e.message);
+        if (e.type === "message_start") { sampled = false; resetMessage(); } else finish(e.message);
         return;
       }
       if (e?.type !== "message_update") return;
@@ -91,6 +96,7 @@ export function createOutputRateTracker(): OutputRateTracker {
       const span = Math.max(0, now - started.startedAt);
       if (block.kind === "visible") visibleMs += span; else thinkingMs += span;
     },
+    sampleRate() { return sampled ? this.rate() : undefined; },
     rate() {
       if (window.length === 0) return undefined;
       let tokens = 0, ms = 0;

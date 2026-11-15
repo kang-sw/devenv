@@ -151,7 +151,7 @@ func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
 		// "short" holds its log and its creation-default state event.
 		`<span class="n">2</span></span><button type="button" class="history-older" hidden>Load older</button><span class="mmeta">`)
 	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:`, `<summary class="mhead">`)
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 }
 
 func TestExpandedQuietTopicCardCSS(t *testing.T) {
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestStandaloneClosedQuietTopicWithStreamStaysCollapsed(t *testing.T) {
 // Owner rule: a log row's role marker sits on the first line beside the clock,
 // never vertically centred against wrapped text.
 func TestStreamRoleMarkerPinsToFirstLine(t *testing.T) {
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

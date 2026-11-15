@@ -206,7 +206,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
 // keeps the copy-path menu and asks the route nothing. A link inside the
 // root opens as before.
 func TestOutsideLinkClickPath(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ process.stdout.write(bad.join("\n"));
 // URL. Any other page lists no such item and posts nothing. hostPath, the
 // split, is pinned for POSIX and drive-letter spellings.
 func TestLinkMenuOpensWithSystem(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

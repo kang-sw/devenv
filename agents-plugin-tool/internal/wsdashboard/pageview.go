@@ -88,6 +88,8 @@ type SessionView struct {
 	Lead         LeadView
 	Tree         TreeView
 	Conversation ConversationView
+	// ModelHistory is retained response metadata, independent of live activity.
+	ModelHistory []ModelHistoryRow
 	// Band is the status band around the composer.
 	Band BandView
 	// Commands are the slash commands the session's adapter runs from a
@@ -175,6 +177,11 @@ func (v SessionView) Mode() string {
 	return modeBoard
 }
 
+type ModelHistoryRow struct {
+	ID, Label string
+	Observed  *wslive.ObservedModel
+}
+
 // LeadView is the lead's live state from the snapshot.
 type LeadView struct {
 	wslive.Lead
@@ -233,7 +240,16 @@ func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
 // ModelText is the agent's model and reasoning effort joined by a space
 // ("<model> <effort>"), either alone when only one is known; empty when
 // neither is. The row renders them as separate stats (template astat).
-func (a AgentNode) ModelText() string { return strings.TrimSpace(a.Model + " " + a.Effort) }
+func (a AgentNode) ModelText() string { return strings.TrimSpace(a.DisplayModel() + " " + a.Effort) }
+
+// DisplayModel prefers this agent's response evidence. Legacy adapter telemetry
+// remains separately labelled in the hover, and never establishes observation.
+func (a AgentNode) DisplayModel() string {
+	if a.Observed != nil {
+		return a.Observed.Current.Model
+	}
+	return a.Model
+}
 
 // ContextText is the agent's context size in compact form; empty while
 // unknown.
@@ -561,10 +577,34 @@ func buildSessionView(in pageInputs) SessionView {
 		Panels:         in.Page.Board.Panels,
 		Mermaid:        in.Page.Board.Mermaid,
 	}
+	if in.Snapshot != nil {
+		if o := in.Snapshot.Lead.Observed; o != nil {
+			v.ModelHistory = append(v.ModelHistory, ModelHistoryRow{Observed: o})
+		}
+		histories := map[string]ModelHistoryRow{}
+		for id, o := range in.Snapshot.ObservedAgents {
+			if o != nil {
+				histories[id] = ModelHistoryRow{ID: id, Observed: o}
+			}
+		}
+		for _, a := range in.Snapshot.Agents {
+			if a.Observed != nil {
+				histories[a.ID] = ModelHistoryRow{ID: a.ID, Label: a.Label, Observed: a.Observed}
+			}
+		}
+		var ids []string
+		for id := range histories {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			v.ModelHistory = append(v.ModelHistory, histories[id])
+		}
+	}
 	if !v.Adapter {
 		// The registry/page source already applies serving eligibility. Do not
 		// promote a runner child to a lead, or use stale snapshot activity.
-		if !reg.Agent && len(in.Ring) > 0 {
+		if !reg.Agent && (len(in.Ring) > 0 || len(v.ModelHistory) > 0) {
 			v.SavedConversation = true
 			contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID))

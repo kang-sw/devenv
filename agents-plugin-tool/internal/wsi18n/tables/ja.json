@@ -1771,6 +1771,8 @@
   "hover.lastrate": "前のターンの出力速度",
   "hover.turn": "現在のターン",
   "hover.lastturn": "前のターン",
+  "hover.lastobserved": "最終観測",
+  "hover.history": "観測モデルの履歴",
   "hover.children": "実行中のサブエージェント",
   "hover.cost": "費用",
   "hover.registered": "登録",

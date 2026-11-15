@@ -14,7 +14,7 @@ import (
 // session owns alone. After the morph the removed sections are swept and
 // the inserted ones watched.
 func TestBoardKeepWiring(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestBoardKeepWiring(t *testing.T) {
 // keep session owns is not restored while the others are. The cases
 // execute under node when it is installed.
 func TestBoardKeepUnderNode(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,7 +19,7 @@ const desktopUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/6
 // browser keep their behavior: a plain click previews, a modified click is
 // the browser's new tab.
 func TestDesktopPathClickOpensMenuAndModifiedClickPreviews(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

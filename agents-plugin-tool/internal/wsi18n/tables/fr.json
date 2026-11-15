@@ -1771,6 +1771,8 @@
   "hover.lastrate": "Débit de sortie du dernier tour",
   "hover.turn": "Tour en cours",
   "hover.lastturn": "Dernier tour",
+  "hover.lastobserved": "Dernière observation",
+  "hover.history": "Historique des modèles observés",
   "hover.children": "Sous-agents en cours",
   "hover.cost": "Coût",
   "hover.registered": "Enregistrement",

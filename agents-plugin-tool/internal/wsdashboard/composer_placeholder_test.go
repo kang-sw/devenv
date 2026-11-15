@@ -12,7 +12,7 @@ import (
 // alone. Real layout is checked in a browser (the ticket's verification);
 // this pins the decision logic and the wiring that calls it.
 func TestComposerGrowFitsThePlaceholder(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ process.stdout.write(bad.join("\n"));
 // change through a ResizeObserver that ignores height-only changes, so the
 // height grow() sets cannot loop.
 func TestComposerRegrowsOnPlaceholderAndWidth(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestComposerRegrowsOnPlaceholderAndWidth(t *testing.T) {
 			t.Errorf("dashboard.js lacks %q", want)
 		}
 	}
-	css, err := dashboardFS.ReadFile("assets/dashboard.css")
+	css, err := dashboardTestAsset("assets/dashboard.css")
 	if err != nil {
 		t.Fatal(err)
 	}
