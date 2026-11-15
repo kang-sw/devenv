@@ -805,6 +805,9 @@
         }
       }
     },
+    "261115-feat-ws-whiteboard-toolbar-state-filter": {
+      "registered_at": "2026-11-15T00:54:28Z"
+    },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
       "lease": {
