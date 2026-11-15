@@ -47,7 +47,9 @@ var history = { pushState: function (s, t, u) { location.hash = u; }, replaceSta
 doc.querySelector = function () { return null; };
 doc.addEventListener = function () {};
 doc.title = "sess - ws dashboard";
-var rootAttrs = {};
+var rootAttrs = {}, bodyWatch = [];
+doc.body = {};
+var MutationObserver = window.MutationObserver = function () { var seen = new Map(); this.observe = function (node, opts) { if (node === doc.body) { if (seen.has(node)) bodyWatch[seen.get(node)] = opts; else { seen.set(node, bodyWatch.length); bodyWatch.push(opts); } } }; };
 var root = { setAttribute: function (k) { rootAttrs[k] = true; }, removeAttribute: function (k) { delete rootAttrs[k]; }, hasAttribute: function (k) { return k === "data-lifted" && !!rootAttrs[k]; }, clientWidth: 1200 };
 function region() { return null; }
 function $() { return null; }
@@ -88,6 +90,8 @@ q = function (sel) {
 connect();
 shFrameInit();
 var s = sockets[0];
+check("the body is watched for appended popovers and for hidden/open toggles, neither observe() overwriting the other",
+  [bodyWatch.some(function (o) { return o.childList && !o.subtree; }), bodyWatch.some(function (o) { return o.subtree && o.attributes && o.attributeFilter.indexOf("hidden") >= 0; })], [true, true]);
 check("a framed session page streams without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1");
 s.onopen({});
 function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }

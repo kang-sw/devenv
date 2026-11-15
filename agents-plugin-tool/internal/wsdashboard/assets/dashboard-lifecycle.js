@@ -510,8 +510,11 @@
       var mo = new MutationObserver(queue);
       if (top) mo.observe(top, { subtree: true, childList: true, attributes: true, characterData: true });
       mo.observe(root, { attributes: true, attributeFilter: ["style", "data-pincol"] });
-      mo.observe(doc.body, { childList: true });
       mo.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["open", "hidden"] });
+      // A second observe() of the same node on one observer replaces its
+      // options, so the body's direct children (a popover appended already
+      // shown) need their own observer.
+      new MutationObserver(queue).observe(doc.body, { childList: true });
     }
     window.addEventListener("resize", queue);
     window.addEventListener("scroll", function () { send("scroll", { y: Math.round(window.scrollY) }); });
