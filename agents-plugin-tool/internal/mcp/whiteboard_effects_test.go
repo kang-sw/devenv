@@ -4,9 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
@@ -86,6 +88,160 @@ func TestWhiteboardEffectsNoopRefusalAndAuthorization(t *testing.T) {
 		if dir, ok := f.server.liveSessionDir(key); ok {
 			t.Fatalf("unauthorized projection directory: %s", dir)
 		}
+	}
+}
+
+func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
+	f := newLiveFixture(t, true)
+	wb := effectsWhiteboardFixture(f)
+
+	// Use the existing durable mutation seam to give two separate updates the
+	// same recorded clock without teaching the production handler a test clock.
+	applyAt := func(commands string, now time.Time) {
+		t.Helper()
+		var (
+			outcome  wswhiteboard.Outcome
+			problems []string
+			observed boardMutationObservation
+		)
+		err := f.server.sessions.mutateRecordPartsObserved(f.keyA, partAll, partWhiteboard, func(rec *sessionRecord) error {
+			if rec.Whiteboard == nil {
+				rec.Whiteboard = &wswhiteboard.State{}
+			}
+			var err error
+			outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, wswhiteboard.Env{
+				Now: now,
+				IsDir: func(path string) bool {
+					info, statErr := os.Stat(path)
+					return statErr == nil && info.IsDir()
+				},
+				IsAbs: filepath.IsAbs,
+			})
+			if len(problems) > 0 {
+				return errWhiteboardRefused
+			}
+			return err
+		}, &observed)
+		if err != nil || !observed.Committed {
+			t.Fatalf("controlled whiteboard update failed: %v (%v), observed=%+v", err, problems, observed)
+		}
+		f.server.recordWhiteboardEffects(f.keyA, outcome.Effects)
+	}
+	readBoard := func() *wswhiteboard.State {
+		t.Helper()
+		rec, err := f.server.sessions.readWhiteboard(f.keyA)
+		if err != nil || rec.Whiteboard == nil {
+			t.Fatalf("read whiteboard: %v", err)
+		}
+		return rec.Whiteboard
+	}
+	entriesFor := func(board *wswhiteboard.State, name string) []wswhiteboard.Entry {
+		t.Helper()
+		for _, topic := range board.Topics {
+			if topic.Name == name {
+				return topic.Entries
+			}
+		}
+		t.Fatalf("missing topic %q in %+v", name, board.Topics)
+		return nil
+	}
+
+	legacyAt := time.Date(2026, 11, 15, 1, 0, 0, 0, time.UTC)
+	applyAt(`<wb:topic name="legacy"><wb:add class="technical"><wb:title>Legacy one</wb:title></wb:add></wb:topic>`, legacyAt)
+	applyAt(`<wb:topic name="legacy"><wb:add class="check"><wb:title>Legacy two</wb:title></wb:add></wb:topic>`, legacyAt)
+	legacyBefore := append([]wswhiteboard.Entry(nil), entriesFor(readBoard(), "legacy")...)
+	if len(legacyBefore) != 2 || legacyBefore[0].ItemID != 1 || legacyBefore[1].ItemID != 2 || legacyBefore[0].Text != "Item {{1}} added [technical]: Legacy one" || legacyBefore[1].Text != "Item {{2}} added [check]: Legacy two" || legacyBefore[0].At != legacyBefore[1].At {
+		t.Fatalf("legacy creation entries were not separate equal-time records: %+v", legacyBefore)
+	}
+
+	wb.update(t, `<wb:topic name="known"><wb:add class="policy"><wb:title>First</wb:title></wb:add><wb:add class="check"><wb:title>Second</wb:title></wb:add></wb:topic>`)
+	board := readBoard()
+	known := entriesFor(board, "known")
+	if len(known) != 1 || known[0].ItemID != 0 || known[0].Text != "Items added: policy {{3}}, check {{4}}." {
+		t.Fatalf("known creation batch was not one stored line: %+v", known)
+	}
+	if got := entriesFor(board, "legacy"); !reflect.DeepEqual(got, legacyBefore) {
+		t.Fatalf("legacy creation bytes/order changed: before=%+v after=%+v", legacyBefore, got)
+	}
+
+	records := effectsRecords(t, f, f.replyA)
+	if len(records) != 3 {
+		t.Fatalf("accepted updates produced %d effects carriers, want 3: %+v", len(records), records)
+	}
+	effects, ok := wslive.DecodeWhiteboardEffects(records[len(records)-1].RingEntry)
+	if !ok {
+		t.Fatalf("known creation carrier is not typed: %+v", records[len(records)-1])
+	}
+	type itemValue struct {
+		id    int
+		field string
+		after string
+	}
+	var values []itemValue
+	for _, effect := range effects {
+		if effect.Kind == "item" && (effect.Field == "class" || effect.Field == "title") {
+			values = append(values, itemValue{id: effect.ID, field: effect.Field, after: effect.After})
+		}
+	}
+	wantValues := []itemValue{{id: 3, field: "class", after: "policy"}, {id: 3, field: "title", after: "First"}, {id: 4, field: "class", after: "check"}, {id: 4, field: "title", after: "Second"}}
+	if !reflect.DeepEqual(values, wantValues) {
+		t.Fatalf("typed creation effects lost resolved order/values: got %+v want %+v", values, wantValues)
+	}
+
+	beforeRefusal := readBoard()
+	beforeRecords := len(effectsRecords(t, f, f.replyA))
+	refused := wb.call(t, "whiteboard.update", map[string]any{
+		"commands": `<wb:topic name="known"><wb:add class="technical"><wb:title>Rejected</wb:title></wb:add></wb:topic><wb:nope/>`,
+	})
+	if !isToolError(refused) {
+		t.Fatalf("invalid creation batch was accepted: %s", refused)
+	}
+	afterRefusal := readBoard()
+	if !reflect.DeepEqual(beforeRefusal, afterRefusal) || len(effectsRecords(t, f, f.replyA)) != beforeRecords {
+		t.Fatalf("refused batch changed durable state or effects ring: before=%+v after=%+v records=%d", beforeRefusal, afterRefusal, len(effectsRecords(t, f, f.replyA)))
+	}
+
+	beforeNoop := readBoard()
+	beforeNoopRecords := len(effectsRecords(t, f, f.replyA))
+	wb.update(t, `<wb:patch id="3"><wb:title>First</wb:title></wb:patch>`)
+	afterNoop := readBoard()
+	if afterNoop.Seq != beforeNoop.Seq+1 {
+		t.Fatalf("accepted no-op did not advance render sequence: before=%d after=%d", beforeNoop.Seq, afterNoop.Seq)
+	}
+	if afterNoop.LastEmbedSeq != afterNoop.Seq {
+		t.Fatalf("no-op embed sequence = %d, want current render sequence %d", afterNoop.LastEmbedSeq, afterNoop.Seq)
+	}
+	if len(afterNoop.Embeds) != len(beforeNoop.Embeds)+1 {
+		t.Fatalf("no-op appended %d embeds, want exactly one", len(afterNoop.Embeds)-len(beforeNoop.Embeds))
+	}
+	if !reflect.DeepEqual(afterNoop.Embeds[:len(beforeNoop.Embeds)], beforeNoop.Embeds) {
+		t.Fatalf("no-op changed the prior embed prefix: before=%+v after=%+v", beforeNoop.Embeds, afterNoop.Embeds)
+	}
+	priorEmbed := beforeNoop.Embeds[len(beforeNoop.Embeds)-1]
+	newEmbed := afterNoop.Embeds[len(afterNoop.Embeds)-1]
+	if newEmbed.Seq != afterNoop.Seq || newEmbed.Name == priorEmbed.Name {
+		t.Fatalf("new embed identity/sequence = %+v, prior = %+v", newEmbed, priorEmbed)
+	}
+	if !strings.HasPrefix(newEmbed.Name, f.replyA+"-") || !strings.HasSuffix(newEmbed.Name, ".html") {
+		t.Fatalf("new embed does not follow reply/hash/html naming contract: %q", newEmbed.Name)
+	}
+	hash := strings.TrimSuffix(strings.TrimPrefix(newEmbed.Name, f.replyA+"-"), ".html")
+	if len(hash) != 10 || hash == strings.TrimSuffix(strings.TrimPrefix(priorEmbed.Name, f.replyA+"-"), ".html") {
+		t.Fatalf("new embed hash identity = %q, prior = %q", hash, priorEmbed.Name)
+	}
+	for _, r := range hash {
+		if !strings.Contains("0123456789abcdef", string(r)) {
+			t.Fatalf("new embed hash is not lowercase hexadecimal: %q", hash)
+		}
+	}
+	beforeComparable := *beforeNoop
+	afterComparable := *afterNoop
+	beforeComparable.Seq = afterComparable.Seq
+	beforeComparable.LastEmbedSeq = afterComparable.LastEmbedSeq
+	beforeComparable.Embeds = append([]wswhiteboard.Embed(nil), afterComparable.Embeds...)
+	afterComparable.Embeds = append([]wswhiteboard.Embed(nil), afterComparable.Embeds...)
+	if !reflect.DeepEqual(beforeComparable, afterComparable) || len(effectsRecords(t, f, f.replyA)) != beforeNoopRecords {
+		t.Fatalf("true no-op changed board semantics or effects ring: before=%+v after=%+v records=%d", beforeComparable, afterComparable, len(effectsRecords(t, f, f.replyA)))
 	}
 }
 
