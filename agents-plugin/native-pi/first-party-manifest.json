@@ -26,7 +26,7 @@
     "agents-plugin-pi/pi-lead-guide.md": "1629b17ee77ca83ea486249c132c21836334ec53b7839b2788d1e6dff2b8232c",
     "agents-plugin-pi/scripts/bundle.mjs": "1d28f773058057cd07888bd7fa1c5034abb522f5ccf468b932c7091cb801291e",
     "agents-plugin-pi/scripts/copy-skills.mjs": "9bdc5a3b1d8339a7c11cc51b9a75ec522308713b9fa8e9ba79d312313c021d2d",
-    "agents-plugin-pi/scripts/prepare-native-payload.py": "d42ab04e36c01584e36493ed4db380769654c3683af0958a7237c22379ab5d58",
+    "agents-plugin-pi/scripts/prepare-native-payload.py": "61670118830787ced91661e7d6c926e1860957e46e910b034ad1c4ef78a0e3ad",
     "agents-plugin-pi/scripts/verify-display-summary-host.mjs": "e0e77a6043c34a02635a82946de7f22195f1038dd28d93053a3db9b7f860d60d",
     "agents-plugin-pi/src/adapter-config.ts": "3481659ed9f666c5d012df64498a3dc52e017a425ca8eb6a0646c8e7571aa6b3",
     "agents-plugin-pi/src/adapter-label.ts": "c64a3c34d24f48b698694458e8ca8440654906cc0a21f0613025468d08d2666d",
