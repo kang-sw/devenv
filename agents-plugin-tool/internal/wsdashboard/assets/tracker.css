@@ -76,16 +76,13 @@
 .tk .i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .tk .tk-wait { padding: 12px; font-size: 13px; color: var(--wb-muted-fg); }
 
-/* ===== search sheet: answer left, five result cells right ===== */
+/* ===== search sheet: five result cells ===== */
 /* A standalone host gets a top sheet; the dashboard mounts it in its shared drawer. */
 .tk.tk-qswrap { display: block; }
 .tk.tk-palette { position: fixed; inset: 40px 12px auto; height: min(540px, calc(100dvh - 80px)); box-sizing: border-box; border: 1px solid var(--wb-line); color: var(--wb-fg); background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px 10px 6px; display: flex; flex-direction: column; gap: 6px; z-index: 80; }
 .tk.tk-palette[hidden] { display: none; }
 .tk .tk-qmain { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; flex: 1 1 auto; min-height: 0; }
-.tk .tk-qmain.with-answer { grid-template-columns: minmax(0, 1.12fr) minmax(0, 2fr); }
 .tk .tk-qresults { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.tk .tk-qanswer { display: flex; flex-direction: column; min-height: 0; min-width: 0; border: 1px solid color-mix(in srgb, var(--wb-primary) 45%, var(--wb-line)); border-radius: 10px; overflow: hidden; background: color-mix(in srgb, var(--wb-primary) 4%, var(--wb-card)); }
-.tk .tk-qanswer[hidden] { display: none; }
 .tk-palette .tk-qlabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tk-palette kbd { font-size: 10px; color: var(--wb-muted-fg); font-weight: normal; font-family: var(--wb-mono); padding: 0 4px; border: 1px solid var(--wb-line); border-radius: 4px; }
 .tk .tk-qrow { display: flex; gap: 8px; align-items: center; flex: none; }
@@ -145,23 +142,6 @@
 .tk .qopt .qk { flex: none; font-size: 11px; font-weight: 700; color: var(--wb-muted-fg); padding: 0 6px; border-radius: 4px; background: var(--wb-muted); }
 .tk .qnone { padding: 10px 8px; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .tk-qhint { font-size: 11px; color: var(--wb-muted-fg); padding: 0 2px; flex: none; }
-.tk .tk-qanswer-head, .tk .tk-qanswer-foot { display: flex; align-items: center; gap: 6px; flex: none; padding: 5px 7px; }
-.tk .tk-qanswer-head { border-bottom: 1px solid var(--wb-line); font-size: 11px; color: var(--wb-muted-fg); }
-.tk .tk-qanswer-head strong { color: var(--wb-fg); }
-.tk .tk-qanswer-state { margin-left: auto; }
-.tk .tk-qanswer-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px 11px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
-.tk .tk-qanswer-text { white-space: pre-wrap; }
-.tk .tk-qanswer-question { font-size: 12px; margin-bottom: 6px; }
-.tk .tk-qanswer-foot { border-top: 1px solid var(--wb-line); }
-.tk .tk-qanswer-foot input { padding: 4px 7px; font-size: 12px; }
-.tk .tk-qanswer-history { display: flex; flex-direction: column; gap: 4px; }
-.tk .tk-qanswer-history button { display: block; text-align: left; white-space: normal; border-radius: 6px; padding: 5px 7px; }
-.tk .tk-qanswer-history small { display: block; color: var(--wb-muted-fg); }
-.tk .tk-qcite { display: inline; padding: 1px 4px; margin: 0 1px; border-radius: 5px; font: 600 10.5px var(--wb-mono); color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); border: 0; cursor: pointer; }
-.tk .tk-qsources { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--wb-line); }
-.tk.tk-palette[data-step=narrow] .tk-qmain.with-answer { grid-template-columns: minmax(0, 1.12fr) minmax(0, 2fr); }
-.tk.tk-palette[data-step=narrow] .tk-qanswer-head { flex-wrap: wrap; }
-.tk.tk-palette[data-step=narrow] .tk-qanswer-foot { flex-wrap: wrap; }
 .tk.tk-palette[data-step=narrow] .tk-qscroll { max-height: none; }
 .tk .tk-qsbtn { height: 28px; width: 32px; padding: 0; justify-content: center; }
 .tk .tk-qsbtn .i { width: 17px; height: 17px; }

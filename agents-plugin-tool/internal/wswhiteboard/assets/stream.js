@@ -85,10 +85,10 @@
     return !!last && (last.matches('.wb-entry.panel') ? panels >= PANELS : lines >= LINES);
   }
   function boundary(h) { return h._wbHistoryChunks[h._wbHistoryChunks.length - 1]; }
-  function fit(h) {
-    var node = boundaryRow(h, boundary(h)), live = h.querySelector('.history-live');
-    if (!node) return;
-    var kept = kit.keep(h);
+  function fitRows(h, node) {
+    node = node || boundaryRow(h, boundary(h));
+    if (!node) return null;
+    var live = h.querySelector('.history-live');
     node = splitAt(h, node);
     // Membership, not pixels: hide only whole top-level rows before the
     // saved boundary. splitAt preserves independently open log/system folds.
@@ -99,6 +99,12 @@
       if (before && !row.hasAttribute('data-wb-history-before')) row.setAttribute('data-wb-history-before', '');
       if (!before && row.hasAttribute('data-wb-history-before')) row.removeAttribute('data-wb-history-before');
     });
+    return live;
+  }
+  function fit(h) {
+    var node = boundaryRow(h, boundary(h));
+    if (!node) return;
+    var kept = kit.keep(h), live = fitRows(h, node);
     h._wbHistoryHeight = Math.ceil(live.getBoundingClientRect().height);
     kept.apply();
   }
@@ -180,11 +186,14 @@
       h._wbHistoryChunks[h._wbHistoryChunks.length - 1] = first.id;
     } finally { h._wbHistoryChoosing = false; }
   }
-  function reset(h) {
+  function startChunk(h) {
     h._wbHistoryHeld = false;
     h._wbHistoryChunks = [null];
     h._wbHistorySteps = 1;
     h._wbHistoryPending = { before: null };
+  }
+  function reset(h) {
+    startChunk(h);
     choose(h); fit(h);
   }
   function updateControl(h) {
@@ -472,13 +481,33 @@
     });
   }
   function init(root) {
+    var fresh = [];
     histories(root).forEach(function (h) {
       if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
       if (h._wbHistoryBound) { updateControl(h); return; }
       h._wbHistoryBound = true;
       h._wbHistoryHeights = {};
-      reset(h);
-      updateControl(h);
+      startChunk(h);
+      h.querySelectorAll('[data-wb-history-before]').forEach(function (row) { row.removeAttribute('data-wb-history-before'); });
+      fresh.push(h);
+    });
+    // New histories have no reading position of their own. Select all tails
+    // in ordinary flow, then hide all prefixes before measuring any result.
+    // Share captures per scroller so admitting many histories does not scan
+    // the entire board once per history. Existing readers still stay put.
+    fresh.forEach(choose);
+    var kept = new Map();
+    fresh.forEach(function (h) {
+      var scroller = kit.keep(h, { capture: false }).scroller;
+      if (!kept.has(scroller)) kept.set(scroller, kit.keep(h));
+    });
+    var live = fresh.map(function (h) { return fitRows(h); });
+    fresh.forEach(function (h, i) {
+      if (live[i]) h._wbHistoryHeight = Math.ceil(live[i].getBoundingClientRect().height);
+    });
+    kept.forEach(function (k) { k.apply(); });
+    fresh.forEach(updateControl);
+    fresh.forEach(function (h) {
       arm(h);
       // Excluded whole rows are not tab stops. For a selected control,
       // native Tab must also clear sticky overlays, not just history bounds.

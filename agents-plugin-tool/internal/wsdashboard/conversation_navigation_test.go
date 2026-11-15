@@ -82,8 +82,8 @@ func TestConversationPresentationMergePreservesIdentityAndDisclosures(t *testing
 var bad=[],ENTRY_CAP=150,restored=[];
 function check(label,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(label+': '+JSON.stringify(got));}
 function restoreOpen(n){restored.push(n.key);}function fmtTimes(){}
-function entry(key){return {key:key,open:true,raw:'<script>diagnostic stays text</script>',getAttribute:function(){return this.key;}};}
-function box(nodes){var b={children:nodes||[],insertBefore:function(n,next){var i=next?this.children.indexOf(next):this.children.length;this.children.splice(i,0,n);this.sync();},removeChild:function(n){this.children.splice(this.children.indexOf(n),1);this.sync();},sync:function(){var ns=this.children;this.firstChild=this.firstElementChild=ns[0];this.lastElementChild=ns[ns.length-1];ns.forEach(function(n,i){n.previousElementSibling=ns[i-1]||null;n.nextSibling=ns[i+1]||null;});}};b.sync();return b;}
+function entry(key,state){return {key:key,state:state||null,open:true,raw:'<script>diagnostic stays text</script>',getAttribute:function(a){return a==='data-entry'?this.key:a==='data-mail-wake'?this.state:null;}};}
+function box(nodes){var b={children:nodes||[],insertBefore:function(n,next){var i=next?this.children.indexOf(next):this.children.length;this.children.splice(i,0,n);this.sync();},replaceChild:function(n,old){this.children[this.children.indexOf(old)]=n;this.sync();},removeChild:function(n){this.children.splice(this.children.indexOf(n),1);this.sync();},sync:function(){var ns=this.children;this.firstChild=this.firstElementChild=ns[0];this.lastElementChild=ns[ns.length-1];ns.forEach(function(n,i){n.previousElementSibling=ns[i-1]||null;n.nextSibling=ns[i+1]||null;});}};b.sync();return b;}
 `+src+`
 var mail=entry('02'),wake=entry('03'),shown=box([mail,wake]);
 mergeEntries(shown,box([entry('03'),entry('04')]));
@@ -93,6 +93,22 @@ check('history/live remain ordered with no duplicate key',shown.children.map(fun
 check('only inserted nodes restore disclosure state',restored,['04','01']);
 check('reconnect gap still uses stable ring cursors',[gapped(shown,box([entry('09')])),gapped(shown,box([entry('03')]))],[true,false]);
 check('no eviction or transport grouping for a short page',evictEntries(shown),false);
+var marker=entry('02','suppressed'),matched=entry('03','matched');
+mergeEntries(shown,box([marker,matched]));
+check('association replaces existing mail with a marker and wake with mail',[shown.children[1]===marker,shown.children[2]===matched,shown.children.length],[true,true,4]);
+check('replacements restore disclosure state',restored,['04','01','02','03']);
+mergeEntries(shown,box([entry('02','suppressed'),entry('03','matched')]));
+check('unchanged association retains the open delivery details',shown.children[2]===matched,true);
+var separateMail=entry('02'),unmatched=entry('03');
+mergeEntries(shown,box([separateMail,unmatched]));
+check('expiry restores both rows at the same keys',[shown.children[1]===separateMail,shown.children[2]===unmatched,shown.children.map(function(n){return n.key;})],[true,true,['01','02','03','04']]);
+var windowed=box([entry('02','suppressed'),entry('03','matched')]);
+check('hidden oldest marker remains the initial paging cursor',windowed.firstElementChild.getAttribute('data-entry'),'02');
+mergeEntries(windowed,box([entry('01')]));
+check('older history joins without reintroducing the associated mail',windowed.children.map(function(n){return [n.key,n.state];}),[['01',null],['02','suppressed'],['03','matched']]);
+ENTRY_CAP=2;
+check('eviction counts keyed ring entries including markers',evictEntries(windowed),true);
+check('cursor and keyed index survive eviction',[windowed.firstElementChild.key,Object.keys(entryKeys(windowed)).sort()],['02',['02','03']]);
 process.stdout.write(bad.join('\n'));
 `)
 }

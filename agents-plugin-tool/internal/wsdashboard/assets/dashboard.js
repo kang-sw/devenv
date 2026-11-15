@@ -14,6 +14,9 @@
   // load (luIcon, below).
   var SVGNS = "http://www.w3.org/2000/svg";
   var rid = root.getAttribute("data-rid");
+  var worktree = root.getAttribute("data-worktree") || "", cardIdentity = worktree ? "wt:" + worktree : rid;
+  // Browser identity and transport authority are deliberately separate.
+  function browsePost(route, body, done) { post("/s/host0/" + route, body, done); }
   // The iframe shell (shell.js, the shell block below): shell marks the
   // shell page, which holds the rail and the top header and no page's own
   // content; framed marks a page the shell frames (?frame=1), which leaves
@@ -343,7 +346,7 @@
     layoutMode = v;
     if (grid) grid.setAttribute("data-layout", v);
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
-    if (live) revealPanes();
+    if (live || worktree) revealPanes();
     if (cardBoard) window.WsCards.relayout();
   }
   // The tree and the conversation share their column at a fixed ratio; the
@@ -430,7 +433,7 @@
     q("#ctabs [data-ctab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ctab") === t)); });
     revealPanes();
   }
-  if (live) {
+  if (live || worktree) {
     // "auto" crosses its breakpoint on a resize without a click.
     window.addEventListener("resize", revealPanes);
   }
@@ -516,6 +519,7 @@
       var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
       if (pick) s.pick = pickKey(pick);
       if (note && note.value) s.note = note.value;
+      if (note && note.wsc) s.capsules = note.wsc.snapshot();
       if (note && !note.hidden) s.noteOpen = true;
       if (box && box.checked) s.checked = true;
       if (item.hasAttribute("data-no")) s.no = true;
@@ -523,12 +527,17 @@
     });
     // A topic note carries over by topic name, keyed apart from item numbers.
     q(".tnote[data-topic]", el).forEach(function (note) {
-      if (note.value || !note.hidden) out["t:" + note.getAttribute("data-topic")] = { note: note.value, noteOpen: !note.hidden };
+      if (note.value || !note.hidden) {
+        var saved = { note: note.value, noteOpen: !note.hidden };
+        if (note.wsc) saved.capsules = note.wsc.snapshot();
+        out["t:" + note.getAttribute("data-topic")] = saved;
+      }
     });
     return out;
   }
   function openNote(note, s) {
     note.value = s.note || "";
+    if (s.capsules && window.WsCapsules) window.WsCapsules.attach(note).restore(s.capsules);
     note.hidden = false;
     note.style.height = "auto";
     if (note.scrollHeight) note.style.height = note.scrollHeight + "px";
@@ -555,7 +564,10 @@
       var s = saved["t:" + note.getAttribute("data-topic")];
       // A note a send closed (closeTopicNotes) keeps its text closed.
       if (s && s.noteOpen) openNote(note, s);
-      else if (s) note.value = s.note || "";
+      else if (s) {
+        note.value = s.note || "";
+        if (s.capsules && window.WsCapsules) window.WsCapsules.attach(note).restore(s.capsules);
+      }
     });
   }
   // A board swap waits while the user is typing in the answer form, and
@@ -563,7 +575,7 @@
   var deferred = null;
   function editing() {
     var a = doc.activeElement;
-    return !!(a && inBoard(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"));
+    return !!(a && inBoard(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable));
   }
   doc.addEventListener("focusout", function () {
     if (!deferred) return;

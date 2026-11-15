@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
 var dashboardFS embed.FS
 
 // These are ordered source fragments, not independently loaded scripts or
@@ -269,7 +269,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		TrackerCSS:       template.CSS(get("tracker.css")),
 		TrackerScript:    template.JS(get("tracker.js")),
-		MentionScript:    template.JS(get("mention.js")),
+		MentionScript:    template.JS(get("mention.js") + "\n" + get("capsules.js")),
 		ToastScript:      template.JS(get("toast.js")),
 		RailScript:       template.JS(get("rail.js")),
 		MemoScript:       template.JS(get("memo.js")),
@@ -645,6 +645,9 @@ type sessionPageData struct {
 	// the page (XtermAsset) when the daemon runs terminals and the page
 	// was asked for by a browser on this machine, and empty otherwise.
 	Terminal string
+	// Worktree selects the session-less consumer of the files and card columns.
+	Worktree                  string
+	Workspace, WorktreeBranch string
 	// Frame renders the session page as the iframe shell frames it
 	// (?frame=1, shellPageData): the shell's rail and header stand over
 	// it, so the page keeps both only as invisible placeholders that lay
@@ -655,6 +658,13 @@ type sessionPageData struct {
 }
 
 func (p sessionPageData) regionByName(name string) renderedRegion { return p.regions[name] }
+
+func (p sessionPageData) Mode() string {
+	if p.Worktree != "" {
+		return "worktree"
+	}
+	return p.SessionView.Mode()
+}
 
 // shellPageData is the iframe shell (the "shell" template): the session
 // rail and the top header, which stay across navigations, over the frames
@@ -1095,7 +1105,7 @@ func (r pageReader) history(replyID, before string, n int) (ConversationView, ws
 	}
 	reg := s.Registration
 	contacts := resolvedContacts(page.Contacts, reg.ReplyID)
-	cv := conversation(wslive.Lead{}, ring.Records, page.MailBodies, contacts, r.lookup(), replyMarkdown(reg.Project, reg.ReplyID))
+	cv := conversation(wslive.Lead{}, ring.Records, page.MailBodies, contacts, r.lookup(), replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 	splitUserEntries(cv.Entries, wsinbox.AttachmentsDir(sessionInbox(r.dir, replyID)), reg.ReplyID)
 	return cv, ring, true, nil
 }

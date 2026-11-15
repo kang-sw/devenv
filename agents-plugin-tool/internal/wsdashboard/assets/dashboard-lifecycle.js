@@ -104,6 +104,7 @@
     Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
     var d = {
       text: ctext ? ctext.value : "",
+      capsules: ctext && ctext.wsc ? ctext.wsc.snapshot() : [],
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
       mentions: mentions.map(function (m) { return { start: m.start, end: m.end, text: m.text }; }),
       answers: b ? boardRead(readAnswers) : {},
@@ -146,7 +147,10 @@
       var unlost = function (note) { return typeof note === "string" && note ? WsRail.stripMarkers(note, [], lost).text : note; };
       if (d.answers && typeof d.answers === "object") Object.keys(d.answers).forEach(function (k) {
         var a = d.answers[k];
-        if (a && a.note) { a.note = unlost(a.note); named += "\n" + a.note; }
+        if (a && a.note) {
+          if (a.capsules && window.WsCapsules) a.capsules = window.WsCapsules.stripMarkers(a.note, a.capsules, lost).ranges;
+          a.note = unlost(a.note); named += "\n" + a.note;
+        }
       });
       if (Array.isArray(d.chips)) d.chips.forEach(function (c) { if (c && c.note) { c.note = unlost(c.note); named += "\n" + c.note; } });
       if (d.open && typeof d.open === "object") {
@@ -178,6 +182,7 @@
       if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
         var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);
         ctext.value = s.text;
+        if (ctext.wsc) ctext.wsc.restore(window.WsCapsules.stripMarkers(d.text, d.capsules, lost).ranges);
         mentions = s.mentions.filter(function (m) { return liveMention(m, s.text); });
         mentionWas = ctext.value;
         named += "\n" + s.text;
@@ -325,7 +330,6 @@
   // shRid marks the session the shell shows (rid, the rail's viewed row,
   // the memo pad's workspace).
   function shRid(id) {
-    if (id === rid) return;
     rid = id;
     root.setAttribute("data-rid", id);
     railMarks();
@@ -585,6 +589,7 @@
     setLayout(load(LAYOUT_KEY));
     setInput(load(INPUT_KEY));
   }
+  if (worktree) revealPanes();
   if (live) {
     setSplit(savedSplit());
     setTab("convo");
@@ -595,6 +600,7 @@
   // posts it again.
   q("iframe.doc-frame").forEach(function (f) { postDoc(f, { wbDoc: "size" }); });
   if (window.wbForm) window.wbForm();
+  bindCapsuleNotes();
   // The served board's frames mount once the cards have moved the pinned
   // topics into the pin list, so no frame loads and then moves, paced so the
   // whole board's mounting never lengthens one long task, and once the
