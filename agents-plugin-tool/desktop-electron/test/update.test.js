@@ -240,11 +240,13 @@ test('helper and extraction commands for both platforms', () => {
   const [ps, psArgs] = u.helperCommand('win32', 'C:\\s\\apply.ps1', opts, { SystemRoot: 'C:\\Windows' });
   assert.equal(ps, path.join('C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
   assert.deepEqual(psArgs, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', 'C:\\s\\apply.ps1',
-    '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1']);
+    '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1', '-Log', path.join(path.dirname(opts.staging), 'update-apply.log')]);
   const ps1 = u.helperScript('win32');
-  assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch, \[string\]\$RelaunchArgs = '-'\)/);
-  assert.match(ps1, /\n"helper started pid=\$PID app=\$AppPid"\n\$ErrorActionPreference/);
+  assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch, \[string\]\$Log, \[string\]\$RelaunchArgs = '-'\)/);
+  assert.match(ps1, /\ntry \{\n  Add-Content -LiteralPath \$Log -Value "helper started pid=\$PID app=\$AppPid"\n/);
   assert.ok(ps1.indexOf('helper started') < ps1.indexOf('Wait-Process'));
+  assert.ok(ps1.includes('Add-Content -LiteralPath $Log -Value "updated $Target"'));
+  assert.match(ps1, /\} catch \{\n  Add-Content -LiteralPath \$Log -Value "helper failed: \$_"\n  exit 1\n\}\n$/);
   for (const needle of ['Wait-Process -Id $AppPid', 'Move-Item -LiteralPath $Target -Destination $Backup',
     'Move-Item -LiteralPath $Staged -Destination $Target', 'Move-Item -LiteralPath $Backup -Destination $Target',
     "Join-Path $Target 'Werkschaft.exe'"]) assert.ok(ps1.includes(needle), needle);
@@ -358,7 +360,7 @@ test('both helper kinds receive the original arguments for a relaunch', () => {
   for (const relaunch of [false, true]) {
     const [, none] = u.helperCommand('win32', 'C:\\s\\apply.ps1', { ...opts, relaunch, args: [] }, { SystemRoot: 'C:\\Windows' });
     assert.equal(none.includes('-RelaunchArgs'), false, 'omit empty args: powershell.exe -File cannot bind a bare hyphen');
-    assert.deepEqual(none.slice(-2), ['-Relaunch', relaunch ? '1' : '0']);
+    assert.deepEqual(none.slice(-4), ['-Relaunch', relaunch ? '1' : '0', '-Log', path.join(path.dirname(opts.staging), 'update-apply.log')]);
   }
   const ps1 = u.helperScript('win32');
   assert.ok(ps1.includes("[string]$RelaunchArgs = '-')"));
