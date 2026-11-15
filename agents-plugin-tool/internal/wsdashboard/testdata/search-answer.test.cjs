@@ -1,9 +1,8 @@
 // Offline browser-state contracts; every transport and DOM dependency is fake.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const vm = require('node:vm');
-const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, '../assets/dashboard.js'), 'utf8');
+const { readAssetSource } = require('./asset-source.cjs');
+const source = readAssetSource('wsdashboard', 'dashboard.js');
 function block(from, to) {
   const start = source.indexOf(from), end = source.indexOf(to, start);
   assert(start >= 0 && end > start, from);

@@ -101,7 +101,7 @@ func TestSupportChatCarriesTheSubagentBadge(t *testing.T) {
 // the background-task badge beside it, and the word is its title and
 // accessible name.
 func TestSubagentBadgeShowsIconAndCount(t *testing.T) {
-	d, err := dashboardFS.ReadFile("assets/dashboard.js")
+	d, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

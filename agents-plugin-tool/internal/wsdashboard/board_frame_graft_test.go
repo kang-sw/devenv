@@ -18,7 +18,7 @@ func TestBoardFrameGraftStaysPut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	board, err := dashboardFS.ReadFile("assets/dashboard.js")
+	board, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

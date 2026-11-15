@@ -11,7 +11,7 @@ func TestSearchPaletteAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := dashboardFS.ReadFile("assets/dashboard.js")
+	page, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestSearchPaletteAssets(t *testing.T) {
 			t.Errorf("tracker lacks palette hook %q", want)
 		}
 	}
-	hostCSS, err := dashboardFS.ReadFile("assets/dashboard.css")
+	hostCSS, err := dashboardTestAsset("assets/dashboard.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +61,36 @@ func TestSearchPaletteAssets(t *testing.T) {
 	for _, want := range []string{".tk .tk-qmain.with-answer { grid-template-columns: minmax(0, 1.12fr) minmax(0, 2fr); }", `grid-template-areas: "board content tracker" "files content tnote"`, "[data-step=wide]", "prefers-reduced-motion: reduce", ".palette-flash { animation: none; }"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("palette CSS lacks %q", want)
+		}
+	}
+}
+
+func TestSearchDrawerSplitOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		logical string
+		owner   string
+		markers []string
+	}{
+		{"dashboard.js", "dashboard-drawer.js", []string{"function drApply(anim)", "var sbody = null, shandle = null;"}},
+		{"dashboard.js", "dashboard-tracker.js", []string{"function searchAnswerClient(io)", "function paletteSearch(o)"}},
+		{"dashboard.css", "dashboard-drawer.css", []string{".dr-search-handle {", ".dr-fold.search {"}},
+	} {
+		whole, err := dashboardTestAsset("assets/" + tc.logical)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner, err := dashboardFS.ReadFile("assets/" + tc.owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opening, err := dashboardFS.ReadFile("assets/" + tc.logical)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, marker := range tc.markers {
+			if strings.Count(string(whole), marker) != 1 || !strings.Contains(string(owner), marker) || strings.Contains(string(opening), marker) {
+				t.Errorf("%q must occur once, in %s rather than the opening fragment", marker, tc.owner)
+			}
 		}
 	}
 }

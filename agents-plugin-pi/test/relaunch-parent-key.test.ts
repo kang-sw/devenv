@@ -1,9 +1,9 @@
 /**
  * A dormant relaunch re-stamps the dispatching session's current key as a
- * non-fork child's ferrule parent (`relaunchDelegation`), so a child spawned
+ * child's ferrule parent (`relaunchDelegation`), so a child spawned
  * without one, one whose stored parent key was pruned, or one outliving a lead
- * re-login bootstraps with lineage instead of a parent-less `ferrule`. Fork
- * records stay lateral leads with no policy parent.
+ * re-login bootstraps with lineage instead of a parent-less `ferrule`. Forks
+ * retain lead authority while carrying the current launching lead as parent.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -15,11 +15,14 @@ import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { DELEGATION_ENV, type DelegationPolicy } from "../src/delegation-policy.ts";
 import { registerAgentTools, relaunchDelegation, sendToAgent, spawnAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
+import { closeThreadOnDone, createForkChannel, createThreadRegistryHandle, ensureRespondent, type ThreadRecord } from "../src/ask.ts";
+import { buildForkSpawnCtx } from "../src/fork.ts";
+import { until } from "./fixtures/subtree-channels.ts";
 
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
 const leafPolicy: DelegationPolicy = { version: 1, depth: 1, maxDepth: 2, authority: "leaf", tools: ["read"], write: { mode: "none" } };
 
-test("relaunchDelegation re-stamps only a non-fork policy without a pre-minted key", () => {
+test("relaunchDelegation re-stamps every policy without a pre-minted key, including forks", () => {
   const worker = { spawnRole: "worker" as const, delegation: leafPolicy };
   assert.deepEqual(relaunchDelegation(worker, "lead-now"), { ...leafPolicy, parentSessionKey: "lead-now" });
   assert.equal(leafPolicy.parentSessionKey, undefined, "the stored policy is not mutated");
@@ -31,7 +34,11 @@ test("relaunchDelegation re-stamps only a non-fork policy without a pre-minted k
   assert.equal(relaunchDelegation(preMinted, "lead-now"), preMinted.delegation, "a pre-minted key needs no parent");
 
   const fork = { spawnRole: "fork" as const, delegation: { ...leafPolicy, authority: "lead" as const } };
-  assert.equal(relaunchDelegation(fork, "lead-now"), fork.delegation, "a fork keeps its parent-less policy");
+  assert.deepEqual(relaunchDelegation(fork, "lead-now"), { ...fork.delegation, parentSessionKey: "lead-now" });
+  const staleFork = { ...fork, delegation: { ...fork.delegation, parentSessionKey: "stale-lead" } };
+  assert.equal(relaunchDelegation(staleFork, "lead-now")?.parentSessionKey, "lead-now");
+  const preMintedFork = { ...fork, delegation: { ...fork.delegation, sessionKey: "own-fork" } };
+  assert.equal(relaunchDelegation(preMintedFork, "lead-now"), preMintedFork.delegation);
 
   assert.equal(relaunchDelegation(worker, undefined), leafPolicy, "no current key leaves the stored policy unchanged");
   assert.equal(relaunchDelegation({ spawnRole: "worker" }, "lead-now"), undefined);
@@ -88,14 +95,18 @@ test("ws-agent-send relaunches a dormant worker with the lead's key read at send
   }
 });
 
-test("a dormant fork relaunch keeps its policy without a parentSessionKey", async () => {
+for (const route of ["agent-send", "owner-send", "done"] as const) {
+for (const storedParent of [undefined, "stale-parent"]) {
+test(`a dormant fork re-stamps ${storedParent ?? "missing"} parent through ${route}`, async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-relaunch-fork-")));
   const storage = createAgentStorageContext("relaunch-fork-owner", root);
   const registry = new Map<string, RpcAgentRecord>();
   const launched: DelegationPolicy[] = [];
   const context = { version: 1, kind: "task", effectiveSystemPrompt: "captured", activeTools: [], registeredTools: [] };
   const restore = installRpcHarness(async function (this: any) {
-    launched.push(JSON.parse(this.options.env[DELEGATION_ENV]));
+    const policy = JSON.parse(this.options.env[DELEGATION_ENV]);
+    assert.equal(this.options.env.WS_PI_PARENT_SESSION_KEY, policy.parentSessionKey);
+    launched.push(policy);
     const home = this.options.args[this.options.args.indexOf("--session-dir") + 1];
     this.sessionFile = join(home, "fork-child.jsonl");
     if (!existsSync(this.sessionFile)) writeFileSync(this.sessionFile, "offline fork session\n");
@@ -105,19 +116,68 @@ test("a dormant fork relaunch keeps its policy without a parentSessionKey", asyn
   });
   const pi = { sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
   try {
+    const bridge = { wsToolNames: [], defaultSessionKeyRef: { current: "lead-at-spawn" }, client: {} };
     const result = await spawnAgent(registry, {
-      storage, pi, cwd: root, inheritModel: "offline/test", catalog: [], wsToolNames: [], extensionPath: TEST_EXTENSION_ENTRY,
-      client: {} as never, forkFrom: "/tmp/relaunch-parent.jsonl", spawnRole: "fork", forkContext: context as never, parentSessionKey: "lead-at-spawn",
+      ...buildForkSpawnCtx(pi, bridge as never, { cwd: root, extensionPath: TEST_EXTENSION_ENTRY }, {
+        inheritModel: "offline/test", catalog: [], explicitTools: "read", forkFrom: "/tmp/relaunch-parent.jsonl", forkContext: context as never,
+      }), storage,
     }, { prompt: "task" });
     const record = registry.get(result.agent_id)!;
     await record.client?.stop();
     record.client = undefined;
-    await sendToAgent(registry, { cwd: root, pi, extensionPath: TEST_EXTENSION_ENTRY, leadSessionKey: "lead-now" }, result.agent_id, "resume");
+    record.delegation = { ...record.delegation!, parentSessionKey: storedParent };
+    const resumeCtx = { cwd: root, extensionPath: TEST_EXTENSION_ENTRY, leadSessionKeyRef: bridge.defaultSessionKeyRef };
+    const channel = createForkChannel(pi, registry, resumeCtx, result.agent_id);
+    bridge.defaultSessionKeyRef.current = "lead-now";
+    if (route === "owner-send") await channel.send!("resume");
+    else if (route === "done") {
+      const thread: ThreadRecord = { threadId: "q1", title: "question", origin: "fork-raised", status: "open", respondentAgentId: result.agent_id, createdAt: "now", touchedAt: "now" };
+      closeThreadOnDone(pi, createThreadRegistryHandle(), registry, thread, "", resumeCtx);
+      await until(() => launched.length === 2 && record.running, "dormant /done relaunch");
+    } else await sendToAgent(registry, { cwd: root, pi, extensionPath: TEST_EXTENSION_ENTRY, leadSessionKey: "lead-now" }, result.agent_id, "resume");
     assert.equal(launched.length, 2);
-    for (const policy of launched) {
-      assert.equal(policy.authority, "lead");
-      assert.equal(policy.parentSessionKey, undefined);
-    }
+    assert.equal(launched[0]!.parentSessionKey, "lead-at-spawn");
+    assert.equal(launched[1]!.parentSessionKey, "lead-now");
+    for (const policy of launched) assert.equal(policy.authority, "lead");
+    assert.equal(record.delegation.parentSessionKey, storedParent, "stored policy remains immutable");
+  } finally {
+    for (const record of registry.values()) record.ownershipObserverStop?.();
+    restore();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+}
+}
+
+test("the discussion-fork spawn passes the current lead's parent policy", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-discussion-parent-")));
+  const registry = new Map<string, RpcAgentRecord>();
+  const launched: DelegationPolicy[] = [];
+  const restore = installRpcHarness(async function (this: any) {
+    launched.push(JSON.parse(this.options.env[DELEGATION_ENV]));
+    assert.equal(this.options.env.WS_PI_PARENT_SESSION_KEY, "discussion-lead");
+    const home = this.options.args[this.options.args.indexOf("--session-dir") + 1];
+    this.sessionFile = join(home, "discussion.jsonl");
+    writeFileSync(this.sessionFile, "offline discussion session\n");
+    await connectFakeChild(this.options.env, this.options.args, { fork: { sessionId: "discussion-id", sessionPath: this.sessionFile, ownSessionKey: "discussion-key", activeTools: ["read"], registeredTools: [{ name: "read", description: "Read", parameters: { type: "object" } }] } });
+  }, {
+    async getState(this: any) { return { sessionId: "discussion-id", sessionFile: this.sessionFile }; },
+  });
+  const pi = { sendMessage() {}, sendUserMessage() {}, getActiveTools: () => ["read"], getAllTools: () => [{ name: "read", description: "Read", parameters: { type: "object" } }], getThinkingLevel: () => "off" } as unknown as ExtensionAPI;
+  const bridge = { wsToolNames: [], defaultSessionKeyRef: { current: "discussion-lead" }, client: {} };
+  const thread: ThreadRecord = { threadId: "q1", title: "question", origin: "fork-raised", status: "open", createdAt: "now", touchedAt: "now" };
+  try {
+    await ensureRespondent(pi, {
+      agentStorageRoot: root,
+      model: { provider: "offline", id: "test" },
+      sessionManager: { getSessionId: () => "parent-session", getSessionFile: () => "/tmp/parent-session.jsonl" },
+    } as never, bridge as never, registry, createThreadRegistryHandle(), thread, {
+      cwd: root, extensionPath: TEST_EXTENSION_ENTRY,
+      effectivePromptRef: { current: { effectiveSystemPrompt: "captured", activeTools: [], registeredTools: [] } } as never,
+    });
+    assert.equal(launched.length, 1);
+    assert.equal(launched[0]!.parentSessionKey, "discussion-lead");
+    assert.equal(launched[0]!.authority, "lead");
   } finally {
     for (const record of registry.values()) record.ownershipObserverStop?.();
     restore();

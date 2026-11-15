@@ -5,7 +5,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assets = path.join(__dirname, '..', 'assets');
 const tracker = fs.readFileSync(path.join(assets, 'tracker.js'), 'utf8');
-const dashboard = fs.readFileSync(path.join(assets, 'dashboard.js'), 'utf8');
+const { readAssetSource } = require('./asset-source.cjs');
+const dashboard = readAssetSource('wsdashboard', 'dashboard.js');
 function block(source, from, to) {
   const start = source.indexOf(from), end = source.indexOf(to, start);
   assert(start >= 0 && end > start, `missing block: ${from}`);

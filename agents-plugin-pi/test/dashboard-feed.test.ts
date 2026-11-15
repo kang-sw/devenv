@@ -19,6 +19,7 @@ import {
   acceptedKinds,
   compactTrigger,
   createDashboardFeed,
+  createAgentEventDiff,
   dashboardAgentEntries,
   dashboardStatus,
   dashboardUserMessage,
@@ -35,6 +36,7 @@ import { ADAPTER_MESSAGE_LABEL, WHITEBOARD_MESSAGE_LABEL, labelAdapterText, labe
 import { createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
 import { agentDisplayDetail } from "../src/agent-display.ts";
 import { createOutputRateTracker } from "../src/output-rate.ts";
+import { modelObservation } from "../src/model-observation.ts";
 import { ADAPTER_ONLY_RAW_TOOLS, filterOutAdapterOnlyTools, filterOutMercenaryTools } from "../src/bridge.ts";
 import { markAgentExited, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { dashboardWakeMessages } from "../src/dashboard-wake.ts";
@@ -500,6 +502,91 @@ describe("dashboardAgentEntries telemetry", () => {
     assert.deepEqual([g1.model, g1.effort, g1.contextTokens, g1.outputTps], ["p/n", "low", 9_000, 42]);
     const b1 = byId.get("b1")!;
     for (const field of ["model", "effort", "contextTokens", "outputTps"] as const) assert.equal(b1[field], undefined, `${field} present while unknown`);
+  });
+});
+
+describe("observed output evidence", () => {
+  const completed = (model: string, at: number, extra = {}) => ({ type: "message_end", message: { role: "assistant", model, timestamp: at, responseId: `response-${at}`, stopReason: "stop", content: [], ...extra } });
+  const accepts = { content: [{ type: "text", text: "ok\naccepts: status" }] };
+
+  test("lead response transitions survive coalescing, original-time replay and retry without clearing usage", async () => {
+    let fail = false;
+    const usage = { context: { tokens: 1234, window: 200000 }, cost: { usd: 0.5, estimate: true as const, incomplete: false } };
+    const h = harness({ status: () => usage, answer: async () => { if (fail) { fail = false; throw new Error("lost"); } return accepts; } });
+    h.feed.start(); await h.advance(0); await h.advance(FLUSH_INTERVAL_MS);
+    h.feed.leadEvent({ type: "agent_start" });
+    h.feed.leadEvent(completed("physical-old", 11000, { thinkingLevel: "high" }));
+    h.feed.leadEvent(completed("physical-new", 12000));
+    h.feed.leadEvent({ type: "agent_settled" });
+    fail = true; await h.advance(FLUSH_INTERVAL_MS); await h.advance(RETRY_MS); await h.advance(FLUSH_INTERVAL_MS);
+    const deliveredEvidence = h.calls.findLast((call) => call.args.events.some((e) => e.observed !== undefined))!.args.events;
+    const sent = deliveredEvidence.filter((e) => e.observed !== undefined);
+    assert.equal(sent.length, 2);
+    assert.deepEqual(sent.map((e) => (e.observed as { model: string; at: number }).model), ["physical-old", "physical-new"]);
+    assert.deepEqual(sent.map((e) => (e.observed as { at: number }).at), [11000, 12000]);
+    assert.equal((sent[0]!.observed as { effort: string }).effort, "high");
+    assert.equal((sent[1]!.observed as { effort?: string }).effort, undefined);
+    for (const event of sent) { assert.deepEqual(event.context, usage.context); assert.deepEqual(event.cost, usage.cost); }
+    const end = deliveredEvidence.findIndex((e) => e.kind === "turn_end");
+    assert.ok(end > deliveredEvidence.findIndex((e) => e.observed !== undefined));
+    h.feed.stop();
+  });
+
+  test("response evidence does not erase held usage when the current usage reader is unavailable", async () => {
+    let unavailable = false;
+    const usage = { context: { tokens: 1234, window: 200000 } };
+    const h = harness({ status: () => { if (unavailable) throw new Error("temporary usage read"); return usage; }, answer: async () => accepts });
+    h.feed.start(); await h.advance(0); await h.advance(FLUSH_INTERVAL_MS);
+    unavailable = true;
+    h.feed.leadEvent(completed("physical", 1000)); await h.advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(h.events().findLast((e) => e.observed !== undefined)?.context, usage.context);
+    h.feed.stop();
+  });
+
+  test("lead evidence includes only the current response's eligible established block-span rate", async () => {
+    const h = harness({ answer: async () => accepts });
+    h.feed.start(); await h.advance(0);
+    h.feed.leadEvent({ type: "message_start", message: completed("physical", 1000).message });
+    h.feed.leadEvent({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
+    await h.advance(1000);
+    h.feed.leadEvent({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 0 } });
+    h.feed.leadEvent(completed("physical", 1000, { usage: { output: 100 } }));
+    await h.advance(FLUSH_INTERVAL_MS);
+    h.feed.leadEvent({ type: "message_start", message: completed("physical", 2000).message });
+    h.feed.leadEvent(completed("physical", 2000, { usage: { output: 1 } }));
+    await h.advance(FLUSH_INTERVAL_MS);
+    const observed = h.events().filter((e) => e.observed !== undefined).map((e) => e.observed as { outputTps?: number });
+    assert.equal(observed[0]!.outputTps, 100);
+    assert.equal(observed[1]!.outputTps, undefined);
+    h.feed.stop();
+  });
+
+  test("restored own evidence negotiates status and older daemons omit it honestly", async () => {
+    const observed = modelObservation(completed("restored-output", 1000).message)!;
+    const h = harness({ observations: () => [observed], answer: async () => accepts });
+    h.feed.start(); await h.advance(0); await h.advance(FLUSH_INTERVAL_MS);
+    assert.equal(h.calls[0]!.args.events.some((e) => e.observed !== undefined), false);
+    assert.deepEqual(h.events().find((e) => e.observed !== undefined)?.observed, observed);
+    h.feed.stop();
+    const old = harness({ observations: () => [observed] });
+    old.feed.start(); await old.advance(FLUSH_INTERVAL_MS * 3);
+    assert.equal(old.events().some((e) => e.observed !== undefined), false);
+    assert.ok(old.events().some((e) => e.kind === "reset")); old.feed.stop();
+  });
+
+  test("direct and relayed deep children retain every bounded transition without parent inheritance", () => {
+    const own = modelObservation(completed("direct-output", 1000).message)!;
+    const deep = modelObservation(completed("deep-output", 2000).message)!;
+    const record: RpcAgentRecord = { agentId: "direct", sessionPath: "/tmp/x/session.jsonl", wsToolNames: [], toolGroup: "full-worker", streaming: false, running: true, runStartedAt: 50, reportLog: [], modelObservations: [own], observedModel: "state-only", observedEffort: "max", client: {} as never,
+      subtreeDescendants: [{ id: "deep", parentId: null, depth: 0, role: "explore", live: true, display: { name: "deep", state: "running", runStartedAt: 60, lastOutputAt: 0, observations: [deep] } }, { id: "unknown", parentId: null, depth: 0, role: "explore", live: true, display: { name: "unknown", state: "running", runStartedAt: 60, lastOutputAt: 0, model: "state-unknown" } }] };
+    const entries = dashboardAgentEntries(new Map([[record.agentId, record]]));
+    assert.deepEqual(entries.find((e) => e.agentId === "direct")?.observations, [own]);
+    assert.deepEqual(entries.find((e) => e.agentId === "deep")?.observations, [deep]);
+    assert.equal(entries.find((e) => e.agentId === "unknown")?.observations, undefined);
+    entries[0]!.observations!.push(modelObservation(completed("direct-next", 3000).message)!);
+    const events = createAgentEventDiff().events(entries);
+    assert.deepEqual(events.filter((e) => e.agentId === "direct").map((e) => (e.observed as { model: string }).model), ["direct-output", "direct-next"]);
+    assert.equal(events.find((e) => e.agentId === "unknown")?.observed, undefined);
   });
 });
 

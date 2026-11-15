@@ -210,7 +210,7 @@ func TestTopicETAPendingOmittedValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stateRaw(s, "Work", "e3", string(data))
+	stateRaw(s, "Work", fmt.Sprintf("e%d", s.EntrySeq+1), string(data))
 	v := s.TopicStates()["Work"]
 	if v.Diagnostic != nil || v.State == nil || v.State.Value != StateImplementing || v.State.Run.ETAMinutes != 60 {
 		t.Fatalf("omitted extend value must derive implementing: %+v", v)
@@ -224,7 +224,7 @@ func TestTopicETAPendingOmittedValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stateRaw(s, "Work", "e4", string(data))
+	stateRaw(s, "Work", fmt.Sprintf("e%d", s.EntrySeq+1), string(data))
 	if v := s.TopicStates()["Work"]; v.State != nil || v.Diagnostic == nil || v.Diagnostic.Code != "malformed" {
 		t.Fatalf("conflicting explicit extend value accepted: %+v", v)
 	}

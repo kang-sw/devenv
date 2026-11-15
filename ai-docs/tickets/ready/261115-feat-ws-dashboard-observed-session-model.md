@@ -271,6 +271,57 @@ Verification (implementation, not performed by this preparation):
   snapshot field meanings or `BatchView` JSON. Any incompatible requirement
   returns to the lead; no T2 approval is implied.
 
+### Result (a83c12c84) - 2026-11-15
+
+**Partial Phase 1 result.** Telemetry A merged as `a83c12c84`
+(implementation `4dc1e7c35`). Follow-up B
+`7d3e69331e924f520268d26afaa60be9c8135a06` landed as `3e10e3613`,
+confirmed by MAIN at 2026-11-15T05:36:25Z. This records scoped implementation
+evidence, not complete native-file
+collection or runtime/owner acceptance. MAIN authorized this partial record
+and the unscheduled research follow-up at 2026-11-15T05:35:53Z.
+
+A/B use CLI Claude completed-step `usage.model`, CLI Pi completed assistant
+events plus existing own-log restoration, and hosted Claude/Pi response parsing
+in Go. They add no Go native-file backfill. Safe Claude native-file/session
+association and step-ID versus transcript-message-ID deduplication remain
+unvalidated, as does Codex response identity. Missing evidence remains unknown;
+these gaps do not prove a supported native Codex identity exists.
+
+Verification evidence supplied by the implementation worker (not rerun for
+this documentation update):
+- A: full wslive/wsi18n and scoped hosted/parser/watcher/replay/reducer/dashboard/
+  rail checks passed with unchanged current adapters/CSS.
+- B: worker-side Claude 80 tests, Pi helper/rate/display 19 tests and scoped
+  dashboard/recursive 9 tests passed; an actual Claude recovery capture passed
+  through Go intake/reducer. MAIN subsequently confirmed Pi 119/119 passing
+  and wsflow runtime-contract/skill-shim suite 24 OK with 2 Windows-only skips
+  and a byte-exact mirror pass.
+- Merge-side Claude `dashboard.test.ts` could not run because the
+  `claude-code/testing` shim was missing. The worker-side 80-test pass used a
+  local shim; its recipe has been requested. This is not native-harness coverage.
+- One prior Lite found 4 Criticals; each was repaired with actual-path
+  regressions. No new Lite was run.
+- MAIN independently reported wslive/wsi18n and 4 observed-dashboard tests
+  passing, with one pre-existing `TestCommonContractLifecycle` failure.
+  The newly requested MCP Observed test is pending; no result is claimed.
+
+Deferred native-evidence validation is captured in
+`261115-research-ws-native-model-evidence-backfill`; MAIN must schedule it.
+This ticket stays ready/open: frozen CSS/label C remains pending after 793,
+Phase 1 is partial, and runtime/owner activation remains pending. B did not
+regenerate Pi's dist index; MAIN authorized the same implementation worker's
+offline bundle follow-up without version bumps. Claude hook live pickup is
+not yet confirmed. The frozen Phase 2 Result below is unchanged and describes
+its original UI-only head.
+
+#### Edition (9479185e7) - 2026-11-15
+
+The implementation worker reported `go test ./internal/mcp -run 'Observed'`
+returned RC0 at `9479185e73`, whose Go tree is identical to A; MAIN was notified.
+This supersedes the pending MCP Observed test statement above. Activation and
+bundle follow-up remain pending as recorded; no checks were rerun for this update.
+
 ### Phase 2: Approved compact session hover and current-agent model provenance
 
 MAIN's explicit 2026-11-15 03:33:37Z execution grant supersedes the original
