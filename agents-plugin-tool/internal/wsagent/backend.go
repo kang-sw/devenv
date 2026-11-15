@@ -349,8 +349,8 @@ type Event struct {
 	SessionID string
 	// TurnEnd ends the running turn; TurnError describes a turn that ended
 	// in an error (a refusal, an interrupt).
-	TurnEnd   bool
-	TurnError string
+	TurnEnd    bool
+	TurnError  string
 	TurnReason string
 	// CompactRequested (with TurnEnd): the ending turn carried a successful
 	// compaction lever call (a *__request_compaction tool call whose result

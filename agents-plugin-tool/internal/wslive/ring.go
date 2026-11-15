@@ -76,10 +76,10 @@ type RingEntry struct {
 	Caption  string `json:"caption,omitempty"`
 	WakeTurn bool   `json:"wakeTurn,omitempty"`
 	// Text is a user message, a lead reply, or a failed compaction's error.
-	Text      string `json:"text,omitempty"`
+	Text string `json:"text,omitempty"`
 	// Truncated qualifies retained text; on a summary-bearing natural turn
 	// it carries aggregate clipping, separately from provider terminal facts.
-	Truncated bool   `json:"truncated,omitempty"`
+	Truncated bool `json:"truncated,omitempty"`
 	// Done, Failed, and DurationMs summarize a turn: its tool calls and its
 	// length.
 	Done       int   `json:"done,omitempty"`
@@ -87,7 +87,7 @@ type RingEntry struct {
 	DurationMs int64 `json:"durationMs,omitempty"`
 	// Reason is a turn's end reason (Event.Reason), absent when its
 	// turn_end named none.
-	Reason string `json:"reason,omitempty"`
+	Reason         string          `json:"reason,omitempty"`
 	SummaryHistory *SummaryHistory `json:"summaryHistory,omitempty"`
 	// Tools is a tools row's summary.
 	Tools *ToolSummary `json:"tools,omitempty"`
@@ -197,7 +197,9 @@ func writeRingEntry(dir string, entry RingEntry) error {
 		return err
 	}
 	stamp := entry.ringStamp
-	if stamp.IsZero() { stamp = nextRingStamp() }
+	if stamp.IsZero() {
+		stamp = nextRingStamp()
+	}
 	name := stamp.Format(ringStampLayout) + "-" + hex.EncodeToString(suffix[:]) + ".json"
 	return writeRingRaw(dir, name, raw)
 }
@@ -206,7 +208,11 @@ func writeRingEntry(dir string, entry RingEntry) error {
 // receiver splits the real turn candidate from its ordinary reply/tool writes.
 // Legacy paths never call it and retain their existing scheduling.
 func PrepareSummaryRing(entries []RingEntry) {
-	for i := range entries { if entries[i].ringStamp.IsZero() { entries[i].ringStamp = nextRingStamp() } }
+	for i := range entries {
+		if entries[i].ringStamp.IsZero() {
+			entries[i].ringStamp = nextRingStamp()
+		}
+	}
 }
 
 func writeRingRaw(dir, name string, raw []byte) error {

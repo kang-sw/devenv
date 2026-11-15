@@ -859,7 +859,11 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 				out := piHostedEvents(l.WidgetLines)
 				if len(line)+1 > wslive.SummaryFrameBytes {
 					kept := out[:0]
-					for _, ev := range out { if ev.ReasoningSummary == nil { kept = append(kept, ev) } }
+					for _, ev := range out {
+						if ev.ReasoningSummary == nil {
+							kept = append(kept, ev)
+						}
+					}
 					out = kept
 				}
 				return out
@@ -1027,9 +1031,12 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 		group := strconv.Itoa(m.messages)
 		m.turnErr, m.turnReason = "", ""
 		switch msg.StopReason {
-		case "aborted": m.turnReason = wslive.TurnAborted
-		case "error": m.turnReason = "error"
-		case "length": m.turnReason = "incomplete"
+		case "aborted":
+			m.turnReason = wslive.TurnAborted
+		case "error":
+			m.turnReason = "error"
+		case "length":
+			m.turnReason = "incomplete"
 		}
 		if msg.StopReason == "error" {
 			m.turnErr = strings.TrimSpace(msg.ErrorMessage)

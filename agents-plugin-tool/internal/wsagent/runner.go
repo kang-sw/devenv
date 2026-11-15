@@ -178,7 +178,7 @@ type Runner struct {
 	once   sync.Once
 	// Separate from mu: held through summary mutation/write fencing without
 	// blocking the runner's ordinary List/Get or spawn snapshot reads.
-	summaryMu sync.Mutex
+	summaryMu     sync.Mutex
 	summaryOwners map[string]*conv
 	// closedRows caches immutable closed states under mu, until reopened.
 	// Handed-off snapshots still belong to a terminal and are not cached.
@@ -420,7 +420,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	}
 	if rec.Lead {
 		r.summaryMu.Lock()
-		if r.summaryOwners == nil { r.summaryOwners = map[string]*conv{} }
+		if r.summaryOwners == nil {
+			r.summaryOwners = map[string]*conv{}
+		}
 		r.summaryOwners[rec.ReplyID] = c
 		r.summaryMu.Unlock()
 		c.live.owner = c.lockSummaryWriter
@@ -1180,13 +1182,13 @@ func closedState(rec Record) State {
 // act through do(), and tell the loop of an inbox change through
 // signalInbox().
 type conv struct {
-	r     *Runner
-	dir   string
-	inbox string
-	live  *liveWriter
-	summaryGap bool
+	r             *Runner
+	dir           string
+	inbox         string
+	live          *liveWriter
+	summaryGap    bool
 	summaryReason string
-	reqs  chan func()
+	reqs          chan func()
 	// inboxC (one slot) tells the loop the inbox changed (signalInbox).
 	inboxC chan struct{}
 	done   chan struct{}

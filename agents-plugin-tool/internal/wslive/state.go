@@ -138,7 +138,7 @@ type Event struct {
 	// mod: answer, aborted, or error); the turn's ring entry keeps it.
 	// Absent when the adapter names none (an older adapter, the hosted
 	// runner).
-	Reason string `json:"reason,omitempty"`
+	Reason           string            `json:"reason,omitempty"`
 	ReasoningSummary *ReasoningSummary `json:"reasoningSummary,omitempty"`
 }
 
@@ -993,10 +993,10 @@ func (st *State) Snapshot(now int64) Snapshot {
 		UpdatedAt:     now,
 		HeartbeatMs:   HeartbeatInterval.Milliseconds(),
 		Lead: Lead{
-			Activity:       st.lead.view(),
-			TurnStartedAt:  st.turnStartedAt,
-			TurnOrigin:     st.turnOrigin,
-			PreviousTurnMs: st.previousTurnMs,
+			Activity:         st.lead.view(),
+			TurnStartedAt:    st.turnStartedAt,
+			TurnOrigin:       st.turnOrigin,
+			PreviousTurnMs:   st.previousTurnMs,
 			ReasoningSummary: cloneSummary(st.summary.current),
 		},
 	}

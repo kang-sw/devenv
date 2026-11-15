@@ -345,10 +345,10 @@ type liveWriter struct {
 	log io.Writer
 	// beforeSnapshot refreshes daemon-owned rows in this writer's loop.
 	beforeSnapshot func()
-	owner func() (func(), bool)
-	wake func()
+	owner          func() (func(), bool)
+	wake           func()
 	// Only an observed holder agent_start supplies this real identity.
-	summarySource string
+	summarySource     string
 	summaryNaturalEnd bool
 }
 
@@ -380,9 +380,13 @@ func (w *liveWriter) apply(ev wslive.Event) bool {
 	var err error
 	if ev.ReasoningSummary != nil || (ev.Kind == wslive.KindTurnEnd && w.st.Snapshot(w.now().UnixMilli()).Lead.ReasoningSummary != nil) {
 		res, err = w.applySummary(ev)
-	} else { res, err = w.st.Apply(ev, w.now().UnixMilli()) }
+	} else {
+		res, err = w.st.Apply(ev, w.now().UnixMilli())
+	}
 	changed := w.write(res, err, ev.Kind)
-	if w.owner != nil { w.retrySummaries() }
+	if w.owner != nil {
+		w.retrySummaries()
+	}
 	return changed
 }
 

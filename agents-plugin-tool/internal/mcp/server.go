@@ -292,7 +292,9 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			continue
 		}
 		if _, v1 := canonicalIntake(req); v1 && len(line)+1 > wslive.SummaryFrameBytes {
-			if err := writeResponse(errorResponse(req.ID, -32602, "reasoning summary JSONL frame exceeds 49152 bytes")); err != nil { return err }
+			if err := writeResponse(errorResponse(req.ID, -32602, "reasoning summary JSONL frame exceeds 49152 bytes")); err != nil {
+				return err
+			}
 			continue
 		}
 		if len(req.ID) == 0 {
