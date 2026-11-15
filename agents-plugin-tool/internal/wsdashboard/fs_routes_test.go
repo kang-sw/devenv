@@ -129,6 +129,42 @@ func TestFSListStaysInsideTheRoot(t *testing.T) {
 	}
 }
 
+// Typed path-bar input is authorized by the existing listing route, which
+// returns a canonical relative directory even for absolute and dotted input.
+func TestFSPathBarCanonicalDirectories(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	local, lan := fsViewers(t, f)
+	writeFile(t, filepath.Join(f.project, "docs", "deep", "inside.txt"), "inside")
+	for _, v := range []viewer{local, lan} {
+		for _, tc := range []struct{ input, want string }{
+			{".", ""},
+			{"docs/./deep/..", "docs"},
+			{filepath.Join(f.project, "docs", "deep"), "docs/deep"},
+		} {
+			code, a := fsList(t, f, v, "dir="+url.QueryEscape(tc.input))
+			if code != http.StatusOK || a.Dir != tc.want || !a.Session || a.Root != filepath.ToSlash(f.project) {
+				t.Errorf("%s: typed path %q = %d %+v, want dir %q in unchanged root", v.name, tc.input, code, a, tc.want)
+			}
+		}
+	}
+	// The existing strict relativeInside guard refuses the absolute root
+	// itself; callers address the root with an empty path or "." instead.
+	for _, v := range []viewer{local, lan} {
+		if code, _ := fsList(t, f, v, "dir="+url.QueryEscape(f.project)); code != http.StatusNotFound {
+			t.Errorf("%s: absolute root path = %d, want existing 404", v.name, code)
+		}
+	}
+	if err := os.Symlink(filepath.Join(f.project, "docs"), filepath.Join(f.project, "alias")); err == nil {
+		for _, v := range []viewer{local, lan} {
+			for _, input := range []string{"alias", filepath.Join(f.project, "alias")} {
+				if code, _ := fsList(t, f, v, "dir="+url.QueryEscape(input)); code != http.StatusNotFound {
+					t.Errorf("%s: typed final in-root symlink %q = %d, want 404", v.name, input, code)
+				}
+			}
+		}
+	}
+}
+
 // TestFSPreviewAndRawStayInsideTheRoot pins the containment of the preview
 // and raw routes: a traversal, an outside path, a symlink (even one that
 // stays inside the root), a path through a symlinked folder, a folder, and

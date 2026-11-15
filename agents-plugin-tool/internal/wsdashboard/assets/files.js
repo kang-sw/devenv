@@ -152,7 +152,7 @@
     if (destroyed) return;
     snapshot();
     var state = location || { root: rootAbs, dir: dir, view: viewMode };
-    tabs.push({ id: ++tabSeq, state: { root: local() && typeof state.root === "string" ? state.root : "", dir: cleanLocation(state.dir),
+    tabs.push({ id: ++tabSeq, history: { paths: [cleanLocation(state.dir)], index: 0 }, state: { root: local() && typeof state.root === "string" ? state.root : "", dir: cleanLocation(state.dir),
       selection: state.selection == null ? null : cleanLocation(state.selection), scroll: +state.scroll || 0, treeScroll: +state.treeScroll || 0,
       view: viewModes.indexOf(state.view) >= 0 ? state.view : "details", columnLeft: +state.columnLeft || 0,
       columnScroll: state.columnScroll && typeof state.columnScroll === "object" ? Object.assign({}, state.columnScroll) : {} } });
@@ -182,6 +182,7 @@
   function switchTab(index) {
     if (destroyed || !tabs[index] || index === active) return;
     snapshot();
+    closePath(false);
     gen++; rootAttempt++; navAttempt++; rootPending = false;
     clearSearch(); closeMenu(false); closePop(false);
     active = index;
@@ -248,13 +249,45 @@
     ui.copy.addEventListener("click", function () { var s = selection(); if (s && h.copy) h.copy(s.session ? s.path : s.absolute); });
     notify("selection");
   }
-  function navigate(path, selected, focusPath) {
+  function history() { return tabs[active] && tabs[active].history; }
+  function resetHistory() {
+    if (tabs[active]) tabs[active].history = { paths: [dir], index: 0 };
+  }
+  function traverseHistory(delta) {
+    var hist = history(), index = hist ? hist.index + delta : -1;
+    if (!hist || index < 0 || index >= hist.paths.length) return;
+    navigate(hist.paths[index], null, null, { index: index });
+  }
+  function editPath() {
+    if (destroyed || !info || !lists[dir]) return;
+    ui.crumbs.hidden = true; ui.path.hidden = false; ui.path.value = dir;
+    ui.path.focus(); ui.path.select();
+  }
+  function closePath(focus) {
+    if (!ui.path || ui.path.hidden) return;
+    ui.path.hidden = true; ui.crumbs.hidden = false;
+    if (focus) ui.crumbs.focus();
+  }
+  function navigate(path, selected, focusPath, navigation) {
     if (destroyed) return;
-    path = cleanLocation(path);
+    navigation = navigation || {};
+    // Typed paths bypass storage sanitization and the listing cache: only
+    // /fs/list may authorize them and return their canonical relative dir.
+    path = navigation.typed ? path : cleanLocation(path);
+    closePath(false);
     clearSearch();
     var g = gen, attempt = ++navAttempt;
     function accept(a) {
       if (g !== gen || attempt !== navAttempt) return;
+      path = typeof a.dir === "string" ? a.dir : path;
+      var hist = history();
+      if (hist) {
+        if (navigation.index != null) hist.index = navigation.index;
+        else if (hist.paths[hist.index] !== path) {
+          hist.paths = hist.paths.slice(0, hist.index + 1);
+          hist.paths.push(path); hist.index++;
+        }
+      }
       lists[path] = a; dir = path; sel = cur = selected == null ? null : selected; contentTop = 0;
       render();
       if (viewMode === "column" && focusPath != null) {
@@ -268,8 +301,10 @@
       persistTabs(); paintTabs(); notify("navigation");
       if (selected != null) notify("selection");
     }
-    if (lists[path]) accept(lists[path]);
-    else listDir(path).then(accept, function () { if (g === gen && attempt === navAttempt) toast(wsT("js.files.failed")); });
+    if (!navigation.typed && navigation.index == null && lists[path]) accept(lists[path]);
+    else listDir(path).then(accept, function (err) {
+      if (g === gen && attempt === navAttempt) toast(wsT(err && err.status === 404 ? "js.files.root.refused" : "js.files.failed"));
+    });
   }
 
   // fsGet asks a file browser route; it rejects with {status, text} on a
@@ -304,6 +339,33 @@
   }
 
   // --- the root --------------------------------------------------------------
+  var rootsAttempt = 0, rootChoices = [];
+  function paintRootChoices() {
+    ui.rChoices.textContent = "";
+    if (local() && !directoriesOnly) rootChoices.forEach(function (root, index) {
+      if (!root || typeof root.path !== "string") return;
+      var current = info ? info.root === root.path : rootAbs ? rootAbs === root.path : index === 0;
+      var name = root.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || root.path;
+      var branch = root.detached ? wsT("js.wt.detached") : root.branch;
+      var b = mk("button", "btn opt", (current ? "✓ " : "") + name + (branch ? " · " + branch : ""));
+      b.type = "button"; b.title = root.path;
+      b.setAttribute("aria-pressed", String(current));
+      b.addEventListener("click", function () { if (local() && pop === ui.rootPop) applyRoot(index === 0 ? "" : root.path); });
+      ui.rChoices.appendChild(b);
+    });
+    ui.rChoices.hidden = !ui.rChoices.children.length;
+  }
+  function loadRootChoices() {
+    var attempt = ++rootsAttempt;
+    rootChoices = []; paintRootChoices();
+    if (!local() || directoriesOnly) return;
+    // Suggestions are session-scoped, never scoped to the active alternate root.
+    fsGet("worktrees", {}).then(function (a) {
+      if (destroyed || attempt !== rootsAttempt || pop !== ui.rootPop || !local()) return;
+      rootChoices = Array.isArray(a.roots) ? a.roots : [];
+      paintRootChoices();
+    }, function () { /* Older daemons or a failed read leave the free-text path usable. */ });
+  }
   function paintHead() {
     ui.rootBtn.disabled = directoriesOnly || !local();
     if (ui.roots && info) ui.roots.value = rootAbs;
@@ -324,12 +386,16 @@
       ui.crumbs.appendChild(b);
     });
     ui.up.disabled = !dir;
+    var hist = history();
+    ui.back.disabled = !hist || hist.index === 0;
+    ui.forward.disabled = !hist || hist.index >= hist.paths.length - 1;
   }
   // useRoot makes a listing of a root's top folder the tree's root, with a
   // fresh tree.
   function useRoot(a, restore) {
     var saved = restore ? { dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, columnLeft: columnLeft, columnScroll: columnScroll } : null;
     gen++; navAttempt++;
+    closePath(false);
     clearTimeout(timer);
     abort();
     searchResult = null;
@@ -338,15 +404,21 @@
     rootAbs = a.session ? "" : a.root;
     save(ROOT_KEY + rid, rootAbs || null);
     info = a;
+    if (pop === ui.rootPop) paintRootChoices();
     lists = { "": a };
     open = {};
     sel = cur = null;
     treeTop = 0; dir = ""; contentTop = 0;
+    if (!restore) resetHistory();
     columnLeft = saved ? saved.columnLeft : 0; columnScroll = saved ? saved.columnScroll : {}; columnLoads = {};
     readView();
     paintHead();
     render();
-    function complete() { persistTabs(); paintTabs(); notify("navigation"); }
+    function complete() {
+      var hist = history();
+      if (!hist || hist.paths[hist.index] !== dir) resetHistory();
+      paintHead(); persistTabs(); paintTabs(); notify("navigation");
+    }
     if (saved && saved.dir) {
       var g = gen, attempt = navAttempt;
       dir = saved.dir; sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll;
@@ -819,6 +891,7 @@
     pop = p;
     popFrom = btn;
     if (p === ui.rootPop) {
+      loadRootChoices();
       ui.rErr.textContent = "";
       ui.rIn.value = info ? info.root : "";
       ui.rIn.focus();
@@ -991,6 +1064,11 @@
     ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
     ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
     bar.appendChild(mk("span", "fbar-sep"));
+    ui.back = iconBtn("chevron-right", wsT("js.files.back")); ui.back.classList.add("fback");
+    ui.forward = iconBtn("chevron-right", wsT("js.files.forward")); ui.forward.classList.add("fforward");
+    ui.back.addEventListener("click", function () { traverseHistory(-1); });
+    ui.forward.addEventListener("click", function () { traverseHistory(1); });
+    bar.appendChild(ui.back); bar.appendChild(ui.forward);
     ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
     bar.appendChild(ui.up);
     ui.location = mk("div", "flocation");
@@ -1001,7 +1079,22 @@
     ui.root = ui.crumbRoot;
     if (h.rootSlot) { ui.root = mk("span", "froot"); h.rootSlot.appendChild(ui.root); }
     ui.location.appendChild(ui.rootBtn);
-    ui.crumbs = mk("span", "fcrumb-trail"); ui.location.appendChild(ui.crumbs); bar.appendChild(ui.location);
+    ui.crumbs = mk("span", "fcrumb-trail"); ui.crumbs.tabIndex = 0;
+    ui.crumbs.title = wsT("js.files.path"); ui.crumbs.setAttribute("aria-label", wsT("js.files.path"));
+    ui.crumbs.addEventListener("click", function (e) { if (!e.target.closest(".fcrumb")) editPath(); });
+    ui.crumbs.addEventListener("keydown", function (e) { if (e.target === ui.crumbs && e.key === "Enter") { e.preventDefault(); editPath(); } });
+    ui.location.appendChild(ui.crumbs);
+    ui.path = mk("input", "fpin fpath"); ui.path.type = "text"; ui.path.hidden = true; ui.path.spellcheck = false;
+    ui.path.setAttribute("aria-label", wsT("js.files.path")); ui.path.setAttribute("autocomplete", "off");
+    ui.path.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation();
+      var path = ui.path.value;
+      closePath(true);
+      if (e.key === "Enter") navigate(path, null, null, { typed: true });
+    });
+    ui.path.addEventListener("blur", function () { closePath(false); });
+    ui.location.appendChild(ui.path); bar.appendChild(ui.location);
     var head = mk("div", "fhd");
     ui.collapse = iconBtn("chevrons-down-up", wsT("js.files.collapse"));
     ui.refresh = iconBtn("refresh-cw", wsT("js.files.refresh"));
@@ -1098,6 +1191,11 @@
     ui.rootPop.hidden = true;
     var rootLabel = mk("div", "lb"); rootLabel.innerHTML = licon("folder-input");
     rootLabel.appendChild(mk("span", "", wsT("js.files.root.label"))); ui.rootPop.appendChild(rootLabel);
+    ui.rChoices = mk("div", "froot-list");
+    ui.rChoices.hidden = true;
+    ui.rChoices.setAttribute("role", "group");
+    ui.rChoices.setAttribute("aria-label", wsT("js.files.root.label"));
+    ui.rootPop.appendChild(ui.rChoices);
     ui.rIn = mk("input", "fpin");
     ui.rIn.type = "text";
     ui.rIn.spellcheck = false;
@@ -1239,6 +1337,9 @@
     // "/" focuses the search box while the pane shows; a click elsewhere,
     // a scroll, a resize, or leaving the window closes a menu or popover.
     listen(doc, "keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l" && !e.defaultPrevented && shows(el) && el.contains(e.target)) {
+        e.preventDefault(); editPath(); return;
+      }
       var pane = e.target.closest && e.target.closest(".fpane"), sheet = doc.querySelector(".bcard[data-max] .fpane, .fpane[data-max]");
       if ((pane && pane !== el) || (sheet && sheet !== el) || (!pane && !sheet)) return;
       if (directoriesOnly || e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || editable(e.target) || !shows(el)) return;
@@ -1299,6 +1400,7 @@
     hidden: function () {
       if (destroyed) return;
       searchPaused = true;
+      closePath(false);
       clearTimeout(timer);
       abort();
       closeMenu(false);

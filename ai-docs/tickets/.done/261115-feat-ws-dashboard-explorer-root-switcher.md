@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a15b8d8ffc7bbb47
 sage-review-completeness-reviewed: a15b8d8ffc7bbb47
+completed: 2026-11-15
 ---
 
 # Explorer allowed-root switcher: project and its worktrees
@@ -154,3 +155,42 @@ membership, decides refusal), and that a remote viewer gets no list; `TestFS|Tes
 neighbours and `./internal/wsi18n` for new strings. Look and placement go to
 the owner's visual check (owner UI principle) instead of a side-by-side
 capture.
+
+### Result (cd250bbca) - 2026-11-15
+
+Implemented the additive T0 `GET /s/<reply-id>/fs/roots` route and one-click
+root suggestions above the existing free-text input. The session root comes
+first with its branch metadata when available, followed by deduplicated,
+valid, non-prunable worktree directories. Reads use `RepoWorktreeSource`
+directly, independent of an open rail stream; an absent or failed source
+still returns the session root. Non-local and cross-site viewers are refused
+before enumeration. The host0 discovery answer and existing root/capability
+guards are unchanged.
+
+The shared popover shows folder, branch/detached state, and the current root;
+selection uses `applyRoot` and existing per-tab/card persistence. Request
+tokens reject stale popover answers, and current marking follows initial
+loads and saved-root fallback. Merely unlisted directories remain browsable;
+a removed saved directory falls back with the existing notice. Existing
+classes and localized labels were reused, with no CSS or breadcrumb/up/back/
+forward edits, per the lead's scope boundary and owner (918).
+
+Verification (all passed with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`):
+
+- `go test ./internal/wsdashboard -run 'TestFS|TestFiles|TestExplorer' -count=1`
+- `go test -race ./internal/wsdashboard -run 'TestFSRoots|TestFSChangeRootIsLoopbackOnly|TestFilesExplorerInstances|TestFilesExplorerCards' -count=1`
+- `go test ./internal/wsi18n -count=1`
+- `node --check agents-plugin-tool/internal/wsdashboard/assets/files.js` and
+  `git diff --check` (from the repository root).
+
+Go tests cover ordering/fields, duplicates and invalid/prunable directories,
+source fallback, refusal before enumeration, unknown sessions, and removed
+versus unlisted directory validity. Production-JS fixtures cover late
+responses, current-root races, remote suppression, free-text retention,
+saved-root fallback, per-card persistence, and isolation from other cards,
+inner tabs, and the Files tab.
+
+A brief correctness/security/test self-review replaced independent review
+because the lead disabled spawning; no independent-review pass is claimed.
+The owner's on-screen check remains visual acceptance. No browser/screenshot
+rounds, daemon rebuild/restart, process kills, push, or merge were performed.

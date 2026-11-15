@@ -111,6 +111,19 @@ func TestFilesWorkspacePickerShellAssets(t *testing.T) {
 	}
 }
 
+func TestFilesExplorerPathBarLayout(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		`.fcrumb-trail[hidden], .fpath[hidden] { display: none; }`,
+		`.fpath { flex: 1 1 auto; min-width: 0; width: 0; height: 24px; box-sizing: border-box;`,
+		`.fback .li { transform: rotate(180deg); }`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("path bar stylesheet lacks %q", want)
+		}
+	}
+}
+
 func TestFilesExplorerColumnLayout(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
