@@ -5,6 +5,7 @@
   "go_tests_rerun": false,
   "historical_manifest_cleanup_lead_owned": true,
   "history_rewritten": false,
+  "verification_stage": "Historical evidence-cleanup snapshot before lead-owned history consolidation; see README.md for the completed consolidation.",
   "original_artifact_files_scanned": 29,
   "original_delivery_head": "01d14188534b2e26fe49840f162b61c3eec96b86",
   "original_public_artifact_bytes": 2642794,

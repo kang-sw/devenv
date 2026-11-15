@@ -7,9 +7,14 @@ This is MAIN-authorized, evidence-only cleanup of delivery
 and the closed ticket body are unchanged. Result anchor `7bee94167` and final
 source anchor `fb5739515` remain the implementation references.
 
-**This normal tip commit does not remove historical copies.** The root lead
-will perform the separately authorized unpushed-history rewrite before
-publication. No history rewrite, Go rerun or runtime action occurred here.
+The root lead consolidated the four unpushed docs/evidence commits into
+`cae8e7ea530be240295b378b20a9c8d66e797fe2`, retaining the sanitized tree
+exactly and preserving source/preparation history through `fb5739515`.
+Every commit in the resulting implementation range is manifest-free; no
+recovery ref was created. The private old/new mapping is at
+`/tmp/ws-retention-module-choosing-tartar/history-rewrite-mapping.txt`.
+Source/tests and the closed ticket remain byte-identical to the original
+delivery. No Go rerun, runtime action, integration or push occurred.
 
 ## Private archive and deterministic aggregates
 
