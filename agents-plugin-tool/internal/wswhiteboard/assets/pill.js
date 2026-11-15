@@ -68,11 +68,24 @@
       var p = d.createElement("div");
       p.className = "oq-pill";
       p.hidden = true;
-      var arr = d.createElement("span");
+      var arr = d.createElement(edge === "top" ? "button" : "span");
       arr.className = "oq-arr";
-      arr.setAttribute("aria-hidden", "true");
+      if (edge === "top") {
+        arr.type = "button";
+        arr.title = wsT("js.board.hold.pill.title");
+        arr.setAttribute("aria-label", arr.title);
+      } else arr.setAttribute("aria-hidden", "true");
       arr.textContent = edge === "top" ? "↑" : "↓";
+      if (edge === "top") arr.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
       p.appendChild(arr);
+      if (edge === "top") {
+        var updates = d.createElement("button");
+        updates.type = "button";
+        updates.className = "oq-updates";
+        updates.hidden = true;
+        updates.title = arr.title;
+        p.appendChild(updates);
+      }
       KINDS.forEach(function (k) {
         var b = d.createElement("button");
         b.type = "button";
@@ -113,8 +126,14 @@
   // item of its own state: still open, answered, or answered with a note
   // (noted items are a subset of the answered ones).
   function show(edge, list) {
-    var p = pills[edge];
-    p.hidden = !list.length;
+    var p = pills[edge], pending = edge === "top" && st.pending > 0;
+    p.hidden = edge !== "top" && !list.length;
+    p.classList.toggle("board-updated", !!pending);
+    if (edge === "top") {
+      var updates = p.querySelector(".oq-updates");
+      updates.hidden = !pending;
+      updates.textContent = pending ? wsT("js.board.hold.pill") + " " + st.pending : "";
+    }
     var groups = { open: [], ans: [], nt: [] };
     list.forEach(function (el) {
       if (!answered(el)) { groups.open.push(el); return; }
@@ -126,8 +145,24 @@
       var k = b.getAttribute("data-k"), g = groups[k] || [];
       b.hidden = !g.length;
       b.querySelector(".n").textContent = String(g.length);
+      b.setAttribute("aria-label", b.title + " (" + g.length + ")");
       if (g.length) target[edge][k] = edge === "top" ? g[g.length - 1] : g[0];
     });
+    // Animate the one outer capsule, not a second update capsule. Its final
+    // width remains intrinsic, so locale/count changes cannot clip the label.
+    var shape = [p.hidden, pending ? st.pending : 0, groups.open.length, groups.ans.length, groups.nt.length].join();
+    if (shape !== p.wbShape) {
+      var from = p.wbGrow && p.wbGrow.playState === "running" ? p.offsetWidth : p.wbWidth;
+      if (p.wbGrow) p.wbGrow.cancel();
+      p.style.overflow = "";
+      var width = p.offsetWidth;
+      if (p.animate && from && width && from !== width && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+        p.style.overflow = "clip";
+        p.wbGrow = p.animate([{ width: from + "px" }, { width: width + "px" }], { duration: 420, easing: "cubic-bezier(.34,1.56,.64,1)" });
+        p.wbGrow.onfinish = function () { p.style.overflow = ""; };
+      }
+      p.wbWidth = width; p.wbShape = shape;
+    }
   }
   // Avoid reading every far item's rect: an item in a topic wholly above
   // or below the view takes its side from the topic's rect, read once per
@@ -203,6 +238,12 @@
 
   function click(edge) {
     return function (e) {
+      if (edge === "top" && e.target.closest && e.target.closest(".oq-arr, .oq-updates")) {
+        if (st.home) st.home();
+        else if (window.wbHistory && window.wbHistory.jump) window.wbHistory.jump(pills.top, { top: 0, behavior: "smooth" });
+        else (root || window).scrollTo({ top: 0, behavior: window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+        return;
+      }
       var b = e.target.closest && e.target.closest(".oq-seg");
       var el = b && target[edge][b.getAttribute("data-k")];
       if (!el) return;
@@ -214,6 +255,8 @@
   pills.top.onclick = click("top");
   pills.bot.onclick = click("bot");
 
+  st.update = redrawSoon;
+  redrawSoon();
   st.off = function () {
     io.disconnect();
     if (ro) ro.disconnect();

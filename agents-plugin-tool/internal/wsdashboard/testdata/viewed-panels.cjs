@@ -38,6 +38,7 @@ function setLive(a,b){board.children=board.childNodes=a;pins.children=pins.child
 function input(list){var topics=Object.create(null);list.forEach(function(n){topics[n.getAttribute("data-topic")]=n;});return {topics:topics,order:list.map(function(n){return n.getAttribute("data-topic");}),before:[],after:[]};}
 var boardPending=Object.create(null),boardFrozen=[],boardOwn=Object.create(null),boardImmediate=Object.create(null),boardRelease=false;
 var boardPaged=Object.create(null),boardPagedEdits=[];
+var boardTopHeld=Object.create(null),boardTopOrder=null;
 var boardRendered=null,boardLatest=null,boardOffered=null,boardChanges=[],boardBadge=null,boardReleaseFrame=0,boardSnap=null,boardExposedUnits=null;
 function keys(list){return list.map(function(n){return n.getAttribute("data-topic");}).join();}
 function geometry(list,scroll){var y=0,out={};list.forEach(function(n){out[n.getAttribute("data-topic")]=y-scroll;y+=n.height;});return out;}

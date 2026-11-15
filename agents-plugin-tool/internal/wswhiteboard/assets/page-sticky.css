@@ -1,20 +1,44 @@
-/* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar; rail.js sets --wb-rail-h and --wb-rail-bot on the wrappers themselves */
+/* The always-present home capsule owns a fixed-height sticky band above the
+   toolbar/rail/heads. Counts change only its width, never the board's layout.
+   The bottom question pill keeps its zero-height wrapper above the reply bar. */
+:root { --wb-nav-height: 44px; }
+.wb-rail { --wb-rail-inset: var(--wb-nav-height); }
 .oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
-.oq-wrap.wb-oq-top { top: calc(10px + var(--wb-rail-h, 0px)); }
+.oq-wrap.wb-oq-top { top: 0; height: var(--wb-nav-height); flex: none; z-index: 5; background: var(--wb-bg); }
 .oq-wrap.wb-oq-bot { bottom: 10px; }
-.oq-pill { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 3px 0 10px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
-.oq-pill[hidden], .oq-seg[hidden] { display: none; }
-.oq-wrap.wb-oq-top .oq-pill { top: 0; }
+.oq-pill { --board-amber: #9a5b00; position: absolute; left: 50%; translate: -50% 0; pointer-events: auto; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; height: 28px; padding: 3px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; transition: background-color .3s, box-shadow .3s; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .oq-pill { --board-amber: #f2b632; } }
+:root[data-theme="dark"] .oq-pill { --board-amber: #f2b632; }
+.oq-pill[hidden], .oq-seg[hidden], .oq-updates[hidden] { display: none; }
+.oq-wrap.wb-oq-top .oq-pill { top: 8px; }
 .oq-wrap.wb-oq-bot .oq-pill { bottom: 0; }
 /* one inset capsule per state (pill.js): open, answered, answered with a note */
-.oq-arr { color: var(--wb-muted-fg); margin-right: 3px; }
+.oq-arr { color: var(--wb-muted-fg); }
+button.oq-arr { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; font: inherit; font-size: 18px; font-weight: 400; line-height: 1; cursor: pointer; transition: color .2s, background-color .2s; }
+button.oq-arr svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+button.oq-arr:hover { color: var(--wb-fg); background: var(--wb-muted); }
+.oq-updates { flex: none; height: 22px; padding: 0 5px 0 1px; border: 0; background: transparent; color: var(--board-amber); font: inherit; font-weight: 800; font-variant-numeric: tabular-nums; cursor: pointer; }
+.oq-pill.board-updated { background: color-mix(in srgb, var(--board-amber) 12%, var(--wb-card)); box-shadow: 0 0 0 2px var(--wb-bg), 0 0 0 3px color-mix(in srgb, var(--board-amber) 50%, transparent), var(--wb-shadow-hi); animation: board-pill-sway 2.6s ease-in-out .3s infinite; }
+.oq-pill.board-updated .oq-arr { color: var(--board-amber); }
+.oq-pill.board-updated .oq-seg { height: 18px; padding: 0 6px; gap: 0; font-size: 11px; font-weight: 600; }
+.oq-pill.board-updated .oq-seg > :first-child { display: none; }
+@keyframes board-pill-sway {
+  0%, 34%, 100% { transform: translateX(0); }
+  5% { transform: translateX(-4px); }
+  11% { transform: translateX(4px); }
+  17% { transform: translateX(-3px); }
+  23% { transform: translateX(2px); }
+  29% { transform: translateX(-1px); }
+}
+:root[data-overview] .oq-wrap { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .oq-pill, .oq-pill * { animation: none !important; transition: none !important; } }
 .oq-seg { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; font: inherit; line-height: 1; cursor: pointer; }
 .oq-seg.open { background: var(--wb-policy); color: var(--wb-on-policy); }
 .oq-seg.ans { background: var(--wb-announced); color: var(--wb-on-announced); }
 .oq-seg.nt { background: var(--wb-muted); color: var(--wb-muted-fg); font-weight: 600; }
 .oq-seg .n { font-variant-numeric: tabular-nums; }
 .oq-seg:hover { filter: brightness(1.1); }
-.oq-seg:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.oq-seg:focus-visible, .oq-arr:focus-visible, .oq-updates:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 
 /* topic rail (rail.js): the current topic's head (.tophead: its bar, note,
    and summary line, one sticky unit) sticks under the top capsules

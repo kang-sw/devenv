@@ -12,8 +12,10 @@ import (
 const pillPrelude = `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
-function E() { this.children = []; this.style = {}; this.attrs = {}; this.cls = {}; var me = this; this.classList = { contains: function (c) { return !!me.cls[c]; } }; }
-E.prototype.querySelector = function () { return null; };
+function E() { this.children = []; this.style = {}; this.attrs = {}; this.cls = {}; var me = this; this.classList = { contains: function (c) { return !!me.cls[c]; }, toggle: function (c, on) { me.cls[c] = on; } }; }
+Object.defineProperty(E.prototype, 'className', { set: function(v) { var me=this; v.split(' ').forEach(function(c){me.cls[c]=true;}); } });
+E.prototype.querySelectorAll = function (s) { var out=[]; this.children.forEach(function(c){if(c.cls[s.slice(1)])out.push(c); out=out.concat(c.querySelectorAll(s));}); return out; };
+E.prototype.querySelector = function (s) { return this.querySelectorAll(s)[0] || null; };
 E.prototype.closest = function () { return null; };
 E.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 E.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
@@ -24,6 +26,8 @@ Object.defineProperty(E.prototype, "firstChild", { get: function () { return thi
 E.prototype.addEventListener = function () {};
 E.prototype.removeEventListener = function () {};
 E.prototype.getBoundingClientRect = function () { return { top: 0, bottom: 0, width: 0, height: 0 }; };
+function requestAnimationFrame() { return 1; }
+function cancelAnimationFrame() {}
 function IntersectionObserver() { this.observe = function () {}; this.disconnect = function () {}; }
 function getComputedStyle() { return { overflowY: "auto" }; }
 function wsT(k) { return k; }

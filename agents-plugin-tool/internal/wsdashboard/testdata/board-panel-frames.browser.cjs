@@ -43,8 +43,8 @@ const [base, updates] = process.argv.slice(2);
       // Viewed protection may stage a change across these exposed panels.
       // Apply it through the real control, without moving either topic away.
       await page.waitForFunction(selector => document.querySelector(selector) ||
-        [...document.querySelectorAll('.board-viewed-pending')].some(b => !b.hidden), marker);
-      const pending = page.locator('.board-viewed-pending:visible');
+        [...document.querySelectorAll('.wb-oq-top .oq-updates')].some(b => !b.hidden), marker);
+      const pending = page.locator('.wb-oq-top .oq-updates:visible');
       if (await pending.count()) await pending.click();
       await page.locator(marker).waitFor({ state: 'attached' });
       // Sample only after the morph, body double buffer and mount pass settle.

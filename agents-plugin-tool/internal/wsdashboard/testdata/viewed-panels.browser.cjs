@@ -99,7 +99,7 @@ async function geometry(run) {
     return {
       url: location.href, assetID: document.documentElement.dataset.assets,
       focus: { tag: document.activeElement.tagName, id: document.activeElement.id },
-      badge: [...document.querySelectorAll('.board-viewed-pending')].filter(n => !n.hidden).map(n => n.textContent),
+      badge: [...document.querySelectorAll('.wb-oq-top .oq-updates')].filter(n => !n.hidden).map(n => n.textContent),
       topics: [...document.querySelectorAll('#r-board > section.topic, #bpins > section.topic')].map(n => n.dataset.topic),
       panels: [...new Set(panels)].map(n => {
         const h = window.__viewedGeometry(n), r = n.getBoundingClientRect(), s = h.scroller;
@@ -369,9 +369,9 @@ async function queueScenario(info, mode, width) {
     allPreserved(run.name + ' first reorder freezes EVERY visible panel', before, first);
     allPreserved(run.name + ' queued reorder freezes EVERY visible panel', before, after);
     check(run.name + ' rendering stays frozen away from reading line', observations.bytesHeld && after.panels.find(p => p.id === 'p3').top > after.panels.find(p => p.id === 'p3').viewport.top + 1, observations);
-    check(run.name + ' one Korean bar counts/names two queued changes', after.badge.length === 1 && /^최신 변경 2건 반영 · /.test(after.badge[0]) && after.badge[0].includes('B'), after.badge);
+    check(run.name + ' one Korean pill counts a twice-revised topic once', after.badge.length === 1 && after.badge[0] === '보드 업데이트 1', after.badge);
     check(run.name + ' owner/native anchoring policy', after.panels.filter(p => p.visible).every(p => p.owner && p.nativeAnchor === 'none'), after);
-    await guard(run, run.frame.locator('.board-viewed-pending').click()); await quiet(run);
+    await guard(run, run.frame.locator('.wb-oq-top .oq-updates').click()); await quiet(run);
     const clicked = await snap(run, run.name + '-explicit');
     check(run.name + ' explicit click releases latest rendering/count', (await bytes(run, 'p3')).includes('queue2') && !clicked.badge.length, clicked);
   }
@@ -393,7 +393,7 @@ async function onePixel(width) {
   const old = await bytes(run, 'p1');
   await guard(run, run.frame.locator('#ctext').focus());
   await emit(run, 'changeA'); const held = await snap(run, run.name + '-held');
-  check(run.name + ' sliver rendering and focus held', old === await bytes(run, 'p1') && held.focus.id === 'ctext' && held.badge.some(s => s.includes('A')), held);
+  check(run.name + ' sliver rendering and focus held', old === await bytes(run, 'p1') && held.focus.id === 'ctext' && held.badge.some(s => /^보드 업데이트 [1-9]/.test(s)), held);
   allPreserved(run.name + ' sliver holds EVERY exposed panel', before, held);
   // Scroll ONLY far enough for changed p1 to fully leave; avoid moving to a
   // guessed later reference. Capture after scroll and BEFORE staged release.
@@ -422,11 +422,11 @@ async function pinned(width) {
   await emit(run, 'pin1'); await emit(run, 'pin2');
   const held = await snap(run, run.name + '-held');
   allPreserved(run.name + ' queued pinned recency updates preserve all visible panels', before, held);
-  check(run.name + ' pinned rendering/count held', old === await bytes(run, 'p7') && held.badge.length === 1 && /^최신 변경 2건 반영 · /.test(held.badge[0]) && held.badge[0].includes('Q'), held);
+  check(run.name + ' pinned rendering/count held', old === await bytes(run, 'p7') && held.badge.length === 1 && held.badge[0] === '보드 업데이트 1', held);
   // Pinned order is user-authored, not latest server recency. Record that
   // distinction instead of manufacturing a server reorder by patching weave.
   observe(run.name + ' pinned recency does not override manual pin order', held.topics);
-  await guard(run, run.frame.locator('.board-viewed-pending').click()); await quiet(run);
+  await guard(run, run.frame.locator('.wb-oq-top .oq-updates').click()); await quiet(run);
   check(run.name + ' pinned explicit release', (await bytes(run, 'p7')).includes('pin2'), null);
   const moved = await guard(run, run.frame.evaluate(() => {
     window.WsCards.move(document.querySelector('#bpins section[data-topic="Q"]'), { pin: true, index: 1 });
@@ -470,9 +470,9 @@ async function growth(width, pinnedColumn) {
   check(run.name + ' wrong source Window rejected', (await geometry(run)).panels.find(p => p.id === focus).frames[0].height === oldHeight, null);
   await height(run, focus, 37);
   const held = await snap(run, run.name + '-height-held');
-  check(run.name + ' visible height held in shared bar', held.panels.find(p => p.id === focus).frames[0].height === oldHeight && held.badge.length === 1, held);
+  check(run.name + ' visible height held in shared pill', held.panels.find(p => p.id === focus).frames[0].height === oldHeight && held.badge.length === 1, held);
   allPreserved(run.name + ' held height preserves each exposed panel', after, held);
-  await guard(run, run.frame.locator('.board-viewed-pending').click()); await quiet(run);
+  await guard(run, run.frame.locator('.wb-oq-top .oq-updates').click()); await quiet(run);
   check(run.name + ' explicit height release', (await geometry(run)).panels.find(p => p.id === focus).frames[0].height !== oldHeight, null);
   await closeRun(run);
 }
@@ -487,7 +487,7 @@ async function fetched(width) {
   const history = await guard(run, run.frame.evaluate(() => window.wbHistory.capture(document.getElementById('r-board')).map(h => ({ key: h.key, chunks: h.chunks }))));
   check(run.name + ' fetched panels exposed precondition', before.panels.some(p => p.id === 'p10' && p.visible) && before.panels.some(p => p.id === 'p11' && p.visible), before);
   await emit(run, 'transferEdit'); const held = await snap(run, run.name + '-held');
-  check(run.name + ' transfer/content staged in fetched page', await guard(run, run.frame.locator('.closed-page #p10').count()) === 1 && old === await bytes(run, 'p10') && held.badge.some(s => s.includes('Past')), held);
+  check(run.name + ' transfer/content staged in fetched page', await guard(run, run.frame.locator('.closed-page #p10').count()) === 1 && old === await bytes(run, 'p10') && held.badge.some(s => /^보드 업데이트 [1-9]/.test(s)), held);
   allPreserved(run.name + ' fetched transfer freezes each visible panel', before, held);
   check(run.name + ' fetched transfer keeps mounted panel membership', JSON.stringify(before.panels.map(p => p.id)) === JSON.stringify(held.panels.map(p => p.id)), { before: before.panels.map(p => p.id), after: held.panels.map(p => p.id) });
   check(run.name + ' history boundaries survive held transfer', JSON.stringify(history) === JSON.stringify(await guard(run, run.frame.evaluate(() => window.wbHistory.capture(document.getElementById('r-board')).map(h => ({ key: h.key, chunks: h.chunks }))))), history);
@@ -520,9 +520,9 @@ async function owner(width) {
   check(run.name + ' external rewrite panel visible precondition', (await geometry(run)).panels.find(p => p.id === 'p1').visible, null);
   const old = await bytes(run, 'p1');
   await emit(run, 'changeA');
-  check(run.name + ' local send alone never exempts an external rewrite', old === await bytes(run, 'p1') && (await geometry(run)).badge.some(s => s.includes('A')), null);
+  check(run.name + ' local send alone never exempts an external rewrite', old === await bytes(run, 'p1') && (await geometry(run)).badge.some(s => /^보드 업데이트 [1-9]/.test(s)), null);
   await emit(run, 'mixed'); const after = await snap(run, run.name + '-mixed');
-  check(run.name + ' receipt-only partial snapshot isolates same-topic external rewrite', await guard(run, run.frame.locator('.wb-entry.owner').count()) > 0 && old === await bytes(run, 'p1') && after.badge.some(s => s.includes('A')), after);
+  check(run.name + ' receipt-only partial snapshot isolates same-topic external rewrite', await guard(run, run.frame.locator('.wb-entry.owner').count()) > 0 && old === await bytes(run, 'p1') && after.badge.some(s => /^보드 업데이트 [1-9]/.test(s)), after);
   await closeRun(run);
 }
 async function core() {

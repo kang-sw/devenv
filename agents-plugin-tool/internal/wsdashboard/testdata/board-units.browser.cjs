@@ -1,12 +1,15 @@
 // Run through TestBoardTopicUnitsBrowser, against disposable fixture sessions.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
+const output = process.env.WS_BOARD_UNITS_ARTIFACTS;
+async function capture(page, name) { if (output) await page.screenshot({path: path.join(output, name)}); }
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [base, updates] = process.argv.slice(2);
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
     const tab = await context.newPage(), events = [], errors = [];
     tab.on('pageerror', e => errors.push(e.message));
     tab.on('websocket', ws => ws.on('framereceived', f => {
@@ -29,12 +32,12 @@ const [base, updates] = process.argv.slice(2);
       const check = () => events.some(e => e.event === 'region' && e.data.name === 'board') ? resolve() : Date.now() > limit ? reject(new Error('no first full board')) : setTimeout(check, 20);
       check();
     });
-    fs.mkdirSync('/tmp/exec5/btp1', { recursive: true });
-    await tab.screenshot({ path: '/tmp/exec5/btp1/browser-before.png' });
+    if (output) fs.mkdirSync(output, { recursive: true });
+    await capture(tab, 'browser-before.png');
     await fetch(updates);
     // The existing reader-anchor gate deliberately holds an exposed topic.
     // Release it through its UI instead of weakening the product's gate.
-    const pending = page.locator('.board-viewed-pending');
+    const pending = page.locator('.wb-oq-top .oq-updates');
     await pending.waitFor({ state: 'visible' });
     assert((await page.locator('section.topic[data-topic="topic-000"] .doc-frame').first().getAttribute('data-srcdoc')).includes('Original body 0'), 'visible body is held until release');
     await pending.click();
@@ -54,9 +57,9 @@ const [base, updates] = process.argv.slice(2);
     const freshPage = await sessionFrame(fresh);
     await freshPage.locator('section.topic').nth(111).waitFor({ state: 'attached' });
     assert.deepEqual(await signature(page), await signature(freshPage), 'streamed board matches a fresh full render');
-    await tab.screenshot({ path: '/tmp/exec5/btp1/browser-after.png' });
-    await fresh.screenshot({ path: '/tmp/exec5/btp1/browser-fresh.png' });
+    await capture(tab, 'browser-after.png');
+    await capture(fresh, 'browser-fresh.png');
     assert.deepEqual(errors, [], 'no page errors');
-    console.log('112 topics: one-topic delta, unchanged node retained, streamed/fresh board parity, screenshots saved');
+    console.log('112 topics: one-topic delta, unchanged node retained, streamed/fresh board parity');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exit(1); });

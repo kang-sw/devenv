@@ -17,7 +17,7 @@ func viewedHarness(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFlushViewed", "boardWithSnap", "boardScroller", "boardLivePanels", "boardPanelMap", "boardViewedPanels", "boardStageSnap", "boardExposureUnits", "boardReleaseDue")
+	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFlushViewed", "boardWithSnap", "boardScroller", "boardLivePanels", "boardPanelMap", "boardViewedPanels", "boardStageSnap", "boardExposureUnits", "boardReleaseDue", "boardPendingNames", "boardHome", "boardStageTop")
 }
 
 func TestBoardViewedCrossTopicInsertion(t *testing.T) {
@@ -53,8 +53,8 @@ var staged=boardStageInput(incoming);
 must("cross-topic insertion must be staged before reference-B correction",
   staged.topics.A===oldA && staged.topics.B===oldB && !!boardPending.A);
 boardRecordPending();boardPendingBadge();
-must("cross-topic insertion uses the existing one-change A pending badge",
-  boardBadge && !boardBadge.hidden && boardBadge.textContent==="최신 변경 1건 반영 · A");
+must("cross-topic insertion feeds the shared pill from pending data",
+  window.wbPill.pending===1 && boardPendingNames().join()==="A");
 var rendered=project([oldA,oldB],[staged.topics.A,staged.topics.B],[oldA,oldB]);
 var uncorrected=geometry(rendered,scroll),delta=uncorrected.B-before.B;
 var after=geometry(rendered,scroll+delta);
@@ -138,17 +138,38 @@ check("no blockers: latest canonical order releases",keys(project(current,[C,B,A
 var newA=topic("A","a2");
 var mapped=project(current,[B,newA,C],[A,B]);
 check("placement staging admits an eligible new rendering",mapped[0]===newA && mapped[1]===B);
-// Two successive held revisions of one topic are two changes, not one
-// pending topic. Replaying the latest snapshot must not increment again.
+// Revisions retain their ledger evidence, but the pill counts distinct
+// pending topics. Replaying the latest snapshot must not increment again.
 boardChanges=[];boardPending={A:true};
 var one=input([A]),two=input([newA]),newerA=topic("A","a3"),three=input([newerA]);
 boardOffered={previous:one,input:two};boardRecordPending();
 boardOffered={previous:two,input:three};boardRecordPending();
 boardRecordPending();boardPendingBadge();
-check("two revisions of same topic count as two changes",boardBadge.textContent==="최신 변경 2건 반영 · A");
+check("two revisions of same topic count once",window.wbPill.pending===1 && boardChanges.length===2);
 boardPending={};boardRecordPending();boardPendingBadge();
-check("release clears pending ledger and shared control",boardChanges.length===0 && boardBadge.hidden);
+check("release clears pending ledger and shared control",boardChanges.length===0 && window.wbPill.pending===0);
 process.stdout.write(bad.join("\n"));`)
+}
+
+func TestBoardViewedTopOriginClickOnly(t *testing.T) {
+	runNode(t, "top-origin click-only", viewedHarness(t)+`
+main.scrollTop=0;
+var A=topic('A','a',[panel('a','visible')]),B=topic('B','b',[panel('b','far')]);
+var liveA=topic('A','a',[panel('a','visible',true)]),liveB=topic('B','b',[panel('b','far')]);
+liveA.exposed=true;setLive([liveA,liveB]);
+boardRendered=input([A,B]);var changedB=topic('B','b2',[panel('b','new far')]);
+var rise=input([changedB,A]);boardOffered={previous:boardRendered,input:rise};
+var staged=boardStageInput(rise);boardRecordPending();
+check('top rise preserves old order and bytes',staged.order.join()==='A,B' && staged.topics.B===B && boardPendingNames().join()==='B');
+var fresh=topic('NEW','n',[panel('n','new topic')]),incoming=input([fresh,changedB,A]);
+boardOffered={previous:rise,input:incoming};staged=boardStageInput(incoming);boardRecordPending();
+check('unmounted new topic is counted but not rendered',staged.order.join()==='A,B' && !staged.topics.NEW && boardPendingNames().length===2);
+main.scrollTop=500;liveA.exposed=false;boardOffered=null;
+staged=boardStageInput(incoming);boardRecordPending();
+check('scroll-away restaging cannot release top-origin changes',staged.order.join()==='A,B' && staged.topics.B===B && !staged.topics.NEW && boardPendingNames().length===2);
+boardRelease=true;staged=boardStageInput(incoming);boardRecordPending();boardRelease=false;
+check('explicit release admits canonical order/content and clears top latch',staged.order.join()==='NEW,B,A' && staged.topics.B===changedB && staged.topics.NEW===fresh && Object.keys(boardTopHeld).length===0 && boardPendingNames().length===0);
+process.stdout.write(bad.join('\n'));`)
 }
 
 func TestBoardViewedInternalGeometry(t *testing.T) {
