@@ -66,6 +66,7 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 func TestFilesExplorerInstances(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	files, _ := json.Marshal(mustAsset(t, "files.js"))
+	preview, _ := json.Marshal(mustAsset(t, "preview.js"))
 	var picker strings.Builder
 	for _, name := range []string{"rpWsBrowse", "rpWsMake"} {
 		fn := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(mustAsset(t, "dashboard.js"))
@@ -83,7 +84,7 @@ func TestFilesExplorerInstances(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PICKER = "+string(pickerJSON)+";\n"+cardsDOM+string(pickerFixture)+string(fixture))
+	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PREVIEW = "+string(preview)+", PICKER = "+string(pickerJSON)+";\n"+cardsDOM+string(pickerFixture)+string(fixture))
 }
 
 func TestFilesWorkspacePickerShellAssets(t *testing.T) {

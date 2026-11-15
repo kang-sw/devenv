@@ -832,9 +832,8 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 	}
 }
 
-// TestPagesLeaveOutTheTrackerStrings: a whiteboard page, full or embed,
-// never loads the dashboard's tracker renderer, so its client table carries
-// every client string except the tracker's (js.tk.*).
+// Static whiteboard pages never load the dashboard's tracker or explorer;
+// their strings must not consume the embed's payload budget.
 func TestPagesLeaveOutTheTrackerStrings(t *testing.T) {
 	st := &State{Seq: 1}
 	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
@@ -842,8 +841,10 @@ func TestPagesLeaveOutTheTrackerStrings(t *testing.T) {
 		if !strings.Contains(out, `"js.ago"`) {
 			t.Errorf("layout %v: the page lacks its client strings", layout)
 		}
-		if strings.Contains(out, `"js.tk.`) {
-			t.Errorf("layout %v: the page carries the tracker strings", layout)
+		for _, prefix := range []string{`"js.tk.`, `"js.files.`} {
+			if strings.Contains(out, prefix) {
+				t.Errorf("layout %v: the page carries unused dashboard strings %s", layout, prefix)
+			}
 		}
 	}
 }
