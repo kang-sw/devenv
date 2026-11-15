@@ -164,7 +164,9 @@ func (f FolderStore) UpdateAndPublish(legacy *State, fn func(*State) error, publ
 	})
 }
 
-func (f FolderStore) locked(fn func() error) error {
+func (f FolderStore) locked(fn func() error) error { return f.withLock(true, fn) }
+
+func (f FolderStore) withLock(create bool, fn func() error) error {
 	if f.Dir == "" {
 		return fmt.Errorf("whiteboard folder: empty directory")
 	}
@@ -173,8 +175,10 @@ func (f FolderStore) locked(fn func() error) error {
 	if err := f.guard(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(f.Dir, 0o755); err != nil {
-		return err
+	if create {
+		if err := os.MkdirAll(f.Dir, 0o755); err != nil {
+			return err
+		}
 	}
 	lock := flock.New(filepath.Join(f.Dir, ".lock"))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

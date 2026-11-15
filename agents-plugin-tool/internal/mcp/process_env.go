@@ -63,6 +63,9 @@ type ServerOptions struct {
 	// spawn the session's Pi subagents (pi_tools.go); nil on the direct
 	// path, where they refuse.
 	Agents PiAgents
+	// WhiteboardChanged invalidates daemon timers after a successful board write,
+	// even when this session has no dashboard page. It must not block.
+	WhiteboardChanged func(cacheHome, root, key string)
 }
 
 // procEnv is a snapshot of one process's environment.
@@ -144,6 +147,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	if opts.Harness != "" {
 		s.observeHarness("hello", opts.Harness)
 	}
+	s.whiteboardChanged = opts.WhiteboardChanged
 	s.pi.agents = opts.Agents
 	s.startPiFeed()
 	return s
