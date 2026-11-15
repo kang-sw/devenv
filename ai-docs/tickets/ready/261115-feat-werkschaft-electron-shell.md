@@ -473,6 +473,36 @@ protocol/API was changed. The ticket remains in `ready/`.
   explicit Electron download authorizations, then complete the original
   Windows interactive-session smoke and evidence cleanup.
 
+#### Edition (7525029be) - 2026-11-15
+
+Fixed the independent lite review's Critical cancelled-navigation finding.
+Retry and same-origin popup loads now distinguish Electron `ERR_ABORTED`
+(`errno: -3`) from a genuine load failure. Choosing Stay retains the current
+page and restores the previous pin/title rather than loading
+`connection.html`. Retry captures that state before its provisional title
+and rediscovered pin, including when discovery moves to another port. Real
+load failures retain the existing failure title, cleared pin and connection
+page. No renderer authority, protocol/API, dependency or later phase changed.
+
+Verification for this review-fix round only:
+
+- The focused Retry regression failed against the previous implementation:
+  Stay incorrectly loaded `connection.html`. After the fix, headless
+  `npm test` passed all **21 tests**. New regressions cover Retry Stay,
+  same-origin popup Stay, retained page/internal title and origin pin, no
+  connection page or external handoff for later same-origin frames, released
+  retry lock, and genuine Retry/popup failures after a previous cancellation.
+- Offline `npm run build` produced the unsigned darwin-arm64 app. Only the
+  pre-existing optional `.icon` format warning remains. `git diff --check`
+  passed.
+- The final local process scan found no remaining test/build/app/fixture
+  processes in this worktree; no processes were signalled. No Electron or
+  GUI ran on the Mac, and this round made **no Windows-host access**.
+- Windows smoke for this fix rides the next owner-authorized host run. The
+  preceding host blockers remain with the owner; this edition does not claim
+  live Electron acceptance. This is the requested lite-review fix, not a new
+  implementation phase or an additional independent review pass.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
