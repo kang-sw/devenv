@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPermissionStoreOmitted(t *testing.T) {
@@ -52,6 +53,7 @@ func TestPermissionStoreRoundTrip(t *testing.T) {
 	stop := make(chan struct{})
 	ready := make(chan struct{})
 	observed := make(chan error, 1)
+	observations := 0 // Read only after observed synchronizes the reader's exit.
 	go func() {
 		first := true
 		for {
@@ -67,6 +69,10 @@ func TestPermissionStoreRoundTrip(t *testing.T) {
 				observed <- err
 				return
 			}
+			observations++
+			// Give Windows rename-over a handle-free interval; a tight reader
+			// can otherwise exhaust replaceFile's sharing-violation retries.
+			time.Sleep(time.Millisecond)
 			select {
 			case <-stop:
 				observed <- nil
@@ -81,8 +87,14 @@ func TestPermissionStoreRoundTrip(t *testing.T) {
 		if err := <-observed; err != nil {
 			t.Error(err)
 		}
+		if observations < 3 {
+			t.Errorf("reader made only %d observations, want at least 3", observations)
+		}
 	}()
 	for i := 0; i < 64; i++ {
+		// Keep reads interleaved even on hosts where all writes finish in a
+		// single reader sleep interval.
+		time.Sleep(time.Millisecond)
 		for _, level := range []PermissionLevel{PermissionReadOnly, PermissionFull} {
 			if err := writePermissionSelection(dir, level); err != nil {
 				t.Fatal(err)
