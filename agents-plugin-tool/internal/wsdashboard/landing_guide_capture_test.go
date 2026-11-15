@@ -107,6 +107,8 @@ func captureGuide(t *testing.T, lang, out string) {
 		filepath.Join(login, "README.md"): "# my-app\n", filepath.Join(login, "go.mod"): "module my-app\n",
 		filepath.Join(login, "src", "login.go"): "package src\n", filepath.Join(login, "src", "login_test.go"): "package src\n",
 		filepath.Join(login, "docs", "plan.md"): "# Plan\n",
+		// The folder the add-workspace step types into the popover.
+		filepath.Join(home, "projects", "web-shop", "README.md"): "# web-shop\n",
 	} {
 		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 			t.Fatal(err)
@@ -169,6 +171,8 @@ func captureGuide(t *testing.T, lang, out string) {
 		o.LAN = false
 		o.bindHost = "127.0.0.1"
 		o.Agents = &guideAgents{}
+		// Stored workspaces put the add-workspace + on the rail's header.
+		o.WorkspacesFile = filepath.Join(t.TempDir(), "workspaces.json")
 		o.Worktrees = guideWorktrees{{Path: project, Branch: "main"}, {Path: login, Branch: "feat/login"}}
 		o.Support = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/support/choices" {

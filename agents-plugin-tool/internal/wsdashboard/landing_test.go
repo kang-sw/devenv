@@ -19,7 +19,7 @@ import (
 
 // guideSteps are the landing guide's steps, in order: each names its
 // screenshots (assets/guide/<lang>-<theme>-<step>.webp).
-var guideSteps = []string{"open", "new", "ask", "board", "answer", "files", "settings"}
+var guideSteps = []string{"open", "workspace", "new", "ask", "board", "answer", "files", "settings"}
 
 var guideImg = regexp.MustCompile(`<img class="dshot-([dl])" src="(/s/guide-([a-z]+)-(dark|light)-([a-z]+)-[0-9a-f]{12}\.webp)" width="([0-9]+)" height="([0-9]+)" alt="([^"]+)" loading="lazy" decoding="async">`)
 
@@ -41,7 +41,7 @@ func TestIndexShowsTheLandingLogoAndGuide(t *testing.T) {
 		`<div class="dlanding" id="guide">`, `<div class="dlogo" role="img" aria-label="Werkschaft">`,
 		`<span class="dlogo-d"><svg`, `<span class="dlogo-l"><svg`,
 		`<article class="dguide" aria-labelledby="dguide-h">`, wsi18n.T("en", "index.guide.title"), wsi18n.T("en", "index.guide.lead"),
-		wsi18n.T("en", "index.guide.settings.sub"), wsi18n.T("en", "index.guide.settings"),
+		wsi18n.T("en", "index.guide.workspace"), wsi18n.T("en", "index.guide.settings.sub"), wsi18n.T("en", "index.guide.settings"),
 	} {
 		if !strings.Contains(main, want) {
 			t.Errorf("the index's main panel lacks %q", want)
@@ -168,7 +168,8 @@ func TestLandingGuideAssetsAreComplete(t *testing.T) {
 // each theme (and fetching only those), and a second click (or Enter) on
 // the open session's rail row closes its view, back to / and the landing,
 // while a click on another row opens it as before. With WS_LANDING_SHOTS
-// set (an absolute directory) it also saves full-page screenshots.
+// set (an absolute directory) it also saves full-page screenshots and the
+// add-workspace step close up.
 func TestLandingGuideBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")

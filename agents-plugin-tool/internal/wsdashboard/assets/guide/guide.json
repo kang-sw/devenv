@@ -6,6 +6,7 @@
   "en-dark-new.webp": {"w":354,"h":578},
   "en-dark-open.webp": {"w":420,"h":60},
   "en-dark-settings.webp": {"w":354,"h":702},
+  "en-dark-workspace.webp": {"w":354,"h":242},
   "en-light-answer.webp": {"w":800,"h":241},
   "en-light-ask.webp": {"w":612,"h":216},
   "en-light-board.webp": {"w":800,"h":358},
@@ -13,6 +14,7 @@
   "en-light-new.webp": {"w":354,"h":578},
   "en-light-open.webp": {"w":420,"h":60},
   "en-light-settings.webp": {"w":354,"h":702},
+  "en-light-workspace.webp": {"w":354,"h":242},
   "ko-dark-answer.webp": {"w":800,"h":241},
   "ko-dark-ask.webp": {"w":612,"h":216},
   "ko-dark-board.webp": {"w":800,"h":358},
@@ -20,11 +22,13 @@
   "ko-dark-new.webp": {"w":354,"h":578},
   "ko-dark-open.webp": {"w":420,"h":60},
   "ko-dark-settings.webp": {"w":354,"h":702},
+  "ko-dark-workspace.webp": {"w":354,"h":242},
   "ko-light-answer.webp": {"w":800,"h":241},
   "ko-light-ask.webp": {"w":612,"h":216},
   "ko-light-board.webp": {"w":800,"h":358},
   "ko-light-files.webp": {"w":612,"h":250},
   "ko-light-new.webp": {"w":354,"h":578},
   "ko-light-open.webp": {"w":420,"h":60},
-  "ko-light-settings.webp": {"w":354,"h":702}
+  "ko-light-settings.webp": {"w":354,"h":702},
+  "ko-light-workspace.webp": {"w":354,"h":242}
 }
