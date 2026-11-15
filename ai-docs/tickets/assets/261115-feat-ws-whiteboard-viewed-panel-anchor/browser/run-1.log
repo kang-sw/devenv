@@ -1,0 +1,30 @@
+=== RUN   TestBoardViewedBrowser
+    board_viewed_browser_test.go:93: node:internal/process/promises:332
+            triggerUncaughtException(err, true /* fromPromise */);
+            ^
+        
+        AssertionError [ERR_ASSERTION]: exact inline asset occurrence: internal/wswhiteboard/assets/stream.js
+        
+        0 !== 1
+        
+            at /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool/internal/wsdashboard/testdata/viewed-panels.browser.cjs:107:16
+            at async Promise.all (index 1)
+            at async RouteHandler._handleInternal (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:55342:27)
+            at async RouteHandler._handleImpl (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:55311:18)
+            at async RouteHandler.handle (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:55305:16)
+            at async _BrowserContext._onRoute (/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js:57374:27) {
+          generatedMessage: false,
+          code: 'ERR_ASSERTION',
+          actual: 0,
+          expected: 1,
+          operator: 'strictEqual',
+          diff: 'simple'
+        }
+        
+        Node.js v25.9.0
+        
+    board_viewed_browser_test.go:95: viewed-panel Chromium acceptance: exit status 1 (evidence: /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser)
+--- FAIL: TestBoardViewedBrowser (0.81s)
+FAIL
+FAIL	github.com/kang-sw/devenv/internal/wsdashboard	1.624s
+FAIL

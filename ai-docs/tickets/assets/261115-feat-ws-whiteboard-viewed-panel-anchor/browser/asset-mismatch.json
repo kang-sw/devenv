@@ -1,0 +1,8 @@
+{
+  "path": "internal/wswhiteboard/assets/stream.js",
+  "at": -1,
+  "same": 0,
+  "expectedLength": 48808,
+  "expected": "/* Shared history window. The dashboard calls capture before a board swap,\n   init/restore afterwards, and loadTarget be",
+  "actual": null
+}
