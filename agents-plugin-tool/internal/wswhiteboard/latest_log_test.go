@@ -9,11 +9,12 @@ import (
 func TestLatestLogHighlightMarkersAndMotion(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="current"><wb:log>old</wb:log><wb:log>latest</wb:log></wb:topic>`)
+	// e2 is the creation-default state event that follows the creating log.
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `class="trecap" data-entry="e2" data-kind="agent"`)
+		wantAll(t, out, `class="trecap" data-entry="e3" data-kind="agent"`)
 		if layout == LayoutFull {
-			wantAll(t, out, `class="wb-entry agent current" id="e2"`, `class="wb-entry agent" id="e1"`)
+			wantAll(t, out, `class="wb-entry agent current" id="e3"`, `class="wb-entry agent" id="e1"`)
 		}
 	}
 	css, err := embeddedAsset("page.css")
