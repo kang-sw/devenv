@@ -534,6 +534,36 @@ later route/dialog composition and independence fixtures. Include pinned
 old-write/new-reopen and session lifecycle cases below. These checks prove the
 exercised wiring, not a universal sandbox.
 
+#### Edition (3a0953c0c) - 2026-11-15
+
+**Phase 2a backend/root-lead slice — UI deferred to Claude mockup pass.**
+
+MAIN's **2026-11-15 17:20:53Z** disposition supersedes the total runtime hold
+only for this narrowed Phase 2a. The appended Blocked section records the
+historical total stop; its statement that no runtime resumption was authorized
+applies before this new disposition. Root-lead Phase 2a is now authorized; only
+the worker-lineage slice remains blocked pending (1177). The Phase 2 plan above
+and owner decisions remain unchanged. This is an authorized partial delivery, not completion of
+Phase 2: **worker current-parent ceiling deferred pending (1177)**;
+**UI deferred to Claude mockup pass**. MAIN owns (1177), which remains
+unanswered here.
+
+Phase 2a implements lead selection persistence, transient lead launch input,
+additive support preflight, lead/settings selection HTTP routes, computed State,
+Claude/Pi lead mapping, root-lead admission, durable authorized lead lowering,
+user-only lead raises and server-side full acknowledgement. Unenforceable
+permission intent produces a launch nudge for both leads and workers. Existing
+worker start/control behavior and capability checks stay unchanged; no common
+permission level is applied to workers, and worker State/choices must not imply
+otherwise. No lineage source, key-parent change or ParentRef authority is added.
+
+Verification is offline and focused (`-run` only), using fake processes/holders,
+lead mapping/admission/control fixtures and pinned old-write/new-reopen/router
+fixtures. No live harness/provider, full suite, network, installation, Windows
+SSH, daemon operation, push or merge is authorized. UI acceptance and the worker
+ceiling fixtures are deferred, not passing evidence. The ticket remains `ready/`
+without a whole-Phase 2 Result; independent lite review precedes head handoff.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch
