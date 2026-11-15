@@ -114,6 +114,8 @@ func (w RailWorktree) Empty() bool { return len(w.Sessions) == 0 && len(w.Ended)
 
 // RailRow is one session.
 type RailRow struct {
+	// Hover is presentation-only reuse of this session's existing snapshot.
+	Hover            railHover
 	ReplyID, Harness string
 	Live             bool
 	// Label is the session's display label, shown in place of ReplyID;
@@ -566,6 +568,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		User:        in.Message.User,
 		Hosted:      reg.Hosted,
 		Exit:        hostExit(reg),
+		Hover:       sessionHover(reg, in.Snapshot, live, now),
 	}
 	if !live {
 		row.Revive, row.ReviveBlocked = railRevive(in)
