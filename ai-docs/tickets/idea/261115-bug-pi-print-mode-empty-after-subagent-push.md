@@ -36,7 +36,14 @@ test-caller migration to a ws child, ended its own turn with "Waiting for the
 mechanical test-caller migration", and the process exited (`agent_settled`,
 exit 0) with the server-side work uncommitted. No child process remained in
 the worktree afterwards; two daemon swaps happened during the run, so whether
-the child died with the parent or with the swap is unverified. A print-mode
+the child died with the parent or with the swap was first unverified.
+Timeline from the worker's JSON log (UTC): the Pi plugin's `ws-agent-spawn`
+started child `test-callers` at 00:07:16; MAIN's daemon swaps landed at about
+00:07 and 00:08-00:09:07; the parent's `ws-agent-send` to that child still
+succeeded at 00:09:54, after both swaps; the parent's final text followed at
+00:09:54 and the process exited. INFERRED: the child was cut by the parent
+print-mode process exiting, not by a daemon swap (the `ws-agent-*` children
+belong to the Pi plugin's sidecar, `agents-plugin-pi/src/agent-sidecar.ts`). A print-mode
 caller therefore cannot rely on a worker that waits on children
 asynchronously. Workaround in use: instruct the worker to block on
 `pi.wait` before ending a turn, and keep a session file (no `--no-session`)
