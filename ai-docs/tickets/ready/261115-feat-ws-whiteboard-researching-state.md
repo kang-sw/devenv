@@ -3,6 +3,10 @@ title: "Add researching as a whiteboard topic work state"
 related:
   261114-refactor-ws-dashboard-whiteboard-asset-split: "793: rendering phase waits for the asset split"
   261114-feat-ws-whiteboard-topic-state-and-lead-nudges: "Existing state, run, query and notification contracts"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 5a87a5b89f65d3b3
+sage-review-completeness-reviewed: 5a87a5b89f65d3b3
 ---
 
 # Add researching as a whiteboard topic work state
@@ -114,6 +118,11 @@ lead-owned.
   the split landed; this remains the ticket's phase boundary.
 - No new research provider, research execution machinery, automatic state
   inference or changes to general stale policy are included.
+- MAIN owns develop integration and runtime activation. Implementation uses
+  offline, scoped checks only: no provider calls, downloads, credentials,
+  shared-daemon changes, plugin install/reload or push. Execute Phase 1 only
+  in this invocation; retain Phase 2 for the next handoff. Lead reads diffs,
+  not repeated raw logs; keep worker reports short and in plain English.
 
 ## Current-source grounding
 
@@ -175,9 +184,14 @@ start/extension/close semantics. Make warnings and timed notices reflect the
 settled scopes without changing general stale behavior.
 
 Update the canonical whiteboard playbook's work-state obligation, grammar,
-query and notification explanations; regenerate the wsflow rsrc copy and both
-manifests through the documented mirroring procedure. Add the state and filter
-translations in all 11 locales. Honor the frozen rendering boundary above;
+query and notification explanations; synchronize the wsflow and Pi rsrc copies
+(`agents-plugin-{wsflow,pi}/rsrc/whiteboard/whiteboard.md`) and their manifests
+through the documented mirroring procedure. Add the state and filter
+translations in all 11 locales. Keep `TestEveryEnglishKeyIsUsed` strict: a
+Phase 1 staging allowance may name only the exact new research state/filter
+keys whose consumers arrive in Phase 2, with a removal obligation in Phase 2.
+Do not add dummy consumers or weaken the general unused-key guard. Honor the
+frozen rendering boundary above;
 report the partial delivery and remaining UI gap explicitly. Optional research
 owner/ETA must survive replay, queries and net-change summaries without a run;
 `wb:eta` remains invalid for researching, transitioning to implementing starts
@@ -195,7 +209,9 @@ Verification boundary for the future worker (not run during ticket capture):
   warning behavior, general stale thresholds and default discussing output.
 - Run relevant Go package tests in `internal/wswhiteboard`, affected MCP
   whiteboard tests, `internal/wsi18n`, and `internal/wsrsrc`; include manifest
-  drift and `TestWsflowRsrcMirrorUpToDate`. Run
+  drift, `TestWsflowRsrcMirrorUpToDate` and `TestPiMirrorUpToDate`. Verify the
+  staged-key allowance is confined to the exact new research state/filter keys.
+  Run
   `python3 -m unittest discover agents-plugin-wsflow/tests` for the mirror.
   Record exact commands/results when execution is authorized. Inspect the diff
   to prove frozen assets were not changed; tests reading old badges are not
@@ -214,7 +230,9 @@ state filter labels/selection and affected rendering/overview surfaces for
 researching. Use actual post-split asset/assembly locations, including dashboard
 CSS/JS responsibilities only as needed. Render `Researching` / `연구 중` as the
 fifth peer state with the existing localized badge/filter pattern; owner/ETA
-presentation follows the separately confirmed metadata contract. Do not add a
+presentation follows the separately confirmed metadata contract. Remove the
+Phase 1 unused-translation-key staging allowance when those real consumers
+land, and verify `TestEveryEnglishKeyIsUsed` without that allowance. Do not add a
 second research marker or infer researching from topic content.
 
 Verification boundary: extend `topic_state_badge_test.go` and
