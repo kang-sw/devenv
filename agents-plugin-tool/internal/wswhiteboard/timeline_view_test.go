@@ -167,3 +167,14 @@ func TestTimelineInputHeadersAreTopicLocalAndEscaped(t *testing.T) {
 	view = BuildView(st, ViewInput{Layout: LayoutFull})
 	wantNone(t, markup(render(t, view)), `class="owner-input"`)
 }
+
+// Owner-input clocks carry the same data-at/data-stamp as agent entry clocks,
+// so ago.js gives owner rows the same relative label as lead rows.
+func TestTimelineInputHeaderClockIsRelativeTimeTarget(t *testing.T) {
+	sent := time.Date(2026, 11, 15, 21, 35, 0, 0, time.UTC).UnixMilli()
+	st := &State{Seq: 2, Items: []Item{{ID: 1, Topic: "a", Class: ClassTechnical, Title: "yes", Status: StatusOpen}}, Topics: []TopicDoc{
+		{Name: "a", Entries: []Entry{{ID: "e1", Kind: EntrySystem, ItemID: 1, Text: "Item {{1}} added [technical]: yes", Seq: 2, Inputs: json.RawMessage(fmt.Sprintf(`[{"inbox_id":"x","sent_at":%d,"excerpt":"hello","chip_ids":[]}]`, sent))}}},
+	}}
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, Location: time.UTC})))
+	wantAll(t, out, fmt.Sprintf(`<span class="evi owner">O</span><time class="entry-at" title="2026-11-15 21:35" data-stamp="2026-11-15 21:35" data-at="%d">21:35</time>`, sent))
+}
