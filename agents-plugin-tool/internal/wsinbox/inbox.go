@@ -184,6 +184,8 @@ type Entry struct {
 	// Mentions holds the text the user selected on the board and added to
 	// the message (mentions.go), in the order added.
 	Mentions []Mention `json:"mentions,omitempty"`
+	// CloseRequests holds optional per-topic close requests, including empty reasons.
+	CloseRequests []CloseRequest `json:"closeRequests,omitempty"`
 	// Picks and Consoles hold the page elements the user picked in a web
 	// card and the console errors it attached (webpicks.go), in the order
 	// added.
@@ -326,7 +328,7 @@ func NameForID(id string) (string, bool) {
 }
 
 // bodyText assembles the envelope's content: the answer block (AnswerBlock)
-// first, then the mentions (MentionBlock), then the picks (PickBlock) and the
+// first, then mentions and close requests, then the picks (PickBlock) and the
 // console blocks (ConsoleBlock) as one paragraph each, then each part as its
 // own paragraph, then one ImageLine per image. A command entry's text is its
 // typed line (Command.Line), which a host that runs a bare "/name args"
@@ -340,6 +342,9 @@ func (e Entry) bodyText() string {
 		paras = append(paras, block)
 	}
 	if block := MentionBlock(e.Mentions); block != "" {
+		paras = append(paras, block)
+	}
+	if block := CloseRequestBlock(e.CloseRequests); block != "" {
 		paras = append(paras, block)
 	}
 	if block := PickBlock(e.Picks); block != "" {
@@ -369,7 +374,9 @@ func (e Entry) bodyText() string {
 // earlier one, an empty topic note is dropped, a mention is trimmed and
 // dropped when blank (its text counts toward the text limit), a pick and a
 // console block are validated and capped (normalizeWeb; they do not count
-// toward the text limit), and a repeated image path is dropped with its
+// toward the text limit). Close requests dedupe by topic (last reason wins),
+// count as content even without a reason, and their reasons count toward the
+// text limit. A repeated image path is dropped with its
 // number. An image, a pick, and a console block count as content. Image
 // numbers are optional: ImageNums is empty or parallel to Images, a number is
 // unique and at most maxImageNum, and an image numbered 0 (or every image,
@@ -419,6 +426,32 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		size += len(m.Text)
 		out.Mentions = append(out.Mentions, m)
+	}
+	if len(e.CloseRequests) > maxTopics {
+		return Entry{}, fmt.Errorf("%w: more than %d close requests", ErrInvalid, maxTopics)
+	}
+	for _, r := range e.CloseRequests {
+		r.Topic, r.Reason = strings.TrimSpace(r.Topic), strings.TrimSpace(r.Reason)
+		if r.Topic == "" || len(r.Topic) > maxTopicLen || strings.ContainsAny(r.Topic, "\x00\r\n") {
+			return Entry{}, fmt.Errorf("%w: close request topic %q", ErrInvalid, r.Topic)
+		}
+		if len(r.Reason) > maxNoteBytes {
+			return Entry{}, fmt.Errorf("%w: close reason for %s is longer than %d bytes", ErrInvalid, r.Topic, maxNoteBytes)
+		}
+		found := false
+		for i := range out.CloseRequests {
+			if out.CloseRequests[i].Topic == r.Topic {
+				out.CloseRequests[i] = r
+				found = true
+				break
+			}
+		}
+		if !found {
+			out.CloseRequests = append(out.CloseRequests, r)
+		}
+	}
+	for _, r := range out.CloseRequests {
+		size += len(r.Reason)
 	}
 	if size > maxTextBytes {
 		return Entry{}, fmt.Errorf("%w: text is longer than %d bytes", ErrInvalid, maxTextBytes)
@@ -519,7 +552,7 @@ func Normalize(e Entry) (Entry, error) {
 			}
 		}
 	}
-	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.Picks) == 0 && len(out.Consoles) == 0 && len(out.Images) == 0 {
+	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.CloseRequests) == 0 && len(out.Picks) == 0 && len(out.Consoles) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
 	}
 	return out, nil
@@ -542,8 +575,8 @@ func normalizeCommand(e Entry) (Entry, error) {
 			return Entry{}, fmt.Errorf("%w: a command carries no text", ErrInvalid)
 		}
 	}
-	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.Picks) > 0 || len(e.Consoles) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
-		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, picks, console blocks, or images", ErrInvalid)
+	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.CloseRequests) > 0 || len(e.Picks) > 0 || len(e.Consoles) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
+		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, close requests, picks, console blocks, or images", ErrInvalid)
 	}
 	return Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, UTCOffsetMinutes: e.UTCOffsetMinutes, Command: &c}, nil
 }

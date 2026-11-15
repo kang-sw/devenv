@@ -154,18 +154,24 @@ func TestChecksOnlyTopicChipIsAPlainCount(t *testing.T) {
 func TestCheckRowsRenderTheirStates(t *testing.T) {
 	for _, layout := range layouts() {
 		page := render(t, BuildView(checkBoard(t), ViewInput{Layout: layout, ReplyID: "r"}))
+		prefix := "item-"
+		if layout == LayoutFull {
+			prefix = "check-"
+		}
 		row := func(id string) string {
-			return regexp.MustCompile(`<div class="ckrow[^"]*" id="item-` + id + `".*?</div>`).FindString(page)
+			return regexp.MustCompile(`<div class="ckrow[^"]*" id="` + prefix + id + `".*?</div>`).FindString(page)
 		}
 		open := row("3")
-		for _, want := range []string{`class="ckrow" id="item-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
+		for _, want := range []string{`class="ckrow" id="` + prefix + `3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
 			if !strings.Contains(open, want) {
 				t.Fatalf("open check row missing %q:\n%s", want, open)
 			}
 		}
 		if layout == LayoutFull {
 			for _, id := range []string{"4", "5", "6"} {
-				wantNone(t, row(id), `class="ckrow`)
+				if id != "6" {
+					wantNone(t, row(id), `class="ckrow`)
+				}
 				wantAll(t, regexpHistoryArticle(page, "item-"+id), `data-history-item="`+id+`"`, `class="wb-hclass">Check</span>`)
 			}
 			wantAll(t, regexpHistoryArticle(page, "item-4"), `class="wb-hstatus"`, ">ok</span>", "4=ok")
@@ -191,7 +197,11 @@ func TestCheckRowsRenderTheirStates(t *testing.T) {
 		}
 		// Placement: recap, check list, then the policy and ack items.
 		recap, list, policy := strings.Index(page, `class="trecap"`), strings.Index(page, `class="checks"`), strings.Index(page, `class="card policy"`)
-		if !(recap >= 0 && recap < list && list < policy) {
+		ordered := recap >= 0 && recap < list && list < policy
+		if layout == LayoutFull {
+			ordered = recap >= 0 && recap < policy && policy < list
+		}
+		if !ordered {
 			t.Fatalf("placement recap %d, checks %d, policy %d", recap, list, policy)
 		}
 	}
@@ -217,7 +227,7 @@ func TestCheckStampReadsALoneOkOrNo(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassCheck, "t", "look")+`<wb:answer id="1" value="no problem, ship it">fine</wb:answer>`)
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, regexpHistoryArticle(full, "item-1"), `data-history-item="1"`, "no problem, ship it</span>")
+	wantAll(t, regexpHistoryArticle(full, "item-1"), `data-history-item="1"`, "no problem, ship it</div>")
 	wantNone(t, regexpHistoryArticle(full, "item-1"), `class="stamp"`, `class="ckrow`)
 	page := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
 	row := regexp.MustCompile(`<div class="ckrow[^"]*" id="item-1".*?</div>`).FindString(page)
@@ -235,7 +245,8 @@ func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
 	}
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, full, `<div class="topic-stream">`)
-	wantNone(t, full, `<details class="settled"`, `<details class="topic-stream"`, `class="checks"`)
+	wantNone(t, full, `<details class="settled"`, `<details class="topic-stream"`, `id="check-3"`, `id="check-4"`, `id="check-5"`)
+	wantAll(t, full, `id="check-6"`, `data-assumed`)
 	for _, id := range []string{"3", "4", "5", "6"} {
 		wantAll(t, regexpHistoryArticle(full, "item-"+id), `data-history-item="`+id+`"`)
 	}

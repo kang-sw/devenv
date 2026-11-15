@@ -263,6 +263,36 @@ func parseSelection(raw string) *Selection {
 	return &s
 }
 
+// Excerpt is free owner text, without serialized selection/mention groups
+// or attachment markers. Malformed groups remain opaque, literal text.
+func (e Entry) Excerpt() string {
+	var parts []string
+	for _, text := range e.Parts {
+		walkSelections(text, func(raw string, group bool, s *Selection) {
+			if s != nil {
+				return
+			}
+			if !group {
+				_, raw = ParseMentions(raw)
+				raw = imageMarkerPattern.ReplaceAllString(raw, "")
+				var lines []string
+				for _, line := range strings.Split(raw, "\n") {
+					if _, _, ok := ParseImageLine(line); !ok {
+						lines = append(lines, line)
+					}
+				}
+				raw = strings.Join(lines, "\n")
+			}
+			parts = append(parts, raw)
+		})
+	}
+	runes := []rune(strings.TrimSpace(strings.Join(parts, "\n")))
+	if len(runes) > 240 {
+		runes = runes[:240]
+	}
+	return string(runes)
+}
+
 // normalizeSelectionText makes the server the serializer of valid groups,
 // retaining malformed groups as ordinary text. Validation of actual image
 // ownership happens after Normalize assigns the entry's image numbers.

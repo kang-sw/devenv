@@ -8,8 +8,9 @@ import "testing"
 // data-srcdoc takes that old frame, the same element, moved (moveBefore)
 // rather than detached, so it never reloads; one whose data-srcdoc changed
 // stays a placeholder for the mount pass; the topic-body frame (topic:)
-// still takes frameGraft's double buffer; duplicate keys pair off once
-// each; and without moveBefore nothing is kept. The cases execute under node
+// still takes frameGraft's double buffer; a panel-only topic's first frame
+// takes keyed reuse too; duplicate keys pair off once each; and without
+// moveBefore nothing is kept. The cases execute under node
 // when it is installed.
 func TestBoardKeepsUnchangedEntryFrames(t *testing.T) {
 	src := dashboardFuncs(t, "openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameKeep", "frameKept", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft", "frameNext", "mountFrame")
@@ -55,9 +56,9 @@ function boardNodes(input) { return frag(input).childNodes; }
 `+src+`
 function mounted(key, text) { return mountFrame(new El("div", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text })); }
 function holder(key, text) { return new El("div", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text }); }
-function run(f) { return new El("article", {}, [new El("details", { open: "" }, [f])]); }
+function run(f) { return new El("div", { "class": "timeline-row", "data-row": f.getAttribute("data-doc-key") }, [new El("article", {}, [new El("details", { open: "" }, [f])])]); }
 function topic(th, bodyFrame, runs) {
-  return new El("section", { "class": "topic", "data-topic": "A", "data-th": th }, [new El("div", { "class": "doc-body framed" }, [bodyFrame]), new El("div", { "class": "topic-stream" }, runs.map(run))]);
+  return new El("section", { "class": "topic", "data-topic": "A", "data-th": th }, (bodyFrame ? [new El("div", { "class": "doc-body framed" }, [bodyFrame])] : []).concat([new El("div", { "class": "topic-stream" }, runs.map(run))]));
 }
 function setup() {
   var board = new El("div", { id: "r-board" });
@@ -78,11 +79,25 @@ check("the changed topic keeps its section (frameGraft)", o.board.childNodes[0] 
 var bf = walk(o.sec, []).filter(function (n) { return n.classList.contains("doc-frame") && /^topic:/.test(n.getAttribute("data-doc-key")); });
 check("the topic-body frame takes the double buffer: old kept, new mounted beside it, pending", bf.length === 2 && bf[0] === o.body && bf[1].tagName === "IFRAME" && bf[1].getAttribute("srcdoc") === "B2" && bf[1].wbNext === true);
 check("an unchanged entry frame is the same element, on the board, never reloaded", inBoard(o, o.e1) && !o.e1.reloads && !p1.parentNode);
-check("it stands where its placeholder stood", o.e1.parentNode && o.e1.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode.classList.contains("topic-stream") && o.e1.parentNode.childNodes.length === 1);
+check("it stands in the admitted whole-item timeline row", o.e1.parentNode && o.e1.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode.classList.contains("timeline-row") && o.e1.parentNode.childNodes.length === 1);
 check("a changed data-srcdoc is replaced: the placeholder stays for the mount pass", !inBoard(o, o.e2) && inBoard(o, p2) && p2.tagName === "DIV");
 check("a new entry stays a placeholder", inBoard(o, p3));
 check("duplicate keys pair off once each", inBoard(o, o.d1) && inBoard(o, o.d2) && !pd1.parentNode && !pd2.parentNode && inBoard(o, pd3) && !o.d1.reloads && !o.d2.reloads);
 check("the holder is gone", body.childNodes.length === 1);
+
+// With no topic body, the first panel must not take the body double buffer.
+o = setup();
+o.sec.removeChild(o.body.parentNode);
+var first = holder("entry:e1", "S1"), second = holder("entry:e2", "S2");
+var incoming = topic("h2", null, [first, second]);
+check("a panel-only topic has no body graft", frameGraftable(o.sec, incoming) === null);
+morphBoard(o.board, [incoming]);
+check("the first panel in a panel-only topic is reused without a reload or pending next frame", inBoard(o, o.e1) && !o.e1.reloads && !first.parentNode && !o.e1.wbNext && !o.e1.wbOut);
+check("its other unchanged panel is reused too", inBoard(o, o.e2) && !o.e2.reloads && !second.parentNode);
+var overwrite = holder("entry:e1", "replacement"), same = holder("entry:e2", "S2");
+morphBoard(o.board, [topic("h3", null, [overwrite, same])]);
+check("the same first-panel key with changed bytes is replaced, never double-buffered", !inBoard(o, o.e1) && inBoard(o, overwrite) && !overwrite.wbNext);
+check("overwriting the first panel leaves its unchanged sibling running", inBoard(o, o.e2) && !o.e2.reloads && !same.parentNode);
 
 // Without moveBefore nothing is kept.
 var mb = El.prototype.moveBefore;
