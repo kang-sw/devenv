@@ -19,14 +19,26 @@
 .usage-harness .claude, .usage-pop .claude { background: #D97757; color: #fff; }
 .usage-harness .codex, .usage-pop .codex { background: #10A37F; color: #fff; }
 .usage-empty, .usage-meta, .usage-plan, .usage-status { color: var(--wb-muted-fg); }
-.usage-pop { width: 310px; }
+.usage-pop { width: 340px; max-width: 100%; font-size: 12.5px; }
 .usage-pop:focus { outline: none; }
 .usage-heading { display: flex; align-items: center; gap: 7px; }
 .usage-plan { margin-left: auto; font-size: 11px; }
 .usage-close { margin-left: auto; padding: 0 3px; border: 0; background: none; color: var(--wb-muted-fg); font: inherit; cursor: pointer; }
-.usage-account { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--wb-line); }
-.usage-window { display: flex; justify-content: space-between; margin-top: 4px; font-variant-numeric: tabular-nums; }
-.usage-window.warning b { color: var(--wb-warn-ink, #d49d38); }
-.usage-window.critical b { color: var(--wb-fail, #d95f68); }
+.usage-account { display: grid; gap: 7px; padding: 10px 0; border-top: 1px solid var(--wb-line); }
+.usage-window-card { min-width: 0; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--wb-bg) 50%, var(--wb-card)); }
+.usage-window { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.usage-window-name { margin-right: auto; font-size: 12px; font-weight: 700; }
+.usage-window .usage-number { font-size: 20px; }
+.usage-window .usage-pace { padding: 2px 4px; border-radius: 4px; }
+.usage-window .usage-clock { position: static; flex: none; }
+.usage-window-card > .usage-meta { margin-top: 4px; font-size: 10px; }
+.usage-observed { border-top: 1px solid var(--wb-line); padding-top: 5px; }
+.usage-chart { display: block; width: 100%; height: auto; margin-top: 3px; }
+.usage-chart text { font: 9px var(--wb-sans, sans-serif); fill: var(--wb-muted-fg); }
+.usage-grid { stroke: var(--wb-line); stroke-width: .7; }
+.usage-ideal { stroke: var(--wb-muted-fg); stroke-width: 1.2; fill: none; opacity: .75; }
+.usage-actual { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.usage-point { stroke: var(--wb-card); stroke-width: 1; }
+.usage-point-current { stroke-width: 2; }
 .usage-meta { font-size: 11px; }
 .usage-status { margin: 3px 0; font-size: 12px; }
