@@ -539,6 +539,31 @@ run. No protocol/API, dependency, dashboard/daemon source, frozen phase plan
 or later phase changed. This records the final requested review fixes, not a
 new phase or an additional independent review pass.
 
+#### Edition (0c9961c6f) - 2026-11-15
+
+Fixed the third review's narrow Critical rollback-state finding. Attempts no
+longer snapshot another attempt's provisional pin/title. The retained rollback
+state advances only on a matching main-document `did-navigate` commit for the
+current load target. Stay restores that committed state, including the last
+committed connection-page error title; a late promise settlement cannot
+advance it. Runtime changes are limited to rollback-state handling. Cleanup
+code and the smoke harness are unchanged.
+
+The required Retry → popup → Stay regression was added **before** editing
+`main.js` and confirmed **RED on `0bb29c533`** with only the test file changed:
+A's retained frame was cancelled (`{ cancel: true }` instead of `{}`). After
+the fix, headless `npm test` passed all **33 tests**, including that regression,
+commit-before-load-completion, late superseded success without a commit, and
+connection-page title restoration. Unit fixtures now explicitly emit document
+commit events rather than treating a pending/resolved load as proof of commit.
+
+Offline `npm run build` passed for darwin-arm64 with only the pre-existing
+optional `.icon` warning; `git diff --check` passed. The local process scan
+found no remaining test/build/app/fixture processes in this worktree, and no
+processes were signalled. No Windows host was accessed and no Electron/GUI ran
+on the Mac. Live smoke remains deferred to the owner-authorized Windows run;
+no new phase, policy, dependency, API or independent review pass was added.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
