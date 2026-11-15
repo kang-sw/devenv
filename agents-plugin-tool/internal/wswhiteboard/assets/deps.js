@@ -9,6 +9,12 @@
     return node && node.closest ? node.closest('.dw') : null;
   }
   function cancel() { clearTimeout(opening); clearTimeout(leaving); }
+  function isOpen(p) {
+    if (p.showPopover) {
+      try { return p.matches(':popover-open'); } catch (e) { /* older engine */ }
+    }
+    return !p.hidden;
+  }
   function close(focus) {
     cancel();
     if (!active) return;
@@ -30,11 +36,11 @@
     if (!w || !w.isConnected) return;
     if (active !== w) { close(false); active = w; }
     var b = w.querySelector('.dbtn'), p = w.querySelector('.pop');
-    var wasHidden = p.hidden;
+    var wasOpen = isOpen(p);
     p.hidden = false;
     // The top layer also escapes sticky-head stacking contexts and transient
     // rail reorder transforms. Older engines retain the fixed fallback.
-    if (wasHidden && p.showPopover) p.showPopover();
+    if (!wasOpen && p.showPopover) p.showPopover();
     b.setAttribute('aria-expanded', 'true');
     // Fixed descendants bypass overflow:hidden on .topic. Measure each open,
     // including after swaps; clamp horizontally and flip above when needed.
@@ -59,7 +65,7 @@
     var w = wrapper(e.target);
     if (!w || (e.relatedTarget && w.contains(e.relatedTarget))) return;
     clearTimeout(leaving);
-    if (active === w || pinned) return;
+    if (active === w ? isOpen(w.querySelector('.pop')) : pinned) return;
     clearTimeout(opening);
     opening = setTimeout(function () { open(w); }, 120);
   });
@@ -81,9 +87,23 @@
     if (b) {
       e.preventDefault();
       e.stopPropagation();
-      if (active === w && pinned) close(false);
+      if (active === w && pinned && isOpen(w.querySelector('.pop'))) close(false);
       else { open(w); pinned = true; }
     } else if (!w || (e.target.closest && e.target.closest('a'))) close(false);
+  }, true);
+  // Reparenting can close a native popover without changing hidden. Toggle
+  // does not bubble; capture it and release the stale active wrapper and pin.
+  d.addEventListener('toggle', function (e) {
+    if (!active || e.newState !== 'closed') return;
+    var p = active.querySelector('.pop');
+    if (e.target !== p) return;
+    // Ignore a delayed close event if this popup has already reopened.
+    try { if (p.matches(':popover-open')) return; } catch (err) { /* older engine */ }
+    cancel();
+    p.hidden = true;
+    active.querySelector('.dbtn').setAttribute('aria-expanded', 'false');
+    active = null;
+    pinned = false;
   }, true);
   d.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && active) {

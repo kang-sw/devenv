@@ -229,7 +229,8 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .topic.quiet { box-shadow: none; background: transparent; }
 /* A visible body shares one surface with its bar, including framed div.tdoc.
    The dashboard folds the section; standalone pages fold details.tdoc. */
-.topic.quiet:not([data-size="fold"]):has(> div.tdoc, > details.tdoc[open], > .topic-stream),
+.topic.quiet[data-size]:not([data-size="fold"]),
+.topic.quiet:not([data-size]):has(> details.tdoc[open]),
 .topic.quiet[data-max] { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }
 .topic.quiet .tbar { background: var(--wb-muted); color: var(--wb-muted-fg); border-radius: var(--wb-radius); flex-wrap: wrap; }
 .topic.quiet .tbar .tname { font-size: 13px; }

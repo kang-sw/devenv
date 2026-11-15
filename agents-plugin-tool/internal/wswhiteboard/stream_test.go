@@ -344,7 +344,8 @@ func TestExpandedQuietTopicCardCSS(t *testing.T) {
 	wantAll(t, string(css),
 		`.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow);`,
 		`.topic.quiet { box-shadow: none; background: transparent; }`,
-		`.topic.quiet:not([data-size="fold"]):has(> div.tdoc, > details.tdoc[open], > .topic-stream),
+		`.topic.quiet[data-size]:not([data-size="fold"]),
+.topic.quiet:not([data-size]):has(> details.tdoc[open]),
 .topic.quiet[data-max] { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }`,
 		`.entry-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }`,
 		`.topic.quiet .tbar details.settled[open] { flex: 1 0 100%; width: 100%; min-width: 0; padding-bottom: 4px; }`,
@@ -353,6 +354,28 @@ func TestExpandedQuietTopicCardCSS(t *testing.T) {
 	// The native disclosure must not draw a second, inset card inside the
 	// section; framed div.tdoc has no native open attribute at all.
 	wantNone(t, string(css), `.topic.quiet details.tdoc[open] {`)
+	for _, selector := range regexp.MustCompile(`\.topic\.quiet[^,{]*:has\([^)]*(?:div\.tdoc|\.topic-stream)[^)]*\)`).FindAllString(string(css), -1) {
+		guard := strings.SplitN(selector, ":has(", 2)[0]
+		if !strings.Contains(guard, "[data-size]") {
+			t.Errorf("quiet surface has a body/stream condition without an explicit dashboard size: %s", selector)
+		}
+	}
+}
+
+func TestStandaloneClosedQuietTopicWithStreamStaysCollapsed(t *testing.T) {
+	st := streamFixture()
+	st.ClosedTopics = []string{"t"}
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	topic := regexp.MustCompile(`<section class="topic[^>]* data-topic="t"[^>]*>.*?</section>`).FindString(out)
+	if topic == "" {
+		t.Fatal("closed topic missing")
+	}
+	wantAll(t, topic, `class="topic quiet closed has-doc"`, `<details class="tdoc" data-key="doc:t"`, `<div class="topic-stream">`)
+	wantNone(t, topic, `data-size=`, `data-max`)
+	disclosure := regexp.MustCompile(`<details class="tdoc"[^>]*>`).FindString(topic)
+	wantNone(t, disclosure, ` open`)
+	// The CSS contract above requires data-size for dashboard expansion and
+	// open details for standalone expansion. This sibling stream supplies neither.
 }
 
 // Owner rule: a log row's role marker sits on the first line beside the clock,

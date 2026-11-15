@@ -30,11 +30,19 @@ class E {
  focus(){document.activeElement=this;fire('focusin',this);}
 }
 const listeners={}, winListeners={};
-var document={activeElement:null,addEventListener(type,fn){(listeners[type]||=[]).push(fn);}};
+const captures={};
+var document={activeElement:null,addEventListener(type,fn,capture){(listeners[type]||=[]).push(fn);captures[type]=!!capture;}};
 var window={innerWidth:1024,innerHeight:768,addEventListener(type,fn){(winListeners[type]||=[]).push(fn);}};
 function fire(type,target,extra={}){const e={target,preventDefault(){this.prevented=true;},stopPropagation(){this.stopped=true;},...extra};for(const fn of listeners[type]||[])fn(e);return e;}
 function fixture(){const w=new E('dw'),b=new E('dbtn',w),p=new E('pop',w),a=new E('a',p);p.rect={width:318,height:220};return {w,b,p,a};}
-function state(f,open){assert.equal(f.p.hidden,!open);assert.equal(f.b.attrs['aria-expanded']||'false',String(open));}
+function state(f,open){assert.equal(f.p.hidden,!open);assert.equal(f.b.attrs['aria-expanded']||'false',String(open));if(f.p.showPopover)assert.equal(f.p.nativeOpen,open);}
+function nativeFixture(){
+ const f=fixture();f.p.nativeOpen=false;f.p.shown=0;f.p.hiddenCalls=0;
+ f.p.matches=s=>{assert.equal(s,':popover-open');if(f.p.unsupportedPseudo)throw new SyntaxError('unsupported pseudo-class');return f.p.nativeOpen;};
+ f.p.showPopover=()=>{assert(!f.p.hidden);assert(!f.p.nativeOpen);f.p.nativeOpen=true;f.p.shown++;};
+ f.p.hidePopover=()=>{f.p.nativeOpen=false;f.p.hiddenCalls++;};
+ return f;
+}
 const f=fixture(), outside=new E('outside');
 ` + string(asset) + `
 fire('mouseover',f.b);tick(119);state(f,false);tick(1);state(f,true);
@@ -69,11 +77,35 @@ for(const list of Object.values(listeners))assert.equal(list.length,1);
 assert.equal(winListeners.resize.length,1);
 fire('click',inserted.b);state(inserted,true);fire('keydown',inserted.b,{key:'Escape'});state(inserted,false);
 assert(f.b.measured>=5,'position is measured again on every open');
-const native=fixture();let shown=0,hidden=0;
-native.p.showPopover=()=>shown++;native.p.hidePopover=()=>hidden++;
-native.b.focus();native.a.focus();assert.equal(shown,1,'already open top-layer popover is not shown twice');
-fire('keydown',native.a,{key:'Escape'});assert.equal(hidden,1);state(native,false);
-console.log('PASS dependency hover grace, pin, outside click, focus, Escape, placement, scroll, resize, inserts and singleton listeners');
+const native=nativeFixture();
+native.b.focus();native.a.focus();assert.equal(native.p.shown,1,'already open top-layer popover is not shown twice');
+fire('keydown',native.a,{key:'Escape'});assert.equal(native.p.hiddenCalls,1);state(native,false);
+// Reparenting closes native visibility independently of hidden. Reopen even
+// before the asynchronous toggle event has arrived, including when pinned.
+fire('click',native.b);state(native,true);
+native.p.nativeOpen=false;assert.equal(native.p.hidden,false);
+fire('click',native.b);state(native,true);assert.equal(native.p.shown,3);
+native.p.nativeOpen=false;
+fire('mouseover',native.b,{relatedTarget:outside});tick(120);state(native,true);assert.equal(native.p.shown,4);
+// Native toggle does not bubble: its capture listener clears ARIA and the pin.
+assert.equal(captures.toggle,true);
+fire('toggle',outside,{newState:'closed'});state(native,true);
+fire('toggle',native.p,{newState:'open'});state(native,true);
+native.p.nativeOpen=false;fire('toggle',native.p,{newState:'closed'});state(native,false);
+const afterNativeClose=fixture();fire('mouseover',afterNativeClose.b);tick(120);state(afterNativeClose,true);
+fire('click',outside);state(afterNativeClose,false);
+fire('mouseover',native.b);tick(120);state(native,true);assert.equal(native.p.shown,5);
+// A delayed close event from a previous open must not close a reopened popup.
+fire('toggle',native.p,{newState:'closed'});state(native,true);
+native.p.nativeOpen=false;fire('toggle',native.p,{newState:'closed'});state(native,false);
+fire('click',native.b);state(native,true);assert.equal(native.p.shown,6);
+fire('click',outside);state(native,false);
+const legacy=nativeFixture();legacy.p.unsupportedPseudo=true;
+legacy.b.focus();legacy.a.focus();assert.equal(legacy.p.shown,1);
+legacy.p.nativeOpen=false;fire('toggle',legacy.p,{newState:'closed'});state(legacy,false);
+fire('mouseover',legacy.b);tick(120);state(legacy,true);assert.equal(legacy.p.shown,2);
+fire('click',outside);state(legacy,false);
+console.log('PASS dependency hover grace, pin, outside click, focus, Escape, placement, scroll, resize, inserts, singleton listeners and native visibility reconciliation');
 `
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
