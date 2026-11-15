@@ -87,7 +87,7 @@ fire(items.map(function (el) { return { isIntersecting: true, target: el }; }));
 check("stale reports leave top counts alone", shown(top), [["open", "js.pill.open", "2"], ["ans", "js.pill.answered", "1"], ["nt", "js.pill.noted", "1"]]);
 items.forEach(function (el) { el.top = 100; });
 fire(items.map(function (el) { return { isIntersecting: false, target: el }; }));
-check("current positions hide both pills despite stale reports", [top.hidden, bot.hidden], [true, true]);
+check("current positions hide empty bottom pill but retain the home control", [top.hidden, bot.hidden], [false, true]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {

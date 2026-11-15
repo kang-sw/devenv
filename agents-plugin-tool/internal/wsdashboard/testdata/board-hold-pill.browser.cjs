@@ -85,9 +85,9 @@ const report = {cases: [], screenshots: [], errors: []};
         const full = path.join(output, `impl-${id}-${state}.png`);
         await page.screenshot({path: full});
         const box = await pill.boundingBox();
-        if (box) assert.equal(box.height, 28, `${id} ${state}: capsule retains accepted 28px height`);
-        else assert.equal(state, 'after-click', 'only the cleared home state may hide');
-        const anchor = box || await page.locator('.wb-oq-top').evaluate(n => {const r = n.getBoundingClientRect(); return {x: r.x, y: r.y, width: r.width};});
+        assert(box, `${id} ${state}: home capsule is always visible outside overview`);
+        assert.equal(box.height, 28, `${id} ${state}: capsule retains accepted 28px height`);
+        const anchor = box;
         const clip = {x: Math.max(0, anchor.x + anchor.width / 2 - 200), y: Math.max(0, anchor.y - 20), width: 400, height: 76};
         const implCrop = await page.screenshot({clip});
         await ref.evaluate(counts => tt.set(counts), counts);
@@ -104,6 +104,11 @@ const report = {cases: [], screenshots: [], errors: []};
         await pair.close();
         report.screenshots.push({id, state, full, reference: refPath, sideBySide: sbs, box});
       }
+      await page.evaluate(() => {window.__holdScroller().scrollTop = 0; window.wbPill.update();});
+      await frames(14);
+      assert.equal(await pill.locator('.oq-arr').isVisible(), true, 'home arrow is present at idle top');
+      assert.equal(await label.isVisible(), false);
+      await capture('idle-top', {upd: 0, open: 0, ans: 0});
       await scrollToTopic('T04');
       await pill.waitFor({state: 'visible'});
       assert.equal(await pill.locator('.oq-arr').isVisible(), true, 'home arrow exists with zero updates');
@@ -159,8 +164,7 @@ const report = {cases: [], screenshots: [], errors: []};
       const homeScrolls = after.scrolls.slice(before.scrolls);
       assert(homeScrolls.length >= 1 && homeScrolls.every(s => s.args[0].top === 0), 'only the navigation owner targets absolute zero');
       assert.equal(homeScrolls[0].args[0].behavior, reduced ? 'instant' : 'smooth');
-      // The existing at-home visibility rule may hide the cleared capsule.
-      // Capture the real zero-scroll outcome, never manufacture a shown state.
+      // The home arrow stays visible in the real zero-scroll outcome.
       await capture('after-click', {upd: 0, open: 0, ans: 0});
       await page.waitForFunction(() => !document.querySelector('.board-fresh'));
       // Pending at top: existing visible-panel staging, not later head/new-

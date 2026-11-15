@@ -127,8 +127,7 @@
   // (noted items are a subset of the answered ones).
   function show(edge, list) {
     var p = pills[edge], pending = edge === "top" && st.pending > 0;
-    var top = root ? root.scrollTop : (d.scrollingElement || html).scrollTop;
-    p.hidden = !list.length && !(edge === "top" && (pending || top > 4));
+    p.hidden = edge !== "top" && !list.length;
     p.classList.toggle("board-updated", !!pending);
     if (edge === "top") {
       var updates = p.querySelector(".oq-updates");
