@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const tick = () => new Promise(setImmediate);
 
-async function fixture(discover = async () => 'http://127.0.0.1:39418/') {
+async function fixture(discover = async () => 'http://127.0.0.1:39418/', platform = 'darwin') {
   // Replace only the main-process discovery dependency; never a renderer bridge.
   const endpoint = require('../endpoint');
   const original = endpoint.discover;
@@ -25,8 +25,21 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/') {
         loadFile: async file => { this.loads.push(file); this.currentURL = file; this.webContents.emit('did-navigate', {}, pathToFileURL(file).href); },
         setZoomFactor: zoom => { this.zoom = zoom; },
       });
+      this.children = [];
+      this.contentView = { addChildView: view => this.children.push(view) };
+      this.webContents.send = (channel, value) => { this.state = { channel, value }; };
+      this.webContents.focus = () => { this.contentFocused = true; };
+      this.webContents.isDestroyed = () => !!this.destroyed;
+      this.webContents.close = options => { this.closeOptions = options; };
+      this.webContents.session = { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest: handler => { this.request = handler; } } };
+      this.webContents.mainFrame = {};
       Window.current = this;
     }
+    getTitle() { return this.title; }
+    getContentSize() { return [1280, 860]; }
+    setTitleBarOverlay(value) { this.overlay = value; }
+    setMenuBarVisibility(value) { this.menuVisible = value; }
+    close() { this.emit('close', { preventDefault() {} }); }
     isDestroyed() { return false; }
     setTitle(title) { this.title = title; }
     isMinimized() { return true; }
@@ -39,17 +52,23 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/') {
     setPermissionCheckHandler(handler) { this.check = handler; },
     webRequest: { onBeforeRequest(handler) { this.handler = handler; } },
   } };
-  let template, response = 0;
+  const views = [];
+  class View extends Window {
+    constructor(options) { const current = Window.current; super(options); Window.current = current; views.push(this); }
+    setBounds(bounds) { this.bounds = bounds; }
+  }
+  const ipcMain = new EventEmitter(), nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: false });
+  let template, response = 0, popups = 0;
   const opened = [];
-  start({ app, BrowserWindow: Window, session,
-    Menu: { buildFromTemplate: t => t, setApplicationMenu: t => { template = t; } },
+  start({ app, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
+    Menu: { buildFromTemplate: t => Object.assign(t, { popup() { popups++; } }), setApplicationMenu: t => { template = t; } },
     shell: { openExternal: async url => { opened.push(url); } },
     dialog: { showMessageBoxSync: () => response },
-  });
+  }, platform);
   await tick();
   const window = Window.current;
   const menus = Object.fromEntries(template.flatMap(item => item.submenu || []).filter(item => item.id).map(item => [item.id, item]));
-  return { app, window, menus, session: session.defaultSession, opened, choose: n => { response = n; } };
+  return { app, window, views, ipcMain, nativeTheme, popups: () => popups, menus, session: session.defaultSession, opened, choose: n => { response = n; } };
 }
 test('native window, menus, authority, close veto and single-instance focus', async () => {
   const f = await fixture(), w = f.window;
@@ -372,4 +391,108 @@ test('losing single-instance lock quits before creating a window', () => {
   let quit = false;
   start({ app: { setName() {}, requestSingleInstanceLock: () => false, quit() { quit = true; } } });
   assert(quit);
+});
+
+test('platform switch keeps native construction on macOS/Linux and isolates Windows sibling views', async () => {
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const f = await fixture(undefined, platform), w = f.window;
+    const isolation = { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false };
+    assert.deepEqual(w.options.webPreferences, isolation);
+    if (platform !== 'win32') {
+      assert.deepEqual(w.options, { title: 'Werkschaft — Connecting…', width: 1280, height: 860, minWidth: 760, minHeight: 520, webPreferences: isolation });
+      assert.equal(f.views.length, 0);
+      continue;
+    }
+    assert.equal(w.options.titleBarStyle, 'hidden');
+    assert.deepEqual(w.options.titleBarOverlay, { color: '#f3f3f3', symbolColor: '#000000', height: 36 });
+    const [dashboard, bar] = f.views, wc = dashboard.webContents;
+    assert.deepEqual(dashboard.options.webPreferences, isolation);
+    assert.equal(w.menuVisible, false);
+    assert.deepEqual(w.children, [dashboard, bar]);
+    assert.deepEqual(dashboard.bounds, { x: 0, y: 36, width: 1280, height: 824 });
+    assert.deepEqual(bar.bounds, { x: 0, y: 0, width: 1280, height: 36 });
+    assert.equal(w.loads.length, 0);
+    assert.deepEqual(dashboard.loads, ['http://127.0.0.1:39418/']);
+    assert.equal(dashboard.agent, 'Chromium Werkschaft/0.1.0');
+    assert.equal(path.basename(bar.options.webPreferences.preload), 'titlebar-preload.js');
+    wc.emit('page-title-updated', { preventDefault() {} }, 'Board — Test');
+    assert.equal(w.title, 'Board — Test');
+    assert.equal(bar.state.value.title, 'Board — Test');
+    f.menus.zoom_in.click(); assert.equal(dashboard.zoom, 1.1);
+    let blocked = false;
+    wc.emit('will-frame-navigate', { url: 'file:///etc/passwd', isMainFrame: true, preventDefault() { blocked = true; } });
+    assert(blocked);
+    w.emit('close', { preventDefault() { blocked = 'close'; } });
+    assert.equal(blocked, 'close');
+    assert.deepEqual(dashboard.closeOptions, { waitForBeforeUnload: true });
+    let override = false;
+    wc.emit('will-prevent-unload', { preventDefault() { override = true; } });
+    assert.equal(override, false);
+    f.choose(1);
+    wc.emit('will-prevent-unload', { preventDefault() { override = true; } });
+    assert.equal(override, true);
+    // A real view destruction completes the window close, not a Stay answer.
+    dashboard.destroyed = true;
+    let completed = false;
+    w.close = () => { completed = true; };
+    wc.emit('destroyed');
+    assert(completed);
+  }
+});
+test('title changes and connection failure titles remain correct on both content layouts', async () => {
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    let unavailable = false;
+    const f = await fixture(async () => {
+      if (unavailable) throw new Error('Endpoint unavailable');
+      return 'http://127.0.0.1:39418/';
+    }, platform);
+    const wc = f.views[0]?.webContents || f.window.webContents;
+    wc.emit('page-title-updated', { preventDefault() {} }, 'My document');
+    assert.equal(f.window.title, 'My document');
+    unavailable = true;
+    await f.menus.retry.click();
+    wc.emit('page-title-updated', { preventDefault() {} }, 'Bundled connection page');
+    assert.match(f.window.title, /Endpoint unavailable/);
+    if (platform === 'win32') assert.equal(f.views[1].state.value.title, f.window.title);
+  }
+});
+test('bar authority accepts only its bundled main frame; Alt and hamburger share the native menu', async () => {
+  const f = await fixture(undefined, 'win32'), [dashboard, bar] = f.views;
+  const { MENU } = require('../titlebar');
+  const frame = bar.webContents.mainFrame;
+  frame.url = pathToFileURL(path.resolve(__dirname, '../titlebar.html')).href;
+  f.ipcMain.emit(MENU, { sender: dashboard.webContents, senderFrame: frame });
+  f.ipcMain.emit(MENU, { sender: bar.webContents, senderFrame: { url: frame.url } });
+  assert.equal(f.popups(), 0);
+  f.ipcMain.emit(MENU, { sender: bar.webContents, senderFrame: frame });
+  assert.equal(f.popups(), 1);
+  assert(dashboard.contentFocused);
+  for (const view of [dashboard, bar]) {
+    view.webContents.emit('before-input-event', { preventDefault() {} }, { key: 'Alt', type: 'keyDown' });
+    view.webContents.emit('before-input-event', { preventDefault() {} }, { key: 'Alt', type: 'keyUp' });
+  }
+  assert.equal(f.popups(), 3);
+  for (const url of ['https://example.com/', 'file:///etc/passwd', frame.url + '?x']) {
+    bar.request({ url }, value => assert.deepEqual(value, { cancel: true }));
+  }
+  bar.request({ url: frame.url }, value => assert.deepEqual(value, { cancel: false }));
+  assert.deepEqual(bar.popup({ url: 'https://example.com' }), { action: 'deny' });
+  f.window.emit('closed');
+  assert.equal(f.ipcMain.listenerCount(MENU), 0);
+  assert.equal(f.nativeTheme.listenerCount('updated'), 0);
+});
+test('dashboard theme maps to both bar and overlay, with native fallback and reset on navigation', async () => {
+  const f = await fixture(undefined, 'win32'), [dashboard, bar] = f.views;
+  dashboard.webContents.emit('did-change-theme-color', {}, '#112233');
+  assert.deepEqual(f.window.overlay, { color: '#112233', symbolColor: '#ffffff', height: 36 });
+  assert.equal(bar.state.value.color, '#112233');
+  f.nativeTheme.shouldUseDarkColors = true;
+  f.nativeTheme.emit('updated');
+  assert.equal(f.window.overlay.color, '#112233');
+  dashboard.webContents.emit('did-change-theme-color', {}, null);
+  assert.equal(f.window.overlay.color, '#202020');
+  dashboard.webContents.emit('did-change-theme-color', {}, '#ffffff');
+  assert.equal(bar.state.value.symbolColor, '#000000');
+  dashboard.webContents.emit('did-start-navigation', {}, 'http://127.0.0.1:39418/', false, true);
+  assert.equal(f.window.overlay.color, '#202020');
 });
