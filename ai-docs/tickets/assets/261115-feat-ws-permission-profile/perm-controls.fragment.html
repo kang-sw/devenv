@@ -1,0 +1,326 @@
+<!-- Mockup (not approved): permission-profile Phase 2 UI controls.
+     A fragment layered on the real dashboard page: the classes it reuses
+     (.rpop, .sphd, .sploc, .spsec, .spseg, .spopts, .sprc, .spsm, .spdesc,
+     .sprow, .pbtn, .spacts, .spact, dialog.rdeldlg and its parts) come from
+     the dashboard's own CSS, and only the pm* rules below are new. The
+     renderer injects the <style> and one <template> per state into a served
+     session shell page (Korean UI), in both colour schemes at 1440 and 420.
+     States: create, create-pi, settings, settings-picked, full-warning,
+     state, unsupported. -->
+<style id="pm-css">
+/* permission level: a segment the width of the popover; on creation it
+   leads with the default (today's behaviour, no level sent) */
+.rpop .pmseg { width: 100%; box-sizing: border-box; display: flex; flex-wrap: nowrap; }
+.rpop .pmseg button { flex: 1 1 auto; padding: 3px 6px; white-space: nowrap; font-size: 11.5px; }
+/* a legacy-derived level: dashed and tagged, not selected */
+.rpop .pmseg button.derived { outline: 1.5px dashed color-mix(in srgb, var(--wb-muted-fg) 70%, transparent); outline-offset: -2px; }
+.pmtag { margin-left: 4px; font-size: 9.5px; font-weight: 700; padding: 0 4px; border-radius: 4px; background: var(--wb-card); color: var(--wb-muted-fg); vertical-align: 1px; }
+/* the native mode, kept editable behind a disclosure */
+.rpop .pmadv { display: grid; gap: 3px; min-width: 0; }
+.rpop .pmadv > summary { display: flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rpop .pmadv > summary::-webkit-details-marker { display: none; }
+.rpop .pmadv > summary::before { content: "▸"; font-size: 10px; transition: transform .12s; }
+.rpop .pmadv[open] > summary::before { transform: rotate(90deg); }
+.rpop .pmadv .pmown { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); text-transform: none; letter-spacing: 0; }
+.rpop .pmseg button.full[aria-checked="true"] { color: var(--wb-fail); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fail) 50%, transparent); }
+/* what the picked level asks for, then how this harness carries it */
+.rpop .pmwhat { margin: 2px 0 0; font-size: 11.5px; color: var(--wb-fg); }
+.rpop .pmmap { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmmap code, .pmstate code, .rdeldlg .pmc { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-fg); background: var(--wb-muted); padding: 0 5px; border-radius: 4px; }
+.rpop .pmfine { margin: 0; font-size: 11px; color: var(--wb-muted-fg); }
+/* evidence quality pills; there is deliberately no "enforced" pill */
+.pmq { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 700; padding: 0 7px; border-radius: 999px; line-height: 17px; white-space: nowrap; }
+.pmq.partial { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); }
+.pmq.advisory { color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); }
+.pmq.pending { color: var(--wb-muted-fg); background: var(--wb-muted); }
+.pmq.mismatch { color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); }
+/* a lead's permission state: intent, native mode and evidence, apart */
+.rpop .pmstate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.pmstate .k { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); white-space: nowrap; }
+.pmstate .v { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
+.pmstate .v b { font-weight: 700; }
+.pmstate .pmsrc { font-size: 11px; color: var(--wb-muted-fg); }
+.pmstate .pmnote { grid-column: 1 / -1; margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.pmstate .pmnote.bad { color: var(--wb-fail); }
+.rpop .pmchg { display: grid; gap: 5px; }
+/* unsupported and refused */
+.rpop .pmoff { margin: 0; padding: 6px 9px; border-radius: 8px; background: var(--wb-muted); font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmerr { margin: 0; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); font-size: 11.5px; display: grid; gap: 2px; }
+.rpop .pmerr span { color: color-mix(in srgb, var(--wb-fail) 70%, var(--wb-fg)); }
+.rpop .pbtn.pmfull { background: var(--wb-fail); color: var(--wb-card); }
+/* the full-permission warning: the delete dialog's frame and parts */
+.rdeldlg .rdhd .i.pmlock { color: var(--wb-fail); }
+.rdeldlg .pmack { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fail) 45%, transparent); cursor: pointer; font-weight: 600; }
+.rdeldlg .pmack input { margin: 2px 0 0; accent-color: var(--wb-fail); flex: none; }
+/* the head chip beside the harness badge */
+.chip.pmhead { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; background: var(--wb-muted); color: var(--wb-fg); font-weight: 700; }
+.chip.pmhead .i { width: 11px; height: 11px; }
+.chip.pmhead .pmq { line-height: 15px; padding: 0 5px; margin-right: -4px; }
+/* mockup chrome only: a gallery of popovers and their captions */
+.pmgal { position: fixed; inset: 0; z-index: 70; overflow: auto; background: var(--wb-bg); color: var(--wb-fg); padding: 22px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 18px; align-content: flex-start; justify-content: center; font: 13px/1.45 var(--wb-sans); }
+.pmgal .pmcard { display: grid; gap: 6px; align-content: start; width: 330px; max-width: 100%; }
+.pmgal .pmcap { font-size: 12px; font-weight: 800; color: var(--wb-fg); }
+.pmgal .pmcap span { display: block; font-weight: 400; font-size: 11.5px; color: var(--wb-muted-fg); }
+.pmgal .rpop { position: static; width: auto; max-height: none; }
+.pmgal .pmtitle { flex: 1 0 100%; font-size: 14px; font-weight: 800; text-align: center; }
+</style>
+
+<!-- 1. Lead creation, shown only when /support/choices names
+     permission_levels for the picked harness. "기본(기존 동작)" leads and is
+     preselected: native auto on the legacy route, no permission_level sent.
+     The native mode stays editable behind a collapsed disclosure; picking a
+     level disables it and shows the mapped mode. Start with "full" opens the
+     warning. -->
+<template data-state="create">
+<div class="rpop pm-anchor-rail" role="dialog" aria-label="새 세션">
+  <div class="sphd">새 세션</div>
+  <div class="sploc"><svg class="i" aria-hidden="true"><use href="#i-repo"/></svg><span>devenv</span><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><b>feat/agent-popup</b><code>~/devenv/.ws-worktrees/agent-popup</code></div>
+  <div class="spsec"><div class="spseg" role="radiogroup" aria-label="하네스"><button type="button" role="radio" aria-checked="true">Claude</button><button type="button" role="radio" aria-checked="false">Pi</button></div></div>
+  <div class="spsec">
+    <div class="splbl">권한 수준</div>
+    <div class="spseg pmseg" role="radiogroup" aria-label="권한 수준"><button type="button" role="radio" aria-checked="true">기본(기존 동작)</button><button type="button" role="radio" aria-checked="false">읽기 전용</button><button type="button" role="radio" aria-checked="false">작업 폴더 쓰기</button><button type="button" role="radio" aria-checked="false" class="full">전체</button></div>
+    <p class="pmwhat">지금과 같은 동작으로 시작합니다. 권한 수준을 보내지 않습니다.</p>
+    <p class="pmmap">Claude <code>auto</code> 모드 · 아래 고급에서 바꿀 수 있습니다</p>
+  </div>
+  <div class="spopts">
+    <div class="sprc"><label>모델</label><select class="spsm mono"><option>opus-4.7</option></select></div>
+    <div class="sprc"><label>노력 수준</label><select class="spsm"><option>high</option></select></div>
+    <p class="spdesc">--effort high</p>
+  </div>
+  <details class="pmadv"><summary>고급: 네이티브 권한 모드</summary>
+    <div class="sprc"><label>권한 모드</label><select class="spsm"><option>auto</option></select></div>
+    <p class="spdesc">분류기가 위험하다고 본 호출만 묻습니다.</p>
+  </details>
+  <div class="spsec"><div class="splbl">플러그인</div><div class="spseg"><button type="button" aria-checked="true">기본</button><button type="button" aria-checked="false">격리</button></div><p class="spdesc">번들된 ws/wsflow가 설치된 사본을 대체하며, 다른 플러그인은 그대로 유지됩니다.</p></div>
+  <p class="pmfine">권한 수준은 의도 표시이며 샌드박스가 아닙니다.</p>
+  <div class="sprow"><span class="spnote"></span><button type="button" class="pbtn">취소</button><button type="button" class="pbtn go">시작</button></div>
+</div>
+</template>
+
+<!-- 1b. Lead creation with Pi: the same segment; Pi has no native permission
+     mode, so every level is advisory and there is no native disclosure. -->
+<template data-state="create-pi">
+<div class="rpop pm-anchor-rail" role="dialog" aria-label="새 세션">
+  <div class="sphd">새 세션</div>
+  <div class="sploc"><svg class="i" aria-hidden="true"><use href="#i-repo"/></svg><span>devenv</span><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><b>feat/agent-popup</b><code>~/devenv/.ws-worktrees/agent-popup</code></div>
+  <div class="spsec"><div class="spseg" role="radiogroup" aria-label="하네스"><button type="button" role="radio" aria-checked="false">Claude</button><button type="button" role="radio" aria-checked="true">Pi</button></div></div>
+  <div class="spsec">
+    <div class="splbl">권한 수준</div>
+    <div class="spseg pmseg" role="radiogroup" aria-label="권한 수준"><button type="button" role="radio" aria-checked="false">기본(기존 동작)</button><button type="button" role="radio" aria-checked="false">읽기 전용</button><button type="button" role="radio" aria-checked="true">작업 폴더 쓰기</button><button type="button" role="radio" aria-checked="false" class="full">전체</button></div>
+    <p class="pmwhat">작업 폴더 안에서의 수정을 요청합니다.</p>
+    <p class="pmmap">Pi에는 네이티브 권한 모드가 없습니다 · 세 수준 모두 <span class="pmq advisory">권고</span></p>
+  </div>
+  <div class="spopts">
+    <div class="sprc"><label>모델</label><select class="spsm mono"><option>gpt-5.5</option></select></div>
+    <div class="sprc"><label>노력 수준</label><select class="spsm"><option>medium</option></select></div>
+    <p class="spdesc">--thinking medium</p>
+  </div>
+  <div class="spsec"><div class="splbl">플러그인</div><div class="spseg"><button type="button" aria-checked="false">기본</button><button type="button" aria-checked="true">격리</button></div><p class="spdesc">번들된 ws/wsflow만 로드되며, 권한·훅·메모리·MCP 설정은 유지됩니다. 독립 실행형 Pi 바이너리는 격리만 지원합니다.</p></div>
+  <p class="pmfine">권한 수준은 의도 표시이며 샌드박스가 아닙니다.</p>
+  <div class="sprow"><span class="spnote"></span><button type="button" class="pbtn">취소</button><button type="button" class="pbtn go">시작</button></div>
+</div>
+</template>
+
+<!-- 2. Existing lead settings, legacy-derived: the head chip's session
+     menu. The derived level is dashed and tagged 추정; nothing is selected
+     until the user picks. The native mode stays editable in the disclosure. -->
+<template data-state="settings">
+<div class="rpop pm-anchor-head" data-chip="작업 폴더 쓰기&lt;span class=&quot;pmtag&quot;&gt;추정&lt;/span&gt;&lt;span class=&quot;pmq advisory&quot;&gt;권고&lt;/span&gt;" role="dialog" aria-label="대시보드가 실행하는 세션">
+  <div class="sphd">대시보드가 실행하는 세션</div>
+  <div class="pmstate">
+    <span class="k">의도</span><span class="v"><b>작업 폴더 쓰기</b><span class="pmsrc">· 기존 설정에서 추정</span></span>
+    <span class="k">네이티브</span><span class="v">Claude <code>auto</code><span class="pmsrc">· 하네스가 보고함</span></span>
+    <span class="k">근거</span><span class="v"><span class="pmq advisory">권고</span><span class="pmsrc">하네스가 이 경계를 강제한다는 근거가 없습니다</span></span>
+  </div>
+  <div class="spsec pmchg">
+    <div class="splbl">권한 수준</div>
+    <div class="spseg pmseg" role="radiogroup" aria-label="권한 수준"><button type="button" role="radio" aria-checked="false">읽기 전용</button><button type="button" role="radio" aria-checked="false" class="derived">작업 폴더 쓰기<span class="pmtag">추정</span></button><button type="button" role="radio" aria-checked="false" class="full">전체</button></div>
+    <p class="pmfine">아직 고른 수준이 없습니다. 고르면 명시적 선택이 됩니다. 낮추기는 저장되어 재시작해도 유지되고, 올리기는 사용자만 할 수 있습니다.</p>
+  </div>
+  <div class="spopts">
+    <div class="sprc"><label>모델</label><select class="spsm mono"><option>opus-4.7</option></select></div>
+    <div class="sprc"><label>노력 수준</label><select class="spsm"><option>high</option></select></div>
+    <p class="spdesc">--effort high</p>
+  </div>
+  <details class="pmadv" open><summary>고급: 네이티브 권한 모드</summary>
+    <div class="sprc"><label>권한 모드</label><select class="spsm"><option>auto</option></select></div>
+    <p class="spdesc">분류기가 위험하다고 본 호출만 묻습니다.</p>
+  </details>
+  <p class="spnote">변경은 다음 턴부터 적용됩니다.</p>
+  <div class="spacts">
+    <button type="button" class="spact"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg><span>중지<span class="gs">프로세스를 끝냅니다. 다음 메시지나 메일이 오면 다시 시작합니다.</span></span></button>
+    <button type="button" class="spact"><svg class="i" aria-hidden="true"><use href="#i-archive"/></svg><span>보관<span class="gs">레일에서 숨깁니다.</span></span></button>
+    <button type="button" class="spact danger"><svg class="i" aria-hidden="true"><use href="#i-power"/></svg><span>닫기<span class="gs">대화와 프로세스를 종료하고 메일 깨우기를 중지합니다.</span></span></button>
+  </div>
+</div>
+</template>
+
+<!-- 2b. The same menu after the user picked 읽기 전용: an explicit selection,
+     so the native row is disabled and shows the mapped mode. -->
+<template data-state="settings-picked">
+<div class="rpop pm-anchor-head" data-chip="읽기 전용&lt;span class=&quot;pmq pending&quot;&gt;관측 대기&lt;/span&gt;" role="dialog" aria-label="대시보드가 실행하는 세션">
+  <div class="sphd">대시보드가 실행하는 세션</div>
+  <div class="pmstate">
+    <span class="k">의도</span><span class="v"><b>읽기 전용</b><span class="pmsrc">· 명시적 선택</span></span>
+    <span class="k">네이티브</span><span class="v">Claude <code>plan</code><span class="pmsrc">· 다음 턴에 전환</span></span>
+    <span class="k">근거</span><span class="v"><span class="pmq pending">관측 대기</span><span class="pmsrc">하네스가 아직 모드를 보고하지 않았습니다</span></span>
+  </div>
+  <div class="spsec pmchg">
+    <div class="splbl">권한 수준</div>
+    <div class="spseg pmseg" role="radiogroup" aria-label="권한 수준"><button type="button" role="radio" aria-checked="true">읽기 전용</button><button type="button" role="radio" aria-checked="false">작업 폴더 쓰기</button><button type="button" role="radio" aria-checked="false" class="full">전체</button></div>
+    <p class="pmwhat">살펴보기만 하고 수정하지 않도록 요청합니다.</p>
+    <p class="pmmap">Claude <code>plan</code> 모드로 전환 · <span class="pmq partial">부분</span> plan이 관측되면 편집이 막힙니다</p>
+    <p class="pmfine">낮추기는 저장되어 재시작해도 유지됩니다. 올리기는 사용자만 할 수 있습니다.</p>
+  </div>
+  <div class="spopts">
+    <div class="sprc"><label>모델</label><select class="spsm mono"><option>opus-4.7</option></select></div>
+    <div class="sprc"><label>노력 수준</label><select class="spsm"><option>high</option></select></div>
+    <p class="spdesc">--effort high</p>
+  </div>
+  <details class="pmadv" open><summary>고급: 네이티브 권한 모드<span class="pmown">권한 수준이 결정</span></summary>
+    <div class="sprc"><label>권한 모드</label><select class="spsm" disabled><option>plan</option></select></div>
+    <p class="spdesc">권한 수준(읽기 전용)에서 정해집니다. 바꾸려면 위에서 수준을 고르세요.</p>
+  </details>
+  <p class="spnote">변경은 다음 턴부터 적용됩니다.</p>
+  <div class="spacts">
+    <button type="button" class="spact"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg><span>중지<span class="gs">프로세스를 끝냅니다. 다음 메시지나 메일이 오면 다시 시작합니다.</span></span></button>
+    <button type="button" class="spact"><svg class="i" aria-hidden="true"><use href="#i-archive"/></svg><span>보관<span class="gs">레일에서 숨깁니다.</span></span></button>
+    <button type="button" class="spact danger"><svg class="i" aria-hidden="true"><use href="#i-power"/></svg><span>닫기<span class="gs">대화와 프로세스를 종료하고 메일 깨우기를 중지합니다.</span></span></button>
+  </div>
+</div>
+</template>
+
+<!-- 3. The full-permission warning: the creation popover with "full"
+     picked stays behind; Start opened this modal. Cancel sends nothing; the
+     grant button enables only once the box is ticked, and only that submit
+     carries permission_full_ack:true. Shown as it opens: unticked, grant
+     disabled, focus on Cancel. -->
+<template data-state="full-warning">
+<div class="rpop pm-anchor-rail" role="dialog" aria-label="새 세션">
+  <div class="sphd">새 세션</div>
+  <div class="sploc"><svg class="i" aria-hidden="true"><use href="#i-repo"/></svg><span>devenv</span><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><b>feat/agent-popup</b><code>~/devenv/.ws-worktrees/agent-popup</code></div>
+  <div class="spsec"><div class="spseg"><button type="button" aria-checked="true">Claude</button><button type="button" aria-checked="false">Pi</button></div></div>
+  <div class="spsec">
+    <div class="splbl">권한 수준</div>
+    <div class="spseg pmseg" role="radiogroup" aria-label="권한 수준"><button type="button" role="radio" aria-checked="false">기본(기존 동작)</button><button type="button" role="radio" aria-checked="false">읽기 전용</button><button type="button" role="radio" aria-checked="false">작업 폴더 쓰기</button><button type="button" role="radio" aria-checked="true" class="full">전체</button></div>
+    <p class="pmwhat">공통 제한을 모두 해제합니다. 시작 전에 확인합니다.</p>
+    <p class="pmmap">Claude <code>bypassPermissions</code> 모드로 실행 · <span class="pmq advisory">권고</span></p>
+  </div>
+  <div class="sprow"><span class="spnote"></span><button type="button" class="pbtn">취소</button><button type="button" class="pbtn go">시작…</button></div>
+</div>
+<dialog class="rdeldlg pm-modal" aria-labelledby="pmdh">
+  <h2 class="rdhd" id="pmdh"><svg class="i pmlock" aria-hidden="true"><use href="#i-lock"/></svg>전체 권한으로 시작할까요?</h2>
+  <div class="rdpath">devenv · feat/agent-popup · Claude</div>
+  <div class="rdfacts">
+    <div class="rdfact bad"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg><span>Claude를 <span class="pmc">bypassPermissions</span> 모드로 실행합니다. 도구 호출마다 묻지 않습니다.</span></div>
+    <div class="rdfact warn"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg><span>작업 폴더 밖의 파일 수정, 셸 명령, 네트워크를 공통 수준에서 막지 않습니다.</span></div>
+    <div class="rdfact"><svg class="i" aria-hidden="true"><use href="#i-wrench"/></svg><span>도구·MCP 허용 목록 같은 기존 능력 제한은 그대로입니다. 이 표시는 샌드박스가 아닙니다.</span></div>
+    <div class="rdfact"><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span>에이전트는 권한을 스스로 올릴 수 없습니다. 낮추기는 언제든 세션 메뉴에서 할 수 있습니다.</span></div>
+  </div>
+  <label class="pmack"><input type="checkbox">이 세션에 전체 권한을 주는 위험을 이해했습니다.</label>
+  <div class="rdrow"><button type="button" class="pbtn">취소</button><button type="button" class="pbtn danger" disabled>전체 권한으로 시작</button></div>
+</dialog>
+</template>
+
+<!-- 4. A lead's permission state, as the session menu's top block shows it
+     in five cases, plus the head chip. Intent, native mode and evidence
+     never merge; evidence is partial, advisory or pending, never enforced. -->
+<template data-state="state">
+<div class="pmgal">
+  <div class="pmtitle">세션 권한 상태: 의도 · 네이티브 모드 · 근거</div>
+  <div class="pmcard"><div class="pmcap">A. Claude, 명시적 읽기 전용<span>plan이 관측됨 → 부분</span></div>
+    <div class="rpop"><div class="pmstate">
+      <span class="k">의도</span><span class="v"><b>읽기 전용</b><span class="pmsrc">· 명시적 선택</span></span>
+      <span class="k">네이티브</span><span class="v">Claude <code>plan</code><span class="pmsrc">· 하네스가 보고함</span></span>
+      <span class="k">근거</span><span class="v"><span class="pmq partial">부분</span><span class="pmsrc">편집은 막히지만 셸·MCP·플러그인 동작은 증명되지 않습니다</span></span>
+    </div></div></div>
+  <div class="pmcard"><div class="pmcap">B. Claude, 선택 없음 (기존 세션)<span>네이티브 auto에서 추정, 저장하지 않음</span></div>
+    <div class="rpop"><div class="pmstate">
+      <span class="k">의도</span><span class="v"><b>작업 폴더 쓰기</b><span class="pmsrc">· 기존 설정에서 추정</span></span>
+      <span class="k">네이티브</span><span class="v">Claude <code>auto</code><span class="pmsrc">· 하네스가 보고함</span></span>
+      <span class="k">근거</span><span class="v"><span class="pmq advisory">권고</span><span class="pmsrc">하네스가 이 경계를 강제한다는 근거가 없습니다</span></span>
+    </div></div></div>
+  <div class="pmcard"><div class="pmcap">C. Pi, 명시적 작업 폴더 쓰기<span>Pi에는 네이티브 권한 모드가 없음</span></div>
+    <div class="rpop"><div class="pmstate">
+      <span class="k">의도</span><span class="v"><b>작업 폴더 쓰기</b><span class="pmsrc">· 명시적 선택</span></span>
+      <span class="k">네이티브</span><span class="v"><span class="pmsrc">없음 · Pi에는 권한 모드가 없습니다</span></span>
+      <span class="k">근거</span><span class="v"><span class="pmq advisory">권고</span><span class="pmsrc">Pi는 이 경계를 강제하지 않습니다</span></span>
+    </div></div></div>
+  <div class="pmcard"><div class="pmcap">D. Claude, 요청과 다른 모드 보고<span>읽기 전용을 요청했지만 acceptEdits로 실행 중</span></div>
+    <div class="rpop"><div class="pmstate">
+      <span class="k">의도</span><span class="v"><b>읽기 전용</b><span class="pmsrc">· 명시적 선택</span></span>
+      <span class="k">네이티브</span><span class="v">Claude <code>acceptEdits</code><span class="pmq mismatch">요청: plan</span></span>
+      <span class="k">근거</span><span class="v"><span class="pmq advisory">권고</span><span class="pmsrc">보고된 모드가 의도와 다릅니다</span></span>
+    </div></div></div>
+  <div class="pmcard"><div class="pmcap">E. Claude, 아직 관측 없음<span>프로세스 시작 전이거나 모드 보고 대기</span></div>
+    <div class="rpop"><div class="pmstate">
+      <span class="k">의도</span><span class="v"><b>전체</b><span class="pmsrc">· 명시적 선택</span></span>
+      <span class="k">네이티브</span><span class="v">Claude <code>bypassPermissions</code><span class="pmsrc">· 요청됨, 보고 대기</span></span>
+      <span class="k">근거</span><span class="v"><span class="pmq pending">관측 대기</span><span class="pmsrc">하네스가 아직 모드를 보고하지 않았습니다</span></span>
+    </div></div></div>
+  <div class="pmcard"><div class="pmcap">헤드 칩<span>하네스 배지 옆, 의도와 근거만; 누르면 세션 메뉴</span></div>
+    <div class="rpop" style="gap:8px">
+      <div><span class="host sse"><span class="dot"></span>claude</span><span class="chip pmhead"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg>읽기 전용<span class="pmq partial">부분</span></span></div>
+      <div><span class="host sse"><span class="dot"></span>claude</span><span class="chip pmhead"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg>작업 폴더 쓰기<span class="pmq advisory">권고</span></span></div>
+      <div><span class="host sse"><span class="dot"></span>pi</span><span class="chip pmhead"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg>전체<span class="pmq advisory">권고</span></span></div>
+    </div></div>
+</div>
+</template>
+
+<!-- 5. Unsupported and refused: no permission_levels in the current
+     server's choices keeps the legacy native row and sends no selection; a
+     refused selection shows the refusal, creates nothing, and is never
+     retried on a legacy URL; if a re-check still finds none, the user may
+     pick a native mode by hand, labelled as their own choice. -->
+<template data-state="unsupported">
+<div class="pmgal">
+  <div class="pmtitle">지원 없음 · 거부됨 (기존 경로로 대체하지 않음)</div>
+  <div class="pmcard"><div class="pmcap">A. 이 데몬이 권한 수준을 알리지 않음<span>/support/choices에 permission_levels 없음 → 기존 네이티브 모드만</span></div>
+    <div class="rpop">
+      <div class="sphd">새 세션</div>
+      <div class="spsec"><div class="spseg"><button type="button" aria-checked="true">Claude</button><button type="button" aria-checked="false">Pi</button></div></div>
+      <div class="spsec"><div class="splbl">권한 수준</div><p class="pmoff">이 데몬은 공통 권한 수준을 지원하지 않습니다. 아래의 네이티브 권한 모드로 시작합니다.</p></div>
+      <div class="spopts">
+        <div class="sprc"><label>모델</label><select class="spsm mono"><option>opus-4.7</option></select></div>
+        <div class="sprc"><label>권한 모드</label><select class="spsm"><option>auto</option></select></div>
+        <p class="spdesc">분류기가 위험하다고 본 호출만 묻습니다.</p>
+        <div class="sprc"><label>노력 수준</label><select class="spsm"><option>high</option></select></div>
+      </div>
+      <div class="sprow"><span class="spnote"></span><button type="button" class="pbtn">취소</button><button type="button" class="pbtn go">시작</button></div>
+    </div></div>
+  <div class="pmcard"><div class="pmcap">B. 선택이 거부됨 (데몬 교체 후)<span>보낸 요청: /agents/leads/permission → 404</span></div>
+    <div class="rpop">
+      <div class="sphd">새 세션</div>
+      <div class="spsec"><div class="spseg"><button type="button" aria-checked="true">Claude</button><button type="button" aria-checked="false">Pi</button></div></div>
+      <div class="spsec"><div class="splbl">권한 수준</div><div class="spseg pmseg" role="radiogroup" aria-label="권한 수준"><button type="button" role="radio" aria-checked="false">기본(기존 동작)</button><button type="button" role="radio" aria-checked="true">읽기 전용</button><button type="button" role="radio" aria-checked="false">작업 폴더 쓰기</button><button type="button" role="radio" aria-checked="false" class="full">전체</button></div></div>
+      <p class="pmerr"><b>권한 선택이 거부되었습니다 (404)</b><span>지금 연결된 데몬이 이 요청을 지원하지 않습니다. 세션을 만들지 않았고, 권한 없이 다시 보내지 않았습니다.</span></p>
+      <div class="sprow"><span class="spnote"></span><button type="button" class="pbtn">취소</button><button type="button" class="pbtn go">지원 다시 확인</button></div>
+    </div></div>
+  <div class="pmcard"><div class="pmcap">B2. 다시 확인해도 지원 없음<span>사용자가 직접 네이티브 모드를 고름 · 자동 대체 아님</span></div>
+    <div class="rpop">
+      <div class="sphd">새 세션</div>
+      <div class="spsec"><div class="spseg"><button type="button" aria-checked="true">Claude</button><button type="button" aria-checked="false">Pi</button></div></div>
+      <div class="spsec"><div class="splbl">권한 수준</div><p class="pmoff">다시 확인했지만 이 데몬은 권한 수준을 지원하지 않습니다. 고른 읽기 전용은 보내지 않습니다.</p></div>
+      <div class="spopts">
+        <div class="sprc"><label>권한 모드</label><select class="spsm"><option>plan</option></select></div>
+        <p class="spdesc">읽기와 계획만 합니다. 직접 고른 네이티브 모드입니다.</p>
+        <div class="sprc"><label>노력 수준</label><select class="spsm"><option>high</option></select></div>
+      </div>
+      <div class="sprow"><span class="spnote"></span><button type="button" class="pbtn">취소</button><button type="button" class="pbtn go">이 네이티브 모드로 시작</button></div>
+    </div></div>
+  <div class="pmcard"><div class="pmcap">C. 세션 메뉴, 지원 없음<span>현재 상태는 보이되 변경 컨트롤은 숨김</span></div>
+    <div class="rpop">
+      <div class="sphd">대시보드가 실행하는 세션</div>
+      <div class="pmstate">
+        <span class="k">의도</span><span class="v"><b>작업 폴더 쓰기</b><span class="pmsrc">· 기존 설정에서 추정</span></span>
+        <span class="k">네이티브</span><span class="v">Claude <code>auto</code></span>
+        <span class="k">근거</span><span class="v"><span class="pmq advisory">권고</span></span>
+        <p class="pmnote">이 데몬에서는 권한 수준을 바꿀 수 없습니다.</p>
+      </div>
+      <div class="spopts">
+        <div class="sprc"><label>권한 모드</label><select class="spsm"><option>auto</option></select></div>
+        <div class="sprc"><label>노력 수준</label><select class="spsm"><option>high</option></select></div>
+      </div>
+    </div></div>
+</div>
+</template>
