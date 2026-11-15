@@ -853,6 +853,31 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
    ratio: --sa and --sb are fr shares the page script sets from the saved
    splitter position, so neither pane resizes with its content; the px floors
    keep either from collapsing on a short window. */
+/* Saved lead history has its own layout, not a synthetic live adapter. */
+.dash.history .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+.dash.history .top { flex: none; }
+.dgrid.history { flex: 1 1 0; min-height: 0; display: grid; gap: 10px 16px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+.dgrid.history > * { min-width: 0; min-height: 0; }
+.dgrid.history > .tabbar { grid-column: 1 / -1; }
+.dgrid.history > .convo, .dgrid.history > .bcol { grid-column: 1; grid-row: 2; overflow: auto; }
+.dgrid.history > .bcol { overflow-anchor: none; }
+.dgrid.history[data-tab="board"] > .convo, .dgrid.history:not([data-tab="board"]) > .bcol { display: none; }
+@media (min-width: 1100px) {
+  .dgrid.history { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(0, 1fr); }
+  .dgrid.history > .tabbar { display: none; }
+  .dgrid.history[data-tab] > .convo, .dgrid.history[data-tab] > .bcol { display: block; grid-row: 1; }
+  .dgrid.history > .bcol { grid-column: 2; }
+}
+.wbeffects { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 8px; min-width: 0; }
+.wbeffects > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.wbeffects > summary time { margin-left: auto; flex: none; }
+.wbeffects > ol { margin: 10px 0 0; padding-left: 20px; }
+.wbeffects li { margin: 8px 0; min-width: 0; }
+.wbeffect-id { overflow-wrap: anywhere; }
+.wbeffect-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.wbeffect-values pre, .wbeffect-fallback { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; padding: 6px; background: var(--wb-muted); }
+.wbeffect-note { color: var(--wb-muted-fg); font-size: 12px; }
+@media (max-width: 640px) { .wbeffect-values { grid-template-columns: minmax(0, 1fr); } }
 .dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.live .top { flex: none; }
 .dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
@@ -1572,11 +1597,11 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rscrim { display: none; }
 @media (min-width: 1600px) {
   .dbody { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0 16px; align-items: start; }
-  .dash.live .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
-  .dash.live .dbody > .dgrid.live { min-height: 0; }
+  .dash.live .dbody, .dash.history .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
+  .dash.live .dbody > .dgrid.live, .dash.history .dbody > .dgrid.history { min-height: 0; }
   body.tk-paged .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
   .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
-  .dash:not(.live) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  .dash:not(.live):not(.history) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
   .top > .back { display: none; }
 }
 @media (max-width: 1599.98px) {
@@ -1626,7 +1651,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
   :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
-  .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  .dash:not(.live):not(.history) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
   :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
 }
 @media (min-width: 1600px) and (max-width: 2199.98px) {

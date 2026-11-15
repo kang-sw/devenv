@@ -305,6 +305,9 @@ type Env struct {
 
 // Outcome is what an accepted update did.
 type Outcome struct {
+	// Effects holds typed semantic transitions, in command order. It is
+	// meaningful only after the enclosing store commits, never on refusal.
+	Effects []Effect
 	// IDs holds the ID of every wb:add command, in command order.
 	IDs []int
 	// Withdrawn holds the ID of every item a wb:close withdrew, in command
@@ -595,6 +598,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	work.Seq++
 	mark := work.Seq
 	var out Outcome
+	previous := effectSnapshot(work)
 	var optionWarn []int
 	embedDir := false
 	// closedBy names, per item a close in this batch withdrew, that close.
@@ -619,6 +623,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	for _, cmd := range cmds {
 		if cmd.IsGroup() {
 			keys[cmd.Scope] = applyGroup(p, work, origins, cmd)
+			out.Effects = append(out.Effects, semanticEffects(previous, work)...)
+			previous = effectSnapshot(work)
 			continue
 		}
 		switch cmd.Tag {
@@ -640,6 +646,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 			applyLog(p, work, cmd, topicOf, env.Now)
 		case "wb:state":
 			applyTopicState(p, work, cmd, topicOf, env.Now)
+		case "wb:eta":
+			applyTopicETA(p, work, cmd, topicOf, env.Now)
 		case "wb:close":
 			withdrawn := applyClose(p, work, cmd, topicOf, mark, env.Now)
 			for _, id := range withdrawn {
@@ -666,6 +674,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 				work.EmbedDir = dir
 			}
 		}
+		out.Effects = append(out.Effects, semanticEffects(previous, work)...)
+		previous = effectSnapshot(work)
 	}
 	if !embedDir && work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {
 		p.Add("embed_dir %s (stored for this session) is no longer an existing directory; send <wb:embed-dir path=\"...\"/> with the host's current folder, or path=\"\" to clear it", work.EmbedDir)
@@ -676,6 +686,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	}
 	work.evictArchive()
 	work.pruneLabels()
+	out.Effects = append(out.Effects, semanticEffects(previous, work)...)
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
 	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.structuralWarnings())
