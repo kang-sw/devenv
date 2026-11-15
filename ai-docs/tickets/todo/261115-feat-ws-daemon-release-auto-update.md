@@ -1,19 +1,22 @@
 ---
-title: "ws dashboard daemon auto-update from GitHub releases"
+title: "Electron shell: user-approved daemon update from GitHub releases"
 related:
-  261115-feat-werkschaft-electron-shell: "owner sequencing: this ticket is ordered after the Electron shell; not a technical prerequisite. That ticket carries the thin-Tauri daemon-ownership decision this ticket partly supersedes"
+  261115-feat-werkschaft-electron-shell: "prerequisite: the update runs in the Electron shell main process (its Phase 1 shell must exist). That ticket carries the shell daemon rule (never replace or stop a daemon) that this ticket gives one user-approved exception"
   261113-feat-werkschaft-thin-tauri-shell: "Decision 2 (daemon ownership, 'revisit when the app self-updates') is the decision this ticket revisits"
   261112-research-ws-ade-desktop-shell-and-rename: "Daemon ownership section records the same policy and its minor-lockout concern"
 ---
 
-# ws dashboard daemon auto-update from GitHub releases
+# Electron shell: user-approved daemon update from GitHub releases
 
 ## Background
 
 The owner asked (relayed by MAIN, 2026-11-15 at 01:29Z) for the dashboard
-daemon to update itself: check the GitHub release tag, download the latest
-release whole into a unique path, then swap daemons. Implementation is not
-authorized yet; the owner orders this ticket after
+daemon to update from GitHub releases: check the release tag, download the
+latest release whole into a unique path, then swap daemons. The owner then
+scoped it (01:49Z): the update is a feature of the Electron app shell only
+("애초에 자동 업데이트는 electron 앱 셸에만 생각하고 있긴 했는데요."), and
+nothing swaps without the user's click. Implementation is not authorized
+yet; the owner orders this ticket after
 `261115-feat-werkschaft-electron-shell`.
 
 Evidence was taken read-only on 2026-11-15 (develop `1b815bf67` worktree);
@@ -90,114 +93,179 @@ paths are relative to the repository root.
 
 Owner decisions (relayed by MAIN, 2026-11-15):
 
-- **(860)=a: patch releases auto-swap; a minor bump notifies.** A newer
-  release with the running daemon's major.minor and a higher patch is
-  downloaded, verified and swapped in automatically. A newer minor (or
-  major) shows a notification with an "update" button and plugin-update
-  guidance instead. Rejected: auto-swapping minors too (an older-minor
-  launcher is locked out the moment a newer-minor daemon runs).
-- **(861) closed: the update applies to the single global daemon.** There
-  is one daemon per cache root and the newest version already wins in both
-  the launcher and `Ensure`, so a daemon that updates itself does not fight
-  launcher-started daemons. Rejected premise: limiting auto-update to an
-  Electron-launched daemon.
+- **(867)=c: no automatic swap.** When a newer patch release (same
+  major.minor as the running daemon, higher patch) is found and verified,
+  the shell shows a persistent bottom-right toast the user must dismiss,
+  "새 패치가 있습니다. 적용할까요?", and swaps only when the user clicks
+  apply. Dismiss hides it until a newer release appears. Rejected: swapping
+  at the next idle moment with a 24-hour cap; swapping immediately after
+  verification. This supersedes the auto-swap half of (860)=a below.
+- **(869) withdrawn: the update lives only in the Electron shell.** The
+  shell's main process checks the release, downloads, prompts and performs
+  the swap. The daemon and the plugin packages gain no autonomous update
+  path and no config knob (no `dashboard.auto_update`, no per-package
+  default). A dashboard opened in a plain browser shows no update notice.
+  The Tauri shell, kept until parity, gets no update feature.
+- **(860)=a, as narrowed by (867) and (869): patch versus minor.** A patch
+  is offered through the toast above. A newer minor (or major) is offered
+  with a warning because an older-minor plugin session is locked out the
+  moment a newer-minor daemon runs; see (868). Rejected: treating a minor
+  exactly like a patch with no warning.
+- **(868)=a: a minor uses the same toast plus one confirmation.** A newer
+  minor (or major) release shows the same bottom-right toast; after apply,
+  one extra confirmation dialog lists the attached older-minor sessions
+  that will disconnect and the plugin-update steps (Claude `/plugin`
+  update, Codex plugin refresh), and confirming performs the daemon swap.
+  Rejected: a toast that only shows the plugin-update steps and never swaps
+  to a new minor.
+- **(861) closed: the target is the single global daemon.** The shell
+  updates whichever daemon serves its cache root, whoever started it; the
+  newest version already wins in the launcher and in `Ensure`, so the
+  updated daemon does not fight launcher-started daemons. Rejected premise:
+  updating only a daemon the shell itself launched.
 
-Announced defaults relayed by MAIN:
+Announced defaults relayed by MAIN (still standing after the rescope):
 
-- `-dev` builds never auto-update (and never show the minor notice).
+- A `-dev` daemon is never offered an update (a release never replaces a
+  same-core `-dev` daemon anyway).
 - Swap only after the downloaded asset's SHA256 matches the release's
   published `SHA256SUMS`.
-- Keep the previous unique executable path and roll back to it when the
-  new daemon fails its health check.
-- Reuse the existing daemon replacement path (`Ensure`, as
-  `applyLANChange` does) rather than inventing a new handover.
+- Keep the previous executable and roll back to it when the new daemon
+  fails its health check.
+- Reuse the existing replacement path (`Ensure`) rather than inventing a
+  new handover.
 - Check every few hours; silently skip when offline.
 - Start the downloaded daemon with an accurate `--build-time`, not the
   download's mtime.
 
+Consequences of the owner answers (announced by EXEC4, accepted by MAIN on
+2026-11-15 at 01:52Z):
+
+- **Shell daemon rule gains one exception.** The Electron ticket carries
+  thin-Tauri Decision 2/3: the shell attaches, starts a daemon only when none
+  runs, never replaces or stops one, and never runs `ws-mcp daemon-start`.
+  The user's apply click is the single exception: the shell runs
+  `<downloaded exe> daemon-start --build-time <ms>`, whose `Ensure` handoff
+  replaces an older daemon under the existing newest-wins rules
+  (`cmd/ws-mcp/proxy.go:354-399`, `internal/wsdashboard/ensure.go:124-184`).
+  No other shell path replaces or stops a daemon. Thin-Tauri Decision 2's
+  clause "the plugin launcher's daemon stays the authority until self-update
+  lands" is superseded by this user-approved update
+  (`261113-feat-werkschaft-thin-tauri-shell` Decision 2: "Revisit when the
+  app self-updates").
+- **No daemon-side change.** The check, download, verification, prompt,
+  swap and rollback live in the shell, so the earlier daemon-side items
+  (the `dashboard.auto_update` knob, `/health` update-status fields, a
+  loopback-only update route, the dashboard `#dash-banner`/toast notices,
+  and the daemon-orchestrated rollback) are dropped.
+- **Compatibility: no tier.** Nothing in the ws-mcp cross-version surface
+  changes (no MCP tool, hello, store, tracker event, manifest field,
+  `endpoint.json`, `runtime.json` or asset name;
+  `ai-docs/manuals/release-compatibility.md:59-80`); the shell only consumes
+  the existing release assets, `/health` and `daemon-start`.
+- **Shell self-update is out of scope.** No release asset ships the Electron
+  app, so the shell updates the daemon only.
+
+Technical calls (the release-source, release-check and build-time items were
+posted by MAIN as no-answer-needed on 2026-11-15 and carry over unchanged;
+the rest were re-derived for the shell-only scope and accepted by MAIN on
+2026-11-15 at 01:52Z):
+
+- **Release source = the launcher's.** `kang-sw/devenv` (the product's
+  release repository, the launcher's `runtime.json` default) with the
+  `WS_MCP_RELEASE_REPOSITORY` / `WS_MCP_RELEASE_BASE_URL` overrides honored
+  from the shell's environment (`ws-mcp-launcher.py:357-382`), so the
+  launcher and the shell agree on "latest".
+- **Release check.** `GET https://api.github.com/repos/<repo>/releases/latest`
+  from the shell main process (unauthenticated, 10 s timeout), first 10
+  minutes after shell start, then every 6 hours with ±10 % jitter; any
+  network error, 403 or 429 skips silently to the next tick. The running
+  daemon's version and build come from its `/health`
+  (`internal/wsdashboard/daemon.go:284-301`). Rejected: polling download
+  URLs by guessed tag (only the API names the latest tag and its asset
+  upload times).
+- **Build time.** `--build-time` is the matching asset's `updated_at` from
+  the same API response, in Unix milliseconds. Rejected: the downloaded
+  file's mtime (download time, the equal-version tie) and a new build-time
+  field in the release metadata sidecar (a release-pipeline change for a
+  value the API already gives).
+- **Download location.** The verified asset (`SHA256SUMS` plus the
+  `.metadata.json` sidecar whose version equals the tag) goes to a
+  shell-owned content-addressed directory under the app's user-data
+  directory, `daemon-updates/ws-mcp-<sha256 first 16><ext>`, downloaded to a
+  `.tmp` name and renamed after verification. Rejected: the daemon's
+  `dashboard/bin/` staging directory, because the daemon that next holds the
+  lock prunes every other settled entry there after a 2-minute grace
+  (`internal/wsdashboard/spawn.go:69-101`), which could delete the
+  rollback target mid-swap.
+- **Rollback.** Before the swap the shell copies the running daemon's
+  executable into the same shell-owned directory, locating it from the
+  `/health` PID through the OS process table (macOS first; the Windows
+  equivalent belongs with the Electron ticket's Phase 3). If the successor
+  is not healthy within the `Ensure` wait, the shell starts the retained
+  copy with `daemon-start --build-time <its /health build_time>` and
+  records the failed version so it is not offered again until a newer
+  release appears. When the executable cannot be located, the toast's apply
+  action is disabled with the reason shown. Rejected: an optional
+  `executable` field in `/health` (a daemon change and a path disclosure to
+  LAN viewers for a lookup the OS already answers); falling back to the
+  shell's bundled daemon (may be older than the one it replaced). This is
+  the least-certain call: the worker verifies the PID lookup on the
+  supported macOS versions and reports if it fails.
+- **Toast surface.** The toast is a small shell-owned overlay view
+  (bottom-right of the window, local packaged content only, never remote
+  content) whose own preload exposes exactly two actions, apply and dismiss,
+  to the main process. The dashboard renderer keeps the Electron ticket's
+  zero-authority posture (no preload, no IPC). Rejected: a native OS
+  notification (not a persistent in-window toast); a toast inside the
+  daemon-served page (the renderer has no channel to the shell by design).
+- **Two phases**: Phase 1 the check, verified download, swap and rollback in
+  the main process; Phase 2 the toast and the minor flow. Rejected: one
+  phase (Phase 1 is testable alone with a fake release server and an
+  isolated daemon, and carries the risk).
+
 ## Constraints
 
 - Implementation is not authorized until the owner says so; the ticket is
-  queued after `261115-feat-werkschaft-electron-shell`.
+  queued after `261115-feat-werkschaft-electron-shell` and needs its Phase 1
+  shell.
+- Code lives in the Electron shell (`agents-plugin-tool/desktop-electron/`,
+  plain CommonJS per the Electron ticket); no ws-mcp source change.
 - Never touch the shared daemon or port 29417; tests use a fake release
-  server and an isolated `WS_CACHE_HOME`. Offline env
-  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`; never the whole
-  `./internal/wsdashboard` package (`go test -run`); end runs with an owned
-  process scan.
-- No change to the `/mcp` hello, the protocol number, `endpoint.json`
-  required fields, `runtime.json`, or release asset names.
+  server, an isolated `WS_CACHE_HOME` and an isolated daemon built from
+  source. Offline env `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`; end runs
+  with an owned process scan.
+- No change to the `/mcp` hello, the protocol number, `endpoint.json`,
+  `runtime.json`, release asset names or the release pipeline.
 - Before editing, read the manuals the AGENTS.md Implementation
   Conventions table binds to the touched paths:
-  `ai-docs/manuals/shipped-surface-boundary.md`,
-  `ai-docs/manuals/release-compatibility.md`,
-  `ai-docs/manuals/ws-mcp.md` (for `internal/mcp/`), and
-  `ai-docs/manuals/wsflow-mirroring.md` (both packages' config manifests).
-
-## Open Decision Queue
-
-Last ID used: pending MAIN board mapping (local labels A1-A14)
-
-(A1) [open] [announced] The thin-Tauri Decision 2 splits: its shell rule (the shell attaches, starts a daemon only when none runs, never replaces or stops one) stays as carried by the Electron ticket; its "the plugin launcher's daemon stays the authority until self-update lands" clause is superseded here, because this is that self-update and its minor-lockout concern is met by (860)=a - `261113-feat-werkschaft-thin-tauri-shell` Decision 2 text ("Revisit when the app self-updates") plus (860)=a.
-
-(A2) [open] [announced] The release source is the same one the launcher uses: `kang-sw/devenv` (the product's release repository, compiled into the daemon as the launcher's `runtime.json` default) with the `WS_MCP_RELEASE_REPOSITORY` / `WS_MCP_RELEASE_BASE_URL` overrides honored - `ws-mcp-launcher.py:357-382`; one source keeps the launcher and the updater from disagreeing about "latest".
-
-(A3) [open] [announced] Compatibility T0: a new optional `dashboard.*` knob, optional `/health` update-status fields, a new loopback-only POST route and new UI; no hello, protocol, `endpoint.json` required field, `runtime.json` or asset-name change - `ai-docs/manuals/release-compatibility.md:59-80`.
-
-(A4) [open] [announced] The update action route and its button exist only for local viewers (`TrustedWrite`: 404 remote, 403 bad Origin); remote/LAN viewers see neither - `access.go:162-175`, an execution-authority write.
-
-(A5) [open] [technical] The daemon queries `GET https://api.github.com/repos/<repo>/releases/latest` (unauthenticated, default proxy-from-environment transport, 10 s timeout), first 10 minutes after start and then every 6 hours with ±10 % jitter; any network error, 403 or 429 skips silently to the next tick - over polling the download URL by guessed tag, because only the API names the latest tag and its asset upload times.
-
-(A6) [open] [technical] `--build-time` is the matching asset's `updated_at` from the same API response, in Unix milliseconds - over the downloaded file's mtime (download time, the tie MAIN flagged) or adding a build-time field to the release metadata sidecar (a release-pipeline change for a value the API already gives).
-
-(A7) [open] [technical] The downloaded asset goes to the existing content-addressed staging directory `<cache root>/dashboard/bin/ws-mcp-dashboard-<sha256 first 16><ext>` after `SHA256SUMS` and the `.metadata.json` sidecar (its version must equal the tag) verify; the running daemon's own staged path is recorded as the rollback target and exempted from pruning until the successor has been healthy for 24 hours - over a new directory, since staging is already unique per content and Windows-lock-safe (`spawn.go:33-65`).
-
-(A8) [open] [technical] Swap and rollback are orchestrated by the old daemon: it runs `Ensure` with the new executable (as `applyLANChange` does); if the successor does not become healthy, it stops the successor process it spawned, restarts its own retained executable through `daemon-start --build-time <its own build time>`, and records the failed version so it is not retried until a newer release appears - over leaving rollback to the next launcher start, which would leave no daemon running meanwhile (`ensure.go:151-159` returns unavailable without restarting anything).
-
-(A9) [open] [technical] After a successful auto-swap the new daemon shows a toast "Updated to vX.Y.Z" once per browser; the minor notice is a persistent `#dash-banner` entry plus an index notice - over toast-only (toasts expire, `toast.js`) or banner-only for patches (a completed patch swap needs no action).
-
-(A10) [open] [policy] When a patch auto-swap happens.
-- Context: a swap drains the daemon: already-sent MCP requests fail, long calls linger up to two minutes on the old process, and hosted sessions are drained (`proxy.go:42-50,306-340`).
-- Alternative a: at the next idle moment: no MCP request in flight and no hosted agent turn running, checked every minute once the verified download is staged; if no idle moment comes within 24 hours, swap anyway.
-- Alternative b: immediately after verification.
-> Recommend a: patches are routine; waiting for idle avoids failing a request or cutting an agent turn, and the 24-hour cap keeps fixes from stalling.
-
-(A11) [open] [policy] What the minor-bump "update" button does.
-- Context: (860)=a says "notification + update button with plugin-update guidance". Swapping to a newer-minor daemon disconnects every older-minor plugin session until its plugin is updated.
-- Alternative a: the button swaps the daemon to the new minor after a confirmation that lists the attached older-minor sessions it will disconnect, and the notice shows the plugin-update steps (Claude `/plugin` update, Codex plugin refresh).
-- Alternative b: the button only shows the plugin-update steps; updating a plugin brings the newer daemon through the launcher's newest-wins rule, so the daemon never swaps to a new minor on its own.
-> Recommend a: it matches "update button" literally, and the confirmation makes the lockout visible before it happens.
-
-(A12) [open] [policy] The per-package default of the new knob `dashboard.auto_update`.
-- Context: `agents-plugin-wsflow/` is the conservative-default distribution of the same product (same keys, only defaults differ).
-- Alternative a: `ws` default `true` (patch auto-swap); `wsflow` default `false` (patches also only notify, with the same button).
-- Alternative b: both `true`.
-- Alternative c: both `false` (opt-in everywhere).
-> Recommend a: the owner's flow becomes the `ws` default, and `wsflow` keeps its conservative posture; either package can flip it.
-
-(A13) [open] [technical] The knob is machine-wide (global scope, registered in code like the other global-only dashboard keys, `internal/mcp/dashboard_config.go:15-33`) and, when `false`, still checks and shows a notice for every newer release, with the same button - over disabling the check entirely, which would hide security patches.
-
-(A14) [open] [technical] Two phases: Phase 1 the daemon side (check, download, verify, idle swap, rollback, knob, `/health` fields); Phase 2 the dashboard side (toast, minor banner and button, confirmation, guidance) - over one phase, because Phase 1 is testable alone with a fake release server and carries the risk.
+  `ai-docs/manuals/shipped-surface-boundary.md` (all of
+  `agents-plugin-tool/`).
 
 ## Phases
 
-### Phase 1: Release check, verified download, patch swap and rollback
+### Phase 1: Release check, verified download, swap and rollback
 
-Implement the decisions above on the daemon side. Verification with a fake
-release server and an isolated cache root (`go test -run`): latest-tag
-parsing and the patch/minor/major/older/`-dev` matrix; offline, 403 and 429
-skips; `SHA256SUMS` and metadata mismatch refusals; the staged path and
-pruning exemption; the idle-swap gate and the 24-hour cap (per (A10));
-`--build-time` from the asset time; a successful swap through `Ensure` with
-launcher reconnect; a successor that fails health triggering rollback to the
-retained executable and the failed version not being retried; the knob
-default per package and its `false` behavior.
+Implement the decisions above in the shell main process. Verification with
+a fake release server and an isolated daemon (Node tests plus one packaged
+smoke): latest-tag parsing and the patch/minor/major/older/`-dev` matrix
+against `/health`; offline, 403 and 429 skips; `SHA256SUMS` and metadata
+mismatch refusals; the `.tmp`-then-rename download into the shell-owned
+directory; `--build-time` from the asset time; a successful swap through
+`daemon-start` with a launcher-style client reconnecting; a successor that
+fails health triggering rollback to the retained copy and the failed
+version not being offered again; the executable-not-located path disabling
+apply; no other code path in the shell running `daemon-start` against a
+running daemon.
 
-### Phase 2: Dashboard notices and the update action
+### Phase 2: Update toast and the minor flow
 
-Add the post-swap toast, the persistent minor notice with its button,
-confirmation and plugin-update guidance, and the loopback-only action route.
-Verification: Go route tests for local/remote/bad-Origin; a headless
-Chromium check against an isolated daemon with a fake release server for the
-toast, the banner, the confirmation listing older-minor sessions and the
-button's effect (per (A11)); no notice on a `-dev` daemon; light and dark
+Add the overlay toast with apply and dismiss, its narrow preload, and the
+minor flow per (868)=a. Verification: a Playwright `_electron` check against
+an isolated daemon and a fake release server for the toast text, dismiss
+persistence until a newer release, apply performing the swap, the minor
+flow (the confirmation lists the older-minor sessions and the
+plugin-update steps, and cancel leaves the daemon untouched), no toast on a
+`-dev` daemon, and the dashboard renderer
+still exposing no `window.require`/`process`/preload API; light and dark
 screenshots.
