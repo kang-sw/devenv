@@ -20,6 +20,19 @@ func stateTopicTag(t *testing.T, out, topic string) string {
 	return ""
 }
 
+func stateViewOutputs(t *testing.T, view View) []string {
+	t.Helper()
+	outputs := []string{render(t, view)}
+	if view.Layout == LayoutFull {
+		regions, err := RenderRegions(view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs = append(outputs, string(regions.Board))
+	}
+	return outputs
+}
+
 func TestTopicStateViewOperationalStates(t *testing.T) {
 	for _, value := range topicStateValues {
 		t.Run(value, func(t *testing.T) {
@@ -32,31 +45,47 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 			if value == StateImplementing {
 				stateApply(t, s, `<wb:topic name="Work"><wb:eta minutes="10" reason="more work"/></wb:topic>`, stateNow.Add(time.Minute))
 			}
-			for name, layout := range layouts() {
-				view := BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})
-				current := s.TopicStates()["Work"]
-				if len(view.Topics) != 1 || !reflect.DeepEqual(view.Topics[0].State, current.State) || view.Topics[0].StateDiagnostic != nil {
-					t.Fatalf("%s: projection = %+v", name, view.Topics)
-				}
-				outputs := []string{render(t, view)}
-				if layout == LayoutFull {
-					regions, err := RenderRegions(view)
-					if err != nil {
-						t.Fatal(err)
+			for _, lang := range []string{"en", "ko"} {
+				for name, layout := range layouts() {
+					view := BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})
+					view.Lang = lang
+					current := s.TopicStates()["Work"]
+					if len(view.Topics) != 1 || !reflect.DeepEqual(view.Topics[0].State, current.State) || view.Topics[0].StateDiagnostic != nil {
+						t.Fatalf("%s: projection = %+v", name, view.Topics)
 					}
-					outputs = append(outputs, string(regions.Board))
-				}
-				for _, out := range outputs {
-					tag := stateTopicTag(t, out, "Work")
-					wantAll(t, tag, `data-state="`+value+`"`)
-					wantNone(t, tag, "data-state-diagnostic")
-					if value != StateImplementing {
-						wantNone(t, tag, "data-state-owner", "data-state-eta-minutes", "data-state-started-at", "data-state-deadline-at", "data-state-run")
-						continue
+					for _, out := range stateViewOutputs(t, view) {
+						labels := map[string]string{
+							StateAwaitingConfirmation: "Awaiting confirmation",
+							StateWaiting:              "Waiting",
+							StateDiscussing:           "Discussing",
+							StateImplementing:         "Implementing",
+						}
+						if lang == "ko" {
+							labels = map[string]string{
+								StateAwaitingConfirmation: "확인 대기",
+								StateWaiting:              "대기",
+								StateDiscussing:           "논의 중",
+								StateImplementing:         "구현 중",
+							}
+						}
+						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wait", StateDiscussing: "discuss", StateImplementing: "impl"}
+						badge := `<span class="topic-state"><span class="stb ` + classes[value] + `"><span class="d" aria-hidden="true"></span>` + labels[value]
+						if value == StateImplementing {
+							badge += ` · <span class="own">executor &#34;&lt;&amp;&gt;&#39;</span>`
+						}
+						wantAll(t, out, badge+`</span></span>`)
+						wantNone(t, out, `<span class="own">executor "`)
+						tag := stateTopicTag(t, out, "Work")
+						wantAll(t, tag, `data-state="`+value+`"`)
+						wantNone(t, tag, "data-state-diagnostic")
+						if value != StateImplementing {
+							wantNone(t, tag, "data-state-owner", "data-state-eta-minutes", "data-state-started-at", "data-state-deadline-at", "data-state-run")
+							continue
+						}
+						run := current.State.Run
+						wantAll(t, tag, `data-state-owner="executor &#34;&lt;&amp;&gt;&#39;"`, `data-state-eta-minutes="10"`,
+							`data-state-started-at="`+run.StartedAt+`"`, `data-state-deadline-at="`+run.DeadlineAt+`"`, `data-state-run="`+run.ID+`"`)
 					}
-					run := current.State.Run
-					wantAll(t, tag, `data-state-owner="executor &#34;&lt;&amp;&gt;&#39;"`, `data-state-eta-minutes="10"`,
-						`data-state-started-at="`+run.StartedAt+`"`, `data-state-deadline-at="`+run.DeadlineAt+`"`, `data-state-run="`+run.ID+`"`)
 				}
 			}
 		})
@@ -77,17 +106,22 @@ func TestTopicStateViewAbsenceAndDiagnostics(t *testing.T) {
 				stateApply(t, s, stateCommand(StateWaiting, ""), stateNow)
 				stateRaw(s, "Work", fmt.Sprintf("e%d", s.EntrySeq+1), tc.raw)
 			}
-			view := BuildView(s, ViewInput{Layout: LayoutFull, ReplyID: "r"})
-			current := view.Topics[0]
-			if current.State != nil || !reflect.DeepEqual(current.StateDiagnostic, s.TopicStates()["Work"].Diagnostic) {
-				t.Fatalf("unexpected authority: %+v", current)
-			}
-			tag := stateTopicTag(t, render(t, view), "Work")
-			wantNone(t, tag, `data-state=`, "data-state-owner", "data-state-eta-minutes", "data-state-started-at", "data-state-deadline-at", "data-state-run")
-			if tc.code == "" {
-				wantNone(t, tag, "data-state-diagnostic")
-			} else {
-				wantAll(t, tag, `data-state-diagnostic="`+tc.code+`"`)
+			for _, layout := range layouts() {
+				view := BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})
+				current := view.Topics[0]
+				if current.State != nil || !reflect.DeepEqual(current.StateDiagnostic, s.TopicStates()["Work"].Diagnostic) {
+					t.Fatalf("unexpected authority: %+v", current)
+				}
+				for _, out := range stateViewOutputs(t, view) {
+					wantNone(t, out, `<span class="topic-state">`, `<span class="stb `, `<span class="own">`, `<span class="eta`)
+					tag := stateTopicTag(t, out, "Work")
+					wantNone(t, tag, `data-state=`, "data-state-owner", "data-state-eta-minutes", "data-state-started-at", "data-state-deadline-at", "data-state-run")
+					if tc.code == "" {
+						wantNone(t, tag, "data-state-diagnostic")
+					} else {
+						wantAll(t, tag, `data-state-diagnostic="`+tc.code+`"`)
+					}
+				}
 			}
 		})
 	}
@@ -116,6 +150,7 @@ func TestTopicStateViewCloseResetAndClosedWindows(t *testing.T) {
 	}
 	for _, out := range []string{render(t, view), string(regions.Board)} {
 		wantAll(t, out, `<template data-history-topic="closed-0">`)
+		wantNone(t, out, `<span class="topic-state">`, `<span class="stb `, `<span class="own">`, `<span class="eta`)
 		for i := 0; i <= ClosedCap; i++ {
 			tag := stateTopicTag(t, out, fmt.Sprintf("closed-%d", i))
 			wantAll(t, tag, " closed")
@@ -131,4 +166,5 @@ func TestTopicStateViewCloseResetAndClosedWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantNone(t, stateTopicTag(t, string(out), "closed-0"), "data-state")
+	wantNone(t, string(out), `<span class="topic-state">`, `<span class="stb `, `<span class="own">`, `<span class="eta`)
 }
