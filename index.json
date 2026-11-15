@@ -719,19 +719,6 @@
     "261114-refactor-ws-common-session-interface": {
       "registered_at": "2026-11-14T11:13:55Z"
     },
-    "261114-refactor-ws-dashboard-file-explorer-instance-isolation": {
-      "registered_at": "2026-11-14T13:07:39Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-14T23:46:26Z",
-        "impl": {
-          "branch": "impl/develop/haste-serve-defy"
-        }
-      }
-    },
     "261114-refactor-ws-dashboard-large-frontend-files": {
       "registered_at": "2026-11-14T09:32:30Z"
     },
