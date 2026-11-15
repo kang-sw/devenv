@@ -52,22 +52,19 @@
 .dash.live .top { flex: none; }
 /* Empty selection keeps a full main panel even while the rail overlays. */
 :root[data-mode="index"] .dgrid { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; }
-/* The landing (the "landing" template). At / the lockup alone sits at the
-   panel's centre, with no card behind it: the outer rows share the free
-   height. At /#guide (the landing is the hash target) the how-to shows
-   under it and the two centre as one group, scrolling when they do not fit.
-   One lockup variant shows per theme: the light-ink one on dark, the
-   dark-ink one on light. */
-.dlanding { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: grid; grid-template-rows: 1fr auto 1fr; justify-items: center; padding: 16px 20px; box-sizing: border-box; }
-.dlanding:target { grid-template-rows: 1fr auto auto 1fr; }
+/* The landing (the "landing" template): the lockup over the how-to, one
+   block with no card behind it, centred across and a little above the
+   middle (the outer rows split the free height 2:3, the optical centre),
+   scrolling when it does not fit. One lockup variant shows per theme: the
+   light-ink one on dark, the dark-ink one on light. */
+.dlanding { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: grid; grid-template-rows: 2fr auto auto 3fr; justify-items: center; padding: 16px 20px; box-sizing: border-box; }
 .dlogo { grid-row: 2; width: clamp(220px, 50%, 420px); max-width: 100%; }
 .dlogo svg { display: block; width: 100%; height: auto; }
 .dlogo-d { display: none; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .dlogo-d { display: block; } :root:not([data-theme="light"]) .dlogo-l { display: none; } }
 :root[data-theme="dark"] .dlogo-d { display: block; }
 :root[data-theme="dark"] .dlogo-l { display: none; }
-.dguide { display: none; grid-row: 3; width: min(520px, 100%); margin-top: 40px; color: var(--wb-muted-fg); font-size: 13px; line-height: 1.5; }
-.dlanding:target .dguide { display: block; }
+.dguide { grid-row: 3; width: min(520px, 100%); margin-top: 40px; color: var(--wb-muted-fg); font-size: 13px; line-height: 1.5; }
 /* Korean breaks between words, not inside them. */
 :root[data-lang="ko"] .dguide { word-break: keep-all; overflow-wrap: anywhere; }
 .dguide h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted-fg); }

@@ -37,21 +37,17 @@ async function landing(page) {
   });
 }
 
-// root: the lockup alone at the panel's centre, nothing behind it.
+// root: the lockup over the how-to as one block with nothing behind it,
+// centred across, a little above the middle (never below it), and nothing
+// clipped or scrolled away.
 function root(r, what) {
-  assert.equal(r.guide, false, what + ': the how-to shows at /');
-  assert.ok(r.dx < 2 && r.dy < 2, what + ': lockup off centre by ' + r.dx + ',' + r.dy);
+  assert.equal(r.guide, true, what + ': no how-to');
+  assert.equal(r.steps, 5, what + ': how-to steps');
+  assert.ok(r.dx < 2, what + ': block off centre horizontally by ' + r.dx);
+  assert.ok(!r.scrolls, what + ': the landing scrolls');
+  assert.ok(r.above > 0 && r.above <= r.below + 0.5, what + ': block not at the optical centre (above ' + r.above + ', below ' + r.below + ')');
   assert.deepEqual(r.bg, [clear, clear, clear], what + ': a background behind the landing');
   assert.ok(r.width <= 420.5 && r.width >= Math.min(220, r.gridWidth) - 0.5, what + ': lockup width ' + r.width);
-}
-
-// guide: the lockup over the how-to, centred as one group, nothing behind.
-function guide(r, what) {
-  assert.equal(r.guide, true, what + ': no how-to at /#guide');
-  assert.equal(r.steps, 5, what + ': how-to steps');
-  assert.ok(r.dx < 2, what + ': lockup off centre horizontally by ' + r.dx);
-  assert.ok(!r.scrolls && Math.abs(r.above - r.below) < 2, what + ': group not centred (above ' + r.above + ', below ' + r.below + ')');
-  assert.deepEqual(r.bg, [clear, clear, clear], what + ': a background behind the landing');
 }
 
 async function openRail(page) {
@@ -97,7 +93,7 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     await shot(page, 'root-dark-1440.png');
 
     // Picking a session opens it; picking it again closes its view and
-    // shows the guide at /#guide, and the row is no longer marked.
+    // shows the landing at /, and the row is no longer marked.
     await openRail(page);
     await page.locator('#rail .rs[data-rid="livesession"] .rl').click();
     await shows(page, '/s/livesession');
@@ -106,31 +102,30 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     assert.equal(await cur(page, 'livesession'), true, 'the open session is marked');
     await shot(page, 'selected-row.png');
     await page.locator('#rail .rs[data-rid="livesession"] .rl').click();
-    await shows(page, '/', '#guide');
+    await shows(page, '/');
     r = await landing(page);
-    guide(r, 'after reselect');
+    root(r, 'after reselect');
     assert.equal(await cur(page, 'livesession'), false, 'no row marked after reselect');
     await page.waitForTimeout(300);
     await shot(page, 'after-reselect.png');
-    await shot(page, 'guide-dark-1440.png');
 
     // Another row still opens as before; Enter on the open row closes it
-    // like a click; Back returns to the session, and Back again to the guide.
+    // like a click; Back returns to the session, and Back again to /.
     await openRail(page);
     await page.locator('#rail .rs[data-rid="boardsession"] .rl').click();
     await shows(page, '/s/boardsession');
     await openRail(page);
     await page.locator('#rail .rs[data-rid="boardsession"] .rl').focus();
     await page.keyboard.press('Enter');
-    await shows(page, '/', '#guide');
+    await shows(page, '/');
     await page.goBack();
     await shows(page, '/s/boardsession');
     await page.goBack();
-    await shows(page, '/', '#guide');
-    guide(await landing(page), 'back to the guide');
+    await shows(page, '/');
+    root(await landing(page), 'back to the landing');
     await c.close();
 
-    // Light: the dark-ink lockup, at the root and on the guide.
+    // Light: the dark-ink lockup, at the root and after a reselect.
     ({ c, page } = await ctx('light', 1440));
     await page.goto(base + '/');
     r = await landing(page);
@@ -143,10 +138,8 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     await shows(page, '/s/livesession');
     await openRail(page);
     await page.locator('#rail .rs[data-rid="livesession"] .rl').click();
-    await shows(page, '/', '#guide');
-    guide(await landing(page), 'guide light');
-    await page.waitForTimeout(300);
-    await shot(page, 'guide-light-1440.png');
+    await shows(page, '/');
+    root(await landing(page), 'landing light after reselect');
     await c.close();
 
     // A picked theme wins over the OS: light picked on a dark OS, and dark
@@ -162,19 +155,20 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     assert.deepEqual([r.dark, r.light], [true, false], 'picked dark on a light OS shows the light-ink lockup');
     await c.close();
 
-    // Narrow, opened at /#guide directly.
+    // Narrow: the same block, nothing clipped.
     ({ c, page } = await ctx('dark', 700));
+    await page.goto(base + '/');
+    root(await landing(page), 'root dark 700');
+    await page.waitForTimeout(150);
+    await shot(page, 'root-dark-700.png');
+    // An earlier /#guide address lands on the same page.
     await page.goto(base + '/#guide');
     await shows(page, '/', '#guide');
-    r = await landing(page);
-    assert.equal(r.guide, true, 'narrow guide shows');
-    assert.ok(r.dx < 2, 'narrow lockup off centre horizontally by ' + r.dx);
-    await page.waitForTimeout(150);
-    await shot(page, 'guide-dark-700.png');
+    root(await landing(page), '/#guide');
     await c.close();
 
     assert.deepEqual(errors, []);
-    console.log('PASS: root lockup centred per theme; reselect closes the view to /#guide and its how-to; other rows open as before');
+    console.log('PASS: landing block centred per theme at / and 700px; reselect closes the view to /; other rows open as before');
   } finally {
     await browser.close();
   }
