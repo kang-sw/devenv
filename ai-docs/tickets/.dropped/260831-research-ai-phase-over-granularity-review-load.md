@@ -5,6 +5,7 @@ related:
   260824-epic-review-watermark-model: the review-altitude epic whose sweep/gate is the coarser-boundary alternative to per-phase review
 related-mental-model:
   - workflow-skills
+dropped: 2026-11-15
 ---
 
 # Decomposition granularity — AI over-splits phases and tickets, amplifying review load
@@ -112,3 +113,8 @@ drift and keep a cheap human touch where judgment is irreducible.
   in `lead-discuss`, or a strengthening of the existing creation approval? And
   should the epic-level design review carry the over-decomposition critique, or
   is the human checkpoint alone sufficient?
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.

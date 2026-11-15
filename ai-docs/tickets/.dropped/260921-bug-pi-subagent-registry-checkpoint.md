@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f109b1ef0115c8d8
 sage-review-completeness-reviewed: f109b1ef0115c8d8
+dropped: 2026-11-15
 ---
 
 # Pi adapter: keep a durable same-session subagent registry checkpoint
@@ -115,3 +116,8 @@ Verify at least:
 - The no-session locator round-trips through its owner bucket without colliding with the legacy no-session sidecar.
 - A transient Windows replacement failure on the checkpoint path retries asynchronously with a bound and does not block the event loop.
 - A `waitingOnChildren` transition is checkpointed (coalesced), a restored record keeps the persisted value, and a subtree publication that leaves it unchanged writes nothing.
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.
