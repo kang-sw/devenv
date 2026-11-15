@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a287b6f219541be6
 sage-review-completeness-reviewed: a287b6f219541be6
+completed: 2026-11-15
 ---
 
 # Keep dashboard streams through transient board or session read failures
@@ -235,3 +236,46 @@ historical confidence limits; no implementation Result is claimed here.
   the reported interrupted-run failure. The lead must provide a blocking Pi
   review path or resume under a persistent harness; the phase has no Result
   and the ticket remains ready until independent review is resolved.
+
+### Result (1f4b3ff45) - 2026-11-15
+
+- Completed Phase 1 in client commit `5015e6747` and server/test commit
+  `1f4b3ff45`. The internal three-way result preserves transient read causes,
+  retains index entries and last-good page caches, and retries without
+  changing the wire contract, persistent state or authoritative lock boundary
+  (T0). Confirmed absence and readable identity mismatch still invalidate
+  the session. Index retries use the existing 30-second polling backstop;
+  failed open-stream renders use the existing 15-second refresh tick.
+- Client decision: after `gone`, wait three seconds before checking the
+  stream route. Non-404 probe failures, including HTTP 503 and network
+  errors, continue retrying every three seconds while preserving the held
+  page and drafts. Only a confirmed HTTP 404 shows the gone banner and ends
+  retrying; a successful probe reconnects with the current region hashes.
+- Verification: the exact offline commands and fixture pins are recorded in
+  the implementation checkpoint above. Both focused transient-read Go
+  suites passed without skips, including real folder-lock contention,
+  permission denial, malformed records, I/O and scan failures, registration
+  errors, recovery and genuine invalidation. Focused dashboard/MCP
+  compatibility regressions and the wsagent compile-only check passed;
+  all eight JavaScript probe tests passed. Formatting and whitespace checks
+  were clean. Every test run ended with a process scan showing no started
+  test/compiler/Node process left behind. The fixtures demonstrate the
+  mechanism without a partial authoritative write or daemon restart; they
+  do not establish historical incident attribution or frequency.
+- Independent lite review was run by the lead using `code-review-lite` over
+  `cc2185725..1f4b3ff45`: clean, no correctness or test-integrity findings,
+  remaining none. Review report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@ce1b477c/review-paths/31349b50-01-busy-board-read-gone-lite.md`.
+  The worker read the report in full; this resolves the checkpoint's
+  review/tooling blocker. No child agent was spawned for closure.
+- Final action gate: HEAD remained `1f4b3ff45` with a clean worktree before
+  this documentation-only closure, so the reviewed code and passing test
+  inputs are unchanged. Reuse that verification evidence and validate the
+  ticket through the ticket guardrails. No Critical, Important or Minor
+  review findings remain. Whole-package dashboard tests, shared daemon/port
+  29417 interaction, process signals, merge and push were not performed.
+
+
+## Resolution (2026-11-15)
+
+Phase 1 completed in 5015e6747 and 1f4b3ff45. Lead-run code-review-lite over cc2185725..1f4b3ff45 was clean with no findings; the worker read its report and recorded it in the Result. Reused passing offline focused verification because code/test/build inputs remained unchanged; closure changes documentation only. Non-404 probe failures retry every three seconds, while confirmed 404 banners and terminates retries. No merge or push performed.
