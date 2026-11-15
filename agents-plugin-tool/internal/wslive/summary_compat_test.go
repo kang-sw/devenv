@@ -3,8 +3,11 @@ package wslive
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -18,7 +21,7 @@ import (
 // This is a real historical package build, not a newly simplified 'old'
 // struct standing in for an older writer. The fixed revision predates the
 // optional fields; its ordinary immutable writer must leave prior bytes alone.
-const summaryHistoricalRevision = "9854ff350"
+const summaryHistoricalRevision = "9854ff350fa1b0eccfb5c71649c5190c405925b9"
 
 func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 	dir := t.TempDir()
@@ -37,48 +40,7 @@ func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	top, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	archiveCmd := exec.CommandContext(ctx, "git", "archive", summaryHistoricalRevision, "agents-plugin-tool")
-	archiveCmd.Dir = strings.TrimSpace(string(top))
-	archive, err := archiveCmd.Output()
-	if err != nil {
-		t.Fatalf("load pinned historical source: %v", err)
-	}
-	root := t.TempDir()
-	tr := tar.NewReader(bytes.NewReader(archive))
-	for {
-		h, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		clean := filepath.Clean(h.Name)
-		if !strings.HasPrefix(filepath.ToSlash(clean), "agents-plugin-tool/") {
-			continue
-		}
-		path := filepath.Join(root, clean)
-		switch h.Typeflag {
-		case tar.TypeDir:
-			err = os.MkdirAll(path, 0o755)
-		case tar.TypeReg:
-			err = os.MkdirAll(filepath.Dir(path), 0o755)
-			if err == nil {
-				var raw []byte
-				raw, err = io.ReadAll(tr)
-				if err == nil {
-					err = os.WriteFile(path, raw, 0o600)
-				}
-			}
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+	module := summaryHistoricalModule(t, "wslive", summaryHistoricalRevision)
 	fixture := `package wslive
 import("os";"testing")
 func TestSummaryHistoricalWriterFixture(t *testing.T){
@@ -87,7 +49,6 @@ func TestSummaryHistoricalWriterFixture(t *testing.T){
  if err:=AppendRing(RingDir(dir),[]RingEntry{{Kind:RingReply,Text:"historical writer append"},{Kind:RingTurn,Done:1,DurationMs:11}});err!=nil{t.Fatal(err)}
 }
 `
-	module := filepath.Join(root, "agents-plugin-tool")
 	if err := os.WriteFile(filepath.Join(module, "internal", "wslive", "summary_historical_fixture_test.go"), []byte(fixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -126,46 +87,9 @@ func TestSummaryOldDaemonNewBundleWidget(t *testing.T) {
 	// This source pin is the exact integrated pre-feature develop gate, not a
 	// newer moving branch. It contains the real hosted test harness.
 	mapperRevision := "54b252036f430ddd0886af90ba8de767bc4b1a6a"
-	mapperArchive := exec.CommandContext(ctx, "git", "archive", mapperRevision, "agents-plugin-tool")
-	mapperArchive.Dir = strings.TrimSpace(string(top))
-	mapperRaw, err := mapperArchive.Output()
-	if err != nil {
-		t.Fatalf("load pinned legacy mapper: %v", err)
-	}
-	mapperRoot := t.TempDir()
-	// Build that complete historical module; do not mix mapper and dependency
-	// revisions into a synthetic daemon.
-	mapperReader := tar.NewReader(bytes.NewReader(mapperRaw))
-	for {
-		header, err := mapperReader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		clean := filepath.Clean(header.Name)
-		if !strings.HasPrefix(filepath.ToSlash(clean), "agents-plugin-tool/") {
-			continue
-		}
-		path := filepath.Join(mapperRoot, clean)
-		if header.Typeflag == tar.TypeDir {
-			err = os.MkdirAll(path, 0o755)
-		} else if header.Typeflag == tar.TypeReg {
-			err = os.MkdirAll(filepath.Dir(path), 0o755)
-			if err == nil {
-				var data []byte
-				data, err = io.ReadAll(mapperReader)
-				if err == nil {
-					err = os.WriteFile(path, data, 0o600)
-				}
-			}
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	mapperModule := filepath.Join(mapperRoot, "agents-plugin-tool")
+	// All mapper dependencies and original harness helpers come from that
+	// same revision, not from the current checkout or a synthetic old struct.
+	mapperModule := summaryHistoricalModule(t, "wsagent", mapperRevision)
 	if err := os.WriteFile(filepath.Join(mapperModule, "internal", "wsagent", "summary_historical_mapper_test.go"), []byte(mapperFixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -192,11 +116,83 @@ func TestSummaryOldDaemonNewBundleWidget(t *testing.T) {
 	}
 }
 
+// The retained source closure makes shallow CI checkouts and source archives
+// equivalent to a full clone. Verify the archive and each original source path
+// before adding the test driver; no historical source is rewritten.
+func summaryHistoricalModule(t *testing.T, name, revision string) string {
+	t.Helper()
+	base := filepath.Join("testdata", "historical-summary")
+	var manifest struct {
+		Revision      string
+		Archive       string
+		ArchiveSHA256 string
+		Files         map[string]string
+	}
+	raw, err := os.ReadFile(filepath.Join(base, name+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Revision != revision || len(manifest.Files) == 0 || filepath.Base(manifest.Archive) != manifest.Archive {
+		t.Fatalf("invalid historical %s manifest for %s", name, revision)
+	}
+	raw, err = os.ReadFile(filepath.Join(base, manifest.Archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) != manifest.ArchiveSHA256 {
+		t.Fatalf("historical %s archive digest mismatch", name)
+	}
+	compressed, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer compressed.Close()
+	root := t.TempDir()
+	seen := make(map[string]bool)
+	reader := tar.NewReader(compressed)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Clean(filepath.FromSlash(header.Name))
+		if header.Typeflag != tar.TypeReg || !strings.HasPrefix(filepath.ToSlash(path), "agents-plugin-tool/") ||
+			filepath.ToSlash(path) != header.Name || manifest.Files[header.Name] == "" || seen[header.Name] {
+			t.Fatalf("unexpected historical source path %q", header.Name)
+		}
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprintf("%x", sha256.Sum256(data)) != manifest.Files[header.Name] {
+			t.Fatalf("historical source digest mismatch: %s", header.Name)
+		}
+		path = filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		seen[header.Name] = true
+	}
+	if len(seen) != len(manifest.Files) {
+		t.Fatalf("historical %s source missing: extracted %d of %d files", name, len(seen), len(manifest.Files))
+	}
+	return filepath.Join(root, "agents-plugin-tool")
+}
+
 // Keep the historical child independent of developer credentials, host session
 // keys, installed harness launchers and test-binary stand-in switches.
 func summaryHistoricalEnv(dir string) []string {
 	var env []string
-	for _, key := range []string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "GOROOT", "GOCACHE", "GOMODCACHE", "GOOS", "GOARCH", "GOMAXPROCS", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_NO_REPLACE_OBJECTS", "GIT_ATTR_NOSYSTEM", "GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "GIT_SSH_COMMAND", "SSH_ASKPASS"} {
+	for _, key := range []string{"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SystemRoot", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "GOROOT", "GOCACHE", "GOMODCACHE", "GOOS", "GOARCH", "GOMAXPROCS", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_NO_REPLACE_OBJECTS", "GIT_ATTR_NOSYSTEM", "GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "GIT_SSH_COMMAND", "SSH_ASKPASS"} {
 		if value, ok := os.LookupEnv(key); ok {
 			env = append(env, key+"="+value)
 		}
