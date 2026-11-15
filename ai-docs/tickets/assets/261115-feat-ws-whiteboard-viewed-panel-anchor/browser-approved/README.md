@@ -165,3 +165,39 @@ all screenshots concern outer panel guarantees, not visual design approval.
 
 This is authored test infrastructure, not acceptance, a review, a phase Result,
 a ticket closure, a deployment, or permission to start the batch.
+
+## MAIN 01:01:56 local fixture continuation
+
+Only the Go fixture's `os/signal` import alias and its required references change.
+The driver, geometry, assertions, stimuli and timing stay byte-identical to
+`b0af755624cc13929f4a384145d5787d76e3dbdb`. Prior `approved-001/` artifacts and
+the ten untracked retained items are not rewritten, removed or released.
+
+This fixture workflow now requires a compile-only/vet gate before its next
+frozen browser batch. This is a local fixture step, not a shipped/global rule:
+
+```sh
+python3 .../browser-approved/run.py --result <full-frozen-pin> --batch preflight-002 --preflight
+```
+
+The runner resolves the exact Go 1.26.2 installation from the compiler path in
+`approved-001/cleanup.json`, records SHA-256 for Go/compile/vet and that receipt,
+and invokes its absolute `bin/go` with `GOROOT` fixed. It never runs a version
+probe or chooses a newer toolchain. The gate independently compiles BOTH full
+baseline-558/result snapshots into retained binaries, then runs `go vet
+./internal/wsdashboard` in both snapshots. Build caps remain 180 seconds each;
+vet caps are 90 seconds each, clipped by the existing overall 600-second limit
+and 30-second cleanup reserve. No fixture test, server or browser is launched.
+First failure stops the gate without repair, retry or browser execution.
+
+Only a green gate authorizes the single `approved-002` invocation:
+
+```sh
+python3 .../browser-approved/run.py --result <same-full-frozen-pin> --batch approved-002 --preflight-receipt <absolute-preflight-002/manifest.json>
+```
+
+The runner rejects a receipt unless its green status, baseline/result pins,
+fixture/driver/runner hashes and exact toolchain hashes match. Browser-batch
+caps and first-failure cleanup stay unchanged. The parent reports the new
+freeze/manifest, actual preflight commands/exits/binary hashes and exact batch
+invocation before starting. No second batch or unrelated correction is allowed.

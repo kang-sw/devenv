@@ -256,6 +256,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result", required=True)
     parser.add_argument("--batch", required=True)
+    gate = parser.add_mutually_exclusive_group(required=True)
+    gate.add_argument("--preflight", action="store_true",
+                      help="compile both binaries and vet both fixture packages; no servers/browser")
+    gate.add_argument("--preflight-receipt",
+                      help="green compile/vet manifest for these exact frozen inputs/toolchain")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.result):
         parser.error("--result must be the parent's frozen FULL commit hash")
@@ -265,6 +270,7 @@ def main():
     out.mkdir()  # Refuse reuse. Never erase or overwrite an earlier batch.
     batch = Batch(out, args.result)
     batch.servers = []
+    batch.record["mode"] = "compile-vet-preflight" if args.preflight else "browser-batch"
     def interrupted(signum, _frame):
         raise InterruptedError("outer signal " + str(signum))
     signal.signal(signal.SIGINT, interrupted)
@@ -273,6 +279,19 @@ def main():
     # Include Python extraction/hashing and startup, not just subprocess waits.
     signal.setitimer(signal.ITIMER_REAL, max(1, batch.work_deadline - time.monotonic()))
     try:
+        # Resolve the previously used toolchain from retained receipts, never
+        # from a new version probe, PATH selection, installation or download.
+        authority = HERE / "approved-001" / "cleanup.json"
+        receipt = json.loads(authority.read_text())
+        compiler = next(Path(row["command"].split(" ", 1)[0])
+                        for row in receipt["tracked"]
+                        if "/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile " in row["command"])
+        goroot = compiler.parents[3]
+        go = goroot / "bin" / "go"
+        batch.record["toolchain"] = dict(authority=str(authority), authority_sha256=digest(authority),
+            goroot=str(goroot), go=str(go), go_sha256=digest(go),
+            compile_sha256=digest(compiler), vet_sha256=digest(compiler.with_name("vet")))
+        batch.env["GOROOT"] = str(goroot)
         if not (Path(PLAYWRIGHT) / "package.json").is_file():
             raise RuntimeError("approved cached Playwright module absent; do not install")
         batch.record["cached_playwright_package_sha256"] = digest(Path(PLAYWRIGHT) / "package.json")
@@ -289,12 +308,20 @@ def main():
         batch.record["driver_sha256"] = digest(out / "driver.cjs")
         for name in ["fixture.go", "driver.cjs", "runner.py"]:
             (out / name).chmod(0o444)
+        if not args.preflight:
+            prior = json.loads(Path(args.preflight_receipt).read_text())
+            fields = ["baseline", "result", "fixture_sha256", "driver_sha256", "runner_sha256", "toolchain"]
+            if prior.get("mode") != "compile-vet-preflight" or not prior.get("completed") or prior.get("failure") or prior.get("cleanup_failure") or any(prior.get(k) != batch.record.get(k) for k in fields):
+                raise RuntimeError("green compile/vet receipt does not match frozen inputs/toolchain")
+            batch.record["preflight_receipt"] = str(Path(args.preflight_receipt).resolve())
+            batch.record["preflight_receipt_sha256"] = digest(Path(args.preflight_receipt))
         ready_files = []
         binaries = []
+        snapshots = []
         for label, pin in [("baseline", BASELINE), ("result", args.result)]:
             snapshot = batch.snapshot(label, pin)
             binary = out / (label + ".test")
-            batch.command(label + "-build", ["go", "test", "-c", "./internal/wsdashboard", "-o", str(binary)],
+            batch.command(label + "-build", [str(go), "test", "-c", "./internal/wsdashboard", "-o", str(binary)],
                           snapshot / "agents-plugin-tool", 180)
             source_manifest = json.loads((out / (label + "-sources.json")).read_text())
             if any(digest(snapshot / file["path"]) != file["sha256"] for file in source_manifest["files"]):
@@ -302,11 +329,17 @@ def main():
             batch.record[label + "_binary_sha256"] = digest(binary)
             binary.chmod(0o555)
             binaries.append((label, pin, binary))
+            snapshots.append((label, snapshot))
             batch.checkpoint()
-        for label, pin, binary in binaries:
-            ready_files.append(batch.ready(label, pin, binary))
-        batch.command("browser", ["node", str(out / "driver.cjs"),
-                      str(ready_files[0]), str(ready_files[1]), str(out)], out, 180)
+        if args.preflight:
+            for label, snapshot in snapshots:
+                batch.command(label + "-vet", [str(go), "vet", "./internal/wsdashboard"],
+                              snapshot / "agents-plugin-tool", 90)
+        else:
+            for label, pin, binary in binaries:
+                ready_files.append(batch.ready(label, pin, binary))
+            batch.command("browser", ["node", str(out / "driver.cjs"),
+                          str(ready_files[0]), str(ready_files[1]), str(out)], out, 180)
         batch.record["completed"] = True
     except BaseException as exc:
         batch.record["failure"] = dict(type=type(exc).__name__, message=str(exc))
