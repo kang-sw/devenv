@@ -23,6 +23,7 @@ Owner decisions `(847)=a` and `(856)=ok`, relayed by MAIN, settle the visible be
 - If a selected path was removed or its identity was replaced before Apply, Apply rejects that entry. Apply never deletes, removes, or otherwise alters a worktree on disk.
 - Pending entries have approve/reject selection toggles; any selection reveals the Apply capsule. This does not settle toggle clearing or mutual exclusion.
 - Selected approvals persist across refresh. User-added worktrees remain admitted; unrecorded Git discoveries remain pending until Apply admits them.
+- MAIN owner settlement `(888)=a` confirms that a removed and later recreated same path is a new detected/pending worktree; prune the admission record once the old path is confirmed gone.
 - Apply admits approved entries and moves rejected entries into a collapsed rejected-worktree list.
 - When rejected entries are applied, the dashboard copies the rejected-worktree list together with a prompt asking the agent to investigate unauthorized non-pool creation and report the finding to the user. Rejection does not delete or otherwise alter the worktree on disk.
 - Detection and remediation are the scope; shell prevention or interception of worktree creation is not.
@@ -35,25 +36,17 @@ Owner decisions `(847)=a` and `(856)=ok`, relayed by MAIN, settle the visible be
 - The mockup's same-toggle clearing and mutual-exclusion behavior is visual reference only, not normative contract. Report any remaining owner-visible UI choice to the lead without silently resolving or minting a local decision ID.
 - Keep this ticket in `todo/`; no ready promotion, fact population, or Sage review is part of this capture.
 
-## Open Decision Queue
-
-Last ID used: 891 (MAIN board).
-(888) [open] [policy] Decide admission reappearance and retention after a worktree path disappears.
-Context: this remains open and is not settled by this TODO. MAIN explicitly authorizes committing this TODO with (888) open.
-Options:
-- (a) MAIN-recommended: a removed-and-recreated path is new detected/pending state; prune its record once the old path is confirmed gone.
-- (b) Remember the old admission and show the recreated path admitted immediately; retain the record until the user removes it.
-
 ## Phases
 
 ### Phase 1: Detect, review, and remediate non-pool worktrees
 
-Implement the settled T0 admission contract above while preserving root admission, canonical identity, and pool-first exclusion. Record dashboard-created additions as user/admitted, classify unrecorded Git discoveries as detected/pending, persist Apply outcomes, reject removed or replaced entries without touching disk, and wake the existing rail generation. Preserve rejected entries as a collapsed list plus the investigation prompt. Do not prevent worktree creation at the shell or Git layer. Leave the reappearance/retention policy to MAIN board ID 888.
+Implement the settled T0 admission contract above while preserving root admission, canonical identity, and pool-first exclusion. Record dashboard-created additions as user/admitted, classify unrecorded Git discoveries as detected/pending, persist Apply outcomes, reject removed or replaced entries without touching disk, and wake the existing rail generation. Preserve rejected entries as a collapsed list plus the investigation prompt. A removed and later recreated same path is new detected/pending state; prune the admission record once the old path is confirmed gone. Do not prevent worktree creation at the shell or Git layer.
 
 Focused verification must cover:
 
 - pure rail classification for root, user/admitted, detected/pending, and pool-filtered worktrees using canonical root/worktree identity;
 - schema-1 admission-field round-trip, unknown-field preservation, and persistence across refresh;
+- reappearance and pruning: after a recorded path is confirmed gone, recreating the same path is new detected/pending state and the old admission record is pruned; do not invent or assert a timing mechanism;
 - successful `/rail/worktrees/add` recording `origin: user` and admitted state;
 - same-origin Apply revalidation against latest rail facts, persistent admitted/rejected writes, existing generation wake, and rejection of removed/replaced paths without deletion;
 - rejected-list prompt contents and the no-delete guarantee;
