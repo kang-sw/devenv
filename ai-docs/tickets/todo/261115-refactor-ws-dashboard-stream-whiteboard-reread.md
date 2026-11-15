@@ -114,3 +114,51 @@ Make a stream re-read that finds the session board unchanged reuse the
 loaded board instead of re-opening every topic file. Verify with a
 before/after idle daemon CPU profile and the existing whiteboard folder-store
 tests.
+
+### Result (cecd432ab) - 2026-11-15
+
+- **VERIFIED:** implemented the T0 read cache and moved this ticket to `todo/`
+  in `cecd432ab`. Twenty unchanged opens of a 112-topic board read no topic,
+  session-metadata, or log content again. Regression coverage observes a
+  separate writer handle and a real child-process writer, recovers pending
+  intents after partial publication, rejects newer nested schemas, detects
+  same-stamp atomic replacements, preserves legacy/missing-metadata behavior,
+  and prevents returned-state aliasing
+  (`wswhiteboard/folders_cache_test.go:40-220`). The existing dashboard lock
+  contention regression still passes; cache hits do not bypass flock.
+- **VERIFIED:** from `agents-plugin-tool`, with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` on every Go command:
+  - `go test ./internal/wswhiteboard/ -run 'Folder|Open|Store' -count=1`:
+    PASS (41.931 s).
+  - `go test -race ./internal/wswhiteboard/ -run '^TestFolderCache' -count=1`:
+    PASS (27.907 s).
+  - `go test ./internal/wsdashboard/ -run 'TestRefreshCacheNonBoardWake|TestRefreshTick|TestStreamsOfOnePageShareOneRender|TestTransientReadCache|TestStreamingTickChangesOnlyTheLiveRegion' -count=1 -v`:
+    PASS, seven tests (14.360 s). The full dashboard package was not run.
+  - `go test ./internal/mcp/ -run 'Whiteboard|Dashboard|Record' -count=1`:
+    one pre-existing failure,
+    `TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation`
+    (`mcp/whiteboard_effects_test.go:154`, an extra topic-state event).
+    Reproduced the identical failure with the original MCP source via Go's
+    read-only overlay. The requested scope with
+    `-skip '^TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation$'`
+    passes (91.420 s). No assertion was weakened or unrelated code changed.
+- **VERIFIED:** paired `BenchmarkFolderIdleOpen112` runs (`-run '^$' -bench
+  '^BenchmarkFolderIdleOpen112$' -benchtime=20x -count=3 -benchmem`) give median
+  **8,705,075 -> 1,660,854 ns/op** (5.24x faster), and **461 -> 1 open attempts
+  per refresh**. The read seam counts content-open attempts, including absent
+  pending/receipt reads, plus one flock-file open. Metadata stats are excluded;
+  the remaining open is the lock, not a topic file. The uncached arm executes
+  the original load/guard path in the same benchmark.
+- **VERIFIED:** isolated daemon profiles over approximately 10 seconds, one
+  112-topic stream and 40 non-board snapshot wakes at 4 Hz, sample
+  **1.24 -> 0.37 CPU seconds** (**11.93% -> 3.58%** of one core). Both runs have
+  40 signals, 41 total session renders and one further board-memo render. The
+  before arm uses the original MCP source overlay; the after arm uses the cache.
+  `TestDashboardFolderIdleCPUFixture` is opt-in through
+  `WS_DASHBOARD_IDLE_PROFILE=<output.pprof>` and creates its own state, cache,
+  config, home and listener. No real session or shared daemon was modified.
+- Raw profiles, counter snapshots, benchmark output, overlay inputs and test
+  logs are in `/tmp/exec5/perfC/`. These are machine-local evidence, not shipped
+  assets. The shared runtime was not rebuilt/replaced, so a live after-deploy
+  CPU reduction is **INFERRED**, not measured. The exact per-page live wake
+  origin and the unrelated baseline MCP failure remain unresolved here.
