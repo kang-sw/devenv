@@ -10,6 +10,49 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
+func TestWhiteboardTopicStateResearchingResponseAndRestart(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	out := f.update(t, `<wb:topic name="research"><wb:log>Research summary</wb:log><wb:state value="researching" owner="investigator" eta_minutes="7"/></wb:topic>`)
+	if !strings.Contains(out, "topic added: research (state: researching, explicit)") || strings.Contains(out, "discussing_without_open_items") {
+		t.Fatalf("research update: %s", out)
+	}
+	restarted := NewServer(f.root, "restart")
+	rec, err := restarted.sessions.readWhiteboard(f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := rec.Whiteboard.TopicStates()["research"].State
+	if state == nil || state.Value != wswhiteboard.StateResearching || state.Owner != "investigator" || state.ETAMinutes != 7 || state.Run != nil {
+		t.Fatalf("persisted research: %+v", state)
+	}
+	for _, payload := range []any{nil, map[string]any{"topic": "research"}, map[string]any{"topic": "research", "entries": "all", "kind": "agent"}} {
+		text := toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": payload}))
+		for _, want := range []string{"state: researching; entry: " + state.Entry, `owner: "investigator"`, "eta_minutes: 7 (informational)", "Research summary"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("research query lacks %q: %s", want, text)
+			}
+		}
+		if strings.Contains(text, "deadline_at:") || strings.Contains(text, "run:") {
+			t.Fatalf("research became timed: %s", text)
+		}
+	}
+	before := whiteboardTreeForTest(t, f.pageDir())
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="research"><wb:log>Rollback</wb:log><wb:eta minutes="8" reason="invalid research extension"/></wb:topic>`})
+	if !isToolError(resp) || !strings.Contains(toolText(t, resp), "ETA requires known implementing state") {
+		t.Fatalf("research ETA refusal: %s", resp)
+	}
+	assertWhiteboardTreeForTest(t, f.pageDir(), before)
+	out = f.update(t, `<wb:topic name="research"><wb:state value="researching" owner="second" eta_minutes="9"/></wb:topic>`)
+	if !strings.Contains(out, "topic updated: research (state: researching)") {
+		t.Fatalf("metadata-only research update absent: %s", out)
+	}
+	f.update(t, `<wb:topic name="research"><wb:close result="Done"/><wb:log>Reopened</wb:log></wb:topic>`)
+	rec, err = restarted.sessions.readWhiteboard(f.key)
+	if err != nil || rec.Whiteboard.TopicStates()["research"].State != nil {
+		t.Fatal("reopen restored research metadata", err)
+	}
+}
+
 func TestWhiteboardTopicStateResponseAndRestart(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	out := f.update(t, `<wb:topic name="state" label="State" tickets="261114-feat-example"><wb:log>Human summary</wb:log><wb:state value="discussing"/></wb:topic>`)

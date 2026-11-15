@@ -145,6 +145,12 @@ linkMenus = [];
 check("closing the link menu preserves another visible popover", popover(), true);
 railPops = [];
 check("closing the last popover restores the shell layer", popover(), false);
+var hoverCard = { classList: { contains: function (c) { return c === "shp"; } }, getClientRects: function () { return [{}]; } };
+railPops = [hoverCard];
+check("a visible read-only hover card does not lift the frame over the shell header and rail", popover(), false);
+railPops = [hoverCard, visible];
+check("an interactive popover beside a hover card still lifts the frame", popover(), true);
+railPops = [];
 process.stdout.write(bad.join("\n"));
 })();
 `)

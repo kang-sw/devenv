@@ -50,6 +50,7 @@ agent log line, retaining a human current-state summary:
 | state | lead obligation |
 |---|---|
 | Discussing | Keep one open ask for the unresolved discussion. |
+| Researching | Investigate actively; declare implementing when research resolves into executable work. |
 | Waiting | Keep held items visible and one open ask for the unfinished work that is not being worked. |
 | Implementing | Name the responsible executor and ETA when work starts. |
 | Awaiting confirmation | Keep one live confirmation check for the finished artifact. |
@@ -127,15 +128,20 @@ Markdown up to the closing tag.
   old title still reaches an adopted topic. Stems and labels are one
   namespace: a stem or label another topic already uses is refused.
 - `wb:state` is an empty command inside `wb:topic`, with `value` one of
-  `discussing`, `waiting`, `implementing`, or `awaiting-confirmation`.
+  `discussing`, `waiting`, `researching`, `implementing`, or `awaiting-confirmation`.
   Entering `implementing` requires `owner` (the responsible executor) and
   `eta_minutes`, a positive decimal integer from 1 through 153722867: the
-  cumulative wall-clock budget in minutes from the original start. Other
-  states accept neither attribute. The topic must already be known and open;
+  cumulative wall-clock budget in minutes from the original start.
+  Only implementing and researching accept these attributes. Researching accepts
+  optional `owner` and `eta_minutes` independently; an estimate uses the same
+  positive decimal integer range but is informational, with no run or deadline.
+  Changing research attributes records a state event; omitting them clears them.
+  Entering implementing starts a fresh clock, without carrying research time.
+  The topic must already be known and open;
   item/content activity earlier in the batch may create or reopen it, but
-  `wb:state` alone does neither. Repeating the current declaration is a no-op;
-  for `implementing`, owner and ETA must match, so repeats do not reset the
-  start. To change executor, exit implementing and re-enter with the new
+  `wb:state` alone does neither. Repeating the current declaration with identical
+  attributes is a no-op; for `implementing`, owner and ETA must match, so
+  repeats do not reset the start. To change executor, exit implementing and re-enter with the new
   owner and ETA. Extend the current run with `wb:eta` instead.
 - Waiting dependencies: `wb:state value="waiting"` optionally takes `on`, a
   space-separated list of at most 8 distinct targets, in display order:
@@ -308,7 +314,9 @@ or direct retrieval; their selectors are not silently mixed.
 
 Topic metadata in discovery, stream, and explicit item/content queries adds
 optional derived `state` (`value`, latest state `entry`, and an implementing
-`run` with `deadline_at`). Legacy topics without a declaration omit it.
+`run` with `deadline_at`). Researching instead carries optional top-level
+`owner` and `eta_minutes`, without a `run`. Legacy topics without a declaration
+omit it.
 Unknown state omits `state` and reports `state_diagnostic` with `entry` and
 code `malformed` or `unsupported`, rather than reusing an older deadline.
 These are metadata, not selectors; system state events do not replace the
@@ -374,8 +382,9 @@ latest-agent summary.
 
 Updates return response-only structural warnings for discussing topics with
 zero open items and waiting topics when this board has no open implementing
-topic. Every open item, including a check, counts as an ask. These warnings
-neither refuse the update nor create asks; they are not timed notifications.
+topic. Researching needs no open ask and does not count as implementing for
+these warnings. Every open item, including a check, counts as an ask. These
+warnings neither refuse the update nor create asks; they are not timed notifications.
 
 ## Timed mailbox nudges
 
@@ -384,8 +393,10 @@ own board. Each overdue implementing topic has a 30-minute debounce; a newly
 overdue topic triggers the full overdue list even during another topic's
 debounce. The list includes owners, original/current estimates, elapsed time,
 and extension counts/reasons. The board's full topic list repeats hourly
-only while an open implementing or waiting topic exists. When both are due,
-one message covers both.
+only while an open implementing or waiting topic exists; it includes every
+open topic, including researching. Researching triggers neither hourly nor
+ETA-overdue notices, even with an informational estimate. General stale-topic
+nudges remain state-independent. When both are due, one message covers both.
 
 A waiting topic becoming ready also sends one unblocked nudge naming its
 resolved targets, through the same alive-lead delivery gate. It is deduped per
