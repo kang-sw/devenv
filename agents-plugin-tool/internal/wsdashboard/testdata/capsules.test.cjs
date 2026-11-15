@@ -179,7 +179,9 @@ assert.deepEqual(plain(context.commandRows(context.commandList(), 'lrv')).map(r 
 context.commandList = () => []; assert.equal(context.slashToken('/lrv', 4), null);
 
 // The real composer submission functions keep structured commands separate.
-Object.assign(context, { ctext: f, cmdSel: null, sending: false, imgs: [], posted: [], warns: [], chips: {}, bmentions: [], closeRequests: [], wpicks: [], wconsoles: [] });
+vm.runInContext(fs.readFileSync(path.join(root, 'dashboard-bundles.js'), 'utf8'), context);
+Object.assign(context, { ctext: f, cmdSel: null, sending: false, imgs: [], posted: [], warns: [], chips: {}, bmentions: [], closeRequests: [], bselections: [], mpend: null, wpicks: [], wconsoles: [] });
+context.allNums = () => ({}); // Ordinary sends here have no image markers; image sends are guarded below.
 context.sendText = () => f.value; context.followConvo = () => {}; context.noteWarn = s => context.warns.push(s); context.clearDraft = () => {}; context.grow = () => {}; context.clearMentions = () => {};
 context.post = (route, body, done) => { context.posted.push(plain(body)); done(true, {}); };
 context.chipList = () => []; context.topicNotes = () => []; context.boardOwn = {}; context.boardFlushViewed = () => {}; context.clearTrash = () => {}; context.closeTopicNotes = () => {}; context.renderChips = () => {}; context.renderImgs = () => {};
@@ -192,10 +194,14 @@ f.value = '/lrv'; f.wsc.insert('skill', 'lead-review', 'lead-review', { start: 0
 context.sendMessage(); assert.equal(context.posted.length, count); assert.equal(context.warns.at(-1), 'js.cmd.images');
 context.imgs = []; const answers = [{ id: '12', answer: 'ok' }], topicNotes = [{ topic: 'other', value: 'note' }];
 context.chipList = () => answers; context.topicNotes = () => topicNotes; context.bmentions = [{ topic: 'other', text: 'selection' }]; context.wpicks = [{ selector: '#x' }];
+const heldGroup = { mentions: [{ topic: 'other', entry: 'e7', text: 'captured' }], comment: 'held memo', images: [] };
+context.bselections = [heldGroup];
 context.closeRequests = [{ topic: 'other', reason: '' }];
 context.sendMessage(); assert.deepEqual(context.posted.at(-1), { command: 'lead-review', args: '' });
 assert.equal(context.closeRequests.length, 1, 'a command leaves close requests held for a later message');
 assert.equal(answers.length, 1); assert.equal(topicNotes.length, 1); assert.equal(context.bmentions.length, 1); assert.equal(context.wpicks.length, 1, 'command-only requests leave other components held for a later message');
+
+assert.deepEqual(context.bselections, [heldGroup], 'command-only sends retain selection groups too');
 
 // Candidate loading follows every unopened closed page of this selected session.
 vm.runInContext(fn('capsuleTopics'), context);

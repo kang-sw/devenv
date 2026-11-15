@@ -458,6 +458,9 @@ type ConvEntry struct {
 	HTML template.HTML
 	// Images are a user message's attached images, taken out of its text.
 	Images []AttachmentView
+	// Content keeps grouped source/memo/image display in message order;
+	// nil retains the legacy Text rendering path.
+	Content []SelectionContentPart
 	// Answers are the lines of the answer block a user message starts with,
 	// taken out of its text; the bubble shows them as capsules.
 	Answers []wsinbox.AnswerLine

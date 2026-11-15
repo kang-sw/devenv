@@ -10,12 +10,17 @@ import (
 
 // Display-only metadata never supplies item state or changes append ordering.
 type inputHeader struct {
-	InboxID string   `json:"inbox_id"`
-	SentAt  int64    `json:"sent_at"`
-	Excerpt string   `json:"excerpt"`
-	ChipIDs []string `json:"chip_ids"`
-	Clock   string   `json:"-"`
+	InboxID string      `json:"inbox_id"`
+	SentAt  int64       `json:"sent_at"`
+	Excerpt string      `json:"excerpt"`
+	ChipIDs []string    `json:"chip_ids"`
+	Clock   string      `json:"-"`
+	Chips   []inputChip `json:"-"`
 }
+
+// inputChip is one answered/asked item an owner message referenced, with the
+// answer to show inline when the message carried no text of its own.
+type inputChip struct{ ID, Answer string }
 
 type timelineRow struct {
 	Key, From, To, Reasked, AnswerTarget string
@@ -126,8 +131,16 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 				h.ChipIDs = nil
 				for _, id := range input.ChipIDs {
 					n, _ := strconv.Atoi(id)
-					if _, ok := byID[n]; ok {
+					if it, ok := byID[n]; ok {
 						h.ChipIDs = append(h.ChipIDs, id)
+						c := inputChip{ID: id}
+						if it.Status == StatusAnswered {
+							c.Answer = strings.TrimSpace(it.Answer)
+							if r := []rune(c.Answer); len(r) > 40 {
+								c.Answer = string(r[:40]) + "…"
+							}
+						}
+						h.Chips = append(h.Chips, c)
 					}
 				}
 				if h.Excerpt != "" || len(h.ChipIDs) > 0 {
@@ -285,6 +298,8 @@ func (r timelineData) ItemData() itemData {
 	d := r.Page.ItemOf(*r.Item)
 	if r.Event().ID == "" {
 		d.History = &EntryView{}
+	} else if r.Ask {
+		d.AskClock, d.AskAt, d.AskReasked = r.Clock, r.At, r.Reasked
 	}
 	return d
 }

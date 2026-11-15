@@ -275,15 +275,33 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .achip.mchip { background: var(--wb-muted); box-shadow: inset 3px 0 0 var(--wb-primary), inset 0 0 0 1px var(--wb-line); }
 .achip.mchip .anote { font-style: italic; }
 .achip.mchip .anote::before { content: none; }
+.mchip-open { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.mchip-open:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; border-radius: 999px; }
 /* a picked page element and a console block: mention capsules whose bold
    part is a selector (clipped, monospace) or the error count */
 .achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .achip.cchip { box-shadow: inset 3px 0 0 var(--wb-warn), inset 0 0 0 1px var(--wb-line); }
+/* One captured selection keeps its sources, memo and images together. */
+.selection-bundle { position: relative; box-sizing: border-box; min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--wb-line); border-left: 3px solid var(--wb-primary); border-radius: 9px; background: var(--wb-muted); }
+.selection-bundle + .selection-bundle { margin-top: 6px; }
+.cchips > .selection-bundle { flex: 1 1 280px; }
+.selection-bundle > .hchips { padding-right: 20px; }
+.selection-bundle .achip { border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.selection-bundle .anote { max-width: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.selection-bundle > .unchip { position: absolute; top: 6px; right: 4px; }
+.selection-comment, .selection-edit { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--wb-fg); }
+.selection-edit { padding: 5px 7px; text-align: left; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); cursor: pointer; }
+.selection-edit:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.selection-images { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 6px; }
+.selection-images:empty { display: none; }
 /* The selection note stays next to its attach action, within the viewport. */
-.wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
-.wbmention-note { flex: 1; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
+.wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.wbmention-note { flex: 1 1 180px; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
 .wbmention button { flex: none; align-self: stretch; gap: 5px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; }
 .wbmention button .i { pointer-events: none; }
+.wbmention-note + .wsc-editor { flex: 1 1 180px; min-width: 0; max-height: 30vh; overflow: auto; box-sizing: border-box; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.wbmention > .selection-images { flex-basis: 100%; order: 1; margin-top: 0; }
+.wbmention .unimg { padding: 0; border-radius: 999px; align-self: auto; font-size: 13px; }
 .wbmention :focus-visible { outline-offset: 2px; }
 .wbmention-note:focus-visible { outline: 1.5px solid var(--wb-fg); }
 .wbmention[hidden] { display: none; }

@@ -46,6 +46,29 @@ const assets = path.join(__dirname, '../assets');
     assert.equal(state.blocks, 0, 'insertion creates no forced line break or block wrapper');
     assert.deepEqual(state.ranges, [{ start: 4, end: 8, kind: 'topic', id: 't1', label: 'A long topic label that wraps across several lines' }]);
     console.log('capsules: native Tab insertion wraps inline and preserves text, identity and caret');
+    // Korean IME: the last syllable stays uncommitted, yet the popup must show
+    // and match across NFC/NFD forms; Tab after the commit inserts the capsule.
+    const ime = await browser.newPage();
+    await ime.route('**/*', route => route.abort());
+    await ime.setContent('<div class="composer"><textarea id="text"></textarea></div>');
+    await ime.evaluate(() => { window.wsT = key => key; });
+    await ime.addScriptTag({ content: fs.readFileSync(path.join(assets, 'mention.js'), 'utf8') });
+    await ime.addScriptTag({ content: fs.readFileSync(path.join(assets, 'capsules.js'), 'utf8') });
+    await ime.evaluate(() => {
+      const field = document.getElementById('text');
+      WsCapsules.topicPicker(field, done => done([{ id: 'current-work-overview', label: '현재 작업 상태 오버뷰'.normalize('NFD') }]));
+      field.focus();
+    });
+    const cdp = await ime.context().newCDPSession(ime);
+    await ime.keyboard.type('#');
+    for (const t of ['ㅇ', '오', '오ㅂ', '오버', '오버ㅂ', '오버뷰']) {
+      await cdp.send('Input.imeSetComposition', { text: t, selectionStart: t.length, selectionEnd: t.length });
+    }
+    await ime.locator('.wsm-pop:not([hidden]) .wsm-opt').waitFor({ timeout: 3000 });
+    await cdp.send('Input.insertText', { text: '오버뷰' });
+    await ime.keyboard.press('Tab');
+    assert.deepEqual(await ime.evaluate(() => document.getElementById('text').wsc.snapshot().map(r => r.id)), ['current-work-overview']);
+    console.log('capsules: topic popup opens while a Hangul syllable is still composing, NFC/NFD-insensitive');
   } finally {
     await browser.close();
   }
