@@ -67,6 +67,20 @@ These observations establish overlapping selection, not its locking root cause.
   implicit T3 approval; an unfixed old acquirer is not made race-safe by a new
   binary alone.
 
+- Verification gate amendment (MAIN09:30:24, 2026-11-15): the whole offline Go
+  suite is not a gate and must not be rerun. Focused touched-path checks are the
+  gate (the 98.321 s affected-suite pass counts), plus targeted `-run` comparison
+  of observed failures against the exact current develop HEAD after MAIN's
+  synchronization. Only failures on the implementation head and not develop
+  block. Known develop reds are exempt: `TestBoardStateFilterBrowser`,
+  `TestWhiteboardEffectsBrowser`, `TestTrackerMockupI18nIsCurrent`,
+  `TestRenderPageEmbedSizeBudget`, `TestBoardPanelFrameReuseBrowser`;
+  `TestGitWakeReachesThePagesUnderItsRoot` is known flaky. Never run the entire
+  `internal/wsdashboard` suite. Every future MCP test invocation must use
+  `-timeout=30m`; every Go invocation keeps `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local`. MAIN coordinates bounded comparisons and independent Lite;
+  the worker pauses at the clean pre-review checkpoint without moving HEAD.
+
 ## Current source and historical evidence
 
 - VERIFIED by source inspection: `provisionWorktree` reads eligibility and
@@ -146,3 +160,49 @@ not the shared pool. Run the affected `internal/mcp` tests and the project's
 Level 1 Go suite (`cd agents-plugin-tool && go test ./...`); any runtime smoke
 requiring a shared daemon is a separate lead-controlled step. No implementation
 or test pass is claimed by this draft.
+
+#### Pre-review checkpoint (47401fef9) - 2026-11-15
+
+- Implemented the common-Git-directory flock with a bounded context-aware wait.
+  `acquireWorktree` now owns the lock across the eligibility snapshot,
+  provisioning, injected worker-key mint, schema-1 lease publication and all
+  rollback mutations. Profile selection, hygiene, lease format and existing
+  cleanup semantics remain unchanged. Older acquirers do not participate.
+- Added temporary-repository process overlap tests for full/housekeeping, idle
+  reuse/new creation and linked caller roots; regressions cover wait timeout and
+  cancellation, slow hooks, quarantine, mint/lease-write/hidden-board failure
+  cleanup, and preservation of dirty, branch-held/leased and other-profile
+  candidates. A first fixture-only failure used macOS `/var` pool aliases;
+  canonicalizing the fixture paths fixed it without changing production guards.
+- VERIFIED commands from `agents-plugin-tool/`, all with
+  `GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off`:
+  - `go test ./internal/mcp -run '^TestWorktreeAcquire(ReleaseDispatch|WritesLeaseAndReleaseRemovesIt|FailedLeaseWriteDetaches|HousekeepingDispatch)$' -count=1`:
+    exit 0, 10.339 s.
+  - `go test ./internal/mcp -run '^TestWorktreeAcquire(ConcurrentProcesses|LockTimeoutAndCancellation|RollbackRetainsLock)$' -count=1 -timeout=150s`:
+    first exit 1 on fixture path mismatch; after canonicalizing, exit 0, 46.455 s.
+  - `go test ./internal/mcp -run '^(TestWorktreeAcquire|TestProvisionWorktree|TestReleaseWorktree|TestWorktreeHook|TestWorktreeHygiene)' -count=1 -timeout=300s`:
+    exit 0, 98.321 s on the final implementation source.
+  - `go test ./...`: exit 1; full output read. Four packages exhausted the
+    default ten-minute package timer, and unrelated-looking tool-list,
+    dashboard, holder, job-wait, agent-envelope and embed-budget checks failed.
+    Attribution to baseline drift or concurrent load is INFERRED, not a
+    reproduced baseline result. This broad command will not be rerun.
+  - `gofmt` and `git diff --check`: exit 0.
+- Complete failure names, source-ground attribution, command output and pending
+  comparison boundary:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@c1381248/review-paths/b5e36ec5-01-pool-acquire-checkpoint-verification.md`.
+  Full combined stdout/stderr:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@c1381248/review-paths/b5e36ec5-01-pool-acquire-full-suite.log`
+  (SHA-256 `4642b4c93b78e3b06c0b8601ab2e45e0d41fb4f78cc7dc9c3a9cd88e2e95bda2`).
+- Tooling follow-up, not a ticket-scope permission change: the sole
+  `playbook.render(name: "delegate-implementer", tier_override: "medium",
+  context: {plan_stem: "pool-acquire-eligibility"})` call failed with
+  `ws-pi-agent: child capability exceeds parent ceiling
+  (ws__session_request_hire, ws__session_roster)`. No child was spawned, no
+  permission was altered, and the render was not retried.
+- Not a phase Result or completion claim. MAIN's latest-develop sync and bounded
+  targeted failure comparisons remain pending. One fresh independent
+  `code-review-lite` review of the Git diff (correctness and test integrity)
+  follows those steps, with no self-review substitute or second sweep. No
+  shared-pool/runtime smoke, Windows runtime check or race-detector check ran.
+
