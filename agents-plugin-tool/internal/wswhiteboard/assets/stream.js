@@ -318,9 +318,9 @@
       h._wbGapShell = first ? shell(first) : null;
       fresh.push(h);
     });
-    // Anchor/gap membership is selected on the server. Batch disclosure
-    // writes before any result reads and share one capture per scroller,
-    // retaining the landed initialization cost shape without a client cut.
+    // The server folds every row except open questions and the latest batch;
+    // fill() then cuts the visible bottom window client-side. Batch disclosure
+    // writes before any result reads and share one capture per scroller.
     var kept = new Map();
     fresh.forEach(function (h) {
       var scroller = kit.keep(h, { capture: false }).scroller;

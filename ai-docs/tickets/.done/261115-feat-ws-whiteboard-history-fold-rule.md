@@ -2,6 +2,7 @@
 title: "Whiteboard history uses one 1000px cut and folds closed Q/A like ordinary log entries"
 related:
   fix/history-autofold-loadmore-capsule: "branch carrying the history auto-fold regression fix; this ticket lands after it"
+completed: 2026-11-16
 ---
 
 # Whiteboard history uses one 1000px cut and folds closed Q/A like ordinary log entries
@@ -54,3 +55,18 @@ Acceptance:
   inputs, open-question lift-out from folded history, and anchor delta 0
   across expand.
 - Screenshots of the initial view and an expanded view.
+
+### Result
+
+All three decisions were already live on develop when this phase started:
+the server fold (closed questions, answers and old owner inputs no longer
+anchor; only an open question is lifted out) landed in `9986256aa`, and the
+client bottom-up cut in `fill()` landed in `20972a5f8`. No behaviour change
+was needed. This phase adds the missing mixed-content acceptance:
+`TestHistoryFoldRuleBrowser` (`testdata/history-fold-rule.cjs`) checks, in
+dark and light, the initial cut (1017px over 45 rows, crossing row included
+and nothing above it), that no closed Q/A or old input is shown, that only the
+open question and its leading entry sit between folds, and that two expands
+each add the same cut with the anchor delta at 0px right after the click and
+again past the 1500ms settle window. A stale `init()` comment ("without a
+client cut") was corrected. Screenshots: `/tmp/history-fold-rule/{before,after}/`.
