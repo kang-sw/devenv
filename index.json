@@ -836,7 +836,17 @@
       }
     },
     "261115-feat-ws-dashboard-search-drawer-answer-agent": {
-      "registered_at": "2026-11-15T01:15:10Z"
+      "registered_at": "2026-11-15T01:15:10Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T04:48:55Z",
+        "impl": {
+          "branch": "impl/develop/boil-rants-plant"
+        }
+      }
     },
     "261115-feat-ws-dashboard-user-message-envelope": {
       "registered_at": "2026-11-15T02:43:38Z"
