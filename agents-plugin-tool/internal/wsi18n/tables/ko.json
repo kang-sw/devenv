@@ -392,6 +392,8 @@
   "js.post.unreachable": "대시보드에 연결할 수 없습니다",
   "js.preview.failed": "미리보기를 불러오지 못했습니다",
   "js.preview.gone": "이 파일은 더 이상 열 수 없습니다. 보드에서 다시 여세요.",
+  "js.preview.kind.pdf": "PDF",
+  "js.preview.pdf.open": "PDF 열기 / 다운로드",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · 격리",
   "js.preview.kind.image": "이미지",

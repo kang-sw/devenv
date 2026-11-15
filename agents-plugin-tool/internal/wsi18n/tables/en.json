@@ -392,6 +392,8 @@
   "js.post.unreachable": "the dashboard is not reachable",
   "js.preview.failed": "The preview could not be loaded",
   "js.preview.gone": "This file is no longer available. Reopen it from the board.",
+  "js.preview.kind.pdf": "PDF",
+  "js.preview.pdf.open": "Open / download PDF",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · sandboxed",
   "js.preview.kind.image": "Image",
