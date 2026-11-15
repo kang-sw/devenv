@@ -414,3 +414,60 @@ kept this one batch on baseline 558; no silent repin, restart, extra execution,
 shared-runtime action or final integration is claimed. Further execution and
 any verification beyond the approved budget need MAIN disposition. Phase 1
 remains incomplete, with no Result or closure.
+
+## Minimal Fixture Continuation — 2026-11-15 (incomplete)
+
+MAIN01:01:56 authorized only aliasing the Go fixture's `os/signal` import and
+its required references, minimal local compile/vet gate wiring, and one
+`approved-002` batch after a green gate. Commit `a57290575` changes the fixture
+blob from `c073da3b0` to `bff43320c` only for `ossignal`, `ossignal.Notify` and
+`ossignal.Stop`. The driver/geometry/assertions/timing retain SHA-256
+`c109f426e58e7e97a65aa9ce84e9bff6c34f8f92f41bd87cb9645b713aed92e9`.
+No unrelated correction, silent repin or prior-artifact rewrite was made.
+
+**VERIFIED green compile-only/vet preflight:** The exact Go 1.26.2 executable
+was resolved from `approved-001/cleanup.json`'s retained compiler command,
+without a version probe. With fixed `GOROOT` and offline environment,
+`/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go test -c ./internal/wsdashboard -o
+<side.test>` compiled BOTH baseline-558/result-a572 snapshots; the same
+executable ran `go vet ./internal/wsdashboard` in BOTH. All four commands exited
+0 with empty full outputs. No server/browser launched during preflight.
+`browser-approved/preflight-002/manifest.json` records exact cwd, commands,
+executable/toolchain/source/asset hashes and both retained binaries. Elapsed
+19.115 seconds including cleanup; independent final process list empty. This
+required gate is fixture-local, not a shipped/global workflow rule.
+
+**VERIFIED failed approved-002:** After reporting
+`browser-approved/freeze-002.json`, the single batch reused the exact green
+preflight receipt and unchanged baseline 558/result a572. Both builds exited 0;
+both disposable fixture servers reached ready and returned 0 during cleanup.
+Baseline 1800 startup then reported:
+
+```text
+Error: page script: Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag.
+```
+
+No behavioral check or comparison ran (`checks: []`). Normal shell/content
+frame documents returned 200 with baseline asset identity `f5d4d7a241df28e6`;
+request URLs, frame identities, response headers/body prefixes, complete raw
+stack and diagnostic screenshot are retained in
+`browser-approved/approved-002/`. Underlying script attribution remains UNKNOWN;
+this is not a product-contract verdict. The batch returned 1 after 12.519
+seconds including cleanup. No cap expired; no repair/retry/review/closure
+followed. Outer and browser cleanup records have empty final process lists,
+no cleanup signals, and no errors.
+
+**Unexpected side effect, explicitly unresolved:** Outer `cleanup.json` tracked
+PID 58444 `/Users/kang-sw/.local/bin/codex app-server`, parent PID 58001 (the
+baseline fixture). This was not requested by the worker/driver and violates the
+intended no-provider-process isolation; do not claim that boundary held. Source
+attribution and external provider/network activity are UNKNOWN. No further probe
+or runtime action investigated it. Independent final process evidence confirms
+that the tracked process was absent after cleanup.
+
+`approved-002/RESULT.md` records actual commands, exits, all four retained binary
+hashes (preflight and batch), artifact paths, and limitations. Exact source/asset
+manifests and immutable local archives remain, as do all ten original untracked
+artifacts and approved-001 evidence. Preserve the dirty worktree/artifacts before
+release. Further execution requires MAIN disposition; final lead-owned sync of
+`1612e099c` is still pending. Phase 1 has no Result and the ticket remains ready.

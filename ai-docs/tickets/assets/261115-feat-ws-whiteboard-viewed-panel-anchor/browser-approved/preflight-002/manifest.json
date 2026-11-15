@@ -1,0 +1,294 @@
+{
+  "baseline": "5585844a794a031a770ce4171c5e05daf1bd3353",
+  "result": "a57290575bf57b506e05f6b8180c67cf56c87f65",
+  "overall_cap_seconds": 600,
+  "build_cap_seconds": 180,
+  "browser_cap_seconds": 180,
+  "cleanup_reserve_seconds": 30,
+  "steps": [
+    {
+      "label": "frozen-fixture.go",
+      "command": [
+        "git",
+        "show",
+        "a57290575bf57b506e05f6b8180c67cf56c87f65:agents-plugin-tool/internal/wsdashboard/board_viewed_browser_test.go"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 42069,
+      "started_elapsed": 0.05872258311137557,
+      "returncode": 0,
+      "ended_elapsed": 0.14179808273911476,
+      "final_returncode": 0
+    },
+    {
+      "label": "frozen-driver.cjs",
+      "command": [
+        "git",
+        "show",
+        "a57290575bf57b506e05f6b8180c67cf56c87f65:agents-plugin-tool/internal/wsdashboard/testdata/viewed-panels.browser.cjs"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 42072,
+      "started_elapsed": 0.15191608294844627,
+      "returncode": 0,
+      "ended_elapsed": 0.22018599975854158,
+      "final_returncode": 0
+    },
+    {
+      "label": "frozen-runner.py",
+      "command": [
+        "git",
+        "show",
+        "a57290575bf57b506e05f6b8180c67cf56c87f65:ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/run.py"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 42075,
+      "started_elapsed": 0.22989804111421108,
+      "returncode": 0,
+      "ended_elapsed": 0.2934757908806205,
+      "final_returncode": 0
+    },
+    {
+      "label": "baseline-archive",
+      "command": [
+        "git",
+        "archive",
+        "--format=tar",
+        "--output=/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline.tar",
+        "5585844a794a031a770ce4171c5e05daf1bd3353",
+        "agents-plugin-tool"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 42081,
+      "started_elapsed": 0.3077015411108732,
+      "returncode": 0,
+      "ended_elapsed": 1.2232676660642028,
+      "final_returncode": 0
+    },
+    {
+      "label": "baseline-build",
+      "command": [
+        "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go",
+        "test",
+        "-c",
+        "./internal/wsdashboard",
+        "-o",
+        "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline.test"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline-source/agents-plugin-tool",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 43005,
+      "started_elapsed": 7.98822862515226,
+      "returncode": 0,
+      "ended_elapsed": 12.365866624750197,
+      "final_returncode": 0
+    },
+    {
+      "label": "result-archive",
+      "command": [
+        "git",
+        "archive",
+        "--format=tar",
+        "--output=/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result.tar",
+        "a57290575bf57b506e05f6b8180c67cf56c87f65",
+        "agents-plugin-tool"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 43622,
+      "started_elapsed": 12.431999249849468,
+      "returncode": 0,
+      "ended_elapsed": 12.650990208145231,
+      "final_returncode": 0
+    },
+    {
+      "label": "result-build",
+      "command": [
+        "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go",
+        "test",
+        "-c",
+        "./internal/wsdashboard",
+        "-o",
+        "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result.test"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result-source/agents-plugin-tool",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 43646,
+      "started_elapsed": 13.16609187470749,
+      "returncode": 0,
+      "ended_elapsed": 16.830697250086814,
+      "final_returncode": 0
+    },
+    {
+      "label": "baseline-vet",
+      "command": [
+        "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go",
+        "vet",
+        "./internal/wsdashboard"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/baseline-source/agents-plugin-tool",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 44124,
+      "started_elapsed": 16.91075974982232,
+      "returncode": 0,
+      "ended_elapsed": 17.61539579089731,
+      "final_returncode": 0
+    },
+    {
+      "label": "result-vet",
+      "command": [
+        "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go",
+        "vet",
+        "./internal/wsdashboard"
+      ],
+      "cwd": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/result-source/agents-plugin-tool",
+      "environment": {
+        "PATH": "/Users/kang-sw/.pi/agent/bin:/Users/kang-sw/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/kang-sw/.cargo/bin",
+        "HOME": "/Users/kang-sw",
+        "TMPDIR": "/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/",
+        "USER": "kang-sw",
+        "LOGNAME": "kang-sw",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "GOENV": "off",
+        "WS_PLAYWRIGHT_MODULE": "/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright",
+        "GOROOT": "/opt/homebrew/Cellar/go/1.26.2/libexec"
+      },
+      "pid": 44349,
+      "started_elapsed": 17.617608499713242,
+      "returncode": 0,
+      "ended_elapsed": 18.67754133278504,
+      "final_returncode": 0
+    }
+  ],
+  "completed": true,
+  "mode": "compile-vet-preflight",
+  "toolchain": {
+    "authority": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/approved-001/cleanup.json",
+    "authority_sha256": "f703907b708a9b5ec02fc978356553f2048c32b6780a5911e24c8f92e6d49800",
+    "goroot": "/opt/homebrew/Cellar/go/1.26.2/libexec",
+    "go": "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go",
+    "go_sha256": "912f19a1a95ffe44a9e349d8283c74eb1d2eace37aad3ca6ef7b9ae321eb709f",
+    "compile_sha256": "f4236db18fb2f793985a459463f2b73a6deac71782ff4ac9a5e1cba30f191562",
+    "vet_sha256": "6e0b73a9e1fd5a53f46391383ebdf33b23fa52b48f53c63b8293f4e030431fb8"
+  },
+  "cached_playwright_package_sha256": "8be9edc5642a8c761b677e7af8b9937f36c0443a91e14765877716d70034e5bf",
+  "elapsed_seconds": 19.115,
+  "runner_sha256": "a8bbff6671d772886840457cc7c9f0f62a1643b03c965507e8ceb91b3741d598",
+  "fixture_sha256": "96f6db43bf361dc4dfbf1424629ac6028e175f7ef688ef596b34863d6df560d4",
+  "driver_sha256": "c109f426e58e7e97a65aa9ce84e9bff6c34f8f92f41bd87cb9645b713aed92e9",
+  "baseline_sources_manifest_sha256": "79f7c888813d19e642387a1ebad31454a0be013454f6dcab0f41906432e02f88",
+  "baseline_binary_sha256": "199c9da99de71aa40cbdbfa519dcee8f389c6dd4019a288b6380fbb8a4ccda80",
+  "result_sources_manifest_sha256": "3af34d1936259aa26c1acb0ea0fe4d52527a3e0e28fa7e3e685d91cd0abdbfc6",
+  "result_binary_sha256": "558551093e7a8f6e94ce6580cc04bd7ef7b15bcb8dcbf74936fc1745897b38a6"
+}

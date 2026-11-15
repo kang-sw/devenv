@@ -1,0 +1,48 @@
+[
+  {
+    "url": "http://127.0.0.1:55892/s/livesession",
+    "resourceType": "document",
+    "frame": {
+      "id": 1,
+      "url": "about:blank",
+      "parent": null
+    },
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-security-policy": "frame-src 'self'; frame-ancestors 'none'",
+      "content-type": "text/html; charset=utf-8",
+      "date": "Sun, 15 Nov 2026 01:07:04 GMT",
+      "referrer-policy": "no-referrer",
+      "transfer-encoding": "chunked",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    },
+    "run": "baseline-1800-queued",
+    "bodyPrefix": "<!DOCTYPE html>\n<html data-mode=\"shell\" data-shell=\"1\" data-rid=\"livesession\" data-assets=\"f5d4d7a241df28e6\" data-lang=\"en\" data-langpref=\"\" data-sysopen=\"1\">\n<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"manifest\" href=\"/pwa/manifest.webmanifest\" crossorigin=\"use-credentials\"><meta name=\"theme-col",
+    "assetID": "f5d4d7a241df28e6"
+  },
+  {
+    "url": "http://127.0.0.1:55892/s/livesession?frame=1",
+    "resourceType": "document",
+    "frame": {
+      "id": 2,
+      "url": "",
+      "parent": 1
+    },
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-security-policy": "frame-src 'self'; frame-ancestors 'self'",
+      "content-type": "text/html; charset=utf-8",
+      "date": "Sun, 15 Nov 2026 01:07:04 GMT",
+      "referrer-policy": "no-referrer",
+      "transfer-encoding": "chunked",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN"
+    },
+    "run": "baseline-1800-queued",
+    "bodyPrefix": "<!DOCTYPE html>\n<html data-mode=\"live\" data-rid=\"livesession\" data-assets=\"f5d4d7a241df28e6\" data-wb-titlehost data-lang=\"en\" data-langpref=\"\" data-sysopen=\"1\" data-frame=\"1\">\n<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"manifest\" href=\"/pwa/manifest.webmanifest\" crossorigin=\"use-credentials\"><met",
+    "assetID": "f5d4d7a241df28e6"
+  }
+]
