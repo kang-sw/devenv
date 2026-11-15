@@ -60,7 +60,7 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
     wc.on('will-redirect', event => guard(event, event.url, event.isMainFrame));
     wc.setWindowOpenHandler(({ url }) => {
       const action = destination(url, pin);
-      if (action === 'dashboard') wc.loadURL(url).catch(navigationFailed);
+      if (action === 'dashboard') navigate(url);
       else if (action === 'external') openExternal(url);
       return { action: 'deny' };
     });
@@ -79,8 +79,21 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       setTitle('Werkschaft — Navigation failed — ⌘R to retry');
       return wc.loadFile(path.join(__dirname, 'connection.html')).catch(() => {});
     }
+    async function navigate(url, previous = { pin, title }) {
+      try { await wc.loadURL(url); }
+      catch (error) {
+        if (window.isDestroyed()) return;
+        // Stay rejects loadURL with ERR_ABORTED, not a failed attachment. Undo
+        // Retry's provisional pin/title without replacing the retained draft page.
+        if (error.code === 'ERR_ABORTED' || error.errno === -3) {
+          pin = previous.pin;
+          setTitle(previous.title);
+        } else await navigationFailed();
+      }
+    }
     async function connect() {
       if (connecting || window.isDestroyed()) return;
+      const previous = { pin, title };
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
@@ -95,7 +108,7 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
         if (window.isDestroyed()) return;
         pin = url;
         setTitle('Werkschaft');
-        await wc.loadURL(url);
+        await navigate(url, previous);
       } catch { if (!window.isDestroyed()) await navigationFailed(); }
       finally { connecting = false; }
     }

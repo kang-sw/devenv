@@ -21,7 +21,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/') {
       this.webContents = Object.assign(new EventEmitter(), {
         setUserAgent: agent => { this.agent = agent; }, getUserAgent: () => 'Chromium',
         setWindowOpenHandler: handler => { this.popup = handler; },
-        loadURL: async url => { this.loads.push(url); }, loadFile: async file => { this.loads.push(file); },
+        loadURL: async url => { this.loads.push(url); this.currentURL = url; },
+        loadFile: async file => { this.loads.push(file); this.currentURL = file; },
         setZoomFactor: zoom => { this.zoom = zoom; },
       });
       Window.current = this;
@@ -129,6 +130,73 @@ test('discovery and immediate navigation failure show the bundled connection pag
   await healthy.menus.retry.click();
   assert.equal(healthy.window.title, 'Werkschaft — Navigation failed — ⌘R to retry');
   assert.equal(path.basename(healthy.window.loads.at(-1)), 'connection.html');
+});
+function stayOnNavigation(f, error) {
+  const w = f.window;
+  w.webContents.loadURL = async url => {
+    w.loads.push(url);
+    let override = false;
+    // Stand in for the dashboard's armed pasted-image beforeunload guard.
+    w.webContents.emit('will-prevent-unload', { preventDefault() { override = true; } });
+    assert.equal(override, false, 'Stay must retain the renderer unload veto');
+    throw error;
+  };
+}
+function assertRetainedPage(f, url, title) {
+  const w = f.window;
+  assert.equal(w.currentURL, url);
+  assert.equal(w.title, title);
+  // Check the internal title too: renderer title updates must not undo rollback.
+  w.webContents.emit('page-title-updated', { preventDefault() {} });
+  assert.equal(w.title, title);
+  assert(!w.loads.some(load => path.basename(load) === 'connection.html'));
+  let decision;
+  f.session.webRequest.handler({ url: url + 's/later-frame', resourceType: 'subFrame' }, value => { decision = value; });
+  assert.deepEqual(decision, {}, 'the retained origin must remain pinned');
+  let prevented = false;
+  w.webContents.emit('will-frame-navigate', { url: url + 's/later-frame', isMainFrame: false, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false);
+  assert.deepEqual(f.opened, []);
+}
+test('Retry Stay preserves the current page, title and old pin after rediscovery', async () => {
+  let discovered = 'http://127.0.0.1:39418/';
+  const f = await fixture(async () => discovered), w = f.window;
+  const originalURL = w.currentURL, originalTitle = w.title;
+  discovered = 'http://127.0.0.1:39419/';
+  stayOnNavigation(f, Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED', errno: -3 }));
+  await f.menus.retry.click();
+  assert.equal(w.loads.at(-1), discovered);
+  assertRetainedPage(f, originalURL, originalTitle);
+  // Cancellation must release the retry lock, not leave the shell stuck.
+  w.webContents.loadURL = async url => { w.loads.push(url); w.currentURL = url; };
+  await f.menus.retry.click();
+  assert.equal(w.currentURL, discovered);
+});
+test('same-origin popup Stay preserves the current page, title and pin', async () => {
+  const f = await fixture(), w = f.window;
+  const originalURL = w.currentURL, originalTitle = w.title;
+  stayOnNavigation(f, Object.assign(new Error('ERR_ABORTED'), { errno: -3 }));
+  assert.deepEqual(w.popup({ url: originalURL + 's/another-session' }), { action: 'deny' });
+  await tick();
+  assert.equal(w.loads.at(-1), originalURL + 's/another-session');
+  assertRetainedPage(f, originalURL, originalTitle);
+});
+test('genuine Retry and popup load failures still clear the pin and show the connection page', async () => {
+  for (const trigger of ['retry', 'popup']) {
+    const f = await fixture(), w = f.window;
+    const originalURL = w.currentURL;
+    // A previous Stay must not suppress a later, genuine network failure.
+    stayOnNavigation(f, Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }));
+    await f.menus.retry.click();
+    w.webContents.loadURL = async () => { throw Object.assign(new Error('ERR_CONNECTION_REFUSED'), { code: 'ERR_CONNECTION_REFUSED', errno: -102 }); };
+    if (trigger === 'retry') await f.menus.retry.click();
+    else { w.popup({ url: originalURL + 's/another-session' }); await tick(); }
+    assert.equal(w.title, 'Werkschaft — Navigation failed — ⌘R to retry');
+    assert.equal(path.basename(w.currentURL), 'connection.html');
+    let decision;
+    f.session.webRequest.handler({ url: originalURL + 's/frame', resourceType: 'subFrame' }, value => { decision = value; });
+    assert.deepEqual(decision, { cancel: true });
+  }
 });
 test('losing single-instance lock quits before creating a window', () => {
   const { start } = require('../main');
