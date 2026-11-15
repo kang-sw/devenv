@@ -825,6 +825,9 @@
     "261115-feat-ws-dashboard-settings-in-usage-strip": {
       "registered_at": "2026-11-15T02:26:58Z"
     },
+    "261115-feat-ws-dashboard-user-message-envelope": {
+      "registered_at": "2026-11-15T02:43:38Z"
+    },
     "261115-feat-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:46Z"
     },
