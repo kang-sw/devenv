@@ -91,6 +91,11 @@ func failedCommands(failed []command, keys map[*wsxmlcmd.Scope]string) string {
 		}
 	}
 	for _, cmd := range failed {
+		// A failed zero-command group retains its entire source, including
+		// stray fragments. Keep their diagnostics, but not a second payload.
+		if group, bad := groups[cmd.Scope]; bad && group.Scope.Commands == 0 && !cmd.IsGroup() {
+			continue
+		}
 		if cmd.Scope != scope {
 			closeScope()
 		}

@@ -300,6 +300,38 @@ func TestGroupRules(t *testing.T) {
 	}
 }
 
+func TestParseOrderedStrayFragmentLabels(t *testing.T) {
+	for name, tc := range map[string]struct {
+		input, label string
+	}{
+		"root-text":   {"loose\n<tr:drop id=\"1\"/>", "stray fragment (line 1)"},
+		"root-close":  {"\n</tr:oops>", "stray fragment (line 2)"},
+		"group-text":  {"<tr:in name=\"a\"><tr:note>x</tr:note>\nloose</tr:in>", `stray fragment inside <tr:in name="a"> (line 2)`},
+		"group-close": {`<tr:in name="a"></tr:oops></tr:in>`, `stray fragment inside <tr:in name="a"> (line 1)`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := &Problems{}
+			cmds, complete := ParseOrdered(p, groupGrammar, tc.input)
+			if !complete {
+				t.Fatal(p.List)
+			}
+			fragments := 0
+			for _, cmd := range cmds {
+				if cmd.Pos >= 0 {
+					continue
+				}
+				fragments++
+				if cmd.Label() != tc.label || len(cmd.Problems) != 1 || !strings.HasPrefix(cmd.Problems[0], tc.label+": ") || !slices.Contains(p.List, cmd.Problems[0]) {
+					t.Fatalf("fragment label/diagnostics: %+v; %v", cmd, p.List)
+				}
+			}
+			if fragments != 1 {
+				t.Fatalf("fragment count %d: %+v", fragments, cmds)
+			}
+		})
+	}
+}
+
 func TestParseOrderedRejectedGroupContainerFields(t *testing.T) {
 	prefix := `<tr:drop id="1"/>`
 	rejected := `<tr:in name="outer">junk<tr:set><tr:name></tr:set></tr:in><tr:in name="literal"><![CDATA[</tr:name></tr:set><tr:in>]]></tr:name></tr:set></tr:in>`

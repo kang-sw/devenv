@@ -242,9 +242,15 @@ func (c Command) IsGroup() bool {
 	return c.Pos == 0 && c.Scope != nil
 }
 
-// Label names the command in a problem: its position, tag, and line; a
-// group's Command is named as its group.
+// Label names a command by position, tag, and line, a group by its scope,
+// or a stray fragment by its location without inventing a command position.
 func (c Command) Label() string {
+	if c.Pos < 0 {
+		if c.Scope != nil {
+			return fmt.Sprintf("stray fragment inside <%s %s=%q> (line %d)", c.Scope.Tag, c.Scope.Attr, c.Scope.Value, c.Line)
+		}
+		return fmt.Sprintf("stray fragment (line %d)", c.Line)
+	}
 	if c.IsGroup() {
 		return c.Scope.Label()
 	}
@@ -343,8 +349,12 @@ func (r *parser) fragment(scope *Scope, read func()) {
 	start, before := r.i, len(r.p.List)
 	read()
 	if r.ordered {
-		r.out = append(r.out, Command{Pos: -1, Line: r.lineAt(start), Scope: scope,
-			Source: r.s[start:r.i], Problems: append([]string(nil), r.p.List[before:]...)})
+		cmd := Command{Pos: -1, Line: r.lineAt(start), Scope: scope, Source: r.s[start:r.i]}
+		for i := before; i < len(r.p.List); i++ {
+			r.p.List[i] = cmd.Label() + ": " + strings.TrimPrefix(r.p.List[i], fmt.Sprintf("line %d: ", cmd.Line))
+		}
+		cmd.Problems = append([]string(nil), r.p.List[before:]...)
+		r.out = append(r.out, cmd)
 	}
 }
 

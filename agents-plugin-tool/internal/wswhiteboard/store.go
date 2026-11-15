@@ -307,7 +307,7 @@ type Env struct {
 	IsAbs func(path string) bool
 }
 
-// Outcome is what an accepted update did.
+// Outcome reports accepted work and rejected payloads from an update.
 type Outcome struct {
 	// Accepted counts accepted commands, including semantic no-ops. Failed
 	// contains complete retry payloads; Unpartitioned forbids applying a prefix.
