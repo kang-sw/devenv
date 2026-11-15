@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e11e43b2e45965a2
 sage-review-completeness-reviewed: e11e43b2e45965a2
+completed: 2026-11-15
 ---
 
 # Concurrent pooled worktree acquires can select the same checkout
@@ -205,3 +206,94 @@ or test pass is claimed by this draft.
   `code-review-lite` review of the Git diff (correctness and test integrity)
   follows those steps, with no self-review substitute or second sweep. No
   shared-pool/runtime smoke, Windows runtime check or race-detector check ran.
+
+### Result (47401fef9) - 2026-11-15
+
+Implemented decision (1061): a symlink-resolved common-Git-directory flock
+serializes participating acquisitions before their eligibility snapshots and
+through provisioning, canonical worker-key binding, lease publication and
+failure rollback. Its context-aware two-second wait fails before checkout
+mutation; a timeout never unlinks the lock or cancels the holder's hooks. Tool
+arguments/results, profile partitioning and schema-1 leases remain compatible
+(T0); old acquirers remain outside the synchronization guarantee.
+
+VERIFIED: The affected acquisition/profile/hook suite passed in 98.321 s with
+exit 0, using the exact focused command recorded above. MAIN explicitly retained
+that evidence under the amended gate. MAIN synchronized develop
+`dedb8a1e5c28b9efd78460c52b0f00a78458d646` into this branch without conflicts at
+`014a7d701a4acda78dac15c39a7ebbd63f69320d`. Subsequent work is ticket-only;
+no additional source/test changes or broad test runs were made.
+
+Independent one-pass Lite reviewed the exact synchronized range
+`dedb8a1e5c28b9efd78460c52b0f00a78458d646..014a7d701a4acda78dac15c39a7ebbd63f69320d`.
+No Critical or Important findings; remaining none. The complete report was read:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/f7de7afb-01-fix6-pool-lite.md`.
+No fixes or second review were required.
+
+#### Targeted comparison matrix
+
+MAIN's independent diagnostic worker compared the exact pinned develop head
+`dedb8a1e5c28b9efd78460c52b0f00a78458d646` in
+`/Users/kang-sw/.ws-worktrees/devenv/bountiful-dress-energy` with synchronized
+implementation head `014a7d701a4acda78dac15c39a7ebbd63f69320d` in this worktree.
+Both heads and clean worktrees were checked before and after. The complete
+report `/tmp/fix6-targeted-comparison.md` and all 26 raw logs were read. Commands
+ran serially, once per row per head, from each checkout's `agents-plugin-tool/`:
+
+```sh
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test <package> -run '<selector>' -count=1 -timeout=<budget> > /tmp/fix6-<baseline|impl>-<stem>.log 2>&1
+```
+
+| Stem | Package | Exact selector | Budget | Develop result | Implementation result |
+|---|---|---|---|---|---|
+| capabilities | `./cmd/ws-mcp` | `^TestRuntimeCapabilitiesCommandReports(Launcher\|Wsflow)ContractSurface$` | `20s` | PASS, 5.570 s | PASS, 6.234 s |
+| execjob | `./internal/execjob` | `^TestResultWithContextEndsAWaitWhenTheContextEnds$` | `20s` | PASS, 8.790 s | PASS, 9.675 s |
+| dashboard | `./internal/wsdashboard` | `^Test(DevAssetsIDFollowsTheServedFiles\|ToolbarPageActionHooks\|DevAssetsOffServesTheEmbeddedPages\|DevAssetsShowEditsWithoutARestart\|DevAssetsReportABrokenTemplateAndRecover\|DevAssetsRequireSourceFragments\|LabelRouteSavesShowsAndResets\|SelectionTextTransportLifecycle\|GearHoldsTheThemeSection)$` | `20s` | FAIL, 7.386 s | FAIL, 9.797 s |
+| mcp | `./internal/mcp` | `^TestImplIdentityResolveProvisionRouteIntegration$` | `30m` | PASS, 6.142 s | PASS, 3.349 s |
+| wsagent-assertions | `./internal/wsagent` | `^Test(TokenSpawnRecordsTheHolderAsParent\|CommonContractLifecycle\|RESTRoutesEndToEnd\|PiLeadCommands)$` | `20s` | FAIL, 1.267 s | FAIL, 1.277 s |
+| wsagent-launch | `./internal/wsagent` | `^Test(ClaudeLeadRejoinIgnoresChangedPluginLaunchInputs\|ClaudeLeadLaunchAsksForCommands)$` | `20s` | FAIL, 15.787 s | FAIL, 15.825 s |
+| wsagent-drain | `./internal/wsagent` | `^Test(ClaudeLeadCommandSplitsTheDrain\|LeadQueuedInputDropsWithTheConversation\|LeadStopKeepsTheQueueWithoutARestart)$` | `20s` | FAIL, 15.776 s | FAIL, 15.888 s |
+| wsagent-handoff | `./internal/wsagent` | `^Test(LeadRowTakenWhileNoDaemonRan\|LeadRowOfAnEarlierDaemonIsNotATerminals\|LeadControlRoutesTakeTheTrustedGate)$` | `20s` | FAIL, 15.730 s | FAIL, 16.033 s |
+| wsagent-daemon-control | `./internal/wsagent` | `^TestLeadControlRoutesThroughTheDaemonsGate$` | `20s` | FAIL, 5.740 s | FAIL, 5.972 s |
+| wsagent-isolation | `./internal/wsagent` | `^TestLeadIsolationRequestAndRelaunch$/^pi$/^default$` | `20s` | PASS, 0.664 s | PASS, 0.895 s |
+| holder | `./internal/wsholder` | `^TestAConsumersReplayIsNoLoss$` | `20s` | FAIL, 15.715 s | FAIL, 15.568 s |
+| ledger | `./internal/wsledger` | `^TestRemoteSmokeRegisterSyncFetch$` | `20s` | Diagnostic timeout, 20.490 s | PASS, 18.718 s |
+| trackerhost | `./internal/wstrackerhost` | `^TestIdlePushWithoutDaemon$` | `20s` | PASS, 11.796 s | PASS, 13.144 s |
+
+VERIFIED: Among 30 selected top-level tests (including the selected isolation
+subtest), 17 failed on both heads, 12 passed on both, and the ledger control
+reached only its baseline's diagnostic budget while implementation passed. No
+implementation-only failure was observed. The shared failures are:
+
+- Dashboard: `TestToolbarPageActionHooks`,
+  `TestLabelRouteSavesShowsAndResets`, `TestGearHoldsTheThemeSection`.
+- wsagent: all 13 top-level names selected by the five failing wsagent rows;
+  the rejoin test fails in both `malformed_settings` and `missing_bundle`, and
+  the common-contract test fails for both `claude` and `pi`.
+- Holder: `TestAConsumersReplayIsNoLoss`.
+
+The six other selected dashboard names pass on both synchronized heads. MCP
+integration, tracker-host idle push and isolated `pi/default` also pass on both;
+the original package-wide ten-minute timers were not standalone assertion
+failures for those tests. The baseline ledger's 20 s timeout occurs during
+`Register` at `remote_smoke_test.go:68`, not the original full-run `syncOK`
+point at line 47. It does not establish failure at the normal ten-minute budget.
+Shared reproduction establishes baseline failures, not their timing root cause.
+
+#### Gate settlement and limits
+
+MAIN confirmed the revised focused-plus-comparison gate satisfied and authorized
+Result/closure after reading the full comparison and clean independent Lite.
+The historical whole-suite command remains **FAIL**, never PASS, and was not
+rerun. MAIN-exempt `TestTrackerMockupI18nIsCurrent` and
+`TestRenderPageEmbedSizeBudget` were deliberately not repeated. All other
+pool-lane failure names and original timer cases were covered; the diagnostic
+worker received no occupied-lane inventory, so no cross-lane coverage is claimed.
+
+Omitted: shared-runtime/pool smoke, Windows runtime verification, race detector,
+separate in-flight cancellation and symlink-alias regression cases, historical
+`d17d335cb` reproduction, and a normal-budget baseline ledger retry. These are
+explicit evidence limits, not implementation findings. No resource-exhaustion
+or full-suite-pass claim is made. The earlier delegation capability-ceiling
+refusal remains a reported tooling follow-up for MAIN; no permission changes,
+unrelated repairs, additional review or branch integration were performed.
