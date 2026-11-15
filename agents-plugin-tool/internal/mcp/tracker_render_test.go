@@ -8,6 +8,57 @@ import (
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
+// Every date renderer adds start immediately before due, without changing
+// any bytes when start is absent (including the card's explicit due none).
+func TestTrackerStartDateRenderers(t *testing.T) {
+	start, due := "2026-11-15", "2026-11-20"
+	for _, withDue := range []bool{false, true} {
+		t.Run(map[bool]string{false: "start-only", true: "start-and-due"}[withDue], func(t *testing.T) {
+			it := wstracker.ItemView{ID: "item", Alias: "maya.pc-5", Kind: "task", Title: "Parser", PriorityLevel: 2, PriorityName: "normal"}
+			if withDue {
+				it.Due = &due
+			}
+			v := &wstrackerhost.StoreView{View: &wstracker.View{Items: map[string]wstracker.ItemView{"item": it}}}
+			a := wstracker.Assignment{Item: "item", To: "maya", By: "lena", State: "live", Status: "todo"}
+			renderers := map[string]func() string{
+				"item row":       func() string { return formatTrackerItemRow(v, v.Items["item"]) },
+				"assignment row": func() string { return formatTrackerAssignmentRow(v, a) },
+				"detail":         func() string { return formatTrackerItem(v, "item") },
+				"card":           func() string { return formatTrackerCard(v, "team", "item") },
+			}
+			for name, render := range renderers {
+				t.Run(name, func(t *testing.T) {
+					baseline := render()
+					if strings.Contains(baseline, "start ") {
+						t.Fatalf("absent start printed: %s", baseline)
+					}
+					it.Start = &start
+					v.Items["item"] = it
+					got := render()
+					var want string
+					if withDue || name == "card" {
+						want = strings.Replace(baseline, "due ", "start "+start+", due ", 1)
+					} else if name == "item row" {
+						want = baseline + " (start " + start + ")"
+					} else if name == "assignment row" {
+						want = baseline + ", start " + start
+					} else {
+						want = strings.Replace(baseline, "priority 2 (normal)", "priority 2 (normal), start "+start, 1)
+					}
+					if got != want {
+						t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+					}
+					it.Start = nil
+					v.Items["item"] = it
+					if got := render(); got != baseline {
+						t.Fatalf("absent-start output changed:\n%s\nwant:\n%s", got, baseline)
+					}
+				})
+			}
+		})
+	}
+}
+
 // The team scope prints a legend, each person's load with its per-status
 // breakdown (in-review and dropped outside it), and the stale, overdue,
 // dropped, in-review, idea, fallback-held, and done counts,
