@@ -56,6 +56,10 @@ const [base, updates] = process.argv.slice(2);
           d.nextElementSibling.matches('.centries')), true, 'template sibling order retained');
         assert.equal(await history.locator('time[data-ms]').evaluateAll(times => times.length > 0 &&
           times.every(t => t.wsFmt && t.title)), true, 'new timestamps formatted');
+        if (open) assert.equal(await history.locator('.brow').evaluateAll(rows => rows.length > 0 && rows.every(r => {
+          const bp = r.querySelector('.bp'), bm = r.querySelector('.bm');
+          return bp.scrollWidth <= bp.clientWidth && Math.abs(bp.getBoundingClientRect().top - bm.getBoundingClientRect().top) < 4;
+        })), true, 'model row label unclipped, time on the same row');
       }
       await update('first-model');
       await checkModel('first-model', false);

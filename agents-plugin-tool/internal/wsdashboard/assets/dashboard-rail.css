@@ -353,6 +353,8 @@
 .shp-stat > span { font-size: 10.5px; line-height: 1.25; color: var(--wb-muted-fg); white-space: normal; overflow-wrap: anywhere; }
 .modelhistory { margin: 8px 12px; font-size: 12px; color: var(--wb-muted-fg); }
 .modelhistory > summary { cursor: pointer; }
+/* Observed-model rows carry no leading .mk marker, so drop .brow's 16px marker column here. */
+.modelhistory .brow { grid-template-columns: minmax(0, 1fr) auto; }
 .shp-foot { display: flex; flex-wrap: wrap; gap: 2px 0; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
 .shp-foot > span { white-space: nowrap; }
 .shp-foot > span + span::before { content: "\00b7"; margin: 0 6px; opacity: .7; }
