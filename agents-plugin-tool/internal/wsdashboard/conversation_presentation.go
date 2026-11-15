@@ -38,6 +38,9 @@ func (e ConvEntry) BoardNudgeSummary() string {
 	if len(topics) > 2 {
 		preview += " +" + strconv.Itoa(len(topics)-2)
 	}
+	if len(e.BoardNudgeMails) > 1 {
+		return wsi18n.T(e.Lang, "entry.board.nudge.batch", strings.Join(reasons, ", "), len(e.BoardNudgeMails), preview)
+	}
 	return wsi18n.T(e.Lang, "entry.board.nudge", strings.Join(reasons, ", "), preview)
 }
 
