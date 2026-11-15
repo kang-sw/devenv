@@ -596,7 +596,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T03:17:45Z"
+        "touched_at": "2026-11-15T03:19:02Z",
+        "impl": {
+          "branch": "impl/develop/robin-caddy-aroma"
+        }
       }
     },
     "261114-feat-ws-dashboard-selection-mention-note": {
