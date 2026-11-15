@@ -103,7 +103,7 @@ func TestCheckRowsStageAnswersInTheReplyBar(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := "var BOARD = " + string(board) + ";\n" + formPrelude + "(function () {\n" + string(answers) + string(form) + "})();\n" + `
-var row = byId("item-3"), box = row.querySelector("label.ck > input"), x = row.querySelector("button.no-toggle"), note = row.querySelector("textarea.note");
+var row = byId("check-3"), box = row.querySelector("label.ck > input"), x = row.querySelector("button.no-toggle"), note = row.querySelector("textarea.note");
 check("nothing staged", reply(), "");
 tick(box, true);
 check("box stages ok", reply(), "03=ok");
@@ -124,12 +124,12 @@ check("the all-ok box ticks the ack alone", [reply(), box.checked], ["02=ok", fa
 tick(all, false);
 document.querySelectorAll("button[data-bulk]").forEach(click);
 check("the bulk buttons answer the policy pick and the ack, never the check", [reply(), box.checked], ["01=a\n02=ok", false]);
-var as = byId("item-6");
+var as = byId("check-6");
 check("the assumed check has a pen and no box", [!!as.querySelector("button.note-toggle"), as.querySelector("label.ck > input")], [true, null]);
 click(as.querySelector("button.note-toggle"));
 type(as.querySelector("textarea.note"), "wait, no");
 check("the assumed check sends a note alone", reply(), "01=a\n06=^wait, no\n02=ok");
-check("answered checks carry no answer control", [byId("item-4").getAttribute("data-id"), byId("item-5").getAttribute("data-id")], [null, null]);
+check("answered checks carry no answer control", [byId("check-4").getAttribute("data-id"), byId("check-5").getAttribute("data-id")], [null, null]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
@@ -184,8 +184,8 @@ process.stdout.write(bad.join("\n"));`
 check("before the script runs nothing is set", state(), null);
 run();
 check("on by default", [state(), pressed(), stored], ["1", ["true"], {}]);
-check("the rows the stylesheet hides are the answered ones", ids(".topic .checks .ckrow:not([data-id])"), ["item-4", "item-5"]);
-check("open and assumed rows stay", ids(".topic .checks .ckrow[data-id]"), ["item-3", "item-6"]);
+check("the rows the stylesheet hides are the answered ones", ids(".topic .checks .ckrow:not([data-id])"), ["check-4", "check-5"]);
+check("open and assumed rows stay", ids(".topic .checks .ckrow[data-id]"), ["check-3", "check-6"]);
 var first = document.querySelector("button.ckhide");
 click(first);
 check("a press turns it off and stores it", [state(), pressed(), stored["ws.wb.checks.hideAnswered"]], ["0", ["false"], "0"]);
@@ -250,7 +250,7 @@ func TestTypingBuildsTheReplyOnceAFrame(t *testing.T) {
 	script := "var BOARD = " + string(board) + ";\n" + formPrelude + "(function () {\n" + string(answers) + string(form) + "})();\n" + `
 var builds = 0, block = window.wbAnswers.block;
 window.wbAnswers.block = function (a, b) { builds++; return block(a, b); };
-var ra = byId("item-1"), rb = byId("item-2"), na = ra.querySelector("textarea.note"), boxA = ra.querySelector("label.ck > input");
+var ra = byId("check-1"), rb = byId("check-2"), na = ra.querySelector("textarea.note"), boxA = ra.querySelector("label.ck > input");
 var tb = document.querySelector('section.topic[data-topic="b"] textarea.tnote');
 key(na, "h"); key(na, "hi");
 check("a keystroke waits for its frame", [reply(), builds], ["", 0]);

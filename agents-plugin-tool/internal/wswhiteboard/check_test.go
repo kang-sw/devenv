@@ -155,10 +155,10 @@ func TestChecksOnlyTopicChipIsAPlainCount(t *testing.T) {
 func TestCheckRowsRenderTheirStates(t *testing.T) {
 	page := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	row := func(id string) string {
-		return regexp.MustCompile(`<div class="ckrow[^"]*" id="item-` + id + `".*?</div>`).FindString(page)
+		return regexp.MustCompile(`<div class="ckrow[^"]*" id="check-` + id + `".*?</div>`).FindString(page)
 	}
 	open := row("3")
-	for _, want := range []string{`class="ckrow" id="item-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
+	for _, want := range []string{`class="ckrow" id="check-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
 		if !strings.Contains(open, want) {
 			t.Fatalf("open check row missing %q:\n%s", want, open)
 		}
@@ -205,7 +205,7 @@ func TestCheckStampReadsALoneOkOrNo(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassCheck, "t", "look")+`<wb:answer id="1" value="no problem, ship it">fine</wb:answer>`)
 	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	row := regexp.MustCompile(`<div class="ckrow[^"]*" id="item-1".*?</div>`).FindString(page)
+	row := regexp.MustCompile(`<div class="ckrow[^"]*" id="check-1".*?</div>`).FindString(page)
 	if !strings.Contains(row, `class="ckrow done"`) || strings.Contains(row, `class="stamp"`) || !strings.Contains(row, `no problem, ship it</span>`) {
 		t.Fatalf("free-text answered check row:\n%s", row)
 	}
