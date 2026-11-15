@@ -34,7 +34,7 @@ func TestClaudeLeadRejoinIgnoresChangedPluginLaunchInputs(t *testing.T) {
 			})
 			h.send(id, "two")
 			eventually(t, "the next turn to reach the same process", func() bool {
-				return slices.Equal(h.userInputs(holder), []string{"one", "two"})
+				return slices.Equal(h.userInputs(holder), h.envelopes("one", "two"))
 			})
 			h.holders.out(holder, turnLines("sess-1", "u2", "second")...)
 			h.idle(id)

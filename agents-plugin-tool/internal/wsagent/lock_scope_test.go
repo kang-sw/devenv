@@ -100,7 +100,7 @@ func TestSendReturnsWhileTheProcessStarts(t *testing.T) {
 	})
 	returns(t, "Get while the process starts", func() { h.state(id) })
 	gate.release()
-	if got := h.backend.waitProc(t, 0).nextSent(t); got != "one\n\ntwo" {
+	if got := h.backend.waitProc(t, 0).nextSent(t); got != h.envelope("one")+"\n\n"+h.envelope("two") {
 		t.Fatalf("first turn = %q, want both held messages", got)
 	}
 }

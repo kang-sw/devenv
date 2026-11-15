@@ -55,11 +55,6 @@ func (tc commonContractCase) assertResume(h *leadHarness, id, holder string) {
 	}
 }
 
-// expectedUserEnvelope pins the wire grammar independently of Entry.Text.
-func expectedUserEnvelope(at time.Time, text string) string {
-	return `<ws:user at="` + at.In(time.Local).Format("2006-01-02T15:04-07:00") + `">` + "\n" + text + "\n</ws:user>"
-}
-
 func TestCommonContractLifecycle(t *testing.T) {
 	for _, tc := range commonContractCases() {
 		t.Run(tc.backend, func(t *testing.T) {

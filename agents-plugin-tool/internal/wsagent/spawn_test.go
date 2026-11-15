@@ -72,7 +72,7 @@ func TestSpawnRecordsParentCwdAndSendsPrompt(t *testing.T) {
 	if err != nil || rec.Parent == nil || *rec.Parent != leadParent || rec.Cwd != sub || rec.Lead {
 		t.Fatalf("record = %+v, %v", rec, err)
 	}
-	if got := h.backend.waitProc(t, 0).nextSent(t); got != "do the thing" {
+	if got := h.backend.waitProc(t, 0).nextSent(t); got != h.envelope("do the thing") {
 		t.Fatalf("first turn = %q", got)
 	}
 	if spec := h.backend.start(0); spec.Cwd != sub || spec.Root != h.root || spec.Model != "sonnet" {
@@ -226,7 +226,7 @@ func TestWaitWaitsForTheTurnAfterTheLastSend(t *testing.T) {
 		t.Fatalf("the turn before the held send answered the wait: %+v", res)
 	case <-time.After(100 * time.Millisecond):
 	}
-	if got := p.nextSent(t); got != "third" {
+	if got := p.nextSent(t); got != h.envelope("third") {
 		t.Fatalf("the held send's turn = %q", got)
 	}
 	p.reply("three")
@@ -339,7 +339,7 @@ func TestPiProcessGoneIsIdleAndSendStartsNewTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := h.backend.waitProc(t, 1)
-	if text := p.nextSent(t); text != "new turn" {
+	if text := p.nextSent(t); text != h.envelope("new turn") {
 		t.Fatalf("follow-up actually submitted = %q", text)
 	}
 	p.reply("recovered")
@@ -432,7 +432,7 @@ func TestCommandTurnDoesNotAnswerAWaitForTheTextBehindIt(t *testing.T) {
 		t.Fatalf("the command's turn answered the wait for the text: %+v", res)
 	case <-time.After(100 * time.Millisecond):
 	}
-	if got := p.nextSent(t); got != "the text" {
+	if got := p.nextSent(t); got != h.envelope("the text") {
 		t.Fatalf("the text's turn = %q", got)
 	}
 	p.reply("answered")
