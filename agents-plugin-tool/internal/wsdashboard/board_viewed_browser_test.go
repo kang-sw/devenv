@@ -39,6 +39,7 @@ func TestBoardViewedFixture(t *testing.T) {
 	// temporary directories are local to this test process.
 	SetDevAssets(nil)
 	f := startPageFixture(t, func(o *DaemonOptions) {
+		o.Tracker = &fakeTracker{}
 		o.Port = 0
 		o.LAN = false
 		o.bindHost = "127.0.0.1"
