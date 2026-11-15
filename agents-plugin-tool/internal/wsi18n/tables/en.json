@@ -263,6 +263,7 @@
   "js.files.tab.new": "New tab",
   "js.files.tabs": "Explorer tabs",
   "js.files.up": "Parent directory",
+  "js.files.home": "Root folder",
   "js.files.back": "Back",
   "js.files.forward": "Forward",
   "js.files.path": "Path inside the root (Ctrl/Cmd+L)",

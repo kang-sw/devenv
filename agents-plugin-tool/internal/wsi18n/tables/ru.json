@@ -263,6 +263,7 @@
   "js.files.tab.new": "Новая вкладка",
   "js.files.tabs": "Вкладки проводника",
   "js.files.up": "Родительская папка",
+  "js.files.home": "Корневая папка",
   "js.files.back": "Назад",
   "js.files.forward": "Вперёд",
   "js.files.path": "Путь внутри корневой папки (Ctrl/Cmd+L)",

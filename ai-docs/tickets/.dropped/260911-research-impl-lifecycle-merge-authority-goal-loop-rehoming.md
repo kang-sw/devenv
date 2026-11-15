@@ -5,6 +5,7 @@ related:
   260909-epic-ws-worker-interpreter-refoundation: context; the refoundation renamed lead-drain-ready-queue to lead-run and left goal-loop consumers dangling
   260911-refactor-lead-run-ticket-only-delegate-implementer: adjacent; that ticket removes worker/lead surface, this one moves merge off the worker onto a lead tool
   260911-research-golden-fixture-verification-gap: sibling research from the same dogfood session
+dropped: 2026-11-15
 ---
 
 # Impl-branch lifecycle re-tightening
@@ -201,3 +202,8 @@ lead-run; the loop re-fire/emitter is the separate deferred host axis); and
 branch→owning-ticket helper, coupled to B's readable slug). The commit-history
 soft-continuity idea folds into D as a lower-priority refinement rather than a
 separate parked item.
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.

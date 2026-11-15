@@ -263,6 +263,7 @@
   "js.files.tab.new": "新增分頁",
   "js.files.tabs": "檔案總管分頁",
   "js.files.up": "上層資料夾",
+  "js.files.home": "根資料夾",
   "js.files.back": "上一頁",
   "js.files.forward": "下一頁",
   "js.files.path": "根目錄內的路徑 (Ctrl/Cmd+L)",

@@ -6,6 +6,7 @@ related:
   260908-epic-ws-pi-subagent-conversation-view: Pi extension child view this may overlap
   261112-bug-ws-hosted-pi-subagents-missing-from-dashboard: hosted Pi child visibility
   261112-feat-pi-subagent-long-shell-auto-background: Pi subagent shell behaviour
+completed: 2026-11-15
 ---
 
 # ws MCP spawns Pi subagents directly (pi.spawn and friends) with a tune-pi playbook
@@ -125,3 +126,8 @@ Planned, in this order (470):
 - Nudge: once `pi.*` has proven out, propose that Pi leads switch to `pi.*`
   and the extension retire its `ws-agent-*` spawn tools, so one runner serves
   every harness ((466) alternative b, user 2026-11-12).
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): both children are in .done (merge 6faab3fc3).

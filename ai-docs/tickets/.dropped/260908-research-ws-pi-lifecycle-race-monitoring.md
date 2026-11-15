@@ -4,6 +4,7 @@ related:
   260906-bug-ws-pi-goal-loop-reinject-races-manual-compaction: archived implementation and compaction/carry-forward acceptance evidence
   260906-bug-ws-pi-goal-reminder-races-child-push-at-settle: archived implementation and simultaneous-settle/provider-context acceptance evidence
   260906-bug-ws-pi-push-wake-can-run-before-report-delivery: archived implementation and provider request/response-count acceptance evidence
+dropped: 2026-11-15
 ---
 
 # Pi lifecycle race monitoring and archived live-acceptance references
@@ -89,3 +90,8 @@ changes no runtime, notification delivery, display policy, or safety guard.
 The separate mirror-drift failure remains open, and compact muted push
 presentation is a separate feature. No additional implementation is authorized
 by this monitoring ticket.
+
+
+## Resolution (2026-11-15)
+
+Dropped in the 2026-11-15 todo triage: owner approved dropping the pre-October backlog ((1121)=a), not expected to reopen.

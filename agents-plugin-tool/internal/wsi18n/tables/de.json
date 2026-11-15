@@ -263,6 +263,7 @@
   "js.files.tab.new": "Neuer Tab",
   "js.files.tabs": "Explorer-Tabs",
   "js.files.up": "Übergeordneter Ordner",
+  "js.files.home": "Stammordner",
   "js.files.back": "Zurück",
   "js.files.forward": "Vorwärts",
   "js.files.path": "Pfad innerhalb des Stammordners (Ctrl/Cmd+L)",
