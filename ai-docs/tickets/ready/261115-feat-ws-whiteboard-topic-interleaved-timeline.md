@@ -346,3 +346,13 @@ Verification:
   screenshots, daemon launches, full-dashboard testing, merge and push. Work
   remains on `exec4/timeline-impl`; the ticket is deliberately left in `ready/`
   without closure or movement.
+
+#### Edition (e875aa671) - 2026-11-15
+
+Owner amendment (owner-decided, relayed by the main lead; no open decision):
+CHECK items interleave in the timeline too, rendered the same way as
+questions. A check item sits at its own event position as a permanent anchor
+row in the question-row form (ID, title, status chip; for example the owner's
+"(964) held · ok" row), not only as a list lifted under the sticky check pill.
+The pill's fold/lift of the real controls stays. Scope and contracts are
+otherwise unchanged: no schema, MCP, or HTTP change.
