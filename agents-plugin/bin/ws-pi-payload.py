@@ -31,11 +31,19 @@ def overlaid(name):
     return name in OVERLAY_FILES or any(name == root or name.startswith(root + "/") for root in OVERLAY_TREES)
 
 
+def ignored_path(name):
+    # One policy for source scanning, producer copying and owner overlays.
+    return any(part in OS_JUNK or part == "__pycache__" or part.endswith((".pyc", ".pyo", ".swp", "~"))
+               for part in PurePosixPath(name).parts)
+
+
 def drift_input(name):
-    if PurePosixPath(name).name in OS_JUNK:
+    if ignored_path(name):
         return False
+    # The consumer is outside the archive. Its recorded hash is provenance,
+    # not native-closure freshness; consumer fixes need no payload regeneration.
     prefix = "agents-plugin-pi/"
-    return (name.startswith(prefix) and not overlaid(name[len(prefix):])) or name == "agents-plugin/bin/ws-pi-payload.py"
+    return name.startswith(prefix) and not overlaid(name[len(prefix):])
 
 
 def digest(data):
@@ -46,11 +54,11 @@ def tree(root, ignore_junk=False, allow_runtime=False, expected_dirs=None):
     files = {}
     def walk(directory):
         for path in sorted(directory.iterdir()):
-            if ignore_junk and path.name in OS_JUNK:
+            rel = path.relative_to(root).as_posix()
+            if ignore_junk and ignored_path(rel):
                 continue
             if path.is_symlink():
                 raise ValueError(f"payload contains a link: {path}")
-            rel = path.relative_to(root).as_posix()
             if allow_runtime and rel == ".runtime" and path.is_dir():
                 continue
             if path.is_dir():
@@ -135,7 +143,8 @@ def check_source(plugin, repo):
             raise StalePayload(f"native Pi distribution is stale: {rel}; {hint}")
     # piBundleInputHash covers src TS/MJS, the wordlist, lock and bundle script.
     # Also gate added distribution/build inputs, but never owner overlays/junk.
-    roots = ["agents-plugin-pi/src", "agents-plugin-pi/scripts", "agents-plugin-pi/dist", "agents-plugin-pi/bin"]
+    # bin contains only the owner-overlaid launcher, so it has no added inputs.
+    roots = ["agents-plugin-pi/src", "agents-plugin-pi/scripts", "agents-plugin-pi/dist"]
     for root in roots:
         for rel in tree(repo / root, ignore_junk=True):
             full = f"{root}/{rel}"
@@ -154,8 +163,8 @@ def cleanup_stages(cache):
             try:
                 if path.stat().st_mtime < cutoff:
                     shutil.rmtree(path)
-            except FileNotFoundError:
-                pass  # Another materializer already removed this stale stage.
+            except OSError:
+                pass  # Removed concurrently or temporarily locked; retry later.
 
 
 def cache_matches(dest, expected):
@@ -226,7 +235,12 @@ def materialize(plugin, cache, manifest=None):
         if previous.exists() and not dest.exists():
             print(f"native Pi cache rollback needs recovery from {previous}", file=sys.stderr)
         else:
-            shutil.rmtree(stage)
+            try:
+                shutil.rmtree(stage)
+            except OSError:
+                # A published entry remains usable even if antivirus/open handles
+                # delay cleanup. cleanup_stages retries abandoned stages later.
+                pass
 
 
 def main():

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[2]
@@ -59,8 +60,11 @@ class NativePiPayloadTests(unittest.TestCase):
             with self.subTest(product=product):
                 manifest = PAYLOAD.check_source(REPO / product, REPO)
                 self.assertEqual(manifest["dependencies"], json.loads((REPO / "agents-plugin-pi/package.json").read_text())["dependencies"])
-                self.assertTrue(all(PAYLOAD.drift_input(name) for name in manifest["inputs"]))
-                self.assertFalse(any(Path(name).name in PAYLOAD.OS_JUNK for name in manifest["files"]))
+                # The historical external-consumer hash remains provenance only;
+                # the archive and its actual producer/native inputs stay gated.
+                self.assertTrue(all(PAYLOAD.drift_input(name) for name in manifest["inputs"]
+                                    if name != "agents-plugin/bin/ws-pi-payload.py"))
+                self.assertFalse(any(PAYLOAD.ignored_path(name) for name in manifest["files"]))
 
     def test_materialized_owner_bytes_and_offline_reuse(self):
         for product, identity in (("agents-plugin", "ws"), ("agents-plugin-wsflow", "wsflow")):
@@ -152,6 +156,73 @@ class NativePiPayloadTests(unittest.TestCase):
         added.write_text("// new input\n")
         with self.assertRaisesRegex(ValueError, "input added"):
             PAYLOAD.check_source(owner, repo)
+
+    def test_python_and_editor_junk_is_not_drift_or_copied_by_producer(self):
+        repo = self.source_fixture()
+        owner = repo / "agents-plugin"
+        pi = repo / "agents-plugin-pi"
+        # bin really contains only the overlaid launcher; no native added-file
+        # scan is needed there. Populate the other owner overlays for copying.
+        self.assertEqual(PAYLOAD.tree(REPO / "agents-plugin-pi/bin", ignore_junk=True).keys(),
+                         {"ws-mcp-launcher.py"})
+        shutil.copytree(REPO / "agents-plugin-pi/rsrc", pi / "rsrc", dirs_exist_ok=True)
+        for name in PAYLOAD.OVERLAY_FILES:
+            target = pi / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(REPO / "agents-plugin-pi" / name, target)
+        junk = ["bin/__pycache__/ws-mcp-launcher.cpython-314.pyc", "src/__pycache__/module.pyc",
+                "src/old.pyc", "src/old.pyo", "src/edit.swp", "src/backup~", "src/.DS_Store", "src/Thumbs.db"]
+        for name in junk:
+            path = pi / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture junk")
+        PAYLOAD.check_source(owner, repo)
+        cache = self.root / "junk-cache"
+        result = subprocess.run([sys.executable, "-I", "-B", str(owner / "bin/ws-pi-payload.py"),
+                                 "--plugin", str(owner), "--materialize", str(cache), "--prefer-source"],
+                                env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "", "junk must not emit stale/sibling warnings")
+        self.assertEqual(Path(result.stdout.strip()).parent, cache)
+
+        def fake_npm(args, cwd, **kwargs):
+            if args[1] == "ci":
+                (cwd / "node_modules").mkdir()
+
+        def inspect_archive(fixture):
+            # Exercise the actual producer copy/archive loops, then stop before
+            # validation/publication: fake npm intentionally installs no deps.
+            with zipfile.ZipFile(fixture / "native-pi/payload.zip") as archive:
+                names = set(archive.namelist())
+            self.assertIn("src/index.ts", names)
+            self.assertIn("bin/ws-mcp-launcher.py", names)
+            self.assertTrue(all(name not in names for name in junk))
+            self.assertFalse(any(PAYLOAD.ignored_path(name) for name in names))
+            raise RuntimeError("producer copy inspected")
+
+        with patch.object(PRODUCER.subprocess, "run", side_effect=fake_npm), \
+             patch.object(PRODUCER.payload, "validate", side_effect=inspect_archive):
+            with self.assertRaisesRegex(RuntimeError, "producer copy inspected"):
+                PRODUCER.generate(repo)
+
+    def test_locked_cleanup_cannot_replace_success_and_is_retried(self):
+        owner = self.owner()
+        cache = self.root / "cleanup-cache"
+        cache.mkdir()
+        abandoned = cache / (".native-pi-stage-" + "c" * 32)
+        abandoned.mkdir()
+        old = time.time() - PAYLOAD.STAGE_MAX_AGE - 60
+        os.utime(abandoned, (old, old))
+        with patch.object(PAYLOAD.shutil, "rmtree", side_effect=PermissionError("fixture antivirus lock")) as remove:
+            entry = PAYLOAD.materialize(owner, cache)
+            self.assertGreaterEqual(remove.call_count, 2, "both stale and post-publish cleanup were attempted")
+        self.assertTrue(entry.is_dir(), "a valid published entry must still be returned")
+        stages = list(cache.glob(".native-pi-stage-*"))
+        self.assertGreaterEqual(len(stages), 2)
+        for path in stages:
+            os.utime(path, (old, old))
+        self.assertEqual(PAYLOAD.materialize(owner, cache), entry)
+        self.assertEqual(list(cache.glob(".native-pi-stage-*")), [])
 
     def test_materializer_schema_namespaces_entries(self):
         owner = self.owner()
