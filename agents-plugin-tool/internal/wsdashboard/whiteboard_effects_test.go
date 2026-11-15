@@ -161,9 +161,14 @@ func TestWhiteboardEffectsHistoryLayoutAndClientGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Static tripwires, not browser geometry/interaction acceptance.
-	for _, want := range []string{`.dgrid.history[data-tab="board"] > .convo`, `.dgrid.history[data-tab] > .bcol`, `.wbeffect-values { grid-template-columns: minmax(0, 1fr); }`, `white-space: pre-wrap; overflow-wrap: anywhere`} {
+	for _, want := range []string{`.dgrid.history[data-tab="board"] > .convo`, `.dgrid.history[data-tab] > .bcol`, `.wbupdate-items { display: flex; flex-wrap: wrap;`, `white-space: pre-wrap; overflow-wrap: anywhere`} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("missing responsive guard %q", want)
+		}
+	}
+	for _, forbidden := range []string{`.wbeffect-values`, `.wbeffect-id`, `.wbeffect-details`, `.wbupdate-options`, `.wbupdate-class`} {
+		if strings.Contains(string(css), forbidden) {
+			t.Errorf("obsolete diagnostic/item styling %q", forbidden)
 		}
 	}
 	for _, want := range []string{`mode !== "history" ? WsRail.drafts`, `var liveMode = mode === "live"`, `q("details[data-key]"`, `convo.addEventListener("scroll", nearTop)`} {
