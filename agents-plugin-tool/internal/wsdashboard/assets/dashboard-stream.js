@@ -178,7 +178,7 @@
     var boardInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
-    var path = shell ? "/rail/events" : mode === "index" ? "/events" : "/s/" + rid + "/events";
+    var path = shell ? "/rail/events" : mode === "index" || worktree ? "/events" : "/s/" + rid + "/events";
     var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
@@ -192,6 +192,7 @@
     });
     function onRegion(ev) {
       if (!ev) return;
+      if (worktree && ev.name !== "rail") return;
       if (ev.name === "mode") {
         if (ev.html !== mode) modeChanged(ev.html);
         modeHash = ev.hash;

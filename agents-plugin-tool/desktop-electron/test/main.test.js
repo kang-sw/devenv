@@ -55,6 +55,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
         loadURL: async url => { this.loads.push(url); this.currentURL = url; loaded(url); },
         loadFile: async file => { this.loads.push(file); this.currentURL = file; loaded(pathToFileURL(file).href); },
         setZoomFactor: zoom => { this.zoom = zoom; },
+        executeJavaScript: async script => { this.themeScript = script; return null; },
         focus: () => { focusedContents = this.webContents; },
         isFocused: () => focusedContents === this.webContents,
         isDestroyed: () => !!this.destroyed,
@@ -437,13 +438,19 @@ test('platform switch keeps native construction on macOS/Linux and isolates Wind
     assert.equal('webPreferences' in w.options, false);
     assert.equal(f.renderers.length, 2, 'only dashboard and bar contents are created');
     assert.equal(w.options.titleBarStyle, 'hidden');
-    assert.deepEqual(w.options.titleBarOverlay, { color: '#f3f3f3', symbolColor: '#000000', height: 36 });
+    assert.deepEqual(w.options.titleBarOverlay, { color: '#f3f3f3', symbolColor: '#000000', height: 30 });
     const [dashboard, bar] = f.views, wc = dashboard.webContents;
     assert.deepEqual(dashboard.options.webPreferences, isolation);
     assert.equal(w.menuVisible, false);
     assert.deepEqual(w.children, [dashboard, bar]);
-    assert.deepEqual(dashboard.bounds, { x: 0, y: 36, width: 1280, height: 824 });
-    assert.deepEqual(bar.bounds, { x: 0, y: 0, width: 1280, height: 36 });
+    assert.equal(w.options.icon, path.resolve(__dirname, '../icons/icon.ico'));
+    assert.deepEqual(dashboard.bounds, { x: 0, y: 30, width: 1280, height: 830 });
+    assert.deepEqual(bar.bounds, { x: 0, y: 0, width: 1280, height: 30 });
+    w.getContentSize = () => [1000, 700];
+    w.emit('resize');
+    assert.deepEqual(dashboard.bounds, { x: 0, y: 30, width: 1000, height: 670 });
+    assert.deepEqual(bar.bounds, { x: 0, y: 0, width: 1000, height: 30 });
+    assert.match(dashboard.themeScript, /getComputedStyle/);
     assert.deepEqual(dashboard.loads, ['http://127.0.0.1:39418/']);
     assert.equal(dashboard.agent, 'Chromium Werkschaft/0.1.0');
     assert.equal(path.basename(bar.options.webPreferences.preload), 'titlebar-preload.js');
@@ -606,7 +613,7 @@ test('bar authority accepts only its bundled main frame; Alt and hamburger share
 test('dashboard theme maps to both bar and overlay, with native fallback and reset on navigation', async () => {
   const f = await fixture(undefined, 'win32'), [dashboard, bar] = f.views;
   dashboard.webContents.emit('did-change-theme-color', {}, '#112233');
-  assert.deepEqual(f.window.overlay, { color: '#112233', symbolColor: '#ffffff', height: 36 });
+  assert.deepEqual(f.window.overlay, { color: '#112233', symbolColor: '#ffffff', height: 30 });
   assert.equal(bar.state.value.color, '#112233');
   f.nativeTheme.shouldUseDarkColors = true;
   f.nativeTheme.emit('updated');

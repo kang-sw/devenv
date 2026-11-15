@@ -25,13 +25,13 @@ func send(t *testing.T, dir, text string, chips ...Chip) (string, bool) {
 
 func TestEntryTextLeadsWithTheAnswerBlock(t *testing.T) {
 	e := Entry{Parts: []string{"first", "second\nline"}, Chips: []Chip{{ID: "03", Answer: "a"}}, Topics: []TopicNote{{Topic: "ship", Note: "why?"}}}
-	if got, want := e.Text(), "<wb:answers>\n03=a\n[ship]^why?\n</wb:answers>\n\nfirst\n\nsecond\nline"; got != want {
+	if got, want := e.testBody(t), "<wb:answers>\n03=a\n[ship]^why?\n</wb:answers>\n\nfirst\n\nsecond\nline"; got != want {
 		t.Fatalf("Text = %q, want %q", got, want)
 	}
-	if got := (Entry{Chips: []Chip{{ID: "01", Answer: "ok"}}}).Text(); got != "<wb:answers>\n01=ok\n</wb:answers>" {
+	if got := (Entry{Chips: []Chip{{ID: "01", Answer: "ok"}}}).testBody(t); got != "<wb:answers>\n01=ok\n</wb:answers>" {
 		t.Fatalf("chips-only Text = %q", got)
 	}
-	if got := (Entry{Parts: []string{"just text"}}).Text(); got != "just text" {
+	if got := (Entry{Parts: []string{"just text"}}).testBody(t); got != "just text" {
 		t.Fatalf("text-only Text = %q", got)
 	}
 }
@@ -86,10 +86,10 @@ func TestEachSendIsItsOwnHeldEntry(t *testing.T) {
 	if err != nil || len(held) != 2 || held[0].Name != first || held[1].Name != second {
 		t.Fatalf("held = %+v, %v", held, err)
 	}
-	if got, want := held[0].Entry.Text(), "<wb:answers>\n03=a\n04=ok\n</wb:answers>\n\nhello"; got != want {
+	if got, want := held[0].Entry.testBody(t), "<wb:answers>\n03=a\n04=ok\n</wb:answers>\n\nhello"; got != want {
 		t.Fatalf("first text = %q, want %q", got, want)
 	}
-	if got, want := held[1].Entry.Text(), "<wb:answers>\n03=b^changed\n</wb:answers>\n\nand more"; got != want {
+	if got, want := held[1].Entry.testBody(t), "<wb:answers>\n03=b^changed\n</wb:answers>\n\nand more"; got != want {
 		t.Fatalf("second text = %q, want %q", got, want)
 	}
 	recs, err := Drain(dir)
@@ -106,11 +106,11 @@ func TestSteeredSendDoesNotMergeOrPromoteHeldText(t *testing.T) {
 		t.Fatalf("steered Send = %s, %v, %v", name, merged, err)
 	}
 	recs, err := DrainSteer(dir)
-	if err != nil || len(recs) != 1 || recs[0].Entry.Text() != "steer" {
+	if err != nil || len(recs) != 1 || recs[0].Entry.testBody(t) != "steer" {
 		t.Fatalf("steered drain = %+v, %v", recs, err)
 	}
 	held, err := Held(dir)
-	if err != nil || len(held) != 1 || held[0].Name != first || held[0].Entry.Text() != "held" {
+	if err != nil || len(held) != 1 || held[0].Name != first || held[0].Entry.testBody(t) != "held" {
 		t.Fatalf("unrelated text stays held = %+v, %v", held, err)
 	}
 }
@@ -119,7 +119,7 @@ func TestCancelReturnsTheHeldEntry(t *testing.T) {
 	dir := Dir(t.TempDir())
 	name, _ := send(t, dir, "hello", Chip{ID: "03", Answer: "a"})
 	e, err := Cancel(dir, name)
-	if err != nil || e.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\nhello" {
+	if err != nil || e.testBody(t) != "<wb:answers>\n03=a\n</wb:answers>\n\nhello" {
 		t.Fatalf("Cancel = %+v, %v", e, err)
 	}
 	if names, _ := Names(dir); len(names) != 0 {
@@ -154,7 +154,7 @@ func TestDrainClaimsOnceAndKeepsRecords(t *testing.T) {
 	}
 	name, _ := send(t, dir, "hello")
 	got, err := Drain(dir)
-	if err != nil || len(got) != 1 || got[0].Name != name || got[0].Entry.Text() != "hello" {
+	if err != nil || len(got) != 1 || got[0].Name != name || got[0].Entry.testBody(t) != "hello" {
 		t.Fatalf("Drain = %+v, %v", got, err)
 	}
 	if again, _ := Drain(dir); len(again) != 0 {
@@ -195,7 +195,7 @@ func TestReadersIgnoreUnknownFieldsAndStrayFiles(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(dir, stray), []byte("{}"), 0o644)
 	}
 	held, err := Held(dir)
-	if err != nil || len(held) != 1 || held[0].Entry.Text() != "x" || held[0].ID() != strings.TrimSuffix(name, ".json") {
+	if err != nil || len(held) != 1 || held[0].Entry.testBody(t) != "x" || held[0].ID() != strings.TrimSuffix(name, ".json") {
 		t.Fatalf("Held = %+v, %v", held, err)
 	}
 }
@@ -308,7 +308,7 @@ func TestDrainAndSendRaceLosesNothing(t *testing.T) {
 		held, _ := Held(dir)
 		var texts []string
 		for _, r := range append(drained, held...) {
-			texts = append(texts, r.Entry.Text())
+			texts = append(texts, r.Entry.testBody(t))
 		}
 		all := strings.Join(texts, "|")
 		if strings.Count(all, "one") != 1 || strings.Count(all, "two") != 1 {
@@ -317,7 +317,7 @@ func TestDrainAndSendRaceLosesNothing(t *testing.T) {
 		if merged {
 			t.Fatalf("run %d: send merged", i)
 		}
-		if len(drained) == 0 || drained[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\none" {
+		if len(drained) == 0 || drained[0].Entry.testBody(t) != "<wb:answers>\n03=a\n</wb:answers>\n\none" {
 			t.Fatalf("run %d: the drain got %+v, want the first send first", i, drained)
 		}
 	}
@@ -354,7 +354,7 @@ func TestSteerRewritesTheEntryMarkedUnderAFreshName(t *testing.T) {
 	if err != nil || len(held) != 1 || held[0].Name != steered {
 		t.Fatalf("held after steer = %+v, %v", held, err)
 	}
-	if e := held[0].Entry; !e.Steer || e.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\nhello" || e.SentAt == 0 {
+	if e := held[0].Entry; !e.Steer || e.testBody(t) != "<wb:answers>\n03=a\n</wb:answers>\n\nhello" || e.SentAt == 0 {
 		t.Fatalf("steered entry = %+v", e)
 	}
 	// Steering it again leaves it as it is.
@@ -378,10 +378,10 @@ func TestSteerRewritesTheEntryMarkedUnderAFreshName(t *testing.T) {
 }
 
 // texts is each record's text, in order.
-func texts(recs []Record) []string {
+func texts(t *testing.T, recs []Record) []string {
 	out := make([]string, len(recs))
 	for i, r := range recs {
-		out[i] = r.Entry.Text()
+		out[i] = r.Entry.testBody(t)
 	}
 	return out
 }
@@ -400,7 +400,7 @@ func TestSteerMovesTheEntryToTheEndOfTheSteerQueue(t *testing.T) {
 	}
 	f3, _ := send(t, dir, "f3")
 	held, _ := Held(dir)
-	if got, want := strings.Join(texts(held), " "), "s1 f1 f2 f3"; got != want {
+	if got, want := strings.Join(texts(t, held), " "), "s1 f1 f2 f3"; got != want {
 		t.Fatalf("held order = %q, want %q", got, want)
 	}
 	// Promote the oldest follow-up: it goes behind s1, not ahead of it.
@@ -412,7 +412,7 @@ func TestSteerMovesTheEntryToTheEndOfTheSteerQueue(t *testing.T) {
 		t.Fatalf("promoted name %s does not sort after the earlier steer %s", p1, s1)
 	}
 	held, _ = Held(dir)
-	if got, want := strings.Join(texts(held), " "), "s1 f1 f2 f3"; got != want {
+	if got, want := strings.Join(texts(t, held), " "), "s1 f1 f2 f3"; got != want {
 		t.Fatalf("held order after promoting f1 = %q, want %q", got, want)
 	}
 	// Promote the newest follow-up, then an older one: steer order is the
@@ -425,20 +425,20 @@ func TestSteerMovesTheEntryToTheEndOfTheSteerQueue(t *testing.T) {
 	}
 	f4, _ := send(t, dir, "f4")
 	held, _ = Held(dir)
-	if got, want := strings.Join(texts(held), " "), "s1 f1 f3 f2 f4"; got != want {
+	if got, want := strings.Join(texts(t, held), " "), "s1 f1 f3 f2 f4"; got != want {
 		t.Fatalf("held order = %q, want %q", got, want)
 	}
 	for i, r := range held {
 		if r.Entry.Steer != (i < 4) {
-			t.Fatalf("held[%d] %s steer = %v", i, r.Entry.Text(), r.Entry.Steer)
+			t.Fatalf("held[%d] %s steer = %v", i, r.Entry.testBody(t), r.Entry.Steer)
 		}
 	}
 	if held[len(held)-1].Name != f4 {
 		t.Fatalf("follow-up %s not last: %+v", f4, held)
 	}
 	recs, err := Drain(dir)
-	if err != nil || strings.Join(texts(recs), " ") != "s1 f1 f3 f2 f4" {
-		t.Fatalf("Drain = %q, %v; want the held order", texts(recs), err)
+	if err != nil || strings.Join(texts(t, recs), " ") != "s1 f1 f3 f2 f4" {
+		t.Fatalf("Drain = %q, %v; want the held order", texts(t, recs), err)
 	}
 	if rec, _ := Drained(dir); len(rec) != 5 {
 		t.Fatalf("drained records = %d, want 5", len(rec))
@@ -458,8 +458,8 @@ func TestDrainTakesTheSteerQueueBeforeTheFollowUps(t *testing.T) {
 		t.Fatal(err)
 	}
 	recs, err := Drain(dir)
-	if err != nil || strings.Join(texts(recs), " ") != "s1 s2 f1 f2" {
-		t.Fatalf("Drain = %q, %v", texts(recs), err)
+	if err != nil || strings.Join(texts(t, recs), " ") != "s1 s2 f1 f2" {
+		t.Fatalf("Drain = %q, %v", texts(t, recs), err)
 	}
 }
 
@@ -478,7 +478,7 @@ func TestSteerOnlyDrainTakesOnlySteeredEntries(t *testing.T) {
 		t.Fatalf("SteerNames = %v, %v", names, err)
 	}
 	got, err := DrainSteer(dir)
-	if err != nil || len(got) != 1 || got[0].Name != steered || got[0].Entry.Text() != "promoted" {
+	if err != nil || len(got) != 1 || got[0].Name != steered || got[0].Entry.testBody(t) != "promoted" {
 		t.Fatalf("DrainSteer = %+v, %v", got, err)
 	}
 	if again, _ := DrainSteer(dir); len(again) != 0 {
@@ -508,7 +508,7 @@ func TestFullDrainAlsoTakesSteeredEntries(t *testing.T) {
 	}
 	send(t, dir, "follow-up")
 	got, err := Drain(dir)
-	if err != nil || len(got) != 2 || !got[0].Entry.Steer || got[1].Entry.Text() != "follow-up" {
+	if err != nil || len(got) != 2 || !got[0].Entry.Steer || got[1].Entry.testBody(t) != "follow-up" {
 		t.Fatalf("Drain = %+v, %v", got, err)
 	}
 }
@@ -557,7 +557,7 @@ func TestInterruptClaimsEveryHeldMessageAndWritesTheEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Interrupt: %v", err)
 	}
-	if len(held) != 2 || held[0].Name != steered || held[1].Name != second || held[0].Entry.Text() != "promoted" || held[1].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\nfollow-up" {
+	if len(held) != 2 || held[0].Name != steered || held[1].Name != second || held[0].Entry.testBody(t) != "promoted" || held[1].Entry.testBody(t) != "<wb:answers>\n03=a\n</wb:answers>\n\nfollow-up" {
 		t.Fatalf("Interrupt held = %+v", held)
 	}
 	names, _ := Names(dir)

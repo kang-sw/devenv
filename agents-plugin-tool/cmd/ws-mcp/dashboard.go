@@ -90,16 +90,6 @@ func dashboardCommand(args []string) {
 		OnExit: persistHolderExit(dir),
 	})
 	agents := newAgentRunner(dir, logw, trackerChanged.call, holders)
-	answers := wsagent.NewSearchAnswers(wsagent.SearchAnswerOptions{
-		Runner: agents,
-		Session: func(id string) (string, []byte, error) {
-			reg, err := wsdashboard.ReadRegistration(dir, id)
-			if err != nil {
-				return "", nil, err
-			}
-			return sessions.SearchAnswerSnapshot(reg)
-		},
-	})
 	nudges := mcp.NewWhiteboardNudges(dir, agents, logw)
 	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents, nudges: nudges}
 	// A store's support conversation runs in the store's clone, so an
@@ -131,7 +121,6 @@ func dashboardCommand(args []string) {
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
 		Holders:        holders,
 		Support:        support,
-		SearchAnswers:  answers,
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		closeTracker()

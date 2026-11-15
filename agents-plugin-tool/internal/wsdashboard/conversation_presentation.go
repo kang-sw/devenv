@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -17,6 +18,31 @@ func (e ConvEntry) ChildReport() bool { return e.Kind == "wake" && e.Cause == "s
 // Wakes without an unambiguous display association keep compact diagnostics.
 // Repeated/reclaimed records lack shared delivery identity and stay separate.
 func (e ConvEntry) MailWake() bool { return e.Kind == "wake" && e.Cause == "mail" }
+
+func (e ConvEntry) BoardNudgeSummary() string {
+	reasons, topics := e.boardNudge()
+	if len(topics) == 0 {
+		return ""
+	}
+	for i, reason := range reasons {
+		switch reason {
+		case "overdue":
+			reasons[i] = wsi18n.T(e.Lang, "entry.board.nudge.overdue")
+		case "unblocked":
+			reasons[i] = wsi18n.T(e.Lang, "entry.board.nudge.unblocked")
+		case "hourly":
+			reasons[i] = wsi18n.T(e.Lang, "entry.board.nudge.hourly")
+		}
+	}
+	preview := strings.Join(topics[:min(2, len(topics))], ", ")
+	if len(topics) > 2 {
+		preview += " +" + strconv.Itoa(len(topics)-2)
+	}
+	if len(e.BoardNudgeMails) > 1 {
+		return wsi18n.T(e.Lang, "entry.board.nudge.batch", strings.Join(reasons, ", "), len(e.BoardNudgeMails), preview)
+	}
+	return wsi18n.T(e.Lang, "entry.board.nudge", strings.Join(reasons, ", "), preview)
+}
 
 var peerLeadFirstLine = regexp.MustCompile(`^\[(?:ws|wsflow) note: from a peer lead session \((?:(?:claude|codex|pi), )?not a worker\), with the same authority as yours\]$`)
 

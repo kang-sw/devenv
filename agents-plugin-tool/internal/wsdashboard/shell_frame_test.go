@@ -54,7 +54,7 @@ var root = { setAttribute: function (k) { rootAttrs[k] = true; }, removeAttribut
 function region() { return null; }
 function $() { return null; }
 var searchOpens = 0, tkApi = { openSearch: function () { searchOpens++; } };
-var mode = "session", rid = "rid1", hiddenRegions = {}, modeHash = "", liveMode = false, tlHeld = {};
+var mode = "session", rid = "rid1", worktree = "", hiddenRegions = {}, modeHash = "", liveMode = false, tlHeld = {};
 function held() { return ""; }
 function boardInputFull() { return null; }
 function trackerLost() {}

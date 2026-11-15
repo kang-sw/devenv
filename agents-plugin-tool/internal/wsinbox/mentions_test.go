@@ -37,11 +37,11 @@ func TestEntryTextPlacesMentions(t *testing.T) {
 	want := "<wb:answers>\n5=a\n</wb:answers>\n\n" +
 		`<wb:mention topic="t" id="5">first</wb:mention>` + "\n" + `<wb:mention topic="u">second</wb:mention>` +
 		"\n\nmy text\n\nImage #1: /x/a.png"
-	if got := e.Text(); got != want {
+	if got := e.testBody(t); got != want {
 		t.Fatalf("Text =\n%s\nwant\n%s", got, want)
 	}
 	e.Chips = nil
-	if got := e.Text(); !strings.HasPrefix(got, `<wb:mention topic="t" id="5">first</wb:mention>`) {
+	if got := e.testBody(t); !strings.HasPrefix(got, `<wb:mention topic="t" id="5">first</wb:mention>`) {
 		t.Fatalf("without answers the mentions open the message:\n%s", got)
 	}
 }
@@ -90,7 +90,7 @@ func TestParseMentionsRoundTrips(t *testing.T) {
 		{Topic: `Plain "name" &`, Entry: "e18", Text: "multi\nline"},
 		{Topic: "legacy", ID: "7", Text: "old-shaped mention"},
 	}
-	text := Entry{Parts: []string{"user text"}, Chips: []Chip{{ID: "1", Answer: "ok"}}, Mentions: mentions}.Text()
+	text := Entry{Parts: []string{"user text"}, Chips: []Chip{{ID: "1", Answer: "ok"}}, Mentions: mentions}.testBody(t)
 	_, rest, ok := ParseAnswerBlock(text)
 	if !ok {
 		t.Fatalf("answer block not parsed:\n%s", text)
@@ -172,7 +172,7 @@ func TestEntryMentionsSurviveInboxLifecycle(t *testing.T) {
 	if err != nil || len(drained) != 1 || !reflect.DeepEqual(drained[0].Entry.Mentions, want) {
 		t.Fatalf("steer drain = %+v, %v", drained, err)
 	}
-	got, rest := ParseMentions(drained[0].Entry.Text())
+	got, rest := ParseMentions(drained[0].Entry.testBody(t))
 	if rest != "" || !reflect.DeepEqual(got, want) {
 		t.Fatalf("delivered locators = %+v, %q", got, rest)
 	}

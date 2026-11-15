@@ -24,7 +24,8 @@ func TestConversationPresentationStyleContract(t *testing.T) {
 	section := css[start:end]
 	for _, want := range []string{
 		".mail-notification", ".input-record { border-style: dashed; }",
-		".wake-card.child-report", ".delivery-details > summary",
+		".mailline.child-report", ".mailline.child-report .mfirst { margin-left: 0; }",
+		".delivery-details > summary",
 		".src.peer-lead { color: var(--wb-ck-ok);",
 		".wbeffects.wbupdate {", ".wbupdate-bar", ".wbupdate-l",
 		".wbupdate-panel .wbupdate-text", "text-overflow: ellipsis; white-space: nowrap;",

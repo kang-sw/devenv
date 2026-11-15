@@ -446,6 +446,10 @@ type ConvEntry struct {
 	Key string
 	// At is the entry's time (epoch ms).
 	At int64
+	// UserBlocks keeps per-envelope bubbles under one stable ring/stream key.
+	// EnvelopeAt is the original offset-bearing timestamp of one such bubble.
+	UserBlocks []ConvEntry
+	EnvelopeAt string
 	// HTML is a lead reply's text rendered as markdown with its inline HTML
 	// sanitized; user messages, mail bodies, and turn lines stay plain text,
 	// raw HTML included. It is set only while the entry renders on an entry
@@ -472,8 +476,11 @@ type ConvEntry struct {
 	Body    string
 	HasBody bool
 	// MailWakeSuppressed leaves only a hidden keyed marker when this mail is
-	// shown at its associated wake. Keeping the key preserves history cursors.
+	// shown at its associated wake or nudge run. Keeping the key preserves cursors.
 	MailWakeSuppressed bool
+	// BoardNudgeMails holds each raw envelope once on the first row of a
+	// collapsed run. Ring text and all absorbed entry keys remain unchanged.
+	BoardNudgeMails []string
 	// PeerReplyID links a mail line's peer to its page when PeerLinked.
 	PeerReplyID string
 	PeerLinked  bool
@@ -992,6 +999,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 		cv.Entries = append(cv.Entries, e)
 	}
 	linkMailWakes(cv.Entries, self)
+	collapseBoardNudges(cv.Entries)
 	return cv
 }
 
