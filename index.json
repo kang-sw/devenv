@@ -820,7 +820,14 @@
       "registered_at": "2026-11-15T02:02:38Z"
     },
     "261115-feat-ws-dashboard-local-browse-anchor": {
-      "registered_at": "2026-11-15T02:43:39Z"
+      "registered_at": "2026-11-15T02:43:39Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T03:49:34Z"
+      }
     },
     "261115-feat-ws-dashboard-observed-session-model": {
       "registered_at": "2026-11-14T23:03:59Z",
