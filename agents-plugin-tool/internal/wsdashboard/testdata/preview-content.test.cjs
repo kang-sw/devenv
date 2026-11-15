@@ -6,10 +6,12 @@ function fetch(url, options) {
 }
 var window = { navigator: { pdfViewerEnabled: true }, WsCards: {
   register: (name, kind) => kinds[name] = kind,
+  relayout() {},
   list: () => cards,
   open: (kind, data) => {
     var card = { data, body: new El('div'), el: new El('div'),
       title(v) { this.head = v; }, actions() {}, paint() {}, bump() {}, fold() {}, show() {}, save() {} };
+    card.name = card.el.appendChild(new El('span'));
     cards.push(card); kinds[kind].open(card); return card;
   }
 } };

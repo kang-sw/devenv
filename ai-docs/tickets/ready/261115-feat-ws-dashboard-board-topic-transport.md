@@ -20,9 +20,9 @@ client-side causes landed separately (head A `69c7e50fa`, merged
 `7622414ea`; head B `fa65f7c53`, merged `219aa6032`). The daemon's per-read
 whiteboard folder reload is ticket
 `261115-refactor-ws-dashboard-stream-whiteboard-reread` (worker C), whose
-Phase 1 read cache has landed in this checkout via `aa07206c0` (including
-`8145ec935`); the ticket remains in `todo/` with its Phase 1 Result
-(`ai-docs/tickets/todo/261115-refactor-ws-dashboard-stream-whiteboard-reread.md`).
+Phase 1 read cache landed via `aa07206c0` (including `8145ec935`). C has
+since completed its metadata-write elision phase too and is in `.done/`
+(`ai-docs/tickets/.done/261115-refactor-ws-dashboard-stream-whiteboard-reread.md`).
 
 ### Baseline (live, read-only, 2026-11-15)
 
@@ -198,6 +198,87 @@ waiting on topic B re-renders B (its reverse-waiter markup) without
 re-rendering unrelated topics, the existing
 board-topic/stream/region tests, and a Chromium check that the page shows
 the same board after a topic edit.
+
+### Result (3a6a3f3d2) - 2026-11-15
+
+Implemented Phase 1 only. The source-owned MCP memo now caches each topic by
+its complete projected render input, including reverse waiters and board-wide
+reference membership, plus shared language/mailbox/process and external-file
+inputs. Cache hits retain image watches. Folder metadata identity and sequence
+alone do not invalidate topics. Body/panel markdown and topic templates run
+only on misses; the dashboard consumes immutable ordered units and caches the
+assembled region, hash and decomposition per theme.
+
+Each unit is exactly the section span returned by `splitBoardTopics`:
+inter-section whitespace stays in its original position in the full board and
+in the parser-equivalent shell, never in a wire unit. Regression tests compare
+every unit, shell, full-region HTML and hash on 112 topics in auto/light/dark
+themes. Unfamiliar layouts retain the parser/full-region fallback. D6 remains
+T0: `PageContent.BoardUnits` is in-process only (`json:"-"`), the existing
+`topics=1` flag/event payload and first-full/legacy-region behavior are unchanged,
+and neither stores nor MCP calls/hello changed.
+
+**Measurements.** All measurements used disposable in-process fixtures, not
+the shared daemon. Baseline: `cf6d129b9`; candidate: `3a6a3f3d2`. The main
+fixture has 112 topics and 4,032 entries, with 200 measured operations per row.
+Source and session-transport stages were measured separately; these are not
+end-to-end request latencies. CPU/op is total sampled process CPU divided by
+200, including runtime/GC; wall time is sensitive to host scheduling.
+
+| Stage / change | CPU ms/op, before -> after | Wall ms/op, before -> after | Board delta JSON bytes, before -> after |
+|---|---:|---:|---:|
+| Source, non-board read | 5.35 -> 5.25 | 11.048 -> 12.706 | n/a |
+| Source, one small body edit | 270.45 -> 25.75 | 473.160 -> 49.222 | n/a |
+| Session render/diff, non-board change | 23.80 -> 0.20 | 17.935 -> 0.191 | 0 -> 0 |
+| Session render/diff, one small body edit | 25.05 -> 2.30 | 23.038 -> 1.708 | 26,406 -> 26,406 |
+
+The initial assembled board remains 2,214,962 bytes; the edited state remains
+2,214,297 bytes, before and after. This phase saves render/tokenizer work,
+not additional wire bytes: the old `topics=1` path already sent one topic.
+Baseline transport profiles attribute cost to `html.Tokenizer`; the new
+transport profiles contain no tokenizer samples. Unchanged source reads are
+essentially CPU-flat, as expected from the pre-existing whole-board memo.
+
+The existing isolated idle-stream fixture (112 topics, 40 non-board snapshot
+wakes at 4 Hz, about 10.4 seconds) sampled **0.55 -> 0.44 CPU seconds**
+(**5.33% -> 4.22%** of one core over the profile windows). This is synthetic
+snapshot churn, not a new measurement of the live daemon's idle percentage.
+Raw logs, profiles, top reports and saved scratch harnesses are under
+`/tmp/exec5/btp1/{before,after}/` and `/tmp/exec5/btp1/*-scratch.go`; scratch
+tests were removed from the worktree before committing.
+
+**Verification.** Every Go command used `GOPROXY=off GOSUMDB=off
+GOTOOLCHAIN=local`, `-count=1`, and focused `-run` patterns; no full dashboard
+package run was performed.
+
+- `./internal/mcp`: dashboard board/memo/read-page/read-cache/closed-topic
+  cases and `WhiteboardStream` passed, including non-board zero topic renders,
+  one-topic edits, A waiting on B rendering A+B only, sequence/file-identity
+  independence, external invalidation and retained image watches.
+- `./internal/wsdashboard`: board-topic parser/client/SSE/WebSocket, unit
+  parity, stream/page-cache/region and transient-read cases passed. Node
+  fragments ran through their Go tests, not as standalone source files.
+- `./internal/wswhiteboard`: topic-unit/hash, stream/history, panel reference
+  and waiting-view cases passed. The eager full-render parity test also covers
+  deferred history and English/Korean output.
+- `go test -race ./internal/mcp -run '^TestDashboardBoardTopicCache'` and
+  `go test -race ./internal/wsdashboard -run
+  '^TestBoardTopicUnits(ReuseAndParity|Streams)$'` passed.
+- `TestBoardTopicUnitsBrowser` passed with the supplied Playwright module and
+  Chromium cache: one-topic WebSocket delta, unchanged topic node retained,
+  existing reader-anchor hold/release preserved, streamed/fresh board signatures
+  equal, no page errors. Compared `/tmp/exec5/btp1/browser-after.png` vs
+  `/tmp/exec5/btp1/browser-fresh.png`: match.
+
+The lead authorized one retry after stop (f). The server-side whitespace defect
+was fixed without relaxing `dashboard-board.js`'s single-element validator.
+The subsequent Chromium timeout was diagnosed from captured events/DOM as the
+existing visible-reader gate, and the fixture now uses its apply-latest control
+instead of assuming immediate replacement. Direct author-performed lite review
+covered the source and tests because subagents were prohibited; this was not an
+independent review. Evidence: `/tmp/exec5/btp1/self-review.md` and the final
+`{dashboard,whiteboard,mcp}-final.log` files. No remaining finding from that pass.
+Phases 2-5 remain unimplemented; the ticket stays in `ready/`.
 
 ### Phase 2: Rail row deltas
 

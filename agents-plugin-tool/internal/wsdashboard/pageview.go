@@ -83,6 +83,7 @@ type SessionView struct {
 	// check items, then technical and announced ones.
 	CountPolicy, CountAcks int
 	Board, Panels          template.HTML
+	BoardUnits             *BoardUnits
 	Mermaid                bool
 
 	Lead         LeadView
@@ -589,6 +590,7 @@ func buildSessionView(in pageInputs) SessionView {
 		CountPolicy:    in.Page.Board.CountPolicy,
 		CountAcks:      in.Page.Board.CountAcks,
 		Board:          in.Page.Board.Board,
+		BoardUnits:     in.Page.BoardUnits,
 		Panels:         in.Page.Board.Panels,
 		Mermaid:        in.Page.Board.Mermaid,
 	}

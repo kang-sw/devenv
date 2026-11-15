@@ -69,7 +69,7 @@ const BUNDLED_RUNTIME = JSON.parse(readFileSync(join(TEST_DIR, "..", "runtime.js
 // to the bundled contract below; it is not an independent hand-maintained
 // contract source.
 const LIVE_TOOL_NAMES = [
-  "runtime.read", "runtime.debug_events", "session.children",
+  "runtime.read", "runtime.debug_events", "session.children", "session.request_hire", "session.roster",
   "mailbox.send", "mailbox.recv", "mailbox.lookup_peers",
   "ferrule", "agenda.set", "agenda.clear", "agenda.list",
   "route.resolve_implement", "todo.add", "todo.check",

@@ -183,6 +183,26 @@
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }) };
     });
   }
+  // Restore membership before a host's DOM morph, without binding, mounting
+  // frames or reading layout. A former anchor may now live in an inert gap.
+  function prepare(root, snapshot) {
+    (snapshot || []).forEach(function (saved) {
+      var h = histories(root).find(function (n) { return n.getAttribute('data-history') === saved.key; });
+      if (h) restoreRows(h, saved);
+    });
+  }
+  function restoreRows(h, saved) {
+    var wanted = new Set(saved.rows || []), entries = new Set(saved.entries || []), changed = false;
+    gaps(h).forEach(function (gap) {
+      Array.from(payload(gap).children).forEach(function (row) {
+        if (!wanted.has(row.getAttribute('data-row')) && !Array.from(row.querySelectorAll('.wb-entry')).some(function (n) { return entries.has(n.id); })) return;
+        split(gap, row);
+        take(gap, 'down'); changed = true;
+        refresh(gap);
+      });
+    });
+    return changed;
+  }
   function restore(root, snapshot) {
     // Materialize exact previously admitted rows without granting another
     // 1000px window on each update. No append can evict a viewed row.
@@ -199,15 +219,7 @@
       }
       if (!h) return;
       if (panelState) panelState.snapshot(h, saved);
-      var wanted = new Set(saved.rows || []), entries = new Set(saved.entries || []), kept = kit.keep(h), changed = false;
-      gaps(h).forEach(function (gap) {
-        Array.from(payload(gap).children).forEach(function (row) {
-          if (!wanted.has(row.getAttribute('data-row')) && !Array.from(row.querySelectorAll('.wb-entry')).some(function (n) { return entries.has(n.id); })) return;
-          split(gap, row);
-          take(gap, 'down'); changed = true;
-          refresh(gap);
-        });
-      });
+      var kept = kit.keep(h), changed = restoreRows(h, saved);
       var folds = new Map(saved.folds || []);
       h.querySelectorAll('details[data-key]').forEach(function (d) {
         if (folds.has(d.getAttribute('data-key'))) d.open = folds.get(d.getAttribute('data-key'));
@@ -767,7 +779,7 @@
   }
   var kit = viewKit(window);
   var panelState = panelStateKit(window);
-  window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
+  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
     watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
