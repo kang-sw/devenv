@@ -27,3 +27,7 @@ Today the panel has no whole-panel collapse: only per-agent `<details>` rows
   with a user-dragged splitter position?
 - In the tabs layout (narrow widths), does the panel collapse the same way
   or stay a tab?
+
+## Dropped
+
+2026-11-16: moot. The agent badge popover (261115-feat-ws-dashboard-agent-badge-popover, merged ad9c2c79f) removed the top-left agent panel this idea proposed to auto-collapse; the conversation already owns that height.
