@@ -30,12 +30,14 @@ Read at every session start, before other action:
   success.
 - **No performative agreement.** Restate the requirement, verify, then act or
   push back.
-- **Dogfood surprises get captured.** When a ws tool behaves contrary to
-  reasonable caller expectations during dogfooding, create a short `idea/`
-  ticket immediately when the surprise implies a bug, feature, or research
-  follow-up. Mention the ticket in the next natural status or final response;
-  interrupt the workflow only when the surprise blocks progress or changes the
-  user-visible outcome.
+- **Dogfood surprises get fixed, not parked.** When a ws tool behaves contrary
+  to reasonable caller expectations during dogfooding, fix it in the same
+  change if the fix is small and within the current task's scope. Otherwise do
+  not create an `idea/` ticket: a worker reports the surprise to its lead in
+  its result, and the lead either promotes it to a `ready/` ticket at the next
+  merge point so it is fixed in the next cycle, or raises it to the user as a
+  whiteboard topic. Interrupt the workflow only when the surprise blocks
+  progress or changes the user-visible outcome.
 - **Actions over words.** Prefer "Fixed. [what changed]" or the diff. Skip
   filler.
 

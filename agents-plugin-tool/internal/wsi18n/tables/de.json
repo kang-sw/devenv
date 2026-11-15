@@ -1886,6 +1886,7 @@
   "composer.cmd.remove": "Befehl entfernen",
   "entry.command.terminal": "keine Textausgabe: öffnet sich im Terminal",
   "entry.board.nudge": "Board-Hinweis · {0}: {1}",
+  "entry.board.nudge.batch": "Board-Hinweis · {0} · {1} Nachrichten: {2}",
   "entry.board.nudge.overdue": "Überfällig",
   "entry.board.nudge.unblocked": "Nicht mehr blockiert",
   "entry.board.nudge.hourly": "Stündliche Prüfung",

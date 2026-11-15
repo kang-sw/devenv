@@ -1886,6 +1886,7 @@
   "composer.cmd.remove": "rimuovi il comando",
   "entry.command.terminal": "nessun output di testo: si apre nel terminale",
   "entry.board.nudge": "Promemoria della bacheca · {0}: {1}",
+  "entry.board.nudge.batch": "Promemoria della bacheca · {0} · {1} messaggi: {2}",
   "entry.board.nudge.overdue": "Scaduto",
   "entry.board.nudge.unblocked": "Sbloccato",
   "entry.board.nudge.hourly": "Verifica oraria",
