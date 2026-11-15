@@ -2,7 +2,12 @@
 title: Whiteboard topic waiting-on dependencies with unblocked surfacing and reverse view
 related:
   261115-feat-ws-whiteboard-topic-state-badge: coordinate; landed in develop 02a2e5722, owns the header badge and toolbar state filter this ticket extends without changing lifecycle values
+  261114-feat-whiteboard-center-reference-navigation: coordinate; owns closed-topic reveal, which this ticket's topic chips leave to it
   261115-feat-ws-revive-topic-state-summaries: coordinate; revive summaries read folded topic state and should list waiting targets once this lands
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 7509b4987c412d90
+sage-review-design-reviewed: 7509b4987c412d90
 ---
 
 # Whiteboard topic waiting-on dependencies with unblocked surfacing and reverse view
@@ -40,7 +45,9 @@ Today (develop `02a2e5722`, paths under `agents-plugin-tool/internal/`):
   and ETA (`wswhiteboard/topic_state.go` ~18-26, ~255-280).
 - Topic state is folded from immutable system entries carrying
   `Entry.TopicState` raw JSON (`entries.go` ~26-43, `topic_state.go`
-  ~57-130). A same-value declaration is a no-op (~290-300); the record
+  ~57-130). A same-value declaration is a no-op only when valid; an
+  implementing repeat with different owner/ETA is refused
+  (`agents-plugin-tool/internal/wswhiteboard/topic_state.go#L290-L295`); the record
   validator refuses `set` with `from == value` and turns unknown ops into
   unsupported diagnostics (~188-196, ~242-249). `Entry` round-trips unknown
   members (`entry_json.go`); `State`/`TopicDoc` are typed structs.
@@ -57,7 +64,9 @@ Today (develop `02a2e5722`, paths under `agents-plugin-tool/internal/`):
   (`topics.go` ~53-65).
 - Tickets: whiteboard has a host-supplied `TicketResolver`
   (`view.go` ~249-255); production resolves via `wsdoc.TicketStatus`
-  (five `os.Stat` checks, `.done` -> `done`; `wsdoc/tickets.go` ~202-221).
+  (up to five `os.Stat` calls for a valid stem, stopping at the first matching
+  file; `.done` -> `done`;
+  `agents-plugin-tool/internal/wsdoc/tickets.go#L202-L221`).
 - Open asks: `AskCount()` = open policy + open checks per topic
   (`view.go` ~357-390); `OpenAskCount()` board-wide (`store.go` ~160-174).
 - No `topic_default_state` setting or contract exists at `02a2e5722`; the
@@ -116,8 +125,13 @@ Today (develop `02a2e5722`, paths under `agents-plugin-tool/internal/`):
   (render-only, never persisted); listing `owner` explicitly and deriving it
   render one chip. Rejected: persisting the derived target (it would go stale
   as asks settle).
-- **Readiness ("진행 가능").** A waiting topic is ready when its effective list
-  (declared plus derived owner) is non-empty and every target is resolved.
+- **Readiness ("진행 가능").** A waiting topic is ready when its declared list
+  is non-empty and every declared target is resolved and no derived owner
+  chip is open. A waiting topic with no declared list never surfaces
+  readiness: a derived owner chip alone just disappears when the asks
+  settle, because the owner's answers already reach the agent through the
+  inbox. Rejected: surfacing readiness for derived-only waits (an empty
+  declaration says nothing about what unblocks the topic).
   Readiness is derived presentation only: the lifecycle value stays
   `waiting`, `data-state` is unchanged, the toolbar's waiting filter still
   includes it, and the topic gains `data-waiting-ready` plus a "진행 가능"
@@ -127,8 +141,17 @@ Today (develop `02a2e5722`, paths under `agents-plugin-tool/internal/`):
 - **Chips placement.** A server-rendered `.topic-deps` row follows
   `.topic-state` in the topic header, outside `.topic-state`, so the badge
   reconciler's child rebuild never deletes it; each chip names its target
-  (topic chips link to that topic through the existing in-board fragment
-  links, ticket chips show the stem) and carries ✓ when resolved. No new
+  (topic chips link to that topic, ticket chips show the stem) and carries ✓
+  when resolved. Topic-link navigation needs implementation: topic sections
+  have `data-topic` but no topic anchor ID, and the existing in-board fragment
+  handler accepts only item/panel IDs
+  (`agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L48-L48`,
+  `agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L4060-L4094`).
+  Add a topic anchor id on each topic section and extend that handler to
+  accept it: a target hidden by the toolbar state filter resets the filter to
+  all before scrolling; a closed target that is not loaded in the page
+  renders as plain chip text (no link) with its ✓, leaving closed-topic
+  reveal to 261114-feat-whiteboard-center-reference-navigation. No new
   client timer. Rejected: chips inside `.topic-state` (needs a reconciler
   rewrite for no gain).
 - **Reverse view.** A topic that some waiting topic on the same board lists
@@ -144,7 +167,13 @@ Today (develop `02a2e5722`, paths under `agents-plugin-tool/internal/`):
   current `waiting_on`), so a re-declaration can nudge again and a
   re-block-then-resolve under the same declaration does not. Its receipt is
   a separate optional Entry member (`unblocked_receipt`) on its own system
-  entry, never a new value in the existing receipt's reason list. Ticket
+  entry, never a new value in the existing receipt's reason list. Payload:
+  `{"v":1,"reply_id":"<owning lead reply id>","topic":"<topic dir>","declaration":"<entry id holding waiting_on>"}`.
+  Like existing receipts it is reply-id-specific: a receipt whose `reply_id`
+  differs from the board's current owner (a copied or adopted board) does not
+  dedupe, so the new owner gets its own nudge once. A malformed or
+  unknown-version receipt member is ignored, never fatal to the board or to
+  other receipts. Ticket
   targets are resolved in the scheduler through an injected resolver over
   the session root's ticket tree (`wsdoc.TicketStatus`), only for boards with
   waiting topics that have ticket targets, at the existing 30 s cadence.
@@ -175,11 +204,43 @@ Today (develop `02a2e5722`, paths under `agents-plugin-tool/internal/`):
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - No change to the four lifecycle values, the badge markup inside
   `.topic-state`, or the toolbar filter order.
 - Owner run rules: offline env `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`;
   never the full `./internal/wsdashboard` package, only `-run`; never the
   shared dashboard daemon or port 29417; end with an owned process scan.
+
+## Prior Decisions
+
+- 261115-feat-ws-whiteboard-topic-state-badge (2026-11-15, Decisions): "Preserve ordinary legacy absence and diagnostic authority rather than inventing a state." — bearing: constrains
+- 02a2e5722 (2026-11-15, commit): "Trimmed acceptance per (899)=a and the owner UI-fast principle: scoped tests, wsi18n, one lite (clean); owner on-screen check is acceptance." — bearing: supports
+- 0203cff95 (2026-11-15, commit): "Add an explicit absent-to-created symlinked cache regression and retain the actual /var versus /private/var pair in precise-timer test output" — bearing: constrains
+- dd03b1d0 (2026-11-15, commit): "Failure after enqueue permits duplicates rather than loss; missing boards are never created." — bearing: constrains
+- 733c7522 (2026-11-15, commit): "Retain raw payload and future Entry members in memory and deep-clone bytes directly; committed folder prefixes remain suffix-only" — bearing: supports
+- 05096e96 (2026-11-15, commit): "Real archived historical schema-2 source remains unchanged rather than substituting current model types." — bearing: constrains
+- e7c6e32b (2026-11-15, commit): "Reuse common topic rendering for full/embed, served regions, deferred topics and ClosedWindow." — bearing: constrains
+- f5b6b502 (2026-11-15, commit): "Reuse the existing wbAgo initializer/refresh/adoption hook and its document-owned timer rather than introduce another asset or mutate dashboard refresh interfaces." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | Phase 1 spans agents-plugin-tool/internal/wswhiteboard/{commands.go,entries.go,entry_json.go,topic_state.go,view.go,board_notice.go,assets/page.tmpl}, internal/mcp/whiteboard_nudges.go, internal/wsi18n/tables/, and agents-plugin/rsrc/whiteboard/whiteboard.md plus wsflow/Pi copies. |
+| scope.surface | public-interface | New optional on attribute on caller-facing wb:state and optional persisted waiting_on/unblocked_receipt Entry members; current grammar: agents-plugin-tool/internal/wswhiteboard/commands.go#L22-L40. |
+| scope.new_public_symbol | yes | on is a new public wb:state attribute; waiting_on and unblocked_receipt are new serialized member names. Go member/type names are not specified. |
+| scope.new_type_contract | yes | Decisions define waiting_on {v:1,targets:[...]} and whole-list replacement, readiness and receipt dedupe semantics; unblocked_receipt payload {v,reply_id,topic,declaration} is defined in Decisions. |
+| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/{topic_state_history_test.go,topic_state_badge_test.go,topic_state_view_test.go,board_notice_test.go}, internal/mcp/whiteboard_nudges_test.go, internal/wsi18n/keys_test.go and internal/wsrsrc/{wsflow_mirror_test.go,pi_mirror_test.go}; no new test filename is mandated. |
+| complexity.reuse_points | confirmed | Read Entry codec/clone, TopicStates, AskCount, TicketResolver, whiteboardTickets, Notify and scheduler. Receipt parser rejects the entire receipt for any unknown reason (agents-plugin-tool/internal/wswhiteboard/board_notice.go#L69-L91); TestBoardNoticeRawCloneAndReceiptValidation passed offline on 2026-11-15. |
+| complexity.side_effect_risk | high | Readiness adds durable receipts and unsolicited lead mail under the existing folder lock; enqueue-before-receipt can duplicate after failure (agents-plugin-tool/internal/wswhiteboard/board_notice.go#L230-L288). |
+| risk.correctness | high | Whole-list/no-op/clear semantics, close/reopen, derived owner, external ticket changes and declaration-scoped dedupe must agree between view and scheduler; current state fold is agents-plugin-tool/internal/wswhiteboard/topic_state.go#L94-L130. |
+| risk.fit | moderate | Scheduler currently has no ticket-resolver field/constructor argument, and Notify has no resolver parameter; injection is Phase 1 work, not an existing seam (agents-plugin-tool/internal/mcp/whiteboard_nudges.go#L30-L49, #L186-L205; internal/wswhiteboard/board_notice.go#L236-L236). Host-supplied TicketResolver exists for views (internal/wswhiteboard/view.go#L249-L255). Topic fragment navigation also needs support. All internal/ paths in this cell are under agents-plugin-tool/. |
+| risk.test | high | Existing historical-writer test passed offline on 2026-11-15 for committed opaque future members, pending bytes and separate typed-legacy loss, but does not exercise the proposed dependency/receipt payloads, injected scheduler resolver or new chips (agents-plugin-tool/internal/wswhiteboard/topic_state_history_test.go#L171-L329). New behavior coverage remains Phase 1 work; no dashboard test package was run. |
+| risk.security_or_contract | high | Static T0 premise holds for existing folder entries: unknown members are retained but not interpreted by the Entry codec, and a payload-only system entry leaves TopicStates/hourly epochs unchanged unless its text starts with the legacy close literal (agents-plugin-tool/internal/wswhiteboard/entry_json.go#L10-L56, topic_state.go#L102-L130, board_notice.go#L43-L66). Preserve provenance, reply-id isolation and byte prefixes; planned fields still need their own historical-writer proof. |
 
 ## Phases
 
@@ -201,12 +262,15 @@ Verification:
   (`topic_state_history_test.go` pattern).
 - View: chips with ✓ for closed topic and done/dropped ticket, unknown
   ticket chip, derived owner chip, readiness attribute and chip, reverse
-  count excluding closed/non-waiting waiters, escaping; badge reconciler
+  count excluding closed/non-waiting waiters, escaping; topic anchor
+  navigation including filter reset and unloaded-closed plain text; badge reconciler
   leaves `.topic-deps` intact (`topic_state_badge_test.go` pattern); state
   filter unchanged (`-run` only).
 - Nudges: transition to ready posts one mail; re-declaration nudges again;
   re-block/resolve under one declaration does not; restart keeps the
-  receipt; old overdue/hourly receipts still parse
+  receipt; a receipt for another reply id does not dedupe; a malformed
+  receipt member is ignored; derived-only waits never nudge; old
+  overdue/hourly receipts still parse
   (`board_notice_test.go`, `whiteboard_nudges_test.go` patterns).
 - `wsi18n` completeness tests; wsflow mirror drift tests.
 - Acceptance: owner's on-screen check after merge and swap.
