@@ -19,29 +19,12 @@ func (r *Runner) CreateHireLead(requestID, root string, launch wsdashboard.HireL
 	}
 	r.hireMu.Lock()
 	defer r.hireMu.Unlock()
-	dirs, err := os.ReadDir(filepath.Join(r.opts.Dir, "sessions"))
-	if err != nil && !os.IsNotExist(err) {
+	rec, err := r.findHireLead(requestID)
+	if err != nil {
 		return "", err
 	}
-	for _, dir := range dirs {
-		if !dir.IsDir() || !wsdashboard.ValidReplyID(dir.Name()) {
-			continue
-		}
-		meta, err := wsdashboard.ReadHiringMetadata(r.opts.Dir, dir.Name())
-		if err != nil {
-			return "", err
-		}
-		if meta.RequestID != requestID {
-			continue
-		}
-		rec, err := ReadRecord(r.opts.Dir, dir.Name())
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		if !rec.Lead || rec.Root != root {
+	if rec != nil {
+		if rec.Root != root {
 			return "", fmt.Errorf("hiring creation identity mismatch")
 		}
 		return rec.ReplyID, nil
@@ -51,4 +34,55 @@ func (r *Runner) CreateHireLead(requestID, root string, launch wsdashboard.HireL
 		PluginIsolation: launch.PluginIsolation, HireRequestID: requestID, HireLabel: launch.Label,
 	})
 	return st.ID, err
+}
+
+// CancelHireLead rolls back an uncommitted approval after rejection, expiry,
+// or withdrawal. Only the daemon's proposal reconciler calls it; there is no
+// requester-facing control. Already approved proposals never reach this path.
+func (r *Runner) CancelHireLead(requestID string) error {
+	if requestID == "" {
+		return fmt.Errorf("empty hiring request id")
+	}
+	r.hireMu.Lock()
+	defer r.hireMu.Unlock()
+	rec, err := r.findHireLead(requestID)
+	if err != nil || rec == nil {
+		return err
+	}
+	if rec.ClosedAt != "" || rec.HandedOffAt != "" {
+		return nil
+	}
+	_, err = r.CloseConversation(rec.ReplyID)
+	return err
+}
+
+func (r *Runner) findHireLead(requestID string) (*Record, error) {
+	dirs, err := os.ReadDir(filepath.Join(r.opts.Dir, "sessions"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, dir := range dirs {
+		if !dir.IsDir() || !wsdashboard.ValidReplyID(dir.Name()) {
+			continue
+		}
+		meta, err := wsdashboard.ReadHiringMetadata(r.opts.Dir, dir.Name())
+		if err != nil {
+			return nil, err
+		}
+		if !meta.Hired || meta.RequestID != requestID {
+			continue
+		}
+		rec, err := ReadRecord(r.opts.Dir, dir.Name())
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !rec.Lead {
+			return nil, fmt.Errorf("hiring creation identity mismatch")
+		}
+		return &rec, nil
+	}
+	return nil, nil
 }

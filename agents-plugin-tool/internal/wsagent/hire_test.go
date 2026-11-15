@@ -10,6 +10,29 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
+func TestHiringCancellationOnlyRollsBackItsCorrelatedCreation(t *testing.T) {
+	h := newLeadHarness(t).start()
+	ownerSession := h.lead("pi", LeadOptions{})
+	provisional, err := h.runner.CreateHireLead("unfinished", h.root, wsdashboard.HireLaunch{Harness: "pi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err = h.runner.CancelHireLead("unfinished"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h.state(provisional).Status != "closed" {
+		t.Fatal("provisional creation was not closed")
+	}
+	if h.state(ownerSession.ID).Status == "closed" {
+		t.Fatal("rollback closed an unrelated owner session")
+	}
+	if err = h.runner.CancelHireLead("not-created"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHiringCreationUsesOwnerLeadAndSurvivesRetry(t *testing.T) {
 	h := newLeadHarness(t).start()
 	requester := h.lead("pi", LeadOptions{})

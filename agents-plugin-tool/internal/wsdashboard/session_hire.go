@@ -43,6 +43,9 @@ type HireLaunch struct {
 // durable approval retry reuse its session, without setting authority lineage.
 type HireCreator interface {
 	CreateHireLead(requestID, root string, launch HireLaunch) (string, error)
+	// CancelHireLead rolls back only a creation whose proposal did not approve.
+	// It is daemon recovery, not control delegated to the requester.
+	CancelHireLead(requestID string) error
 }
 
 // HireProposal is a daemon-private journal. Launch is an approval intent,
@@ -52,14 +55,15 @@ type HireProposal struct {
 	Requester string `json:"requester"`
 	Root      string `json:"root"`
 	HireRequest
-	CreatedAt     time.Time   `json:"created_at"`
-	ExpiresAt     time.Time   `json:"expires_at"`
-	Status        string      `json:"status"`
-	Launch        *HireLaunch `json:"launch,omitempty"`
-	Session       string      `json:"session,omitempty"`
-	ReasonClosed  string      `json:"reason_closed,omitempty"`
-	Notified      bool        `json:"notified,omitempty"`
-	CreationError string      `json:"creation_error,omitempty"`
+	CreatedAt         time.Time   `json:"created_at"`
+	ExpiresAt         time.Time   `json:"expires_at"`
+	Status            string      `json:"status"`
+	Launch            *HireLaunch `json:"launch,omitempty"`
+	Session           string      `json:"session,omitempty"`
+	ReasonClosed      string      `json:"reason_closed,omitempty"`
+	Notified          bool        `json:"notified,omitempty"`
+	CreationError     string      `json:"creation_error,omitempty"`
+	CreationAttempted bool        `json:"creation_attempted,omitempty"`
 }
 
 func (d *Daemon) hireClock() time.Time {
@@ -239,7 +243,7 @@ func (d *Daemon) settleHiresLocked(proposals []HireProposal) error {
 				pendingErrors = append(pendingErrors, err)
 				continue
 			case p.Launch != nil:
-				if err := d.approveHireLocked(p); err != nil {
+				if err := d.approveHireLocked(proposals, i); err != nil {
 					// A failed creation leaves the request in the owner's queue;
 					// it is not a new outcome or an automatic provider retry loop.
 					p.Launch, p.CreationError = nil, err.Error()
@@ -250,11 +254,26 @@ func (d *Daemon) settleHiresLocked(proposals []HireProposal) error {
 			}
 		}
 		if p.Status != "pending" && !p.Notified {
-			// Persist the outcome before sending. A failed mail write is retried by
-			// the next refresh, even when the requester is no longer indexed.
+			// Commit the disposition before cleanup or mail, so a crash cannot
+			// revive a cancelled request. Failed side effects retry from disk.
 			if err := d.saveHires(proposals); err != nil {
 				return err
 			}
+			// An interrupted approval may already have created its session before
+			// grouping/outcome committed. Cancel that provisional creation only;
+			// approved peers are never closed when their requester ends.
+			if p.Status != "approved" && p.CreationAttempted {
+				creator, ok := d.agents.(HireCreator)
+				if !ok {
+					pendingErrors = append(pendingErrors, errors.New("hiring creation recovery is unavailable"))
+					continue
+				}
+				if err := creator.CancelHireLead(p.ID); err != nil {
+					pendingErrors = append(pendingErrors, err)
+					continue
+				}
+			}
+			// Mail retries even when the requester is no longer indexed.
 			if err := d.notifyHire(p); err != nil {
 				pendingErrors = append(pendingErrors, err)
 				continue
@@ -293,7 +312,8 @@ func (d *Daemon) notifyHire(p *HireProposal) error {
 	return nil
 }
 
-func (d *Daemon) approveHireLocked(p *HireProposal) error {
+func (d *Daemon) approveHireLocked(proposals []HireProposal, index int) error {
+	p := &proposals[index]
 	unlock, err := LockRegistration(d.dir, p.Requester)
 	if err != nil {
 		return err
@@ -306,6 +326,10 @@ func (d *Daemon) approveHireLocked(p *HireProposal) error {
 	creator, ok := d.agents.(HireCreator)
 	if !ok {
 		return errors.New("hosted session creation is unavailable")
+	}
+	p.CreationAttempted = true
+	if err := d.saveHires(proposals); err != nil {
+		return err
 	}
 	id, err := creator.CreateHireLead(p.ID, p.Root, *p.Launch)
 	if err != nil {

@@ -123,7 +123,7 @@ func (d *Daemon) handleSessionHire(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), 500)
 				return
 			}
-			if err = d.approveHireLocked(p); err != nil {
+			if err = d.approveHireLocked(proposals, i); err != nil {
 				p.Launch, p.CreationError = nil, err.Error()
 				if saveErr := d.saveHires(proposals); saveErr != nil {
 					err = fmt.Errorf("%v; save: %w", err, saveErr)

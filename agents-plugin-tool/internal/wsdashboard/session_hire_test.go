@@ -26,6 +26,7 @@ type hireFake struct {
 	root      string
 	createErr error
 	requests  map[string]string
+	cancelled int
 }
 
 func (h *hireFake) Handler() http.Handler      { return http.NotFoundHandler() }
@@ -57,6 +58,28 @@ func (h *hireFake) CreateHireLead(requestID, root string, launch HireLaunch) (st
 	}
 	h.requests[requestID] = id
 	return id, nil
+}
+
+func (h *hireFake) CancelHireLead(requestID string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	id := h.requests[requestID]
+	if id == "" {
+		return nil
+	}
+	reg, err := ReadRegistration(h.dir, id)
+	if err != nil {
+		return err
+	}
+	if reg.EndedAt != "" {
+		return nil
+	}
+	reg.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	if err = WriteRegistration(h.dir, reg); err != nil {
+		return err
+	}
+	h.cancelled++
+	return nil
 }
 
 type hireWakeCounter struct{ n atomic.Int64 }
@@ -278,6 +301,22 @@ func TestHiringLifecycle(t *testing.T) {
 	if wake.n.Load() != 3 {
 		t.Fatalf("wake count = %d", wake.n.Load())
 	}
+	reg, err := ReadRegistration(f.dir, "livesession")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	if err = WriteRegistration(f.dir, reg); err != nil {
+		t.Fatal(err)
+	}
+	f.d.index.Refresh()
+	f.d.settleHires()
+	creator.mu.Lock()
+	cancelled := creator.cancelled
+	creator.mu.Unlock()
+	if cancelled != 0 {
+		t.Fatal("requester end closed an already approved peer")
+	}
 }
 
 func TestHiringExpiryAndRestart(t *testing.T) {
@@ -465,6 +504,7 @@ func TestHiringApprovalIntentRecoversOnStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposals[0].Launch = &HireLaunch{Harness: "pi", Model: "owner-model"}
+	proposals[0].CreationAttempted = true
 	if err = f.d.saveHires(proposals); err != nil {
 		t.Fatal(err)
 	}
@@ -487,6 +527,65 @@ func TestHiringApprovalIntentRecoversOnStartup(t *testing.T) {
 	if count != 1 || d.hireParent(id) != p.Requester {
 		t.Fatalf("recovered creation count %d, parent %s", count, d.hireParent(id))
 	}
+}
+
+func TestHiringEndedRequesterCancelsInterruptedCreation(t *testing.T) {
+	creator := &hireFake{}
+	f := startPageFixture(t, func(o *DaemonOptions) { creator.dir = o.Dir; o.Agents = creator })
+	f.src.setPage("hiredsession", PageContent{HasBoard: true})
+	enableHiring(t, f.d, "livesession")
+	p := requestHiring(t, f.d, "livesession")
+	f.d.Close()
+	proposals, err := f.d.readHires()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposals[0].Launch = &HireLaunch{Harness: "pi"}
+	proposals[0].CreationAttempted = true
+	if err = f.d.saveHires(proposals); err != nil {
+		t.Fatal(err)
+	}
+	id, err := creator.CreateHireLead(p.ID, f.project, *proposals[0].Launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := ReadRegistration(f.dir, p.Requester)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	if err = WriteRegistration(f.dir, reg); err != nil {
+		t.Fatal(err)
+	}
+	d, err := StartDaemon(DaemonOptions{Dir: f.dir, Sessions: f.src, Agents: creator, noGitBadge: true, PollInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	waitFor(t, "interrupted approval withdrawal", func() bool { return len(hireMails(t, d, p.Requester)) == 1 })
+	assertHireMail(t, d, p, "withdrawn")
+	child, err := ReadRegistration(f.dir, id)
+	if err != nil || child.EndedAt == "" {
+		t.Fatalf("provisional creation survived withdrawal: %+v %v", child, err)
+	}
+	creator.mu.Lock()
+	created, cancelled := creator.created, creator.cancelled
+	creator.mu.Unlock()
+	if created != 1 || cancelled != 1 {
+		t.Fatalf("created=%d cancelled=%d", created, cancelled)
+	}
+	reg.EndedAt = ""
+	reg.HeartbeatAt = time.Now().UTC().Format(time.RFC3339)
+	if err = WriteRegistration(f.dir, reg); err != nil {
+		t.Fatal(err)
+	}
+	d.index.Refresh()
+	d.settleHires()
+	queue, err := d.pendingHires()
+	if err != nil || len(queue) != 0 {
+		t.Fatalf("cancelled creation revived: %+v %v", queue, err)
+	}
+	assertHireMail(t, d, p, "withdrawn")
 }
 
 func TestHiringOutcomeWriteFailureRetriesFromDisk(t *testing.T) {
