@@ -169,12 +169,15 @@ func TestTopicUpdateNetChangesFirstTouchAndRootAnswers(t *testing.T) {
 }
 
 func TestTopicUpdateAdoptionKeepsFirstTouchAndExplicitIdentity(t *testing.T) {
-	s := &State{Counter: 1, Items: []Item{{ID: 1, Topic: "Old", Class: ClassCheck, Status: StatusOpen, Title: "Check"}}, Topics: []TopicDoc{{Name: "Other", Body: "Other"}}}
-	out := stateApply(t, s, `<wb:answer id="1" value="yes">Yes.</wb:answer><wb:topic name="Other"><wb:body>Changed</wb:body></wb:topic><wb:topic name="new" label="Old"/>`, stateNow)
-	wantSummaries(t, out, "topic updated: new (answered 1, renamed from Old)", "topic updated: Other (body)")
+	s := &State{Counter: 1, Items: []Item{{ID: 1, Topic: "Old", Class: ClassCheck, Status: StatusOpen, Title: "Check"}}, Topics: []TopicDoc{{Name: "other", Body: "Other"}}}
+	out := stateApply(t, s, `<wb:answer id="1" value="yes">Yes.</wb:answer><wb:topic name="other"><wb:body>Changed</wb:body></wb:topic><wb:topic name="new" label="Old"/>`, stateNow)
+	wantSummaries(t, out, "topic updated: new (answered 1, renamed from Old)", "topic updated: other (body)")
 	if s.TopicStates()["new"].State != nil {
 		t.Fatal("root answer/adoption backfilled")
 	}
+	out = stateApply(t, s, `<wb:topic name="other" label="other"/>`, stateNow)
+	wantSummaries(t, out, "topic updated: other (adopted)")
+	wantSummaries(t, stateApply(t, s, `<wb:topic name="other" label="other"/>`, stateNow))
 	s = &State{}
 	out = stateApply(t, s, `<wb:topic name="Old"><wb:log>Start</wb:log></wb:topic><wb:topic name="new" label="Old"><wb:state value="waiting"/></wb:topic>`, stateNow)
 	wantSummaries(t, out, "topic added: new (state: waiting, explicit)")
@@ -183,6 +186,22 @@ func TestTopicUpdateAdoptionKeepsFirstTouchAndExplicitIdentity(t *testing.T) {
 			t.Fatal("default survived adoption/explicit")
 		}
 	}
+}
+
+func TestTopicUpdateKindTagsUseNetFieldWriters(t *testing.T) {
+	s := &State{}
+	stateApply(t, s, `<wb:topic name="t"><wb:add class="check"><wb:title>Original</wb:title></wb:add></wb:topic>`, stateNow)
+	// The no-op patch must not take credit for the answer's changed fields.
+	out := stateApply(t, s, `<wb:answer id="1" value="yes">Yes.</wb:answer><wb:patch id="1"><wb:title>Original</wb:title></wb:patch>`, stateNow)
+	wantSummaries(t, out, "topic updated: t (answered 1)")
+	// Real intermediate patches cancel; the answer remains the only net kind.
+	out = stateApply(t, s, `<wb:patch id="1"><wb:title>Interim</wb:title></wb:patch><wb:patch id="1"><wb:title>Original</wb:title></wb:patch><wb:answer id="1" value="no">No.</wb:answer>`, stateNow)
+	wantSummaries(t, out, "topic updated: t (answered 1)")
+	out = stateApply(t, s, `<wb:answer id="1" value="yes">Yes.</wb:answer><wb:patch id="1"><wb:title>Changed</wb:title></wb:patch>`, stateNow)
+	wantSummaries(t, out, "topic updated: t (answered 1, patched 1)")
+	// An intermediate answer cancels while a separate title patch remains.
+	out = stateApply(t, s, `<wb:answer id="1" value="no">No.</wb:answer><wb:answer id="1" value="yes">Yes.</wb:answer><wb:patch id="1"><wb:title>Final</wb:title></wb:patch>`, stateNow)
+	wantSummaries(t, out, "topic updated: t (patched 1)")
 }
 
 func TestTopicUpdateDefaultFolderReloadAndRecovery(t *testing.T) {

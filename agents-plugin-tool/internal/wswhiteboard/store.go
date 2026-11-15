@@ -718,7 +718,9 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 				updates.byKey[topic].explicit = true
 			}
 		}
-		out.Effects = append(out.Effects, semanticEffects(previous, work)...)
+		effects := semanticEffects(previous, work)
+		updates.recordKinds(cmd, effects)
+		out.Effects = append(out.Effects, effects...)
 		previous = effectSnapshot(work)
 	}
 	if !embedDir && work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {

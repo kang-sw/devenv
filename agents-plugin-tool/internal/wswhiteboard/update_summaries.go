@@ -15,8 +15,9 @@ type topicUpdate struct {
 	key, base string
 	creation  int
 	explicit  bool
-	answers   map[int]bool
-	patches   map[int]bool
+	// Last semantic writer per item field, so no-op or net-cancelled
+	// commands cannot claim an applied kind through another command's diff.
+	itemKinds map[int]map[string]string
 }
 
 type topicUpdates struct {
@@ -94,22 +95,27 @@ func (u *topicUpdates) touchCommand(s *State, cmd command, topicOf topicResolver
 			if i := s.index(id); i >= 0 {
 				key := s.Items[i].Topic
 				add(key)
-				t := u.byKey[key]
-				if cmd.Tag == "wb:answer" {
-					if t.answers == nil {
-						t.answers = map[int]bool{}
-					}
-					t.answers[id] = true
-				} else {
-					if t.patches == nil {
-						t.patches = map[int]bool{}
-					}
-					t.patches[id] = true
-				}
+
 			}
 		}
 	}
 	return topics
+}
+
+func (u *topicUpdates) recordKinds(cmd command, effects []Effect) {
+	for _, e := range effects {
+		if e.Kind != "item" {
+			continue
+		}
+		t := u.byKey[e.Topic]
+		if t.itemKinds == nil {
+			t.itemKinds = map[int]map[string]string{}
+		}
+		if t.itemKinds[e.ID] == nil {
+			t.itemKinds[e.ID] = map[string]string{}
+		}
+		t.itemKinds[e.ID][e.Field] = cmd.Tag
+	}
 }
 
 func (u *topicUpdates) created(before, after *State, key string, index int, assign bool, now time.Time, p *problems) {
@@ -159,6 +165,9 @@ func summaryState(view TopicStateView) string {
 }
 
 func (u *topicUpdates) summaries(before, after *State) []string {
+	if len(u.order) == 0 {
+		return nil
+	}
 	// Align adopted identities in the comparison copy only. Otherwise every
 	// moved item/body/panel looks newly added and the old topic looks removed.
 	base := before.clone()
@@ -199,7 +208,8 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 		}
 		stateChanged := summaryState(oldStates[t.key]) != summaryState(states[t.key])
 		renamed := t.base != "" && (t.base != t.key || before.TopicLabel(t.base) != after.TopicLabel(t.key))
-		if len(net) == 0 && !stateChanged && !renamed {
+		adopted := t.base != "" && !before.stemmed(t.base) && after.stemmed(t.key)
+		if len(net) == 0 && !stateChanged && !renamed && !adopted {
 			continue
 		}
 		tags := summaryTags(t, net, base, after)
@@ -217,6 +227,8 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 		}
 		if renamed {
 			tags = append(tags, "renamed from "+before.TopicLabel(t.base))
+		} else if adopted {
+			tags = append(tags, "adopted")
 		}
 		line := "topic updated: " + t.key
 		if len(tags) > 0 {
@@ -237,12 +249,13 @@ func summaryTags(t *topicUpdate, effects []Effect, before, after *State) []strin
 			if e.Field == "presence" && e.After == "present" {
 				added[e.ID] = true
 			}
-			if t.answers[e.ID] && (e.Field == "status" || e.Field == "answer" || e.Field == "answer-quote") {
+			kind := t.itemKinds[e.ID][e.Field]
+			if kind == "wb:answer" && (e.Field == "status" || e.Field == "answer" || e.Field == "answer-quote") {
 				if i := after.index(e.ID); i >= 0 && (after.Items[i].Status == StatusAnswered || after.Items[i].Status == StatusAssumed) {
 					answered[e.ID] = true
 				}
 			}
-			if t.patches[e.ID] {
+			if kind == "wb:patch" {
 				patched[e.ID] = true
 			}
 		case "panel":
