@@ -761,7 +761,11 @@
     }
     // Reattach after a renderer replaces only the head, or the whole node.
     var before = c.files ? c.back : c instanceof Card ? c.minBtn : sheetBtn(c.el, "d-min");
-    if (before) before.parentNode.insertBefore(c.widthBtn, before);
+    if (before && (c.widthBtn.nextSibling !== before || c.widthBtn.parentNode !== before.parentNode)) {
+      var focused = doc.activeElement === c.widthBtn;
+      before.parentNode.insertBefore(c.widthBtn, before);
+      if (focused) c.widthBtn.focus({ preventScroll: true });
+    }
     c.widthBtn.hidden = !wide;
     c.widthBtn.setAttribute("aria-pressed", String(!!c.extended));
     var label = c.extended ? wsT("js.card.width.normal") : wsT("js.card.width.extend");

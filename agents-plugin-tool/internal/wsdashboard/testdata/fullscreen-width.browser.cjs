@@ -94,6 +94,18 @@ async function shot(page, name) {
   // Actual preview renderer responses supply identity, including source-vs-prose.
   for (const [kind, expected] of [['text',1280],['markdown',1280],['code',1440],['diff',1760],['frame',1600],['image',1600],['video',1600],['other',1920]]) {
     await preview(page,kind); await geometry(page,'.bcard[data-max] .bc-in',2400,expected,'preview '+kind);
+    if (kind === 'markdown') {
+      const toggle = page.locator('.bcard[data-max] .sheet-width');
+      await toggle.focus();
+      await page.keyboard.press('Enter');
+      assert.equal(await toggle.getAttribute('aria-pressed'),'true');
+      assert(await toggle.evaluate(n => document.activeElement === n), 'extension keeps keyboard focus');
+      await geometry(page,'.bcard[data-max] .bc-in',2400,2368,'keyboard extended');
+      await page.keyboard.press('Enter');
+      assert.equal(await toggle.getAttribute('aria-pressed'),'false');
+      assert(await toggle.evaluate(n => document.activeElement === n), 'restore keeps keyboard focus');
+      await geometry(page,'.bcard[data-max] .bc-in',2400,expected,'keyboard restored');
+    }
     await page.locator('.bcard[data-max] .bc-min').click();
   }
   for (const [kind, expected] of [['web',1600],['approval',1024],['system',1024],['other',1920]]) {
