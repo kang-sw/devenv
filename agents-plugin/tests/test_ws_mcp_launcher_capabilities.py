@@ -588,10 +588,33 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             touch(tool_dir / "internal" / "dash" / "dash_test.go", "package dash // edited\n")
             self.assertEqual(fingerprint(), baseline)
 
+            # Ignored: the independent desktop package, including output churn.
+            desktop_source = tool_dir / "desktop" / "src" / "main.rs"
+            desktop_dependency = tool_dir / "desktop" / "node_modules" / "pkg" / "index.js"
+            desktop_output = tool_dir / "desktop" / "target" / "debug" / "werkschaft"
+            for path in (desktop_source, desktop_dependency, desktop_output):
+                touch(path, "native-only")
+            self.assertEqual(fingerprint(), baseline)
+            for path in (desktop_dependency, desktop_output):
+                touch(path, "native-only changed")
+                self.assertEqual(fingerprint(), baseline)
+                path.unlink()
+                self.assertEqual(fingerprint(), baseline)
+
+            # Counted: Go source/module inputs, including nested desktop names.
+            changed = baseline
+            for path in (source, tool_dir / "go.mod", tool_dir / "go.sum",
+                         tool_dir / "internal" / "desktop" / "asset.txt"):
+                touch(path, "MCP input changed")
+                current = fingerprint()
+                self.assertNotEqual(current, changed)
+                changed = current
+
             # Counted: an asset-only change, and a new non-Go embed input.
             touch(asset, "two-changed")
-            changed = fingerprint()
-            self.assertNotEqual(changed, baseline)
+            current = fingerprint()
+            self.assertNotEqual(current, changed)
+            changed = current
             touch(tool_dir / "internal" / "dash" / "assets" / "new.css", "body{}")
             self.assertNotEqual(fingerprint(), changed)
 

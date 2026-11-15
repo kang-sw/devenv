@@ -271,7 +271,7 @@ func TestSelfClosingAndEmptyForms(t *testing.T) {
 func TestCommandPositionsAndLinesInProblems(t *testing.T) {
 	_, problems := parse("<wb:topic name=\"a\"><wb:close/></wb:topic>\n\n<wb:floor id=\"1\"/>\n<wb:mystery>\nbody\n</wb:mystery>\n<wb:topic name=\"t\"><wb:add class=\"x\"\n  color=\"red\"><wb:title>t</wb:title><wb:size>1</wb:size></wb:add></wb:topic>")
 	wantProblems(t, problems,
-		"command 3 <wb:mystery> (line 4): unknown command (commands: wb:add, wb:answer, wb:body, wb:close, wb:edit, wb:embed-dir, wb:floor, wb:log, wb:panel, wb:patch, wb:topic)",
+		"command 3 <wb:mystery> (line 4): unknown command (commands: wb:add, wb:answer, wb:body, wb:close, wb:edit, wb:embed-dir, wb:eta, wb:floor, wb:log, wb:panel, wb:patch, wb:state, wb:topic)",
 		"command 4 <wb:add> (line 7): unknown attribute color (known: id, class)",
 		"command 4 <wb:add> (line 7): unknown field <wb:size> (fields: wb:title, wb:option, wb:recommend, wb:why, wb:link)",
 	)

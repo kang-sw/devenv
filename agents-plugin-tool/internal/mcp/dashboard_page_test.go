@@ -37,7 +37,10 @@ func dashboardPageSource(t *testing.T, now *time.Time) *DashboardSessionSource {
 
 func readPageOK(t *testing.T, src *DashboardSessionSource, reg wsdashboard.Registration) wsdashboard.PageContent {
 	t.Helper()
-	page, ok := src.ReadPage(reg)
+	page, ok, err := src.ReadPage(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatalf("ReadPage found no session for %+v", reg)
 	}
@@ -46,7 +49,10 @@ func readPageOK(t *testing.T, src *DashboardSessionSource, reg wsdashboard.Regis
 
 func readFingerprint(t *testing.T, src *DashboardSessionSource, reg wsdashboard.Registration) string {
 	t.Helper()
-	data, ok := src.ReadSession(reg)
+	data, ok, err := src.ReadSession(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatalf("ReadSession found no session for %+v", reg)
 	}
@@ -67,7 +73,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	src := dashboardPageSource(t, nil)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 
-	if _, ok := src.ReadPage(wsdashboard.Registration{ReplyID: "nosuchsession", Project: f.root}); ok {
+	if _, ok, err := src.ReadPage(wsdashboard.Registration{ReplyID: "nosuchsession", Project: f.root}); ok || err != nil {
 		t.Fatal("ReadPage read an unknown reply-id")
 	}
 
@@ -669,14 +675,20 @@ func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 
-	en, ok := src.ReadPageLang(reg, "en")
+	en, ok, err := src.ReadPageLang(reg, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("ReadPageLang found no session")
 	}
 	if plain := readPageOK(t, src, reg); plain.Board != en.Board {
 		t.Fatal("ReadPage is not the English ReadPageLang")
 	}
-	ko, _ := src.ReadPageLang(reg, "ko")
+	ko, ok, err := src.ReadPageLang(reg, "ko")
+	if err != nil || !ok {
+		t.Fatalf("ReadPageLang: found=%v err=%v", ok, err)
+	}
 	enHTML, koHTML := string(en.Board.Board)+string(en.Board.Panels), string(ko.Board.Board)+string(ko.Board.Panels)
 	for _, want := range []string{"Tickets", "1 ready, 1 todo", "Todos"} {
 		if !strings.Contains(enHTML, want) {
@@ -915,7 +927,7 @@ func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
 
 	settle("language (before)")
 	before = boardRenders(src)
-	if _, ok := src.ReadPageLang(reg, "ko"); !ok {
+	if _, ok, err := src.ReadPageLang(reg, "ko"); !ok || err != nil {
 		t.Fatal("ReadPageLang failed")
 	}
 	if boardRenders(src) == before {
@@ -1030,7 +1042,7 @@ func TestDashboardBoardMemoFullReplacesItsOwnKey(t *testing.T) {
 	if got := entries(); got != boardMemoMax {
 		t.Fatalf("a re-render of a held key left %d entries, want %d", got, boardMemoMax)
 	}
-	if _, ok := src.ReadPageLang(reg, "ko"); !ok {
+	if _, ok, err := src.ReadPageLang(reg, "ko"); !ok || err != nil {
 		t.Fatal("ReadPageLang failed")
 	}
 	if got := entries(); got != 1 {
@@ -1047,7 +1059,10 @@ func TestDashboardReadSessionCountsOpenAskItems(t *testing.T) {
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>p1</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="policy"><wb:title>p2</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="technical"><wb:title>q</wb:title></wb:add><wb:add class="check"><wb:title>c1</wb:title></wb:add><wb:add class="check"><wb:title>c2</wb:title></wb:add></wb:topic><wb:answer id="5" value="ok">5=ok</wb:answer>`)
 	before := boardRenders(src)
-	data, ok := src.ReadSession(reg)
+	data, ok, err := src.ReadSession(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("ReadSession failed")
 	}

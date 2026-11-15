@@ -1,0 +1,1 @@
+{"name":"werkschaft-desktop-electron","version":"0.1.0","author":"kang-sw","private":true,"main":"main.js","scripts":{"test":"node --test test/*.test.js","build":"node scripts/build.cjs","smoke":"node test/smoke.cjs"},"devDependencies":{"@electron/packager":"20.3.0","electron":"44.11.3"}}

@@ -36,6 +36,8 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 - **Acceptance includes tests and before/after screenshots.** Capture the actual cut-line baseline, not an older visual reference, and compare the result side by side at matching routes, viewports, state and motion settings. Neither a file move nor syntax checks alone prove behavior preservation.
 - **MAIN's 17:59:12 repin.** Integrate exact develop `aac39c69f381a82677f0ee6857e8f8fc5bc89322` before the split's future slot, preserving its landed UI-C2 history-boundary and UI-C3 topic-unfold/beforeGeometry changes. That exact source is now the actual BEFORE comparison pin, replacing historical `d0ad8a9f1`; unmerged 777 and UI-T5 remain excluded. MAIN owns integration; reconciliation and recipe edits remain static-only while H runs.
 
+- **MAIN's 2026-11-15 exact-099 rework supersedes the earlier verification allocation.** Mechanically reconstruct/re-extract all four originals from `09998d57986f9d0f716036115452e1cb912d1f28`, preserving every upstream edit. MAIN owns the started merge; finish its conflict resolution without re-pinning to newer develop. Run the same seven Node commands and both complete Go packages offline by approximately 06:00Z. No new browser matrix, screenshots, old-baseline harness/Lite chase or shared-runtime work is allocated; old Lite evidence applies only to its old head. Preserve the combined browser-gap ticket and all original failures. Publish the [current map](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/move-map-09998d579.md) and record fresh command exits separately from historical results.
+
 ## Constraints
 
 - MAIN's cut-line start signal is satisfied at baseline `d0ad8a9f1`; complete the normal fact-population and design/completeness gates before promotion and worker implementation. The start signal authorizes move-only T0 implementation in a parallel worktree, not test execution, release, a daemon rebuild/restart/swap, profiling or an installed-owner test. Send the bounded test recipe for a heavy-slot allocation.
@@ -76,7 +78,7 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 | risk.test | high | INFERRED: Many tests extract source spans from a single file; syntax checks cannot prove assembled behavior or visual equality. The actual comparison baseline, repinned by MAIN to exact aac39c69f381a82677f0ee6857e8f8fc5bc89322, is still to be captured in the split's separately granted heavy slot, not an already-approved mockup. git show -s --format=%B cacd771c1 records owner-accepted open picker/card Important and an incomparable earlier baseline, not full 652 acceptance. |
 | risk.security_or_contract | moderate | INFERRED: T0 asset organization must retain trusted frame dispatch, sandboxed document loading and existing action availability; agents-plugin-tool/internal/wswhiteboard/render.go and agents-plugin-tool/internal/wsdashboard/pages.go are assembly boundaries, not authority to change those contracts. |
 
-## Static Preparation — Awaiting MAIN's Heavy-Slot START
+## Historical Static Preparation — Before MAIN's Heavy-Slot START
 
 Static move-only T0 preparation is retained on `impl/develop/map-yoga-coach`.
 MAIN started integration of exact `aac39c69f381a82677f0ee6857e8f8fc5bc89322`

@@ -257,6 +257,8 @@
         if (kr) kidFold(kr, !kr.classList.contains("kcol"));
         return;
       }
+      var settings = t.closest && t.closest(".settings-toggle");
+      if (settings && gmenu) { e.preventDefault(); railPopOpen("settings", settings); return; }
       var usage = t.closest && t.closest(".usage-toggle");
       if (usage && usageGutter) { e.preventDefault(); railPopOpen("usage", usage); return; }
       var add = t.closest && t.closest(".radd");

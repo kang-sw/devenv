@@ -1,4 +1,37 @@
-# One proposed offline verification batch
+# Offline verification allocations
+
+## Current exact-099 source-only allocation — 2026-11-15
+
+MAIN's 04:57:46 rework grant supersedes the historical batch below: preserve exact
+`09998d57986f9d0f716036115452e1cb912d1f28`, then run the same seven Node commands
+and both full Go packages offline. MAIN's 05:16:46 update explicitly keeps that
+pin despite newer develop heads. No browser/screenshot/Lite rerun or shared-runtime
+action is allocated. Existing browser gaps remain failures/omissions, tracked in
+`261115-bug-ws-dashboard-remaining-browser-harness-gaps`.
+
+From the repository root, with `GOPROXY=off`, `GOSUMDB=off`,
+`GOTOOLCHAIN=local`, and `BOARD_SPLIT_BASELINE` set to that exact pin:
+
+```sh
+node --test scripts/board-headless/split.test.mjs
+node --check scripts/board-headless.mjs
+node --check scripts/board-headless/toolbar-overview.mjs
+node --check scripts/board-headless/shared-actions.mjs
+node agents-plugin-tool/internal/wsdashboard/testdata/lead-popover.test.cjs
+node agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs
+node --test agents-plugin-tool/internal/wsdashboard/testdata/task_badges.test.cjs
+cd agents-plugin-tool
+go test ./internal/wsdashboard -count=1 -timeout=5m
+go test ./internal/wswhiteboard -count=1 -timeout=5m
+```
+
+Go uses only its own timeout; no outer test/compiler kill is permitted. Exact
+exit codes and tested source head are recorded after execution in the ticket.
+Raw output remains private cache evidence, not a committed log bundle.
+The [current move map](move-map-09998d579.md) includes the whole-harness inverse
+comparison and updated upstream source readers.
+
+## Historical proposed browser allocation
 
 **NOT RUN. Combined browser batch is NOT START-ready.** The split has no actual
 MAIN START; H CRLF's slot is separate and grants this worker no execution.

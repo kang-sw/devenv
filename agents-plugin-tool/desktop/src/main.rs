@@ -5,6 +5,7 @@ compile_error!("This first-window slice supports macOS only");
 
 mod endpoint;
 mod navigation;
+mod zoom;
 
 use navigation::{destination, Destination, CONNECT_VIEW};
 use std::sync::{
@@ -12,11 +13,21 @@ use std::sync::{
     Arc, Mutex,
 };
 use tauri::{
-    menu::{Menu, MenuItem, Submenu},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     webview::NewWindowResponse,
     AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use url::Url;
+
+// The dashboard keys its desktop-only link behavior (a plain click on a file
+// link opens its menu, Cmd/Ctrl+click previews) on the "Werkschaft/" token.
+// A custom agent replaces WKWebView's default rather than extending it, so
+// the macOS default (frozen by WebKit at 10_15_7) stays ahead of the token.
+// Only a name, never a credential or native capability.
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Werkschaft/",
+    env!("CARGO_PKG_VERSION")
+);
 
 #[derive(Default)]
 struct Connection {
@@ -85,17 +96,60 @@ fn connect(app: AppHandle, state: Arc<Connection>) {
 fn main() {
     let connection = Arc::new(Connection::default());
     let menu_state = connection.clone();
+    let zoom_level = Mutex::new(1.0_f64);
     tauri::Builder::default()
         // No invoke_handler, plugins, remote capabilities, or JS initialization.
         .on_menu_event(move |app, event| {
             if event.id().as_ref() == "retry" {
                 connect(app.clone(), menu_state.clone());
+            } else if let Some(step) = zoom::Step::from_menu_id(event.id().as_ref()) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let mut level = zoom_level.lock().unwrap();
+                    let target = zoom::next(*level, step);
+                    if window.set_zoom(target).is_ok() {
+                        *level = target;
+                    }
+                }
             }
         })
         .setup(move |app| {
             let menu = Menu::default(app.handle())?;
             let retry = MenuItem::with_id(app, "retry", "Retry", true, Some("CmdOrCtrl+R"))?;
             menu.append(&Submenu::with_items(app, "Connection", true, &[&retry])?)?;
+            // Cmd+= and Cmd+Shift+= (Cmd++) both zoom in, as in browsers;
+            // AppKit matches Shift exactly, so each needs its own item.
+            let zoom_items = [
+                MenuItem::with_id(app, "zoom_reset", "Actual Size", true, Some("CmdOrCtrl+0"))?,
+                MenuItem::with_id(app, "zoom_in", "Zoom In", true, Some("CmdOrCtrl+="))?,
+                MenuItem::with_id(
+                    app,
+                    "zoom_in_shifted",
+                    "Zoom In",
+                    true,
+                    Some("CmdOrCtrl+Shift+="),
+                )?,
+                MenuItem::with_id(app, "zoom_out", "Zoom Out", true, Some("CmdOrCtrl+-"))?,
+            ];
+            let separator = PredefinedMenuItem::separator(app)?;
+            let view = menu.items()?.into_iter().find_map(|item| {
+                item.as_submenu()
+                    .filter(|submenu| submenu.text().ok().as_deref() == Some("View"))
+                    .cloned()
+            });
+            let view = match view {
+                Some(view) => {
+                    view.append(&separator)?;
+                    view
+                }
+                None => {
+                    let view = Submenu::new(app, "View", true)?;
+                    menu.append(&view)?;
+                    view
+                }
+            };
+            for item in &zoom_items {
+                view.append(item)?;
+            }
             app.set_menu(menu)?;
 
             let navigation_state = connection.clone();
@@ -103,6 +157,7 @@ fn main() {
             let popup_app = app.handle().clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Werkschaft — Connecting…")
+                .user_agent(USER_AGENT)
                 .inner_size(1280.0, 860.0)
                 .min_inner_size(760.0, 520.0)
                 .on_navigation(move |url| {
@@ -149,6 +204,15 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn user_agent_carries_the_dashboard_desktop_token() {
+        // The dashboard tests /\bWerkschaft\// against navigator.userAgent.
+        let token = format!(" Werkschaft/{}", env!("CARGO_PKG_VERSION"));
+        assert!(super::USER_AGENT.ends_with(&token));
+        assert!(super::USER_AGENT.starts_with("Mozilla/5.0 (Macintosh;"));
+        assert!(super::USER_AGENT.contains("AppleWebKit/"));
+    }
+
     #[test]
     fn configuration_grants_no_local_or_remote_native_permissions() {
         let config: serde_json::Value =

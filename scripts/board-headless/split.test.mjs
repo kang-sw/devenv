@@ -31,6 +31,23 @@ test('move-only sources equal the explicitly pinned baseline', { skip: !process.
   assert.equal(span(overview, '// --- toolbar / overview QA', 'async function readWebPopover'), span(old, '// --- toolbar / overview QA', 'async function scenarioSharedControls'));
   assert.equal(span(overview, 'async function readWebPopover', 'const shared = createSharedActions'), span(old, 'async function readWebPopover', "// BANDS_PAGE's bandTopics"));
   assert.equal(span(entry, 'const SCENARIOS = {', '// --- main'), span(old, 'const SCENARIOS = {', '// --- main'));
+  // Reconstruct the WHOLE upstream harness, not just its scenario registry:
+  // this pins fixture seeding/history and all upstream changes outside moves.
+  const bindingStart = entry.indexOf('// Factories retain the existing shared helpers');
+  const bindingEnd = entry.indexOf("// BANDS_PAGE's bandTopics", bindingStart);
+  assert(bindingStart >= 0 && bindingEnd > bindingStart, 'factory binding boundary');
+  let reconstructed = entry.slice(0, bindingStart) +
+    span(overview, '// --- toolbar / overview QA', 'async function readWebPopover') +
+    span(shared, 'async function scenarioSharedControls', 'return { scenarioSharedControls') +
+    span(overview, 'async function readWebPopover', 'const shared = createSharedActions') + entry.slice(bindingEnd);
+  const imports = "import { createToolbarOverview } from './board-headless/toolbar-overview.mjs';\n" +
+    "import assetSource from '../agents-plugin-tool/internal/wsdashboard/testdata/asset-source.cjs';\n\n" +
+    'const { readAssetSource } = assetSource;\n';
+  assert(reconstructed.includes(imports), 'explicit source-reader/factory imports');
+  reconstructed = reconstructed.replace(imports, '').replace(
+    "const current = readAssetSource(file.split('/')[0], path.basename(file));",
+    "const current = fs.readFileSync(path.join(REPO, relative), 'utf8');");
+  assert.equal(reconstructed, old, 'all upstream entry/fixture/history code is retained');
 });
 
 const scenarioNames = [

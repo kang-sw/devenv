@@ -26,14 +26,14 @@ func newFakeSource() *fakeSource {
 	return &fakeSource{data: map[string]SessionData{}, gone: map[string]bool{}, reads: map[string]int{}}
 }
 
-func (f *fakeSource) ReadSession(reg Registration) (SessionData, bool) {
+func (f *fakeSource) ReadSession(reg Registration) (SessionData, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads[reg.ReplyID]++
 	if f.gone[reg.ReplyID] {
-		return SessionData{}, false
+		return SessionData{}, false, nil
 	}
-	return f.data[reg.ReplyID], true
+	return f.data[reg.ReplyID], true, nil
 }
 
 func (f *fakeSource) set(id string, data SessionData) {

@@ -182,6 +182,8 @@ type terminalFolders struct {
 	// Root is the main root of the repository Worktree is a linked
 	// worktree of; empty when it is not one.
 	Root string `json:"root,omitempty"`
+	// Path is the exact folder filter of a host-anchor list, when supplied.
+	Path string `json:"path,omitempty"`
 }
 
 // terminalList is the list route's answer.
@@ -189,6 +191,7 @@ type terminalList struct {
 	Terminals []TerminalInfo  `json:"terminals"`
 	Orphans   []TerminalInfo  `json:"orphans"`
 	Folders   terminalFolders `json:"folders"`
+	Anchor    bool            `json:"anchor,omitempty"`
 }
 
 // terminalCreate is the create route's body. Unknown fields are ignored.
@@ -224,7 +227,13 @@ func (d *Daemon) terminalSession(w http.ResponseWriter, r *http.Request, replyID
 		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return Session{}, false
 	}
-	if d.index != nil && ValidReplyID(replyID) {
+	if replyID == LocalBrowseAnchor {
+		if crossSiteFetch(r) {
+			http.Error(w, "cross-origin request refused", http.StatusForbidden)
+			return Session{}, false
+		}
+		s, ok = Session{Registration: Registration{ReplyID: LocalBrowseAnchor}}, true
+	} else if d.index != nil && ValidReplyID(replyID) {
 		s, ok = d.index.Session(replyID)
 	}
 	if !ok {
@@ -249,7 +258,7 @@ func (d *Daemon) handleTerminals(w http.ResponseWriter, r *http.Request, replyID
 	if rest == "" {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead:
-			d.listTerminals(w, s)
+			d.listTerminals(w, r, s)
 		case http.MethodPost:
 			d.createTerminal(w, r, s)
 		default:
@@ -307,26 +316,59 @@ func (d *Daemon) handleTerminals(w http.ResponseWriter, r *http.Request, replyID
 	d.serveTerminal(w, r, t, from)
 }
 
-func (d *Daemon) listTerminals(w http.ResponseWriter, s Session) {
-	out := terminalList{Terminals: []TerminalInfo{}, Orphans: []TerminalInfo{}, Folders: terminalFolders{Worktree: s.Project}}
-	if root := worktreeMain(s.Project); root != "" && root != s.Project {
-		out.Folders.Root = root
+func (d *Daemon) listTerminals(w http.ResponseWriter, r *http.Request, s Session) {
+	out := terminalList{Terminals: []TerminalInfo{}, Orphans: []TerminalInfo{}}
+	if s.ReplyID == LocalBrowseAnchor {
+		out.Anchor = true
+		if raw, supplied := r.URL.Query()["folder"]; supplied {
+			dir, refusal := terminalFolder(s, terminalCreate{Folder: "path", Path: raw[0]})
+			if refusal != "" {
+				http.Error(w, refusal, http.StatusBadRequest)
+				return
+			}
+			out.Folders.Path = dir
+		}
+	} else {
+		out.Folders.Worktree = s.Project
+		if root := worktreeMain(s.Project); root != "" && root != s.Project {
+			out.Folders.Root = root
+		}
 	}
 	for _, t := range d.terminals.list() {
 		if t.Session == s.ReplyID {
-			out.Terminals = append(out.Terminals, t)
-		} else if _, live := d.index.Session(t.Session); !live {
-			out.Orphans = append(out.Orphans, t)
+			if !out.Anchor || out.Folders.Path == "" || filepath.Clean(t.Cwd) == out.Folders.Path {
+				out.Terminals = append(out.Terminals, t)
+			}
+		} else if !out.Anchor && t.Session != LocalBrowseAnchor {
+			if _, live := d.index.Session(t.Session); !live {
+				out.Orphans = append(out.Orphans, t)
+			}
 		}
+	}
+	var answer any = out
+	if out.Anchor {
+		// Keep the real-session folders shape unchanged, including its empty
+		// worktree field, while the non-session anchor has no session folders.
+		folders := map[string]string{}
+		if out.Folders.Path != "" {
+			folders["path"] = out.Folders.Path
+		}
+		answer = struct {
+			terminalList
+			Folders map[string]string `json:"folders"`
+		}{out, folders}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(out)
+	_ = json.NewEncoder(w).Encode(answer)
 }
 
 // terminalFolder resolves a create request's folder for the session s. A
 // folder that cannot be used returns its refusal code.
 func terminalFolder(s Session, req terminalCreate) (dir, refusal string) {
+	if s.ReplyID == LocalBrowseAnchor && (req.Folder != "path" || !filepath.IsAbs(strings.TrimSpace(req.Path))) {
+		return "", terminalFolderRelative
+	}
 	switch req.Folder {
 	case "", "worktree":
 		dir = s.Project

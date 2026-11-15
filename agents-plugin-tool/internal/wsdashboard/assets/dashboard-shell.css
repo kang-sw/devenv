@@ -34,7 +34,7 @@
 :root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }
 .rail[data-premark] > .r-rail { visibility: hidden; }
 :root[data-shell] .dwrap > .top.sh-own > :not(.back) { display: none; }
-:root[data-frame]:not([data-mode="index"]) .dwrap > .top > *, :root[data-frame] .dwrap > .top > .back { visibility: hidden; }
+:root[data-frame] .dwrap > .top > * { visibility: hidden; }
 .ixmain { min-width: 0; max-width: 1080px; }
 body.tk-paged .ixmain { display: none; }
 :root[data-frame] .dash.index { --tkml: 0px; --tkmaxw: initial; }

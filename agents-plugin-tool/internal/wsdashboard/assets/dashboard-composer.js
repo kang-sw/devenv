@@ -305,9 +305,9 @@
   // marker drops the chip, removing the chip deletes the marker. A dropped
   // image waits in imgTrash, so an undo that brings its marker back brings
   // the chip back too. Numbers are never reused or rewritten within a draft
-  // (rewriting text the user is editing shakes it); the server renumbers a
-  // send that merges into a held message, so the page never numbers across
-  // sends.
+  // (rewriting text the user is editing shakes it). Each send is its own
+  // held message, numbered as the draft numbered it; a fresh draft numbers
+  // from 1 again.
   //
   // The board's note pens (item notes and topic notes) take pasted images
   // too: one image list and one number sequence span the composer text and
@@ -364,6 +364,17 @@
   }
   // editText is editField on the composer's text.
   function editText(start, end, s) { editField(ctext, start, end, s); }
+  // The explorer has already resolved the path against its active tab root.
+  // Use the composer's mention syntax and edit path; this never submits.
+  function attachExplorerPath(path) {
+    if (!ctext || !window.wsMention) return;
+    window.WsCards.dismissFiles();
+    var v = ctext.value, a = ctext.selectionStart, b = ctext.selectionEnd;
+    var s = window.wsMention.mentionParts(path).text;
+    if (a > 0 && !/\s/.test(v.charAt(a - 1))) s = " " + s;
+    if (b >= v.length || !/\s/.test(v.charAt(b))) s += " ";
+    editText(a, b, s);
+  }
   // insertMarkers puts the markers for nums at el's cursor (the composer's
   // by default), spaced from the text around them.
   function insertMarkers(nums, el) {
@@ -734,6 +745,7 @@
     var sel = cmdSel, fixed = typeof sel.args === "string";
     if (!fixed && imgs.length) { noteWarn(wsT("js.cmd.images")); return; }
     var raw = ctext.value, args = fixed ? sel.args : sendText().trim();
+    followConvo();
     sending = true;
     post("message", { command: sel.name, args: args }, function (ok, res) {
       sending = false;
@@ -1007,6 +1019,7 @@
       body.refs = refs.map(function (p) { return p.ref; });
       body.refNums = refs.map(function (p) { return p.n; });
     }
+    followConvo();
     sending = true;
     post("message", body, function (ok, res) {
       sending = false;
@@ -1058,13 +1071,15 @@
     });
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
-  // the composer, oldest first, ahead of the draft: their texts joined as
+  // the composer, in the order given (an interrupt's queue order: steered
+  // first, then the rest, oldest first), ahead of the draft: their texts joined as
   // paragraphs, their answer chips, their mentions and web picks, their topic notes back
   // on the board's topics (restoreTopics), and their images as chips that
   // reference the written files, with their markers in the returned text
   // and notes. Each message's numbers move above the highest the draft and
   // the messages before it use, the markers in its text, chip notes, and
-  // topic notes with them, as the server numbers a merge. An image no
+  // topic notes with them, so the restored draft never names a number
+  // twice. An image no
   // restored text names (a message held before images were numbered, or a
   // note a newer one replaced) gets a marker in the composer, so the next
   // edit does not drop it.
@@ -1092,10 +1107,12 @@
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
     Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
     imgs.forEach(function (p) { top = Math.max(top, p.n); });
-    // A later message's answer replaces an earlier one's, and a chip
-    // attached since keeps its newer answer.
-    var got = {}, order = [];
+    // The newest send's answer wins (its sentAt; a later message on a tie),
+    // whatever the list's queue order, and a chip attached since keeps its
+    // newer answer.
+    var got = {}, gotAt = {}, order = [];
     list.forEach(function (res) {
+      var at = +res.sentAt || 0;
       var names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
       names.forEach(function (name, i) {
         var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
@@ -1110,7 +1127,9 @@
         Object.keys(c).forEach(function (k) { o[k] = c[k]; });
         if (c.note) o.note = rn(c.note);
         if (!got[c.id]) order.push(c.id);
+        else if (at < gotAt[c.id]) return;
         got[c.id] = o;
+        gotAt[c.id] = at;
       });
       var stray = restoreTopics((res.topics || []).map(function (tn) { return { topic: tn.topic, note: rn(tn.note) }; }));
       if (stray.length) text += (text ? "\n\n" : "") + stray.join("\n");
@@ -1126,7 +1145,7 @@
     grow();
     shiftMentions(back.length + (back && cur ? 2 : 0) - lead);
     imgs.sort(function (a, b) { return a.n - b.n; });
-    // Their mentions go back ahead of the draft's, oldest message first.
+    // Their mentions go back ahead of the draft's, in the order given.
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);

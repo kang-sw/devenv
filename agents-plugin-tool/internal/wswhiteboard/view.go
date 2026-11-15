@@ -138,7 +138,11 @@ type TopicView struct {
 	// Name is the topic's key (its stem, else its label), which page-to-lead
 	// lines carry (data-topic) so the lead can address the topic with it;
 	// Label is the name the page shows.
-	Name, Label string
+	Name, Label  string
+	Anchor       string
+	Dependencies []DependencyView
+	WaitingReady bool
+	Waiters      []DependencyView
 	// Doc is the topic's body, markdown with inline HTML written as is; empty
 	// when it has none. It renders above the items: open unless the topic is
 	// closed on the full page, and open on the embed only when it changed
@@ -147,6 +151,10 @@ type TopicView struct {
 	// DocMarks are the change marks of the body's latest edit, in the block
 	// numbering of bodyUnits.
 	DocMarks []BlockMark
+	// BodyUpdatedAt is the locally validated actual body mutation time,
+	// shared by the body metadata and both gutter render paths. Empty means unknown;
+	// ChangedAt alone (possibly a legacy backfill) never supplies this value.
+	BodyUpdatedAt string
 	// DocStale marks the body's change marks as no longer fresh: an item of
 	// the topic changed after the body's latest edit (Item.Changed above
 	// the body's Changed; a recap change does not count). The marks stay,
@@ -196,13 +204,20 @@ type TopicView struct {
 	// or recap showing; it collapses to one title line (and a closed body's
 	// fold).
 	Quiet bool
+	// State and StateDiagnostic project authoritative topic-state history;
+	// ordinary legacy absence leaves both nil.
+	State           *TopicState
+	StateDiagnostic *StateDiagnostic
 	// Closed marks a topic the lead closed.
 	Closed bool
 	// Result is the closed topic's close result, empty while the topic is
 	// open or when its close gave none (a store written before results).
 	Result string
 	// UpdatedAt is the topic's latest change, the newest change time among
-	// its items, body, and recap (RFC 3339, UTC), empty when none has one. UpdatedMs
+	// its items, body, recap, and stream entries (logs, panels, and the
+	// system events of closes, reopens, item and content changes) (RFC 3339,
+	// UTC), empty when none has one. Label and tickets are metadata and do
+	// not count. UpdatedMs
 	// is the same instant in Unix milliseconds for the page script, and
 	// UpdatedClock its local HH:MM, which the embed shows.
 	UpdatedAt    string
@@ -586,13 +601,18 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 
+	topicStates := state.TopicStates()
 	var order []string
 	blocks := map[string]*TopicView{}
 	itemsChanged := map[string]int{} // newest Item.Changed per topic
 	blockOf := func(topic string) *TopicView {
 		block, ok := blocks[topic]
 		if !ok {
-			block = &TopicView{Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic)}
+			current := topicStates[topic]
+			block = &TopicView{
+				Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic),
+				State: current.State, StateDiagnostic: current.Diagnostic,
+			}
 			blocks[topic] = block
 			order = append(order, topic)
 		}
@@ -633,6 +653,7 @@ func BuildView(state *State, in ViewInput) View {
 		block.Live = slices.ContainsFunc(block.Tickets, TicketBadge.live)
 		block.Doc = doc.Body
 		block.DocMarks = doc.Marks
+		block.BodyUpdatedAt = doc.validatedBodyTime()
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap
@@ -721,6 +742,34 @@ func BuildView(state *State, in ViewInput) View {
 	end := min(from+n, len(capped))
 	shown = append(shown, capped[from:end]...)
 	view.ClosedNext, view.ClosedMore = end, len(capped)-end
+	waiting := state.WaitingTopics(in.Tickets)
+	loaded := map[string]bool{}
+	for _, name := range shown {
+		loaded[name] = true
+	}
+	for _, name := range order {
+		block := blocks[name]
+		block.Anchor = topicAnchor(name)
+		w := waiting[name]
+		block.WaitingReady = w.Ready
+		block.Dependencies = w.Targets
+		for i := range block.Dependencies {
+			dep := &block.Dependencies[i]
+			if dep.Topic == "" {
+				continue
+			}
+			if loaded[dep.Topic] {
+				dep.Anchor = topicAnchor(dep.Topic)
+			}
+			if target := blocks[dep.Topic]; target != nil {
+				waiter := DependencyView{Label: block.Label}
+				if loaded[name] || in.Closed != nil && !block.Closed {
+					waiter.Anchor = topicAnchor(name)
+				}
+				target.Waiters = append(target.Waiters, waiter)
+			}
+		}
+	}
 	for _, name := range shown {
 		view.Topics = append(view.Topics, *blocks[name])
 	}
@@ -777,7 +826,8 @@ func bumpRank(state *State, activity map[string]int) map[string]int {
 }
 
 // stampUpdated sets each block's latest change from the change times of its
-// items, body, and recap, and its recap's own update time; a time that does
+// items, body, recap, and stream entries, and its recap's own update time
+// (the latest agent log, else the legacy recap); a time that does
 // not parse (a store written before change times) counts as none.
 func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location) {
 	if loc == nil {

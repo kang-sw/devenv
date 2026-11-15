@@ -666,7 +666,85 @@
     return text.length > APPROVAL_CAP ? text.slice(0, APPROVAL_CAP) + "\u2026" : text;
   }
 
+  // Keep a read-only hover outside replaced rail/tree regions. The source
+  // belongs directly to its row/agent: a parent's model is never a fallback.
+  function hoverPlace(anchor, edge, width, height, viewport) {
+    var left = edge + 8;
+    if (left + width > viewport.width - 8) left = anchor.left - width - 8;
+    return { left: Math.max(8, Math.min(left, viewport.width - width - 8)),
+      top: Math.max(8, Math.min(anchor.top, viewport.height - height - 8)) };
+  }
+  function hover(doc, win) {
+    var pop = null, active = null, x = 0, y = 0, keyboard = false, html = null;
+    function target(n) {
+      return n && n.closest ? n.closest(".rs, .amodel, .agent .aname") : null;
+    }
+    function source(n) {
+      var owner = hasClass(n, "rs") ? n : n.closest(".agent");
+      if (!owner) return null;
+      for (var i = 0; i < owner.children.length; i++) {
+        var c = owner.children[i];
+        if (c.tagName === "TEMPLATE" && hasClass(c, "shp-source")) return c;
+      }
+      return null;
+    }
+    function hide() {
+      active = null; html = null;
+      if (pop) pop.hidden = true;
+    }
+    function show(n) {
+      var src = n && source(n);
+      if (!src || !n.isConnected || !n.getClientRects().length) { hide(); return; }
+      if (!pop) {
+        pop = doc.createElement("div"); pop.className = "rpop shp";
+        pop.setAttribute("role", "tooltip");
+        doc.body.appendChild(pop);
+      }
+      active = n;
+      pop.className = "rpop shp" + (src.getAttribute("data-stale") ? " stale" : "");
+      if (html !== src.innerHTML) { html = src.innerHTML; pop.innerHTML = html; }
+      pop.hidden = false;
+      var a = n.getBoundingClientRect(), rail = hasClass(n, "rs") && n.closest(".rail");
+      var p = hoverPlace(a, rail ? rail.getBoundingClientRect().right : a.right,
+        pop.offsetWidth, pop.offsetHeight, { width: win.innerWidth, height: win.innerHeight });
+      pop.style.left = p.left + "px"; pop.style.top = p.top + "px";
+    }
+    doc.addEventListener("mouseover", function (e) {
+      keyboard = false; x = e.clientX; y = e.clientY;
+      var n = target(e.target); if (n) show(n); else hide();
+    });
+    doc.addEventListener("mousemove", function (e) { x = e.clientX; y = e.clientY; });
+    doc.addEventListener("mouseout", function (e) {
+      if (active && target(e.relatedTarget) !== active) hide();
+    });
+    doc.addEventListener("focusin", function (e) {
+      keyboard = true; var n = target(e.target); if (n) show(n); else hide();
+    });
+    doc.addEventListener("focusout", hide);
+    doc.addEventListener("pointerdown", hide);
+    doc.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); });
+    doc.addEventListener("scroll", hide, true);
+    win.addEventListener("resize", hide); win.addEventListener("blur", hide);
+    // SSE can replace the hovered node without a pointer event. Re-hit-test
+    // at the last pointer (or focus) rather than retaining detached evidence.
+    var observer = new win.MutationObserver(function (changes) {
+      if (!active || !changes.some(function (c) { return c.target !== pop && !pop.contains(c.target); })) return;
+      show(target(keyboard ? doc.activeElement : doc.elementFromPoint(x, y)));
+    });
+    observer.observe(doc.body, { childList: true, subtree: true });
+    return { hide: hide, refresh: function () { if (active) show(target(keyboard ? doc.activeElement : doc.elementFromPoint(x, y))); } };
+  }
+
+  // rail.js is shared by the shell (which owns the rail) and framed pages
+  // (which own the agent tree). Each document installs exactly one hover.
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { hover(document, window); });
+    else hover(document, window);
+  }
+
   window.WsRail = {
+    hover: hover,
+    hoverPlace: hoverPlace,
     DRAFT_CAP: DRAFT_CAP,
     drafts: drafts,
     emptyDraft: emptyDraft,

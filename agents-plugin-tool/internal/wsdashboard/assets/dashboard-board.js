@@ -163,6 +163,45 @@
   // below 2200px the column takes the rail's place and the rail overlays.
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
+  // Two owners, not two views onto one explorer. Keep the tab's existing
+  // storage keys; the toolbar uses the same records in its own namespace.
+  if (live && fpane && window.WsFiles) {
+    var fileHooks = {
+      rid: rid, post: post, toast: toast, copy: copyText, load: load, save: save,
+      local: function () { return root.hasAttribute("data-sysopen"); },
+      send: attachExplorerPath,
+      openCard: function (location) {
+        // Dismiss before constructing/revealing the new card, not afterward.
+        window.WsCards.dismissFiles();
+        window.WsFiles.open(location);
+      }
+    };
+    // Register adapters before board mount restores explorer card IDs.
+    window.WsFiles.setup(fileHooks);
+    function createFiles(node, rootSlot, toolbar) {
+      return window.WsFiles.create(node, Object.assign({}, fileHooks, {
+        rootSlot: rootSlot,
+        load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : load,
+        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : save
+      }));
+    }
+    filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false);
+    var sheet = doc.createElement("section");
+    sheet.id = "toolbar-files";
+    sheet.className = "fpane";
+    sheet.hidden = true;
+    sheet.setAttribute("aria-label", fpane.getAttribute("aria-label"));
+    doc.body.appendChild(sheet);
+    var sheetInstance = null;
+    filesSheet = {
+      el: sheet,
+      shown: function () {
+        if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
+        sheetInstance.shown();
+      },
+      hidden: function () { if (sheetInstance) sheetInstance.hidden(); }
+    };
+  }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
   function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
@@ -187,8 +226,9 @@
       key: "ws.dashboard.cards." + rid, load: load, save: save,
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
+        filter: function (run) { if (window.WsOverview) window.WsOverview.filter(run); else run(); },
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
-        files: fpane && window.WsFiles ? revealPanes : null
+        files: filesSheet
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
@@ -243,14 +283,6 @@
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   boardBoxes().forEach(watchBoard);
-  // --- the Files pane (files.js): mounted once, loaded when first shown -------
-  if (live && fpane && window.WsFiles) {
-    window.WsFiles.mount(fpane, {
-      rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
-      rootSlot: chead && chead.querySelector(".fsum"),
-      local: function () { return root.hasAttribute("data-sysopen"); }
-    });
-  }
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {

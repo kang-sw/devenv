@@ -33,11 +33,12 @@ const (
 	endedSessionWindow = 24 * time.Hour
 )
 
-// Page modes: a session with a live host adapter gets the full page; one
-// without gets the board-first page (board and panels only).
+// Page modes: a fresh host adapter gets the full page; a lead with saved
+// entries gets read-only history without one; an empty board stays board-first.
 const (
-	modeLive  = "live"
-	modeBoard = "board"
+	modeLive    = "live"
+	modeBoard   = "board"
+	modeHistory = "history"
 )
 
 // SessionView is what the session page renders.
@@ -54,9 +55,11 @@ type SessionView struct {
 	// ProcessRunning is the harness process state shown in the header.
 	ProcessRunning bool
 	// Adapter reports a live host adapter (a fresh snapshot naming one):
-	// the page shows the lead bar, the subagent tree, the conversation, the
-	// composer, and the layout control. Without one the page is board-first.
+	// the page shows live activity, the subagent tree, the composer, and
+	// the layout control. Saved history does not require an adapter.
 	Adapter bool
+	// SavedConversation exposes persisted lead history without live controls.
+	SavedConversation bool
 	// Hosted marks a lead session the daemon spawned and feeds
 	// (Registration.Hosted): the page answers its tool approvals and
 	// carries its process controls.
@@ -161,10 +164,13 @@ func (SessionView) LabelMax() int { return maxLabelRunes }
 // ThemedBoard is Board with its topic-body frames pinned to Theme.
 func (v SessionView) ThemedBoard() template.HTML { return wswhiteboard.ThemeFrames(v.Board, v.Theme) }
 
-// Mode is the page mode, modeLive or modeBoard.
+// Mode is the live, saved-history, or board-only page layout.
 func (v SessionView) Mode() string {
 	if v.Adapter {
 		return modeLive
+	}
+	if v.SavedConversation {
+		return modeHistory
 	}
 	return modeBoard
 }
@@ -224,8 +230,9 @@ type LiveSlot struct {
 // IsRunning reports a running agent.
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
 
-// ModelText is the agent's model and reasoning effort as one stat ("<model>
-// <effort>"), either alone when only one is known; empty when neither is.
+// ModelText is the agent's model and reasoning effort joined by a space
+// ("<model> <effort>"), either alone when only one is known; empty when
+// neither is. The row renders them as separate stats (template astat).
 func (a AgentNode) ModelText() string { return strings.TrimSpace(a.Model + " " + a.Effort) }
 
 // ContextText is the agent's context size in compact form; empty while
@@ -459,6 +466,17 @@ type ConvEntry struct {
 	Lang string
 }
 
+// WhiteboardChanges decodes only the supported carrier; values remain plain
+// strings for html/template to escape, never markdown or panel HTML.
+func (e ConvEntry) WhiteboardChanges() []wswhiteboard.Effect {
+	effects, _ := wslive.DecodeWhiteboardEffects(e.RingEntry)
+	return effects
+}
+
+func (e ConvEntry) WhiteboardFallback() string {
+	return wslive.WhiteboardEffectsFallback(e.RingEntry)
+}
+
 // pageInputs is what buildSessionView reads.
 type pageInputs struct {
 	Session Session
@@ -544,6 +562,14 @@ func buildSessionView(in pageInputs) SessionView {
 		Mermaid:        in.Page.Board.Mermaid,
 	}
 	if !v.Adapter {
+		// The registry/page source already applies serving eligibility. Do not
+		// promote a runner child to a lead, or use stale snapshot activity.
+		if !reg.Agent && len(in.Ring) > 0 {
+			v.SavedConversation = true
+			contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
+			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID))
+			splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+		}
 		return v
 	}
 	lookup := in.Lookup

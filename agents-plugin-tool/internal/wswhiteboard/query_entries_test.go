@@ -250,13 +250,13 @@ func TestQueryDurableLocatorsAcrossRestartAndRepost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := queryResult(t, after, `{"panel":"e2"}`).Direct.Entry; got != before.Topics[0].Entries[1] {
+	if got := queryResult(t, after, `{"panel":"e2"}`).Direct.Entry; !reflect.DeepEqual(got, before.Topics[0].Entries[1]) {
 		t.Fatal("old panel mention redirected after repost/restart")
 	}
 	if got := queryResult(t, after, `{"panel":"p1"}`).Direct.Entry; got.ID != "e19" || got.Text != "new full payload" {
 		t.Fatal("stable panel target did not resolve latest")
 	}
-	if got := queryResult(t, after, `{"entry":"e3"}`).Direct.Entry; got != before.Topics[0].Entries[2] {
+	if got := queryResult(t, after, `{"entry":"e3"}`).Direct.Entry; !reflect.DeepEqual(got, before.Topics[0].Entries[2]) {
 		t.Fatal("log locator changed at equal timestamps")
 	}
 	if got := queryResult(t, after, `{"topic":"a","entries":"all","since":"e16"}`).Topics[0].Entries; len(got) != 1 || got[0].ID != "e19" {

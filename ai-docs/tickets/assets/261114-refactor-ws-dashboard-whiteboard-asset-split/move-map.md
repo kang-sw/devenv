@@ -1,4 +1,9 @@
-# Static asset extraction map
+# Asset extraction map
+
+Current: [exact-099 mechanical re-extraction map](move-map-09998d579.md).
+Its coordinates and allocation supersede the historical preparation below.
+
+## Historical aac39c69f static preparation
 
 Status: **UNVERIFIED STATIC PREPARATION**, not a Phase 1 Result or acceptance.
 Actual before/source pin: `aac39c69f381a82677f0ee6857e8f8fc5bc89322`.

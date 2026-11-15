@@ -151,9 +151,15 @@ const devAssetDir = "internal/wswhiteboard/assets"
 // client table leaves them out.
 const trackerKeyPrefix = "js.tk."
 
-// codeKeyPrefix marks the copy button's client strings (code.js), the only
-// ones a topic-body frame's script reads.
+// File-explorer controls also belong only to the dashboard, not static boards.
+const filesKeyPrefix = "js.files."
+
+// codeKeyPrefix is the copy button's standalone client subset (code.js).
 const codeKeyPrefix = "js.wb.copy"
+
+// frameKeyPrefix keeps the frame's copy and relative body-time strings local
+// to the opaque-origin document, without the rest of the dashboard table.
+const frameKeyPrefix = "js.wb."
 
 // buildAssets reads every asset by file name through read and parses the
 // template set.
@@ -170,6 +176,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 	svgView := get("svg-view.js")
 	chg := get("chg.js")
 	code := get("code.js")
+	ago := get("ago.js")
 	a := &pageAssets{
 		css:         template.CSS(get("page.css")),
 		answers:     get("answers.js"),
@@ -179,9 +186,9 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		stream:      get("stream.js"),
 		pill:        get("pill.js"),
 		rail:        get("rail.js"),
-		ago:         get("ago.js"),
+		ago:         ago,
 		mermaidInit: template.JS(get("mermaid-init.js")),
-		docFrame:    svgView + "\n" + chg + "\n" + code + "\n" + get("doc-frame.js"),
+		docFrame:    svgView + "\n" + ago + "\n" + chg + "\n" + code + "\n" + get("doc-frame.js"),
 		chg:         chg,
 		viewer:      "(function () {\n" + svgView + "\n" + get("viewer.js") + "})();\n",
 		sprite:      template.HTML(strings.TrimSpace(get("sprite.svg"))),
@@ -211,7 +218,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 			"href":        rowHref,
 			"actionAttrs": panelActionAttrs,
 			"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
-			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix) },
+			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix) },
 		}
 		// The file's template is "page.tmpl" under the root "page", as
 		// ParseFS names it.
@@ -521,7 +528,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		if framed {
 			// The frame loads mermaid for its own blocks; the page loads it
 			// only for a block outside every frame.
-			html = p.framedDoc(t.Name, "", html, t.DocStale, p.Mermaid, p.relays, a)
+			html = p.framedDoc(t.Name, "", html, t.DocStale, p.Mermaid, p.relays, a, t.BodyUpdatedAt)
 			p.Mermaid = false
 		}
 		p.Mermaid = p.Mermaid || page
@@ -543,7 +550,7 @@ func (p *pageData) panelHTML(topic, entry, content string, framed bool, a *pageA
 	out := p.convertWith(p.rawMarkdown(), content, "entry/"+entry, nil)
 	p.framing, p.inDoc = false, false
 	if framed {
-		out = p.framedDoc(topic, entry, out, false, p.Mermaid, p.relays, a)
+		out = p.framedDoc(topic, entry, out, false, p.Mermaid, p.relays, a, "")
 		p.Mermaid = false
 	}
 	p.Mermaid = p.Mermaid || pageMermaid
@@ -626,7 +633,7 @@ func FrameAsset(name string) (data []byte, contentType string, ok bool) {
 // is open (mountFrames), so a frame under a closed fold costs no document
 // until it is opened. An <iframe> left without srcdoc would not be inert: it
 // commits an about:blank document synchronously as the page parses.
-func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets) template.HTML {
+func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets, bodyAt string) template.HTML {
 	title, key, entryAttr := topic, "topic:"+topic, ""
 	if entry != "" {
 		title, key = topic+"/"+entry, "entry:"+entry
@@ -634,12 +641,14 @@ func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mer
 	}
 	var doc strings.Builder
 	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><meta name="wb-doc-key" content="` + template.HTMLEscapeString(key) + `"><base target="_blank"><link rel="stylesheet" href="` + a.frameCSSFile.name + `">`)
+	if entry == "" && bodyAt != "" {
+		doc.WriteString(`<meta name="wb-body-at" data-body-at="` + template.HTMLEscapeString(bodyAt) + `">`)
+	}
 	doc.WriteString(`</head><body class="doc-frame"><div class="doc-body md` + staleClass(stale) + `">`)
 	doc.WriteString(string(body))
-	// The frame cannot reach the host page's wsT, so it carries its own over
-	// the copy button's two strings (code.js), in the page's language, ahead
-	// of the shared frame script that reads it.
-	doc.WriteString(`</div><script>` + string(wsi18n.SubsetScript(p.Lang, codeKeyPrefix)) + `</script><script src="` + a.frameJSFile.name + `"></script>`)
+	// The frame cannot reach the host page's wsT: copy and relative body age
+	// use its own whiteboard subset, ahead of the shared frame script.
+	doc.WriteString(`</div><script>` + string(wsi18n.SubsetScript(p.Lang, frameKeyPrefix)) + `</script><script src="` + a.frameJSFile.name + `"></script>`)
 	if mermaid {
 		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbDocMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
 	}

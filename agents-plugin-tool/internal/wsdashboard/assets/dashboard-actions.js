@@ -26,15 +26,14 @@
     u = t.closest("#r-convlive [data-steer]");
     if (u) { if (!u.disabled) steerHeld(u); return; }
     if (ibadge && t.closest("#ibadge")) { if (!ibadge.disabled) interruptTurn(); return; }
-    if (gmenu && t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
-    if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
+    if (gmenu && t.closest("#settings-close")) { railPopClose(true); return; }
     var th = t.closest(".gmenu [data-theme-set]");
     if (th) { setTheme(th.getAttribute("data-theme-set")); return; }
-    if (!live) return;
     var b = t.closest(".gmenu [data-input]");
-    if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); return; }
+    if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); if (shell) shFrames.forEach(shSettings); return; }
     b = t.closest(".gmenu [data-layout]");
-    if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
+    if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); if (shell) shFrames.forEach(shSettings); return; }
+    if (!live) return;
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
     b = t.closest("#ctabs [data-ctab]");
@@ -51,8 +50,8 @@
   // preview card can show (previews), the preview slot, with the menu on
   // the right click and the keyboard activation instead; Cmd/Ctrl+click on a link
   // the page can open is left to the browser, which opens a new tab, and
-  // opens the menu otherwise. The system-browser and native-app items show
-  // only on a page the server marked data-sysopen (a browser on the daemon's
+  // opens the menu otherwise. The open-with-system item shows only on a
+  // page the server marked data-sysopen (a browser on the daemon's
   // machine), and a data-out link opens at all only there; the daemon checks
   // both again. The markup is the same for every viewer: entries render once
   // for all of them.
@@ -220,6 +219,26 @@
   function linkOpens(a) {
     return !!a.getAttribute("href") && (!a.hasAttribute("data-out") || root.hasAttribute("data-sysopen"));
   }
+  // desktopShell reports the Werkschaft desktop app, which names itself in
+  // its user agent ("Werkschaft/<version>"). Its webview has no tabs, so a
+  // modified click on a file link cannot be the browser's new tab there:
+  // left to the webview it navigates the clicked frame in place, onto a
+  // file view that refuses to be framed. In the app a plain click on a file
+  // link opens its menu and a Cmd/Ctrl+click previews (desktopPreview); a
+  // browser keeps the behavior below.
+  function desktopShell() {
+    var n = window.navigator;
+    return !!n && /\bWerkschaft\//.test(n.userAgent || "");
+  }
+  // desktopPreview previews a file link the preview card can show, in the
+  // desktop app only, and reports whether it did.
+  function desktopPreview(a) {
+    if (!desktopShell()) return false;
+    if (previews(a)) previewOpen(a, a.getAttribute("data-rel"), false);
+    else if (outsideOpens(a)) previewOpen(a, a.getAttribute("data-abs"), true);
+    else return false;
+    return true;
+  }
   // previews reports a file link the preview card (preview.js) can show,
   // decided from what the page already knows: a file inside the session
   // root whose extension is not one no preview shows. What the server then
@@ -279,6 +298,20 @@
     if (origin) o.origin = origin;
     if (out || origin) window.WsPreview.open(path, o); else window.WsPreview.open(path);
   }
+  // hostPath splits abs, an absolute path as the daemon's host spells it
+  // (data-abs), into its parent folder and its name, the root and path
+  // fs/act takes; null for anything else. A backslash separates only in a
+  // drive-letter path, since a POSIX name may hold one.
+  function hostPath(abs) {
+    if (!abs) return null;
+    var win = /^[A-Za-z]:[\\\/]/.test(abs);
+    if (!win && abs.charAt(0) !== "/") return null;
+    var i = win ? Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\")) : abs.lastIndexOf("/");
+    var dir = abs.slice(0, i), name = abs.slice(i + 1);
+    if (!win && !dir) dir = "/";
+    if (win && dir.length === 2) dir += "\\";
+    return { dir: dir, name: name };
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
@@ -293,16 +326,17 @@
     }
     if (webFile(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ path: rel }); }]);
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
-    if (href && sys && !out) {
+    // "Open with system" hands the target to the host's default handler: a
+    // url link to the system-open route (the default browser), a file or
+    // folder (an .app bundle included) to fs/act's open, by its own path.
+    var hostAt = kind === "file" && sys ? hostPath(abs) : null;
+    if (kind === "url" && href && sys) {
       items.push([wsT("js.menu.sysopen"), function () {
-        // A file link sends its file view path; the daemon opens it on the
-        // address this page was loaded from.
-        post("open", { target: kind === "url" ? url : href }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
+        post("open", { target: url }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
       }]);
-    }
-    if (kind === "file" && abs && sys && a.hasAttribute("data-img")) {
-      items.push([wsT("js.menu.native"), function () {
-        post("open", { native: abs }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
+    } else if (hostAt) {
+      items.push([wsT("js.menu.sysopen"), function () {
+        post("fs/act", { path: hostAt.name, action: "open", root: hostAt.dir }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
       }]);
     }
     if (kind === "url") items.push([wsT("js.menu.copyurl"), function () { copyText(url); }]);
@@ -343,6 +377,15 @@
     if (e.button !== 0 || !t || !t.closest) return;
     var a = t.closest("a[data-wl]");
     if (!a) return;
+    // The desktop app: every click on a file link stays on the page; a
+    // pointer Cmd/Ctrl+click previews what the card can show, and any other
+    // click, or a file the card cannot show, opens the menu.
+    if (a.getAttribute("data-wl") === "file" && desktopShell()) {
+      e.preventDefault();
+      if (e.detail !== 0 && (e.metaKey || e.ctrlKey) && desktopPreview(a)) return;
+      linkAt(a, e);
+      return;
+    }
     if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
     // A pointer click on a link the preview can show opens the preview

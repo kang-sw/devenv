@@ -98,7 +98,7 @@
   // restored draft says so, and while the page holds one, leaving it asks
   // first (the browser's leave-page confirmation).
   // The shell holds no draft: its frames keep their own.
-  var draftStore = WsRail && rid && !shell ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
@@ -279,6 +279,7 @@
     var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
     el.addEventListener("load", function () {
       ent.loaded = true;
+      shSettings(ent);
       if (shWant === ent) shShow(ent);
       else shSend(ent, "shown", { shown: ent === shOn });
     });
@@ -351,6 +352,8 @@
     if (ent.title) doc.title = ent.title;
     try { ent.el.contentWindow.focus(); } catch (x) { /* unloading */ }
   }
+  // Private UI state only: no daemon protocol or persistence contract changes.
+  function shSettings(ent) { shSend(ent, "settings", { layout: layoutMode, input: inputMode }); }
   function shReload() { if (shOn) try { shOn.el.contentWindow.location.reload(); } catch (x) { /* unloading */ } }
   // shHead shows the shown frame's header: its head region (none while the
   // frame has not named one) and search button, or with the head null the
@@ -545,7 +548,8 @@
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);
-      } else if (m.wsShell === "theme") setTheme(m.theme, true);
+      } else if (m.wsShell === "settings") { setLayout(m.layout); setInput(m.input); }
+      else if (m.wsShell === "theme") setTheme(m.theme, true);
       else if (m.wsShell === "sync") { sent = {}; post(); shPost("title", { title: doc.title }); }
     });
     post();
@@ -566,12 +570,15 @@
     if (f.hash) { el.src = window.WsShell.src(f); return; }
     try { ent.loaded = el.contentDocument.readyState === "complete"; } catch (x) { /* not yet */ }
     shSend(ent, "sync");
+    if (ent.loaded) shSettings(ent);
   }
 
-  if (live) {
+  if (live || gmenu) {
     setLayout(load(LAYOUT_KEY));
-    setSplit(savedSplit());
     setInput(load(INPUT_KEY));
+  }
+  if (live) {
+    setSplit(savedSplit());
     setTab("convo");
     setCtab("convo");
   }

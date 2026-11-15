@@ -2,7 +2,6 @@ package wsinbox
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	"time"
 )
@@ -64,23 +63,14 @@ func TestCommandIsNeverMergedOrMergedInto(t *testing.T) {
 	if cmd == text {
 		t.Fatal("command reused the text entry")
 	}
-	// A send after a command never joins the text before it, which would
-	// deliver that text ahead of the command.
-	if rec, ok, _ := MergeTarget(dir); ok {
-		t.Fatalf("MergeTarget = %s past a command entry", rec.Name)
-	}
 	if _, merged := send(t, dir, "after"); merged {
 		t.Fatal("text after a command merged into the text before it")
 	}
 	if held, _ := Held(dir); len(held) != 3 || held[0].Name != text || held[1].Name != cmd {
 		t.Fatalf("held = %+v", held)
 	}
-	// A command alone is no merge target.
 	only := t.TempDir()
 	sendCommand(t, only, "compact", "")
-	if _, ok, _ := MergeTarget(only); ok {
-		t.Fatal("a command entry is a merge target")
-	}
 	after, merged := send(t, only, "after")
 	if merged {
 		t.Fatal("text merged into a command entry")
@@ -140,22 +130,24 @@ func TestDrainKeepsACommandInOrder(t *testing.T) {
 	}
 }
 
-// TestSteeredTextKeepsItsPlaceBeforeACommand pins that a steer keeps the
-// entry's stamp: text sent before a held command, steered but not taken
-// mid-turn, still drains ahead of the command.
-func TestSteeredTextKeepsItsPlaceBeforeACommand(t *testing.T) {
+// TestSteeredTextDrainsAheadOfACommand: a steered entry, not taken
+// mid-turn, drains in the steer queue, ahead of a held command, though its
+// steer gave it a stamp newer than the command's; the follow-ups keep their
+// order around the command.
+func TestSteeredTextDrainsAheadOfACommand(t *testing.T) {
 	dir := t.TempDir()
 	a, _ := send(t, dir, "A")
 	sendCommand(t, dir, "compact", "")
+	send(t, dir, "B")
 	steered, err := Steer(dir, a)
 	if err != nil || steered == a {
 		t.Fatalf("Steer = %s, %v", steered, err)
 	}
-	if steered[:strings.LastIndexByte(steered, '-')] != a[:strings.LastIndexByte(a, '-')] {
-		t.Fatalf("steered name %s lost the stamp of %s", steered, a)
+	if steered <= a {
+		t.Fatalf("steered name %s keeps the stamp of %s; want a fresh one", steered, a)
 	}
 	recs, err := Drain(dir)
-	if err != nil || len(recs) != 2 || recs[0].Name != steered || recs[1].Entry.Command == nil {
-		t.Fatalf("Drain = %+v, %v; want the steered text first", recs, err)
+	if err != nil || len(recs) != 3 || recs[0].Name != steered || recs[1].Entry.Command == nil || recs[2].Entry.Text() != "B" {
+		t.Fatalf("Drain = %+v, %v; want the steered text, the command, then B", recs, err)
 	}
 }

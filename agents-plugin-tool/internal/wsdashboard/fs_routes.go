@@ -22,9 +22,10 @@ import (
 // The file browser routes: the session page's Files tab lists a folder and
 // its preview cards show a file, read-only.
 //
+//	GET  /s/<reply-id>/fs/worktrees                      session/worktree root suggestions (local only)
 //	GET  /s/<reply-id>/fs/list?dir=<dir>[&root=<abs>]     one directory's entries
 //	GET  /s/<reply-id>/fs/preview?path=<p>[&root=<abs>]   what a preview card shows (text=1: as plain text)
-//	GET  /s/<reply-id>/fs/raw?path=<p>[&root=<abs>]       an image's or a video's bytes
+//	GET  /s/<reply-id>/fs/raw?path=<p>[&root=<abs>]       image, video, or PDF bytes
 //	GET  /s/<reply-id>/fs/find, /fs/search                name and content search (fs_search.go)
 //	GET  /s/<reply-id>/fs/cap/<capability>/<p>            the sandboxed HTML preview (fs_capability.go)
 //	GET  /s/<reply-id>/fs/view/<capability>/<p>           the file view's sandboxed HTML page (fs_capability.go)
@@ -99,7 +100,7 @@ type fsListAnswer struct {
 // fsPreviewAnswer is the preview route's answer. Kind picks what the card
 // draws:
 //
-//   - "image", "video": Src is the raw route's URL of the file;
+//   - "image", "video", "audio", "pdf": Src is the raw route's URL of the file;
 //   - "frame": an HTML or SVG file; Frame is its capability route URL, for
 //     an iframe with sandbox="allow-scripts", and TTL the seconds the
 //     capability still lives;
@@ -123,18 +124,40 @@ type fsPreviewAnswer struct {
 	Text   string        `json:"text,omitempty"`
 	Source bool          `json:"source,omitempty"`
 	Reason string        `json:"reason,omitempty"`
+	// ReasonCode lets clients distinguish binary fallback from size limits.
+	ReasonCode string `json:"reason_code,omitempty"`
+	// HighlightedLines is optional, bounded by highlightLines' 256 KiB cap.
+	HighlightedLines [][]GitPiece `json:"highlighted_lines,omitempty"`
 }
 
 // videoTypes are the video containers the raw route streams, by extension.
 var videoTypes = map[string]string{
 	".mp4":  "video/mp4",
 	".webm": "video/webm",
-	".ogg":  "video/ogg",
 	".ogv":  "video/ogg",
+	".mov":  "video/quicktime",
+	".m4v":  "video/mp4",
 }
 
 func videoType(name string) (string, bool) {
 	ctype, ok := videoTypes[strings.ToLower(filepath.Ext(name))]
+	return ctype, ok
+}
+
+// audioTypes are the audio containers the raw route streams, by extension.
+var audioTypes = map[string]string{
+	".mp3":  "audio/mpeg",
+	".wav":  "audio/wav",
+	".ogg":  "audio/ogg",
+	".oga":  "audio/ogg",
+	".flac": "audio/flac",
+	".m4a":  "audio/mp4",
+	".aac":  "audio/aac",
+	".opus": "audio/ogg",
+}
+
+func audioType(name string) (string, bool) {
+	ctype, ok := audioTypes[strings.ToLower(filepath.Ext(name))]
 	return ctype, ok
 }
 
@@ -179,6 +202,13 @@ func browseRootParam(raw string) (string, bool) {
 // machine. session reports the session's own root, the only one an HTML
 // preview capability is minted for.
 func (d *Daemon) browseRoot(r *http.Request, replyID string) (root string, session, ok bool) {
+	if replyID == LocalBrowseAnchor {
+		if !localBrowseViewer(r) {
+			return "", false, false
+		}
+		root, ok = browseRootParam(r.URL.Query().Get("root"))
+		return root, false, ok
+	}
 	if d.index == nil || !ValidReplyID(replyID) {
 		return "", false, false
 	}
@@ -419,7 +449,13 @@ func writeFSJSON(w http.ResponseWriter, outside bool, v any) {
 // handleFSRoutes serves the file browser's read routes of one session; sub
 // is the path under /s/<reply-id>/fs/.
 func (d *Daemon) handleFSRoutes(w http.ResponseWriter, r *http.Request, replyID, sub string) {
+	if replyID == LocalBrowseAnchor && sub == "roots" {
+		d.handleBrowseRoots(w, r)
+		return
+	}
 	switch {
+	case sub == "worktrees":
+		d.handleFSRoots(w, r, replyID)
 	case sub == "list":
 		d.handleFSList(w, r, replyID)
 	case sub == "preview":
@@ -593,6 +629,7 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 	lang, _ := requestLang(r)
 	_, image := imageType(rel)
 	_, video := videoType(rel)
+	_, audio := audioType(rel)
 	framed := framedFile(rel)
 	// text=1 asks for the file as plain text whatever it is, which a jump
 	// to a line needs (a content search's match).
@@ -605,6 +642,10 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 		a.Kind, a.Src = "image", fsURL(replyID, "raw", rel, outside)
 	case video:
 		a.Kind, a.Src = "video", fsURL(replyID, "raw", rel, outside)
+	case audio:
+		a.Kind, a.Src = "audio", fsURL(replyID, "raw", rel, outside)
+	case strings.EqualFold(filepath.Ext(rel), ".pdf"):
+		a.Kind, a.Src = "pdf", fsURL(replyID, "raw", rel, outside)
 	case info.Size() > fileViewMax:
 		a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 	default:
@@ -616,7 +657,7 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 		case len(data) > fileViewMax:
 			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		case !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0:
-			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.binary")
+			a.Kind, a.Reason, a.ReasonCode = "none", wsi18n.T(lang, "file.reason.binary"), "binary"
 		default:
 			switch ext := strings.ToLower(filepath.Ext(rel)); {
 			case plain:
@@ -642,13 +683,43 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 			default:
 				a.Kind, a.Text = "text", string(data)
 			}
+			if a.Kind == "text" {
+				a.HighlightedLines = fsHighlightedLines(rel, data)
+			}
 		}
 	}
 	writeFSJSON(w, !session, a)
 }
 
-// handleFSRaw serves the raw route: an image's or a video's bytes through
-// http.ServeContent, so a video seeks by Range, with no size cap. An image
+// fsHighlightedLines uses the diff lexer and token classes, but keeps source
+// bytes authoritative: some lexers normalize CRLF or append a final newline.
+func fsHighlightedLines(path string, data []byte) [][]GitPiece {
+	hl := highlightLines(path, data)
+	if hl == nil {
+		return nil
+	}
+	lines := strings.Split(string(data), "\n")
+	out := make([][]GitPiece, len(lines))
+	for i, line := range lines {
+		tokens := hl.line(i+1, line)
+		if line != "" && tokens == nil {
+			return nil
+		}
+		out[i] = make([]GitPiece, 0, len(tokens))
+		for _, token := range tokens {
+			out[i] = append(out[i], GitPiece{Text: token.Text, Class: token.Class})
+		}
+	}
+	return out
+}
+
+// The native PDF plugin needs object/frame loading and must not inherit the
+// image policy's sandbox. Only same-origin object/frame sources are allowed;
+// HTML/SVG continue to use their separate capability sandbox.
+const pdfContentSecurityPolicy = "default-src 'none'; object-src 'self'; frame-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+
+// handleFSRaw serves image, video, audio, or PDF bytes through http.ServeContent,
+// so media/PDF seeks by Range, with no size cap. An image
 // is served as the image route serves one, so an SVG opened on its own runs
 // no script in the daemon's origin.
 func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID string) {
@@ -661,8 +732,13 @@ func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID str
 	ctype, ok := imageType(path)
 	if !ok {
 		if ctype, ok = videoType(path); !ok {
-			fsNotFound(w)
-			return
+			if ctype, ok = audioType(path); !ok {
+				if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+					fsNotFound(w)
+					return
+				}
+				ctype = "application/pdf"
+			}
 		}
 	}
 	f, _, info, ok := openContained(root, path)
@@ -674,7 +750,11 @@ func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID str
 	h := w.Header()
 	h.Set("Content-Type", ctype)
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Content-Security-Policy", imageContentSecurityPolicy)
+	policy := imageContentSecurityPolicy
+	if ctype == "application/pdf" {
+		policy = pdfContentSecurityPolicy
+	}
+	h.Set("Content-Security-Policy", policy)
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Referrer-Policy", "no-referrer")
 	if !session {

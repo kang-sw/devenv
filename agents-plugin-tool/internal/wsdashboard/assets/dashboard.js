@@ -257,6 +257,9 @@
   function atBottom() { return convo.scrollTop + convo.clientHeight >= convo.scrollHeight - 24; }
   function pinned() { if (visible(convo)) stick = atBottom(); return stick; }
   function pinConvo() { if (stick && visible(convo)) convo.scrollTop = convo.scrollHeight; }
+  // An accepted message starts a new reply, so sending re-arms bottom follow
+  // even when the user had scrolled up. A later user scroll still cancels it.
+  function followConvo() { stick = true; pinConvo(); }
   if (convo) {
     convo.addEventListener("scroll", function () { if (visible(convo)) stick = atBottom(); });
     // A resize (another pane grew, the window changed, the tab came back)
@@ -264,9 +267,10 @@
     if (window.ResizeObserver) new ResizeObserver(pinConvo).observe(convo);
   }
 
-  // --- layout and tabs (session page with a live adapter only) -------------
+  // --- layout and tabs (live or saved session conversation) ----------------
+  // A saved-history page shares tab/scroll handling, not live controls.
   var grid = $("grid"), gmenu = $("gmenu"), live = !!$("tabbar");
-  var LAYOUT_KEY = "ws.dashboard.layout";
+  var LAYOUT_KEY = "ws.dashboard.layout", layoutMode = "auto";
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view. The panels
   // live in the drawer, whose handle carries their dot instead.
@@ -278,7 +282,7 @@
   // shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  var fpane = $("files"), chead = $("chead"), filesSeen = false;
+  var fpane = $("files"), chead = $("chead"), filesSeen = false, filesTab = null, filesSheet = null;
   // syncChead moves the conversation's counts from the entries region's
   // own title bar, which a live page hides, into the panel's header; it
   // runs on load and after each entries swap.
@@ -304,17 +308,18 @@
     // The Files pane hears each time it comes into view (a tab, a layout,
     // or a resize showed it) and each time it leaves.
     var fs = visible(fpane);
-    if (fs !== filesSeen && window.WsFiles) {
-      if (fs) window.WsFiles.shown();
-      else window.WsFiles.hidden();
+    if (fs !== filesSeen && filesTab) {
+      if (fs) filesTab.shown();
+      else filesTab.hidden();
     }
     filesSeen = fs;
   }
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
-    grid.setAttribute("data-layout", v);
+    layoutMode = v;
+    if (grid) grid.setAttribute("data-layout", v);
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
-    revealPanes();
+    if (live) revealPanes();
     if (cardBoard) window.WsCards.relayout();
   }
   // The tree and the conversation share their column at a fixed ratio; the
@@ -405,12 +410,12 @@
     // "auto" crosses its breakpoint on a resize without a click.
     window.addEventListener("resize", revealPanes);
   }
-  // The settings are on every page (the index page's gear menu, a session
-  // page's drawer card; the index and board-first pages hold only the theme
-  // and language items), so the gear menu's Escape and the language setting
-  // do not wait for a live layout. The item selectors read .gmenu, which
-  // both carry.
-  if (gmenu) doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && !gmenu.hidden) gmenu.hidden = true; });
+  // Storage synchronizes other tabs. The shell also sends its in-memory
+  // choice to frames, so denied/full storage never prevents immediate use.
+  window.addEventListener("storage", function (e) {
+    if (e.key === LAYOUT_KEY) setLayout(e.newValue);
+    if (e.key === INPUT_KEY) setInput(e.newValue);
+  });
   // Language: the choice lives in a cookie the server reads, so every page,
   // its stream, and its history render in it from the first byte. An empty
   // value deletes the cookie and follows the browser again. The page shows
@@ -425,7 +430,10 @@
     doc.cookie = LANG_COOKIE + "=" + encodeURIComponent(v) + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
     root.setAttribute("data-langpref", v);
     markLang();
-    if (holdsDraft()) banner(wsT("js.banner.lang"));
+    if (holdsDraft() || (shell && shFrames.some(shHolds))) {
+      if (shell) toast(wsT("js.banner.lang"));
+      else banner(wsT("js.banner.lang"));
+    }
     else if (framed) window.parent.location.reload();
     else location.reload();
   }
@@ -447,6 +455,7 @@
   function setTheme(v, quiet) {
     if (v !== "light" && v !== "dark") v = "";
     if (framed && !quiet) shPost("theme", { theme: v });
+    if (shell && !quiet) shFrames.forEach(function (x) { shSend(x, "theme", { theme: v }); });
     doc.cookie = THEME_COOKIE + "=" + v + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
     if (v) root.setAttribute("data-theme", v);
     else root.removeAttribute("data-theme");

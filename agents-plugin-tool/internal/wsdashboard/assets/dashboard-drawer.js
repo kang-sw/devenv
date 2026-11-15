@@ -81,7 +81,6 @@
   }
   cardTab("worktrees");
   cardTab("holders");
-  cardTab("settings");
   // The worktrees and holders cards' nodes (wtLoad, hdLoad, below): set
   // here, ahead of the drawer's first drApply, which a drawer left open
   // calls on load.

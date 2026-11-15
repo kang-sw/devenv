@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>목업 W · 질문 앵커 + 1000px 단위 불러오기</title>
+<link rel="stylesheet" href="page.css">
+<link rel="stylesheet" href="mock-common.css">
+<style>
+/* ---- variant W: anchored interleave with gap rows ---- */
+.w-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0; padding: 4px 8px; border-radius: 8px; border: 1px dashed color-mix(in srgb, var(--wb-fg) 20%, transparent); font-size: 12px; color: var(--wb-muted-fg); }
+.w-gap .dots { font-weight: 800; letter-spacing: .1em; }
+.w-gap .cnt { font-weight: 700; color: var(--wb-fg); }
+.w-gap .rng { font: 11px var(--wb-mono); font-variant-numeric: tabular-nums; }
+.w-gap .acts { margin-left: auto; display: inline-flex; gap: 4px; }
+.w-gap button { border: 0; border-radius: 999px; padding: 2px 10px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.w-gap button:hover { color: var(--wb-fg); background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-muted)); }
+.w-anchor-lead { position: relative; }
+.w-anchor-lead > .entry-line { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
+.w-anchor-lead .lead-tag { margin-left: 6px; font-size: 10px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: rgb(127 127 127 / .2); color: var(--wb-muted-fg); vertical-align: 1px; white-space: nowrap; }
+.w-cluster { margin: 2px 0 6px; }
+.w-row[hidden] { display: none !important; }
+.w-row.revealed { animation: w-in .6s ease-out; }
+@keyframes w-in { from { background: color-mix(in srgb, var(--wb-primary) 18%, transparent); } to { background: transparent; } }
+/* answered question at its ask position: one line, "원래 질문" */
+.ix-done .orig { font-size: 10px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: rgb(127 127 127 / .2); color: var(--wb-muted-fg); }
+.ix-done .qt a { color: inherit; text-decoration: underline dotted color-mix(in srgb, var(--wb-fg) 40%, transparent); text-underline-offset: 3px; }
+/* answer row at its answer position */
+details.w-ans { margin: 4px 0; border-radius: 8px; background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
+details.w-ans > summary { list-style: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 8px 3px 6px; cursor: pointer; font-size: 12.5px; color: color-mix(in srgb, var(--wb-accent-policy) 60%, var(--wb-fg)); }
+details.w-ans > summary::-webkit-details-marker { display: none; }
+details.w-ans > summary > .evi { align-self: flex-start; margin-top: 2px; }
+details.w-ans > summary .entry-at { font: 11px/1.6 var(--wb-mono); opacity: .8; }
+details.w-ans > summary .exp { margin-left: auto; font-size: 11px; color: var(--wb-muted-fg); }
+details.w-ans[open] > summary .exp::after { content: " ▴"; }
+details.w-ans:not([open]) > summary .exp::after { content: " ▾"; }
+details.w-ans .ab { padding: 4px 10px 10px 29px; font-size: 12.5px; }
+details.w-ans .ab .h { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; color: var(--wb-muted-fg); margin: 6px 0 3px; }
+details.w-ans .ab .opt { font-size: 12px; padding: 4px 9px; }
+details.w-ans .ab .said { color: color-mix(in srgb, var(--wb-accent-policy) 55%, var(--wb-fg)); }
+html.shot .w-row.revealed { animation: none; box-shadow: inset 3px 0 0 color-mix(in srgb, var(--wb-primary) 55%, transparent); background: color-mix(in srgb, var(--wb-primary) 5%, transparent); }
+.w-row.straddle { position: relative; }
+.w-row.straddle::after { content: "← 1000px 선에 걸친 항목: 자르지 않고 포함"; position: absolute; right: 6px; bottom: -2px; font-size: 10px; font-weight: 700; color: var(--wb-primary); background: var(--wb-card); padding: 0 6px; border-radius: 999px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-primary) 50%, transparent); }
+.flash { animation: w-flash 1.4s ease-out; }
+@keyframes w-flash { 0%, 30% { box-shadow: 0 0 0 2px var(--wb-accent-policy); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.ix-q .ctx table { margin-top: 6px; }
+.w-panel-mini { margin: 6px 0 2px; }
+.mk-note { max-width: 880px; margin: 6px auto 0; padding: 0 16px; font-size: 12px; color: var(--wb-muted-fg); }
+.mk-note code { font-size: 11.5px; }
+</style>
+</head>
+<body class="full">
+<!--SPRITE-->
+<div class="mk-bar" id="mkbar">
+  <span class="grp">상태 <button data-step="0">처음 (앵커만)</button><button data-step="1">"아래쪽 더 불러오기" 1회 후</button><button data-step="2">+ "위쪽 더 불러오기" 1회 후</button></span>
+  <span class="grp">테마 <button data-theme-btn="dark">다크</button><button data-theme-btn="light">라이트</button></span>
+  <span class="grp"><a href="mockup.html" style="color:var(--wb-primary)">다른 변형 A/B/C/현재 →</a></span>
+</div>
+<div class="mk-desc"><b>W · 질문 앵커 + 1000px 단위 불러오기</b> — 단일 타임라인. 항상 보이는 것: 질문 뭉치, 그 바로 앞 로그/패널 1개, 답변 줄, 현재 상태 줄. 나머지는 "⋯ N개 로그 항목" 줄로 접히고, 누를 때마다 그 방향으로 누적 높이 1000px를 넘길 때까지 항목을 통째로(걸친 항목 포함) 펼칩니다.</div>
+<div class="wrap mk"><div id="root"></div></div>
+<script>
+// --------------------------------------------------------------------------
+// Synthetic long topic (realistic content modeled on the same session).
+// kinds: agent | system | panel | add (question minted) | answer (owner answer row)
+// --------------------------------------------------------------------------
+const LABEL = "Electron 데스크톱 셸 · Windows 창 처리";
+const Q = {
+  895: { title: "Windows에서 창 제목 표시줄을 어떻게 그릴까요?", asked: "11:21",
+    options: ["VS Code처럼 우리가 직접 그림: 메뉴 · 세션 탭 · 창 버튼을 한 줄에 통합", "OS 기본 제목 표시줄 유지 (가장 단순, 맥과 다르게 보임)", "OS 창 버튼만 남기고 나머지 영역만 그림 (titleBarOverlay)"],
+    rec: "a", recWhy: "말씀하신 방향이고, 맥에서 이미 쓰는 숨김 제목 표시줄과 같은 배치라 두 플랫폼 화면이 같아짐",
+    ctx: "| | 직접 그림 | OS 기본 | 오버레이 |\n|---|---|---|---|\n| 화면 통일 | 맥과 동일 | 다름 | 대체로 동일 |\n| 스냅 레이아웃(Win11) | 직접 구현 필요 | 기본 제공 | 기본 제공 |\n| 작업량 | 큼 | 없음 | 중간 |" },
+  896: { title: "Electron 시각 · 실행 검증은 어느 기기에서 할까요?", asked: "11:21", answered: "12:18", wait: "57분 뒤",
+    options: ["Windows ThinkPad에서 원격 실행 (맥 포커스를 뺏지 않음)", "맥에서 직접 실행 (포커스를 가끔 뺏김)"],
+    rec: "a", recWhy: "맥에서 창이 뜰 때마다 포커스를 뺏는 문제가 있었음", pick: "a", reading: "잠금 풀어 둠, 바로 진행", quote: "896=a^잠금은 풀어둘게요" },
+  899: { title: "창 닫기(×)를 누르면 앱을 끌까요, 트레이로 숨길까요?", asked: "11:49",
+    options: ["트레이로 숨김 (데몬 세션은 계속 돌아감, 트레이 메뉴에 '종료')", "앱 종료 (데몬은 별도로 계속 돌아감)", "처음 한 번 묻고 기억"],
+    rec: "a", recWhy: "대시보드 창을 닫아도 세션 알림은 받아야 하므로 트레이가 자연스러움",
+    ctx: "지금 맥에서는 ⌘W가 창만 닫고 앱은 남습니다. Windows에는 같은 관례가 없어서 정해야 합니다." },
+};
+const POOL = [
+  "프로토타입 창을 띄워 기본 레이아웃을 확인했습니다. 세션 레일 · 보드 · 입력창 배치는 브라우저 대시보드와 같습니다",
+  "EXEC 2가 `electron/main.ts` 창 생성 코드를 정리했습니다. 창 크기와 위치는 다음 실행 때 복원됩니다",
+  "맥에서 창이 뜰 때마다 포커스를 가져가는 문제를 재현했습니다. `show: false` 후 준비되면 보여 주는 방식으로 줄일 수 있습니다",
+  "대시보드 데몬 주소를 창이 직접 찾지 않고, 실행 인자로 받도록 바꿨습니다",
+  "개발용 자동 새로고침을 붙였습니다. 화면 파일을 고치면 창이 다시 그려집니다",
+  "보안 기본값 점검: 렌더러에서 Node 접근을 끄고, 미리 정한 통로로만 데몬과 통신합니다",
+  "Windows 빌드 스크립트를 추가했습니다. 아직 서명은 하지 않습니다",
+  "창 최소 크기를 720×480으로 정했습니다. 그보다 작으면 세션 레일이 접힙니다",
+  "트레이 아이콘 초안을 넣었습니다. 알림 개수 배지는 다음 단계입니다",
+  "고해상도 화면에서 글자가 흐린 문제를 확인했습니다. 배율 설정을 따르도록 고쳤습니다",
+  "EXEC 2 보고: 맥 빌드 통과, 실행 확인. 메뉴의 단축키가 브라우저 단축키와 겹치는 2곳을 찾았습니다",
+  "겹치는 단축키 2곳(⌘K, ⌘P)은 앱 쪽을 우선하도록 정리했습니다",
+  "외부 링크는 앱 창 안이 아니라 기본 브라우저에서 열리도록 막았습니다",
+  "충돌 시 다시 띄우는 감시 코드를 넣었습니다. 연속 3번 실패하면 멈추고 알려 줍니다",
+  "창 테마가 시스템 밝기 설정을 따르도록 했습니다. 대시보드의 테마 고정 설정이 우선합니다",
+  "자동 업데이트는 이번 범위에서 빼고 티켓으로 남겼습니다",
+  "Windows에서 창 그림자와 둥근 모서리가 OS 버전마다 다르게 나오는 점을 확인했습니다",
+  "로그 파일 위치를 정리했습니다. 문제 보고 때 한 폴더만 보내면 됩니다",
+];
+const E = [];
+let n = 0, clock = 10 * 60 + 58;
+const t = () => { const h = Math.floor(clock / 60), m = clock % 60; return `${h}:${String(m).padStart(2, "0")}`; };
+function logs(count, step) { for (let i = 0; i < count; i++) { E.push({ k: "agent", at: t(), text: (i % 3 === 1) ? POOL[(n++) % POOL.length] + ". " + POOL[(n++) % POOL.length] + ". 다음 단계는 EXEC 2 보고를 받은 뒤 이어서 진행합니다" : POOL[(n++) % POOL.length] }); if (i % 4 === 3) E.push({ k: "system", at: t(), text: i % 8 === 3 ? "Topic state: implementing" : "Panel [p41](#p41) re-posted: 빌드 결과" }); clock += step; } }
+// top region: 14 entries before cluster 1's lead
+logs(12, 2);
+E.push({ k: "panel", at: t(), recap: "Windows 제목 표시줄 세 가지 방식 비교 (스크린샷 3장)", lines: 42, imgs: 3 });                 // lead of cluster 1
+E.push({ k: "add", at: t(), q: 895 }); E.push({ k: "add", at: t(), q: 896 });
+clock += 2;
+// middle region K
+logs(34, 1);
+E.push({ k: "agent", at: t(), text: "Windows 창 버튼을 직접 그리는 쪽으로 기본 작업은 진행해 둡니다. 닫기 버튼 동작은 정해야 해서 {{899}}로 여쭙니다" });   // lead of cluster 2
+E.push({ k: "add", at: t(), q: 899 });
+clock += 2;
+// lower region M
+logs(16, 1);
+clock = 12 * 60 + 18;
+E.push({ k: "answer", at: t(), q: 896, comment: "ThinkPad에서 검증을 시작합니다. 앞으로 Electron 화면 확인은 모두 ThinkPad에서 하고, 결과 화면은 패널로 올립니다" });
+E.push({ k: "agent", at: "12:19", text: "ThinkPad 원격 실행 확인: 창이 뜨고 세션 목록이 보입니다. 제목 표시줄은 {{895}} 답을 기다리는 동안 OS 기본으로 둡니다", current: true });
+E.forEach((e, i) => { e.i = i; e.id = "e" + (5000 + i); });
+const mins = s => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
+E.forEach(e => { if (e.k === "add") Q[e.q].asked = e.at; });
+E.forEach(e => { if (e.k === "answer") { const q = Q[e.q]; q.answered = e.at; const d = mins(e.at) - mins(q.asked); q.wait = d >= 60 ? `${Math.floor(d / 60)}시간 ${d % 60}분 뒤` : `${d}분 뒤`; } });
+
+// ---- anchors -------------------------------------------------------------
+// always visible: each question cluster (consecutive adds), the one log|panel
+// right before it, every answer row, the current-state line.
+function anchors() {
+  const a = new Set();
+  E.forEach((e, i) => {
+    if (e.k === "add" || e.k === "answer" || e.current) a.add(i);
+    if (e.k === "add" && (i === 0 || E[i - 1].k !== "add")) {
+      for (let j = i - 1; j >= 0; j--) if (E[j].k === "agent" || E[j].k === "panel") { a.add(j); E[j].lead = true; break; }
+    }
+  });
+  return a;
+}
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\{\{(\d+)\}\}/g, (_, d) => `<a href="#item-${d}" data-jump="item-${d}">(${d})</a>`);
+const icon = k => `<svg class="i" aria-hidden="true"><use href="#i-${k}"/></svg>`;
+const licon = k => `<svg class="li" aria-hidden="true"><use href="#l-${k}"/></svg>`;
+function md(table) {
+  const rows = table.split("\n").filter(r => !/^\|-/.test(r)).map(r => r.split("|").slice(1, -1).map(c => c.trim()));
+  if (rows.length < 2) return `<p>${esc(table)}</p>`;
+  return `<table><thead><tr>${rows[0].map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.slice(1).map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+function opts(q, pick) {
+  return `<div class="opts stack">${q.options.map((o, i) => { const L = String.fromCharCode(97 + i), rec = L === q.rec;
+    return pick ? `<div class="opt static${rec ? " rec" : ""}${L === pick ? " picked" : ""}"><span class="k">${L}${rec ? icon("star") : ""}</span><div class="md">${esc(o)}</div></div>`
+                : `<div class="opt${rec ? " rec" : ""}" role="button" tabindex="0" data-opt="${L}" aria-pressed="false"><span class="k">${L}${rec ? icon("star") : ""}</span><div class="md">${esc(o)}</div></div>`; }).join("")}</div>`;
+}
+function rowHTML(e) {
+  if (e.k === "agent") return `<article class="wb-entry agent${e.current ? " current" : ""}${e.lead ? " w-anchor-lead" : ""}" id="${e.id}"><div class="entry-line"><span class="evi lead">L</span><span class="entry-text"><time class="entry-at">${e.at}</time> — ${inline(e.text)}${e.current ? `<span class="ptag">현재 상태</span>` : ""}${e.lead ? `<span class="lead-tag">질문 직전</span>` : ""}</span></div></article>`;
+  if (e.k === "system") return `<article class="wb-entry system" id="${e.id}"><div class="entry-line"><span class="evi sys"></span><span class="entry-text"><time class="entry-at">${e.at}</time> — ${inline(e.text)}</span></div></article>`;
+  if (e.k === "panel") return `<article class="wb-entry panel${e.lead ? " w-anchor-lead" : ""}" id="${e.id}"><details class="entry-panel msg"><summary><span class="entry-recap">${esc(e.recap)}${e.lead ? `<span class="lead-tag">질문 직전</span>` : ""}</span><span class="pmeta"><time class="entry-at">${e.at}</time><span class="hint">이미지 ${e.imgs} · ${e.lines}줄</span><a class="mref" href="#p40">#p40</a></span></summary></details></article>`;
+  const q = Q[e.q];
+  if (e.k === "add") {
+    if (!q.answered) return `<div class="card policy ix-q open-ask" id="item-${e.q}"><div class="cbar"><span class="head"><span class="id">(${e.q})</span><span class="cls">policy</span><span class="title">${esc(q.title)}</span></span><span class="qtime">질문 ${q.asked}<span class="wait">대기 중</span></span><button class="btn mini note-toggle">${icon("pen")}</button></div><div class="cbody">${q.ctx ? `<div class="ctx md">${q.ctx.startsWith("|") ? md(q.ctx) : `<p>${esc(q.ctx)}</p>`}</div>` : ""}${opts(q)}<div class="rec-line md"><b>${icon("star")}${q.rec}</b> ${esc(q.recWhy)}</div></div></div>`;
+    const po = q.options[q.pick.charCodeAt(0) - 97];
+    return `<details class="ix-done" id="item-${e.q}"><summary><span class="ok">${icon("check")}</span><span class="orig">원래 질문</span><span class="id">(${e.q})</span><span class="qt"><a href="#ans-${e.q}" data-jump="ans-${e.q}" title="답변 위치로 이동">${esc(q.title)}</a></span>
+      <span class="ansl"><span class="pick"><span class="k">${q.pick}</span><span class="pt">${esc(po.slice(0, 30))}…</span></span><span class="qtime">질문 ${q.asked}<span class="sep">→</span>답변 ${q.answered}<span class="wait">${q.wait}</span></span><a class="jump" href="#ans-${e.q}" data-jump="ans-${e.q}">↓ 답변 위치</a></span></summary>
+      <div class="sx">${opts(q, q.pick)}<div class="rec-line md"><b>${icon("star")}${q.rec}</b> ${esc(q.recWhy)}</div></div></details>`;
+  }
+  if (e.k === "answer") return `<details class="w-ans" id="ans-${e.q}"><summary><span class="evi owner">O</span><time class="entry-at">${e.at}</time><span><a href="#item-${e.q}" data-jump="item-${e.q}">(${e.q})</a> 답변 <b>${q.pick}</b>, ${esc(q.reading)} · “${esc(q.quote)}”</span><span class="exp">질문 ${q.asked} · 펼치기</span></summary>
+     <div class="ab"><div class="h">원래 질문 · ${q.asked}</div><div><b>${esc(q.title)}</b></div>${opts(q, q.pick)}<div class="h">오너 답변 · ${e.at}</div><div class="said">“${esc(q.quote)}”</div><div class="h">에이전트 코멘트 · ${e.at}</div><div>${inline(e.comment)}</div></div></details>`;
+}
+
+// ---- window state ------------------------------------------------------
+const LIMIT = 1000;
+let shown, H = [];
+function reset() { const a = anchors(); shown = E.map((_, i) => a.has(i)); }
+function gaps() { const g = []; let s = -1; E.forEach((_, i) => { if (!shown[i] && s < 0) s = i; if ((shown[i] || i === E.length - 1) && s >= 0) { g.push([s, shown[i] ? i - 1 : i]); s = -1; } }); return g; }
+// Reveal whole rows from one edge of a gap until the revealed height reaches
+// LIMIT; the row that crosses the line joins (never cut), so a click always
+// shows >= LIMIT px unless the gap runs out first.
+let STRADDLE = -1;
+function load(gs, ge, dir) {
+  let sum = 0, i = dir === "up" ? ge : gs; const out = [];
+  while (i >= gs && i <= ge && sum < LIMIT) { shown[i] = true; out.push(i); sum += H[i]; if (sum >= LIMIT) STRADDLE = i; i += dir === "up" ? -1 : 1; }
+  return out;
+}
+const fmtRange = (a, b) => E[a].at === E[b].at ? E[a].at : `${E[a].at}–${E[b].at}`;
+function gapHTML(s, e) {
+  const top = s === 0, cnt = e - s + 1;
+  return `<div class="w-gap" data-gap="${s}-${e}"><span class="dots">⋯</span><span class="cnt">${cnt}개 로그 항목</span><span class="rng">${fmtRange(s, e)}</span><span class="acts"><button data-load="up">▲ 위쪽 더 불러오기</button>${top ? "" : `<button data-load="down">▼ 아래쪽 더 불러오기</button>`}</span></div>`;
+}
+function draw(fresh) {
+  let h = "", i = 0;
+  const gl = gaps(), gmap = new Map(gl.map(g => [g[0], g]));
+  while (i < E.length) {
+    if (gmap.has(i)) { const [s, e] = gmap.get(i); h += gapHTML(s, e); i = e + 1; continue; }
+    let run = [];
+    while (i < E.length && shown[i] && E[i].k === "system") run.push(E[i++]);
+    if (run.length) { h += sysRun(run, fresh); continue; }
+    h += `<div class="w-row${fresh && fresh.has(i) ? " revealed" : ""}${i === STRADDLE && fresh && fresh.has(i) ? " straddle" : ""}">${rowHTML(E[i])}</div>`; i++;
+  }
+  const hidden = shown.filter(x => !x).length, open = Object.values(Q).filter(q => !q.answered).length;
+  document.getElementById("root").innerHTML = `<div class="mk-label">VARIANT W · ${STEP_LABEL[STEP]} · ${THEME}</div>
+  <section class="topic" data-topic="electron-shell">${tophead(open)}<div class="topic-stream"><div class="wb-history"><div class="mhead"><span class="wb-mtitle">${icon("list")}<span class="wb-mlabel">기록</span><span class="n">${E.length}</span></span><span></span><span class="mmeta">질문 3 · 접힘 ${hidden} · 패널 1</span></div><div class="history-live">${h}</div></div></div></section>`;
+}
+function sysRun(list, fresh) {
+  const r = list[0].at === list[list.length - 1].at ? list[0].at : `${list[0].at}–${list[list.length - 1].at}`;
+  const rev = fresh && list.some(e => fresh.has(e.i));
+  return `<details class="system-run w-row${rev ? " revealed" : ""}"><summary><span class="rl"></span><span class="lbl">시스템 이벤트 ${list.length}개 · ${r}</span></summary>${list.map(rowHTML).join("")}</details>`;
+}
+function tophead(open) {
+  const cur = E.find(e => e.current);
+  return `<div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">${LABEL}</span></span><time class="tago">1분 전</time>
+  <button type="button" class="chip policy bulk" title="답변 필요">${icon("ask")}${open}</button>
+  <button class="ibtn">${licon("pin")}</button><button class="ibtn">${licon("chevron-down")}</button><button class="ibtn">${licon("arrow-up-to-line")}</button><button class="ibtn">${licon("maximize-2")}</button><button class="btn mini tnote-toggle">${icon("pen")}</button></div>
+  <div class="tsub"><div class="trecap"><span class="rat" role="button"><span class="evi lead">L</span>${cur.at} · <time class="tago">1분 전</time></span> — <div class="rtext md">${inline(cur.text)}</div></div></div></div>`;
+}
+function measure() {
+  // Lay out every row once (all shown) to learn its height, as the real page
+  // would from its rendered rows; system rows count at their own height.
+  shown = E.map(() => true);
+  let h = E.map(e => `<div class="w-row" data-m="${e.i}">${rowHTML(e)}</div>`).join("");
+  document.getElementById("root").innerHTML = `<section class="topic"><div class="topic-stream"><div class="wb-history"><div class="history-live">${h}</div></div></div></section>`;
+  H = E.map(e => document.querySelector(`[data-m="${e.i}"]`).getBoundingClientRect().height + 2);
+}
+
+const STEP_LABEL = ["처음: 앵커만", "가운데 틈 '아래쪽 더 불러오기' 1회 후", "+ 맨 위 틈 '위쪽 더 불러오기' 1회 후"];
+const qs = new URLSearchParams(location.search);
+let STEP = +(qs.get("step") || 0), THEME = qs.get("theme") || "dark";
+if (qs.get("shot")) document.documentElement.classList.add("shot");
+let lastLoad = null;
+function apply() {
+  document.documentElement.setAttribute("data-theme", THEME);
+  measure(); reset();
+  let fresh = new Set(); STRADDLE = -1;
+  if (STEP >= 1) { const g = gaps()[1]; lastLoad = load(g[0], g[1], "down"); if (STEP === 1) lastLoad.forEach(i => fresh.add(i)); }
+  if (STEP >= 2) { const g = gaps()[0]; load(g[0], g[1], "up").forEach(i => fresh.add(i)); }
+  draw(fresh);
+  if (qs.get("openans")) document.querySelectorAll("details.w-ans, details.ix-done").forEach(d => d.open = true);
+  document.querySelectorAll("[data-step]").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.step === STEP)));
+  document.querySelectorAll("[data-theme-btn]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeBtn === THEME)));
+}
+document.getElementById("mkbar").addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.step) STEP = +b.dataset.step;
+  if (b.dataset.themeBtn) THEME = b.dataset.themeBtn;
+  apply();
+});
+document.addEventListener("click", ev => {
+  const lb = ev.target.closest("[data-load]");
+  if (lb) { STRADDLE = -1; const [s, e] = lb.closest(".w-gap").dataset.gap.split("-").map(Number); draw(new Set(load(s, e, lb.dataset.load))); return; }
+  const j = ev.target.closest("[data-jump]");
+  if (j) { ev.preventDefault(); const t = document.getElementById(j.dataset.jump); if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash"); } return; }
+  const o = ev.target.closest(".opt[data-opt]");
+  if (o) { const on = o.getAttribute("aria-pressed") !== "true"; o.parentNode.querySelectorAll(".opt").forEach(x => x.setAttribute("aria-pressed", "false")); o.setAttribute("aria-pressed", String(on)); }
+});
+apply();
+</script>
+</body>
+</html>

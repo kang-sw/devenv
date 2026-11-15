@@ -72,12 +72,15 @@ function ResizeObserver(fn){this.fn=fn;}
 ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
 function resize(h){h._wbHistoryObserver.fn();flush();}
 function panel(i,height,unknown){return '<article class="wb-entry panel" id="e'+i+'" data-entry="e'+i+'" data-panel="p'+i+'" data-history-anchor="e'+i+'" data-height="'+height+'"><details class="entry-panel" id="p'+i+'" data-key="entry:e'+i+'" open><summary>panel</summary><iframe class="doc-frame"'+(unknown?'':' data-known="1"')+'></iframe></details></article>';}
-function logs(from,to){var out='';for(var i=from;i<=to;i++)out+='<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'">line</article>';return out;}
-function run(from,inner,open){return '<details class="run-fold" data-key="run:e'+from+'" data-history-anchor="e'+from+'"'+(open?' open':'')+'><summary><span class="lbl">logs</span></summary>'+inner+'</details>';}
+function logs(from,to,height){var out='';for(var i=from;i<=to;i++)out+='<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'"'+(height?' data-height="'+height+'"':'')+'>line</article>';return out;}
+function chip(from,inner,open){return '<details class="system-run" data-key="system:e'+from+'" data-history-anchor="e'+from+'"'+(open?' open':'')+'><summary><span class="lbl">logs</span></summary>'+inner+'</details>';}
 function board(html,pages){
-  root=parse('<section class="topic"><details class="topic-stream" open><summary>stream</summary><div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-clip"><div class="history-live">'+html+'</div></div>'+(pages||[]).map(function(p){return '<template data-history-page>'+p+'</template>';}).join('')+'</div></details></section>');
+  root=parse('<section class="topic"><div class="topic-stream"><div class="wb-history" data-history="t"><div class="mhead"><button class="history-older">older</button></div><div class="history-clip"><div class="history-live">'+html+'</div></div>'+(pages||[]).map(function(p){return '<template data-history-page>'+p+'</template>';}).join('')+'</div></div></section>');
   root.querySelectorAll('template').reverse().forEach(function(t){t.content=new E('#fragment');t.children.slice().forEach(function(c){t.content.appendChild(c);});});
-  root.querySelectorAll('[data-known]').forEach(function(f){f.style.height='100px';});
+  // Known frames have rendered, including those a page will materialize.
+  function rendered(f){f.style.height='100px';}
+  root.querySelectorAll('[data-known]').forEach(rendered);
+  root.querySelectorAll('template').forEach(function(t){t.content.querySelectorAll('[data-known]').forEach(rendered);});
   var h=root.querySelector('.wb-history');h.style.setProperty=function(k,v){this[k]=v;};return h;
 }
 function start(html,pages){var h=board(html,pages);window.wbHistory.init(document);flush();return h;}
@@ -92,19 +95,28 @@ check('inline timestamp wrapping never recuts finalized boundary',[first(h),h.st
 h=start(panel(1,320)+logs(2,3)+panel(4,320)+panel(5,320));
 check('exactly one thousand pixels retains three',[first(h),h.style['--wb-history-height']],['e1','1000px']);
 h=start(logs(1,2)+panel(3,400)+logs(4,5)+panel(6,400)+logs(7,8)+panel(9,400)+logs(10,11));
-check('three shrinks to two',first(h),'e6');
-check('boundary immediately above panel not older logs',h.style['--wb-history-height'],'880px');
+check('logs above the second panel fill the pixel budget',first(h),'e4');
+check('row-granular cut stops before the overflowing panel',h.style['--wb-history-height'],'920px');
 var oldWatch=h._wbHistoryWatch;click(h.querySelector('.history-older'));flush();
-check('next chunk includes prior older logs and panel',h._wbHistoryChunks,['e6','e3']);
+check('next chunk is the remaining panel and logs',h._wbHistoryChunks,['e4','e1']);
 check('expansion re-arms and uses shared keep',[h._wbHistorySteps,oldWatch.gone,keeps.at(-1).applied],[2,true,1]);
-check('logs before oldest panel are still older',h.querySelector('.history-older').hidden,false);
-click(h.querySelector('.history-older'));flush();
-check('remaining log-only prefix is next chunk',first(h),'e1');
 check('exhausted control hides',h.querySelector('.history-older').hidden,true);
 h=start(panel(1,600)+logs(2,3)+panel(4,600)+logs(5,6)+panel(7,600));
-check('two shrinks to one',first(h),'e7');
+check('pixel budget keeps the newest panel and the logs above it',[first(h),h.style['--wb-history-height']],['e5','640px']);
 h=start(panel(1,1200)+panel(2,1500));
 check('oversized singleton always shown',[first(h),h.style['--wb-history-height']],['e2','1500px']);
+h=start(logs(1,5)+panel(6,1400));
+check('single oversized panel is a one-row chunk',[first(h),h.style['--wb-history-height']],['e6','1400px']);
+// One chunk stops before whichever budget a row would exceed first:
+// thirty log lines, three panels, or 1000px of rendered height.
+h=start(logs(1,40,60));
+check('tall log lines cut under thirty by pixels',[first(h),h.style['--wb-history-height']],['e25','960px']);
+h=start(logs(1,100,5));
+check('short log lines cap at thirty',[first(h),h.style['--wb-history-height']],['e71','150px']);
+h=start(panel(1,300)+logs(2,51)+panel(52,300));
+check('logs between panels cap at thirty lines',[first(h),h.style['--wb-history-height']],['e22','900px']);
+h=start(panel(1,300)+logs(2,51,30)+panel(52,300));
+check('logs between panels cut by pixels',[first(h),h.style['--wb-history-height']],['e29','990px']);
 // First frame measurement settles once; subsequent size changes only move
 // the clip with its saved boundary. Cached heights survive swaps.
 h=start(panel(1,400)+panel(2,400)+panel(3,400,true));
@@ -129,30 +141,30 @@ check('swap restores exact chunk IDs',next._wbHistoryChunks,chunks);
 check('swap restores cached measured height',next._wbHistoryHeights['e2:true'],400);
 check('swap is not recut by new height',next.style['--wb-history-height'],'4500px');
 window.wbHistory.init(document);check('one delegated click listener',next.on.click.length,1);
-// A log-only history counts entries, including rows behind a closed run.
-h=start(run(1,logs(1,97),false)+logs(98,100));
+// A log-only history counts entries, including rows behind a closed system chip.
+h=start(chip(1,logs(1,97),false)+logs(98,100));
 check('log-only chunk is thirty entries',first(h),'e71');
-check('run is split at exact boundary',h.querySelectorAll('.run-fold').map(function(d){return [d.getAttribute('data-history-anchor'),d.querySelectorAll('.wb-entry').length,d.open];}),[['e1',70,false],['e71',27,false]]);
-h.querySelectorAll('.run-fold')[1].open=true;
+check('chip is split at exact boundary',h.querySelectorAll('.system-run').map(function(d){return [d.getAttribute('data-history-anchor'),d.querySelectorAll('.wb-entry').length,d.open];}),[['e1',70,false],['e71',27,false]]);
+h.querySelectorAll('.system-run')[1].open=true;
 var logSnapshot=window.wbHistory.capture(document);
-var restoredLogs=board(run(1,logs(1,97),false)+logs(98,100));window.wbHistory.restore(document,logSnapshot);flush();
-check('swap retains split fold choices',restoredLogs.querySelectorAll('.run-fold').map(function(d){return [d.getAttribute('data-history-anchor'),d.open];}),[['e1',false],['e71',true]]);
+var restoredLogs=board(chip(1,logs(1,97),false)+logs(98,100));window.wbHistory.restore(document,logSnapshot);flush();
+check('swap retains split fold choices',restoredLogs.querySelectorAll('.system-run').map(function(d){return [d.getAttribute('data-history-anchor'),d.open];}),[['e1',false],['e71',true]]);
 h=restoredLogs;
 click(h.querySelector('.history-older'));flush();check('second log chunk is thirty',first(h),'e41');
-var appendedSnapshot=window.wbHistory.capture(document), appendedHistory=board(run(1,logs(1,98),false)+logs(99,101));
+var appendedSnapshot=window.wbHistory.capture(document), appendedHistory=board(chip(1,logs(1,98),false)+logs(99,101));
 window.wbHistory.restore(document,appendedSnapshot);flush();
 check('append swap retains expanded boundaries',appendedHistory._wbHistoryChunks,['e71','e41']);
-check('append swap preserves actually open rows',[71,72,97].map(function(i){return appendedHistory.querySelector('[id="e'+i+'"]').closest('.run-fold').open;}),[true,true,true]);
+check('append swap preserves actually open rows',[71,72,97].map(function(i){return appendedHistory.querySelector('[id="e'+i+'"]').closest('.system-run').open;}),[true,true,true]);
 h=appendedHistory;
 click(h.querySelector('.history-older'));flush();check('third log chunk is thirty',first(h),'e11');
 click(h.querySelector('.history-older'));flush();check('last log chunk is remainder',[first(h),h.querySelector('.history-older').hidden],['e1',true]);
 h=start(logs(51,100),[logs(1,50)]);
 check('initial thirty needs no page',[first(h),loads],['e71',0]);
 click(h.querySelector('.history-older'));flush();check('cross-page log chunk',[first(h),h.querySelectorAll('.wb-entry').length],['e41',100]);
-// A closed run crossing a page joins without swallowing or losing the cut.
-h=start(run(51,logs(51,97),false)+logs(98,100),[run(1,logs(1,50),false)]);
+// A closed chip crossing a page joins without swallowing or losing the cut.
+h=start(chip(51,logs(51,97),false)+logs(98,100),[chip(1,logs(1,50),false)]);
 click(h.querySelector('.history-older'));flush();
-check('joined closed run retains thirty-line boundary',first(h),'e41');
+check('joined closed chip retains thirty-line boundary',first(h),'e41');
 check('joined rows remain chronological',[h.querySelector('.wb-entry').id,h.querySelectorAll('.wb-entry').at(-1).id],['e1','e100']);
 // Fewer than three live panels fetches only candidate pages, one per frame.
 h=start(panel(101,200),[panel(51,200),panel(1,200)]);
@@ -164,16 +176,18 @@ function repost(oldID,newID){
   var historical=panel(oldID,400).replace('class="wb-entry panel"','class="wb-entry panel historical"').replace(' id="p'+oldID+'"','').replace(' open>','>');
   return panel(newID,400).replace('data-panel="p'+newID+'"','data-panel="p'+oldID+'"').replace('id="p'+newID+'"','id="p'+oldID+'"').replace('</details></article>','<details class="panel-versions"><summary>versions</summary>'+historical+'</details></details></article>');
 }
-h=start(panel(1,400)+logs(2,2)+panel(3,400)+logs(4,4)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400));
+// Row heights place the pixel cuts exactly at e7 (820+190 > 1000) and e3
+// (190+400+5+400 = 995, and e2 would exceed).
+h=start(panel(1,400)+logs(2,2)+panel(3,400)+logs(4,4,5)+panel(5,400)+logs(6,6,190)+panel(7,400)+logs(8,8)+panel(9,400));
 click(h.querySelector('.history-older'));flush();
 check('republish fixture has finalized expanded boundary',h._wbHistoryChunks,['e7','e3']);
 var republishSnapshot=window.wbHistory.capture(document),republishChunks=h._wbHistoryChunks.slice();
-function republishedBoard(){return board(run(2,logs(2,2)+logs(4,4),false)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[panel(1,400)]);}
+function republishedBoard(){return board(chip(2,logs(2,2)+logs(4,4),false)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[panel(1,400)]);}
 h=republishedBoard();window.wbHistory.restore(document,republishSnapshot);flush();
 check('republish restores exact finalized membership',h._wbHistoryChunks,republishChunks);
 check('republished boundary lives only in Versions',!!h.querySelector('[id="e3"]').closest('.panel-versions'),true);
 check('republish clips at whole chronological successor',h.style['--wb-history-height'],'1660px');
-check('republish splits the log fold at successor',h.querySelectorAll('.run-fold').map(function(d){return d.getAttribute('data-history-anchor');}),['e2','e4']);
+check('republish splits the system chip at successor',h.querySelectorAll('.system-run').map(function(d){return d.getAttribute('data-history-anchor');}),['e2','e4']);
 resize(h);check('republish resize never recuts restored chunks',h._wbHistoryChunks,republishChunks);
 click(h.querySelector('.history-older'));flush();
 check('Older advances before historical cutoff',[h._wbHistoryChunks,h._wbHistoryPending,h.querySelector('.history-older').hidden],[['e7','e3','e1'],null,true]);
@@ -181,18 +195,22 @@ h=republishedBoard();window.wbHistory.restore(document,republishSnapshot);flush(
 check('navigation can reveal rows before historical cutoff',first(h),'e2');keeps.at(-1).opt.onEnd();
 // When the saved first entry also became historical, its successor may
 // still be inert. Restore the known cut's rows before measuring the clip.
-h=start(panel(3,400)+logs(4,4)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400),[logs(1,2)]);
+h=start(panel(3,400)+logs(4,4,5)+panel(5,400)+logs(6,6,190)+panel(7,400)+logs(8,8)+panel(9,400),[logs(1,2)]);
 click(h.querySelector('.history-older'));flush();var deferredSnapshot=window.wbHistory.capture(document);
-check('deferred fixture saves historical first as boundary',[deferredSnapshot[0].first,h._wbHistoryChunks,h.querySelectorAll('template[data-history-page]').length],['e3',['e7','e3'],1]);
-h=board(panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[run(1,logs(1,2)+logs(4,4),false)]);
+// Here the page loads to learn that e2 overflows, so capture saves e1 as
+// first. A chunk that fills its counts first leaves the page inert and saves
+// its boundary e3; pin that reachable shape to exercise the held successor.
+check('deferred fixture cuts at the historical boundary',[deferredSnapshot[0].first,h._wbHistoryChunks,h.querySelectorAll('template[data-history-page]').length],['e1',['e7','e3'],0]);
+deferredSnapshot[0].first='e3';
+h=board(panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[chip(1,logs(1,2)+logs(4,4),false)]);
 window.wbHistory.restore(document,deferredSnapshot);flush();
 check('historical first restores inert successor and exact cut',[h._wbHistoryChunks,h.style['--wb-history-height'],h.querySelectorAll('template[data-history-page]').length],[['e7','e3'],'1660px',0]);
 click(h.querySelector('.history-older'));flush();check('Older reaches logs before deferred historical cut',[first(h),h._wbHistoryPending,h.querySelector('.history-older').hidden],['e1',null,true]);
-h=start(panel(3,400)+run(4,logs(4,4),true)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400),[logs(1,2)]);
-click(h.querySelector('.history-older'));flush();var disclosureSnapshot=window.wbHistory.capture(document);
-h=board(panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[run(1,logs(1,2)+logs(4,4),false)]);
+h=start(panel(3,400)+chip(4,logs(4,4,5),true)+panel(5,400)+logs(6,6,150)+panel(7,400)+logs(8,8,70)+panel(9,400),[logs(1,1)+logs(2,2,100)]);
+click(h.querySelector('.history-older'));flush();var disclosureSnapshot=window.wbHistory.capture(document);disclosureSnapshot[0].first='e3';
+h=board(panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[chip(1,logs(1,2)+logs(4,4),false)]);
 window.wbHistory.restore(document,disclosureSnapshot);flush();
-check('deferred successor retains saved open disclosure',[h._wbHistoryChunks,h.querySelector('[id="e4"]').closest('.run-fold').open,h.style['--wb-history-height']],[['e7','e3'],true,'1680px']);
+check('deferred successor retains saved open disclosure',[h._wbHistoryChunks,h.querySelector('[id="e4"]').closest('.system-run').open,h.style['--wb-history-height']],[['e7','e3'],true,'1680px']);
 // Even a saved in-flight Older operation resolves that same historical cut.
 var inFlight=JSON.parse(JSON.stringify(republishSnapshot));inFlight[0].chunks.push('e3');inFlight[0].pending={before:'e3'};
 h=republishedBoard();window.wbHistory.restore(document,inFlight);resize(h);
@@ -268,17 +286,14 @@ var revealedSnapshot=window.wbHistory.capture(document),ownerCalls=navigationOrd
 h=board(panel(51,200)+panel(52,200)+panel(53,200),[panel(1,200)]);guardTopic(h);
 window.wbHistory.restore(document,revealedSnapshot);flush();
 check('callback-free restore does not unfold the whole topic',[h.closest('.topic').getAttribute('data-size'),navigationOrder.filter(function(p){return p==='owner';}).length],['fold',ownerCalls]);
-// Fold summaries have no .wb-entry ancestor: navigate by their existing
-// first-entry anchor for both long logs and adjacent system-event chips.
-['run-fold','system-run'].forEach(function(kind){
-  var html=run(1,logs(1,97),false).replace('run-fold',kind)+logs(98,100);
-  h=start(html);
-  var summary=h.querySelector('.'+kind).querySelector('summary');
-  check(kind+' summary starts clipped',summary.getBoundingClientRect().top<0,true);
-  fire(summary,'focusin');flush();
-  check(kind+' summary reveals first represented entry',[first(h),keeps.at(-1).node===summary],['e1',true]);
-  keeps.at(-1).opt.onEnd();
-});
+// A chip summary has no .wb-entry ancestor: navigate by its existing
+// first-entry anchor.
+h=start(chip(1,logs(1,97),false)+logs(98,100));
+var summary=h.querySelector('.system-run').querySelector('summary');
+check('chip summary starts clipped',summary.getBoundingClientRect().top<0,true);
+fire(summary,'focusin');flush();
+check('chip summary reveals first represented entry',[first(h),keeps.at(-1).node===summary],['e1',true]);
+keeps.at(-1).opt.onEnd();
 // Focus in a clipped row uses navigation, not scrolling the hidden box.
 h=start(logs(1,100));fire(h.querySelector('[id="e1"]'),'focusin');flush();
 check('clipped focus reveals exact row',[first(h),keeps.at(-1).node.id],['e1','e1']);

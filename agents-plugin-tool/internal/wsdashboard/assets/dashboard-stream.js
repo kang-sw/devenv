@@ -251,11 +251,25 @@
       try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
       location.reload();
     }
-    // The session left: the close that follows is final.
+    // A WebSocket handshake hides HTTP status. Recheck the stream once after
+    // the usual retry delay before calling the session gone; never replace
+    // the held DOM (or its drafts) with the probe's response. Transient probe
+    // failures keep retrying at that cadence until absence is confirmed or
+    // the stream can reopen with the hashes held then.
     function onGone() {
       st.close();
       connected(false);
-      banner(wsT("js.banner.gone"));
+      trackerLost();
+      setTimeout(recheckGone, 3000);
+    }
+    function recheckGone() {
+      fetch(path + (framed && mode !== "index" ? "?frame=1" : ""), { cache: "no-store" }).then(function (res) {
+        // The GET is only a status probe, not another long-lived SSE stream.
+        if (res.body) res.body.cancel().catch(function () {});
+        if (res.status === 404) { banner(wsT("js.banner.gone")); return; }
+        if (res.ok) { connect(); return; }
+        setTimeout(recheckGone, 3000);
+      }).catch(function () { setTimeout(recheckGone, 3000); });
     }
   }
   // showRegions applies, once each and in arrival order, the region updates

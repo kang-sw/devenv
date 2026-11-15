@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -48,7 +49,7 @@ func railWT(t *testing.T, ws RailWorkspace, path string) RailWorktree {
 
 // TestRailViewGroupsSessionsByWorkspaceAndWorktree pins the grouping: a
 // repository lists every worktree git lists (a sessionless one dimmed), a
-// pooled worktree only while it holds a session, never a prunable one; a
+// pooled worktree never (its session hidden), never a prunable one; a
 // session in a subfolder sits under its worktree, one in a worktree no list
 // names yet gets a worktree of its own; a plain folder lists its sessions
 // directly; live rows go oldest registration first, ended ones fold apart,
@@ -79,23 +80,23 @@ func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 	if len(view.Workspaces) != 2 {
 		t.Fatalf("workspaces = %+v, want the repository and the folder", view.Workspaces)
 	}
-	if view.Live != 5 {
-		t.Errorf("live = %d, want 5", view.Live)
+	if view.Live != 4 {
+		t.Errorf("live = %d, want 4 (the pooled session left out)", view.Live)
 	}
 	plain, ws := view.Workspaces[0], view.Workspaces[1]
 	if filepath.ToSlash(plain.Path) != "/w/plain" || plain.Repo || len(plain.Worktrees) != 0 || len(plain.Sessions) != 1 {
 		t.Errorf("plain folder = %+v", plain)
 	}
-	if ws.Name != "repo" || !ws.Repo || ws.Live != 4 {
+	if ws.Name != "repo" || !ws.Repo || ws.Live != 3 {
 		t.Errorf("repository = %+v", ws)
 	}
 	var paths []string
 	for _, w := range ws.Worktrees {
 		paths = append(paths, filepath.ToSlash(w.Path))
 	}
-	want := []string{repo, pool + "/busy", "/w/feature", "/w/fresh", "/w/idle"}
+	want := []string{repo, "/w/feature", "/w/fresh", "/w/idle"}
 	if strings.Join(paths, " ") != strings.Join(want, " ") {
-		t.Errorf("worktrees = %v, want %v (root first, the spare pooled and the prunable one hidden)", paths, want)
+		t.Errorf("worktrees = %v, want %v (root first, both pooled and the prunable one hidden)", paths, want)
 	}
 	root := railWT(t, ws, repo)
 	if !root.Root || root.Branch != "develop" || strings.Join(railIDs(root.Sessions), " ") != "oldroot newroot" {
@@ -129,13 +130,69 @@ func TestRailViewWithoutAListShowsTheSessionRoots(t *testing.T) {
 	// worktree inside the repository folder is its own row.
 	sub := buildRailView([]railInput{
 		{Session: railSession("a", "/r/sub/dir", now, time.Time{}), Repo: "/r"},
-		{Session: railSession("b", "/r/.ws-worktrees/w", now, time.Time{}), Repo: "/r", Linked: true},
+		{Session: railSession("b", "/r/wts/w", now, time.Time{}), Repo: "/r", Linked: true},
 	}, nil, nil, now)
-	if wts := sub.Workspaces[0].Worktrees; len(wts) != 2 || filepath.ToSlash(wts[0].Path) != "/r" || len(wts[0].Sessions) != 1 || wts[0].Sessions[0].ReplyID != "a" || filepath.ToSlash(wts[1].Path) != "/r/.ws-worktrees/w" {
+	if wts := sub.Workspaces[0].Worktrees; len(wts) != 2 || filepath.ToSlash(wts[0].Path) != "/r" || len(wts[0].Sessions) != 1 || wts[0].Sessions[0].ReplyID != "a" || filepath.ToSlash(wts[1].Path) != "/r/wts/w" {
 		t.Errorf("worktrees = %+v, want a under the root and b on its own", wts)
 	}
 	if !view.Workspaces[0].Worktrees[0].Root {
 		t.Errorf("first worktree = %+v, want the root", view.Workspaces[0].Worktrees[0])
+	}
+}
+
+// TestRailViewHidesPooledWorktrees: a worktree under a ws pool root never
+// shows, whether its sessions are live or ended, and its sessions count
+// nowhere; the root and an unpooled worktree show as before. A pool root
+// the list has not supplied yet (the default one beside the root) hides
+// too, and a repository whose only sessions are pooled keeps its bar.
+func TestRailViewHidesPooledWorktrees(t *testing.T) {
+	now := time.Now()
+	repo := "/w/repo"
+	pool := "/w/pool/repo"
+	sessions := []railInput{
+		{Session: railSession("root", repo, now.Add(-time.Hour), time.Time{}), Repo: repo},
+		{Session: railSession("feat", "/w/feature", now.Add(-time.Hour), time.Time{}), Repo: repo},
+		{Session: railSession("pooledlive", pool+"/live", now.Add(-time.Hour), time.Time{}), Repo: repo, Linked: true},
+		{Session: railSession("pooledsub", pool+"/live/sub", now.Add(-time.Hour), time.Time{}), Repo: repo, Linked: true},
+		{Session: railSession("pooledended", pool+"/ended", now.Add(-3*time.Hour), now.Add(-2*time.Hour)), Repo: repo, Linked: true},
+		{Session: railSession("defaultpool", "/w/.ws-worktrees/repo/x", now.Add(-time.Hour), time.Time{}), Repo: repo, Linked: true},
+		{Session: railSession("onlypooled", "/w/.ws-worktrees/other/y", now, time.Time{}), Repo: "/w/other", Linked: true},
+	}
+	repos := map[string]railRepo{filepath.FromSlash(repo): {Read: true, Pools: []string{pool}, Entries: []railWorktreeEntry{
+		{Path: repo, Branch: "develop"},
+		{Path: "/w/feature", Branch: "feat/x"},
+		{Path: pool + "/live", Branch: "impl/a"},
+		{Path: pool + "/ended", Branch: "impl/b"},
+		{Path: "/w/.ws-worktrees/repo/x", Branch: "impl/c"},
+	}}}
+	view := buildRailView(sessions, repos, nil, now)
+	if len(view.Workspaces) != 2 {
+		t.Fatalf("workspaces = %+v, want the repository and the other one's bar", view.Workspaces)
+	}
+	other, ws := view.Workspaces[0], view.Workspaces[1]
+	if filepath.ToSlash(other.Path) != "/w/other" || !other.Repo || other.Live != 0 || len(other.Worktrees) != 0 {
+		t.Errorf("repository with only a pooled session = %+v, want an empty bar", other)
+	}
+	if view.Live != 2 || ws.Live != 2 {
+		t.Errorf("live = %d (repository %d), want 2: pooled sessions count nowhere", view.Live, ws.Live)
+	}
+	var paths []string
+	for _, w := range ws.Worktrees {
+		paths = append(paths, filepath.ToSlash(w.Path))
+		for _, r := range append(append([]RailRow(nil), w.Sessions...), w.Ended...) {
+			if strings.HasPrefix(r.ReplyID, "pooled") || r.ReplyID == "defaultpool" {
+				t.Errorf("worktree %s lists hidden session %s", w.Path, r.ReplyID)
+			}
+		}
+	}
+	if want := []string{repo, "/w/feature"}; strings.Join(paths, " ") != strings.Join(want, " ") {
+		t.Errorf("worktrees = %v, want %v (every pooled worktree hidden, live or ended)", paths, want)
+	}
+	if root := railWT(t, ws, repo); !root.Root || strings.Join(railIDs(root.Sessions), " ") != "root" {
+		t.Errorf("root worktree = %+v, want it with its session", root)
+	}
+	if feat := railWT(t, ws, "/w/feature"); strings.Join(railIDs(feat.Sessions), " ") != "feat" {
+		t.Errorf("unpooled worktree = %+v, want it with its session", feat)
 	}
 }
 
@@ -913,7 +970,8 @@ func TestRailMarkupRevive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	html := string(region.HTML)
+	// Ignore inert hover content when checking visible row boundaries.
+	html := regexp.MustCompile(`(?s)<template class="shp-source"[^>]*>.*?</template>`).ReplaceAllString(string(region.HTML), "")
 	rowOf := func(id string) string {
 		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`">`)
 		if !ok {
@@ -1040,7 +1098,8 @@ func TestRailMarkupTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	html := string(region.HTML)
+	// Ignore inert hover content when checking visible row boundaries.
+	html := regexp.MustCompile(`(?s)<template class="shp-source"[^>]*>.*?</template>`).ReplaceAllString(string(region.HTML), "")
 	rowOf := func(id string) string {
 		_, rest, ok := strings.Cut(html, `data-rid="`+id+`"`)
 		if !ok {

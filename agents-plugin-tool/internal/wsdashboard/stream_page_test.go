@@ -47,9 +47,9 @@ function shDrafts() { return false; }
 // answers pings, applies regions (holding them on a hidden tab while the
 // tracker event still acts), shows a drop and a recovery on the connection
 // indicator, forgets the tracker revision and reconnects once per drop with
-// the hashes held then, and stops for good after "gone". The support chat's
-// stream treats its first entries region after each connect as history and
-// acts on the ui lines of later ones, a hidden tab included, retries a drop,
+// the hashes held then, and confirms "gone" by a delayed HTTP probe. The
+// support chat's stream treats its first entries region after each connect
+// as history and acts on the ui lines of later ones, a hidden tab included, retries a drop,
 // and closes on "gone". The cases execute under node when it is installed.
 func TestPageStreamsRideWebSocket(t *testing.T) {
 	data, err := dashboardTestAsset("assets/dashboard.js")
@@ -73,7 +73,8 @@ func TestPageStreamsRideWebSocket(t *testing.T) {
 	sup := block("supOpen ... supClose", `(?s)\n  function supOpen\(c\) \{.*?\n  function supClose\(c\) \{.*?\n  \}\n`)
 	act := block("supActUI", `(?s)\n  function supActUI\(c, added, st\) \{.*?\n  \}\n`)
 
-	runNode(t, "page stream", "(function () {\n"+streamPageHarness+`
+	runNode(t, "page stream", "(async function () {\n"+streamPageHarness+`
+function fetch() { return Promise.resolve({ status: 404 }); }
 var mode = "session", rid = "rid1", heldNow = "board.1,head.2", hiddenRegions = {}, modeHash = "", liveMode = false;
 function held() { return heldNow; }
 function boardInputFull() { return null; }
@@ -118,8 +119,11 @@ check("the dropped socket is ignored", log, ["lost"]);
 log = [];
 r.msg("gone", {});
 r.onclose({});
+check("gone does not banner immediately", log, ["lost"]);
+advance(3000);
+await Promise.resolve();
 advance(10000);
-check("gone is final", [log, indicator.off, r.closed, sockets.length], [["banner:js.banner.gone"], true, true, 2]);
+check("confirmed gone is final", [log, indicator.off, r.closed, sockets.length], [["lost", "banner:js.banner.gone"], true, true, 2]);
 mode = "index";
 connect();
 check("the index stream", sockets[2].url, "ws://localhost:1234/events?h=" + encodeURIComponent("board.3,head.4"));

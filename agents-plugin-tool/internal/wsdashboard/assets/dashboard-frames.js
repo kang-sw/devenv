@@ -218,26 +218,28 @@
     f = frameWins.get(win);
     return f && inBoard(f) ? f : undefined;
   }
-  // Only an existing board item or latest stable panel target may be
-  // navigated. The history loader accepts bare IDs, never selectors/URLs.
+  // Only existing board items, latest stable panels and encoded topic anchors
+  // may be navigated. Topic chips never materialize unloaded closed topics.
   function boardJump(id) {
-    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*)$/.test(id)) return;
+    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*|topic-(?:[0-9a-f]{2})+)$/.test(id)) return;
+    var isTopic = id.indexOf("topic-") === 0;
     var target = null, unfoldTopic = window.WsCards && window.WsCards.unfoldTopic;
-    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
+    if (!isTopic && window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
     if (!target) target = $(id);
     if (!target || target.id !== id || !inBoard(target)) return;
-    if (unfoldTopic) unfoldTopic(target);
-    for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
-    // History targets were revealed and anchored by the shared loader.
-    // scrollIntoView would also scroll the overflow:hidden clip itself.
-    // Under the viewport bands the frames around the target mount and
-    // report their heights after the jump: a keep session holds the target
-    // where it landed meanwhile.
-    if (!target.closest(".wb-history")) {
-      target.scrollIntoView({ block: "start" });
-      var w = window.wbHistory;
-      if (w && w.bands && w.keep) w.keep(target);
+    if (isTopic && (target.tagName !== "SECTION" || !target.hasAttribute("data-topic"))) return;
+    function reveal() {
+      if (unfoldTopic) unfoldTopic(target);
+      for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
+      // History targets were anchored by the loader; never scroll their clip.
+      if (!target.closest(".wb-history")) {
+        target.scrollIntoView({ block: "start" });
+        var w = window.wbHistory;
+        if (w && w.bands && w.keep) w.keep(target);
+      }
     }
+    if (isTopic && window.WsCards && window.WsCards.revealTopic) window.WsCards.revealTopic(target, reveal);
+    else reveal();
     return target;
   }
   function captureBoardHistory() {
@@ -398,6 +400,9 @@
       // offers the card.
       var act = navigator.userActivation;
       if (webLink(a) && act && act.isActive) { window.WsWeb.open({ url: a.href }); return; }
+      // In the desktop app a frame's Cmd/Ctrl+click on a file link (mod)
+      // previews it, under the same user-activation gate.
+      if (m.mod === true && act && act.isActive && desktopPreview(a)) return;
       var r = f.getBoundingClientRect();
       openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
     } else if (m.wbDoc === "img") {
