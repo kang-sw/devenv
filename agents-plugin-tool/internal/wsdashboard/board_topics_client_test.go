@@ -66,7 +66,7 @@ process.stdout.write(bad.join("\n"));
 func TestBoardTopicsClientHiddenAndRecovery(t *testing.T) {
 	src := dashboardFuncs(t, "topicKey", "topicSeen", "boardInputFull", "boardInputPatch", "boardNodes", "openStream", "connected", "connect", "showRegions", "held")
 	runNode(t, "board hidden patches and recovery", streamPageHarness+boardTopicsClientDOM+`
-var mode="session",rid="rid1",hiddenRegions={},modeHash="m1",liveMode=false,sseOn=true;
+var mode="session",rid="rid1",worktree="",hiddenRegions={},modeHash="m1",liveMode=false,sseOn=true;
 var regions=[{getAttribute:function(k) { return k==="data-region"?"board":"old-board"; }},{getAttribute:function(k) { return k==="data-region"?"head":"head-hash"; }}];
 function q(sel) { return sel==="[data-region]"?regions:[indicator]; }
 function pageHidden() { return doc.hidden; }
