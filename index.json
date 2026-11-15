@@ -422,9 +422,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T19:17:28Z",
+        "touched_at": "2026-11-15T20:30:38Z",
         "impl": {
-          "branch": "impl/develop/marble-cobalt-sparrow"
+          "branch": "impl/develop/copy-equal-wound"
         }
       }
     },
@@ -525,9 +525,6 @@
           "branch": "impl/develop/theft-civil-cushy"
         }
       }
-    },
-    "261116-refactor-ws-model-evidence-bounded-retention": {
-      "registered_at": "2026-11-15T16:42:54Z"
     }
   }
 }
