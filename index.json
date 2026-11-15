@@ -826,7 +826,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T03:49:34Z"
+        "touched_at": "2026-11-15T03:50:27Z",
+        "impl": {
+          "branch": "impl/develop/untie-calm-nanny"
+        }
       }
     },
     "261115-feat-ws-dashboard-observed-session-model": {
