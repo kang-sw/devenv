@@ -58,6 +58,8 @@ function send(c) { c.body.querySelectorAll('.fattachment button')[0].click(); }
 function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
 (async function () {
   var p = fixture({}); p.owners.tab.shown(); await settle();
+  var tabPane = p.doc.getElementById('files');
+  check('Files tab keeps compact breadcrumb and external root summary in sync', [tabPane.querySelector('.fcrumb-root .froot').textContent, p.doc.querySelector('.fsum .froot').textContent, tabPane.querySelector('.ftab-select .fn').textContent], ['session', 'session', 'session']);
   p.owners.tab.navigate('src'); await settle();
   p.doc.getElementById('files').querySelector('.fopen-card').click(); await settle();
   var a = p.W.list('explorer')[0];
@@ -68,6 +70,13 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
   check('outside-root mention uses mention.js quoting and never sends', [p.ctext.value, p.posts.length, p.submits(), p.inputs(), p.copies], ['Inspect @`/other/space name.png` ', 0, 0, 1, ['/other/space name.png']]);
   check('gallery raw URL keeps the card root', a.body.querySelector('.fthumb').src, '/s/session/fs/raw?path=space%20name.png&root=%2Fother');
   var b = p.win.WsFiles.open({ root: '', dir: '' }); await settle(); mode(b, 2); clickEntry(b, 'main.go');
+  check('explorer card root tabs retain folder names for session and alternate roots', [a.body.querySelectorAll('.ftab-select .fn').map(n => n.textContent), b.body.querySelector('.ftab-select .fn').textContent], [['src', 'other'], 'session']);
+  check('explorer card footer exposes selected path, attach, and copy', [b.body.querySelector('.fselection b').textContent, b.body.querySelectorAll('.ffooter .fattachment button').map(n => n.textContent)], ['main.go', ['js.files.send', 'js.files.copy']]);
+  check('five view icons use the embedded Lucide sprite and accessible names', b.body.querySelectorAll('.fview-modes button').map(n => [n.html.includes('#l-'), !!n.getAttribute('aria-label')]), Array(5).fill([true, true]));
+  b.body.querySelectorAll('.fseg button')[1].click();
+  check('content-only toggles are isolated between Files tab and explorer cards', [tabPane.querySelector('.fopts').hidden, a.body.querySelector('.fopts').hidden, b.body.querySelector('.fopts').hidden], [true, true, false]);
+  b.body.querySelectorAll('.fseg button')[0].click();
+  check('returning explorer card to name mode hides content-only toggles', b.body.querySelector('.fopts').hidden, true);
   draft(p, ''); send(b);
   check('session-root mention stays relative and does not mutate another owner', [p.ctext.value, selected(a).absolute, selected(b).path, p.owners.tab.location().dir], ['@main.go ', '/other/space name.png', 'main.go', 'src']);
   check('two cards have isolated ID-keyed records', [a.id !== b.id, a.explorerKey !== b.explorerKey, !!p.store[a.explorerKey], !!p.store[b.explorerKey]], [true, true, true, true]);
@@ -87,6 +96,7 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
 
   // The existing toolbar toggle still opens its own persistent sheet.
   var toggle = p.W.toolbar().querySelector('.board-files'); toggle.click(); await settle();
+  check('toolbar sheet shares compact rows and footer without losing actions', [!!p.owners.sheet.el.querySelector('.fbar .ftabs'), !!p.owners.sheet.el.querySelector('.fsr .fseg'), p.owners.sheet.el.querySelector('.fopts').hidden, p.owners.sheet.el.querySelectorAll('.ffooter .fattachment button').length], [true, true, true, 2]);
   check('toolbar toggle keeps sheet behavior', [p.owners.sheet.el.hidden, p.owners.sheet.el.hasAttribute('data-max')], [false, true]);
   fire(p.owners.sheet.el.querySelector('.fentry'), 'dblclick'); await settle();
   // Wrap open only to observe order, leaving the actual registered implementation in use.
