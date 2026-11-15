@@ -73,6 +73,21 @@ test('footer and popover show only detected harnesses, source, age, reset and sa
   pop.close();
 });
 
+test('fractional percentages round like the server and pace, in footer, title and popover', async () => {
+  const at = Date.UTC(2026, 10, 15), env = environment(at), resetsAt = at + 3600000;
+  const cases = [[59.6, '60'], [59.000000001, '59'], [28.999999999999996, '29'], [59.4, '59']];
+  const mounted = env.window.WsUsage.mount(env.doc, env.rail);
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open();
+  for (const [percent, want] of cases) {
+    env.set({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent, resetsAt, asOf: at }] }] });
+    env.ticks[0].fn(); await flush();
+    assert.equal(env.button.querySelector('.usage-number').textContent, want + '%', String(percent));
+    assert.ok(env.button.querySelector('.usage-column').title.includes('Weekly: ' + want + '%;'), String(percent));
+    assert.ok(pop.el.querySelector('.usage-window').textContent.includes(want + '%'), String(percent));
+  }
+  pop.close();
+});
+
 test('footer matches normal, over-pace and weekly-only reference columns', async () => {
   const at = Date.UTC(2026, 10, 15), env = environment(at);
   const w = (kind, percent, elapsed) => ({ kind, percent, asOf: at, resetsAt: at + (1 - elapsed) * (kind === 'five_hour' ? 5 * 3600000 : 7 * 86400000) });

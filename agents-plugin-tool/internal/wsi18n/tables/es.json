@@ -1388,7 +1388,6 @@
   "js.wb.copy": "Copiar",
   "js.wb.copy.done": "Copiado",
   "js.wb.copy.wrap": "Ajustar líneas largas",
-  "js.wb.stream.run": "Registro {0} · {1}",
   "js.wb.stream.system": "Eventos del sistema {0} · {1}",
   "js.wb.tag.announced": "Valor por defecto anunciado — tiene una única respuesta que se deriva de restricciones existentes, decisiones anteriores o convenciones del proyecto; basta con confirmarlo.",
   "js.wb.tag.policy": "Pregunta de criterio — depende de tus preferencias, prioridades o dirección del producto; elige una opción.",

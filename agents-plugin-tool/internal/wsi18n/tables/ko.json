@@ -1,7 +1,7 @@
 {
   "agent.context": "컨텍스트: {0} 토큰",
   "agent.done": "완료",
-  "agent.effort": "노력 수준: {0}",
+  "agent.effort": "추론 강도: {0}",
   "agent.failed": "실패",
   "agent.model": "모델: {0}",
   "agent.name": "에이전트 {0}",
@@ -1388,7 +1388,6 @@
   "js.wb.copy": "복사",
   "js.wb.copy.done": "복사됨",
   "js.wb.copy.wrap": "줄 바꿈",
-  "js.wb.stream.run": "로그 {0}줄 · {1}",
   "js.wb.stream.system": "시스템 이벤트 {0}개 · {1}",
   "js.wb.tag.announced": "기본값 안내 — 기존 제약·이전 결정·프로젝트 관례에서 답이 하나로 정해지는 항목입니다. 확인만 해 주세요.",
   "js.wb.tag.policy": "정책 질문 — 사용자의 선호·우선순위·제품 방향에 달린 결정입니다. 선택지 중 하나를 골라 주세요.",

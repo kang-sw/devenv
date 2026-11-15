@@ -57,7 +57,7 @@ function mounted(key, text) { return mountFrame(new El("div", { "class": "doc-fr
 function holder(key, text) { return new El("div", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text }); }
 function run(f) { return new El("article", {}, [new El("details", { open: "" }, [f])]); }
 function topic(th, bodyFrame, runs) {
-  return new El("section", { "class": "topic", "data-topic": "A", "data-th": th }, [new El("div", { "class": "doc-body framed" }, [bodyFrame]), new El("details", { "class": "topic-stream", open: "" }, runs.map(run))]);
+  return new El("section", { "class": "topic", "data-topic": "A", "data-th": th }, [new El("div", { "class": "doc-body framed" }, [bodyFrame]), new El("div", { "class": "topic-stream" }, runs.map(run))]);
 }
 function setup() {
   var board = new El("div", { id: "r-board" });

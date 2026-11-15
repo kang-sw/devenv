@@ -281,7 +281,7 @@
   // shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  var fpane = $("files"), chead = $("chead"), filesSeen = false;
+  var fpane = $("files"), chead = $("chead"), filesSeen = false, filesTab = null, filesSheet = null;
   // syncChead moves the conversation's counts from the entries region's
   // own title bar, which a live page hides, into the panel's header; it
   // runs on load and after each entries swap.
@@ -307,9 +307,9 @@
     // The Files pane hears each time it comes into view (a tab, a layout,
     // or a resize showed it) and each time it leaves.
     var fs = visible(fpane);
-    if (fs !== filesSeen && window.WsFiles) {
-      if (fs) window.WsFiles.shown();
-      else window.WsFiles.hidden();
+    if (fs !== filesSeen && filesTab) {
+      if (fs) filesTab.shown();
+      else filesTab.hidden();
     }
     filesSeen = fs;
   }
@@ -710,6 +710,34 @@
   // below 2200px the column takes the rail's place and the rail overlays.
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
+  // Two owners, not two views onto one explorer. Keep the tab's existing
+  // storage keys; the toolbar uses the same records in its own namespace.
+  if (live && fpane && window.WsFiles) {
+    function createFiles(node, rootSlot, toolbar) {
+      return window.WsFiles.create(node, {
+        rid: rid, post: post, toast: toast, copy: copyText, rootSlot: rootSlot,
+        load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : load,
+        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : save,
+        local: function () { return root.hasAttribute("data-sysopen"); }
+      });
+    }
+    filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false);
+    var sheet = doc.createElement("section");
+    sheet.id = "toolbar-files";
+    sheet.className = "fpane";
+    sheet.hidden = true;
+    sheet.setAttribute("aria-label", fpane.getAttribute("aria-label"));
+    doc.body.appendChild(sheet);
+    var sheetInstance = null;
+    filesSheet = {
+      el: sheet,
+      shown: function () {
+        if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
+        sheetInstance.shown();
+      },
+      hidden: function () { if (sheetInstance) sheetInstance.hidden(); }
+    };
+  }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
   function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
@@ -735,7 +763,7 @@
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
-        files: fpane && window.WsFiles ? revealPanes : null
+        files: filesSheet
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
@@ -790,14 +818,6 @@
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   boardBoxes().forEach(watchBoard);
-  // --- the Files pane (files.js): mounted once, loaded when first shown -------
-  if (live && fpane && window.WsFiles) {
-    window.WsFiles.mount(fpane, {
-      rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
-      rootSlot: chead && chead.querySelector(".fsum"),
-      local: function () { return root.hasAttribute("data-sysopen"); }
-    });
-  }
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
@@ -1806,9 +1826,9 @@
   // marker drops the chip, removing the chip deletes the marker. A dropped
   // image waits in imgTrash, so an undo that brings its marker back brings
   // the chip back too. Numbers are never reused or rewritten within a draft
-  // (rewriting text the user is editing shakes it); the server renumbers a
-  // send that merges into a held message, so the page never numbers across
-  // sends.
+  // (rewriting text the user is editing shakes it). Each send is its own
+  // held message, numbered as the draft numbered it; a fresh draft numbers
+  // from 1 again.
   //
   // The board's note pens (item notes and topic notes) take pasted images
   // too: one image list and one number sequence span the composer text and
@@ -2561,13 +2581,15 @@
     });
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
-  // the composer, oldest first, ahead of the draft: their texts joined as
+  // the composer, in the order given (an interrupt's queue order: steered
+  // first, then the rest, oldest first), ahead of the draft: their texts joined as
   // paragraphs, their answer chips, their mentions and web picks, their topic notes back
   // on the board's topics (restoreTopics), and their images as chips that
   // reference the written files, with their markers in the returned text
   // and notes. Each message's numbers move above the highest the draft and
   // the messages before it use, the markers in its text, chip notes, and
-  // topic notes with them, as the server numbers a merge. An image no
+  // topic notes with them, so the restored draft never names a number
+  // twice. An image no
   // restored text names (a message held before images were numbered, or a
   // note a newer one replaced) gets a marker in the composer, so the next
   // edit does not drop it.
@@ -2595,10 +2617,12 @@
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
     Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
     imgs.forEach(function (p) { top = Math.max(top, p.n); });
-    // A later message's answer replaces an earlier one's, and a chip
-    // attached since keeps its newer answer.
-    var got = {}, order = [];
+    // The newest send's answer wins (its sentAt; a later message on a tie),
+    // whatever the list's queue order, and a chip attached since keeps its
+    // newer answer.
+    var got = {}, gotAt = {}, order = [];
     list.forEach(function (res) {
+      var at = +res.sentAt || 0;
       var names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
       names.forEach(function (name, i) {
         var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
@@ -2613,7 +2637,9 @@
         Object.keys(c).forEach(function (k) { o[k] = c[k]; });
         if (c.note) o.note = rn(c.note);
         if (!got[c.id]) order.push(c.id);
+        else if (at < gotAt[c.id]) return;
         got[c.id] = o;
+        gotAt[c.id] = at;
       });
       var stray = restoreTopics((res.topics || []).map(function (tn) { return { topic: tn.topic, note: rn(tn.note) }; }));
       if (stray.length) text += (text ? "\n\n" : "") + stray.join("\n");
@@ -2629,7 +2655,7 @@
     grow();
     shiftMentions(back.length + (back && cur ? 2 : 0) - lead);
     imgs.sort(function (a, b) { return a.n - b.n; });
-    // Their mentions go back ahead of the draft's, oldest message first.
+    // Their mentions go back ahead of the draft's, in the order given.
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);

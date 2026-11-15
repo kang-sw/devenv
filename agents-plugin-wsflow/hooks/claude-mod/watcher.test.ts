@@ -1701,7 +1701,7 @@ describe('board messages', () => {
     expect(h.waits.at(-1)!.board).toBe(true)
   })
 
-  test('an entry merged while held is injected once', async () => {
+  test('an entry replaced while held is injected once', async () => {
     const { h, w } = await boardOn()
     h.turn.running = true
     h.board.inbox.push('pick B')
