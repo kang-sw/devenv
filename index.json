@@ -384,7 +384,14 @@
       "registered_at": "2026-11-14T11:13:55Z"
     },
     "261114-epic-ws-dashboard-file-explorer": {
-      "registered_at": "2026-11-14T13:07:39Z"
+      "registered_at": "2026-11-14T13:07:39Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:50:28Z"
+      }
     },
     "261114-feat-ws-content-change-relative-hover": {
       "registered_at": "2026-11-14T11:47:01Z",
