@@ -172,19 +172,6 @@
     "261113-feat-ws-tracker-calendar-multi-day-spans": {
       "registered_at": "2026-11-13T13:42:45Z"
     },
-    "261113-feat-ws-whiteboard-update-refusal-cost": {
-      "registered_at": "2026-11-13T04:24:45Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T17:46:26Z",
-        "impl": {
-          "branch": "impl/develop/hash-print-taste"
-        }
-      }
-    },
     "261113-refactor-ws-dashboard-drop-lan-serving": {
       "registered_at": "2026-11-13T14:07:27Z"
     },
@@ -525,6 +512,9 @@
     },
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
+    },
+    "261116-bug-ws-worktree-acquire-stale-branch-facts": {
+      "registered_at": "2026-11-15T19:26:39Z"
     },
     "261116-refactor-ws-model-evidence-bounded-retention": {
       "registered_at": "2026-11-15T16:42:54Z",
