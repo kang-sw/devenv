@@ -422,6 +422,57 @@ links and the platform report.
   check delivers them.
 - Never launch Electron, the smoke, or the built app on the Mac.
 
+##### Windows rerun checkpoint (01eabf885) - 2026-11-15
+
+The platform changes landed, but Windows acceptance has **not run**. No
+Electron executable, built app or smoke was launched on the Mac. No later
+phase, shell runtime policy, dashboard/daemon source, dependency pin or
+protocol/API was changed. The ticket remains in `ready/`.
+
+- `scripts/build.cjs` supports offline win32-x64 packaging from the normal
+  local Electron cache. Windows uses Electron's default icon (the Edition's
+  allowed no-custom-icon option); darwin's PNG-to-icns path is unchanged.
+- The smoke selects the Windows app/fixture `.exe` paths and retains every
+  existing assertion. A test-only host helper inventories Windows processes
+  with CIM PID, parent and creation identity so cleanup retains the original
+  owned-process safety. Additional evidence covers native menu metadata,
+  close-dialog options and an optional Windows OS-injected Ctrl-key probe.
+- Mac headless `npm test`: **18 passed** (the original 14 plus four platform,
+  process-identity and offline-packaging contracts). `npm run build`:
+  **passed**, producing `dist/Werkschaft-darwin-arm64/Werkschaft.app`
+  offline. The pre-existing optional `.icon` format warning remains.
+- A git bundle based on the host's `08991c9b9` was copied and fetched into
+  the host clone successfully. `git switch
+  impl/exec4/electron-phase1/cake-ember-ramp` then refused to overwrite the
+  pre-existing `agents-plugin-tool/internal/wsdoc/tickets_scope_test.go`
+  modification (+52/-4). The host stays on its original `develop` checkout;
+  that work was not stashed, discarded, committed or edited. Stop (b): the
+  lead must authorize preserving/restoring it before this checkout proceeds.
+- Another prerequisite needs a narrow authorization correction: the host
+  has no Windows Electron cache, and the pinned Electron 44.11.3 package has
+  **no postinstall script**. Its explicit `node
+  node_modules/electron/install.js` downloads the executable; the approved
+  single `npm ci --no-audit --no-fund` alone will not do so. No npm install
+  or network download was attempted. The lead was asked to authorize that
+  one pinned win32-x64 artifact download; no permission was inferred.
+- Windows-versus-Mac empirical differences (Ctrl delivery, native menu bar,
+  dialog rendering, focus, dashboard screenshot) remain **unverified**.
+  The configured Windows default icon differs from the custom macOS icon;
+  the unchanged runtime's retry title still says `⌘R` on either platform.
+  No platform assertion was removed to hide a difference.
+- Final host `tasklist`/CIM scans show no electron, Werkschaft, node or
+  smoke-daemon processes. This run launched none, signalled none, and
+  created no scheduled task (`exec4-smoke` is absent). The Mac process scan
+  shows no owned app/fixture processes. Ignored evidence is under
+  `agents-plugin-tool/desktop-electron/dist/evidence/windows/`
+  (`summary.json`, `preflight-process-scan.log`); there are no Windows
+  screenshots because acceptance has not started. The allowed npm ci
+  remains unused, and Playwright copying/daemon build remain pending.
+- Independent review is deferred to the lead under the explicit
+  no-child-agent adaptation. Resume with the host-file preservation and
+  explicit Electron download authorizations, then complete the original
+  Windows interactive-session smoke and evidence cleanup.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
