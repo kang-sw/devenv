@@ -865,7 +865,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T02:21:33Z",
         "impl": {
           "branch": "impl/develop/fever-avid-stove"
