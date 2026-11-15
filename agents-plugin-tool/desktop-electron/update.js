@@ -186,9 +186,10 @@ if [ "$relaunch" = 1 ]; then /usr/bin/open -n "$target" --args "$@"; fi
 exit $code
 `;
 // RelaunchArgs is base64 (UTF-8) of the app's command line, already quoted
-// for Windows by windowsCommandLine, or "-" for none: one opaque token, so no
-// argument text is ever parsed by PowerShell.
+// for Windows by windowsCommandLine: one opaque token, so no argument text
+// is ever parsed by PowerShell. Empty command lines use the parameter default.
 const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch, [string]$RelaunchArgs = '-')
+"helper started pid=$PID app=$AppPid"
 $ErrorActionPreference = 'Stop'
 try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
 if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { 'app did not exit'; exit 1 }
@@ -250,7 +251,7 @@ function helperCommand(platform, script, { pid, target, staged, backup, staging,
     return [path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script,
         '-AppPid', String(pid), '-Target', target, '-Staged', staged, '-Backup', backup, '-Staging', staging, '-Relaunch', flag,
-        '-RelaunchArgs', line ? Buffer.from(line, 'utf8').toString('base64') : '-']];
+        ...(line ? ['-RelaunchArgs', Buffer.from(line, 'utf8').toString('base64')] : [])]];
   }
   return ['/bin/sh', [script, String(pid), target, staged, backup, staging, flag, ...args]];
 }

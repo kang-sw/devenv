@@ -240,9 +240,11 @@ test('helper and extraction commands for both platforms', () => {
   const [ps, psArgs] = u.helperCommand('win32', 'C:\\s\\apply.ps1', opts, { SystemRoot: 'C:\\Windows' });
   assert.equal(ps, path.join('C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
   assert.deepEqual(psArgs, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', 'C:\\s\\apply.ps1',
-    '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1', '-RelaunchArgs', '-']);
+    '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1']);
   const ps1 = u.helperScript('win32');
   assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch, \[string\]\$RelaunchArgs = '-'\)/);
+  assert.match(ps1, /\n"helper started pid=\$PID app=\$AppPid"\n\$ErrorActionPreference/);
+  assert.ok(ps1.indexOf('helper started') < ps1.indexOf('Wait-Process'));
   for (const needle of ['Wait-Process -Id $AppPid', 'Move-Item -LiteralPath $Target -Destination $Backup',
     'Move-Item -LiteralPath $Staged -Destination $Target', 'Move-Item -LiteralPath $Backup -Destination $Target',
     "Join-Path $Target 'Werkschaft.exe'"]) assert.ok(ps1.includes(needle), needle);
@@ -353,8 +355,11 @@ test('both helper kinds receive the original arguments for a relaunch', () => {
   const token = ps[ps.indexOf('-RelaunchArgs') + 1];
   assert.match(token, /^[A-Za-z0-9+/=]+$/, 'one opaque base64 token, nothing for PowerShell to parse');
   assert.deepEqual(splitWindows(Buffer.from(token, 'base64').toString('utf8')), ORIGINAL);
-  const [, none] = u.helperCommand('win32', 'C:\\s\\apply.ps1', { ...opts, args: [] }, { SystemRoot: 'C:\\Windows' });
-  assert.equal(none.at(-1), '-');
+  for (const relaunch of [false, true]) {
+    const [, none] = u.helperCommand('win32', 'C:\\s\\apply.ps1', { ...opts, relaunch, args: [] }, { SystemRoot: 'C:\\Windows' });
+    assert.equal(none.includes('-RelaunchArgs'), false, 'omit empty args: powershell.exe -File cannot bind a bare hyphen');
+    assert.deepEqual(none.slice(-2), ['-Relaunch', relaunch ? '1' : '0']);
+  }
   const ps1 = u.helperScript('win32');
   assert.ok(ps1.includes("[string]$RelaunchArgs = '-')"));
   assert.ok(ps1.includes('[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))'));
