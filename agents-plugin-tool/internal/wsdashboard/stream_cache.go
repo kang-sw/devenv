@@ -68,6 +68,8 @@ type pageRender struct {
 	board *boardTopics
 	// rail is the row decomposition, shared across rail subscribers.
 	rail *railRows
+	// tree separates nested agent/peer row inputs once per shared render.
+	tree *treeRows
 	// ok is false once the page is gone. err instead denotes a transient
 	// read failure: retain the last good render and retry on a refresh tick.
 	ok  bool

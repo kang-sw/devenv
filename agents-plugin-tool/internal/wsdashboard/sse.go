@@ -332,6 +332,7 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 				return pr
 			}
 			pr.regions = regions
+			pr.tree = splitTreeRows(string(regions[regionTree].HTML))
 			if view.HasBoard && view.BoardUnits != nil {
 				pr.board = view.BoardUnits.rendered(theme).topics
 			} else {
@@ -460,6 +461,10 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 	if r.URL.Query().Get("railrows") == "1" && only.has(regionRail) {
 		rail = &railRowState{}
 	}
+	var tree *treeRowState
+	if r.URL.Query().Get("treerows") == "1" && only.has(regionTree) && src.key.replyID != "" {
+		tree = &treeRowState{}
+	}
 	var parts []sidePart
 	if side != nil {
 		part := sidePart{src: *side, page: d.cache.acquire(side.key)}
@@ -494,7 +499,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			}
 			regions := only.apply(pr.regions)
 			sent := false
-			sent, ok := d.sendRowRegions(sink, regions, held, topics, pr.board, rail, pr.rail)
+			sent, ok := d.sendTreeRegions(sink, regions, held, topics, pr.board, rail, pr.rail, tree, pr.tree)
 			if !ok {
 				return false
 			}
@@ -626,11 +631,16 @@ func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string
 }
 
 func (d *Daemon) sendRowRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics, rail *railRowState, rows *railRows) (sent, ok bool) {
+	return d.sendTreeRegions(sink, regions, held, topics, board, rail, rows, nil, nil)
+}
+
+func (d *Daemon) sendTreeRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics, rail *railRowState, rows *railRows, tree *treeRowState, treeUnits *treeRows) (sent, ok bool) {
 	for _, name := range sortedRegionNames(regions) {
 		region := regions[name]
 		isBoard := name == regionBoard && topics != nil
 		isRail := name == regionRail && rail != nil
-		if held[name] == region.Hash && !(isBoard && topics.previous == nil) && !(isRail && !rail.initialized) {
+		isTree := name == regionTree && tree != nil
+		if held[name] == region.Hash && !(isBoard && topics.previous == nil) && !(isRail && !rail.initialized) && !(isTree && !tree.initialized) {
 			continue
 		}
 		event, data := "region", any(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
@@ -639,6 +649,9 @@ func (d *Daemon) sendRowRegions(sink streamSink, regions regionSet, held map[str
 		}
 		if isRail {
 			event, data = rail.event(region, rows)
+		}
+		if isTree {
+			event, data = tree.event(region, treeUnits)
 		}
 		payload, _ := json.Marshal(data)
 		if sink.event(event, payload) != nil {
@@ -649,6 +662,9 @@ func (d *Daemon) sendRowRegions(sink streamSink, regions regionSet, held map[str
 		}
 		if isRail {
 			rail.previous, rail.initialized = rows, true
+		}
+		if isTree {
+			tree.previous, tree.initialized = treeUnits, true
 		}
 		d.stats.Sends.Add(1)
 		held[name] = region.Hash
