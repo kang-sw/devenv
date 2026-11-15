@@ -29,7 +29,7 @@ var document=new E(),window={wsT:true,addEventListener:()=>{}},now=Date.parse('2
 document.createElement=()=>new E();
 Date.now=()=>now;
 function setInterval(fn,ms){timers.push({fn,ms});return timers.length;}
-function wsT(k,...a){return ({'js.wb.state.awaiting-confirmation':'확인 대기','js.wb.state.waiting':'대기','js.wb.state.discussing':'논의 중','js.wb.state.implementing':'구현 중','js.wb.state.eta':'ETA {0}분 · {1}분 경과'}[k]||k).replace(/\{(\d+)\}/g,(_,i)=>a[i]);}
+function wsT(k,...a){return ({'js.wb.state.awaiting-confirmation':'확인 대기','js.wb.state.waiting':'대기','js.wb.state.discussing':'논의 중','js.wb.state.implementing':'구현 중','js.wb.state.researching':'연구 중','js.wb.state.estimate':'예상 {0}분','js.wb.state.eta':'ETA {0}분 · {1}분 경과'}[k]||k).replace(/\{(\d+)\}/g,(_,i)=>a[i]);}
 const start=now;
 function topic(state='implementing'){
  const n=new E('topic');n.setAttribute('data-topic','work');n.setAttribute('data-state',state);
@@ -41,6 +41,66 @@ function eta(){return n.querySelector('.eta');}
 function tick(at){now=at;timers[0].fn();}
 function expected(minutes,over){assert.equal(eta().textContent,'ETA 30분 · '+minutes+'분 경과'+(over?' (+'+over+')':''));assert.equal(eta().classList.contains('wb-state-over'),!!over);}
 `
+
+func TestTopicStateBadgeResearchingMetadata(t *testing.T) {
+	data, err := embeddedAsset("ago.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("node required for research badge contract")
+	}
+	script := stateBadgeDOM + string(data) + `
+// A transition must discard an overdue implementing clock, even if stale run
+// attributes survive temporarily. Research reads only owner and estimate.
+tick(start+47*60000);expected(47,17);
+n.setAttribute('data-state','researching');window.wbAgo(n);
+assert.equal(n.querySelector('.stb').className,'stb research');
+assert(n.querySelector('.wb-state-dot'));
+assert.equal(n.querySelector('.stb').textContent,'연구 중 · <img src=x onerror=attack()>');
+assert.equal(n.querySelector('.own').children.length,0,'owner remains literal text');
+assert.equal(n.querySelector('.state-estimate').textContent,'예상 30분');
+assert.equal(eta(),null);assert.equal(n.querySelector('.wb-state-over'),null);
+for(const k of ['run','started-at','deadline-at'])delete n.attrs['data-state-'+k];
+window.wbAgo(n);
+const estimate=n.querySelector('.state-estimate');tick(start+999999999);
+assert.equal(n.querySelector('.state-estimate'),estimate,'informational estimate is not rebuilt by ticks');
+assert.equal(estimate.textContent,'예상 30분');assert.equal(eta(),null);
+for(const [owner,minutes] of [['next owner','7'],['','7'],['owner only',''],['','']]) {
+ if(owner)n.setAttribute('data-state-owner',owner);else delete n.attrs['data-state-owner'];
+ if(minutes)n.setAttribute('data-state-eta-minutes',minutes);else delete n.attrs['data-state-eta-minutes'];
+ window.wbAgo(n);
+ assert.equal(n.querySelector('.stb').textContent,'연구 중'+(owner?' · '+owner:''));
+ assert.equal(n.querySelector('.own')?.textContent||'',owner);
+ assert.equal(n.querySelector('.state-estimate')?.textContent||'',minutes?'예상 '+minutes+'분':'');
+ assert.equal(eta(),null);
+}
+for(const bad of ['0','-1','1.5','NaN','9007199254740992']) {
+ n.setAttribute('data-state-eta-minutes',bad);window.wbAgo(n);assert.equal(n.querySelector('.state-estimate'),null);
+}
+n.setAttribute('data-state-owner','researcher');n.setAttribute('data-state-eta-minutes','7');window.wbAgo(n);
+for(const state of ['waiting','discussing','awaiting-confirmation','implementing']) {
+ n.setAttribute('data-state',state);window.wbAgo(n);
+ assert.equal(n.querySelector('.state-estimate'),null);assert.equal(n.querySelector('.own'),null);assert.equal(eta(),null);
+}
+n.setAttribute('data-state-run','fresh');n.setAttribute('data-state-started-at',new Date(now).toISOString());n.setAttribute('data-state-deadline-at',new Date(now+7*60000).toISOString());window.wbAgo(n);
+assert.equal(eta().textContent,'ETA 7분 · 0분 경과','implementing starts its own fresh clock');
+for(const mode of ['closed','diagnostic','absence']) {
+ n.setAttribute('data-state','researching');window.wbAgo(n);assert(n.querySelector('.topic-state'));
+ if(mode==='closed')n.classList.toggle('closed',true);
+ if(mode==='diagnostic')n.setAttribute('data-state-diagnostic','malformed');
+ if(mode==='absence')delete n.attrs['data-state'];
+ window.wbAgo(n);assert.equal(n.querySelector('.topic-state'),null);
+ n.classList.toggle('closed',false);delete n.attrs['data-state-diagnostic'];
+}
+console.log('PASS research metadata, transitions and clearing');`
+	out, err := nodeScript(node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("research badge node: %v\n%s", err, out)
+	}
+	t.Log(string(out))
+}
 
 func TestTopicStateBadgeClockAndReconciliation(t *testing.T) {
 	data, err := embeddedAsset("ago.js")
