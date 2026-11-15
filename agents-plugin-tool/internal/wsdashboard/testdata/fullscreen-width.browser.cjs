@@ -19,17 +19,18 @@ const html = `<!doctype html><html data-rid="fixture" data-theme="light"><head><
 <link rel="stylesheet" href="/page.css"><link rel="stylesheet" href="/dashboard.css"></head>
 <body class="dash live"><svg width="0" height="0" style="position:absolute">${sprite}</svg>
 <div class="dwrap"><div class="top"><h1>Shared fullscreen width — isolated fixture</h1></div><div class="dbody">
-<main class="dgrid live" id="grid" data-tab="board"><div class="r-tree">Session / fixture</div><div class="thead chead">Conversation / Files</div>
+<aside class="rail" id="rail">Session rail / isolated fixture</aside><div class="rscrim"></div>
+<main class="dgrid live" id="grid" data-tab="board" data-layout="split"><div class="r-tree">Session / fixture</div><div class="thead chead">Conversation / Files</div>
 <div class="convo" id="convo"><p>Owning conversation column</p></div><div class="composer">Fixture — no daemon, terminal or provider</div>
 <div class="bcol" id="bcol"><div class="r-board" id="r-board"><section class="topic" data-topic="width"><div class="tophead"><div class="tbar"><b>Topic with mixed content</b></div></div>
 <div class="tdoc"><p>Topic owns its category; inner code or media never overrides it.</p></div>
 <article class="wb-entry panel" data-kind="panel"><details class="entry-panel" data-key="entry:p1"><summary><span class="entry-recap">Framed entry panel</span><span class="pmeta">p1 · 2 versions</span><button class="ibtn d-max">↗</button><button class="ibtn d-min">↙</button></summary>
 <div class="doc-body entry-body framed"><iframe title="stable entry frame" sandbox="allow-scripts" srcdoc="<p>Stable frame</p>"></iframe><details class="inner-disclosure"><summary>Inner disclosure</summary>Preserved body</details>${'<p>Scrollable panel content</p>'.repeat(50)}</div>
-<details class="panel-versions"><summary>Versions</summary>Independent version state</details></details></article></section></div></div></main></div></div>
-<aside class="bpins" id="bpins"></aside><section class="fpane" id="toolbar-files" hidden><div class="fhd">Files / fixture</div><input class="fq" aria-label="Search files"><div class="ftree">docs/ · src/ · README.md</div></section>
+<details class="panel-versions"><summary>Versions</summary>Independent version state</details></details></article></section></div></div></main><aside class="bpcol" id="bpcol"></aside></div></div>
+<section class="fpane" id="toolbar-files" hidden><div class="fhd">Files / fixture</div><input class="fq" aria-label="Search files"><div class="ftree">docs/ · src/ · README.md</div></section>
 <script>const translations=${translations}; function wsT(k,a,b){return k==='js.board.toolbar.count'?'1 open topic':translations[k]||k;}</script>
 <script src="/cards.js"></script><script src="/preview.js"></script><script>
-var W=window.WsCards, board=document.getElementById('r-board'), col=document.getElementById('bpins');
+var W=window.WsCards, board=document.getElementById('r-board'), col=document.getElementById('bpcol');
 var files=document.getElementById('toolbar-files'), counters={shown:0,hidden:0,sized:0};
 W.register('terminal',{open:function(c){c.title({icon:'square-terminal',name:'Terminal / measured board column'});c.body.innerHTML='<pre>fixture@workspace % go test -run TestFullscreenPanelWidth\\nPASS\\n\\nWidth changes preserve the same content node.\\nNormal width comes from this terminal’s owning column.\\nUse the adjacent button to extend and restore.</pre>';},sized:function(){counters.sized++;}});
 W.register('web',{open:function(c){c.title({icon:'globe',name:'Web card'});c.body.innerHTML='<iframe title="stable web" srcdoc="<h2>Stable web content</h2>"></iframe>';}});
@@ -59,13 +60,23 @@ const observations = [], screenshots = [];
 async function rect(page, selector) { return page.locator(selector).evaluate(n => { const r = n.getBoundingClientRect(); return {left:r.left,right:r.right,width:r.width,top:r.top,bottom:r.bottom}; }); }
 function near(actual, expected, name) { assert(Math.abs(actual - expected) <= 1, `${name}: ${actual} != ${expected}`); }
 async function geometry(page, selector, width, expected, name) {
+  // setViewportSize can resolve before the page's resize handler recomputes
+  // its inset. Wait for the observable contract, not an arbitrary delay.
+  await page.waitForFunction(({selector,width,expected}) => {
+    const n=document.querySelector(selector), r=n && n.getBoundingClientRect();
+    return r && Math.abs(r.width-expected)<=1 && Math.abs(r.left-(width-expected)/2)<=1;
+  }, {selector,width,expected});
   const r = await rect(page, selector); near(r.width, expected, name); near(r.left, (width - expected) / 2, name + ' centered');
   observations.push({name,viewport:width,...r});
+}
+async function cardClick(page, variable, control) {
+  const id = await page.evaluate(name => window[name].id, variable);
+  await page.locator(`[data-card="${id}"] ${control}`).click();
 }
 async function preview(page, kind) {
   await page.evaluate(kind => { window.activeCard = WsPreview.open(kind + '.fixture'); }, kind);
   await page.waitForFunction(() => activeCard.el.hasAttribute('data-preview-kind'));
-  await page.evaluate(() => activeCard.maxBtn.click());
+  await cardClick(page, 'activeCard', '.bc-max');
 }
 async function shot(page, name) {
   const file = path.join(evidence, name + '.png'); await page.screenshot({path:file}); screenshots.push(file);
@@ -86,7 +97,8 @@ async function shot(page, name) {
     await page.locator('.bcard[data-max] .bc-min').click();
   }
   for (const [kind, expected] of [['web',1600],['approval',1024],['system',1024],['other',1920]]) {
-    await page.evaluate(kind => { window.testCard=W.open(kind,{}); testCard.maxBtn.click(); },kind);
+    await page.evaluate(kind => { window.testCard=W.open(kind,{}); },kind);
+    await cardClick(page, 'testCard', '.bc-max');
     await geometry(page,'.bcard[data-max] .bc-in',2400,expected,kind);
     if(kind==='web') {
       await page.evaluate(() => { window.keptWeb=testCard.body.firstChild; });
@@ -99,8 +111,20 @@ async function shot(page, name) {
   // Retire the prior cases' cards: a growing synthetic flow is not the page's
   // normal preview-slot lifecycle and would bury the following topic controls.
   await page.evaluate(() => { W.list().slice().forEach(c => c.close()); document.getElementById('bcol').scrollTop=0; });
+  // The real page has a rail before the grid and a sibling pin-column host.
+  // Without that rail the grid occupies its 340px track and clips the board
+  // to zero width, even on unmodified develop. Assert hit-testing, not dispatch.
+  assert((await rect(page, '#r-board')).width > 0, 'fixture board has a usable column');
+  const topicButton = page.locator('section.topic > .tophead .d-max');
+  await topicButton.scrollIntoViewIfNeeded();
+  const hit = await topicButton.evaluate(n => {
+    const r=n.getBoundingClientRect(), target=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+    return {rect:r.toJSON(),hit:target && target.outerHTML,receivesPointer:n===target || n.contains(target)};
+  });
+  fs.writeFileSync(path.join(evidence,'topic-click-hit-test.json'),JSON.stringify(hit,null,2));
+  assert(hit.receivesPointer, 'topic maximize receives a real pointer click');
   // Topic and entry-panel identity wins even when an inner frame contains media.
-  await page.locator('section.topic > .tophead .d-max').click();
+  await topicButton.click();
   await geometry(page,'section.topic[data-max]',2400,1440,'topic');
   await page.locator('section.topic > .tophead .d-min').click();
   await page.locator('.entry-panel > summary > .d-max').click();
@@ -127,19 +151,20 @@ async function shot(page, name) {
   // Terminal takes its original board/pinned column once, across viewport reflow.
   await page.evaluate(()=>{window.term=W.open('terminal',{});});
   const boardWidth=(await rect(page,'#r-board')).width;
-  await page.evaluate(()=>term.maxBtn.click());
+  await cardClick(page, 'term', '.bc-max');
   await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,boardWidth),'Terminal owning board');
   await page.setViewportSize({width:800,height:900});
   await geometry(page,'.bcard[data-max] .bc-in',800,Math.min(768,boardWidth,1920),'resize clamp');
   await page.setViewportSize({width:2400,height:900});
   await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,boardWidth),'original snapshot after resize');
-  await page.evaluate(()=>{term.minBtn.click();term.pin(true);});
-  const pinnedWidth=(await rect(page,'#bpins')).width;
-  await page.evaluate(()=>term.maxBtn.click());
+  await cardClick(page, 'term', '.bc-min'); await cardClick(page, 'term', '.bc-pin');
+  const pinnedWidth=(await rect(page,'#bpcol')).width;
+  assert(pinnedWidth > 0, 'fixture exposes the real optional pinned column');
+  await cardClick(page, 'term', '.bc-max');
   await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,pinnedWidth),'Terminal owning pinned column');
-  await page.evaluate(()=>{term.minBtn.click();term.pin(false);});
+  await cardClick(page, 'term', '.bc-min'); await cardClick(page, 'term', '.bc-pin');
   // Overview hands off before maximizing rather than admitting a second owner.
-  await page.evaluate(()=>{overviewHeld=true;term.maxBtn.click();});
+  await page.evaluate(()=>{overviewHeld=true;}); await cardClick(page, 'term', '.bc-max');
   assert.equal(await page.locator('[data-max]').count(),0);
   await page.evaluate(()=>{overviewHeld=false;overviewAfter();});
   await page.keyboard.press('Escape'); assert.equal(await page.locator('[data-max]').count(),0);
@@ -148,7 +173,7 @@ async function shot(page, name) {
     await page.setViewportSize({width,height:900});
     await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
     const host=(await rect(page,'#r-board')).width;
-    await page.evaluate(()=>term.maxBtn.click());
+    await cardClick(page, 'term', '.bc-max');
     await geometry(page,'.bcard[data-max] .bc-in',width,Math.min(host,1920,width-32),'capture normal');
     await shot(page,`${width}-${theme}-normal`);
     const toggle=page.locator('.bcard[data-max] .sheet-width'); assert(await toggle.isVisible());
@@ -161,7 +186,7 @@ async function shot(page, name) {
     await page.locator('.bcard[data-max] .bc-min').click();
   }
   await page.setViewportSize({width:640,height:900});
-  await page.evaluate(()=>term.maxBtn.click());
+  await cardClick(page, 'term', '.bc-max');
   await geometry(page,'.bcard[data-max] .bc-in',640,624,'mobile unchanged');
   near((await rect(page,'.bcard[data-max] .bc-in')).top,46,'mobile top');
   assert.equal(await page.locator('.bcard[data-max] .sheet-width').isVisible(),false);
@@ -171,12 +196,12 @@ async function shot(page, name) {
   await page.keyboard.press('Escape');
   // Reopen and reload never remember extension; content is not remounted by width.
   await page.setViewportSize({width:2400,height:900});
-  await page.evaluate(()=>term.maxBtn.click()); await page.locator('.bcard[data-max] .sheet-width').click();
+  await cardClick(page, 'term', '.bc-max'); await page.locator('.bcard[data-max] .sheet-width').click();
   await page.locator('.bc-scrim').click({position:{x:1,y:1}});
-  await page.evaluate(()=>term.maxBtn.click());
+  await cardClick(page, 'term', '.bc-max');
   assert.equal(await page.locator('.bcard[data-max] .sheet-width').getAttribute('aria-pressed'),'false');
   await page.locator('.bcard[data-max] .sheet-width').click(); await page.reload(); await page.waitForFunction(()=>window.fixtureReady);
-  await page.evaluate(()=>{window.term=W.list('terminal')[0];term.maxBtn.click();});
+  await page.evaluate(()=>{window.term=W.list('terminal')[0];}); await cardClick(page, 'term', '.bc-max');
   assert.equal(await page.locator('.bcard[data-max] .sheet-width').getAttribute('aria-pressed'),'false');
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(evidence,'browser-results.json'),JSON.stringify({observations,screenshots,errors},null,2));
