@@ -66,7 +66,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260911-research-impl-lifecycle-merge-authority-goal-loop-rehoming": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:53:14Z"
+      }
     },
     "260913-bug-ticket-guardrails-dont-enforce-category-enum": {
       "registered_at": "2026-09-24T10:38:33Z"
