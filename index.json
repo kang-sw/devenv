@@ -435,9 +435,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T18:28:59Z",
+        "touched_at": "2026-11-15T19:14:12Z",
         "impl": {
-          "branch": "impl/develop/copy-equal-wound"
+          "branch": "impl/develop/marble-cobalt-sparrow"
         }
       }
     },
