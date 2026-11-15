@@ -252,7 +252,14 @@
       "registered_at": "2026-11-11T10:28:07Z"
     },
     "261112-epic-ws-mcp-pi-subagents": {
-      "registered_at": "2026-11-12T07:22:22Z"
+      "registered_at": "2026-11-12T07:22:22Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:50:21Z"
+      }
     },
     "261112-feat-pi-subagent-long-shell-auto-background": {
       "registered_at": "2026-11-12T07:07:20Z"
