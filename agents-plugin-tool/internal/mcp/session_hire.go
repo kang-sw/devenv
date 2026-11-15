@@ -25,7 +25,7 @@ type sessionHireHost interface {
 func (s *Server) handleSessionHire(id json.RawMessage, name string, args map[string]any) response {
 	key, _ := args["session_key"].(string)
 	key = strings.TrimSpace(key)
-	entry, ok := s.sessions.lookup(key)
+	entry, ok := s.lookupSession(key)
 	if !ok || entry.scope != roleLead || (name == "session.request_hire" && !entry.isTopLevelLead()) {
 		return toolTextResponse(id, "", fmt.Errorf("%s requires a lead session key; hiring requests require a top-level lead", name))
 	}

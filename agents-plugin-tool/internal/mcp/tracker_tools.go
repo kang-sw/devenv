@@ -62,7 +62,7 @@ func (s *Server) trackerSessionKey(tool string, args map[string]any) (string, *t
 	if err != nil {
 		return "", nil, err
 	}
-	entry, found := s.sessions.lookup(key)
+	entry, found := s.lookupSession(key)
 	if !found {
 		return "", nil, mailboxUnknownSessionError(tool)
 	}

@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0c3b54a649adcc6d
 sage-review-completeness-reviewed: 0c3b54a649adcc6d
+completed: 2026-11-16
 ---
 
 # Common session interface and parity adoption
@@ -374,3 +375,102 @@ separately. Record source fixture results separately from any later authorized
 live acceptance. Completion is the precise foundation prerequisite for
 `261114-feat-ws-conversation-audit-event-store`; audit's UI still depends on
 that backend's Phase 2, not directly on this interface or whole epic.
+
+### Result (c287a318c) - 2026-11-16
+
+- Phase 2 adopted the remaining keyed MCP access consumers through
+  `resolveSession`, in reviewable groups: authority/config/delegation
+  (`c287a318c`), mail/history (`0bfe10521`), and live/intake/reconnect
+  (`ffbbf85f1`). `edeb534a5` preserves worktree child minting as a store-only
+  operation rather than adding a hosted-registration probe or metadata read.
+  Phase 1's registry already owns backend admission; its registered-extension,
+  builtin-default, availability and unsupported-control fixtures remain intact.
+- Pre-edit inventory at `59a283670` (paths below are under
+  `agents-plugin-tool/internal/mcp/`):
+  - Authority/config/delegation: `server.go:619,758,1448,1476,1504,1540,1569,2001,2225,2458,4138,5811`;
+    `note_tools.go:87`, `tracker_tools.go:65`, `session_hire.go:28`,
+    `pi_tools.go:301`, `pi_forward.go:143`, `git_search.go:715`,
+    `git_followups.go:50`.
+  - Mail/history/render context: `mailbox_tools.go:33,152,335`,
+    `lead_mail.go:157,200`, `mailbox_history.go:307`,
+    `playbook_tools.go:373`.
+  - Live/board/reconnect: `live_snapshot.go:340,370,434`,
+    `dashboard_inbox.go:66`, `dashboard_sessions.go:230`, and the intake
+    gate at `server.go:760`. The intake handler lives in `live_snapshot.go`,
+    not a separate intake source file.
+  - After adoption, direct Server identity lookup, intake inspection and
+    mint operations occur only inside `session_context.go`. Compatibility
+    store providers remain owners: `AgentKeyStore`'s ensure/recovery and
+    non-touching lead scan (`agent_keys.go:70,92`), dashboard cached/raw
+    record/board reads (`dashboard_sessions.go:888`), and session store
+    locking, lineage enumeration and part reads/writes were not replaced by
+    touching tool lookups. These are store/lifecycle implementations, not
+    alternate hosted adoption policies.
+- Identity-only access preserves exact key matching, each caller's existing
+  trimming/refusal order, canonical-root authority, scope/parent lineage and
+  ordinary activity touch. Intake retains its existing cache and ten-second
+  revocation bound; timers do not touch activity and retain transient-read
+  versus absent-key behavior. No delivery loop, queue, ownership source,
+  registration writer or permission predicate was added. New fixtures cover
+  CLI/hosted identity selection, historical reads without migration, both
+  CLI-first and hosted-first mail claims, cache/revocation/recovery semantics,
+  and exactly one store-only worktree child mint.
+- Compatibility remains **T0**: no MCP tool/argument/response/hello change and
+  no serialized field, store conversion, profile/backend name or permission
+  change. Both versions use the unchanged key shape and schema
+  (`session_auth.go:53,121`), split/legacy readers
+  (`session_layout.go:231,237`) and part writer (`session_layout.go:312`).
+  Old and new binaries read/write the same bytes; reopening needs no
+  reconstruction. New context modes/fields are in-process only
+  (`session_context.go:12,26,38`). Historical session and dashboard layout
+  fixtures separately verify that reads do not migrate key metadata.
+- Verification used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`, with every
+  Go test run using `-count=1`. Source fixtures only; no provider/live-delivery
+  acceptance is claimed. Logs and the exact-base archive are in
+  `/tmp/ws-csi-phase2.ojsxAb/`:
+  - Focused MCP access/login/mail/live/authority/delegation run:
+    **211 top-level tests passed**, 59.153 s (`mcp-final.log`,
+    `go test ./internal/mcp -run` selecting the adopted consumer groups,
+    `-timeout 600s -v`). Earlier per-group runs also passed. The first new
+    mail fixture assumed whitespace in compact JSON; only that test was
+    corrected to decode the unchanged response, then reverified.
+  - State/config/board run: **56 top-level tests passed**, 13.594 s
+    (`mcp-state.log`), using
+    `-run '^Test(ConfigGet.*|ConfigListSurfacesRepoScope|ConfigListKeylessSkipsRepoScope|ConfigTuneScalarRepoWrite|WorkflowManual.*|WorkflowState.*|ServeStdioTodo.*|ServeStdioAgenda.*|WhiteboardEffectsCallingSessionWithoutAdapterTerminalAndHosted)$'`.
+    The board fixture separately exercised terminal/hosted Claude and Pi.
+  - Historical reads, separately: **15 top-level tests passed**, 2.092 s
+    (`mcp-historical.log`): split/legacy identity and dashboard reads,
+    crash-shaped layouts, fresh-server continuity, lineage/override walks
+    and non-touching inspection.
+  - Native Pi/Claude controls and registry contracts, separately:
+    **16 top-level tests passed**, 0.862 s (`wsagent-native.log`), using
+    `-run '^Test(CommonContract.*|ProcessControls.*|BackendSelectionKeepsNamesAndUnavailableErrors|RegisteredBackendAdmission|Registration.*|ClaudeProcessControls|ClaudeLeadProcessControls|Pi.*(Controls|Settings|Permission).*)$'`.
+  - Focused dashboard fixtures: **22 top-level tests passed**, 1.682 s
+    (`dashboard.log`), using
+    `-run '^Test(Hiring.*|LeadPopover.*|HistoryRoute.*|WhiteboardEffectsRoutesReadSavedHistoryWithoutAnAdapter|RailRowApproval|BoardHistorySnapshotIncludesPinnedTopics)$'`.
+  - Full `go test ./internal/wsagent -timeout 900s -json` was compared
+    against a complete archive of exact `develop` base `59a283670`, not
+    assumed green from a known baseline-red disposition. This invocation
+    had **identical empty failure-name sets**: 0 base, 0 implementation,
+    no added or removed failure names; 370 top-level pass events and the
+    same abrupt-loss helper skip on each side (30.040 s / 32.262 s).
+    Start/resume (`TestCommonContractLifecycle`), delegation ownership
+    (`TestChildrenAreScopedToTheParent`), single mail delivery/rejoin,
+    approval correlation and answered-prompt persistence, holder rejoin,
+    replay-gap input holds and Pi native-turn probes passed on both sides.
+    Later changes touched MCP-only inputs, not this package's inputs.
+  - `go build -o /tmp/ws-csi-phase2.ojsxAb/ws-mcp ./cmd/ws-mcp` and
+    `git diff --check` passed. The built executable was not run. Neither
+    the full MCP package nor the full dashboard package was run.
+- Independent review was explicitly omitted by the lead's assignment:
+  spawning was unavailable, and the lead will run the fresh review after
+  this report. No shared daemon restart/swap, protected-port access,
+  Electron launch, installation, push or merge was performed. Phase 2 is
+  the completed foundation prerequisite for the audit backend; audit's UI
+  still depends on that backend's Phase 2. Ticket implementation is complete;
+  independent review and branch integration remain lead-owned.
+
+
+## Resolution (2026-11-16)
+
+Phase 2 implementation and source-fixture parity verification are complete. The lead owns the explicitly deferred independent review and integration of impl/develop/suing-usage-cold; closure is not a live-harness acceptance claim.

@@ -616,7 +616,7 @@ func builtinConfigAndPromptDefaults() map[string]string {
 func (s *Server) sessionConfigOptions(sessionKey string) wsconfig.Options {
 	opts := s.configOptions()
 	if key := strings.TrimSpace(sessionKey); key != "" {
-		if entry, found := s.sessions.lookup(key); found {
+		if entry, found := s.lookupSession(key); found {
 			opts.RepoRoot = entry.root
 		}
 	}
@@ -752,12 +752,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// spawned key can neither write nor read it.
 	//
 	// dashboard.intake alone resolves its key from the intake cache
-	// (intakeLookup), so its call rate reads no key.json; a removed key
+	// (intakeSession), so its call rate reads no key.json; a removed key
 	// still passes here for up to intakeRecheck, for that tool only.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
-		lookup := s.sessions.lookup
+		lookup := s.lookupSession
 		if params.Name == dashboardIntakeTool {
-			lookup = s.sessions.intakeLookup
+			lookup = s.intakeSession
 		}
 		if entry, found := lookup(keyStr); found {
 			// pi.* on a Pi subagent's server is authorized by the runner's
@@ -1445,7 +1445,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		entry, _ := s.sessions.lookup(key) // requireLeadSessionKey verified it exists and is lead
+		entry, _ := s.lookupSession(key) // requireLeadSessionKey verified it exists and is lead
 		base, _ := params.Arguments["base"].(string)
 		targetBranch, _ := params.Arguments["target_branch"].(string)
 		if strings.TrimSpace(base) == "" {
@@ -1473,7 +1473,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
 		result, err := acquireWorktree(ctx, s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value, key, func(mintPath string) (string, error) {
-			return s.sessions.mint(mintPath, roleLead, key)
+			resolved, err := s.resolveSession(sessionAccess{mode: "mint-identity", root: mintPath, scope: roleLead, parent: key})
+			return resolved.key, err
 		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1501,7 +1502,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.release: path or key is required"))
 		}
 		if path == "" {
-			wentry, ok := s.sessions.lookup(workerKey)
+			wentry, ok := s.lookupSession(workerKey)
 			if !ok {
 				return toolTextResponse(req.ID, "", fmt.Errorf("worktree.release: key %q is not a known session key", workerKey))
 			}
@@ -1537,7 +1538,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: path or key is required"))
 		}
 		if path == "" {
-			wentry, ok := s.sessions.lookup(workerKey)
+			wentry, ok := s.lookupSession(workerKey)
 			if !ok {
 				return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: key %q is not a known session key", workerKey))
 			}
@@ -1566,7 +1567,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		entry, _ := s.sessions.lookup(key) // requireLeadSessionKey verified it exists and is lead
+		entry, _ := s.lookupSession(key) // requireLeadSessionKey verified it exists and is lead
 		resolver := s.sessionResolver(key, builtinConfigDefaults())
 		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
 		if err != nil {
@@ -1998,7 +1999,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		stem, _ := params.Arguments["stem"].(string)
 		to, _ := params.Arguments["to"].(string)
-		entry, _ := s.sessions.lookup(strings.TrimSpace(sessionKey)) // resolveToolRoot verified the key.
+		entry, _ := s.lookupSession(strings.TrimSpace(sessionKey)) // resolveToolRoot verified the key.
 		checkRoot := func() error {
 			// Parenthood preserves the existing session-bound worker flow; it
 			// is not branch-ownership proof and does not require a lease.
@@ -2222,7 +2223,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// The tracker section is never a spawned key's (as workflow_manual
 		// renders it); its tools refuse that key, except a store's support
 		// conversation, which the tracker gate admits.
-		if entry, found := s.sessions.lookup(keyStr); found && trackerOn && !entry.isTopLevelLead() && !s.trackerSupportReadsTracker(keyStr, entry) {
+		if entry, found := s.lookupSession(keyStr); found && trackerOn && !entry.isTopLevelLead() && !s.trackerSupportReadsTracker(keyStr, entry) {
 			trackerOn = false
 		}
 		body, err = applyKnobVariants(s, rsrcRoot, name, body, whiteboardOn, trackerOn)
@@ -2455,7 +2456,7 @@ func (s *Server) handleLeadRelogin(id json.RawMessage, arguments map[string]any,
 // canonical, as the predicate that follows the key in a refusal; empty when
 // it can: a known, parent-less, lead-scope key bound to canonical.
 func (s *Server) leadKeyRefusal(key, canonical string) string {
-	entry, ok := s.sessions.lookup(key)
+	entry, ok := s.lookupSession(key)
 	switch {
 	case !ok:
 		return "is not a known session key"
@@ -4135,7 +4136,7 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 	// Session-key branch: highest priority. When present, the key authoritatively
 	// resolves the root, bypassing every fallback in the chain below.
 	if key, ok := arguments["session_key"].(string); ok && strings.TrimSpace(key) != "" {
-		entry, found := s.sessions.lookup(key)
+		entry, found := s.lookupSession(key)
 		if !found {
 			return "", fmt.Errorf("unknown_session: session key not found; " +
 				"if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call")
@@ -5809,7 +5810,7 @@ func (s *Server) requireLeadSessionKey(toolName string, arguments map[string]any
 	if key == "" {
 		return "", fmt.Errorf("%s: session_key is required", toolName)
 	}
-	entry, found := s.sessions.lookup(key)
+	entry, found := s.lookupSession(key)
 	if !found {
 		return "", fmt.Errorf("%s: unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call", toolName)
 	}

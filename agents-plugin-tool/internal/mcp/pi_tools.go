@@ -298,7 +298,7 @@ func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.Pa
 	if !ok {
 		return toolTextResponse(id, "", wsagent.PiTierRefusal(tool, tier, tiers))
 	}
-	entry, found := s.sessions.lookup(key)
+	entry, found := s.lookupSession(key)
 	if !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}

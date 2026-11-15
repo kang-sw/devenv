@@ -63,7 +63,7 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	if _, found := s.sessions.lookup(key); !found {
+	if _, found := s.lookupSession(key); !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}
 	dir, err := s.sessionInboxDir(key)
