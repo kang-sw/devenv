@@ -62,6 +62,8 @@ func newSummaryIntakeFixture(t *testing.T) (liveFixture, *summaryIntakeSlot) {
 	f.server.sessionHarness = "pi"
 	slot := &summaryIntakeSlot{owned: true}
 	f.server.live.host = summaryIntakeHost{slot}
+	// Direct intake calls bypass the keyed dispatch that registers the row.
+	f.server.dashboardTouch(f.keyA, f.root, false)
 	row, err := wsdashboard.ReadRegistration(f.stateDir, f.replyA)
 	if err != nil {
 		t.Fatal(err)
