@@ -486,9 +486,6 @@
     "261115-bug-pi-print-mode-empty-after-subagent-push": {
       "registered_at": "2026-11-14T23:55:38Z"
     },
-    "261115-bug-worktree-acquire-concurrent-pool-selection": {
-      "registered_at": "2026-11-15T07:37:25Z"
-    },
     "261115-bug-ws-claude-binary-provenance-and-resume-model": {
       "registered_at": "2026-11-14T23:28:48Z"
     },
@@ -686,16 +683,6 @@
     },
     "261115-feat-ws-worker-profile-session-spawn": {
       "registered_at": "2026-11-15T07:40:58Z"
-    },
-    "261115-refactor-ws-dashboard-stream-whiteboard-reread": {
-      "registered_at": "2026-11-15T07:12:07Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec5/perf-meta-writes",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:20:58Z"
-      }
     },
     "261115-refactor-ws-dashboard-wake-reads": {
       "registered_at": "2026-11-15T08:30:56Z"
