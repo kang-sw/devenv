@@ -28,13 +28,13 @@ func TestHistoryLabelsKeepLocalizedClassAndStatusMappings(t *testing.T) {
 	for _, lang := range []string{"en", "ko"} {
 		page := &pageData{View: View{Lang: lang}}
 		for _, tc := range classes {
-			d := itemData{ItemView: ItemView{Item: tc.item}, Page: page}
+			d := itemData{ItemView: ItemView{Class: tc.item.Class}, Page: page}
 			if got, want := d.HistoryClassLabel(), wsi18n.T(lang, tc.key); got != want {
 				t.Errorf("%s class %s: got %q, want %q", lang, tc.item.Class, got, want)
 			}
 		}
 		for _, tc := range statuses {
-			d := itemData{ItemView: ItemView{Item: tc.item}, Page: page}
+			d := itemData{ItemView: ItemView{Status: tc.item.Status}, Page: page}
 			if got, want := d.HistoryStatusLabel(), wsi18n.T(lang, tc.key); got != want {
 				t.Errorf("%s status %s: got %q, want %q", lang, tc.item.Status, got, want)
 			}
