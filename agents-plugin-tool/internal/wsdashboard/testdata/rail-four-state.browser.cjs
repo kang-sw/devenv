@@ -90,7 +90,7 @@ async function behaviour(browser) {
     await page.locator(row('reviewer')).hover();
     await page.locator(row('reviewer') + ' .drarch').click();
     await until(page, 'reviewer archived', async () => (await where(page, 'reviewer')) === 'arch');
-    assert.equal(await page.locator(`${DEVENV} .rfh[data-k="arch"] .n`).textContent(), '4', 'the archived count');
+    assert.equal(await page.locator(`${DEVENV} .rfh[data-k="arch"] .d-n`).textContent(), '4', 'the archived count');
     // It persists across a reload (the daemon's sidecar, not page state).
     await page.reload();
     await showRail(page);

@@ -21,7 +21,7 @@ func TestDependencyPopoverRenderStates(t *testing.T) {
 		}, Waiters: waiters}, []string{
 			`class="dbtn amber"`, `href="#i-clock"`, `class="sum amber"`,
 			`대상 4개 중 1개 해결, 3개 남음`, `style="width:25%"`,
-			`class="dot u"`, `class="dot x"`, `class="dot r"`, `class="row res"`,
+			`class="wb-dot u"`, `class="wb-dot x"`, `class="wb-dot r"`, `class="row res"`,
 			`class="nm" href="#topic-blocker"`, `class="nm">소유자</span>`,
 			`아직 열려 있음`, `직접 해제해야 함`, `알 수 없음`, `해결됨`,
 		}, []string{`class="dbtn green"`}},
@@ -30,12 +30,12 @@ func TestDependencyPopoverRenderStates(t *testing.T) {
 			{Token: "owner", Label: "owner", Resolved: true},
 		}, Waiters: waiters}, []string{
 			`class="dbtn green"`, `class="sum green"`, `진행 가능 · 모든 대상 해결`,
-			`style="width:100%"`, `class="dot r"`, `class="row res"`,
+			`style="width:100%"`, `class="wb-dot r"`, `class="row res"`,
 			`class="tresult" title="주제의 결말">Done</span><span class="dw">`,
-		}, []string{`class="dbtn amber"`, `class="dot u"`, `class="dot x"`}},
+		}, []string{`class="dbtn amber"`, `class="wb-dot u"`, `class="wb-dot x"`}},
 		{"waiters-only", TopicView{Waiters: waiters}, []string{
 			`class="dbtn"`, `aria-label="이 토픽을 기다리는 곳 2"`,
-		}, []string{`class="dbtn amber"`, `class="dbtn green"`, `class="sum `, `class="bar`, `class="dot `}},
+		}, []string{`class="dbtn amber"`, `class="dbtn green"`, `class="sum `, `class="bar`, `class="wb-dot `}},
 		{"none", TopicView{}, nil, []string{`class="dw"`, `class="dbtn`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

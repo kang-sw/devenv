@@ -305,15 +305,16 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .rail .pdot { width: 6px; height: 6px; border-radius: 50%; background: var(--wb-warn); flex: none; margin: 0 4px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-warn) 22%, transparent); }
 .rail .pn { padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--wb-warn) 20%, transparent); }
 .rail .phint { margin-left: auto; font-weight: 500; letter-spacing: 0; color: var(--wb-muted-fg); font-size: 10.5px; }
-.rail .rwt.pend .wthd > .i { color: var(--wb-warn); }
+.rail .rwt.d-pend .wthd > .i { color: var(--wb-warn); }
 .rail .wtpath { display: flex; gap: 6px; min-width: 0; padding: 0 12px 2px 46px; font: 10.5px var(--wb-mono); color: var(--wb-muted-fg); overflow-wrap: anywhere; }
-.rail .wtpath .pt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; opacity: .85; }
-.rail .wtpath .tag { flex: none; margin-left: auto; font: 700 10.5px var(--wb-sans); }
+.rail .wtpath .d-pt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; opacity: .85; }
+/* Rail badges own their spacing independently of whiteboard's tag atom. */
+.rail .wtpath .d-tag { flex: none; margin-left: auto; font: 700 10.5px var(--wb-sans); letter-spacing: .05em; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; }
 .rail .tgs { display: inline-flex; gap: 3px; flex: none; margin-left: auto; }
 .rail .tg { width: 22px; height: 20px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); color: var(--wb-muted-fg); cursor: pointer; }
 .rail .tg .i { width: 12px; height: 12px; stroke-width: 2; }
-.rail .tg.ap:hover, .rail .m-ap .tag { color: var(--wb-ok); }
-.rail .tg.rj:hover, .rail .m-rj .tag { color: var(--wb-fail); }
+.rail .tg.ap:hover, .rail .m-ap .d-tag { color: var(--wb-ok); }
+.rail .tg.rj:hover, .rail .m-rj .d-tag { color: var(--wb-fail); }
 .rail .tg.ap[aria-pressed="true"] { color: var(--wb-card); background: var(--wb-ok); border-color: var(--wb-ok); }
 .rail .tg.rj[aria-pressed="true"] { color: var(--wb-card); background: var(--wb-fail); border-color: var(--wb-fail); }
 .rail .tg:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
@@ -332,7 +333,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .rail .rrej .fl { white-space: nowrap; }
 .rail .rrej .fl::after { content: " \25b8"; }
 .rail .rrej[open] .fl::after { content: " \25be"; }
-.rail .rrej .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rail .rrej .d-n { font-weight: 700; font-variant-numeric: tabular-nums; }
 .rail .rrej-copy { flex: none; margin-left: auto; width: 22px; height: 20px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
 .rail .rrej-copy:hover { color: var(--wb-primary); background: var(--wb-muted); }
 .rail .rrej-copy:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }

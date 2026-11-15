@@ -191,7 +191,8 @@ func TestToolbarPageActionHooks(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	for _, want := range []string{
 		`search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } }`,
-		`files: filesSheet`,
+		// Worktree pages carry their own Files pane, so their toolbar omits the files sheet (d384c5136).
+		`files: worktree ? null : filesSheet`,
 		`filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false)`,
 		`var sheetInstance = null`,
 		`if (!sheetInstance) sheetInstance = createFiles(sheet, null, true)`,
