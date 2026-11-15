@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -18,6 +19,7 @@ func TestConversationRowsShareNativeFrame(t *testing.T) {
 	}
 	for _, e := range []ConvEntry{
 		{RingEntry: wslive.RingEntry{Kind: "wake", Cause: "mail", Source: "mailbox", Caption: "arrived", Text: "raw <wake>"}, Key: "wake"},
+		{RingEntry: wslive.RingEntry{Kind: "wake", Cause: "mail", Text: boardNudgeEnvelope + "Whiteboard lead nudge (unblocked).\n- One: ready to proceed; resolved targets: plan"}, Key: "nudge"},
 		{RingEntry: wslive.RingEntry{Kind: "mail", Direction: "recv", Peer: "peer", Title: "preview"}, Key: "peer", HasBody: true, Body: "[ws note: from a peer lead session (pi, not a worker), with the same authority as yours]\nbody <mail>", PeerLinked: true, PeerReplyID: "other"},
 		{RingEntry: wslive.RingEntry{Kind: "tools", Tools: toolsSummary()}, Key: "tools"},
 		{RingEntry: wslive.RingEntry{Kind: "reply", Text: "reply"}, Key: "reply", HTML: "reply"},
@@ -41,10 +43,46 @@ func TestConversationRowsShareNativeFrame(t *testing.T) {
 			if e.Key == "peer" && (!strings.Contains(html, `href="/s/other"`) || !strings.Contains(html, "body &lt;mail&gt;") || !strings.Contains(html, "[ws note:") || strings.Contains(html, "Delivery details")) {
 				t.Fatal("peer link/body/raw delivery lost or second disclosure retained: " + html)
 			}
+			if e.Key == "nudge" && (!strings.Contains(html, "Board nudge · Unblocked: One") || strings.Count(html, "[ws mailbox]") != 1 || strings.Contains(html, "Delivery details") || strings.Contains(html, "delivery-details")) {
+				t.Fatal("nudge lost its single body-click disclosure/raw text: " + html)
+			}
 			if e.Key == "wake" && !strings.Contains(html, "raw &lt;wake&gt;") {
 				t.Fatal("wake diagnostics lost or interpreted")
 			}
 		})
+	}
+}
+
+func TestConversationRowsArchiveMaintenanceDoesNotProjectUntouchedItems(t *testing.T) {
+	state := &wswhiteboard.State{Counter: wswhiteboard.ArchiveCap + 1, SettleSeq: wswhiteboard.ArchiveCap}
+	for id := 1; id <= wswhiteboard.ArchiveCap; id++ {
+		state.Items = append(state.Items, wswhiteboard.Item{ID: id, Topic: "archive", Class: wswhiteboard.ClassTechnical, Title: "old", Status: wswhiteboard.StatusAnswered, Settled: id})
+	}
+	target := wswhiteboard.ArchiveCap + 1
+	state.Items = append(state.Items, wswhiteboard.Item{ID: target, Topic: "current", Class: wswhiteboard.ClassTechnical, Title: "answer me", Status: wswhiteboard.StatusOpen})
+	out, problems := wswhiteboard.Apply(state, fmt.Sprintf(`<wb:answer id="%d" value="ok">Done.</wb:answer>`, target), wswhiteboard.Env{Now: testNow})
+	if len(problems) != 0 {
+		t.Fatal(problems)
+	}
+	entry, ok := wslive.NewWhiteboardEffects(out.Effects)
+	if !ok || entry.Truncated {
+		t.Fatal("lost or truncated command effects")
+	}
+	decoded, ok := wslive.DecodeWhiteboardEffects(entry)
+	if !ok {
+		t.Fatal("producer no longer emits the closed v1 envelope")
+	}
+	for _, effect := range decoded {
+		if effect.Kind == "item" && effect.ID != target {
+			t.Fatalf("archive maintenance leaked into saved effects: %+v", effect)
+		}
+	}
+	html := presentationHTML(t, []wslive.RingRecord{ringRecord(1, entry)}, PageContent{}, nil)
+	if strings.Count(html, `class="wbupdate-item-id"`) != 1 || !strings.Contains(html, fmt.Sprintf(`data-wb-jump="item-%d" data-wb-topic="topic-63757272656e74"`, target)) || strings.Contains(html, "topic-61726368697665") {
+		t.Fatal("chip projection differs from command-only saved effects: " + html)
+	}
+	if len(state.Items) != wswhiteboard.ArchiveCap || state.Items[0].ID != 2 {
+		t.Fatal("presentation fix changed actual archive eviction")
 	}
 }
 

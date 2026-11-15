@@ -123,7 +123,6 @@ details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
 .input-record .wake-head, .child-report .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
 .input-record .wake-head .t, .child-report .wake-head .t { margin-left: auto; }
 .child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
-.delivery-meta { margin-top: 4px; overflow-wrap: anywhere; }
 .src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
 .mail-block { min-width: 0; }
 .wbupdate-topic[data-wb-topic] { cursor: pointer; }

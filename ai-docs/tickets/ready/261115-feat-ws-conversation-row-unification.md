@@ -78,9 +78,9 @@ Implement the settled frame, typography, chips, time placement and single body-c
 
 Verification covers the four row kinds, collapsed/expanded behavior and keyboard/link handling, visible tokens and moved duration, lead/footer alignment, matched/suppressed/unmatched mail identity and raw delivery details, and preserved update-card topic headers/logs/recaps apart from the approved item-row grouping and diagnostics removal. Assert one wrapping ID-chip group per topic with unchanged item-link targets, unchanged topic headers/log lines, and no unrelated projected items when the saved effect does not contain them. Assert saved-change disclosure is absent, recap is present, raw panel payload is absent, and affected locale keys have real remaining uses or are removed from all eleven tables. Run relevant scoped offline tests and full wsi18n; record known baseline failures separately. A lead-owned current-develop sync before head preserves EXEC4 pairing and any later envelope work; rerun only integration-affected checks. Return a clean committed head; MAIN owns integration and owner-screen acceptance.
 
-## Producer delta amendment — 2026-11-15 (design gate pending)
+## Producer delta amendment — 2026-11-15 (design PASS)
 
-MAIN's 07:42:34Z instruction supersedes the earlier unknown-cause hold only for item 1043. Claude verified the exact saved record was not truncated and identified archive maintenance as the source of unrelated item-presence effects. This amendment authorizes a narrow T0 producer correction **only after MAIN's single elevated delta-design gate passes**. The UI work may finish independently; do not implement this producer delta before that gate. Autofold/new-ticket authoring remains outside this ticket.
+MAIN's 07:42:34Z instruction supersedes the earlier unknown-cause hold only for item 1043. Claude verified the exact saved record was not truncated and identified archive maintenance as the source of unrelated item-presence effects. MAIN's single elevated delta-design review passed and MAIN stamped the design digest `d3d0a3e667cd40f4` before authorizing implementation. This amendment authorizes only the narrow T0 producer correction below. Autofold/new-ticket authoring remains outside this ticket.
 
 ### Consumer evidence
 
@@ -90,7 +90,7 @@ MAIN's 07:42:34Z instruction supersedes the earlier unknown-cause hold only for 
 - `internal/wswhiteboard/update_summaries.go:193-218` independently computes its own net diff; its item-presence classification counts additions (`:255-283`). Keep this summary path unchanged.
 - One existing test explicitly expects archive-maintenance effects: `internal/wswhiteboard/effects_test.go:100-108` applies an empty command to an over-cap fixture and expects ID 1's removal. Under this approved delta its expectation changes to no command effects **while still asserting that eviction occurs**. Preserve the same test's withdrawal, reopening and adoption coverage.
 
-### Intended implementation and compatibility
+### Phase 2: Command effects before archive maintenance
 
 Move the final command-effect comparison to after `coalesceCreated` but before `evictArchive`/`pruneLabels` in `internal/wswhiteboard/store.go`. Preserve per-command effects, implicit command mutations (including close-induced withdrawals and adoption), command order, coalescing, archive cap/settlement order, label pruning, persisted board state and existing post-commit recorder chain. Do not filter by literal command IDs and do not suppress presence removals in the shared `semanticEffects` helper. A clarifying comment may name the command/maintenance boundary in `effects.go`; its closed Kind/Field variants remain unchanged.
 
@@ -104,4 +104,4 @@ T0: both versions write/read the same v1 effect envelope and closed fields (`int
 - Verify saved-envelope decode and conversation chip projection contain only command-caused IDs; the Phase 1 projection test already proves absent saved IDs are never invented.
 - Run focused offline archive/effect/coalescing tests and affected projection tests only; retain the full wsi18n run for the UI deletion. Reuse isolated HOME/config/runtime fixtures and warm Go caches. No full suites, browser/screenshot gate, providers/downloads or shared-runtime action.
 
-Implementation is not started. MAIN owns delta-design acceptance, the single current-develop integration checkpoint and final merge/swap; owner-screen acceptance remains post-merge.
+MAIN owns the final current-develop integration checkpoint and final merge/swap; owner-screen acceptance remains post-merge. The completed delta-design gate does not add a second logic-review round: one combined logic Lite covers both phases after implementation.
