@@ -347,19 +347,6 @@
     "261114-feat-ws-whiteboard-history-unified-decisions": {
       "registered_at": "2026-11-14T06:03:03Z"
     },
-    "261114-refactor-ws-common-session-interface": {
-      "registered_at": "2026-11-14T11:13:55Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T16:45:36Z",
-        "impl": {
-          "branch": "impl/develop/suing-usage-cold"
-        }
-      }
-    },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
     },
@@ -466,7 +453,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T17:14:21Z",
+        "touched_at": "2026-11-15T17:15:39Z",
         "impl": {
           "branch": "impl/develop/foyer-cause-shore"
         }
