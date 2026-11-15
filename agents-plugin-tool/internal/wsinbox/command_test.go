@@ -86,18 +86,34 @@ func TestCommandIsNeverMergedOrMergedInto(t *testing.T) {
 	}
 }
 
-func TestSteerRefusesACommand(t *testing.T) {
-	dir := t.TempDir()
-	cmd := sendCommand(t, dir, "compact", "")
-	if _, err := Steer(dir, cmd); !errors.Is(err, ErrCommand) {
-		t.Fatalf("Steer(command) = %v, want ErrCommand", err)
-	}
-	held, _ := Held(dir)
-	if len(held) != 1 || held[0].Name != cmd || held[0].Entry.Steer {
-		t.Fatalf("held after the refused steer = %+v", held)
-	}
-	if recs, _ := DrainSteer(dir); len(recs) != 0 {
-		t.Fatalf("steer drain took %d entries", len(recs))
+// TestSteerSendsACommandAsText: a steered command becomes a steered text
+// entry holding its typed line, so a steer-only drain injects it mid-turn
+// as a message the agent acts on itself.
+func TestSteerSendsACommandAsText(t *testing.T) {
+	for _, tc := range []struct{ name, args, want string }{
+		{"compact", "", "/compact"},
+		{"ws:lead-run", "ticket 261115", "/ws:lead-run ticket 261115"},
+	} {
+		dir := t.TempDir()
+		cmd := sendCommand(t, dir, tc.name, tc.args)
+		steered, err := Steer(dir, cmd)
+		if err != nil || steered == cmd {
+			t.Fatalf("Steer(/%s) = %q, %v", tc.name, steered, err)
+		}
+		held, _ := Held(dir)
+		if len(held) != 1 || held[0].Name != steered || !held[0].Entry.Steer || held[0].Entry.Command != nil {
+			t.Fatalf("held after steering /%s = %+v", tc.name, held)
+		}
+		recs, err := DrainSteer(dir)
+		if err != nil || len(recs) != 1 || recs[0].Entry.Command != nil {
+			t.Fatalf("steer drain = %+v, %v", recs, err)
+		}
+		if got := recs[0].Entry.testBody(t); got != tc.want {
+			t.Fatalf("steered text = %q, want %q", got, tc.want)
+		}
+		if held, _ := Held(dir); len(held) != 0 {
+			t.Fatalf("held after the steer drain = %+v", held)
+		}
 	}
 }
 

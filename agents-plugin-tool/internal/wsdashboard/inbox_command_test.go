@@ -48,7 +48,7 @@ func TestCommandSendNeedsAnAdapterThatReportsCommands(t *testing.T) {
 	}
 }
 
-func TestCommandEntryStandsAloneAndRefusesSteer(t *testing.T) {
+func TestCommandEntryStandsAloneAndSteersAsText(t *testing.T) {
 	f := startPageFixture(t)
 	f.withCommands(t, wslive.SlashCommand{Name: "compact"})
 	text, _ := f.send(t, `{"text":"before"}`)
@@ -61,11 +61,19 @@ func TestCommandEntryStandsAloneAndRefusesSteer(t *testing.T) {
 		t.Fatalf("held = %+v", held)
 	}
 	code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+cmd+`"}`)
-	if code != http.StatusConflict || !strings.Contains(raw, "cannot be steered") {
+	if code != http.StatusOK {
 		t.Fatalf("steer of a command = %d: %s", code, raw)
 	}
-	if held := f.held(t); held[1].ID() != cmd || held[1].Entry.Steer {
-		t.Fatalf("held after the refused steer = %+v", held)
+	// The steered command is a steered text entry holding its typed line,
+	// ahead of the follow-ups; the command entry is gone.
+	held := f.held(t)
+	if len(held) != 3 || !held[0].Entry.Steer || held[0].Entry.Command != nil || inboxBody(t, held[0].Entry) != "/compact" {
+		t.Fatalf("held after the steer = %+v", held)
+	}
+	for _, r := range held {
+		if r.ID() == cmd {
+			t.Fatalf("command entry %s still held after its steer", cmd)
+		}
 	}
 }
 
