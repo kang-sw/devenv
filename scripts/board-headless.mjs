@@ -125,10 +125,11 @@
 //             --capture-dir retains measurements and responsive screenshots.
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
-//   history-regressions  Exact thirty-line chunks in renderer-produced closed
-//             logs, collapse cancellation, and real Tab into clipped summaries.
-//   history-fit  Controlled 3/2/1/oversized geometry, cached/first heights,
-//             exact log boundaries and wrapping without recutting.
+//   history-regressions  Chunks through renderer-produced closed system chips (thirty
+//             short lines: the line cap binds before the 1000px budget),
+//             collapse cancellation, and real Tab into clipped summaries.
+//   history-fit  Controlled row-budget geometry (all/two-panel/one-panel/
+//             oversized), cached/first heights, wrapping without recutting.
 //
 // History samples retain rAF geometry as diagnostic evidence and assert <=1px
 // on rAF -> zero-delay-task (post-paint) geometry, after ResizeObserver runs.
@@ -298,12 +299,16 @@ function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending, share
       `<wb:panel recap="History panel ${i + 1}"><p>History payload ${i + 1}: delayed content height fixture.</p></wb:panel>`).join("");
     run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key,
       commands: `<wb:topic name="HISTORY">${entries}</wb:topic>` })], { cwd: proj, env });
-    // Renderer-produced closed log runs exercise size-neutral page joins:
-    // newest 47 folded rows + three visible tail rows; older pages fold whole.
+    // Renderer-produced closed system-event chips exercise size-neutral page
+    // joins: newest 47 chip rows + three visible tail rows; older pages hold
+    // whole chips. Log lines stay visible rows, so the chain is alternating
+    // topic-state events (each appends one system entry) between one opening
+    // log line, which creates the topic, and the three tail lines.
     for (const [name, count] of [['LOGCHAIN', 200], ['LOGCANCEL', 600]]) {
-      const logs = Array.from({ length: count }, (_, i) => `<wb:log>Folded history line ${i + 1}</wb:log>`).join('');
+      const states = Array.from({ length: count - 4 }, (_, i) => `<wb:state value="${i % 2 ? 'discussing' : 'waiting'}"/>`).join('');
+      const tail = [1, 2, 3].map((i) => `<wb:log>Visible tail line ${i}</wb:log>`).join('');
       run(bin, ['call', 'whiteboard.update', JSON.stringify({
-        session_key: fer.session_key, commands: `<wb:topic name="${name}">${logs}</wb:topic>`
+        session_key: fer.session_key, commands: `<wb:topic name="${name}"><wb:log>Opening history line</wb:log>${states}${tail}</wb:topic>`
       })], { cwd: proj, env });
     }
     // Keep topics on both sides, so collapse compensation cannot be masked
@@ -1232,18 +1237,22 @@ async function scenarioSharedControls(ctx) {
   });
   const shape = await bodyShape();
   qa(shape.div && !shape.summary && !shape.paddingMarker && shape.visible && shape.title && !shape.tickets && shape.state, 'dashboard body is visible div.tdoc without content-only disclosure or reserved padding; title/state remain without ticket slot', shape);
-  const history = page.locator(topic + ' details.topic-stream');
-  assert(await history.count() === 1, 'renderer supplies independent history disclosure');
-  if (!await history.evaluate((d) => d.open)) await history.locator(':scope > summary').click();
+  // History is always shown: a plain container, never a disclosure.
+  const stream = await page.locator(topic).evaluate((t) => {
+    const s = [...t.querySelectorAll('.topic-stream')];
+    return { count: s.length, tag: s[0]?.tagName, summary: !!s[0]?.querySelector(':scope > summary, :scope > .wb-history > summary'),
+      history: !!s[0]?.querySelector(':scope > .wb-history'), visible: !!s[0] && s[0].getBoundingClientRect().height > 0 };
+  });
+  qa(stream.count === 1 && stream.tag !== 'DETAILS' && !stream.summary && stream.history && stream.visible, 'history is one always-shown non-details .topic-stream without a summary', stream);
   const panels = page.locator(topic + ' details.entry-panel');
   assert(await panels.count() >= 2, 'renderer supplies independent panels');
   if (!await panels.nth(0).evaluate((d) => d.open)) await panels.nth(0).locator(':scope > summary').click();
   if (await panels.nth(1).evaluate((d) => d.open)) await panels.nth(1).locator(':scope > summary').click();
-  await history.locator(':scope > summary').click();
-  qa(!await history.evaluate((d) => d.open), 'history summary remains independently usable');
-  await history.locator(':scope > summary').click();
-  qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'history toggle preserves independently open/closed panels');
-  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.topic-stream,details.entry-panel')].map((d) => [d.getAttribute('data-key'), d.open]));
+  await panels.nth(0).locator(':scope > summary').click();
+  qa(!await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'panel summary remains independently usable');
+  await panels.nth(0).locator(':scope > summary').click();
+  qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'panel toggle preserves independently open/closed panels');
+  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.entry-panel')].map((d) => [d.getAttribute('data-key'), d.open]));
   const inner = await disclosures();
   await page.locator(topic + ' a[data-wl="file"][data-rel="docs/a.md"]').first().click();
   await page.waitForSelector('.bcard[data-kind="preview"] .pv-md');
@@ -2881,9 +2890,14 @@ const HISTORY_PAGE = () => {
       capsules: [...document.querySelectorAll('.wb-cap')].filter((n) => !n.hidden && n.getClientRects().length).map((n) => ({ cls: n.className, rect: rect(n) })),
       keeping: !!keep, targetOffsetObserved: node && node.getBoundingClientRect().top - bh.viewTop(s), scrollTop: s.scrollTop };
   };
+  // The clip lands 100px below the view top, but never so low that HISTORY's
+  // own top drops into view: a sliver of the preceding topic left in view
+  // would anchor the view, so its growth (and HISTORY's) could push HISTORY
+  // out. The clip's offset within its topic follows the history header.
   bh.positionHistory = () => {
-    const s = bh.scroller(), r = bh.history().querySelector('.history-clip').getBoundingClientRect();
-    s.scrollTop += r.top - bh.viewTop(s) - 100;
+    const s = bh.scroller(), h = bh.history(), r = h.querySelector('.history-clip').getBoundingClientRect();
+    const head = r.top - h.closest('.topic').getBoundingClientRect().top;
+    s.scrollTop += r.top - bh.viewTop(s) - Math.min(100, head);
   };
 };
 
@@ -3093,6 +3107,7 @@ async function scenarioHistory(ctx) {
       bh.startSampler([name]);
       return { below: topic.getBoundingClientRect().top >= bh.viewBottom(s), before };
     }, prior);
+    measure('below-collapse-start', belowCollapse);
     assert(belowCollapse.below && belowCollapse.before.steps === 2, 'below-collapse fixture was not expanded below the viewport');
     await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
     await sleep(160);
@@ -3410,7 +3425,8 @@ async function scenarioHistoryRegressions(ctx) {
         const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
         return { expected: node === bh.foldTab.summary, boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
           top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-          centerExposed: !!hit && (hit === node || node.contains(hit)), clipScrollTop: h.querySelector('.history-clip').scrollTop };
+          centerExposed: !!hit && (hit === node || node.contains(hit)), clipScrollTop: h.querySelector('.history-clip').scrollTop,
+          hit: hit && `${hit.tagName.toLowerCase()}.${hit.className}`, hitParent: hit?.parentElement && `${hit.parentElement.tagName.toLowerCase()}.${hit.parentElement.className}` };
       }, name);
       measure(`${selector}-real-tab`, { before, after });
       assert(after.expected && after.boundary === before.anchor && after.steps === before.steps + 1 &&
@@ -3430,7 +3446,7 @@ async function scenarioHistoryRegressions(ctx) {
     // explicit focus() on the desired row or a synthetic focusin callback.
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
-    await page.locator('.wb-history[data-history="HISTORY"] > .history-older').focus();
+    await page.locator('.wb-history[data-history="HISTORY"] > .mhead > .history-older').focus();
     const keyboardBefore = await page.evaluate(() => {
       const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect();
       const node = h.querySelector('.history-live .entry-panel > summary'), r = node.getBoundingClientRect();
@@ -3463,7 +3479,7 @@ async function scenarioHistoryRegressions(ctx) {
       keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0 && keyboardAfter.centerExposed,
       'actual Tab focused a summary outside the clip/page, under a sticky overlay, or scrolled the clip');
     await page.evaluate(() => document.activeElement.blur());
-    await clippedFoldTab('LOGCHAIN', '.run-fold');
+    await clippedFoldTab('LOGCHAIN', '.system-run');
 
     async function settledLog(name) {
       await page.evaluate((name) => {
@@ -3477,7 +3493,7 @@ async function scenarioHistoryRegressions(ctx) {
       await sleep(100);
       return page.evaluate((name) => {
         const bh = window.__bh, h = bh.history(name), live = h.querySelector('.history-live');
-        return { ...bh.historyState(name), folded: !!live.querySelector(':scope > details.run-fold:not([open])'),
+        return { ...bh.historyState(name), folded: !!live.querySelector(':scope > details.system-run:not([open])'),
           tailRows: live.querySelectorAll(':scope > .wb-entry').length,
           deliveries: bh.resizeDeliveries.filter((d) => d.after?.some((r) => r.name === name)).length };
       }, name);
@@ -3492,6 +3508,8 @@ async function scenarioHistoryRegressions(ctx) {
       result.settled = await page.evaluate((name) => window.__bh.historyState(name), name);
       return result;
     };
+    // A chunk stops before 30 log lines, 3 panels or 1000px, whichever binds
+    // first. These fixtures are short single-line logs, so 30 lines bind.
     const boundedClick = (r) => {
       assert(r.before.pages - r.after.pages <= 1, 'one click materialized multiple pages');
       const target = Math.min(200, r.before.includedRows + 30), pagesNeeded = target > r.before.rows ? 1 : 0;
@@ -3505,8 +3523,8 @@ async function scenarioHistoryRegressions(ctx) {
     await page.evaluate(() => { window.__bh.regressionPhase = 'log-thirty'; });
     const initial = await settledLog('LOGCHAIN');
     measure('log-thirty-initial', initial);
-    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1 && initial.includedRows === 30,
-      'need a renderer-produced folded history with an exact thirty-entry first chunk');
+    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1 && initial.includedRows === 30 && initial.height < 1000,
+      'need a renderer-produced folded history whose first chunk is thirty lines under the 1000px budget');
     await capture('before-log-thirty');
     for (let i = 0; i < 6; i++) {
       const click = await clickLog('LOGCHAIN');
@@ -3521,18 +3539,19 @@ async function scenarioHistoryRegressions(ctx) {
     await capture('after-log-thirty');
 
     const appendSwap = await page.evaluate(() => {
-      const bh = window.__bh, h = bh.history('LOGCHAIN'), opened = Array.from(h.querySelectorAll('.run-fold')).at(-1);
+      const bh = window.__bh, h = bh.history('LOGCHAIN'), opened = Array.from(h.querySelectorAll('.system-run')).at(-1);
       opened.open = true;
       const visible = Array.from(opened.querySelectorAll('.wb-entry')).map((e) => e.id);
       const snapshot = window.wbHistory.capture(document), incoming = h.cloneNode(true), live = incoming.querySelector('.history-live');
-      const runs = Array.from(live.querySelectorAll(':scope > .run-fold')), first = runs[0];
+      // Renderer pages carry unsplit chips: rejoin the client's chip cuts.
+      const runs = Array.from(live.querySelectorAll(':scope > .system-run')), first = runs[0];
       runs.slice(1).forEach((run) => { Array.from(run.children).slice(1).forEach((row) => first.appendChild(row)); run.remove(); });
       first.open = false;
       const row = live.lastElementChild.cloneNode(true); row.id = 'e999003'; row.dataset.entry = row.id; row.dataset.historyAnchor = row.id;
       live.appendChild(row); h.replaceWith(incoming);
       window.wbHistory.init(incoming); window.wbHistory.restore(document, snapshot);
       return { state: bh.historyState('LOGCHAIN'), visible,
-        restored: visible.map((id) => { const e = incoming.querySelector('#' + id); return { id, present: !!e, open: !!e?.closest('.run-fold')?.open }; }) };
+        restored: visible.map((id) => { const e = incoming.querySelector('#' + id); return { id, present: !!e, open: !!e?.closest('.system-run')?.open }; }) };
     });
     await paint();
     measure('open-log-append-swap', appendSwap);
@@ -3568,8 +3587,8 @@ async function scenarioHistoryRegressions(ctx) {
       return { ...bh.historyState('LOGCANCEL'), pending: !!bh.history('LOGCANCEL')._wbHistoryPending };
     });
     measure('neutral-chain-canceled', { initial: cancelInitial, click: cancelClick, exit, collapsed, settled: canceled });
-    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && canceled.includedRows === 30 && !canceled.pending,
-      'collapsed history continued materializing older pages or lost its thirty-line boundary');
+    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && canceled.includedRows === 30 && canceled.height < 1000 && !canceled.pending,
+      'collapsed history continued materializing older pages or lost its first-chunk boundary (thirty short lines)');
     await capture('after-cancellation');
     const observerErrors = await page.evaluate(() => window.__bh.observerErrors);
     assert(observerErrors.length === 0, `native ResizeObserver loop errors: ${observerErrors.join(' | ')}`);
@@ -3750,7 +3769,7 @@ async function scenarioHistoryFit(ctx) {
       bh.fitLog = bh.history('LOGCHAIN').querySelector('.wb-entry.agent').cloneNode(true);
       bh.fitFixture = (heights, unknown = false) => {
         const old = bh.history(), h = old.cloneNode(false);
-        h.innerHTML = '<button class="history-older">older</button><div class="history-clip"><div class="history-live"></div></div>';
+        h.innerHTML = '<div class="mhead"><button type="button" class="history-older">older</button></div><div class="history-clip"><div class="history-live"></div></div>';
         const live = h.querySelector('.history-live');
         let id = 900000;
         const row = (panel, height) => {
@@ -3782,11 +3801,14 @@ async function scenarioHistoryFit(ctx) {
         return bh.historyState();
       };
     });
+    // Rows are L1 P2 L3 P4 L5 P6 L7 (logs 20px). A chunk walks back from L7
+    // and stops before a row would pass 30 lines, 3 panels or 1000px; the
+    // newest row always joins, so an oversized P6 leaves L7 alone.
     for (const [heights, boundary, pixels] of [
-      [[300, 300, 300], 'e900002', 960],
-      [[400, 400, 400], 'e900004', 840],
-      [[600, 600, 600], 'e900006', 620],
-      [[1500, 1500, 1500], 'e900006', 1520],
+      [[300, 300, 300], 'e900001', 980],
+      [[400, 400, 400], 'e900003', 860],
+      [[600, 600, 600], 'e900005', 640],
+      [[1500, 1500, 1500], 'e900007', 20],
     ]) {
       const state = await page.evaluate((h) => window.__bh.fitFixture(h), heights);
       await paint();
@@ -3800,7 +3822,7 @@ async function scenarioHistoryFit(ctx) {
       bh.history().querySelector('.history-older').click();
       return { state, cached, expanded: bh.historyState() };
     });
-    assert(!hidden.state.pending && hidden.state.chunks[0] === 'e900004' && hidden.cached === 400 && hidden.expanded.steps === 2,
+    assert(!hidden.state.pending && hidden.state.chunks[0] === 'e900003' && hidden.cached === 400 && hidden.expanded.steps === 2,
       'unsized closed historical frame blocked a positive active panel or its older-page control');
     const zero = await page.evaluate(() => {
       const bh = window.__bh, state = bh.fitFixture([400, 400, 0]);
@@ -3810,10 +3832,11 @@ async function scenarioHistoryFit(ctx) {
     await page.evaluate(() => window.__bh.history().querySelector('#e900006').style.height = '400px');
     await page.waitForFunction(() => !window.__bh.history()._wbHistoryPending, null, { timeout: 2000 });
     const progressed = await page.evaluate(() => window.__bh.historyState());
-    assert(progressed.chunks[0] === 'e900004', 'first nonzero active layout did not progress');
+    assert(progressed.chunks[0] === 'e900003', 'first nonzero active layout did not progress');
     results.push({ hidden, zero, progressed });
     const unknown = await page.evaluate(() => window.__bh.fitFixture([400, 400, 400], true));
-    assert(unknown.pending && unknown.chunks[0] === 'e900002', 'unknown panel must wait for its first rendered height');
+    // Counts alone admit every row provisionally until P6 renders.
+    assert(unknown.pending && unknown.chunks[0] === 'e900001', 'unknown panel must wait for its first rendered height');
     await page.evaluate(() => {
       const h = window.__bh.history(), last = h.querySelector('#e900006');
       last.querySelector('.doc-frame').style.height = '100px'; last.style.height = '401px';
@@ -3821,11 +3844,11 @@ async function scenarioHistoryFit(ctx) {
     await page.waitForFunction(() => !window.__bh.history()._wbHistoryPending);
     await paint();
     const measured = await page.evaluate(() => window.__bh.historyState());
-    assert(measured.chunks[0] === 'e900004', 'first rendered height did not settle the two-panel chunk');
+    assert(measured.chunks[0] === 'e900003', 'first rendered height did not settle the two-panel chunk');
     await page.evaluate(() => window.__bh.history().querySelector('.history-older').click());
     await paint();
     const expanded = await page.evaluate(() => window.__bh.historyState());
-    assert(expanded.chunks.join() === 'e900004,e900002', 'expansion swallowed older logs or lost intervening logs');
+    assert(expanded.chunks.join() === 'e900003,e900001' && !expanded.button, 'expansion did not take the remaining panel and logs as one chunk');
     await page.evaluate(() => {
       const h = window.__bh.history();
       // Keep this controlled resize probe distinct from the real off-screen
@@ -3848,12 +3871,7 @@ async function scenarioHistoryFit(ctx) {
     await paint();
     assert(swapped.state.chunks.join() === expanded.chunks.join() && swapped.cached === 401,
       'swap did not restore exact expanded boundaries and first-height cache');
-    const prefix = await page.evaluate(() => {
-      const bh = window.__bh; bh.history().querySelector('.history-older').click();
-      return bh.historyState();
-    });
-    assert(prefix.chunks.at(-1) === 'e900001' && !prefix.button, 'older logs must belong to their own next chunk');
-    results.push({ swapped, prefix });
+    results.push({ swapped });
     const errors = await page.evaluate(() => window.__bh.observerErrors);
     assert(errors.length === 0, `native ResizeObserver loop errors: ${errors.join(' | ')}`);
     log(`panel-fit: ${JSON.stringify(results)}`);
