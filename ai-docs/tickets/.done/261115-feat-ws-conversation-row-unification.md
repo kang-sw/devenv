@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 6e903006766d43b9
 sage-review-design-reviewed: d3d0a3e667cd40f4
+completed: 2026-11-15
 ---
 
 # Unify conversation row frames and remove saved-change diagnostics
@@ -78,6 +79,16 @@ Implement the settled frame, typography, chips, time placement and single body-c
 
 Verification covers the four row kinds, collapsed/expanded behavior and keyboard/link handling, visible tokens and moved duration, lead/footer alignment, matched/suppressed/unmatched mail identity and raw delivery details, and preserved update-card topic headers/logs/recaps apart from the approved item-row grouping and diagnostics removal. Assert one wrapping ID-chip group per topic with unchanged item-link targets, unchanged topic headers/log lines, and no unrelated projected items when the saved effect does not contain them. Assert saved-change disclosure is absent, recap is present, raw panel payload is absent, and affected locale keys have real remaining uses or are removed from all eleven tables. Run relevant scoped offline tests and full wsi18n; record known baseline failures separately. A lead-owned current-develop sync before head preserves EXEC4 pairing and any later envelope work; rerun only integration-affected checks. Return a clean committed head; MAIN owns integration and owner-screen acceptance.
 
+### Result (2a0d260a8) - 2026-11-15
+
+- Landed the shared four-column row frame, native body-click peer/mail/nudge disclosures, visible tokens/right-column tool duration, aligned lead bubble/footer and safe long-peer wrapping. Matched/suppressed keyed roots, raw delivery text and existing client/cache owners are preserved.
+- Grouped committed item effects into one wrapping chip row per topic with unchanged validated targets; retained topic headers, logs, panel recaps and unsupported fallback. Removed saved-change diagnostics, dead render/CSS support and five unused keys from all eleven locale tables. Repaired the named saved-history recap-only expectation.
+- MAIN initiated both integration merges; this worker completed only those existing merges. Final merge `45b380ea5` includes develop `74f573faf6bf20a02e75eceefd9092591fd95a26`, preserving incoming BoardNudgeState/WakeText/batched summaries, typed ChildReport/inbound icon, USER/envelope definitions, metadata write-skip/cache and search behavior. USER branch and userentry were compared byte-for-byte with the incoming source.
+- The single combined logic Lite found no correctness/test-integrity findings in original B+1043 scope through `9ddabeff1`; no second reviewer or round ran. Pure CSS/test-driver fixes were not represented as reviewed interaction changes.
+- Final scoped offline dashboard integration checks passed (1.136s), including row/mail/nudge/batch/child-report/user-bundle/tool/history/cache/style/CSS-collision/shared-memo contracts. Full `go test ./internal/wsi18n -count=1 -timeout=120s` passed (1.303s), including English-key usage. All Go runs used the assigned absolute tool directory, offline settings, isolated HOME/config/runtime/temp and warm caches.
+- MAIN's small composer follow-up fixed CSS ownership by sharing existing editor atoms; the browser driver targets the visible rich editor while reading canonical backing values. The original native keyboard test was red: six versus five chips at `testdata/selection-note.browser.cjs:119`, then popup timeout at `:116`. Claude diagnosed Shift+End selecting the next heading, correctly producing two mention parts. MAIN authorized the exact Shift+ArrowRight driver fix. One local `TestSelectionNoteBrowser` run then passed, not skipped (3.25s; both existing 1440px/420px fixture cases); no retry, extra matrix or production selection change followed.
+- Scope boundary: addMention focus/caret and note-toggle changes were withdrawn and are absent. Composer-chip navigation and full-note hover are a separate later head, not completion criteria here. No shared-runtime, provider/download, release or swap action occurred. Owner-screen comparison against the approved references remains MAIN's explicitly allocated post-merge acceptance; no screenshot or visual-match claim is made here.
+
 ## Producer delta amendment — 2026-11-15 (design PASS)
 
 MAIN's 07:42:34Z instruction supersedes the earlier unknown-cause hold only for item 1043. Claude verified the exact saved record was not truncated and identified archive maintenance as the source of unrelated item-presence effects. MAIN's single elevated delta-design review passed and MAIN stamped the design digest `d3d0a3e667cd40f4` before authorizing implementation. This amendment authorizes only the narrow T0 producer correction below. Autofold/new-ticket authoring remains outside this ticket.
@@ -105,3 +116,15 @@ T0: both versions write/read the same v1 effect envelope and closed fields (`int
 - Run focused offline archive/effect/coalescing tests and affected projection tests only; retain the full wsi18n run for the UI deletion. Reuse isolated HOME/config/runtime fixtures and warm Go caches. No full suites, browser/screenshot gate, providers/downloads or shared-runtime action.
 
 MAIN owns the final current-develop integration checkpoint and final merge/swap; owner-screen acceptance remains post-merge. The completed delta-design gate does not add a second logic-review round: one combined logic Lite covers both phases after implementation.
+
+### Result (9ddabeff1) - 2026-11-15
+
+- After MAIN's elevated delta-design PASS, moved only the final command/coalescing diff before archive eviction/label pruning. Per-command implicit effects, shared semanticEffects/closed Kind/Field vocabulary, v1 envelope, recorder chain and persisted board behavior remain unchanged (T0).
+- The new cap-crossing regression first reproduced untouched ID 1's maintenance-presence effect. It now requires only answered target effects while FolderStore reload retains capped membership, settlement order, new answers and monotonic IDs. The previous empty-command expectation now requires no command effects and still verifies actual eviction.
+- Producer-to-envelope-to-chip coverage proves unrelated archived IDs are not projected. Focused semantic-effect, implicit withdrawal/adoption, command-order, archive, coalescing, decoder and projection tests passed before review. Final integration reran cap/persistence and row projection against incoming folder-cache/write-skip behavior; wswhiteboard selection passed (1.501s) alongside the dashboard selection.
+- The same original B+1043 logic Lite was clean. No producer filtering, schema/API/store expansion or new review round was introduced. Final integrated source is `45b380ea5`; MAIN retains parent integration, swap and owner-screen acceptance.
+
+
+## Resolution (2026-11-15)
+
+Original B row/chip/diagnostics scope and approved item-1043 producer delta are complete. Final lead-owned develop input was reconciled at 45b380ea5; scoped integration checks, full wsi18n and the one explicitly authorized local SelectionNoteBrowser run passed. The same original-scope logic Lite was clean. Withdrawn focus/note-toggle changes and later composer navigation/full-note hover are outside this ticket. MAIN retains parent integration, runtime swap and the allocated owner-screen reference comparison.
