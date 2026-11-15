@@ -1648,6 +1648,7 @@
   "tree.group.ended": "Encerrados · {0}",
   "tree.group.bg": "Tarefas em segundo plano · {0}",
   "tree.full": "Abrir saída completa",
+  "tree.bgchip": "Segundo plano {0}",
   "wb.allok": "confirmar todos os itens technical/announced",
   "wb.assumed.title": "presumido: confirme ou corrija",
   "wb.banner": "quadro atualizado; o recarregamento foi adiado enquanto você responde",

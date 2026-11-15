@@ -779,7 +779,7 @@ func TestHostedRecoveryAndFailures(t *testing.T) {
 			t.Errorf("head lacks %s:\n%s", want, head)
 		}
 	}
-	if want := `<span class="chip bgt" title="background tasks the harness runs: shells, monitors, and background subagents">2 background tasks</span>`; !strings.Contains(tree, want) {
+	if want := `<span class="chip bgt" title="background tasks the harness runs: shells, monitors, and background subagents">Background 2</span>`; !strings.Contains(tree, want) {
 		t.Errorf("agents panel head lacks %s:\n%s", want, tree)
 	}
 	for _, want := range []string{

@@ -223,7 +223,8 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
   background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); }
 .agpop[hidden] { display: none; }
 .agpop > .r-tree { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.agpop .thead { background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-line); }
+/* The title keeps one line; the chips wrap below one another instead. */
+.agpop .thead { white-space: nowrap; background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-line); }
 .agpop .thead .sum { margin-right: 60px; }
 .agpop .tree { padding: 4px 12px 8px; }
 .agpop .thead .chip { background: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
@@ -235,7 +236,8 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
 .agctl button:hover { background: var(--wb-muted); color: var(--wb-fg); }
 .agctl button:focus-visible { outline: 1.5px solid var(--wb-primary); }
 .agctl .agpin[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); color: var(--wb-primary); }
-.agctl .i { width: 14px; height: 14px; }
+.agctl .li { width: 15px; height: 15px; transform: rotate(45deg); }
+.agctl .agpin[aria-pressed="true"] .li { fill: currentColor; }
 .agfoot { flex: none; padding: 7px 12px; font-size: 11px; color: var(--wb-muted-fg); box-shadow: 0 -1px 0 var(--wb-line); }
 .agpop .tgroup { margin-top: 6px; }
 .agpop .tgroup > .pghead { padding: 4px 0 2px; font-size: 11.5px; }
@@ -245,6 +247,10 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
    full-output action (afull) shows the rest. */
 .agpop details[open] > .brows { margin: 2px 0 4px 23px; padding: 4px 10px; border-radius: 8px; background: var(--wb-muted); }
 .agpop details:not(.d-full) > .brows > li:not(:nth-last-child(-n+4)) { display: none; }
+/* An open row's box already holds the finished batch its live line repeats;
+   only a running, generating or permission line stays below it. */
+.agpop .agent > details[open] ~ .brows.live > .brow:is(.done, .fail) { display: none; }
+.agpop .agent > details[open] ~ .brows.live:not(:has(> li:not(.done, .fail))) { display: none; }
 .afull { display: none; }
 .agpop details[open]:not(.d-full) > .afull { display: inline-flex; margin: 0 0 6px 33px; padding: 0; border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--wb-primary); cursor: pointer; }
 .agpop .afull::after { content: " \2197"; }

@@ -1648,6 +1648,7 @@
   "tree.group.ended": "종료됨 · {0}",
   "tree.group.bg": "백그라운드 작업 · {0}",
   "tree.full": "전체 출력 열기",
+  "tree.bgchip": "백그라운드 {0}",
   "wb.allok": "모든 technical/announced 항목을 확인합니다",
   "wb.assumed.title": "응답으로 해석함, 확인하거나 수정하세요",
   "wb.banner": "보드가 갱신되었습니다. 답변 중이라 새로고침을 미뤘습니다",

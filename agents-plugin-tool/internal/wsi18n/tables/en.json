@@ -1648,6 +1648,7 @@
   "tree.group.ended": "Ended · {0}",
   "tree.group.bg": "Background tasks · {0}",
   "tree.full": "Open full output",
+  "tree.bgchip": "Background {0}",
   "wb.allok": "acknowledge every technical/announced item",
   "wb.assumed.title": "assumed, confirm or correct",
   "wb.banner": "board updated; reload deferred while you answer",

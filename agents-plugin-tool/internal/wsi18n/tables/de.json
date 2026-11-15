@@ -1648,6 +1648,7 @@
   "tree.group.ended": "Beendet · {0}",
   "tree.group.bg": "Hintergrundaufgaben · {0}",
   "tree.full": "Vollständige Ausgabe öffnen",
+  "tree.bgchip": "Hintergrund {0}",
   "wb.allok": "jeden technical/announced-Eintrag zur Kenntnis nehmen",
   "wb.assumed.title": "angenommen, bestätigen oder korrigieren",
   "wb.banner": "Board aktualisiert; Neuladen aufgeschoben, solange du antwortest",

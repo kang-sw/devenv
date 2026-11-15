@@ -70,6 +70,11 @@ const fits = (s, what) => {
           child: !!document.querySelector('#agpop .tgroup.run details[data-key="agent-a1"] ~ .kids details[data-key="agent-a7"]') };
       });
       assert.deepEqual(order, { present: [true, true, true, true, true], ordered: true, run: ['agent-a1', 'agent-a2'], ended: ['agent-a3', 'agent-a4', 'agent-a5', 'agent-a6'], child: true }, 'group order');
+      // Header chips: running, done, failed, mail, background; the pin
+      // control is a pushpin.
+      const head = await frame.evaluate(() => ({ bg: document.querySelector('#agpop .thead .chip.bgt')?.textContent.trim(),
+        chips: document.querySelectorAll('#agpop .thead .chip').length, pin: document.querySelector('#agpin use')?.getAttribute('href') }));
+      assert.deepEqual(head, { bg: '백그라운드 2', chips: 5, pin: '#l-pin' }, 'header chips and pin icon');
       await shot(tab, `open-${scheme}-1440`);
       // Sticky header: only the list scrolls.
       const sticky = await frame.evaluate(() => {
@@ -79,7 +84,10 @@ const fits = (s, what) => {
       });
       assert(!sticky.scrolls || Math.abs(sticky.d) <= 1, 'header stays while the list scrolls: ' + JSON.stringify(sticky));
       // Row expansion: newest four batches, then the full output.
+      const liveLine = () => frame.evaluate(() => [...document.querySelectorAll('#agpop .agent > details[data-key="agent-a1"] ~ .brows.live > li')].filter(li => li.offsetParent).length);
+      assert.equal(await liveLine(), 1, 'a collapsed row shows its last call');
       await frame.click('#agpop details[data-key="agent-a1"] > summary');
+      assert.equal(await liveLine(), 0, 'an open row does not repeat its box\'s last call below it');
       const shown = () => frame.evaluate(() => [...document.querySelectorAll('#agpop details[data-key="agent-a1"] > .brows > li')].filter(li => li.offsetParent).length);
       assert.equal(await shown(), 4, 'expanded row shows its newest four batches');
       assert(await frame.isVisible('#agpop details[data-key="agent-a1"] > .afull'), 'full output action shows');
@@ -108,6 +116,8 @@ const fits = (s, what) => {
       // Pin: Esc and outside clicks leave it open; it opens again on reload.
       await frame.click('#sbadge');
       await frame.click('#agpin');
+      assert.notEqual(await frame.evaluate(() => getComputedStyle(document.querySelector('#agpin svg')).fill), 'none', 'a pinned pushpin is filled');
+      await shot(tab, `pinned-${scheme}-1440`);
       await tab.keyboard.press('Escape');
       await frame.click('#convo', { position: { x: 60, y: 120 } });
       s = await state(frame);
@@ -135,6 +145,8 @@ const fits = (s, what) => {
       assert(s.open, `${width}: opens`);
       fits(s, `${scheme} ${width}`);
       assert(s.rect.width <= s.vw - 16, `${width}: popover narrower than the viewport ${JSON.stringify(s.rect)}`);
+      // The title text node follows the header icon.
+      assert.equal(await frame.evaluate(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#agpop .thead').childNodes[1]); return r.getClientRects().length; }), 1, `${width}: the popover title stays on one line`);
       await frame.click('#agpop details[data-key="agent-a1"] > summary');
       await shot(tab, `open-${scheme}-${width}`);
       await frame.click('#agclose');

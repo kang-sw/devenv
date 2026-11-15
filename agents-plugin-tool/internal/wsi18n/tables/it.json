@@ -1648,6 +1648,7 @@
   "tree.group.ended": "Terminati · {0}",
   "tree.group.bg": "Attività in background · {0}",
   "tree.full": "Apri output completo",
+  "tree.bgchip": "In background {0}",
   "wb.allok": "conferma ogni elemento technical/announced",
   "wb.assumed.title": "presunto, conferma o correggi",
   "wb.banner": "lavagna aggiornata; ricarica rimandata mentre rispondi",

@@ -1648,6 +1648,7 @@
   "tree.group.ended": "Terminados · {0}",
   "tree.group.bg": "Tareas en segundo plano · {0}",
   "tree.full": "Abrir salida completa",
+  "tree.bgchip": "Segundo plano {0}",
   "wb.allok": "confirmar todos los elementos technical/announced",
   "wb.assumed.title": "supuesto: confirma o corrige",
   "wb.banner": "pizarra actualizada; la recarga se pospone mientras respondes",

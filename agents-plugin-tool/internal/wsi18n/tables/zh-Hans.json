@@ -1648,6 +1648,7 @@
   "tree.group.ended": "已结束 · {0}",
   "tree.group.bg": "后台任务 · {0}",
   "tree.full": "打开完整输出",
+  "tree.bgchip": "后台 {0}",
   "wb.allok": "确认每个 technical/announced 项",
   "wb.assumed.title": "已假定，请确认或更正",
   "wb.banner": "看板已更新；你回答期间已推迟重新加载",
