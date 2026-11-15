@@ -113,11 +113,13 @@ type ExecRunner struct {
 // git itself is killed), so a hard timeout is a hard timeout.
 func (r ExecRunner) Run(ctx context.Context, dir string, c Command) ([]byte, error) {
 	argv := append([]string{"-C", dir}, c.Args...)
-	base, bin := os.Environ(), "git"
+	base, bin := os.Environ(), ""
 	var lookErr error
 	if r.Environ != nil {
 		base = r.Environ()
 		bin, lookErr = wsgit.LookPathEnv("git", base)
+	} else {
+		bin = wsgit.Executable()
 	}
 	cmd := exec.CommandContext(ctx, bin, argv...)
 	if lookErr != nil {

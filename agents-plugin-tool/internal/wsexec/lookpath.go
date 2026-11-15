@@ -30,22 +30,7 @@ func LookPath(name string, environ []string) (string, error) {
 	if environ == nil {
 		return exec.LookPath(name)
 	}
-	var path, pathext string
-	for _, kv := range environ {
-		key, value, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		if runtime.GOOS == "windows" {
-			key = strings.ToUpper(key)
-		}
-		switch key {
-		case "PATH":
-			path = value
-		case "PATHEXT":
-			pathext = value
-		}
-	}
+	path, pathext := searchPath(environ)
 	exts := []string{""}
 	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
 		if pathext == "" {
@@ -77,9 +62,34 @@ func LookPath(name string, environ []string) (string, error) {
 	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
 }
 
-// Command is exec.Command for env: with a nil env it is exec.Command itself
-// (the process's own PATH and environment); otherwise name resolves against
-// env's PATH and the command runs with env as its environment. A name env's
+// searchPath shares the resolver's last-entry and platform case rules with
+// the Git cache key. Other environment variables do not select explicit Git.
+func searchPath(environ []string) (path, pathext string) {
+	if environ == nil {
+		return os.Getenv("PATH"), os.Getenv("PATHEXT")
+	}
+	for _, kv := range environ {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if runtime.GOOS == "windows" {
+			key = strings.ToUpper(key)
+		}
+		switch key {
+		case "PATH":
+			path = value
+		case "PATHEXT":
+			pathext = value
+		}
+	}
+	return path, pathext
+}
+
+// Command is exec.Command for env: a nil env uses the process's own PATH
+// and environment; otherwise name resolves against env's PATH and the command
+// runs with env as its environment. Literal "git" uses GitPath's cache; other
+// names are resolved afresh. A name env's
 // PATH does not hold leaves the command unstartable (cmd.Err, as
 // exec.Command does for its own lookup failure), so Start and Run report
 // the missing program rather than run this process's.
@@ -89,10 +99,16 @@ func Command(env []string, name string, args ...string) *exec.Cmd {
 
 // CommandContext is Command bounded by ctx, as exec.CommandContext is.
 func CommandContext(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
-	if env == nil {
+	if env == nil && name != "git" {
 		return exec.CommandContext(ctx, name, args...)
 	}
-	path, err := LookPath(name, env)
+	var path string
+	var err error
+	if name == "git" {
+		path, err = GitPath(env)
+	} else {
+		path, err = LookPath(name, env)
+	}
 	if err != nil {
 		cmd := exec.CommandContext(ctx, name, args...)
 		cmd.Err = err

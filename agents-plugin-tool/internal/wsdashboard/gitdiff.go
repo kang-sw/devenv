@@ -21,6 +21,7 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 
 	"github.com/kang-sw/devenv/internal/gitbatch"
+	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
 // The commit window's diff side reads one file's diff at a time:
@@ -103,7 +104,7 @@ var errNoPath = errors.New("path not in this diff")
 func runGitCapped(ctx context.Context, root string, max int, args ...string) (out []byte, cut bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root}, args...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	gitbatch.Bound(cmd)
 	var stderr bytes.Buffer

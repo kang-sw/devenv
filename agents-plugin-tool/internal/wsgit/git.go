@@ -47,7 +47,7 @@ func (r ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]
 		}
 		cmd.Env = append(base, r.Env...)
 	} else {
-		cmd = exec.CommandContext(ctx, "git", argv...)
+		cmd = exec.CommandContext(ctx, Executable(), argv...)
 		if len(r.Env) > 0 {
 			cmd.Env = append(os.Environ(), r.Env...)
 		}
