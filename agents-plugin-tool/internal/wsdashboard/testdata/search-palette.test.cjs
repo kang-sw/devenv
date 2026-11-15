@@ -528,7 +528,19 @@ async function hostCases() {
   assert.equal(searchCtx.paletteSearch({}).searchAsk, undefined, 'remote session has no agent hook');
   storage['ws.dashboard.drawer.search.state'] = 'invalid JSON';
   assert.equal(searchCtx.paletteSearch({}).searchState.load(), null);
-  assert(dashboard.includes('if (load(DR_SEARCH) === "1") tkApi.openSearch();'), 'reload restores the open search sheet');
+  assert(dashboard.includes('if (load(DR_SEARCH) === "1" || tkWantSearch) tkApi.openSearch();'), 'reload restores the open search sheet');
+
+  // The shortcut before the first store list mounts the palette is a pending
+  // open that mount honours, never a dropped key.
+  const pendCtx = vm.createContext({ tkApi: null });
+  vm.runInContext(block(dashboard, '  var tkWantSearch = false;', '\n  function trackerStart('), pendCtx);
+  pendCtx.tkSearch();
+  assert.equal(pendCtx.tkWantSearch, true, 'a shortcut before mount is kept');
+  let opened = 0;
+  pendCtx.tkApi = { openSearch: () => { opened++; } };
+  pendCtx.tkSearch();
+  assert.equal(opened, 1, 'after mount the shortcut opens at once');
+  assert(/function trackerStart\(\) \{[\s\S]*?doc\.addEventListener\("keydown", function \(e\) \{\n      if \(tkApi \|\| e\.defaultPrevented \|\| !window\.WsTracker\.searchKey[\s\S]*?tkSearch\(\);[\s\S]*?\}, true\);\n    tkReload\(\);/.test(dashboard), 'the page counts the shortcut before mount with the palette\'s own target rule');
 
   // The store search adapter asks for excerpts and passes the abort signal and the status.
   const adapter = block(dashboard, '    search: function (id, q, done, o) {', "    // The store's wiki branches");

@@ -544,7 +544,7 @@
         queue();
       } else if (m.wsShell === "search") {
         // Open, do not toggle a hidden header button via a synthetic click.
-        if (tkApi) tkApi.openSearch();
+        tkSearch();
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);

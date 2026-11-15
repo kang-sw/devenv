@@ -577,10 +577,26 @@
     if (tkSupport) tkAdapter.ext = supExt();
     tkApi = window.WsTracker.mount(tkAdapter, paletteSearch(paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
       drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick })));
-    if (load(DR_SEARCH) === "1") tkApi.openSearch();
+    if (load(DR_SEARCH) === "1" || tkWantSearch) tkApi.openSearch();
+    tkWantSearch = false;
+  }
+  // tkSearch opens the palette, or, before the first store list mounts it,
+  // opens it at mount: the shortcut is never dropped while the page loads.
+  var tkWantSearch = false;
+  function tkSearch() {
+    if (tkApi) tkApi.openSearch();
+    else tkWantSearch = true;
   }
   function trackerStart() {
-    if (window.WsTracker && window.fetch) tkReload();
+    if (!window.WsTracker || !window.fetch) return;
+    // Until mount installs the palette's own key listener, the shortcut
+    // still counts (the same target rule), as a pending open.
+    doc.addEventListener("keydown", function (e) {
+      if (tkApi || e.defaultPrevented || !window.WsTracker.searchKey || !window.WsTracker.searchKey(e)) return;
+      e.preventDefault();
+      tkSearch();
+    }, true);
+    tkReload();
   }
   // trackerNudge handles the stream's tracker event: a revision other than
   // the last one handled reloads. While a reload runs (the page load's, which

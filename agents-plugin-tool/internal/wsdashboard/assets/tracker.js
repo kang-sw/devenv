@@ -7212,4 +7212,7 @@
   }
 
   window.WsTracker = { mount: mount };
+  // searchKey is the palette's shortcut test (qShortcut), for a host that
+  // must recognize the key before mount installs the palette's listener.
+  window.WsTracker.searchKey = qShortcut;
 })();
