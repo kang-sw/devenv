@@ -343,6 +343,9 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 	cmd.Env = claudeEnv(spec.Env)
 	if spec.Lead != nil {
 		cmd.Env = claudeLeadEnv(spec)
+		if spec.Holder != nil {
+			spec.Holder.ringSkip = claudeRingSkip
+		}
 	}
 	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
@@ -610,6 +613,13 @@ type claudeMapper struct {
 // claudePartialEvery is the least time between two sends of the streaming
 // reply: every reply event makes the runner take a snapshot.
 const claudePartialEvery = 100
+
+// claudeRingSkip matches the partial-message lines the mapper drops: tool
+// input, thinking, and signature deltas. A lead's holder keeps them out of
+// its ring, where a large Write's input streams as about 15 bytes of
+// stream_event per byte written and would push the turn's start out. A line
+// whose shape this no longer matches is kept, as before the filter.
+const claudeRingSkip = `^\{"type":"stream_event","event":\{"type":"content_block_delta","index":[0-9]+,"delta":\{"type":"(?:input_json|thinking|signature)_delta"`
 
 // claudeSpawn is what a lead's Agent call asked of its subagent: the model
 // (the call's model parameter) and the effort its subagent type carries.

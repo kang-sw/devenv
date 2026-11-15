@@ -80,6 +80,7 @@ type fakeHolder struct {
 	first            int
 	lostFrom, lostTo uint64
 	ringBytes        int
+	ringSkip         string
 	inputs           []string
 	attached         bool
 	exited           bool
@@ -258,6 +259,7 @@ func (f *fakeHolders) LaunchWith(spec wsholder.LaunchSpec) (string, error) {
 	defer f.mu.Unlock()
 	h := f.newLocked(slices.Clone(spec.Session), true)
 	h.ringBytes = spec.RingBytes
+	h.ringSkip = spec.RingSkip
 	f.ops = append(f.ops, "launch "+h.id)
 	return h.id, nil
 }
@@ -433,6 +435,12 @@ func (f *fakeHolders) launchRing(id string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.holders[id].ringBytes
+}
+
+func (f *fakeHolders) launchSkip(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.holders[id].ringSkip
 }
 
 // exit ends the holder's child from its side.

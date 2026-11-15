@@ -748,6 +748,37 @@ func TestLaunchRingBytes(t *testing.T) {
 	}
 }
 
+// TestLaunchRingSkip pins the skip pattern a start passes a holder: a
+// launch's own RingSkip, and no flag without one.
+func TestLaunchRingSkip(t *testing.T) {
+	for _, want := range []string{"", `^\{"type":"x"`} {
+		var got []string
+		applies := false
+		m := New(Options{
+			Dir:       testHoldersDir(t),
+			Python:    "python3",
+			breakaway: &applies,
+			start: func(exe string, args []string, cwd string, breakaway bool) (*exec.Cmd, error) {
+				got = args
+				return nil, errors.New("not started")
+			},
+		})
+		t.Cleanup(m.Close)
+		if _, err := m.LaunchWith(LaunchSpec{RingSkip: want}); err == nil {
+			t.Fatal("LaunchWith with a failing start succeeded")
+		}
+		skip, flagged := "", false
+		for i, arg := range got {
+			if arg == "--ring-skip" && i+1 < len(got) {
+				skip, flagged = got[i+1], true
+			}
+		}
+		if skip != want || flagged != (want != "") {
+			t.Fatalf("--ring-skip = %q (flagged %v), want %q (args %q)", skip, flagged, want, got)
+		}
+	}
+}
+
 // TestAttachSpeaksTheHoldersOlderProtocol pins version tolerance from the
 // daemon's side: a daemon one version ahead still attaches to the holder,
 // speaking the holder's version.
