@@ -188,6 +188,17 @@ func TestTopicUpdateAdoptionKeepsFirstTouchAndExplicitIdentity(t *testing.T) {
 	}
 }
 
+func TestTopicUpdateClosedAdoptionDeduplicatesConvergingTouches(t *testing.T) {
+	s := &State{}
+	stateApply(t, s, `<wb:topic name="Old"><wb:log>History</wb:log><wb:close result="Done"/></wb:topic>`, stateNow)
+	before := s.clone()
+	out := stateApply(t, s, `<wb:topic name="new"><wb:body/></wb:topic><wb:topic name="Old"><wb:body/></wb:topic><wb:topic name="new" label="Old"/>`, stateNow)
+	wantSummaries(t, out, "topic updated: new (renamed from Old)")
+	if !s.topicClosed("new") || s.CloseResults["new"] != "Done" || !reflect.DeepEqual(before.Topics[0].Entries, s.Topics[0].Entries) || s.TopicStates()["new"].State != nil {
+		t.Fatal("closed adoption changed lifecycle/history")
+	}
+}
+
 func TestTopicUpdateKindTagsUseNetFieldWriters(t *testing.T) {
 	s := &State{}
 	stateApply(t, s, `<wb:topic name="t"><wb:add class="check"><wb:title>Original</wb:title></wb:add></wb:topic>`, stateNow)

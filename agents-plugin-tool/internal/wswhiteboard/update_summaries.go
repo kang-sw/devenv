@@ -168,10 +168,21 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 	if len(u.order) == 0 {
 		return nil
 	}
+	// Provisional destination and source touches can converge on one adopted
+	// identity. Deduplicate before alignment: renameTopic clears stale target
+	// lifecycle state, so applying the same move twice would erase its base.
+	var ordered []*topicUpdate
+	seen := map[*topicUpdate]bool{}
+	for _, t := range u.order {
+		if !seen[t] {
+			seen[t] = true
+			ordered = append(ordered, t)
+		}
+	}
 	// Align adopted identities in the comparison copy only. Otherwise every
 	// moved item/body/panel looks newly added and the old topic looks removed.
 	base := before.clone()
-	for _, t := range u.order {
+	for _, t := range ordered {
 		if t.base != "" && t.base != t.key {
 			base.renameTopic(t.base, t.key)
 		}
@@ -179,12 +190,7 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 	effects := semanticEffects(base, after)
 	oldStates, states := base.TopicStates(), after.TopicStates()
 	var out []string
-	seen := map[*topicUpdate]bool{}
-	for _, t := range u.order {
-		if seen[t] {
-			continue
-		}
-		seen[t] = true
+	for _, t := range ordered {
 		if t.base == "" && after.topicKnown(t.key) {
 			value, source := "none", "default"
 			if state := states[t.key].State; state != nil {

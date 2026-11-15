@@ -68,6 +68,15 @@ func TestWhiteboardUpdateSummariesNetMixedTopicsAnswersAndLifecycle(t *testing.T
 	}
 }
 
+func TestWhiteboardUpdateSummaryClosedAdoptionKeepsNetLifecycle(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.update(t, `<wb:topic name="Old"><wb:log>History</wb:log><wb:close result="Done"/></wb:topic>`)
+	text := f.update(t, `<wb:topic name="new"><wb:body/></wb:topic><wb:topic name="Old"><wb:body/></wb:topic><wb:topic name="new" label="Old"/>`)
+	if got := whiteboardSummaryLines(text); !reflect.DeepEqual(got, []string{"topic updated: new (renamed from Old)"}) {
+		t.Fatalf("adoption invented a close: %s", text)
+	}
+}
+
 func TestWhiteboardUpdateSummaryRefusalIsAtomic(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, "")
