@@ -21,3 +21,6 @@ Expected caller behavior is that independent parallel acquisitions reserve disti
 ### Phase 1: Investigate and prevent concurrent pool-selection collision
 
 Trace pool selection, reservation, and checkout boundaries for concurrent acquisitions. Reproduce the observed same-checkout selection with independent target branches in an isolated fixture. Implement the smallest justified fix after the concurrency contract is settled, and verify concurrent acquisitions either return distinct safe leases or serialize without an incidental Git lock error. Cover cleanup after a failed acquisition without affecting a successful sibling.
+
+## Resolution
+Duplicate of 261115-bug-ws-worktree-acquire-concurrent-pool-claim (owner-approved FIX tier (1060), assigned to EXEC3); evidence kept here for that ticket.
