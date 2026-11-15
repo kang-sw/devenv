@@ -211,20 +211,39 @@
           chart.appendChild(svgNode("text", { "class": "usage-now-label", x: nowX, y: 10, "text-anchor": "middle" }, t("now")));
         }
       }
-      var defs = svgNode("defs"); chart.appendChild(defs);
-      geometry.segments.forEach(function (s, i) {
-        if (s.above) chart.appendChild(svgNode("polygon", { "class": "usage-excess", points: s.a.x + "," + s.a.y + " " + s.b.x + "," + s.b.y + " " + s.b.x + "," + (88 - s.b.elapsed * 76) + " " + s.a.x + "," + (88 - s.a.elapsed * 76), fill: "var(--wb-fail)", opacity: .09 }));
-        var gradientId = id + "-segment-" + i;
-        var gradient = svgNode("linearGradient", { id: gradientId, gradientUnits: "userSpaceOnUse", x1: s.a.x, y1: s.a.y, x2: s.b.x, y2: s.b.y });
-        gradient.appendChild(svgNode("stop", { offset: "0%", "stop-color": tint(s.a.delta) }));
-        gradient.appendChild(svgNode("stop", { offset: "100%", "stop-color": tint(s.b.delta) })); defs.appendChild(gradient);
-        var line = svgNode("line", { "class": "usage-actual", x1: s.a.x, y1: s.a.y, x2: s.b.x, y2: s.b.y, stroke: "url(#" + gradientId + ")", "stroke-width": 2.3 });
-        if (s.estimated) line.setAttribute("stroke-dasharray", "4 3");
-        line.appendChild(svgNode("title", {}, t(s.estimated ? "estimatedTitle" : "interval"))); chart.appendChild(line);
+      // One continuous line per run of observations; a long gap breaks the
+      // run into a dashed bridge with no area. Dense runs are decimated to one
+      // point per ~1.5px column (usage is cumulative, so the last point wins).
+      var gapLimit = (w.kind === "five_hour" ? 30 * 60000 : 12 * 3600000);
+      var runs = [], run = null;
+      geometry.segments.forEach(function (s) {
+        if (s.b.asOf - s.a.asOf > gapLimit) {
+          run = null; runs.push({ gap: true, pts: [s.a, s.b] });
+        } else if (run && run.pts[run.pts.length - 1] === s.a) run.pts.push(s.b);
+        else { run = { gap: false, pts: [s.a, s.b] }; runs.push(run); }
+      });
+      function decimate(pts) {
+        var out = [], lastBucket = null;
+        pts.forEach(function (p, i) {
+          var bucket = Math.round(p.x / 1.5);
+          if (out.length && bucket === lastBucket && i < pts.length - 1) out[out.length - 1] = p; else out.push(p);
+          lastBucket = bucket;
+        });
+        return out;
+      }
+      function d(pts) { return pts.map(function (p, i) { return (i ? "L" : "M") + p.x.toFixed(1) + " " + p.y.toFixed(1); }).join(""); }
+      runs.forEach(function (r) {
+        var pts = r.gap ? r.pts : decimate(r.pts), last = pts[pts.length - 1];
+        var color = old && last.current ? "var(--wb-muted-fg)" : tint(last.delta);
+        if (!r.gap) chart.appendChild(svgNode("path", { "class": "usage-area", d: d(pts) + "L" + last.x.toFixed(1) + " 88L" + pts[0].x.toFixed(1) + " 88Z", fill: color }));
+        var line = svgNode("path", { "class": "usage-actual", d: d(pts), stroke: color, "stroke-width": 2 });
+        if (r.gap) line.setAttribute("stroke-dasharray", "4 3");
+        line.appendChild(svgNode("title", {}, t(r.gap ? "estimatedTitle" : "interval"))); chart.appendChild(line);
       });
       geometry.points.forEach(function (p) {
-        var point = svgNode("circle", { "class": "usage-point" + (p.current ? " usage-point-current" : ""), cx: p.x, cy: p.y, r: p.current ? 4 : 2.5, fill: old && p.current ? "var(--wb-muted-fg)" : tint(p.delta) });
-        point.appendChild(svgNode("title", {}, new Date(p.asOf).toLocaleString(locale()) + ": " + p.percent + "%" + (p.current ? "; " + t("current") : "") + (old && p.current ? "; " + t("stale") : ""))); chart.appendChild(point);
+        if (!p.current) return;
+        var point = svgNode("circle", { "class": "usage-point usage-point-current", cx: p.x, cy: p.y, r: 4, fill: old ? "var(--wb-muted-fg)" : tint(p.delta) });
+        point.appendChild(svgNode("title", {}, new Date(p.asOf).toLocaleString(locale()) + ": " + p.percent + "%; " + t("current") + (old ? "; " + t("stale") : ""))); chart.appendChild(point);
       });
       return { el: chart, geometry: geometry };
     }

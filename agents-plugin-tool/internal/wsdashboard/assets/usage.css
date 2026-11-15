@@ -52,6 +52,7 @@
 .usage-swatch-estimated { border-top-style: dashed; }
 .usage-swatch-point { width: 6px; height: 6px; border: 0; border-radius: 50%; background: var(--wb-muted-fg); }
 .usage-actual { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.usage-area { stroke: none; opacity: .14; }
 .usage-point { stroke: var(--wb-card); stroke-width: 1; }
 .usage-point-current { stroke-width: 2; }
 .usage-meta { font-size: 11px; }
