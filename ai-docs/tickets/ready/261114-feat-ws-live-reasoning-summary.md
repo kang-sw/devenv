@@ -850,6 +850,45 @@ remain untouched. Reuse earlier unaffected scoped results and the sole clean
 claim a post-sync independent re-review. No broader restart, another sync,
 additional Lite, runtime operation or raw evidence packet occurred.
 
+## Lead-started ca1b2e6e5 integration verification - 2026-11-15
+
+EXEC2 lead started the exact `ca1b2e6e543a16fac7eb002530b69dae3203ae0f`
+merge into retained head `1df097a113`. The worker resolved only that merge and
+completed its two-parent record at `94fdc7e7176ae3219af514173338a8112cc49fee`.
+No new integration, develop chase, protocol/schema/version change or cleanup
+was initiated.
+
+- The sole conflict was `assets/dashboard.tmpl`. Preserve the complete incoming
+  `userentry`/UserBlocks rendering, envelope timestamps and one stable batch key;
+  retain 675's escaped live component and its own immutable natural-turn wrapper.
+- Extend only `reasoning_summary_test.go` to single/two-envelope batches across
+  all three existing origins. The same assertions now also require the expected
+  bubble count and one source key; existing live parity, cached prior markup,
+  immutable bytes, history association and paging assertions remain intact.
+- All full command output was read. Exact offline Go 1.26.2 with the existing
+  private environment and `-count=1 -vet=off -p=1 -parallel=1 -timeout=120s -v`
+  passed **57 top-level tests**: dashboard 29, MCP 7, locales 15, inbox 6.
+  `TestInlineCapsulesBrowserWrapping` was selected by the dashboard expression
+  but **skipped**, not passed, because `WS_PLAYWRIGHT_MODULE` was absent. No
+  browser/profile/runtime/Pi/provider action or broad test restart occurred.
+
+```text
+wsdashboard (29 passed, 1 skipped): ^Test(ReasoningSummary(LivePlacementPlainTextAndStableKey|FallbackExactLegacyAndInvalidHistory|HistoryImmutableTurnAssociationAndAttempts|PreservesUserRolesAndUnifiedHistoryKeys)|AgentLiveHostIsBoundBeforeRunnerStarts|Conversation(MailWake|BoardNudge).*|ConversationPresentation(MailKeepsAmbiguousAndRepeatedRecords|PeerNoteIsDisplayOnly|SourceLabelsRequireTypedCause|InboxUserKeepsAnswersTextAndImage|WhiteboardFoldAndTargets)|EntryRendersOnceThroughTheCache|StreamingTickChangesOnlyTheLiveRegion|DashboardSourceAssembly|InlineCapsules.*|OverviewPageIntegration|BoardHistoryHooksSurroundSSESwap|UserMessage.*|RefreshCacheNonBoardWake)$
+mcp (7 passed): ^Test(SummarySnapshot.*|SummaryIntake.*|DashboardSessionSourceTracksLiveStores)$
+wsi18n (15 passed): the unchanged exact 15-key/table selector in Final pre-head verification above.
+wsinbox (6 passed): ^Test(UserMessage.*|ParseUserMessagesMixedAndMalformed)$
+```
+
+The approved-reference check found explicit ticket links to all three 675 assets
+under Approved UI Reference: `mockup.html`, `mockup-1280.png`, `mockup-360.png`
+(owner `717=ok`). Retain all three unchanged; no blanket artifact deletion was
+performed. Seven protected preparation artifacts remain outside the index.
+Retain the earlier clean 967 Lite and unaffected test evidence; neither the Lite
+nor whole-page acceptance was repeated or claimed for this merge. MAIN owns
+acceptance, landing/closure and any later fresh sync if this exact merge becomes
+stale. The existing workflow-commit imported-stage limitation used its already
+approved native current-merge fallback; no new idea ticket was created.
+
 ## Historical receiver checkpoint - 2026-11-15
 
 **VERIFIED:** MAIN's 23:10:43/23:12 authorization is consumed: one exact
