@@ -26,18 +26,27 @@ instrument('function reading(scroller) {', `function reading(scroller) {
 }
 function measuredReading(scroller) {`);
 
-// 100 topics, 1200 chronological entries, 300 open panels. Keep the original
-// large single-column board: a tiny mock hides the repeated sticky-head scan.
+// 100 topics, 1200 chronological entries, 300 open panels, rendered as the
+// server renders a timeline (15e44e235): whole rows, half of each topic
+// behind an inert gap the initial window fill opens. Keep the original large
+// single-column board: a tiny mock hides the repeated sticky-head scan. One
+// gap row holds an open panel whose frame has no height yet, so its window
+// stays pending until "late frame height" sizes it.
+const LATE_TOPIC = 50;
 let topics = '';
 for (let i = 0; i < 100; i++) {
-  let entries = '';
-  for (let j = 0; j < 12; j++) {
-    const id = i * 12 + j + 1;
-    entries += j % 4 === 0
-      ? `<article class="wb-entry panel" id="e${id}" data-panel="p${id}"><details open class="entry-panel" id="p${id}"><summary>Panel ${id}</summary><div class="payload" style="height:180px">Reading material ${id}</div></details></article>`
-      : `<article class="wb-entry" id="e${id}" data-entry="e${id}">Log ${id}: stable review context and longer wrapping text.</article>`;
-  }
-  topics += `<section class="topic" data-topic="Topic ${i}"><header class="tophead">Topic ${i}</header><div class="wb-history" data-history="Topic ${i}"><button hidden class="history-older">Older</button><div class="history-clip"><div class="history-live">${entries}</div></div></div></section>`;
+  const row = (id, late) => {
+    const body = late
+      ? `<article class="wb-entry panel" id="e${id}" data-panel="p${id}"><details open class="entry-panel" id="p${id}"><summary>Panel ${id}</summary><div class="doc-frame" id="late-frame"></div></details></article>`
+      : id % 4 === 1
+        ? `<article class="wb-entry panel" id="e${id}" data-panel="p${id}"><details open class="entry-panel" id="p${id}"><summary>Panel ${id}</summary><div class="payload" style="height:180px">Reading material ${id}</div></details></article>`
+        : `<article class="wb-entry" id="e${id}" data-entry="e${id}">Log ${id}: stable review context and longer wrapping text.</article>`;
+    return `<div class="timeline-row" data-row="r${id}" data-count="1" data-from="" data-to="">${body}</div>`;
+  };
+  let older = '', live = '';
+  for (let j = 0; j < 6; j++) older += row(i * 12 + j + 1, i === LATE_TOPIC && j === 4);
+  for (let j = 6; j < 12; j++) live += row(i * 12 + j + 1, false);
+  topics += `<section class="topic" data-topic="Topic ${i}"><header class="tophead">Topic ${i}</header><div class="wb-history" data-history="Topic ${i}"><div class="history-live"><div class="history-gap" data-count="6" data-from="" data-to=""><span class="gap-label"></span><span class="gap-range"></span><span class="gap-actions"><button type="button" data-load="up">Older</button><button type="button" data-load="down" hidden>Newer</button></span><template data-history-gap>${older}</template></div>${live}</div></div></section>`;
 }
 const boot = `
 window.resetWork = () => window.work = {reading:0, viewport:0, rect:0, style:0, raf:0, ro:0, max:{viewport:0, rect:0, style:0}};
@@ -68,7 +77,7 @@ window.ResizeObserver = class extends RO {
     page.on('pageerror', error => violations.push(`page error: ${error.message}`));
     const css = fs.readFileSync(path.join(assets, 'page.css'), 'utf8');
     const reports = [];
-    async function settle(stage) {
+    async function settle(stage, exercised) {
       // RO delivery -> rAF clip write -> resize delivery -> quiet frame.
       await page.evaluate(() => window.frames(4));
       const settled = await page.evaluate(() => structuredClone(work));
@@ -76,20 +85,33 @@ window.ResizeObserver = class extends RO {
       const quiet = await page.evaluate(() => structuredClone(work));
       reports.push({stage, settled, quiet});
       function check(ok, message) { if (!ok) violations.push(`${stage}: ${message}`); }
-      check(settled.reading > 0 && settled.ro > 0 && settled.raf > 0, 'must exercise reading, RO delivery and rAF work');
+      // A stimulus that reaches the history window must run the RO -> rAF ->
+      // capture path; settled membership never changes on resize, so one
+      // that does not must cost no capture at all.
+      if (exercised) check(settled.reading > 0 && settled.ro > 0 && settled.raf > 0, 'must exercise reading, RO delivery and rAF work');
+      else check(settled.reading === 0 && settled.raf === 0, `settled history did capture work (${settled.reading} captures, ${settled.raf} frames)`);
+      // One capture per scroller per batch (69c7e50fa): initialization plus
+      // one resume frame, never one per history.
+      check(settled.reading <= 2, `${settled.reading} captures > 2`);
       check(settled.max.viewport <= 1, `viewport/capture ${settled.max.viewport} > 1`);
       check(settled.max.rect <= 2000, `rect/capture ${settled.max.rect} > 2000`);
       check(settled.max.style <= 2000, `style/capture ${settled.max.style} > 2000`);
       check(JSON.stringify(settled) === JSON.stringify(quiet), 'work continued during three quiet frames');
     }
     await page.setContent(`<style>${css}\nbody{margin:0}#bcol{height:calc(100vh - 50px);overflow:auto}.topic{margin:12px}.tophead{position:sticky;top:0;height:32px;background:white}</style><div id="bcol">${topics}</div><script>${boot}</script><script>${source}</script>`, {timeout: 60000});
-    assert.deepEqual(await page.evaluate(() => [document.querySelectorAll('.topic').length, document.querySelectorAll('.wb-entry').length, document.querySelectorAll('.entry-panel').length]), [100, 1200, 300]);
-    await settle('initial load');
+    // Rows a pending window has not opened yet still sit in their gap template.
+    assert.deepEqual(await page.evaluate(() => {
+      const count = sel => document.querySelectorAll(sel).length + Array.from(document.querySelectorAll('template[data-history-gap]')).reduce((n, t) => n + t.content.querySelectorAll(sel).length, 0);
+      return [document.querySelectorAll('.topic').length, count('.wb-entry'), count('.entry-panel')];
+    }), [100, 1200, 300]);
+    await settle('initial load', true);
     await page.evaluate(() => resetWork());
     await page.setViewportSize({width: 1000, height: 760});
-    await settle('viewport resize');
+    await settle('viewport resize', true);
+    await page.evaluate(() => { resetWork(); document.getElementById('late-frame').style.height = '120px'; });
+    await settle('late frame height', true);
     await page.evaluate(() => { resetWork(); document.querySelector('.payload').style.height = '260px'; });
-    await settle('panel resize');
+    await settle('panel resize', false);
     // Report every stimulus before asserting: the negative control must show
     // both resize costs, rather than stopping at its first expensive capture.
     console.log(JSON.stringify({settlementFrames: 4, quietFrames: 3, reports, violations}, null, 2));

@@ -328,8 +328,10 @@
     });
     if (panelState) fresh.forEach(function (h) { h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore); });
     fresh.forEach(function (h) { h._wbHistoryHeight = Math.ceil(h.querySelector('.history-live').getBoundingClientRect().height); });
-    kept.forEach(function (k) { k.apply(); });
+    // Fill inside the shared capture: each fill's own keep() joins it, so
+    // N histories cost one capture per scroller, not one per history.
     fresh.forEach(function (h) { h._wbHistoryFilling = true; fill(h); });
+    kept.forEach(function (k) { k.apply(); });
     fresh.forEach(function (h) {
       h.addEventListener('focusin', function (e) {
         var node = e.target, live = h.querySelector('.history-live');

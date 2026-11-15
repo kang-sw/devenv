@@ -57,3 +57,66 @@ Acceptance:
   been added around an assertion.
 - The CI-red test from the v0.50.0 pre-release run is identified, and it
   is on this list or added to it.
+
+### Result (cd477b5a8) - 2026-11-16
+
+Triaged on develop `cd477b5a8` (macOS, cached Chromium 1223, `-run` only).
+
+- `TestGearHoldsTheThemeSection`: PASS on `cd477b5a8`, with no change here.
+  Stale expectation, fixed by `234cef037`: the theme controls moved to the
+  shell-owned Settings menu (accepted in `0bc7fcf24`), and the test now checks
+  every locale there.
+- `TestRootKeepsSessionsInTheRailOnly`: PASS on `cd477b5a8`, with no change
+  here. Stale expectation, fixed by `c918577da` ("update root tests for landing
+  content in main"): the owner-approved landing content at `/` (`d2921cf02`,
+  `bf96b4b13`) replaced the empty main panel.
+- `TestViewedPerformanceBrowser`: red on `cd477b5a8`, with two causes.
+  - **Product regression (fixed).** `20972a5f8` added the initial
+    1000px `fill()` after `init()` applied its shared per-scroller capture.
+    Each `fill()` -> `progress()` then opened its own `kit.keep()` capture,
+    one per history with a gap. That undid the one-capture-per-scroller
+    batching of `69c7e50fa`. On the 100-topic fixture, initial load ran 102
+    captures and about 106k `getBoundingClientRect` calls; after the fix it
+    runs 2 captures and about 4.5k calls.
+  - **The fix.** `assets/stream.js` runs the fill loop before the shared
+    `kept.apply()`, so each fill's `keep()` joins the batch.
+  - **Stale fixture.** The test's board still used the pre-`15e44e235` history
+    markup (`.history-clip` and `.history-older`), so the product's
+    RO -> rAF path never ran (`raf: 0` in every stage).
+    `testdata/viewed-performance.cjs` now renders the timeline markup the
+    server emits (`page.tmpl` `timelinerow` and `.history-gap` with an inert
+    template). One gap row holds a frame with no height yet, so a window
+    stays pending.
+  - **Stages.**
+    - "initial load", "viewport resize" and a new "late frame height" stage
+      must each exercise reading, RO delivery and rAF.
+    - "panel resize" of a settled panel must now do zero capture work. The
+      reason is the documented "Settled membership never changes on resize"
+      rule (`stream.js` above `progress`).
+    - A new per-stage bound of at most 2 captures fails the unfixed source:
+      "initial load: 102 captures > 2".
+    - The existing per-capture, quiet-frame and `max` bounds are unchanged.
+- `TestHistoryLoadAnchorBrowser`: PASS, with no change. It passed 5 of 5 runs
+  with `-count=5` and 16 of 16 runs as 4 parallel runners × `-count=4`. Under
+  CDP CPU throttling at 4×, 8× and 16× it passed every run. On `a882ca00d`,
+  the test's version when MAIN reported it flaky, 16 of 16 parallel runs
+  passed. **The flake cause is not identified, because it never reproduced.**
+  INFERRED candidate: the fixed 1500ms pin cap (`PIN_MS`, a non-renewing cap
+  chosen in `a882ca00d`) against late images arriving at 100/300/600ms. A
+  heavily starved runner could deliver an image after the cap, and the anchor
+  would then move. CPU throttling up to 16× did not trigger this. No retry
+  was added.
+- **CI red from the v0.50.0 pre-release run.** Run 43706357281 (ship-gate log
+  e4883: "나머지 하나는 이 맥에서도 원래 실패하던 시험입니다") failed
+  `TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation`. Its three
+  companions were Windows-only. It was not on this ticket's list.
+  `0500a7690` fixed it as a stale expectation (a new topic records its initial
+  topic-state line), and it passes 3 of 3 runs on `cd477b5a8`.
+- **Verification on the fixed head.**
+  - `go test ./internal/wswhiteboard` (whole package): ok.
+  - `-run 'Browser$'` with the browser env set: every whiteboard browser test
+    passed.
+  - The wsdashboard `(Board|Whiteboard|History|Timeline|Viewed|Overview).*Browser`
+    run passed. `TestBoardViewedReloadBrowser`, `TestBoardViewedLiveBrowser`
+    and `TestBoardStateFilterBrowser` passed, and
+    `TestBoardViewedUpdatePerfBrowser` passed 3 of 3 runs.
