@@ -183,7 +183,9 @@ func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID st
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return s, false
 	}
-	if !adapterPresent(d.pages().readSnapshot(replyID), now) {
+	// Freshness only: the overlay-free read skips the retained-evidence
+	// sweep, which nothing a write route answers depends on.
+	if !d.pages().adapterPresent(replyID, now) {
 		http.Error(w, "this session has no live host adapter: copy the answers into its terminal instead", http.StatusConflict)
 		return s, false
 	}

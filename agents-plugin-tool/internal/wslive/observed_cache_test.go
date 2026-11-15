@@ -18,19 +18,26 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
 		t.Fatal(err)
 	}
-	opens := 0
-	cache := ObservedCache{open: func(path string) (*os.File, error) { opens++; return os.Open(path) }}
+	opens, stats := 0, 0
+	// The clock runs well past every file time, so the directory stat is
+	// trusted between sweeps; the test advances it to force one.
+	clock := time.Now().Add(time.Hour)
+	cache := ObservedCache{
+		open: func(path string) (*os.File, error) { opens++; return os.Open(path) },
+		stat: func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) },
+		now:  func() time.Time { return clock },
+	}
 	first := cache.Load(dir)
-	if opens != 1 {
-		t.Fatalf("cold opens=%d", opens)
+	if opens != 1 || stats != 1 {
+		t.Fatalf("cold opens=%d stats=%d", opens, stats)
 	}
 	for i := 0; i < 20; i++ {
 		if cache.Load(dir) != first {
 			t.Fatal("unchanged projection rebuilt")
 		}
 	}
-	if opens != 1 {
-		t.Fatalf("unchanged files opened %d times", opens-1)
+	if opens != 1 || stats != 1 {
+		t.Fatalf("unchanged files opened %d times, stat'ed %d times", opens-1, stats-1)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, ObservedDirName, "*.json"))
 	path := files[0]
@@ -46,9 +53,15 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if err := os.Chtimes(filepath.Dir(path), dirInfo.ModTime(), dirInfo.ModTime()); err != nil {
 		t.Fatal(err)
 	}
+	// Write-once files make this edit illegitimate: the directory stat hides
+	// it until the forced re-sweep, which picks it up.
+	if cache.Load(dir) != first || opens != 1 {
+		t.Fatalf("trusted directory re-read a child: opens=%d", opens)
+	}
+	clock = clock.Add(observedResweep)
 	changed := cache.Load(dir)
 	if opens != 2 || changed == first || changed.models[""].Current.Model != "second-longer" {
-		t.Fatalf("child edit missed: opens=%d", opens)
+		t.Fatalf("child edit missed by the forced re-sweep: opens=%d", opens)
 	}
 	// Atomic replacement with identical size, mode and timestamp must reload.
 	info, _ := os.Stat(path)
@@ -86,6 +99,73 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	cache.Load(dir)
 	if opens != 5 {
 		t.Fatal("Forget kept records")
+	}
+}
+
+func TestObservedCacheDirectoryGate(t *testing.T) {
+	dir := t.TempDir()
+	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
+		t.Fatal(err)
+	}
+	stats := 0
+	clock := time.Now()
+	cache := ObservedCache{
+		stat: func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) },
+		now:  func() time.Time { return clock },
+	}
+	// A directory mtime inside the racy window of its sweep is not trusted.
+	cache.Load(dir)
+	cache.Load(dir)
+	if stats != 2 {
+		t.Fatalf("recent directory mtime trusted: stats=%d", stats)
+	}
+	// Once the mtime is old enough, an unchanged directory skips the records.
+	clock = clock.Add(time.Minute)
+	cache.Load(dir)
+	first := cache.Load(dir)
+	if stats != 3 {
+		t.Fatalf("unchanged directory re-stat'ed its records: stats=%d", stats)
+	}
+	// An added record moves the directory and is read on the next load.
+	r := observedCacheRecord("two", "second")
+	r.At = 2000
+	if err := AppendObserved(dir, []ObservedRecord{r}); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(time.Minute)
+	got := cache.Load(dir)
+	if got == first || got.models[""].Current.Model != "second" {
+		t.Fatal("added record missed")
+	}
+	want := Snapshot{}
+	retained, err := ReadObserved(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	OverlayObserved(&want, retained)
+	snap := Snapshot{}
+	got.Overlay(&snap)
+	if !reflect.DeepEqual(snap, want) {
+		t.Fatalf("gated overlay differs: %+v vs %+v", snap, want)
+	}
+	// The forced re-sweep fires after the interval even when nothing moved.
+	before := stats
+	cache.Load(dir)
+	if stats != before {
+		t.Fatal("trusted load stat'ed records")
+	}
+	clock = clock.Add(observedResweep)
+	if cache.Load(dir) != got {
+		t.Fatal("unchanged re-sweep rebuilt the projection")
+	}
+	if stats != before+2 {
+		t.Fatalf("forced re-sweep did not stat every record: %d", stats-before)
+	}
+	// A clock that steps backwards is not trusted either.
+	clock = clock.Add(-time.Hour)
+	cache.Load(dir)
+	if stats != before+4 {
+		t.Fatalf("backward clock trusted the directory: %d", stats-before)
 	}
 }
 

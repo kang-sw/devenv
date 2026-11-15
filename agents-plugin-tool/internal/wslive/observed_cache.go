@@ -6,27 +6,69 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+)
+
+const (
+	// observedResweep bounds how long a load may trust the evidence
+	// directory's own stat: past it, the next load stats every record again.
+	observedResweep = 15 * time.Second
+	// observedRacyWindow is how recent a directory mtime may be, relative to
+	// the sweep that recorded it, and still be distrusted: an entry added on a
+	// filesystem with coarse timestamps can keep the directory mtime equal.
+	observedRacyWindow = 2 * time.Second
 )
 
 // ObservedCache retains immutable decoded evidence and its derived model
-// histories. Each load lists the directory and stats each record, following
-// symlinks. SameFile, size, mode and mtime detect replacements and child edits
-// even when the directory's own stat is unchanged. The zero value is ready.
-// Like FolderCache, in-place writes preserving the entire identity are outside
-// this cache's contract; no TTL or recent-write exclusion is used.
+// histories. A full sweep lists the directory and stats each record, following
+// symlinks; SameFile, size, mode and mtime then detect replacements and child
+// edits. Between sweeps a load trusts the directory's own stat: evidence files
+// are write-once (AppendObserved links a synced temp file into place and
+// skips an existing name), so every legitimate change adds, removes or renames an entry
+// and moves the directory's mtime. A full sweep still runs when that stat
+// differs, when its mtime was too recent to trust (observedRacyWindow), and
+// at least every observedResweep, which bounds the staleness of an in-place
+// child edit or a coarse-mtime collision. The prior per-load full sweep cost
+// one stat per record on every snapshot read, which a long session's
+// thousands of records made the dashboard's dominant cost. The zero value is
+// ready.
 type ObservedCache struct {
 	mu       sync.Mutex
 	sessions map[string]*observedSlot
 	opens    atomic.Int64
-	// open is an instance-local test seam; set before the first Load.
+	// open, stat and now are instance-local test seams; set before the first
+	// Load.
 	open func(string) (*os.File, error)
+	stat func(string) (os.FileInfo, error)
+	now  func() time.Time
 }
 
 type observedSlot struct {
 	mu       sync.Mutex
 	files    map[string]observedFile
 	evidence *ObservedEvidence
+	// dirInfo is the evidence directory's stat taken before the last full
+	// sweep listed it, and sweptAt the clock reading before that stat.
+	dirInfo os.FileInfo
+	sweptAt time.Time
 }
+
+// trusted reports that the slot's last full sweep still describes the
+// directory now stat'ed as info at clock now.
+func (s *observedSlot) trusted(info os.FileInfo, now time.Time) bool {
+	prev := s.dirInfo
+	if s.evidence == nil || prev == nil || info == nil || !info.IsDir() || info.ModTime().IsZero() {
+		return false
+	}
+	if d := now.Sub(s.sweptAt); d < 0 || d >= observedResweep {
+		return false
+	}
+	if !info.ModTime().Before(s.sweptAt.Add(-observedRacyWindow)) {
+		return false
+	}
+	return os.SameFile(prev, info) && prev.Size() == info.Size() && prev.Mode() == info.Mode() && prev.ModTime().Equal(info.ModTime())
+}
+
 type observedFile struct {
 	info   os.FileInfo
 	record ObservedRecord
@@ -66,11 +108,31 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	c.mu.Unlock()
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
-	entries, err := os.ReadDir(filepath.Join(dir, ObservedDirName))
+	stat := c.stat
+	if stat == nil {
+		stat = os.Stat
+	}
+	clock := time.Now
+	if c.now != nil {
+		clock = c.now
+	}
+	evidenceDir := filepath.Join(dir, ObservedDirName)
+	now := clock()
+	dirInfo, dirErr := os.Stat(evidenceDir)
+	if dirErr == nil && slot.trusted(dirInfo, now) {
+		return slot.evidence
+	}
+	entries, err := os.ReadDir(evidenceDir)
 	if err != nil {
 		slot.files = nil
 		slot.evidence = nil
+		slot.dirInfo = nil
 		return nil
+	}
+	// An unusable directory stat leaves nothing to trust: every load sweeps.
+	slot.dirInfo, slot.sweptAt = nil, now
+	if dirErr == nil {
+		slot.dirInfo = dirInfo
 	}
 	files := make(map[string]observedFile, len(entries))
 	changed := slot.evidence == nil
@@ -78,8 +140,8 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		path := filepath.Join(dir, ObservedDirName, entry.Name())
-		info, err := os.Stat(path)
+		path := filepath.Join(evidenceDir, entry.Name())
+		info, err := stat(path)
 		if err != nil {
 			changed = true
 			continue
