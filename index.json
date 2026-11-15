@@ -794,7 +794,17 @@
       }
     },
     "261115-feat-ws-conversation-row-unification": {
-      "registered_at": "2026-11-15T07:29:59Z"
+      "registered_at": "2026-11-15T07:29:59Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T07:42:09Z",
+        "impl": {
+          "branch": "impl/develop/tabby-foe-blade"
+        }
+      }
     },
     "261115-feat-ws-daemon-release-auto-update": {
       "registered_at": "2026-11-15T01:40:22Z"
