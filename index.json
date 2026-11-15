@@ -193,7 +193,14 @@
       }
     },
     "261107-epic-ws-personal-common-store": {
-      "registered_at": "2026-11-07T05:11:56Z"
+      "registered_at": "2026-11-07T05:11:56Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:50:07Z"
+      }
     },
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
