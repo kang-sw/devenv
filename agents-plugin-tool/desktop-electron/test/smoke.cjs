@@ -9,7 +9,8 @@ const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
 const { _electron } = require(process.env.WS_PLAYWRIGHT);
 const root = path.resolve(__dirname, '..');
-const executablePath = path.join(root, `dist/Werkschaft-darwin-${process.arch}/Werkschaft.app/Contents/MacOS/Werkschaft`);
+const { builtPaths, processes } = require('./host.cjs');
+const { executablePath, daemonPath } = builtPaths(root);
 const evidence = process.env.WS_ELECTRON_EVIDENCE || path.join(root, 'dist/evidence');
 fs.mkdirSync(evidence, { recursive: true });
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-smoke-'));
@@ -23,12 +24,6 @@ const target = http.createServer((request, response) => {
   targetRequests.push(request.url);
   response.end('<p id="remote-marker">REMOTE CONTENT MUST NOT COMMIT</p>');
 });
-function processes() {
-  return execFileSync('ps', ['-axo', 'pid=,ppid=,lstart=,command='], { encoding: 'utf8' }).split('\n').map(line => {
-    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.{24})\s+(.*)$/);
-    return m && { pid: +m[1], ppid: +m[2], start: m[3], command: m[4] };
-  }).filter(Boolean);
-}
 function remember(pid) {
   const all = processes();
   const family = new Set([pid]);
@@ -80,7 +75,7 @@ async function run() {
   assert.notEqual(target.address().port, 29417);
   const targetOrigin = `http://127.0.0.1:${target.address().port}`;
   const log = fs.openSync(path.join(evidence, 'daemon.log'), 'w');
-  daemon = spawn(path.join(root, 'dist/smoke-daemon'), [], {
+  daemon = spawn(daemonPath, [], {
     env: { ...process.env, WS_CACHE_HOME: daemonRoot, WS_CONFIG_HOME: path.join(temp, 'config'), GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local' },
     stdio: ['ignore', log, log],
   });
@@ -154,7 +149,30 @@ async function run() {
   for (let i = 0; i < 20; i++) await menu('zoom_out');
   assert(Math.abs(await factor() - 0.5) < 0.001);
   await menu('zoom_reset');
-  checks.push('registered Cmd+0, Cmd+=, Cmd+Shift+=, Cmd+- menu callbacks; zoom clamps 50% and 300% (physical keys unverified)');
+  const modifier = process.platform === 'win32' ? 'Ctrl' : 'Cmd';
+  checks.push(`registered ${modifier}+0, ${modifier}+=, ${modifier}+Shift+=, ${modifier}+- menu callbacks; zoom clamps 50% and 300% (physical keys checked separately)`);
+  fs.writeFileSync(path.join(evidence, 'platform.json'), JSON.stringify(await main(({ BrowserWindow, Menu }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    return { platform: process.platform, arch: process.arch, versions: process.versions,
+      menuBarVisible: window.isMenuBarVisible(), menus: Menu.getApplicationMenu().items.map(item => ({ label: item.label, role: item.role })),
+      retryTitle: window.getTitle() };
+  }), null, 2));
+  if (process.platform === 'win32' && process.env.WS_ELECTRON_PHYSICAL_KEYS === '1') {
+    const observations = [];
+    for (const [keys, expected] of [['^0', 1], ['^=', 1.1], ['^+=', 1.25], ['^-', 1.1], ['^0', 1]]) {
+      const pid = application.process().pid;
+      const script = `$shell = New-Object -ComObject WScript.Shell; if (-not $shell.AppActivate(${pid})) { throw 'Could not activate owned Electron window' }; Start-Sleep -Milliseconds 150; $shell.SendKeys('${keys}'); Start-Sleep -Milliseconds 150`;
+      let error;
+      try { execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'pipe' }); }
+      catch (e) { error = e.message; }
+      observations.push({ keys, expected, actual: await factor(), error });
+    }
+    fs.writeFileSync(path.join(evidence, 'physical-keys.json'), JSON.stringify(observations, null, 2));
+    checks.push(observations.every(o => !o.error && Math.abs(o.actual - o.expected) < 0.001)
+      ? 'Windows OS-injected physical Ctrl+0, Ctrl+=, Ctrl+Shift+=, Ctrl+- delivered to the native menu'
+      : 'Windows physical Ctrl zoom delivery incomplete; see physical-keys.json (not a replacement for menu assertions)');
+    await menu('zoom_reset');
+  }
 
   // All popup routes use the same native policy, with the OS opener stubbed.
   const external = ['https://example.com/', `http://127.0.0.1:${ep.port === 39419 ? 39420 : 39419}/`, `http://localhost:${ep.port}/`, 'https://example.com/remote-board'];
@@ -240,6 +258,7 @@ async function run() {
   await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   await waitFor(() => main(() => global.smokeDialogs.length === 1), 'X-close leave/stay dialog');
   assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  fs.writeFileSync(path.join(evidence, 'close-dialog.json'), JSON.stringify(await main(() => global.smokeDialogs[0]), null, 2));
   assert.match(await dashboard.locator('#ctext').inputValue(), /preserve this draft.*\[Image #1\]/s);
   await page.screenshot({ path: path.join(evidence, 'electron-dashboard-draft.png') });
   checks.push('real dashboard image guard: X-close Stay keeps window and draft');
@@ -297,7 +316,7 @@ async function run() {
       try { process.kill(p.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
     await waitFor(() => Promise.resolve(scan('final').length === 0), 'owned process exit');
-    fs.writeFileSync(path.join(evidence, 'summary.json'), JSON.stringify({ checks, failure: failure?.message || null, owned: [...owned.values()], temp }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'summary.json'), JSON.stringify({ platform: process.platform, checks, failure: failure?.message || null, owned: [...owned.values()], temp }, null, 2));
     fs.rmSync(temp, { recursive: true, force: true });
   }
   console.log(JSON.stringify({ checks, failure: failure?.message || null, evidence }, null, 2));
