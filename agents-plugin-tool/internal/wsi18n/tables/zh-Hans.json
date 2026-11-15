@@ -252,6 +252,7 @@
   "js.files.tab.new": "新标签页",
   "js.files.tabs": "资源管理器标签页",
   "js.files.up": "上级文件夹",
+  "js.files.home": "根文件夹",
   "js.files.back": "后退",
   "js.files.forward": "前进",
   "js.files.path": "根目录内的路径 (Ctrl/Cmd+L)",

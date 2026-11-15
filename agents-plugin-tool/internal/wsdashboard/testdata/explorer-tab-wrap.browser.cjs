@@ -57,12 +57,12 @@ async function metrics(card) {
 
       await card.locator('.fentry[data-entry="devenv-explorer-workspace"]').dblclick();
       await card.locator('.ftab-select .fn', { hasText: 'devenv-explorer-workspace' }).first().waitFor();
-      // Narrower card: add tabs until 12 exist, then force the card to 900 px.
+      // Narrower card: add tabs until 12 exist, then force the card to 800 px (the 1440 board column is 826 px).
       for (let i = 1; i < 12; i++) await card.locator('.ftab-new').click();
       await wt.locator('.bcard[data-kind="explorer"] .ftab').nth(11).waitFor();
-      const w900 = await card.evaluate(el => { const host = el.closest('.bcard'); host.style.width = '900px'; host.style.maxWidth = '900px'; return el.getBoundingClientRect().width; });
+      const w800 = await card.evaluate(el => { const host = el.closest('.bcard'); host.style.width = '800px'; host.style.maxWidth = '800px'; return el.getBoundingClientRect().width; });
       const w = {};
-      for (const [name, width] of [['tabs12', 900], ['tabs12-420', 420]]) {
+      for (const [name, width] of [['tabs12', 800], ['tabs12-420', 420]]) {
         await card.evaluate((el, px) => { const host = el.closest('.bcard'); host.style.width = px + 'px'; host.style.maxWidth = px + 'px'; }, width);
         await tab.waitForTimeout(150);
         const m = await metrics(card);
@@ -80,7 +80,7 @@ async function metrics(card) {
         ok(m.ctl.right <= m.card.right + 0.5, `${name}: button array inside the card`);
       }
       assert.deepEqual(errors, []);
-      results[theme] = { one, w900, tabs12: w['tabs12'], tabs12_420: w['tabs12-420'] };
+      results[theme] = { one, w800, tabs12: w['tabs12'], tabs12_420: w['tabs12-420'] };
       await context.close();
     }
     const json = JSON.stringify(results, null, 2);
