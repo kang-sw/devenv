@@ -492,7 +492,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "docs/whiteboard-panel-first-readiness",
         "phase": "active",
-        "touched_at": "2026-11-15T18:33:23Z"
+        "touched_at": "2026-11-15T18:47:31Z",
+        "impl": {
+          "branch": "impl/docs/whiteboard-panel-first-readiness/kudos-pasta-boney"
+        }
       }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
