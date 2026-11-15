@@ -622,7 +622,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T03:50:32Z"
+        "touched_at": "2026-11-15T03:51:33Z",
+        "impl": {
+          "branch": "impl/develop/abide-zesty-bring"
+        }
       }
     },
     "261114-feat-ws-dashboard-worktree-view": {
