@@ -48,9 +48,11 @@ func CompareVersions(a, b string) int {
 	return strings.Compare(pa, pb)
 }
 
-// SameMinor reports whether a and b share a major.minor: the range within
-// which a launcher connects to a daemon it did not build (the MCP wire
-// surface changes only across minors). An unparseable version matches
+// SameMinor reports whether a and b share a major.minor, the current
+// launcher-to-daemon connection boundary. Directional compatibility tiers
+// T0–T2 permit patches; old-client-blocking T3 requires a minor bump and
+// owner approval. T4 (new code cannot read old data) never ships.
+// This comparison does not classify changes. An unparseable version matches
 // nothing.
 func SameMinor(a, b string) bool {
 	ca, _, oka := parseVersion(a)
