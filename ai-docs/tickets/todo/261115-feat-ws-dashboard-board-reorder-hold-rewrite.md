@@ -171,6 +171,71 @@ Verification: a short table recorded in the Phase 0 Result (behaviour, covered b
 evidence screenshot path and scenario steps), screenshots at 1440 px. The run stops after Phase 0
 and reports; Phase 1 waits for the confirmed v3 mockup (Decision 11).
 
+### Result (5314fb8e7) - 2026-11-15
+
+Survey only; the heading identifies the inspected develop revision. Execution HEAD
+was `226f466f4` on `exec5/reorder-hold`, whose only delta from develop was this
+ticket. No product code or committed tests changed; the ticket remains in `todo/`.
+
+Evidence root: `/tmp/exec5/reorder0/` (all screenshot paths below are relative to
+it). A disposable Go overlay modelled on `board_viewed_live_browser_test.go`
+served the production renderers/assets through `httptest.NewServer` on private
+Port 0 origins, without constructing a daemon. It seeded 25 open and 65 closed
+topics through `wswhiteboard.Apply`, then sent server-rendered updates/closes over
+its own WebSocket. Instrumentation only observed morphs, scroll setters and
+staging state. Chromium captures are 1440x900, light, reduced motion; rise was
+checked on both adapter (`#bcol`) and board-only (document) scrollers, other cases
+on the adapter. These are survey observations, not acceptance of later phases.
+
+| Behaviour | Covered by develop | Evidence | Gap for later phases |
+|---|---|---|---|
+| Rise-hold | **partial — VERIFIED** | `rise-before.png` → `rise-after.png`: scroll T04 to y=150; server appends a log and canonically moves T04 to head. Old content stays staged, but the frozen T04–T06 interval moves to head and T04 ends at y=108 (scroll 1346→0; requested correction -42 clamps). `rise-document-before.png` → `rise-document-after.png`: y=150→106. `supplement/rewrite-before.png` → `supplement/rewrite-after.png` reproduces with a panel rewrite. | Preserve the actual open-flow slot and absolute screen y, not just relative order within the exposed interval; avoid the head/clamp failure. |
+| Closing hold, including closed-page accounting | **yes, staged variant — VERIFIED** | `close-before.png` → `close-held.png`: expand the first closed page, return to T04 at y=150, then server-close it. T04 stays open/staged at y=150 with unchanged open-flow order. The held page's topic list equals the offscreen-close control (`close-control.png`): 31 fetched topics and `data-closed-next=61` in both (60 before close). `close-released.png`: explicit apply admits the closed state. `supplement/close-reopened.png` and JSON: reopen restores the page offset to 60. | Decision 1's folded closed rendering is not shown during this hold: the old open rendering is retained. Reopen hits the rise/clamp gap above; past-cap hold eviction was not surveyed. |
+| Batched release and deferral gates | **partial — VERIFIED** | `batch-pending.png` → `batch-applied.png`: T04 updated twice, then T05; one click drains all pending changes in one morph and one scroll correction. `automatic-before.png` → `automatic-after.png`: scrolling away also drains them in one morph. However `close-held.png` → `close-released.png` has one morph but two corrections, the second from late frame heights. `supplement/report.json`, `gate-*` scenarios/screenshots: editing and overview defer morphs and retry on blur/exit; selection, a focused topic button, hover and simulated `pageHidden()` do not prevent an already-pending scroll-triggered release. | Complete the involved-source/destination-card eligibility and gate/retry rules; do not treat one morph as proof of one total scroll correction. **INFERRED:** current release scheduling is scroll/resize+rAF restaging, not an involved-card observer lifecycle (`agents-plugin-tool/internal/wsdashboard/assets/dashboard-board.js:1153–1181`). |
+| At-top freeze, explicit apply only | **no — VERIFIED** | `top-visible-rise-before.png` → `top-visible-rise-after.png`: a visible T01 rise happens to remain staged at scroll 0. But `top-offscreen-rise-before.png` → `top-offscreen-rise-after.png` (server updates T20) inserts it at head immediately and changes scroll 0→380; `top-new-before.png` → `top-new-after.png` inserts NEW and changes scroll 0→165. A pending bar appears, but insertion already happened. `supplement/top-held-before-scroll.png` → `supplement/top-held-auto-applied.png`: even the initially staged top-origin update later releases by scrolling away, without clicking apply. | Add the explicit-only top freeze policy, including stable layout/head insertion and pending signalling. Ordinary visible-interval staging is not that policy. |
+
+Pending/apply surface today:
+
+- **VERIFIED:** the fixed bottom button reads `최신 변경 N건 반영 · <names>`;
+  the two T04 revisions show N=1 then N=2, and the T05 revision makes N=3
+  (`batch-explicit-and-count` in `report.json`). N is not distinct topics. The
+  listed pending names can include many unchanged, placement-affected topics
+  even when N=1 (`rise-after.png`). Click force-applies the pending snapshot;
+  it is not the planned merged home/nav pill (batch apply ended at scroll 411,
+  not 0).
+- **INFERRED from source:** the numeric value is `boardChanges.length`, a ledger
+  of immutable previous/incoming topic-hash changes plus an order-only fallback,
+  not a count of mounted DOM nodes. Live exposure/placement builds `boardPending`
+  and filters which ledger entries survive. See
+  `agents-plugin-tool/internal/wsdashboard/assets/dashboard-board.js:1004–1017,1111–1134`.
+  **VERIFIED:** close→reopen also produced three ledger entries, T04/T04/C35,
+  because the capped-page transfer participates (`supplement/report.json`);
+  N is not simply the number of server events either.
+
+Surprises and limits:
+
+- **VERIFIED:** close staging already protects the sampled reader and pagination;
+  closing-hold work should reuse it rather than add a second placement/scroll owner.
+- **VERIFIED with simulated visibility:** a newly arriving hidden-page event is
+  deferred until show (`supplement/hidden-incoming-before-show.png` →
+  `supplement/hidden-incoming-shown.png`), unlike release of an already-pending
+  update while `pageHidden()` is true. Actual background-tab throttling was not
+  tested. Overview defers/retries, but the bottom pending bar remains visible.
+- **INFERRED:** exposure accounts for sticky heads but requires at least 1 px
+  intersection; subpixel partial intersections need later verification
+  (`agents-plugin-tool/internal/wswhiteboard/assets/stream.js:447–473`).
+- **VERIFIED:** all 25 browser scenarios completed with zero page/scenario errors
+  (`browser.log`, `supplement.log`); `verification.log` checks the observations,
+  including the failures above. Eight focused `TestBoardViewed*` tests and five
+  focused closed-page/frame-batch tests passed (`viewed-tests.log`,
+  `closed-tests.log`). No whole-package test run. `history-cards` and WebKit were
+  not rerun; 700 px/dark/normal-motion acceptance remains for later phases.
+  The rejected hand-seeded pilot is retained under `pilot-invalid-seed/` and is
+  not evidence for this result; final fixtures use normal server commands.
+
+No new owner decision is needed for Phase 0. Phase 1 still waits for Decision 11's
+confirmed v3 merged-pill mockup; this survey does not authorize implementation.
+
 ### Phase 1: indicator and badge, visible first
 Accent, tags, nudge, badge (idle, pending 1, pending N, sway) wired to develop's `boardPending`
 counts from data; i18n keys; reuse `ca025566b`. Click = existing `boardFlushViewed(true)` path
