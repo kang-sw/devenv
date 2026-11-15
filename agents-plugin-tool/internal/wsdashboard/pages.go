@@ -335,6 +335,7 @@ func assetID(data pageAssetsData, source string) string {
 	raw, _ := json.Marshal(data)
 	h.Write(raw)
 	h.Write([]byte(source))
+	h.Write([]byte(guideAssets().id))
 	for _, l := range wsi18n.Languages() {
 		h.Write([]byte(wsi18n.Script(l.Code)))
 	}
@@ -380,6 +381,8 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"i18n":  func() template.JS { return wsi18n.Script(lang) },
 		// pwa is a page head's manifest link and theme-color metas (pwa.go).
 		"pwa": pwaHead,
+		// guideshot is a landing guide step's screenshot (landing_guide.go).
+		"guideshot": func(step, alt string) template.HTML { return guideShotHTML(lang, step, alt) },
 	}
 }
 
@@ -1248,6 +1251,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	if name, _ := TermSymbolsAsset(); rest == name {
 		serveTermSymbols(w)
+		return
+	}
+	if data, ok := GuideAsset(rest); ok {
+		serveGuideAsset(w, data)
 		return
 	}
 	replyID, sub, slash := strings.Cut(rest, "/")

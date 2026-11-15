@@ -359,11 +359,21 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 
 {{/* The landing: what the index's main panel shows with no session open,
 at / and after a second click on the open session's rail row closes its
-view (dashboard-rail.js). The Werkschaft lockup over a short how-to, with
-no card behind them; both lockup variants are inline (Assets.Logo) and the
-stylesheet shows the one for the page's theme. Its id keeps an earlier
-/#guide address landing on the same page. */}}
-{{define "landing"}}<div class="dlanding" id="guide"><div class="dlogo" role="img" aria-label="Werkschaft">{{.Assets.Logo}}</div><section class="dguide" aria-labelledby="dguide-h"><h2 id="dguide-h">{{t "index.guide.title"}}</h2><ol><li><b>{{t "index.guide.new"}}</b><span>{{t "index.guide.new.sub"}}</span></li><li><b>{{t "index.guide.pick"}}</b><span>{{t "index.guide.pick.sub"}}</span></li><li><b>{{t "index.guide.board"}}</b><span>{{t "index.guide.board.sub"}}</span></li><li><b>{{t "index.guide.answer"}}</b><span>{{t "index.guide.answer.sub"}}</span></li><li><b>{{t "index.guide.files"}}</b><span>{{t "index.guide.files.sub"}}</span></li></ol></section></div>{{end}}
+view (dashboard-rail.js). The Werkschaft lockup over an illustrated how-to,
+a short page that scrolls in the panel: each step a title, a line or two,
+and a marked screenshot of the real dashboard (guideshot, landing_guide.go),
+with no card behind them. Both lockup variants and both screenshot themes
+are in the page; the stylesheet shows the ones for the page's theme. Its id
+keeps an earlier /#guide address landing on the same page. */}}
+{{define "landing"}}<div class="dlanding" id="guide"><div class="dlogo" role="img" aria-label="Werkschaft">{{.Assets.Logo}}</div><article class="dguide" aria-labelledby="dguide-h"><header><h2 id="dguide-h">{{t "index.guide.title"}}</h2><p>{{t "index.guide.lead"}}</p></header><ol>
+<li class="dstep" data-step="open"><h3>{{t "index.guide.open"}}</h3><p>{{t "index.guide.open.sub"}}</p><figure class="dshot">{{guideshot "open" (t "index.guide.open")}}</figure></li>
+<li class="dstep" data-step="new"><h3>{{t "index.guide.new"}}</h3><p>{{t "index.guide.new.sub"}}</p><figure class="dshot">{{guideshot "new" (t "index.guide.new")}}</figure></li>
+<li class="dstep" data-step="ask"><h3>{{t "index.guide.board"}}</h3><p>{{t "index.guide.board.sub"}}</p><figure class="dshot">{{guideshot "ask" (t "index.guide.board")}}</figure></li>
+<li class="dstep" data-step="board"><h3>{{t "index.guide.view"}}</h3><p>{{t "index.guide.view.sub"}}</p><figure class="dshot">{{guideshot "board" (t "index.guide.view")}}</figure></li>
+<li class="dstep" data-step="answer"><h3>{{t "index.guide.answer"}}</h3><p>{{t "index.guide.answer.sub"}}</p><figure class="dshot">{{guideshot "answer" (t "index.guide.answer")}}</figure></li>
+<li class="dstep" data-step="files"><h3>{{t "index.guide.files"}}</h3><p>{{t "index.guide.files.sub"}}</p><figure class="dshot">{{guideshot "files" (t "index.guide.files")}}</figure></li>
+<li class="dstep" data-step="settings"><h3>{{t "index.guide.settings"}}</h3><p>{{t "index.guide.settings.sub"}}</p><figure class="dshot">{{guideshot "settings" (t "index.guide.settings")}}</figure></li>
+</ol></article></div>{{end}}
 
 {{define "r-sessions"}}<div class="totals"><span class="chip">{{t "index.live" .Live}}</span><span class="chip">{{t "index.working" .Busy}}</span></div>{{range .Projects}}<section class="project"><div class="pbar"><span class="pname">{{.Name}}</span><span class="ppath">{{.Path}}</span><span class="chip">{{len .Sessions}}</span></div>{{range .Sessions}}{{template "srow" .}}{{end}}{{if .Ended}}<div class="endedhead">{{t "head.ended"}}</div>{{range .Ended}}{{template "srow" .}}{{end}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{t "index.hidden" .}}</div>{{end}}</section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}{{end}}
 
