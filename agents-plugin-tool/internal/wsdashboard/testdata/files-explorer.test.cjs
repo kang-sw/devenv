@@ -43,7 +43,108 @@ function explorer(rid, local = true, options = {}) {
   var instance = win.WsFiles.create(el, Object.assign({ rid, local, load: k => store[k], save: (k, v) => store[k] = v }, options));
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
-function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-root').click(); x.at('.fpin').value = path; x.at('.fgo .pr').click(); }
+function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-root').click(); x.at('.froot-pop .fpin').value = path; x.at('.fgo .pr').click(); }
+async function pathBarChecks() {
+  var notices = [], p = explorer('paths', true, { toast: s => notices.push(s) }), peer = explorer('path-peer');
+  p.instance.shown(); peer.instance.shown();
+  await answer(take('paths', 'list', ''), listing('/paths', undefined, true));
+  await answer(take('path-peer', 'list', ''), listing('/peer', undefined, true));
+  function shortcut(target, modifiers) {
+    var e = Object.assign({ target, key: 'l', preventDefault() { this.defaultPrevented = true; } }, modifiers);
+    doc.listeners.keydown.slice().forEach(f => f(e)); return !!e.defaultPrevented;
+  }
+  function enter(path) { p.at('.fcrumb-trail').click(); p.at('.fpath').value = path; key(p.at('.fpath'), 'Enter'); return take('paths', 'list', path); }
+  async function atPath(request, dir) { await answer(request, Object.assign(listing('/paths/' + dir, [{ name: 'kept.go' }], true), { dir })); }
+  check('path controls start with no history and up disabled at root', [p.at('.fback').disabled, p.at('.fforward').disabled, p.at('.fback').nextSibling === p.at('.fforward')], [true, true, true]);
+  var barButtons = p.at('.fbar').children.filter(n => n.tagName === 'BUTTON');
+  check('back and forward precede existing up', barButtons.map(n => n.title), ['js.files.back', 'js.files.forward', 'js.files.up']);
+  check('up disabled at root', barButtons[2].disabled, true);
+  p.at('.fcrumb-trail').click();
+  check('trail empty space edits in place with a relative path', [p.at('.fcrumb-trail').hidden, p.at('.fpath').hidden, p.at('.fpath').value, doc.activeElement === p.at('.fpath')], [true, false, '', true]);
+  p.at('.fpath').value = 'cancelled'; key(p.at('.fpath'), 'Escape');
+  check('Escape restores breadcrumb focus without a request', [p.at('.fpath').hidden, p.at('.fcrumb-trail').hidden, doc.activeElement === p.at('.fcrumb-trail'), requests.filter(r => !r.taken && r.url.pathname === '/s/paths/fs/list').length], [true, false, true, 0]);
+  p.at('.fcrumb-trail').click(); p.at('.fpath').value = 'blurred'; event(p.at('.fpath'), 'blur');
+  check('blur discards editing without navigation', [p.at('.fpath').hidden, p.instance.location().dir], [true, '']);
+  peer.el.setAttribute('data-max', '');
+  check('Ctrl+L belongs to focused instance even with another maximized', shortcut(p.q, { ctrlKey: true }), true);
+  check('shortcut edits only its own instance', [p.at('.fpath').hidden, peer.at('.fpath').hidden], [false, true]);
+  key(p.at('.fpath'), 'Escape');
+  check('Cmd+L belongs to peer instance', shortcut(peer.tree, { metaKey: true }), true);
+  check('peer shortcut does not edit first instance', [p.at('.fpath').hidden, peer.at('.fpath').hidden], [true, false]);
+  key(peer.at('.fpath'), 'Escape');
+  check('browser shortcut untouched outside explorers, even with maximized pane', shortcut(doc.body, { ctrlKey: true }), false);
+  peer.el.removeAttribute('data-max');
+  check('modified shortcut untouched', shortcut(p.tree, { ctrlKey: true, shiftKey: true }), false);
+
+  var relative = enter('src/./pkg/..');
+  check('typed relative path goes unchanged to guarded route without changing roots', [relative.url.searchParams.get('dir'), relative.url.searchParams.has('root'), p.instance.location().dir], ['src/./pkg/..', false, '']);
+  await atPath(relative, 'src');
+  check('accepted directory uses server canonical relative path', [p.instance.location().dir, p.at('.fcrumb-trail .fcrumb').textContent, p.at('.fback').disabled], ['src', 'src', false]);
+  p.at('.fcrumb-trail').click();
+  check('editing starts at active relative directory', p.at('.fpath').value, 'src');
+  event(p.at('.fpath'), 'blur');
+  p.at('[data-entry="src/kept.go"]').click(); p.at('.fdirectory').scrollTop = 29; event(p.at('.fdirectory'), 'scroll');
+  for (var path of ['../outside', '/outside', 'link', 'missing', 'kept.go', 'src']) {
+    await refuse(enter(path));
+    check('refusal preserves listing selection scroll root and history: ' + path, [p.instance.location(), !!p.at('[data-entry="src/kept.go"]'), p.instance.selection().path, p.at('.fdirectory').scrollTop, p.at('.fforward').disabled, notices.slice(-1)[0]], [{ root: '', dir: 'src' }, true, 'src/kept.go', 29, true, 'js.files.root.refused']);
+  }
+  var supersededPath = enter('obsolete');
+  var absolute = enter('/paths/src/pkg'); await atPath(absolute, 'src/pkg');
+  await atPath(supersededPath, 'obsolete');
+  check('absolute in-root path uses canonical directory and ignores older typed answers', p.instance.location(), { root: '', dir: 'src/pkg' });
+  event(p.at('.fcrumb-trail'), 'click', { target: p.all('.fcrumb-trail .fcrumb')[0] });
+  check('bubbling crumb clicks do not open editor', p.at('.fpath').hidden, true);
+  p.all('.fcrumb-trail .fcrumb')[0].click();
+  check('breadcrumb navigation still works rather than starting editor', [p.instance.location().dir, p.at('.fpath').hidden], ['src', true]);
+  p.at('.fback').click(); await atPath(take('paths', 'list', 'src/pkg'), 'src/pkg');
+  p.at('.fforward').click(); await atPath(take('paths', 'list', 'src'), 'src');
+  check('back and forward traverse rather than append history', [p.instance.location().dir, p.at('.fforward').disabled], ['src', true]);
+  p.at('.fback').click(); await atPath(take('paths', 'list', 'src/pkg'), 'src/pkg');
+  await atPath(enter('docs'), 'docs');
+  check('new path truncates forward branch', [p.instance.location().dir, p.at('.fforward').disabled], ['docs', true]);
+  p.at('.fback').click(); await atPath(take('paths', 'list', 'src/pkg'), 'src/pkg');
+  barButtons[2].click(); check('up goes to canonical parent', p.instance.location().dir, 'src');
+  barButtons[2].click(); check('up reaches root and disables itself', [p.instance.location().dir, barButtons[2].disabled], ['', true]);
+  await atPath(enter('.'), '');
+  p.at('.fback').click(); await atPath(take('paths', 'list', 'src'), 'src');
+  check('same canonical path never appends duplicate history', p.instance.location().dir, 'src');
+  p.at('.fback').click(); await atPath(take('paths', 'list', 'src/pkg'), 'src/pkg');
+  p.at('.fback').click(); await refuse(take('paths', 'list', 'src'));
+  check('refused history destination leaves cursor and listing intact', [p.instance.location().dir, p.at('.fback').disabled, p.at('.fforward').disabled], ['src/pkg', false, false]);
+  p.at('.fback').click(); var staleHistory = take('paths', 'list', 'src');
+  p.instance.navigate(''); await atPath(staleHistory, 'src');
+  check('late history response cannot undo newer navigation', p.instance.location().dir, '');
+
+  var staleTabPath = enter('late-tab');
+  p.instance.newTab({ dir: 'docs' });
+  await answer(take('paths', 'list', ''), listing('/paths', undefined, true));
+  await atPath(take('paths', 'list', 'docs'), 'docs'); await atPath(staleTabPath, 'late-tab');
+  check('new inner tab has independent initial history; late old path is ignored', [p.instance.location().dir, p.at('.fback').disabled, p.at('.fforward').disabled], ['docs', true, true]);
+  p.instance.navigate('');
+  p.all('.ftab-select')[0].click();
+  check('first tab restores history without second tab entries', [p.instance.location().dir, p.at('.fback').disabled], ['', false]);
+  p.at('.fback').click(); await atPath(take('paths', 'list', 'src/pkg'), 'src/pkg');
+  p.all('.ftab-select')[1].click();
+  p.at('.fback').click(); await atPath(take('paths', 'list', 'docs'), 'docs');
+  check('second tab retains its own cursor and forward branch', [p.instance.location().dir, p.at('.fback').disabled, p.at('.fforward').disabled, peer.at('.fback').disabled], ['docs', true, false, true]);
+  var staleRootPath = enter('late-root'); rootRequest(p, '/replacement');
+  await answer(take('paths', 'list', ''), listing('/replacement'));
+  await atPath(staleRootPath, 'late-root');
+  check('accepted root change resets history and drops prior-root navigation', [p.instance.location(), p.at('.fback').disabled, p.at('.fforward').disabled], [{ root: '/replacement', dir: '' }, true, true]);
+  var windowsPath = enter('C:\\work\\root\\folder');
+  check('host-native absolute paths reach server unchanged', windowsPath.url.searchParams.get('dir'), 'C:\\work\\root\\folder');
+  await atPath(windowsPath, 'folder');
+  p.instance.hidden(); var saved = JSON.parse(JSON.stringify(p.store));
+  check('history never enters persisted browser record', Object.keys(JSON.parse(saved['ws.dashboard.files.tabs.paths']).tabs[1]).some(k => /history|paths|index/.test(k)), false);
+  var lateDestroyedPath = enter('late-destroy'); p.instance.destroy();
+  await atPath(lateDestroyedPath, 'late-destroy');
+  check('late typed response cannot rebuild destroyed explorer', p.el.children.length, 0);
+  p = explorer('paths', true, { store: saved }); p.instance.shown();
+  await answer(take('paths', 'list', ''), listing('/replacement'));
+  await atPath(take('paths', 'list', 'folder'), 'folder');
+  check('storage restores directory but starts fresh history', [p.instance.location().dir, p.at('.fback').disabled, p.at('.fforward').disabled], ['folder', true, true]);
+  p.instance.destroy(); peer.instance.destroy();
+}
 (async function () {
   // Candidate-root refusal must not cancel legitimate active-root work.
   var race = explorer('race'); race.instance.shown();
@@ -379,6 +480,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-ro
   check('closed window aborts request and drops late answer without affecting peer', [closingWindow.options.signal.aborted, left.el.children.length, !!right.at('[data-path="surviving.go"]')], [true, 0, true]);
   right.q.value = 'cancel-before-start'; event(right.q, 'input'); right.instance.destroy(); await timers();
   check('destroy cancels pending debounce', requests.filter(r => !r.taken && r.url.pathname === '/s/search-tabs/fs/find').length, 0);
+  await pathBarChecks();
   await workspacePickerChecks();
   check('extended core leaves no global handlers or timers', [doc.listeners.keydown.length, win.listeners.resize.length, pendingTimers.size], [0, 0, 0]);
   process.stdout.write(bad.join('\n'));

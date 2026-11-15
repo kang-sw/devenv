@@ -1112,6 +1112,9 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .ftab-new.ibtn { width: 22px; height: 22px; align-self: center; }
 .ftab-close:disabled { visibility: hidden; }
 .flocation, .fcrumb-trail { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.fcrumb-trail[hidden], .fpath[hidden] { display: none; }
+.fpath { flex: 1 1 auto; min-width: 0; width: 0; height: 24px; box-sizing: border-box; padding: 2px 6px; font: inherit; }
+.fback .li { transform: rotate(180deg); }
 .fcrumb { flex: 0 1 auto; min-width: 2ch; border: 0; padding: 2px 4px; border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fcrumb:hover { background: var(--wb-muted); color: var(--wb-fg); }
 .fcrumb-root { display: inline-flex; align-items: center; gap: 3px; max-width: 160px; font-weight: 700; color: var(--wb-fg); }
