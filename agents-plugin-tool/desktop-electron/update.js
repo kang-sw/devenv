@@ -365,6 +365,12 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       emit({ state: 'apply-error', version: stage.version, message: 'the previous attempt failed; see update-apply.log' });
       return false;
     }
+    // An unwritable folder keeps the stage (and no attempt is spent) and says so.
+    const problem = applyProblem(platform, installLocation(platform, execPath, packaged), staging);
+    if (problem) {
+      emit({ state: 'apply-error', version: stage.version, message: problem });
+      return false;
+    }
     writeState({ launchAttempt: stage.version });
     return apply(true);
   }

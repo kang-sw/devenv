@@ -291,6 +291,11 @@ test('an unwritable install keeps the stage and reports; a launch apply runs onc
       assert.match(u.applyProblem('darwin', installed, path.join(userData, 'update')), /not writable/);
       assert.equal(make().applyOnQuit(), false);
       assert.ok(fs.existsSync(stage), 'the verified stage is kept');
+      assert.equal(make().applyOnLaunch(), false);
+      assert.equal(sent.at(-1).state, 'apply-error');
+      assert.match(sent.at(-1).message, /not writable/);
+      assert.ok(fs.existsSync(stage), 'an unwritable folder at launch keeps the stage and spends no attempt');
+      assert.equal(detached.length, 0);
     } finally { fs.chmodSync(apps, 0o755); }
     assert.equal(make().applyOnLaunch(), true);
     assert.equal(detached.at(-1).at(-1), '1', 'a launch apply relaunches');
