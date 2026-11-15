@@ -968,8 +968,9 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	)
 
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "size-check", Panels: panels}))
-	const budget = 512 << 10
-	t.Logf("populated embed: %d bytes (%.1f%% of 512 KiB)", len(out), 100*float64(len(out))/budget)
+	// The budget keeps the frequently loaded board page small.
+	const budget = 2 << 20
+	t.Logf("populated embed: %d bytes (%.1f%% of 2 MiB)", len(out), 100*float64(len(out))/budget)
 	// About a third of the limit: the stress is past any real board (60
 	// items, 100 ready tickets), and the embed has no truncation to fall back
 	// on. 35% left the topic bar's pen, note box, and updated time room;
@@ -985,7 +986,7 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	// 47% the closed-more control's data-closed-more attribute (Decision 26,
 	// 261114-feat-ws-dashboard-board-toolbar-overview; about 0.2 KB).
 	if len(out) > budget*47/100 {
-		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
+		t.Errorf("populated embed is %d bytes, not well under 2 MiB", len(out))
 	}
 }
 

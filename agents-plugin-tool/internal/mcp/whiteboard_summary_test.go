@@ -21,7 +21,7 @@ func TestWhiteboardUpdateSummariesPreservePrefixLinesAndEffectiveState(t *testin
 	text := f.update(t, `<wb:topic name="rollout"><wb:add class="check"><wb:title>Verify</wb:title></wb:add></wb:topic>`)
 	full, embed := resultLine(t, text, "full: "), resultLine(t, text, "embed: ")
 	oldLines := "ids: (01)\nfull: " + full + "\nembed: " + embed + "\n"
-	if !strings.HasPrefix(text, oldLines) || full != "ai-docs/whiteboards/"+f.replyID()+"/index.html" || !strings.HasPrefix(embed, "ai-docs/whiteboards/"+f.replyID()+"-") || !strings.HasSuffix(text, "topic added: rollout (state: discussing, default)\n") {
+	if !strings.HasPrefix(text, oldLines) || full != "ai-docs/whiteboards/"+f.replyID()+"/index.html" || !strings.HasPrefix(embed, "ai-docs/whiteboards/"+f.replyID()+"-") || !strings.HasSuffix(text, "topic added: rollout (state: discussing, default)\n"+whiteboardAppliedInfo+"\n") {
 		t.Fatalf("prefix/value/summary compatibility: %s", text)
 	}
 	for _, tc := range []struct{ commands, want string }{

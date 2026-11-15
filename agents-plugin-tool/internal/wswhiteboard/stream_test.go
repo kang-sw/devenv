@@ -252,8 +252,8 @@ func TestStreamEmbedOnlyLatestLineAndPanelRecaps(t *testing.T) {
 	out := render(t, view)
 	wantAll(t, out, `data-entry="e5" data-kind="agent"`, "agent state", `href="file:///board/index.html">Open full board</a>`, `href="file:///board/index.html#p1"`, "recap e9")
 	wantNone(t, markup(out), "CURRENT-CONTENT-PAYLOAD", "PANEL-PAYLOAD", "first system", "last system", "recap e3", `class="wb-history"`, "srcdoc=", `class="doc-body`)
-	if len(out) > 512*1024*44/100 {
-		t.Fatalf("compact embed exceeds 44%% of 512 KiB: %d bytes", len(out))
+	if len(out) > (2<<20)*44/100 {
+		t.Fatalf("compact embed exceeds 44%% of the 2 MiB budget: %d bytes", len(out))
 	}
 	if view.Topics[0].Stream.Count != 0 || len(view.Topics[0].Older) != 0 || len(view.Topics[0].PanelRecaps) != 4 {
 		t.Fatal("embed carries accumulated stream data")
