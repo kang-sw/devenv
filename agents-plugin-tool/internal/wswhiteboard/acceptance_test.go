@@ -112,6 +112,36 @@ func TestCommandAcceptanceRejectedWrappedTicksKeepPrefix(t *testing.T) {
 	}
 }
 
+func TestCommandAcceptanceWrappedSkipLabelsAndFragmentDedup(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, panelCommandXML("ok", `name="work" recap="Status"`, "Pending"))
+	patch := `<wb:panel name="work">` + panelChangeXML("Pending", "Complete") + `</wb:panel>`
+	empty := `<wb:topic name="empty"></wb:empty-fragment></wb:topic>`
+	skipped := "<wb:topic name=\"bad\">junk<wb:panel name=\"work\"><wb:change><wb:old typo=\"x\">a `</wb:old><wb:new>b `</wb:new></wb:change></wb:panel></wb:topic>"
+	input := `<wb:topic name="ok">` + patch + `</wb:loose></wb:topic>` + empty + skipped
+	out, problems := Apply(st, input, testEnv())
+	wantFailed := "<wb:failed>\n<wb:topic name=\"ok\">\n</wb:loose>\n</wb:topic>\n" + empty + "\n" + skipped + "\n</wb:failed>"
+	if out.Unpartitioned || out.Accepted != 1 || out.Failed != wantFailed {
+		t.Fatalf("wrapped/fragment seam: %+v %v; want %s", out, problems, wantFailed)
+	}
+	diagnostics := strings.Join(problems, "\n")
+	for _, want := range []string{
+		`stray fragment inside <wb:topic name="ok"> (line 1)`,
+		`stray fragment inside <wb:topic name="empty"> (line 1)`,
+		`<wb:topic> (line 1) skipped <wb:panel> <wb:change> field <wb:old>: unknown attribute typo`,
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Errorf("diagnostics lack %q: %s", want, diagnostics)
+		}
+	}
+	if strings.Contains(diagnostics, "command 0") || strings.Contains(diagnostics, "command -1") || strings.Count(out.Failed, empty) != 1 || strings.Contains(out.Failed, patch) {
+		t.Fatalf("synthetic labels or duplicated retry payload: %s\n%s", diagnostics, out.Failed)
+	}
+	if st.PanelCounter != 1 || st.topicKnown("bad") || st.topicKnown("empty") || queryResult(t, st, `{"panel":"p1"}`).Direct.Entry.Text != "Complete" {
+		t.Fatal("rejected wrapped operands lost accepted named patch or exposed commands")
+	}
+}
+
 func TestCommandAcceptanceRollbackOrderAndCompleteRetry(t *testing.T) {
 	s := &State{}
 	mustApply(t, s, addXML(ClassPolicy, "a", "Pick", "One", "Two")+addXML(ClassPolicy, "b", "Pick", "One", "Two")+topicXML("a", "old\n\nkeep\n\ntail"))
@@ -210,6 +240,44 @@ func TestCommandAcceptanceParserPayloadsAndScopes(t *testing.T) {
 	mixed(t, fresh, `<wb:topic name="t"><wb:panel recap="bad" typo="x">kept raw</wb:panel><wb:log>valid</wb:log></wb:topic><wb:unknown>raw <b>payload</b></wb:unknown>`, logXML("t", "valid"))
 }
 
+func TestCommandAcceptanceStrayFragments(t *testing.T) {
+	for name, tc := range map[string]struct {
+		input, failed, label string
+		accepted             int
+	}{
+		"failed-empty-group": {
+			input:    `<wb:topic name="a"><wb:body>x</wb:body></wb:topic><wb:topic name="b"></wb:oops></wb:topic>`,
+			failed:   "<wb:failed>\n<wb:topic name=\"b\"></wb:oops></wb:topic>\n</wb:failed>",
+			label:    `stray fragment inside <wb:topic name="b"> (line 1)`,
+			accepted: 1,
+		},
+		"accepted-group": {
+			input:    `<wb:topic name="b"><wb:body>x</wb:body></wb:oops></wb:topic>`,
+			failed:   "<wb:failed>\n<wb:topic name=\"b\">\n</wb:oops>\n</wb:topic>\n</wb:failed>",
+			label:    `stray fragment inside <wb:topic name="b"> (line 1)`,
+			accepted: 1,
+		},
+		"root": {
+			input:    `<wb:floor id="1"/></wb:oops>`,
+			failed:   "<wb:failed>\n</wb:oops>\n</wb:failed>",
+			label:    `stray fragment (line 1)`,
+			accepted: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &State{}
+			out, p := Apply(s, tc.input, testEnv())
+			if out.Unpartitioned || out.Accepted != tc.accepted || out.Failed != tc.failed {
+				t.Fatalf("fragment retry: %+v %v; want %s", out, p, tc.failed)
+			}
+			diagnostics := strings.Join(p, "\n")
+			if !strings.Contains(diagnostics, tc.label+`: </wb:oops> closes nothing open`) || strings.Contains(diagnostics, "command -1 <>") {
+				t.Fatalf("fragment diagnostics: %s", diagnostics)
+			}
+		})
+	}
+}
+
 func TestCommandAcceptanceRejectedCDATABoundaries(t *testing.T) {
 	for _, rejected := range []string{
 		`<wb:unknown><![CDATA[</wb:unknown><wb:floor id="999"/>]]></wb:unknown>`,
@@ -257,6 +325,27 @@ func TestCommandAcceptanceRejectedGroupFieldBoundaries(t *testing.T) {
 				t.Fatalf("incomplete failed tree:\n got %s\nwant %s", out.Failed, want)
 			}
 		})
+	}
+}
+
+func TestCommandAcceptanceRejectedGroupFieldDiagnostic(t *testing.T) {
+	prefix := `<wb:topic name="prefix"><wb:body>keep</wb:body></wb:topic>`
+	rejected := `<wb:topic name="outer">junk<wb:add class="technical"><wb:title typo="x">T</wb:title></wb:add></wb:topic>`
+	expected := &State{}
+	want := mustApply(t, expected, prefix)
+	s := &State{}
+	out, p := Apply(s, prefix+rejected, testEnv())
+	gotState, _ := json.Marshal(s)
+	wantState, _ := json.Marshal(expected)
+	if out.Unpartitioned || out.Accepted != want.Accepted || string(gotState) != string(wantState) || !reflect.DeepEqual(out.Effects, want.Effects) {
+		t.Fatalf("rejected group changed prefix acceptance: %+v %v", out, p)
+	}
+	if want := "<wb:failed>\n" + rejected + "\n</wb:failed>"; out.Failed != want {
+		t.Fatalf("failed tree: %s; want %s", out.Failed, want)
+	}
+	diagnostics := strings.Join(p, "\n")
+	if !strings.Contains(diagnostics, `<wb:topic> (line 1) skipped <wb:add> field <wb:title>: unknown attribute typo (it takes none)`) || strings.Contains(diagnostics, "command 0") {
+		t.Fatalf("skipped field diagnostic: %s", diagnostics)
 	}
 }
 

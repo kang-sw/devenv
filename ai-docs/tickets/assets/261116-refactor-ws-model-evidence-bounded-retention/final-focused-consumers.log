@@ -1,0 +1,26 @@
+UTC: 2026-11-15T19:08:21Z
+cwd: /Users/kang-sw/.ws-worktrees/devenv/corporate-predator-shrug/agents-plugin-tool
+command: go test ./internal/wsdashboard ./internal/mcp ./internal/wsagent -run '^(TestObservedSnapshotOverlaySurvivesTypedLegacyFileAndLiveCopies|TestObservedClaudeRetryAdapterToReducer|TestObservedInternalRowsPersistThroughWatcherReconnectAndLegacyRewrite|TestObservedIntakePersistsAcrossReconnectAndLegacySnapshotRewrite|TestHostedObservedLegacySnapshotRewrite)$' -count=1 -v
+environment: {"CLAUDE_CONFIG_DIR": "/tmp/ws-retention-module-choosing-tartar/claude", "CODEX_HOME": "/tmp/ws-retention-module-choosing-tartar/codex", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GOCACHE": "/tmp/ws-retention-module-choosing-tartar/go-build", "GOENV": "off", "GOFLAGS": "-mod=readonly -buildvcs=false", "GOMODCACHE": "/tmp/ws-retention-module-choosing-tartar/gomodcache", "GOPROXY": "off", "GOSUMDB": "off", "GOTELEMETRY": "off", "GOTOOLCHAIN": "local", "GOVCS": "*:off", "GOWORK": "off", "HOME": "/tmp/ws-retention-module-choosing-tartar/home", "LANG": "en_US.UTF-8", "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", "TEMP": "/tmp/ws-retention-module-choosing-tartar/tmp", "TMP": "/tmp/ws-retention-module-choosing-tartar/tmp", "TMPDIR": "/tmp/ws-retention-module-choosing-tartar/tmp", "WS_CACHE_HOME": "/tmp/ws-retention-module-choosing-tartar/ws-cache", "WS_CONFIG_HOME": "/tmp/ws-retention-module-choosing-tartar/ws-config", "XDG_CACHE_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-cache", "XDG_CONFIG_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-config", "XDG_DATA_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-data", "XDG_RUNTIME_DIR": "/tmp/ws-retention-module-choosing-tartar/runtime", "XDG_STATE_HOME": "/tmp/ws-retention-module-choosing-tartar/xdg-state"}
+runner_pid: 44397
+command_root_pid: 44411
+=== RUN   TestObservedSnapshotOverlaySurvivesTypedLegacyFileAndLiveCopies
+--- PASS: TestObservedSnapshotOverlaySurvivesTypedLegacyFileAndLiveCopies (0.04s)
+PASS
+ok  	github.com/kang-sw/devenv/internal/wsdashboard	0.950s
+=== RUN   TestObservedClaudeRetryAdapterToReducer
+--- PASS: TestObservedClaudeRetryAdapterToReducer (0.11s)
+=== RUN   TestObservedInternalRowsPersistThroughWatcherReconnectAndLegacyRewrite
+--- PASS: TestObservedInternalRowsPersistThroughWatcherReconnectAndLegacyRewrite (0.14s)
+=== RUN   TestObservedIntakePersistsAcrossReconnectAndLegacySnapshotRewrite
+--- PASS: TestObservedIntakePersistsAcrossReconnectAndLegacySnapshotRewrite (0.13s)
+PASS
+ok  	github.com/kang-sw/devenv/internal/mcp	1.952s
+=== RUN   TestHostedObservedLegacySnapshotRewrite
+--- PASS: TestHostedObservedLegacySnapshotRewrite (0.02s)
+PASS
+ok  	github.com/kang-sw/devenv/internal/wsagent	0.887s
+exit_code: 0
+recorded_root_after_wait_ps_exit: 1
+recorded_root_after_wait_ps_output:
+PID evidence covers only the recorded command root, not unenumerated descendants.

@@ -70,6 +70,8 @@ type pageRender struct {
 	rail *railRows
 	// tree separates nested agent/peer row inputs once per shared render.
 	tree *treeRows
+	// entries holds complete rendered conversation rows, outside their title bar.
+	entries *entryRows
 	// ok is false once the page is gone. err instead denotes a transient
 	// read failure: retain the last good render and retry on a refresh tick.
 	ok  bool

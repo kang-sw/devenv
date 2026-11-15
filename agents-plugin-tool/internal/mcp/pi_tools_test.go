@@ -185,6 +185,23 @@ func wsManifests() string {
 
 var piToolNames = []string{"pi.list", "pi.send", "pi.spawn", "pi.stop", "pi.transcript", "pi.wait"}
 
+func TestPiSpawnLabelDescribesAgentsPopover(t *testing.T) {
+	for _, def := range piToolDefinitions() {
+		if def["name"] != "pi.spawn" {
+			continue
+		}
+		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
+			props := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
+			desc := props["label"].(map[string]string)["description"]
+			if !strings.Contains(desc, "agents-popover row") || strings.Contains(desc, "agents-panel") {
+				t.Errorf("pi.spawn label description = %q, want agents-popover row", desc)
+			}
+		}
+		return
+	}
+	t.Fatal("pi.spawn is missing")
+}
+
 func TestPiSendDescribesNativeSteeringWithoutChangingArguments(t *testing.T) {
 	for _, def := range piToolDefinitions() {
 		if def["name"] != "pi.send" {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,12 @@ type worktreeAcquireResult struct {
 	Reused    bool   `json:"reused"`
 	Pool      string `json:"pool"`
 	Profile   string `json:"profile"`
+	// Facts describe the checkout after the branch step and hygiene. Pointers
+	// distinguish absent facts from a known false or zero.
+	Head                string `json:"head,omitempty"`
+	TargetBranchExisted *bool  `json:"target_branch_existed,omitempty"`
+	AheadOfBase         *int   `json:"ahead_of_base,omitempty"`
+	BehindBase          *int   `json:"behind_base,omitempty"`
 	// Provisioned reports that this acquire put the worktree into the profile
 	// (fresh, adopted, or re-adopted after a definition change): declared
 	// sparse was applied.
@@ -39,6 +46,18 @@ type worktreeAcquireResult struct {
 
 func (r worktreeAcquireResult) text() string {
 	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\nprofile: %s\nprovisioned: %t\n", r.Path, r.WorkerKey, r.Reused, r.Pool, r.Profile, r.Provisioned)
+	if r.Head != "" {
+		text += "head: " + r.Head + "\n"
+	}
+	if r.TargetBranchExisted != nil {
+		text += fmt.Sprintf("target_branch_existed: %t\n", *r.TargetBranchExisted)
+	}
+	if r.AheadOfBase != nil {
+		text += fmt.Sprintf("ahead_of_base: %d\n", *r.AheadOfBase)
+	}
+	if r.BehindBase != nil {
+		text += fmt.Sprintf("behind_base: %d\n", *r.BehindBase)
+	}
 	for _, h := range r.Hooks {
 		text += h.text()
 	}
@@ -49,6 +68,43 @@ func (r worktreeAcquireResult) text() string {
 		text += "warning: " + w + "\n"
 	}
 	return text
+}
+
+// readCheckoutFacts is informational: a failed read omits the affected facts,
+// never refuses an otherwise usable worktree. Resolve base in the caller's
+// root so a relative revision such as HEAD does not name the target checkout.
+func (r *worktreeAcquireResult) readCheckoutFacts(ctx context.Context, runner wsgit.Runner, root, wtPath, base, targetBranch string) {
+	head, err := wtRun(ctx, runner, wtPath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		r.Warnings = append(r.Warnings, "could not compute head or base divergence: "+err.Error())
+		return
+	}
+	r.Head = head
+	baseHead, err := wtRun(ctx, runner, root, "rev-parse", "--verify", "--end-of-options", base+"^{commit}")
+	if err != nil {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("could not compute ahead_of_base/behind_base: resolve base %q: %v", base, err))
+		return
+	}
+	counts, err := wtRun(ctx, runner, wtPath, "rev-list", "--left-right", "--count", head+"..."+baseHead, "--")
+	if err != nil {
+		r.Warnings = append(r.Warnings, "could not compute ahead_of_base/behind_base: "+err.Error())
+		return
+	}
+	fields := strings.Fields(counts)
+	if len(fields) != 2 {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("could not compute ahead_of_base/behind_base: invalid commit counts %q", counts))
+		return
+	}
+	ahead, aheadErr := strconv.Atoi(fields[0])
+	behind, behindErr := strconv.Atoi(fields[1])
+	if aheadErr != nil || behindErr != nil || ahead < 0 || behind < 0 {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("could not compute ahead_of_base/behind_base: invalid commit counts %q", counts))
+		return
+	}
+	r.AheadOfBase, r.BehindBase = &ahead, &behind
+	if r.TargetBranchExisted != nil && *r.TargetBranchExisted && behind > 0 {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("target branch %q is %d commits behind base %q; it was not reset", targetBranch, behind, base))
+	}
 }
 
 // noSubmoduleRecurse prefixes a checkout-family git invocation (worktree add,
@@ -491,6 +547,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, env []string, r
 				return res, err
 			}
 		}
+		res.TargetBranchExisted = &branchExists
 	}
 
 	// Hygiene: clear any uncommitted change and untracked/ignored cruft so no
@@ -500,6 +557,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, env []string, r
 	if err := worktreeHygiene(ctx, runner, wtPath, def.Preserve); err != nil {
 		return res, err
 	}
+	res.readCheckoutFacts(ctx, runner, root, wtPath, base, targetBranch)
 
 	// Sync submodules only when the worktree actually declares them, keeping a
 	// no-submodule repo free of an unnecessary (and network-touching) call.

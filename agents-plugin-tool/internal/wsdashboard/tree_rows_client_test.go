@@ -29,7 +29,7 @@ check("only newest hidden input applies",applied[1],["tree","two","ABC"]);
 s.msg("tree-rows",{hash:"bad",valid:false});
 check("invalid event closes without applying",[s.closed,applied.length],[true,2]);
 advance(0);
-check("reconnect opts in and preserves held hashes",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("tree.old,head.kept")+"&topics=1&railrows=1&treerows=1");
+check("reconnect opts in and preserves held hashes",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("tree.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1");
 sockets[1].msg("tree-rows",{hash:"premature",valid:true,add:"bad"});
 check("connection cannot inherit another baseline",[sockets[1].closed,applied.length],[true,2]);
 advance(0);

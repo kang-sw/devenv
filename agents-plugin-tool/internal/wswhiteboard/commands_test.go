@@ -556,8 +556,8 @@ func TestRefusalListsEveryProblemSoFar(t *testing.T) {
 	problems := refused(t, st, "<wb:nope/>\nstray\n</wb:add>\n<wb:topic name=\"missing\"><wb:close result=\"done\"/></wb:topic>\n<wb:topic name=\"t\"><wb:add class=\"bad\"><wb:title>x</wb:title></wb:add></wb:topic>")
 	wantProblems(t, problems,
 		"command 1 <wb:nope> (line 1): unknown command",
-		`line 2: text outside a command: "stray"`,
-		"line 3: </wb:add> closes nothing open",
+		`stray fragment (line 2): text outside a command: "stray"`,
+		"stray fragment (line 3): </wb:add> closes nothing open",
 		`command 2 <wb:close> (line 4): no items, content, or entries for topic "missing"`,
 		"command 3 <wb:add> (line 5) class: must be one of",
 	)

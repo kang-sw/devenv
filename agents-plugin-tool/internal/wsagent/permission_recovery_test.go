@@ -13,7 +13,7 @@ import (
 // Admission failures must still block new launches, but cannot orphan a lead
 // already running under its holder when a replacement daemon rejoins it.
 func TestPermissionAttachAdmissionAdvisories(t *testing.T) {
-	for _, failure := range []string{"corrupt-selection", "root-key"} {
+	for _, failure := range []string{"none", "corrupt-selection", "root-key", "both"} {
 		t.Run(failure, func(t *testing.T) {
 			h := permissionHarness(t)
 			keys := &permissionRootKeys{fakeLeadKeys: h.keys}
@@ -29,42 +29,56 @@ func TestPermissionAttachAdmissionAdvisories(t *testing.T) {
 			h.holders.restart()
 			path := filepath.Join(wsdashboard.SessionDir(h.dir, st.ID), "permission.json")
 			corrupt := []byte(`{"permission_level":"broken"}`)
-			wantDiagnostic := "root identity unavailable"
-			if failure == "corrupt-selection" {
+			corruptSelection := failure == "corrupt-selection" || failure == "both"
+			rootFailure := failure == "root-key" || failure == "both"
+			if corruptSelection {
 				if err := os.WriteFile(path, corrupt, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				wantDiagnostic = "invalid permission_level"
-			} else {
-				keys.reject = true
 			}
+			keys.reject = rootFailure
 			h.start()
 			h.sync(st.ID, holder)
 			permissionRejoined(h, st.ID)
 			if got := h.state(st.ID); !got.Process || got.Status != StatusRunning || got.ActiveMode != "bypassPermissions" {
 				t.Fatalf("admission failure orphaned held process: %+v", got)
 			}
-			if !strings.Contains(h.log.String(), wantDiagnostic) {
-				t.Fatalf("advisory missing: %s", h.log.String())
+			got := h.state(st.ID)
+			for diagnostic, want := range map[string]bool{
+				"invalid permission_level":                                    corruptSelection,
+				"rejoin ws session key (advisory): root identity unavailable": rootFailure,
+			} {
+				if strings.Contains(got.Error, diagnostic) != want {
+					t.Fatalf("rejoined state diagnostic %q present = %t, want %t: %+v", diagnostic, strings.Contains(got.Error, diagnostic), want, got)
+				}
+				if want && !strings.Contains(h.log.String(), diagnostic) {
+					t.Fatalf("advisory %q missing: %s", diagnostic, h.log.String())
+				}
 			}
-			if failure == "corrupt-selection" {
-				var diagnostic string
+			if failure == "none" && got.Error != "" {
+				t.Fatalf("successful rejoin has an error: %+v", got)
+			}
+			if failure == "both" {
+				wantError := "earlier backend diagnostic; " + got.Error
 				c := h.runner.conv(st.ID)
-				c.do(func() { diagnostic = c.lastErr })
-				if !strings.Contains(diagnostic, wantDiagnostic) {
-					t.Fatalf("reconciliation did not retain the corruption diagnostic: %q", diagnostic)
+				c.do(func() {
+					c.setStatus(func() { c.lastErr = "earlier backend diagnostic; " + c.lastErr })
+					c.reconcileLeadPermission()
+				})
+				if got := h.state(st.ID); got.Error != wantError {
+					t.Fatalf("reconciliation lost the earlier error: %+v", got)
 				}
 			}
 			// No selection can be safely reconstructed from corrupt bytes. Rejoin
 			// observes the existing mode, but must not deliver or repair a target.
 			h.holders.out(holder, resultLine(), stateLine(HarnessIdle))
 			h.idle(st.ID)
-			if failure == "corrupt-selection" {
+			if corruptSelection {
 				if modes := permissionDeliveredModes(h, holder); len(modes) != 0 {
 					t.Fatalf("corruption delivered a mode: %v", modes)
 				}
 				got := h.state(st.ID)
-				if !strings.Contains(got.Error, wantDiagnostic) || got.PermissionLevel != "" || got.PermissionSource != "" {
+				if !strings.Contains(got.Error, "invalid permission_level") || got.PermissionLevel != "" || got.PermissionSource != "" {
 					t.Fatalf("corruption silently fell back: %+v", got)
 				}
 				if _, err := h.runner.SetPermissionLevel(st.ID, PermissionReadOnly); err == nil {
@@ -91,12 +105,12 @@ func TestPermissionStatePreservesExistingError(t *testing.T) {
 	}
 	rec := Record{Lead: true, Backend: BackendClaude}
 	diagnostic := r.permissionState(State{}, rec, dir).Error
-	for _, existing := range []string{"", "backend process exited unexpectedly", diagnostic} {
+	for _, existing := range []string{"", "backend process exited unexpectedly", diagnostic, "rejoin ws session key (advisory): unavailable; " + diagnostic} {
 		got := r.permissionState(State{Error: existing}, rec, dir)
 		if !strings.Contains(got.Error, "invalid permission_level") || (existing != "" && !strings.Contains(got.Error, existing)) {
 			t.Fatalf("lost diagnostic with existing %q: %+v", existing, got)
 		}
-		if existing == diagnostic && got.Error != diagnostic {
+		if strings.Contains(existing, diagnostic) && got.Error != existing {
 			t.Fatalf("duplicate diagnostic: %q", got.Error)
 		}
 	}

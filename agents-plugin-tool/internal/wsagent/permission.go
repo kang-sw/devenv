@@ -117,11 +117,7 @@ func (r *Runner) permissionState(st State, rec Record, dir string) State {
 	}
 	level, source, err := r.leadPermission(rec, dir)
 	if err != nil {
-		if st.Error == "" {
-			st.Error = err.Error()
-		} else if st.Error != err.Error() {
-			st.Error += "; " + err.Error()
-		}
+		st.Error = appendDiagnostic(st.Error, err.Error())
 		return st
 	}
 	st.PermissionLevel, st.PermissionSource = level, source
@@ -131,6 +127,16 @@ func (r *Runner) permissionState(st State, rec Record, dir string) State {
 	}
 	st.PermissionEnforcement = permissionQuality(rec.Backend, level, active)
 	return st
+}
+
+func appendDiagnostic(existing, diagnostic string) string {
+	if existing == "" {
+		return diagnostic
+	}
+	if strings.Contains(existing, diagnostic) {
+		return existing
+	}
+	return existing + "; " + diagnostic
 }
 
 // A worker projection is used only for the diagnostic. Unknown surfaces remain
@@ -258,7 +264,7 @@ func (c *conv) reconcileLeadPermission() {
 	}
 	level, source, err := c.r.leadPermission(c.rec, c.dir)
 	if err != nil {
-		c.setStatus(func() { c.lastErr = err.Error() })
+		c.setStatus(func() { c.lastErr = appendDiagnostic(c.lastErr, err.Error()) })
 		return
 	}
 	if source != "explicit" {
