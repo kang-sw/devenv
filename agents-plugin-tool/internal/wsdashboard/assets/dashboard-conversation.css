@@ -206,6 +206,48 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .sbadge .spin { width: 10px; height: 10px; }
 .sbadge .i { width: 13px; height: 13px; }
 .sbadge .slabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* On the session page the badge is the button that opens the agents popover;
+   with nothing running it stays, quiet, so the popover is always reachable. */
+button.sbadge { border: 0; font-family: inherit; cursor: pointer; }
+button.sbadge:hover, button.sbadge[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+button.sbadge[aria-expanded="true"] { box-shadow: inset 0 0 0 1.5px var(--wb-primary), var(--wb-shadow-hi); }
+button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 2px; }
+.sbadge .sword { font-size: 11px; font-weight: 600; color: var(--wb-muted-fg); }
+.sbadge.idle { color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 35%, transparent), var(--wb-shadow-hi); }
+.sbadge.idle .spin { display: none; }
+/* The agents popover (agpop): the agents region over the conversation, above
+   the badge, on the rail popovers' surface. The header stays; only the list
+   scrolls. It is at most 500px wide and shrinks to the composer's width on a
+   narrow screen. */
+.agpop { position: absolute; z-index: var(--z-popovers); right: 10px; bottom: calc(100% + 26px); width: min(500px, calc(100% - 20px)); max-height: 60vh; max-height: 60dvh; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); }
+.agpop[hidden] { display: none; }
+.agpop > .r-tree { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.agpop .thead { background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-line); }
+.agpop .thead .sum { margin-right: 60px; }
+.agpop .tree { padding: 4px 12px 8px; }
+.agpop .thead .chip { background: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.agpop .thead .chip.crun { color: var(--wb-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 45%, transparent); }
+.agpop .thead .chip.cdone { color: var(--wb-ok); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-ok) 45%, transparent); }
+.agpop .thead .chip.cfail { color: var(--wb-fail); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fail) 45%, transparent); }
+.agctl { position: absolute; z-index: 2; top: 1px; right: 6px; display: flex; gap: 2px; }
+.agctl button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 18px; line-height: 1; cursor: pointer; }
+.agctl button:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.agctl button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.agctl .agpin[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); color: var(--wb-primary); }
+.agctl .i { width: 14px; height: 14px; }
+.agfoot { flex: none; padding: 7px 12px; font-size: 11px; color: var(--wb-muted-fg); box-shadow: 0 -1px 0 var(--wb-line); }
+.agpop .tgroup { margin-top: 6px; }
+.agpop .tgroup > .pghead { padding: 4px 0 2px; font-size: 11.5px; }
+.tbg { display: flex; align-items: center; gap: 8px; padding: 3px 0 3px 4px; font-size: 12px; }
+.tbg .i { width: 12px; height: 12px; color: var(--wb-primary); }
+/* An expanded row shows its newest four batches in a box until its
+   full-output action (afull) shows the rest. */
+.agpop details[open] > .brows { margin: 2px 0 4px 23px; padding: 4px 10px; border-radius: 8px; background: var(--wb-muted); }
+.agpop details:not(.d-full) > .brows > li:not(:nth-last-child(-n+4)) { display: none; }
+.afull { display: none; }
+.agpop details[open]:not(.d-full) > .afull { display: inline-flex; margin: 0 0 6px 33px; padding: 0; border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--wb-primary); cursor: pointer; }
+.agpop .afull::after { content: " \2197"; }
 @keyframes ibadge-rise { from { opacity: 0; transform: translateY(40%); } }
 @media (prefers-reduced-motion: reduce) { .ibadge:not([hidden]), .sbadge, .ibadge.busy .istop { animation: none; } }
 .crow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }

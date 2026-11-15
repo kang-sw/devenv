@@ -190,7 +190,6 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 		`id="composer"`, "live board text",
 		// A topic body sits in its sandboxed frame; there is no Now slot.
 		`<div class="doc-frame" title="Plan" data-doc="topic:Plan" data-doc-key="topic:Plan"`,
-		`id="splitter"`,
 		`<span class="src wb">whiteboard</span>`, `<span class="src">terminal</span>`,
 		"streamed &lt;partial&gt; reply",
 		// The mail whose history entry exists expands to its body; the
@@ -273,7 +272,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
 		`id="ctext"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
 		`<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
-		`</button><span class="sbwrap"><span class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span><span class="bgbadge" id="bgbadge" title="background tasks the harness runs: shells, monitors, and background subagents" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span><span class="bgbadge" id="monbadge" title="running monitors" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span></span></div>`,
+		`</button><span class="sbwrap"><button type="button" class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" aria-haspopup="dialog" aria-expanded="false" aria-controls="agpop" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span><span class="sword">running</span></button><span class="bgbadge" id="bgbadge" title="background tasks the harness runs: shells, monitors, and background subagents" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span><span class="bgbadge" id="monbadge" title="running monitors" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span></span></div>`,
 		`<div class="conv clive" data-phase="replying" data-sub="0" data-subdeep="0" data-bg="0" data-monitors="0">`,
 		`<div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext"`,
 	} {
@@ -285,15 +284,19 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		t.Errorf("live session page does not load the mention module ahead of the page script (module at %d, page script at %d)", m, d)
 	}
 	// The composer sends on a key or the thin icon-only send button; the
-	// copy button and the lead strip are gone, and the splitter sits between the tree and the
-	// conversation.
+	// copy button and the lead strip are gone, and the agents tree lives in
+	// the popover the running-agent badge opens, after the badges and inside
+	// the composer, with no splitter over the conversation.
 	for _, gone := range []string{`id="ccopy"`, `data-region="lead"`} {
 		if strings.Contains(live, gone) {
 			t.Errorf("live session page still carries %q", gone)
 		}
 	}
-	if i, j, k := strings.Index(live, `data-region="tree"`), strings.Index(live, `id="splitter"`), strings.Index(live, `<div id="convo" class="convo"><div id="r-entries"`); i < 0 || j < i || k < j {
-		t.Errorf("splitter is not between the tree and the conversation wrapper holding the entries region")
+	if i, j, k := strings.Index(live, `<div id="composer" class="composer">`), strings.Index(live, `id="sbadge"`), strings.Index(live, `<div class="agpop" id="agpop" role="dialog" aria-label="Agents" hidden><div id="r-tree" class="region r-tree" data-region="tree"`); i < 0 || j < i || k < j {
+		t.Errorf("the agents tree is not in the popover after the composer's badge")
+	}
+	if strings.Contains(live, `id="splitter"`) || !strings.Contains(live, `<div id="convo" class="convo"><div id="r-entries"`) {
+		t.Errorf("the conversation wrapper does not hold the entries region without a splitter")
 	}
 	_, board := get(t, f.base+"/s/boardsession?frame=1")
 	if !strings.Contains(board, `<div id="bcol" class="bcol"><div id="r-board"`) {

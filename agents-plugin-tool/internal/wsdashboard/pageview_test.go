@@ -1251,7 +1251,7 @@ func TestAgentRowStats(t *testing.T) {
 	}
 
 	css := mustAsset(t, "dashboard.css")
-	for _, want := range []string{".r-tree { container: atree / inline-size; }", ".aline { display: contents; }", "@container atree (max-width: 559px) {",
+	for _, want := range []string{".r-tree { container: atree / inline-size; }", ".aline { display: contents; }", "@container atree (max-width: 439px) {",
 		".ahead:has(> .aline) { flex-wrap: wrap;", ".ahead > .astat { order: 1; flex: 0 0 100%;", ".ahead > .astat .aeff, .ahead > .astat .actx, .ahead > .astat .atps { flex: none; }"} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)

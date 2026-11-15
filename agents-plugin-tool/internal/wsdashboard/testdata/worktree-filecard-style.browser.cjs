@@ -32,7 +32,7 @@ async function capture(page, filename, clip) {
 async function leftColumn(frame) {
   return frame.locator('#grid').evaluate(el => {
     const r = el.getBoundingClientRect();
-    const left = (el.querySelector('#r-tree') || el.querySelector('#files')).getBoundingClientRect();
+    const left = (el.querySelector('#convo') || el.querySelector('#files')).getBoundingClientRect();
     const owner = window.frameElement.getBoundingClientRect();
     return { x: owner.x + r.x, y: owner.y + r.y, width: left.width, height: r.height };
   });
@@ -55,6 +55,8 @@ async function leftColumn(frame) {
       const session = sessionTab.frameLocator('iframe.sframe.on');
       await session.locator('#ctext').waitFor({ state: 'attached' });
       const worktreeHeader = await headerMetrics(wt.locator('#chead'));
+      // The agents header lives in the popover the badge opens.
+      await session.locator('#sbadge').click();
       const sessionHeader = await headerMetrics(session.locator('#r-tree > .thead'));
       assert.deepEqual(worktreeHeader, sessionHeader, 'Files uses the shared session panel header metrics');
       assert.equal(worktreeHeader.height, 30);

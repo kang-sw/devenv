@@ -39,7 +39,7 @@ async function leftPanel(frame, selector) {
       await wt.locator('#files .fentry[data-entry="worktree.txt"]').waitFor();
       await sessionTab.goto(base + '/s/livesession');
       const session = sessionTab.frameLocator('iframe.sframe.on');
-      await session.locator('#r-tree').waitFor();
+      await session.locator('#convo').waitFor();
       const shot = (page, name) => shots ? page.screenshot({ path: path.join(shots, `${name}-${theme}.png`) }) : null;
 
       // 3. The worktree Files panel is exactly as wide as the session's left panel.
@@ -47,7 +47,7 @@ async function leftPanel(frame, selector) {
       for (const vw of [1440, 1100]) {
         await tab.setViewportSize({ width: vw, height: 1000 }); await sessionTab.setViewportSize({ width: vw, height: 1000 });
         await tab.waitForTimeout(200); await sessionTab.waitForTimeout(200);
-        const worktree = await leftPanel(wt, '#files'), sessionPanel = await leftPanel(session, '#r-tree');
+        const worktree = await leftPanel(wt, '#files'), sessionPanel = await leftPanel(session, '#convo');
         widths[vw] = { worktree, session: sessionPanel };
         assert(Math.abs(worktree - sessionPanel) <= 1, `${vw}px: worktree Files ${worktree} vs session panel ${sessionPanel}`);
         if (vw === 1440) { await shot(tab, 'worktree-1440'); await shot(sessionTab, 'session-1440'); }

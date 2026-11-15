@@ -1457,7 +1457,10 @@
     return (c && c.getAttribute("data-turn")) || "";
   }
   function syncBadge() {
-    subBadge(sbadge, doc.querySelector("#r-convlive .clive"), liveMode);
+    // The session page's badge opens the agents popover, so it shows there
+    // whether or not the session is live and anything runs.
+    var popover = !!$("agpop");
+    subBadge(sbadge, doc.querySelector("#r-convlive .clive"), liveMode || popover, popover);
     bgBadge(doc.querySelector("#r-convlive .clive"));
     if (!ibadge) return;
     var on = liveMode && leadWorking();
@@ -1475,13 +1478,15 @@
   // M its data-subdeep (every running agent below them), counted by the
   // server; "(+M)" shows only when M is above zero. on gates it: the
   // session page's live mode, or the support chat card's open conversation.
+  // stay keeps it shown, quiet (idle), while nothing runs.
   var sbadge = $("sbadge");
-  function subBadge(badge, clive, on) {
+  function subBadge(badge, clive, on, stay) {
     if (!badge) return;
     var n = clive ? Number(clive.getAttribute("data-sub")) || 0 : 0;
     var m = clive ? Number(clive.getAttribute("data-subdeep")) || 0 : 0;
-    badge.hidden = !(on && n + m > 0);
+    badge.hidden = !(on && (stay || n + m > 0));
     if (badge.hidden) return;
+    badge.classList.toggle("idle", n + m === 0);
     var count = m > 0 ? n + "(+" + m + ")" : String(n);
     var label = wsTn("js.subagents", n + m, count);
     var el = badge.querySelector(".slabel");
@@ -1515,6 +1520,49 @@
   function bgBadge(clive) {
     taskBadge(bgbadge, clive, "data-bg", bgTitle);
     taskBadge(monbadge, clive, "data-monitors", monTitle);
+  }
+  // --- agents popover ----------------------------------------------------------
+  // The subagent badge opens the session's agents (agpop: the agents region
+  // over the conversation). Esc or a press outside closes it unless it is
+  // pinned; the pin is remembered in the browser, so a pinned popover opens
+  // again on the next load, and the close button closes and unpins. An
+  // expanded row shows its newest batches until its full-output action;
+  // which rows show everything survives the region's swaps (agSwapped).
+  var agpop = $("agpop"), agpin = $("agpin"), AGPIN_KEY = "ws.dashboard.agpop.pin", agFull = {};
+  function agOpen(open) {
+    agpop.hidden = !open;
+    sbadge.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  function agPinned() { return agpin.getAttribute("aria-pressed") === "true"; }
+  function agPin(on) {
+    agpin.setAttribute("aria-pressed", on ? "true" : "false");
+    save(AGPIN_KEY, on ? "1" : null);
+  }
+  function agSwapped() {
+    if (!agpop) return;
+    q("details[data-key]", agpop).forEach(function (d) { d.classList.toggle("d-full", !!agFull[d.getAttribute("data-key")]); });
+  }
+  if (agpop && sbadge && agpin) {
+    sbadge.addEventListener("click", function () { agOpen(agpop.hidden); });
+    agpin.addEventListener("click", function () { agPin(!agPinned()); });
+    $("agclose").addEventListener("click", function () { agPin(false); agOpen(false); sbadge.focus(); });
+    agpop.addEventListener("click", function (e) {
+      var b = e.target.closest && e.target.closest("[data-full]"), d = b && b.closest("details[data-key]");
+      if (!d) return;
+      agFull[d.getAttribute("data-key")] = true;
+      d.classList.add("d-full");
+    });
+    doc.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || e.defaultPrevented || agpop.hidden || agPinned()) return;
+      var inside = agpop.contains(doc.activeElement);
+      agOpen(false);
+      if (inside) sbadge.focus();
+    });
+    doc.addEventListener("pointerdown", function (e) {
+      if (agpop.hidden || agPinned() || agpop.contains(e.target) || sbadge.contains(e.target)) return;
+      agOpen(false);
+    }, true);
+    if (load(AGPIN_KEY) === "1") { agPin(true); agOpen(true); }
   }
   function interruptTurn() {
     if (interrupting) return;

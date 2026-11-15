@@ -1,13 +1,11 @@
 /* ===== session layout =====
-   live: one grid whose children are the tab bar, the tree, the splitter, the
-   conversation, the composer, and the board column (the panels are in the
-   drawer). The base rules are the tabs view; the split view overrides them
-   for an explicit "split" on any screen wider than a phone, and for "auto"
-   (or no choice) on a wide screen. Every pane scrolls on its own inside a grid that fills the
-   viewport. The tree and the conversation share their column at a fixed
-   ratio: --sa and --sb are fr shares the page script sets from the saved
-   splitter position, so neither pane resizes with its content; the px floors
-   keep either from collapsing on a short window. */
+   live: one grid whose children are the tab bar, the conversation, the
+   composer, and the board column (the panels are in the drawer; the agents
+   are a popover over the conversation, inside the composer). The base rules
+   are the tabs view; the split view overrides them for an explicit "split"
+   on any screen wider than a phone, and for "auto" (or no choice) on a wide
+   screen. Every pane scrolls on its own inside a grid that fills the
+   viewport. */
 /* Saved lead history has its own layout, not a synthetic live adapter. */
 .dash.history .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.history .top { flex: none; }
@@ -93,24 +91,22 @@
 .dshot img { max-width: 100%; height: auto; }
 @media (max-width: 760px) { .dlanding { padding: 32px calc(16px + var(--dl-x)) calc(64px + var(--dl-y)); } .dguide { margin-top: 36px; } .dguide ol { gap: 40px; } .dstep > .dshot { grid-column: 1 / -1; } }
 .dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap); --sa: 250fr; --sb: 750fr;
-  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
-  grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(96px, 1fr) auto;
+  grid-template-areas: "tabbar" "chead" "convo" "composer"; }
 .dgrid.live > * { min-width: 0; min-height: 0; }
 .dgrid.live > .tabbar { grid-area: tabbar; margin-bottom: 10px; }
-.dgrid.live > .r-tree { grid-area: tree; overflow: auto; }
-.dgrid.live > .splitter { grid-area: split; }
 .dgrid.live > .convo { grid-area: convo; overflow: auto; }
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
 /* One shared release control for staged rendering, placement and heights.
    Fixed outside the board flow so the badge itself changes no reading geometry. */
 /* Owned board scrollers use permanent manual anchoring (wbHistory.keep). */
-.dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
-.dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
+.dgrid.live > .bcol { grid-column: 1; grid-row: chead-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
+.dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
 /* The conversation panel's header (chead) carries its own tabs (ctabs):
    "Conversation | Files". Under the Files tab the Files pane takes the
    conversation's place below the header, while the conversation is hidden
-   (never removed), so its scroll and pin survive; the agents tree, the
-   splitter, and the composer stay. The header shows the conversation's
+   (never removed), so its scroll and pin survive; the composer, with the
+   agents popover, stays. The header shows the conversation's
    counts under one tab and the Files pane's root under the other. In the
    one-column view the header shows with the conversation, under its tab. */
 .dgrid.live > .chead { grid-area: chead; }
@@ -118,24 +114,21 @@
 .dgrid.live[data-tab="board"] > .chead { display: none; }
 .dgrid.live[data-ctab="files"]:not([data-tab="board"]) > .fpane { display: flex; }
 .dgrid.live[data-ctab="files"] > .convo { display: none; }
-.splitter { position: relative; cursor: row-resize; touch-action: none; outline: 0; }
-.splitter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
-.splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { background: var(--wb-primary); }
 @media (min-width: 760px) {
-  .dgrid.live[data-layout="split"] { grid-template-columns: var(--dgrid-cols); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
-    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
+  .dgrid.live[data-layout="split"] { grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(96px, 1fr) auto;
+    grid-template-areas: "chead board" "convo board" "composer board"; }
   .dgrid.live[data-layout="split"] > .tabbar { display: none; }
-  .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
+  .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
   .dgrid.live[data-layout="split"] > .bcol { grid-area: board; }
   .dgrid.live[data-layout="split"] > .chead { display: flex; }
   .dgrid.live[data-layout="split"][data-ctab="files"] > .fpane { display: flex; }
   .dgrid.live[data-layout="split"][data-ctab="files"] > .convo { display: none; }
 }
 @media (min-width: 1100px) {
-  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: var(--dgrid-cols); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
-    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
+  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(96px, 1fr) auto;
+    grid-template-areas: "chead board" "convo board" "composer board"; }
   .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
-  .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
+  .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
   .dgrid.live:not([data-layout="tabs"]) > .bcol { grid-area: board; }
   .dgrid.live:not([data-layout="tabs"]) > .chead { display: flex; }
   .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .fpane { display: flex; }

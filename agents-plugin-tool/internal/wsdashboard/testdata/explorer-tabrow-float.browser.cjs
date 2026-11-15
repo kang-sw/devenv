@@ -80,7 +80,7 @@ function multiTab(m, name, count) {
       // 3. Session page: the Files tab and the floating toolbar explorer.
       await sessionTab.goto(base + '/s/livesession');
       const session = sessionTab.frameLocator('iframe.sframe.on');
-      await session.locator('#r-tree').waitFor();
+      await session.locator('#convo').waitFor();
       await session.locator('#ctabs button[data-ctab="files"]').click();
       await session.locator('#files .fbar .ftab-new').waitFor();
       oneTab(await bar(session.locator('#files')), 'session Files tab');

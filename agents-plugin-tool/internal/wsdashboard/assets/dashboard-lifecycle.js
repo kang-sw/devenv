@@ -614,7 +614,6 @@
   }
   if (worktree) revealPanes();
   if (live) {
-    setSplit(savedSplit());
     setTab("convo");
     setCtab("convo");
   }

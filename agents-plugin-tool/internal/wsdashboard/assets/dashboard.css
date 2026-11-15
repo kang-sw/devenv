@@ -165,7 +165,7 @@ code.fpath { font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhe
 .empty { margin: 8px 0; padding: 18px 14px; text-align: center; font-size: 13px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); }
 
 /* ===== boxes with a sticky title bar: tree and conversation ===== */
-.r-tree, .convo { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }
+.convo { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }
 .convo { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-bg)); }
 /* the conversation's two regions lay out as the #convo wrapper's own
    children, so its sticky title bar sticks across both */
@@ -222,10 +222,10 @@ summary.ahead::-webkit-details-marker { display: none; }
 details[open] > .ahead .am > .i { transform: rotate(180deg); }
 .ahead .acap { flex: 1 1 0; min-width: 0; font-size: 11px; color: var(--wb-muted-fg); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* the lead row's live detail: the running or approval-waiting tool, one line */
-/* a subagent's telemetry (template astat); the agents panel is the
-   container, so a narrow panel (a side column, the session rail's three
-   columns) moves the stats from the row's end to a muted second line under
-   its name, whatever the viewport is. Wide, aline is display: contents (a
+/* a subagent's telemetry (template astat); the agents popover is the
+   container, so a narrow one (a phone, where it shrinks to the screen) moves
+   the stats from the row's end to a muted second line under its name,
+   whatever the viewport is. Wide, aline is display: contents (a
    no-op). Narrow, the summary wraps: aline takes the first line with the
    trailing .am (flex-basis 0, so it never forces a break and keeps the
    one-line shrink/ellipsis behaviour) and .astat a full-width second line. */
@@ -235,7 +235,7 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
 .ahead .astat .amodel { font-family: var(--wb-mono); font-size: 10.5px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .ahead .astat .aeff { font-weight: 600; }
 .ahead .astat .atps { color: var(--wb-primary); font-weight: 700; }
-@container atree (max-width: 559px) {
+@container atree (max-width: 439px) {
   .ahead:has(> .aline) { flex-wrap: wrap; row-gap: 0; }
   .ahead > .aline { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
   .ahead > .astat { order: 1; flex: 0 0 100%; min-width: 0; padding: 0 0 2px 22px; gap: 0; overflow: hidden; }
