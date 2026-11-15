@@ -43,6 +43,14 @@ func (s *sessionStore) readWhiteboard(key string) (sessionRecord, error) {
 }
 
 func openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
+	return openWhiteboardCached(record, key, raw, nil)
+}
+
+func (src *DashboardSessionSource) openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
+	return openWhiteboardCached(record, key, raw, &src.folders)
+}
+
+func openWhiteboardCached(record *sessionRecord, key string, raw io.Writer, cache *wswhiteboard.FolderCache) error {
 	folder := whiteboardFolder(record.Root, key)
 	if record.Whiteboard != nil {
 		if _, err := os.Stat(filepath.Join(folder.Dir, "meta.json")); os.IsNotExist(err) {
@@ -51,7 +59,7 @@ func openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
 			}
 		}
 	}
-	board, err := folder.Open(record.Whiteboard)
+	board, err := cache.Open(folder, record.Whiteboard)
 	if err != nil {
 		return fmt.Errorf("open whiteboard: %w", err)
 	}
