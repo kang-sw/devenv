@@ -4,26 +4,6 @@
     "last_gc": "2026-10-26T10:43:26Z"
   },
   "registrations": {
-    "260524-epic-async-exec-job-surface": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:49:32Z"
-      }
-    },
-    "260605-epic-ws-playbook-factory-pivot": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:49:39Z"
-      }
-    },
     "260626-research-playbook-print-lead-surface-leak": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -35,16 +15,6 @@
     },
     "260728-bug-chmod-based-tests-skip-silently": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260824-epic-review-watermark-model": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:49:46Z"
-      }
     },
     "260831-research-ai-phase-over-granularity-review-load": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -166,41 +136,11 @@
     "261106-bug-git-commit-trailer-placement": {
       "registered_at": "2026-11-06T07:33:45Z"
     },
-    "261106-epic-ws-dashboard-serve-daemon": {
-      "registered_at": "2026-11-06T04:24:28Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:49:53Z"
-      }
-    },
     "261106-feat-whiteboard-policy-answer-user-alternative": {
       "registered_at": "2026-11-06T04:42:55Z"
     },
     "261107-bug-pi-source-tests-fetch-release-runtime": {
       "registered_at": "2026-11-06T15:40:06Z"
-    },
-    "261107-epic-ws-dashboard-messenger-round2": {
-      "registered_at": "2026-11-07T03:56:25Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:50:00Z"
-      }
-    },
-    "261107-epic-ws-personal-common-store": {
-      "registered_at": "2026-11-07T05:11:56Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:50:07Z"
-      }
     },
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
@@ -229,51 +169,11 @@
     "261110-epic-ws-dashboard-agent-host": {
       "registered_at": "2026-11-09T15:09:33Z"
     },
-    "261110-epic-ws-tracker-team-feedback": {
-      "registered_at": "2026-11-10T06:49:09Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:50:14Z"
-      }
-    },
-    "261110-research-ws-dashboard-agent-host-foundations": {
-      "registered_at": "2026-11-09T15:09:40Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:51:00Z"
-      }
-    },
-    "261110-research-ws-dashboard-background-task-visibility": {
-      "registered_at": "2026-11-09T15:23:36Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:50:36Z"
-      }
-    },
     "261111-bug-ws-dashboard-daemon-idle-cpu-windows": {
       "registered_at": "2026-11-11T07:52:16Z"
     },
     "261111-bug-ws-tracker-body-merge-minor-gaps": {
       "registered_at": "2026-11-11T10:28:07Z"
-    },
-    "261112-epic-ws-mcp-pi-subagents": {
-      "registered_at": "2026-11-12T07:22:22Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:50:21Z"
-      }
     },
     "261112-feat-pi-subagent-long-shell-auto-background": {
       "registered_at": "2026-11-12T07:07:20Z"
@@ -356,16 +256,6 @@
     "261114-bug-ws-dashboard-search-palette-minors": {
       "registered_at": "2026-11-13T16:54:43Z"
     },
-    "261114-bug-ws-history-deep-link-capsule-offset-lag": {
-      "registered_at": "2026-11-14T11:33:20Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:51:08Z"
-      }
-    },
     "261114-bug-ws-installed-plugin-missing-native-pi-payload": {
       "registered_at": "2026-11-14T04:54:50Z",
       "lease": {
@@ -403,16 +293,6 @@
     },
     "261114-epic-ws-common-session-foundation": {
       "registered_at": "2026-11-14T11:13:55Z"
-    },
-    "261114-epic-ws-dashboard-file-explorer": {
-      "registered_at": "2026-11-14T13:07:39Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:50:28Z"
-      }
     },
     "261114-feat-ws-content-change-relative-hover": {
       "registered_at": "2026-11-14T11:47:01Z",
