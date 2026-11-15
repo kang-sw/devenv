@@ -143,6 +143,68 @@ Verification (source fixtures; GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local,
    successful with the fact omitted and a warning.
 7. Record the compatibility tier with source lines.
 
+### Result (10aae7320) - 2026-11-16
+
+- Added optional `head`, `target_branch_existed`, `ahead_of_base` and
+  `behind_base` facts to both response formats. Known false/zero values survive
+  serialization; an omitted target leaves its existence fact absent. A retained
+  branch behind base produces one warning naming the branch, count and lack of
+  reset. Fact-read/parse failures omit unavailable facts and warn while mint and
+  lease publication still succeed.
+- Facts are read immediately after hygiene inside the existing acquisition lock
+  (`agents-plugin-tool/internal/mcp/worktree_tools.go:339-352,550-560`). Base is
+  resolved in the caller's root so relative revisions such as `HEAD` do not
+  accidentally name the target checkout; a regression covers this choice.
+  Arguments, branch selection, hygiene, hooks, lease records, pool behavior and
+  the resolver are unchanged.
+- Verification passed with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` from
+  `agents-plugin-tool/`:
+  - `go test ./internal/mcp -run 'Worktree|^TestImplIdentityResolveProvisionRouteIntegration$' -count=1`
+    — passed in 71.340s. Covers fresh/reused pools independently of branch
+    existence, exact asymmetric divergence, unchanged retained HEAD, direct-base
+    omission, actual text/JSON dispatch, read failures and invalid count output.
+  - `go build ./...` — passed.
+  - `go vet ./internal/mcp` — passed.
+  - `git diff --check` from the repository root — passed.
+- **Compatibility: T0**, comparing pre-change `69096ff0d` with `10aae7320`.
+  The old result writer has no new facts
+  (`69096ff0d:agents-plugin-tool/internal/mcp/worktree_tools.go:21-50`);
+  the new writer adds only optional response members/text lines and warnings
+  (`agents-plugin-tool/internal/mcp/worktree_tools.go:25-106`). Both versions'
+  unchanged dispatcher serializes this transient result through the existing
+  envelope (`agents-plugin-tool/internal/mcp/server.go:1488-1491`). No new
+  argument or persistent field is written, so old calls still work and reopening
+  the new version has no lost data to recover; a fresh acquire recomputes facts.
+- **Consumer audit:** searched `worktree[._/]acquire`, `worktreeAcquire`,
+  `worker_key`, `target_branch_existed` and existing text labels in Pi, launcher,
+  dashboard, ws/wsflow playbooks and tests. No strict acquire-result parser or
+  whole-text equality assertion was found. The unchanged pre-change readers are:
+  - Pi: generic `tools/call` request
+    (`agents-plugin-pi/src/mcp-stdio-client.ts:341-342`); bridge forwards content
+    and details, with special parsing restricted to other named tools
+    (`agents-plugin-pi/src/bridge.ts:1188-1224`). Its acquire test reference is
+    inventory-only (`agents-plugin-pi/test/bridge.test.ts:86`).
+  - Launcher: forwards response bytes, tracking IDs without parsing acquire
+    text/JSON (`agents-plugin/bin/ws-mcp-launcher.py:1505-1520,1599-1610`).
+  - Dashboard: reads its own pool source, not acquire output
+    (`agents-plugin-tool/internal/wsdashboard/worktrees.go:27-30,173-174`;
+    `agents-plugin-tool/internal/mcp/dashboard_worktrees.go:95-136`).
+  - Playbooks: ws and wsflow consume the returned key and nudge, not a fixed
+    response layout (`agents-plugin/rsrc/lead-workflow-manual/lead-workflow-manual.md:171-201`;
+    `agents-plugin-wsflow/rsrc/lead-workflow-manual/lead-workflow-manual.md:171-201`).
+    The two files are byte-identical.
+  - Go JSON consumers use permissive `json.Unmarshal`, ignoring unknown fields
+    (`agents-plugin-tool/internal/mcp/worktree_list_test.go:30-42`,
+    `config_repo_scope_test.go:224-236`,
+    `impl_identity_integration_test.go:128-136`). Existing acquire dispatch tests
+    likewise decoded permissively and are extended to assert the new facts
+    (`agents-plugin-tool/internal/mcp/worktree_tools_test.go:684-758,968-979`).
+- Independent lite review was omitted under the binding lead instruction (no
+  subagents available); the lead will run it after the worker report. No shared
+  daemon restart/replacement, Electron, push or merge was performed.
+- Phase 2 remains open and unplanned pending the owner's decision. The ticket
+  stays in `ready/`.
+
 ### Phase 2: Resolver handling of a fully landed canonical impl ref
 
 Not yet planned. Blocked on the deferred owner decision in `## Constraints`;
