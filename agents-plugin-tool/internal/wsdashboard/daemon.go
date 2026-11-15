@@ -94,12 +94,6 @@ type DaemonOptions struct {
 	// SupportRoutePrefix (the agent runner's per-store conversations); nil
 	// serves none.
 	Support http.Handler
-	// SearchAnswers serves local-only answer requests and private streams;
-	// its Close reaps every one-shot process before the daemon releases its lock.
-	SearchAnswers interface {
-		http.Handler
-		Close()
-	}
 	// Holders is the session holder manager (holders.go): the daemon runs
 	// its scans and serves the holders routes; nil runs none.
 	Holders HolderHost
@@ -177,10 +171,6 @@ type Daemon struct {
 	index         *Index
 	source        SessionSource
 	agents        AgentHost
-	searchAnswers interface {
-		http.Handler
-		Close()
-	}
 	leadNudges interface {
 		Start()
 		Close()
@@ -387,7 +377,6 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		sizes:           newSizeCache(),
 		files:           newFileListCache(),
 		support:         opts.Support,
-		searchAnswers:   opts.SearchAnswers,
 		holders:         opts.Holders,
 		stop:            make(chan struct{}),
 		done:            make(chan struct{}),
@@ -657,9 +646,6 @@ func (d *Daemon) Close() {
 		// The web card listeners are servers of their own; closed here,
 		// before the lock goes, a successor never races a leftover port.
 		d.web.close()
-		if d.searchAnswers != nil {
-			d.searchAnswers.Close()
-		}
 		if d.agents != nil {
 			d.agents.Close()
 		}
@@ -709,6 +695,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc(pwaPrefix, handlePWA)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
+	mux.HandleFunc("/w/", d.handleWorktreePage)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	mux.HandleFunc(railLayoutRoute, d.handleRailLayout)
 	mux.HandleFunc(railEventsRoute, d.handleRailEvents)
@@ -719,9 +706,6 @@ func (d *Daemon) Handler() http.Handler {
 	}
 	if d.tracker != nil {
 		mux.HandleFunc("/tracker/", d.handleTracker)
-	}
-	if d.searchAnswers != nil {
-		mux.Handle("/search-answers/", d.searchAnswers)
 	}
 	if d.agents != nil {
 		agents := d.agents.Handler()

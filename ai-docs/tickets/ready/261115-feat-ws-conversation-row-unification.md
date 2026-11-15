@@ -7,7 +7,7 @@ related:
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 6e903006766d43b9
-sage-review-design-reviewed: 6e903006766d43b9
+sage-review-design-reviewed: d3d0a3e667cd40f4
 ---
 
 # Unify conversation row frames and remove saved-change diagnostics

@@ -1,6 +1,7 @@
 /* ===== conversation ===== */
 .conv { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
 .conv.clive { padding-top: 0; }
+.user-batch { display: flex; flex-direction: column; gap: 10px; }
 .msg { max-width: 100%; }
 .msg .mh { font-size: 11.5px; color: var(--wb-muted-fg); display: flex; gap: 6px; align-items: center; margin-bottom: 3px; }
 .msg .mh b { color: var(--wb-fg); }
@@ -194,7 +195,7 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .wsc-editor:focus { outline: 1.5px solid var(--wb-primary); }
 .wsc-backing[hidden] + .wsc-editor { display: none; }
 .wsc-editor[aria-disabled="true"] { opacity: .6; cursor: default; }
-.wsc-capsule { display: inline; white-space: nowrap; font-size: 12px; line-height: 1.5; padding: 0 6px; border-radius: 5px; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 28%, transparent); }
+.wsc-capsule { display: inline; white-space: normal; box-decoration-break: clone; -webkit-box-decoration-break: clone; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; padding: 0 6px; border-radius: 5px; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 28%, transparent); }
 .wsc-skill { font: 11.5px/1.5 var(--wb-mono); }
 .composer textarea, .composer textarea + .wsc-editor { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
 .composer textarea + .wsc-editor { box-sizing: border-box; overflow: auto; }

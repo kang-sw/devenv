@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e1669011bf135dea
 sage-review-completeness-reviewed: e1669011bf135dea
+completed: 2026-11-15
 ---
 
 # Worktree page reusing session cards and the file explorer without agent panels
@@ -105,3 +106,14 @@ Verification:
 - No conversation tab, composer, agent tree, whiteboard, Web page card or send-to-session action on the page; terminals survive a page close and reappear on revisit.
 - Side-by-side: capture the live page headless (disposable fixture daemon, never the shared daemon) and compare it against `ai-docs/tickets/assets/261114-feat-ws-dashboard-worktree-view/worktree-page.png` for the sidebar entry, header, toolbar and files column. The card area is compared against the session screen's own card layout, not the mockup (owner clarification in (983)).
 - Scoped `go test -run` for the touched wsdashboard areas plus `./internal/wsi18n` (`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`); never the full `./internal/wsdashboard` package.
+
+### Result (60cb167ee) - 2026-11-15
+
+- Added the local-only `/w/<path>` page, framed through the existing shell and selected by rail click or Enter without changing the reorder threshold. Cold bookmarks refresh the same rail worktree source/projection, including pooled-worktree exclusions and branch/detached metadata. Unix URLs supply the leading slash through `/w/`; Windows drive paths remain `/w/C:/...`.
+- Reused the session template's viewport layout, WsFiles, WsPreview and WsCards. The page has only the files and card columns, the worktree header and New terminal/New explorer/Search toolbar; no session, conversation, composer, agent tree, whiteboard, Web action or send-to-session control is introduced.
+- Kept the session/search `rid` empty, routed files/previews/terminal actions through host0, and namespaced browser records under `wt:<path>`. Terminal lists use the exact folder filter; creating a terminal uses the selected path and never happens automatically.
+- Compatibility remains **T0**: `assets/dashboard.js:16-19` selects the new identity only for a worktree page; `assets/dashboard-board.js:185-189,245` selects the new keys/anchor while ordinary sessions retain their original rid and keys; `assets/files.js:1635` retains the existing per-card record format; `assets/terminal.js:24-25,441,477` and `assets/preview.js:28` preserve the session transport fallback. No shared store, protocol, MCP API or manifest changed; an old binary never reads or rewrites these new browser keys.
+- Verification used only disposable fixture daemons and holders with offline Go settings. Focused dashboard regression batch covering worktree routes, shell, rail, files/explorer/cards, previews, terminals and anchor guards passed (38.075 s); `./internal/wsi18n` passed (1.700 s); race-enabled worktree/anchor trust checks passed (3.570 s). The new route test uses a bounded 10-second Git/render budget because the shared 500 ms health client timed out with race instrumentation.
+- `TestWorktreePageBrowser` passed (16.56 s): two roots' live previews and terminal `pwd`, exact terminal lists, per-worktree cards/explorers/pins after reload, preview restoration, click/Enter/drag and non-local gesture suppression, index-scope search, terminal survival across page closure and unchanged session isolation. Windows route framing is covered by the Node shell contract; native Windows execution was not run.
+- Compared `/tmp/exec5/wv-impl/worktree-page.png` vs `ai-docs/tickets/assets/261114-feat-ws-dashboard-worktree-view/worktree-page.png`: **match** for the selected sidebar entry, workspace/branch/path and chips, toolbar actions and explorer-only files column. The implementation uses the current reusable explorer and responsive session rail rather than copying illustrative mockup styling. Card placement follows the session's normal/pinned layout, with no docking or spanning; pinned capture: `/tmp/exec5/wv-impl/pinned-page.png`.
+- Per the caller's no-subagent restriction, the worker performed the Lite correctness/test-integrity read itself; this was not independent review. No outstanding functional findings. Full dashboard runs and shared daemon rebuild/install/start/stop/swap were intentionally omitted. Self-review report: `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@97ab43fd/review-paths/bef381a0-01-261114-worktree-view-self-review.md` (ephemeral).
