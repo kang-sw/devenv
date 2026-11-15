@@ -22,7 +22,6 @@ package wslive
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -422,7 +421,9 @@ type GeneratingView struct {
 // ones read as empty.
 func ReadSnapshot(path string) (Snapshot, error) {
 	var snap Snapshot
-	raw, err := os.ReadFile(path)
+	// Writers replace snapshot.json atomically (wsagent writeFileAtomic,
+	// mcp writeSnapshot); a Windows read racing that rename must retry.
+	raw, err := readReplacedFile(path)
 	if err != nil {
 		return snap, err
 	}
