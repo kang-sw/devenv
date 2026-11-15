@@ -669,3 +669,52 @@ binary enforces the new permission feature.
 
 | # | Title | Severity |
 |---|-------|----------|
+
+## Blocked (2026-11-15)
+
+MAIN's **2026-11-15 17:12:58Z** dispatch authorized Phase 2 backend/runtime
+only after CSI Phase 2 landed. The worker inspected exact base
+`4f78654d6ca2113ad13d610f57dc05cd0696980b` on
+`impl/develop/foyer-cause-shore` and stopped under **stop (c)** before runtime
+edits. The lead accepted the stop; no runtime resumption is authorized.
+
+**VERIFIED — the required actual authority-parent relation is missing from the
+inspected hosted-worker seams.** Paths below are relative to
+`agents-plugin-tool/` at that base.
+
+- Production supplies `AgentKeyStore` to the Runner
+  (`cmd/ws-mcp/dashboard.go:262–273`). Worker minting deliberately creates a
+  parentless delegate key; `ensure` rejects a nonempty key parent and recreates
+  a missing key without one (`internal/mcp/agent_keys.go:12–17,27–30,93–119`).
+- Top-level Pi spawn passes a reporting `ParentRef`, not the calling key or a
+  separate authority-parent input (`internal/mcp/pi_tools.go:154–156,307–327`;
+  `internal/wsagent/spawn.go:66–109`). Nested spawn likewise passes only the
+  holder's `ParentConversation` reply-id (`internal/wsagent/children.go:312–322`).
+- CSI explicitly excludes conversation `ParentRef` from authority selection
+  and projects lineage from the key store
+  (`internal/mcp/session_context.go:9–12,114–120`). Tokens identify their holder
+  (`internal/wsagent/children.go:108–186`); holder metadata records worker
+  identity/capability, not its authority parent (`internal/wsagent/holder.go:82–89`).
+  Worker restart calls the same parentless-key `Ensure`
+  (`internal/wsagent/runner.go:2174–2188`).
+
+**INFERRED — implementation consequence.** These sources cannot supply the
+actual current parent required by Decision 3 after restart without promoting
+`ParentRef` to authority or introducing/changing durable lineage. Neither is
+approved. An empty worker-key parent does not establish that the spawned
+conversation is an authority root. This bounded source inspection, corroborated
+by an independent read-only researcher, is not an exhaustive absence proof.
+
+**Awaiting MAIN's contract/design disposition.** A separately approved durable
+actual-parent binding, supplied at authenticated spawn boundaries with explicit
+legacy missing-parent treatment, was suggested as a prerequisite correction.
+This is an unsettled suggestion, not an approved design, storage choice or
+permission-policy amendment. Compatibility also requires settlement: adding
+parents to worker keys would conflict with the inspected `Ensure` contract;
+no transparent alternative or T0 acceptance is established by this inspection.
+
+Phase 2 backend runtime and UI remain unimplemented. No permission-feature
+fixtures or acceptance ran, and no Phase 2 Result is recorded. The ticket stays
+`ready/`; UI remains deferred to the Claude mockup pass, and Phases 3–5 remain
+outside this dispatch. Owner decisions, phase plans and existing Results are
+unchanged.
