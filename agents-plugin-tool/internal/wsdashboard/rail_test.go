@@ -643,6 +643,55 @@ func TestRailListerReadsOnlyWhilePagesShowTheRail(t *testing.T) {
 	release()
 }
 
+// TestRailListerRenderDuringAReadWaitsForIt pins that a render landing
+// while a repository's read is still running (a second stream opening)
+// waits for that read instead of queuing the same repository again; a
+// reread asked during the read still reads it once more. A slow read (the
+// durable admission writes, slow on Windows) once let both streams' renders
+// read the repository twice.
+func TestRailListerRenderDuringAReadWaitsForIt(t *testing.T) {
+	fake := &railFakeRead{reads: map[string]int{}}
+	started, unblock := make(chan string, 4), make(chan struct{})
+	read := func(repo string, regs []Registration) (RepoWorktrees, error) {
+		started <- repo
+		<-unblock
+		return fake.read(repo, regs)
+	}
+	stop := make(chan struct{})
+	defer close(stop)
+	l := newRailLister(read, nil, stop)
+	l.after = func(time.Duration) <-chan time.Time { return make(chan time.Time) }
+	wanted := map[string][]Registration{"/a": {{ReplyID: "s"}}}
+
+	l.lists(wanted)
+	release := l.watch()
+	defer release()
+	<-started
+	// The second stream's render, while the first read is still running.
+	if got := l.lists(wanted); len(got) != 0 {
+		t.Fatalf("lists during the read = %v", got)
+	}
+	unblock <- struct{}{}
+	waitFor(t, "the list to land", func() bool { return len(l.lists(wanted)) == 1 })
+	select {
+	case repo := <-started:
+		t.Fatalf("a render during the read queued %s again", repo)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if fake.count("/a") != 1 {
+		t.Fatalf("/a read %d times, want 1", fake.count("/a"))
+	}
+
+	// A reread asked while a read runs still reads once more after it.
+	l.reread("/a")
+	<-started
+	l.reread("/a")
+	unblock <- struct{}{}
+	<-started
+	unblock <- struct{}{}
+	waitFor(t, "the reread asked during the read", func() bool { return fake.count("/a") == 3 })
+}
+
 // TestRailListerSweepsOnFullReadsAndRereadsOneRepository pins the lister's
 // two hooks for the stored workspaces: the sweep runs once before each full
 // read and never on a single repository's read, and its change wakes the
