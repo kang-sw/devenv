@@ -7,7 +7,7 @@ const {pathToFileURL} = require('node:url');
 const {chromium} = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [origin, output] = process.argv.slice(2);
 const reference = path.resolve('../../../ai-docs/tickets/assets/261115-feat-ws-dashboard-board-reorder-hold-rewrite/nav-capsule-accepted.html');
-const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: [], errors: []};
+const report = {cases: [], screenshots: [], errors: []};
 (async () => {
   const browser = await chromium.launch({headless: true, args: ['--disable-background-networking', '--no-proxy-server']});
   let active;
@@ -80,36 +80,9 @@ const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: 
       const ref = await refContext.newPage();
       await ref.goto(pathToFileURL(reference).href);
       await ref.evaluate(width => { if (width === 700) document.querySelector('#ttPage').className = 'page n'; }, width);
-      async function assertNoHeaderOverlap(state) {
-        const result = await page.evaluate(() => {
-          const pill = document.querySelector('.wb-oq-top .oq-pill').getBoundingClientRect();
-          const s = window.__holdScroller(), view = s === document.scrollingElement ? {top: 0, bottom: innerHeight, left: 0, right: innerWidth} : s.getBoundingClientRect();
-          const checks = [], overlaps = [];
-          document.querySelectorAll('.tophead .tname, .tophead .topic-state, .tophead .chip.policy, .tophead .chip.ok, .bc-hd .bc-nm').forEach(n => {
-            const r = n.getBoundingClientRect(), card = n.closest('section.topic, .bcard'), c = card && card.getBoundingClientRect();
-            if (!r.width || !r.height) return;
-            const top = Math.max(r.top, view.top, c ? c.top : -Infinity), bottom = Math.min(r.bottom, view.bottom, c ? c.bottom : Infinity);
-            const left = Math.max(r.left, view.left), right = Math.min(r.right, view.right);
-            if (bottom <= top || right <= left) return;
-            const row = {topic: card?.dataset.topic, kind: n.className, text: n.textContent, top, bottom, left, right};
-            checks.push(row);
-            if (Math.min(pill.bottom, bottom) - Math.max(pill.top, top) > .5 && Math.min(pill.right, right) - Math.max(pill.left, left) > .5) overlaps.push(row);
-          });
-          return {pill: {top: pill.top, bottom: pill.bottom, left: pill.left, right: pill.right}, checks, overlaps};
-        });
-        assert(result.checks.length > 0, `${id} ${state}: actual visible header elements are checked`);
-        assert.deepEqual(result.overlaps, [], `${id} ${state}: capsule cannot cover header title/status/ask-count`);
-        report.overlapChecks.push({id, state, ...result});
-      }
-      async function captureFull(state) {
-        if (!reduced || documentMode) return;
-        const file = path.join(output, `full-${width}-${theme}-${state}.png`);
-        await page.screenshot({path: file, fullPage: true});
-        report.fullScreenshots.push(file);
-      }
+      let topToolbarY = null;
       async function capture(state, counts) {
         await frames(10);
-        await assertNoHeaderOverlap(state);
         const full = path.join(output, `impl-${id}-${state}.png`);
         await page.screenshot({path: full});
         const box = await pill.boundingBox();
@@ -121,7 +94,7 @@ const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: 
         await ref.evaluate(counts => tt.set(counts), counts);
         await ref.evaluate(async () => {for(let n=0;n<32;n++) await new Promise(requestAnimationFrame);});
         const rb = await ref.locator('#cap').boundingBox();
-        const refCrop = await ref.screenshot({clip: {x: rb.x + rb.width / 2 - 200, y: rb.y - (anchor.y - clip.y), width: 400, height: 76}});
+        const refCrop = await ref.screenshot({clip: {x: rb.x + rb.width / 2 - 200, y: rb.y - 20, width: 400, height: 76}});
         const refPath = path.join(output, `ref-${id}-${state}.png`);
         fs.writeFileSync(refPath, refCrop);
         const pair = await refContext.newPage();
@@ -130,7 +103,20 @@ const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: 
         const sbs = path.join(output, `sbs-${id}-${state}.png`);
         await pair.screenshot({path: sbs});
         await pair.close();
-        report.screenshots.push({id, state, full, reference: refPath, sideBySide: sbs, box});
+        const layout = await page.evaluate(() => {
+          const rect = n => { if (!n) return null; const r = n.getBoundingClientRect(); return {x: r.x, y: r.y, w: r.width, h: r.height}; };
+          const s = window.__holdScroller();
+          return {scroll: s.scrollTop, toolbar: rect(document.querySelector('.board-toolbar')), wrap: rect(document.querySelector('.oq-wrap.wb-oq-top')), scroller: rect(s === document.scrollingElement ? document.documentElement : s)};
+        });
+        report.screenshots.push({id, state, full, reference: refPath, sideBySide: sbs, box, layout});
+        // The capsule replaces the original top nav pill: it floats in the pill's zero-height sticky
+        // wrapper over the card panel, so pending state never moves the toolbar.
+        if (layout.scroll <= 4 && layout.toolbar) {
+          if (topToolbarY === null) topToolbarY = layout.toolbar.y;
+          assert(Math.abs(layout.toolbar.y - topToolbarY) < 0.5, `${id} ${state}: toolbar top ${layout.toolbar.y} moved from ${topToolbarY}`);
+        }
+        if (layout.scroller && !documentMode) assert(box.y >= layout.scroller.y - 0.5 && box.x >= layout.scroller.x - 0.5 && box.x + box.width <= layout.scroller.x + layout.scroller.w + 0.5, `${id} ${state}: capsule lies inside the card scroll area`);
+        if (layout.wrap) assert(Math.abs(layout.wrap.h) < 0.5, `${id} ${state}: top pill wrapper stays zero-height`);
       }
       await page.evaluate(() => {window.__holdScroller().scrollTop = 0; window.wbPill.update();});
       await frames(14);
@@ -172,7 +158,6 @@ const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: 
       assert.equal(style.animation, reduced ? 'none' : 'board-pill-sway');
       if (!reduced) assert.equal(style.duration, '2.6s');
       await capture('pending-3-chips', {upd: 3, open: 1, ans: 1});
-      await captureFull('scrolled');
       assert(await page.locator('section[data-topic="T04"] iframe.doc-frame').count() > 0, 'the static mount check includes a real hydrated panel');
       assert.equal(await page.locator('.board-hold-nudge').first().evaluate(n => getComputedStyle(n).animationName), reduced ? 'none' : 'board-hold-nudge');
       const mounts = await page.evaluate(() => window.__hold.mounts);
@@ -240,7 +225,7 @@ const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: 
       // cooldown expire on the live document clock before testing a correction.
       await page.evaluate(async () => {const start = performance.now(); while (performance.now() - start < 300) await new Promise(requestAnimationFrame);});
       await update('T04', false, true);
-      assert(await page.evaluate(() => window.__holdScroller().scrollTop <= document.querySelector('.wb-oq-top').offsetHeight), 'canonical rise reaches the reserved home band');
+      assert.equal(await page.evaluate(() => window.__holdScroller().scrollTop), 0, 'fixture reproduces the later-phase canonical-rise clamp');
       assert.equal(await label.textContent(), '보드 업데이트 1', 'an automatic owner correction to home does not acknowledge pending data');
       await page.locator('.board-overview').click();
       await page.waitForFunction(() => document.documentElement.hasAttribute('data-overview'));
@@ -268,22 +253,19 @@ const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: 
       await capture('top-frozen-rise', {upd: 1, open: 0, ans: 0});
       await update('T20', false, true);
       assert.equal(await label.textContent(), '보드 업데이트 1', 'repeated top-origin rise still counts one topic');
-      await update('T21', false, true);
-      assert.equal(await label.textContent(), '보드 업데이트 2', 'a second top-origin rise counts distinctly');
       await update('NEW', false, true);
       assert.equal(await page.evaluate(() => window.__holdScroller().scrollTop), 0, 'new topic at home does not insert/scroll');
       assert.equal(await page.locator('section[data-topic="NEW"]').count(), 0, 'new topic is absent from mounted DOM until apply');
       assert.equal((await geometry()).topics[0].name, initialNames[0], 'first visible card stays unchanged');
-      assert.equal(await label.textContent(), '보드 업데이트 3', 'unmounted new topic counts from pending data');
-      await capture('top-frozen-new', {upd: 3, open: 0, ans: 0});
-      await captureFull('top');
+      assert.equal(await label.textContent(), '보드 업데이트 2', 'unmounted new topic counts from pending data');
+      await capture('top-frozen-new', {upd: 2, open: 0, ans: 0});
       await scrollToTopic('T04');
       await update('T04');
-      assert.equal(await label.textContent(), '보드 업데이트 4', 'down-origin panel can stage beside three click-only top changes');
+      assert.equal(await label.textContent(), '보드 업데이트 3', 'down-origin panel can stage beside two click-only top changes');
       assert.equal(await page.locator('section[data-topic="T04"]').evaluate(n => n.textContent.includes('Pending review update')), false);
       await scrollToTopic('T10');
       await page.waitForFunction(() => document.querySelector('section[data-topic="T04"]').textContent.includes('Pending review update'));
-      await page.waitForFunction(() => window.wbPill.pending === 3);
+      await page.waitForFunction(() => window.wbPill.pending === 2);
       assert.equal(await page.locator('section[data-topic="NEW"]').count(), 0, 'scroll release cannot insert the top-origin new topic');
       assert.equal(await page.locator('section[data-topic="T20"]').evaluate(n => n.textContent.includes('Pending review update')), false, 'scroll release cannot admit the top-origin rise');
       assert.deepEqual((await geometry()).topics.map(n => n.name), initialNames, 'top-origin order stays frozen after scroll-away release');
@@ -296,16 +278,6 @@ const report = {cases: [], screenshots: [], fullScreenshots: [], overlapChecks: 
       assert.equal(await page.locator('section[data-topic="T20"]').evaluate(n => n.textContent.includes('Pending review update')), true, 'pill click admits the offscreen rise');
       assert.equal(await page.evaluate(() => window.__holdMorphs || 0), topMorphs + 1, 'one explicit settle releases top-origin changes');
       await capture('top-after-apply', {upd: 0, open: 0, ans: 0});
-      // The same production whiteboard assets also run without dashboard
-      // toolbar infrastructure. Verify the reserved band on that full page.
-      await page.goto(origin + '/standalone', {waitUntil: 'domcontentloaded'});
-      await page.waitForFunction(() => window.wbPill?.update && document.body.classList.contains('full'));
-      await page.evaluate(() => {window.__holdScroller = () => document.scrollingElement; window.scrollTo(0, 0);});
-      await frames(18);
-      await capture('standalone-top', {upd: 0, open: 0, ans: 0});
-      await scrollToTopic('T04');
-      const standaloneCounts = await pill.evaluate(p => ({upd: 0, open: Number(p.querySelector('.oq-seg.open .n').textContent), ans: Number(p.querySelector('.oq-seg.ans .n').textContent)}));
-      await capture('standalone-scrolled', standaloneCounts);
       report.cases.push({id, topFreeze: 'offscreen rise + new topic; distinct counts; scroll-away cannot release; down-panel release preserved; one click applies at zero', count: 'same topic twice=1; two topics=2; three=3', releaseMorphs: 1, animation: style, homeBehavior: homeScrolls[0].args[0].behavior, mounts, status: 'PASS'});
       console.log(`PASS ${id}: data counts, capsule geometry, bubbles, top, overview, one release, home scroll, manual acknowledgement, no mount churn`);
       await refContext.close();

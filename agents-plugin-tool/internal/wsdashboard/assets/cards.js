@@ -152,12 +152,8 @@
         var r = n.getBoundingClientRect();
         if (r.top <= 0 && r.bottom > 0) inset = Math.max(inset, r.bottom + 4);
       });
-      // The home capsule has its own constant-height band above this row.
-      // Include it in the existing rail/reading clearance, not a scroll writer.
-      var host = doc.getElementById("bcol") || board;
-      inset = Math.max(inset, parseFloat(getComputedStyle(host).getPropertyValue("--wb-nav-height")) || 0);
       style(toolbar, "--toolbar-top", inset + "px");
-      var top = main ? inset : s.getBoundingClientRect().top + s.clientTop + inset;
+      var top = main ? inset : s.getBoundingClientRect().top + s.clientTop;
       var floating = board.getBoundingClientRect().top < top;
       toolbar.toggleAttribute("data-floating", floating);
       var rows = {};

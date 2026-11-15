@@ -85,19 +85,6 @@ func TestBoardHoldPillBrowser(t *testing.T) {
 		return v, r, err
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/standalone", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		view := wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: "standalone"})
-		view.Lang = "ko"
-		page, err := wswhiteboard.RenderPage(view)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, page)
-	})
 	mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
