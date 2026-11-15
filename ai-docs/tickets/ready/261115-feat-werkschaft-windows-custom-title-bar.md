@@ -295,3 +295,86 @@ review remains omitted under the lead's override; EXEC4 owns the lite review.
   startup Alt, activation/menu/dialog focus, native controls/snap/drag, theme,
   X-close veto and pasted-image draft preservation still require authorized
   Windows acceptance. This update does not close Phase 1 or change its status.
+
+##### Windows acceptance attempt 4 (9c105a05c) - 2026-11-15
+
+**Partial acceptance; startup Alt remains a core-menu failure. Phase 1 stays
+open. Owner-copy rebuild is skipped under the caller's core-defect exception.**
+
+Launch and bounded rerun (VERIFIED):
+- `query user` showed ki608 on Active console session 2; WTS independently
+  confirmed state Active before registration. A unique SYSTEM/ServiceAccount
+  task ran `sesslaunch.exe`, which uses `WTSQueryUserToken(2)` and
+  `CreateProcessAsUser` into `winsta0\default`. Its child reported session 2
+  and `desktop-3suvua9\ki608`. Environment, caches, redirection and logging
+  were set inside `run.cmd`; task arguments contained no environment variables.
+  Scheduler result `0x0` means helper launch succeeded, not that smoke passed.
+- An initial runner bootstrap failed because the generated environment-key
+  name was wrong. It exited before either the daemon or Electron started.
+  The key was repaired and that bootstrap log/PIDs retained separately.
+- The actual acceptance on `1d9b9d464` launched Electron and verified the bar,
+  then stopped at startup Alt. The one fix/rerun allowance was used for
+  `9c105a05c`: retain independent checkpoint results and input/foreground
+  diagnostics instead of losing later evidence after the first input failure.
+  The host input helper also supplied Alt's scan code rather than zero.
+  No production implementation changed and no further run followed.
+
+Checks (VERIFIED on the final rerun):
+- Interactive desktop screenshots show the app icon, hamburger, centered
+  document title and Windows-drawn controls, without a native title/menu bar.
+  Layout/preferences assertions confirmed the isolated dashboard sibling
+  below the 36-DIP bar, without a dashboard preload.
+- Changing `document.title` updated both the native window title and bar.
+- Hamburger opened the native P8 menu. Its full tree was recorded, including
+  File, Edit, View, Window, Help and Connection. Physical Ctrl+= and Ctrl+0
+  changed and reset dashboard zoom.
+- The real dashboard light/dark setting recolored the bar and overlay:
+  `#F3F3F0`/black symbols and `#141518`/white symbols. Screenshots captured both.
+- A physical Windows X click reached the dashboard beforeunload confirmation
+  path and Stay retained the window. This used a test-injected unload listener
+  and a stubbed dialog response; it does not verify the real native dialog or
+  pasted-image draft guard.
+
+Remaining failure and limits:
+- VERIFIED: startup bare Alt did not open the menu on either run. Final input
+  evidence shows AltLeft `keyDown` delivered to the initially focused dashboard
+  with no modifiers other than Alt, but no Alt `keyUp`; helper diagnostics
+  confirm Electron was the foreground process in session 2. The implementation
+  opens the menu only on that missing release event. This is an unresolved
+  core keyboard-menu behavior, not the previous task initialization failure.
+- INFERRED: Windows native menu handling consumes the Alt release before
+  renderer delivery. The exact native cause is not established; the diagnostic
+  commit is not a claimed production fix. No additional fix or rerun is authorized.
+- Unverified: every individual P8 action and keyboard submenu traversal,
+  physical drag, double-click maximize/restore, minimize/maximize/restore
+  controls, snap hover, real native confirmation and pasted-image preservation.
+  The single drag injection did not move the window; it was not retried, and
+  the remaining gesture/control group was therefore not exercised. This does
+  not establish a drag implementation defect.
+
+Builds, isolation and cleanup (VERIFIED):
+- One unique verification folder, one `npm ci --no-audit --no-fund` and one
+  explicit Electron `install.js`; all caches, copied Playwright, fixture,
+  scripts and logs stayed below that folder. Both Windows heads passed 44/44
+  unit tests and offline win32-x64 packaging. The offline-cross-compiled daemon
+  used an OS-assigned port and its own cache; never port 29417.
+- After the diagnostic change, Mac headless tests passed 44/44 and offline
+  darwin-arm64 packaging passed with only the existing optional `.icon` warning.
+  Syntax and diff checks passed. No Mac Electron, smoke, built app or GUI ran.
+- Evidence is ignored under
+  `agents-plugin-tool/desktop-electron/dist/evidence/windows/tb/attempt4/`
+  (`first/`, `final/`, build/session/bootstrap logs and cleanup scans), not in
+  `ai-docs`. Recorded runner, daemon, Electron and input-helper PIDs were used
+  for ownership evidence; no process was killed by image name.
+- Unregistered the exact task and removed the unique verification folder only
+  after an empty scoped CIM scan. The final CIM scan confirmed no scoped
+  processes, folder or task. Deleted the Mac bundle and this run's daemon copy;
+  the original Mac `/tmp/exec4/sesslaunch` was retained. The final Mac scoped
+  owned-process scan was empty.
+
+Owner-copy head, executable and shortcut: **no new owner copy was produced**.
+The unresolved Alt core-menu failure triggered STEP B's explicit skip condition;
+`C:\Users\ki608\ws-electron-owner` and its existing executable/head/shortcut
+were not inspected, replaced or launched. Their current values are unverified.
+`C:\Users\ki608\devenv` was untouched. Independent review remains omitted under
+the lead's override; EXEC4 owns the lite review. No merge or push was performed.
