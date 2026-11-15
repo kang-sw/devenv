@@ -53,7 +53,17 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260913-bug-ws-pi-spawn-delegation-metadata-second-write-rejection": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T08:46:49Z",
+        "impl": {
+          "branch": "impl/develop/shiny-drift-exert"
+        }
+      }
     },
     "260915-bug-ticket-move-parallel-index-lock-contention": {
       "registered_at": "2026-09-24T10:38:33Z"
