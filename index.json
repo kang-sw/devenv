@@ -573,6 +573,9 @@
     },
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
+    },
+    "261116-refactor-ws-model-evidence-bounded-retention": {
+      "registered_at": "2026-11-15T16:42:54Z"
     }
   }
 }
