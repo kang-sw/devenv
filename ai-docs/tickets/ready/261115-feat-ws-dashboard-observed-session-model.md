@@ -315,6 +315,13 @@ offline bundle follow-up without version bumps. Claude hook live pickup is
 not yet confirmed. The frozen Phase 2 Result below is unchanged and describes
 its original UI-only head.
 
+#### Edition (9479185e7) - 2026-11-15
+
+The implementation worker reported `go test ./internal/mcp -run 'Observed'`
+returned RC0 at `9479185e73`, whose Go tree is identical to A; MAIN was notified.
+This supersedes the pending MCP Observed test statement above. Activation and
+bundle follow-up remain pending as recorded; no checks were rerun for this update.
+
 ### Phase 2: Approved compact session hover and current-agent model provenance
 
 MAIN's explicit 2026-11-15 03:33:37Z execution grant supersedes the original
