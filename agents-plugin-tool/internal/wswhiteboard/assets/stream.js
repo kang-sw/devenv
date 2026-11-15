@@ -41,6 +41,7 @@
   }
   function admitted(h) {
     if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
+    if (window.wbAgo) window.wbAgo(h);
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
   }
@@ -88,11 +89,17 @@
       touched.forEach(refresh);
       if (changed) admitted(h);
       op.busy = false; kept.apply();
+      // Owner-initiated load above: the row that sat under the gap keeps its
+      // place; the new rows land above it. Measured after keep, so a
+      // reading-line compensation is never doubled.
+      if (changed && op.pin) op.pin.apply();
     }
   }
-  function load(h, gap, direction, fallback) {
+  function load(h, gap, direction, fallback, pinned) {
     if (h._wbHistoryPending.some(function (p) { return p.gap === gap || p.fallback === gap; })) return;
     var op = { gap: gap, direction: direction, fallback: fallback, height: 0, row: null };
+    var below = pinned && direction === 'up' && gap.nextElementSibling;
+    if (below && below.matches('.timeline-row')) op.pin = kit.pin(below);
     h._wbHistoryPending.push(op);
     progress(h, op);
   }
@@ -244,7 +251,36 @@
       kept.apply();
     });
   }
+  // The initial view always holds at least the bottom WINDOW_PX of history,
+  // cut like the expand button: whole rows from the bottom up, including the
+  // row that crosses the line. Server folds mark where a gap may start; only
+  // this client-side measure decides how much below it stays visible. A host
+  // that is not laid out yet (zero heights) retries from the resize observer.
+  function fill(h) {
+    var live = h.querySelector('.history-live');
+    if (!live || h._wbHistoryPending.length) return;
+    var acc = 0, kids = Array.from(live.children);
+    for (var i = kids.length - 1; i >= 0; i--) {
+      var n = kids[i];
+      if (n.matches('.history-gap')) {
+        if (acc >= WINDOW_PX) break;
+        var op = { gap: n, direction: 'up', fallback: null, height: acc, row: null };
+        h._wbHistoryPending.push(op);
+        progress(h, op);
+        if (op.done && op.height < WINDOW_PX) fill(h); // gap exhausted; continue above it
+        return;
+      }
+      if (n.matches('.timeline-row')) {
+        var height = readyHeight(n);
+        if (height === null) return;
+        acc += height;
+        if (acc >= WINDOW_PX) break;
+      }
+    }
+    h._wbHistoryFilling = false;
+  }
   function init(root) {
+    if (window.wbAgo) window.wbAgo(root || document);
     var fresh = [];
     histories(root).forEach(function (h) {
       if (h._wbHistoryBound) {
@@ -266,6 +302,7 @@
     if (panelState) fresh.forEach(function (h) { h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore); });
     fresh.forEach(function (h) { h._wbHistoryHeight = Math.ceil(h.querySelector('.history-live').getBoundingClientRect().height); });
     kept.forEach(function (k) { k.apply(); });
+    fresh.forEach(function (h) { h._wbHistoryFilling = true; fill(h); });
     fresh.forEach(function (h) {
       h.addEventListener('focusin', function (e) {
         var node = e.target, live = h.querySelector('.history-live');
@@ -277,16 +314,18 @@
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('[data-load]');
         if (!button || button.hidden || button.closest('.wb-history') !== h) return;
-        load(h, button.closest('.history-gap'), button.getAttribute('data-load'));
+        load(h, button.closest('.history-gap'), button.getAttribute('data-load'), null, true);
       });
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          if (!h._wbHistoryPending.length || h._wbHistoryFrame) return;
+          if ((!h._wbHistoryPending.length && !h._wbHistoryFilling) || h._wbHistoryFrame) return;
           h._wbHistoryFrame = true;
           window.requestAnimationFrame(function () {
             h._wbHistoryFrame = false;
-            if (h.isConnected) h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
+            if (!h.isConnected) return;
+            h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
+            if (h._wbHistoryFilling) fill(h);
           });
         });
         observer.observe(h.querySelector('.history-live'));
@@ -481,6 +520,18 @@
       };
       return o;
     }
+    // pin(ref) holds ref's place in its scroller: apply() scrolls by however
+    // far ref moved since the call. It writes through the scroll owner so the
+    // write is not taken for user input.
+    function pin(ref) {
+      var scroller = scrollerOf(ref), o = owner(scroller), top = layoutTop(ref, scroller);
+      return { apply: function () {
+        if (!ref.isConnected) return;
+        var delta = layoutTop(ref, scroller) - top;
+        if (Math.abs(delta) >= 0.5) scroller.scrollTop += delta;
+        o.wrote = scroller.scrollTop;
+      } };
+    }
     function keep(node, opt) {
       opt = opt || {};
       var scroller = scrollerOf(node), o = owner(scroller), s = sessions.get(scroller);
@@ -644,7 +695,7 @@
       }
       return { scroller: scroller, visible: visible };
     }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, pin: pin, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
   }
   // Current panel folds follow pN; historical-version folds still use their
   // independent entry keys. The additive browser record is not board data.
@@ -782,7 +833,7 @@
   window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {

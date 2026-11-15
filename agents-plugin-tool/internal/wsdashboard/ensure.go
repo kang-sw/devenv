@@ -20,8 +20,8 @@ const (
 	OutcomeRunning Outcome = "running"
 	// OutcomeStarted: no reachable daemon was running; a new one is up.
 	OutcomeStarted Outcome = "started"
-	// OutcomeReplaced: an older daemon, an older build of the same version,
-	// or one as new in the other LAN mode, was asked to stop and a new one is up.
+	// OutcomeReplaced: an older daemon, an explicitly selected equal-core
+	// daemon, or one as new in the other LAN mode was replaced.
 	OutcomeReplaced Outcome = "replaced"
 	// OutcomeUnavailable: no healthy daemon came up in time, for example
 	// because a hung daemon still holds the lock. Nothing was terminated.
@@ -44,17 +44,13 @@ type EnsureOptions struct {
 	// Version is this ws-mcp's version; a running daemon older than it is
 	// replaced.
 	Version string
-	// BuildTime is this ws-mcp's build time (ExecutableBuildTime); zero is
-	// unknown. It breaks a version tie: a daemon of the same version with an
-	// older (or no reported) build time is replaced, unless ContentHash says
-	// it runs the same content.
-	BuildTime int64
-	// ContentHash is this ws-mcp's executable hash (ExecutableContentHash);
-	// empty is unknown. A same-version daemon reporting the same hash is
-	// never replaced for its build time: Claude, Codex, and Pi each install
-	// their own copy of one binary, so their mtimes differ while the
-	// content is one, and a replacement drains every session on the machine.
+	// BuildTime and ContentHash describe this candidate; neither authorizes
+	// replacing a healthy equal-numeric-core daemon on ordinary connection.
+	BuildTime   int64
 	ContentHash string
+	// Replace requests one explicit equal-core replacement, even for the
+	// same content. It never permits downgrading a newer numeric core.
+	Replace bool
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -94,9 +90,9 @@ func DaemonArgs(port int, lan bool, buildTime int64) []string {
 //
 //   - A healthy newer daemon is left alone whatever its LAN mode, so an older
 //     ws-mcp never replaces a newer daemon; one as new is left alone when its
-//     LAN mode is opts.LAN and, at the same version, its build time is not
-//     older than opts.BuildTime.
-//   - A healthy older daemon, one of the same version from an older build,
+//     LAN mode is opts.LAN, unless opts.Replace explicitly requests a swap.
+//     Equal numeric cores ignore suffix, build time and content hash.
+//   - A healthy older daemon, an explicitly selected equal-core daemon,
 //     or one as new in the other LAN mode, gets the
 //     token-authenticated shutdown request; then a new daemon is started,
 //     which waits for the old one to release the lock. So a changed LAN value
@@ -152,6 +148,9 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			return OutcomeUnavailable, nil
 		}
 		spawns++
+		// An explicit request applies only to the initial daemon, not a
+		// successor (including when the initial endpoint was absent).
+		opts.Replace = false
 		if err := opts.Spawn(DaemonArgs(opts.Port, opts.LAN, opts.BuildTime)); err != nil {
 			return OutcomeUnavailable, fmt.Errorf("dashboard: start daemon: %w", err)
 		}
@@ -163,24 +162,15 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 
 // keepRunning reports whether the healthy daemon info describes may stay:
 // it is newer than this ws-mcp, or as new and in the LAN mode opts asks for.
-// At an equal version the same content always stays (ContentHash equal),
-// and otherwise the newer build wins: a daemon whose build time is older
-// than opts.BuildTime (a missing one counts as older) is replaced, and an
-// unknown opts.BuildTime never replaces.
+// Equal numeric cores stay regardless of suffix, build time or hash, unless
+// an explicit replacement or the existing LAN-mode change requests a drain.
 func keepRunning(info HealthInfo, opts EnsureOptions) bool {
-	switch cmp := CompareVersions(info.Version, opts.Version); {
-	case cmp > 0:
-		return true
-	case cmp == 0:
-		if info.LAN != opts.LAN {
-			return false
-		}
-		if opts.ContentHash != "" && info.ContentHash == opts.ContentHash {
-			return true
-		}
-		return opts.BuildTime <= 0 || info.BuildTime >= opts.BuildTime
+	running, _, runningOK := parseVersion(info.Version)
+	candidate, _, candidateOK := parseVersion(opts.Version)
+	if runningOK && candidateOK && running == candidate {
+		return info.LAN == opts.LAN && !opts.Replace
 	}
-	return false
+	return CompareVersions(info.Version, opts.Version) >= 0
 }
 
 // waitForSuccessor polls the endpoint file until it names a healthy daemon

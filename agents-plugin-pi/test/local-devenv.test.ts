@@ -23,8 +23,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { readLocalDevenvMarker, buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type ChildRuntimeEnsureDeps, type LocalDevenvBuildDeps } from "../src/local-devenv.ts";
-import { wrapLaunchErrorWithLocalDevenvContext } from "../src/bridge.ts";
+import { readLocalDevenvMarker, prepareLocalDevenvStartup, buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type ChildRuntimeEnsureDeps, type LocalDevenvBuildDeps } from "../src/local-devenv.ts";
+import { startBridge, wrapLaunchErrorWithLocalDevenvContext } from "../src/bridge.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildStdioSpawnOptions, spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { buildRpcClientOptions } from "../src/spawner.ts";
@@ -311,6 +312,122 @@ describe("buildLocalDevenvBootstrap", () => {
       assert.deepEqual(readdirSync(join(dir, ".runtime", "local-devenv")), [], "a failed build must not leave a final binary");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("ordinary local-devenv startup", () => {
+  function fixture() {
+    const dir = tempDir("ws-pi-selected-runtime-");
+    const sourceRoot = makeSourceRoot(dir);
+    const pluginDir = join(sourceRoot, "plugin");
+    mkdirSync(pluginDir);
+    writeMarker(pluginDir, { schema_version: 1, source_root: sourceRoot, tool_dir: makeToolDir(dir), go: makeExecutableStub(dir) });
+    const contract = JSON.stringify({ plugin: "ws", plugin_version: "0.50.0", tools: {}, commands: {} });
+    const runtimeJsonPath = join(pluginDir, "runtime.json");
+    writeFileSync(runtimeJsonPath, contract);
+    const platform = `${process.platform === "win32" ? "windows" : process.platform}-${process.arch === "x64" ? "amd64" : process.arch}`;
+    const runtimeDir = join(pluginDir, ".runtime", platform);
+    mkdirSync(runtimeDir, { recursive: true });
+    const runtimePath = join(runtimeDir, `ws-mcp-0.50.0-${runtimeContractHash(contract).slice(0, 12)}${process.platform === "win32" ? ".exe" : ""}`);
+    writeFileSync(runtimePath, "retained runtime", { mode: 0o755 });
+    writeFileSync(`${runtimePath}.metadata.json`, JSON.stringify({ schema_version: 1, binary_sha256: runtimeContractHash(readFileSync(runtimePath)), version: "0.50.0-dev", source_commit: "selected" }));
+    const launcherPath = join(pluginDir, "launcher.py");
+    const realLauncher = join(process.cwd(), "bin", "ws-mcp-launcher.py");
+    // Import uses the real launcher's read-only helpers. Execution is an MCP
+    // fake, so no test can start a daemon or execute the retained sentinel.
+    const fake = `import json,sys
+version=json.load(open(${JSON.stringify(runtimeJsonPath)}))['plugin_version']
+if sys.argv[1:]==['version']:
+ print(version)
+else:
+ for line in sys.stdin:
+  q=json.loads(line); m=q['method']
+  if m=='initialize': r={'serverInfo':{'version':version},'capabilities':{}}
+  elif m=='tools/list': r={'tools':[]}
+  else: r={'isError':False,'content':[]}
+  if 'id' in q: print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)
+`;
+    writeFileSync(launcherPath, `if __name__ != '__main__':\n import runpy\n globals().update(runpy.run_path(${JSON.stringify(realLauncher)}))\nelse:\n${fake.split("\n").map(line => " " + line).join("\n")}`);
+    const builds: string[][] = [];
+    const notices: string[] = [];
+    const deps: LocalDevenvBuildDeps = {
+      runBuild: argv => { builds.push(argv); writeFileSync(argv[argv.indexOf("-o") + 1], "fake built runtime"); },
+      notify: message => notices.push(message),
+    };
+    return { dir, pluginDir, launcherPath, runtimeJsonPath, runtimePath, contract, builds, notices, deps };
+  }
+
+  test("source drift reuses hash-bound selected bytes; missing, corrupt and incompatible runtimes build only through the injected seam", async () => {
+    const f = fixture();
+    const oldRuntimeDir = process.env.WS_MCP_RUNTIME_DIR;
+    delete process.env.WS_MCP_RUNTIME_DIR;
+    try {
+      const reused = await prepareLocalDevenvStartup(f.pluginDir, f.launcherPath, f.runtimeJsonPath, "0.50.0", f.deps);
+      assert.ok(reused);
+      assert.equal(reused.ownedBootstrap, false);
+      assert.deepEqual(reused.env, {});
+      assert.equal(reused.context.builtPath, f.runtimePath);
+      assert.equal(f.builds.length, 0);
+      assert.equal(f.notices.filter(m => m.includes("python3 scripts/dev.py rerun daemon")).length, 1);
+      // Mark only this fixture's actual selected bytes/current source as built,
+      // using the same authority dev.py seeding uses. Unchanged source is quiet.
+      execFileSync("python3", ["-c", `import runpy,sys\nfrom pathlib import Path\nm=runpy.run_path(sys.argv[1])\np,c,b=map(Path,sys.argv[2:])\ncontract=m['read_runtime_contract'](c)\nf=m['local_devenv_source_fingerprint'](p,m['host_os']())\nm['write_compatibility_stamp'](b,contract,c,b.parent,f)`, join(process.cwd(), "bin", "ws-mcp-launcher.py"), f.pluginDir, f.runtimeJsonPath, f.runtimePath], { stdio: ["ignore", "pipe", "pipe"] });
+      f.notices.length = 0;
+      const unchanged = await prepareLocalDevenvStartup(f.pluginDir, f.launcherPath, f.runtimeJsonPath, "0.50.0", f.deps);
+      assert.equal(unchanged?.ownedBootstrap, false);
+      assert.deepEqual(f.notices, []);
+      assert.equal(f.builds.length, 0);
+      const metadata = readFileSync(`${f.runtimePath}.metadata.json`, "utf8");
+      for (const state of ["missing", "corrupt", "incompatible"]) {
+        if (state === "missing") rmSync(f.runtimePath);
+        else {
+          writeFileSync(f.runtimePath, state === "corrupt" ? "changed bytes" : "retained runtime");
+          writeFileSync(`${f.runtimePath}.metadata.json`, state === "incompatible" ? JSON.stringify({ ...JSON.parse(metadata), version: "0.51.0" }) : metadata);
+        }
+        const built = await prepareLocalDevenvStartup(f.pluginDir, f.launcherPath, f.runtimeJsonPath, "0.50.0", f.deps);
+        assert.equal(built?.ownedBootstrap, true, state);
+        assert.ok(built?.env.WS_MCP_BOOTSTRAP_BINARY);
+      }
+      assert.equal(f.builds.length, 3);
+    } finally {
+      if (oldRuntimeDir === undefined) delete process.env.WS_MCP_RUNTIME_DIR; else process.env.WS_MCP_RUNTIME_DIR = oldRuntimeDir;
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("lead/fork reuse survives bridge cleanup and retains the child guard; worker/explore startup stays build-free", async () => {
+    for (const role of [undefined, "fork", "worker", "explore"]) {
+      const f = fixture();
+      const saved = { role: process.env.WS_PI_SPAWN_ROLE, runtime: process.env.WS_MCP_RUNTIME_DIR };
+      delete process.env.WS_MCP_RUNTIME_DIR;
+      if (role === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = role;
+      let bridge: Awaited<ReturnType<typeof startBridge>> | undefined;
+      try {
+        const pi = { registerTool() {}, on() {}, appendEntry() {}, sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
+        bridge = await startBridge(pi, { launcherPath: f.launcherPath, pluginDir: f.pluginDir, runtimeJsonPath: f.runtimeJsonPath, cwd: f.dir, toolPreviewTuiRef: { current: undefined }, runBuild: f.deps.runBuild, ui: { notify: f.deps.notify } as never });
+        assert.equal(f.builds.length, 0, String(role));
+        if (role === undefined || role === "fork") {
+          assert.equal(typeof bridge.ensureChildRuntime, "function");
+          await bridge.ensureChildRuntime!();
+          assert.equal(f.builds.length, 0, "baseline contract does not build");
+          writeFileSync(f.runtimeJsonPath, JSON.stringify({ ...JSON.parse(f.contract), plugin_version: "0.50.1" }));
+          await bridge.ensureChildRuntime!();
+          assert.equal(f.builds.length, 1, "child contract guard remains active without a startup build");
+          assert.equal(f.notices.filter(m => m.includes("python3 scripts/dev.py rerun daemon")).length, 1);
+        } else {
+          assert.equal(bridge.ensureChildRuntime, undefined);
+          assert.deepEqual(f.notices.filter(m => /building ws-mcp|source build is available/.test(m)), []);
+        }
+        bridge.shutdown();
+        assert.equal(readFileSync(f.runtimePath, "utf8"), "retained runtime");
+        assert.ok(existsSync(`${f.runtimePath}.metadata.json`), "retained identity survives cleanup");
+      } finally {
+        bridge?.shutdown();
+        if (saved.role === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = saved.role;
+        if (saved.runtime === undefined) delete process.env.WS_MCP_RUNTIME_DIR; else process.env.WS_MCP_RUNTIME_DIR = saved.runtime;
+        rmSync(f.dir, { recursive: true, force: true });
+      }
     }
   });
 });

@@ -2,21 +2,22 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
 )
 
 // worktreeAcquireResult is the return shape of worktree.acquire. WorkerKey is
-// filled by the dispatch handler after the git lifecycle (provisionWorktree)
-// completes, because minting a session key needs the Server the pure lifecycle
-// code deliberately does not carry.
+// filled by acquireWorktree after provisioning, while the acquisition lock is
+// still held. Minting is injected so the lifecycle code does not carry Server.
 type worktreeAcquireResult struct {
 	Path      string `json:"path"`
 	WorkerKey string `json:"worker_key,omitempty"`
@@ -246,7 +247,78 @@ func registerPoolExclude(commonDir, mainRoot, poolRoot string) error {
 	return err
 }
 
-// provisionWorktree owns the whole worktree lifecycle for worktree.acquire
+const worktreeAcquireLockTimeout = 2 * time.Second
+
+// lockWorktreeAcquire serializes participating acquirers across servers and
+// processes, including callers rooted in different linked worktrees or using
+// different pool/profile settings. The file stays in place: unlinking a held
+// lock would let another process lock a different inode at the same path.
+func lockWorktreeAcquire(ctx context.Context, runner wsgit.Runner, root string) (func(), error) {
+	ctx, cancel := context.WithTimeout(ctx, worktreeAcquireLockTimeout)
+	defer cancel()
+	commonDir, err := wtRun(ctx, runner, root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return nil, fmt.Errorf("worktree.acquire: resolve common git directory: %w", err)
+	}
+	commonDir, err = filepath.EvalSymlinks(commonDir)
+	if err != nil {
+		return nil, fmt.Errorf("worktree.acquire: canonicalize common git directory: %w", err)
+	}
+	lockPath := filepath.Join(commonDir, "ws-worktree-acquire.lock")
+	fl := flock.New(lockPath)
+	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	if errors.Is(err, context.DeadlineExceeded) || (err == nil && !locked) {
+		return nil, fmt.Errorf("worktree.acquire: contention waiting for pool acquisition lock %s (wait bounded by %s): %w", lockPath, worktreeAcquireLockTimeout, context.DeadlineExceeded)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("worktree.acquire: acquire pool acquisition lock: %w", err)
+	}
+	return func() { _ = fl.Unlock() }, nil
+}
+
+// acquireWorktree keeps the common-directory lock from before the eligibility
+// snapshot through key/lease publication and all failure-path checkout mutations.
+// mint binds a worker key to the canonical worktree root; injecting it keeps the
+// Git lifecycle independent of Server and makes failed-mint cleanup testable.
+func acquireWorktree(waitCtx context.Context, runner wsgit.Runner, env []string, root, base, targetBranch string, profile resolvedWorktreeProfile, poolConfigValue, parentKey string, mint func(string) (string, error)) (worktreeAcquireResult, error) {
+	unlock, err := lockWorktreeAcquire(waitCtx, runner, root)
+	if err != nil {
+		return worktreeAcquireResult{}, err
+	}
+	defer unlock()
+
+	// Once admitted, finish the lifecycle even if the request is cancelled,
+	// matching the handler's existing behavior. A waiter's deadline never
+	// cancels the holder's hooks or releases its protection early.
+	ctx := context.Background()
+	result, err := provisionWorktree(ctx, runner, env, root, base, targetBranch, profile, poolConfigValue)
+	if err != nil {
+		return result, err
+	}
+	mintPath := result.Path
+	if canon, cerr := canonicalGitRoot(runner, result.Path); cerr == nil {
+		mintPath = canon
+	}
+	workerKey, err := mint(mintPath)
+	if err != nil {
+		_, _ = runner.RunGit(ctx, result.Path, noSubmoduleRecurse("checkout", "--detach")...)
+		return result, fmt.Errorf("worktree.acquire: mint worker key: %w", err)
+	}
+	// Publish only after mint. On failure the unused key ages out normally;
+	// detach under the same lock so rollback cannot detach a later acquirer's
+	// checkout. No lease schema or existing failure cleanup semantics change.
+	lease := worktreeLease{WorkerKey: workerKey, ParentKey: parentKey, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
+	if err := writeWorktreeLease(ctx, runner, result.Path, lease); err != nil {
+		_, _ = runner.RunGit(ctx, result.Path, noSubmoduleRecurse("checkout", "--detach")...)
+		return result, fmt.Errorf("worktree.acquire: record worktree lease: %w", err)
+	}
+	result.Path = mintPath
+	result.WorkerKey = workerKey
+	return result, nil
+}
+
+// provisionWorktree requires its caller to hold the acquisition lock until key
+// and lease publication (or rollback) finishes. It owns the worktree lifecycle
 // except the session-key mint (which the dispatch handler performs): resolve the
 // pool root against the primary worktree root, reuse an eligible idle pooled
 // worktree of the requested profile or create a new one, provision it into the

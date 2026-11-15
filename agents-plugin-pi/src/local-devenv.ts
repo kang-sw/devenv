@@ -3,9 +3,10 @@
  * own `.local-devenv-runtime` marker (same JSON schema as the launcher's own
  * `bin/ws-mcp-launcher.py:read_local_devenv_contract`, but a fully
  * independent TypeScript reimplementation — read-only against the same file,
- * no shared code, no cross-language import), builds `ws-mcp` from source
- * when the marker is present, and returns an env fragment
- * (`WS_MCP_BOOTSTRAP_BINARY`) for the launcher child's own spawn.
+ * no shared marker-validation code). Ordinary startup imports the launcher's
+ * read-only compatibility helpers to reuse its selected runtime, building only
+ * when unusable. Explicit child contract repair still builds `ws-mcp` and
+ * returns `WS_MCP_BOOTSTRAP_BINARY` for the launcher child's spawn.
  *
  * Deliberately the OPPOSITE validation posture from the launcher's own
  * marker read: the launcher silently treats an invalid marker as "local
@@ -21,13 +22,14 @@
  * `execute-gateway.ts`'s `tryGit` shape, except failures here propagate
  * instead of degrading to `undefined` — the marker is opt-in, so once it
  * exists, brokenness is a bug to surface, not a condition to paper over).
- * Only the actual `go build` invocation is an injected dependency
- * (`LocalDevenvBuildDeps.runBuild`), so this module — and its build-success
+ * Runtime inspection executes Python helpers; the actual `go build` invocation
+ * is an injected dependency (`LocalDevenvBuildDeps.runBuild`), so this module — and its build-success
  * path — can be exercised by `npm test` with no `go` binary installed.
  */
 
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
@@ -53,6 +55,59 @@ export interface LocalDevenvBuildDeps {
 }
 
 const MARKER_FILE_NAME = ".local-devenv-runtime";
+
+// Read-only Python inspection keeps runtime naming, hash-bound compatibility
+// and source fingerprint semantics owned by the launcher. This imports helpers
+// only: it never runs main, probes a daemon, installs, or executes a ws binary.
+const INSPECT_SELECTED_RUNTIME = `
+import json, os, runpy, sys
+from pathlib import Path
+m = runpy.run_path(sys.argv[1])
+plugin = Path(sys.argv[2])
+contract_path = Path(sys.argv[3])
+contract = m['read_runtime_contract'](contract_path)
+os_name = m['host_os']()
+platform = os_name + '-' + m['host_arch']()
+runtime_dir = Path(os.environ.get('WS_MCP_RUNTIME_DIR', str(plugin / '.runtime' / platform)))
+binary = runtime_dir / m['runtime_binary_name'](contract, contract_path, os_name)
+usable = m['runtime_fully_compatible'](binary, contract, runtime_dir, allow_same_minor=True)
+fingerprint = m['local_devenv_source_fingerprint'](plugin, os_name) if usable else None
+print(json.dumps({'path': str(binary), 'metadata': m['read_runtime_metadata'](binary) if usable else None,
+ 'drift': usable and not m['compatibility_stamp_current'](binary, contract, contract_path, runtime_dir, fingerprint)}))
+`;
+
+export interface LocalDevenvStartup {
+  env: Record<string, string>;
+  context: LocalDevenvContext;
+  /** Only a fresh unique bootstrap belongs to the bridge's cleanup path. */
+  ownedBootstrap: boolean;
+}
+
+/** Ordinary lead/fork startup reuses the selected compatible runtime; drift is advisory. */
+export async function prepareLocalDevenvStartup(
+  pluginDir: string,
+  launcherPath: string,
+  runtimeJsonPath: string,
+  pluginVersion: string,
+  deps: LocalDevenvBuildDeps,
+): Promise<LocalDevenvStartup | undefined> {
+  const marker = readLocalDevenvMarker(pluginDir);
+  if (!marker) return undefined;
+  const { stdout } = await promisify(execFile)("python3", ["-c", INSPECT_SELECTED_RUNTIME, launcherPath, pluginDir, runtimeJsonPath], {
+    cwd: pluginDir, encoding: "utf8", timeout: 30_000,
+  });
+  const selected = JSON.parse(stdout) as { path: string; metadata: { source_commit?: string } | null; drift: boolean };
+  if (selected.metadata) {
+    if (selected.drift) deps.notify?.("reusing compatible local runtime; a newer source build is available via python3 scripts/dev.py rerun daemon");
+    return {
+      env: {},
+      context: { sourceRoot: marker.source_root, sourceCommit: selected.metadata.source_commit ?? "unknown", builtPath: selected.path },
+      ownedBootstrap: false,
+    };
+  }
+  const bootstrap = await buildLocalDevenvBootstrap(pluginDir, pluginVersion, deps);
+  return bootstrap ? { ...bootstrap, ownedBootstrap: true } : undefined;
+}
 
 /**
  * Reads and validates `<pluginDir>/.local-devenv-runtime`.

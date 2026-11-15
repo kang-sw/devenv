@@ -80,7 +80,13 @@ if (process.argv[1] && canonical(fileURLToPath(import.meta.url)) === canonical(p
   // helper is only published in the unbundled tree; it owns no class state.
   const localKey = new URL("./core/source-info.js", sdkURL);
   const keyURL = existsSync(fileURLToPath(localKey)) ? localKey : new URL("../core/source-info.js", sdkURL);
-  const { getResourcePathKey } = await import(keyURL.href);
+  let { getResourcePathKey } = await import(keyURL.href);
+  if (typeof getResourcePathKey !== "function") {
+    // Pi 1.0.4's resolver deduplicates with this host-local helper instead.
+    // Keep its legacy identities rather than imposing newer casing rules.
+    const { canonicalizePath } = await import(new URL("../utils/paths.js", keyURL).href);
+    getResourcePathKey = canonicalizePath;
+  }
   installResolver(DefaultPackageManager, getResourcePathKey);
   process.argv = [process.execPath, cli, ...args];
   await import(pathToFileURL(cli).href);

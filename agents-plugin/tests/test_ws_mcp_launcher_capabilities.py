@@ -63,6 +63,63 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             "commands": ["runtime.info"],
         }
 
+    def test_main_local_source_drift_reuses_runtime_without_restamping_or_building(self):
+        for state in ("stale", "unchanged", "missing", "incompatible", "bootstrap_binary", "bootstrap_url"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as temp_dir:
+                launcher = load_launcher()
+                root = Path(temp_dir).resolve()
+                plugin = root / "devenv" / "plugin"
+                plugin.mkdir(parents=True)
+                self.write_local_contract(plugin, package_root=root)
+                contract = self.capability_contract()
+                contract_path = plugin / "runtime.json"
+                contract_path.write_text(json.dumps(contract))
+                runtime_dir = root / "runtime"
+                runtime_dir.mkdir()
+                binary = runtime_dir / launcher.runtime_binary_name(contract, contract_path, launcher.host_os())
+                if state != "missing":
+                    binary.write_bytes(b"selected runtime")
+                    launcher.write_runtime_metadata(binary, dict(self.capability_payload(), version="0.19.0" if state == "incompatible" else "0.18.1"))
+                fingerprint = launcher.local_devenv_source_fingerprint(plugin, launcher.host_os())
+                self.assertIsNotNone(fingerprint, "fixture must activate local source mode")
+                if state not in ("missing", "incompatible"):
+                    launcher.write_compatibility_stamp(binary, contract, contract_path, runtime_dir, fingerprint if state == "unchanged" else "previous-source")
+                stamp = launcher.compatibility_stamp_path(runtime_dir)
+                before = stamp.read_bytes() if stamp.exists() else None
+                env = {"WS_CACHE_HOME": str(root / "cache"), "WS_CONFIG_HOME": str(root / "config"), "WS_MCP_RUNTIME_DIR": str(runtime_dir)}
+                if state == "bootstrap_binary":
+                    env["WS_MCP_BOOTSTRAP_BINARY"] = str(root / "explicit-build")
+                if state == "bootstrap_url":
+                    env["WS_MCP_BOOTSTRAP_URL"] = "https://example.invalid/explicit-build"
+
+                def install(*args, **kwargs):
+                    binary.write_bytes(b"repaired runtime")
+                    launcher.write_runtime_metadata(binary, self.capability_payload())
+
+                stderr = io.StringIO()
+                with mock.patch.dict(os.environ, env, clear=True), \
+                     mock.patch.object(launcher, "__file__", str(plugin / "bin" / "ws-mcp-launcher.py")), \
+                     mock.patch.object(launcher.sys, "argv", ["launcher", "serve", "--stdio"]), \
+                     mock.patch.object(launcher.sys, "stderr", stderr), \
+                     mock.patch.object(launcher, "detect_project_root"), \
+                     mock.patch.object(launcher, "wait_for_rsrc_tree"), \
+                     mock.patch.object(launcher.DaemonLink, "probe", return_value=(None, None)), \
+                     mock.patch.object(launcher, "proxy_serve", return_value=0), \
+                     mock.patch.object(launcher, "install_runtime", side_effect=install) as installer, \
+                     mock.patch.multiple(launcher.subprocess, run=mock.DEFAULT, call=mock.DEFAULT, Popen=mock.DEFAULT) as processes:
+                    self.assertEqual(launcher.main(), 0)
+                for process in processes.values():
+                    process.assert_not_called()
+                if state in ("stale", "unchanged"):
+                    installer.assert_not_called()
+                    self.assertEqual(binary.read_bytes(), b"selected runtime")
+                    self.assertEqual(stamp.read_bytes(), before, "reuse must not claim the current source was built")
+                    self.assertEqual(stderr.getvalue().count("python3 scripts/dev.py rerun daemon"), int(state == "stale"))
+                else:
+                    installer.assert_called_once()
+                    self.assertTrue(installer.call_args.kwargs["force_local"])
+                    self.assertEqual(binary.read_bytes(), b"repaired runtime")
+
     def test_version_compatibility_requires_exact_plugin_patch(self):
         launcher = load_launcher()
         contract = self.capability_contract()
