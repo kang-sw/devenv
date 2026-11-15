@@ -32,6 +32,89 @@ func stateBoard(t *testing.T) *State {
 	return s
 }
 
+func TestTopicStateResearchingAttributesAndRepeats(t *testing.T) {
+	for _, tc := range []struct {
+		attrs string
+		owner string
+		eta   int64
+	}{
+		{"", "", 0},
+		{`owner="  investigator  "`, "investigator", 0},
+		{`eta_minutes="7"`, "", 7},
+		{`owner="investigator" eta_minutes="7"`, "investigator", 7},
+		{fmt.Sprintf(`owner="%s" eta_minutes="%d"`, strings.Repeat("x", 256), maxETAMinutes), strings.Repeat("x", 256), maxETAMinutes},
+	} {
+		t.Run(tc.attrs, func(t *testing.T) {
+			s := stateBoard(t)
+			command := stateCommand(StateResearching, tc.attrs)
+			out := stateApply(t, s, command, stateNow)
+			view := s.TopicStates()["Work"]
+			if view.Diagnostic != nil || view.State == nil || view.State.Value != StateResearching || view.State.Run != nil || view.State.Owner != tc.owner || view.State.ETAMinutes != tc.eta || strings.Contains(out.Info, "discussing_without_open_items") {
+				t.Fatalf("research projection: %+v; %s", view, out.Info)
+			}
+			seq := s.EntrySeq
+			stateApply(t, s, command, stateNow.Add(time.Hour))
+			if s.EntrySeq != seq || !reflect.DeepEqual(view, s.TopicStates()["Work"]) {
+				t.Fatal("identical research declaration emitted history")
+			}
+			stateApply(t, s, stateCommand(StateResearching, `owner="replacement" eta_minutes="9"`), stateNow.Add(2*time.Hour))
+			if s.EntrySeq != seq+1 || s.TopicStates()["Work"].State.Owner != "replacement" || s.TopicStates()["Work"].State.Run != nil {
+				t.Fatal("research metadata change was lost or timed")
+			}
+			stateApply(t, s, stateCommand(StateResearching, ""), stateNow.Add(3*time.Hour))
+			if state := s.TopicStates()["Work"].State; state.Owner != "" || state.ETAMinutes != 0 || state.Run != nil {
+				t.Fatal("omission did not clear informational metadata")
+			}
+		})
+	}
+	// An informational estimate needs no representable future deadline.
+	s := stateBoard(t)
+	stateApply(t, s, stateCommand(StateResearching, `eta_minutes="1"`), time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC))
+}
+
+func TestTopicStateResearchingInvalidAtomicity(t *testing.T) {
+	invalid := []string{`owner=""`, `owner="   "`, `owner="` + strings.Repeat("雪", 86) + `"`, "owner=\"bad\x01owner\"", "owner=\"bad\xffowner\"", `on="owner:someone"`, `run="e1"`, `started_at="2026-01-01T00:00:00Z"`}
+	for _, eta := range []string{"", "0", "-1", "+1", "1.5", " 1", "1 ", "1e2", "١", "9223372036854775808", fmt.Sprint(maxETAMinutes + 1)} {
+		invalid = append(invalid, `eta_minutes="`+eta+`"`)
+	}
+	for _, attrs := range invalid {
+		s := stateBoard(t)
+		before := s.clone()
+		_, p := Apply(s, `<wb:topic name="Work"><wb:log>roll back</wb:log></wb:topic>`+stateCommand(StateResearching, attrs), Env{Now: stateNow})
+		if len(p) == 0 || !reflect.DeepEqual(before, s) {
+			t.Fatalf("non-atomic research refusal %q: %v", attrs, p)
+		}
+	}
+	for _, closed := range []bool{false, true} {
+		s := &State{}
+		if closed {
+			s = stateBoard(t)
+			stateApply(t, s, `<wb:topic name="Work"><wb:close result="Done"/></wb:topic>`, stateNow)
+		}
+		before := s.clone()
+		if _, p := Apply(s, stateCommand(StateResearching, ""), Env{Now: stateNow}); len(p) == 0 || !reflect.DeepEqual(before, s) {
+			t.Fatal("research declaration created/reopened topic")
+		}
+	}
+}
+
+func TestTopicStateResearchingLifecycleAndWarnings(t *testing.T) {
+	s := stateBoard(t)
+	stateApply(t, s, stateCommand(StateResearching, `owner="investigator" eta_minutes="2"`), stateNow)
+	stateApply(t, s, `<wb:topic name="work" label="Work"/>`, stateNow)
+	if s.TopicStates()["work"].State.Owner != "investigator" {
+		t.Fatal("adoption lost research attributes")
+	}
+	out := stateApply(t, s, `<wb:topic name="wait"><wb:log>Waiting</wb:log><wb:state value="waiting"/></wb:topic>`, stateNow)
+	if strings.Contains(out.Info, "discussing_without_open_items") || !strings.Contains(out.Info, "waiting_without_implementing") {
+		t.Fatalf("research changed warning scopes: %s", out.Info)
+	}
+	stateApply(t, s, `<wb:topic name="work"><wb:close result="Done"/><wb:log>Reopened</wb:log></wb:topic>`, stateNow.Add(time.Hour))
+	if s.TopicStates()["work"].State != nil {
+		t.Fatal("reopen restored research metadata")
+	}
+}
+
 func TestTopicStateGrammarAtomicityAndBounds(t *testing.T) {
 	for _, command := range []string{
 		`<wb:state value="waiting"/>`,
