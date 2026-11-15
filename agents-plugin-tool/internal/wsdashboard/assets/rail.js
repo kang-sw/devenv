@@ -122,8 +122,8 @@
       put: put
     };
   }
-  // collapsed is the collapsed workspaces' paths; endedOpen the ended
-  // folds (details.rended) left open, by their data-key.
+  // collapsed is the collapsed workspaces' paths; endedOpen the fold rows'
+  // open lists, by FOLD_KEYS (marks).
   function collapsed(store) { return stringSet(store, COLLAPSED); }
   function endedOpen(store) { return stringSet(store, ENDED); }
 
@@ -522,10 +522,36 @@
       if (row) { if (col) row.classList.add("kcol"); else row.classList.remove("kcol"); }
       tog.setAttribute("aria-expanded", String(!col));
     });
-    all("details.rended[data-key]").forEach(function (d) {
-      var open = s.ended.has(d.getAttribute("data-key"));
-      if (d.open !== open) d.open = open;
+    all(".rfold[data-key]").forEach(function (f) {
+      var key = f.getAttribute("data-key") || "";
+      foldShow(f, s.ended.has(FOLD_KEYS.arch + key) ? "arch" : s.ended.has(FOLD_KEYS.del + key) ? "del" : "");
     });
+  }
+  // A group's fold row (.rfold, data-key its path) has two halves, archived
+  // ("arch") and ended ("del"), acting as one tri-state radio: none, one,
+  // or the other list open. The pick is kept in the ended-fold set under
+  // FOLD_KEYS' prefix and the path; "rended:" is the key the single ended
+  // fold kept before the split, so a fold left open stays open.
+  var FOLD_KEYS = { arch: "rarch:", del: "rended:" };
+  // foldShow opens the fold row f's list open ("arch", "del", or "" for
+  // none); a disabled half (no rows) never opens.
+  function foldShow(f, open) {
+    var halves = Array.prototype.slice.call(f.querySelectorAll(".rfh")), on = "";
+    halves.forEach(function (b) { if (b.getAttribute("data-k") === open && !b.disabled) on = open; });
+    halves.forEach(function (b) { b.setAttribute("aria-expanded", String(!!on && b.getAttribute("data-k") === on)); });
+    (f.parentNode ? Array.prototype.slice.call(f.parentNode.children) : []).forEach(function (l) {
+      if (!l.classList.contains("rended")) return;
+      if (on && l.getAttribute("data-k") === on) l.classList.add("on"); else l.classList.remove("on");
+    });
+  }
+  // foldPick is a click on the fold half: it opens its list and closes the
+  // other, or closes its own list when open, and keeps the pick (s, state).
+  function foldPick(s, half) {
+    var f = half.parentNode, key = f.getAttribute("data-key") || "", k = half.getAttribute("data-k") || "";
+    var on = !half.disabled && half.getAttribute("aria-expanded") !== "true";
+    s.ended.put(FOLD_KEYS.arch + key, on && k === "arch");
+    s.ended.put(FOLD_KEYS.del + key, on && k === "del");
+    foldShow(f, on ? k : "");
   }
 
   // REVIVE_MOVES are the ways an ended row brings its session back (its
@@ -793,6 +819,7 @@
     endedOpen: endedOpen,
     state: state,
     marks: marks,
+    foldPick: foldPick,
     drop: drop,
     dropRefusal: dropRefusal,
     kidsCollapsed: kidsCollapsed,

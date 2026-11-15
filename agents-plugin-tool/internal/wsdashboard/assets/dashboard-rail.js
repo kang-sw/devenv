@@ -62,6 +62,10 @@
     });
     if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
+    q(".drarch", r).forEach(function (b) {
+      var row = b.closest(".rs");
+      b.classList.toggle("busy", !!archBusy && !!row && row.getAttribute("data-rid") === archBusy);
+    });
     if (usageGutter) usageGutter.sync();
     railPopSync();
   }
@@ -70,7 +74,7 @@
   // railRefocus puts it back on the new row after the swap, unless the
   // focus went elsewhere meanwhile. A keyboard move (Alt and an arrow)
   // lands its swap on the row it moved, so the next key still finds it.
-  var RAIL_FOCUS = [".rl", ".star", ".kidtog", ".drren", ".drcopy", ".rrev"];
+  var RAIL_FOCUS = [".rl", ".star", ".kidtog", ".drren", ".drcopy", ".drarch", ".rrev"];
   function railFocus() {
     var a = doc.activeElement, row = a && railEl && WsRail && railEl.contains(a) && a.closest ? a.closest(".rs") : null;
     if (!row) return null;
@@ -295,6 +299,18 @@
       if (del) {
         e.preventDefault();
         railDelete(del);
+        return;
+      }
+      var fold = t.closest && t.closest(".rfh");
+      if (fold) {
+        e.preventDefault();
+        if (railSets) WsRail.foldPick(railSets, fold);
+        return;
+      }
+      var arch = t.closest && t.closest(".drarch");
+      if (arch) {
+        e.preventDefault();
+        railArchive(arch);
         return;
       }
       var ren = t.closest && t.closest(".drren");

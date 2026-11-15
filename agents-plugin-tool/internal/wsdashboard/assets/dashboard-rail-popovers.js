@@ -479,6 +479,25 @@
       toast(leadErr(status, s));
     });
   }
+  // railArchive archives ("hide") or unarchives ("unhide") the row's hosted
+  // lead through its agent route. The row moves only when the rail swap
+  // shows the new state, so a refusal leaves it where it is and says why. A
+  // 409 on archive is the runner still checking the session; the user may
+  // try again, and nothing retries here.
+  var archBusy = "";
+  function railArchive(btn) {
+    var row = btn.closest(".rs"), id = row ? row.getAttribute("data-rid") || "" : "", act = btn.getAttribute("data-act") || "";
+    if (!id || archBusy || (act !== "hide" && act !== "unhide")) return;
+    archBusy = id;
+    railMarks();
+    railPost("/agents/" + encodeURIComponent(id) + "/" + act, {}, function (status, v, s) {
+      archBusy = "";
+      railMarks();
+      if (status !== 200) toast(archErr(act, status, s));
+    });
+  }
+  // archErr is the message for a refused archive or unarchive.
+  function archErr(act, status, text) { return act === "hide" && status === 409 ? wsT("js.rail.archive.busy") : leadErr(status, text); }
   // railForget takes the bar's stored workspace off the list.
   function railForget(btn) {
     var bar = btn.closest(".rws"), path = bar ? bar.getAttribute("data-ws") || "" : "", nm = bar && bar.querySelector(".nm");

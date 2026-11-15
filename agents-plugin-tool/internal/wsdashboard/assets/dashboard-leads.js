@@ -275,6 +275,9 @@
       return { b: b, note: s.appendChild(mk("span", "gs")) };
     }
     var stop = actBtn("stop", "", wsT("js.lead.stop")), restart = actBtn("reload", "", wsT("js.lead.restart"));
+    // archive hides the session from the rail (no process, mail held until
+    // unarchive); on an archived session it is unarchive (back to asleep).
+    var archive = actBtn("archive", "", wsT("js.lead.archive")), archT = archive.b.lastChild.firstChild;
     var handoff = actBtn(luIcon("square-terminal"), "", wsT("js.lead.handoff")), close = actBtn("power", " danger", wsT("js.lead.close"));
     handoff.note.textContent = wsT("js.lead.handoff.note");
     close.note.textContent = wsT("js.lead.close.note");
@@ -296,12 +299,13 @@
         if (st === 200 && v.id) {
           if (inRow && gen === P.gen) P.st = v;
           if (!inRow || (P.rid === rid && (hostedPage || handedPage))) lead.st = v;
-          if (action === "close" && P.live(gen)) railPopClose(false);
+          if ((action === "close" || action === "hide" || action === "unhide") && P.live(gen)) railPopClose(false);
           P.redraw();
           return;
         }
-        if (P.live(gen)) failed = leadErr(st, s);
-        else toast(leadErr(st, s));
+        var msg = action === "hide" && st === 409 ? wsT("js.rail.archive.busy") : leadErr(st, s);
+        if (P.live(gen)) failed = msg;
+        else toast(msg);
         P.redraw();
         P.fetch();
       });
@@ -328,6 +332,10 @@
     stop.b.addEventListener("click", function () {
       var n = bgTasks();
       if (n < 1 || window.confirm(wsTn("js.lead.stop.confirm", n))) act("stop", {});
+    });
+    archive.b.addEventListener("click", function () {
+      var st = state();
+      act(st && st.hidden ? "unhide" : "hide", {});
     });
     restart.b.addEventListener("click", function () {
       var n = bgTasks();
@@ -364,6 +372,13 @@
       restart.b.hidden = !broken.length;
       restart.b.disabled = P.busy;
       handoff.b.disabled = P.busy;
+      archive.b.disabled = P.busy;
+      if (archive.b.getAttribute("data-hidden") !== String(!!st.hidden)) {
+        archive.b.setAttribute("data-hidden", String(!!st.hidden));
+        archive.b.replaceChild(gIcon(st.hidden ? "archive-restore" : "archive"), archive.b.firstChild);
+        archT.textContent = wsT(st.hidden ? "js.lead.unarchive" : "js.lead.archive");
+        archive.note.textContent = wsT(st.hidden ? "js.lead.unarchive.note" : "js.lead.archive.note");
+      }
       restart.note.textContent = broken.length ? wsT("js.lead.restart.note", broken.join(", ")) : "";
       close.b.disabled = P.busy;
       err.textContent = text;

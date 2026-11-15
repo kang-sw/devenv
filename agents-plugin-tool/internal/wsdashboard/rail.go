@@ -32,6 +32,7 @@ func (d *Daemon) railView(r pageReader) RailView {
 	view := d.railBaseView(r)
 	layout, gen := d.layout.current()
 	orderRailView(&view, layout, railFactsOf(view))
+	splitRailArchived(&view)
 	view.LayoutGen = gen
 	for i := range view.Workspaces {
 		// Optional memo state must never prevent the rail from rendering.

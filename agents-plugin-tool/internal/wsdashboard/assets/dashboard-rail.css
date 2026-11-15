@@ -166,15 +166,32 @@
    and its harness icon */
 .rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
 .rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
-.rail .rended > summary { list-style: none; font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 8px 2px 14px; cursor: pointer; }
-.rail .rended > summary::-webkit-details-marker { display: none; }
-.rail .rended > summary::after { content: " \25b8"; }
-.rail .rended[open] > summary::after { content: " \25be"; }
-.rail .rended > summary:hover { color: var(--wb-primary); }
+/* the fold row under a group's live rows: two halves, archived and ended,
+   one tri-state radio (none, archived, or ended open; rail.js marks) */
+.rail .rfold { display: flex; align-items: stretch; padding: 4px 8px 2px 14px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rail .rfh { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.rail .rfh + .rfh { padding-left: 10px; border-left: 1px solid var(--wb-muted); }
+.rail .rfh .i { width: 12px; height: 12px; stroke-width: 1.7; }
+.rail .rfh .n { font-variant-numeric: tabular-nums; }
+.rail .rfh::after { content: "\25b8"; margin-left: 1px; }
+.rail .rfh[aria-expanded="true"]::after { content: "\25be"; }
+.rail .rfh:hover:not(:disabled) { color: var(--wb-primary); }
+.rail .rfh:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.rail .rfh[aria-expanded="true"] { color: var(--wb-fg); font-weight: 700; }
+.rail .rfh:disabled { opacity: .5; cursor: default; }
+.rail .rfh:disabled::after { content: none; }
+.rail .rfold + .rended { margin-top: 2px; }
+.rail .rended:not(.on) { display: none; }
 .rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
 .rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
 .rail .rs.ended { opacity: .75; }
+/* an archived row is ended to the layout (no drag, no parent) but drawn
+   asleep (.stopped), at full strength */
+.rail .rs.ended.archived { opacity: 1; }
+/* a pending-deletion row's time slot: when the registry prune deletes it,
+   in the warning ink under a day */
+.rail .when.del.soon { color: var(--wb-warn-ink); font-weight: 600; }
 /* drag to reorder (dashboard.js, rail drag): a row or a workspace bar
    selects no text and opens no browser long-press menu, so a held press
    drags a bar and opens a row's own menu (the rail row menu); the dragged
@@ -261,6 +278,10 @@
 .rail .dracts button { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
 .rail .dracts .i { width: 13px; height: 13px; stroke-width: 1.6; }
 .rail .dracts button:hover, .rail .dracts button:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+/* a hosted lead's third hover button (archive, or unarchive in the archived
+   fold): the time slot widens so nothing moves when the three show */
+.rail .rs.hosted-row .drslot { min-width: 66px; }
+.rail .drarch.busy { opacity: .55; cursor: progress; }
 @media (hover: hover) {
   .rail .rs:hover .dracts { display: flex; }
   .rail .rs:hover .drslot { visibility: hidden; }
@@ -463,6 +484,7 @@ dialog.rdeldlg [hidden] { display: none !important; }
 .rail .wsbar .chip.perm { margin-left: auto; }
 html:not([data-sysopen]) .rail .rnew { display: none; }
 html:not([data-sysopen]) .rail .rdel { display: none; }
+html:not([data-sysopen]) .rail .drarch { display: none; }
 .rpop .sploc { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: -4px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .rpop .sploc .i { width: 12px; height: 12px; flex: none; }
 .rpop .sploc b { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
