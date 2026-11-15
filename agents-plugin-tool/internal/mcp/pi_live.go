@@ -34,9 +34,9 @@ func (s *Server) piChanged(st wsagent.State) {
 	if len(sessions) == 0 {
 		return
 	}
-	ev := s.piRow(st)
+	rows := wsagent.SpawnAgentEvents(st, s.piChildKey(st.ID))
 	for _, ls := range sessions {
-		ls.applyAgentRows([]wslive.Event{ev})
+		ls.applyAgentRows(rows)
 	}
 }
 
@@ -48,7 +48,7 @@ func (s *Server) piSeed(ls *liveSession) {
 	var rows []wslive.Event
 	for _, st := range wsagent.SpawnTree(wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: ls.replyID}, s.pi.agents.Children) {
 		if st.Status != wsagent.StatusClosed {
-			rows = append(rows, s.piRow(st))
+			rows = append(rows, wsagent.SpawnAgentEvents(st, s.piChildKey(st.ID))...)
 		}
 	}
 	if len(rows) > 0 {
@@ -108,10 +108,11 @@ func (ls *liveSession) applyAgentRows(events []wslive.Event) {
 	seams := currentLiveSeams()
 	now := seams.now().UnixMilli()
 	ls.mu.Lock()
-	defer ls.mu.Unlock()
 	if ls.stopped {
+		ls.mu.Unlock()
 		return
 	}
+	var observed []wslive.ObservedRecord
 	changed := false
 	for _, ev := range events {
 		res, err := ls.state.Apply(ev, now)
@@ -120,9 +121,16 @@ func (ls *liveSession) applyAgentRows(events []wslive.Event) {
 			continue
 		}
 		changed = changed || res.Changed
+		observed = append(observed, res.Observed...)
 	}
 	if changed {
 		ls.dirty = true
 		ls.scheduleLocked(seams.debounceAgent)
 	}
+	ls.ringMu.Lock()
+	ls.mu.Unlock()
+	if err := wslive.AppendObserved(ls.dir, observed); err != nil {
+		ls.debug("dashboard.model_evidence_write_error", map[string]any{"error": err.Error()})
+	}
+	ls.ringMu.Unlock()
 }
