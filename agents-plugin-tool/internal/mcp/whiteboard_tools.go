@@ -327,7 +327,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 }
 
 // whiteboardAppliedInfo ends every successful whiteboard.update result.
-const whiteboardAppliedInfo = "info: applied to the whiteboard; the user sees this content there. In the conversation, reply with only a short summary of about one paragraph; do not repeat the content."
+const whiteboardAppliedInfo = "info: applied to the whiteboard; the user sees this content there. In whiteboard mode, do not repeat or summarize it in the conversation; write there only what the board does not carry."
 
 func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) response {
 	const tool = "whiteboard.query"
