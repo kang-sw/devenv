@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 func whiteboardSummaryLines(text string) []string {
@@ -107,7 +109,7 @@ func TestWhiteboardUpdateSummaryClosedAdoptionKeepsNetLifecycle(t *testing.T) {
 	}
 }
 
-func TestWhiteboardUpdateSummaryRefusalIsAtomic(t *testing.T) {
+func TestWhiteboardUpdateSummaryContainsAcceptedDefaultOnly(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, "")
 	before, err := f.s.sessions.readWhiteboard(f.key)
@@ -116,14 +118,14 @@ func TestWhiteboardUpdateSummaryRefusalIsAtomic(t *testing.T) {
 	}
 	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="fresh"><wb:state value="waiting"/><wb:log>Too late</wb:log></wb:topic>`})
 	text := toolText(t, resp)
-	if !isToolError(resp) || !strings.Contains(text, "state requires a known open topic") || len(whiteboardSummaryLines(text)) != 0 || strings.Contains(text, "\nfull: ") {
+	if !isToolError(resp) || !strings.Contains(text, "state requires a known open topic") || !reflect.DeepEqual(whiteboardSummaryLines(text), []string{"topic added: fresh (state: discussing, default)"}) || !strings.Contains(text, "\nfull: ") || !strings.Contains(text, "<wb:failed>") {
 		t.Fatal(text)
 	}
 	after, err := f.s.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before.Whiteboard, after.Whiteboard) {
-		t.Fatal("refusal persisted a default")
+	if after.Whiteboard.Seq != before.Whiteboard.Seq+1 || after.Whiteboard.TopicStates()["fresh"].State.Value != wswhiteboard.StateDiscussing {
+		t.Fatal("failed state suppressed the accepted creation default")
 	}
 }
