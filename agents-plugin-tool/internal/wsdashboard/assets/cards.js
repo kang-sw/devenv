@@ -462,7 +462,11 @@
   function split(base) {
     var flow = units().filter(function (u) { return !u.pinned; });
     var out = order(base, flow, topicAt);
-    return { pins: pinned().map(function (u) { return u.el; }), board: [toolbar].concat(colOn && !overviewOn ? out : [pins].concat(out)) };
+    // A page may give transient cards a leading seat (the worktree's narrow
+    // preview). This changes placement only, never the persisted open time.
+    var leading = flow.filter(function (u) { return opt.leading && opt.leading(u); }).map(function (u) { return u.el; });
+    out = out.filter(function (n) { return leading.indexOf(n) < 0; });
+    return { pins: pinned().map(function (u) { return u.el; }), board: [toolbar].concat(leading, colOn && !overviewOn ? out : [pins].concat(out)) };
   }
   function weave(base) {
     var rest = claim(base);

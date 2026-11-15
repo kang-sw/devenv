@@ -40,7 +40,7 @@ new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 's
 function explorer(rid, local = true, options = {}) {
   var el = doc.body.appendChild(new El('section', doc)); el.className = 'fpane';
   var store = options.store || {}, previews = [];
-  win.WsPreview = { open: (path, o) => { var record = {}; if (o.root) record.root = o.root; if (o.line) record.line = o.line; previews.push([path, record]); } };
+  win.WsPreview = { state: () => '', open: (path, o) => { var record = {}; if (o.root) record.root = o.root; if (o.line) record.line = o.line; if (o.keep) record.keep = true; previews.push([path, record]); } };
   var instance = win.WsFiles.create(el, Object.assign({ rid, local, load: k => store[k], save: (k, v) => store[k] = v }, options));
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
@@ -521,18 +521,21 @@ async function multiSelectChecks() {
   columns.all('.fcolumn')[0].scrollTop = 23; event(columns.all('.fcolumn')[0], 'scroll');
   entry('src/pkg').click(); await answer(take('columns', 'list', 'src/pkg'), columnPkg);
   check('nested folder levels retain highlighted ancestor and files in every level', [columnPaths(), entry('src').getAttribute('aria-selected'), entry('src/pkg').getAttribute('aria-selected'), !!entry('README.md'), !!entry('src/main.go'), !!entry('src/pkg/first.go'), columns.all('.fcolumn')[0].scrollTop], [['', 'src', 'src/pkg'], 'true', 'true', true, true, true, 23]);
-  entry('src/pkg/first.go').click(); event(entry('src/pkg/first.go'), 'dblclick');
+  entry('src/pkg/first.go').click();
   await answer(take('columns', 'preview'), { kind: 'text', text: 'package main' });
-  check('column files select and reuse existing preview path', [columns.instance.selection().path, entry('src/pkg/first.go').getAttribute('aria-selected'), columns.previews], ['src/pkg/first.go', 'true', [['src/pkg/first.go', {}]]]);
+  check('column single click previews', columns.previews, [['src/pkg/first.go', {}]]);
+  event(entry('src/pkg/first.go'), 'dblclick');
+  await answer(take('columns', 'preview'), { kind: 'text', text: 'package main' });
+  check('column double click opens for real', [columns.instance.selection().path, entry('src/pkg/first.go').getAttribute('aria-selected'), columns.previews[1]], ['src/pkg/first.go', 'true', ['src/pkg/first.go', { keep: true }]]);
   key(entry('src/pkg/first.go'), 'ArrowDown');
-  check('down selects next entry without changing folder', [columns.instance.selection().path, doc.activeElement.getAttribute('data-entry'), columns.instance.location().dir], ['src/pkg/last.go', 'src/pkg/last.go', 'src/pkg']);
+  check('down moves focus only without preview or navigation', [columns.instance.selection().path, doc.activeElement.getAttribute('data-entry'), columns.instance.location().dir, columns.previews.length], ['src/pkg/first.go', 'src/pkg/last.go', 'src/pkg', 2]);
   key(entry('src/pkg/last.go'), 'ArrowUp'); key(entry('src/pkg/first.go'), 'ArrowLeft');
   check('up and left move within and between columns', [columns.instance.selection().path, doc.activeElement.getAttribute('data-entry')], ['src/pkg/first.go', 'src/pkg']);
   key(entry('src/pkg'), 'ArrowRight');
   check('right focuses the selected child column entry', doc.activeElement.getAttribute('data-entry'), 'src/pkg/first.go');
   key(entry('src/pkg/first.go'), 'Enter');
   await answer(take('columns', 'preview'), { kind: 'text', text: 'package main' });
-  check('Enter previews selected file', columns.previews.length, 2);
+  check('Enter opens selected file for real', [columns.previews.length, columns.previews[2]], [3, ['src/pkg/first.go', { keep: true }]]);
   columns.all('.fcolumn')[2].scrollTop = 67; event(columns.all('.fcolumn')[2], 'scroll');
   columns.at('.fdirectory').scrollLeft = 178; event(columns.at('.fdirectory'), 'scroll');
   columns.all('.fview-modes button')[0].click();
@@ -558,10 +561,11 @@ async function multiSelectChecks() {
   await answer(take('columns', 'list', 'src'), columnSrc);
   check('column mode state persists through storage and lazy ancestor restoration', [columnPaths(), !!entry('src/main.go'), columns.instance.selection().path, columns.at('.fdirectory').scrollLeft, columns.all('.fcolumn')[2].scrollTop], [['', 'src', 'src/pkg'], true, 'src/pkg/first.go', 178, 67]);
   entry('README.md').click();
-  check('selecting ancestor file drops trailing columns without preview on single click', [columnPaths(), columns.instance.location().dir, columns.instance.selection().path, columns.previews.length], [[''], '', 'README.md', 0]);
+  await answer(take('columns', 'preview'), { kind: 'text', text: 'readme' });
+  check('single click on ancestor file drops trailing columns and previews', [columnPaths(), columns.instance.location().dir, columns.instance.selection().path, columns.previews], [[''], '', 'README.md', [['README.md', {}]]]);
   entry('linked').click(); event(entry('linked'), 'dblclick');
   entry('gone').click(); event(entry('gone'), 'dblclick');
-  check('symlink and gone folders stay selectable but never open or preview', [columnPaths(), columns.instance.selection().path, columns.previews.length, requests.filter(r => !r.taken && r.url.pathname === '/s/columns/fs/list').length], [[''], 'gone', 0, 0]);
+  check('symlink and gone folders stay selectable but never open or preview', [columnPaths(), columns.instance.selection().path, columns.previews.length, requests.filter(r => !r.taken && r.url.pathname === '/s/columns/fs/list').length], [[''], 'gone', 1, 0]);
   entry('docs').click();
   var cappedColumn = listing('/columns/docs', []); cappedColumn.more = true;
   await answer(take('columns', 'list', 'docs'), cappedColumn);
@@ -620,7 +624,7 @@ async function multiSelectChecks() {
   navRace.instance.destroy();
   // Phase 2: same-session windows and their inner tabs own search independently.
   var left = explorer('search-tabs'), right = explorer('search-tabs', true, { location: { root: '/right' } });
-  var searchPreviews = []; win.WsPreview = { open: (path, o) => { var record = {}; if (o.root) record.root = o.root; if (o.line) record.line = o.line; searchPreviews.push([path, record]); } };
+  var searchPreviews = []; win.WsPreview = { state: () => '', open: (path, o) => { var record = {}; if (o.root) record.root = o.root; if (o.line) record.line = o.line; searchPreviews.push([path, record]); } };
   left.instance.shown(); await answer(take('search-tabs', 'list'), listing('/project', undefined, true));
   right.instance.shown(); await answer(take('search-tabs', 'list'), listing('/right'));
   left.q.value = 'original'; event(left.q, 'input'); await timers(); var originalSearch = take('search-tabs', 'find');
@@ -772,17 +776,19 @@ async function multiSelectChecks() {
   var mediaEntries = playable.map(([ext]) => ({ name: 'play.' + ext })).concat(binaries.map(name => ({ name })), otherPreviews.map(([name]) => ({ name })), [{ name: 'large.txt' }]);
   await answer(take('media', 'list'), listing('/media', mediaEntries, true));
   Object.assign(win.WsCards, {
-    register(name, kind) { previewKind = kind; }, list() { return previewCards; },
+    register(name, kind) { previewKind = kind; }, list() { return previewCards; }, relayout() {},
     open(kind, data) {
       openedCards++;
       var card = { data, el: doc.body.appendChild(new El('section', doc)), body: new El('div', doc),
         title(v) { this.head = v; }, actions() {}, paint() {}, bump() {}, fold() {}, show() {}, save() {},
         close() { previewKind.close(this); previewCards.splice(previewCards.indexOf(this), 1); this.el.parentNode.removeChild(this.el); } };
+      card.name = card.el.appendChild(new El('span', doc));
       card.el.appendChild(card.body); previewCards.push(card); previewKind.open(card); return card;
     }
   });
   doc.documentElement.setAttribute('data-rid', 'media');
   doc.documentElement.setAttribute('data-sysopen', '');
+  doc.dispatchEvent = e => event(doc, e.type);
   new Function('document', 'window', 'wsT', 'fetch', PREVIEW)(doc, win, k => k, fetchControlled);
   function visibleMediaRows() {
     media.at('.fdirectory').getBoundingClientRect = () => ({ left: 10, right: 510, top: 10, bottom: 600 });
@@ -791,7 +797,7 @@ async function multiSelectChecks() {
   function activateMedia(path, keyboard) {
     visibleMediaRows();
     var row = media.at('[data-entry="' + path + '"]');
-    if (keyboard) key(row, 'Enter'); else { row.click(); event(row, 'dblclick'); }
+    if (keyboard) key(row, 'Enter'); else event(row, 'dblclick');
   }
   for (var path of binaries) {
     activateMedia(path, path === 'file.exe');

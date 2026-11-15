@@ -53,6 +53,11 @@ const READ_WS = new Set([
 export function readOnlyWsTools(tools: readonly string[]): string[] {
   return tools.filter(name => name.startsWith("ws__") && READ_WS.has(name.slice(4)));
 }
+// Owner-lead coordination is not inherited, even by workers with lead-scoped MCP keys.
+const OWNER_LEAD_WS_TOOLS: ReadonlySet<string> = new Set(["ws__session_request_hire", "ws__session_roster"]);
+export function inheritableTools(tools: readonly string[]): string[] {
+  return tools.filter(tool => !OWNER_LEAD_WS_TOOLS.has(tool));
+}
 function legacyWriteCapability(policy: Pick<DelegationPolicy, "depth" | "tools">): EffectiveWriteCapability {
   if (policy.depth === 0 || (policy.tools.includes("edit") && policy.tools.includes("write"))) return { mode: "unrestricted" };
   return { mode: "none" };
@@ -85,7 +90,7 @@ export function childPolicy(parent: DelegationPolicy, tools: readonly string[], 
   const depth = parent.depth + 1;
   if (depth > parent.maxDepth) throw new Error(`ws-pi-agent: maximum delegation depth ${parent.maxDepth} reached`);
   if (requiresChildren && depth === parent.maxDepth) throw new Error("ws-pi-agent: playbook requires children but delegation budget is exhausted");
-  const effective = terminalTools(tools, depth, parent.maxDepth);
+  const effective = terminalTools(inheritableTools(tools), depth, parent.maxDepth);
   const requested = network ?? { search: effective.includes("web_search"), fetch: effective.includes("ws_web_fetch") };
   const ceiling = parent.network ?? NO_NETWORK;
   if (parent.depth > 0 && ((requested.search && !ceiling.search) || (requested.fetch && !ceiling.fetch))) {

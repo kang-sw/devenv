@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 26de06ba1713a053
 sage-review-completeness-reviewed: 26de06ba1713a053
+completed: 2026-11-15
 ---
 
 # Shared dashboard daemon restarts without an explicit swap
@@ -418,3 +419,76 @@ shared daemon, its cache, or real user/session/mail/board state. Cover:
 
 Accepted-build recovery, promotion and emergency rollback are implemented only
 by `261115-feat-ws-dev-daemon-accepted-build-recovery`, after this phase lands.
+
+### Result (02ba6f86e) - 2026-11-15
+
+Implemented P1a–P1e. Ordinary Python/Go connection keeps a healthy equal
+numeric core across suffix, timestamp and hash differences. Numeric upgrades,
+newer-core protection, authenticated drain and LAN-mode handling remain.
+`daemon-start --replace` explicitly swaps an equal core once (including identical
+content); consuming it before the first spawn also protects the successor when
+the initial endpoint is absent. `dev.py rerun daemon` passes that flag and no
+longer performs its own identical-content shutdown.
+
+Python reuses hash-bound compatible local runtimes on source drift, emits the
+explicit build+swap command, and preserves the old source fingerprint. Missing
+or incompatible runtime repair and explicit bootstrap binary/URL installs remain.
+Pi lead/fork startup uses a read-only Python helper import to share the launcher's
+compatibility, runtime naming and fingerprint authority rather than duplicating
+it in TypeScript. Retained runtime bytes are not owned by bootstrap cleanup;
+the child contract-drift guard remains active after reuse. Worker/explore startup
+stays build-free. The existing child-wiring fake launcher was adapted to expose
+the imported helpers while retaining its fake executable behavior.
+
+Compatibility remains **T0**. The optional flag is parsed and forwarded locally
+(`agents-plugin-tool/cmd/ws-mcp/proxy.go:365-409`); dev.py invokes its own staged
+candidate (`scripts/dev.py`, `run_daemon_start`). Health still writes version,
+build and hash (`agents-plugin-tool/internal/wsdashboard/daemon.go:761-775`) and
+Go reads those unchanged fields (`client.go:25-46`, relative to the same package).
+Shutdown retains the existing token path (`client.go:53-69`). Metadata and source
+stamp writers/readers retain their shapes
+(`agents-plugin/bin/ws-mcp-launcher.py:198-240,300-349`); reopening this launcher
+revalidates the retained bytes rather than migrating data. Old launchers can
+still perform their old build-time replacement until updated, as P1e states.
+No protocol, manifest, shared-store shape or version changed.
+
+Verification (all isolated; complete commands/output in
+`/tmp/exec5/daemonfix/verification.md`):
+
+- Focused offline Go Ensure/core-policy/absent/dead/hung/LAN fixtures: PASS;
+  `go-dashboard-final.log`. In-process servers use temporary directories and
+  loopback. No whole-dashboard-package run.
+- Go daemon-start flag wiring and LAN apply rule: PASS (2 tests);
+  `go-cli-final.log`. Ensure is injected; no detached process starts.
+- Existing Python proxy file, focused selection: PASS (16 tests);
+  `python-proxy.log`. Existing reconnect fixtures emit unclosed-pipe
+  ResourceWarnings; added tests introduce none.
+- Existing Python capabilities file, focused selection: PASS (10 tests);
+  `python-capabilities-fixed.log`. The initial fixture was outside its marker's
+  source root; fixed the fixture rather than production behavior.
+- `scripts/test_dev.py`: PASS (11 tests); `python-dev-final.log`. Builds,
+  staging, seeding, health and drain subprocesses are mocked for rerun coverage.
+- Named Pi `local-devenv.test.ts` and `version-check.test.ts`: PASS (51 tests);
+  `pi-final.log`. Builds are injected. Coverage includes quiet unchanged source,
+  drift reuse, unusable-runtime repair, actual bridge cleanup/child-guard wiring,
+  role gates and byte-identical ws/wsflow/Pi launchers. The initial new worker
+  assertion incorrectly included the existing tool-registration notification;
+  narrowed the assertion to source-build notices.
+- `cmp` for all three launchers and `git diff --check`: PASS.
+
+Review: the implementer performed the lite correctness/test-integrity read and
+manual self-audit because the caller prohibited subagents. Removed unreachable
+assertion branches from the updated Go fixtures. Evidence:
+`/tmp/exec5/daemonfix/self-review.md`. No unresolved correctness finding.
+Independent review/audit, broader suites (including the adapted existing
+child-wiring integration fixture) and shared activation were omitted under the
+caller's restrictions. The two named Pi suites directly exercise the new bridge
+reuse/cleanup/guard behavior. The worktree temporarily linked the primary
+checkout's existing dependencies for these tests; no install ran and the link
+was removed.
+
+No shared daemon operation/cache activation, live Python/Pi Go build, process
+kill, install, merge, push or version bump was performed. Existing absent/dead/
+hung behavior uses the selected runtime; this phase does not establish accepted
+or last-known-good status. Recovery/promotion/rollback, large-request failures
+and mail durability remain outside this ticket as declared above.

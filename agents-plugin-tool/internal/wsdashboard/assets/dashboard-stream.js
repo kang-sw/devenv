@@ -250,6 +250,12 @@
       try { tried = window.sessionStorage.getItem(ASSETS_TRIED); } catch (x) {}
       if (holdsDraft() || shDrafts() || tried === ev.id) { banner(wsT("js.banner.updated")); return; }
       try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
+      boardSaveReload();
+      // Only the active frame returns with the shell reload; inactive
+      // frames would leave unreachable entries in the tab's storage.
+      if (shell && shOn) {
+        try { if (shOn.el.contentWindow.wsSaveBoardReload) shOn.el.contentWindow.wsSaveBoardReload(); } catch (e) {}
+      }
       location.reload();
     }
     // A WebSocket handshake hides HTTP status. Recheck the stream once after

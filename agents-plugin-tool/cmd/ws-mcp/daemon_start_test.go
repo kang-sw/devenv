@@ -1,6 +1,36 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsdashboard"
+)
+
+func TestDaemonStartReplaceFlagWiring(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("WS_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(root, "config"))
+	for _, replace := range []bool{false, true} {
+		args := []string{"--build-time", "123", "--start-wait", "1s"}
+		if replace {
+			args = append(args, "--replace")
+		}
+		called := false
+		daemonStartWithEnsure(args, func(_ context.Context, opts wsdashboard.EnsureOptions) (wsdashboard.Outcome, error) {
+			called = true
+			if opts.Replace != replace || opts.BuildTime != 123 || opts.StartWait != time.Second {
+				t.Fatalf("starter options = %+v", opts)
+			}
+			return wsdashboard.OutcomeRunning, nil
+		})
+		if !called {
+			t.Fatal("Ensure not called")
+		}
+	}
+}
 
 // TestDaemonStartLANFollowsTheApplyRule pins daemonStartLAN: a starter the
 // dashboard applies to decides from its settings; any other starter leaves

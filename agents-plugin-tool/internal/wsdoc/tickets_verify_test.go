@@ -1,6 +1,7 @@
 package wsdoc
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -194,6 +195,82 @@ func TestTicketVerifyMalformedPhaseAndResultHeadingsAreHardFindings(t *testing.T
 	}
 	if count != 2 {
 		t.Fatalf("phase-result-heading findings = %d, want 2 (one per malformed heading); findings=%#v", count, result.Findings)
+	}
+}
+
+func TestTicketPhaseHeadingProblemsExamplesAndLineNumbers(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name:  "backticks",
+			lines: []string{"```markdown", "### Result", "### Phase First", "#### Edition", "```"},
+		},
+		{
+			name:  "indented tildes and longer close",
+			lines: []string{"   ~~~markdown", "### Result", "### Phase First", "#### Edition", "  ~~~~  "},
+		},
+		{
+			name:  "short mismatched and info-bearing fences do not close",
+			lines: []string{" ````markdown", "```", "### Result", "~~~~", "#### Edition", "````text", "### Phase First", "   `````\t"},
+		},
+		{
+			name:  "quotes and quoted fences",
+			lines: []string{"> ### Result", "  > ### Phase First", "\t> > #### Edition", "> ```"},
+		},
+		{
+			name:  "unclosed fence",
+			lines: []string{"~~~", "### Result", "#### Edition", "### Phase First"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ticketPhaseHeadingProblems(strings.Join(tc.lines, "\n")); len(got) != 0 {
+				t.Fatalf("example headings produced problems: %v", got)
+			}
+			if tc.name == "unclosed fence" {
+				return
+			}
+			lines := append(append([]string{}, tc.lines...),
+				"### Phase 1: Valid", "### Result (abc123) - 2026-07-23", "#### Edition (def456) - 2026-07-24",
+				"### Phase First", "### Result", "#### Edition")
+			got := ticketPhaseHeadingProblems(strings.Join(lines, "\n"))
+			if len(got) != 3 {
+				t.Fatalf("problems = %v, want only three real malformed headings", got)
+			}
+			for i, kind := range []string{"Phase", "Result", "Edition"} {
+				want := fmt.Sprintf("line %d: malformed %s heading", len(tc.lines)+4+i, kind)
+				if !strings.HasPrefix(got[i], want) {
+					t.Errorf("problem = %q, want prefix %q", got[i], want)
+				}
+			}
+		})
+	}
+}
+
+func TestTicketPhaseHeadingProblemsInvalidFenceDoesNotHideHeadings(t *testing.T) {
+	for _, opener := range []string{"    ```", "``", "```bad`info"} {
+		t.Run(opener, func(t *testing.T) {
+			got := ticketPhaseHeadingProblems(opener + "\n### Result\n")
+			if len(got) != 1 || !strings.HasPrefix(got[0], "line 2: malformed Result heading") {
+				t.Fatalf("problems = %v, want malformed Result at line 2", got)
+			}
+		})
+	}
+}
+
+func TestTicketVerifyHeadingExamplesPass(t *testing.T) {
+	root := t.TempDir()
+	path := "ai-docs/tickets/ready/260723-feat-examples.md"
+	body := validReadyTicketBody + "\n```markdown\n### Result\n### Phase First\n#### Edition\n```\n" +
+		"\n~~~markdown\n### Result\n~~~\n> ### Result\n> #### Edition\n"
+	mustWrite(t, root, path, body)
+	result, err := TicketVerify(root, []string{path})
+	if err != nil {
+		t.Fatalf("TicketVerify returned error: %v", err)
+	}
+	if !result.OK || len(result.Findings) != 0 || len(result.Warnings) != 0 {
+		t.Fatalf("result = %#v, want OK with no findings or warnings", result)
 	}
 }
 

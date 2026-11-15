@@ -331,7 +331,11 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 				return pr
 			}
 			pr.regions = regions
-			pr.board = splitBoardTopics(string(regions[regionBoard].HTML))
+			if view.HasBoard && view.BoardUnits != nil {
+				pr.board = view.BoardUnits.rendered(theme).topics
+			} else {
+				pr.board = splitBoardTopics(string(regions[regionBoard].HTML))
+			}
 			return pr
 		},
 		stamp: func(in refreshInputs) (string, bool) { return pages.sessionStamp(replyID, in) },

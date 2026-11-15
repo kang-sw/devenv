@@ -1,12 +1,15 @@
 package wswhiteboard
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 )
 
@@ -50,7 +53,12 @@ func TestFolderCacheIdleOpenAndOtherWriter(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(want, got) {
 			t.Fatalf("idle open %d: %v", i, err)
 		}
-		got.Topics[0].Body = "caller must not mutate cached state"
+		if _, problems := Apply(got, `<wb:topic name="topic-0"><wb:body>private update</wb:body></wb:topic>`, Env{}); len(problems) > 0 {
+			t.Fatal(problems)
+		}
+		if want.Topics[0].Body != "unchanged topic body" {
+			t.Fatal("Apply changed another cached reader")
+		}
 	}
 	if *reads != 0 {
 		t.Fatalf("idle refreshes reopened %d board files", *reads)
@@ -142,7 +150,7 @@ func TestFolderCacheRecoveryAfterPartialPublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := folderOpen(t, f.Dir, nil)
-			if !reflect.DeepEqual(got, want) || got.EntrySeq != 5 {
+			if !reflect.DeepEqual(got.clone(), want) || got.EntrySeq != 5 {
 				t.Fatalf("cached recovery at %s lost or duplicated entries", stage)
 			}
 		})
@@ -217,6 +225,90 @@ func TestFolderCacheAbsentAndLegacy(t *testing.T) {
 	}
 	if _, err := cache.Open(f, folderFixture()); err == nil {
 		t.Fatal("missing committed metadata resurrected legacy state")
+	}
+}
+
+// Dashboard readers keep one frozen value while update/commit and implicit
+// render callers mutate their own handles. Run with -race to enforce the seam.
+func TestFolderCacheSharedReadersAndMutators(t *testing.T) {
+	f := folderIdleBoard(t)
+	var cache FolderCache
+	frozen, err := cache.Open(f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(frozen)
+	other, err := cache.Open(f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &other.Topics[0] != &frozen.Topics[0] || other == frozen || !other.shared {
+		t.Fatal("cache must share backing data, not mutable State headers")
+	}
+	var wg sync.WaitGroup
+	for n := 0; n < 4; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 8; i++ {
+				view := BuildView(frozen, ViewInput{Layout: LayoutFull})
+				if _, err := RenderRegions(view); err != nil {
+					t.Error(err)
+				}
+				_, _ = json.Marshal(frozen)
+			}
+		}()
+	}
+	for _, render := range []bool{false, true} {
+		wg.Add(1)
+		go func(render bool) {
+			defer wg.Done()
+			for i := 0; i < 8; i++ {
+				// Equivalent to an Open header; retaining the original backing
+				// also tests readers of the old generation during publication.
+				local := frozen.sharedRead()
+				if render {
+					local.BeginRender()
+					local.Topics[0].Body = "private render data"
+				} else {
+					_, problems := Apply(local, `<wb:topic name="topic-0"><wb:body>private update</wb:body><wb:log>new history</wb:log></wb:topic>`, testEnv())
+					if len(problems) > 0 {
+						t.Error(problems)
+					}
+				}
+				if local.shared {
+					t.Error("mutation did not detach")
+				}
+			}
+		}(render)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 4; i++ {
+			if err := f.Update(nil, func(s *State) error {
+				_, problems := Apply(s, `<wb:topic name="topic-0"><wb:body>committed update</wb:body></wb:topic>`, testEnv())
+				if len(problems) > 0 {
+					return fmt.Errorf("%v", problems)
+				}
+				s.BeginRender()
+				return nil
+			}); err != nil {
+				t.Error(err)
+			}
+			if _, err := cache.Open(f, nil); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	wg.Wait()
+	after, _ := json.Marshal(frozen)
+	if !bytes.Equal(before, after) {
+		t.Fatal("cached generation changed during mutations")
+	}
+	got, err := cache.Open(f, nil)
+	if err != nil || got.Topics[0].Body != "committed update" {
+		t.Fatalf("committed update lost: %v", err)
 	}
 }
 
