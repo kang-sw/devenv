@@ -425,7 +425,7 @@ function boot(store, served, o) {
   page.board.id = "r-board";
   served().forEach(function (n) { page.board.appendChild(n); });
   page.col = dbody.appendChild(new El("aside", page.doc));
-  var win = page.win = { getSelection: function () { return null; }, addEventListener: function () {}, innerWidth: 2000, innerHeight: 800 };
+  var win = page.win = { listeners: {}, getSelection: function () { return null; }, addEventListener: function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }, innerWidth: 2000, innerHeight: 800 };
   new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible" }; }, function () {});
   page.W = win.WsCards;
   page.W.register("k", { open: function (c) { c.title({ name: c.data.name }); c.el.card = c.data.name; } });
@@ -852,6 +852,92 @@ check("the scrim restores the topic", [large(), scrims()], [[], 0]);
 click(btn(A2, "d-max"));
 swap([B, reply()]);
 check("a large topic the board no longer serves takes the scrim with it", [large(), scrims()], [[], 0]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestFullscreenPanelWidth exercises the shared transient width state through
+// actual cards, topics, entry panels, Files and live renderer replacements.
+func TestFullscreenPanelWidth(t *testing.T) {
+	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
+	runNode(t, "fullscreen panel width", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
+var A, panel, owner = { el: null, shown: function () {}, hidden: function () {} }, store = {};
+function served() {
+  A = topic("A", 100);
+  panel = mk("details.entry-panel", { "data-key": "entry:p1" }, [mk("summary", {}, [mk("button.d-max"), mk("button.d-min")]), mk("div", { "data-kind": "diff" })]);
+  A.appendChild(mk("article.wb-entry", { "data-kind": "panel" }, [panel]));
+  return [A];
+}
+boot(store, served, { wide: true, toolbar: { files: owner } });
+El.prototype.focus = function () { this.ownerDocument.activeElement = this; };
+var sized = 0;
+["preview", "terminal", "web", "approval", "system", "other"].forEach(function (kind) {
+  page.W.register(kind, { open: function () {}, sized: function () { sized++; } });
+});
+function resize(w) { page.win.innerWidth = w; (page.win.listeners.resize || []).forEach(function (fn) { fn(); }); }
+function click(n) { page.board.fire("click", { target: n, preventDefault: function () {} }); }
+function inset(n) { return n.style.props["--sheet-inset"]; }
+function widthBtn(n) { return n.querySelector(".sheet-width"); }
+function toggle(n) { widthBtn(n).fire("click", { preventDefault: function () {} }); }
+function closeCard(c) { c.minBtn.fire("click"); }
+function card(kind, semantic) { var c = page.W.open(kind, {}); if (semantic) c.el.setAttribute("data-preview-kind", semantic); return c; }
+resize(2400);
+// The preview renderer exposes text responses as code, and prose as markdown.
+[["markdown", 1280], ["code", 1440], ["diff", 1760], ["frame", 1600], ["image", 1600], ["video", 1600], ["unknown", 1920]].forEach(function (item) {
+  var c = card("preview", item[0]); c.body.appendChild(mk("div", { "data-kind": "diff" })); c.maxBtn.fire("click");
+  check(item[0] + " uses owning renderer, not nested content", inset(c.el), ((2400 - item[1]) / 2) + "px");
+  check("effective extension is offered", widthBtn(c.el).hidden, false);
+  toggle(c.el);
+  check("extension exceeds 1920 cap and exposes next action", [inset(c.el), widthBtn(c.el).getAttribute("aria-pressed"), widthBtn(c.el).title], ["16px", "true", "js.card.width.normal"]);
+  toggle(c.el);
+  check("same toggle restores width without leaving sheet", [inset(c.el), c.el.hasAttribute("data-max"), widthBtn(c.el).getAttribute("aria-pressed"), widthBtn(c.el).title], [((2400 - item[1]) / 2) + "px", true, "false", "js.card.width.extend"]);
+  toggle(c.el); closeCard(c);
+  check("minimize discards width and toggle", [inset(c.el), widthBtn(c.el)], [undefined, null]);
+  c.maxBtn.fire("click"); check("reopen is normal", widthBtn(c.el).getAttribute("aria-pressed"), "false"); closeCard(c);
+});
+[["web", 1600], ["approval", 1024], ["system", 1024], ["other", 1920]].forEach(function (item) {
+  var c = card(item[0]); c.maxBtn.fire("click"); check(item[0], inset(c.el), ((2400 - item[1]) / 2) + "px"); closeCard(c);
+});
+var term = card("terminal"), reads = 0, span = 812;
+page.board.getBoundingClientRect = function () { reads++; return { width: span }; };
+term.maxBtn.fire("click"); var initialReads = reads;
+check("Terminal captures board column", inset(term.el), "794px");
+span = 1111; resize(1000); resize(2400);
+check("resize never remeasures owning column", [inset(term.el), reads], ["794px", initialReads]);
+closeCard(term); term.pin(true);
+page.col.getBoundingClientRect = function () { return { width: 620 }; };
+term.maxBtn.fire("click"); check("pinned Terminal captures optional column", inset(term.el), "890px"); closeCard(term);
+term.pin(false); span = 0; term.maxBtn.fire("click"); check("Terminal fallback is 960", inset(term.el), "720px"); closeCard(term);
+span = 2600; term.maxBtn.fire("click"); check("column snapshot also has 1920 cap", inset(term.el), "240px"); closeCard(term);
+var convo = page.doc.body.appendChild(mk("div", { id: "convo" })), convoReads = 0;
+convo.getBoundingClientRect = function () { convoReads++; return { width: 1100 }; };
+owner.el = page.doc.body.appendChild(mk("section.fpane", {}, [mk("input.fq")]));
+var files = page.W.toolbar().querySelector(".board-files"); files.fire("click", {});
+check("Files captures conversation, not board", inset(owner.el), "650px");
+var filesWidthBtn = page.W.toolbar().querySelector(".sheet-width");
+filesWidthBtn.fire("click", { preventDefault: function () {} }); resize(1000); resize(2400);
+check("Files toggles without remeasure", [inset(owner.el), convoReads], ["16px", 1]);
+files.fire("click", {}); convo.getBoundingClientRect = function () { return { width: 0 }; }; files.fire("click", {});
+check("Files fallback is 1280 and resets on close", [inset(owner.el), page.W.toolbar().querySelector(".sheet-width").getAttribute("aria-pressed")], ["560px", "false"]);
+files.fire("click", {});
+click(A.querySelector(".d-max")); check("topic outranks nested diff", inset(A), "480px"); toggle(A);
+var A2 = topic("A", 200); swap([A2]);
+check("live replacement keeps width state on the new owner", [inset(A), inset(A2), widthBtn(A2).getAttribute("aria-pressed")], [undefined, "16px", "true"]);
+click(A2.querySelector(".d-min"));
+swap(served()); click(panel.querySelector(".d-max"));
+check("panel category outranks nested diff", inset(panel), "480px");
+var child = panel.children[panel.children.length - 1]; toggle(panel); resize(640);
+check("mobile hides ineffective extension", [widthBtn(panel).hidden, panel.hasAttribute("data-max")], [true, true]);
+resize(1280); check("wide but clamped hides ineffective extension", widthBtn(panel).hidden, true);
+resize(1900); check("resize keeps node/disclosure while exposing extension", [widthBtn(panel).hidden, panel.children[panel.children.length - 1] === child, panel.open], [false, true, true]);
+click(panel.querySelector(".d-min"));
+var p = card("preview", "unknown"); p.maxBtn.fire("click"); p.el.setAttribute("data-preview-kind", "markdown"); p.paint();
+check("late preview renderer identity sizes an already open sheet", inset(p.el), "310px"); closeCard(p);
+resize(2400);
+var remembered = page.W.open("k", { name: "reload" }); remembered.maxBtn.fire("click"); toggle(remembered.el);
+check("storage excludes sheet geometry", /normalWidth|extended|sheet-inset/.test(store.cards), false);
+boot(store, served); var restored = page.W.list("k")[0]; restored.maxBtn.fire("click");
+check("reload does not remember extension", widthBtn(restored.el).getAttribute("aria-pressed"), "false");
 process.stdout.write(bad.join("\n"));
 `)
 }

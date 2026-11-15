@@ -731,6 +731,7 @@
     c.pinBtn.setAttribute("aria-pressed", String(!!c.pinned));
     c.foldBtn.setAttribute("aria-expanded", String(!c.folded));
     c.body.style.height = (c.h || (typeof c.k.base === "function" ? c.k.base(c) : c.k.base) || BASE) + "px";
+    if (maxed === c) sizeSheet(c);
     c.foldEl.textContent = "";
     var f = c.folded && c.k.folded ? c.k.folded(c) : null;
     if (f) c.foldEl.appendChild(f);
@@ -845,6 +846,63 @@
   // board keeps its height meanwhile. Nothing is moved, so a frame or a
   // video keeps running through maximize and back. One thing is large at a
   // time: a card, or a board node (sheet: a topic, or a topic's panel).
+  // Category identity belongs to the owning renderer, never to incidental
+  // nested media. Capture column geometry before any node becomes fixed.
+  function sheetWidth(c) {
+    var kind = c.kind, host, n = c.el;
+    if (c.files || kind === "terminal") {
+      host = c.files ? doc.getElementById("convo") : n;
+      if (!c.files) {
+        while (host && host !== board && host !== col) host = host.parentNode;
+        if (!host) host = board;
+      }
+      var w = host && host.getBoundingClientRect().width;
+      return w > 0 && isFinite(w) ? w : c.files ? 1280 : 960;
+    }
+    if (!(c instanceof Card)) return 1440; // a topic or its entry panel
+    if (kind === "preview") kind = n.getAttribute("data-preview-kind");
+    var widths = { text: 1280, markdown: 1280, code: 1440, diff: 1760,
+      web: 1600, frame: 1600, image: 1600, video: 1600, topic: 1440,
+      panel: 1440, approval: 1024, system: 1024 };
+    return Object.prototype.hasOwnProperty.call(widths, kind) ? widths[kind] : 1920;
+  }
+  function clearSheetWidth(c) {
+    if (c.widthBtn && c.widthBtn.parentNode) c.widthBtn.parentNode.removeChild(c.widthBtn);
+    if (c.el) c.el.style.removeProperty("--sheet-inset");
+    delete c.widthBtn;
+    delete c.normalWidth;
+    delete c.extended;
+  }
+  function sizeSheet(c) {
+    if (!c || !c.el) return;
+    // Preview responses may arrive after maximize; their renderer identity
+    // can change, but Files/Terminal keep the original column snapshot.
+    if (c.kind === "preview") c.normalWidth = sheetWidth(c);
+    var normal = Math.min(c.normalWidth, 1920), wide = window.innerWidth > 640 && window.innerWidth - 32 > normal;
+    c.el.style.setProperty("--sheet-inset", (c.extended ? 16 : Math.max(16, (window.innerWidth - normal) / 2)) + "px");
+    if (!c.widthBtn) {
+      c.widthBtn = ibtn("sheet-width", "maximize-2", "");
+      c.widthBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        c.extended = !c.extended;
+        sizeSheet(c);
+        if (c instanceof Card) c.sized();
+      });
+    }
+    // Reattach after a renderer replaces only the head, or the whole node.
+    var before = c.files ? c.back : c instanceof Card ? c.minBtn : sheetBtn(c.el, "d-min");
+    if (before && (c.widthBtn.nextSibling !== before || c.widthBtn.parentNode !== before.parentNode)) {
+      var focused = doc.activeElement === c.widthBtn;
+      before.parentNode.insertBefore(c.widthBtn, before);
+      if (focused) c.widthBtn.focus({ preventScroll: true });
+    }
+    c.widthBtn.hidden = !wide;
+    c.widthBtn.setAttribute("aria-pressed", String(!!c.extended));
+    var label = c.extended ? wsT("js.card.width.normal") : wsT("js.card.width.extend");
+    c.widthBtn.title = label;
+    c.widthBtn.setAttribute("aria-label", label);
+  }
+  window.addEventListener("resize", function () { sizeSheet(maxed); });
   function maximize(c) {
     if (c && window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(function () { maximize(c); }); return; }
     if (maxed === c) return;
@@ -852,6 +910,7 @@
       var was = maxed;
       maxed = null;
       scrim.hidden = true;
+      clearSheetWidth(was);
       if (was.files) {
         was.el.removeAttribute("data-max");
         was.el.style.removeProperty("--files-top");
@@ -873,6 +932,8 @@
       }
     }
     if (!c) return;
+    c.normalWidth = sheetWidth(c);
+    c.extended = false;
     if (!scrim) {
       scrim = mk("div", "bc-scrim");
       scrim.addEventListener("click", function () { maximize(null); });
@@ -888,6 +949,7 @@
       toolbar.setAttribute("data-files", "");
       c.back.setAttribute("aria-expanded", "true");
       c.owner.shown();
+      sizeSheet(c);
       var filter = c.el.querySelector(".fq");
       if (filter) filter.focus({ preventScroll: true });
       return;
@@ -901,6 +963,7 @@
     }
     c.el.style.height = c.el.getBoundingClientRect().height + "px";
     c.el.setAttribute("data-max", "");
+    sizeSheet(c);
     c.sized();
     c.minBtn.focus();
   }
@@ -936,7 +999,9 @@
     var n = sheetNode(t);
     if (t.el && t.el !== n) shrinkNode(t);
     t.el = n;
-    if (!n || n.hasAttribute("data-max")) return;
+    if (!n) return;
+    sizeSheet(t);
+    if (n.hasAttribute("data-max")) return;
     if (t.topic) {
       if (!t.scroll) {
         t.scroll = [];
@@ -949,6 +1014,7 @@
     n.setAttribute("data-max", "");
   }
   function shrinkNode(t) {
+    t.el.style.removeProperty("--sheet-inset");
     t.el.removeAttribute("data-max");
     if (!t.topic && t.el.parentNode) t.el.parentNode.style.height = "";
   }

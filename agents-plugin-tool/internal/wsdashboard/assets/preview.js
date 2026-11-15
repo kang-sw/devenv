@@ -138,6 +138,10 @@
   }
   function draw(card, v) {
     var d = card.data, box;
+    // Monospace text views are code, regardless of the HTML/SVG source flag;
+    // rendered Markdown is prose. Use renderer kinds, not extensions or MIME.
+    card.el.setAttribute("data-preview-kind", v.kind === "text" ? "code" : v.kind);
+    card.paint();
     head(card, ICON[v.kind] || "file", badge(v));
     if (v.kind === "image") {
       box = mk("div", "pv-img");
@@ -205,6 +209,8 @@
   // one's answer.
   function load(card) {
     var d = card.data, turn = card.turn = (card.turn || 0) + 1;
+    card.el.removeAttribute("data-preview-kind");
+    card.paint();
     head(card, guess(d.path), "");
     ask(d).then(function (r) {
       if (!r.ok) throw r.status;

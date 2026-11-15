@@ -148,6 +148,8 @@
   "js.card.fold": "Fold or unfold",
   "js.card.grip": "Drag to resize; double-click to reset",
   "js.card.max": "Maximize",
+  "js.card.width.extend": "Extend to full width",
+  "js.card.width.normal": "Restore normal width",
   "js.card.min": "Back to the card (Esc)",
   "js.card.back": "Back to the board (Esc)",
   "js.card.pin": "Pin",
