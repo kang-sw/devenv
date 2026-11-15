@@ -30,7 +30,7 @@ function take(rid, route, dir) {
 }
 async function answer(r, body) { r.resolve({ ok: true, json: () => body }); await settle(); }
 async function refuse(r) { r.resolve({ ok: false, status: 404, text: () => Promise.resolve('refused') }); await settle(); }
-function listing(root, entries, session) { return { root, name: root.split('/').pop(), abs: root, sep: '/', session: !!session, entries: entries || [{ name: 'src', dir: true }, { name: 'main.go' }, { name: '.env' }, { name: 'ignored', ign: true }] }; }
+function listing(root, entries, session) { return { root, name: root.split('/').pop(), abs: root, sep: '/', session: !!session, entries: entries || [{ name: 'src', dir: true }, { name: 'main.go' }, { name: '.env' }, { name: 'ignored', dir: true, ign: true }] }; }
 function event(n, type, extra) { var e = Object.assign({ target: n, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {} }, extra); n.fire(type, e); return e; }
 function key(n, key) { return event(n, 'keydown', { key }); }
 function slash(n) { var e = { target: n, key: '/', preventDefault() { this.defaultPrevented = true; } }; doc.listeners.keydown.slice().forEach(f => f(e)); }
@@ -55,7 +55,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   var expansion = take('race', 'list', 'src');
   rootRequest(race, '/invalid-again'); await refuse(take('race', 'list'));
   await answer(expansion, listing('/race/src', [{ name: 'kept.go' }]));
-  check('refused candidate keeps pending expansion and current root', [race.at('.froot').textContent, !!race.at('[data-path="src/kept.go"]')], ['race', true]);
+  check('refused candidate keeps pending expansion and current root', [race.at('.froot').textContent, !!race.at('[data-entry="src/kept.go"]')], ['race', true]);
   rootRequest(race, '/older-success'); var staleCandidate = take('race', 'list');
   rootRequest(race, '/newer-refusal'); await refuse(take('race', 'list'));
   await answer(staleCandidate, listing('/older-success'));
@@ -72,24 +72,24 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   event(a.at('[data-path="src"]'), 'unused');
   event(a.tree, 'click', { target: a.at('[data-path="src"]') });
   await answer(take('alpha', 'list', 'src'), listing('/alpha/src', [{ name: 'a.go' }]));
-  event(a.tree, 'click', { target: a.at('[data-path="src/a.go"]') });
-  check('expansion and selection stay local', [!!a.at('.fr[aria-selected="true"]'), !!b.at('.fr[aria-selected="true"]'), b.at('[data-path="src"]').getAttribute('aria-expanded')], [true, false, 'false']);
+  event(a.at('[data-entry="src/a.go"]'), 'click');
+  check('expansion and selection stay local', [a.instance.selection().path, b.instance.selection().path, b.at('[data-path="src"]').getAttribute('aria-expanded')], ['src/a.go', '.', 'false']);
   a.all('.fhd button')[3].click();
   var ign = a.all('.fpop input')[0]; ign.checked = true; event(ign, 'change');
   check('view and storage isolated', [!!a.at('[data-path="ignored"]'), !!b.at('[data-path="ignored"]'), Object.keys(a.store).length > 0, Object.keys(b.store).some(k => k.includes('.view'))], [true, false, true, false]);
   key(a.at('.fpop'), 'Escape');
   check('popover Escape returns owner focus', doc.activeElement === a.all('.fhd button')[3], true);
-  event(a.tree, 'contextmenu', { target: a.at('[data-path="main.go"]'), clientX: 20, clientY: 30 });
+  event(a.tree, 'contextmenu', { target: a.at('[data-path="src"]'), clientX: 20, clientY: 30 });
   check('row menu opens', !!doc.querySelector('.fmenu'), true);
   key(doc.querySelector('.fmenu'), 'Escape');
-  check('menu Escape returns row focus', doc.activeElement === a.at('[data-path="main.go"]'), true);
+  check('menu Escape returns row focus', doc.activeElement === a.at('[data-path="src"]'), true);
   slash(a.tree); check('target pane owns slash', doc.activeElement === a.q, true);
   b.el.setAttribute('data-max', ''); slash(doc.body); check('active sheet owns slash', doc.activeElement === b.q, true); b.el.removeAttribute('data-max');
   a.tree.scrollTop = 73; event(a.tree, 'scroll'); b.tree.scrollTop = 19; event(b.tree, 'scroll');
   a.instance.hidden(); a.instance.shown();
   await answer(take('alpha', 'list', 'src'), listing('/alpha/src', [{ name: 'a.go' }]));
   await answer(take('alpha', 'list', ''), listing('/alpha', undefined, true));
-  check('reopen refresh preserves expansion selection and scroll', [a.tree.scrollTop, b.tree.scrollTop, !!a.at('[data-path="src/a.go"]'), !!a.at('.fr[aria-selected="true"]')], [73, 19, true, true]);
+  check('reopen refresh preserves expansion selection and scroll', [a.tree.scrollTop, b.tree.scrollTop, !!a.at('[data-entry="src/a.go"]'), a.instance.selection().path], [73, 19, true, 'src/a.go']);
   a.all('.fseg button')[1].click(); a.all('.fopts button').forEach(n => n.click());
   a.q.value = 'needle'; event(a.q, 'input'); await timers(); var old = take('alpha', 'search');
   b.q.value = 'beta'; event(b.q, 'input'); await timers(); var br = take('beta', 'find');
@@ -135,6 +135,12 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   core.instance.on('selection', p => events.push(['sel', p.path]));
   core.instance.shown();
   await answer(take('core', 'list', ''), listing('/core', [{ name: 'src', dir: true }, { name: 'photo space.png' }, { name: 'report.pdf' }, { name: 'unsafe.svg' }, { name: 'linked.png', link: true }] , true));
+  check('side tree lists only folders while the directory pane keeps files', [core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), core.all('.fentry').map(n => n.getAttribute('data-entry'))], [['src'], ['src', 'photo space.png', 'report.pdf', 'unsafe.svg', 'linked.png']]);
+  core.all('.fview-modes button').forEach((button, i) => {
+    button.click();
+    check('side tree stays folders-only in view ' + i, core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), ['src']);
+  });
+  core.all('.fview-modes button')[0].click();
   event(core.at('[data-entry="src"]'), 'auxclick', { button: 1 });
   check('directory grid middle-click also opens a background tab', [core.all('.ftab-select').length, core.instance.location().dir], [2, '']);
   core.all('.ftab-close')[1].click();
@@ -144,6 +150,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   core.all('.fattachment button')[0].click(); core.all('.fattachment button')[1].click();
   check('browse actions emit session-relative path and selection event', [sent, copied, events.some(e => e[0] === 'sel' && e[1] === 'photo space.png')], [['photo space.png'], ['photo space.png'], true]);
   core.all('.fview-modes button')[3].click();
+  check('gallery side tree still lists only folders', core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), ['src']);
   check('gallery uses guarded raw route only for supported unlinked image', core.all('.fthumb').map(n => n.src), ['/s/core/fs/raw?path=photo%20space.png']);
   core.at('.fdirectory').scrollTop = 41; event(core.at('.fdirectory'), 'scroll');
   core.tree.scrollTop = 17; event(core.tree, 'scroll');
@@ -152,6 +159,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   await answer(take('core', 'list', ''), listing('/core', undefined, true));
   await answer(take('core', 'list', 'src'), listing('/core/src', [{ name: 'child.go' }], true));
   check('background tab activates at its folder', core.instance.location(), { root: '', dir: 'src' });
+  check('expanded side tree omits nested files but the directory pane keeps them', [core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), !!core.at('[data-entry="src/child.go"]')], [['src'], true]);
   core.all('.fview-modes button')[1].click(); core.at('.fopen-card').click();
   check('open-as-card forwards active directory', opened, [{ root: '', dir: 'src' }]);
   core.all('.ftab-select')[0].click();
