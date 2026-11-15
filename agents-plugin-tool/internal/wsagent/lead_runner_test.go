@@ -905,6 +905,9 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	h.holders.vanish(holder)
 	h.start()
 	eventually(t, "the vanished process to be noticed", func() bool { return !h.state(id).Process && h.record(id).HolderID == "" })
+	// processGone clears the process and record before writing the row.
+	// Wait for the whole loop step before checking its persisted results.
+	h.quiesce(id)
 	if st := h.state(id); st.Status != StatusIdle || len(st.Approvals) != 0 {
 		t.Fatalf("after the holder vanished: %+v", st)
 	}
