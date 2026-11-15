@@ -11,7 +11,12 @@ const prefix = 'agents-plugin-tool/internal/wsdashboard/assets/';
 const evidence = process.env.WS_FILES_EVIDENCE;
 assert(evidence, 'owned evidence directory required');
 fs.mkdirSync(evidence, { recursive: true });
-function source(rev, file) { return rev === 'result' ? fs.readFileSync(file, 'utf8') : execFileSync('git', ['show', rev + ':' + file], { encoding: 'utf8' }); }
+const { readAssetSource } = require('./asset-source.cjs');
+function source(rev, file) {
+  if (rev !== 'result') return execFileSync('git', ['show', rev + ':' + file], { encoding: 'utf8' });
+  const asset = file.match(/^agents-plugin-tool\/internal\/(wsdashboard|wswhiteboard)\/assets\/(.+)$/);
+  return asset ? readAssetSource(asset[1], asset[2]) : fs.readFileSync(file, 'utf8');
+}
 function initFrom(src, result) {
   if (result) {
     const start = src.indexOf('  if (live && fpane && window.WsFiles) {');

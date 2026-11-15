@@ -24,7 +24,7 @@ func whiteboardBridgeFunctions(t *testing.T, js string, names ...string) string 
 }
 
 func TestBoardEntryFrameBridgeStaysNarrow(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ process.stdout.write(bad.join("\n"));`)
 }
 
 func TestBoardEntryFrameHeightsAreIndependent(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ process.stdout.write(bad.join("\n"));`)
 }
 
 func TestBoardHistorySnapshotIncludesPinnedTopics(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ process.stdout.write(bad.join("\n"));`)
 }
 
 func TestBoardHistoryClosedPagingSkipsMaterializedTopics(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ process.stdout.write(bad.join("\n"));`)
 }
 
 func TestBoardHistoryHooksSurroundSSESwap(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

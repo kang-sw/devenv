@@ -1767,6 +1767,8 @@
   "hover.lastrate": "Last-turn output rate",
   "hover.turn": "Current turn",
   "hover.lastturn": "Last turn",
+  "hover.lastobserved": "Last observed",
+  "hover.history": "Observed model history",
   "hover.children": "Running subagents",
   "hover.cost": "Cost",
   "hover.registered": "Registered",

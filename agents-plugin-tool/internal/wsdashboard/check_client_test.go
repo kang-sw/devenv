@@ -74,7 +74,7 @@ function q(sel, el) { return (el || PAGE).querySelectorAll(sel); }
 // and marks it sent or held. The cases execute under node when it is
 // installed.
 func TestCheckRowClientPaths(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ process.stdout.write(bad.join("\n"));`)
 // counts a held board with TL_ASK in its place, so the two must select the
 // same items, check rows included and assumed ones left out.
 func TestTabLabelAsksAreThePillsItems(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

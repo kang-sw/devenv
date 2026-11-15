@@ -1,0 +1,132 @@
+/* ===== tracker (tracker.js, mounted by dashboard.js) =====
+   The quick-switcher slot holds nothing until the tracker mounts. The index
+   page is narrower: the tracker's drawer and handle row align with its width
+   (--tkmaxw). While a store page shows (body.tk-paged), it takes the page's
+   own content's place on every page, in a column one window tall. */
+.qsslot:empty { display: none; }
+.dash { --tkml: 0px; }
+.dash.index { --tkmaxw: 1080px; --tkml: auto; }
+body.tk-paged .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+body.tk-paged .dwrap > .top { flex: none; }
+body.tk-paged #grid, body.tk-paged #drawer, body.tk-paged #dash-banner, body.tk-paged #r-sessions, body.tk-paged .lanbox { display: none; }
+
+/* ===== index ===== */
+.totals { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.project { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.pbar { display: flex; align-items: center; gap: 8px; padding: 4px 12px; min-height: 32px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.pbar .pname { font-size: 14px; font-weight: 700; }
+.pbar .ppath { font-family: var(--wb-mono); font-size: 11.5px; opacity: .7; margin-right: auto; overflow-wrap: anywhere; min-width: 0; }
+.pbar .chip { background: rgb(127 127 127 / .28); color: inherit; }
+.sess { display: grid; grid-template-columns: minmax(0, 1.6fr) 80px 118px 96px 84px; gap: 12px; align-items: center; padding: 8px 12px; text-decoration: none; color: inherit; }
+.sess + .sess, .endedhead + .sess { border-top: 1px solid var(--wb-muted); }
+.sess:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.sess.ended { opacity: .6; }
+.sess .who { min-width: 0; }
+.sess .rid { font-family: var(--wb-mono); font-size: 13px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.sess .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
+.sess .sub { font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.sess .sub .tn { font-family: var(--wb-mono); }
+.sess .host, .sess .phase { justify-self: start; }
+.sess .qs { display: flex; gap: 4px; }
+.sess .when { font-size: 12px; color: var(--wb-muted-fg); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agents-mini { font-size: 11.5px; color: var(--wb-muted-fg); margin-left: 6px; }
+.sub .agents-mini:first-child { margin-left: 0; }
+.endedhead { font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--wb-muted-fg); padding: 6px 12px 2px; border-top: 1px solid var(--wb-muted); }
+.project > .thidden { padding: 6px 12px 8px; }
+@media (max-width: 720px) {
+  .sess { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .sess .qs, .sess > span:nth-child(2) { display: none; }
+}
+
+/* ===== link actions: the menu a served page's marked links open ===== */
+a[data-wl] { cursor: pointer; }
+a[data-wl]:not([href]) { color: var(--wb-primary); text-decoration: underline dotted; }
+a[data-wl="file"]:not([href]) { color: inherit; }
+.lmenu { position: fixed; z-index: 60; min-width: 190px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 5px; display: grid; gap: 2px; }
+.lmenu button { border: 0; background: transparent; border-radius: 7px; padding: 6px 9px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.lmenu button:hover, .lmenu button:focus-visible { background: var(--wb-muted); outline: none; }
+.fmenu button:disabled { opacity: .45; cursor: default; background: transparent; }
+/* the shared toast stack (toast.js): bottom-right, newest on top, inverted
+   like the page's text; a tracker notification carries a policy bar on its
+   left, the hidden-time summary a primary dot before its text */
+.wstoasts { position: fixed; z-index: 91; right: 16px; bottom: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.wstoast { pointer-events: auto; position: relative; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow-wrap: anywhere; }
+.wstoast.click { cursor: pointer; }
+.wstoast.click:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.wstoast.notice { padding-left: 15px; overflow: hidden; }
+.wstoast.notice::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wb-policy); }
+.wstoast.summary .wst-body::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); margin-right: 7px; vertical-align: 1px; }
+.wstoast.warn { padding-left: 15px; overflow: hidden; }
+.wstoast.warn::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wb-toast-warn); }
+.wstoast.warn .wst-body::before { content: "!"; display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--wb-toast-warn); color: var(--wb-fg); font-size: 11px; font-weight: 800; line-height: 15px; text-align: center; margin-right: 7px; vertical-align: 1px; }
+
+/* conversation images open in the viewer (viewer.js) */
+.thumbs img, .bub img { cursor: zoom-in; }
+
+/* the tracker drawer's chat tab (dashboard.js, supChat): a fixed-height slot,
+   the log scrolling inside it with the newest at the bottom, the composer
+   under it, and the selection popover over the log. The slot holds its
+   height while empty, so the drawer measures the same before the chat
+   moves in. */
+.tk .card.pane.chat > .cbody { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.tk .supslot { flex: 1 1 auto; height: 460px; min-height: 0; display: flex; flex-direction: column; }
+.tk .supchat { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.tk .suplog { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+.tk .suplog > .centries { margin-top: auto; }
+.tk .suplog .conv { padding: 8px 10px; gap: 8px; }
+.tk .suplog .conv.clive { padding-top: 0; }
+.tk .suplog .conv.clive:empty, .tk .suplog .suplive:empty { display: none; }
+.tk .suplog .cardref.up { max-width: 100%; width: min(100%, 420px); }
+.tk .supempty { margin: auto 16px; text-align: center; color: var(--wb-muted-fg); font-size: 12.5px; line-height: 1.5; }
+.tk .supempty[hidden] { display: none; }
+.tk .superr { margin: 0 10px 4px; font-size: 12px; color: var(--wb-fail); overflow-wrap: anywhere; }
+.tk .superr[hidden] { display: none; }
+.tk .supcomp { margin: 0 8px 8px; box-shadow: var(--wb-shadow), inset 0 0 0 1px var(--wb-line); }
+.tk .supbar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tk .supchip { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; border: 0; border-radius: 999px; padding: 1px 6px 1px 9px; cursor: pointer;
+  background: var(--wb-muted); color: var(--wb-muted-fg); }
+.tk .supchip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .supchip .i { width: 11px; height: 11px; flex: none; }
+.tk .supchip:hover, .tk .supchip[aria-expanded="true"] { color: var(--wb-fg); }
+.tk .supchip:focus-visible { outline: 1.5px solid var(--wb-primary); }
+/* tracker.css neutralizes the dashboard's .crow and sizes its own .csend; the chat composer is the dashboard's */
+.tk .supcomp .crow { grid-template-columns: minmax(0, 1fr) auto; }
+.tk .supcomp .csend { height: auto; }
+.tk .supcomp .csend .i { width: 17px; height: 17px; }
+.tk .supcomp .csend:disabled { opacity: .45; cursor: default; }
+.tk .supcomp textarea { min-height: 54px; }
+.tk .supcomp textarea:disabled { opacity: .6; }
+.tk .supcomp .sbadge .i { width: 13px; height: 13px; }
+.tk .supnew .i { width: 12px; height: 12px; }
+.tk .suppop { position: absolute; z-index: 3; left: 0; bottom: calc(100% + 6px); width: min(360px, 100%); max-height: 340px; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 10px;
+  background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
+.tk .suppop[hidden] { display: none; }
+.tk .spsec { display: grid; gap: 5px; }
+.tk .splbl { display: flex; align-items: baseline; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.tk .spval { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--wb-fg); font-family: var(--wb-mono); }
+.tk .spreset { font: inherit; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; border: 0; background: none; padding: 0; color: var(--wb-primary); cursor: pointer; margin-left: auto; }
+.tk .spseg { display: flex; flex-wrap: wrap; gap: 2px; width: fit-content; background: var(--wb-muted); border-radius: 999px; padding: 2px; }
+.tk .spseg button { font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 999px; padding: 2px 12px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.tk .spseg button[aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .spseg button:disabled { opacity: .45; cursor: not-allowed; }
+.tk .spseg button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .spwarn { display: grid; gap: 6px; padding: 6px 8px; border-radius: 8px; color: var(--wb-fg); background: color-mix(in srgb, var(--tk-warn) 12%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-warn) 45%, transparent); }
+.tk .spacts { display: flex; gap: 6px; }
+.tk .spq { font: inherit; font-size: 12.5px; width: 100%; border: 0; border-radius: 8px; padding: 4px 8px; background: var(--wb-muted); color: inherit; }
+.tk .splist { list-style: none; margin: 0; padding: 0; max-height: 132px; overflow-y: auto; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .splist li { padding: 3px 8px; cursor: pointer; font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .splist li i { font-family: system-ui, sans-serif; color: var(--wb-muted-fg); }
+.tk .splist li:hover, .tk .splist li.hi { background: var(--wb-muted); }
+.tk .splist li[aria-selected="true"] { color: var(--wb-primary); font-weight: 700; }
+.tk .splist li.spnone { cursor: default; color: var(--wb-muted-fg); font-family: inherit; }
+.tk .spnote { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .spnote.err { color: var(--wb-fail); }
+/* the effort knob: an empty circle per level, the thumb on the chosen one, the ends labelled */
+.tk .knob { padding: 4px 9px 0; outline: none; touch-action: none; cursor: pointer; border-radius: 8px; }
+.tk .knob:focus-visible { box-shadow: 0 0 0 1.5px var(--wb-primary); }
+.tk .ktrack { position: relative; height: 18px; margin: 0 2px; }
+.tk .ktrack::before { content: ""; position: absolute; left: 0; right: 0; top: 8px; height: 2px; border-radius: 1px; background: var(--wb-line); }
+.tk .kdot { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--wb-card); box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
+.tk .kthumb { position: absolute; top: 1px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--wb-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 22%, transparent); transition: left .08s; pointer-events: none; }
+.tk .kends { display: flex; justify-content: space-between; margin-top: 2px; font-size: 11px; color: var(--wb-muted-fg); font-family: var(--wb-mono); }
+

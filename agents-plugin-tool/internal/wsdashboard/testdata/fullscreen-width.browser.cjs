@@ -10,7 +10,8 @@ const evidence = process.env.WS_FULLSCREEN_EVIDENCE;
 assert(evidence, 'an explicit evidence directory is required');
 fs.mkdirSync(evidence, { recursive: true });
 const base = 'agents-plugin-tool/internal/wsdashboard/assets/';
-const read = name => fs.readFileSync(base + name, 'utf8');
+const { readAssetSource } = require('./asset-source.cjs');
+const read = name => readAssetSource('wsdashboard', name);
 const sprite = fs.readdirSync(base + 'lucide/icons').filter(n => n.endsWith('.svg')).map(n => {
   return `<symbol id="l-${n.slice(0, -4)}" viewBox="0 0 24 24">${read('lucide/icons/' + n).match(/<svg\b[^>]*>([\s\S]*)<\/svg>/)[1]}</symbol>`;
 }).join('');
@@ -55,7 +56,7 @@ const server = http.createServer((req, res) => {
         : { kind, rel, text: 'const width = "semantic category";\n'.repeat(12), html: '<h1>Markdown preview</h1><p>Prose keeps its category width.</p>', diff: [], frame: '/frame' };
     res.end(JSON.stringify(answer)); return;
   }
-  const assets = { '/cards.js': read('cards.js'), '/preview.js': read('preview.js'), '/dashboard.css': read('dashboard.css'), '/page.css': fs.readFileSync('agents-plugin-tool/internal/wswhiteboard/assets/page.css', 'utf8') };
+  const assets = { '/cards.js': read('cards.js'), '/preview.js': read('preview.js'), '/dashboard.css': read('dashboard.css'), '/page.css': readAssetSource('wswhiteboard', 'page.css') };
   if (assets[u.pathname]) { res.setHeader('Content-Type', u.pathname.endsWith('.css') ? 'text/css' : 'text/javascript'); res.end(assets[u.pathname]); return; }
   if (u.pathname === '/frame') { res.end('<p>Sandboxed preview</p>'); return; }
   res.writeHead(404); res.end();

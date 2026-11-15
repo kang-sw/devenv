@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -16,7 +17,8 @@ import (
 // in place of its file, with no stat, until ClearLive. The zero value is
 // ready; a nil cache reads every time.
 type SnapshotCache struct {
-	files FileCache[parsedSnapshot]
+	files    FileCache[parsedSnapshot]
+	observed FileCache[[]wslive.ObservedRecord]
 
 	liveMu sync.Mutex
 	live   map[string]parsedSnapshot // by snapshot path
@@ -117,6 +119,17 @@ func (c *SnapshotCache) Snapshot(stateDir, replyID string) *wslive.Snapshot {
 	if err != nil {
 		return nil
 	}
+	dir := SessionDir(stateDir, replyID)
+	load := func(string) ([]wslive.ObservedRecord, error) { return wslive.ReadObserved(dir) }
+	var records []wslive.ObservedRecord
+	if c == nil {
+		records, _ = load("")
+	} else {
+		records, _ = c.observed.Load(filepath.Join(dir, wslive.ObservedDirName), load)
+	}
+	if len(records) > 0 {
+		wslive.OverlayObserved(&p.snap, records)
+	}
 	return &p.snap
 }
 
@@ -127,6 +140,7 @@ func (c *SnapshotCache) Forget(stateDir, replyID string) {
 		return
 	}
 	c.files.ForgetUnder(SessionDir(stateDir, replyID))
+	c.observed.ForgetUnder(SessionDir(stateDir, replyID))
 }
 
 // Counts reports the snapshot reads served from the cache and the ones that

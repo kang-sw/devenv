@@ -31,8 +31,61 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
 var dashboardFS embed.FS
+
+// These are ordered source fragments, not independently loaded scripts or
+// stylesheets. Joining without separators preserves the original single IIFE,
+// declaration hoisting, initialization order, CSS cascade and asset identity.
+var dashboardScriptFiles = []string{
+	"dashboard.js",
+	"dashboard-board.js",
+	"dashboard-conversation.js",
+	"dashboard-composer.js",
+	"dashboard-actions.js",
+	"dashboard-drawer.js",
+	"dashboard-frames.js",
+	"dashboard-git.js",
+	"dashboard-tracker.js",
+	"dashboard-selection.js",
+	"dashboard-stream.js",
+	"dashboard-rail.js",
+	"dashboard-rail-popovers.js",
+	"dashboard-leads.js",
+	"dashboard-lifecycle.js",
+}
+
+var dashboardStyleFiles = []string{
+	"dashboard.css",
+	"dashboard-conversation.css",
+	"dashboard-board.css",
+	"dashboard-layout.css",
+	"dashboard-drawer.css",
+	"dashboard-menus.css",
+	"dashboard-rail.css",
+	"dashboard-shell.css",
+}
+
+func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte, error) {
+	var files []string
+	switch name {
+	case "dashboard.js":
+		files = dashboardScriptFiles
+	case "dashboard.css":
+		files = dashboardStyleFiles
+	default:
+		return read(name)
+	}
+	var source bytes.Buffer
+	for _, file := range files {
+		raw, err := read(file)
+		if err != nil {
+			return nil, err
+		}
+		source.Write(raw)
+	}
+	return source.Bytes(), nil
+}
 
 // Region names. The session page's regions in order; the index page has one.
 //
@@ -198,7 +251,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 			return ""
 		}
 		var raw []byte
-		raw, err = read(name)
+		raw, err = readDashboardSource(read, name)
 		return string(raw)
 	}
 	wb, werr := wswhiteboard.PageAssets()

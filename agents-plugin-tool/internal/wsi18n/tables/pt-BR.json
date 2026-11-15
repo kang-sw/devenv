@@ -1767,6 +1767,8 @@
   "hover.lastrate": "Velocidade de saída do último turno",
   "hover.turn": "Turno atual",
   "hover.lastturn": "Último turno",
+  "hover.lastobserved": "Última observação",
+  "hover.history": "Histórico de modelos observados",
   "hover.children": "Subagentes em execução",
   "hover.cost": "Custo",
   "hover.registered": "Registro",
