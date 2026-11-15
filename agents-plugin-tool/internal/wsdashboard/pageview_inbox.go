@@ -243,26 +243,41 @@ func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64, settled in
 		return ok && c.SentAt < at
 	}
 	add := func(records []wsinbox.Record, isHeld bool) {
-		// The newest send's chip wins, so read the records in send order: a
+		// The newest send's chip wins, so read the chips in send order: a
 		// steer moves an entry ahead of later sends in queue order (held)
-		// and gives it a newer name (drained).
-		records = slices.Clone(records)
-		slices.SortStableFunc(records, func(a, b wsinbox.Record) int { return cmp.Compare(a.Entry.SentAt, b.Entry.SentAt) })
+		// and gives it a newer name (drained). A chip's own send time
+		// counts (an entry merged before sends stopped merging holds chips
+		// of several sends), its entry's when it has none; the sort is
+		// stable, so a tie keeps the given order.
+		type timed struct {
+			c  wsinbox.Chip
+			at int64
+		}
+		var list []timed
 		for _, r := range records {
 			for _, c := range r.Entry.Chips {
-				if stale(c) {
-					continue
+				at := c.SentAt
+				if at == 0 {
+					at = r.Entry.SentAt
 				}
-				if !isHeld && c.Answer == "" && c.SentAt > 0 && c.SentAt < settled {
-					delete(marks, c.ID)
-					continue
-				}
-				if !seen[c.ID] {
-					seen[c.ID] = true
-					order = append(order, c.ID)
-				}
-				marks[c.ID] = SentMark{ID: c.ID, Answer: c.Answer, Note: c.Note, Held: isHeld}
+				list = append(list, timed{c, at})
 			}
+		}
+		slices.SortStableFunc(list, func(a, b timed) int { return cmp.Compare(a.at, b.at) })
+		for _, tc := range list {
+			c := tc.c
+			if stale(c) {
+				continue
+			}
+			if !isHeld && c.Answer == "" && c.SentAt > 0 && c.SentAt < settled {
+				delete(marks, c.ID)
+				continue
+			}
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				order = append(order, c.ID)
+			}
+			marks[c.ID] = SentMark{ID: c.ID, Answer: c.Answer, Note: c.Note, Held: isHeld}
 		}
 	}
 	add(drained, false)

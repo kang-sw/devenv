@@ -40,6 +40,16 @@ func TestSentMarksTakeTheNewestSendNotTheQueueOrder(t *testing.T) {
 	if got := sentMarks([]wsinbox.Record{rec(200, false, "b"), rec(100, true, "a")}, nil, nil, 0); !reflect.DeepEqual(got, want) {
 		t.Fatalf("drained sentMarks = %+v, want %+v", got, want)
 	}
+	// A chip's own send time counts over its entry's: an entry merged before
+	// sends stopped merging (first send 100) holds a chip sent at 300, newer
+	// than a separate send at 200; a chip with no time takes its entry's.
+	legacy := wsinbox.Record{Entry: wsinbox.Entry{SentAt: 100, Chips: []wsinbox.Chip{{ID: "03", Answer: "c", SentAt: 300}, {ID: "04", Answer: "old"}}}}
+	later := wsinbox.Record{Entry: wsinbox.Entry{SentAt: 200, Chips: []wsinbox.Chip{{ID: "03", Answer: "b", SentAt: 200}, {ID: "04", Answer: "new", SentAt: 200}}}}
+	got := sentMarks(nil, []wsinbox.Record{legacy, later}, nil, 0)
+	want = []SentMark{{ID: "04", Answer: "new", Held: true}, {ID: "03", Answer: "c", Held: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy sentMarks = %+v, want %+v", got, want)
+	}
 }
 
 func TestBoardFirstViewReadsNoInbox(t *testing.T) {
