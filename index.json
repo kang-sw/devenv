@@ -857,7 +857,17 @@
       "registered_at": "2026-11-15T02:02:38Z"
     },
     "261115-feat-ws-session-hire-approval": {
-      "registered_at": "2026-11-15T05:41:00Z"
+      "registered_at": "2026-11-15T05:41:00Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec5/session-hire-p1",
+        "phase": "active",
+        "touched_at": "2026-11-15T07:40:12Z",
+        "impl": {
+          "branch": "impl/exec5/session-hire-p1/swarm-straw-lens"
+        }
+      }
     },
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
