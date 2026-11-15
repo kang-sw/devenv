@@ -209,6 +209,18 @@ func TestTrackerCallsTurnTheKnobOnOnlyWhenTheySucceed(t *testing.T) {
 		t.Fatalf("a successful tracker.update must turn the knob on at session scope")
 	}
 	manual := f.manualText(t, f.key)
+	for _, want := range []string{
+		"`labels?`, `start?`, `due?`",
+		"`start` and `due`: optional `YYYY-MM-DD` dates (month 1–12, day 1–31)",
+		"one-sided edit checks the unchanged date too",
+		"Concurrent edits may fold into an inverted pair without a flag",
+		"`clear` on `tk:item.edit`: `body`, `start`, `due`",
+		"`start` and `due` (RFC 3339, each",
+	} {
+		if !strings.Contains(manual, want) {
+			t.Fatalf("tracker reference lacks %q", want)
+		}
+	}
 	if !strings.Contains(manual, "### Tracker") || !strings.Contains(manual, "`tk:item.create`") {
 		t.Fatalf("knob on: the manual must carry the tracker section:\n%s", manual)
 	}
