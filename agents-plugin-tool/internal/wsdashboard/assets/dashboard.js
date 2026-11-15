@@ -1353,13 +1353,22 @@
       var key = boardPanelKey(p), a = find(before, key), b = find(after, key);
       return !a || !b || a.outerHTML !== b.outerHTML;
     });
-    // Insertions/changes between exposed unchanged panels cannot be fixed
-    // with one delta either. Once the earlier panel leaves, the later one
-    // alone can be preserved and the pending change can be admitted.
-    if (exposed.length > 1) {
+    // The frozen interval crosses topic boundaries, but never scrollers.
+    // Extend this topic's canonical span toward other exposed units.
+    var leading = false, trailing = false;
+    if (exposed.length) {
+      var w = window.wbHistory, scroller = w.keep(live, { capture: false }).scroller;
+      var viewed = boardPanelNodes(scroller).filter(function (p) {
+        return boardExposed(p) && w.keep(p, { capture: false }).scroller === scroller;
+      });
+      var first = viewed.indexOf(exposed[0]), last = viewed.indexOf(exposed[exposed.length - 1]);
+      leading = first > 0;
+      trailing = last >= 0 && last < viewed.length - 1;
+    }
+    if (exposed.length > 1 || leading || trailing) {
       function span(list) {
         var keys = exposed.map(boardPanelKey), indices = list.map(function (p, i) { return keys.indexOf(boardPanelKey(p)) >= 0 ? i : -1; }).filter(function (i) { return i >= 0; });
-        return indices.length ? list.slice(Math.min.apply(Math, indices), Math.max.apply(Math, indices) + 1).map(function (p) { return p.outerHTML; }).join("\n") : "";
+        return indices.length ? list.slice(leading ? 0 : Math.min.apply(Math, indices), trailing ? list.length : Math.max.apply(Math, indices) + 1).map(function (p) { return p.outerHTML; }).join("\n") : "";
       }
       if (span(before) !== span(after)) return exposed;
     }

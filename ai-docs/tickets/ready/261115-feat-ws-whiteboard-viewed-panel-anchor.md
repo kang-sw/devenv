@@ -546,3 +546,60 @@ merges `55b50bd53` into the retained impl branch and issues the next focused
 re-run gate before MAIN handoff. No product/harness repair, retry, 005 or other
 browser, shared-runtime action, sync, post-sync test, Phase Result or closure
 is claimed or authorized by this checkpoint.
+
+## Cross-topic Insertion Fix Checkpoint — 2026-11-15 (incomplete)
+
+The fresh Lite review of `5585844a..fe19766c` reported one Critical gap: per-topic
+render blockers could admit an appended panel in visible topic A and displace
+an exposed panel in B. MAIN 02:54:26 authorized one contract-preserving bounded
+fix round; later separate RED-first and RED-audit/GREEN gates approved the exact
+regression and minimal product patch. No policy or contract change was needed.
+
+**VERIFIED RED before product editing:** Only
+`agents-plugin-tool/internal/wsdashboard/board_viewed_test.go` changed. Dashboard
+bytes stayed identical to `fe19766c` before/after execution. The new
+`TestBoardViewedCrossTopicInsertion` actually ran, exited 1 and failed only at
+`cross-topic insertion must be staged before reference-B correction`, after
+positive setup checks for A's one exposed pixel, B as reading reference and a
+new 40px panel after unchanged A. Total supervised time was 17.539 seconds.
+The lead audited its full evidence before permitting the product edit.
+
+**Applied delta:** `boardRenderBlockers` extends its existing canonical-span
+comparison toward exposed units in other topics sharing the actual scroller;
+independent nested scrollers are excluded. Existing admission and pending-release
+paths consume the blockers. Only the exact approved dashboard patch was applied;
+the RED test stayed frozen, and shared harness/helpers and other product code
+were unchanged. This addresses the reported case; independent review is pending.
+
+**VERIFIED single GREEN batch:** The unchanged four-test whiteboard selector and
+the dashboard selector extended only by the new regression ran all expected
+22 tests and passed, with no skips. Both commands exited 0. Complete raw outputs
+were read: whiteboard 1.138 seconds, dashboard 11.677 seconds; whole batch 30.296
+seconds including cleanup. The actual two-file delta and source/tool hashes were
+frozen before the first command, then checked unchanged. The private offline
+environment and 120-second command/90-second Go/300-second total caps, including
+30 seconds cleanup reserve, were retained; no retry or extra invocation ran.
+
+Full evidence is under
+`ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/`:
+`fix-887-round1-red/{new-test.patch,red.txt,manifest.json,freeze.json,cleanup.json,product-proposal.diff}`
+and `fix-887-round1-green/{README.md,source.patch,source-hashes.json,freeze.json,manifest.json,whiteboard.txt,dashboard.txt,cleanup.json}`.
+Both full cleanup receipts were read; scoped final process/error/action lists
+are empty. No unexpected provider process was detected in scoped observations;
+complete runtime isolation is not claimed. All 64 previous untracked entries
+and the RED directory remained present. Supervisors, binaries, private caches
+and previous protected entries are excluded from the explicit-path commit.
+
+**Browser geometry:** not run (setup positioning precondition failed at 004, 32px residual; not a product finding)
+
+Next is one fresh independent Lite review with the previous Critical report and
+RED proof. MAIN relayed owner policy (899)=a after GREEN: Minor findings become
+follow-ups; only Critical/Important findings block. One additional bounded,
+contract-preserving fix round with relevant `-run` tests is pre-granted for
+blocking findings, without a MAIN roundtrip. This supersedes the earlier
+remaining-step stop/audit gates, not the isolation or preservation requirements.
+The lead skims the diff and owns one sync of `874280de2` immediately before head
+handoff; a conflict-free sync needs no acceptance re-run. No extra lead-facing
+raw-log/manifest/cleanup/byte-equality audit, broad suite, Windows run, new browser,
+screenshot, worker self-sync, runtime action, Phase Result or closure is added.
+Owner (887)'s browser-geometry not-run disposition and no-005 limit remain.
