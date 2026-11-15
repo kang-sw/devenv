@@ -30,7 +30,7 @@ function fixture(harness) {
     saveDraft: () => events.push('draft'), go: href => events.push(['navigate', href]),
     toast: text => events.push(['toast', text]), leadErr: (st, text) => text || 'HTTP ' + st,
     WsRail: { leadBody: (root, options) => ({ root, ...options }) },
-    railPost: (route, body, done) => requests.push({ route, body, done })
+    railPost: (route, body, done, timeout) => requests.push({ route, body, done, timeout })
   });
   vm.runInContext(maker[0], ctx);
   const p = active = ctx.rpLeadMake();
@@ -58,6 +58,7 @@ for (const harness of ['claude', 'pi']) {
   assert.equal(f.requests.length, 1, 'busy prevents duplicate creation');
   assert.equal(f.requests[0].route, '/agents/leads');
   assert.equal(f.requests[0].body.harness, harness);
+  assert.equal(f.requests[0].timeout, 20000, 'a spawn that never answers ends instead of staying busy');
   // A completed HTTP response is sufficient: no SSE/attach event or timer.
   f.requests[0].done(201, { id: 'new/session' }, '');
   assert.equal(f.p.el.hidden, true);
@@ -87,4 +88,41 @@ for (const harness of ['claude', 'pi']) {
   dismissed.requests[0].done(201, { id: 'created' }, '');
   assert.deepEqual(dismissed.events, ['draft', ['navigate', '/s/created']], 'late success still opens the created session without closing another popover');
 }
-console.log('lead popover cases passed');
+// railPost itself: a request that never answers ends once, at the timeout,
+// with the timeout text, and aborts the fetch; a late answer is ignored.
+{
+  const post = source.match(/\n  function railPost\(route, body, done, timeout\) \{[\s\S]*?\n  \}\n/);
+  assert(post, 'production railPost exists');
+  const timers = [], aborted = [], calls = [];
+  let answer;
+  const ctx = vm.createContext({
+    wsT: k => k,
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    clearTimeout: id => { timers[id - 1].cleared = true; },
+    window: {
+      fetch: () => new Promise(resolve => { answer = resolve; }),
+      AbortController: class { constructor() { this.signal = {}; } abort() { aborted.push(true); } }
+    }
+  });
+  ctx.fetch = ctx.window.fetch;
+  vm.runInContext(post[0], ctx);
+  ctx.railPost('/agents/leads', {}, (st, v, s) => calls.push([st, s]), 20000);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 20000);
+  timers[0].fn();
+  assert.deepEqual(calls, [[0, 'js.post.timeout']]);
+  assert.equal(aborted.length, 1);
+  answer({ ok: true, status: 201, text: () => Promise.resolve('{"id":"late"}') });
+  setImmediate(() => {
+    assert.deepEqual(calls, [[0, 'js.post.timeout']], 'a late answer after the timeout is ignored');
+    // Without a timeout nothing is armed and the answer arrives as before.
+    const plain = [];
+    ctx.railPost('/x', {}, (st, v) => plain.push([st, v.id]));
+    assert.equal(timers.length, 1);
+    answer({ ok: true, status: 201, text: () => Promise.resolve('{"id":"ok"}') });
+    setImmediate(() => {
+      assert.deepEqual(plain, [[201, 'ok']]);
+      console.log('lead popover cases passed');
+    });
+  });
+}

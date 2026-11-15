@@ -91,7 +91,7 @@ files for plugin or tooling code unless a ticket changes the layout.
   semantics.
 - **Ask first:** new skills/agents, cross-skill interfaces, template changes that
   affect downstream projects, convention changes, architecture changes,
-  observable workflow behavior changes, and a T2 compatibility change (see
+  observable workflow behavior changes, and a T3 compatibility change (see
   `### Compatibility Tiers`).
 - **Always ask:** deleting skills/agents, changing canonical flows, modifying
   migration checklist semantics, deleting functionality, or changing protocol/API
@@ -105,19 +105,24 @@ config/rsrc manifest field - states its compatibility tier when it is
 discussed, and the ticket records it in `## Decisions`. The tier is settled
 before release, not discovered there.
 
-- T0 transparent: additive only (new tool, argument, optional field; playbook
-  or dashboard asset content).
-- T1 reconnect-recoverable: a rename that keeps the old name as an alias for
-  one minor; a tool list that refreshes on reconnect.
-- T2 breaking: a removal without an alias, a non-additive store change, a
-  protocol or tracker event change. T2 lands only in a minor bump, with the
-  store's `schema_version` or the protocol number raised.
+- T0 transparent: the old binary ignores unknown additions and works normally.
+- T1 display-degraded: the old binary shows unknown/default values and changes
+  no data.
+- T2 recoverable overwrite: the old binary may overwrite new data, but reopening
+  with the new version restores it from retained raw or append-only data.
+- T3 old-version boundary: the old binary is blocked from running, connecting,
+  reading, or writing the affected surface. Requires a minor bump and the
+  owner's explicit approval before the ticket settles it.
+- T4 unreadable history: the new binary cannot read old data. Never ship it;
+  migration must lower the change to T3 or below.
 
-Avoid T2. Design a cross-version change as T0 or T1 (additive, or keeping
-the old name as an alias) whenever one can carry it; a T2 change, and the
-minor bump it forces, needs the owner's explicit approval before a ticket
-settles it. A minor bump locks out every installed-plugin session still on
-the previous minor once a dev rebuild replaces the shared daemon.
+T0–T2 permit patches. Prefer them to a T3 boundary: a minor bump currently
+locks out installed-plugin sessions on the previous minor when a dev rebuild
+replaces the shared daemon. Every concrete verdict cites source lines for
+which version writes and reads what, and whether reopening the new version
+recovers it. Whole-file loss of unknown fields is not T2 without that recovery;
+preserve the fields or enforce a T3 boundary. A behavior-preserving alias is
+normally T0; a tool-list refresh alone does not make broken old calls compatible.
 
 Scenario sheet and enforcement: `ai-docs/manuals/release-compatibility.md`.
 

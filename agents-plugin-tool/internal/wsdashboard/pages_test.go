@@ -336,6 +336,9 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		if !strings.Contains(page, "window.wbRail") {
 			t.Errorf("%s page lacks the topic rail script", name)
 		}
+		if n := strings.Count(page, "if (d._wbDeps) return;"); n != 1 {
+			t.Errorf("%s page carries dependency popover script %d times, want once", name, n)
+		}
 	}
 }
 

@@ -92,7 +92,7 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .entry-line { display: flex; align-items: baseline; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
 .entry-line:hover { background: var(--wb-wash); }
 .entry-line .entry-at { font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .8; cursor: default; }
-.entry-text { flex: 1; min-width: 0; }
+.entry-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .wb-entry.agent > .entry-line { color: var(--wb-fg); font-size: 12.5px; }
 .wb-entry.system .entry-text { overflow-wrap: anywhere; }
 .wb-entry.owner > .entry-line { background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
@@ -182,7 +182,6 @@ details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: poin
 details.tdoc > summary::-webkit-details-marker { display: none; }
 details.tdoc > summary .new { background: currentColor; }
 .topic.quiet details.tdoc > summary { color: var(--wb-muted-fg); }
-.topic.quiet details.tdoc[open] { background: var(--wb-card); border-radius: var(--wb-radius); margin-top: 4px; overflow: hidden; }
 .doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
 .doc-body > :first-child { margin-top: 0; }
 .doc-body > :last-child { margin-bottom: 0; }

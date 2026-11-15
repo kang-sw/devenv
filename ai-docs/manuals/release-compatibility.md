@@ -1,107 +1,148 @@
 ---
-summary: Required when a change touches a cross-version surface (MCP tool or argument, `/mcp` hello, shared store shape, tracker event type, config/rsrc manifest field) - how ws versions meet, the scenario sheet, the T0/T1/T2 tiers, and the release rules
+summary: Required when a change touches a cross-version surface (MCP tool or argument, `/mcp` hello, shared store shape, tracker event type, config/rsrc manifest field) - directional T0–T4 tiers, source-backed scenarios, and release rules
 ---
 
 # Release Compatibility
 
 Several ws versions run on one machine at once: Claude, Codex, and Pi each
-install their own plugin copy and update on their own schedule. This manual
-says how those versions meet, what goes wrong, and which changes a release may
-carry. A change's compatibility tier is decided while it is discussed and
-recorded in the ticket's `## Decisions`, so the release gate only confirms it.
+install their own plugin copy and update on their own schedule. Decide a
+change's compatibility tier during discussion and record it in the ticket's
+`## Decisions`; release confirms that decision against the implementation.
 
 ## How Versions Meet
 
-- **One daemon per cache root.** Only its dashboard daemon runs a ws executable;
-  Python launchers and holders are the adapters. Starting or replacing that
-  daemon is the sole executable lifecycle exception. Within a minor the newest version wins
-  (`ensure.go` keepRunning, `version.go` CompareVersions). An older client
-  never replaces a newer daemon. Equal version strings fall back to binary
-  mtime.
+- **One daemon per cache root.** Python launchers and holders connect to the
+  dashboard daemon; starting or replacing it is the executable lifecycle
+  exception. Newer versions win. Equal versions keep identical content, then
+  compare build times, not binary mtime (`wsdashboard/ensure.go:164–185`).
 - **Binary and text come from different places.** Hosted MCP tools run in the
-  daemon binary, while playbook and skill text comes from the connecting
-  plugin's own directory (`WS_RSRC_ROOT` is required). The typical in-minor
-  skew is old skill text running against a newer binary. Playbook content
-  always matches its own package's skills.
-- **A minor mismatch never creates a second server.** The current hello
-  rejects it; the Python adapter diagnoses "dashboard daemon not reachable"
-  and retries without executable fallback. Cross-minor acceptance and notices
-  remain owned by the mixed-version guards ticket.
-- **There is effectively no version negotiation.** The `/mcp` hello requires
-  `protocol: 1` exactly. The hello's plugin version is used only for the minor
-  check and is not recorded per session. `runtime.json` per-tool ranges are
-  never evaluated, and no `tools/list_changed` is sent. The comment at
-  `version.go:52-54` states that the wire surface changes only in a minor;
-  nothing checks it yet.
-- **Stores mostly read tolerantly.** Go struct round-trips can drop fields an
-  older writer does not know (suspected; no per-writer audit yet). The config
-  and rsrc manifests, and the schema-2 whiteboard folder store, check
-  `schema_version` on read. Whiteboard conversion preserves old snapshots and
-  never dual-writes them. sqlite has no guard against an older binary opening
-  a newer schema. The tracker
-  flags unknown event types.
-- **Existing mechanisms.** Intake `accepts:` negotiation for optional event
-  kinds; the holder v / v-1 window; Pi's version pin (daemon `serverInfo` >=
-  bundled version, same minor) with one `tools/list` at startup; the Claude
-  mod reconnect watchdog, which fires only when tools disappear.
+  daemon binary, while skills and playbooks come from the connecting plugin's
+  directory (`WS_RSRC_ROOT`). Old skill text can therefore call a newer binary.
+- **Connection guards are strict today.** The hello accepts only its exact
+  protocol and, when supplied, the daemon's major.minor
+  (`wsdashboard/proxy.go:232–254`). Pi additionally requires the server to be
+  at least its bundled version in that minor
+  (`agents-plugin-pi/src/version-check.ts:39–57`). A minor mismatch does not
+  create a second server.
+- **Reconnect is not compatibility negotiation.** The launcher replays
+  initialization, not sent requests or tool discovery
+  (`agents-plugin/bin/ws-mcp-launcher.py:1473–1481,1656–1683`). Pi discovers
+  tools at initialization (`agents-plugin-pi/src/bridge.ts:1072–1079`).
+- **Store behavior is per writer.** Some writers preserve unknown raw fields;
+  others serialize a fixed struct and lose them. Some readers/writers refuse
+  newer schemas. The scenario sheet audits examples; a schema field alone
+  establishes neither preservation nor refusal.
 
-## Scenario Sheet
-
-| # | Situation | What happens | Tier |
-|---|---|---|---|
-| 1 | Pi updated a patch, Claude still on the older patch (same minor) | The daemon is replaced by Pi's newer binary; Claude sessions reconnect and run old skill text on the new binary. Fine if tools/args were only added; a removed or renamed arg fails loudly as unknown | added: T0; removed: T2 (today possible even in a patch) |
-| 2 | Claude updated, Pi older (same minor) | Symmetric to 1; Pi's pin (daemon >= bundled) passes | same as 1 |
-| 3 | Another harness replaces the daemon mid-session | In-flight calls get `-32000`, the launcher reconnects; the tool list is not refreshed, so new tools stay invisible and removed tools fail on call | T1 |
-| 4 | Minor mismatch (Pi 0.49 / Claude 0.48) | Current hello rejects it; no direct server is started. Future mixed-version acceptance still needs store guards against old writers dropping fields or opening newer schemas | T2 for non-additive store/protocol changes |
-| 5 | Same version string, different build (release vs dev) | mtime decides; a newer file wins even with older code; total order, no flapping, but a wasted replace attempt per session start | T0 (cost only) |
-| 6 | Local dev: source newer than binary | Asset-only changes are not picked up (`261112-bug-ws-launcher-fingerprint-skips-embedded-assets`) | dev-only bug |
-| 7 | Tracker ledger synced across machines on different versions | The older side flags new event types as errors | T2 (cross-machine; daemon rules cannot prevent it) |
+Go source references in this manual are relative to `agents-plugin-tool/internal/`;
+other paths are repository-relative. They describe this checkout, not an
+uninspected historical binary.
 
 ## Tiers
 
-- **T0 transparent.** Playbook and skill content changes; dashboard assets;
-  new tools, arguments, and optional fields; new optional store fields, as
-  long as read-modify-write preserves fields the writer does not know.
-- **T1 reconnect-recoverable.** Tool list refresh after a daemon replacement;
-  a tool or argument rename that keeps the old name as an alias for one
-  minor.
-- **T2 breaking.** Non-additive store changes (field removal or meaning
-  change, destructive sqlite migration); the hello protocol; new tracker event
-  types; strict config manifest fields; tool or argument removal without an
-  alias.
+Grade directionally: identify the old and new versions, which side writes what,
+which side reads or rewrites it, and what remains when the new version reopens.
+Cite source lines for each concrete verdict, including the recovery path.
+The highest tier across the affected paths controls the release.
+
+| Tier | Old/new behavior | Release |
+|---|---|---|
+| **T0 transparent** | The old binary ignores unknown additions and works normally; any write preserves the additions | Patch allowed |
+| **T1 display-degraded** | The old binary shows unknown/default values and changes no data | Patch allowed |
+| **T2 recoverable overwrite** | The old binary may overwrite new data; reopening with the new version restores it from retained raw or append-only data | Patch allowed |
+| **T3 old-version boundary** | The old binary is blocked from running or connecting, or the affected read/write is refused (hello/protocol or schema boundary) | Minor + explicit owner approval |
+| **T4 unreadable history** | The new binary cannot read old data | Never ship; migration must lower it to T3 or below |
+
+A migration executed by the new binary is fine if it reads the old data and
+makes it usable. Its effect on subsequent old readers/writers still determines
+the tier. For T2, retained bytes and the new reader's actual reconstruction are
+both evidence: an append-only store alone does not prove that a particular
+new value survives intervening old writes.
+
+### Tools and Protocol Mapping
+
+- A new tool, optional argument, or defaulted field is T0 when legacy calls
+  still work normally. New callers using new arguments against old servers
+  need capability gating or a compatible fallback; optional in the new schema
+  does not mean accepted by an old server.
+- A rename keeping the old name with the same behavior is normally T0, not
+  automatically T1. T1 applies only when the old side merely displays
+  unknown/default values and changes no data.
+- Tool-list refresh is T0 if transparent, or T1 if its only degradation meets
+  that display-only criterion, **provided old calls remain compatible**.
+  Reconnection cannot repair a removed call or argument. Removal without a
+  working alias is T3 because old clients break; retain the alias through any
+  patch and require the minor boundary and approval for its removal.
+- A hello/protocol bump that refuses old connections is T3. Store or tracker
+  event changes take their tier from the actual reader/writer behavior, not
+  from being called a protocol change.
+
+The current dispatcher refuses unknown tools (`mcp/server.go:2315–2316`),
+and the argument precheck refuses missing required or undeclared top-level
+arguments (`mcp/tool_arguments.go:65–128`). Thus discovery refresh or a migration
+hint is not a behavior-preserving alias. These are wire-call refusals; they
+perform no handler write, and reopening does not restore the old call.
+
+## Scenario Sheet
+
+Each verdict is limited to the path described. “Reopen” means reopening with
+the new version, not reconnecting the transport.
+
+| # | Situation and direction | Reads/writes and reopen result | Grade and evidence |
+|---|---|---|---|
+| 1 | Pi updates a patch; Claude uses old skill text against the new daemon | The old caller sends legacy tool/argument names; the new dispatcher reads them. No store write occurs on precheck/unknown-tool refusal; reopen cannot restore a removed call. Compatible additions keep the legacy handlers' behavior | T0 for compatible additions; T3 for removal without alias. `mcp/server.go:2315–2316`, `mcp/tool_arguments.go:65–128` |
+| 2 | Claude updates a patch; Pi is older in the same minor | Pi reads the new daemon's version and tool list, then sends old calls to it. The version pin permits this direction; data/reopen consequences remain those of the called handlers in row 1 | T0 with compatible old calls; T3 with removals. `agents-plugin-pi/src/version-check.ts:39–57`, `agents-plugin-pi/src/bridge.ts:1072–1079`, row 1 |
+| 3 | Another harness replaces the daemon mid-session | The launcher forwards old requests to the successor; already-sent calls fail with unknown outcome and are not replayed. A handler may already have written data, so reconnect proves no rollback or reopen recovery. Discovery refresh alone says nothing about those writes | No standalone tier for replacement: grade each call/store path. Compatible discovery can be T0/T1 only under the mapping above; removed calls are T3. `agents-plugin/bin/ws-mcp-launcher.py:1473–1481,1642–1683`, row 1 |
+| 4 | Old plugin connects across a minor/protocol boundary | The daemon reads its hello and refuses before handing it to the session handler. No session/store write on this path; reopening stored data is not a remedy for connection refusal | T3. `wsdashboard/proxy.go:232–254` |
+| 5 | Same version string, different release/dev build | The launcher reads health identity; equal content stays, otherwise build time selects the daemon. This selection is not a shared-data writer. Reopening cannot establish compatibility of the selected build's handlers | No independent grade from the version label; grade the content change. `wsdashboard/ensure.go:164–185` |
+| 6 | Local source changes without a version change | The launcher reads source stat metadata, including embedded assets, into its fingerprint. This is build selection, not a store write/recovery path; the former asset-omission scenario no longer describes this code | No standalone tier. `agents-plugin/bin/ws-mcp-launcher.py:546–575` |
+| 7 | New tracker event reaches an older reader on another machine | The new writer appends an event; the older domain reader flags its unknown type in a derived view without rewriting the event. New reopen reads and replays retained events; restoration of a particular new value is unverified until its new handler and intervening writes are traced | T1 for this read-only unknown-event display, not an automatic T2/T3 event rule. `wstracker/check.go:1471–1473`, `wstracker/replay.go:263–294`, `wsledger/store.go:725–763,1455–1472`, `wstracker/tracker.go:33–64` |
+| 8 | New optional memo fields meet the current writer, which does not know them | The newer side writes extra root/item fields in schema 1; the current side reads raw maps and edits known memo text while preserving extras. New reopen still has those raw fields; no lost field needs reconstruction | T0 for those additions. `wsdashboard/memos.go:23–50,67–85`; preservation fixture: `wsdashboard/memos_test.go:22–42` |
+| 9 | A newer memo schema meets the current writer | The newer side writes schema 2; the current reader projects known memo fields but save refuses before writing. New reopen sees the unchanged file | T3 write boundary, even though reads remain possible. `wsdashboard/memos.go:67–72`, `wsdashboard/memos_test.go:44–58` |
+| 10 | A new field in `registration.json` meets a struct-only older writer | The newer side writes an unknown field; the current-style reader drops it during struct decode, and the writer replaces the whole JSON file. New reopen reads the replacement, not the lost bytes; this path provides no recovery | Not T2 and not patch-safe as-is: preserve unknown fields or enforce a T3 boundary. `wsdashboard/registry.go:75–140,236–254,280–316`, `wsstate/replace_file_unix.go:7–12`, `wsstate/replace_file_windows.go:13–32` |
+| 11 | New config-manifest field or newer whiteboard folder schema meets the current reader | The newer side writes the manifest/folder; the current reader refuses unknown manifest fields or unsupported folder schema before normal use. No rewrite in these checks; new reopen retains the original bytes, but does not unblock the old reader | T3 read boundary. `mcp/config_manifest.go:172–185`, `wswhiteboard/folders.go:231–246` |
+
+No concrete T2 overwrite/reopen trace is established by these examples. Tracker
+append preserves earlier event bytes (`wsledger/store.go:725–763`), and a new
+open refreshes the ledger (`wsledger/store.go:319–336`) before tracker replay
+(`wstracker/tracker.go:33–64`); a proposed T2 change must additionally trace the
+specific value through the old write and the new handler's reconstruction.
+Likewise, a new reader that rejects old history is T4 until a migration is
+implemented and its old-data read path verified; no such change is approved by
+this sheet.
 
 ## Release Rules
 
-1. **A patch release carries only T0 and T1.** Within a minor, tools and
-   arguments stay; a rename keeps an alias for one minor.
-2. **T2 lands only in a minor bump**, raising the affected store's
-   `schema_version` or the protocol number. A writer that sees a newer
-   `schema_version` than its own refuses to write and fails loud.
-3. **The daemon judges skew.** It records each session's hello version. On a
-   minor mismatch it injects a strong notice into that session's tool results
-   and workflow manual ("plugin compatibility is broken; tell the user to
-   update") plus a dashboard badge, and the session keeps working. A patch
-   difference shows only a quiet dashboard badge. There is no direct-execution
-   fallback. Inspection reads `/health`, or the existing hello version when
-   health/version information is missing; it never executes a ws binary or
-   starts a daemon just to obtain its version.
-4. **A daemon replacement refreshes the tool list.** `tools/list_changed`
-   first; where a host ignores it, a forced reconnect (the Claude mod watchdog
-   widened to version or content-hash changes; Pi re-fetches `tools/list` on
-   reconnect).
+1. **Patches may carry T0–T2.** Retain legacy call behavior and cite any T2
+   overwrite/reopen reconstruction before settling the tier. Whole-file loss
+   without that reconstruction needs preservation or a T3 boundary.
+2. **T3 requires a minor bump and explicit owner approval.** Raise the affected
+   protocol or store schema where that enforces the boundary. Verify the old
+   side actually refuses before damaging writes; merely adding a schema number
+   to a reader that ignores it does not protect data.
+3. **T4 never ships.** Add migration in the new reader so old data remains
+   readable, then grade its effect on the old side as T3 or below.
+4. **The daemon judges skew.** The planned mechanism records each session's
+   hello version. A minor mismatch gets a strong update notice in tool results
+   and the workflow manual, plus a dashboard badge; a patch difference gets a
+   quiet badge. Sessions may continue only where calls and stores meet the
+   chosen tier; a notice does not waive a T3 refusal. Inspection uses `/health`
+   or existing hello information, with no direct-execution fallback or daemon
+   startup just to obtain a version.
+5. **A daemon replacement refreshes the tool list.** The planned mechanism
+   sends `tools/list_changed` first, with forced reconnect where a host ignores
+   it: widen the Claude mod watchdog to version/content changes and re-fetch
+   Pi's tool list on reconnect. Refresh does not repair incompatible old calls.
 
 ## Enforcement State
 
-Rules 1-4 are confirmed (user decisions 2026-11-12); their mechanisms are not
-implemented yet. Until they land, the tier recorded at discussion time and the
-release gate's review are the only checks. Pending mechanisms, tracked in
-ticket `261112-feat-ws-mixed-version-compat-guards`:
+Existing connection refusals are cited above. `SameMinor` compares version
+components, not compatibility tiers (`wsdashboard/version.go:51–61`). This
+change updates its explanatory comment only; runtime enforcement is unchanged.
 
-- Rule 1: a tool-surface monotonicity test against the previous release's
-  `runtime.json` surface.
-- Rule 2: newer-`schema_version` write refusal in every remaining shared store
-  writer; whiteboard topic folders and session metadata already refuse newer
-  schemas.
-- Rule 3: per-session hello version recording, the skew notice, and the
-  dashboard badge.
-- Rule 4: `tools/list_changed` emission and the widened reconnect triggers.
+Ticket `261112-feat-ws-mixed-version-compat-guards` tracks remaining mechanisms:
+legacy tool-surface checks, shared-store guards, per-session skew notices and
+badges, and tool-list refresh. Its older tier labels and decisions need a
+separate re-grade under this policy. In particular, cross-minor notices cannot
+replace a T3 refusal while an old writer can irrecoverably drop new fields.
+The discussion record and release review remain the checks for a change's
+source-backed tier until those mechanisms land.
