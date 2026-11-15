@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
 var dashboardFS embed.FS
 
 // These are ordered source fragments, not independently loaded scripts or
@@ -198,6 +198,10 @@ type pageAssetsData struct {
 	// page that offers terminals inlines (sessionPageData.Terminal).
 	XtermCSS     template.CSS
 	LucideSprite template.HTML
+	// Logo is the Werkschaft lockup the index page centres (the landing):
+	// both theme variants inline, the stylesheet showing the one that reads
+	// on the page's theme (dlogo-d on dark, dlogo-l on light).
+	Logo template.HTML
 	// ID is the assets' identity (assetID), which the page roots carry
 	// (data-assets) and every stream sends first (sse.go), so an open page
 	// can tell that the daemon now serves different assets than it runs.
@@ -284,6 +288,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		WebScript:        template.JS(get("webcard.js")),
 		XtermCSS:         xtermStyle(),
 		LucideSprite:     lucide,
+		Logo:             template.HTML(`<span class="dlogo-d">` + strings.TrimSpace(get("brand/werkschaft-dark.svg")) + `</span><span class="dlogo-l">` + strings.TrimSpace(get("brand/werkschaft-light.svg")) + `</span>`),
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,

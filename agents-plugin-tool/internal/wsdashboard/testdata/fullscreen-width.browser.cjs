@@ -158,10 +158,11 @@ async function shot(page, name) {
   const panelRect=await rect(page,'.entry-panel[data-max]'), headRect=await rect(page,'.entry-panel[data-max] > summary');
   near(headRect.top,panelRect.top+1,'sticky panel header');
   await page.locator('.entry-panel[data-max] .d-min').click();
-  // Files uses the conversation grid pane, not the board or hidden explorer.
-  const convoWidth=(await rect(page,'#convo')).width;
+  // Files spans the main (board) column it floats over, not the conversation pane.
+  const columnWidth=(await rect(page,'#bcol')).width;
   await page.locator('.board-files').click();
-  await geometry(page,'.fpane[data-max]',2400,Math.min(1920,convoWidth),'Files owning column');
+  near((await rect(page,'.fpane[data-max]')).width,columnWidth,'Files main column width');
+  near((await rect(page,'.fpane[data-max]')).left,(await rect(page,'#bcol')).left,'Files over the main column');
   await page.locator('.board-toolbar .sheet-width').click();
   await geometry(page,'.fpane[data-max]',2400,2368,'Files extended');
   await page.locator('.board-toolbar .sheet-width').click();

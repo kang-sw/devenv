@@ -59,6 +59,14 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .wstoast.warn { padding-left: 15px; overflow: hidden; }
 .wstoast.warn::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wb-toast-warn); }
 .wstoast.warn .wst-body::before { content: "!"; display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--wb-toast-warn); color: var(--wb-fg); font-size: 11px; font-weight: 800; line-height: 15px; text-align: center; margin-right: 7px; vertical-align: 1px; }
+.wstoast.wst-closable { padding-right: 28px; }
+.wstoast .wst-x { position: absolute; top: 3px; right: 4px; width: 20px; height: 20px; border: 0; border-radius: 5px; background: transparent; color: inherit; opacity: .7; font: inherit; font-size: 15px; line-height: 18px; cursor: pointer; padding: 0; }
+.wstoast .wst-x:hover { opacity: 1; background: color-mix(in srgb, var(--wb-card) 16%, transparent); }
+.wstoast .wst-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.wstoast .wst-act { border: 1px solid color-mix(in srgb, var(--wb-card) 40%, transparent); background: transparent; color: inherit; border-radius: 6px; padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.wstoast .wst-act:first-child { background: var(--wb-primary); border-color: var(--wb-primary); color: var(--wb-card); }
+.wstoast .wst-act:hover { filter: brightness(1.08); }
+.wstoast .wst-act:focus-visible, .wstoast .wst-x:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; }
 
 /* conversation images open in the viewer (viewer.js) */
 .thumbs img, .bub img { cursor: zoom-in; }

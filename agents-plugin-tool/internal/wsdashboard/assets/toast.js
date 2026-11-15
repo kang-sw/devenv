@@ -17,6 +17,11 @@
   //                  8000 for "notice" and "summary"
   //   opts.onClick   makes the toast a button: a click (or Enter / Space)
   //                  runs it and closes the toast
+  //   opts.sticky    no timer: it stays until closed (by an action, the
+  //                  dismiss button, the cap, or the caller's close)
+  //   opts.actions   [{ label, run }]: buttons under the text; a click
+  //                  closes the toast, then runs that action
+  //   opts.dismiss   label of a corner close button (its aria-label)
   if (window.WsToast) return;
   var doc = document, MAX = 3, DURATION = { info: 4000, warn: 6000, notice: 8000, summary: 8000 };
   var box = null, live = []; // live: the shown toasts' close functions, oldest first
@@ -42,6 +47,30 @@
     if (opts.html) body.innerHTML = String(content);
     else body.textContent = String(content);
     el.appendChild(body);
+    var acts = Array.isArray(opts.actions) ? opts.actions : [];
+    if (acts.length) {
+      var row = doc.createElement("span");
+      row.className = "wst-acts";
+      acts.forEach(function (a) {
+        var b = doc.createElement("button");
+        b.type = "button";
+        b.className = "wst-act";
+        b.textContent = String(a.label);
+        b.addEventListener("click", function () { close(); if (typeof a.run === "function") a.run(); });
+        row.appendChild(b);
+      });
+      el.appendChild(row);
+    }
+    if (opts.dismiss) {
+      var x = doc.createElement("button");
+      x.type = "button";
+      x.className = "wst-x";
+      x.setAttribute("aria-label", String(opts.dismiss));
+      x.textContent = "\u00d7";
+      x.addEventListener("click", function () { close(); });
+      el.classList.add("wst-closable");
+      el.appendChild(x);
+    }
 
     var timer = 0, left = ms, since = 0, gone = false;
     function close() {
@@ -52,10 +81,12 @@
       if (el.parentNode) el.parentNode.removeChild(el);
     }
     function run() {
+      if (opts.sticky) return;
       since = Date.now();
       timer = setTimeout(close, left);
     }
     el.addEventListener("mouseenter", function () {
+      if (opts.sticky) return;
       clearTimeout(timer);
       left = Math.max(0, left - (Date.now() - since));
     });

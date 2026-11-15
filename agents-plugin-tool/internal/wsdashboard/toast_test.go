@@ -75,8 +75,9 @@ function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(wan
 // toast leaves after 4 s, a warn toast after 6 s, and a notice after 8 s; a
 // hover pauses the timer and leaving resumes it with the time left; a
 // clickable toast is a button whose click runs its action and closes it;
-// content is text unless the caller asks for HTML. The cases execute under
-// node when it is installed.
+// content is text unless the caller asks for HTML; a sticky toast keeps no
+// timer, its action buttons close it and then run, and a dismiss button only
+// closes it. The cases execute under node when it is installed.
 func TestToastStack(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/toast.js")
 	if err != nil {
@@ -127,6 +128,18 @@ advance(5999);
 check("a warn toast stays until 6 s", texts(), ["w"]);
 advance(1);
 check("a warn toast leaves at 6 s", texts(), []);
+var ran = [];
+W.show("u", { sticky: true, dismiss: "Close", actions: [{ label: "Update", run: function () { ran.push("update"); } }, { label: "Skip", run: function () { ran.push("skip"); } }] });
+var u = document.body.children[0].children[0];
+check("actions and a dismiss button", [u.className, u.children[1].className, u.children[1].children.map(function (b) { return b.textContent; }), u.children[2].className, u.children[2].getAttribute("aria-label")],
+  ["wstoast info wst-closable", "wst-acts", ["Update", "Skip"], "wst-x", "Close"]);
+advance(100000);
+check("a sticky toast has no timer", texts(), ["u"]);
+u.children[1].children[1].fire("click");
+check("an action closes the toast, then runs", [ran, texts()], [["skip"], []]);
+W.show("v", { sticky: true, dismiss: "Close" });
+document.body.children[0].children[0].children[1].fire("click");
+check("dismiss closes without an action", [ran, texts()], [["skip"], []]);
 check("no timers left", timers.length, 0);
 process.stdout.write(bad.join("\n"));
 `)

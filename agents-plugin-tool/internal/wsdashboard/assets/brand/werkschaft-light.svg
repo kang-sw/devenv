@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 56 1300 272" width="650" height="136"><title>Werkschaft</title>
+<g transform="translate(56 72) scale(0.46875)"><rect width="512" height="512" rx="96" fill="#1E2235"/><g transform="translate(8 0)" fill="none" stroke-width="46" stroke-linejoin="miter" stroke-miterlimit="2">
+<path d="M120 362 L176 200" stroke="#F2EBDD" stroke-linecap="butt"/><path d="M232 362 L288 150" stroke="#F2EBDD" stroke-linecap="butt"/>
+<path d="M64 150 L112.3 333" stroke="#E4572E" stroke-linecap="butt"/><path d="M185.1 226.5 L222.9 335.5" stroke="#E4572E" stroke-linecap="butt"/>
+<path d="M428.3 180 A50 50 0 1 0 339.7 226.1" stroke="#F2EBDD" stroke-linecap="butt"/><path d="M360 238.9 L408 269.2" stroke="#E4572E" stroke-linecap="butt"/><path d="M428.3 282 A50 50 0 1 1 339.7 328.1" stroke="#F2EBDD" stroke-linecap="butt"/>
+</g></g>
+<g transform="translate(400 142)" fill="none" stroke="#1E2235" stroke-width="14" stroke-linecap="square" stroke-linejoin="miter" stroke-miterlimit="2">
+<path d="M0 0 L22 100 L48 30 L74 100 L96 0"/>
+<path transform="translate(126 0)" d="M56 0 H0 V100 H56 M0 50 H48"/>
+<g transform="translate(212 0)"><path d="M0 100 V0 H22 A25 25 0 0 1 22 50 H0"/><path d="M27 64 L42 100" stroke="#E4572E" stroke-linecap="butt"/></g>
+<g transform="translate(290 0)"><path d="M0 0 V100 M58 0 L4 54"/><path d="M32.7 44 L56 100" stroke="#E4572E" stroke-linecap="butt"/></g>
+<path transform="translate(380 0)" d="M48.5 10.7 A25 25 0 1 0 28 50 A25 25 0 1 1 7.5 89.3" stroke-linecap="butt"/>
+<path transform="translate(450 0)" d="M81 19 A44 44 0 1 0 81 81" stroke-linecap="butt"/>
+<path transform="translate(570 0)" d="M0 0 V100 M60 0 V100 M0 50 H60"/>
+<g transform="translate(660 0)"><path d="M0 100 L41 0 L63.1 54 M19.7 48 H60.7"/><path d="M67 64 L82 100" stroke="#E4572E" stroke-linecap="butt"/></g>
+<path transform="translate(772 0)" d="M0 100 V0 H54 M0 48 H46"/>
+<path transform="translate(856 0)" d="M0 0 H64 M32 0 V100"/>
+</g></svg>
