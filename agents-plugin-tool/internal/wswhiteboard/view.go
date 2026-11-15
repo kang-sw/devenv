@@ -135,6 +135,9 @@ type FileAction struct {
 
 // TopicView is one topic block.
 type TopicView struct {
+	// fullHistory distinguishes the unified full-page history from the
+	// compact embed's existing recap/check/settled presentation.
+	fullHistory bool
 	// Name is the topic's key (its stem, else its label), which page-to-lead
 	// lines carry (data-topic) so the lead can address the topic with it;
 	// Label is the name the page shows.
@@ -305,10 +308,11 @@ func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string
 }
 
 // HeadSummary reports whether the topic's head carries its summary line: an
-// open topic with a latest agent line or a check list. The line holds the
-// agent line (never a legacy recap or a system event) and the check pill.
+// open topic with a latest agent line or checks. The line holds the agent
+// line (never a legacy recap or a system event) and the check pill. Keep
+// that pill after the last open check settles: it reveals answered history.
 func (t TopicView) HeadSummary() bool {
-	return !t.Closed && (t.LatestAgent != nil || t.ChecksShown())
+	return !t.Closed && (t.LatestAgent != nil || len(t.Checks) > 0)
 }
 
 // LegacyRecapOpen reports whether an open topic shows an unconverted legacy
@@ -356,7 +360,9 @@ func (t TopicView) SettledCount() int {
 
 // ChecksShown reports whether the check list shows under the recap: the
 // topic has checks and is open.
-func (t TopicView) ChecksShown() bool { return len(t.Checks) > 0 && !t.Closed }
+func (t TopicView) ChecksShown() bool {
+	return !t.Closed && len(t.Checks) > 0 && (!t.fullHistory || t.OpenChecks() > 0)
+}
 
 // OpenChecks counts the topic's checks still waiting on the user.
 func (t TopicView) OpenChecks() int {
@@ -604,7 +610,8 @@ func BuildView(state *State, in ViewInput) View {
 	topicStates := state.TopicStates()
 	var order []string
 	blocks := map[string]*TopicView{}
-	itemsChanged := map[string]int{} // newest Item.Changed per topic
+	itemsChanged := map[string]int{}        // newest Item.Changed per topic
+	historyItems := map[string][]ItemView{} // stable State.Items order, never settle-counter order
 	blockOf := func(topic string) *TopicView {
 		block, ok := blocks[topic]
 		if !ok {
@@ -612,6 +619,7 @@ func BuildView(state *State, in ViewInput) View {
 			block = &TopicView{
 				Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic),
 				State: current.State, StateDiagnostic: current.Diagnostic,
+				fullHistory: in.Layout == LayoutFull,
 			}
 			blocks[topic] = block
 			order = append(order, topic)
@@ -622,6 +630,9 @@ func BuildView(state *State, in ViewInput) View {
 		block := blockOf(item.Topic)
 		iv := itemView(item)
 		itemsChanged[item.Topic] = max(itemsChanged[item.Topic], item.Changed)
+		if in.Layout == LayoutFull && item.Status != StatusOpen {
+			historyItems[item.Topic] = append(historyItems[item.Topic], iv)
+		}
 		if in.Layout == LayoutEmbed && item.Changed > state.LastEmbedSeq {
 			iv.New = true
 			block.Fresh++
@@ -660,10 +671,18 @@ func BuildView(state *State, in ViewInput) View {
 		if latest, ok := doc.LatestAgent(); ok {
 			block.LatestAgent = &latest
 		}
-		block.PanelRecaps, block.Stream, block.Older = streamView(doc, block.Closed, in.Location)
+		block.PanelRecaps, block.Stream, block.Older = streamView(doc, block.Closed, in.Location, historyItems[doc.Name])
 		if in.Layout == LayoutEmbed {
 			block.Doc, block.DocMarks, block.DocNew = "", nil, false
 			block.Stream, block.Older = EntryPage{}, nil
+		}
+	}
+	// Legacy item-only topics have no TopicDoc/event ledger. They still get
+	// the same history component, with explicitly unknown event times.
+	for name, items := range historyItems {
+		block := blocks[name]
+		if block.Stream.Count == 0 {
+			block.PanelRecaps, block.Stream, block.Older = streamView(TopicDoc{Name: name}, block.Closed, in.Location, items)
 		}
 	}
 	stampUpdated(state, blocks, in.Location)
@@ -683,6 +702,9 @@ func BuildView(state *State, in ViewInput) View {
 	// Quiet follows what the page shows, so an unread body that stays folded
 	// (the embed, an unchanged body) does not make a topic look active.
 	quiet := func(t *TopicView) bool {
+		if t.fullHistory && t.StreamTotal() > 0 {
+			return false
+		}
 		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen() && (t.Closed || len(t.PanelRecaps) == 0)
 	}
 	for _, name := range order {

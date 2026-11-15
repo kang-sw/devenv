@@ -632,6 +632,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.Seq++
 	mark := work.Seq
 	var out Outcome
+	created := map[string]Item{} // only this Apply knows these entries' batch membership
 	previous := effectSnapshot(work)
 	var optionWarn []int
 	embedDir := false
@@ -667,7 +668,13 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 		topics := updates.touchCommand(work, cmd, topicOf)
 		switch cmd.Tag {
 		case "wb:add":
+			before := len(work.Items)
 			id := applyAdd(p, work, cmd, topicOf, mark, env.Now)
+			if len(work.Items) > before {
+				item := work.Items[len(work.Items)-1]
+				entries := work.topicDoc(item.Topic).Entries
+				created[entries[len(entries)-1].ID] = item
+			}
 			out.IDs = append(out.IDs, id)
 			optionWarn = work.noteNonPolicyOptions(optionWarn, id)
 		case "wb:answer":
@@ -730,6 +737,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	if len(p.List) > 0 {
 		return work, Outcome{}, updates
 	}
+	coalesceCreated(work, created)
 	work.evictArchive()
 	work.pruneLabels()
 	out.Effects = append(out.Effects, semanticEffects(previous, work)...)

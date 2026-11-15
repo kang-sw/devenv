@@ -78,6 +78,7 @@ async function until(check, message) {
         }, 'active production session frame reaches ' + mode);
       }
       async function shot(name) {
+        if (process.env.WS_BOARD_ACCEPTANCE_LOGIC_ONLY === '1') return;
         await tab.screenshot({ path: path.join(output, `${width}-${name}.png`), fullPage: true });
       }
       async function showTab(name) {

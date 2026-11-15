@@ -152,35 +152,48 @@ func TestChecksOnlyTopicChipIsAPlainCount(t *testing.T) {
 }
 
 func TestCheckRowsRenderTheirStates(t *testing.T) {
-	page := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	row := func(id string) string {
-		return regexp.MustCompile(`<div class="ckrow[^"]*" id="item-` + id + `".*?</div>`).FindString(page)
-	}
-	open := row("3")
-	for _, want := range []string{`class="ckrow" id="item-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
-		if !strings.Contains(open, want) {
-			t.Fatalf("open check row missing %q:\n%s", want, open)
+	for _, layout := range layouts() {
+		page := render(t, BuildView(checkBoard(t), ViewInput{Layout: layout, ReplyID: "r"}))
+		row := func(id string) string {
+			return regexp.MustCompile(`<div class="ckrow[^"]*" id="item-` + id + `".*?</div>`).FindString(page)
 		}
-	}
-	if ok := row("4"); !strings.Contains(ok, `class="ckrow done"`) || !strings.Contains(ok, `checked disabled`) || !strings.Contains(ok, `<span class="stamp">ok</span>`) || strings.Contains(ok, "data-id") {
-		t.Fatalf("answered ok row:\n%s", ok)
-	}
-	if no := row("5"); !strings.Contains(no, `class="ckrow no"`) || !strings.Contains(no, `class="cbox"`) || !strings.Contains(no, `<span class="stamp">no</span>`) || !strings.Contains(no, `B is too dark; go with A</span>`) {
-		t.Fatalf("answered no row:\n%s", no)
-	}
-	if as := row("6"); !strings.Contains(as, `data-id="06" data-assumed`) || !strings.Contains(as, `class="amark"`) || !strings.Contains(as, "note-toggle") {
-		t.Fatalf("assumed row:\n%s", as)
-	}
-	if strings.Contains(page, `label class="ack"><input type="checkbox" data-id="03"`) {
-		t.Fatal("a check row reuses label.ack")
-	}
-	if !strings.Contains(page, `answered 3 / 4`) {
-		t.Fatal("the check list header carries its progress")
-	}
-	// Placement: recap, check list, then the policy and ack items.
-	recap, list, policy := strings.Index(page, `class="trecap"`), strings.Index(page, `class="checks"`), strings.Index(page, `class="card policy"`)
-	if !(recap >= 0 && recap < list && list < policy) {
-		t.Fatalf("placement recap %d, checks %d, policy %d", recap, list, policy)
+		open := row("3")
+		for _, want := range []string{`class="ckrow" id="item-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
+			if !strings.Contains(open, want) {
+				t.Fatalf("open check row missing %q:\n%s", want, open)
+			}
+		}
+		if layout == LayoutFull {
+			for _, id := range []string{"4", "5", "6"} {
+				wantNone(t, row(id), `class="ckrow`)
+				wantAll(t, regexpHistoryArticle(page, "item-"+id), `data-history-item="`+id+`"`, `class="wb-hclass">Check</span>`)
+			}
+			wantAll(t, regexpHistoryArticle(page, "item-4"), `class="wb-hstatus"`, ">ok</span>", "4=ok")
+			wantAll(t, regexpHistoryArticle(page, "item-5"), ">no</span>", "B is too dark; go with A")
+			wantAll(t, regexpHistoryArticle(page, "item-6"), `data-id="06"`, "assumed", "sounds fine", "note-toggle")
+			wantNone(t, page, `<details class="settled"`, `<details class="topic-stream"`)
+		} else {
+			if ok := row("4"); !strings.Contains(ok, `class="ckrow done"`) || !strings.Contains(ok, `checked disabled`) || !strings.Contains(ok, `<span class="stamp">ok</span>`) || strings.Contains(ok, "data-id") {
+				t.Fatalf("answered ok row:\n%s", ok)
+			}
+			if no := row("5"); !strings.Contains(no, `class="ckrow no"`) || !strings.Contains(no, `class="cbox"`) || !strings.Contains(no, `<span class="stamp">no</span>`) || !strings.Contains(no, `B is too dark; go with A</span>`) {
+				t.Fatalf("answered no row:\n%s", no)
+			}
+			if as := row("6"); !strings.Contains(as, `data-id="06" data-assumed`) || !strings.Contains(as, `class="amark"`) || !strings.Contains(as, "note-toggle") {
+				t.Fatalf("assumed row:\n%s", as)
+			}
+		}
+		if strings.Contains(page, `label class="ack"><input type="checkbox" data-id="03"`) {
+			t.Fatal("a check row reuses label.ack")
+		}
+		if !strings.Contains(page, `answered 3 / 4`) {
+			t.Fatal("the check list header carries its progress")
+		}
+		// Placement: recap, check list, then the policy and ack items.
+		recap, list, policy := strings.Index(page, `class="trecap"`), strings.Index(page, `class="checks"`), strings.Index(page, `class="card policy"`)
+		if !(recap >= 0 && recap < list && list < policy) {
+			t.Fatalf("placement recap %d, checks %d, policy %d", recap, list, policy)
+		}
 	}
 }
 
@@ -200,10 +213,13 @@ func TestCheckStampReadsALoneOkOrNo(t *testing.T) {
 			t.Errorf("%q: verdict and reading %q, want %q", answer, got, want)
 		}
 	}
-	// A free-text answer renders as a ticked row with the text and no stamp.
+	// An embed keeps its ticked row; full pages carry the same answer in history.
 	st := &State{}
 	mustApply(t, st, addXML(ClassCheck, "t", "look")+`<wb:answer id="1" value="no problem, ship it">fine</wb:answer>`)
-	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, regexpHistoryArticle(full, "item-1"), `data-history-item="1"`, "no problem, ship it</span>")
+	wantNone(t, regexpHistoryArticle(full, "item-1"), `class="stamp"`, `class="ckrow`)
+	page := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
 	row := regexp.MustCompile(`<div class="ckrow[^"]*" id="item-1".*?</div>`).FindString(page)
 	if !strings.Contains(row, `class="ckrow done"`) || strings.Contains(row, `class="stamp"`) || !strings.Contains(row, `no problem, ship it</span>`) {
 		t.Fatalf("free-text answered check row:\n%s", row)
@@ -217,7 +233,13 @@ func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
 	if topic.ChecksShown() || len(topic.Checks) != 4 || topic.SettledCount() != 3+4 {
 		t.Fatalf("closed topic: shown %v, checks %d, settled %d", topic.ChecksShown(), len(topic.Checks), topic.SettledCount())
 	}
-	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, full, `<div class="topic-stream">`)
+	wantNone(t, full, `<details class="settled"`, `<details class="topic-stream"`, `class="checks"`)
+	for _, id := range []string{"3", "4", "5", "6"} {
+		wantAll(t, regexpHistoryArticle(full, "item-"+id), `data-history-item="`+id+`"`)
+	}
+	page := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
 	fold := regexp.MustCompile(`(?s)<details class="settled".*?</details>`).FindString(page)
 	if !strings.Contains(fold, `class="checks"`) {
 		t.Fatalf("the check list folds into the settled details:\n%s", fold)
@@ -250,7 +272,7 @@ func TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide(t *testing.T) {
 
 	closed := checkBoard(t)
 	mustApply(t, closed, `<wb:answer id="1" value="a">a</wb:answer><wb:answer id="2" value="ok">ok</wb:answer><wb:answer id="3" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="done"/></wb:topic>`)
-	if page := render(t, BuildView(closed, ViewInput{Layout: LayoutFull, ReplyID: "r"})); !strings.Contains(page, `class="checks"`) || strings.Contains(page, `class="btn mini ckhide"`) {
+	if page := render(t, BuildView(closed, ViewInput{Layout: LayoutEmbed, ReplyID: "r"})); !strings.Contains(page, `class="checks"`) || strings.Contains(page, `class="btn mini ckhide"`) {
 		t.Fatal("a closed topic's folded check list carries the hide toggle")
 	}
 

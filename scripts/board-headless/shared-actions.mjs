@@ -29,7 +29,7 @@ async function scenarioSharedControls(ctx) {
   qa(!await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'panel summary remains independently usable');
   await panels.nth(0).locator(':scope > summary').click();
   qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'panel toggle preserves independently open/closed panels');
-  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.entry-panel')].map((d) => [d.getAttribute('data-key'), d.open]));
+  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.entry-panel,details.panel-versions,details.system-run,details.sx')].map((d) => [d.getAttribute('data-key'), d.open]));
   const inner = await disclosures();
   await page.locator(topic + ' a[data-wl="file"][data-rel="docs/a.md"]').first().click();
   await page.waitForSelector('.bcard[data-kind="preview"] .pv-md');
