@@ -289,10 +289,12 @@
   // child (its own group only; the route checks no stars for a detach).
   // The line after a parent whose children show is the line before its
   // first child. An orphan shows top-level, so it is a target as one.
-  function dropZone(d, t, frac) {
+  // With halves every row splits in halves (no child zone): the pointer
+  // drag's line, whose child zone arms only after a dwell.
+  function dropZone(d, t, frac, halves) {
     if (!d || !t || !d.rid || t.rid === d.rid || t.parent === d.rid) return null;
     var parentOK = !t.parent && t.live && t.ws === d.ws && !d.kids;
-    var zone = parentOK ? (frac < 0.25 ? "before" : frac > 0.75 ? "after" : "child") : (frac < 0.5 ? "before" : "after");
+    var zone = parentOK && !halves ? (frac < 0.25 ? "before" : frac > 0.75 ? "after" : "child") : (frac < 0.5 ? "before" : "after");
     if (zone === "child") return { zone: zone, ref: t.rid, op: { op: "attach", rid: d.rid, parent: t.rid } };
     if (zone === "after" && parentOK && t.first) {
       return dropZone(d, { rid: t.first, ws: t.ws, group: "", live: true, parent: t.rid, kids: false, star: false, first: "" }, 0);
@@ -770,7 +772,8 @@
     }
     function show(n) {
       var src = n && source(n);
-      if (!src || !n.isConnected || !n.getClientRects().length) { hide(); return; }
+      // A rail drag (rdragging) shows no hover: the rows it passes are targets.
+      if (!src || !n.isConnected || !n.getClientRects().length || hasClass(doc.documentElement, "rdragging")) { hide(); return; }
       if (!pop) {
         pop = doc.createElement("div"); pop.className = "rpop shp";
         pop.setAttribute("role", "tooltip");

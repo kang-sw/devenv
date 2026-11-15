@@ -613,13 +613,17 @@
 
   // --- rail drag: sessions in their tree, workspaces among themselves ---
   // A live session row drags by its grip (the gutter left of its harness
-  // icon), a parent with its children; a workspace section drags by its
-  // bar among the sections. Over a live row the row's zones decide
-  // (WsRail.dropZone): the middle half of a valid parent attaches the row
-  // as its last child (the parent outlined, no line), its quarters and
-  // any other row's halves are a line before or after it at its level,
-  // which reorders, attaches among a parent's children, or detaches a
-  // child to the top level of its own group. Anywhere else in its own
+  // icon) or, with a mouse or pen, by its whole body, a parent with its
+  // children; a workspace section drags by its bar among the sections.
+  // Over a live row its halves are a line before or after it at its
+  // level (WsRail.dropZone with halves), which reorders, attaches among a
+  // parent's children, or detaches a child to the top level of its own
+  // group; the pointer held still RD_NEST in a valid parent's middle half
+  // instead attaches the row as its last child (the parent outlined, no
+  // line). The child zone is never armed by a pass alone: it once took the
+  // middle half of every top-level row at once, so a drop aimed at a row
+  // nested under it, and its quarters left 7px for a reorder on a
+  // one-line row. Anywhere else in its own
   // group the drop takes the nearest place among its top-level peers on
   // its side of the stars. A line shows where it lands, clamped to the
   // list's edge when that place is scrolled out of view, and the drop
@@ -628,7 +632,8 @@
   // with the reason in a toast. Over a place it cannot land (another
   // workspace or worktree, the other side of the stars, an ended row, too
   // deep) the cursor says no and a hint says why. A press that never moves past
-  // RD_SLOP stays a click. The rest of a row is its link and never drags; a
+  // RD_SLOP stays a click (a row's link opens). A row's buttons and rename
+  // field never drag, nor does a touch on a row off its grip; a
   // touch on a grip drags with no hold, while a touch on a bar drags only
   // after holding still for RD_HOLD, so a swipe still scrolls the list. No
   // drag starts from a button in a bar (+, forget); the bar's own toggle is
@@ -636,7 +641,7 @@
   // cancelled. Every rail swap waits from the press until it ends
   // (railGate), and a node replaced anyway is found again by its reply-id
   // or path.
-  var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48;
+  var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48, RD_NEST = 600;
   var rdragged = false, rdLineEl = null, rdHintEl = null, rdKidEl = null, rdRaf = 0;
   function rdPeers(item) {
     var ws = item.classList.contains("rws"), wt = item.classList.contains("rwt");
@@ -706,11 +711,18 @@
     }
     if (row && (!railEl.contains(row) || row.classList.contains("ended"))) row = null;
     if (row) {
-      var rr = row.getBoundingClientRect();
-      z = WsRail.dropZone(WsRail.rowFacts(d.item), WsRail.rowFacts(row), rr.height ? (y - rr.top) / rr.height : 0.5);
+      var rr = row.getBoundingClientRect(), df = WsRail.rowFacts(d.item), tf0 = WsRail.rowFacts(row);
+      var frac = rr.height ? (y - rr.top) / rr.height : 0.5, kz = WsRail.dropZone(df, tf0, frac);
+      // The child zone (a valid parent's middle half) arms only once the
+      // pointer has dwelt there RD_NEST: a pass over a row on the way is a
+      // line at its halves, the same line the drop lands on.
+      if (kz && kz.zone === "child") rdDwell(d, tf0.rid);
+      else rdDwell(d, "");
+      z = kz && kz.zone === "child" && d.nest === tf0.rid ? kz : WsRail.dropZone(df, tf0, frac, true);
       ref = row;
       if (z && z.ref !== row.getAttribute("data-rid")) ref = row.nextElementSibling && row.nextElementSibling.firstElementChild;
     } else {
+      rdDwell(d, "");
       var why = WsRail.dropRefusal(d.item, over);
       if (why) z = { refusal: why };
       else {
@@ -735,6 +747,21 @@
     var box = ref.getBoundingClientRect(), top = Math.round((z.zone === "after" ? rdBottom(ref) : box.top) - 1);
     if (lr) top = Math.max(Math.round(lr.top), Math.min(Math.round(lr.bottom) - 2, top));
     rdLine({ left: box.left, width: box.width, top: top });
+  }
+  // rdDwell tracks the pointer over a valid parent's child zone (rid, ""
+  // for none): RD_NEST after it entered that zone, without leaving it,
+  // d.nest arms it and the drop is redrawn; leaving it disarms.
+  function rdDwell(d, rid) {
+    if (d.dwell === rid) return;
+    clearTimeout(d.dwellTimer);
+    d.dwell = rid;
+    d.nest = "";
+    if (!rid) return;
+    d.dwellTimer = setTimeout(function () {
+      if (rdrag !== d || !d.on || d.dwell !== rid) return;
+      d.nest = rid;
+      rdOver(d.x, d.y);
+    }, RD_NEST);
   }
   // rdItem keeps the press on its item: a node a swap replaced anyway is
   // found again (WsRail.refind) and takes the drag's marks. False when it is
@@ -802,8 +829,12 @@
     if (rdrag || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
     var t = e.target, item, grip = t.closest && t.closest(".drgrip");
     if (!t.closest) return;
-    if (grip) {
-      item = grip.closest(".rs");
+    // A mouse or pen press drags a live row from anywhere on it but its
+    // buttons and its rename field; a touch drags by the grip alone (on
+    // the rest of the row it scrolls the list or holds for the row menu).
+    var body = !grip && e.pointerType !== "touch" && !t.closest("button, input, textarea, select, [contenteditable]") ? t.closest(".rs") : null;
+    if (grip || body) {
+      item = (grip || body).closest(".rs");
       if (!item || !railEl.contains(item) || item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
     } else {
       var b = t.closest("button"), hd = t.closest(".wthd"), bar = hd || t.closest(".wsbar");
@@ -812,7 +843,7 @@
       if (!item || rdPeers(item).length < 2) return;
     }
     var touch = e.pointerType === "touch";
-    rdrag = { item: item, key: WsRail.itemKey(item), id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: touch, hold: touch && !grip, timer: 0, ref: null, after: false, z: null, noop: true, edge: 0 };
+    rdrag = { item: item, key: WsRail.itemKey(item), id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: touch, hold: touch && !grip, timer: 0, ref: null, after: false, z: null, noop: true, edge: 0, dwell: "", dwellTimer: 0, nest: "" };
     if (rdrag.hold) rdrag.timer = setTimeout(function () { if (rdrag && !rdrag.on) rdBegin(); }, RD_HOLD);
   }
   function rdBegin() {
@@ -855,6 +886,7 @@
     if (d.on && !d.item.isConnected) rdOver(d.x, d.y);
     rdrag = null;
     clearTimeout(d.timer);
+    clearTimeout(d.dwellTimer);
     if (d.on) {
       d.item.classList.remove("rdrag");
       root.classList.remove("rdragging");

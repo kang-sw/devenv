@@ -200,7 +200,7 @@
 .rail .rs, .rail .wsbar, .rail .wthd { -webkit-touch-callout: none; }
 .rail .rs.rdrag, .rail .rwt.rdrag, .rail .rws.rdrag { opacity: .45; }
 .rdragging, .rdragging * { cursor: grabbing !important; }
-.rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); opacity: .7; pointer-events: none; }
+.rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); pointer-events: none; }
 /* a live row's grip, the only part of a row that drags (the rest is its
    link): shown while the row is hovered or focused, always on a touch
    screen, where it takes the touch from scrolling; over a place the drop is
