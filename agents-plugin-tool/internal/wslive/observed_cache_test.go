@@ -18,19 +18,26 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
 		t.Fatal(err)
 	}
-	opens := 0
-	cache := ObservedCache{open: func(path string) (*os.File, error) { opens++; return os.Open(path) }}
+	opens, stats := 0, 0
+	// The clock runs well past every file time, so the directory stat is
+	// trusted between sweeps; the test advances it to force one.
+	clock := time.Now().Add(time.Hour)
+	cache := ObservedCache{
+		open: func(path string) (*os.File, error) { opens++; return os.Open(path) },
+		stat: func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) },
+		now:  func() time.Time { return clock },
+	}
 	first := cache.Load(dir)
-	if opens != 1 {
-		t.Fatalf("cold opens=%d", opens)
+	if opens != 1 || stats != 1 {
+		t.Fatalf("cold opens=%d stats=%d", opens, stats)
 	}
 	for i := 0; i < 20; i++ {
 		if cache.Load(dir) != first {
 			t.Fatal("unchanged projection rebuilt")
 		}
 	}
-	if opens != 1 {
-		t.Fatalf("unchanged files opened %d times", opens-1)
+	if opens != 1 || stats != 1 {
+		t.Fatalf("unchanged files opened %d times, stat'ed %d times", opens-1, stats-1)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, ObservedDirName, "*.json"))
 	path := files[0]
@@ -46,11 +53,19 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if err := os.Chtimes(filepath.Dir(path), dirInfo.ModTime(), dirInfo.ModTime()); err != nil {
 		t.Fatal(err)
 	}
+	// Write-once files make this edit illegitimate: the directory stat hides
+	// it until the forced re-sweep, which picks it up.
+	if cache.Load(dir) != first || opens != 1 {
+		t.Fatalf("trusted directory re-read a child: opens=%d", opens)
+	}
+	clock = clock.Add(observedResweep)
 	changed := cache.Load(dir)
 	if opens != 2 || changed == first || changed.models[""].Current.Model != "second-longer" {
-		t.Fatalf("child edit missed: opens=%d", opens)
+		t.Fatalf("child edit missed by the forced re-sweep: opens=%d", opens)
 	}
-	// Atomic replacement with identical size, mode and timestamp must reload.
+	// Atomic replacement with identical size, mode and timestamp is no
+	// legitimate write either: a listing reuses the known name, and the
+	// forced re-sweep's SameFile check reloads it.
 	info, _ := os.Stat(path)
 	raw, _ = json.Marshal(observedCacheRecord("one", "third-longerr"))
 	if int64(len(raw)) != info.Size() {
@@ -66,8 +81,12 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if err := os.Rename(tmp, path); err != nil {
 		t.Fatal(err)
 	}
+	if got := cache.Load(dir); opens != 2 || got != changed {
+		t.Fatalf("listing re-read a known name: opens=%d", opens)
+	}
+	clock = clock.Add(observedResweep)
 	if got := cache.Load(dir); opens != 3 || got.models[""].Current.Model != "third-longerr" {
-		t.Fatalf("replacement missed: opens=%d", opens)
+		t.Fatalf("replacement missed by the forced re-sweep: opens=%d", opens)
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
@@ -86,6 +105,90 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	cache.Load(dir)
 	if opens != 5 {
 		t.Fatal("Forget kept records")
+	}
+}
+
+func TestObservedCacheDirectoryGate(t *testing.T) {
+	dir := t.TempDir()
+	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
+		t.Fatal(err)
+	}
+	stats, opens := 0, 0
+	clock := time.Now()
+	cache := ObservedCache{
+		open: func(path string) (*os.File, error) { opens++; return os.Open(path) },
+		stat: func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) },
+		now:  func() time.Time { return clock },
+	}
+	// A directory mtime inside the racy window of its stat costs a listing,
+	// never a record stat.
+	cache.Load(dir)
+	cache.Load(dir)
+	if stats != 1 || opens != 1 {
+		t.Fatalf("racy listing stat'ed known records: stats=%d opens=%d", stats, opens)
+	}
+	// Once the mtime is old enough, an unchanged directory is trusted.
+	clock = clock.Add(time.Second * 3)
+	first := cache.Load(dir)
+	if cache.Load(dir) != first || stats != 1 {
+		t.Fatalf("unchanged directory re-stat'ed its records: stats=%d", stats)
+	}
+	// An added record moves the directory: only the new name is stat'ed
+	// and read.
+	r := observedCacheRecord("two", "second")
+	r.At = 2000
+	if err := AppendObserved(dir, []ObservedRecord{r}); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(time.Second)
+	got := cache.Load(dir)
+	if got == first || got.models[""].Current.Model != "second" {
+		t.Fatal("added record missed")
+	}
+	if stats != 2 || opens != 2 {
+		t.Fatalf("listing stat'ed known records: stats=%d opens=%d", stats, opens)
+	}
+	want := Snapshot{}
+	retained, err := ReadObserved(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	OverlayObserved(&want, retained)
+	snap := Snapshot{}
+	got.Overlay(&snap)
+	if !reflect.DeepEqual(snap, want) {
+		t.Fatalf("gated overlay differs: %+v vs %+v", snap, want)
+	}
+	// A vanished record drops on the next listing.
+	files, _ := filepath.Glob(filepath.Join(dir, ObservedDirName, "*.json"))
+	for _, path := range files {
+		raw, _ := os.ReadFile(path)
+		var rec ObservedRecord
+		if json.Unmarshal(raw, &rec) == nil && rec.ID == "two" {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	clock = clock.Add(time.Second)
+	dropped := cache.Load(dir)
+	if dropped.models[""].Current.Model != "first" || len(dropped.models[""].History) != 1 || stats != 2 {
+		t.Fatalf("vanished record kept: stats=%d", stats)
+	}
+	// The forced re-sweep stats every record even when nothing moved, and
+	// rebuilds nothing.
+	clock = clock.Add(time.Second * 3)
+	trusted := cache.Load(dir)
+	before := stats
+	clock = clock.Add(observedResweep)
+	if cache.Load(dir) != trusted || stats != before+1 {
+		t.Fatalf("forced re-sweep: stats=%d rebuilt=%t", stats-before, cache.Load(dir) != trusted)
+	}
+	// A clock that steps backwards forces a sweep too.
+	clock = clock.Add(-time.Hour)
+	cache.Load(dir)
+	if stats != before+2 {
+		t.Fatalf("backward clock trusted the directory: %d", stats-before)
 	}
 }
 

@@ -1496,6 +1496,7 @@
   "js.tk.wk.unsaved": "не сохранено",
   "js.tk.wk.yours": "Ваша версия",
   "js.toast.copied": "Скопировано: {0}",
+  "js.toast.copydone": "Скопировано.",
   "js.toast.copyfail": "Не удалось скопировать: {0}",
   "js.toast.newnotes.one": "1 новое уведомление",
   "js.toast.newnotes.other": "новых уведомлений: {0}",
