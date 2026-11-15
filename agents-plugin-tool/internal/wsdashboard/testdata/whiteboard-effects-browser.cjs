@@ -186,9 +186,40 @@ async function until(check, message) {
         const bodyFrame = page.locator('section.topic[data-topic="navigation"] iframe.doc-frame').first();
         await bodyFrame.waitFor();
         const body = await (await bodyFrame.elementHandle()).contentFrame();
-        await body.getByRole('link', { name: 'Jump to target', exact: true }).click();
-        await page.waitForFunction(() => location.hash === '#p1' && document.querySelector('#p1') && document.querySelector('#p1').open);
         const target = page.locator('#p1');
+        async function jumpGeometry() {
+          const geometry = await target.evaluate(e => {
+            const r = e.getBoundingClientRect();
+            const board = e.closest('#bcol, #bpins');
+            const b = board.getBoundingClientRect();
+            const clip = { left: b.left + board.clientLeft, top: b.top + board.clientTop };
+            clip.right = clip.left + board.clientWidth;
+            clip.bottom = clip.top + board.clientHeight;
+            const css = getComputedStyle(e);
+            return {
+              open: e.open, rendered: r.width > 0 && r.height > 0 && css.display !== 'none' && !['hidden', 'collapse'].includes(css.visibility),
+              target: { left: r.left, top: r.top, right: r.right, bottom: r.bottom }, clip,
+              offscreen: r.bottom <= clip.top || r.top >= clip.bottom || r.right <= clip.left || r.left >= clip.right,
+              inBoard: r.left >= clip.left && r.right <= clip.right && r.top >= clip.top && r.bottom <= clip.bottom
+            };
+          });
+          const bounds = await target.boundingBox();
+          const viewport = tab.viewportSize();
+          return { ...geometry, bounds, viewport, inBrowser: !!bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width && bounds.y + bounds.height <= viewport.height };
+        }
+        const preJump = await jumpGeometry();
+        fs.writeFileSync(path.join(output, `${width}-jump-before.json`), JSON.stringify(preJump, null, 2));
+        assert(preJump.rendered && preJump.offscreen, 'jump target starts outside the board clipping viewport');
+        await body.getByRole('link', { name: 'Jump to target', exact: true }).click();
+        let postJump = null;
+        try {
+          await until(async () => {
+            postJump = await jumpGeometry();
+            return postJump.open && postJump.rendered && postJump.inBoard && postJump.inBrowser;
+          }, 'production jump opens and reveals target inside the board and browser viewports');
+        } finally {
+          fs.writeFileSync(path.join(output, `${width}-jump-after.json`), JSON.stringify(postJump, null, 2));
+        }
         await target.waitFor({ state: 'visible' });
         const before = await target.boundingBox();
         assert(before && before.y >= 0 && before.y < 900, 'production jump brings target into view');
