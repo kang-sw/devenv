@@ -5,7 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -50,12 +53,83 @@ func admissionRecords(t *testing.T, s *railLayoutStore) []railAdmissionRecord {
 	}
 	return records
 }
+
+// Prompts carry JSON, so Windows path separators are escaped on the wire.
+func admissionPromptHasPath(t *testing.T, prompt, root, path string) bool {
+	t.Helper()
+	_, raw, ok := strings.Cut(prompt, "\n\n")
+	var records []railAdmissionRecord
+	if !ok {
+		t.Fatalf("prompt has no JSON list: %s", prompt)
+	}
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		if r.Repository == root && r.Path == path && r.State == "rejected" {
+			return true
+		}
+	}
+	return false
+}
+
+// Git hides .git files on Windows. Opening an existing hidden file with
+// O_CREATE (as WriteFile does) is denied there; truncate without recreating it
+// so this fixture also retains the association file's filesystem identity.
+func rewriteAdmissionMarker(t *testing.T, marker string, raw []byte) {
+	t.Helper()
+	f, err := os.OpenFile(marker, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Write(raw)
+	closeErr := f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+}
+
+// Deny temporary-file creation while keeping the durable layout readable.
+// Windows ignores Unix directory write bits, so use its directory ACL instead.
+func blockAdmissionWrites(t *testing.T, dir string) func() {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		u, err := user.Current()
+		if err != nil {
+			t.Fatal(err)
+		}
+		acl := func(args ...string) {
+			t.Helper()
+			if out, err := exec.Command("icacls", append([]string{dir}, args...)...).CombinedOutput(); err != nil {
+				t.Fatalf("fixture ACL: %v: %s", err, out)
+			}
+		}
+		restore := func() { acl("/remove:d", "*"+u.Uid) }
+		t.Cleanup(restore)
+		acl("/deny", "*"+u.Uid+":(WD)")
+		return restore
+	}
+	restore := func() {
+		if err := os.Chmod(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(restore)
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	return restore
+}
+
 func TestRailAdmissionPersistenceAndAtomicBatch(t *testing.T) {
 	root, path, a, read := admissionFixture(t)
 	selection := admissionSelection(t, a, read, root, path, "reject")
 	before := a.store.gen
 	reply, err := a.apply([]railAdmissionSelection{selection}, read)
-	if err != nil || !reply.Applied || reply.Gen <= before || !strings.Contains(reply.Prompt, path) {
+	if err != nil || !reply.Applied || reply.Gen <= before || !admissionPromptHasPath(t, reply.Prompt, root, path) {
 		t.Fatalf("reject: %+v %v", reply, err)
 	}
 	if _, err := os.Stat(filepath.Join(path, "a")); err != nil {
@@ -98,7 +172,7 @@ func TestRailAdmissionPersistenceAndAtomicBatch(t *testing.T) {
 	gitRun(t, root, "worktree", "add", "-q", "-b", "third", third)
 	three := admissionSelection(t, a, read, root, third, "reject")
 	v, e := a.apply([]railAdmissionSelection{three}, read)
-	if e != nil || !strings.Contains(v.Prompt, other) || !strings.Contains(v.Prompt, third) {
+	if e != nil || !admissionPromptHasPath(t, v.Prompt, root, other) || !admissionPromptHasPath(t, v.Prompt, root, third) {
 		t.Fatalf("cumulative: %+v %v", v, e)
 	}
 }
@@ -124,9 +198,7 @@ func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(marker, []byte("gitdir: /missing-admin\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	rewriteAdmissionMarker(t, marker, []byte("gitdir: /missing-admin\n"))
 	observeAdmissions(t, a, root, list)
 	if len(admissionRecords(t, a.store)) != 1 {
 		t.Fatal("unreadable association pruned admission")
@@ -135,9 +207,7 @@ func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
 	if v, e := a.apply([]railAdmissionSelection{selection}, read); !errors.Is(e, errAdmissionStale) || v.Applied {
 		t.Fatalf("association: %+v %v", v, e)
 	}
-	if err = os.WriteFile(marker, original, 0600); err != nil {
-		t.Fatal(err)
-	}
+	rewriteAdmissionMarker(t, marker, original)
 	// Existing handle evidence survives a temporary probe failure, but its old
 	// revision cannot silently become fresh proof after recovery.
 	got := observeAdmissions(t, a, root, list)[path]
@@ -212,19 +282,20 @@ func TestRailAdmissionRetriesInvalidationAfterWriteFailure(t *testing.T) {
 	}
 	l := newRailLister(func(root string, _ []Registration) (RepoWorktrees, error) { return read(root) }, nil, make(chan struct{}))
 	l.admission = a
-	dir := filepath.Dir(a.store.file)
-	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
-	if err = os.Chmod(dir, 0500); err != nil {
-		t.Fatal(err)
+	restoreWrites := blockAdmissionWrites(t, filepath.Dir(a.store.file))
+	// Prove this is a write failure, not a malformed or unreadable store.
+	if _, err := readRailLayout(a.store.file); err != nil {
+		t.Fatalf("blocked store is not readable: %v", err)
+	}
+	if err := writePrivateFile(filepath.Dir(a.store.file), "write-probe", nil); err == nil {
+		t.Fatal("fixture still permits atomic writes")
 	}
 	failed := l.readRepo(root, nil)
 	if admissionAt(admissionRecords(t, a.store), root, path).State != "rejected" {
 		t.Fatal("fixture did not inject a durable write failure")
 	}
 	t.Logf("injected prune write failure retained the durable rejection; reported Read=%v", failed.Read)
-	if err = os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
+	restoreWrites()
 	recovered := l.readRepo(root, nil)
 	if !recovered.Read {
 		t.Fatal("read did not recover after writes were restored")
@@ -293,7 +364,7 @@ func TestRailAdmissionRecreatedUserAddKeepsAdmission(t *testing.T) {
 	add := func(branch string) {
 		t.Helper()
 		raw, _ := json.Marshal(worktreeAddRequest{Workspace: f.root, Branch: branch, New: true, Folder: path})
-		code, _, body := postJSON(t, f.base+worktreeAddRoute, f.base, string(raw))
+		code, _, body := postJSONWith(t, &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}, f.base+worktreeAddRoute, f.base, string(raw))
 		if code != http.StatusOK {
 			t.Fatalf("dashboard Add %s: %d %s", branch, code, body)
 		}
@@ -462,7 +533,7 @@ func TestRailAdmissionRouteAndUserAdd(t *testing.T) {
 	}
 	added := filepath.Join(f.tmp, "user-added")
 	addRaw, _ := json.Marshal(worktreeAddRequest{Workspace: f.root, Branch: "user-added", New: true, Folder: added})
-	code, _, body = postJSON(t, f.base+worktreeAddRoute, f.base, string(addRaw))
+	code, _, body = postJSONWith(t, &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}, f.base+worktreeAddRoute, f.base, string(addRaw))
 	if code != 200 {
 		t.Fatalf("add: %d %s", code, body)
 	}

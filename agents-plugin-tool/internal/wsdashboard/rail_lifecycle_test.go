@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -83,7 +84,7 @@ func TestRailFourStateLifecycle(t *testing.T) {
 	}
 	html := string(region.HTML)
 	for _, want := range []string{
-		`<div class="rfold" role="group" aria-label="접힌 세션" data-key="/w/repo">`,
+		`<div class="rfold" role="group" aria-label="접힌 세션" data-key="` + filepath.Clean("/w/repo") + `">`,
 		`class="rfh" data-k="arch" aria-expanded="false" title="보관된 세션 2개"><svg class="i" aria-hidden="true"><use href="#i-archive"/></svg>보관 <span class="d-n">2</span></button>`,
 		`class="rfh" data-k="del" aria-expanded="false" title="종료된 세션 3개"><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg>종료됨 <span class="d-n">3</span></button>`,
 		`<div class="rended" data-k="arch"><div class="rsessions"><div class="rs ended stopped archived hosted-row" data-rid="archived"`,
