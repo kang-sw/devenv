@@ -329,6 +329,111 @@ compared side by side with the matching state of
 `ai-docs/tickets/assets/261115-feat-ws-dashboard-board-reorder-hold-rewrite/nav-capsule-accepted.html`
 (Decision 11; replaces the v2 mockups as the badge reference).
 
+### Result (43886b2df) - 2026-11-15
+
+Phase 1 and both lead follow-ups are complete and committed. This report supersedes the initial interpretation that idle home could hide and top insertion freezing belonged to a later phase. The original report is retained as `/tmp/exec5/reorder1/initial-result.md` for earlier verification details.
+
+#### Commits
+
+- `b5bc1df0a` — original Phase 1 capsule, indicators, strings, owner-routed home action, and acceptance tests.
+- `5bf581d48` — follow-up item 4: home arrow always visible, including idle top; idle-top and refreshed after-click captures. Committed separately after green tests.
+- `43886b2df` — follow-up items 1-2: click-only top-origin staging, new-topic counts, mixed down-panel scroll release, browser regressions and refreshed evidence.
+
+Branch: `impl/exec5/reorder-p1`. Worktree clean after commit. Ticket file untouched. No push, merge, rebase, version bump, installed-plugin rebuild, shared-daemon operation, or subagent. Runtime verification used only owned disposable fixture stores/Port 0 servers or pure production-renderer/websocket fixtures.
+
+#### What changed
+
+Paths relative to `agents-plugin-tool/internal/`:
+
+- `wswhiteboard/assets/pill.js:128`: top home capsule is always present, including scroll zero with no pending changes or question chips. Overview hiding remains. Existing open/answered/noted navigation is preserved.
+- `wsdashboard/assets/dashboard-board.js:158,1069`: ephemeral top-origin latch records immutable old topic bytes (or absence for a new topic) and old open-flow slots. At `scrollTop <= 4`, offscreen rises and new topics are excluded from admission; visible old order/positions and scroll stay unchanged. New topics still feed the distinct pending-data count without a mounted node. Top-origin changes remain latched after scrolling away.
+- `wsdashboard/assets/dashboard-board.js:1230`: a scroll-triggered release cannot drain a top-only latch. Mixed updates still run the existing staging path, so an unrelated panel staged while scrolled down can release when it leaves view while top-origin changes remain held. Explicit pill apply clears the latch and admits the latest canonical input in one morph, through the existing navigation owner, landing at scroll zero.
+- Existing Phase 1 capsule styling, amber sway, compact count bubbles, moved/closed tags, 3px nudge, 0.6s flash, all eleven i18n tables, and bottom-bar removal remain landed. No second scroll writer or persisted state was added.
+- `wsdashboard/board_viewed_test.go:154`: deterministic top-origin rise/new-topic/scroll-away/explicit-release regression.
+- `wsdashboard/testdata/board-hold-pill.browser.cjs:222`: real canonical stream tests in every matrix case: offscreen T20 rises at home; T20 updated twice counts once; NEW is unmounted but counts; first card/order/visible geometry and scroll zero stay stable; scrolling away does not release them; an ordinary T04 down-origin panel releases on scroll; one pill click admits NEW at the canonical head plus the held rise and lands at zero.
+- The continuity browser uses reduced motion for deterministic capsule clicking. The performance browser now explicitly applies top-origin pending changes before checking canonical order, while retaining its original admission timing/long-task gate; user-apply long-task diagnostics are recorded separately rather than conflated with admission.
+
+#### Verification
+
+Run from `agents-plugin-tool/`, always with:
+
+```sh
+export GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local
+export WS_PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright
+export PLAYWRIGHT_BROWSERS_PATH=/Users/kang-sw/Library/Caches/ms-playwright
+export WS_VIEWED_PERF_PLAYWRIGHT="$WS_PLAYWRIGHT_MODULE"
+export WS_VIEWED_PERF_CHROMIUM='/Users/kang-sw/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
+```
+
+Exact commands and results:
+
+```sh
+go test ./internal/wsi18n/...
+# PASS: ok github.com/kang-sw/devenv/internal/wsi18n (1.127s)
+
+go test ./internal/wswhiteboard -run '^Test(Pill|ViewKit)' -count=1 -v
+# PASS: all eleven selected tests, including HomeRelease.
+# Evidence: always-home-unit.log; unchanged owner code was also verified in the original Phase 1 run.
+
+go test ./internal/wsdashboard -run '^TestBoardViewed(CrossTopicInsertion|RenderingAndRelease|PlacementAndQueuedCounts|TopOriginClickOnly|InternalGeometry|TimelineQuestionIdentity|ScrollReleaseGate|FetchedPageTransfer|BoundaryAndBatchWiring)$' -count=1 -v
+# PASS: all nine selected tests plus identity subtests; package ok (1.884s).
+
+WS_BOARD_HOLD_ARTIFACTS=/tmp/exec5/reorder1 go test ./internal/wsdashboard -run '^TestBoardHoldPillBrowser$' -count=1 -v
+# PASS: nine matrix cases; --- PASS: TestBoardHoldPillBrowser (114.76s).
+# Zero browser page errors; full stacks retained on failure.
+
+go test ./internal/wsdashboard -run '^TestBoard(PanelFrameReuseBrowser|TopicUnitsBrowser)$' -count=1 -v
+# PASS: PanelFrameReuseBrowser (6.46s), TopicUnitsBrowser (1.48s); package ok (9.182s).
+
+go test ./internal/wsdashboard -run '^TestBoardViewedUpdatePerfBrowser$' -count=1 -v
+# PASS: --- PASS: TestBoardViewedUpdatePerfBrowser (27.75s); package ok (28.599s).
+```
+
+Final evidence logs:
+
+- `/tmp/exec5/reorder1/always-home-unit.log`
+- `/tmp/exec5/reorder1/always-home-browser.log`
+- `/tmp/exec5/reorder1/top-freeze-i18n.log`
+- `/tmp/exec5/reorder1/top-freeze-unit.log`
+- `/tmp/exec5/reorder1/top-freeze-browser.log`
+- `/tmp/exec5/reorder1/top-freeze-existing-browser.log`
+- `/tmp/exec5/reorder1/top-freeze-perf.log`
+
+`git diff --check` and browser-driver syntax checks passed. No whole dashboard-package run. The earlier extra `TestBoardViewedLiveBrowser` diagnostic failed its stale setup assertion `420 != 1200`, identically reproduced on untouched base `98632f4ac`; see `initial-result.md` and `baseline-browser-tests.log`. That fixture was not changed or rerun in the follow-up. WebKit, unrelated history-cards, declared known-red tests, and the frozen historical-baseline comparison batch were not rerun.
+
+#### Refreshed screenshots and side-by-sides
+
+Root: `/tmp/exec5/reorder1/`.
+
+- `/tmp/exec5/reorder1/browser-report.json` lists every exact final capture/reference/side-by-side path and the nine successful cases.
+- `/tmp/exec5/reorder1/image-manifest.json` lists all **243 final PNGs / 81 state comparisons**, with dimensions verified from PNG bytes: implementation 1440x900 or 700x900; reference crop 400x76; side-by-side 808x104.
+- Existing idle-scrolled/pending/after-click captures were regenerated. Added `idle-top`, `top-frozen-rise`, `top-frozen-new`, and `top-after-apply` for all cases. After-click and idle-top now show the real home arrow at zero, matching the reference visibility.
+
+New reduced-motion comparison paths include:
+
+- `/tmp/exec5/reorder1/sbs-1440-light-reduced-idle-top.png`
+- `/tmp/exec5/reorder1/sbs-1440-light-reduced-top-frozen-rise.png`
+- `/tmp/exec5/reorder1/sbs-1440-light-reduced-top-frozen-new.png`
+- `/tmp/exec5/reorder1/sbs-1440-light-reduced-top-after-apply.png`
+- `/tmp/exec5/reorder1/sbs-1440-dark-reduced-idle-top.png`
+- `/tmp/exec5/reorder1/sbs-1440-dark-reduced-top-frozen-new.png`
+- `/tmp/exec5/reorder1/sbs-700-light-reduced-idle-top.png`
+- `/tmp/exec5/reorder1/sbs-700-light-reduced-top-frozen-new.png`
+- `/tmp/exec5/reorder1/sbs-700-dark-reduced-idle-top.png`
+- `/tmp/exec5/reorder1/sbs-700-dark-reduced-top-frozen-new.png`
+
+The complete path matrix is `sbs-{1440,700}-{light,dark}-{reduced,motion}-{idle-top,idle-scrolled,pending-1,pending-1-chips,pending-3-chips,after-click,top-frozen-rise,top-frozen-new,top-after-apply}.png`. Replace `sbs-` with `impl-` for full implementation captures or `ref-` for reference crops. A supplementary `1440-light-reduced-document` series covers the real document scroller. All exact expanded paths are in the two manifests above.
+
+#### Decisions and remaining limits
+
+- T0 only: bundled frontend behavior/ephemeral memory; no MCP, wire API, store, tracker, config, or manifest changes.
+- Top-origin latches and ordinary down-origin panel blockers are independent. Offscreen content-only changes with unchanged placement may still admit normally; rises/new insertions and exposed content at home are staged. Existing owner-receipt admission remains immediate. Existing hand-home acknowledgement semantics are retained without releasing a top latch.
+- At-top freezing and the always-visible home arrow are now complete Phase 1 work, **not later-phase gaps**. No follow-up item remains unimplemented.
+- **Owner visual review is still required before merge.** Automated captures are evidence, not owner acceptance.
+- Non-top rise-slot/clamp repair, complete involved-card/deferral policy, folded-close rendering/accounting refinements, and momentum/late-height policy remain the unchanged later phases.
+- Non-English translations remain unchecked. The synthetic heavy-board performance driver records user-apply long tasks separately; only its original admission and wheel gates are asserted. The stale live fixture and unrun historical/WebKit/history checks remain the verification limits above.
+(Commit hashes are after the lead rebased the branch onto the ready-ticket commit.)
+
 ### Phase 2: rise hold gaps
 Only what Phase 0 shows missing: visible topic rising holds in place, releases when all involved
 cards are off-screen, batched, deferrals (selection, focus, hover, hidden, overview, maximize).
