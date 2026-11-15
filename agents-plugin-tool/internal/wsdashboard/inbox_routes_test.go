@@ -34,7 +34,12 @@ func inboxBody(t *testing.T, e wsinbox.Entry) string {
 // returns the status, the response, and its body.
 func postJSON(t *testing.T, url, origin, body string) (int, http.Header, string) {
 	t.Helper()
-	return postJSONWith(t, testClient(), url, origin, body)
+	client := testClient()
+	// wsinbox/fileops_windows.go:retryTransient allows about two seconds for
+	// transient sharing failures. Allow that designed retry budget plus one
+	// second for HTTP and handler work, not the health client's 500 ms.
+	client.Timeout = 3 * time.Second
+	return postJSONWith(t, client, url, origin, body)
 }
 
 // postJSONWith is postJSON through client, for a route whose handler does
