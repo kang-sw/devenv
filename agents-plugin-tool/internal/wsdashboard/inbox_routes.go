@@ -50,7 +50,8 @@ import (
 //
 // A message may instead be a slash command the composer picked: the body's
 // command and args fields, never text the daemon parses. It is held as its
-// own command entry (wsinbox.Command), which steer refuses, and is offered
+// own command entry (wsinbox.Command), which a steer turns into steered text
+// holding its typed line for the agent to act on, and is offered
 // only for a session whose adapter reports a command
 // list in its snapshot, so an adapter that cannot run one never drains one.
 // A cancel or interrupt answers a command entry with its command, so the
@@ -542,9 +543,6 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, 
 		steered, err := wsinbox.Steer(dir, name)
 		if errors.Is(err, wsinbox.ErrGone) {
 			return http.StatusConflict, "the session already received this message"
-		}
-		if errors.Is(err, wsinbox.ErrCommand) {
-			return http.StatusConflict, err.Error()
 		}
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: inbox steer: %v\n", err)

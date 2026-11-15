@@ -44,8 +44,8 @@ type HeldView struct {
 	// Images are the entry's attached images.
 	Images []AttachmentView
 	// Command is a command entry's slash command; the bubble shows its
-	// typed line and offers no steer control, since a command waits for the
-	// turn end.
+	// typed line. Its steer control sends the line as steered text the agent
+	// acts on itself (wsinbox.Steer).
 	Command *wsinbox.Command
 }
 
