@@ -91,6 +91,17 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+func TestSearchAnswerDrawerBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; run testdata/search-answer.test.cjs locally")
+	}
+	out, err := exec.Command(node, "testdata/search-answer.test.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("answer drawer cases failed: %v\n%s", err, out)
+	}
+}
+
 func TestSearchPaletteBehavior(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

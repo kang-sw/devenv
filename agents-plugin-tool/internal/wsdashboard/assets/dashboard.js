@@ -3427,13 +3427,21 @@
   var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
   var drhandle = $("drhandle"), drheader = doc.querySelector(".dwrap > .top");
   var gbody = $("gbody"), gitRegion = region("git");
-  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h";
+  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h", DR_SEARCH = "ws.dashboard.drawer.search";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
   var drMode = "panels", drShown = "", drfold = null, drFoldW = -1, drFoldGw = -1;
   // The stored height is read with or without the frame: a page with no
   // session drawer still shares it with the tracker's store drawers.
   (function () { var h = parseFloat(load(DR_H)); if (isFinite(h) && h > 0) drH = h; })();
+  var sbody = null, shandle = null;
+  if (drawer) {
+    sbody = doc.createElement("div"); sbody.id = "sbody"; sbody.className = "dr-search"; sbody.hidden = true;
+    drsheet.appendChild(sbody);
+    shandle = doc.createElement("button"); shandle.type = "button"; shandle.id = "shandle"; shandle.className = "dr-handle dr-search-handle";
+    shandle.title = wsT("js.tk.qs.tip") + " (Ctrl+K)"; shandle.setAttribute("aria-label", shandle.title); shandle.setAttribute("aria-controls", "drsheet");
+    shandle.appendChild(luIcon("search")); drhandle.parentNode.insertBefore(shandle, drhandle);
+  }
   // ghandle is the git handle now: a region swap replaces it.
   function ghandle() { return $("ghandle"); }
   var drBadge = false, drSwap = false; // the handle's dot: a section badge, or a panels change while closed
@@ -3567,7 +3575,10 @@
   function drRoom() {
     var w = drHas ? Math.ceil(drhandle.getBoundingClientRect().width) : 0;
     var gw = ghandle() ? Math.ceil(gitRegion.getBoundingClientRect().width) : 0;
-    var off = w && gw ? w + 6 : 0, all = gw ? off + gw : w;
+    var sw = shandle ? Math.ceil(shandle.getBoundingClientRect().width) : 0;
+    var so = w && sw ? w + 6 : 0, beforeGit = sw ? so + sw : w;
+    var off = beforeGit && gw ? beforeGit + 6 : 0, all = gw ? off + gw : beforeGit;
+    doc.documentElement.style.setProperty("--shr", so + "px");
     if (all !== drRoomW || off !== drGhOff) {
       drRoomW = all;
       drGhOff = off;
@@ -3588,6 +3599,7 @@
     if (!drfold) return;
     drfold.hidden = !mode;
     drfold.classList.toggle("git", mode === "git");
+    drfold.classList.toggle("search", mode === "search");
   }
   function drTitle() {
     var t = wsT(drOpen && drMode === "panels" ? "js.drawer.close" : "js.drawer.open"), tip = drhandle.getAttribute("data-tip");
@@ -3630,16 +3642,22 @@
   function drApply(anim) {
     if (!drawer) return;
     drMeasure();
-    var h = drClamp(drH), git = drMode === "git";
+    var h = drClamp(drH), git = drMode === "git", search = drMode === "search";
     drawer.classList.toggle("anim", !!anim);
     drawer.classList.toggle("open", drOpen);
-    drbody.hidden = git;
+    drbody.hidden = git || search;
     if (gbody) gbody.hidden = !git;
+    if (sbody) sbody.hidden = !search;
+    drsheet.setAttribute("aria-label", wsT(search ? "js.tk.qs.tip" : "js.drawer.open"));
     drsheet.style.height = h + "px";
     drclip.style.height = (drOpen ? h : 0) + "px";
-    drhandle.style.top = (drOpen && !git ? drTop + h : 0) + "px";
+    drhandle.style.top = (drOpen && !git && !search ? drTop + h : 0) + "px";
+    if (shandle) {
+      shandle.style.top = (drOpen && search ? drTop + h : 0) + "px";
+      shandle.setAttribute("aria-expanded", String(drOpen && search));
+    }
     if (gitRegion) gitRegion.style.top = (drOpen && git ? drTop + h : 0) + "px";
-    drhandle.setAttribute("aria-expanded", String(drOpen && !git));
+    drhandle.setAttribute("aria-expanded", String(drOpen && !git && !search));
     drFoldShow(drOpen ? drMode : "");
     ghSync();
     drTitle();
@@ -3652,6 +3670,7 @@
       drShown = shown;
       if (shown === "panels") { wtLoad(); hdLoad(); }
       else if (shown === "git") gitOpened();
+      if (tkApi) { if (shown === "search") tkApi.openSearch(); else tkApi.closeSearch(); }
     }
   }
   // ghSync marks the git handle open or closed; a swap draws it closed.
@@ -3677,13 +3696,14 @@
   // or closes it. Only the panels sheet's open state is kept.
   function drSetOpen(open, mode) {
     mode = mode || drMode;
-    if (open && !(mode === "git" ? ghandle() : drHas)) return;
+    if (open && !(mode === "git" ? ghandle() : mode === "search" ? shandle : drHas)) return;
     if (open && !drOpen) drAnnounce();
-    if (!open && drsheet.contains(doc.activeElement)) (drMode === "git" && ghandle() || drhandle).focus();
+    if (!open && drsheet.contains(doc.activeElement)) (drMode === "search" && shandle || drMode === "git" && ghandle() || drhandle).focus();
     drMode = mode;
     drOpen = open;
     drWant = open && mode === "panels";
     save(DR_OPEN, drWant ? "1" : null);
+    save(DR_SEARCH, open && mode === "search" ? "1" : null);
     if (drWant) { drSwap = false; drDot(); }
     drApply(true);
   }
@@ -3692,7 +3712,7 @@
   // the button hides.
   function drFold() {
     if (drDragged || !drOpen) return;
-    var back = drMode === "git" && ghandle() || drhandle, kb = doc.activeElement === drfold;
+    var back = drMode === "search" && shandle || drMode === "git" && ghandle() || drhandle, kb = doc.activeElement === drfold;
     drSetOpen(false);
     if (kb) back.focus();
   }
@@ -3720,11 +3740,11 @@
     // the document.
     var drDrag = null, drDragged = false;
     function drDragStart(e) {
-      var h = e.target.closest && e.target.closest("#drhandle, #ghandle");
+      var h = e.target.closest && e.target.closest("#drhandle, #ghandle, #shandle");
       if (!h || (e.button !== undefined && e.button !== 0)) return;
-      var git = h.id === "ghandle", rider = git ? gitRegion : drhandle;
+      var git = h.id === "ghandle", search = h.id === "shandle", rider = git ? gitRegion : search ? shandle : drhandle;
       drMeasure();
-      drDrag = { mode: git ? "git" : "panels", rider: rider, id: e.pointerId, y0: e.clientY, off: e.clientY - rider.getBoundingClientRect().top, moved: false, ext: 0 };
+      drDrag = { mode: git ? "git" : search ? "search" : "panels", rider: rider, id: e.pointerId, y0: e.clientY, off: e.clientY - rider.getBoundingClientRect().top, moved: false, ext: 0 };
       if (!git) try { h.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
     }
     function drDragMove(e) {
@@ -3779,6 +3799,7 @@
       drOpen = true;
       drWant = d.mode === "panels";
       save(DR_OPEN, drWant ? "1" : null);
+      save(DR_SEARCH, d.mode === "search" ? "1" : null);
       if (drWant) { drSwap = false; drDot(); }
       drApply(false);
     }
@@ -3789,6 +3810,9 @@
     drhandle.addEventListener("click", function () {
       if (drDragged) return;
       drSetOpen(!(drOpen && drMode === "panels"), "panels");
+    });
+    shandle.addEventListener("click", function () {
+      if (!drDragged) drSetOpen(!(drOpen && drMode === "search"), "search");
     });
     // The git handle toggles the git sheet, or brings it in place of the
     // panels; it is looked up per click, since a swap replaces it.
@@ -3814,6 +3838,7 @@
       if (e.key !== "Escape" || !drOpen || e.defaultPrevented) return;
       if (lmenu || (gmenu && !gmenu.hidden)) return;
       if (ctext && doc.activeElement === ctext) return;
+      if (drMode === "search" && sbody.contains(doc.activeElement)) return;
       drSetOpen(false);
     }, true);
     // A click outside the drawer closes it; the link menu a drawer link
@@ -3821,7 +3846,7 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!drOpen || drDragged || !t || !t.closest) return;
-      if (t.closest("#drclip, #drhandle, #drfold, #r-git, .lmenu, .gwin-back")) return;
+      if (t.closest("#drclip, #drhandle, #shandle, #drfold, #r-git, .lmenu, .gwin-back")) return;
       drSetOpen(false);
     }, true);
     // The header can wrap or change height (a chip appears): the sheet
@@ -5723,13 +5748,207 @@
     return o;
   }
 
+  // Browser-owned rolling context. Transport and rendering are injected so
+  // generation races can be tested without a daemon or a real agent.
+  function searchAnswerClient(io) {
+    function cap(s) { return Array.from(String(s || "")).slice(0, 1600).join(""); }
+    var context = cap(io.context), history = (io.history || []).slice(0, 5), current = null, gen = 0, stream = null, queue = Promise.resolve();
+    function closeStream() { if (stream) stream(); stream = null; }
+    function draw() { io.draw(current, history); }
+    function accept(v, token) {
+      if (token !== gen || !current || current.id !== v.id) return;
+      current = { id: v.id, question: current.question, text: String(v.text || ""), status: v.status, error: v.error || "", time: current.time };
+      if (v.status !== "running") {
+        closeStream();
+        if (v.status === "done" && !v.error) {
+          if (typeof v.context === "string") { context = cap(v.context); io.saveContext(context); }
+          history = [current].concat(history.filter(function (a) { return a.id !== v.id; })).slice(0, 5);
+          io.saveHistory(history);
+        }
+      }
+      draw();
+    }
+    function cancel() {
+      gen++; closeStream();
+      if (current && current.status === "running") {
+        if (current.id) io.cancel(current.id);
+        current.status = "cancelled"; draw();
+      }
+    }
+    return {
+      ask: function (question) {
+        question = String(question || "").trim(); if (!question) return;
+        var token = ++gen, summary = context;
+        closeStream(); current = { id: "", question: question, text: "", status: "running", time: new Date().toISOString() }; draw();
+        // Serialize creation: an older delayed POST must not supersede a
+        // newer question on the server after the browser already moved on.
+        queue = queue.catch(function () {}).then(function () {
+          if (token !== gen) return;
+          return io.start({ question: question, context: summary }).then(function (v) {
+            if (token !== gen) { io.cancel(v.id); return; }
+            current.id = v.id; accept(v, token);
+            if (v.status === "running") stream = io.watch(v.id, function (next) { accept(next, token); });
+          }, function (err) {
+            if (token !== gen) return;
+            current.status = "failed"; current.error = String(err.message || err); draw();
+          });
+        });
+      },
+      cancel: cancel,
+      reset: function () { cancel(); context = ""; io.saveContext(""); current = null; draw(); },
+      select: function (i) { if (history[i] && (!current || current.status !== "running")) { current = history[i]; draw(); } },
+      state: function () { return { current: current, history: history, context: context }; }
+    };
+  }
+  function searchCitation(marker, rows) {
+    var b = /^\[\[board:([^\]\r\n]+)\]\]$/.exec(marker), f = /^\[\[file:(.+):(\d+)\]\]$/.exec(marker);
+    if (b) {
+      var row = rows.filter(function (r) { return r.kind === "board-item" && r.id === b[1]; })[0];
+      return row ? { board: row, label: "(" + row.id + ")" } : null;
+    }
+    if (!f || !Number.isSafeInteger(Number(f[2])) || Number(f[2]) < 1) return null;
+    var path = f[1];
+    if (/^[\\/]|^[A-Za-z]:|[\\\u0000-\u001f]/.test(path) || path.split("/").some(function (s) { return !s || s === "." || s === ".."; })) return null;
+    return { path: path, line: Number(f[2]), label: path.split("/").pop() + ":" + f[2] };
+  }
+  function paletteSearch(o) {
+    var prefix = "ws.dashboard.drawer.search";
+    o.searchState = {
+      load: function () { try { return JSON.parse(load(prefix + ".state") || "null"); } catch (e) { return null; } },
+      save: function (v) { save(prefix + ".state", JSON.stringify(v)); }
+    };
+    if (sbody) o.searchHost = {
+      parent: sbody,
+      contains: function (t) { return !!(t.closest && t.closest("#shandle, #drfold")); },
+      setOpen: function (open) {
+        if (open && !(drOpen && drMode === "search")) drSetOpen(true, "search");
+        else if (!open && drOpen && drMode === "search") drSetOpen(false);
+      }
+    };
+    // Remote and non-session pages get the same arrow-only result contract,
+    // but no answer UI, private history reads, or agent transport.
+    if (!rid || !root.hasAttribute("data-sysopen") || !window.EventSource) return o;
+    var key = prefix + "." + rid, history = [], pane = null, client = null, renderGen = 0, citeCtl = null, citeAnswer = null, fileChecks = {};
+    try { history = JSON.parse(load(key + ".history") || "[]"); } catch (e) { history = []; }
+    if (!Array.isArray(history)) history = [];
+    history = history.filter(function (a) { return a && typeof a.question === "string" && typeof a.text === "string"; }).slice(0, 5);
+    function request(suffix, body) {
+      return fetch("/search-answers/" + encodeURIComponent(rid) + suffix, { method: body ? "POST" : "GET", credentials: "same-origin", cache: "no-store", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }).then(function (r) {
+        return r.text().then(function (text) {
+          var v; try { v = JSON.parse(text); } catch (e) { v = {}; }
+          if (!r.ok) throw new Error(r.status === 503 ? wsT("js.search.unavailable") : r.status === 429 ? wsT("js.search.limit") : v.error || text || "HTTP " + r.status);
+          return v;
+        });
+      });
+    }
+    function cancel(id) { if (id) request("/" + encodeURIComponent(id) + "/cancel", {}).catch(function () {}); }
+    function watch(id, receive) {
+      var es = new EventSource("/search-answers/" + encodeURIComponent(rid) + "/" + encodeURIComponent(id) + "/events"), closed = false;
+      es.addEventListener("region", function (e) {
+        if (closed) return;
+        try {
+          var region = JSON.parse(e.data), parsed = doc.createElement("template");
+          if (region.name !== "answer") return;
+          parsed.innerHTML = region.html;
+          var section = parsed.content.querySelector("section[data-answer-id]"), pre = section && section.querySelector("pre"), error = section && section.querySelector('[role="alert"]');
+          if (!section || section.getAttribute("data-answer-id") !== id) return;
+          receive({ id: id, status: section.getAttribute("data-answer-status"), text: pre ? pre.textContent : "", error: error ? error.textContent : "", context: region.context });
+        } catch (x) { /* a malformed event cannot replace current context */ }
+      });
+      es.onerror = function () {
+        if (closed) return;
+        request("/" + encodeURIComponent(id)).then(function (v) { if (!closed) receive(v); }, function (err) {
+          if (!closed) receive({ id: id, status: "failed", error: err.message });
+        });
+      };
+      return function () { closed = true; es.close(); };
+    }
+    function inline(text) {
+      return esc(text).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+    }
+    function draw(current, recent) {
+      if (!pane) return;
+      var token = ++renderGen;
+      var answerKey = current ? current.id + ":" + current.question : "";
+      if (citeAnswer !== answerKey) {
+        if (citeCtl) citeCtl.abort();
+        citeCtl = new AbortController(); citeAnswer = answerKey; fileChecks = {};
+      }
+      var follow = pane.querySelector("input"), typed = follow ? follow.value : "", focused = follow && doc.activeElement === follow;
+      var caret = focused ? [follow.selectionStart, follow.selectionEnd] : null;
+      var running = current && current.status === "running", status = current ? wsT(running ? "js.search.running" : current.status === "done" ? "js.search.done" : "js.search.stopped") : wsT("js.search.readonly");
+      pane.innerHTML = '<div class="tk-qanswer-head"><strong>' + wsT("js.search.answer") + '</strong><span class="tk-qanswer-state" role="status">' + esc(status) + '</span>' +
+        (running ? '<button class="btn mini" data-answer-stop>' + wsT("js.search.stop") + '</button>' : '') + '<button class="btn mini" data-answer-reset>' + wsT("js.search.reset") + '</button></div>' +
+        '<div class="tk-qanswer-body">' + (current ? '<div class="tk-qanswer-question"><b>' + esc(current.question) + '</b> <small>' + esc(new Date(current.time).toLocaleTimeString()) + '</small></div><div class="tk-qanswer-text"></div>' + (current.error ? '<p role="alert">' + esc(current.error) + '</p>' : '') : '<p>' + wsT("js.search.idle") + '</p>') +
+        '<div class="tk-qanswer-history">' + (!running ? recent.map(function (a, i) { return '<button class="btn" data-answer-history="' + i + '">' + esc(a.question) + '<small>' + esc(a.text.slice(0, 100)) + '</small></button>'; }).join("") : '') + '</div></div>' +
+        '<form class="tk-qanswer-foot"><input aria-label="' + wsT("js.search.followup") + '" placeholder="' + wsT("js.search.followup") + '" autocomplete="off"><button class="btn" type="submit">' + wsT("js.search.ask") + '</button></form>';
+      follow = pane.querySelector("input"); follow.value = typed;
+      if (focused) { follow.focus({ preventScroll: true }); if (follow.setSelectionRange) follow.setSelectionRange(caret[0], caret[1]); }
+      if (!current) return;
+      var body = pane.querySelector(".tk-qanswer-text"), markers = [], parts = current.text.split(/(\[\[(?:board|file):[^\]\r\n]+\]\])/g);
+      body.innerHTML = parts.map(function (part) {
+        if (!/^\[\[/.test(part)) return inline(part);
+        var i = markers.push(part) - 1;
+        return '<span data-answer-cite="' + i + '">' + esc(part) + '</span>';
+      }).join("");
+      var sources = doc.createElement("div"); sources.className = "tk-qsources"; sources.hidden = true; body.appendChild(sources);
+      var rows = paletteRows();
+      markers.slice(0, 64).forEach(function (marker, i) {
+        var cite = searchCitation(marker, rows);
+        if (!cite) return;
+        var valid = cite.board ? Promise.resolve(true) : fileChecks[marker];
+        if (!valid) valid = fileChecks[marker] = paletteFs("preview", { path: cite.path, text: "1" }, citeCtl.signal).then(function (v) {
+          return v.kind === "text" && typeof v.text === "string" && cite.line <= v.text.split("\n").length;
+        }, function () { return false; });
+        valid.then(function (ok) {
+          if (!ok || token !== renderGen) return;
+          var span = body.querySelector('[data-answer-cite="' + i + '"]');
+          if (!span) return;
+          function button() {
+            var b = doc.createElement("button"); b.type = "button"; b.className = "tk-qcite"; b.textContent = cite.label; b.title = marker;
+            b.addEventListener("click", function () {
+              if (cite.board) palettePick(cite.board, { keep: true });
+              else if (window.WsPreview) window.WsPreview.open(cite.path, { line: cite.line });
+            });
+            return b;
+          }
+          span.replaceChildren(button()); sources.hidden = false; sources.appendChild(button());
+        });
+      });
+    }
+    client = searchAnswerClient({ context: load(key + ".context") || "", history: history, draw: draw, start: function (body) { return request("", body); }, watch: watch, cancel: cancel,
+      saveContext: function (v) { save(key + ".context", v || null); }, saveHistory: function (v) { save(key + ".history", JSON.stringify(v)); } });
+    o.searchAsk = client.ask;
+    var readRows = o.searchRows;
+    if (readRows) o.searchRows = function (update) {
+      return readRows(function (rows) { update(rows); var state = client.state(); draw(state.current, state.history); });
+    };
+    o.searchAnswerMount = function (el) {
+      pane = el; draw(null, history);
+      pane.addEventListener("submit", function (e) { e.preventDefault(); var input = pane.querySelector("input"), question = input.value; input.value = ""; client.ask(question); });
+      pane.addEventListener("click", function (e) {
+        var t = e.target.closest("button"); if (!t) return;
+        if (t.hasAttribute("data-answer-stop")) client.cancel();
+        else if (t.hasAttribute("data-answer-reset")) client.reset();
+        else if (t.hasAttribute("data-answer-history")) client.select(Number(t.getAttribute("data-answer-history")));
+      });
+      pane.addEventListener("keydown", function (e) {
+        if (e.isComposing || e.keyCode === 229) { if (e.key === "Enter") e.preventDefault(); return; }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); var input = pane.querySelector("input"); if (input.value) input.value = ""; else if (tkApi) tkApi.closeSearch(); }
+      });
+    };
+    window.addEventListener("pagehide", client.cancel);
+    return o;
+  }
+
   function tkMount() {
     var header = doc.querySelector(".dwrap > .top"), slot = $("qsslot"), wrap = doc.querySelector(".dwrap");
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
-    tkApi = window.WsTracker.mount(tkAdapter, paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
-      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick }));
+    tkApi = window.WsTracker.mount(tkAdapter, paletteSearch(paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
+      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick })));
+    if (load(DR_SEARCH) === "1") tkApi.openSearch();
   }
   function trackerStart() {
     if (window.WsTracker && window.fetch) tkReload();

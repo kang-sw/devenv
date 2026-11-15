@@ -150,6 +150,11 @@
 // opts:
 //   header           the page header element; the drawer hangs from its bottom edge
 //   qsSlot           an element in the header for the search-palette button
+//   searchHost       optional {parent, setOpen(bool), contains(target)} sheet host;
+//                    the returned API's openSearch/closeSearch follows host switches
+//   searchState      optional {load(), save({query, slot})} browser persistence
+//   searchAsk(text)  optional answer action for Enter without an arrow selection
+//   searchAnswerMount(element) optional host-owned answer pane and transport
 //   searchRows(update) optional host rows: {group (0..4), kind, title, text?,
 //                    hint?, id?, topic?, href?, at?}; session labels (the palette's
 //                    strip), then topics, bodies, items, answers (its board slot).
@@ -6217,14 +6222,14 @@
     });
     return out;
   }
-  // qIdx is the selected row of view v: the row whose key it last selected while that row
-  // remains, else the first.
+  // Only arrow movement arms a result. Late batches keep that key, never
+  // silently select a replacement when the selected row disappeared.
   function qIdx(v) {
-    var list = qView(v), i = 0;
-    for (var j = 0; j < list.length; j++) if (list[j].key === qs.sel[v]) { i = j; break; }
-    if (list[i]) qs.sel[v] = list[i].key;
-    return i;
+    var list = qView(v);
+    for (var j = 0; j < list.length; j++) if (list[j].key === qs.sel[v]) return j;
+    return -1;
   }
+  function qSave() { if (O.searchState) O.searchState.save({ query: qs.q, slot: qs.cur }); }
   function qFixCur() {
     var ord = QORDER[qs.step];
     if (ord.indexOf(qs.prev) < 0) qs.prev = ord[0];
@@ -6312,6 +6317,7 @@
     qs.jump = qStrip(t);
     qs.S.board = qDone(qBoard(qs.rows, t));
     qs.S.tracker = qDone(qTracker(t));
+    qs.sel = {};
     qRender();
   }
   function qFetch(gen, t, on) {
@@ -6420,6 +6426,7 @@
   function qRender() {
     if (!qs.open) return;
     qFixCur();
+    qSave();
     var d = $('tkqpop'), list = $('tkqlist'), st = qs.step, v = qs.cur === 'jump' ? qs.prev : qs.cur, ji = qs.cur === 'jump' ? qIdx('jump') : -1, h = '', keep = {};
     var si = qs.cur === 'jump' ? -1 : qIdx(qs.cur), selE = qs.cur === 'jump' ? null : qView(qs.cur)[si];
     function on(k, i) { return !!selE && selE.slot === k && selE.row === qs.S[k].rows[i]; }
@@ -6469,33 +6476,32 @@
     var o = cur && $(cur);
     if (o && o.scrollIntoView) o.scrollIntoView({ block: 'nearest' });
   }
-  // a pointer over a row of the view the keys move in selects it, without a redraw
-  function qHover(o) {
-    var k = o.getAttribute('data-qs'), i = Number(o.getAttribute('data-qi')), v = qs.cur, r = k === 'jump' ? qs.jump[i] : qs.S[k] && qs.S[k].rows[i];
-    if (!r || (k === 'jump' ? v !== 'jump' : v !== 'all' && v !== k)) return;
-    var key = k === 'jump' ? qKeyOf('jump', r) : k + '|' + qKeyOf(k, r);
-    if (qs.sel[v] === key) return;
-    qs.sel[v] = key;
-    Array.prototype.forEach.call($('tkqpop').querySelectorAll('.qopt.on, .tk-qchip.on'), function (x) { x.classList.remove('on'); x.setAttribute('aria-selected', 'false'); });
-    o.classList.add('on'); o.setAttribute('aria-selected', 'true');
-    $('tkqin').setAttribute('aria-activedescendant', o.id);
-  }
+  // Hover is CSS-only: it never arms Enter to open a result.
+  function qHover(o) {}
   function qOpen() {
     if (qs.open) return;
     qs.open = true; qs.back = document.activeElement;
     qs.rows = O.searchRows ? O.searchRows(function (rows) { if (qs.open) { qs.rows = rows; qLocal(); } }) : [];
     var d = $('tkqpop');
-    d.hidden = false; d.showModal(); $('tkqs').setAttribute('aria-expanded', 'true');
+    d.hidden = false;
+    if (O.searchHost) O.searchHost.setOpen(true);
+    $('tkqs').setAttribute('aria-expanded', 'true');
     qs.step = qStepOf(d.getBoundingClientRect ? d.getBoundingClientRect().width : 0);
-    // each opening starts on the step's first view; only the query is restored
-    qs.cur = QORDER[qs.step][0]; qs.prev = null;
+    if (!qs.loaded && O.searchState) {
+      var saved = O.searchState.load() || {};
+      qs.q = typeof saved.query === 'string' ? saved.query : '';
+      qs.cur = saved.slot || qs.cur;
+    }
+    qs.loaded = true;
+    qs.prev = null;
     $('tkqin').value = qs.q; qRun(); $('tkqin').focus();
     if ($('tkqin').select) $('tkqin').select();
   }
   function qClose() {
     if (!qs.open) return;
     qs.open = false; qAbort(); qs.gen++;
-    $('tkqpop').close(); $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    if (O.searchHost) O.searchHost.setOpen(false);
     var b = qs.back; qs.back = null;
     if (b && b.isConnected) b.focus({ preventScroll: true }); else $('tkqs').focus({ preventScroll: true });
   }
@@ -6505,13 +6511,13 @@
     var ord = QORDER[qs.step], i = ord.indexOf(qs.cur === 'jump' ? qs.prev : qs.cur);
     for (var n = 0; n < ord.length; n++) {
       i = (i + dir + ord.length) % ord.length;
-      if (ord[i] === 'all' || qs.S[ord[i]].rows.length) { qs.cur = ord[i]; qRender(); return; }
+      if (ord[i] === 'all' || qs.S[ord[i]].rows.length) { qs.cur = ord[i]; qs.sel = {}; qRender(); return; }
     }
   }
   function qEnterJump() {
     if (!qs.jump.length) return;
     if (qs.cur !== 'jump') qs.prev = qs.cur;
-    qs.cur = 'jump'; qRender();
+    qs.cur = 'jump'; qs.sel = {}; qRender();
   }
   // a tracker content hit opens its item window at the comment; a store with no loaded view
   // takes the item link's route (#/<store>/<item>), which loads it and opens the item
@@ -6553,13 +6559,14 @@
   // qKey: the input's keys. The focus stays in the input; Alt+digit is matched on e.code,
   // since macOS Option changes e.key.
   function qKey(e) {
+    if (e.isComposing || e.keyCode === 229) return;
     var k = e.key, v = qs.cur, d = /^Digit([0-5])$/.exec(e.code || '');
     // AltGr (Ctrl+Alt on Windows) types characters on some layouts; it stays typing
-    if (e.altKey && !e.ctrlKey && d) { e.preventDefault(); if (d[1] === '0') qEnterJump(); else { qs.cur = QSLOTS[d[1] - 1]; qRender(); } return; }
+    if (e.altKey && !e.ctrlKey && d) { e.preventDefault(); if (d[1] === '0') qEnterJump(); else { qs.cur = QSLOTS[d[1] - 1]; qs.sel = {}; qRender(); } return; }
     if (k === 'Tab') { e.preventDefault(); qTab(e.shiftKey ? -1 : 1); return; }
     if (v === 'jump' && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
       e.preventDefault();
-      if (k === 'ArrowDown') { qs.cur = qs.prev; qRender(); return; }
+      if (k === 'ArrowDown') { qs.cur = qs.prev; qs.sel = {}; qRender(); return; }
       var j = qIdx('jump') + (k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0);
       j = Math.max(0, Math.min(qs.jump.length - 1, j));
       qs.sel.jump = qKeyOf('jump', qs.jump[j]); qRender();
@@ -6570,11 +6577,18 @@
       var list = qView(v), i = qIdx(v);
       if (k === 'ArrowUp' && i === 0) { qEnterJump(); return; }
       if (!list.length) return;
-      i = Math.max(0, Math.min(list.length - 1, i + (k === 'ArrowDown' ? 1 : -1)));
+      i = i < 0 ? 0 : Math.max(0, Math.min(list.length - 1, i + (k === 'ArrowDown' ? 1 : -1)));
       qs.sel[v] = list[i].key; qRender();
       return;
     }
-    if (k === 'Enter') { e.preventDefault(); qPick(v, qIdx(v), e.ctrlKey || e.metaKey); return; }
+    if (k === 'Enter') {
+      e.preventDefault();
+      if (!$('tkqin').value.trim()) return;
+      var selected = qIdx(v);
+      if (selected >= 0) qPick(v, selected, e.ctrlKey || e.metaKey);
+      else if (!e.ctrlKey && !e.metaKey && O.searchAsk) O.searchAsk($('tkqin').value.trim());
+      return;
+    }
     if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); qEsc(); }
   }
   // Editors keep their own keys: a terminal card (its .xterm helper textarea),
@@ -6734,15 +6748,16 @@
     // the range and label pickers' discard capsule: outside the menu, which clips its children
     b.appendChild(el('button', { type: 'button', class: 'tk tk-mcap', id: 'tkcap', hidden: '' }, '<svg class="i"><use href="#tki-trash"/></svg><span>' + wsT("js.tk.menu.discard") + '</span>'));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
-      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
-    b.appendChild(el('dialog', { class: 'tk tk-palette', id: 'tkqpop', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
+      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-controls="tkqpop" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
+    (O.searchHost ? O.searchHost.parent : b).appendChild(el('section', { class: 'tk tk-palette', id: 'tkqpop', role: 'region', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
       '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '</label>' +
       '<div class="tk-qrow"><input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
       '<span class="tk-qscope" id="tkqscope" hidden></span></div>' +
       '<div class="tk-qjump" id="tkqjump" role="listbox" aria-label="' + wsT("js.tk.qs.strip") + '" hidden></div>' +
-      '<div class="tk-qtabs" id="tkqtabs" role="tablist" hidden></div>' +
-      '<div class="tk-qgrid" id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></div>' +
-      '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span>'));
+      '<div class="tk-qmain' + (O.searchAsk ? ' with-answer' : '') + '"><section id="tkqanswer" class="tk-qanswer"' + (O.searchAsk ? '' : ' hidden') + '></section><div class="tk-qresults"><div class="tk-qtabs" id="tkqtabs" role="tablist" hidden></div>' +
+      '<div class="tk-qgrid" id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></div></div></div>' +
+      '<span class="tk-qhint">' + (O.searchAsk ? wsT("js.search.askhint") + ' · ' : '') + wsT("js.tk.qs.hint") + '</span>'));
+    if (O.searchAnswerMount) O.searchAnswerMount($('tkqanswer'));
   }
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
   // changes, and keys stay the host's.
@@ -6791,7 +6806,7 @@
 
     document.addEventListener('click', function (e) {
       var t = e.target;
-      if (qs.open && (t === $('tkqpop') || !(t.closest && t.closest('#tkqpop, #tkqs')))) qClose();
+      if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs')) && !(O.searchHost && O.searchHost.contains(t))) qClose();
       if (mentionBox(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
       else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
       // a click outside the menu closes it; a click on its own opener toggles it shut (menuOutside)
@@ -6805,7 +6820,7 @@
         qPickEntry({ slot: qk, row: qk === 'jump' ? qs.jump[qi] : qs.S[qk] && qs.S[qk].rows[qi] }, e.ctrlKey || e.metaKey);
         return;
       }
-      if (qh) { qs.cur = qh.getAttribute('data-qslot'); qRender(); $('tkqin').focus(); return; }
+      if (qh) { qs.cur = qh.getAttribute('data-qslot'); qs.sel = {}; qRender(); $('tkqin').focus(); return; }
       var h = t.closest('.tk-handle[data-handle]');
       if (h) { openStore(h.getAttribute('data-handle')); return; }
       var fb = t.closest('.tk-fold[data-fold]');
@@ -7074,8 +7089,6 @@
     }, true);
     // Esc from the input is its keydown's (qKey); a close request from elsewhere in the
     // dialog clears then closes the same way, and one the browser forced closes it
-    $('tkqpop').addEventListener('cancel', function (e) { e.preventDefault(); qEsc(); });
-    $('tkqpop').addEventListener('close', function () { if (qs.open) qClose(); });
     // the list keeps the focus in the input: a click picks or switches without taking it
     $('tkqpop').addEventListener('mousedown', function (e) { if (e.target !== $('tkqin') && e.target.closest('[data-qi], [data-qslot]')) e.preventDefault(); });
     $('tkqin').addEventListener('input', function (e) { if (!e.isComposing) qRun(); });
@@ -7218,6 +7231,7 @@
       refresh: function () { render(); },
       openStore: openStore,
       openSearch: qOpen,
+      closeSearch: qClose,
       closeStore: function () { if (ui.open) collapse(); },
       openItemWindow: openItemWindow,
       leavePage: leavePage,
