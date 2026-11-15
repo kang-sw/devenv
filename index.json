@@ -870,7 +870,14 @@
       "registered_at": "2026-11-15T02:43:44Z"
     },
     "261115-feat-ws-whiteboard-topic-interleaved-timeline": {
-      "registered_at": "2026-11-15T03:11:31Z"
+      "registered_at": "2026-11-15T03:11:31Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T06:16:28Z"
+      }
     },
     "261115-feat-ws-whiteboard-topic-waiting-on": {
       "registered_at": "2026-11-15T03:33:00Z",
