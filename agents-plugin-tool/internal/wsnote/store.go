@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -27,6 +28,41 @@ const (
 // lockTimeout bounds how long a note-store RMW waits to acquire its flock
 // before giving up, mirroring wsconfig's updateConfigFile.
 const lockTimeout = 2 * time.Second
+
+// lockSlots holds one single-token channel per lock file path, so this
+// process's writers of one store queue in memory before its flock.
+var lockSlots sync.Map
+
+// lockFile takes the flock at lockPath within lockTimeout and returns its
+// release. Goroutines of this process first queue on the path's in-memory
+// slot, under the same deadline, so the flock poll arbitrates only between
+// processes. Without the slot every waiter re-polls the flock on one 50 ms
+// cadence: at most one waiter wins per tick, a tick that lands inside the
+// holder's write is lost, and a burst of writers spends the whole deadline
+// idle between holders (TestWriteIsConcurrencySafe on a loaded Windows
+// runner, where each replace is a write-through MoveFileEx). locked is
+// false with a nil error only if the poll gave up without an error.
+func lockFile(lockPath string) (unlock func(), locked bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+	defer cancel()
+	v, _ := lockSlots.LoadOrStore(filepath.Clean(lockPath), make(chan struct{}, 1))
+	slot := v.(chan struct{})
+	select {
+	case slot <- struct{}{}:
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	}
+	fl := flock.New(lockPath)
+	locked, err = fl.TryLockContext(ctx, 50*time.Millisecond)
+	if err != nil || !locked {
+		<-slot
+		return nil, locked, err
+	}
+	return func() {
+		fl.Unlock() //nolint:errcheck
+		<-slot
+	}, true, nil
+}
 
 // MachinePath resolves the machine-layer note store path: the sibling
 // "notes.json" of wsconfig.GlobalPath's "config.json" (e.g. ~/.ws/notes.json
@@ -167,18 +203,14 @@ func rmw(path string, transform func(map[string]Record) map[string]Record) error
 	}
 
 	lockPath := path + ".lock"
-	fl := flock.New(lockPath)
-	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
-	defer cancel()
-
-	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	unlock, locked, err := lockFile(lockPath)
 	if err != nil {
 		return fmt.Errorf("acquire note store lock: %w", err)
 	}
 	if !locked {
 		return fmt.Errorf("timed out waiting for note store lock: %s", lockPath)
 	}
-	defer fl.Unlock() //nolint:errcheck
+	defer unlock()
 
 	current, err := readForUpdate(path)
 	if err != nil {

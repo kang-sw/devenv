@@ -1,9 +1,12 @@
 package wsnote
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
@@ -322,5 +325,24 @@ func TestSetVisibleUnmuteRestoresVisibility(t *testing.T) {
 	}
 	if !records["k"].Visible {
 		t.Fatalf("SetVisible(true) after mute left Visible = false, want true (unmuted)")
+	}
+}
+
+// TestLockFileQueuedWaiterKeepsTheDeadline: a writer queued behind another
+// goroutine of this process on the in-memory slot still gives up within
+// lockTimeout, as a flock wait does, rather than waiting without bound.
+func TestLockFileQueuedWaiterKeepsTheDeadline(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "notes.json.lock")
+	unlock, locked, err := lockFile(lockPath)
+	if err != nil || !locked {
+		t.Fatalf("first lockFile = %v, %v", locked, err)
+	}
+	defer unlock()
+	start := time.Now()
+	if _, _, err := lockFile(lockPath); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued lockFile = %v, want context.DeadlineExceeded", err)
+	}
+	if waited := time.Since(start); waited < lockTimeout/2 || waited > 3*lockTimeout {
+		t.Fatalf("queued lockFile gave up after %v, want about %v", waited, lockTimeout)
 	}
 }

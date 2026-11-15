@@ -1,7 +1,6 @@
 package wsnote
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,9 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/gofrs/flock"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -105,7 +101,7 @@ func repoLockPath(targetPath string) (string, error) {
 }
 
 // lockRepoRecordFile acquires the per-key flock for the tracked file at
-// path, mirroring rmw's flock+timeout pattern but scoped to one key. The
+// path through lockFile, as rmw does, but scoped to one key. The
 // caller must call the returned unlock func (typically via defer) once done;
 // it is nil (call it anyway — it's a no-op) only on error, which is always
 // non-nil when unlock is nil.
@@ -117,18 +113,14 @@ func lockRepoRecordFile(path string) (unlock func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create repo note lock dir: %w", err)
 	}
-	fl := flock.New(lockPath)
-	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
-	defer cancel()
-
-	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	unlock, locked, err := lockFile(lockPath)
 	if err != nil {
 		return nil, fmt.Errorf("acquire repo note lock: %w", err)
 	}
 	if !locked {
 		return nil, fmt.Errorf("timed out waiting for repo note lock: %s", lockPath)
 	}
-	return func() { fl.Unlock() }, nil //nolint:errcheck
+	return unlock, nil
 }
 
 // readRepoRecordFileLocked reads and decodes the record file at path. The
