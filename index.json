@@ -621,7 +621,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/fullscreen-panel-width",
         "phase": "active",
-        "touched_at": "2026-11-15T00:26:18Z"
+        "touched_at": "2026-11-15T01:14:30Z",
+        "impl": {
+          "branch": "impl/exec4/fullscreen-panel-width/chug-diner-dill"
+        }
       }
     },
     "261114-feat-ws-hosted-antigravity-acp-adapter": {
