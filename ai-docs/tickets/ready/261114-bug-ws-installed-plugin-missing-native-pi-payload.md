@@ -210,10 +210,10 @@ Verification:
   processes only. Record exact commands, outcomes and deferred platform/live
   rollout boundaries in the Result before claiming the ticket complete.
 
-### Result (10c2345f8) - 2026-11-16
+### Result (50b78ce18) - 2026-11-16
 
 Implemented on `exec5/native-pi-payload`, based on `28cf9c7bc`; product commit
-`10c2345f87d70e954b18897e70ed80676503e1c5`. The generated bundle and both
+`50b78ce18e21bb24cf4f59c7b7b3937a43e6ff9b`. The generated bundle and both
 payloads were committed once. No installed cache, user configuration, live
 session, shared daemon, marketplace manifest, version or protocol was changed.
 Independent review is requested from EXEC5 and remains pending; this Result
@@ -408,13 +408,13 @@ DryRun), independent review, real marketplace activation and live rollout
 remain unrun. EXEC5 owns independent review; live snapshot/cache/daemon/session
 replacement remains separately owner-gated. The ticket stays in `ready/`.
 
-#### Edition (d9a8b9093) - 2026-11-16
+#### Edition (7475f2059) - 2026-11-16
 
 EXEC5 review round 1 on the rebased branch (`ea80c8103`; original implementation
-and Result are now `10c2345f8` and `1b12c1398`). Source fixes:
-`dc136790ca118a887d093d5b5158151676d3a98a`. Last product commit, containing the
+and Result are now `50b78ce18` and `ed1a7eb60`). Source fixes:
+`91c0410bd0f3c6c4ba3c998ca7b04324781fbefc`. Last product commit, containing the
 round's **single** bundle/payload regeneration:
-`d9a8b9093d3301271ae86f1022878310a289169e`. The preceding Result is unchanged.
+`7475f2059daee2e6c23c4dc568f9b8553d6fdd88`. The preceding Result is unchanged.
 
 - **I1 VERIFIED.** `StalePayload` separates source drift from archive invalidity.
   With an existing source sibling, `--prefer-source` validates first, keeps a
@@ -562,9 +562,9 @@ No hard boundary was hit. Native Windows/PowerShell, the opt-in real npm install
 lane, live marketplace activation and rollout remain unrun. Re-review is handed
 to EXEC5; the ticket remains `ready/` and the original live-rollout gate remains.
 
-#### Edition (4f6834b3f) - 2026-11-16
+#### Edition (def63cbc6) - 2026-11-16
 
-Round 2 fixes N1/N2 in `4f6834b3f878c16e3125c8096097dbdb8307e613`; earlier
+Round 2 fixes N1/N2 in `def63cbc6061f02eb5330e82099ab5133bda3102`; earlier
 Result/Edition text is unchanged. No archive or bundle regeneration ran.
 
 - **N1 VERIFIED.** `ignored_path` (`agents-plugin/bin/ws-pi-payload.py:34`) is
@@ -599,7 +599,7 @@ Verification used isolated HOME/USERPROFILE, WS cache/config and npm cache under
   "$PWD"` gates passed with Node/npm absent from PATH; `cmp` of manifest, ZIP
   and materializer between packages passed.
 - Both ZIPs were captured using `git show HEAD:<pkg>/native-pi/payload.zip`
-  before committing (HEAD was `3a00b956d`), then compared with `cmp`: **identical**.
+  before committing (HEAD was `bab53836b`), then compared with `cmp`: **identical**.
   Both manifests also compare identical to the pre-round manifest blob.
 - Targeted verbose junk and locked-cleanup regressions passed individually
   (**2.722s**, **3.204s**); `git diff --check` passed. Logs are in the round2
@@ -609,6 +609,215 @@ Payload unchanged: **19,074,902-byte ZIP + 1,275,049-byte manifest = 20,349,951
 bytes/package**; repository payload delta this round is **0 bytes**. T0;
 no hard boundary hit. Native Windows/PowerShell and live rollout remain unrun;
 final review remains with EXEC5 and the ticket stays `ready/`.
+
+#### Edition (8621f4cc6) - 2026-11-16
+
+MAIN's binding split/prune decision under owner grant **(1170)=a** replaces the
+monolithic layout to prevent source churn from adding permanent public binary
+blobs. Code/tests/gates: `754fb767deb4f48ff1cc61aaf9e2178f3d3abdcf`.
+Generated native files: `8621f4cc6693ef4a2b441f9bd5adaf669346f3dc`.
+This worktree regenerated once, using the warmed isolated producer cache with
+`--offline`; the old payload.zip and manifest.json are deleted. Earlier ticket
+text is unchanged. The lead owns the eventual history rewrite; this worker did
+not rewrite, squash, push or merge anything.
+
+**Layout and freshness.** `closure.zip` contains only `node_modules/`; its
+`closure-manifest.json` contains the normalized production lock, canonical
+dependency declaration, prune-rule version **2**, archive SHA and dependency
+file hashes. The closure key is
+`0abbaf013d0dd47ae1fa8b0946e1b69f003e2e69cfbe34c55887dd65f48e5183`.
+A same-key/different-archive-or-manifest result fails generation. No first-party
+source hashes enter that large manifest.
+
+Eleven small plain files live in `native-pi/first-party/`, with a separate small
+`first-party-manifest.json`: the bundle, wordlist, synthetic runtime package
+manifest, Pi config manifest, four guides, bundle input record and the **two
+standalone MJS helpers actually spawned/imported**. No TypeScript source tree,
+lock or build scripts are copied into the runtime entry. The complete source
+input hashes remain in the small manifest for producer/source drift gates.
+The runtime package declares `dist/index.js`; Python verifies its hashes/header,
+and Go uses the recorded digest only on an owner-marked prepared entry.
+Source checkouts keep the original `piBundleInputHash` path unchanged. Skills,
+rsrc, runtime/dashboard defaults and launcher reuse the owning package's files.
+
+Materializer schema **3** keys assembly by closure key, first-party digest and
+owner overlays. It retains strict verification, `.runtime` tolerance,
+self-repair, safe-age stage cleanup, best-effort deletion, common junk filtering,
+separate stderr and the 300s budget. Separate extracted-closure caching was
+skipped to avoid another sharing/locking layer; this does not affect Git cost.
+
+**C8: sizes, per package.** The old ZIP/manifest combined both domains; its
+first-party count includes the old source/build/resource duplicates. New owner
+resources already shipped at package root are reused, not counted twice below.
+
+| Measure | Before: monolithic | After: split/pruned |
+|---|---:|---:|
+| ZIP bytes (old combined / new closure only) | 19,074,902 | 7,284,712 |
+| Large manifest bytes | 1,275,049 | 725,054 |
+| Small first-party manifest bytes | 0 (inside combined metadata) | 11,990 |
+| First-party file bytes | 4,223,174 (inside ZIP) | 1,725,978 (plain files) |
+| First-party file count | 165 | 11 |
+| Dependency file count | 9,515 | 5,571 |
+| Total payload member count, excluding manifests | 9,680 | 5,582 |
+| Dependency unpacked bytes | 40,749,096 | 21,547,906 |
+| Total payload unpacked bytes | 44,972,270 | 23,273,884 |
+| Native directory bytes, archive + metadata + plain files | 20,349,951 | 9,747,734 |
+
+The closure preserves **138 redistribution-notice files and 157 package.json
+files byte-for-byte** against the original pinned archive. The additional 19
+embedded manifests are module/type markers with no main/module/exports/bin/
+browser/imports fields. All retained dependency file bytes match the original
+archive, and every one of the 138 production packages' declared local runtime
+targets is asserted before and after pruning and again during validation.
+
+| Prune rule | Files removed | Unpacked bytes removed |
+|---|---:|---:|
+| Media outside dist/lib, unless runtime-referenced | 2 | 6,403,101 |
+| docs/doc/examples/example/test/tests/__tests__/benchmark(s)/.github trees | 1,254 | 6,870,349 |
+| Non-legal Markdown | 238 | 1,499,631 |
+| Unreferenced source maps | 372 | 1,472,047 |
+| Unreferenced type declarations | 2,014 | 2,060,026 |
+| TypeScript build metadata | 0 | 0 |
+| Redundant src with compiled output and no runtime path into src | 64 | 896,036 |
+| **Total** | **3,944** | **19,201,190** |
+
+Rules are in the named `prune_rule`, applied only under node_modules, with
+comments per rule. Legal files and package.json always survive. **68** candidate
+removals are explicitly retained because manifest targets or transitive literal
+runtime imports/resources need them. This narrows declaration pruning for
+exported types and directory pruning for YAML's actual `dist/doc` runtime
+modules. Temml declares `"./*":"./*"`, so its src, exported documentation and
+SVG cannot be dropped under the hard target-preservation rule. No manifest was
+rewritten to hide missing files. Nonlisted `.yarn` tooling was conservatively
+retained and reported to EXEC5 rather than silently extending the reviewed list.
+
+**Top 15 remaining closure files (unpacked bytes):**
+
+| File under node_modules/ | Bytes |
+|---|---:|
+| unpdf/dist/pdfjs.mjs | 1,676,063 |
+| jiti/dist/babel.cjs | 1,526,691 |
+| @mixmark-io/domino/.yarn/plugins/@yarnpkg/plugin-version.cjs | 1,073,677 |
+| defuddle/dist/index.full.js | 760,734 |
+| temml/dist/temml.cjs | 479,810 |
+| temml/dist/temml.mjs | 479,800 |
+| temml/dist/temml.js | 425,056 |
+| linkedom/worker.js | 421,658 |
+| pi-web-access/node_modules/linkedom/worker.js | 414,459 |
+| defuddle/node_modules/linkedom/worker.js | 411,521 |
+| defuddle/dist/index.js | 334,960 |
+| @mixmark-io/domino/lib/HTMLParser.js | 252,315 |
+| jiti/dist/jiti.cjs | 190,082 |
+| mathml-to-latex/dist/bundle.min.js | 172,706 |
+| mathml-to-latex/dist/index.cjs | 168,343 |
+
+**Acceptance evidence (C1-C8).** All execution used isolated HOME/USERPROFILE,
+WS cache/config and npm cache under `/tmp/exec5/native-pi/round3/`, except the
+producer's previously warmed isolated cache. No external network test ran.
+
+1. **VERIFIED:** both actual Pi **1.5.2 CLI-adjacent SDK** identity fixtures
+   passed, one test per package, zero skips. The unchanged bundle entry SHA is
+   `af1e77fb4a83b50be87da5e518f1509c5b2787bcadd43a8fd9b375a245b732fd`.
+   The test is `agents-plugin-tool/internal/wsagent/testdata/pi-native-payload-identity.test.mjs`;
+   the prior Result's identity loop was run on both new packages using canonical
+   `/private/tmp/exec5/native-pi/round3/identity-final-<product>.XXXXXX` roots and
+   `final-native-cache`. Physical RpcClient/registry/TUI identity, child CLI and
+   extension choice, exact owner skill inventory and unchanged-entry teardown
+   all passed. MCP/socket/child-start boundaries remain mocked.
+2. **VERIFIED:** `node --test agents-plugin-pi/test/web-package.test.ts
+   agents-plugin-pi/test/helper-host.test.mjs agents-plugin-pi/test/workflow-owner.test.ts`
+   with WS_PI_TEST_CLI/WS_PI_TEST_NETWORK and role flags unset: **6 passed,
+   1 deliberate network-install skip, 0 failed**. The existing helper probe
+   loads pi-web-access from the materialized entry and captures/validates its
+   search registration; it sends no query and invokes no provider. A separate
+   `createWebSearch({packageRoot: materialized, env}).probe()` smoke ran for both
+   new entries against the actual 1.5.2 CLI and passed, with realpaths inside
+   each entry's own node_modules. Logs: `node.log`, `helper-smoke.log`.
+3. **VERIFIED:** `python3 -B -m unittest discover -s agents-plugin/tests`:
+   **158 tests OK (2 existing Windows skips)**; wsflow equivalent:
+   **22 tests OK (2 existing Windows skips)**. Existing runtime, rollback,
+   corruption repair, `.runtime`, marker bytes, source selection, stage cleanup,
+   junk and snapshot assertions remain tested on the new representation.
+   New tests assert pruning, legal preservation, all manifest target fields,
+   wildcard/browser targets and source/dependency freshness separation.
+   Existing unclosed-stream ResourceWarnings remain non-failing.
+4. **VERIFIED:** from agents-plugin-tool, with
+   `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` and existing offline Go caches:
+   `go test -count=1 ./internal/wsagent -run 'Pi'` **ok, 76.530s**;
+   `go test -count=1 ./internal/wsrsrc` **ok, 1.162s**;
+   `go build ./...` and `go vet ./...` **exit 0**. Prepared-record freshness
+   without source is tested while the original source freshness tests still pass.
+5. **VERIFIED:** both `python3 -I -B <pkg>/bin/ws-pi-payload.py --plugin <pkg>
+   --check-source "$PWD"` gates pass with PATH=/usr/bin:/bin and the absolute
+   Python interpreter (no Node/npm). `cmp` passes for closure.zip, closure
+   manifest, first-party manifest and materializer; recursive `diff` of both
+   first-party directories passes. Build/release gates check the same files;
+   both installers keep warning-on-stale/fatal-on-invalid through the existing
+   shared flags, with separate component diagnostics.
+6. **VERIFIED:** `test_closure_and_first_party_staleness_have_distinct_gates`
+   passes. Additional actual CLI fixture runs changed the dependency declaration,
+   then a production lock record, then src/index.ts. They emitted respectively
+   `CLOSURE stale: ...package.json dependencies`, `CLOSURE stale:
+   ...package-lock.json production closure`, and `FIRST-PARTY stale:
+   ...src/index.ts`. Every bare gate exited **2**; every installer
+   `--allow-stale-source` gate exited **0 with WARNING**. Every message named
+   the source input and `npm run bundle && python3 scripts/prepare-native-payload.py`.
+   Invalid archive/first-party bytes remain fatal. Log: `gate-cli.log`.
+7. **VERIFIED:** the required experiment used a plain `git clone --no-hardlinks
+   --local --single-branch --branch exec5/native-pi-payload`, not a worktree,
+   under `/tmp/exec5/native-pi/round3/delta-clone`. After applying the candidate
+   code and committing regenerated baseline `918620a26c681cfdfeafa50ab6b84e1b4dca75c3`,
+   it appended a trivial src/index.ts comment, ran `npm run bundle` and the
+   offline producer, then committed `392a9d8570ff9a61fb0eeba3f35d0fb0418415d4`.
+   `git diff --stat HEAD~1` showed only **8 first-party paths, 16 insertions,
+   14 deletions** (original src/bundle plus each package's small manifest,
+   bundle record and bundle). **No closure ZIP or closure manifest changed.**
+   The four distinct new blobs are 1,620,395-byte bundle, 84,847-byte original
+   source, 11,990-byte small manifest and 97-byte record: **1,717,329 logical
+   uncompressed bytes**, with **1,619 bytes in a thin incremental pack** from
+   `git pack-objects --stdout --thin --revs` over HEAD excluding HEAD~1.
+   That pack size is an incremental fixture measurement, not a claim about a
+   later whole-repository GC. The plain clone was deleted. Receipts:
+   `clone-delta-stat.txt`, `delta-proof.json`, `source-delta.thin.pack`.
+8. **VERIFIED:** the preceding size/removal/largest-file tables come from the
+   old ZIP inventory and final producer report, `size-comparison.json` and
+   `final-report.json`. Both products are byte-identical. Source-derived input
+   hashes and each bundle/header record are now confined to small plain files.
+
+The main producer command was
+`python3 -B agents-plugin-pi/scripts/prepare-native-payload.py --offline --npm-cache /tmp/exec5/native-pi/current/producer/npm-cache --report /tmp/exec5/native-pi/round3/final-report.json`.
+It exited 0, once in this worktree. Clone preflight/proof generations never
+published into this checkout. All logs/receipts named above are under the round3
+scratch directory. No forbidden host packages, producer links or producer paths
+were found in the new closure. The two MJS source files remain because the
+runtime actually spawns/imports them; all other native src stays out of the entry.
+
+**Compatibility and remaining boundaries.** T0: the producer writes the split
+assets at `prepare-native-payload.py:197-246`; validation/read/assembly is in
+`ws-pi-payload.py:183-260,287-345`. The old `998cb3fe3` binary reads only the
+repository sibling at `pi_lead.go:123-129`, never native-pi, and retains its
+missing-sibling bridge/warning at `:41-58`. The new `pi_lead.go:125-137` keeps
+that sibling route and the existing invalid-payload bridge. Prepared Go
+freshness uses a verified record at `pi_bundle.go:98-115`; source freshness
+continues recomputing at `:35-66`. Neither binary rewrites shared data or changes
+protocol/config/tool semantics, and no migration or T3/version boundary exists.
+Native Windows/PowerShell, the opt-in network install lane, actual provider
+queries and live rollout remain unrun. The ticket stays ready for EXEC5 review
+and the owner-gated rollout; no install hook, marketplace semantic change,
+version bump, forbidden whiteboard edit or daemon operation was performed.
+
+**History rewrite (EXEC5 lead, MAIN decision 2 under (1170)=a).** Before
+merge, the unpushed branch was rewritten so that exactly one payload generation
+exists in its history. The superseded single-archive `native-pi/payload.zip`
+and `native-pi/manifest.json` were removed from every commit before
+`8621f4cc6`. That commit is now the only one adding generated archive blobs: one
+`closure.zip` blob (7,284,712 B) and one `closure-manifest.json` blob
+(725,054 B), each shared by ws and wsflow. As a result, commits `50b78ce18`
+through `754fb767d` carry no committed native payload, and their Results'
+payload-size figures describe the pre-rewrite generations. `7475f2059` now
+regenerates only `agents-plugin-pi/dist/index.js`. Commit hashes in this
+ticket were repointed to the rewritten commits. The final tree is
+byte-identical to the pre-rewrite head `0fd0711ba`.
 
 ## Owner Decisions (2026-11-16)
 
