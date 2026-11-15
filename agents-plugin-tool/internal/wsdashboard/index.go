@@ -58,6 +58,10 @@ type Session struct {
 	// Live is Registration.Live at the time the index was read.
 	Live     bool
 	HasBoard bool
+	// Hidden comes only from the dashboard sidecar, never Registration.
+	// Lifecycle is derived without changing liveness or retention behavior.
+	Hidden    bool
+	Lifecycle SessionLifecycle
 	// CountPolicy is SessionData.CountPolicy as of the last read.
 	CountPolicy int
 	// Resumable is SessionData.Resumable as of the last read.
@@ -384,6 +388,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		}
 	}
 	var label string
+	var hidden bool
 	if keep {
 		var err error
 		data, keep, err = x.opts.Source.ReadSession(*reg)
@@ -393,6 +398,14 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 			return false
 		}
 		label = readSessionLabel(SessionDir(x.opts.Dir, replyID))
+		if reg.Hosted {
+			hidden, err = ReadSessionHidden(x.opts.Dir, replyID)
+			if err != nil {
+				// Match the runner's fail-closed launch gate, retaining the row.
+				hidden = true
+				fmt.Fprintf(x.opts.Log, "dashboard: read visibility %s: %v\n", replyID, err)
+			}
+		}
 	}
 	now := x.opts.Now()
 
@@ -408,7 +421,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s removed (project %s)\n", replyID, entry.session.Project)
 		return true
 	}
-	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, Label: label, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
+	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, Label: label, SnapshotUpdatedAt: data.SnapshotUpdatedAt, Hidden: hidden, Lifecycle: DeriveSessionLifecycle(*reg, hidden, now)}
 	if !known {
 		next.Rev = 1
 		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint}
@@ -466,6 +479,7 @@ func (x *Index) Sessions() []Session {
 	for _, entry := range x.sessions {
 		s := entry.session
 		s.Live = s.Registration.Live(now)
+		s.Lifecycle = DeriveSessionLifecycle(s.Registration, s.Hidden, now)
 		out = append(out, s)
 	}
 	x.mu.Unlock()
@@ -488,7 +502,9 @@ func (x *Index) Session(replyID string) (Session, bool) {
 	}
 	x.mu.Unlock()
 	if ok {
-		s.Live = s.Registration.Live(x.opts.Now())
+		now := x.opts.Now()
+		s.Live = s.Registration.Live(now)
+		s.Lifecycle = DeriveSessionLifecycle(s.Registration, s.Hidden, now)
 	}
 	return s, ok
 }

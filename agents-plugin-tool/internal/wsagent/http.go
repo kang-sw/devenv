@@ -190,6 +190,9 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 	case action == "stop":
 		st, err := r.Stop(id)
 		writeAnswer(w, http.StatusOK, view(st), err)
+	case action == "hide" || action == "unhide":
+		st, err := r.SetHidden(id, action == "hide")
+		writeAnswer(w, http.StatusOK, view(st), err)
 	case action == "restart":
 		st, err := r.Restart(id)
 		writeAnswer(w, http.StatusOK, view(st), err)
@@ -240,7 +243,7 @@ func leadControl(action string) bool {
 // leadMove reports whether action moves a lead session between the daemon
 // and a terminal. These take the trusted gate whatever id they name.
 func leadMove(action string) bool {
-	return action == "handoff" || action == "takeover" || action == "reopen"
+	return action == "handoff" || action == "takeover" || action == "reopen" || action == "hide" || action == "unhide"
 }
 
 // writeAllowed is the POST rule: a JSON body, and no Origin or the
