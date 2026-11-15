@@ -1,8 +1,12 @@
 ---
 title: "Electron shell on Windows: app-drawn VS Code-style title bar"
 related:
-  261115-feat-werkschaft-electron-shell: prerequisite (Phase 1 macOS shell; Phase 3 Windows packaged delivery)
+  261115-feat-werkschaft-electron-shell: prerequisite (Phase 1 shell only per (943)=a; Windows build already supported in agents-plugin-tool/desktop-electron/scripts/build.cjs#L10-L13)
   261115-feat-ws-daemon-release-auto-update: precedent (shell-owned overlay view for the update toast)
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 6d137ba89e3979fe
+sage-review-completeness-reviewed: 6d137ba89e3979fe
 ---
 
 # Electron shell on Windows: app-drawn VS Code-style title bar
@@ -29,11 +33,13 @@ Useful existing pieces:
   (`win.setTitleBarOverlay`).
 - The dashboard already keeps `meta[name="theme-color"]` in step with its
   own theme setting for installed-app title bars
-  (`agents-plugin-tool/internal/wsdashboard/assets/dashboard.js:455-461`);
+  (`agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L463-L468`);
   Electron reports it through `webContents` `did-change-theme-color`.
 - The auto-update ticket already settled a shell-owned overlay view with a
-  narrow preload for its toast (T3), the precedent for shell-drawn UI beside
-  the remote dashboard.
+  narrow preload for its toast (Decisions → Toast surface; implementation is
+  Phase 2 in `ai-docs/tickets/todo/261115-feat-ws-daemon-release-auto-update.md`),
+  the precedent for shell-drawn UI beside the remote dashboard
+  (pending 261115-feat-ws-daemon-release-auto-update).
 
 ## Decisions
 
@@ -72,6 +78,16 @@ Useful existing pieces:
   consequence of the owner directive that Electron never launches on the
   owner's Mac). The platform-switch unit test proves those platforms keep
   the native title bar. Rejected: a macOS GUI smoke run.
+- **Dashboard view ownership on Windows** (technical, EXEC4): the
+  dashboard loads in its own sibling view below the bar view, and every
+  existing per-webContents behavior binds to the dashboard's webContents
+  through one accessor, unit-tested on both layouts: title handling, the
+  beforeunload/close veto, the navigation guard, zoom, and theme-color. The
+  dashboard keeps its isolation unchanged (contextIsolation, sandbox,
+  no preload); the narrow preload belongs to the local bar view only, and
+  the bar view loads only the bundled bar page. Rejected: overlaying the bar
+  on the window's own dashboard webContents (it covers dashboard content
+  and would need a dashboard inset change, which the Constraints bar).
 
 ## Constraints
 
@@ -94,6 +110,30 @@ Useful existing pieces:
   `WS_CACHE_HOME` on free ports, never the shared dashboard daemon or port
   29417, owned process scan at the end).
 - Not a cross-version surface (shell chrome only).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
+## Prior Decisions
+
+- 261115-feat-werkschaft-electron-shell (2026-11-15, Decisions): "The renderer runs with `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, and no preload script" — bearing: constrains
+- 261115-feat-ws-daemon-release-auto-update (2026-11-15, Decisions): "The toast is a small shell-owned overlay view (bottom-right of the window, local packaged content only, never remote content)" — bearing: supports
+- 0bc7fcf2 (2026-11-15, commit): "Reuse theme messages; language reload now also checks cached frames for drafts. Preferences are available before selecting a session." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/desktop-electron/: main.js, bundled bar HTML and narrow preload, tests and packaging inputs; scripts/build.cjs#L25-L27 currently copies only four runtime files. |
+| scope.surface | public-interface | Windows window chrome, native controls and P8 menu/keyboard access are user-facing; dashboard assets stay unchanged. |
+| scope.new_public_symbol | no | No new daemon, MCP or dashboard export is planned; the new preload is confined to the bundled shell-owned bar. |
+| scope.new_type_contract | yes | New local preload contract carries title updates into the bar and menu commands out; exact channel and symbol names are not yet specified (Decisions). |
+| scope.test_surface | existing | agents-plugin-tool/desktop-electron/test/main.test.js already mocks BrowserWindow, menus, renderer isolation and close veto; test/smoke.cjs exercises the packaged shell. |
+| complexity.reuse_points | confirmed | Read main.js#L81-L95 and #L148-L166 for close/menu/zoom behavior, connection.html and test/main.test.js; dashboard.js#L455-L468 supplies theme-color updates. The toast overlay is only a design precedent, not landed code. |
+| complexity.side_effect_risk | high | Adding a dashboard view and privileged local bar changes content ownership, keyboard routing and window-close handling around the existing draft-preservation guard. |
+| risk.correctness | high | main.js#L29-L40 binds title handling to window.webContents, #L81-L95 handles unload there, and #L56-L63 allows only connection.html as a local main-frame document; new views must preserve these behaviors deliberately. |
+| risk.fit | moderate | The local bar/preload must fit the one-window shell without changing dashboard assets or macOS/Linux chrome; no reusable overlay implementation exists in desktop-electron/. |
+| risk.test | high | Existing unit fixtures mock Electron; Windows snap hover, drag/double-click, Alt/menu focus, theme repaint and close behavior need the specified Windows-host acceptance, not a Mac GUI run. |
+| risk.security_or_contract | high | A new local preload/menu authority boundary must remain inaccessible to the daemon-served dashboard; current main.js#L23-L28 and test/main.test.js#L54-L62 explicitly enforce its no-preload isolation. |
 
 ## Phases
 
