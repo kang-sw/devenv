@@ -398,3 +398,43 @@ the lead's override; EXEC4 owns the lite review. No merge or push was performed.
   process scan was empty. No GUI ran on the Mac, no process was killed, and
   `C:\Users\ki608\devenv` was untouched. Independent review was omitted under
   the lead override; no merge or push was performed.
+
+#### Edition (e1c73dbec) - 2026-11-15
+
+Title bar v2 (owner follow-up)
+
+- VERIFIED: the shell-owned Windows strip is now 30px, with the approved
+  brand mark, hamburger and centered title. Dashboard bounds track the strip;
+  native `titleBarOverlay` caption buttons remain. macOS/Linux window
+  construction and dashboard assets/isolation are unchanged.
+- VERIFIED: main installs a computed-body/root-background reader and a small
+  theme-attribute/media observer through `executeJavaScript`, without a
+  dashboard preload. Only bounded, strictly parsed, current-document console
+  markers from the dashboard main frame update the bar. Actual opaque page
+  background takes precedence, with theme-color then nativeTheme fallback;
+  luminance controls text, hamburger and overlay symbol contrast.
+- VERIFIED: cached headless Playwright Chromium rasterized only
+  `ai-docs/ref/brand/werkschaft-mark.svg`. The committed 256px PNG and PNG-entry
+  ICO (16/24/32/48/64/128/256px) preserve transparency. The dev-time generator
+  is separate from offline packaging; the Windows window/taskbar, executable
+  packager and bar use the shipped brand icons.
+- VERIFIED: Mac `npm test` passed 49/49; offline darwin-arm64 `npm run build`
+  passed with the existing optional `.icon` warning. Headless Chromium checked
+  initial background, live class/theme changes and prefers-color-scheme
+  changes. No Electron, app, smoke or GUI was launched on the Mac.
+- VERIFIED: Windows owner-copy rebuild stopped at its required CIM
+  ExecutablePath preflight because the existing owner copy was running. No
+  process was killed, no target content was replaced, and no bundle,
+  dependency installation, Windows test/build, acceptance run or app launch
+  occurred. The temporary preflight/cleanup scripts were deleted; the final
+  CIM scan still showed only the same pre-existing owner-copy processes.
+- Owner-copy executable observed in preflight (VERIFIED):
+  `C:\Users\ki608\ws-electron-owner\src\agents-plugin-tool\desktop-electron\dist\Werkschaft-win32-x64\Werkschaft.exe`.
+  No new Windows built head exists from this pass. Its current head, embedded
+  icon and shortcut TargetPath were not inspected or changed. Implementation
+  head ready for a later authorized rebuild:
+  `e1c73dbec96e92d3920af97c8dc74af402be4ac0`.
+- INFERRED: Windows visual behavior and executable-icon delivery follow the
+  implementation and packaging unit tests; owner acceptance remains pending.
+  Close the existing owner copy before authorizing another rebuild. No merge
+  or push was performed, and `C:\Users\ki608\devenv` was untouched.
