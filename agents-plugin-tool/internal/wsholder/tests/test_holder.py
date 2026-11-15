@@ -337,6 +337,34 @@ class RingReplayTest(HolderTestCase):
         self.assertEqual(decode(events[0]), b"line %04d\n" % (first + 5 - 1))
 
 
+class RingSkipTest(HolderTestCase):
+    def test_skipped_stdout_lines_take_no_sequence_and_reach_no_client(self):
+        holder = self.start_holder(ring_skip="^drop")
+        client = self.attached(holder)
+        code = (
+            "import sys\n"
+            "sys.stdout.buffer.write(b'keep 1\\ndrop 2\\nkeep drop 3\\ndrop 4\\n')\n"
+            "sys.stderr.buffer.write(b'drop on stderr\\n')\n"
+        )
+        self.spawn(client, py_child(code), mode="pipe")
+        events = client.events_until(lambda m: m.get("event") == "exit")
+        stdout = [decode(m) for m in events if m.get("stream") == "stdout"]
+        stderr = [decode(m) for m in events if m.get("stream") == "stderr"]
+        self.assertEqual(stdout, [b"keep 1\n", b"keep drop 3\n"])
+        self.assertEqual(stderr, [b"drop on stderr\n"])
+        self.assertEqual(sorted(m["seq"] for m in events), list(range(1, 5)))
+
+    def test_only_whole_lines_are_skipped(self):
+        pattern = holder_mod.re.compile(b"^drop")
+        pieces = [(b"keep", True), (b"drop tail\n", False), (b"drop\n", False), (b"drop cut", True), (b"rest\n", False)]
+        kept, at_start = holder_mod.unskipped(pattern, pieces, True)
+        self.assertEqual(kept, [(b"keep", True), (b"drop tail\n", False), (b"drop cut", True), (b"rest\n", False)])
+        self.assertTrue(at_start)
+        kept, at_start = holder_mod.unskipped(pattern, [(b"drop\n", False)], False)
+        self.assertEqual(kept, [(b"drop\n", False)])
+        self.assertTrue(at_start)
+
+
 class IdleExitTest(HolderTestCase):
     def test_never_idles_out_while_the_child_lives_then_exits_after_it(self):
         holder = self.start_holder(idle_exit=0.4)

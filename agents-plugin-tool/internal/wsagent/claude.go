@@ -113,6 +113,9 @@ func claudeLeadArgs(spec StartSpec) ([]string, error) {
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
+		// The reply streams into the conversation view as it is written
+		// (stream_event lines; the mapper's partial).
+		"--include-partial-messages",
 		"--permission-mode", mode,
 		"--permission-prompt-tool", "stdio",
 	}
@@ -340,6 +343,9 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 	cmd.Env = claudeEnv(spec.Env)
 	if spec.Lead != nil {
 		cmd.Env = claudeLeadEnv(spec)
+		if spec.Holder != nil {
+			spec.Holder.ringSkip = claudeRingSkip
+		}
 	}
 	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
@@ -596,7 +602,24 @@ type claudeMapper struct {
 	// telemetry; both by the Agent call's tool call id.
 	spawns map[string]claudeSpawn
 	subs   map[string]*claudeSub
+
+	// partial is the lead's text content block still streaming
+	// (--include-partial-messages), and partialAt when it was last sent as
+	// the reply so far; the block's whole assistant line replaces it.
+	partial   strings.Builder
+	partialAt int64
 }
+
+// claudePartialEvery is the least time between two sends of the streaming
+// reply: every reply event makes the runner take a snapshot.
+const claudePartialEvery = 100
+
+// claudeRingSkip matches the partial-message lines the mapper drops: tool
+// input, thinking, and signature deltas. A lead's holder keeps them out of
+// its ring, where a large Write's input streams as about 15 bytes of
+// stream_event per byte written and would push the turn's start out. A line
+// whose shape this no longer matches is kept, as before the filter.
+const claudeRingSkip = `^\{"type":"stream_event","event":\{"type":"content_block_delta","index":[0-9]+,"delta":\{"type":"(?:input_json|thinking|signature)_delta"`
 
 // claudeSpawn is what a lead's Agent call asked of its subagent: the model
 // (the call's model parameter) and the effort its subagent type carries.
@@ -653,6 +676,8 @@ type claudeLine struct {
 	ErrorStatus json.RawMessage `json:"error_status"`
 	// ParentToolUseID names the Agent call whose subagent wrote the line.
 	ParentToolUseID string `json:"parent_tool_use_id"`
+	// Event is a stream_event line's raw API stream event.
+	Event json.RawMessage `json:"event"`
 	// TaskID, TaskType, Description, Status, and Patch describe a
 	// background task's system lines (task_started, task_updated,
 	// task_notification).
@@ -903,6 +928,11 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			}
 			return out
 		}
+	case "stream_event":
+		if l.ParentToolUseID != "" || !m.lead() {
+			return nil
+		}
+		return m.streamEvent(l.Event, now)
 	case "assistant":
 		if l.ParentToolUseID != "" {
 			return m.subagentReply(l, now)
@@ -1194,6 +1224,47 @@ func (m *claudeMapper) settled(raw json.RawMessage) []Event {
 		}
 	}
 	return out
+}
+
+// streamEvent maps a lead's partial-message stream event: a text block's
+// deltas accumulate and are sent as the reply so far (not final), at most
+// every claudePartialEvery ms. The block's whole assistant line follows and
+// finishes the reply with its own text, so a stream that stops short (an
+// interrupt) is finished by the turn's end instead. Other events (thinking,
+// tool input) carry no reply text.
+func (m *claudeMapper) streamEvent(raw json.RawMessage, now int64) []Event {
+	var ev struct {
+		Type  string `json:"type"`
+		Delta struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"delta"`
+	}
+	if json.Unmarshal(raw, &ev) != nil {
+		return nil
+	}
+	switch ev.Type {
+	case "message_start", "content_block_start":
+		m.partial.Reset()
+		m.partialAt = 0
+		return nil
+	case "content_block_delta":
+		if ev.Delta.Type != "text_delta" || ev.Delta.Text == "" {
+			return nil
+		}
+		m.partial.WriteString(ev.Delta.Text)
+		if m.partialAt != 0 && now-m.partialAt < claudePartialEvery {
+			return nil
+		}
+		m.partialAt = now
+		if strings.TrimSpace(m.partial.String()) == "" {
+			return nil
+		}
+		// A turn the harness began on its own opens here, ahead of its
+		// first reply text, as an assistant line opens it.
+		return []Event{{TurnStart: true}, {Live: &wslive.Event{Kind: wslive.KindReply, Text: m.partial.String()}}}
+	}
+	return nil
 }
 
 // claudeSeenUUIDs is how many recent assistant line uuids the mapper keeps
