@@ -272,6 +272,29 @@ no-answer-needed, 2026-11-15; settled):
   requires it. Preserve the Phase 1 plan and Results. The lead owns the HEAD
   handoff, integration and ticket closure; this invocation does not close it.
 
+### Confirmed owner UI feedback - 2026-11-15
+
+MAIN relayed explicit owner approval at 05:13:25Z, within the current Phase 2
+unit and its existing UI-fast verification budget:
+
+- Make the top search input row noticeably shorter by reducing height and
+  padding. Remove the right-hand project/gitignore scope capsule entirely.
+- Remove the entire jump/command strip, including session-switch capsules.
+  This explicitly supersedes the earlier preserve-jump/command-strip constraint,
+  its Alt+0 shortcut and Up-to-strip navigation. Session switching remains
+  reachable through the existing session rail; add no replacement search UI.
+- Keep layout A, rolling context, the five result sources and the remaining
+  keyboard contract. The approved layout A reference governs the two-column
+  body; these later owner deletions govern its top chrome.
+- The feedback screenshot was inspected at
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/dashboard/sessions/sweatradartakingoverwrite/inbox/attachments/fe893250b711fd2a-1.png`.
+  It identifies existing chrome to remove, not a new target or screenshot
+  matrix. No new decision IDs, worker lane or review pass are introduced.
+- The head touches `wsdashboard/assets/dashboard.js` and `dashboard.css`,
+  currently frozen for the lead-coordinated large-file split. Deliver and retain
+  this branch for lead-owned integration onto that split; no self-sync or
+  runtime action is authorized.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
