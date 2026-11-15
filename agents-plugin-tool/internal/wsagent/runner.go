@@ -2318,12 +2318,17 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	level, source, err := c.r.leadPermission(rec, c.dir)
 	if err != nil {
-		return err
+		if !attach {
+			return err
+		}
+		// Admission checks still block new launches, but must not orphan an
+		// existing held process. Rejoin observes it without applying a selection.
+		fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission selection (advisory): %v\n", rec.ReplyID, err)
 	}
 	if attach {
 		// Root lead keys remain parentless under the existing key-store contract.
 		if err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey); err != nil {
-			return fmt.Errorf("ws session key: %w", err)
+			fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin ws session key (advisory): %v\n", rec.ReplyID, err)
 		}
 	}
 	host := c.r.opts.Holders

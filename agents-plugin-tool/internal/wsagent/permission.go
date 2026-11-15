@@ -117,7 +117,11 @@ func (r *Runner) permissionState(st State, rec Record, dir string) State {
 	}
 	level, source, err := r.leadPermission(rec, dir)
 	if err != nil {
-		st.Error = err.Error()
+		if st.Error == "" {
+			st.Error = err.Error()
+		} else if st.Error != err.Error() {
+			st.Error += "; " + err.Error()
+		}
 		return st
 	}
 	st.PermissionLevel, st.PermissionSource = level, source
