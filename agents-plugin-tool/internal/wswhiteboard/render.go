@@ -150,7 +150,7 @@ const devAssetDir = "internal/wswhiteboard/assets"
 
 // trackerKeyPrefix marks the client strings of the dashboard's tracker
 // renderer (tracker.js). A whiteboard page never loads that script, and
-// the strings would take a large share of the embed's size budget, so its
+// the strings would bloat every embed page, which is loaded often, so its
 // client table leaves them out.
 const trackerKeyPrefix = "js.tk."
 
@@ -159,7 +159,7 @@ const trackerKeyPrefix = "js.tk."
 const filesKeyPrefix = "js.files."
 
 // gitKeyPrefix belongs to dashboard-git.js, which static boards never load.
-// Its controls must not consume the standalone or embed translation budget.
+// Its controls must not bloat the standalone or embed translation table.
 const gitKeyPrefix = "js.git."
 
 // codeKeyPrefix is the copy button's standalone client subset (code.js).
