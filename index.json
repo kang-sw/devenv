@@ -803,6 +803,9 @@
     "261115-feat-ws-dashboard-board-search-log-entries": {
       "registered_at": "2026-11-15T01:54:37Z"
     },
+    "261115-feat-ws-dashboard-board-topic-transport": {
+      "registered_at": "2026-11-15T07:28:41Z"
+    },
     "261115-feat-ws-dashboard-conversation-rendering-consolidation": {
       "registered_at": "2026-11-14T22:47:31Z"
     },
