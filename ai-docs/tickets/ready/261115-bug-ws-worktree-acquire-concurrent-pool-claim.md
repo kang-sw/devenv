@@ -205,4 +205,3 @@ or test pass is claimed by this draft.
   `code-review-lite` review of the Git diff (correctness and test integrity)
   follows those steps, with no self-review substitute or second sweep. No
   shared-pool/runtime smoke, Windows runtime check or race-detector check ran.
-
