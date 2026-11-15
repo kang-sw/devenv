@@ -319,9 +319,8 @@ type Outcome struct {
 	// Withdrawn holds the ID of every item a wb:close withdrew, in command
 	// order.
 	Withdrawn []int
-	// Info is the note on Withdrawn, then the note on items left holding
-	// options under a class other than policy, then the stale-topic nudge
-	// (see staleNudge), "" when the batch carries none. It is for the caller's
+	// Info holds the withdrawal note and response-only nudges and warnings,
+	// "" when the batch carries none. It is for the caller's
 	// tool result only; no page shows it.
 	Info string
 }
@@ -643,7 +642,6 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	var out Outcome
 	created := map[string]Item{} // only this Apply knows these entries' batch membership
 	previous := effectSnapshot(work)
-	var optionWarn []int
 	embedDir := false
 	// closedBy names, per item a close in this batch withdrew, that close.
 	closedBy := map[int]string{}
@@ -685,11 +683,10 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 				created[entries[len(entries)-1].ID] = item
 			}
 			out.IDs = append(out.IDs, id)
-			optionWarn = work.noteNonPolicyOptions(optionWarn, id)
 		case "wb:answer":
 			applyAnswer(p, work, cmd, mark, env.Now, closedBy)
 		case "wb:patch":
-			optionWarn = work.noteNonPolicyOptions(optionWarn, applyPatch(p, work, cmd, mark, env.Now))
+			applyPatch(p, work, cmd, mark, env.Now)
 		case "wb:body":
 			applyBody(p, work, origins, cmd, topicOf, mark, env.Now)
 		case "wb:edit":
@@ -754,7 +751,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
-	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
+	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
 	return work, out, updates
 }
 
@@ -815,40 +812,6 @@ func withdrawnInfo(ids []int) string {
 		labels[i] = FormatID(id)
 	}
 	return "wb:close withdrew " + strings.Join(labels, ", ") + " (still open in the closed topic)."
-}
-
-// noteNonPolicyOptions appends id to ids when the item it names now holds
-// options under a class other than policy, and is not listed yet. Options
-// are judged after the command, so an add, a patch adding options, and a
-// reclass away from policy that keeps them all count.
-func (s *State) noteNonPolicyOptions(ids []int, id int) []int {
-	idx := s.index(id)
-	if id == 0 || idx < 0 || slices.Contains(ids, id) {
-		return ids
-	}
-	if item := s.Items[idx]; item.Class != ClassPolicy && len(item.Options) > 0 {
-		ids = append(ids, id)
-	}
-	return ids
-}
-
-// nonPolicyOptionsInfo is the update result's note on items that hold
-// options under a class other than policy, "" when there are none. Only a
-// policy item's options are offered for a pick.
-func nonPolicyOptionsInfo(s *State, ids []int) string {
-	if len(ids) == 0 {
-		return ""
-	}
-	labels := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if idx := s.index(id); idx >= 0 {
-			labels = append(labels, FormatID(id)+" ["+s.Items[idx].Class+"]")
-		}
-	}
-	if len(labels) == 0 {
-		return ""
-	}
-	return "Options on a non-policy item: " + strings.Join(labels, ", ") + ". Options are a pick for a policy question; reclass it with <wb:patch id=\"..\" class=\"policy\"> or clear them with clear=\"options\"."
 }
 
 // joinInfo joins the non-empty info sentences with a space.
@@ -1233,9 +1196,13 @@ func applyEdit(p *problems, work *State, base bodyOrigins, cmd command, topicOf 
 	}
 }
 
-// checkPolicyShape checks what a policy item's options and recommendation
-// must satisfy.
+// checkPolicyShape checks the resulting add or patch: only policy items
+// carry options or a recommendation, which must name one of those options.
 func checkPolicyShape(p *problems, label string, item Item) {
+	if item.Class != ClassPolicy && (len(item.Options) > 0 || item.Recommendation != "") {
+		p.Add("%s: options and recommendations are only for policy items; use class=\"policy\" for a pick, or clear=\"options\" and an empty <wb:recommend> to repair this item", label)
+		return
+	}
 	if item.Recommendation == "" {
 		return
 	}

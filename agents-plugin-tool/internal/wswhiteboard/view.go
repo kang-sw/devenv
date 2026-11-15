@@ -958,6 +958,11 @@ func itemView(item Item) ItemView {
 		AnsweredAt:  item.AnsweredAt,
 		Links:       item.Links,
 	}
+	// Older writers may have stored choices on other classes. Hide them in
+	// every rendering without changing the authoritative item or its answer.
+	if item.Class != ClassPolicy {
+		return iv
+	}
 	count := len(item.Options)
 	if item.Recommendation != "" {
 		iv.RecLetter, iv.RecText = SplitLetter(item.Recommendation, count)
