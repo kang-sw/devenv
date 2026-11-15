@@ -47,7 +47,8 @@ var history = { pushState: function (s, t, u) { location.hash = u; }, replaceSta
 doc.querySelector = function () { return null; };
 doc.addEventListener = function () {};
 doc.title = "sess - ws dashboard";
-var root = { hasAttribute: function () { return false; }, clientWidth: 1200 };
+var rootAttrs = {};
+var root = { setAttribute: function (k) { rootAttrs[k] = true; }, removeAttribute: function (k) { delete rootAttrs[k]; }, hasAttribute: function (k) { return k === "data-lifted" && !!rootAttrs[k]; }, clientWidth: 1200 };
 function region() { return null; }
 function $() { return null; }
 var searchOpens = 0, tkApi = { openSearch: function () { searchOpens++; } };
@@ -137,6 +138,7 @@ var visible = { getClientRects: function () { return [{}]; } };
 var hidden = { getClientRects: function () { return []; } };
 linkMenus = [visible];
 check("a visible link menu lifts its frame above the shell header", popover(), true);
+check("a lifted page drops its background so the shell header and rail show beneath", "data-lifted" in rootAttrs, true);
 linkMenus = [hidden];
 check("a menu with no layout does not lift the frame", popover(), false);
 linkMenus = [visible]; railPops = [visible];
@@ -145,9 +147,11 @@ linkMenus = [];
 check("closing the link menu preserves another visible popover", popover(), true);
 railPops = [];
 check("closing the last popover restores the shell layer", popover(), false);
+check("closing the last popover restores the page background", "data-lifted" in rootAttrs, false);
 var hoverCard = { classList: { contains: function (c) { return c === "shp"; } }, getClientRects: function () { return [{}]; } };
 railPops = [hoverCard];
 check("a visible read-only hover card does not lift the frame over the shell header and rail", popover(), false);
+check("a hover card keeps the page background", "data-lifted" in rootAttrs, false);
 railPops = [hoverCard, visible];
 check("an interactive popover beside a hover card still lifts the frame", popover(), true);
 railPops = [];

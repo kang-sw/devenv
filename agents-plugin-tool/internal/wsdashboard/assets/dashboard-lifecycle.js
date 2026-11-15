@@ -495,10 +495,13 @@
       });
       // A link menu's local z-index cannot outrank the shell header either;
       // lift its frame through the same layer as the other popovers. The
-      // read-only hover card (rail.js, .shp) never lifts: the lifted frame's
-      // opaque layer would cover the shell's header and rail while it shows.
-      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
-        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; }) });
+      // read-only hover card (rail.js, .shp) is a tooltip and never lifts.
+      // While lifted for a popover the page drops its own background
+      // (data-lifted, dashboard-shell.css), so the shell's header and rail
+      // stay visible under the raised frame instead of going blank.
+      var popover = q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; });
+      if (popover) root.setAttribute("data-lifted", ""); else root.removeAttribute("data-lifted");
+      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(), popover: popover });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);
