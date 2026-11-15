@@ -220,3 +220,56 @@ than the route's nested branch suggestion; skip child delegation and independent
 review under the caller's override (the lead owns one lite review). Do not
 retry beyond the single authorized fix round. A fresh Windows acceptance run
 requires renewed lead authorization; this checkpoint does not close the phase.
+
+##### Windows acceptance rerun (2dd8050c0) - 2026-11-15
+
+EXEC4 authorized one additional acceptance attempt (fix round 2 of 2), with
+one explicit-interactive-token task fallback. **Acceptance remains blocked;
+no live UI check passed in this rerun.** No code changed, no code-fix rerun
+was used, and no further task start was attempted after the fallback failed.
+
+Session diagnosis:
+- VERIFIED: immediately before task creation, `query user` reported ki608
+  console session 2 Active (logged on at 14:38 KST), and session 1 Down.
+  This corroborates the lead's session-transition evidence for attempt 2.
+- INFERRED: attempt 2 may have targeted the disconnected session. That
+  explanation is not established: even with an Active console confirmed,
+  both this attempt's `/it /ru ki608` task and its sole fallback using
+  `New-ScheduledTaskPrincipal -UserId ki608 -LogonType Interactive` returned
+  `0xC0000142` (3221225794). The fallback produced no smoke log within two
+  minutes. Failure occurred before the runner logged its session or launched
+  its daemon/Electron; the remaining blocker is task/process initialization,
+  not a demonstrated title-bar code failure.
+
+Checks and deltas (VERIFIED):
+- Built head `2dd8050c0`, containing the owner-document fix `c8609cb1b`.
+  Windows `npm test` passed 39/39 and offline win32-x64 packaging passed.
+  Exactly one `npm ci --no-audit --no-fund` and one explicit Electron
+  `install.js` ran, with caches and temporary files under the unique folder
+  `C:\Users\ki608\ws-tb-verify-20261115T054720`.
+- Copied Playwright and cross-compiled the isolated Windows daemon offline
+  on the Mac. Neither fixture nor GUI reached execution through the failed
+  task. No shared daemon/port was touched; no Mac Electron or GUI ran.
+  No code change required another Mac test/build; the prior Result's Mac
+  checks remain the implementation evidence.
+- Evidence is ignored under
+  `agents-plugin-tool/desktop-electron/dist/evidence/windows/tb/attempt3/`:
+  session listings, setup/test/build log, both scheduler outcomes, and
+  cleanup scans. No interactive screenshots were produced.
+- Deleted the exact task, then removed the unique verification folder
+  (including the host bundle) only after an empty folder-scoped CIM scan.
+  A second CIM scan after removal was empty; the task and folder were absent.
+  Deleted the Mac bundle; the final Mac owned executable scan was empty.
+
+Unverified: all live core checks (visible icon/hamburger/centered title,
+`document.title` propagation, hamburger/Alt menu reachability, X-close
+confirmation), individual P8 actions, theme repaint, Windows controls,
+double-click/real drag, snap flyout, and real pasted-image draft preservation.
+No claim of physical gesture verification is made.
+
+Owner-copy rebuild and shortcut update: SKIPPED because the core acceptance
+prerequisite did not pass. `C:\Users\ki608\ws-electron-owner` was not accessed,
+replaced or launched; no new owner-copy head or executable exists from this
+rerun. The existing owner-copy head/exe and desktop shortcut target were not
+inspected or changed. `C:\Users\ki608\devenv` was untouched. Independent
+review remains omitted under the lead's override; EXEC4 owns the lite review.
