@@ -851,17 +851,7 @@
       "registered_at": "2026-11-15T02:43:44Z"
     },
     "261115-feat-ws-whiteboard-topic-default-and-update-summaries": {
-      "registered_at": "2026-11-15T03:50:38Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T04:18:47Z",
-        "impl": {
-          "branch": "impl/develop/crop-attic-pasty"
-        }
-      }
+      "registered_at": "2026-11-15T03:50:38Z"
     },
     "261115-feat-ws-whiteboard-topic-interleaved-timeline": {
       "registered_at": "2026-11-15T03:11:31Z"
