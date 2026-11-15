@@ -1,6 +1,5 @@
 // Run through TestModelHistoryEntriesBrowser against disposable fixture sessions.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [base, updates] = process.argv.slice(2);
 (async () => {
@@ -75,8 +74,6 @@ const [base, updates] = process.argv.slice(2);
       assert.equal(await history.count(), 0, 'history removed when absent from payload');
       await update('restored-model');
       await checkModel('restored-model', true);
-      fs.mkdirSync('/tmp/exec5/mh', { recursive: true });
-      await tab.screenshot({ path: '/tmp/exec5/mh/model-history-' + width + '.png' });
       assert.deepEqual(errors, [], 'no page errors');
       console.log(width + ': entries region add/replace/remove, open/closed state, formatted times and entry identity passed');
       await context.close();
