@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 665ffcf93cf6d847
 sage-review-completeness-reviewed: 665ffcf93cf6d847
+completed: 2026-11-15
 ---
 
 # Bulk config.get keys[] with band fallback to single reads
@@ -150,3 +151,55 @@ Verification:
   with stale-result guards;
 - runs: `go test ./internal/mcp -run Config` (scoped) and the mod's test
   command; never the full `./internal/wsdashboard` package.
+
+### Result (13012d5a5) - 2026-11-15
+
+- Added the mutually exclusive `key`/`keys` schema and request validation,
+  ordered `resolved-v1` JSON rows, and one-line-per-row text output. Each row
+  calls the existing resolver; legacy response bytes, typed defaults and
+  warnings, structured values, harness buckets, child authorization and
+  per-key resolver error isolation are covered by server tests.
+- Added a per-start microtask queue for contemporaneous keyless mod reads.
+  Existing gates still determine which keys are requested; enabled features'
+  follow-up keys can form later batches. No completed values are cached.
+  Manual retry and every band read after its initial keyless read remain
+  fresh singles, preserving the band's sequence guards. The new helper,
+  wiring and tests are mirrored byte-identically to wsflow.
+- Compatibility confirmed as **T0 with fallback**: old band requests still
+  take the unchanged single-result path (`server.go:1266-1273`, compared
+  with the old band at `af6106128:register.ts:1385-1387`). A new band calling
+  an old server encounters the existing missing/unknown-argument precheck
+  (`af6106128:tool_arguments.go:70-128`, old schema at
+  `af6106128:server.go:4746-4757`) and falls back to exact keyless singles
+  (`settings.ts:35-46`). Missing discriminators or malformed rows also fall
+  back; valid error rows reject only their own feature read
+  (`settings.ts:7-20,49-52`). Paths here are relative to the implementation
+  directories named in Route Facts. No stored shape or config writer changed,
+  so reopening has no new data to recover.
+- Verification:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run
+    'Config|ToolArguments'`: passed.
+  - Same offline environment, `go test ./internal/wsrsrc -run
+    'WsflowHooksMirror'`: passed.
+  - `claude plugin test` on scratch copies retaining only the unchanged
+    band/settings test files and current runtime modules: **47 passed, 0
+    failed in each package**. Includes hosted/headless/project and conditional
+    feature gates, bulk validation/fallback, error-row band-off, fresh keyed
+    adoption/tuning and stale-startup protection.
+  - Full `claude plugin test agents-plugin`: **761 passed, 2 failed**. The
+    existing `dashboard.test.ts` imports `node:fs`, which this hooks runner
+    rejects. The streaming-delivery engine test exceeded its 5-second runtime
+    limit; its existing `{ timeout: 30_000 }` option is not the runner's
+    `timeoutMs` option. Both fixture issues exist at the baseline and were
+    left outside this change; the timeout's baseline runtime was not rerun.
+  - `claude plugin validate` on both packages: passed with baseline warnings.
+    JSON comparison against an archived baseline confirmed **zero added
+    diagnostics**, with the same 57 hooks warnings.
+  - `python3 -m unittest discover agents-plugin-wsflow/tests`: 24 tests,
+    passed with 2 skips. `git diff --check`: passed.
+- Independent one-pass lite review of `af6106128..13012d5a5`: clean, no
+  correctness or test-integrity findings. Review did not rerun tests.
+- Unresolved: full-suite hooks-runner import/timeout limitations above;
+  no feature-contract finding. Full wsflow execution was omitted to avoid
+  repeating the known runner failures; its affected tests ran separately.
+
