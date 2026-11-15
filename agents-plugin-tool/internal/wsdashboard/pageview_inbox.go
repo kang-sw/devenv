@@ -27,9 +27,11 @@ type HeldView struct {
 	At int64
 	// Parts are the send's text; an entry merged before sends stopped
 	// merging holds one per send, and the bubble divides them.
-	Parts  []string
-	Chips  []wsinbox.Chip
-	Topics []wsinbox.TopicNote
+	Parts []string
+	// Content projects grouped Parts without changing the stored send.
+	Content []SelectionContentPart
+	Chips   []wsinbox.Chip
+	Topics  []wsinbox.TopicNote
 	// Mentions are the board text the message points at, shown as capsules
 	// after the answer capsules.
 	Mentions []wsinbox.Mention
@@ -98,6 +100,84 @@ func regularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
+// SelectionContentPart is an ordered display segment of existing Parts text.
+// Plain keeps a failed selection envelope opaque, including image-like text.
+// Selection source and memo are decoded once by ParseSelections and escaped
+// by html/template, never passed through markedText or a second parser.
+type SelectionContentPart struct {
+	Text      string
+	Plain     bool
+	Selection *SelectionView
+}
+
+type SelectionView struct {
+	Mentions []wsinbox.Mention
+	Comment  string
+	Images   []AttachmentView
+}
+
+// selectionViews associates thumbnails by the current message's numbers, not
+// across messages. Missing references retain their number; the original path
+// line remains ordinary text through userImages' existing fallback.
+func selectionViews(parts []wsinbox.SelectionPart, images []AttachmentView) ([]SelectionContentPart, []AttachmentView) {
+	grouped := false
+	for _, p := range parts {
+		grouped = grouped || p.Selection != nil || strings.Contains(p.Text, "<wb:selection")
+	}
+	if !grouped {
+		return nil, images
+	}
+	used := map[int]bool{}
+	var out []SelectionContentPart
+	for _, p := range parts {
+		v := SelectionContentPart{Text: p.Text, Plain: strings.Contains(p.Text, "<wb:selection")}
+		if s := p.Selection; s != nil {
+			v.Selection = &SelectionView{Mentions: s.Mentions, Comment: s.Comment}
+			for _, n := range s.Images {
+				img := AttachmentView{Num: n}
+				for _, candidate := range images {
+					if candidate.Num == n {
+						img = candidate
+						break
+					}
+				}
+				v.Selection.Images = append(v.Selection.Images, img)
+				used[n] = true
+			}
+		}
+		out = append(out, v)
+	}
+	var loose []AttachmentView
+	for _, img := range images {
+		if !used[img.Num] {
+			loose = append(loose, img)
+		}
+	}
+	return out, loose
+}
+
+// splitSelectionContent consumes bare message content, after legacy leading
+// blocks (and, when present, the caller-owned message envelope). Extract image
+// definitions only outside selections so source/memo path lines stay literal.
+func splitSelectionContent(text, attachDir, replyID string) (string, []SelectionContentPart, []AttachmentView) {
+	parts := wsinbox.ParseSelections(text)
+	var images []AttachmentView
+	var rest strings.Builder
+	for i, p := range parts {
+		// ParseSelections deliberately merges failed envelopes with adjacent
+		// plain text. Keep that entire segment opaque rather than guessing a
+		// second boundary grammar or extracting an image from a failed group.
+		if p.Selection == nil && !strings.Contains(p.Text, "<wb:selection") {
+			var found []AttachmentView
+			parts[i].Text, found = userImages(p.Text, attachDir, replyID)
+			images = append(images, found...)
+		}
+		rest.WriteString(parts[i].Text)
+	}
+	content, loose := selectionViews(parts, images)
+	return rest.String(), content, loose
+}
+
 // splitUserEntries takes each user entry's answer block
 // (wsinbox.ParseAnswerBlock), the mentions after it (wsinbox.ParseMentions),
 // the picks and console blocks after those (wsinbox.ParseWebElements), and
@@ -112,7 +192,7 @@ func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 			}
 			entries[i].Mentions, text = wsinbox.ParseMentions(text)
 			entries[i].Picks, entries[i].Consoles, text = wsinbox.ParseWebElements(text)
-			entries[i].Text, entries[i].Images = userImages(text, attachDir, replyID)
+			entries[i].Text, entries[i].Content, entries[i].Images = splitSelectionContent(text, attachDir, replyID)
 		}
 	}
 }
@@ -165,6 +245,7 @@ func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 		for i, path := range r.Entry.Images {
 			v.Images = append(v.Images, attachmentView(attachDir, replyID, nums[i], path))
 		}
+		v.Content, v.Images = selectionViews(wsinbox.ParseSelections(strings.Join(v.Parts, "\n\n")), v.Images)
 		out = append(out, v)
 	}
 	return out
