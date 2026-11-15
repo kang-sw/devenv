@@ -361,6 +361,7 @@ type ConversationView struct {
 	// ReplyHTML is its text rendered as markdown with raw HTML escaped.
 	Reply     *wslive.Reply
 	ReplyHTML template.HTML
+	Summary   *SummaryView
 	// Phase and Permission drive the trailing activity or approval line.
 	Phase      string
 	Permission *wslive.Permission
@@ -477,8 +478,11 @@ type ConvEntry struct {
 	Body    string
 	HasBody bool
 	// MailWakeSuppressed leaves only a hidden keyed marker when this mail is
-	// shown at its associated wake. Keeping the key preserves history cursors.
+	// shown at its associated wake or nudge run. Keeping the key preserves cursors.
 	MailWakeSuppressed bool
+	// BoardNudgeMails holds each raw envelope once on the first row of a
+	// collapsed run. Ring text and all absorbed entry keys remain unchanged.
+	BoardNudgeMails []string
 	// PeerReplyID links a mail line's peer to its page when PeerLinked.
 	PeerReplyID string
 	PeerLinked  bool
@@ -965,7 +969,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 			byAddress[c.Address] = c.ReplyID
 		}
 	}
-	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render.finished}
+	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, Summary: liveSummary(lead.ReasoningSummary), markdown: render.finished}
 	if lead.Reply != nil {
 		cv.ReplyHTML = render.streaming(lead.Reply.Text)
 	}
@@ -997,6 +1001,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 		cv.Entries = append(cv.Entries, e)
 	}
 	linkMailWakes(cv.Entries, self)
+	collapseBoardNudges(cv.Entries)
 	return cv
 }
 

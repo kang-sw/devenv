@@ -1,0 +1,372 @@
+package wsdashboard
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
+)
+
+const hireProposalsFile = "hire-proposals.json"
+const hireLifetime = 30 * time.Minute
+
+// HireRequest contains preferences only. The owner chooses the final launch.
+type HireRequest struct {
+	Reason          string `json:"reason"`
+	RecoveryContext string `json:"recovery_context"`
+	Label           string `json:"label,omitempty"`
+	Harness         string `json:"harness,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
+}
+
+// HireLaunch is the owner's final selection; Root is never accepted from a
+// request or approval body. It always comes from the requester's registration.
+type HireLaunch struct {
+	Harness         string `json:"harness"`
+	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
+	Label           string `json:"label,omitempty"`
+	PermissionMode  string `json:"permission_mode,omitempty"`
+	PluginIsolation string `json:"plugin_isolation,omitempty"`
+}
+
+// HireCreator uses the ordinary hosted-lead creation path. RequestID makes a
+// durable approval retry reuse its session, without setting authority lineage.
+type HireCreator interface {
+	CreateHireLead(requestID, root string, launch HireLaunch) (string, error)
+	// CancelHireLead rolls back only a creation whose proposal did not approve.
+	// It is daemon recovery, not control delegated to the requester.
+	CancelHireLead(requestID string) error
+}
+
+// HireProposal is a daemon-private journal. Launch is an approval intent,
+// persisted before creation; a restart completes it without creating twice.
+type HireProposal struct {
+	ID        string `json:"id"`
+	Requester string `json:"requester"`
+	Root      string `json:"root"`
+	HireRequest
+	CreatedAt         time.Time   `json:"created_at"`
+	ExpiresAt         time.Time   `json:"expires_at"`
+	Status            string      `json:"status"`
+	Launch            *HireLaunch `json:"launch,omitempty"`
+	Session           string      `json:"session,omitempty"`
+	ReasonClosed      string      `json:"reason_closed,omitempty"`
+	Notified          bool        `json:"notified,omitempty"`
+	CreationError     string      `json:"creation_error,omitempty"`
+	CreationAttempted bool        `json:"creation_attempted,omitempty"`
+}
+
+func (d *Daemon) hireClock() time.Time {
+	if d.hireNow != nil {
+		return d.hireNow()
+	}
+	return time.Now()
+}
+
+func (d *Daemon) readHires() ([]HireProposal, error) {
+	raw, err := os.ReadFile(filepath.Join(d.dir, hireProposalsFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return []HireProposal{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var proposals []HireProposal
+	err = json.Unmarshal(raw, &proposals)
+	return proposals, err
+}
+
+func (d *Daemon) saveHires(p []HireProposal) error {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	return writePrivateFile(d.dir, hireProposalsFile, append(raw, '\n'))
+}
+
+// hiringEligible reads the row on disk, not the eventually refreshed index:
+// approval must refuse an end that raced the last index refresh.
+func (d *Daemon) hiringEligible(replyID string) (Registration, error) {
+	if !ValidReplyID(replyID) {
+		return Registration{}, errors.New("unknown requester")
+	}
+	reg, err := ReadRegistration(d.dir, replyID)
+	if err != nil {
+		return reg, err
+	}
+	if !reg.Live(d.hireClock()) {
+		return reg, errors.New("requester session has ended")
+	}
+	if reg.Agent || reg.Unlisted {
+		return reg, errors.New("only lead sessions may request hiring")
+	}
+	meta, err := ReadHiringMetadata(d.dir, replyID)
+	if err != nil {
+		return reg, err
+	}
+	if meta.Hired {
+		return reg, errors.New("hired sessions cannot hire")
+	}
+	if !meta.Enabled {
+		return reg, errors.New("hiring is not enabled for this session")
+	}
+	if d.hireParent(replyID) != "" {
+		return reg, errors.New("nested sessions cannot hire")
+	}
+	return reg, nil
+}
+
+// hireParent deliberately reads display hierarchy only, never key lineage.
+func (d *Daemon) hireParent(replyID string) string {
+	doc, _ := d.layout.current()
+	facts := railFactsOf(d.railBaseView(d.pages()))
+	row, ok := facts.rows[replyID]
+	if !ok {
+		return ""
+	}
+	scope := doc.scope(row.WS, facts, false)
+	// Dormant links also preclude entitlement: reviving the parent would
+	// otherwise turn an enabled root into a nested session without a write.
+	return scope.parent(replyID)
+}
+
+// RequestHire is called only after the MCP server authenticates a top-level
+// lead key. There is no model-facing flag setter or approval operation.
+func (d *Daemon) RequestHire(replyID string, request HireRequest) (HireProposal, error) {
+	if strings.TrimSpace(request.Reason) == "" || strings.TrimSpace(request.RecoveryContext) == "" {
+		return HireProposal{}, errors.New("reason and recovery_context are required")
+	}
+	if len(request.RecoveryContext) > 16<<10 || !utf8.ValidString(request.RecoveryContext) {
+		return HireProposal{}, errors.New("recovery_context must be valid UTF-8 and at most 16 KiB")
+	}
+	label, err := cleanLabel(request.Label)
+	if err != nil {
+		return HireProposal{}, err
+	}
+	request.Label = label
+	if request.Harness != "" && request.Harness != "claude" && request.Harness != "pi" {
+		return HireProposal{}, errors.New("harness must be claude or pi")
+	}
+	d.hireMu.Lock()
+	defer d.hireMu.Unlock()
+	if d.index == nil || !d.index.Loaded() {
+		return HireProposal{}, errors.New("session index is not ready")
+	}
+	reg, err := d.hiringEligible(replyID)
+	if err != nil {
+		return HireProposal{}, err
+	}
+	proposals, err := d.readHires()
+	if err != nil {
+		return HireProposal{}, err
+	}
+	id, err := newToken()
+	if err != nil {
+		return HireProposal{}, err
+	}
+	now := d.hireClock()
+	p := HireProposal{ID: id, Requester: replyID, Root: reg.Project, HireRequest: request, CreatedAt: now, ExpiresAt: now.Add(hireLifetime), Status: "pending"}
+	proposals = append(proposals, p)
+	if err = d.saveHires(proposals); err != nil {
+		return HireProposal{}, err
+	}
+	d.broker.wake(railListRepoKey)
+	return p, nil
+}
+
+// pokeHires folds registry changes into the daemon's proposal reconciler.
+func (d *Daemon) pokeHires() {
+	if d.hireWake == nil {
+		return
+	}
+	select {
+	case d.hireWake <- struct{}{}:
+	default:
+	}
+}
+
+func (d *Daemon) hireLoop() {
+	defer close(d.hireDone)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.stop:
+			return
+		case <-d.hireWake:
+		case <-ticker.C:
+		}
+		select {
+		case <-d.stop:
+			return
+		default:
+		}
+		d.settleHires()
+	}
+}
+
+func (d *Daemon) settleHires() {
+	d.hireMu.Lock()
+	defer d.hireMu.Unlock()
+	proposals, err := d.readHires()
+	if err == nil {
+		err = d.settleHiresLocked(proposals)
+	}
+	if err != nil {
+		fmt.Fprintf(d.log, "dashboard: hiring recovery: %v\n", err)
+	}
+}
+
+// A stopped hosted process still has a live row and keeps its requests.
+func (d *Daemon) settleHiresLocked(proposals []HireProposal) error {
+	var pendingErrors []error
+	for i := range proposals {
+		p := &proposals[i]
+		if p.Status == "pending" {
+			reg, err := ReadRegistration(d.dir, p.Requester)
+			switch {
+			case errors.Is(err, os.ErrNotExist) || (err == nil && !reg.Live(d.hireClock())):
+				p.Status, p.ReasonClosed = "withdrawn", "requester session has ended"
+			case !d.hireClock().Before(p.ExpiresAt):
+				p.Status = "expired"
+			case err != nil:
+				pendingErrors = append(pendingErrors, err)
+				continue
+			case p.Launch != nil:
+				if err := d.approveHireLocked(proposals, i); err != nil {
+					// A failed creation leaves the request in the owner's queue;
+					// it is not a new outcome or an automatic provider retry loop.
+					p.Launch, p.CreationError = nil, err.Error()
+					if err := d.saveHires(proposals); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if p.Status != "pending" && !p.Notified {
+			// Commit the disposition before cleanup or mail, so a crash cannot
+			// revive a cancelled request. Failed side effects retry from disk.
+			if err := d.saveHires(proposals); err != nil {
+				return err
+			}
+			// An interrupted approval may already have created its session before
+			// grouping/outcome committed. Cancel that provisional creation only;
+			// approved peers are never closed when their requester ends.
+			if p.Status != "approved" && p.CreationAttempted {
+				creator, ok := d.agents.(HireCreator)
+				if !ok {
+					pendingErrors = append(pendingErrors, errors.New("hiring creation recovery is unavailable"))
+					continue
+				}
+				if err := creator.CancelHireLead(p.ID); err != nil {
+					pendingErrors = append(pendingErrors, err)
+					continue
+				}
+			}
+			// Mail retries even when the requester is no longer indexed.
+			if err := d.notifyHire(p); err != nil {
+				pendingErrors = append(pendingErrors, err)
+				continue
+			}
+			p.Notified = true
+			if err := d.saveHires(proposals); err != nil {
+				return err
+			}
+			d.broker.wake(railListRepoKey)
+		}
+	}
+	return errors.Join(pendingErrors...)
+}
+
+func (d *Daemon) notifyHire(p *HireProposal) error {
+	path, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(d.dir)}}).ReplyRegistry()
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf("Hiring request %s: %s\n", p.ID, p.Status)
+	if p.Session != "" {
+		text += "Session: id:" + p.Session + "\n"
+	}
+	if p.ReasonClosed != "" {
+		text += "Reason: " + p.ReasonClosed + "\n"
+	}
+	text += "\nRecovery context:\n" + p.RecoveryContext
+	// Mail append and the proposal's Notified checkpoint are separate writes:
+	// a crash between them can resend this correlated request-id outcome.
+	if err := wsmailbox.PostSystem(path, p.Requester, "", text, d.hireClock()); err != nil {
+		return err
+	}
+	if d.mailWake != nil {
+		d.mailWake.Wake()
+	}
+	return nil
+}
+
+func (d *Daemon) approveHireLocked(proposals []HireProposal, index int) error {
+	p := &proposals[index]
+	unlock, err := LockRegistration(d.dir, p.Requester)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, err := d.hiringEligible(p.Requester); err != nil {
+		p.Status, p.ReasonClosed = "withdrawn", err.Error()
+		return nil
+	}
+	creator, ok := d.agents.(HireCreator)
+	if !ok {
+		return errors.New("hosted session creation is unavailable")
+	}
+	p.CreationAttempted = true
+	if err := d.saveHires(proposals); err != nil {
+		return err
+	}
+	id, err := creator.CreateHireLead(p.ID, p.Root, *p.Launch)
+	if err != nil {
+		return err
+	}
+	// Creation publishes the row before returning, but the asynchronous index
+	// may not have seen it. Refresh before applying the exact rail attach op.
+	d.index.Refresh()
+	answer, err := d.layout.apply(railLayoutRequest{Op: "attach", RID: id, Parent: p.Requester}, railFactsOf(d.railBaseView(d.pages())), d.index.Loaded())
+	if err != nil {
+		return err
+	}
+	if answer.Reason != "" {
+		return fmt.Errorf("attach hired session: %s", answer.Reason)
+	}
+	p.Session, p.Status = id, "approved"
+	return nil
+}
+
+// pendingHires returns the owner's queue in arrival order, without stealing
+// focus. The UI consumes this route in the following implementation phase.
+func (d *Daemon) pendingHires() ([]HireProposal, error) {
+	d.hireMu.Lock()
+	defer d.hireMu.Unlock()
+	proposals, err := d.readHires()
+	if err != nil {
+		return nil, err
+	}
+	if err = d.settleHiresLocked(proposals); err != nil {
+		return nil, err
+	}
+	out := []HireProposal{}
+	for _, p := range proposals {
+		if p.Status == "pending" {
+			out = append(out, p)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}

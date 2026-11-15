@@ -88,6 +88,19 @@ func (d *Daemon) handleRailLayout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, railLayoutReply{Reason: layoutInvalid})
 		return
 	}
+	d.hireMu.Lock()
+	defer d.hireMu.Unlock()
+	if req.Op == "attach" && ValidReplyID(req.RID) {
+		meta, err := ReadHiringMetadata(d.dir, req.RID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, railLayoutReply{Reason: layoutStore})
+			return
+		}
+		if meta.Enabled {
+			writeJSON(w, http.StatusConflict, railLayoutReply{Reason: "hiring"})
+			return
+		}
+	}
 	loaded := d.index != nil && d.index.Loaded()
 	answer, err := d.layout.apply(req, railFactsOf(d.railBaseView(d.pages())), loaded)
 	if err != nil {

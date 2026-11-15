@@ -166,7 +166,7 @@
     depth: "js.rail.layout.depth", workspace: "js.rail.layout.workspace", group: "js.rail.layout.group",
     level: "js.rail.layout.level", stars: "js.rail.layout.stars", child: "js.rail.layout.child",
     toplevel: "js.rail.layout.toplevel", invalid: "js.rail.layout.invalid", retry: "js.rail.layout.retry",
-    store: "js.rail.layout.store"
+    store: "js.rail.layout.store", hiring: "js.rail.layout.hiring"
   };
   function layoutRefusal(reason) {
     return LAYOUT_REFUSALS.hasOwnProperty(reason) ? LAYOUT_REFUSALS[reason] : LAYOUT_REFUSALS.invalid;

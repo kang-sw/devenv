@@ -1,7 +1,11 @@
 package wsdashboard
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,15 +78,106 @@ func linkMailWakes(entries []ConvEntry, self string) {
 	}
 }
 
-// Board nudges have no peer or retained ring mail. Read only their known
-// single-message envelope; unfamiliar or incomplete diagnostics stay unmatched.
+// Peer pairing deliberately retains mailBatchHead's single-message contract.
+var nudgeBatchHead = regexp.MustCompile(`^\[(?:ws|wsflow) mailbox\] ([1-9][0-9]*) message\(s\) arrived for session_key ([^\s.]+)\. They were already received through mailbox\.recv; do not call it again for these\.$`)
+
+// formatMailBatch puts the header on only the first mail; runner emits one
+// wake per mail. The count bounds membership, including peer/malformed mails.
+// Without that header (for example at a page boundary), do not infer a batch.
+func collapseBoardNudges(entries []ConvEntry) {
+	remaining, run, source := 0, -1, ""
+	for i := range entries {
+		e := &entries[i]
+		if !e.MailWake() {
+			remaining, run = 0, -1
+			continue
+		}
+		head, _, _ := strings.Cut(e.Text, "\n\n")
+		if count := nudgeBatchSize(head); count > 0 {
+			remaining = count
+			run, source = -1, e.Source
+		} else if e.Source != source || strings.HasPrefix(e.Text, "[") {
+			remaining = 0
+		}
+		if remaining <= 0 {
+			run = -1
+			continue
+		}
+		remaining--
+		if _, topics := e.boardNudge(); len(topics) == 0 {
+			run = -1
+			continue
+		}
+		if run < 0 {
+			run = i
+			continue
+		}
+		first := &entries[run]
+		if len(first.BoardNudgeMails) == 0 {
+			first.BoardNudgeMails = []string{first.Text}
+		}
+		first.BoardNudgeMails = append(first.BoardNudgeMails, e.Text)
+		e.MailWakeSuppressed = true
+	}
+}
+
+// Board nudges have no peer or retained ring mail. Each text is one envelope,
+// optionally preceded by the batch header; unfamiliar diagnostics stay raw.
 func (e ConvEntry) boardNudge() (reasons, topics []string) {
 	if !e.MailWake() || e.Truncated || e.Peer != "" {
 		return nil, nil
 	}
-	head, envelope, ok := strings.Cut(e.Text, "\n\n")
-	if !ok || !mailBatchHead.MatchString(head) {
-		return nil, nil
+	if len(e.BoardNudgeMails) == 0 {
+		return boardNudgeMail(e.Text)
+	}
+	for _, text := range e.BoardNudgeMails {
+		r, t := boardNudgeMail(text)
+		for _, reason := range r {
+			if !slices.Contains(reasons, reason) {
+				reasons = append(reasons, reason)
+			}
+		}
+		for _, topic := range t {
+			if !slices.Contains(topics, topic) {
+				topics = append(topics, topic)
+			}
+		}
+	}
+	return reasons, topics
+}
+
+// The state token uses the existing mail-wake replacement path when a window
+// grows/shrinks a collapsed run. The same token invalidates its cached HTML.
+func (e ConvEntry) BoardNudgeState() string {
+	if len(e.BoardNudgeMails) < 2 {
+		return ""
+	}
+	return fmt.Sprintf("nudge-%x", sha256.Sum256([]byte(strings.Join(e.BoardNudgeMails, "\x00"))))
+}
+
+func (e ConvEntry) WakeText() string {
+	if len(e.BoardNudgeMails) > 1 {
+		return strings.Join(e.BoardNudgeMails, "\n\n")
+	}
+	return e.Text
+}
+
+func nudgeBatchSize(head string) int {
+	batch := nudgeBatchHead.FindStringSubmatch(head)
+	if batch == nil {
+		return 0
+	}
+	count, err := strconv.Atoi(batch[1])
+	if err != nil {
+		return 0
+	}
+	return count
+}
+
+func boardNudgeMail(text string) (reasons, topics []string) {
+	envelope := text
+	if head, rest, ok := strings.Cut(text, "\n\n"); ok && nudgeBatchSize(head) > 0 {
+		envelope = rest
 	}
 	from, body, ok := strings.Cut(envelope, ":\n")
 	if !ok {

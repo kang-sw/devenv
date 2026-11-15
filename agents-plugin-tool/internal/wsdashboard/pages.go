@@ -1204,6 +1204,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	} else if sub == "worktrees/cleanup" {
 		d.handleWorktreeCleanup(w, r, replyID)
 		return
+	} else if sub == "hiring" {
+		d.handleHiringFlag(w, r, replyID)
+		return
 	} else if sub == "label" {
 		d.handleSessionLabel(w, r, replyID)
 		return

@@ -72,8 +72,12 @@ func TestWhiteboardEffectsDoNotReplaceLegacyToolSummaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(regions[regionEntries].HTML)
-	if strings.Count(html, `<details class="toolsline"`) != 1 || strings.Count(html, `<details class="wbeffects"`) != 1 || !strings.Contains(html, "whiteboard.update") || !strings.Contains(html, "committed payload") || !strings.Contains(html, "old command output") {
+	if strings.Count(html, `<details class="toolsline"`) != 1 || strings.Count(html, `<article class="wbeffects wbupdate"`) != 1 || !strings.Contains(html, "whiteboard.update") || !strings.Contains(html, "Saved panel summary") || !strings.Contains(html, "old command output") {
 		t.Fatalf("effects replaced/misclassified legacy history: %s", html)
+	}
+	// Conversation cards expose committed panel recaps, not panel payloads.
+	if strings.Contains(html, "committed payload") {
+		t.Fatal("panel payload escaped its board-only surface")
 	}
 }
 
