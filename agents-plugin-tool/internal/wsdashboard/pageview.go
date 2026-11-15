@@ -345,6 +345,7 @@ type ConversationView struct {
 	// ReplyHTML is its text rendered as markdown with raw HTML escaped.
 	Reply     *wslive.Reply
 	ReplyHTML template.HTML
+	Summary   *SummaryView
 	// Phase and Permission drive the trailing activity or approval line.
 	Phase      string
 	Permission *wslive.Permission
@@ -917,7 +918,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 			byAddress[c.Address] = c.ReplyID
 		}
 	}
-	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render.finished}
+	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, Summary: liveSummary(lead.ReasoningSummary), markdown: render.finished}
 	if lead.Reply != nil {
 		cv.ReplyHTML = render.streaming(lead.Reply.Text)
 	}
