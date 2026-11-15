@@ -585,6 +585,9 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, sc
 		return
 	}
 	s.ensureMailboxRegistered(root)
+	// Registration may adopt a predecessor's auto stem; bind that name,
+	// not the provisional stem resolved before registration.
+	identity = s.mailboxIdentityResolved()
 	if s.mailboxHasConflict() {
 		s.debugEvent("mailbox.rebind_skipped_conflict", map[string]any{"name": identity.Name, "scope": string(identity.Scope)})
 		return

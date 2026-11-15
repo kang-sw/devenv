@@ -384,12 +384,27 @@ func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
 		root := t.TempDir()
 		mustWrite(t, root, "README.md", "# Test\n")
 		initGit(t, root)
-		opts, _ := seed(t, root, map[string]string{envMailboxAuto: "worktree"}, record("zeta-stem", live, true), record("alpha-stem", live, true), record("mid-stem", stale, true))
-		for i := 0; i < 3; i++ {
+		opts, path := seed(t, root, map[string]string{envMailboxAuto: "worktree"}, record("zeta-stem", live, true), record("alpha-stem", live, true), record("mid-stem", stale, true))
+		for i, stem := range []string{"afternoon-handbag-undermine", "zealous-handbag-undermine", "zealous-handbag-undermine"} {
 			s := NewServerWithOptions(opts)
-			parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+			// Fix the provisional auto identities without changing registration:
+			// a stray record for the first sorts before alpha on the next login.
+			s.mailbox.identityOnce.Do(func() {
+				s.mailbox.identityValue = mailboxIdentity{Active: true, Name: stem, Scope: wsmailbox.ScopeWorktree, Auto: true}
+			})
+			key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 			if got := s.mailboxIdentityResolved().Name; got != "alpha-stem" {
 				t.Fatalf("server %d adopted %q, want alpha-stem", i, got)
+			}
+			store, err := wsmailbox.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p := store.Presence["alpha-stem"]; p.Owner != key {
+				t.Fatalf("server %d adopted record = %+v, want owner %s", i, p, key)
+			}
+			if _, ok := store.Presence[stem]; ok {
+				t.Fatalf("server %d published provisional auto name %q", i, stem)
 			}
 		}
 	})
