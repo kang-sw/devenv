@@ -276,7 +276,7 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 		t.Fatalf("add args = %#v, want %#v", runner.calls[2].args, wantFirst)
 	}
 	commitArgs := runner.calls[6].args
-	if len(commitArgs) != 4 || commitArgs[0] != "commit" || commitArgs[1] != "-m" || commitArgs[3] != "--cleanup=verbatim" {
+	if len(commitArgs) != 4 || commitArgs[0] != "commit" || commitArgs[1] != "-m" || commitArgs[3] != "--cleanup=whitespace" {
 		t.Fatalf("commit args = %#v", commitArgs)
 	}
 	message := commitArgs[2]
@@ -318,7 +318,7 @@ func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 	commitArgs := runner.calls[6].args
-	if len(commitArgs) != 4 || commitArgs[0] != "commit" || commitArgs[1] != "-m" || commitArgs[3] != "--cleanup=verbatim" {
+	if len(commitArgs) != 4 || commitArgs[0] != "commit" || commitArgs[1] != "-m" || commitArgs[3] != "--cleanup=whitespace" {
 		t.Fatalf("commit args = %#v", commitArgs)
 	}
 	message := commitArgs[2]
@@ -1318,8 +1318,8 @@ func TestCommitStillRefusesUnrelatedStagedRenameOldPath(t *testing.T) {
 	if verifierCalled {
 		t.Fatalf("Verifier was invoked despite an unrelated staged path blocking the commit")
 	}
-	if len(runner.calls) != 4 {
-		t.Fatalf("runner.calls = %#v, want exactly 4 (branch guard, pre-status, add, post-status)", runner.calls)
+	if len(runner.calls) != 5 || !reflect.DeepEqual(runner.calls[4].args, []string{"rev-parse", "--git-path", "MERGE_HEAD"}) {
+		t.Fatalf("runner.calls = %#v, want branch guard, pre-status, add, post-status, and a read-only merge-state probe", runner.calls)
 	}
 }
 

@@ -725,7 +725,9 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 			return CommitResult{}, err
 		}
 	}
-	if _, err := runner.RunGit(ctx, root, "commit", "-m", message, "--cleanup=verbatim"); err != nil {
+	// Match Git's non-editing whitespace cleanup while preserving Markdown
+	// headings even when the caller configured commit.cleanup=strip.
+	if _, err := runner.RunGit(ctx, root, "commit", "-m", message, "--cleanup=whitespace"); err != nil {
 		return CommitResult{}, err
 	}
 	hashOut, err := runner.RunGit(ctx, root, "rev-parse", "HEAD")
