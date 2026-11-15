@@ -471,6 +471,9 @@ type ConvEntry struct {
 	// only its first line.
 	Body    string
 	HasBody bool
+	// MailWakeSuppressed leaves only a hidden keyed marker when this mail is
+	// shown at its associated wake. Keeping the key preserves history cursors.
+	MailWakeSuppressed bool
 	// PeerReplyID links a mail line's peer to its page when PeerLinked.
 	PeerReplyID string
 	PeerLinked  bool

@@ -12,9 +12,10 @@ import (
 var mailBatchHead = regexp.MustCompile(`^\[(?:ws|wsflow) mailbox\] 1 message\(s\) arrived for session_key ([^\s.]+)\. They were already received through mailbox\.recv; do not call it again for these\.$`)
 
 // Present an unambiguous single-message wake as its stored mail. This is a
-// display association, not delivery identity: keep both records and raw wake
-// diagnostics. History lacks the envelope's sent time, so never use claim time
-// or proximity to select between repeated/reclaimed records.
+// display association, not delivery identity: keep both keys and raw wake
+// diagnostics, but suppress the mail row at its original position. History
+// lacks the envelope's sent time, so never use claim time or proximity to
+// select between repeated/reclaimed records.
 func linkMailWakes(entries []ConvEntry, self string) {
 	matches := make(map[int]int)
 	uses := make(map[int]int)
@@ -69,6 +70,7 @@ func linkMailWakes(entries []ConvEntry, self string) {
 		mail.Key, mail.At = wake.Key, wake.At
 		mail.Cause, mail.Source, mail.Caption, mail.Text = wake.Cause, wake.Source, wake.Caption, wake.Text
 		entries[i] = mail
+		entries[j].MailWakeSuppressed = true
 	}
 }
 

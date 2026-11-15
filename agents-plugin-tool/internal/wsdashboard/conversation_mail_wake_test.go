@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -61,11 +62,25 @@ func TestConversationMailWakeAssociationFallbacks(t *testing.T) {
 			}
 			raw := es[1].Text
 			linkMailWakes(es, self)
-			if es[1].MatchedMailWake() != tc.want || es[1].Text != raw || es[1].Key != "wake" || es[0].Key != "mail" {
+			if es[1].MatchedMailWake() != tc.want || es[0].MailWakeSuppressed != tc.want || es[1].Text != raw || es[1].Key != "wake" || es[0].Key != "mail" {
 				t.Fatalf("wrong association or changed identity/diagnostics: %+v", es)
 			}
 			if tc.want && (es[1].Body != body || es[1].MailDeliveryText() != raw) {
 				t.Fatal("lost mail body or raw diagnostics")
+			}
+			if !tc.want {
+				assets, err := loadDashboardAssets()
+				if err != nil {
+					t.Fatal(err)
+				}
+				cv := ConversationView{Entries: es}
+				if err := renderEntries(assets, nil, self, &cv); err != nil {
+					t.Fatal(err)
+				}
+				html := renderedEntries(cv.Entries)
+				if strings.Contains(html, "data-mail-wake=") || strings.Count(html, "data-entry=") != len(es) || !strings.Contains(html, `data-entry="mail"`) || !strings.Contains(html, `data-entry="wake"`) {
+					t.Fatalf("unmatched records did not retain separate rows: %s", html)
+				}
 			}
 		})
 	}
@@ -83,37 +98,74 @@ func TestConversationMailWakeReplyIDHeader(t *testing.T) {
 				ringRecord(1, wslive.RingEntry{Kind: wslive.RingMail, Direction: wslive.MailRecv, Peer: peer, HistoryKey: "h1", Title: "Synthetic regression"}),
 				ringRecord(2, wslive.RingEntry{Kind: wslive.RingWake, Cause: "mail", Text: text}),
 			}
+			original, _ := json.Marshal(ring)
 			lookup := sessionLookup{session: func(id string) (Session, bool) {
 				s := liveSession(id, "/proj", testNow)
 				s.Label = "EXEC 4"
 				return s, id == "suspectcaboosetalonunretired"
 			}}
 			page := PageContent{MailBodies: map[string]string{"h1": body}}
-			v := buildSessionView(pageInputs{Session: liveSession(self, "/proj", testNow), Snapshot: liveSnap(testNow, wslive.Lead{}), Ring: ring, Now: testNow, Page: page, Lookup: lookup})
-			if e := v.Conversation.Entries[1]; e.Kind != wslive.RingMail || !e.PeerLinked || !e.PeerLead() || e.Body != body {
-				t.Fatalf("wake did not receive linked peer-mail presentation: %+v", e)
+			build := func(records []wslive.RingRecord, p PageContent) SessionView {
+				return buildSessionView(pageInputs{Session: liveSession(self, "/proj", testNow), Snapshot: liveSnap(testNow, wslive.Lead{}), Ring: records, Now: testNow, Page: p, Lookup: lookup})
 			}
 			cache := newEntryCache()
+			// Prime the separate mail row before the wake arrives.
+			if _, err := renderSessionRegions(build(ring[:1], page), cache); err != nil {
+				t.Fatal(err)
+			}
+			v := build(ring, page)
+			if len(v.Conversation.Entries) != 2 || v.Conversation.Mails != 1 || !v.Conversation.Entries[0].MailWakeSuppressed {
+				t.Fatalf("association changed ring indexing/counts or did not suppress the mail: %+v", v.Conversation)
+			}
+			if e := v.Conversation.Entries[1]; e.Kind != wslive.RingMail || !e.PeerLinked || !e.PeerLead() || e.Body != body || e.Key != ring[1].Name || e.At != ring[1].At.UnixMilli() {
+				t.Fatalf("wake did not receive linked peer-mail presentation: %+v", e)
+			}
 			set, err := renderSessionRegions(v, cache)
 			if err != nil {
 				t.Fatal(err)
 			}
 			html := string(set[regionEntries].HTML)
-			if strings.Contains(html, "mail-notification") || strings.Count(html, `href="/s/suspectcaboosetalonunretired"`) != 2 || !strings.Contains(html, "Synthetic regression &lt;text&gt;") || !strings.Contains(html, "[ws mailbox]") || strings.Count(html, ">EXEC 4</a>") != 2 {
+			if strings.Contains(html, "mail-notification") || strings.Count(html, `href="/s/suspectcaboosetalonunretired"`) != 1 || !strings.Contains(html, "Synthetic regression &lt;text&gt;") || !strings.Contains(html, "[ws mailbox]") || strings.Count(html, ">EXEC 4</a>") != 1 || strings.Count(html, `class="mail-block"`) != 1 || strings.Count(html, `class="mailline recv"`) != 1 {
 				t.Fatalf("missing linked presentation or raw diagnostics: %s", html)
+			}
+			matchedHash := set[regionEntries].Hash
+			marker := `<span hidden data-entry="` + ring[0].Name + `" data-mail-wake="suppressed"></span>`
+			if !strings.Contains(html, marker) || !strings.Contains(html, `<article class="mail-block" data-entry="`+ring[1].Name+`" data-mail-wake="matched">`) || strings.Count(html, "data-entry=") != 2 {
+				t.Fatalf("lost keyed cursor marker or delivery position: %s", html)
 			}
 			// Losing retained history must undo the association on the next
 			// render, including when the entry cache already holds the match.
-			v = buildSessionView(pageInputs{Session: liveSession(self, "/proj", testNow), Snapshot: liveSnap(testNow, wslive.Lead{}), Ring: ring, Now: testNow, Lookup: lookup})
+			v = build(ring, PageContent{})
 			set, err = renderSessionRegions(v, cache)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(set[regionEntries].HTML), "mail-notification") {
-				t.Fatal("expired history left a stale wake association")
+			html = string(set[regionEntries].HTML)
+			if strings.Count(html, `class="mail-notification"`) != 1 || strings.Count(html, `class="mailline recv nobody"`) != 1 || strings.Contains(html, "data-mail-wake=") || strings.Count(html, "data-entry=") != 2 || strings.Count(html, ">EXEC 4</a>") != 1 {
+				t.Fatalf("expired history did not restore both separate rows: %s", html)
 			}
-			if ring[1].Kind != wslive.RingWake || ring[1].Text != text {
-				t.Fatal("presentation mutated stored wake")
+			if set[regionEntries].Hash == matchedHash {
+				t.Fatal("expiry did not change the entries region diff")
+			}
+			set, err = renderSessionRegions(build(ring, page), cache)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if set[regionEntries].Hash != matchedHash {
+				t.Fatal("restored history did not recover the same single-mail region")
+			}
+			// A page without the wake must also restore the retained mail row,
+			// even though its body/link cache inputs match the suppressed row.
+			set, err = renderSessionRegions(build(ring[:1], page), cache)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if html = string(set[regionEntries].HTML); strings.Contains(html, "data-mail-wake=") || strings.Count(html, `class="mail-block"`) != 1 {
+				t.Fatalf("mail-only page reused the suppressed cache entry: %s", html)
+			}
+			after, _ := json.Marshal(ring)
+			if string(after) != string(original) {
+				t.Fatal("presentation mutated stored ring")
 			}
 		})
 	}
