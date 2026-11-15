@@ -854,7 +854,17 @@
       "registered_at": "2026-11-15T02:12:43Z"
     },
     "261115-feat-ws-whiteboard-researching-state": {
-      "registered_at": "2026-11-15T05:51:36Z"
+      "registered_at": "2026-11-15T05:51:36Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T06:14:02Z",
+        "impl": {
+          "branch": "impl/develop/lend-lens-shack"
+        }
+      }
     },
     "261115-feat-ws-whiteboard-topic-close-request": {
       "registered_at": "2026-11-15T02:43:44Z"
