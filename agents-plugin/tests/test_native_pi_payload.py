@@ -65,6 +65,31 @@ class NativePiPayloadTests(unittest.TestCase):
                 self.assertTrue(all(name.startswith("node_modules/") for name in manifests["closure"]["files"]))
                 self.assertEqual(PAYLOAD.tree(REPO / "agents-plugin/native-pi/first-party"), PAYLOAD.tree(REPO / "agents-plugin-wsflow/native-pi/first-party"))
 
+    def test_plain_first_party_ignores_junk_but_rejects_unlisted_files(self):
+        repo = self.source_fixture()
+        owner = repo / "agents-plugin"
+        first = owner / "native-pi/first-party"
+        junk = (".DS_Store", "dist/Thumbs.db", "__pycache__/x.pyc")
+        for name in junk:
+            path = first / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture junk")
+        PAYLOAD.validate(owner)
+        PAYLOAD.check_source(owner, repo)
+        cache = self.root / "plain-junk-cache"
+        entry = PAYLOAD.materialize(owner, cache)
+        for name in junk:
+            self.assertFalse((entry / name).exists(), "input junk was copied into the entry")
+            path = entry / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"benign cache junk")
+        self.assertEqual(PAYLOAD.materialize(owner, cache), entry)
+        (first / "unlisted-not-junk.txt").write_text("unexpected")
+        for action in (lambda: PAYLOAD.validate(owner), lambda: PAYLOAD.check_source(owner, repo),
+                       lambda: PAYLOAD.materialize(owner, cache)):
+            with self.assertRaisesRegex(ValueError, "FIRST-PARTY file checksum/inventory mismatch"):
+                action()
+
     def test_materialized_owner_bytes_and_offline_reuse(self):
         for product, identity in (("agents-plugin", "ws"), ("agents-plugin-wsflow", "wsflow")):
             owner = self.owner(product)
@@ -201,6 +226,7 @@ class NativePiPayloadTests(unittest.TestCase):
             raise RuntimeError("producer copy inspected")
 
         with patch.object(PRODUCER.subprocess, "run", side_effect=fake_npm), \
+             patch.object(PRODUCER, "write_zip", side_effect=AssertionError("same-key generation must not recompress")), \
              patch.object(PRODUCER.payload, "validate", side_effect=inspect_archive):
             with self.assertRaisesRegex(RuntimeError, "producer copy inspected"):
                 PRODUCER.generate(repo)

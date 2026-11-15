@@ -25,7 +25,12 @@ MEDIA = {".mp4", ".mov", ".webm", ".png", ".gif", ".jpg", ".jpeg", ".svg", ".ico
 
 
 def legal_file(name):
-    # Notices survive even inside otherwise excluded documentation/test trees.
+    # Preserve legal filename families, including camel-case and suffixed names,
+    # even inside otherwise excluded documentation/test trees.
+    compact = re.sub(r"[^a-z]", "", name.casefold())
+    if compact.startswith(("license", "licence", "licensing", "thirdpartynotice", "copyright", "patent",
+                           "notice", "copying", "authors", "contributors", "acknowledgment", "acknowledgement")):
+        return True
     return bool(re.search(r"(^|[^a-z])(licen[cs]es?|unlicense|notices?|copying|copyright|authors?|contributors?|patents?|legal|acknowledg[em]*ents?|third.party|[al]?gpl|gfdl|ofl|bsd|mit|apache)([^a-z]|$)", name.lower()))
 
 
@@ -157,8 +162,39 @@ def write_zip(path, stage, files):
         for rel in sorted(files):
             payload.safe_path(rel)
             info = zipfile.ZipInfo(rel, (2020, 1, 1, 0, 0, 0))
+            info.create_system = 3  # Fixed Unix metadata, including Windows producers.
             info.external_attr = 0o100644 << 16
             z.writestr(info, (stage / rel).read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+
+
+def retain_committed_closure(repo, native, candidate):
+    """Reuse committed encoding for a same-key, byte-exact CONTENT inventory.
+
+    Compression and ZIP creator metadata are not closure inputs. Do not make a
+    Windows/zlib-ng producer mint a permanent blob for identical runtime files.
+    Validate the chosen committed archive later, with the new first-party set.
+    """
+    selected = None
+    for product in ("agents-plugin", "agents-plugin-wsflow"):
+        prior = repo / product / "native-pi"
+        manifest = prior / "closure-manifest.json"
+        if not manifest.exists():
+            continue
+        existing = json.loads(manifest.read_text())
+        if existing["key"] != candidate["key"]:
+            continue
+        if existing["files"] != candidate["files"]:
+            raise ValueError("same closure key, different CONTENT: key-input bug or prune change without a version bump")
+        if selected is not None:
+            for name in ("closure.zip", "closure-manifest.json"):
+                if (prior / name).read_bytes() != (selected / name).read_bytes():
+                    raise ValueError("committed same-key closure copies disagree; reconcile them before generation")
+        selected = prior
+    if selected is None:
+        return None
+    for name in ("closure.zip", "closure-manifest.json"):
+        shutil.copyfile(selected / name, native / name)
+    return json.loads((native / "closure-manifest.json").read_text())
 
 
 def generate(repo, offline=False, npm_cache=None, report=None):
@@ -193,12 +229,14 @@ def generate(repo, offline=False, npm_cache=None, report=None):
         native = temp / "native-pi"
         native.mkdir()
         closure_files = {"node_modules/" + p: h for p, h in payload.tree(deps / "node_modules", ignore_junk=True).items()}
-        write_zip(native / "closure.zip", deps, closure_files)
-        closure = {"schema_version": 1, "key": payload.closure_key(normalized, pkg["dependencies"], PRUNE_RULE_VERSION),
-                   "prune_version": PRUNE_RULE_VERSION, "dependencies": pkg["dependencies"],
-                   "production_lock": payload.normalized_lock(normalized, pkg["dependencies"]),
-                   "archive_sha256": payload.digest((native / "closure.zip").read_bytes()), "files": closure_files}
-        (native / "closure-manifest.json").write_bytes(payload.canonical(closure) + b"\n")
+        candidate = {"schema_version": 1, "key": payload.closure_key(normalized, pkg["dependencies"], PRUNE_RULE_VERSION),
+                     "prune_version": PRUNE_RULE_VERSION, "dependencies": pkg["dependencies"],
+                     "production_lock": payload.normalized_lock(normalized, pkg["dependencies"]), "files": closure_files}
+        closure = retain_committed_closure(repo, native, candidate)
+        if closure is None:
+            write_zip(native / "closure.zip", deps, closure_files)
+            closure = {**candidate, "archive_sha256": payload.digest((native / "closure.zip").read_bytes())}
+            (native / "closure-manifest.json").write_bytes(payload.canonical(closure) + b"\n")
         first = native / "first-party"
         for name in payload.FIRST_PARTY_FILES:
             target = first / name
@@ -223,15 +261,6 @@ def generate(repo, offline=False, npm_cache=None, report=None):
         fixture.mkdir()
         shutil.copytree(native, fixture / "native-pi")
         payload.validate(fixture)
-        # Same key MUST mean identical archive and closure manifest bytes. A
-        # policy/content change without a prune-version bump is a producer error.
-        for product in ("agents-plugin", "agents-plugin-wsflow"):
-            dest = repo / product / "native-pi"
-            prior = dest / "closure-manifest.json"
-            if prior.exists() and json.loads(prior.read_text())["key"] == closure["key"]:
-                for name in ("closure.zip", "closure-manifest.json"):
-                    if (dest / name).read_bytes() != (native / name).read_bytes():
-                        raise ValueError("same closure key produced different bytes; bump PRUNE_RULE_VERSION for a policy change")
         for product in ("agents-plugin", "agents-plugin-wsflow"):
             dest = repo / product / "native-pi"
             ready, old = repo / product / ".native-pi-prepared", repo / product / ".native-pi-previous"

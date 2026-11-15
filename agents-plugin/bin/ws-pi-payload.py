@@ -216,7 +216,7 @@ def validate(plugin):
                 raise ValueError(f"CLOSURE incomplete: {required}")
     if first["closure_key"] != closure["key"]:
         raise ValueError("FIRST-PARTY closure reference mismatch")
-    if tree(native / "first-party") != first["files"] or not set(FIRST_PARTY_FILES).issubset(first["files"]):
+    if tree(native / "first-party", ignore_junk=True) != first["files"] or not set(FIRST_PARTY_FILES).issubset(first["files"]):
         raise ValueError("FIRST-PARTY file checksum/inventory mismatch")
     pkg = json.loads((native / "first-party/package.json").read_text())
     if pkg["dependencies"] != closure["dependencies"]:
@@ -280,7 +280,7 @@ def cleanup_stages(cache):
 def cache_matches(dest, expected):
     try:
         directories = {str(p) for name in expected for p in PurePosixPath(name).parents if str(p) != "."}
-        return dest.is_dir() and tree(dest, allow_runtime=True, expected_dirs=directories) == expected
+        return dest.is_dir() and tree(dest, ignore_junk=True, allow_runtime=True, expected_dirs=directories) == expected
     except (OSError, ValueError):
         return False
 
@@ -321,7 +321,7 @@ def materialize(plugin, cache, manifest=None):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(base / rel, path)
         (ready / "workflow-owner.json").write_bytes(owner_bytes)
-        if tree(ready) != expected:
+        if tree(ready, ignore_junk=True) != expected:
             raise ValueError("native Pi staging verification failed")
         if cache_matches(dest, expected):
             return dest

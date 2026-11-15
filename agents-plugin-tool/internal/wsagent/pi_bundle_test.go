@@ -20,21 +20,6 @@ func TestPiBundleCommittedIsFresh(t *testing.T) {
 	}
 }
 
-func TestPiPreparedBundleUsesRecordedInputsWithoutSource(t *testing.T) {
-	pkg := t.TempDir()
-	hash := strings.Repeat("a", 64)
-	piLeadFile(t, filepath.Join(pkg, "workflow-owner.json"), `{"plugin":"ws"}`)
-	piLeadFile(t, filepath.Join(pkg, "bundle-inputs.json"), `{"schema_version":1,"sha256":"`+hash+`"}`)
-	piLeadFile(t, filepath.Join(pkg, "dist", "index.js"), piBundleHeader+hash+"\nexport {};\n")
-	if err := piBundleFresh(pkg); err != nil {
-		t.Fatal(err)
-	}
-	piLeadFile(t, filepath.Join(pkg, "bundle-inputs.json"), `{"schema_version":1,"sha256":"`+strings.Repeat("b", 64)+`"}`)
-	if err := piBundleFresh(pkg); err == nil {
-		t.Fatal("accepted mismatched prepared digest")
-	}
-}
-
 // piBundlePackage writes a source-shaped Pi package and, when fresh, a bundle
 // whose header matches its inputs.
 func piBundlePackage(t *testing.T, pkg string, fresh bool) string {

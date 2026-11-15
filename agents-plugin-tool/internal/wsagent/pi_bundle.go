@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -93,21 +92,6 @@ func piBundleFresh(pkg string) error {
 	recorded, err := piBundleHeaderHash(bundle)
 	if err != nil {
 		return err
-	}
-	// Prepared entries contain the bundle and its recorded input digest, not
-	// duplicate source trees. The Python assembler verifies every first-party
-	// file before publication. Source checkouts have no owner marker and keep
-	// the original source-recomputing freshness path below.
-	if fileExists(filepath.Join(pkg, "workflow-owner.json")) {
-		raw, err := os.ReadFile(filepath.Join(pkg, "bundle-inputs.json"))
-		var inputs struct {
-			Schema int    `json:"schema_version"`
-			SHA256 string `json:"sha256"`
-		}
-		if err != nil || json.Unmarshal(raw, &inputs) != nil || inputs.Schema != 1 || len(inputs.SHA256) != 64 || inputs.SHA256 != recorded {
-			return fmt.Errorf("%s prepared input record is missing or stale", piBundleFile)
-		}
-		return nil
 	}
 	current, err := piBundleInputHash(pkg)
 	if err != nil {

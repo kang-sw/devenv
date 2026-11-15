@@ -88,8 +88,10 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 					t.Fatalf("package-only native entries: %v, %v", entries, err)
 				}
 				root := filepath.Dir(filepath.Dir(entries[0]))
-				if err := piBundleFresh(root); err != nil {
-					t.Fatal(err)
+				// Prepared freshness is enforced by the Python header/manifest
+				// validator on this actual launch path, not source-only piBundleFresh.
+				if fileExists(filepath.Join(root, filepath.FromSlash(piBundleSource))) {
+					t.Fatal("prepared entry unexpectedly ships the TypeScript source")
 				}
 				if !strings.HasPrefix(root, filepath.Join(base, "cache", "native-pi")) || !strings.HasSuffix(entries[0], filepath.FromSlash(piBundleFile)) {
 					t.Fatalf("not a prepared native entry: %v", entries)
