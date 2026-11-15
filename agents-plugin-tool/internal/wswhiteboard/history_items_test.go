@@ -1,7 +1,9 @@
 package wswhiteboard
 
 import (
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -118,6 +120,60 @@ func TestHistoryRichDetailIsContentDrivenAndStatic(t *testing.T) {
 		wantNone(t, row(2), `data-opt=`, `aria-pressed=`, `role="button"`)
 		wantAll(t, row(3), `data-key="item:3"`, `class="ctx md">title-like`)
 		wantNone(t, row(4), `<details`, `sbody`, `ctx md`)
+	}
+}
+
+func TestHistoryAllAnsweredCheckKeepsVisibilityToggle(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassCheck, "only", "completed check"))
+	mustApply(t, st, `<wb:answer id="1" value="ok">done</wb:answer>`)
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	topic := topicView(t, st, LayoutFull, "only")
+	if topic.ChecksShown() {
+		t.Fatal("all-answered full history must not render an empty open-check list")
+	}
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range map[string]string{"page": markup(render(t, view)), "regions": string(regions.Board)} {
+		t.Run(name, func(t *testing.T) {
+			wantAll(t, out, `class="ckpill"`, `class="btn mini ckhide"`, `id="item-1"`, `wb-hitem check`)
+			wantNone(t, out, `<div class="checks">`)
+		})
+	}
+
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; all-answered toggle runtime not executed")
+	}
+	board, _ := json.Marshal(string(regions.Board))
+	answers, err := embeddedAsset("answers.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	form, err := embeddedAsset("form.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "var BOARD = " + string(board) + ";\nvar BODY_CLASS = 'full';\n" + formPrelude + `
+var stored = {};
+window.localStorage = { getItem: function(k) { return stored[k] || null; }, setItem: function(k,v) { stored[k] = String(v); } };
+` + string(answers) + string(form) + `
+var toggle = document.querySelector('button.ckhide');
+check('all-answered board retains its normally hidden history row', document.querySelector('.wb-hitem.check').getAttribute('id'), 'item-1');
+check('fresh browser hides answered checks by default', document.documentElement.getAttribute('data-ck-hide'), '1');
+check('the only topic still exposes its visibility toggle', !!toggle, true);
+if (toggle) {
+  click(toggle);
+  check('the native handler exposes answered history', [document.documentElement.getAttribute('data-ck-hide'), toggle.getAttribute('aria-pressed'), stored['ws.wb.checks.hideAnswered']], ['0', 'false', '0']);
+  click(toggle);
+  check('the native handler restores the hidden state', document.documentElement.getAttribute('data-ck-hide'), '1');
+}
+process.stdout.write(bad.join('\n'));
+`
+	if out, err := nodeScript(node, script).CombinedOutput(); err != nil || len(out) != 0 {
+		t.Fatalf("all-answered visibility toggle: %v\n%s", err, out)
 	}
 }
 

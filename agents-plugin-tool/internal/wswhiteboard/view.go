@@ -296,10 +296,11 @@ func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string
 }
 
 // HeadSummary reports whether the topic's head carries its summary line: an
-// open topic with a latest agent line or a check list. The line holds the
-// agent line (never a legacy recap or a system event) and the check pill.
+// open topic with a latest agent line or checks. The line holds the agent
+// line (never a legacy recap or a system event) and the check pill. Keep
+// that pill after the last open check settles: it reveals answered history.
 func (t TopicView) HeadSummary() bool {
-	return !t.Closed && (t.LatestAgent != nil || t.ChecksShown())
+	return !t.Closed && (t.LatestAgent != nil || len(t.Checks) > 0)
 }
 
 // LegacyRecapOpen reports whether an open topic shows an unconverted legacy
