@@ -39,7 +39,7 @@ function topic(state='implementing'){
 var n=topic();
 function eta(){return n.querySelector('.eta');}
 function tick(at){now=at;timers[0].fn();}
-function expected(minutes,over){assert.equal(eta().textContent,'ETA 30분 · '+minutes+'분 경과'+(over?' (+'+over+')':''));assert.equal(eta().classList.contains('over'),!!over);}
+function expected(minutes,over){assert.equal(eta().textContent,'ETA 30분 · '+minutes+'분 경과'+(over?' (+'+over+')':''));assert.equal(eta().classList.contains('wb-state-over'),!!over);}
 `
 
 func TestTopicStateBadgeClockAndReconciliation(t *testing.T) {
@@ -60,7 +60,7 @@ assert.equal(n.querySelector('.own').children.length,0,'owner is text, not marku
 for(const [delta,min,over] of [[-1,0,0],[0,0,0],[30*60000-1,29,0],[30*60000,30,0],[31*60000-1,30,0],[31*60000,31,1],[47*60000,47,17]]) {tick(start+delta);expected(min,over);}
 const run=n.getAttribute('data-state-run'),started=n.getAttribute('data-state-started-at');
 n.setAttribute('data-state-eta-minutes','60');n.setAttribute('data-state-deadline-at',new Date(start+60*60000).toISOString());window.wbAgo(n);
-assert.equal(eta().textContent,'ETA 60분 · 47분 경과');assert.equal(eta().classList.contains('over'),false);
+assert.equal(eta().textContent,'ETA 60분 · 47분 경과');assert.equal(eta().classList.contains('wb-state-over'),false);
 assert.equal(n.getAttribute('data-state-run'),run);assert.equal(n.getAttribute('data-state-started-at'),started);
 for(const state of ['awaiting-confirmation','waiting','discussing']) {n.setAttribute('data-state',state);window.wbAgo(document);assert.equal(n.querySelector('.stb').textContent,wsT('js.wb.state.'+state));assert.equal(eta(),null);assert.equal(n.querySelector('.own'),null);}
 assert.equal(n.querySelector('.dw'),deps,'badge transitions preserve dependency button and popover');
