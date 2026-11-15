@@ -35,14 +35,6 @@ func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := NewState("fixture-key")
-	_, _ = st.Apply(Event{Kind: KindTurnStart}, 1)
-	_, _ = st.Apply(Event{Kind: KindAgent, ReasoningSummary: summaryFixture()}, 2)
-	snap, _ := json.Marshal(st.Snapshot(3))
-	if err := os.WriteFile(SnapshotPath(dir), snap, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	top, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
@@ -88,12 +80,11 @@ func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 		}
 	}
 	fixture := `package wslive
-import("encoding/json";"os";"testing")
+import("os";"testing")
 func TestSummaryHistoricalWriterFixture(t *testing.T){
  dir:=os.Getenv("WS_SUMMARY_FIXTURE_DIR")
  rows,err:=ReadRing(RingDir(dir));if err!=nil||len(rows)!=1||rows[0].Kind!=RingTurn||rows[0].Done!=2||rows[0].Failed!=1||rows[0].DurationMs!=73||rows[0].Reason!="error"{t.Fatalf("old reader: %+v %v",rows,err)}
  if err:=AppendRing(RingDir(dir),[]RingEntry{{Kind:RingReply,Text:"historical writer append"},{Kind:RingTurn,Done:1,DurationMs:11}});err!=nil{t.Fatal(err)}
- s,err:=ReadSnapshot(SnapshotPath(dir));if err!=nil{t.Fatal(err)};raw,err:=json.Marshal(s);if err!=nil{t.Fatal(err)};if err=os.WriteFile(SnapshotPath(dir),raw,0600);err!=nil{t.Fatal(err)}
 }
 `
 	module := filepath.Join(root, "agents-plugin-tool")
@@ -193,12 +184,11 @@ func TestSummaryOldDaemonNewBundleWidget(t *testing.T) {
 	if err != nil || len(rows) != 3 || rows[0].SummaryHistory == nil || rows[0].SummaryHistory.Requests[0].Attempt != 1 {
 		t.Fatalf("new reader after old append: %+v %v", rows, err)
 	}
-	rebuilt, err := ReadSnapshot(SnapshotPath(dir))
-	if err != nil || rebuilt.Lead.ReasoningSummary != nil {
-		t.Fatal("old snapshot reconstruction did not drop unknown live projection", err)
-	}
+	// Decision967 keeps live state out of both production disk writers; their
+	// tests own that invariant. This real historical build proves only the
+	// separate immutable-history boundary, never recovery of in-flight data.
 	if !store.Has(rows[0].SummaryHistory.Commit) {
-		t.Fatal("snapshot incorrectly became retained-summary authority")
+		t.Fatal("immutable summary commit was not retained")
 	}
 }
 
