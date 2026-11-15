@@ -471,7 +471,8 @@ var shell = false, framed = false, mode = "live";
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
 var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [], wpicks = [], wconsoles = [];
-var ccmd = {}, cmdSel = null;
+var ccmd = {}, cmdSel = null, bselections = [];
+function marker(n) { return "[Image #" + n + "]"; }
 function setCommand(name, args) { cmdSel = { name: name, args: typeof args === "string" ? args : null }; }
 function validMentions(l) { return Array.isArray(l) ? l.filter(function (m) { return m && m.topic && m.text; }) : []; }
 function validPicks(l) { return Array.isArray(l) ? l.filter(function (p) { return p && p.url && p.selector; }) : []; }
@@ -519,7 +520,7 @@ func TestRailDraftRestore(t *testing.T) {
 	if !regexp.MustCompile(`(?s)\n  function sendMessage\(\) \{.*?post\("message", body, function \(ok, res\) \{\n[^\n]*\n      if \(!ok\) \{[^\n]*return; \}\n.*?\n      clearDraft\(\);\n    \}\);\n  \}\n`).MatchString(src) {
 		t.Error("a successful send no longer clears the draft")
 	}
-	runNode(t, "draft restore", railJSHarness+string(rail)+railDraftPrelude+boardBoxSrc(t, src)+block+`
+	runNode(t, "draft restore", selectionCodecSource(t)+railJSHarness+string(rail)+railDraftPrelude+boardBoxSrc(t, src)+block+`
 // type, pick, open, and switch tab; the debounce saves it
 ctext.value = "hi @bob see [Image #1] and [Image #2] end";
 ctext.selectionStart = ctext.selectionEnd = 6;
