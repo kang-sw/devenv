@@ -76,7 +76,7 @@ async function run(browser, theme, width) {
     if (pop.box.l < 0 || pop.box.r > width || pop.box.t < 0 || pop.box.b > 900) fail.push(`${tag}: popover leaves the viewport ${JSON.stringify(pop.box)}`);
     assert.equal(pop.label, '연관 티켓 3개', tag);
     assert.deepEqual(pop.rows.map((r) => [r.cls, r.stem, r.status, r.mark]), [
-      ['row open', '261114-feat-ws-whiteboard-topic-state-and-lead-nudges', '열림 · ready', 'dot'],
+      ['row open', '261114-feat-ws-whiteboard-topic-state-and-lead-nudges', '열림 · ready', 'wb-dot'],
       ['row done', '261113-bug-board-ticket-status-resolver', '완료', '#i-check'],
       ['row dropped', '261112-refactor-retired-badge-glow', '취소됨', '#i-x'],
     ], tag);

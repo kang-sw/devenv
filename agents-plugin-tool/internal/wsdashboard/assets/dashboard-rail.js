@@ -195,7 +195,7 @@
         b.setAttribute("aria-pressed", String(!!d && d.action === b.getAttribute("data-admission-action")));
         b.disabled = admissionBusy;
       });
-      var tag = row.querySelector(".tag"), fix = row.querySelector(".admission-row-correction");
+      var tag = row.querySelector(".d-tag"), fix = row.querySelector(".admission-row-correction");
       if (tag) tag.textContent = d ? (d.action === "approve" ? wsT("js.admission.will.approve") : wsT("js.admission.will.reject")) : "";
       if (fix) fix.hidden = !stale;
       // Rejected rows have no pending correction markup. Their draft remains

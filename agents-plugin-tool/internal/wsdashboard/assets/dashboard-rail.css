@@ -172,7 +172,7 @@
 .rail .rfh { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
 .rail .rfh + .rfh { padding-left: 10px; border-left: 1px solid var(--wb-muted); }
 .rail .rfh .i { width: 12px; height: 12px; stroke-width: 1.7; }
-.rail .rfh .n { font-variant-numeric: tabular-nums; }
+.rail .rfh .d-n { font-variant-numeric: tabular-nums; }
 .rail .rfh::after { content: "\25b8"; margin-left: 1px; }
 .rail .rfh[aria-expanded="true"]::after { content: "\25be"; }
 .rail .rfh:hover:not(:disabled) { color: var(--wb-primary); }

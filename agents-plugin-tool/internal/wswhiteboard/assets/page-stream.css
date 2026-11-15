@@ -46,8 +46,8 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .dw.wbtk .bd { top: -2px; right: -5px; background: rgb(127 127 127 / .6); color: #fff; }
 .dw.wbtk .pop { width: 400px; }
 .wbtk .row > .i { width: 10px; height: 10px; stroke-width: 2.4; }
-.wbtk .row.open .dot { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
-.wbtk .row.unknown .dot { box-shadow: none; border: 1.5px dashed var(--wb-muted-fg); box-sizing: border-box; }
+.wbtk .row.open .wb-dot { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.wbtk .row.unknown .wb-dot { box-shadow: none; border: 1.5px dashed var(--wb-muted-fg); box-sizing: border-box; }
 .wbtk .row.done > .i, .wbtk .row.done .st { color: var(--wb-ck-ok); }
 .wbtk .row.dropped > .i { color: var(--wb-muted-fg); }
 .wbtk .row.done .nm, .wbtk .row.dropped .nm, .wbtk .row.unknown .nm { opacity: .6; }
