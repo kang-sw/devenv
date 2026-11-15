@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // TestHiddenFrameHoldsItsUpdatesUntilShown pins a framed page's side of the
@@ -167,7 +169,7 @@ process.stdout.write(bad.join("\n"));
 // TestFramesOfOneSessionShareOneRender pins the render fan-out under the
 // shell: two frames of one session (two shells, or a shell and the page
 // standing alone) take one session render per change, and two shells' rail
-// streams share at most one rail render (none if its visible content is unchanged).
+// streams share one rail render when its visible content changes.
 func TestFramesOfOneSessionShareOneRender(t *testing.T) {
 	f := startPageFixture(t)
 	a := openStream(t, f.base+"/s/livesession/events?frame=1")
@@ -178,16 +180,24 @@ func TestFramesOfOneSessionShareOneRender(t *testing.T) {
 		quiet(t, s)
 	}
 	renders, rails := f.d.stats.SessionRenders.Load(), f.d.stats.RailRenders.Load()
+	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), []wslive.RingEntry{
+		{Kind: wslive.RingReply, Text: "shared rail change"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	f.change(t, "livesession", f.project, "shared change", 4)
 	for _, s := range []<-chan sseEvent{a, b} {
 		waitRegionHolding(t, s, regionBoard, "shared change")
+	}
+	for _, s := range []<-chan sseEvent{railA, railB} {
+		waitRegionHolding(t, s, regionRail, "shared rail change")
 	}
 	time.Sleep(settle)
 	if got := f.d.stats.SessionRenders.Load() - renders; got != 1 {
 		t.Errorf("the change took %d session renders for two frames, want 1", got)
 	}
-	if got := f.d.stats.RailRenders.Load() - rails; got > 1 {
-		t.Errorf("the change took %d rail renders for two shells, want at most 1", got)
+	if got := f.d.stats.RailRenders.Load() - rails; got != 1 {
+		t.Errorf("the change took %d rail renders for two shells, want 1", got)
 	}
 }
 

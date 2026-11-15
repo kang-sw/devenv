@@ -174,6 +174,29 @@ func TestSessionPageAgentPopoverGroupsAndTasks(t *testing.T) {
 	if empty := (TreeView{}); len(empty.RunningAgents()) != 0 || len(empty.EndedAgents()) != 0 {
 		t.Error("an empty tree has popover agents")
 	}
+	// wslive's supported statuses, crossed so every parent's group is
+	// independent of each supported child status (and keeps the child).
+	statuses := []string{wslive.StatusRunning, wslive.StatusDone, wslive.StatusFailed}
+	for _, parentStatus := range statuses {
+		for _, childStatus := range statuses {
+			t.Run(parentStatus+"/"+childStatus, func(t *testing.T) {
+				node := AgentNode{Agent: wslive.Agent{ID: "parent", Status: parentStatus},
+					Children: []AgentNode{{Agent: wslive.Agent{ID: "child", Status: childStatus}}}}
+				tree := TreeView{Agents: []AgentNode{node}}
+				wantRunning := parentStatus == wslive.StatusRunning
+				if node.IsRunning() != wantRunning {
+					t.Errorf("IsRunning = %t, want %t", node.IsRunning(), wantRunning)
+				}
+				selected, excluded := tree.RunningAgents(), tree.EndedAgents()
+				if !wantRunning {
+					selected, excluded = excluded, selected
+				}
+				if !reflect.DeepEqual(selected, []AgentNode{node}) || len(excluded) != 0 {
+					t.Errorf("status groups = %+v / %+v, want intact parent in one group only", selected, excluded)
+				}
+			})
+		}
+	}
 	for _, tc := range []struct {
 		name                 string
 		background, monitors int

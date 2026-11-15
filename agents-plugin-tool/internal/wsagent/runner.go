@@ -2328,7 +2328,9 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	if attach {
 		// Root lead keys remain parentless under the existing key-store contract.
 		if err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey); err != nil {
-			fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin ws session key (advisory): %v\n", rec.ReplyID, err)
+			diagnostic := "rejoin ws session key (advisory): " + err.Error()
+			c.setStatus(func() { c.lastErr = appendDiagnostic(c.lastErr, diagnostic) })
+			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, diagnostic)
 		}
 	}
 	host := c.r.opts.Holders

@@ -22,7 +22,7 @@ import (
 // dashboard daemon's agent runner (ServerOptions.Agents), steers them by
 // id, and collects each finished turn from a completion mail the daemon
 // posts to its reply-id queue (PiTurnReporter), with pi.wait as the
-// fallback. The live feed of the session's agents panel is pi_live.go.
+// fallback. The live feed of the session's agents popover is pi_live.go.
 //
 // A Pi subagent's own attached ws-mcp has no runner: on the capability
 // token and the daemon endpoint the runner put in its environment
@@ -105,7 +105,7 @@ type piHost struct {
 	listOnce sync.Once
 	listErr  error
 
-	// keys caches a child's ws session key by its id, for its agents-panel
+	// keys caches a child's ws session key by its id, for its agents-popover
 	// row (pi_live.go).
 	keyMu sync.Mutex
 	keys  map[string]string
@@ -536,7 +536,7 @@ func piToolDefinitions() []map[string]any {
 					"profile":     stringProperty("Optional agent.profile name: a non-lead Pi profile. Default: pi-worker. pi-mini-lead adds bounded ticket workflow tools."),
 					"tier":        stringProperty(`Capability tier: "small", "medium", "large", or "xlarge", resolved from agents.tier's pi bucket.`),
 					"cwd":         stringProperty("Directory the subagent works in: absolute, or relative to the session's root. Default: the session's root."),
-					"label":       stringProperty("Optional one-line name for the subagent's agents-panel row and its completion mail; default: the prompt's first line."),
+					"label":       stringProperty("Optional one-line name for the subagent's agents-popover row and its completion mail; default: the prompt's first line."),
 					"format":      format,
 				},
 				"required": []string{"session_key", "prompt", "tier"},
