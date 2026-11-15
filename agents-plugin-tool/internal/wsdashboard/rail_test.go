@@ -293,7 +293,7 @@ func TestRailWorktreeChangesComeFromTheNewestSnapshot(t *testing.T) {
 }
 
 // TestRailRowStatus pins a row's status: working is a live adapter in a
-// phase other than idle and permission; the robot counts running agents the
+// phase other than idle and permission; the subagent count is running agents the
 // lead spawned (no parent id), not their children; the last tool call is
 // the newest running call's start or finished batch's end, a generating
 // batch excluded; a stale snapshot keeps the last tool time and nothing
@@ -1063,7 +1063,7 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 		row, _, _ := strings.Cut(rest, `</a></div>`)
 		return row
 	}
-	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="stopped"`) || !strings.Contains(row, `">C</span><span class="rid">stopped</span>`) {
+	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="stopped"`) || !strings.Contains(row, `">C</span></span><span class="rid">stopped</span>`) {
 		t.Errorf("the stopped row lacks its stopped class, or something sits between its icon and title:\n%s", row)
 	}
 	if row := rowOf("crashed"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="crashed"`) || !strings.Contains(row, "exit code 1") {

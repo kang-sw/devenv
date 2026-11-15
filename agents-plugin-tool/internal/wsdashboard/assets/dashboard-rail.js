@@ -377,7 +377,7 @@
     var at = star || row.querySelector(".drtail");
     if (!id || !s1 || !nm || !pen || !at) return;
     labelStart({
-      box: s1, at: at, cls: "drinp", hide: [nm, row.querySelector(".hosted"), row.querySelector(".rbt"), star, row.querySelector(".kidtog")], route: "/s/" + encodeURIComponent(id) + "/label",
+      box: s1, at: at, cls: "drinp", hide: [nm, row.querySelector(".hosted"), row.querySelector(".rbt"), star], route: "/s/" + encodeURIComponent(id) + "/label",
       label: pen.getAttribute("data-label") || "", max: +(list && list.getAttribute("data-max")) || 64,
       ph: id, aria: pen.getAttribute("aria-label") || "",
       saved: function (label) {

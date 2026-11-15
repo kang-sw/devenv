@@ -1604,6 +1604,8 @@
   "rail.kids.approval.other": "この下で承認待ちのセッション {0} 件",
   "rail.kids.busy.one": "この下で作業中のセッション {0} 件",
   "rail.kids.busy.other": "この下で作業中のセッション {0} 件",
+  "rail.questions.one": "回答が必要な項目 {0} 件",
+  "rail.questions.other": "回答が必要な項目 {0} 件",
   "rail.title": "セッション",
   "rail.waiting": "リード待機中",
   "rail.working": "リード作業中",
