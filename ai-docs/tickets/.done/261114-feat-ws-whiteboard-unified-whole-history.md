@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6ece1ddbc182036b
 sage-review-completeness-reviewed: 6ece1ddbc182036b
+completed: 2026-11-15
 ---
 
 # Unify rich whole-entry HISTORY with the centered header and unobstructed focus
@@ -337,3 +338,94 @@ historical-version folds, and repeated updates while the badge is pending.
 Include its visual refinement in both-reference comparison without changing
 either approved asset. Send screenshots, comparison, Go output, review and any
 unverified surface to MAIN before develop integration.
+
+### Result (db28581b0) - 2026-11-15
+
+Implemented unified, permanently expanded full-page HISTORY with rich decisions,
+recorded chronology, explicit unknown-time legacy rows and whole-entry membership.
+Retained independent panel/version/topic/item folds, stable pN fold/read state,
+updated badges, centered localized controls and question-pill focus clearance.
+The final owner refinements are 30 lines / 3 panels / 1000px, newest whole entry
+included, and no automatic log folding. Embedded catalogs remain separate.
+Future creation batching uses actual batch membership; equal clocks do not
+regroup legacy or independent updates.
+
+The lead integrated exact a21, then the superseding 1d/54/099 gates. Conflict
+resolution retained TASK3 behavior and incoming topic anchors, waiting-ready and
+`topicdeps` markup, while respecting the approved Viewed rollback. No worker
+initiated a merge or changed the shared runtime. The final tested product head
+is `db28581b05816f8691392e7cb665a73226c01282` on the retained implementation branch.
+
+#### Verification and independent review
+
+- One fresh lite review of the full retained TASK3 range found one Critical:
+  an all-answered check-only topic lost its visibility toggle. Fixed in
+  `434440d9e`, with red-first full-page/region and native-handler regression
+  coverage. No re-review was allocated.
+- Earlier isolated logic acceptance covered paging/exhaustion, saved boundaries,
+  rich/static options, pN republish and unrelated updates, migration/reload,
+  actual-open acknowledgement, native Tab/control exposure, cache/collapse,
+  panel controls and recap risks. The integrated 777 browser check passed at
+  1280 and 360. Those packets remain under `/tmp/task3-final-logic.nrv34u9q/`
+  and the earlier continuation roots; they are not final-099 browser reruns.
+- Final full `internal/wsi18n` passed. Scoped `internal/wsdashboard` passed,
+  including history/bridge, collision, fold, effects and waiting-on navigation
+  contracts. Full `internal/wswhiteboard` ran and exited 1: exactly the 11
+  MAIN-authorized renderer fixture failures in `/tmp/wb-fails.txt`, plus the
+  independently reproduced baseline embed-size failure below. No other failure
+  remained; this is not a claim that the package is green.
+- Final command specifications, complete output and process accounting:
+  `/tmp/task3-own-reds.ch0t3lgk/{whiteboard-full-final,i18n-final,dashboard-final}/`.
+  All owned descendants were quiescent, with no ownership errors or signals.
+
+The five additional failures were compared against untouched bare
+`09998d57986f9d0f716036115452e1cb912d1f28`, then against the repaired TASK3 head:
+
+| Exact test | Bare 099 | Final TASK3 |
+|---|---|---|
+| `TestCheckRowsStageAnswersInTheReplyBar` | PASS | PASS |
+| `TestCheckHideToggleKeepsItsStateOnTheRoot` | PASS | PASS |
+| `TestRenderPageChangeSignalOnlyOnFull` | PASS | PASS |
+| `TestRenderPageEmbedSizeBudget` | FAIL, 247192 bytes | FAIL, 250521 bytes |
+| `TestTopicWithABodyIsNotQuiet` | PASS | PASS |
+
+The size ceiling was not raised; MAIN classified that baseline red as
+nonblocking and EXEC1-owned. The baseline was left source-unchanged, clean and
+quiescent and reported to the lead for release, not released by this worker.
+
+Own-head repairs preserve the contracts rather than blessing failures:
+reply ordering and row assertions now follow intentional HISTORY placement;
+stamp/seq checks inspect the actual html tag alongside reply-scoped reader
+identity; the unchanged-embed fixture records its acknowledged sequence.
+The answered-check filter additionally excludes existing `.void` rows, restoring
+withdrawn/superseded visibility. Recorded-retirement, unknown-time and assumed
+regressions cover that selector. Integration repairs also use literal localized
+label calls, namespaced state modifiers and assertions matching the incoming
+rollback's actual bridge calls.
+
+#### Decisions, fixtures and remaining boundaries
+
+- MAIN's UI-fast override superseded the historical screenshot-proof matrix:
+  existing captures/references remain, and final visuals are owner-onscreen
+  acceptance. No new screenshots or visual-match claim was made. Final-099
+  standalone binary build and informational pinned browser rerun were not part
+  of the final scoped Go verification.
+- The genuine earlier pinned-arrival A/B failed on both plain 874 and TASK3;
+  it remains tracked by `261115-bug-ws-dashboard-pinned-deeplink-under-topic-header`,
+  not reported as PASS or as a final-099 reproduction. The EN360 viewport
+  correction is diagnostic-supported, not proof that all flakiness is removed.
+  Completed native Tab targets had no setup skips; fixture-generation/browser
+  opt-ins skipped when their required environments were absent.
+- All three retained `scripts/board-*.cjs`/`.mjs` files are intentional executable
+  acceptance/developer fixtures, and all six added `approved-*.html`/`.md`
+  assets are intentional approved references, not scratch. The four TASK3
+  approved assets remain byte-identical to capture `1b54402f3`. Raw evidence
+  stays outside Git under `/tmp`; no intended fixture was dropped.
+- The merge-completion refusal is captured in
+  `261115-bug-ws-git-commit-conflicted-merge-completion-path`. Exact-parent
+  native completion was used only after the ws primitive refused approved
+  incoming staged paths and the lead explicitly authorized that fallback.
+- MAIN's split freeze still holds parent integration until EXEC1's 793 lands.
+  Required CSS/script changes remain intact. The lead owns integration, push,
+  runtime activation and owner-onscreen acceptance; this closure records the
+  implementation unit, not permission to bypass that hold.
