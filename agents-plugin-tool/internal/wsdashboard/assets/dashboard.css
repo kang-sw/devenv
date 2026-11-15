@@ -832,6 +832,9 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 }
 .board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
 .board-term-slot:empty, .board-web-slot:empty { display: none; }
+/* The sticky offset and rounded corners must mask scrolled panel text too,
+   not just the face. Stay inside the toolbar stacking context and hit model. */
+.board-toolbar[data-floating]::before { content: ""; position: absolute; inset: calc(-1 * var(--toolbar-top, 0px)) 0 0; background: var(--wb-bg); z-index: -1; }
 .board-toolbar[data-floating] .board-toolbar-face { border-radius: 8px; }
 .board-toolbar[data-floating] .board-tools { padding-block: 1px; }
 .board-toolbar[data-floating] .board-action { height: 24px; border-radius: 6px; }
