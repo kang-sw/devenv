@@ -332,6 +332,28 @@ func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 	}
 }
 
+func TestExpandedQuietTopicCardCSS(t *testing.T) {
+	css, err := embeddedAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One section surface aligns both body variants and the stream with the
+	// bar. A dashboard fold stays transparent unless temporarily maximized;
+	// standalone details acquire the surface only while open.
+	wantAll(t, string(css),
+		`.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow);`,
+		`.topic.quiet { box-shadow: none; background: transparent; }`,
+		`.topic.quiet:not([data-size="fold"]):has(> div.tdoc, > details.tdoc[open], > .topic-stream),
+.topic.quiet[data-max] { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }`,
+		`.entry-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }`,
+		`.topic.quiet .tbar details.settled[open] { flex: 1 0 100%; width: 100%; min-width: 0; padding-bottom: 4px; }`,
+		`.topic.quiet .tbar details.settled .chead { flex-wrap: wrap; }`,
+	)
+	// The native disclosure must not draw a second, inset card inside the
+	// section; framed div.tdoc has no native open attribute at all.
+	wantNone(t, string(css), `.topic.quiet details.tdoc[open] {`)
+}
+
 // Owner rule: a log row's role marker sits on the first line beside the clock,
 // never vertically centred against wrapped text.
 func TestStreamRoleMarkerPinsToFirstLine(t *testing.T) {
