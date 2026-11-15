@@ -232,10 +232,11 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 	}
 	stem, _ := args["ticket_stem"].(string)
 	stem = strings.TrimSpace(stem)
-	explicitTrack := ""
-	if op == wsindex.OpAcquire {
-		explicitTrack, _ = args["track"].(string)
-	}
+	// An explicit track names the work line the lease is (to be) recorded
+	// on. A release passes it to drop a lease this email and clone still hold
+	// on a track the caller is no longer checked out on; the owner match in
+	// wsindex still refuses any other email, clone, or track.
+	explicitTrack, _ := args["track"].(string)
 	override := op == wsindex.OpAcquire && boolArgument(args["dangerously_override_lease_status"])
 	reason, _ := args["reason"].(string)
 	reason = strings.TrimSpace(reason)
