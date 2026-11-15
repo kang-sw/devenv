@@ -6,6 +6,7 @@ const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
 if (process.platform !== 'win32') throw new Error('Windows acceptance only');
+process.env.DEBUG = [process.env.DEBUG, 'pw:browser*'].filter(Boolean).join(',');
 const { _electron } = require(process.env.WS_PLAYWRIGHT);
 const root = process.env.TBV_ROOT;
 if (!root) throw new Error('TBV_ROOT is required');
@@ -35,7 +36,7 @@ async function physical(action, args = []) {
     args = ['-X', point.x, '-Y', point.y];
   }
   return execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'physical.ps1'),
-    '-Action', action, '-OwnedPid', String(application.process().pid), ...args.map(String)], { encoding: 'utf8' });
+    '-Action', action, '-OwnedPid', String(await main(() => process.pid)), ...args.map(String)], { encoding: 'utf8' });
 }
 const main = (fn, value) => application.evaluate(fn, value);
 const state = () => main(({ BrowserWindow }) => {

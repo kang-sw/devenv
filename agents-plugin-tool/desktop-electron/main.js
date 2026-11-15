@@ -111,11 +111,22 @@ function start({ app, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
       if (details.resourceType === 'mainFrame' && details.url === connectionURL) return callback({});
+      if (dashboardView && details.webContentsId === window.webContents.id && details.url === 'about:blank') return callback({});
       const action = destination(details.url, pin, details.resourceType === 'mainFrame');
       if (action === 'dashboard' || action === 'frame') return callback({});
       callback({ cancel: true });
       if (action === 'external') openExternal(details.url);
     });
+    if (dashboardView) {
+      // Initialize the inert owner document as well as both sibling views.
+      // An unnavigated owner leaves CDP's page initialization pending forever.
+      const host = window.webContents;
+      host.on('page-title-updated', event => event.preventDefault());
+      host.on('will-navigate', event => event.preventDefault());
+      host.on('will-attach-webview', event => event.preventDefault());
+      host.setWindowOpenHandler(() => ({ action: 'deny' }));
+      host.loadURL('about:blank');
+    }
     const guard = (event, url, isMainFrame) => {
       const action = destination(url, pin, isMainFrame);
       if (action === 'dashboard' || action === 'frame') return;

@@ -411,7 +411,8 @@ test('platform switch keeps native construction on macOS/Linux and isolates Wind
     assert.deepEqual(w.children, [dashboard, bar]);
     assert.deepEqual(dashboard.bounds, { x: 0, y: 36, width: 1280, height: 824 });
     assert.deepEqual(bar.bounds, { x: 0, y: 0, width: 1280, height: 36 });
-    assert.equal(w.loads.length, 0);
+    assert.deepEqual(w.loads, ['about:blank'], 'the inert owner must have a committed document for CDP initialization');
+    assert.deepEqual(w.popup({ url: 'https://example.com' }), { action: 'deny' });
     assert.deepEqual(dashboard.loads, ['http://127.0.0.1:39418/']);
     assert.equal(dashboard.agent, 'Chromium Werkschaft/0.1.0');
     assert.equal(path.basename(bar.options.webPreferences.preload), 'titlebar-preload.js');
