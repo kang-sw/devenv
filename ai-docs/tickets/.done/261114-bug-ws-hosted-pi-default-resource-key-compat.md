@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e201fd039fe83548
 sage-review-completeness-reviewed: e201fd039fe83548
+completed: 2026-11-15
 ---
 
 # Hosted Pi default mode fails when the host lacks getResourcePathKey
@@ -115,6 +116,87 @@ Verification:
 - Obtain independent review before integration. Record exact commands,
   outcomes, source commits and any remaining gaps in the Result.
 
+### Result (0d356f9dd) - 2026-11-15
+
+Adopted the orphan repair onto `exec5/pi-resource-key-compat`, based on develop
+`e4c88934c`, at the owner's direction. All four commits cherry-picked without
+conflicts or squashing; original authorship is retained:
+
+- `4386f745a` -> `5a1e15ef8` (ticket).
+- `88ad29919` -> `0d356f9dd` (implementation and regression tests).
+- `58f491a69` -> `6986c42d4` (earlier verification blocker).
+- `7f7f52f2c` -> `cfd3a1097` (exact-host checkpoint).
+
+Root cause **VERIFIED**: the develop adapter unconditionally imported
+`getResourcePathKey` at `agents-plugin-tool/internal/wsagent/pi_lead.mjs:83`
+and passed the missing export into the function guard at lines 42-45, aborting
+before CLI startup. The locally extracted Pi 1.0.4
+`dist/core/source-info.js:1-34` has no such export; its
+`dist/core/package-manager.js:2127` deduplicates with `canonicalizePath`, whose
+realpath-or-original behavior is defined at `dist/utils/paths.js:13-20`.
+The adopted adapter prefers the newer helper and otherwise imports that same
+host's legacy helper (adapter lines 83-90). SDK/CLI identity, native loader
+ownership and all other develop behavior are unchanged. This remains T0:
+only an internal host adapter and tests change; no cross-version serialized,
+MCP, API, manifest or protocol surface is added or rewritten.
+
+Verification commands below ran from `agents-plugin-tool`; every Go invocation
+used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`. Full output is in
+`/tmp/exec5/pikey/`.
+
+1. `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^TestPiLeadResolverAdapter$' -count=1 -timeout 4m -v`
+   - Red: temporarily removed only the source fallback, and `cmp` verified
+     byte equality with the develop adapter. New tests remained unchanged.
+     `--- FAIL: TestPiLeadResolverAdapter (13.09s)`; Node **13 pass, 2 fail,
+     0 skipped**. Both new legacy-layout fixtures failed with the incompatible
+     extension-resolver error at adapter line 45. Log: `red-go.log`.
+   - Green: restored the exact adopted adapter, verified by `cmp` against its
+     saved copy. `--- PASS: TestPiLeadResolverAdapter (10.08s)`;
+     `ok github.com/kang-sw/devenv/internal/wsagent 11.015s`; Node **15 pass,
+     0 fail, 0 skipped**. Log: `green-go.log`. The Go driver is
+     `pi_lead_test.go:296-317`, which runs `node --test testdata/pi-lead.test.mjs`.
+     Auto-discovery selected the installed Pi 1.5.2 SDK; native resource tests
+     use disposable projects/settings, offline CLI startup and no model calls.
+2. `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run 'TestPiLead|TestLeadIsolation|TestPi.*Isolation' -count=1 -timeout 4m -v`
+   - **FAIL**: `TestPiLeadCommands` asserted unwrapped user text at
+     `lead_command_test.go:411`; `TestLeadIsolationRequestAndRelaunch` then
+     timed out after 4m in `claude/default`. Log: `focused-go.log`.
+3. With the fallback temporarily removed again:
+   `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^TestPiLeadCommands$|^TestLeadIsolationRequestAndRelaunch$/^claude$/^default$' -count=1 -timeout 30s -v`
+   - **FAIL**: the same command-history assertion reproduced against the
+     unchanged develop adapter; the selected isolation subtest passed.
+     Log: `baseline-unrelated-reds.log`.
+   - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^TestLeadIsolationRequestAndRelaunch$' -count=1 -timeout 30s -v`
+     **PASS**, `ok github.com/kang-sw/devenv/internal/wsagent 0.973s`.
+     Log: `baseline-isolation.log`. The baseline's standalone pass does not
+     establish the cause of the broader isolation timeout.
+4. After restoring the byte-identical adopted source:
+   `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^TestPiLead(BundledEntries|IsolatedLaunch|DefaultLaunchUsesHostSDK|MissingBundleFallback|SDKMatchesCLIBuild|UnixNPMSymlink|StandaloneDefaultStartsIsolated|OtherSDKErrorsStillFail|NoSDKAndBridgeWarningsCombine|ResolverAdapter)$|^TestLeadIsolation(RequestAndRelaunch|RejectsUnknownValue)$' -count=1 -timeout 2m -v`
+   - **FAIL**, isolation timed out after 2m in `claude/`, before the Pi adapter
+     tests ran. Both timeout stacks point to `lead_isolation_test.go:79` and
+     its fake backend's channel send at line 21. Log:
+     `focused-adapter-launch-go.log`. No unrelated test or runner changes made.
+5. `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^TestPiLead(BundledEntries|IsolatedLaunch|DefaultLaunchUsesHostSDK|MissingBundleFallback|SDKMatchesCLIBuild|UnixNPMSymlink|StandaloneDefaultStartsIsolated|OtherSDKErrorsStillFail|NoSDKAndBridgeWarningsCombine|ResolverAdapter)$|^TestLeadIsolationRejectsUnknownValue$' -count=1 -timeout 2m -v`
+   - **PASS**, all 11 selected Go tests;
+     `ok github.com/kang-sw/devenv/internal/wsagent 2.555s`. Node **15 pass,
+     0 fail, 0 skipped**. Log: `adapter-launch-go.log`.
+
+Self-review read all four original commits, the current Go launcher/driver,
+resolver and complete JS suite, and both hosts' native identity helpers.
+No source changes beyond the adopted patch were needed. The newer-helper
+fixture and current-host native tests pass; legacy fixtures cover both SDK
+layouts, symlink deduplication, synthetic builtins, metadata/order, disabled
+resources and incompatible-helper refusal.
+
+Closure records the owner's bounded adoption and focused-verification request,
+not complete native/platform acceptance. The earlier exact Pi 1.0.4 checkpoint
+below remains historical evidence, not a fresh rerun: its mixed dependency
+graph's unbundled negative control still has an unresolved codemode export gap.
+The broader isolation timeout also remains unexplained. Independent review
+before integration remains for the lead; this task explicitly prohibited
+subagents, so only self-review was performed. No daemon operation, installation,
+shared-runtime mutation, model request, version bump, merge or push occurred.
+
 ## Earlier blocked verification (2026-11-14)
 
 Exact Pi 1.0.4 native acceptance is **blocked on dependency closure**, not
@@ -185,3 +267,7 @@ Full command, identity, stdout/stderr and quiescence artifacts are under
 source boundary. No shared daemon, installed runtime, live account or model
 request was invoked; the seed was read/copied, never run or mutated.
 
+
+## Resolution (2026-11-15)
+
+Closed at the owner's direction after conflict-free, authorship-preserving orphan adoption and focused red/green verification on current develop. Result (0d356f9dd) records exact commands, 15/15 passing adapter cases and passing named launch checks. Full exact-Pi-1.0.4 dependency acceptance, the broader isolation timeout, and independent pre-integration review remain explicitly unclaimed; see the Result and historical checkpoint.
