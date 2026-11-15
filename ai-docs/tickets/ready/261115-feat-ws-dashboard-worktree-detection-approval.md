@@ -115,3 +115,13 @@ Focused verification must cover:
 - regression coverage that pool entries remain hidden before admission classification through `railPooled`/`worktreePoolRoots`;
 - the rail's existing worktree-list cadence and no-per-worktree-status-read boundary; and
 - browser result screenshots at both 1440px and 700px, in light and dark themes, for pending, selected, rejected-list-with-undo and stale-refusal states, plus an applied-state comparison against `ai-docs/tickets/assets/261115-feat-ws-dashboard-worktree-detection-approval/847-worktree-approval.html`. Provide side-by-side comparison evidence and paths for MAIN's pre-merge check; do not substitute mockup screenshots for production result captures.
+
+## Blocked (2026-11-15)
+
+Implementation is retained at `679b9b9b4d1d779da3055c6d30f82e066f943dcb` on `impl/develop/gush-wince-guru`; the worker and its UI child are quiescent. This is incomplete work, not a Phase Result or HEAD READY.
+
+- VERIFIED: Focused backend passes were reported at 2.101s and 5.391s. The lead read the complete final browser/focused output: all eight owner behaviors and 14 focused tests passed in 10.250s. Exact sandbox environment, commands, outputs and the 16-state capture index are in `/tmp/ws-worktree-admission-evidence/{commands.txt,final-test-output.txt,summary.md}`. These artifacts are local evidence, not shipped runtime dependencies.
+- VERIFIED: The lead viewed the production 700px dark applied capture and rejected-list side-by-side comparison. The general copy-success toast displays the entire investigation prompt, obscuring and clipping the rail instead of the reference's concise feedback. This Important visual defect remains unfixed; visual acceptance has not passed.
+- VERIFIED: The worker reported stop `(f)` at xlarge. The lead read `test-output.txt`, `diagnostic-output.txt` and `diagnostic-stack-output.txt` in that evidence directory: two diagnostic reruns repeated an initial malformed-fixture failure before correction. Undefined usage/memo entries interrupted rail synchronization. Subsequent passing tests do not erase the literal stop condition.
+- Pending MAIN decision `(1113)`: authorize one bounded continuation for the concise-toast fix, focused acceptance recapture and fresh independent Lite review, or retain WIP for later. No further implementation, tests, source or HEAD mutation by the worker is authorized while this decision remains unanswered.
+- Independent review, final visual acceptance, Phase Result, ticket closure, integration and runtime acceptance remain outstanding. The owner's 20:45 KST committed-WIP/progress-report fallback remains in force.
