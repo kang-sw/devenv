@@ -86,12 +86,10 @@
   function fit(h) {
     var node = boundaryRow(h, boundary(h)), live = h.querySelector('.history-live');
     if (!node) return;
-    var kept = kit.keep(h);
     node = splitAt(h, node);
     // Only the saved boundary's geometry changes on resize, never its ID.
     var height = Math.max(0, live.getBoundingClientRect().bottom - node.getBoundingClientRect().top);
     h.style.setProperty('--wb-history-height', Math.ceil(height) + 'px');
-    kept.apply();
   }
   function later(h) {
     if (h._wbHistoryFrame) return;
@@ -102,9 +100,7 @@
         var target = h._wbHistoryTarget;
         if (target && target.isConnected && h.contains(target)) reveal(h, target);
         else if (target) h._wbHistoryTarget = null;
-        var kept = kit.keep(h);
         choose(h); fit(h); updateControl(h);
-        kept.apply();
       }
     });
   }
@@ -234,7 +230,7 @@
       }
       return;
     }
-    var kept = kit.keep(topic);
+    var anchor = below(topic), kept = anchor && kit.keep(anchor, { observe: [h.querySelector('.history-live')] });
     h._wbHistoryOut = false;
     h._wbHistoryTarget = null;
     reset(h);
@@ -275,7 +271,7 @@
     var head = h.closest('.topic').querySelector('.tophead'), offset = 12;
     var style = head && window.getComputedStyle(head);
     if (style && style.position === 'sticky') offset += (parseFloat(style.top) || 0) + head.offsetHeight;
-    kit.jump(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
+    kit.keep(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
       if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
     } });
   }
@@ -495,18 +491,26 @@
   // has not left view). seen(node) reads the node's last report without a
   // layout. sweep() drops the subscriptions of nodes no longer on the page.
   //
-  // keep(node) captures the reading-line panel on node's actual scroller.
-  // Nested synchronous mutations share one transaction; the last apply()
-  // resolves that identity and writes at most once. There is no ordinary
-  // resize session or substituted reference. capture:false only inspects
-  // exposed geometry. Owners retain native-anchor suppression and input
-  // listeners; input/momentum suppress captures until 200 ms after scrolling.
-  // jump(node, {block, behavior}) alone follows asynchronous layout, until
-  // 150 ms / five stable frames or its non-renewing 2 s cap. It has priority
-  // over ordinary transactions, and input cancels it immediately.
+  // keep(node, {offset, observe, onEnd}) keeps node at its offset from its
+  // nearest scroller's top until layout settles: measured now, in layout
+  // terms (a running transform, as a slide's, does not count), so it is
+  // called before the DOM change it compensates, and apply() right after
+  // it. An offset given puts node there instead. A ResizeObserver over the
+  // scroller's content (and observe) re-applies on every layout change. The
+  // session ends 500 ms after the last change ("quiet"), 5 s after it began
+  // ("cap"), on a scroll it did not write ("user"), or on end() ("ended").
+  // One session per scroller: a keep on a scroller that has one re-anchors
+  // it (node, offset, observed nodes) and restarts both windows, so two
+  // callers never take each other's writes for a user scroll. keeping(el)
+  // returns the session el has, which other scroll writers leave alone.
+  // While a session runs its scroller takes overflow-anchor: none, so the
+  // browser's own anchoring does not compensate a second time.
+  // jump(node, {block, behavior}) gives an explicit navigation priority over
+  // keeps until 150 ms / five stable frames, at most 2 s. Scroll intent wins;
+  // ordinary keep policy is unchanged once the jump session ends.
   function viewKit(win) {
-    var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map(), owners = new Map();
-    var IO = win.IntersectionObserver, bands = !!(IO && IO.prototype && "scrollMargin" in IO.prototype);
+    var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map();
+    var QUIET = 500, CAP = 5000, IO = win.IntersectionObserver, bands = !!(IO && IO.prototype && "scrollMargin" in IO.prototype);
     function observer(margin) {
       if (observers[margin]) return observers[margin];
       var o = observers[margin] = { subs: new Map(), io: null };
@@ -543,7 +547,6 @@
       var sub = { node: node, margin: opt.margin || "0px", onChange: opt.onChange, onOut: opt.onOut, ratio: undefined, gone: false };
       var handle = { node: node, unwatch: function () { drop(sub); } };
       if (!node || !win.IntersectionObserver) { sub.gone = true; return handle; }
-      owner(scrollerOf(node));
       var o = observer(sub.margin), list = o.subs.get(node);
       // A node already observed reports only on a change: observing it
       // again gives the new subscription its first report.
@@ -588,138 +591,40 @@
       return y;
     }
     function scrollerTop(scroller) { return scroller === docScroller() ? 0 : scroller.getBoundingClientRect().top + (scroller.clientTop || 0); }
-    function viewport(scroller) {
-      var main = scroller === docScroller(), r = main ? { top: 0, bottom: win.innerHeight || scroller.clientHeight } : scroller.getBoundingClientRect();
-      var top = Math.max(0, r.top + (main ? 0 : scroller.clientTop || 0));
-      var bottom = Math.min(win.innerHeight || scroller.clientHeight, main ? r.bottom : r.top + (scroller.clientTop || 0) + scroller.clientHeight);
-      var style = win.getComputedStyle(scroller);
-      top += parseFloat(style.scrollPaddingTop) || 0;
-      // The rail publishes its clearance on sticky heads, not on the host.
-      Array.from((main ? doc : scroller).querySelectorAll('.tophead, .bc-hd, .wb-rail-wrap.up .wb-rail-stack')).forEach(function (head) {
-        var hs = win.getComputedStyle(head), h = head.getBoundingClientRect();
-        if ((hs.position === 'sticky' || head.matches('.wb-rail-stack')) && h.height && h.top <= top + (parseFloat(hs.top) || 0) + 1 && h.bottom > top)
-          top = Math.max(top, h.bottom);
-      });
-      return { top: top, bottom: bottom, left: main ? 0 : Math.max(0, r.left + (scroller.clientLeft || 0)),
-        right: Math.min(win.innerWidth || r.right || Infinity, main ? win.innerWidth || Infinity : r.left + (scroller.clientLeft || 0) + scroller.clientWidth) };
-    }
-    function exposed(node, scroller, view) {
-      var v = view || viewport(scroller), r = node.getBoundingClientRect(), top = Math.max(v.top, r.top), bottom = Math.min(v.bottom, r.bottom);
-      var left = Math.max(v.left, r.left), right = Math.min(v.right, r.right);
-      if (!(r.height > 0 && bottom - top >= 1 && right - left >= 1)) return false;
-      for (var p = node.parentElement; p && p !== scroller && p !== doc.body; p = p.parentElement) {
-        if (p.tagName === 'DETAILS' && !p.open) return false;
-        if (/hidden|clip|auto|scroll/.test(win.getComputedStyle(p).overflowY)) {
-          var box = p.getBoundingClientRect(); top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom);
-          left = Math.max(left, box.left); right = Math.min(right, box.right);
-        }
-      }
-      return r.height > 0 && bottom - top >= 1 && right - left >= 1;
-    }
-    function reading(scroller) {
-      // One synchronous capture has one viewport. Re-scanning every sticky
-      // head for every candidate makes history initialization/resize cubic
-      // in board size; reject offscreen boxes before walking their ancestry.
-      var root = scroller === docScroller() ? doc : scroller, view = viewport(scroller), line = view.top + 1;
-      var nodes = Array.from(root.querySelectorAll('.entry-panel, .wb-entry:not(.panel), .doc-frame, [data-card]')).filter(function (n) {
-        if (!exposed(n, scroller, view) || scrollerOf(n) !== scroller) return false;
-        // An opaque frame is represented by its host panel, never its DOM.
-        return !(n.matches('.doc-frame') && n.closest('.entry-panel'));
-      });
-      nodes.sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
-      return nodes.find(function (n) { var r = n.getBoundingClientRect(); return r.top <= line && r.bottom > line; }) ||
-        nodes.find(function (n) { return n.getBoundingClientRect().top > line; }) || null;
-    }
-    function owner(scroller) {
-      var o = owners.get(scroller);
-      if (o) return o;
-      var main = scroller === docScroller(), target = main ? win : scroller;
-      o = { state: 'idle', until: 0, wrote: scroller.scrollTop, transaction: null };
-      owners.set(scroller, o);
-      scroller.wbScrollOwner = true;
-      (main ? doc.documentElement : scroller).style.overflowAnchor = 'none';
-      function clock() { return win.performance ? win.performance.now() : Date.now(); }
-      function intent() {
-        o.state = 'user-scrolling'; o.until = clock() + 200;
-        if (o.transaction) o.transaction.cancel();
-        var s = sessions.get(scroller);
-        if (s && s.follow) { scroller.scrollTo({ top: scroller.scrollTop, left: scroller.scrollLeft, behavior: 'instant' }); s.cancel(); }
-      }
-      ['wheel', 'touchstart', 'touchmove', 'pointerdown'].forEach(function (type) { target.addEventListener(type, intent, { passive: true, capture: true }); });
-      win.addEventListener('keydown', function (e) {
-        if (!main && e.target && !scroller.contains(e.target) && doc.activeElement && !scroller.contains(doc.activeElement)) return;
-        if (/^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) intent();
-      }, true);
-      target.addEventListener('scroll', function () {
-        if (Math.abs(scroller.scrollTop - o.wrote) <= 1) return;
-        var s = sessions.get(scroller);
-        if (s && s.follow) return; // Native initial smooth navigation is not input.
-        if (o.state === 'user-scrolling') o.until = clock() + 200;
-        else intent();
-        o.wrote = scroller.scrollTop;
-      }, { passive: true });
-      o.ready = function () {
-        if (o.state === 'user-scrolling' && clock() >= o.until) o.state = 'idle';
-        return o.state === 'idle';
-      };
-      return o;
-    }
     function keep(node, opt) {
       opt = opt || {};
-      var scroller = scrollerOf(node), o = owner(scroller), s = sessions.get(scroller);
-      var inspect = { scroller: scroller, visible: function (n) { return exposed(n, scroller); }, viewport: function () { return viewport(scroller); }, apply: function () {}, end: function () {} };
-      if (opt.capture === false) return inspect;
-      if (s && s.follow) return s.handle;
-      if (!o.ready()) return inspect;
-      var t = o.transaction;
-      if (!t) {
-        var ref = typeof opt.offset === 'number' ? node : reading(scroller);
-        var id = ref && ref.id, topic = ref && ref.closest('.topic'), name = topic && topic.getAttribute('data-topic');
-        var key = ref && ref.getAttribute('data-doc-key');
-        var offset = ref && (typeof opt.offset === 'number' ? opt.offset + scrollerTop(scroller) : layoutTop(ref, scroller));
-        t = o.transaction = { depth: 0, done: false };
-        t.cancel = function () { t.done = true; o.transaction = null; sessions.delete(scroller); };
-        t.apply = function () {
-          if (t.done || --t.depth > 0) return;
-          t.cancel();
-          if (!o.ready() || !ref) return;
-          if (!ref.isConnected) {
-            ref = id ? doc.getElementById(id) : null;
-            if (!ref && key) ref = Array.from(doc.querySelectorAll('.doc-frame[data-doc-key]')).find(function (n) {
-              var p = n.closest('.topic'); return n.getAttribute('data-doc-key') === key && p && p.getAttribute('data-topic') === name;
-            });
-          }
-          if (!ref || !ref.isConnected || scrollerOf(ref) !== scroller || (name && (!ref.closest('.topic') || ref.closest('.topic').getAttribute('data-topic') !== name))) return;
-          var delta = layoutTop(ref, scroller) - offset;
-          if (Math.abs(delta) >= 0.5) scroller.scrollTop += delta;
-          o.wrote = scroller.scrollTop;
-          if (opt.onEnd) opt.onEnd('settled');
-        };
-        sessions.set(scroller, { handle: inspect });
+      var scroller = scrollerOf(node), s = sessions.get(scroller);
+      if (s && s.follow) {
+        if (opt.onEnd) s.ends.push(opt.onEnd);
+        return s.handle;
       }
-      t.depth++;
-      var used = false;
-      inspect.apply = function () { if (!used) { used = true; t.apply(); } };
-      inspect.end = function () { if (!used) { used = true; if (!t.done && --t.depth === 0) t.cancel(); } };
-      return inspect;
+      var offset = typeof opt.offset === "number" ? opt.offset : layoutTop(node, scroller) - scrollerTop(scroller);
+      if (!s) s = start(scroller);
+      s.node = node;
+      s.offset = offset;
+      if (opt.onEnd) s.ends.push(opt.onEnd);
+      if (s.ro) (opt.observe || []).forEach(function (el) { if (el) s.ro.observe(el); });
+      s.restart(true);
+      if (typeof opt.offset === "number") s.handle.apply();
+      return s.handle;
     }
     function jump(node, opt) {
-      var scroller = scrollerOf(node), s = sessions.get(scroller);
-      if (!s || !s.follow) s = start(scroller);
-      if (opt && opt.onEnd) s.ends.push(opt.onEnd);
+      var scroller = scrollerOf(node), s = sessions.get(scroller) || start(scroller);
       s.jump(node, opt || {});
       return s.handle;
     }
     function start(scroller) {
-      var o = owner(scroller);
-      if (o.transaction) o.transaction.cancel();
-      o.state = 'explicit-jump-follow';
-      var s = { ends: [], ro: null, done: false };
-      var main = scroller === docScroller();
+      var s = { node: null, offset: 0, ends: [], ro: null, quiet: 0, cap: 0, done: false, wrote: scroller.scrollTop };
+      var main = scroller === docScroller(), anchorEl = main ? doc.documentElement : scroller, target = main ? win : scroller;
+      var was = anchorEl.style.overflowAnchor;
+      anchorEl.style.overflowAnchor = "none";
       function apply() {
         if (s.done) return;
-        if (s.follow) s.follow.align();
-        o.wrote = scroller.scrollTop;
+        if (s.follow) { s.follow.align(); return; }
+        if (!s.node.isConnected) { end("ended"); return; }
+        var d = layoutTop(s.node, scroller) - scrollerTop(scroller) - s.offset;
+        if (Math.abs(d) >= 0.5) scroller.scrollTop += d;
+        s.wrote = scroller.scrollTop;
       }
       function end(reason) {
         if (s.done) return;
@@ -727,21 +632,49 @@
         if (s.follow) s.follow.off();
         sessions.delete(scroller);
         if (s.ro) s.ro.disconnect();
-        if (o.state === 'explicit-jump-follow') o.state = 'idle';
-        o.wrote = scroller.scrollTop;
+        win.clearTimeout(s.quiet);
+        win.clearTimeout(s.cap);
+        target.removeEventListener("scroll", onScroll);
+        anchorEl.style.overflowAnchor = was;
         s.ends.forEach(function (fn) { fn(reason); });
       }
-      s.cancel = function () { end('user'); };
+      function onScroll() {
+        if (s.done || s.follow || Math.abs(scroller.scrollTop - s.wrote) <= 1) return;
+        // Content that shrank under the scroll clamps it: not the user's.
+        var max = scroller.scrollHeight - scroller.clientHeight;
+        if (s.wrote > max + 1 && Math.abs(scroller.scrollTop - max) <= 1) { apply(); return; }
+        end("user");
+      }
+      s.restart = function (both) {
+        if (s.follow) return;
+        win.clearTimeout(s.quiet);
+        s.quiet = win.setTimeout(function () { end("quiet"); }, QUIET);
+        if (!both) return;
+        win.clearTimeout(s.cap);
+        s.cap = win.setTimeout(function () { end("cap"); }, CAP);
+      };
       s.jump = function (node, opt) {
         if (s.follow) s.follow.off();
+        win.clearTimeout(s.quiet);
+        win.clearTimeout(s.cap);
         var block = opt.block || "center", raf = 0, cap = 0, stable = 0, quiet = 0, last, position;
+        var intents = ["wheel", "touchstart", "touchmove", "pointerdown"];
+        function cancel() {
+          // Stop an initial native smooth scroll too; pointer/touch intent
+          // need not itself produce a scroll event that would interrupt it.
+          scroller.scrollTo({ top: scroller.scrollTop, left: scroller.scrollLeft, behavior: "instant" });
+          end("user");
+        }
+        function key(e) { if (/^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) cancel(); }
         function off() {
           win.cancelAnimationFrame(raf);
           win.clearTimeout(cap);
+          intents.forEach(function (t) { target.removeEventListener(t, cancel, true); });
+          win.removeEventListener("keydown", key, true);
         }
         function measure() {
           var r = node.getBoundingClientRect();
-          return r.top - scrollerTop(scroller) + scroller.scrollTop - (typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0);
+          return r.top - scrollerTop(scroller) + scroller.scrollTop - (block === "center" ? (scroller.clientHeight - r.height) / 2 : 0);
         }
         function align() {
           // A board morph may replace the item but retain its stable ID.
@@ -751,7 +684,7 @@
           // Smooth scrolling changes the viewport rect, not this content-space
           // destination. Only layout movement interrupts it with an instant fix.
           if (Math.abs(next - position) >= 0.5) {
-            land('instant');
+            node.scrollIntoView({ block: block, behavior: "instant" });
             stable = 0; quiet = 0;
             position = next;
           }
@@ -768,24 +701,22 @@
           last = current;
           raf = win.requestAnimationFrame(frame);
         }
-        function land(behavior) {
-          if (typeof opt.offset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
-          else node.scrollIntoView({ block: block, behavior: behavior });
-          o.wrote = scroller.scrollTop;
-        }
         s.follow = { align: align, off: off };
         position = measure();
+        intents.forEach(function (t) { target.addEventListener(t, cancel, { passive: true, capture: true }); });
+        win.addEventListener("keydown", key, true);
         var reduced = win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        land(reduced ? "instant" : opt.behavior || "instant");
+        node.scrollIntoView({ block: block, behavior: reduced ? "instant" : opt.behavior || "instant" });
         cap = win.setTimeout(function () { end("cap"); }, 2000);
         raf = win.requestAnimationFrame(frame);
       };
       // A swap settling on another anchor must not end explicit navigation.
       s.handle = { scroller: scroller, apply: apply, end: function () { if (!s.follow) end("ended"); } };
       if (win.ResizeObserver) {
-        s.ro = new win.ResizeObserver(function () { if (!s.done) apply(); });
+        s.ro = new win.ResizeObserver(function () { if (s.done) return; apply(); s.restart(false); });
         (main ? [doc.body] : Array.prototype.slice.call(scroller.children)).forEach(function (el) { if (el) s.ro.observe(el); });
       }
+      target.addEventListener("scroll", onScroll, { passive: true });
       sessions.set(scroller, s);
       return s;
     }
