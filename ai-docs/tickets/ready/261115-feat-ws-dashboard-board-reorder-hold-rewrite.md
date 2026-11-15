@@ -449,6 +449,19 @@ wswhiteboard Pill|ViewKit, BoardViewed*, ToolbarFloatingGeometry, TestBoardHoldP
 PanelFrameReuse/TopicUnits/ViewedUpdatePerf browsers). Full-page captures:
 `/tmp/exec5/reorder1/full-{1440,700}-{light,dark}-{top,scrolled}.png`.
 
+#### Edition (7d052ec6b) - 2026-11-15
+
+The capsule-slot follow-up above is reverted. Owner (1155)=b, 22:04, verbatim: "저는 당연히 원래의
+위쪽 방향 미결 캡슐 위치를 대체하는 걸로 알았죠 .. 지금은 탑바를 아래로 밀어내는데다가 카드 패널
+위에 떠있지도 않잖아요". The board-update capsule replaces the original top nav pill in place: it
+floats in that pill's zero-height sticky wrapper over the card panel (Decision 11), and overlaying the
+first card header is expected, as with the existing pill. `7d052ec6b` reverts ad9397cd3 (keeping only its
+perf-driver click on the permanent home arrow). The non-overlap assertion is replaced in
+`board-hold-pill.browser.cjs` by three checks in every matrix case: the toolbar top is identical across
+idle and pending at-top states (1440: y=52; 700: y=96); the capsule lies inside the card scroll area;
+the top pill wrapper stays zero-height (the capsule is centred in it, e.g. 1440 at top: wrapper
+x=614 y=114 w=806 h=0, capsule x=958.7 y=114 w=116.6 h=28).
+
 ### Phase 2: rise hold gaps
 Only what Phase 0 shows missing: visible topic rising holds in place, releases when all involved
 cards are off-screen, batched, deferrals (selection, focus, hover, hidden, overview, maximize).
