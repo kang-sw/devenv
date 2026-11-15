@@ -10,7 +10,7 @@ export function applyWorkflowOwner(root: string, env: NodeJS.ProcessEnv = proces
   const owner = JSON.parse(readFileSync(marker, "utf8")).plugin;
   if (owner !== "ws" && owner !== "wsflow") throw new Error("Invalid native workflow package owner");
   env.WS_MCP_NAMESPACE = owner;
-  env.WS_MCP_SETUP_TOOL = `${owner}.setup`;
+  env.WS_MCP_SETUP_TOOL = owner === "wsflow" ? "setup" : "ws.setup";
   env.WS_MCP_NO_AGENT = owner === "wsflow" ? "1" : "";
   env.WS_RSRC_ROOT = join(root, "rsrc");
   env.WS_SKILLS_ROOT = join(root, "skills");

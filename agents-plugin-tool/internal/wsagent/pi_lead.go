@@ -119,8 +119,9 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any) (string, error) {
 }
 
 // piBundledEntries prefers the owning workflow package's prepared payload.
-// Source checkouts without one retain the repository-sibling route. A broken
-// local payload is an error, not permission to load a different product copy.
+// Source checkouts use the sibling when their valid payload is stale against
+// source inputs (the helper logs why). Invalid local payloads remain errors;
+// only source drift, never failed archive validation, permits that substitution.
 func piBundledEntries() ([]string, error) {
 	root, err := piBundledPluginRoot()
 	if err != nil {

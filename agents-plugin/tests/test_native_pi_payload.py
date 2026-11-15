@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -58,6 +59,8 @@ class NativePiPayloadTests(unittest.TestCase):
             with self.subTest(product=product):
                 manifest = PAYLOAD.check_source(REPO / product, REPO)
                 self.assertEqual(manifest["dependencies"], json.loads((REPO / "agents-plugin-pi/package.json").read_text())["dependencies"])
+                self.assertTrue(all(PAYLOAD.drift_input(name) for name in manifest["inputs"]))
+                self.assertFalse(any(Path(name).name in PAYLOAD.OS_JUNK for name in manifest["files"]))
 
     def test_materialized_owner_bytes_and_offline_reuse(self):
         for product, identity in (("agents-plugin", "ws"), ("agents-plugin-wsflow", "wsflow")):
@@ -76,9 +79,24 @@ class NativePiPayloadTests(unittest.TestCase):
             self.assertEqual(PAYLOAD.tree(first / "skills"), PAYLOAD.tree(owner / "skills"))
             self.assertEqual((first / "dist/eff_large_wordlist.txt").read_bytes(), (REPO / "agents-plugin-pi/src/eff_large_wordlist.txt").read_bytes())
             self.assertEqual(json.loads((first / "runtime.json").read_text())["plugin"], identity)
-            (first / "dist/index.js").write_bytes(b"corrupt")
-            with self.assertRaisesRegex(ValueError, "corrupt"):
-                PAYLOAD.materialize(owner, self.root / "native-cache")
+            original_bundle = (first / "dist/index.js").read_bytes()
+            runtime = first / ".runtime/test-platform/last-launch-error"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_text("fixture launcher failure\n")
+            self.assertEqual(first, PAYLOAD.materialize(owner, self.root / "native-cache"))
+            self.assertEqual(runtime.read_text(), "fixture launcher failure\n")
+            for mutation in ("modified", "extra", "empty-directory"):
+                if mutation == "modified":
+                    (first / "dist/index.js").write_bytes(b"corrupt")
+                elif mutation == "extra":
+                    (first / "unexpected.txt").write_text("not launcher-owned")
+                else:
+                    (first / "unexpected-dir").mkdir()
+                repaired = PAYLOAD.materialize(owner, self.root / "native-cache")
+                self.assertEqual(repaired, first)
+                self.assertEqual((first / "dist/index.js").read_bytes(), original_bundle)
+                self.assertFalse((first / "unexpected.txt").exists())
+                self.assertFalse((first / "unexpected-dir").exists())
 
     def source_fixture(self):
         repo = self.root / "repo"
@@ -91,23 +109,97 @@ class NativePiPayloadTests(unittest.TestCase):
         shutil.copytree(owner, repo / "agents-plugin", dirs_exist_ok=True)
         return repo
 
-    def test_source_dependency_generator_and_skill_drift_rejected(self):
+    def test_bundle_input_drift_rejected_but_owner_overlays_and_junk_are_not_drift(self):
         repo = self.source_fixture()
         owner = repo / "agents-plugin"
         PAYLOAD.check_source(owner, repo)
         for name in ("agents-plugin-pi/src/index.ts", "agents-plugin-pi/package.json",
                      "agents-plugin-pi/package-lock.json", "agents-plugin-pi/scripts/prepare-native-payload.py",
-                     "agents-plugin/skills/lead-run/SKILL.md", "agents-plugin-wsflow/skills/lead-run/SKILL.md"):
+                     "agents-plugin-pi/scripts/bundle.mjs", "agents-plugin-pi/dist/index.js",
+                     "agents-plugin-pi/src/eff_large_wordlist.txt"):
             path = repo / name
             original = path.read_bytes()
             path.write_bytes(original + b"\n")
             with self.subTest(input=name), self.assertRaisesRegex(ValueError, "stale"):
                 PAYLOAD.check_source(owner, repo)
             path.write_bytes(original)
+        # These inputs are supplied by the owner at materialization, not by the
+        # native bundle; changing them must not require npm or archive generation.
+        for name in ("skills/lead-run/SKILL.md", "rsrc/manifest.json", "runtime.json",
+                     "dashboard-config-manifest.json", "bin/ws-mcp-launcher.py"):
+            path = owner / name
+            path.write_bytes(path.read_bytes() + b"\n")
+        wsflow_skill = repo / "agents-plugin-wsflow/skills/lead-run/SKILL.md"
+        wsflow_skill.parent.mkdir(parents=True, exist_ok=True)
+        wsflow_skill.write_text((REPO / "agents-plugin-wsflow/skills/lead-run/SKILL.md").read_text() + "\n")
+        for root in ("agents-plugin/skills", "agents-plugin/rsrc", "agents-plugin-wsflow/skills", "agents-plugin-wsflow/rsrc",
+                     "agents-plugin-pi/src", "agents-plugin-pi/scripts", "agents-plugin-pi/dist", "agents-plugin-pi/rsrc"):
+            folder = repo / root
+            folder.mkdir(parents=True, exist_ok=True)
+            for name in PAYLOAD.OS_JUNK:
+                (folder / name).write_text("OS junk")
+        PAYLOAD.check_source(owner, repo)
+        materialized = PAYLOAD.materialize(owner, self.root / "overlay-cache")
+        for name in ("skills", "rsrc"):
+            self.assertEqual(PAYLOAD.tree(materialized / name), PAYLOAD.tree(owner / name, ignore_junk=True))
+        # Whole-tree replacement must not retain removed archive resources.
+        removed = next(path for path in (owner / "rsrc").rglob("*.md"))
+        relative = removed.relative_to(owner)
+        removed.unlink()
+        updated = PAYLOAD.materialize(owner, self.root / "overlay-cache")
+        self.assertFalse((updated / relative).exists())
         added = repo / "agents-plugin-pi/src/new-input.ts"
         added.write_text("// new input\n")
         with self.assertRaisesRegex(ValueError, "input added"):
             PAYLOAD.check_source(owner, repo)
+
+    def test_materializer_schema_namespaces_entries(self):
+        owner = self.owner()
+        cache = self.root / "schema-cache"
+        first = PAYLOAD.materialize(owner, cache)
+        with patch.object(PAYLOAD, "MATERIALIZER_SCHEMA", PAYLOAD.MATERIALIZER_SCHEMA + 1):
+            second = PAYLOAD.materialize(owner, cache)
+        self.assertNotEqual(first, second)
+        self.assertEqual(PAYLOAD.tree(first), PAYLOAD.tree(second))
+        self.assertTrue(first.is_dir(), "schema change is not cache GC")
+
+    def test_only_abandoned_owned_stages_are_cleaned(self):
+        owner = self.owner()
+        cache = self.root / "stage-cache"
+        cache.mkdir()
+        abandoned = [cache / (".native-pi-stage-" + "a" * 32), cache / ".native-pi-deadbeef"]
+        recent = cache / (".native-pi-stage-" + "b" * 32)
+        unrelated = cache / ".native-pi-keep-custom"
+        for path in [*abandoned, recent, unrelated]:
+            path.mkdir()
+            (path / "partial-file").write_text("partial")
+        old = time.time() - PAYLOAD.STAGE_MAX_AGE - 60
+        for path in [*abandoned, unrelated]:
+            os.utime(path, (old, old))
+        entry = PAYLOAD.materialize(owner, cache)
+        self.assertTrue(entry.is_dir())
+        for path in abandoned:
+            self.assertFalse(path.exists())
+        self.assertTrue(recent.is_dir())
+        self.assertTrue(unrelated.is_dir())
+
+    def test_source_stale_status_is_distinct_from_invalid_payload(self):
+        repo = self.source_fixture()
+        owner = repo / "agents-plugin"
+        changed = repo / "agents-plugin-pi/src/index.ts"
+        changed.write_bytes(changed.read_bytes() + b"\n// stale input\n")
+        utility = owner / "bin/ws-pi-payload.py"
+        args = [sys.executable, "-I", "-B", str(utility), "--plugin", str(owner), "--check-source", str(repo)]
+        result = subprocess.run(args, env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("agents-plugin-pi/src/index.ts", result.stderr)
+        result = subprocess.run([*args, "--allow-stale-source"], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("WARNING:", result.stderr)
+        (owner / "native-pi/payload.zip").write_bytes(b"corrupt")
+        result = subprocess.run([*args, "--allow-stale-source"], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("checksum mismatch", result.stderr)
 
     def test_producer_rejects_embedded_checkout_paths_before_preparation(self):
         repo = self.source_fixture()
@@ -157,6 +249,18 @@ class NativePiPayloadTests(unittest.TestCase):
                     else:
                         self.assertEqual(json.loads(actual)["go"], argv[-1])
                     (cache / "ws/stale-destination-file").write_text("stale")
+                # Source drift warns loudly but never prevents an offline update;
+                # release/source gates keep their default nonzero stale result.
+                changed = repo / "agents-plugin-pi/src/index.ts"
+                unchanged = changed.read_bytes()
+                changed.write_bytes(unchanged + b"\n// development edit\n")
+                result = subprocess.run(argv, env=self.env, capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("WARNING:", result.stderr)
+                self.assertIn("agents-plugin-pi/src/index.ts", result.stderr)
+                self.assertIn("npm run bundle && python3 scripts/prepare-native-payload.py", result.stderr)
+                self.assertFalse((cache / "ws/stale-destination-file").exists())
+                changed.write_bytes(unchanged)
                 before = PAYLOAD.tree(cache)
                 archive = repo / "agents-plugin/native-pi/payload.zip"
                 original = archive.read_bytes()
@@ -166,8 +270,6 @@ class NativePiPayloadTests(unittest.TestCase):
                 self.assertIn("checksum mismatch", result.stderr)
                 self.assertEqual(PAYLOAD.tree(cache), before)
                 archive.write_bytes(original)
-                # Repeated update removed the stale file from the first pass.
-                (cache / "ws/stale-destination-file").unlink()
                 self.assertEqual(list(cache.parent.glob(".ws-snapshot-*")), [])
 
     def test_windows_dry_run_keeps_all_python_and_cli_execution_gated(self):

@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -14,7 +15,7 @@ import (
 )
 
 // Use the launcher's stdlib-only validator/materializer. It checks every byte
-// before publishing an immutable content-addressed closure; no npm or network
+// before publishing a content-addressed closure; no npm or network
 // is involved. Python is already a workflow package runtime prerequisite.
 func piPreparedPayload(plugin string) (string, error) {
 	cache, err := wsstate.CacheRoot(wsstate.Options{})
@@ -33,12 +34,22 @@ func piPreparedPayload(plugin string) (string, error) {
 			return "", fmt.Errorf("native Pi payload needs Python 3: %w", err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Cold extraction of 9,680 files / ~70 MB measured ~28s on macOS.
+	// Allow slower Windows disks/antivirus 300s; the helper reaps abandoned
+	// stages after one hour, well beyond this budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
-	args := append(pre, "-I", filepath.Join(plugin, "bin", "ws-pi-payload.py"), "--plugin", plugin, "--materialize", filepath.Join(cache, "native-pi"))
-	out, err := exec.CommandContext(ctx, python, args...).CombinedOutput()
+	args := append(pre, "-I", filepath.Join(plugin, "bin", "ws-pi-payload.py"), "--plugin", plugin, "--materialize", filepath.Join(cache, "native-pi"), "--prefer-source")
+	cmd := exec.CommandContext(ctx, python, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("native Pi payload preparation: %w: %s", err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("native Pi payload preparation: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	if stderr.Len() > 0 {
+		// Selection diagnostics belong in the daemon log, never in the path.
+		fmt.Fprint(os.Stderr, stderr.String())
 	}
 	root := strings.TrimSpace(string(out))
 	if !filepath.IsAbs(root) || !fileExists(filepath.Join(root, "package.json")) {

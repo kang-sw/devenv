@@ -97,23 +97,23 @@ def generate(repo, offline=False, npm_cache=None):
         inputs = {}
         def copy(source, destination):
             if source.is_dir():
-                for rel in payload.tree(source):
+                for rel in payload.tree(source, ignore_junk=True):
                     copy(source / rel, destination / rel)
             else:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, destination)
-                inputs[source.relative_to(repo).as_posix()] = payload.digest(source.read_bytes())
+                rel = source.relative_to(repo).as_posix()
+                if payload.drift_input(rel):
+                    inputs[rel] = payload.digest(source.read_bytes())
         for name in ("src", "dist", "scripts", "bin", "rsrc", "package.json", "package-lock.json", "runtime.json", "config-manifest.json", "dashboard-config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"):
             copy(pi / name, stage / name)
         copy(repo / "agents-plugin/skills", stage / "skills")
-        for rel in payload.tree(repo / "agents-plugin-wsflow/skills"):
-            inputs["agents-plugin-wsflow/skills/" + rel] = payload.digest((repo / "agents-plugin-wsflow/skills" / rel).read_bytes())
         for rel in ("agents-plugin/bin/ws-pi-payload.py",):
             inputs[rel] = payload.digest((repo / rel).read_bytes())
-        shutil.copytree(deps / "node_modules", stage / "node_modules")
+        shutil.copytree(deps / "node_modules", stage / "node_modules", ignore=shutil.ignore_patterns(*payload.OS_JUNK))
         (stage / "node_modules/.package-lock.json").unlink(missing_ok=True)
         (stage / "production-lock.json").write_text(json.dumps(normalized, sort_keys=True, indent=2) + "\n")
-        files = payload.tree(stage)
+        files = payload.tree(stage, ignore_junk=True)
         native = temp / "native-pi"
         native.mkdir()
         with zipfile.ZipFile(native / "payload.zip", "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:

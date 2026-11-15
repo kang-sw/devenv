@@ -102,7 +102,7 @@ test("unchanged materialized native payload uses the actual Pi host graph", {
   process.chdir(cwd);
   process.argv[1] = cli; // The unchanged bundle captures this at import time.
   const payloadEnvironment = {
-    ...environment, WS_MCP_NAMESPACE: owner, WS_MCP_SETUP_TOOL: `${owner}.setup`,
+    ...environment, WS_MCP_NAMESPACE: owner, WS_MCP_SETUP_TOOL: owner === "wsflow" ? "setup" : "ws.setup",
     WS_MCP_NO_AGENT: owner === "wsflow" ? "1" : "",
     WS_RSRC_ROOT: join(nativeRoot, "rsrc"), WS_SKILLS_ROOT: join(nativeRoot, "skills"),
   };
@@ -297,10 +297,14 @@ test("unchanged materialized native payload uses the actual Pi host graph", {
     const loader = new sdk.DefaultResourceLoader({
       cwd, agentDir, settingsManager: settings, eventBus: bus,
       additionalExtensionPaths: [entry, witnessPath], extensionFactories: [],
-      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      additionalSkillPaths: [join(nativeRoot, "skills")],
+      noExtensions: true, noSkills: false, noPromptTemplates: true, noThemes: true, noContextFiles: true,
       systemPrompt: "identity fixture; never prompt", appendSystemPrompt: [],
     });
     await step("load unchanged payload", () => loader.reload());
+    const loadedSkills = loader.getSkills();
+    assert.deepEqual(loadedSkills.diagnostics, []);
+    assert.deepEqual(loadedSkills.skills.map(skill => skill.filePath).sort(), before.filter(([path]) => path.startsWith("skills/") && path.endsWith("/SKILL.md")).map(([path]) => join(nativeRoot, path)).sort());
     load = loader.getExtensions();
     assert.deepEqual(load.errors, []); assert.deepEqual(load.warnings ?? [], []);
     assert.deepEqual(load.extensions.map(extension => extension.resolvedPath).sort(), [entry, witnessPath].sort());

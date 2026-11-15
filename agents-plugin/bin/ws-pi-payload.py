@@ -7,25 +7,64 @@ A content-addressed, fully verified directory is published only after extraction
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import stat
-import tempfile
+import sys
+import time
+import uuid
 import zipfile
+
+MATERIALIZER_SCHEMA = 2
+STAGE_MAX_AGE = 3600
+OS_JUNK = {".DS_Store", "Thumbs.db"}
+OVERLAY_TREES = ("rsrc", "skills")
+OVERLAY_FILES = ("runtime.json", "dashboard-config-manifest.json", "bin/ws-mcp-launcher.py")
+
+
+class StalePayload(ValueError):
+    """A valid archive no longer matches its producer source inputs."""
+
+
+def overlaid(name):
+    return name in OVERLAY_FILES or any(name == root or name.startswith(root + "/") for root in OVERLAY_TREES)
+
+
+def drift_input(name):
+    if PurePosixPath(name).name in OS_JUNK:
+        return False
+    prefix = "agents-plugin-pi/"
+    return (name.startswith(prefix) and not overlaid(name[len(prefix):])) or name == "agents-plugin/bin/ws-pi-payload.py"
 
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def tree(root):
+def tree(root, ignore_junk=False, allow_runtime=False, expected_dirs=None):
     files = {}
-    for path in sorted(root.rglob("*")):
-        if path.is_symlink():
-            raise ValueError(f"payload contains a link: {path}")
-        if path.is_file():
-            files[path.relative_to(root).as_posix()] = digest(path.read_bytes())
+    def walk(directory):
+        for path in sorted(directory.iterdir()):
+            if ignore_junk and path.name in OS_JUNK:
+                continue
+            if path.is_symlink():
+                raise ValueError(f"payload contains a link: {path}")
+            rel = path.relative_to(root).as_posix()
+            if allow_runtime and rel == ".runtime" and path.is_dir():
+                continue
+            if path.is_dir():
+                if expected_dirs is not None and rel not in expected_dirs:
+                    raise ValueError(f"payload contains an extra directory: {path}")
+                walk(path)
+            elif path.is_file():
+                files[rel] = digest(path.read_bytes())
+            else:
+                raise ValueError(f"payload contains a non-file: {path}")
+    if root.is_symlink():
+        raise ValueError(f"payload contains a link: {root}")
+    if root.exists():
+        walk(root)
     return files
 
 
@@ -87,68 +126,106 @@ def validate(plugin):
 
 def check_source(plugin, repo):
     manifest = validate(plugin)
+    hint = f"regenerate in {repo / 'agents-plugin-pi'}: npm run bundle && python3 scripts/prepare-native-payload.py"
     for rel, expected in manifest["inputs"].items():
+        if not drift_input(rel):
+            continue
         path = repo / rel
         if not path.is_file() or digest(path.read_bytes()) != expected:
-            raise ValueError(f"native Pi distribution is stale: {rel}")
-    # Inventory changes (including newly added sources/skills) must invalidate it.
-    roots = ["agents-plugin-pi/src", "agents-plugin-pi/scripts", "agents-plugin-pi/rsrc", "agents-plugin/skills", "agents-plugin-wsflow/skills"]
+            raise StalePayload(f"native Pi distribution is stale: {rel}; {hint}")
+    # piBundleInputHash covers src TS/MJS, the wordlist, lock and bundle script.
+    # Also gate added distribution/build inputs, but never owner overlays/junk.
+    roots = ["agents-plugin-pi/src", "agents-plugin-pi/scripts", "agents-plugin-pi/dist", "agents-plugin-pi/bin"]
     for root in roots:
-        for rel in tree(repo / root):
+        for rel in tree(repo / root, ignore_junk=True):
             full = f"{root}/{rel}"
-            if full not in manifest["inputs"]:
-                raise ValueError(f"native Pi distribution input added: {full}")
+            if drift_input(full) and full not in manifest["inputs"]:
+                raise StalePayload(f"native Pi distribution input added: {full}; {hint}")
     return manifest
 
 
-def materialize(plugin, cache):
-    manifest = validate(plugin)
-    # Runtime and skills follow the owner; native code/dependencies are identical.
+def cleanup_stages(cache):
+    # Only our UUID stages and the previous mkdtemp naming scheme are eligible.
+    # One hour exceeds the 300s extraction budget, protecting active producers.
+    pattern = re.compile(r"^\.native-pi-(?:stage-[0-9a-f]{32}|[a-z0-9_]{8})$")
+    cutoff = time.time() - STAGE_MAX_AGE
+    for path in cache.iterdir():
+        if pattern.fullmatch(path.name) and not path.is_symlink() and path.is_dir():
+            try:
+                if path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path)
+            except FileNotFoundError:
+                pass  # Another materializer already removed this stale stage.
+
+
+def cache_matches(dest, expected):
+    try:
+        directories = {str(parent) for name in expected for parent in PurePosixPath(name).parents if str(parent) != "."}
+        return dest.is_dir() and tree(dest, allow_runtime=True, expected_dirs=directories) == expected
+    except (OSError, ValueError):
+        return False
+
+
+def materialize(plugin, cache, manifest=None):
+    cache.mkdir(parents=True, exist_ok=True)
+    cleanup_stages(cache)
+    manifest = manifest if manifest is not None else validate(plugin)
+    # Replace whole owner trees, including deletions, rather than merging stale
+    # archive resources into a package's current curated inventory.
     overlay = {}
-    for root in ("rsrc", "skills"):
-        overlay.update({f"{root}/{p}": h for p, h in tree(plugin / root).items()})
-    for name in ("runtime.json", "dashboard-config-manifest.json", "bin/ws-mcp-launcher.py"):
+    for root in OVERLAY_TREES:
+        overlay.update({f"{root}/{p}": h for p, h in tree(plugin / root, ignore_junk=True).items()})
+    for name in OVERLAY_FILES:
         overlay[name] = digest((plugin / name).read_bytes())
     identity = json.loads((plugin / "runtime.json").read_text())["plugin"]
     if identity not in ("ws", "wsflow"):
         raise ValueError("unsupported native Pi workflow owner")
-    key = digest(json.dumps([manifest["archive_sha256"], identity, overlay], sort_keys=True).encode())
-    cache.mkdir(parents=True, exist_ok=True)
+    key = digest(json.dumps([MATERIALIZER_SCHEMA, manifest["archive_sha256"], identity, overlay], sort_keys=True).encode())
     dest = cache / key
     owner_bytes = (json.dumps({"plugin": identity}) + "\n").encode("utf-8")
-    expected = {**manifest["files"], **overlay, "workflow-owner.json": digest(owner_bytes)}
-    expected = {p: h for p, h in expected.items() if not p.startswith("skills/") or p in overlay}
-    if dest.exists():
-        if tree(dest) != expected:
-            raise ValueError("staged native Pi payload is corrupt; remove this cache entry and retry: " + str(dest))
+    expected = {p: h for p, h in manifest["files"].items() if not overlaid(p)}
+    expected.update(overlay)
+    expected["workflow-owner.json"] = digest(owner_bytes)
+    if cache_matches(dest, expected):
         return dest
-    stage = Path(tempfile.mkdtemp(prefix=".native-pi-", dir=cache))
+    stage = cache / (".native-pi-stage-" + uuid.uuid4().hex)
+    stage.mkdir(mode=0o700)
+    ready, previous = stage / "ready", stage / "previous"
+    ready.mkdir()
     try:
         with zipfile.ZipFile(plugin / "native-pi/payload.zip") as z:
             for info in z.infolist():
-                path = stage / info.filename
+                if overlaid(info.filename):
+                    continue
+                path = ready / info.filename
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(z.read(info))
         for rel in overlay:
-            path = stage / rel
+            path = ready / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(plugin / rel, path)
-        # Remove canonical skills absent from an owning package's curated set.
-        for path in (stage / "skills").rglob("*"):
-            if path.is_file() and path.relative_to(stage).as_posix() not in overlay:
-                path.unlink()
-        expected = {p: h for p, h in expected.items() if not p.startswith("skills/") or p in overlay}
-        (stage / "workflow-owner.json").write_bytes(owner_bytes)
-        if tree(stage) != expected:
+        (ready / "workflow-owner.json").write_bytes(owner_bytes)
+        if tree(ready) != expected:
             raise ValueError("native Pi staging verification failed")
+        if cache_matches(dest, expected):
+            return dest  # Another materializer published the same valid entry.
+        if dest.exists() or dest.is_symlink():
+            try:
+                dest.rename(previous)
+            except FileNotFoundError:
+                pass  # A concurrent repair already moved the corrupt entry.
         try:
-            stage.rename(dest)
+            ready.rename(dest)
         except OSError:
-            if not dest.exists() or tree(dest) != expected:
+            if not cache_matches(dest, expected):
+                if previous.exists() and not dest.exists():
+                    previous.rename(dest)
                 raise
         return dest
     finally:
-        if stage.exists():
+        if previous.exists() and not dest.exists():
+            print(f"native Pi cache rollback needs recovery from {previous}", file=sys.stderr)
+        else:
             shutil.rmtree(stage)
 
 
@@ -157,15 +234,31 @@ def main():
     parser.add_argument("--plugin", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--check-source", type=Path)
     parser.add_argument("--materialize", type=Path)
+    parser.add_argument("--prefer-source", action="store_true", help="Select a sibling only when this valid payload is stale against its source")
+    parser.add_argument("--allow-stale-source", action="store_true", help="Installer warning instead of failure for source drift only")
     args = parser.parse_args()
     plugin = args.plugin.resolve()
     try:
         if args.check_source:
             check_source(plugin, args.check_source.resolve())
         elif args.materialize:
-            print(materialize(plugin, args.materialize.resolve()))
+            manifest = None
+            source = plugin.parent / "agents-plugin-pi"
+            if args.prefer_source and source.is_dir():
+                try:
+                    manifest = check_source(plugin, plugin.parent)
+                except StalePayload as exc:
+                    print(f"native Pi payload: using repository sibling: {exc}", file=sys.stderr)
+                    print(source)
+                    return
+            print(materialize(plugin, args.materialize.resolve(), manifest))
         else:
             validate(plugin)
+    except StalePayload as exc:
+        if args.check_source and args.allow_stale_source:
+            print(f"WARNING: {exc}; continuing with the validated prepared payload", file=sys.stderr)
+        else:
+            parser.exit(2, f"native Pi payload unavailable: {exc}\n")
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
         parser.exit(1, f"native Pi payload unavailable: {exc}\n")
 

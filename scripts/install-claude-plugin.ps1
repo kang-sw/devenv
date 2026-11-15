@@ -60,7 +60,7 @@ repo, cache = map(Path, sys.argv[1:3])
 go = sys.argv[3]
 source = repo / "agents-plugin"
 helper = source / "bin/ws-pi-payload.py"
-subprocess.run([sys.executable, str(helper), "--plugin", str(source), "--check-source", str(repo)], check=True)
+subprocess.run([sys.executable, str(helper), "--plugin", str(source), "--check-source", str(repo), "--allow-stale-source"], check=True)
 cache.parent.mkdir(parents=True, exist_ok=True)
 stage = Path(tempfile.mkdtemp(prefix=".ws-snapshot-", dir=cache.parent))
 backup = stage / "previous"

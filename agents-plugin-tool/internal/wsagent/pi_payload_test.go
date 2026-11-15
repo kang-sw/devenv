@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,32 @@ func copyPiOwner(t *testing.T, source, dest string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// Recreate the producer's complete input inventory, not just a sibling manifest:
+// local-first is valid only while the prepared payload matches these sources.
+func copyPiSourceInputs(t *testing.T, owner, repo string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(owner, "native-pi", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Inputs map[string]string `json:"inputs"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for rel := range manifest.Inputs {
+		input, err := os.ReadFile(filepath.Join("..", "..", "..", filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		piLeadFile(t, filepath.Join(repo, filepath.FromSlash(rel)), string(input))
+	}
+	sibling := filepath.Join(repo, "agents-plugin-pi")
+	piLeadDeps(t, sibling)
+	return sibling
 }
 
 func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
@@ -71,8 +98,7 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 					t.Fatalf("unchanged second consumption: %v, %v", got, err)
 				}
 				// A valid source sibling must not displace the package-local payload.
-				sibling := filepath.Join(filepath.Dir(owner), "agents-plugin-pi")
-				piLeadBundle(t, sibling)
+				copyPiSourceInputs(t, owner, filepath.Dir(owner))
 				if got, err := piBundledEntries(); err != nil || !slices.Equal(got, entries) {
 					t.Fatalf("local-first selection: %v, %v", got, err)
 				}
