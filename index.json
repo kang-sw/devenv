@@ -182,7 +182,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T17:45:20Z"
+        "touched_at": "2026-11-15T17:46:26Z",
+        "impl": {
+          "branch": "impl/develop/hash-print-taste"
+        }
       }
     },
     "261113-refactor-ws-dashboard-drop-lan-serving": {
