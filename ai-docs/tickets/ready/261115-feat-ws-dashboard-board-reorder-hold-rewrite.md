@@ -3,6 +3,10 @@ title: "Dashboard board: hold what the user reads when the server reorders it (f
 related:
   261113-feat-ws-dashboard-board-reorder-hold: superseded; its branch impl/develop/perm-unlit-icon is the reuse source (see Reuse map)
   261115-feat-ws-whiteboard-viewed-panel-anchor: develop staging this ticket builds on (boardStage*, boardPending, boardFlushViewed)
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 816c23434fdfae98
+sage-review-completeness-reviewed: 816c23434fdfae98
 ---
 
 # Dashboard board: hold what the user reads when the server reorders it (fresh re-implementation)
@@ -12,7 +16,8 @@ related:
 Supersedes the stalled implementation of `261113-feat-ws-dashboard-board-reorder-hold`.
 Only its Phase 1 (scroll compensation on every board swap, 0b58bed9a) landed on
 develop. Phases 2-4 were implemented on `impl/develop/perm-unlit-icon` (22
-commits, 1104 behind develop; Phase 2/3 Result 0520c1301). Phase 4 stopped for
+commits, 1237 behind develop at inspection HEAD 98632f4ac; `git rev-list --count
+impl/develop/perm-unlit-icon..develop` returned 1237; Phase 2/3 Result 0520c1301). Phase 4 stopped for
 non-convergence and the owner-approved (694) repair round also failed. The owner
 chose to extract the spec and re-implement on current develop, not merge the branch.
 
@@ -97,7 +102,10 @@ Binding decisions:
    응답이나 미결보다 더 우선시되는 방향을 과죠"). The board-updated badge is not a separate
    top-center control: it merges with the floating nav pill in
    `agents-plugin-tool/internal/wswhiteboard/assets/pill.js`, which already shows an up arrow and
-   the open/answered/noted chips (미결/응답/노트). The up arrow is always present as a home button.
+   the open/answered/noted chips (미결/응답/노트). Currently it creates separate top/bottom
+   pills, hides either when its offscreen-item list is empty, and renders each arrow as an
+   aria-hidden span, not a clickable home button (`agents-plugin-tool/internal/wswhiteboard/assets/pill.js#L60-L101,#L115-L139,#L204-L217`).
+   The up arrow is always present as a home button in the approved target.
    When chips appear, the pill grows smoothly to their size, like a droplet. While board updates are
    pending, the "보드 업데이트 N" state takes priority over the answered/open chips.
    This supersedes the form and visibility clauses of Decision 6 that describe a standalone v2
@@ -149,14 +157,45 @@ Binding decisions:
   release move of the held topic itself.
 - Mirror/doc obligations from AGENTS.md rows for `agents-plugin-tool/` and
   `agents-plugin-tool/internal/`.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
+## Prior Decisions
+
+- 7f1e5935 (2026-11-15, commit): "dashboard.js swap, staging state/init, overview restoreFrames, morphBoard frozen/paged edits, frameReveal captures, and viewed helper block" — bearing: constrains
+- 261114-refactor-ws-dashboard-whiteboard-asset-split (2026-11-15, commit 961c8e3b): "Concatenate contiguous JavaScript source fragments without separators into the original single IIFE" — bearing: constrains
+- 35cab361 (2026-11-11, commit): "Segment buttons are built once per wrapper and only their hidden flag and count change on update, so a scroll/input redraw never drops keyboard focus" — bearing: constrains
+- 91e82ae0 (2026-11-07, commit): "Pills sit in zero-height sticky wrappers first/last in the host, so showing them never shifts layout" — bearing: supports
+- 22ab9734 (2026-11-14, commit): "Namespaced question-pill edge modifiers eliminate the bare .top collision" — bearing: constrains
+- 261113-feat-ws-dashboard-board-reorder-hold (2026-11-15, commit 28dd4042): "261113-feat-ws-dashboard-board-reorder-hold: moved ready -> .dropped" — bearing: supports
+- 232f25ded (2026-11-14, Result): "The `wbHoldSelection` guard looked dead: kept, because reorder-hold's branch sets it." — bearing: constrains
+- 3a13a369 (2026-11-14, commit): "Hold board swaps until exit and route palette Enter/Ctrl+Enter through the overview picker" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | Phase 1 only: agents-plugin-tool/internal/wsdashboard/assets/dashboard-board.js, dashboard-board.css/dashboard-layout.css; agents-plugin-tool/internal/wswhiteboard/assets/pill.js and page-sticky.css; agents-plugin-tool/internal/wsi18n/tables/*.json; focused tests. Phases 2–4 are not this landing. |
+| scope.surface | cross-module | Dashboard closure-local boardPending/boardChanges/boardFlushViewed must reach the independently executed whiteboard pill.js; existing window.wbPill exposes cleanup only. Frontend T0, no external API/store change. |
+| scope.new_public_symbol | yes | Four new frontend js.board.hold.* translation keys are specified; no new external API is authorized. The cross-script pending/apply hook is unnamed and boardFlushViewed is not a window export. |
+| scope.new_type_contract | yes | Phase 1 requires a distinct-topic pending inventory and apply/home interaction shared between dashboard staging and pill lifecycle; existing boardChanges counts revisions and boardPending includes placement blockers. |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/board_viewed_test.go and board_viewed_live_browser_test.go/testdata/viewed-live.browser.cjs; agents-plugin-tool/internal/wswhiteboard/pill_segments_test.go, pill_title_test.go, view_kit_test.go; agents-plugin-tool/internal/wsi18n/keys_test.go. New badge-specific browser coverage must be added. |
+| complexity.reuse_points | confirmed | Read boardRecordPending/boardPendingBadge/boardFlushViewed, boardStageOrder, pill wrapper/show/click/off, stream.js keep/jump/keeping and accepted nav-capsule HTML. ca025566b supplies accent/tag CSS and four old-form strings, not the accepted merged capsule. |
+| complexity.side_effect_risk | high | Applying a pending snapshot runs the full board morph, rebuilds pill bindings and performs scroll-owner correction; home navigation must avoid competing writes and frame churn. |
+| risk.correctness | high | Distinct-topic counting cannot blindly use ledger length or blocker keys; at-top freeze and no-keep to-top navigation are not implemented by boardFlushViewed(true). |
+| risk.fit | moderate | Accepted Decision 11 fixes the form, but existing top/bottom offscreen-control pills and the dashboard-only pending ledger have separate owners; preserve noted/nearest-target navigation and standalone behavior. |
+| risk.test | high | Current deterministic count test explicitly expects two revisions of one topic to count twice; real browser coverage is opt-in and Phase 0 reports at-top layout failure. Visual reference has 420/1240px inner widths, whereas requested captures are 700/1440px outer widths. |
+| risk.security_or_contract | moderate | T0 frontend-only changes still cross dashboard/standalone/form-script boundaries; preserve frame identity, existing per-state navigation and one scroll owner without changing server order or persistence. |
 
 ## Phases
 
 Reuse map. Reusable pure logic and tests on `impl/develop/perm-unlit-icon`:
-- `308f6c5ce`, `6ae3b64d8` and `board_hold_test.go`, `board_hold_review_test.go`: placement with holds,
-  start decision table, lifecycle, batching, held pagination.
+- `308f6c5ce` and `board_hold_test.go`, `board_hold_review_test.go`: placement with holds,
+  start decision table, lifecycle and batching; held-pagination harness coverage is in
+  `6ae3b64d8` (`git show --name-only 308f6c5ce 6ae3b64d8`; the latter changes only the headless scripts).
 - `6369d1ecd` cards.js hold map + `order()` override (about 42 lines): reuse the idea and the
-  weave integration; rewrite against current cards.js (1484 lines now).
+  weave integration; rewrite against current cards.js (1488 lines at 98632f4ac;
+  `wc -l agents-plugin-tool/internal/wsdashboard/assets/cards.js`).
 - `e8b32ec48`, `0520c1301`: closing hold in weave, closed-page release base
   (`WsCards.closedPage`), whitespace-tolerant `order()`, `board_close_hold_test.go`,
   `board_close_fold_test.go` additions. Highest reuse value.
@@ -164,8 +203,11 @@ Reuse map. Reusable pure logic and tests on `impl/develop/perm-unlit-icon`:
   `hold-selection`, `hold-batch`, `hold-hidden`, `hold-blur`, `hold-page`, `hold-maximize`,
   `hold-close`, `hold-reopen`, `serve --closed 65`, plus `board-headless.test.mjs`. Port onto
   develop's `scripts/board-headless/` layout.
-- `ca025566b`: indicator CSS and 4 strings x 11 tables. Reuse nearly as is (move CSS to
-  `dashboard-board.css`/`dashboard-layout.css`).
+- `ca025566b`: indicator CSS and 4 strings x 11 tables. Accent/tag/nudge CSS is reusable
+  in `dashboard-board.css`/`dashboard-layout.css`; its `.board-totop` control is the superseded
+  standalone form, and its English pill string is "Board updated", not Decision 7's "Board updates"
+  (`git show ca025566b -- agents-plugin-tool/internal/wsdashboard/assets/dashboard.css agents-plugin-tool/internal/wsi18n/tables/en.json`).
+  The existing nav-pill styles instead live in `agents-plugin-tool/internal/wswhiteboard/assets/page-sticky.css#L3-L17`.
 - `32a27c0b9`: the ResizeObserver wrapper and lifetime fix and its regressions
   (`board_frame_bands_test.go`, `view_kit_test.go`); the idea is reusable, the code is not
   (keep helper has since been rewritten).
@@ -255,7 +297,27 @@ the ↑ or the text = existing `boardFlushViewed(true)` path plus scroll to top 
 Bottom "최신 변경 N건 반영" bar removed; its pending set feeds the pill.
 N counts distinct pending topics (Decision 6). Phase 0 found develop's bar counts ledger entries
 (`boardChanges.length`: T04 updated twice = 2); the pill must show 1 for that case.
-Verification: `go test ./internal/wsi18n/...`; browser tests (Go-driven .cjs, like
+Current code confirms that `boardPending` includes placement-affected topics, while
+`boardChanges` records changed-topic names with an order-only fallback; neither its length nor
+`Object.keys(boardPending).length` alone establishes the required distinct changed-topic count
+(`agents-plugin-tool/internal/wsdashboard/assets/dashboard-board.js#L927-L946,#L1004-L1017,#L1111-L1134`).
+`boardFlushViewed(true)` only releases/swaps: it neither scrolls home nor suppresses the swap's
+`boardKeep()` transaction (`dashboard-board.js#L60-L61,#L116-L118,#L1125-L1134`). The current
+explicit-jump handle deliberately ignores `end()` while following (`agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L607-L696`);
+ending an existing follow is not provided by an unconditional `keeping(scroller).end()` call.
+The current at-top path has no `scrollTop <= 4` freeze gate (`dashboard-board.js#L20-L61,#L1063-L1109`);
+Phase 0's recorded at-top failure remains an implementation gap, not an unsettled owner decision.
+Phase 1 owns that at-top freeze ((1100)=a): at `scrollTop <= 4` incoming reorders and new topics
+are staged (pending, counted in the pill) instead of inserted, and apply only on the pill click;
+no later phase carries it.
+Existing `TestBoardViewedPlacementAndQueuedCounts` explicitly expects the old two-revision count
+(`agents-plugin-tool/internal/wsdashboard/board_viewed_test.go#L141-L150`).
+All 11 translation tables exist; none currently contains `js.board.hold.*`
+(`rg -n 'js.board.hold' agents-plugin-tool/internal/wsi18n/tables` returns no matches).
+The four new keys need literal production call sites as well as translations: the existing
+`agents-plugin-tool/internal/wsi18n/keys_test.go#L14-L31,#L109-L125,#L152-L171` rejects unused English keys
+and incomplete translation tables.
+Verification (from `agents-plugin-tool/`): `go test ./internal/wsi18n/...`; browser tests (Go-driven .cjs, like
 `board_viewed_live_browser_test.go`): ↑ present with nothing pending (home button) after scrolling
 down; "보드 업데이트 N" state shown at the top with pending changes and the visible layout
 unchanged until click; bottom bar absent; same topic updated twice shows N=1, two topics N=2;
