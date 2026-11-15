@@ -1668,16 +1668,18 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			resolveWarnings = warnings
 		}
+		updatedTickets := stringList(params.Arguments["updated_tickets"])
 		result, err := wsgit.Client{Runner: s.gitRunner(), Verifier: s.verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
-			Paths:             stringList(params.Arguments["paths"]),
-			Title:             title,
-			Description:       description,
-			AIContext:         aiContext,
-			UpdatedTickets:    stringList(params.Arguments["updated_tickets"]),
-			Followups:         followups,
-			Resolves:          resolves,
-			ExpectedBranch:    expectedBranch,
-			SparseScopeActive: wsdoc.SparseCheckoutActiveEnv(root, s.environ()),
+			Paths:                         stringList(params.Arguments["paths"]),
+			Title:                         title,
+			Description:                   description,
+			AIContext:                     aiContext,
+			UpdatedTickets:                updatedTickets,
+			SuppressInferredTicketUpdates: updatedTickets != nil && len(updatedTickets) == 0,
+			Followups:                     followups,
+			Resolves:                      resolves,
+			ExpectedBranch:                expectedBranch,
+			SparseScopeActive:             wsdoc.SparseCheckoutActiveEnv(root, s.environ()),
 		})
 		if err == nil {
 			result.Warnings = append(result.Warnings, resolveWarnings...)

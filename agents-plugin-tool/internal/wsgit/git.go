@@ -568,6 +568,10 @@ type CommitOptions struct {
 	Description    string   `json:"description,omitempty"`
 	AIContext      []string `json:"ai_context"`
 	UpdatedTickets []string `json:"updated_tickets,omitempty"`
+	// SuppressInferredTicketUpdates records an explicit empty MCP list without
+	// changing direct Go/CLI callers' zero-value inference. It affects only
+	// inferred message summaries, never ticket detection or verification.
+	SuppressInferredTicketUpdates bool `json:"-"`
 	// Followups are written under "## Follow-ups", one minted id each. The
 	// root-lead authorization gate is the caller's (internal/mcp owns sessions).
 	Followups []Followup `json:"followups,omitempty"`
@@ -710,7 +714,7 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 		advisories = verifyAdvisories
 	}
 	ticketChanges := detectTicketChanges(ctx, runner, root)
-	if len(opts.UpdatedTickets) == 0 {
+	if len(opts.UpdatedTickets) == 0 && !opts.SuppressInferredTicketUpdates {
 		opts.UpdatedTickets = ticketChangeSummaries(ticketChanges)
 	}
 	if err := mintFollowupIDs(opts.Followups, c.MintID); err != nil {
