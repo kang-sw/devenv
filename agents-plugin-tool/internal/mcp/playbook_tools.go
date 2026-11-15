@@ -147,7 +147,7 @@ func (s *Server) callerPiMCPOnly(key string) bool {
 	if def == nil && !rec.Lead {
 		// Records written before the launched-profile snapshot fall back to
 		// the profile their name resolves to now.
-		if rp, err := wsagent.ResolveProfile(s.configOptions(), rec.Root, rec.Profile); err == nil {
+		if rp, err := wsagent.ResolveProfile(s.configOptions(), rec.Root, rec.Profile, s.agentBackends()...); err == nil {
 			def = &rp.Definition
 		}
 	}

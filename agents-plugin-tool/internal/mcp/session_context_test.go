@@ -80,6 +80,20 @@ func TestResolveSessionSelection(t *testing.T) {
 	}
 }
 
+func TestResolveSessionMintPreservesParent(t *testing.T) {
+	root, s := hostedLoginEnv(t)
+	t.Setenv(envHostedSession, "")
+	parent := " padded-parent "
+	got, err := s.resolveSession(sessionAccess{mode: "mint", root: canonicalRootForTest(t, root), scope: roleDelegate, parent: parent})
+	if err != nil || !got.found || got.parent != parent {
+		t.Fatalf("mint context = %+v, %v; want exact parent %q", got, err, parent)
+	}
+	rec, err := s.sessions.readStateWithError(got.key, partKey)
+	if err != nil || rec.Parent != parent {
+		t.Fatalf("mint record = %+v, %v; want exact parent %q", rec, err, parent)
+	}
+}
+
 func TestResolveSessionHistoricalRecordsStayReadable(t *testing.T) {
 	root, s := hostedLoginEnv(t)
 	t.Setenv(envHostedSession, "")

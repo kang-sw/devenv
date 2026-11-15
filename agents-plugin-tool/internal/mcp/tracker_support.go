@@ -58,7 +58,7 @@ func (s *Server) trackerSupport(key string, entry sessionEntry) (trackerSupportS
 	if err != nil || rec.WSKey != key || rec.ClosedAt != "" || canonicalDir(rec.Root) != canonicalDir(entry.root) {
 		return trackerSupportScope{}, false
 	}
-	rp, err := wsagent.ResolveProfile(s.configOptions(), rec.Root, rec.Profile)
+	rp, err := wsagent.ResolveProfile(s.configOptions(), rec.Root, rec.Profile, s.agentBackends()...)
 	if err != nil {
 		return trackerSupportScope{}, false
 	}

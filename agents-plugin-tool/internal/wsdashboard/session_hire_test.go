@@ -674,6 +674,30 @@ func TestHiringRegistryAdmission(t *testing.T) {
 	}
 }
 
+func TestHiringHostWithoutLeadAdmission(t *testing.T) {
+	creator := &hireFake{}
+	f := startPageFixture(t, func(o *DaemonOptions) {
+		creator.dir = o.Dir
+		// Expose only AgentHost, deliberately hiding optional lead admission.
+		o.Agents = struct{ AgentHost }{creator}
+	})
+	enableHiring(t, f.d, "livesession")
+	for _, harness := range []string{"claude", "pi", "unknown"} {
+		_, err := f.d.RequestHire("livesession", HireRequest{Reason: "why", RecoveryContext: "recover", Harness: harness})
+		if err == nil || err.Error() != "this daemon's agent host cannot admit a lead harness" {
+			t.Fatalf("%s: inaccurate host refusal: %v", harness, err)
+		}
+	}
+	queue, err := f.d.pendingHires()
+	if err != nil || len(queue) != 0 || creator.created != 0 {
+		t.Fatalf("refusal side effects = %+v, %v; created=%d", queue, err, creator.created)
+	}
+	// An omitted preference still bypasses admission, as before.
+	if _, err := f.d.RequestHire("livesession", HireRequest{Reason: "why", RecoveryContext: "recover"}); err != nil {
+		t.Fatalf("unspecified harness refused: %v", err)
+	}
+}
+
 func TestHiringRoster(t *testing.T) {
 	f := startPageFixture(t)
 	res := hirePost(f.d, railLayoutRoute, `{"op":"attach","rid":"boardsession","parent":"livesession"}`)

@@ -129,8 +129,17 @@ func TestHostedFerruleHoldsTheSessionToItsKey(t *testing.T) {
 		t.Fatalf("same-key re-login returned %q, want %q", got, hosted)
 	}
 
+	// Re-login trimmed its key and parent before the hosted comparison.
+	resp = callLogin(t, server, 30, root, map[string]any{"relogin_session_key": " " + hosted + " ", "parent_session_key": " \t "})
+	if toolIsError(t, resp) {
+		t.Fatalf("padded hosted re-login refused: %s", resp)
+	}
+	if got, _ := parseLoginResponse(t, resp); got != hosted {
+		t.Fatalf("padded re-login returned %q, want %q", got, hosted)
+	}
+
 	// A parent-less lead bootstrap returns the hosted key and mints nothing.
-	resp = callLogin(t, server, 4, root, nil)
+	resp = callLogin(t, server, 4, root, map[string]any{"parent_session_key": " \t "})
 	if got, _ := parseLoginResponse(t, resp); got != hosted {
 		t.Fatalf("hosted top-lead bootstrap returned %q, want %q", got, hosted)
 	}
@@ -254,12 +263,12 @@ func TestHostedWorkflowManualHoldsTheSessionToItsKey(t *testing.T) {
 		t.Fatalf("refused manuals minted a key: before=%d after=%d", before, after)
 	}
 
-	for i, key := range []string{hosted, child} {
+	for i, key := range []string{hosted, child, " " + hosted + " ", " " + child + " "} {
 		resp := callToolOnce(t, s, 20+i, "workflow_manual", map[string]any{"session_key": key})
 		if toolIsError(t, resp) {
 			t.Fatalf("workflow_manual(%q) refused: %s", key, resp)
 		}
-		if text := toolText(t, resp); !strings.Contains(text, "## Session Key\n"+key) {
+		if text := toolText(t, resp); !strings.Contains(text, "## Session Key\n"+strings.TrimSpace(key)) {
 			t.Fatalf("workflow_manual(%q) should render the manual for it", key)
 		}
 	}
