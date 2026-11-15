@@ -47,7 +47,7 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
 | P15 | User agent ends in `Werkschaft/<version>`; the dashboard and board frames use it for desktop file-link behavior (click → link menu, Cmd/Ctrl-click → preview) | `desktop/src/main.rs:22-30,160`, `internal/wsdashboard/assets/dashboard.js:3127-3154,3285-3304,4227-4243`, `internal/wswhiteboard/assets/doc-frame.js:135-152,186-191` | Keep the same UA token so the dashboard needs no change |
 | P16 | "Open with system" is daemon HTTP (`open`, `fs/act` open/reveal), not shell IPC | `internal/wsdashboard/assets/dashboard.js:3206-3246`, `internal/wsdashboard/fs_act_route.go` | Works unchanged; verify from the Electron window |
 | P17 | X-close destroys the window without consulting `beforeunload`; closing never stops the daemon | `desktop/src/main.rs:96-202` | Closing still never stops the daemon; X-close now honors `beforeunload` (see Decisions) |
-| P18 | No single-instance handling (Tauri Phase 2 scope) | `desktop/src/main.rs:100-101` | See (858) |
+| P18 | No single-instance handling (Tauri Phase 2 scope) | `desktop/src/main.rs:100-101` | Phase 1 adds it ((858)=a) |
 | P19 | Identity: product `Werkschaft`, version `0.1.0`, bundle id `dev.werkschaft.desktop`, `.app` target, temporary `icons/icon.png` | `desktop/tauri.conf.json:3-5,23-27` | Same identity and icon |
 | P20 | Pinned, frozen build: `scripts/build-slot.py --allocated` builds an unsigned debug `.app` offline with owned-process cleanup | `desktop/scripts/build-slot.py` | An offline, pinned, unsigned `.app` build with the same owned-process discipline |
 | P21 | Security: no invoke handler, plugins, preload or global API; empty capability; page gets zero native command authority; connection-page CSP `default-src 'none'` | `desktop/src/main.rs:100-101,217-233`, `desktop/tauri.conf.json:9-20` | Same zero-authority posture (see Decisions) |
@@ -90,7 +90,26 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
   parity. Removing `agents-plugin-tool/desktop/` Tauri sources is a separate,
   owner-approved step; this ticket deletes no functionality.
 - **Packaging: macOS `.app` first.** The current shell is macOS-only (P1).
-  Windows and Linux are out of scope for this ticket.
+  Windows delivery is the later Phase 3 (re-homed by (859)); Linux is out of
+  scope.
+- **(857)=a, owner: the Electron download is a one-time, MAIN-run
+  prerequisite with an exact pinned version.** MAIN (allowed by the owner:
+  "MAIN에서 하는 거 허용입니다.") runs the networked install described in
+  Constraints → Prerequisite; the lockfile records the exact versions and
+  integrity hashes; afterwards every install and build is offline. Workers
+  never fetch. Rejected: a manual release-zip download into a custom
+  `ELECTRON_CACHE` (more manual steps, no lockfile integrity); vendoring the
+  binary into git (about 100 MB per version).
+- **(858)=a, owner: single-instance launch/focus lands in Phase 1.** A second
+  launch focuses the existing window (`app.requestSingleInstanceLock` and the
+  `second-instance` event) instead of opening another window. Rejected:
+  strict parity first and single-instance later.
+- **(859)=a, owner: the Tauri ticket's unimplemented Phases 2-4 move here.**
+  They become Phases 2-4 below, rewritten for Electron (single-instance
+  already moved into Phase 1). After Phase 1 verifies parity, the lead closes
+  `261113-feat-werkschaft-thin-tauri-shell` with a note that its Phases 2-4
+  were re-homed here; its Phase 1 Result stays as history. Rejected: leaving
+  them on the Tauri ticket; dropping them.
 - **Electron sources live in a new sibling directory
   `agents-plugin-tool/desktop-electron/`.** The Tauri crate stays in place
   until parity; separate directories keep two independent package manifests,
@@ -113,7 +132,31 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
 - **Offline build environment.** Builds and tests run with
   `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` and npm offline
   (`npx --offline`, `npm ci --offline`). Nothing in this ticket fetches from
-  the network silently; the one-time Electron download is settled by (857).
+  the network silently; the one-time Electron download is the MAIN-run
+  prerequisite below.
+- **Prerequisite (MAIN-run, before Phase 1 dispatch; (857)=a).** In a pool
+  worktree on the branch Phase 1 will start from, MAIN runs:
+
+  ```sh
+  mkdir -p agents-plugin-tool/desktop-electron
+  cd agents-plugin-tool/desktop-electron
+  printf '%s\n' '{"name":"werkschaft-desktop-electron","version":"0.1.0","private":true,"main":"main.js"}' > package.json
+  npm install --save-dev --save-exact electron@44.5.1 @electron/packager@latest
+  rm -rf node_modules && npm ci --offline   # proves the offline reinstall
+  ```
+
+  `electron@44.5.1` is the newest stable release visible offline on
+  2026-11-15 (`electron-to-chromium` 1.5.444 in the local npx cache lists
+  44.5.1 as the latest stable and 45.0.0 only as alpha). If
+  `npm view electron@44 version` shows a newer 44.x patch at install time,
+  MAIN pins that patch instead. `@electron/packager` is saved at the exact
+  version `latest` resolves to. MAIN commits `package.json` and
+  `package-lock.json` (never `node_modules/`) and records both resolved
+  versions in the commit's `## AI Context`. The Electron zip lands in
+  Electron's default cache (`~/Library/Caches/electron`) and the npm
+  tarballs in the npm cache, which keeps later `npm ci --offline` and
+  `@electron/packager` runs offline. The Phase 1 worker stops and reports
+  when the lockfile or the cached Electron zip is missing; it never fetches.
 - Never touch the shared daemon or port 29417. Launch tests against an
   isolated daemon fixture or a stub endpoint and health server on a free port
   with its own `WS_CACHE_HOME`.
@@ -128,54 +171,6 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
 - Before editing under `agents-plugin-tool/`, read
   `ai-docs/manuals/shipped-surface-boundary.md`.
 
-## Open Decision Queue
-
-Last ID used: (859)
-
-(857) [open] [policy] How the one-time Electron download is fetched, pinned and cached.
-- Context: no Electron binary or npm package exists on this machine (the npx
-  cache holds only `@electron` helpers and `electron-to-chromium`). Electron
-  and the packager need one networked install; afterwards builds are offline.
-- Alternative a: pin an exact current stable `electron` and
-  `@electron/packager` version in `package.json` / `package-lock.json`; the
-  owner (or MAIN on the owner's go) runs one networked `npm ci` in the
-  Electron directory; the binary lands in Electron's default cache
-  (`~/Library/Caches/electron`) and the npm cache, so later
-  `npm ci --offline` and builds need no network.
-- Alternative b: the owner downloads the release zip and its SHASUMS manually
-  and places them in a repo-external `ELECTRON_CACHE` directory; npm installs
-  with `ELECTRON_SKIP_BINARY_DOWNLOAD` and the packager reads the cache.
-- Alternative c: vendor the binary into the repository. Rejected in advance:
-  about 100 MB of binary history per version.
-> Recommend a: the fewest manual steps, the lockfile records the exact
-> version and integrity hash, and Electron's own cache keeps later builds
-> offline. The worker does not fetch; it stops if the binary is absent.
-
-(858) [open] [policy] Whether single-instance launch/focus lands in this ticket.
-- Context: the Tauri shell has none (P18); it is approved scope deferred to
-  that ticket's Phase 2. Electron offers it as one call
-  (`app.requestSingleInstanceLock` plus focusing the existing window).
-- Alternative a: include it in Phase 1 (a second launch focuses the
-  existing window).
-- Alternative b: strict parity now; leave it to the reliability phase in
-  (859).
-> Recommend a: it is already approved scope, costs a few lines, and avoids
-> two Werkschaft windows racing the same endpoint.
-
-(859) [open] [policy] Where the Tauri ticket's unimplemented Phases 2-4 go.
-- Context: `261113-feat-werkschaft-thin-tauri-shell` still lists Phase 2
-  (daily-use reliability, single instance, reconnect after restart, safe
-  missing-daemon start), Phase 3 (Windows/WebView2 and zip delivery) and
-  Phase 4 (scoped grant), all phrased for Tauri/WKWebView/WebView2.
-- Alternative a: re-home them as later phases of this ticket, rewritten for
-  Electron, and close the Tauri ticket once Electron parity is verified (its
-  Phase 1 Result stays as history).
-- Alternative b: leave them on the Tauri ticket untouched; decide later.
-- Alternative c: drop them; capture fresh tickets when needed.
-> Recommend a: the requirements (reconnect, safe start, grant limits)
-> survive the technology change, and one ticket keeps the shell's contract
-> in one place.
-
 ## Phases
 
 ### Phase 1: Electron macOS shell at verified Tauri parity, with X-close confirmation
@@ -185,7 +180,8 @@ packaged with `@electron/packager`, meeting every row P1-P21 of the parity
 inventory and the Decisions above. Keep the user agent token
 `Werkschaft/<version>` so the dashboard's desktop file-link behavior works
 unchanged. Package an unsigned macOS `.app` with the same identity and icon
-(P19) through an offline, pinned build. Leave the Tauri crate untouched.
+(P19) through an offline, pinned build. Add single-instance launch/focus
+((858)=a). Leave the Tauri crate untouched.
 
 Verification, on isolated fixtures only (never port 29417, never the shared
 daemon):
@@ -211,7 +207,49 @@ daemon):
 - Security posture: assert `contextIsolation`, `sandbox`, no
   `nodeIntegration`, no preload, and that `window.require`/`process` are
   undefined in the page.
+- Single instance: a second launch of the built app focuses the existing
+  window and exits without opening another window.
 - An offline `.app` build succeeds from the pinned lockfile with no network
   access, and the built app launches for the smoke above.
 - Record commands, fixture setup, process scans and any parity row that
   could not be verified.
+
+### Phase 2: Daily-use reliability
+
+Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
+Verify rediscovery and reconnect after a daemon restart, and broader
+acceptance in the Electron window: dashboard writes, terminals and live
+transports, clipboard, isolated content frames, internal and external
+links, and notification fallback. Add safe missing-daemon start only after
+establishing a race-safe non-replacement path under the carried Decision 2;
+verify it cannot replace or stop an existing daemon and does not bind daemon
+lifetime to shell exit. The scoped-grant decision stays independent of this
+phase.
+
+### Phase 3: Windows packaged delivery
+
+Re-homed from the Tauri ticket's Phase 3 ((859)=a). Add a Windows build of
+the Electron shell and zip delivery with the daemon exe. Verify attach, safe
+missing-daemon start, second-launch focus, external links, writes, close
+survival and the X-close confirmation on Windows, and report platform
+differences explicitly. Signing, installers, an updater, the rename and a
+built-in agent remain separate later work; carried Decision 4's signing
+boundary holds.
+
+### Phase 4: Scoped grant only when new shell-only HTTP authority is needed
+
+Re-homed unchanged in substance from the Tauri ticket's Phase 4
+((859)=a). Independent of platform delivery and gated on an actual new
+authority need; no ceremonial bootstrap key for today's browser surface.
+Apply the carried Decision 8 and that ticket's grant constraints before any
+daemon registration or bootstrap contract, and keep the endpoint credential
+native and separate from the grant. Verification when activated: daemon
+recognition of only the scoped authority, authenticated bootstrap and
+rediscovery after restart, bounded expiry and exit/crash revocation, an
+exact trusted-window ACL, rejection of external and preview/opaque-frame
+access, and absence from URLs, persistent storage, logs and general
+`postMessage`; `/mcp`, lifecycle, master credentials and generic native
+commands/filesystem stay excluded, and existing browser guards, sanitizer
+and capability roots still hold. Document reload/re-bootstrap and any
+fetch/stream transport implications; do not assume browser WebSocket or
+EventSource accept bearer headers.
