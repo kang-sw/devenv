@@ -371,6 +371,56 @@ Phase 1 remains unfinished. Phase 2 has not started.
   sandbox. Independent review is deferred to the lead under the run's explicit
   adaptation; no review verdict is claimed.
 
+### Result (5f281584a) - 2026-11-15
+
+Phase 1 landed in `87f953e9c` with the owner-approved test correction
+`5f281584a` ((882)=a). The snapshot test now counts three non-system entries
+(the agent log and both panel versions); all snapshot content assertions are
+unchanged. The four generated system entries remain in the snapshot. No
+product-code change was needed on resume.
+
+- Delivered both builtin profiles, root-layer resolution and the read-only
+  override ceiling; private per-question Runner instances freeze the checked
+  profile and keep their records out of generic agent/session routes and
+  shared region caches. Board snapshots include retained open/closed topics,
+  logs and panel history under the authoritative store's lock.
+- Local-only `/search-answers/<session>` creation returns the current answer;
+  `/<answer>` reads it, `/<answer>/events` streams escaped `answer` regions,
+  and `/<answer>/cancel` cancels it. Creation/cancel require TrustedWrite;
+  reads/streams reject remote viewers and a supplied bad Origin, while absent
+  Origin is permitted for same-origin EventSource. Process cleanup precedes
+  terminal status on settle, failure, cancel, timeout and supersede. At most
+  two questions run daemon-wide, with one current question per session.
+- Passing acceptance (all offline): targeted answer/builtin/snapshot tests;
+  the same targeted contracts with `-race`; neighbouring runner lifecycle,
+  profile parsing/resolution and Claude/Pi subprocess stand-ins; race-enabled
+  MCP profile catalog, session source, transient-read and lock contracts;
+  command startup and isolated daemon lock/shutdown tests; and
+  `go build -o /tmp/scouts-sandbag-viselike-phase1/ws-mcp ./cmd/ws-mcp`.
+  `git diff --check` and the repaired test's gofmt check were clean.
+- `go test -race ./internal/wsdashboard -run
+  '^Test(SecondDaemonIsRefused|EndpointFileRoundTrip|HealthAnswers|ShutdownRequires|NonLoopbackHost|CloseReleases|TakenPortFalls|AgentHostStarts|SupportHandlerMounted|LANModeGuardsEveryRoute|OutsidePreview)'
+  -count=1 -timeout=90s` failed only the declared base
+  `TestOutsidePreviewCardRemintsOnEveryLoad` removeAttribute TypeError.
+  `go test ./internal/wsi18n -count=1` failed only the declared
+  js.card.width.extend/normal omissions in the nine non-English tables.
+  These failures remain untouched; no new i18n keys were added.
+- Full logs are under `/tmp/scouts-sandbag-viselike-phase1/`:
+  `race.log`, `agent-neighbours.log`, `mcp-neighbours.log`,
+  `dashboard-neighbours.log`, `command-neighbours.log`, `i18n.log`,
+  and `build.log`. Commands used GOPROXY=off, GOSUMDB=off,
+  GOTOOLCHAIN=local; runtime fixtures used private cache/config homes and
+  OS-selected ports. No shared daemon, port 29417, real model, merge or push
+  was used. The owned-process scan found no matching processes remaining.
+- Boundary observation: tests establish scoped Claude Read/Grep/Glob launch
+  rules and Pi read-only tools at project cwd, not actual Claude Grep/Glob
+  permission enforcement. That runtime property remains unverified; the
+  launch comment and builtin descriptions explicitly say best effort, not a
+  sandbox. No stronger confinement claim is made.
+- Independent review is deferred to the lead by the explicit run adaptation;
+  this Result claims no review verdict. Phase 2 remains unfinished, so the
+  ticket stays in ready/.
+
 ### Phase 2: Search drawer and keyboard contract
 
 Move the palette from the modal `<dialog>` into the search sheet of the
