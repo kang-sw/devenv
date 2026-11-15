@@ -379,21 +379,67 @@
   }
 
   // --- the root --------------------------------------------------------------
-  var rootsAttempt = 0, rootChoices = [];
+  var rootsAttempt = 0, rootChoices = [], rootRows = [];
+  // Lower scores win. A substring beats a scattered subsequence; within
+  // either kind prefer tighter, earlier matches. Null means no match.
+  function rootMatch(text, query) {
+    text = (text || "").toLowerCase();
+    var contiguous = text.indexOf(query);
+    if (contiguous >= 0) return contiguous;
+    var best = null;
+    for (var start = 0; start < text.length; start++) {
+      if (text[start] !== query[0]) continue;
+      var end = start, q = 1;
+      while (q < query.length && (end = text.indexOf(query[q], end + 1)) >= 0) q++;
+      if (q !== query.length) continue;
+      var score = 100000 + (end - start + 1 - query.length) * 100 + start;
+      if (best == null || score < best) best = score;
+    }
+    return best;
+  }
   function paintRootChoices() {
-    ui.rChoices.textContent = "";
-    if (local() && !directoriesOnly) rootChoices.forEach(function (root, index) {
-      if (!root || typeof root.path !== "string") return;
-      var current = info ? info.root === root.path : rootAbs ? rootAbs === root.path : index === 0;
-      var name = root.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || root.path;
-      var branch = root.detached ? wsT("js.wt.detached") : root.branch;
-      var b = mk("button", "btn opt", (current ? "✓ " : "") + name + (branch ? " · " + branch : ""));
-      b.type = "button"; b.title = root.path;
-      b.setAttribute("aria-pressed", String(current));
-      b.addEventListener("click", function () { if (local() && pop === ui.rootPop) applyRoot(index === 0 ? "" : root.path); });
-      ui.rChoices.appendChild(b);
-    });
+    ui.rCurrent.textContent = ""; ui.rChoices.textContent = ""; rootRows = [];
+    var query = ui.rFilter.value.trim().toLowerCase(), groups = [[], []], pinned;
+    function row(item, parent) {
+      var b = mk("button", "froot-row" + (item.current ? " froot-row-current" : ""));
+      b.type = "button"; b.title = item.root.path;
+      b.setAttribute("aria-pressed", String(item.current));
+      b.appendChild(mk("span", "froot-check", item.current ? "✓" : ""));
+      b.appendChild(mk("span", "froot-name", item.name));
+      var branch = mk("span", "froot-branch");
+      branch.appendChild(mk("bdi", "", item.branch)); b.appendChild(branch);
+      b.addEventListener("click", function () { if (local() && pop === ui.rootPop) applyRoot(item.index === 0 ? "" : item.root.path); });
+      parent.appendChild(b); rootRows.push(b);
+    }
+    if (local() && !directoriesOnly) {
+      rootChoices.forEach(function (root, index) {
+        if (!root || typeof root.path !== "string") return;
+        var name = root.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || root.path;
+        var branch = root.detached ? wsT("js.wt.detached") : root.branch || "";
+        var current = info ? info.root === root.path : rootAbs ? rootAbs === root.path : index === 0;
+        var item = { root: root, index: index, name: name, branch: branch, current: current, score: 0 };
+        if (current) { pinned = item; return; }
+        if (query) {
+          var n = rootMatch(name, query), b = rootMatch(branch, query);
+          if (n == null && b == null) return;
+          item.score = n == null ? b : b == null ? n : Math.min(n, b);
+        }
+        groups[root.pooled ? 1 : 0].push(item);
+      });
+      // An arbitrary, validated folder need not appear in git's suggestions.
+      if (!pinned && info) pinned = { root: { path: info.root }, index: rootAbs ? -1 : 0, name: info.name || info.root, branch: "", current: true };
+      if (pinned) row(pinned, ui.rCurrent);
+      groups.forEach(function (items, group) {
+        if (query) items.sort(function (a, b) { return a.score - b.score || a.index - b.index; });
+        if (group && items.length && groups[0].length) {
+          var sep = mk("div", "froot-separator"); sep.setAttribute("role", "separator"); ui.rChoices.appendChild(sep);
+        }
+        items.forEach(function (item) { row(item, ui.rChoices); });
+      });
+    }
+    ui.rCurrent.hidden = !ui.rCurrent.children.length;
     ui.rChoices.hidden = !ui.rChoices.children.length;
+    ui.rFilter.hidden = !local() || directoriesOnly;
   }
   function loadRootChoices() {
     var attempt = ++rootsAttempt;
@@ -989,11 +1035,11 @@
     pop = p;
     popFrom = btn;
     if (p === ui.rootPop) {
+      ui.rFilter.value = "";
       loadRootChoices();
       ui.rErr.textContent = "";
       ui.rIn.value = info ? info.root : "";
-      ui.rIn.focus();
-      ui.rIn.select();
+      ui.rFilter.focus();
     } else ui.vIgn.focus();
   }
 
@@ -1292,6 +1338,15 @@
     ui.rootPop.hidden = true;
     var rootLabel = mk("div", "lb"); rootLabel.innerHTML = licon("folder-input");
     rootLabel.appendChild(mk("span", "", wsT("js.files.root.label"))); ui.rootPop.appendChild(rootLabel);
+    ui.rCurrent = mk("div", "froot-current");
+    ui.rCurrent.hidden = true;
+    ui.rootPop.appendChild(ui.rCurrent);
+    ui.rFilter = mk("input", "froot-filter");
+    ui.rFilter.type = "text"; ui.rFilter.spellcheck = false;
+    ui.rFilter.setAttribute("autocomplete", "off");
+    ui.rFilter.placeholder = wsT("js.files.root.filter");
+    ui.rFilter.setAttribute("aria-label", ui.rFilter.placeholder);
+    ui.rootPop.appendChild(ui.rFilter);
     ui.rChoices = mk("div", "froot-list");
     ui.rChoices.hidden = true;
     ui.rChoices.setAttribute("role", "group");
@@ -1326,6 +1381,21 @@
     ui.rHome.addEventListener("click", function () { applyRoot(""); });
     ui.rIn.addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); ui.rApply.click(); }
+    });
+    ui.rFilter.addEventListener("input", paintRootChoices);
+    ui.rootPop.addEventListener("keydown", function (e) {
+      if (e.target !== ui.rFilter && rootRows.indexOf(e.target) < 0) return;
+      var index = rootRows.indexOf(e.target);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (!rootRows.length) return;
+        index = index < 0 ? (e.key === "ArrowDown" ? 0 : rootRows.length - 1) : (index + (e.key === "ArrowDown" ? 1 : -1) + rootRows.length) % rootRows.length;
+        rootRows[index].focus(); rootRows[index].scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        var pick = index >= 0 ? rootRows[index] : ui.rFilter.value.trim() ? ui.rChoices.querySelector("button") : rootRows[0];
+        if (pick) pick.click();
+      }
     });
     [ui.viewPop, ui.rootPop].forEach(function (p) {
       p.addEventListener("keydown", function (e) {

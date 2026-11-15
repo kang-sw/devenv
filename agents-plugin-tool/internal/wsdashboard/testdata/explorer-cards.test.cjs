@@ -128,7 +128,7 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
   rootCard.explorer.newTab({ root: '', dir: '' }); await settle();
   var untouchedPeer = rootsPage.store[peerCard.explorerKey], untouchedFiles = rootsPage.store['ws.dashboard.files.tabs.session'];
   rootCard.body.querySelector('.fchange-root').click(); await settle();
-  rootCard.body.querySelectorAll('.froot-list button')[1].click(); await settle();
+  rootCard.body.querySelector('.froot-list button').click(); await settle();
   check('allowed root changes only the active tab of its own card', [rootCard.explorer.location(), peerCard.explorer.location(), rootsPage.owners.tab.location(), rootsPage.store[peerCard.explorerKey] === untouchedPeer, rootsPage.store['ws.dashboard.files.tabs.session'] === untouchedFiles], [{ root: '/other', dir: '' }, { root: '', dir: '' }, { root: '', dir: '' }, true, true]);
   var rootSaved = JSON.parse(JSON.stringify(rootsPage.store)), rootReload = fixture(rootSaved); await settle();
   var restoredCard = rootReload.W.list('explorer').find(c => c.id === rootCard.id);
