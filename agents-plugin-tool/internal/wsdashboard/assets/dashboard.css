@@ -106,7 +106,8 @@
 .gmenu .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
 .gmenu select { width: 100%; box-sizing: border-box; border: 1px solid var(--wb-muted); background: var(--wb-card); color: inherit; font: inherit; font-size: 13px; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
 .gmenu .gh { padding: 0 4px; }
-.gmenu .gn { font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; }
+.gmenu .gn { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; white-space: nowrap; }
+.gmenu .gn .settings-version { margin-left: auto; flex: none; }
 
 /* LAN access block: Settings shows it to this machine only. */
 .lanbox { min-width: 0; overflow-wrap: anywhere; margin: 0 0 12px; padding: 8px 14px; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); font-size: 13px; line-height: 1.5; }
