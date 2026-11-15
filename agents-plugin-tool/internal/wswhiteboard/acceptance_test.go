@@ -93,6 +93,25 @@ func TestCommandAcceptanceRejectedNamedPatchKeepsOperandBoundaries(t *testing.T)
 	}
 }
 
+func TestCommandAcceptanceRejectedWrappedTicksKeepPrefix(t *testing.T) {
+	prefix := `<wb:topic name="ok"><wb:log>keep</wb:log></wb:topic>`
+	rejected := "<wb:topic name=\"bad\">junk<wb:panel name=\"work\"><wb:change><wb:old>a `</wb:old><wb:new>b `</wb:new></wb:change></wb:panel></wb:topic>"
+	st := &State{}
+	out, problems := Apply(st, prefix+rejected, testEnv())
+	log, exists := st.LatestAgent("ok")
+	t.Logf("Apply unpartitioned=%v accepted=%d kept-log=%v text=%q problems=%v failed=%q", out.Unpartitioned, out.Accepted, exists, log.Text, problems, out.Failed)
+	if len(problems) == 0 || out.Unpartitioned || out.Accepted != 1 || !exists || log.Text != "keep" {
+		t.Errorf("well-delimited rejected operands destroyed accepted prefix: %+v", out)
+	}
+	want := "<wb:failed>\n" + rejected + "\n</wb:failed>"
+	if out.Failed != want {
+		t.Errorf("retry tree got %q, want %q", out.Failed, want)
+	}
+	if st.topicKnown("bad") || st.PanelCounter != 0 {
+		t.Error("rejected group mutated state")
+	}
+}
+
 func TestCommandAcceptanceRollbackOrderAndCompleteRetry(t *testing.T) {
 	s := &State{}
 	mustApply(t, s, addXML(ClassPolicy, "a", "Pick", "One", "Two")+addXML(ClassPolicy, "b", "Pick", "One", "Two")+topicXML("a", "old\n\nkeep\n\ntail"))

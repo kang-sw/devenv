@@ -126,9 +126,9 @@ func (f *fenceIndex) next(after, run int) int {
 // a following command/group/operand. Complete balanced examples remain inert.
 // Return the first enclosing close on rejection, so subsequent candidates in
 // this body can be bounded without rescanning the same following commands.
-func codeBodyBoundary(code, closing string, commands, fields []string) int {
+func codeBodyBoundary(code, closing string, grammar *Grammar, fields []string) int {
 	first := -1
-	var pending []string
+	var pending []literalFrame
 	for pos := 0; pos < len(code); {
 		next := strings.IndexByte(code[pos:], '<')
 		if next < 0 {
@@ -147,43 +147,112 @@ func codeBodyBoundary(code, closing string, commands, fields []string) int {
 			pos += len(closing)
 			continue
 		}
-		if first >= 0 && strings.HasPrefix(rest, "</") {
-			if end := strings.IndexByte(rest, '>'); end >= 0 {
-				name := rest[2:end]
-				if len(pending) > 0 && pending[len(pending)-1] == name {
-					pending = pending[:len(pending)-1]
-				}
-				pos += end + 1
+		if len(pending) > 0 {
+			top := pending[len(pending)-1]
+			endTag := "</" + top.tag + ">"
+			if strings.HasPrefix(rest, endTag) {
+				pending = pending[:len(pending)-1]
+				pos += len(endTag)
+				continue
+			}
+			// A field/leaf body ends only at its own close. In particular,
+			// literal parent closes in raw fields cannot pop a container.
+			if top.raw && (top.wrapper == "" || !openingTagPrefix(rest, top.wrapper)) {
+				pos++
 				continue
 			}
 		}
-		if first >= 0 && len(rest) > 1 && isNameByte(rest[1]) {
-			nameEnd := 1
-			for nameEnd < len(rest) && isNameByte(rest[nameEnd]) {
-				nameEnd++
+		nameEnd := pos + 1
+		for nameEnd < len(code) && isNameByte(code[nameEnd]) {
+			nameEnd++
+		}
+		if nameEnd == pos+1 {
+			pos++
+			continue
+		}
+		name := code[pos+1 : nameEnd]
+		frame, known := literalCommand(grammar, name)
+		if len(pending) > 0 {
+			top := pending[len(pending)-1]
+			if !top.group {
+				// Container children (including rejected unknown fields) are
+				// raw fields. A wrapper itself is the one nested container.
+				frame, known = literalFrame{tag: name, raw: !top.raw}, true
+			} else if !known {
+				frame, known = literalFrame{tag: name, raw: true}, true
 			}
-			name := rest[1:nameEnd]
-			probe := tokenizer{s: code, i: pos, p: &Problems{}}
-			tag, ok := probe.readOpen()
-			if slices.Contains(commands, name) || slices.Contains(fields, name) {
-				if !ok {
-					return first
-				}
-				if !tag.selfClosing {
-					pending = append(pending, name)
-				}
+		} else if slices.Contains(fields, name) {
+			frame, known = literalFrame{tag: name, raw: true}, true
+		}
+		limit := len(code)
+		if !known {
+			limit = min(limit, pos+256)
+		}
+		end, selfClosing, complete := literalTagEnd(code, nameEnd, limit)
+		if first >= 0 && known {
+			if !complete {
+				return first
 			}
-			if ok {
-				pos = probe.i
-				continue
+			if !selfClosing {
+				pending = append(pending, frame)
 			}
 		}
-		pos++
+		if complete {
+			pos = end
+		} else {
+			pos = nameEnd
+		}
 	}
 	if len(pending) > 0 {
 		return first
 	}
 	return -1
+}
+
+type literalFrame struct {
+	tag        string
+	raw, group bool
+	wrapper    string
+}
+
+func literalCommand(g *Grammar, name string) (literalFrame, bool) {
+	if g.isGroup(name) {
+		return literalFrame{tag: name, group: true}, true
+	}
+	spec, known := g.lookup(name)
+	frame := literalFrame{tag: name, raw: spec.Kind != Container}
+	if spec.Wrapper != "" {
+		frame.wrapper = g.Prefix + spec.Wrapper
+	}
+	return frame, known
+}
+
+// Boundary recognition does not validate attributes or emit diagnostics.
+// Unknown literal names get only a bounded lexical probe, so malformed markup
+// cannot trigger diagnostic lineAt prefix scans or unbounded repeated scans.
+func literalTagEnd(s string, afterName, limit int) (end int, selfClosing, complete bool) {
+	if afterName >= limit || !isSpace(s[afterName]) && s[afterName] != '>' && s[afterName] != '/' {
+		return afterName, false, false
+	}
+	var quote byte
+	for pos := afterName; pos < limit; pos++ {
+		c := s[pos]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+		} else {
+			switch c {
+			case '\'', '"':
+				quote = c
+			case '<':
+				return pos, false, false
+			case '>':
+				return pos + 1, pos > afterName && s[pos-1] == '/', true
+			}
+		}
+	}
+	return limit, false, false
 }
 
 func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, fields []string, limit *int) int {
@@ -199,7 +268,7 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 		if end <= at || end > *limit {
 			return at
 		}
-		if boundary := codeBodyBoundary(t.s[at:end], closing, t.commandTags, fields); boundary >= 0 {
+		if boundary := codeBodyBoundary(t.s[at:end], closing, t.grammar, fields); boundary >= 0 {
 			*limit = min(*limit, at+boundary)
 			return at
 		}

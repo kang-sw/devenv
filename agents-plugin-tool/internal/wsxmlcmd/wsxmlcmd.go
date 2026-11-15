@@ -322,15 +322,7 @@ func ParseOrdered(p *Problems, g Grammar, s string) (commands []Command, complet
 func (r *parser) read() {
 	g := r.g
 	r.literalCode = g.LiteralCode
-	for name, spec := range g.Commands {
-		r.commandTags = append(r.commandTags, g.Prefix+name)
-		if spec.Wrapper != "" {
-			r.commandTags = append(r.commandTags, g.Prefix+spec.Wrapper)
-		}
-	}
-	if g.Group != nil {
-		r.commandTags = append(r.commandTags, g.Prefix+g.Group.Name)
-	}
+	r.grammar = &r.g
 	for !r.fatal {
 		r.skipSpace()
 		if r.i >= len(r.s) {
@@ -413,7 +405,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 			if spec.Wrapper != "" {
 				wrapper = &bodyWrapper{tag: r.g.Prefix + spec.Wrapper, fields: r.g.fieldTags(spec), children: &cmd.Children, refuseOpenings: r.g.RefuseFieldOpenings, parent: cmd}
 			}
-			body, ok := r.readContent(tag.name, tag.at, spec.DecodeBody, nil, "", wrapper, nil)
+			body, ok := r.readContent(tag.name, tag.at, spec.DecodeBody, bodyFieldRules{}, "", wrapper, nil)
 			if !ok {
 				return false
 			}
@@ -591,7 +583,7 @@ type tokenizer struct {
 	fatal       bool
 	ordered     bool
 	literalCode bool
-	commandTags []string
+	grammar     *Grammar
 	literals    *literalIndex
 }
 
@@ -699,7 +691,14 @@ type bodySegment struct {
 // sections through, and strips the one newline at each end; with decode, it
 // then decodes the text outside CDATA.
 func (t *tokenizer) readBody(name string, from int, decode bool, fields []string, label string) (string, bool) {
-	return t.readContent(name, from, decode, fields, label, nil, nil)
+	return t.readContent(name, from, decode, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, nil)
+}
+
+// Field boundaries are grammar metadata even when skipped content suppresses
+// sibling-opening diagnostics. Literal lookahead must never lose those tags.
+type bodyFieldRules struct {
+	tags           []string
+	refuseOpenings bool
 }
 
 type bodyWrapper struct {
@@ -714,10 +713,10 @@ type bodyWrapper struct {
 // raw body, a nested group makes its closing tag ambiguous. Quoted attributes,
 // comments, CDATA and command payloads cannot introduce a nested group.
 func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields []string, label string, group *Grammar) (string, bool) {
-	return t.readContent(name, from, decode, fields, label, nil, group)
+	return t.readContent(name, from, decode, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, group)
 }
 
-func (t *tokenizer) readContent(name string, from int, decode bool, fields []string, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
+func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
 	bodyStart, lineStart := t.i, t.i
 	literalUntil, literalLimit := t.i, len(t.s)
 	closing := "</" + name + ">"
@@ -742,7 +741,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 			return "", false
 		}
 		if t.literalCode && t.i >= literalUntil {
-			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, fields, &literalLimit)
+			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, fields.tags, &literalLimit)
 			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
 				text.WriteString(t.s[t.i:literalUntil])
 				advance(literalUntil)
@@ -848,7 +847,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 						// Wrapped operands have the same boundary authority while
 						// skipping a rejected group as in an accepted command.
 						wrapped := &bodyWrapper{tag: group.Prefix + spec.Wrapper, fields: group.fieldTags(spec), children: &cmd.Children, parent: cmd}
-						if _, ok := t.readContent(tagName, start-end, false, nil, "", wrapped, nil); !ok {
+						if _, ok := t.readContent(tagName, start-end, false, bodyFieldRules{}, "", wrapped, nil); !ok {
 							return "", false
 						}
 					} else if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
@@ -862,10 +861,12 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 				}
 				continue
 			}
-			for _, field := range fields {
-				if strings.HasPrefix(rest, "<"+field+">") {
-					t.p.Add("%s field <%s> (line %d): body holds an opening <%s> - missing </%s>?", label, name, t.lineAt(t.i), field, name)
-					break
+			if fields.refuseOpenings {
+				for _, field := range fields.tags {
+					if strings.HasPrefix(rest, "<"+field+">") {
+						t.p.Add("%s field <%s> (line %d): body holds an opening <%s> - missing </%s>?", label, name, t.lineAt(t.i), field, name)
+						break
+					}
 				}
 			}
 			text.WriteByte('<')
@@ -1117,11 +1118,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", cmd.Label(), tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			var openings []string
-			if refuseOpenings {
-				openings = fields
-			}
-			body, ok := t.readBody(tag.name, tag.at, decode[tag.name], openings, cmd.Label())
+			body, ok := t.readContent(tag.name, tag.at, decode[tag.name], bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, cmd.Label(), nil, nil)
 			if !ok {
 				return false
 			}

@@ -186,6 +186,39 @@ func BenchmarkLiteralCodeLookahead(b *testing.B) {
 	}
 }
 
+func literalMalformedMarkupFixture(n int) (Grammar, string, string) {
+	g := Grammar{Prefix: "wb:", LiteralCode: true, Group: &Group{Name: "topic", Attr: "name"}, Commands: map[string]Spec{"panel": {Kind: Leaf, Attrs: []string{"recap"}, Scoped: true}}}
+	body := "`</wb:panel>" + strings.Repeat("<a?", n) + "`"
+	input := `<wb:topic name="t"><wb:panel recap="r">` + body + `</wb:panel></wb:topic>`
+	return g, input, body
+}
+
+func BenchmarkLiteralCodeMalformedMarkup(b *testing.B) {
+	for _, n := range []int{33300, 66600} {
+		g, input, body := literalMalformedMarkupFixture(n)
+		b.Run(fmt.Sprint(len(body)), func(b *testing.B) {
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				cmds, problems := parse(g, input)
+				if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
+					b.Fatalf("legal literal changed: commands=%d problems=%v", len(cmds), problems)
+				}
+			}
+		})
+	}
+}
+
+func TestLiteralCodeMalformedMarkupIsVerbatim(t *testing.T) {
+	g, input, body := literalMalformedMarkupFixture(66600)
+	start := time.Now()
+	cmds, problems := parse(g, input)
+	t.Logf("%d-byte malformed-name literal parsed in %s", len(body), time.Since(start))
+	if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
+		t.Fatalf("legal literal changed: commands=%d problems=%v", len(cmds), problems)
+	}
+}
+
 func TestEmptyPrefixTakesBareNames(t *testing.T) {
 	g := Grammar{Commands: map[string]Spec{"go": {Kind: Empty}}}
 	cmds, problems := parse(g, `<go/><go></go>`)

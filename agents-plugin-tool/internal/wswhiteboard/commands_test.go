@@ -227,6 +227,23 @@ func TestLiteralNestedOpenersCannotSwallowFollowingCommands(t *testing.T) {
 	}
 }
 
+func TestLiteralContainerFieldCloseCannotSwallowCommands(t *testing.T) {
+	input := "<wb:topic name=\"t\"><wb:panel recap=\"r\">a `</wb:panel><wb:add class=\"technical\"><wb:title>literal </wb:add> `</wb:title></wb:add><wb:panel recap=\"s\">two</wb:panel></wb:topic>"
+	cmds, parseProblems := parse(input)
+	st := &State{}
+	out, applyProblems := Apply(st, input, testEnv())
+	t.Logf("parser commands=%d problems=%v; Apply accepted=%d panels=%d questions=%d problems=%v failed=%q", len(cmds), parseProblems, out.Accepted, st.PanelCounter, len(st.Items), applyProblems, out.Failed)
+	if len(parseProblems) != 0 || len(cmds) != 3 {
+		t.Errorf("container raw field merged parser commands: %+v", cmds)
+	}
+	if len(applyProblems) != 0 || out.Accepted != 3 || st.PanelCounter != 2 || len(st.Items) != 1 {
+		t.Errorf("container raw field lost applied commands: %+v", st)
+	}
+	if len(st.Items) == 1 && st.Items[0].Title != "literal </wb:add> `" {
+		t.Errorf("raw field changed: %q", st.Items[0].Title)
+	}
+}
+
 func TestLastFieldCodeCannotPairWithFollowingCommands(t *testing.T) {
 	for _, field := range []string{"why", "recommend", "link"} {
 		for _, next := range []string{"<wb:log>c `d</wb:log>", "<wb:panel recap=\"c `\">end</wb:panel>"} {
