@@ -761,6 +761,9 @@
     "261115-chore-settings-hidden-theme-and-rail-swap-tests": {
       "registered_at": "2026-11-15T04:00:54Z"
     },
+    "261115-feat-git-commit-owner-selected-footer-order": {
+      "registered_at": "2026-11-15T07:32:01Z"
+    },
     "261115-feat-werkschaft-electron-shell": {
       "registered_at": "2026-11-15T01:09:25Z",
       "lease": {
@@ -783,9 +786,6 @@
         "phase": "active",
         "touched_at": "2026-11-15T05:23:26Z"
       }
-    },
-    "261115-feat-ws-composer-inline-skill-and-topic-capsules": {
-      "registered_at": "2026-11-15T06:37:55Z"
     },
     "261115-feat-ws-conversation-row-unification": {
       "registered_at": "2026-11-15T07:29:59Z"
