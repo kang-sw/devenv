@@ -63,11 +63,18 @@ const [base, updates] = process.argv.slice(2);
     }
     assert.equal(await topic(panels[0]).locator('.tdoc .doc-frame').count(), 1, 'first topic has a body frame');
     assert.equal(await topic(panels[1]).locator('.tdoc .doc-frame').count(), 0, 'second topic has panels only');
+    async function bodyLoad() {
+      const body = await (await topic(panels[0]).locator('.tdoc iframe.doc-frame').elementHandle()).contentFrame();
+      await body.waitForFunction(() => document.readyState === 'complete');
+      return body.evaluate(() => window.bodyLoad || (window.bodyLoad = Math.random().toString(36)));
+    }
+    const originalBodyLoad = await bodyLoad();
     let previous = await Promise.all(panels.map(sample));
     for (const [state, marker, owner] of [
       ['log-body', '#e10', 0], ['log-only', '#e11', 1]
     ]) {
       await update(state, marker);
+      assert.equal(await bodyLoad(), originalBodyLoad, 'unchanged body retains its live document after ' + state);
       const current = await Promise.all(panels.map(sample));
       panels.forEach((p, i) => record(p, i === owner ? 'own-topic log' : 'other-topic log', previous[i], current[i]));
       previous = current;
@@ -76,6 +83,7 @@ const [base, updates] = process.argv.slice(2);
       ['overwrite-body', '#e20', 0], ['overwrite-only', '#e21', 1]
     ]) {
       await update(state, marker);
+      assert.equal(await bodyLoad(), originalBodyLoad, 'unchanged body retains its live document after ' + state);
       const current = await Promise.all(panels.map(sample));
       panels.forEach((p, i) => record(p, i === owner ? 'own-panel overwrite' : 'other-panel overwrite', previous[i], current[i], i === owner));
       previous = current;
