@@ -937,6 +937,9 @@
         }
       }
     },
+    "261115-feat-ws-worker-profile-session-spawn": {
+      "registered_at": "2026-11-15T07:40:58Z"
+    },
     "261115-refactor-ws-dashboard-stream-whiteboard-reread": {
       "registered_at": "2026-11-15T07:12:07Z"
     },
