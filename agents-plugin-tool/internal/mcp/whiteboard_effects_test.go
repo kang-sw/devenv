@@ -139,7 +139,15 @@ func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
 		t.Helper()
 		for _, topic := range board.Topics {
 			if topic.Name == name {
-				return topic.Entries
+				// A new topic also records its initial topic-state line; this
+				// test is about item-creation lines, so leave those out.
+				var entries []wswhiteboard.Entry
+				for _, entry := range topic.Entries {
+					if len(entry.TopicState) == 0 {
+						entries = append(entries, entry)
+					}
+				}
+				return entries
 			}
 		}
 		t.Fatalf("missing topic %q in %+v", name, board.Topics)
@@ -154,10 +162,13 @@ func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
 		t.Fatalf("legacy creation entries were not separate equal-time records: %+v", legacyBefore)
 	}
 
+	// Open the topic first: a new topic records its initial topic-state line
+	// right after its first item, which would split the creation batch.
+	wb.update(t, `<wb:topic name="known"><wb:body>Known batch.</wb:body></wb:topic>`)
 	wb.update(t, `<wb:topic name="known"><wb:add class="policy"><wb:title>First</wb:title></wb:add><wb:add class="check"><wb:title>Second</wb:title></wb:add></wb:topic>`)
 	board := readBoard()
 	known := entriesFor(board, "known")
-	if len(known) != 1 || known[0].ItemID != 0 || known[0].Text != "Items added: policy {{3}}, check {{4}}." {
+	if len(known) != 2 || known[0].Text != "Content updated." || known[1].ItemID != 0 || known[1].Text != "Items added: policy {{3}}, check {{4}}." {
 		t.Fatalf("known creation batch was not one stored line: %+v", known)
 	}
 	if got := entriesFor(board, "legacy"); !reflect.DeepEqual(got, legacyBefore) {
@@ -165,8 +176,8 @@ func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
 	}
 
 	records := effectsRecords(t, f, f.replyA)
-	if len(records) != 3 {
-		t.Fatalf("accepted updates produced %d effects carriers, want 3: %+v", len(records), records)
+	if len(records) != 4 {
+		t.Fatalf("accepted updates produced %d effects carriers, want 4: %+v", len(records), records)
 	}
 	effects, ok := wslive.DecodeWhiteboardEffects(records[len(records)-1].RingEntry)
 	if !ok {

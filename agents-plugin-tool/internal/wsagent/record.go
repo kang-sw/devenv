@@ -277,7 +277,7 @@ func WriteRecordForTest(dir string, rec Record) error {
 }
 
 func readRecord(sessionDir string) (Record, error) {
-	raw, err := os.ReadFile(recordPath(sessionDir))
+	raw, err := readFile(recordPath(sessionDir))
 	if err != nil {
 		return Record{}, err
 	}

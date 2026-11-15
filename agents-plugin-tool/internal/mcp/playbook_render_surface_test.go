@@ -200,10 +200,9 @@ func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := filepath.Rel(cwd, subdir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// No relative path exists across volumes (a Windows runner keeps the
+	// checkout on D: and the temp dir on C:); that case then skips.
+	relative, relErr := filepath.Rel(cwd, subdir)
 	link := filepath.Join(t.TempDir(), "linked-symlink")
 	for _, tc := range []struct{ name, override string }{
 		{"no-override", ""},
@@ -212,6 +211,9 @@ func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
 		{"symlink", link},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "relative-subdir" && relErr != nil {
+				t.Skipf("no relative path from the working directory: %v", relErr)
+			}
 			if tc.name == "symlink" {
 				if err := os.Symlink(subdir, link); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
