@@ -21,7 +21,57 @@
     var elapsed = Math.max(0, Math.min(1, (at - (w.resetsAt - duration)) / duration));
     return Math.round(w.percent - elapsed * 100);
   }
-  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, mount: function (doc, rail) {
+  // Pure chart geometry. Crossing points and gap interpolation are visual
+  // only: points contains real observations, never an origin or extrapolation.
+  function trend(entry, w, history) {
+    var duration = w.kind === "five_hour" ? 5 * 3600000 : 7 * 86400000;
+    var at = observation(w, entry), reset = w.resetsAt || 0, start = reset - duration;
+    var knownReset = reset > 0, samples = [], points = [], segments = [];
+    var valid = function (s) { return s.asOf > 0 && Number.isFinite(s.percent) && s.percent >= 0 && s.percent <= 100; };
+    var identity = function (s) { return [s.source, s.resetsAt || 0, s.asOf].join("|"); };
+    var indices = Object.create(null);
+    function upsert(s) {
+      var key = identity(s);
+      if (indices[key] !== undefined) samples[indices[key]] = s;
+      else { indices[key] = samples.length; samples.push(s); }
+    }
+    if (history && history.schema_version === 1 && history.status === "ok" && Array.isArray(history.samples)) {
+      history.samples.forEach(function (s) {
+        if (s.harness === entry.harness && s.kind === w.kind && valid(s) && s.asOf <= at) upsert(s);
+      });
+    }
+    var current = { harness: entry.harness, kind: w.kind, source: entry.source || "", resetsAt: reset, asOf: at, percent: w.percent };
+    if (valid(current)) upsert(current);
+    samples.sort(function (a, b) {
+      return a.asOf - b.asOf || (identity(a) < identity(b) ? -1 : identity(a) > identity(b) ? 1 : 0);
+    });
+    function visible(s) { return (s.resetsAt || 0) === reset && (!knownReset || s.asOf >= start && s.asOf <= reset); }
+    function geometry(s) {
+      var elapsed = knownReset ? Math.max(0, Math.min(1, (s.asOf - start) / duration)) : null;
+      return { asOf: s.asOf, percent: s.percent, elapsed: elapsed, delta: knownReset ? s.percent - elapsed * 100 : null,
+        x: knownReset ? 24 + elapsed * 246 : 147, y: 88 - s.percent * .76,
+        current: identity(s) === identity(current) };
+    }
+    samples.forEach(function (s, i) {
+      if (!visible(s)) return;
+      var b = geometry(s); points.push(b);
+      var previous = samples[i - 1];
+      // Inspect adjacent observations BEFORE selecting a reset/source. Otherwise
+      // an intervening identity could disappear and reconnect A -> B -> A.
+      if (!knownReset || !previous || !visible(previous) || !s.source || previous.source !== s.source ||
+          previous.asOf >= s.asOf || previous.percent > s.percent) return;
+      var a = geometry(previous), estimated = s.asOf - previous.asOf > 10 * 60000;
+      function segment(left, right) { segments.push({ a: left, b: right, estimated: estimated, above: (left.delta + right.delta) / 2 > 0 }); }
+      if (a.delta * b.delta < 0) {
+        var fraction = -a.delta / (b.delta - a.delta);
+        var cross = geometry({ asOf: a.asOf + (b.asOf - a.asOf) * fraction, percent: a.percent + (b.percent - a.percent) * fraction });
+        cross.delta = 0; cross.current = false;
+        segment(a, cross); segment(cross, b);
+      } else segment(a, b);
+    });
+    return { knownReset: knownReset, start: knownReset ? start : null, reset: reset, at: at, points: points, segments: segments };
+  }
+  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, mount: function (doc, rail) {
     var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, popover = null, shown = false, place = function () {};
     function el(tag, cls, text) {
       var n = doc.createElement(tag); n.className = cls || "";
