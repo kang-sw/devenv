@@ -151,11 +151,11 @@ func TestWhiteboardEffectsPinnedOldRendererOmitsOnlyNewKind(t *testing.T) {
 }
 
 func TestWhiteboardEffectsHistoryLayoutAndClientGuards(t *testing.T) {
-	css, err := dashboardFS.ReadFile("assets/dashboard.css")
+	css, err := dashboardTestAsset("assets/dashboard.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	js, err := dashboardFS.ReadFile("assets/dashboard.js")
+	js, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

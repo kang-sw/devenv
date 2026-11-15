@@ -17,7 +17,7 @@ func TestLatestLogHighlightMarkersAndMotion(t *testing.T) {
 			wantAll(t, out, `class="wb-entry agent current" id="e3"`, `class="wb-entry agent" id="e1"`)
 		}
 	}
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

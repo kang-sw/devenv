@@ -254,7 +254,7 @@ func TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide(t *testing.T) {
 		t.Fatal("a closed topic's folded check list carries the hide toggle")
 	}
 
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestOpenCheckRanksAsAnAskNotAnAck(t *testing.T) {
 func TestCheckRowClassIsTheBoardsOwn(t *testing.T) {
 	crow := regexp.MustCompile(`\bcrow\b`)
 	for _, name := range []string{"assets/page.css", "assets/page.tmpl", "assets/form.js", "assets/pill.js"} {
-		raw, err := assetFS.ReadFile(name)
+		raw, err := whiteboardTestAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}

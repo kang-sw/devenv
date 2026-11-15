@@ -10,7 +10,7 @@ import (
 // including) end, both regexp-quoted literals.
 func dashboardJSBlock(t *testing.T, start, end string) string {
 	t.Helper()
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

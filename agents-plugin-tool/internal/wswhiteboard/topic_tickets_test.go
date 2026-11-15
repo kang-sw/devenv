@@ -298,7 +298,7 @@ func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
 func TestTopicHeadClassIsTheBoardsOwn(t *testing.T) {
 	thead := regexp.MustCompile(`\bthead\b`)
 	for _, name := range []string{"assets/page.css", "assets/page.tmpl", "assets/rail.js", "assets/form.js"} {
-		raw, err := assetFS.ReadFile(name)
+		raw, err := whiteboardTestAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -307,7 +307,7 @@ func TestTopicHeadClassIsTheBoardsOwn(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"assets/page.css", "assets/page.tmpl", "assets/rail.js"} {
-		raw, _ := assetFS.ReadFile(name)
+		raw, _ := whiteboardTestAsset(name)
 		if !strings.Contains(string(raw), "tophead") {
 			t.Errorf("%s does not name the head tophead", name)
 		}
@@ -338,7 +338,7 @@ func TestTopicTicketsSurviveTheFolderStore(t *testing.T) {
 // the tracker's own .tk root and dialogs (the Ctrl+K palette squashed into a
 // 17px pill once).
 func TestPageCSSLeavesTrackerTkAlone(t *testing.T) {
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

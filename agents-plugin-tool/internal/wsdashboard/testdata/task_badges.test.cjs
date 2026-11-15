@@ -1,11 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readAssetSource } = require('./asset-source.cjs');
 const vm = require('node:vm');
 
 // Exercise the real badge functions without booting the rest of the page.
-const source = fs.readFileSync(path.join(__dirname, '../assets/dashboard.js'), 'utf8');
+const source = readAssetSource('wsdashboard', 'dashboard.js');
 const functions = source.slice(source.indexOf('  function taskBadge('), source.indexOf('  function interruptTurn('));
 function badge() {
   const label = { textContent: '' };

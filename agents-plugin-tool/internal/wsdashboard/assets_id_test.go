@@ -2,6 +2,8 @@ package wsdashboard
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -60,10 +62,55 @@ func TestAssetIDFollowsAssetContent(t *testing.T) {
 	if a, _ := loadDashboardAssets(); a.data.ID != base {
 		t.Errorf("the embedded assets' identity %q differs from a rebuild's %q", a.data.ID, base)
 	}
-	for _, name := range []string{"dashboard.js", "dashboard.css", "dashboard.tmpl", "rail.js", "shell.js", "tracker.css", "memo.js", "memo.css"} {
+	names := append([]string{}, dashboardScriptFiles...)
+	names = append(names, dashboardStyleFiles...)
+	names = append(names, "dashboard.tmpl", "rail.js", "shell.js", "tracker.css", "memo.js", "memo.css")
+	for _, name := range names {
 		if build(name) == base {
 			t.Errorf("an edit to %s keeps the identity", name)
 		}
+	}
+}
+
+func TestDevAssetsIDFollowsEverySourceFragment(t *testing.T) {
+	dash, wb := devSource(t)
+	base, err := loadDashboardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, files := range [][]string{dashboardScriptFiles, dashboardStyleFiles} {
+		for _, name := range files {
+			paths = append(paths, dash(name))
+		}
+	}
+	whiteboard, err := filepath.Glob(wb("page*.css"))
+	if err != nil || len(whiteboard) == 0 {
+		t.Fatalf("whiteboard stylesheet sources: %v, %v", whiteboard, err)
+	}
+	paths = append(paths, whiteboard...)
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := os.WriteFile(path, raw, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}()
+			if err := os.WriteFile(path, append(append([]byte{}, raw...), "\n/*fragment edit*/"...), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			a, err := loadDashboardAssets()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.data.ID == base.data.ID {
+				t.Errorf("an edit to %s keeps the identity", path)
+			}
+		})
 	}
 }
 
