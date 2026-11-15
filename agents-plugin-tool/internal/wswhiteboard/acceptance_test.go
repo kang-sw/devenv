@@ -135,6 +135,44 @@ func TestCommandAcceptanceParserPayloadsAndScopes(t *testing.T) {
 	mixed(t, fresh, `<wb:topic name="t"><wb:panel recap="bad" typo="x">kept raw</wb:panel><wb:log>valid</wb:log></wb:topic><wb:unknown>raw <b>payload</b></wb:unknown>`, logXML("t", "valid"))
 }
 
+func TestCommandAcceptanceStrayFragments(t *testing.T) {
+	for name, tc := range map[string]struct {
+		input, failed, label string
+		accepted             int
+	}{
+		"failed-empty-group": {
+			input:    `<wb:topic name="a"><wb:body>x</wb:body></wb:topic><wb:topic name="b"></wb:oops></wb:topic>`,
+			failed:   "<wb:failed>\n<wb:topic name=\"b\"></wb:oops></wb:topic>\n</wb:failed>",
+			label:    `stray fragment inside <wb:topic name="b"> (line 1)`,
+			accepted: 1,
+		},
+		"accepted-group": {
+			input:    `<wb:topic name="b"><wb:body>x</wb:body></wb:oops></wb:topic>`,
+			failed:   "<wb:failed>\n<wb:topic name=\"b\">\n</wb:oops>\n</wb:topic>\n</wb:failed>",
+			label:    `stray fragment inside <wb:topic name="b"> (line 1)`,
+			accepted: 1,
+		},
+		"root": {
+			input:    `<wb:floor id="1"/></wb:oops>`,
+			failed:   "<wb:failed>\n</wb:oops>\n</wb:failed>",
+			label:    `stray fragment (line 1)`,
+			accepted: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &State{}
+			out, p := Apply(s, tc.input, testEnv())
+			if out.Unpartitioned || out.Accepted != tc.accepted || out.Failed != tc.failed {
+				t.Fatalf("fragment retry: %+v %v; want %s", out, p, tc.failed)
+			}
+			diagnostics := strings.Join(p, "\n")
+			if !strings.Contains(diagnostics, tc.label+`: </wb:oops> closes nothing open`) || strings.Contains(diagnostics, "command -1 <>") {
+				t.Fatalf("fragment diagnostics: %s", diagnostics)
+			}
+		})
+	}
+}
+
 func TestCommandAcceptanceRejectedCDATABoundaries(t *testing.T) {
 	for _, rejected := range []string{
 		`<wb:unknown><![CDATA[</wb:unknown><wb:floor id="999"/>]]></wb:unknown>`,
@@ -182,6 +220,27 @@ func TestCommandAcceptanceRejectedGroupFieldBoundaries(t *testing.T) {
 				t.Fatalf("incomplete failed tree:\n got %s\nwant %s", out.Failed, want)
 			}
 		})
+	}
+}
+
+func TestCommandAcceptanceRejectedGroupFieldDiagnostic(t *testing.T) {
+	prefix := `<wb:topic name="prefix"><wb:body>keep</wb:body></wb:topic>`
+	rejected := `<wb:topic name="outer">junk<wb:add class="technical"><wb:title typo="x">T</wb:title></wb:add></wb:topic>`
+	expected := &State{}
+	want := mustApply(t, expected, prefix)
+	s := &State{}
+	out, p := Apply(s, prefix+rejected, testEnv())
+	gotState, _ := json.Marshal(s)
+	wantState, _ := json.Marshal(expected)
+	if out.Unpartitioned || out.Accepted != want.Accepted || string(gotState) != string(wantState) || !reflect.DeepEqual(out.Effects, want.Effects) {
+		t.Fatalf("rejected group changed prefix acceptance: %+v %v", out, p)
+	}
+	if want := "<wb:failed>\n" + rejected + "\n</wb:failed>"; out.Failed != want {
+		t.Fatalf("failed tree: %s; want %s", out.Failed, want)
+	}
+	diagnostics := strings.Join(p, "\n")
+	if !strings.Contains(diagnostics, `<wb:topic> (line 1) skipped <wb:add> field <wb:title>: unknown attribute typo (it takes none)`) || strings.Contains(diagnostics, "command 0") {
+		t.Fatalf("skipped field diagnostic: %s", diagnostics)
 	}
 }
 

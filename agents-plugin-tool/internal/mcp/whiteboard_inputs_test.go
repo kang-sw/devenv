@@ -152,6 +152,57 @@ func TestWhiteboardInputsSteeringSetAndNewestAnswerChip(t *testing.T) {
 	}
 }
 
+func TestWhiteboardInputsNoteOnlyCommentSendTime(t *testing.T) {
+	for _, olderAnswer := range []string{"", "a"} {
+		t.Run("older-answer-"+olderAnswer, func(t *testing.T) {
+			f := newWhiteboardFixture(t)
+			dir, err := f.s.sessionInboxDir(f.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>pick</wb:title><wb:option>A</wb:option><wb:option>B</wb:option></wb:add></wb:topic>`)
+			if olderAnswer != "" {
+				if _, _, err := wsinbox.Send(dir, wsinbox.Entry{Chips: []wsinbox.Chip{{ID: "1", Answer: olderAnswer}}}, time.UnixMilli(3000)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			const note = "Please consider a third option"
+			name, _, err := wsinbox.Send(dir, wsinbox.Entry{Chips: []wsinbox.Chip{{ID: "1", Note: note}}}, time.UnixMilli(4000))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := wsinbox.Drain(dir); err != nil {
+				t.Fatal(err)
+			}
+			f.update(t, `<wb:answer id="1" value="">`+note+`</wb:answer>`)
+			last := lastInput(t, f)
+			if !(wswhiteboard.EntryView{Entry: last}).OwnerAnswer() || last.ItemID != 1 || last.AnswerSentAt != 4000 {
+				t.Fatalf("note-only comment lost owner send time: %+v", last)
+			}
+			inputs := stampList(t, last)
+			wantInputs := 1
+			if olderAnswer != "" {
+				wantInputs++
+			}
+			if len(inputs) != wantInputs {
+				t.Fatalf("input count: %+v", inputs)
+			}
+			input := inputs[len(inputs)-1]
+			if input.InboxID != (wsinbox.Record{Name: name}).ID() || input.SentAt != 4000 || len(input.ChipIDs) != 1 || input.ChipIDs[0] != "1" {
+				t.Fatalf("note-only input provenance: %+v", inputs)
+			}
+			rec, err := f.s.sessions.readWhiteboard(f.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			item := rec.Whiteboard.Items[0]
+			if item.Status != wswhiteboard.StatusCommented || item.Answer != "" || item.AnswerQuote != note {
+				t.Fatalf("note-only comment: %+v", item)
+			}
+		})
+	}
+}
+
 func TestWhiteboardInputsRetainedRecordsOnly(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	dir, _ := f.s.sessionInboxDir(f.key)

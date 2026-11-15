@@ -300,6 +300,38 @@ func TestGroupRules(t *testing.T) {
 	}
 }
 
+func TestParseOrderedStrayFragmentLabels(t *testing.T) {
+	for name, tc := range map[string]struct {
+		input, label string
+	}{
+		"root-text":   {"loose\n<tr:drop id=\"1\"/>", "stray fragment (line 1)"},
+		"root-close":  {"\n</tr:oops>", "stray fragment (line 2)"},
+		"group-text":  {"<tr:in name=\"a\"><tr:note>x</tr:note>\nloose</tr:in>", `stray fragment inside <tr:in name="a"> (line 2)`},
+		"group-close": {`<tr:in name="a"></tr:oops></tr:in>`, `stray fragment inside <tr:in name="a"> (line 1)`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := &Problems{}
+			cmds, complete := ParseOrdered(p, groupGrammar, tc.input)
+			if !complete {
+				t.Fatal(p.List)
+			}
+			fragments := 0
+			for _, cmd := range cmds {
+				if cmd.Pos >= 0 {
+					continue
+				}
+				fragments++
+				if cmd.Label() != tc.label || len(cmd.Problems) != 1 || !strings.HasPrefix(cmd.Problems[0], tc.label+": ") || !slices.Contains(p.List, cmd.Problems[0]) {
+					t.Fatalf("fragment label/diagnostics: %+v; %v", cmd, p.List)
+				}
+			}
+			if fragments != 1 {
+				t.Fatalf("fragment count %d: %+v", fragments, cmds)
+			}
+		})
+	}
+}
+
 func TestParseOrderedRejectedGroupContainerFields(t *testing.T) {
 	prefix := `<tr:drop id="1"/>`
 	rejected := `<tr:in name="outer">junk<tr:set><tr:name></tr:set></tr:in><tr:in name="literal"><![CDATA[</tr:name></tr:set><tr:in>]]></tr:name></tr:set></tr:in>`
@@ -311,6 +343,33 @@ func TestParseOrderedRejectedGroupContainerFields(t *testing.T) {
 	}
 	if cmds[0].Source != prefix || cmds[1].Source != rejected || cmds[2].Source != suffix || len(cmds[1].Scope.Problems) != 1 {
 		t.Fatalf("lost source boundaries/diagnostics: %+v", cmds)
+	}
+}
+
+func TestParseOrderedRejectedGroupFieldDiagnostics(t *testing.T) {
+	for name, tc := range map[string]struct {
+		payload, diagnostic string
+	}{
+		"attribute":     {`<tr:name typo="x">T</tr:name>`, `field <tr:name>: unknown attribute typo (it takes none)`},
+		"unknown-field": {`<tr:typo>T</tr:typo>`, `: unknown field <tr:typo> (fields: tr:name)`},
+		"text":          {`loose<tr:name>T</tr:name>`, `outside its field tags: "loose"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			prefix, suffix := `<tr:drop id="1"/>`, `<tr:drop id="2"/>`
+			rejected := `<tr:in name="outer">junk<tr:set>` + tc.payload + `</tr:set></tr:in>`
+			p := &Problems{}
+			cmds, complete := ParseOrdered(p, groupGrammar, prefix+rejected+suffix)
+			if !complete || len(cmds) != 3 || len(p.List) != 2 {
+				t.Fatalf("skipped field boundary: complete=%v commands=%+v problems=%v", complete, cmds, p.List)
+			}
+			if cmds[0].Pos != 1 || cmds[0].Source != prefix || cmds[2].Pos != 2 || cmds[2].Source != suffix || cmds[1].Source != rejected || !slices.Equal(cmds[1].Scope.Problems, p.List) {
+				t.Fatalf("lost positions/source/attribution: %+v %v", cmds, p.List)
+			}
+			diagnostics := strings.Join(p.List, "\n")
+			if !strings.Contains(diagnostics, `<tr:in> (line 1) skipped <tr:set>`) || !strings.Contains(diagnostics, tc.diagnostic) || strings.Contains(diagnostics, "command 0") {
+				t.Fatalf("skipped field diagnostics: %s", diagnostics)
+			}
+		})
 	}
 }
 
