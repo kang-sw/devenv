@@ -17,6 +17,30 @@ func (e ConvEntry) ChildReport() bool { return e.Kind == "wake" && e.Cause == "s
 // Repeated/reclaimed records lack shared delivery identity and stay separate.
 func (e ConvEntry) MailWake() bool { return e.Kind == "wake" && e.Cause == "mail" }
 
+// AgentBadge, AgentPreview and AgentExpands feed the shared agent row frame
+// (child reports and subagent/background notifications).
+func (e ConvEntry) AgentBadge() string {
+	if e.ChildReport() {
+		return wsi18n.T(e.Lang, "entry.childreport")
+	}
+	return ""
+}
+
+func (e ConvEntry) AgentPreview() string {
+	if e.Caption != "" {
+		return e.Caption
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(e.Text), "\n")
+	if line == "" && !e.ChildReport() {
+		return e.Cause
+	}
+	return line
+}
+
+func (e ConvEntry) AgentExpands() bool {
+	return e.ChildReport() || e.Text != "" || (e.Cause != "subagent_done" && e.Cause != "subagent_failed" && e.Cause != "background_exit")
+}
+
 func (e ConvEntry) BoardNudgeSummary() string {
 	reasons, topics := e.boardNudge()
 	if len(topics) == 0 {
@@ -83,7 +107,6 @@ type conversationEffectTopic struct {
 
 type conversationEffectCard struct {
 	Topics []conversationEffectTopic
-	Folded bool
 }
 
 var conversationEntryID = regexp.MustCompile(`^e[1-9][0-9]*$`)
@@ -94,7 +117,7 @@ var conversationPanelID = regexp.MustCompile(`^p[1-9][0-9]*$`)
 // their payloads, even as an in-chat escaped preview.
 func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 	changes := e.WhiteboardChanges()
-	card := conversationEffectCard{Folded: len(changes) > 0}
+	card := conversationEffectCard{}
 	for _, effect := range changes {
 		index := -1
 		for i := range card.Topics {
@@ -112,9 +135,6 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			index = len(card.Topics) - 1
 		}
 		topic := &card.Topics[index]
-		if effect.Kind != "log" || effect.Topic == "" {
-			card.Folded = false
-		}
 		switch effect.Kind {
 		case "log":
 			target := ""
@@ -144,7 +164,6 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			}
 		}
 	}
-	card.Folded = card.Folded && len(card.Topics) == 1
 	return card
 }
 
