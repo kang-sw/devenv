@@ -14,7 +14,8 @@ import (
 
 // Every conversation row kind rendered with the shipped CSS, in Chromium: the
 // agent rows share the mail rows' frame (time column, chevron, one-line
-// preview), and whiteboard updates are never folded. WS_CONVO_SHOTS, when set
+// preview), whiteboard updates are never folded, and a compaction pill keeps
+// 1em above and below while the other non-chat rows keep 0.2em. WS_CONVO_SHOTS, when set
 // to a directory, also receives dark and light screenshots.
 func TestConversationRowGrammarBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
@@ -46,6 +47,12 @@ func TestConversationRowGrammarBrowser(t *testing.T) {
 		ringRecord(9, wb),
 		ringRecord(10, wslive.RingEntry{Kind: "notice", Notice: &wslive.Notice{Kind: "usage_limit", Text: "limit hit"}}),
 		ringRecord(11, wslive.RingEntry{Kind: wslive.RingWake, Cause: "mail", Text: boardNudgeEnvelope + "Whiteboard lead nudge (unblocked).\n- One: ready to proceed; resolved targets: plan"}),
+		// a compaction pill between tool and turn-footer rows, for the spacing check
+		ringRecord(12, wslive.RingEntry{Kind: "tools", Tools: toolsSummary()}),
+		ringRecord(13, wslive.RingEntry{Kind: wslive.RingTurn, Origin: "terminal", DurationMs: 39_000}),
+		ringRecord(14, wslive.RingEntry{Kind: wslive.RingCompact, Trigger: wslive.TriggerManual}),
+		ringRecord(15, wslive.RingEntry{Kind: wslive.RingWake, Cause: "subagent_report", Source: "Merge landing root-guide follow-up", Text: "Merged."}),
+		ringRecord(16, wslive.RingEntry{Kind: wslive.RingTurn, Origin: "terminal", DurationMs: 0}),
 	}
 	page := PageContent{MailBodies: map[string]string{"h1": "body one", "h2": "body two"}}
 	body := presentationHTML(t, ring, page, nil)

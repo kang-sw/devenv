@@ -1944,5 +1944,21 @@
   "js.cmd.group.rest": "otros comandos",
   "js.cmd.args": "Argumentos para /{0} (opcional)",
   "js.cmd.images": "Un comando de barra se envía solo y no lleva imágenes: quita las imágenes o quita el comando.",
-  "js.cmd.astext": "Un comando de barra devuelto volvió como texto, porque el editor ya tiene otro comando: elígelo de nuevo desde / para ejecutarlo."
+  "js.cmd.astext": "Un comando de barra devuelto volvió como texto, porque el editor ya tiene otro comando: elígelo de nuevo desde / para ejecutarlo.",
+  "js.update.title": "Actualización de la app",
+  "js.update.check": "Buscar actualizaciones",
+  "js.update.restart": "Reiniciar ahora",
+  "js.update.state.none": "Actualizada",
+  "js.update.state.available": "Nueva versión v{0} disponible",
+  "js.update.state.ready": "Actualización lista (v{0}) — reinicia para aplicarla",
+  "js.update.skipped": "(omitida antes)",
+  "js.update.available": "Nueva versión v{0}",
+  "js.update.install": "Actualizar",
+  "js.update.skip": "Omitir esta versión",
+  "js.update.downloading": "Descargando v{0}…",
+  "js.update.ready": "Actualización lista (v{0}). Se aplica al reiniciar ahora, al cerrar la app por completo o al reiniciar el equipo.",
+  "js.update.current": "Tienes la versión más reciente (v{0})",
+  "js.update.failed": "No se pudo buscar actualizaciones",
+  "js.update.downloadfailed": "No se pudo descargar la actualización: {0}",
+  "js.update.applyfailed": "No se puede aplicar la actualización: {0}"
 }

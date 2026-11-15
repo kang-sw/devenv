@@ -4,7 +4,12 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const os = require('node:os');
+const fs = require('node:fs');
 const tick = () => new Promise(setImmediate);
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-main-test-'));
+process.on('exit', () => fs.rmSync(userData, { recursive: true, force: true }));
+const preload = path.resolve(__dirname, '../dashboard-preload.js');
 
 async function fixture(discover = async () => 'http://127.0.0.1:39418/', platform = 'darwin') {
   // Replace only the main-process discovery dependency; never a renderer bridge.
@@ -14,7 +19,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   delete require.cache[require.resolve('../main')];
   const { start } = require('../main');
   endpoint.discover = original;
-  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0' });
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: false, getPath: () => userData });
   let focusedContents = null;
   const renderers = [];
   class Base extends EventEmitter {
@@ -103,8 +108,7 @@ test('native window, menus, authority, close veto and single-instance focus', as
   assert.equal(w.title, 'Werkschaft');
   assert.deepEqual(w.loads, ['http://127.0.0.1:39418/']);
   assert.equal(w.agent, 'Chromium Werkschaft/0.1.0');
-  assert.deepEqual(w.options.webPreferences, { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false });
-  assert.equal('preload' in w.options.webPreferences, false);
+  assert.deepEqual(w.options.webPreferences, { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false, preload });
   assert.equal(f.session.check(), false);
   f.session.request(null, 'clipboard-read', grant => assert.equal(grant, false));
   assert.equal(f.menus.retry.accelerator, 'CmdOrCtrl+R');
@@ -424,7 +428,7 @@ test('losing single-instance lock quits before creating a window', () => {
 test('platform switch keeps native construction on macOS/Linux and isolates Windows sibling views', async () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
     const f = await fixture(undefined, platform), w = f.window;
-    const isolation = { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false };
+    const isolation = { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false, preload };
     if (platform !== 'win32') {
       assert.equal(w.constructor, f.Window);
       assert.deepEqual(w.options, { title: 'Werkschaft — Connecting…', width: 1280, height: 860, minWidth: 760, minHeight: 520, webPreferences: isolation });
@@ -624,4 +628,80 @@ test('dashboard theme maps to both bar and overlay, with native fallback and res
   assert.equal(bar.state.value.symbolColor, '#000000');
   dashboard.webContents.emit('did-start-navigation', {}, 'http://127.0.0.1:39418/', false, true);
   assert.equal(f.window.overlay.color, '#202020');
+});
+test('update bridge: IPC only from the pinned dashboard main frame, status replay, apply on launch and quit', async () => {
+  const update = require('../update'), original = update.createUpdater;
+  const calls = [];
+  let options, ready = false;
+  update.createUpdater = opts => {
+    options = opts;
+    return { applyOnLaunch: () => false, applyOnQuit: relaunch => calls.push(`quit:${relaunch}`), schedule: () => calls.push('schedule'),
+      phase: () => ({ phase: 'none', version: null, skipped: false }), canRestart: () => ready,
+      check: manual => calls.push(`check:${manual}`), download: () => calls.push('download'), skip: v => calls.push(`skip:${v}`) };
+  };
+  let f;
+  try { f = await fixture(); } finally { update.createUpdater = original; }
+  const wc = f.window.webContents;
+  assert.equal(options.version, '0.1.0');
+  assert.equal(options.packaged, false);
+  assert.equal(options.userData, userData);
+  assert.deepEqual(calls, ['schedule']);
+  const sent = [];
+  wc.send = (channel, value) => sent.push([channel, value]);
+  // A status that arrives before the page subscribes waits for it.
+  options.send({ state: 'available', version: '9.0.0' });
+  assert.deepEqual(sent, []);
+  const from = (url, extra = {}) => ({ sender: wc, senderFrame: Object.assign(wc.mainFrame, { url }), ...extra });
+  f.ipcMain.emit('werkschaft:update-subscribe', from('https://example.com/'));
+  f.ipcMain.emit('werkschaft:update-check', from('file:///tmp/connection.html'));
+  f.ipcMain.emit('werkschaft:update-download', { sender: {}, senderFrame: { url: 'http://127.0.0.1:39418/' } });
+  f.ipcMain.emit('werkschaft:update-skip', { sender: wc, senderFrame: { url: 'http://127.0.0.1:39418/' } }, '9.0.0');
+  assert.deepEqual(sent, []);
+  assert.deepEqual(calls, ['schedule']);
+  f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/s/x'));
+  assert.deepEqual(sent, [['werkschaft:update-status', { state: 'available', version: '9.0.0' }]]);
+  f.ipcMain.emit('werkschaft:update-check', from('http://127.0.0.1:39418/'));
+  f.ipcMain.emit('werkschaft:update-download', from('http://127.0.0.1:39418/'));
+  f.ipcMain.emit('werkschaft:update-skip', from('http://127.0.0.1:39418/'), '9.0.0');
+  assert.deepEqual(calls, ['schedule', 'check:true', 'download', 'skip:9.0.0']);
+  options.send({ state: 'ready', version: '9.0.0' });
+  assert.equal(sent.length, 2);
+  // A new document must subscribe again before it receives anything.
+  wc.emit('did-start-navigation', {}, 'http://127.0.0.1:39418/', false, true);
+  options.send({ state: 'current', version: '0.1.0' });
+  assert.equal(sent.length, 2);
+  // With nothing pending, a subscription receives the standing phase.
+  f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
+  f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
+  assert.deepEqual(sent.at(-1), ['werkschaft:update-status', { state: 'phase', phase: { phase: 'none', version: null, skipped: false } }]);
+  // A plain full quit applies without relaunch.
+  f.app.emit('will-quit');
+  assert.equal(calls.at(-1), 'quit:false');
+  // Restart now: ignored until a stage is ready and from any other sender; then quit + relaunch.
+  f.ipcMain.emit('werkschaft:update-restart', from('http://127.0.0.1:39418/'));
+  assert.equal(f.app.quitCalled, undefined);
+  ready = true;
+  f.ipcMain.emit('werkschaft:update-restart', from('https://example.com/'));
+  assert.equal(f.app.quitCalled, undefined);
+  f.ipcMain.emit('werkschaft:update-restart', from('http://127.0.0.1:39418/'));
+  assert.equal(f.app.quitCalled, true);
+  f.app.emit('will-quit');
+  assert.equal(calls.at(-1), 'quit:true');
+});
+test('a stage applied at launch quits before any window and never registers the quit apply', async () => {
+  const update = require('../update'), original = update.createUpdater;
+  let quitApplied = false;
+  update.createUpdater = () => ({ applyOnLaunch: () => true, applyOnQuit: () => { quitApplied = true; }, schedule() {} });
+  delete require.cache[require.resolve('../main')];
+  const { start } = require('../main');
+  update.createUpdater = original;
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true,
+    quit() { this.quitCalled = true; this.emit('will-quit'); }, whenReady: () => Promise.resolve(),
+    getVersion: () => '0.1.0', isPackaged: true, getPath: () => userData });
+  let windows = 0;
+  start({ app, BrowserWindow: class { constructor() { windows++; } }, session: {}, ipcMain: new EventEmitter() }, 'darwin');
+  await tick();
+  assert.equal(app.quitCalled, true);
+  assert.equal(windows, 0);
+  assert.equal(quitApplied, false);
 });

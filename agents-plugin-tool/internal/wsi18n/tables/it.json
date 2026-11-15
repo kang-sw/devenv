@@ -1944,5 +1944,21 @@
   "js.cmd.group.rest": "altri comandi",
   "js.cmd.args": "Argomenti per /{0} (facoltativi)",
   "js.cmd.images": "Un comando slash viene inviato da solo e non porta immagini: rimuovi le immagini o rimuovi il comando.",
-  "js.cmd.astext": "Un comando slash restituito è tornato come testo, perché il compositore contiene già un altro comando: sceglilo di nuovo da / per eseguirlo."
+  "js.cmd.astext": "Un comando slash restituito è tornato come testo, perché il compositore contiene già un altro comando: sceglilo di nuovo da / per eseguirlo.",
+  "js.update.title": "Aggiornamento app",
+  "js.update.check": "Controlla aggiornamenti",
+  "js.update.restart": "Riavvia ora",
+  "js.update.state.none": "Aggiornata",
+  "js.update.state.available": "Nuova versione v{0} disponibile",
+  "js.update.state.ready": "Aggiornamento pronto (v{0}) — riavvia per applicarlo",
+  "js.update.skipped": "(saltata in precedenza)",
+  "js.update.available": "Nuova versione v{0}",
+  "js.update.install": "Aggiorna",
+  "js.update.skip": "Salta questa versione",
+  "js.update.downloading": "Download di v{0}…",
+  "js.update.ready": "Aggiornamento pronto (v{0}). Si applica riavviando ora, chiudendo completamente l'app o riavviando il computer.",
+  "js.update.current": "Hai la versione più recente (v{0})",
+  "js.update.failed": "Controllo aggiornamenti non riuscito",
+  "js.update.downloadfailed": "Download dell'aggiornamento non riuscito: {0}",
+  "js.update.applyfailed": "Impossibile applicare l'aggiornamento: {0}"
 }
