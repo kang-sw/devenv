@@ -217,7 +217,14 @@
       "registered_at": "2026-10-03T03:19:31Z"
     },
     "261004-research-pi-reviewer-report-scope-discovery": {
-      "registered_at": "2026-10-04T03:10:48Z"
+      "registered_at": "2026-10-04T03:10:48Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "docs/exec3-dedupe-1051",
+        "phase": "closed",
+        "touched_at": "2026-11-15T08:07:06Z"
+      }
     },
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T08:41:34Z"
