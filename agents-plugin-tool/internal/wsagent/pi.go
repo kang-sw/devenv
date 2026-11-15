@@ -534,13 +534,10 @@ func (p *piProcess) compact(instructions string) error {
 }
 
 // piCompactCommand reports whether text is a typed /compact, bare or in a
-// single user envelope, and returns the instructions after it.
+// single timestamped user envelope, and returns the instructions after it.
+// Other input is checked unchanged against the bare command rules.
 func piCompactCommand(text string) (string, bool) {
-	messages, ok := wsinbox.ParseUserMessages(text)
-	if !ok || len(messages) != 1 {
-		return "", false
-	}
-	if messages[0].At != "" {
+	if messages, ok := wsinbox.ParseUserMessages(text); ok && len(messages) == 1 && messages[0].At != "" {
 		text = messages[0].Text
 	}
 	text = strings.TrimSpace(text)
