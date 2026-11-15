@@ -792,7 +792,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/search-drawer-impl",
         "phase": "active",
-        "touched_at": "2026-11-15T01:59:25Z"
+        "touched_at": "2026-11-15T02:00:38Z",
+        "impl": {
+          "branch": "impl/exec4/search-drawer-impl/boil-rants-plant"
+        }
       }
     },
     "261115-feat-ws-hosted-codex-adapter-contract": {
