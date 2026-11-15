@@ -63,12 +63,13 @@
    anywhere beside the column and its scrollbar sits at the window's edge:
    it runs out over the page's paddings (--dl-x across, --dl-y below; the
    rail's gap on the left while the rail stands) and, right of the 1680px
-   page, to the window's right edge (--dl-r), and pads back as much, so the
-   column keeps its width and its centre in the main panel. */
+   page, to the window's right edge (--dl-r). Its padding is even on both
+   sides, so the column centres in that whole area (on a wide window, not
+   in the 1680px page). */
 .dlanding { --dl-x: 16px; --dl-y: 12px; --dl-r: max(var(--dl-x), 100vw - 1680px + var(--dl-x));
   flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;
   margin: 0 calc(0px - var(--dl-r)) calc(0px - var(--dl-y)) calc(0px - var(--dl-x));
-  padding: 56px calc(24px + var(--dl-r)) calc(88px + var(--dl-y)) calc(24px + var(--dl-x)); }
+  padding: 56px calc(24px + var(--dl-x)) calc(88px + var(--dl-y)); }
 @media (max-width: 640px) { .dlanding { --dl-x: 10px; --dl-y: 8px; } }
 .dlogo { flex: none; width: clamp(220px, 50%, 420px); max-width: 100%; }
 .dlogo svg { display: block; width: 100%; height: auto; }
@@ -90,7 +91,7 @@
 .dstep p { margin: 0 0 14px; }
 .dshot { justify-self: start; max-width: 100%; margin: 0; overflow: hidden; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--wb-fg) 14%, transparent); box-shadow: 0 8px 28px rgba(0, 0, 0, .16); line-height: 0; }
 .dshot img { max-width: 100%; height: auto; }
-@media (max-width: 760px) { .dlanding { padding: 32px calc(16px + var(--dl-r)) calc(64px + var(--dl-y)) calc(16px + var(--dl-x)); } .dguide { margin-top: 36px; } .dguide ol { gap: 40px; } .dstep > .dshot { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .dlanding { padding: 32px calc(16px + var(--dl-x)) calc(64px + var(--dl-y)); } .dguide { margin-top: 36px; } .dguide ol { gap: 40px; } .dstep > .dshot { grid-column: 1 / -1; } }
 .dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap); --sa: 250fr; --sb: 750fr;
   grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
   grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }

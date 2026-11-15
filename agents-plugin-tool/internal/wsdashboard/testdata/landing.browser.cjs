@@ -44,7 +44,7 @@ async function loaded(page) {
 
 // landing reads the shown frame's landing: which lockup variant and which
 // screenshot theme show, the lockup's and the how-to's centres against the
-// main panel's, their order, whether the page scrolls (down, never
+// scroll box's visible area (its client box, the whole main area), their order, whether the page scrolls (down, never
 // across), whether every step's screenshot loaded and fits the column, which
 // guide images the frame fetched, and whether anything paints a background
 // behind them.
@@ -56,6 +56,7 @@ async function landing(page) {
     const vis = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).display !== 'none';
     const box = document.querySelector('.dlanding');
     const g = document.querySelector('#grid').getBoundingClientRect();
+    const bx = box.getBoundingClientRect().left + box.clientLeft + box.clientWidth / 2;
     const l = document.querySelector('.dlogo').getBoundingClientRect();
     const guide = document.querySelector('.dguide');
     const gr = guide.getBoundingClientRect();
@@ -64,7 +65,7 @@ async function landing(page) {
     const fetched = performance.getEntriesByType('resource').map(e => new URL(e.name).pathname).filter(p => p.startsWith('/s/guide-'));
     return {
       dark: vis(document.querySelector('.dlogo-d')), light: vis(document.querySelector('.dlogo-l')), guide: vis(guide),
-      dx: Math.abs((l.left + l.right) / 2 - (g.left + g.right) / 2), gx: Math.abs((gr.left + gr.right) / 2 - (g.left + g.right) / 2),
+      dx: Math.abs((l.left + l.right) / 2 - bx), gx: Math.abs((gr.left + gr.right) / 2 - bx),
       order: l.bottom <= gr.top, scrolls: box.scrollHeight > box.clientHeight, across: box.scrollWidth > box.clientWidth,
       width: l.width, gridWidth: g.width, guideWidth: gr.width,
       bg: ['.dlanding', '.dlogo', '.dguide'].map(s => getComputedStyle(document.querySelector(s)).backgroundColor),
@@ -79,7 +80,7 @@ async function landing(page) {
 }
 
 // root: the lockup over the illustrated how-to with nothing behind them,
-// both centred across, eight titled steps each with one loaded screenshot of
+// both centred across the scroll box's visible area, eight titled steps each with one loaded screenshot of
 // the theme shown (the other theme's never fetched) that fits the column,
 // and a page that scrolls down but never across.
 function root(r, what, theme) {
@@ -283,8 +284,8 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
 
     // Wide, the rail standing: the scroll box spans the main area to the
     // window's right edge, so the wheel scrolls the landing right of the
-    // column too, while the column keeps its width and its centre in the
-    // page's main panel (root's checks).
+    // column too, and the column keeps its width and centres in that whole
+    // area, not in the 1680px page (root's checks).
     for (const theme of ['dark', 'light']) {
       ({ c, page } = await ctx(theme, 2560));
       await page.goto(base + '/');
