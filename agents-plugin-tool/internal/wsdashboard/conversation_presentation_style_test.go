@@ -50,6 +50,7 @@ func TestConversationPresentationStyleContract(t *testing.T) {
 	for _, want := range []string{
 		".toolsline .tsl > span, .toolsline .tool { font-family: var(--wb-mono); }",
 		".toolsline .tsn { min-width: 0; font-size: 12px; }",
+		".mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }",
 		".brow .ba", "font-family: inherit;",
 		".msg.fromlead .bub { margin: 0 62px 0 36px;",
 		".turnline { align-self: flex-start;", "margin-left: 36px; font-size: 12px;", "max-width: calc(100% - 98px);",

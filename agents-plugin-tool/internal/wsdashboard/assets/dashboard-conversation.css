@@ -90,7 +90,7 @@
 .mailline { min-width: 0; }
 .mailline .arr { font-weight: 800; flex: none; }
 .mailline.recv .arr { color: var(--wb-primary); }
-.mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: none; }
+.mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .mailline a.mpeer { color: var(--wb-primary); }
 .mailline a.mpeer:hover { text-decoration: underline; }
 .mailline .mfirst { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
