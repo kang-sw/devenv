@@ -298,6 +298,12 @@ func (c Command) Single(p *Problems, tag string) (string, bool) {
 // refusal.
 func Parse(p *Problems, g Grammar, s string) []Command {
 	r := &parser{tokenizer: tokenizer{s: s, p: p, literalCode: g.LiteralCode}, g: g}
+	for name := range g.Commands {
+		r.commandTags = append(r.commandTags, g.Prefix+name)
+	}
+	if g.Group != nil {
+		r.commandTags = append(r.commandTags, g.Prefix+g.Group.Name)
+	}
 	for !r.fatal {
 		r.skipSpace()
 		if r.i >= len(r.s) {
@@ -503,6 +509,7 @@ type tokenizer struct {
 	p           *Problems
 	fatal       bool
 	literalCode bool
+	commandTags []string
 }
 
 func (t *tokenizer) lineAt(i int) int {
@@ -637,7 +644,11 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 			return "", false
 		}
 		if t.literalCode {
-			if end := codeLiteralEnd(t.s, t.i, bodyStart, closing); end > t.i {
+			siblings := fields
+			if siblings == nil {
+				siblings = t.commandTags
+			}
+			if end := codeLiteralEnd(t.s, t.i, bodyStart, closing, siblings); end > t.i {
 				text.WriteString(t.s[t.i:end])
 				t.i = end
 				continue
@@ -695,7 +706,13 @@ func openingTagPrefix(s, tag string) bool {
 // codeLiteralEnd recognizes matched Markdown code without changing its bytes.
 // Unmatched delimiters remain ordinary text, so they cannot hide a command's
 // real closing tag. Fences take precedence over spans and may contain backticks.
-func codeLiteralEnd(s string, at, bodyStart int, closing string) int {
+func codeLiteralEnd(s string, at, bodyStart int, closing string, siblings []string) int {
+	withinBody := func(end int) int {
+		if crossesBodyBoundary(s[at:end], closing, siblings) {
+			return at
+		}
+		return end
+	}
 	mark := s[at]
 	if mark != '`' && mark != '~' || at > bodyStart && s[at-1] == mark {
 		return at
@@ -728,12 +745,12 @@ func codeLiteralEnd(s string, at, bodyStart int, closing string) int {
 					if pos-closeStart >= run {
 						tail := strings.TrimSpace(s[pos:end])
 						if tail == "" {
-							return end
+							return withinBody(end)
 						}
 						// The enclosing command tag is not Markdown payload, so a
 						// fence at the very end of that payload still closes.
 						if strings.HasPrefix(tail, closing) {
-							return pos
+							return withinBody(pos)
 						}
 					}
 					if end == len(s) {
@@ -765,11 +782,50 @@ func codeLiteralEnd(s string, at, bodyStart int, closing string) int {
 			end++
 		}
 		if end-pos == run {
-			return end
+			return withinBody(end)
 		}
 		pos = end
 	}
 	return at
+}
+
+// A closing tag followed by another command/operand opening is a structural
+// boundary, even when unmatched code delimiters in separate bodies would pair.
+// Balanced examples of the enclosing element remain literal code; a bare
+// closing-tag example alone also stays inert. Prefer the existing structure in
+// the ambiguous close-then-sibling case rather than merge immutable writes.
+func crossesBodyBoundary(code, closing string, siblings []string) bool {
+	name := closing[2 : len(closing)-1]
+	depth, closed := 0, false
+	for pos := 0; pos < len(code); {
+		next := strings.IndexByte(code[pos:], '<')
+		if next < 0 {
+			break
+		}
+		pos += next
+		rest := code[pos:]
+		if closed {
+			for _, sibling := range siblings {
+				if openingTagPrefix(rest, sibling) {
+					return true
+				}
+			}
+		}
+		if strings.HasPrefix(rest, closing) {
+			if depth > 0 {
+				depth--
+			} else {
+				closed = true
+			}
+		} else if openingTagPrefix(rest, name) {
+			probe := tokenizer{s: code, i: pos, p: &Problems{}}
+			if tag, ok := probe.readOpen(); ok && !tag.selfClosing {
+				depth++
+			}
+		}
+		pos++
+	}
+	return false
 }
 
 // joinBody strips the body's one newline at each end before decoding, so a

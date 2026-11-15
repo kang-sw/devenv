@@ -110,6 +110,33 @@ func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
 	}
 }
 
+func TestLiteralCodeDoesNotPairAcrossStructuralBodies(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, RefuseFieldOpenings: true, Commands: map[string]Spec{
+		"text": {Kind: Leaf}, "other": {Kind: Leaf},
+		"set": {Kind: Container, Fields: []string{"old", "new"}},
+	}}
+	for _, tc := range []struct{ input, first, second string }{
+		{"<x:text>a `</x:text><x:text>b `</x:text>", "a `", "b `"},
+		{"<x:text>a ``</x:text><x:other>b ``</x:other>", "a ``", "b ``"},
+		{"<x:text>~~~\na</x:text><x:other>\n~~~\nb</x:other>", "~~~\na", "~~~\nb"},
+	} {
+		cmds, problems := parse(g, tc.input)
+		if len(problems) != 0 || len(cmds) != 2 || cmds[0].Body != tc.first || cmds[1].Body != tc.second {
+			t.Fatalf("cross-command code pairing: %+v, %q", cmds, problems)
+		}
+	}
+	cmds, problems := parse(g, "<x:set><x:old>a `</x:old><x:new>b `</x:new></x:set>")
+	if len(problems) != 0 || len(cmds) != 1 || len(cmds[0].Fields) != 2 || cmds[0].FieldsOf("x:old")[0] != "a `" || cmds[0].FieldsOf("x:new")[0] != "b `" {
+		t.Fatalf("cross-operand code pairing: %+v, %q", cmds, problems)
+	}
+	// Complete examples can contain repeated enclosing elements in one span.
+	body := "`<x:text>one</x:text><x:text>two</x:text>`"
+	cmds, problems = parse(g, "<x:text>"+body+"</x:text>")
+	if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
+		t.Fatalf("balanced literal example: %+v, %q", cmds, problems)
+	}
+}
+
 func TestEmptyPrefixTakesBareNames(t *testing.T) {
 	g := Grammar{Commands: map[string]Spec{"go": {Kind: Empty}}}
 	cmds, problems := parse(g, `<go/><go></go>`)

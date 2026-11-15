@@ -167,6 +167,27 @@ func TestPanelAndLogCodeLiteralsAreInert(t *testing.T) {
 	}
 }
 
+func TestUnmatchedCodeInSeparateLegacyBodiesStaysSeparate(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel recap="one">a `+"`"+`</wb:panel><wb:panel recap="two">b `+"`"+`</wb:panel></wb:topic>`)
+	if st.PanelCounter != 2 || queryResult(t, st, `{"panel":"p1"}`).Direct.Entry.Text != "a `" || queryResult(t, st, `{"panel":"p2"}`).Direct.Entry.Text != "b `" {
+		t.Fatal("unmatched backticks merged separate full panel writes")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel recap="three">c `+"`"+`</wb:panel><wb:log>d `+"`"+`</wb:log></wb:topic>`)
+	if latest, _ := st.LatestAgent("t"); st.PanelCounter != 3 || latest.Text != "d `" {
+		t.Fatal("unmatched backticks merged panel/log writes")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:body>alpha `+"`"+`</wb:body><wb:edit><wb:old>alpha `+"`"+`</wb:old><wb:new>beta `+"`"+`</wb:new></wb:edit></wb:topic>`)
+	if st.TopicBody("t") != "beta `" {
+		t.Fatal("unmatched operand backticks changed legacy edit")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="work" recap="four">alpha `+"`"+`</wb:panel></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="work"><wb:change><wb:old>alpha `+"`"+`</wb:old><wb:new>beta `+"`"+`</wb:new></wb:change></wb:panel></wb:topic>`)
+	if queryResult(t, st, `{"panel":"p4"}`).Direct.Entry.Text != "beta `" {
+		t.Fatal("unmatched operand backticks changed panel patch")
+	}
+}
+
 func TestCDATAHoldsALiteralClosingTag(t *testing.T) {
 	cmds := mustParse(t, `<wb:topic name="t"><wb:body>use <![CDATA[</wb:body> and <b> & ]]> here</wb:body></wb:topic>`)
 	if want := "use </wb:body> and <b> & " + " here"; cmds[0].Body != want {
