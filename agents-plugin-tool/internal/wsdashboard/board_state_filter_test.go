@@ -60,6 +60,12 @@ store["cards.state-filter"] = "invented"; boot(store, served);
 check("invalid persisted filter is all, never inferred", [shown().length, radio("all").getAttribute("aria-checked")], [6, "true"]);
 boot({}, function(){return [];});
 check("empty board has selectable zero counts", counts(), ["0","0","0","0","0","0"]);
+var deferred;
+boot({}, served, { toolbar: { filter: function(run){ deferred = run; } } });
+choose("discussing");
+check("filter waits for overview restoration callback", [shown(), radio("all").getAttribute("aria-checked"), page.store["cards.state-filter"]], [["a","b","c","d","legacy","old"], "true", undefined]);
+deferred();
+check("overview callback applies and persists selection", [shown(), radio("discussing").getAttribute("aria-checked"), page.store["cards.state-filter"]], [["b"], "true", "discussing"]);
 process.stdout.write(bad.join("\n"));
 `)
 }
