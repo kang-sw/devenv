@@ -22,7 +22,8 @@
 //   - A body is raw text up to the first exact closing tag of its element
 //     (`</wb:why>`), so `<`, `&`, inline HTML, and mermaid are written as is.
 //     A CDATA section (`<![CDATA[...]]>`) passes its content through
-//     literally, for a body that must contain its own closing tag.
+//     literally, for a body that must contain its own closing tag. A grammar
+//     may also opt into inert Markdown code spans/fences (Grammar.LiteralCode).
 //   - A body loses one newline right after its opening tag and one right
 //     before its closing tag, so a body written on its own lines keeps its
 //     text exactly; nothing else is trimmed.
@@ -35,7 +36,8 @@
 //     written: it may carry HTML whose entities are meant, or be an operand
 //     matched against stored text.
 //   - An unknown tag or attribute is a problem; so is text between commands
-//     (inside a group too) or between a command's fields.
+//     (inside a group too) or between a command's fields. A leaf may declare
+//     an alternative of repeated wrapped field sets (Spec.Wrapper).
 //
 // The workflow manual's shared command-syntax section states these rules to
 // the lead; a change here changes that text's contract.
@@ -79,6 +81,10 @@ type Spec struct {
 	// Scoped marks a command that sits only inside the grammar's group and
 	// takes the group's attribute from it (Command.Scoped).
 	Scoped bool
+	// Wrapper lets a Leaf alternatively hold repeated wrapped field sets.
+	// Body retains text outside wrappers so the caller can refuse mixed payloads;
+	// Children holds each wrapper's fields in written order.
+	Wrapper string
 }
 
 // Group is a grammar's one level of grouping: an element at the root whose
@@ -111,6 +117,9 @@ type Grammar struct {
 	Group    *Group
 	// RefuseFieldOpenings rejects literal sibling field openings in field bodies.
 	RefuseFieldOpenings bool
+	// LiteralCode makes Markdown code spans and fenced blocks inert in bodies.
+	// Other grammars retain their original delimiter behavior.
+	LiteralCode bool
 }
 
 func (g Grammar) isGroup(tag string) bool {
@@ -211,8 +220,9 @@ type Command struct {
 	Tag   string
 	Attrs []Attr
 	// Body is a leaf command's text.
-	Body   string
-	Fields []Field
+	Body     string
+	Fields   []Field
+	Children []Command
 	// Scope is the group the command sits in, nil at the root. Commands of
 	// one group share it.
 	Scope *Scope
@@ -287,7 +297,7 @@ func (c Command) Single(p *Problems, tag string) (string, bool) {
 // still returned, so the caller's validation lists as much as it can in one
 // refusal.
 func Parse(p *Problems, g Grammar, s string) []Command {
-	r := &parser{tokenizer: tokenizer{s: s, p: p}, g: g}
+	r := &parser{tokenizer: tokenizer{s: s, p: p, literalCode: g.LiteralCode}, g: g}
 	for !r.fatal {
 		r.skipSpace()
 		if r.i >= len(r.s) {
@@ -348,7 +358,11 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 	if !tag.selfClosing {
 		switch spec.Kind {
 		case Leaf:
-			body, ok := r.readBody(tag.name, tag.at, spec.DecodeBody, nil, "")
+			var wrapper *bodyWrapper
+			if spec.Wrapper != "" {
+				wrapper = &bodyWrapper{tag: r.g.Prefix + spec.Wrapper, fields: r.g.fieldTags(spec), children: &cmd.Children, refuseOpenings: r.g.RefuseFieldOpenings, parent: cmd}
+			}
+			body, ok := r.readContent(tag.name, tag.at, spec.DecodeBody, nil, "", wrapper)
 			if !ok {
 				return false
 			}
@@ -484,10 +498,11 @@ func excerpt(s string) string {
 
 // tokenizer reads a command string; fatal is set once reading cannot go on.
 type tokenizer struct {
-	s     string
-	i     int
-	p     *Problems
-	fatal bool
+	s           string
+	i           int
+	p           *Problems
+	fatal       bool
+	literalCode bool
 }
 
 func (t *tokenizer) lineAt(i int) int {
@@ -594,6 +609,19 @@ type bodySegment struct {
 // sections through, and strips the one newline at each end; with decode, it
 // then decodes the text outside CDATA.
 func (t *tokenizer) readBody(name string, from int, decode bool, fields []string, label string) (string, bool) {
+	return t.readContent(name, from, decode, fields, label, nil)
+}
+
+type bodyWrapper struct {
+	tag            string
+	fields         []string
+	children       *[]Command
+	refuseOpenings bool
+	parent         Command
+}
+
+func (t *tokenizer) readContent(name string, from int, decode bool, fields []string, label string, wrapper *bodyWrapper) (string, bool) {
+	bodyStart := t.i
 	closing := "</" + name + ">"
 	var segs []bodySegment
 	var text strings.Builder
@@ -604,13 +632,22 @@ func (t *tokenizer) readBody(name string, from int, decode bool, fields []string
 		}
 	}
 	for {
-		next := strings.IndexByte(t.s[t.i:], '<')
-		if next < 0 {
+		if t.i >= len(t.s) {
 			t.fail(from, "<%s> has no closing %s", name, closing)
 			return "", false
 		}
-		text.WriteString(t.s[t.i : t.i+next])
-		t.i += next
+		if t.literalCode {
+			if end := codeLiteralEnd(t.s, t.i, bodyStart, closing); end > t.i {
+				text.WriteString(t.s[t.i:end])
+				t.i = end
+				continue
+			}
+		}
+		if t.s[t.i] != '<' {
+			text.WriteByte(t.s[t.i])
+			t.i++
+			continue
+		}
 		rest := t.s[t.i:]
 		switch {
 		case strings.HasPrefix(rest, closing):
@@ -626,6 +663,17 @@ func (t *tokenizer) readBody(name string, from int, decode bool, fields []string
 			flush()
 			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
 			t.i += 9 + end + 3
+		case wrapper != nil && openingTagPrefix(rest, wrapper.tag):
+			tag, ok := t.readOpen()
+			if !ok {
+				return "", false
+			}
+			child := Command{Pos: wrapper.parent.Pos, Line: t.lineAt(tag.at), Tag: tag.name, Scope: wrapper.parent.Scope}
+			checkAttrs(t.p, child.Label(), tag.attrs, nil)
+			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings) {
+				return "", false
+			}
+			*wrapper.children = append(*wrapper.children, child)
 		default:
 			for _, field := range fields {
 				if strings.HasPrefix(rest, "<"+field+">") {
@@ -637,6 +685,91 @@ func (t *tokenizer) readBody(name string, from int, decode bool, fields []string
 			t.i++
 		}
 	}
+}
+
+func openingTagPrefix(s, tag string) bool {
+	prefix := "<" + tag
+	return strings.HasPrefix(s, prefix) && len(s) > len(prefix) && (isSpace(s[len(prefix)]) || s[len(prefix)] == '>' || s[len(prefix)] == '/')
+}
+
+// codeLiteralEnd recognizes matched Markdown code without changing its bytes.
+// Unmatched delimiters remain ordinary text, so they cannot hide a command's
+// real closing tag. Fences take precedence over spans and may contain backticks.
+func codeLiteralEnd(s string, at, bodyStart int, closing string) int {
+	mark := s[at]
+	if mark != '`' && mark != '~' || at > bodyStart && s[at-1] == mark {
+		return at
+	}
+	run := 1
+	for at+run < len(s) && s[at+run] == mark {
+		run++
+	}
+	lineStart := strings.LastIndexByte(s[bodyStart:at], '\n') + bodyStart + 1
+	indent := s[lineStart:at]
+	if run >= 3 && len(indent) <= 3 && strings.Trim(indent, " ") == "" {
+		if newline := strings.IndexByte(s[at+run:], '\n'); newline >= 0 {
+			infoEnd := at + run + newline
+			if mark != '`' || !strings.ContainsRune(s[at+run:infoEnd], '`') {
+				for start := infoEnd + 1; start < len(s); {
+					end := strings.IndexByte(s[start:], '\n')
+					if end < 0 {
+						end = len(s)
+					} else {
+						end += start
+					}
+					pos := start
+					for pos < end && pos-start < 3 && s[pos] == ' ' {
+						pos++
+					}
+					closeStart := pos
+					for pos < end && s[pos] == mark {
+						pos++
+					}
+					if pos-closeStart >= run {
+						tail := strings.TrimSpace(s[pos:end])
+						if tail == "" {
+							return end
+						}
+						// The enclosing command tag is not Markdown payload, so a
+						// fence at the very end of that payload still closes.
+						if strings.HasPrefix(tail, closing) {
+							return pos
+						}
+					}
+					if end == len(s) {
+						break
+					}
+					start = end + 1
+				}
+			}
+		}
+	}
+	if mark != '`' {
+		return at
+	}
+	slashes := 0
+	for pos := at - 1; pos >= bodyStart && s[pos] == '\\'; pos-- {
+		slashes++
+	}
+	if slashes%2 != 0 {
+		return at
+	}
+	for pos := at + run; pos < len(s); {
+		next := strings.IndexByte(s[pos:], '`')
+		if next < 0 {
+			break
+		}
+		pos += next
+		end := pos + 1
+		for end < len(s) && s[end] == '`' {
+			end++
+		}
+		if end-pos == run {
+			return end
+		}
+		pos = end
+	}
+	return at
 }
 
 // joinBody strips the body's one newline at each end before decoding, so a

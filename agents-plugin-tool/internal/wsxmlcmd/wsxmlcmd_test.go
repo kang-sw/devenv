@@ -57,6 +57,59 @@ func TestCallerPrefixAndTableDecideTheTags(t *testing.T) {
 	}
 }
 
+func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
+	input := "<tr:note>`</tr:note>` tail</tr:note>"
+	cmds, problems := parse(testGrammar, input)
+	if len(problems) == 0 || len(cmds) != 1 || cmds[0].Body != "`" {
+		t.Fatalf("default grammar changed delimiter behavior: %+v, %q", cmds, problems)
+	}
+	g := Grammar{Prefix: "x:", LiteralCode: true, RefuseFieldOpenings: true, Commands: map[string]Spec{
+		"payload": {Kind: Leaf, Wrapper: "change", Fields: []string{"old", "new"}},
+		"text":    {Kind: Leaf},
+	}}
+	for _, body := range []string{
+		"`</x:text>`", "``a ` </x:text>``", "unmatched ` text",
+		"```xml\n</x:text> `\n```\n", "~~~xml\n</x:text> `\n~~~\n",
+		"   ````xml\n</x:text>\n```\n   `````\n",
+		"```xml\ninterior ``` </x:text> is still code\n```",
+		"~~~xml\n</x:text> `\n~~~",
+	} {
+		cmds, problems := parse(g, "<x:text>"+body+"</x:text>")
+		if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != stripTrailingNewline(body) {
+			t.Fatalf("literal %q: %+v, %q", body, cmds, problems)
+		}
+	}
+	cmds, problems = parse(g, "<x:payload>\n<x:change><x:old>`<x:new></x:old>`</x:old><x:new/></x:change>\n<x:change><x:old><![CDATA[<x:new></x:old>]]></x:old><x:new> &amp; </x:new></x:change>\n</x:payload>")
+	if len(problems) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 2 || strings.TrimSpace(cmds[0].Body) != "" {
+		t.Fatalf("wrapped fields: %+v, %q", cmds, problems)
+	}
+	children := cmds[0].Children
+	if children[0].FieldsOf("x:old")[0] != "`<x:new></x:old>`" || children[1].FieldsOf("x:old")[0] != "<x:new></x:old>" || children[1].FieldsOf("x:new")[0] != " &amp; " {
+		t.Fatalf("operand bytes changed: %+v", children)
+	}
+	// Undeclared wrapper spellings and code/CDATA examples remain raw payload.
+	body := "`<x:change/>` <![CDATA[<x:change/>]]> <x:changex/>"
+	cmds, problems = parse(g, "<x:payload>"+body+"</x:payload>")
+	if len(problems) != 0 || len(cmds[0].Children) != 0 || cmds[0].Body != "`<x:change/>` <x:change/> <x:changex/>" {
+		t.Fatalf("literal wrapper: %+v, %q", cmds, problems)
+	}
+	cmds, problems = parse(g, "<x:payload>stray<x:change/></x:payload>")
+	if len(problems) != 0 || cmds[0].Body != "stray" || len(cmds[0].Children) != 1 {
+		t.Fatalf("mixed content must remain visible to validation: %+v, %q", cmds, problems)
+	}
+	// Long unmatched runs must remain linear rather than rescanning every
+	// suffix of the same delimiter run.
+	long := strings.Repeat("`", 128*1024)
+	cmds, problems = parse(g, "<x:text>"+long+"</x:text>")
+	if len(problems) != 0 || cmds[0].Body != long {
+		t.Fatal("unmatched run changed payload")
+	}
+	_, problems = parse(g, "<x:payload><x:change><x:old>missed<x:new>closing</x:old></x:change></x:payload>")
+	if len(problems) == 0 || !strings.Contains(problems[0], "body holds an opening <x:new>") {
+		t.Fatalf("literal opt-in relaxed real sibling validation: %q", problems)
+	}
+}
+
 func TestEmptyPrefixTakesBareNames(t *testing.T) {
 	g := Grammar{Commands: map[string]Spec{"go": {Kind: Empty}}}
 	cmds, problems := parse(g, `<go/><go></go>`)

@@ -116,6 +116,57 @@ func TestFieldBodiesRefuseSiblingOpenings(t *testing.T) {
 	}
 }
 
+func TestPanelAndLogCodeLiteralsAreInert(t *testing.T) {
+	for _, payload := range []string{
+		"Inline `</wb:panel></wb:topic><wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>` stays text.",
+		"Use ``a ` backtick </wb:panel><wb:change/>`` literally.",
+		"```xml\n</wb:panel></wb:topic>\n<wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>\n```\n\nAfter fence.",
+		"```xml\ninterior ``` </wb:panel><wb:change/> remains code\n```",
+		"~~~xml\n</wb:panel> and <wb:change/>\n~~~",
+		"  ~~~~xml\n</wb:panel> and <wb:change/>\n~~~\n  ~~~~~\nAfter tilde fence.",
+		"<![CDATA[<wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>]]>",
+	} {
+		cmds := mustParse(t, panelXML("t", "sample", payload)+logXML("t", "after sample"))
+		want := strings.TrimSuffix(strings.TrimPrefix(payload, "<![CDATA["), "]]>")
+		if len(cmds) != 2 || cmds[0].Body != want || len(cmds[0].Children) != 0 || cmds[1].Body != "after sample" {
+			t.Fatalf("literal payload changed structure or bytes: %+v", cmds)
+		}
+		st := &State{}
+		mustApply(t, st, panelXML("t", "sample", payload))
+		if entries(t, st, "t")[0].Text != want {
+			t.Fatal("literal panel was not stored verbatim")
+		}
+	}
+	line := "Literal `</wb:log></wb:topic><wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>` is inert."
+	st := &State{}
+	mustApply(t, st, logXML("t", line))
+	if got, _ := st.LatestAgent("t"); got.Text != line {
+		t.Fatalf("literal log = %+v", got)
+	}
+	// Fences do not relax the independent one-source-line log contract.
+	refused(t, st, logXML("t", "```xml\n</wb:log>\n```"))
+	for _, operand := range []string{
+		"`<wb:new></wb:old><wb:change/>`",
+		"```xml\n<wb:new></wb:old><wb:change/>\n```",
+	} {
+		cmds := mustParse(t, `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>`+operand+`</wb:old><wb:new/></wb:change></wb:panel></wb:topic>`)
+		if len(cmds[0].Children) != 1 || cmds[0].Children[0].FieldsOf("wb:old")[0] != operand {
+			t.Fatalf("literal patch operand changed: %+v", cmds)
+		}
+		// The existing sibling-opening guard still applies outside literals.
+		_, problems := parse(`<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>x<wb:new>y</wb:old><wb:new/></wb:change></wb:panel></wb:topic>`)
+		wantProblems(t, problems, "body holds an opening <wb:new>")
+	}
+	old := "`<wb:old></wb:panel><wb:change/>`"
+	newText := "~~~xml\n<wb:new></wb:panel><wb:change/>\n~~~"
+	st = &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="sample" recap="Literal">`+old+`</wb:panel></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>`+old+`</wb:old><wb:new>`+newText+`</wb:new></wb:change></wb:panel></wb:topic>`)
+	if latest := queryResult(t, st, `{"panel":"p1"}`).Direct.Entry; latest.Text != newText {
+		t.Fatal("literal operands did not patch stored payload verbatim")
+	}
+}
+
 func TestCDATAHoldsALiteralClosingTag(t *testing.T) {
 	cmds := mustParse(t, `<wb:topic name="t"><wb:body>use <![CDATA[</wb:body> and <b> & ]]> here</wb:body></wb:topic>`)
 	if want := "use </wb:body> and <b> & " + " here"; cmds[0].Body != want {
