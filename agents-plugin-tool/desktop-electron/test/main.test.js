@@ -21,8 +21,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/') {
       this.webContents = Object.assign(new EventEmitter(), {
         setUserAgent: agent => { this.agent = agent; }, getUserAgent: () => 'Chromium',
         setWindowOpenHandler: handler => { this.popup = handler; },
-        loadURL: async url => { this.loads.push(url); this.currentURL = url; },
-        loadFile: async file => { this.loads.push(file); this.currentURL = file; },
+        loadURL: async url => { this.loads.push(url); this.currentURL = url; this.webContents.emit('did-navigate', {}, url); },
+        loadFile: async file => { this.loads.push(file); this.currentURL = file; this.webContents.emit('did-navigate', {}, pathToFileURL(file).href); },
         setZoomFactor: zoom => { this.zoom = zoom; },
       });
       Window.current = this;
@@ -168,7 +168,7 @@ test('Retry Stay preserves the current page, title and old pin after rediscovery
   assert.equal(w.loads.at(-1), discovered);
   assertRetainedPage(f, originalURL, originalTitle);
   // Cancellation must release the retry lock, not leave the shell stuck.
-  w.webContents.loadURL = async url => { w.loads.push(url); w.currentURL = url; };
+  w.webContents.loadURL = async url => { w.loads.push(url); w.currentURL = url; w.webContents.emit('did-navigate', {}, url); };
   await f.menus.retry.click();
   assert.equal(w.currentURL, discovered);
 });
@@ -232,7 +232,7 @@ test('a superseded popup cannot roll back Retry after discovery pins a new origi
       w.webContents.loadURL = url => {
         w.loads.push(url);
         return new Promise((resolve, reject) => {
-          pending.push({ resolve: () => { w.currentURL = url; resolve(); }, reject });
+          pending.push({ resolve: () => { w.currentURL = url; w.webContents.emit('did-navigate', {}, url); resolve(); }, reject });
         });
       };
       w.popup({ url: originalURL + 's/slow-popup' });
@@ -258,6 +258,95 @@ test('a superseded popup cannot roll back Retry after discovery pins a new origi
       assertRetainedPage(f, discovered, 'Werkschaft');
     }
   }
+});
+test('Retry then popup Stay restores the committed page instead of the provisional Retry pin', async () => {
+  let discovered = 'http://127.0.0.1:39418/';
+  const f = await fixture(async () => discovered), w = f.window;
+  const originalURL = w.currentURL, originalTitle = w.title, pending = [];
+  w.webContents.loadURL = url => {
+    w.loads.push(url);
+    return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
+  };
+  discovered = 'http://127.0.0.1:39419/';
+  const retry = f.menus.retry.click();
+  await tick();
+  assert.equal(w.currentURL, originalURL, 'Retry has not committed origin B');
+  assert.equal(pending.length, 1);
+  assert.deepEqual(w.popup({ url: discovered + 's/popup' }), { action: 'deny' });
+  assert.equal(pending.length, 2);
+  w.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must retain the popup unload veto'); } });
+  pending[1].reject(Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED', errno: -3 }));
+  await tick();
+  pending[0].reject(Object.assign(new Error('superseded Retry'), { code: 'ERR_ABORTED', errno: -3 }));
+  await retry;
+  assertRetainedPage(f, originalURL, originalTitle);
+});
+test('rollback advances on a document commit before its load promise settles', async () => {
+  let discovered = 'http://127.0.0.1:39418/';
+  const f = await fixture(async () => discovered), w = f.window, pending = [];
+  w.webContents.loadURL = url => {
+    w.loads.push(url);
+    return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
+  };
+  discovered = 'http://127.0.0.1:39419/';
+  const retry = f.menus.retry.click();
+  await tick();
+  // Main-document commit precedes did-finish-load / loadURL resolution.
+  w.currentURL = discovered;
+  w.webContents.emit('did-navigate', {}, discovered);
+  w.popup({ url: discovered + 's/popup' });
+  w.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must retain the veto'); } });
+  pending[1].reject(Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }));
+  await tick();
+  pending[0].reject(Object.assign(new Error('superseded Retry'), { code: 'ERR_ABORTED' }));
+  await retry;
+  assertRetainedPage(f, discovered, 'Werkschaft');
+});
+test('a superseded Retry promise cannot advance rollback without a document commit', async () => {
+  let discovered = 'http://127.0.0.1:39418/';
+  const f = await fixture(async () => discovered), w = f.window, pending = [];
+  const originalURL = w.currentURL, originalTitle = w.title;
+  w.webContents.loadURL = url => {
+    w.loads.push(url);
+    return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
+  };
+  discovered = 'http://127.0.0.1:39419/';
+  const retry = f.menus.retry.click();
+  await tick();
+  w.popup({ url: discovered + 's/popup' });
+  pending[0].resolve(); // Late successful settlement is not a new commit event.
+  await retry;
+  w.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must retain the veto'); } });
+  pending[1].reject(Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }));
+  await tick();
+  assertRetainedPage(f, originalURL, originalTitle);
+});
+test('Stay restores a committed connection-page title, not an in-flight Retry title', async () => {
+  let discovered;
+  const f = await fixture(async () => {
+    if (!discovered) throw new Error('No readable dashboard endpoint');
+    return discovered;
+  }), w = f.window;
+  const originalURL = w.currentURL, originalTitle = w.title, pending = [];
+  w.webContents.loadURL = url => {
+    w.loads.push(url);
+    return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
+  };
+  discovered = 'http://127.0.0.1:39419/';
+  const retry = f.menus.retry.click();
+  await tick();
+  w.popup({ url: discovered + 's/popup' });
+  w.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must retain the veto'); } });
+  pending[1].reject(Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }));
+  await tick();
+  pending[0].reject(Object.assign(new Error('superseded Retry'), { code: 'ERR_ABORTED' }));
+  await retry;
+  assert.equal(w.currentURL, originalURL);
+  assert.equal(w.title, originalTitle);
+  assert.equal(w.loads.filter(load => path.basename(load) === 'connection.html').length, 1);
+  let decision;
+  f.session.webRequest.handler({ url: discovered + 's/frame', resourceType: 'subFrame' }, value => { decision = value; });
+  assert.deepEqual(decision, { cancel: true }, 'a connection page has no retained dashboard origin');
 });
 test('an unrelated close Stay does not turn a later navigation abort into Stay', async () => {
   const f = await fixture(), w = f.window;

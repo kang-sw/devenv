@@ -28,10 +28,10 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false },
     });
     const wc = window.webContents;
-    let navigation, closing = false;
+    let navigation, closing = false, retained = { pin, title };
     window.on('close', () => { closing = true; });
     function beginNavigation() {
-      const attempt = { previous: { pin, title }, loading: false, stayed: false };
+      const attempt = { loading: false, stayed: false };
       navigation = attempt;
       return attempt;
     }
@@ -48,6 +48,12 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
     // Initial iframe src loads do not reliably emit will-frame-navigate.
     // Enforce the pin at the network boundary too, including redirect hops.
     const connectionURL = pathToFileURL(path.join(__dirname, 'connection.html')).href;
+    wc.on('did-navigate', (_event, url) => {
+      const target = navigation?.commitTarget;
+      // Rollback belongs to the committed document, never another attempt's
+      // provisional pin/title. A late promise settlement cannot advance it.
+      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : url === connectionURL)) retained = target;
+    });
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
       if (details.resourceType === 'mainFrame' && details.url === connectionURL) return callback({});
@@ -87,23 +93,26 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       else if (attempt && isCurrent(attempt)) attempt.stayed = true;
     });
     function setTitle(value) { title = value; if (!window.isDestroyed()) window.setTitle(title); }
-    function navigationFailed() {
+    function navigationFailed(attempt) {
       pin = null;
-      setTitle('Werkschaft — Navigation failed — ⌘R to retry');
+      const failureTitle = 'Werkschaft — Navigation failed — ⌘R to retry';
+      setTitle(failureTitle);
+      attempt.commitTarget = { pin: null, title: failureTitle };
       return wc.loadFile(path.join(__dirname, 'connection.html')).catch(() => {});
     }
     async function navigate(url, attempt = beginNavigation()) {
       if (!isCurrent(attempt)) return;
+      attempt.commitTarget = { pin: `${new URL(url).origin}/`, title: 'Werkschaft' };
       attempt.loading = true;
       try { await wc.loadURL(url); }
       catch (error) {
         if (!isCurrent(attempt)) return;
         // ERR_ABORTED alone also means supersession or policy cancellation. Only
-        // this still-current load's observed Stay may restore its previous pin.
+        // this still-current load's observed Stay may restore the retained page.
         if (attempt.stayed && (error.code === 'ERR_ABORTED' || error.errno === -3)) {
-          pin = attempt.previous.pin;
-          setTitle(attempt.previous.title);
-        } else await navigationFailed();
+          pin = retained.pin;
+          setTitle(retained.title);
+        } else await navigationFailed(attempt);
       } finally {
         attempt.loading = false;
         if (navigation === attempt) navigation = null;
@@ -120,7 +129,9 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
         catch (error) {
           if (!isCurrent(attempt)) return;
           pin = null;
-          setTitle(`Werkschaft — ${error.message} — ⌘R to retry`);
+          const failureTitle = `Werkschaft — ${error.message} — ⌘R to retry`;
+          setTitle(failureTitle);
+          attempt.commitTarget = { pin: null, title: failureTitle };
           await wc.loadFile(path.join(__dirname, 'connection.html'));
           return;
         }
@@ -128,7 +139,7 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
         pin = url;
         setTitle('Werkschaft');
         await navigate(url, attempt);
-      } catch { if (isCurrent(attempt)) await navigationFailed(); }
+      } catch { if (isCurrent(attempt)) await navigationFailed(attempt); }
       finally {
         connecting = false;
         if (navigation === attempt) navigation = null;
