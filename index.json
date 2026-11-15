@@ -219,7 +219,17 @@
       "registered_at": "2026-11-14T13:57:08Z"
     },
     "261114-bug-ws-dashboard-conversation-send-follow-bottom": {
-      "registered_at": "2026-11-14T11:36:43Z"
+      "registered_at": "2026-11-14T11:36:43Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T18:16:54Z",
+        "impl": {
+          "branch": "impl/develop/stomp-stunt-fox"
+        }
+      }
     },
     "261114-bug-ws-dashboard-history-paint-resizeobserver-loop": {
       "registered_at": "2026-11-13T21:17:34Z"
