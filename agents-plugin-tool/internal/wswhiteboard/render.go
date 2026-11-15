@@ -216,6 +216,9 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 	for _, l := range wsi18n.Languages() {
 		lang := l.Code
 		funcs := template.FuncMap{
+			"clockOf": func(at string, ms int64, stamp, clock, class string) clockView {
+				return clockView{At: at, Ms: ms, Stamp: stamp, Clock: clock, Class: class}
+			},
 			"icon": func(name string) (template.HTML, error) {
 				if !a.icons[name] {
 					return "", fmt.Errorf("whiteboard page: no sprite symbol %q", name)
@@ -899,6 +902,10 @@ type itemData struct {
 	// AskClock/AskAt/AskReasked put an anchored question's ask time and
 	// re-ask time in its own row instead of a caption line above it.
 	AskClock, AskAt, AskReasked string
+	// AskMs/AskStamp give the ask clock the same relative-time data every
+	// other history clock carries.
+	AskMs    int64
+	AskStamp string
 }
 
 // ItemOf pairs an item with the page for the item templates.
@@ -1142,4 +1149,14 @@ func rowBox(state string) string {
 	default:
 		return "box"
 	}
+}
+
+// clockView is the "clock" template's input: one entry-at time element with
+// its datetime, exact stamp, Unix-millisecond time and any extra class.
+type clockView struct {
+	At    string
+	Ms    int64
+	Stamp string
+	Clock string
+	Class string
 }

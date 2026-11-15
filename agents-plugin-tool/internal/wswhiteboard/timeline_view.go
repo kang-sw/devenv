@@ -30,6 +30,8 @@ type timelineRow struct {
 	Created                              []timelineRow
 	Ask, Answer, Preceding, LatestAnswer bool
 	Clock, At                            string
+	Ms                                   int64
+	Stamp                                string
 	Inputs                               []inputHeader
 }
 
@@ -195,6 +197,7 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 				iv := itemView(item)
 				r.Item, r.Ask, r.Answer = &iv, firstAsk[e.ItemID] == e.ID, e.OwnerAnswer()
 				r.Clock, r.At, r.Reasked = e.Clock, e.At, clock(item.ReaskedAt)
+				r.Ms, r.Stamp = e.Ms, e.Stamp
 				r.AnswerTarget = lastAnswer[e.ItemID]
 				if r.Answer {
 					currentAnswer := e.ID == lastAnswer[e.ItemID] && item.Answer != "" && item.Status != StatusAssumed
@@ -307,6 +310,7 @@ func (r timelineData) ItemData() itemData {
 		d.History = &EntryView{}
 	} else if r.Ask {
 		d.AskClock, d.AskAt, d.AskReasked = r.Clock, r.At, r.Reasked
+		d.AskMs, d.AskStamp = r.Ms, r.Stamp
 	}
 	return d
 }
