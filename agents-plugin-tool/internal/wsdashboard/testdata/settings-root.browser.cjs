@@ -22,12 +22,13 @@ const [base, emptyBase] = process.argv.slice(2);
       { kind: 'five_hour', percent: 20, asOf: at, resetsAt: at + 3 * 3600000 },
       { kind: 'seven_day', percent: 53, asOf: at, resetsAt: at + 4 * 86400000 }
     ] }, { harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent: 38, asOf: at, resetsAt: at + 4 * 86400000 }] }];
-    await context.route('**/*', route => {
+    const offlineRoute = route => {
       const url = new URL(route.request().url());
       if (![base, emptyBase].includes(url.origin)) return route.abort();
       if (url.pathname === '/rail/usage') return route.fulfill({ json: { entries: url.origin === emptyBase ? [] : entries, warnPercent: 80, critPercent: 95 } });
       return route.continue();
-    });
+    };
+    await context.route('**/*', offlineRoute);
     const page = await context.newPage();
     page.on('pageerror', e => errors.push(e.message));
     const current = () => page.frameLocator('iframe.sframe.on');
@@ -127,5 +128,74 @@ const [base, emptyBase] = process.argv.slice(2);
     assert.deepEqual(errors, []);
     console.log('Settings/root: keyboard, focus, dismissal, frame preferences, cookies/reload, cached draft, empty selection, narrow geometry, usage interaction and no-session reachability passed.');
     await context.close();
+
+    // Persistence is optional: the current choice must still reach visible,
+    // cached hidden and newly loaded frames when storage is denied or full.
+    for (const failure of ['denied', 'writes']) {
+      const locked = await browser.newContext({ viewport: { width: 1700, height: 900 }, serviceWorkers: 'allow', reducedMotion: 'reduce' });
+      locked.setDefaultTimeout(10000);
+      await locked.addInitScript(failure => {
+        if (self.origin === 'null') return;
+        const workers = navigator.serviceWorker;
+        if (workers) Object.getPrototypeOf(workers).register = async () => { throw new Error('Service workers forbidden in isolated Settings fixture'); };
+        const refuse = () => { throw new DOMException('Fixture storage unavailable', 'SecurityError'); };
+        if (failure === 'denied') Object.defineProperty(window, 'localStorage', { get: refuse });
+        else {
+          Storage.prototype.setItem = refuse;
+          Storage.prototype.removeItem = refuse;
+        }
+      }, failure);
+      const sends = [], lockedErrors = [];
+      await locked.route('**/*', route => {
+        if (new URL(route.request().url()).pathname === '/s/livesession/message') {
+          sends.push(route.request().postDataJSON());
+          return route.fulfill({ json: {} });
+        }
+        return offlineRoute(route);
+      });
+      const tab = await locked.newPage();
+      tab.on('pageerror', e => lockedErrors.push(e.message));
+      await tab.goto(base + '/');
+      await tab.locator('.rl[href="/s/livesession"]').click();
+      await tab.frameLocator('.sframe.on').locator('#ctext').waitFor();
+      const cached = tab.frame({ url: base + '/s/livesession?frame=1' });
+      await tab.goBack();
+      await tab.frameLocator('.sframe.on').locator('#grid').waitFor();
+      await tab.locator('#gear').click();
+      await tab.locator('#gmenu [data-layout="tabs"]').click();
+      await tab.locator('#gmenu [data-input="mod"]').click();
+      await cached.waitForFunction(() => document.getElementById('grid').getAttribute('data-layout') === 'tabs' && document.getElementById('ctext').placeholder === window.wsT('js.hint.mod'));
+      await tab.keyboard.press('Escape');
+      await tab.locator('#gear').click();
+      assert.equal(await tab.locator('#gmenu [data-layout="tabs"]').getAttribute('aria-pressed'), 'true');
+      assert.equal(await tab.locator('#gmenu [data-input="mod"]').getAttribute('aria-pressed'), 'true');
+      await tab.keyboard.press('Escape');
+      await tab.goForward();
+      await cached.goto(base + '/s/livesession?frame=1');
+      await cached.locator('#grid[data-layout="tabs"]').waitFor();
+      const textarea = cached.locator('#ctext');
+      await textarea.waitFor();
+      await textarea.fill('Actual send-key mode');
+      await textarea.press('Enter');
+      assert.equal(await textarea.inputValue(), 'Actual send-key mode\n');
+      assert.equal(sends.length, 0, failure + ': plain Enter must not send in modifier mode');
+      const sent = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/livesession/message');
+      await textarea.press('Control+Enter'); await sent;
+      await cached.waitForFunction(() => document.getElementById('ctext').value === '');
+      assert.equal(sends.length, 1, failure + ': modifier Enter sends despite failed persistence');
+      await tab.locator('#gear').click();
+      await tab.locator('#gmenu [data-layout="split"]').click();
+      await tab.locator('#gmenu [data-input="enter"]').click();
+      await cached.locator('#grid[data-layout="split"]').waitFor();
+      await tab.keyboard.press('Escape');
+      await textarea.fill('Enter sends again');
+      const sentAgain = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/livesession/message');
+      await textarea.press('Enter'); await sentAgain;
+      assert.equal(sends.length, 2, failure + ': active-frame mode changes immediately');
+      assert.deepEqual(lockedErrors, []);
+      assert.deepEqual(locked.serviceWorkers(), []);
+      await locked.close();
+      console.log('Storage ' + failure + ': hidden/visible frame layout, retained in-memory choice and actual send keys passed.');
+    }
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
