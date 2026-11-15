@@ -1,7 +1,5 @@
 ---
 title: "Clarify generated artifact path reservation contracts"
-related:
-  261114-feat-ws-content-change-relative-hover: "dogfood preparation failure exposed caller confusion"
 ---
 
 # Clarify generated artifact path reservation contracts
