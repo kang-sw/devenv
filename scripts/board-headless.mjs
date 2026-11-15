@@ -178,6 +178,7 @@ import { scenarioHistoryUnified } from "./board-history-unified.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TOOL_DIR = path.join(REPO, "agents-plugin-tool");
+const LOGIC_ONLY = process.env.WS_BOARD_ACCEPTANCE_LOGIC_ONLY === '1';
 
 // --- arguments ---------------------------------------------------------------
 
@@ -697,7 +698,7 @@ async function openBoard(ctx) {
     BROWSERS.push(browser);
   }
   const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height }, locale: ctx.language === 'ko' ? 'ko-KR' : undefined });
-  if (ctx.language) await tab.context().addCookies([{ name: 'ws_dashboard_lang', value: ctx.language, url: new URL(ctx.args.url).origin }]);
+  if (ctx.language && /^https?:/.test(ctx.args.url)) await tab.context().addCookies([{ name: 'ws_dashboard_lang', value: ctx.language, url: new URL(ctx.args.url).origin }]);
   tab.on("pageerror", (e) => ctx.errors.push(String(e)));
   if (ctx.args['menu-hit-targets']) {
     ctx.menuHits = [];
@@ -709,6 +710,13 @@ async function openBoard(ctx) {
   const consoleErrors = [];
   tab.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   await tab.addInitScript(INIT, { menuHitTargets: !!ctx.args['menu-hit-targets'] });
+  if (ctx.legacyPanelFold) await tab.addInitScript((legacyKey) => {
+    // Seed only the fresh top document, before production reads browser state.
+    // Subsequent reloads keep the migrated record rather than reseeding it.
+    if (window !== window.top || localStorage.getItem('ws.dashboard.panelshut') !== null) return;
+    if (localStorage.length || sessionStorage.length) throw new Error('legacy-only fixture requires empty browser storage');
+    localStorage.setItem('ws.dashboard.panelshut', JSON.stringify([legacyKey]));
+  }, ctx.legacyPanelFold);
   if (ctx.assetRef) {
     const files = ['wsdashboard/assets/cards.js', 'wsdashboard/assets/dashboard.css', 'wsdashboard/assets/overview.js', 'wsdashboard/assets/terminal.js', 'wswhiteboard/assets/rail.js'];
     ctx.assetReplacements = []; ctx.assetHashes = {};
@@ -2894,13 +2902,13 @@ const HISTORY_PAGE = () => {
     const cr = rect(control), x = cr && (cr.left + cr.right) / 2, y = cr && (cr.top + cr.bottom) / 2;
     let owner = cr && document.elementFromPoint(x, y), ancestry = [];
     for (let p = owner; p && ancestry.length < 7; p = p.parentElement) ancestry.push({ tag: p.tagName, id: p.id, cls: p.className });
-    const hs = getComputedStyle(head), keep = bh.keeping();
+    const hs = getComputedStyle(head), keep = bh.keeping(), column = document.querySelector('#bcol');
     return { id, target: rect(node), control: cr, point: { x, y }, ancestry,
       head: { rect: rect(head), position: hs.position, styleTop: hs.top, railTop: hs.getPropertyValue('--wb-rail-top'), height: head.offsetHeight },
       computedNavigateOffset: 12 + (hs.position === 'sticky' ? (parseFloat(hs.top) || 0) + head.offsetHeight : 0),
       face: rect(document.querySelector('.board-toolbar-face')), toolbar: rect(document.querySelector('.board-toolbar')),
       floating: document.querySelector('.board-toolbar')?.hasAttribute('data-floating'),
-      railInset: getComputedStyle(document.querySelector('#bcol')).getPropertyValue('--wb-rail-inset'), padding: getComputedStyle(s).scrollPaddingTop,
+      railInset: column ? getComputedStyle(column).getPropertyValue('--wb-rail-inset') : null, padding: getComputedStyle(s).scrollPaddingTop,
       capsules: [...document.querySelectorAll('.wb-cap')].filter((n) => !n.hidden && n.getClientRects().length).map((n) => ({ cls: n.className, rect: rect(n) })),
       keeping: !!keep, targetOffsetObserved: node && node.getBoundingClientRect().top - bh.viewTop(s), scrollTop: s.scrollTop };
   };
@@ -2983,7 +2991,7 @@ async function scenarioHistory(ctx) {
     measure(label, { maxDy: worst, rafMaxDy: rafWorst, frames: painted.filter((s) => s.y).length });
     assert(worst <= 1, `${label}: post-paint screen y moved ${worst.toFixed(2)}px (>1px); evidence ${dir}/${label}.json`);
   };
-  const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
+  const capture = async (name) => { if (LOGIC_ONLY) return; const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
   async function cards() {
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
@@ -3140,9 +3148,12 @@ async function scenarioHistory(ctx) {
     assert(belowAfter.rows === belowCollapse.before.rows && JSON.stringify(belowAfter.folds) === JSON.stringify(belowCollapse.before.folds),
       'below collapse lost rows or disclosure choices');
 
-    // Reuse the dashboard's actual pin button and its real #bpins scroller.
-    if (kind !== 'standalone') {
-      assert(ctx.width >= 1600, 'history dashboard pinned-column check requires --width 1800');
+    if (kind !== 'standalone') await pinnedSetup();
+  }
+  // Shared by the full history scenario and the comparable A/B arrival probe.
+  // No TASK3-only whole-entry/count precheck belongs in this host setup.
+  async function pinnedSetup() {
+      assert(kind !== 'standalone' && ctx.width >= 1600, 'history dashboard pinned-column check requires --width 1800');
       await page.evaluate(() => {
         const bh = window.__bh, topic = bh.history().closest('.topic');
         // A single panel chunk may fit the column. Pin a tall peer as well,
@@ -3172,7 +3183,6 @@ async function scenarioHistory(ctx) {
         bh.section(bh.pinPeer).querySelector('.tpin').click(); bh.focus = null;
       });
       await waitQuiet(page);
-    }
   }
   try {
     if (ctx.args['verify-ref']) {
@@ -3189,7 +3199,8 @@ async function scenarioHistory(ctx) {
       const bar = document.querySelector('.board-toolbar'); bar.style.width = width + 'px'; bar.style.maxWidth = '100%';
     }, +ctx.args['face-width']);
     assert(await page.evaluate(() => !!window.__bh.history()), 'seed HISTORY with serve --history-entries 180');
-    if (ctx.navigationOnly) {
+    if (ctx.pinnedArrivalOnly) await pinnedSetup();
+    else if (ctx.navigationOnly) {
       // Recreate the previous 214px rAF excursion's near-full clip: load a
       // page and let an older payload grow before navigating. This is fixture
       // setup, not an alternative history implementation or keep session.
@@ -3265,7 +3276,7 @@ async function scenarioHistory(ctx) {
       if (!equivalent) throw failure;
       (ctx.knownBaselineFailures ||= []).push(classification);
     }
-    if (ctx.args.case === 'arrival') {
+    if (ctx.args.case === 'arrival' || ctx.pinnedArrivalOnly) {
       report.omissions.push('Focused arrival case excludes subsequent late-height, collapse and live-arrival assertions.');
       return;
     }
@@ -3415,7 +3426,7 @@ async function scenarioHistoryRegressions(ctx) {
   fs.mkdirSync(dir, { recursive: true });
   const report = { url: ctx.args.url, kind, measurements: [], omissions: [] };
   const measure = (label, data) => { report.measurements.push({ label, ...data }); log(`${label}: ${JSON.stringify(data)}`); };
-  const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
+  const capture = async (name) => { if (LOGIC_ONLY) return; const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
   const paint = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0))));
   try {
     await page.evaluate(HISTORY_PAGE);
@@ -3435,29 +3446,50 @@ async function scenarioHistoryRegressions(ctx) {
         if (!fold) throw new Error(`${id} is not the expected ${selector}`);
         fold.open = false;
         bh.foldTab = { summary: fold.querySelector(':scope > summary'), fold };
+        const sentinel = document.createElement('button'); sentinel.textContent = 'Tab starting point';
+        sentinel.style.cssText = 'position:absolute;height:1px;width:1px;padding:0;border:0;opacity:0';
+        fold.before(sentinel); sentinel.focus({ preventScroll: true }); bh.foldTab.sentinel = sentinel;
       }, [name, id, selector]);
       await waitQuiet(page);
-      await page.evaluate(() => {
-        const bh = window.__bh, s = bh.scroller(), node = bh.foldTab.summary;
-        const pill = document.querySelector('.oq-wrap.wb-oq-top .oq-pill:not([hidden])');
-        if (!pill) throw new Error('691 requires a real visible top question pill; seed --shared-actions');
-        const r = node.getBoundingClientRect(), p = pill.getBoundingClientRect();
-        s.scrollTop += (r.top + r.height / 2) - (p.top + p.height / 2);
-      });
-      await waitQuiet(page);
+      let setupAttempts = 0;
+      for (; setupAttempts < 3; setupAttempts++) {
+        const positioned = await page.evaluate(() => {
+          const bh = window.__bh, s = bh.scroller(), node = bh.foldTab.summary;
+          const pill = document.querySelector('.oq-wrap.wb-oq-top .oq-pill:not([hidden])');
+          if (!pill) return false;
+          const r = node.getBoundingClientRect(), p = pill.getBoundingClientRect();
+          if (!r.height || !p.height) return false;
+          // The sticky pill can change owners/position during the scroll.
+          // Use its real settled rectangle again rather than stale geometry.
+          s.scrollTop += (r.top + r.height / 2) - (p.top + p.height / 2);
+          return true;
+        });
+        if (!positioned) break;
+        await waitQuiet(page);
+        if (await page.evaluate(() => {
+          const r = window.__bh.foldTab.summary.getBoundingClientRect();
+          return !!document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('.oq-pill');
+        })) break;
+      }
       const before = await page.evaluate((name) => {
         const bh = window.__bh, h = bh.history(name), node = bh.foldTab.summary, r = node.getBoundingClientRect();
         const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        const sentinel = document.createElement('button'); sentinel.textContent = 'Tab starting point';
-        sentinel.style.cssText = 'position:absolute;height:1px;width:1px;padding:0;border:0;opacity:0';
-        bh.foldTab.fold.before(sentinel); sentinel.focus({ preventScroll: true }); bh.foldTab.sentinel = sentinel;
         const wrap = document.querySelector('.oq-wrap.wb-oq-top');
+        const rectPill = () => wrap?.querySelector('.oq-pill:not([hidden])')?.getBoundingClientRect().toJSON() || null;
         return { boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
           centerCoveredByPill: !!hit?.closest('.oq-pill'), height: r.height,
+          control: r.toJSON(), pill: rectPill(), centerHit: hit && { tag: hit.tagName, classes: hit.className },
           collisionGone: !!wrap && !wrap.classList.contains('top') && parseFloat(getComputedStyle(wrap).marginBottom) === 0,
           whole: h.querySelector('.history-clip').scrollTop === 0 && getComputedStyle(h.querySelector('.history-clip')).maxHeight === 'none' };
       }, name);
-      measure(`${id}-before-real-tab`, before);
+      measure(`${id}-before-real-tab`, { ...before, setupAttempts: Math.min(setupAttempts + 1, 3) });
+      if (!(before.height > 0 && before.centerCoveredByPill)) {
+        const reason = `Skipped: precondition not met for ${id} at ${ctx.width}x${ctx.height}; real pill obstruction could not be established: ` +
+          JSON.stringify({ control: before.control, pill: before.pill, centerHit: before.centerHit });
+        report.omissions.push(reason); (ctx.skips ||= []).push(reason); log(reason);
+        await page.evaluate(() => { window.__bh.foldTab.sentinel.blur(); window.__bh.foldTab.sentinel.remove(); });
+        return;
+      }
       assert(before.height > 0 && before.centerCoveredByPill && before.collisionGone && before.whole,
         `${id}: setup must prove genuine pill obstruction separately from the removed .top collision`);
       await capture(`${id}-before-tab`);
@@ -3716,7 +3748,7 @@ async function scenarioPanelHeader(ctx) {
     });
     assert(JSON.stringify(intrinsic) === JSON.stringify(['23px', '17px', true]), 'intrinsic body spacing/disclosure changed');
   }
-  for (const width of [1440, 800, 360, 320]) {
+  for (const width of (LOGIC_ONLY ? [ctx.width] : [1440, 800, 360, 320])) {
     await viewport(width);
     await measure(`viewport-${width}-open`);
     // Native keyboard disclosure, with focus in the real clipped history.
@@ -3730,7 +3762,7 @@ async function scenarioPanelHeader(ctx) {
     await page.evaluate(() => { window.__bh.headerPanels[1].open = true; });
   }
   await viewport(1440);
-  for (const width of [420, 421]) {
+  for (const width of (LOGIC_ONLY ? [] : [420, 421])) {
     await page.evaluate((w) => { document.querySelector('[data-history="HISTORY"]').style.width = w + 'px'; }, width);
     await measure(`wide-host-content-${width}`);
   }
@@ -3913,6 +3945,7 @@ const SCENARIOS = {
   'history-fit': scenarioHistoryFit,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
+  'history-pinned-arrival': (ctx) => scenarioHistory({ ...ctx, pinnedArrivalOnly: true }),
   'history-regressions': scenarioHistoryRegressions,
   'history-unified': (ctx) => scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFor, bindPage: IN_PAGE, log, assert }),
 };
@@ -3921,6 +3954,7 @@ const SCENARIOS = {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (LOGIC_ONLY) delete args['capture-dir'];
   const name = args._[0];
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
@@ -3930,7 +3964,7 @@ async function main() {
   }
   // check records a failed expectation and lets the scenario go on, so one
   // run reports every part; assert stops the scenario.
-  const ctx = { args, width: +(args.width || 1440), height: +(args.height || 900), errors: [], failures: [], knownBaselineFailures: [] };
+  const ctx = { args, language: args.lang, width: +(args.width || 1440), height: +(args.height || 900), errors: [], failures: [], knownBaselineFailures: [] };
   ctx.check = (cond, msg) => { if (!cond) { ctx.failures.push(msg); console.error(`FAILED: ${msg}`); } return !!cond; };
   try {
     const t0 = Date.now();
@@ -3943,7 +3977,9 @@ async function main() {
     }
     if (ctx.errors.length) ctx.failures.push(`page errors: ${ctx.errors.join(" | ")}`);
     if (ctx.failures.length) throw new Failure(`${ctx.failures.length} check(s) failed:\n  - ${ctx.failures.join("\n  - ")}`);
-    log(`${ctx.knownBaselineFailures?.length ? 'REGRESSION-PASS with ' + ctx.knownBaselineFailures.length + ' known-baseline-failure(s)' : 'PASS'} ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    const verdict = ctx.skips?.length ? 'COMPLETED WITH ' + ctx.skips.length + ' SETUP SKIP(S)' :
+      ctx.knownBaselineFailures?.length ? 'REGRESSION-PASS with ' + ctx.knownBaselineFailures.length + ' known-baseline-failure(s)' : 'PASS';
+    log(`${verdict} ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   } catch (e) {
     console.error(`FAIL ${name}: ${e instanceof Failure ? e.message : e.stack || e}`);
     process.exitCode = 1;

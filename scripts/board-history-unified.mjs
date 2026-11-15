@@ -13,11 +13,14 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
   const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), 'history-unified-captures'));
   fs.mkdirSync(dir, { recursive: true });
   const opened = await openBoard(ctx);
-  let page = opened.page;
-  const { tab, browser, kind } = opened;
+  let page = opened.page, tab = opened.tab;
+  const { browser, kind } = opened;
   const report = { kind, language, width: ctx.width, beforeOnly: !!ctx.args.before, measurements: [], captures: [], comparisons: [], omitted: [] };
+  const logicOnly = process.env.WS_BOARD_ACCEPTANCE_LOGIC_ONLY === '1';
+  if (logicOnly) report.omitted.push('Pure visual captures and reference comparisons omitted under owner UI-fast acceptance.');
   const measure = (name, data) => { report.measurements.push({ name, ...data }); log(`${name}: ${JSON.stringify(data)}`); };
   const capture = async (name, selector) => {
+    if (logicOnly) return null;
     const file = path.join(dir, `${kind}-${language}-${ctx.width}-${name}.png`);
     if (selector) await page.locator(selector).screenshot({ path: file });
     else await tab.screenshot({ path: file, fullPage: true });
@@ -76,6 +79,18 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
         b.click(); return true;
       }, name);
       if (!more) return;
+      // A real reader can expose an admitted panel before its first frame
+      // height exists. Do not exhaust an offscreen topic and wait for its
+      // viewport-unmounted frame to render without bringing it into view.
+      await page.evaluate((name) => {
+        const h = document.querySelector(`.wb-history[data-history="${name}"]`);
+        if (!h?._wbHistoryPending) return;
+        const unmeasured = [...h.querySelectorAll('.history-live .wb-entry.panel')].find(e => {
+          const panel = e.querySelector('.entry-panel');
+          return !e.closest('.panel-versions') && panel?.open && h._wbHistoryHeights[e.id + ':true'] === undefined;
+        });
+        unmeasured?.scrollIntoView({ block: 'center' });
+      }, name);
       await page.waitForFunction((name) => !document.querySelector(`.wb-history[data-history="${name}"]`)?._wbHistoryPending, name, { timeout: 3000 });
       await paint();
     }
@@ -88,6 +103,40 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
         badgeText: badge?.textContent, badgeFill: badge && getComputedStyle(badge).backgroundColor,
         sameSection: !!window.__bh.fixtureGraft };
     }, fixture.foldPanel);
+  }
+  const legacyDiagnostics = [];
+  async function diagnoseLegacy(label, retainDOM = false) {
+    const state = await page.evaluate(({ label, id }) => {
+      const item = document.getElementById('item-' + id), entry = item?.closest('.wb-entry'), history = item?.closest('.wb-history');
+      const topic = item?.closest('.topic'), control = document.querySelector('section.topic[data-topic="DENSITY"] .ckhide');
+      const s = window.__bh.scroller(), seen = topic && window.wbHistory.seen(topic, '0px');
+      const describe = node => {
+        const style = getComputedStyle(node), r = node.getBoundingClientRect();
+        return { tag: node.tagName, id: node.id, classes: node.className,
+          display: style.display, visibility: style.visibility, opacity: style.opacity, contentVisibility: style.contentVisibility,
+          rect: { x: r.x, y: r.y, width: r.width, height: r.height, top: r.top, right: r.right, bottom: r.bottom, left: r.left },
+          clientRects: node.getClientRects().length, beforeCut: node.hasAttribute('data-wb-history-before'), hidden: node.hidden,
+          open: node.tagName === 'DETAILS' ? node.open : undefined };
+      };
+      const ancestors = [];
+      for (let node = item; node; node = node.parentElement) ancestors.push(describe(node));
+      return { label, at: new Date().toISOString(), performanceNow: performance.now(), present: !!item,
+        rootCheckHide: document.documentElement.getAttribute('data-ck-hide'),
+        control: control ? { ...describe(control), pressed: control.getAttribute('aria-pressed') } : null,
+        item: item ? { ...describe(item), outerHTML: item.outerHTML, unknown: !!item.querySelector('.wb-hunknown'),
+          matchesCompletedCheckHide: item.matches('html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not(:has(.wb-hunknown))') } : null,
+        entry: entry ? { ...describe(entry), outerHTML: entry.outerHTML } : null, ancestors,
+        history: history ? { name: history.dataset.history, out: history._wbHistoryOut, steps: history._wbHistorySteps,
+          chunks: history._wbHistoryChunks?.slice(), pending: history._wbHistoryPending && { ...history._wbHistoryPending },
+          firstHeights: { ...history._wbHistoryHeights }, visible: seen && { ratio: seen.ratio, visible: seen.visible, rect: seen.rect } } : null,
+        scroll: { node: s.id || s.tagName, scrollTop: s.scrollTop, scrollHeight: s.scrollHeight, clientHeight: s.clientHeight,
+          windowX: scrollX, windowY: scrollY, documentTop: document.documentElement.scrollTop },
+        activeElement: document.activeElement?.outerHTML };
+    }, { label, id: fixture.legacyOrderedIDs[0] });
+    legacyDiagnostics.push(state);
+    fs.writeFileSync(path.join(dir, `${kind}-${language}-${ctx.width}-legacy-lifecycle.json`), JSON.stringify(legacyDiagnostics, null, 2));
+    if (retainDOM) fs.writeFileSync(path.join(dir, `${kind}-${language}-${ctx.width}-completed-check-failure-dom.html`), await page.content());
+    log(`legacy lifecycle ${label}: ${JSON.stringify({ hide: state.rootCheckHide, pressed: state.control?.pressed, itemDisplay: state.item?.display, entryBeforeCut: state.entry?.beforeCut, history: state.history, scroll: state.scroll })}`);
   }
   async function verifyData(stage) {
     await exhaust('LEGACY'); await exhaust('DENSITY');
@@ -112,14 +161,31 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
       const plain = document.getElementById('item-' + itemIDs.plain)?.closest('.wb-entry');
       const rich = document.getElementById('item-' + itemIDs.rich)?.closest('.wb-entry');
       const titleLike = document.getElementById('item-' + itemIDs.titleLike)?.closest('.wb-entry');
+      const richDiagnostic = {
+        present: !!rich,
+        counts: Object.fromEntries(['table', 'pre code', 'strong', '.opt.static', '.rec-line', '[data-opt]', '[aria-pressed]', '[role="button"]'].map(selector => [selector, rich?.querySelectorAll(selector).length || 0])),
+        offenders: [...(rich?.querySelectorAll('[data-opt],[aria-pressed],[role="button"]') || [])].map(node => ({ tag: node.tagName, classes: node.className, outerHTML: node.outerHTML })),
+        outerHTML: rich?.outerHTML || null
+      };
+      // Answer options stay inert. The rich renderer separately owns native
+      // code-wrap buttons, whose aria-pressed state is not an answer control.
+      const optionNodes = [...(rich?.querySelectorAll('.opts .opt') || [])];
+      const wrapButtons = [...(rich?.querySelectorAll('.ctx .cb > button.cb-wrapbtn') || [])];
+      const richOptionsInert = optionNodes.length === 2 && optionNodes.every(node => node.classList.contains('static')) &&
+        !rich.querySelector('.opts [data-opt],.opts [aria-pressed],.opts [role="button"],.opts button,.opts input,.opts select,.opts textarea');
+      const richNativeCodeControls = wrapButtons.length === rich?.querySelectorAll('.ctx pre code').length && wrapButtons.length > 0 &&
+        wrapButtons.every(node => node.tagName === 'BUTTON' && node.type === 'button' && ['true', 'false'].includes(node.getAttribute('aria-pressed')) &&
+          !node.hasAttribute('data-opt') && !node.hasAttribute('role') && !node.closest('.opts') && !!node.parentElement.querySelector(':scope > pre > code'));
+      const richUnexpectedControls = [...(rich?.querySelectorAll('[data-opt],[aria-pressed],[role="button"]') || [])].filter(node => !wrapButtons.includes(node));
       const histories = [...document.querySelectorAll('.wb-history')];
       const batch = recorded.DENSITY.filter((e) => e.kind === 'system' && e.text?.startsWith('Items added:') && knownBatchIDs.every((id) => e.text.includes('{{' + id + '}}')));
       const separate = [itemIDs.rich, itemIDs.plain].every((id) => recorded.DENSITY.some((e) => e.item_id === id && e.text?.startsWith('Item {{' + id + '}} added [')));
       return { knownBatch: batch.length === 1 && batch.every((e) => document.getElementById(e.id)?.textContent.includes('Items added:')), separateEqualTimeCreations: separate,
-        actualLegacy, expectedLegacy: legacy, unknown, actualRecorded, expected, clocks,
+        actualLegacy, expectedLegacy: legacy, unknown, actualRecorded, expected, clocks, richDiagnostic,
         wholeHistoryExpanded: !document.querySelector('details.topic-stream,[data-key^="history:"]'),
         wholeEntries: histories.every((x) => { const c = x.querySelector('.history-clip'); return getComputedStyle(c).maxHeight === 'none' && c.scrollTop === 0 && !['auto', 'scroll', 'hidden'].includes(getComputedStyle(c).overflowY); }),
-        rich: !!rich?.querySelector('table') && !!rich?.querySelector('pre code') && !!rich?.querySelector('strong') && rich.querySelectorAll('.opt.static').length === 2 && !!rich.querySelector('.rec-line') && !rich.querySelector('[data-opt],[aria-pressed],[role="button"]'),
+        rich: !!rich?.querySelector('table') && !!rich?.querySelector('pre code') && !!rich?.querySelector('strong') && rich.querySelectorAll('.opt.static').length === 2 && !!rich.querySelector('.rec-line') && richOptionsInert && richUnexpectedControls.length === 0,
+        richOptionsInert, richNativeCodeControls, richUnexpectedControls: richUnexpectedControls.map(node => node.outerHTML),
         plain: !!plain && !plain.querySelector('details,.sbody') && plain.querySelector('.wb-hstatus')?.textContent.trim() === 'ok',
         titleLike: !!titleLike?.querySelector('details.sx .ctx'),
         openPolicy: document.querySelectorAll(`.card.policy[data-id="${String(itemIDs.openPolicy).padStart(2, '0')}"] [data-opt]`).length === 2,
@@ -127,8 +193,14 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
         noArchiveTime: ![...document.querySelectorAll('.wb-htime,.wb-hanswer-at')].some((n) => /archive/i.test(n.textContent)) };
     }, { legacy: fixture.legacyOrderedIDs, recorded: stage.recorded, panelEntries: stage.panelEntries, itemIDs: fixture.itemIDs, knownBatchIDs: fixture.knownBatchIDs });
     measure(stage.name + '-data', data);
+    // Retain post-initializer DOM and each conjunct before the unchanged
+    // assertion, so a control-boundary failure is diagnosed from runtime data.
+    fs.writeFileSync(path.join(dir, `${kind}-${language}-${ctx.width}-${stage.name}-rich-dom.html`), data.richDiagnostic.outerHTML || '');
+    fs.writeFileSync(path.join(dir, `${kind}-${language}-${ctx.width}-${stage.name}-rich-diagnostic.json`), JSON.stringify(data.richDiagnostic, null, 2));
+    if (stage.name === 'initial') await diagnoseLegacy('after-initial-data-no-capture');
     assert(JSON.stringify(data.actualLegacy) === JSON.stringify(data.expectedLegacy) && data.unknown, 'legacy rows lost their explicit unknown time or stable stored order');
     assert(Object.entries(data.expected).every(([name, ids]) => JSON.stringify(data.actualRecorded[name]) === JSON.stringify(ids)) && data.clocks.every((r) => r.same), 'recorded order/time changed, including equal-time events');
+    assert(data.richNativeCodeControls, 'rich code controls must be native renderer-owned wrap buttons, not answer controls');
     assert(data.wholeHistoryExpanded && data.wholeEntries && data.rich && data.plain && data.titleLike && data.openPolicy && data.openCheck && data.noArchiveTime && data.knownBatch && data.separateEqualTimeCreations, 'rich/whole-entry/open-control production contract failed');
   }
   try {
@@ -152,13 +224,51 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
       const answered = page.locator('#item-' + fixture.itemIDs.answeredCheck + ' .wb-hitem, .wb-hitem#item-' + fixture.itemIDs.answeredCheck);
       const hide = page.locator(density + ' .ckhide');
       assert(await hide.count() === 1 && await answered.count() === 1, 'completed-check control or moved history row missing');
+      async function revealForFilter(id, owner, label) {
+        const reached = await page.evaluate((id) => !!window.wbHistory.loadTarget(document, 'item-' + id), id);
+        assert(reached, label + ': normal reader API did not resolve the stored item');
+        await waitQuiet(page);
+        const paging = await page.evaluate((id) => {
+          const item = document.getElementById('item-' + id), entry = item?.closest('.wb-entry'), h = item?.closest('.wb-history');
+          return { id: item?.id, owner: h?.dataset.history, included: !!entry && !entry.hasAttribute('data-wb-history-before'),
+            steps: h?._wbHistorySteps, chunks: h?._wbHistoryChunks?.slice(), pending: !!h?._wbHistoryPending,
+            filter: document.documentElement.getAttribute('data-ck-hide'), pressed: document.querySelector('section.topic[data-topic="DENSITY"] .ckhide')?.getAttribute('aria-pressed') };
+        }, id);
+        measure(label + '-reader-paging', paging);
+        assert(paging.id === 'item-' + id && paging.owner === owner && paging.included && !paging.pending,
+          label + ': visibility probe must address a normally revealed whole history entry');
+        return paging;
+      }
+      async function assertUnknownVisible(label, expectedFilter) {
+        const paging = await revealForFilter(fixture.legacyOrderedIDs[0], 'LEGACY', label);
+        assert(paging.filter === expectedFilter && paging.pressed === String(expectedFilter === '1'), label + ': native filter state changed during reader navigation');
+        const unknownCheck = await page.locator('#item-' + fixture.legacyOrderedIDs[0] + ' .wb-hitem, .wb-hitem#item-' + fixture.legacyOrderedIDs[0]).isVisible();
+        await diagnoseLegacy(label + '-before-unknown-check-assert', true);
+        assert(unknownCheck, 'completed-check filter hid an explicitly undated legacy item');
+      }
+      const initialFilter = (await revealForFilter(fixture.itemIDs.answeredCheck, 'DENSITY', 'initial-completed-check')).filter;
+      assert(initialFilter === '0' || initialFilter === '1', 'completed-check filter must have an explicit native state');
       const beforeHide = await answered.isVisible();
+      await diagnoseLegacy('before-first-native-hide-click');
       await hide.click(); await paint();
+      await diagnoseLegacy('after-first-native-hide-click');
+      const firstFilter = initialFilter === '1' ? '0' : '1';
+      const firstPaging = await revealForFilter(fixture.itemIDs.answeredCheck, 'DENSITY', 'after-first-native-toggle');
+      assert(firstPaging.filter === firstFilter && firstPaging.pressed === String(firstFilter === '1'), 'first native click did not toggle the completed-check filter');
       assert(await answered.isVisible() !== beforeHide, 'completed-check hide control no longer affects its moved history row');
+      await assertUnknownVisible('first-filter-state', firstFilter);
+      await diagnoseLegacy('before-second-native-hide-click');
       await hide.click(); await paint();
+      await diagnoseLegacy('after-second-native-hide-click');
+      const secondPaging = await revealForFilter(fixture.itemIDs.answeredCheck, 'DENSITY', 'after-second-native-toggle');
+      assert(secondPaging.filter === initialFilter && secondPaging.pressed === String(initialFilter === '1'), 'second native click did not restore the completed-check filter');
       assert(await answered.isVisible() === beforeHide, 'completed-check hide control did not restore its prior state');
-      const unknownCheck = await page.locator('#item-' + fixture.legacyOrderedIDs[0] + ' .wb-hitem, .wb-hitem#item-' + fixture.legacyOrderedIDs[0]).isVisible();
-      assert(unknownCheck, 'completed-check filter hid an explicitly undated legacy item');
+      await assertUnknownVisible('second-filter-state', initialFilter);
+      // Crossing between real reader targets may normally collapse the other
+      // topic. Restore DENSITY with its ordinary Older control before testing
+      // its exhausted-header geometry; do not force row styles or membership.
+      await revealForFilter(fixture.itemIDs.answeredCheck, 'DENSITY', 'return-to-density');
+      await exhaust('DENSITY');
       const exhausted = await page.evaluate(() => {
         const h = document.querySelector('.wb-history[data-history="DENSITY"] > .mhead');
         return { height: h.getBoundingClientRect().height, hidden: h.querySelector('.history-older').hidden, totals: h.querySelector('.mmeta').textContent };
@@ -167,6 +277,7 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
       assert(exhausted.hidden && exhausted.height === band.height && exhausted.totals === band.totals, 'exhaustion changed the stable header band or totals');
       await page.evaluate(() => document.querySelectorAll('.wb-hitem details.sx').forEach((d) => { d.open = true; }));
       await capture('after-density', density);
+      await capture('after-rich-expanded', '#item-' + fixture.itemIDs.rich);
       await capture('after-closed', 'section.topic[data-topic="CLOSED"]');
       await page.evaluate((id) => window.wbHistory.loadTarget(document, id), fixture.foldPanel);
       await waitQuiet(page);
@@ -205,18 +316,22 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
       assert(state.open && !state.pending, 'actual reader open did not acknowledge the update');
       await capture('754-opened', '#' + fixture.foldPanel + ' > summary');
       const legacyStage = fixture.stages.find((s) => s.name === 'republish-p2');
-      await page.evaluate((entry) => {
+      const legacyKey = await page.evaluate((entry) => {
         const html = document.documentElement, scope = html.getAttribute('data-rid') || html.getAttribute('data-wb-reply');
-        localStorage.removeItem('ws.whiteboard.panels');
-        localStorage.setItem('ws.dashboard.panelshut', JSON.stringify([scope + '/entry:' + entry]));
+        return scope + '/entry:' + entry;
       }, fixture.originalEntry);
-      if (kind !== 'standalone') await reloadDashboard();
+      // The actual-open assertion above owns its modern acknowledgment. A new
+      // isolated context must migrate legacy-only state, not that view snapshot.
+      await tab.context().close();
+      const migration = await openBoard({ ...ctx, browser, legacyPanelFold: legacyKey });
+      page = migration.page; tab = migration.tab;
+      assert(migration.kind === kind, 'legacy-only setup changed the production host');
       await inject(legacyStage);
       state = await panelState(); measure('754-legacy-entry-key-migration', state);
       assert(!state.open && state.pending && state.entry === fixture.repostEntry, 'legacy entry-key migration did not retain the old panel fold and mark its known new version');
       await verifyData(legacyStage);
     }
-    for (const [name, relative] of [
+    if (!logicOnly) for (const [name, relative] of [
       ['centered-header', 'ai-docs/tickets/assets/261114-feat-ws-whiteboard-history-centered-header/approved-centered-header.fragment.html'],
       ['decision-density', 'ai-docs/tickets/assets/261114-feat-ws-whiteboard-history-unified-decisions/approved-density.fragment.html']
     ]) {
