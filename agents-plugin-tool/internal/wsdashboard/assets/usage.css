@@ -39,7 +39,11 @@
 .usage-grid { stroke: var(--wb-line); stroke-width: .7; }
 .usage-ideal { stroke: var(--wb-muted-fg); stroke-width: 1.2; fill: none; opacity: .75; }
 .usage-now { stroke: var(--wb-line); stroke-width: 1; }
-.usage-chart-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0; color: var(--wb-muted-fg); font-size: 10px; }
+.usage-help { position: relative; display: inline-flex; }
+.usage-help-button { width: 17px; height: 17px; padding: 0; border: 1px solid var(--wb-line); border-radius: 50%; background: none; color: var(--wb-muted-fg); font: inherit; cursor: help; }
+.usage-help-button:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.usage-chart-legend { position: absolute; z-index: 1; top: 100%; left: -100px; display: none; width: 240px; box-sizing: border-box; gap: 6px; padding: 10px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card); color: var(--wb-muted-fg); font-size: 10px; box-shadow: 0 4px 12px #0003; }
+.usage-help:hover .usage-chart-legend, .usage-help:focus-within .usage-chart-legend { display: grid; }
 .usage-chart-legend > span { display: inline-flex; align-items: center; gap: 5px; }
 .usage-swatch { display: inline-block; flex: none; width: 15px; border-top: 2px solid var(--wb-muted-fg); }
 .usage-swatch-actual { height: 2px; border: 0; background: linear-gradient(to right, var(--wb-ok), var(--wb-muted-fg), var(--wb-fail)); }
