@@ -48,6 +48,16 @@ const { chromium } = require(process.env.WS_VIEWED_PERF_PLAYWRIGHT);
             if (row.textWidth < 120) violations.push(`${width}px ${kind} ${row.question ? 'question' : 'settlement'} expanded=${expanded}: text width ${row.textWidth} < 120px`);
           }
         }
+        // The answer chip is capped at a fixed 10em so it never squeezes the question.
+        const chips = await page.locator('.wb-hstatus').evaluateAll(els => els.map(el => {
+          const cs = getComputedStyle(el);
+          return {max: parseFloat(cs.maxWidth), font: parseFloat(cs.fontSize), width: el.getBoundingClientRect().width};
+        }));
+        assert(chips.length > 0, 'missing .wb-hstatus chip');
+        for (const chip of chips) {
+          assert(Math.abs(chip.max - 10 * chip.font) < 0.5, `${width}px chip max-width ${chip.max} != 10em (${10 * chip.font})`);
+          assert(chip.width <= chip.max + 0.5, `${width}px chip width ${chip.width} exceeds ${chip.max}`);
+        }
         assert(rows.some(row => row.kind === 'check' && row.question), 'must measure the anchored check question, not just its timestamped settlement');
       }
     }
