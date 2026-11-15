@@ -16,6 +16,9 @@ func TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	asset = []byte(strings.Replace(string(asset), "var kit = viewKit(window);", "var kit = window.historyKit;", 1))
+	// These cases drive gaps explicitly from hand-set layouts; the initial
+	// 1000px fill has its own browser test (TestHistoryInitialWindowBrowser).
+	asset = []byte(strings.Replace(string(asset), "h._wbHistoryFilling = true; fill(h);", "", 1))
 	script := `var BOARD='',BODY_CLASS='';` + formPrelude + `
 Object.defineProperty(E.prototype,'id',{get:function(){return this.attrs.id||'';}});
 Object.defineProperty(E.prototype,'tagName',{get:function(){return this.tag.toUpperCase();}});

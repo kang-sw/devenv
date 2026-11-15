@@ -244,6 +244,34 @@
       kept.apply();
     });
   }
+  // The initial view always holds at least the bottom WINDOW_PX of history,
+  // cut like the expand button: whole rows from the bottom up, including the
+  // row that crosses the line. Server folds mark where a gap may start; only
+  // this client-side measure decides how much below it stays visible. A host
+  // that is not laid out yet (zero heights) retries from the resize observer.
+  function fill(h) {
+    var live = h.querySelector('.history-live');
+    if (!live || h._wbHistoryPending.length) return;
+    var acc = 0, kids = Array.from(live.children);
+    for (var i = kids.length - 1; i >= 0; i--) {
+      var n = kids[i];
+      if (n.matches('.history-gap')) {
+        if (acc >= WINDOW_PX) break;
+        var op = { gap: n, direction: 'up', fallback: null, height: acc, row: null };
+        h._wbHistoryPending.push(op);
+        progress(h, op);
+        if (op.done && op.height < WINDOW_PX) fill(h); // gap exhausted; continue above it
+        return;
+      }
+      if (n.matches('.timeline-row')) {
+        var height = readyHeight(n);
+        if (height === null) return;
+        acc += height;
+        if (acc >= WINDOW_PX) break;
+      }
+    }
+    h._wbHistoryFilling = false;
+  }
   function init(root) {
     var fresh = [];
     histories(root).forEach(function (h) {
@@ -266,6 +294,7 @@
     if (panelState) fresh.forEach(function (h) { h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore); });
     fresh.forEach(function (h) { h._wbHistoryHeight = Math.ceil(h.querySelector('.history-live').getBoundingClientRect().height); });
     kept.forEach(function (k) { k.apply(); });
+    fresh.forEach(function (h) { h._wbHistoryFilling = true; fill(h); });
     fresh.forEach(function (h) {
       h.addEventListener('focusin', function (e) {
         var node = e.target, live = h.querySelector('.history-live');
@@ -282,11 +311,13 @@
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          if (!h._wbHistoryPending.length || h._wbHistoryFrame) return;
+          if ((!h._wbHistoryPending.length && !h._wbHistoryFilling) || h._wbHistoryFrame) return;
           h._wbHistoryFrame = true;
           window.requestAnimationFrame(function () {
             h._wbHistoryFrame = false;
-            if (h.isConnected) h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
+            if (!h.isConnected) return;
+            h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
+            if (h._wbHistoryFilling) fill(h);
           });
         });
         observer.observe(h.querySelector('.history-live'));
