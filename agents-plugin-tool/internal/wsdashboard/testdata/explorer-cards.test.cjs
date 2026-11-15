@@ -36,6 +36,7 @@ function fixture(store) {
   function save(k, v) { if (v === null) delete store[k]; else store[k] = v; }
   function fetchFS(url) {
     requests.push(url); var u = new URL(url, 'http://fixture.invalid'), root = u.searchParams.get('root') || '/session', dir = u.searchParams.get('dir') || '';
+    if (u.pathname.endsWith('/fs/roots')) return Promise.resolve({ ok: true, json: () => ({ roots: [{ path: '/session', branch: 'main', detached: false }, { path: '/other', branch: 'work', detached: false }] }) });
     return Promise.resolve({ ok: true, json: () => ({ root, abs: root + (dir ? '/' + dir : ''), name: root.split('/').pop(), session: root === '/session', sep: '/', entries: dir ? [{ name: 'child.go' }] : [{ name: 'src', dir: true }, { name: 'main.go' }, { name: 'space name.png' }] }) });
   }
   new Function('document', 'window', 'wsT', 'getComputedStyle', 'requestAnimationFrame', CARDS)(doc, win, wsT, () => ({ overflowY: 'visible' }), () => {});
@@ -122,6 +123,18 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
   var loadingCard = reload2.win.WsFiles.open({ root: '/pending', dir: 'src' }), loadingKey = loadingCard.explorerKey;
   loadingCard.close(); await settle();
   check('late root response cannot recreate a closed card storage record', loadingKey in reload2.store, false);
-  for (var f of [p, reload, reload2]) { f.W.list().slice().forEach(c => c.close()); f.owners.tab.destroy(); }
+  var rootsPage = fixture({}); rootsPage.owners.tab.shown(); await settle();
+  var rootCard = rootsPage.win.WsFiles.open({ root: '', dir: '' }), peerCard = rootsPage.win.WsFiles.open({ root: '', dir: '' }); await settle();
+  rootCard.explorer.newTab({ root: '', dir: '' }); await settle();
+  var untouchedPeer = rootsPage.store[peerCard.explorerKey], untouchedFiles = rootsPage.store['ws.dashboard.files.tabs.session'];
+  rootCard.body.querySelector('.fchange-root').click(); await settle();
+  rootCard.body.querySelectorAll('.froot-list button')[1].click(); await settle();
+  check('allowed root changes only the active tab of its own card', [rootCard.explorer.location(), peerCard.explorer.location(), rootsPage.owners.tab.location(), rootsPage.store[peerCard.explorerKey] === untouchedPeer, rootsPage.store['ws.dashboard.files.tabs.session'] === untouchedFiles], [{ root: '/other', dir: '' }, { root: '', dir: '' }, { root: '', dir: '' }, true, true]);
+  var rootSaved = JSON.parse(JSON.stringify(rootsPage.store)), rootReload = fixture(rootSaved); await settle();
+  var restoredCard = rootReload.W.list('explorer').find(c => c.id === rootCard.id);
+  check('allowed root and untouched sibling tab persist per card', [restoredCard.explorer.location(), restoredCard.body.querySelectorAll('.ftab-select').length], [{ root: '/other', dir: '' }, 2]);
+  restoredCard.body.querySelectorAll('.ftab-select')[0].click();
+  check('switching back retains the original tab root', restoredCard.explorer.location(), { root: '', dir: '' });
+  for (var f of [p, reload, reload2, rootsPage, rootReload]) { f.W.list().slice().forEach(c => c.close()); f.owners.tab.destroy(); }
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });

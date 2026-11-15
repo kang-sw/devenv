@@ -304,6 +304,33 @@
   }
 
   // --- the root --------------------------------------------------------------
+  var rootsAttempt = 0, rootChoices = [];
+  function paintRootChoices() {
+    ui.rChoices.textContent = "";
+    if (local() && !directoriesOnly) rootChoices.forEach(function (root, index) {
+      if (!root || typeof root.path !== "string") return;
+      var current = info ? info.root === root.path : rootAbs ? rootAbs === root.path : index === 0;
+      var name = root.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || root.path;
+      var branch = root.detached ? wsT("js.wt.detached") : root.branch;
+      var b = mk("button", "btn opt", (current ? "✓ " : "") + name + (branch ? " · " + branch : ""));
+      b.type = "button"; b.title = root.path;
+      b.setAttribute("aria-pressed", String(current));
+      b.addEventListener("click", function () { if (local() && pop === ui.rootPop) applyRoot(index === 0 ? "" : root.path); });
+      ui.rChoices.appendChild(b);
+    });
+    ui.rChoices.hidden = !ui.rChoices.children.length;
+  }
+  function loadRootChoices() {
+    var attempt = ++rootsAttempt;
+    rootChoices = []; paintRootChoices();
+    if (!local() || directoriesOnly) return;
+    // Suggestions are session-scoped, never scoped to the active alternate root.
+    fsGet("roots", {}).then(function (a) {
+      if (destroyed || attempt !== rootsAttempt || pop !== ui.rootPop || !local()) return;
+      rootChoices = Array.isArray(a.roots) ? a.roots : [];
+      paintRootChoices();
+    }, function () { /* Older daemons or a failed read leave the free-text path usable. */ });
+  }
   function paintHead() {
     ui.rootBtn.disabled = directoriesOnly || !local();
     if (ui.roots && info) ui.roots.value = rootAbs;
@@ -338,6 +365,7 @@
     rootAbs = a.session ? "" : a.root;
     save(ROOT_KEY + rid, rootAbs || null);
     info = a;
+    if (pop === ui.rootPop) paintRootChoices();
     lists = { "": a };
     open = {};
     sel = cur = null;
@@ -789,6 +817,7 @@
     pop = p;
     popFrom = btn;
     if (p === ui.rootPop) {
+      loadRootChoices();
       ui.rErr.textContent = "";
       ui.rIn.value = info ? info.root : "";
       ui.rIn.focus();
@@ -1068,6 +1097,11 @@
     ui.rootPop.hidden = true;
     var rootLabel = mk("div", "lb"); rootLabel.innerHTML = licon("folder-input");
     rootLabel.appendChild(mk("span", "", wsT("js.files.root.label"))); ui.rootPop.appendChild(rootLabel);
+    ui.rChoices = mk("div", "froot-list");
+    ui.rChoices.hidden = true;
+    ui.rChoices.setAttribute("role", "group");
+    ui.rChoices.setAttribute("aria-label", wsT("js.files.root.label"));
+    ui.rootPop.appendChild(ui.rChoices);
     ui.rIn = mk("input", "fpin");
     ui.rIn.type = "text";
     ui.rIn.spellcheck = false;
