@@ -149,14 +149,15 @@ func TestSummaryHostedReasonsRequireExplicitBundleCapability(t *testing.T) {
 		{"new-capable", []string{wslive.ReasoningSummaryCapability}, true},
 	} {
 		for _, stop := range []struct {
-			name, reason, turnError string
-			aborted                 bool
+			name, reason, legacyError, capableError string
+			aborted                                 bool
 		}{
-			{"stop", "", "", false},
-			{"aborted", "aborted", "", false},
-			{"error", "error", "actual failure", false},
-			{"length", "incomplete", "", false},
-			{"stop", "aborted", "", true},
+			{"stop", "", "", "", false},
+			{"aborted", "aborted", "", "", false},
+			{"error", "error", "actual failure", "actual failure", false},
+			{"length", "incomplete", "", "", false},
+			{"stop", "aborted", "", "", true},
+			{"error", "aborted", "actual failure", "", true},
 		} {
 			t.Run(bundle.name+"/"+stop.name, func(t *testing.T) {
 				m := newPiMapper(StartSpec{Lead: &LeadSpec{}})
@@ -167,12 +168,12 @@ func TestSummaryHostedReasonsRequireExplicitBundleCapability(t *testing.T) {
 				raw, _ = json.Marshal(map[string]any{"type": "agent_settled", "aborted": stop.aborted})
 				evs := m.mapLine(raw, nopReplies{})
 				end := evs[len(evs)-1]
-				want := ""
+				want, wantError := "", stop.legacyError
 				if bundle.capable {
-					want = stop.reason
+					want, wantError = stop.reason, stop.capableError
 				}
-				if !end.TurnEnd || end.TurnReason != want || end.TurnError != stop.turnError {
-					t.Fatalf("bundle capability changed legacy end: %+v; want reason %q, error %q", end, want, stop.turnError)
+				if !end.TurnEnd || end.TurnReason != want || end.TurnError != wantError {
+					t.Fatalf("bundle capability changed legacy end: %+v; want reason %q, error %q", end, want, wantError)
 				}
 			})
 		}
@@ -186,29 +187,42 @@ func TestSummaryHostedReasonsRequireExplicitBundleCapability(t *testing.T) {
 }
 
 func TestSummaryHostedOldBundlePersistsExactLegacyReason(t *testing.T) {
-	for _, stop := range []string{"aborted", "error", "length"} {
-		t.Run(stop, func(t *testing.T) {
-			h := newLeadHarness(t).start()
-			id := h.lead(BackendPi, LeadOptions{}).ID
-			h.send(id, "legacy bundle")
-			holder := h.holder(id)
-			raw, _ := json.Marshal(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{}, "stopReason": stop, "errorMessage": "actual failure"}})
-			settled, _ := json.Marshal(map[string]any{"type": "agent_settled", "aborted": stop == "aborted"})
-			h.holders.out(holder, `{"type":"agent_start"}`, hostedCapabilitiesLine(t, nil), string(raw), string(settled))
-			h.idle(id)
-			turns := 0
-			for _, row := range hostedSummaryRecords(t, h, id) {
-				if row.Kind != wslive.RingTurn {
-					continue
-				}
-				turns++
-				if row.Reason != "" || row.SummaryHistory != nil {
-					t.Fatalf("old bundle changed natural turn fields: %+v", row)
-				}
+	for _, nativeAbort := range []bool{false, true} {
+		for _, stop := range []string{"aborted", "error", "length"} {
+			name := stop
+			if nativeAbort {
+				name += "-native-abort"
 			}
-			if turns != 1 {
-				t.Fatalf("legacy turn count = %d", turns)
-			}
-		})
+			t.Run(name, func(t *testing.T) {
+				h := newLeadHarness(t).start()
+				id := h.lead(BackendPi, LeadOptions{}).ID
+				h.send(id, "legacy bundle")
+				holder := h.holder(id)
+				raw, _ := json.Marshal(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{}, "stopReason": stop, "errorMessage": "actual failure"}})
+				settled, _ := json.Marshal(map[string]any{"type": "agent_settled", "aborted": nativeAbort})
+				h.holders.out(holder, `{"type":"agent_start"}`, hostedCapabilitiesLine(t, nil), string(raw), string(settled))
+				h.idle(id)
+				turns := 0
+				for _, row := range hostedSummaryRecords(t, h, id) {
+					if row.Kind != wslive.RingTurn {
+						continue
+					}
+					turns++
+					if row.Reason != "" || row.SummaryHistory != nil {
+						t.Fatalf("old bundle changed natural turn fields: %+v", row)
+					}
+				}
+				if turns != 1 {
+					t.Fatalf("legacy turn count = %d", turns)
+				}
+				wantError := ""
+				if stop == "error" {
+					wantError = "actual failure"
+				}
+				if got := h.state(id).Error; got != wantError {
+					t.Fatalf("old bundle diagnostic changed: got %q, want %q", got, wantError)
+				}
+			})
+		}
 	}
 }

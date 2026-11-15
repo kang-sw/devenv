@@ -922,7 +922,7 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 			replies.send(piGetCommands)
 		}
 		err := m.turnErr
-		if m.aborted.Load() || l.Aborted {
+		if m.aborted.Load() || (m.summaryCapable && l.Aborted) {
 			err = ""
 			m.turnReason = wslive.TurnAborted
 		}

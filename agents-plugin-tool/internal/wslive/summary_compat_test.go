@@ -113,15 +113,18 @@ func TestSummaryHistoricalWriterFixture(t *testing.T){
 	mapperFixture := `package wsagent
 import("testing";"github.com/kang-sw/devenv/internal/wslive")
 func TestSummaryOldDaemonNewBundleWidget(t *testing.T) {
- for _,stop:=range []string{"aborted","error","length"} { t.Run(stop,func(t *testing.T){
+ for _,nativeAbort:=range []bool{false,true} { for _,stop:=range []string{"aborted","error","length"} {
+  name:=stop; if nativeAbort { name+="-native-abort" }; t.Run(name,func(t *testing.T){
   h:=newLeadHarness(t).start(); id:=h.lead(BackendPi,LeadOptions{}).ID; h.send(id,"new bundle on old daemon"); holder:=h.holder(id)
   hello:=string(piWidgetLine(piEventsWidgetKey,"{\"kind\":\"status\",\"background\":0,\"monitors\":0,\"capabilities\":[\"reasoning_summary_v1\"]}"))
   summary:=string(piWidgetLine(piEventsWidgetKey,__SUMMARY_WIDGET_JSON__))
-  h.holders.out(holder,"{\"type\":\"agent_start\"}",hello,summary,"{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[],\"stopReason\":\""+stop+"\",\"errorMessage\":\"actual failure\"}}","{\"type\":\"agent_settled\",\"aborted\":false}")
+  settled:="{\"type\":\"agent_settled\",\"aborted\":false}"; if nativeAbort { settled="{\"type\":\"agent_settled\",\"aborted\":true}" }
+  h.holders.out(holder,"{\"type\":\"agent_start\"}",hello,summary,"{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[],\"stopReason\":\""+stop+"\",\"errorMessage\":\"actual failure\"}}",settled)
   h.idle(id); h.quiesce(id); turns:=0
   for _,row:=range h.ring(id) { if row.Kind==wslive.RingTurn { turns++; if row.Reason!="" { t.Fatalf("old daemon reason changed: %+v",row) } } }
-  if turns!=1 || h.state(id).BackgroundTasks!=0 { t.Fatalf("old daemon lifecycle/counts changed: turns=%d background=%d",turns,h.state(id).BackgroundTasks) }
- }) }
+  wantError:=""; if stop=="error" { wantError="actual failure" }
+  if turns!=1 || h.state(id).BackgroundTasks!=0 || h.state(id).Error!=wantError { t.Fatalf("old daemon lifecycle/counts/diagnostic changed: turns=%d state=%+v",turns,h.state(id)) }
+ }) } }
 }
 `
 	projection, err := json.Marshal(map[string]any{"kind": KindAgent, "reasoningSummary": summaryFixture()})
