@@ -148,6 +148,8 @@
   "js.card.fold": "Plegar o desplegar",
   "js.card.grip": "Arrastra para cambiar la altura; doble clic para restablecer",
   "js.card.max": "Maximizar",
+  "js.card.width.extend": "Ampliar a todo el ancho",
+  "js.card.width.normal": "Restaurar el ancho normal",
   "js.card.min": "Volver a la tarjeta (Esc)",
   "js.card.back": "Volver al tablero (Esc)",
   "js.card.pin": "Fijar",

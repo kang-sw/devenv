@@ -148,6 +148,8 @@
   "js.card.fold": "折叠/展开",
   "js.card.grip": "拖动调整高度，双击重置",
   "js.card.max": "最大化",
+  "js.card.width.extend": "扩展到全宽",
+  "js.card.width.normal": "恢复默认宽度",
   "js.card.min": "返回卡片 (Esc)",
   "js.card.back": "返回看板 (Esc)",
   "js.card.pin": "固定",

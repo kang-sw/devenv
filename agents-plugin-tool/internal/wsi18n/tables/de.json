@@ -148,6 +148,8 @@
   "js.card.fold": "Ein- oder ausklappen",
   "js.card.grip": "Ziehen, um die Höhe zu ändern; Doppelklick setzt zurück",
   "js.card.max": "Maximieren",
+  "js.card.width.extend": "Auf volle Breite erweitern",
+  "js.card.width.normal": "Normale Breite wiederherstellen",
   "js.card.min": "Zurück zur Karte (Esc)",
   "js.card.back": "Zurück zum Board (Esc)",
   "js.card.pin": "Anheften",

@@ -148,6 +148,8 @@
   "js.card.fold": "折りたたむ/展開",
   "js.card.grip": "ドラッグで高さを変更、ダブルクリックでリセット",
   "js.card.max": "最大化",
+  "js.card.width.extend": "全幅に拡張",
+  "js.card.width.normal": "通常の幅に戻す",
   "js.card.min": "カードに戻る (Esc)",
   "js.card.back": "ボードに戻る (Esc)",
   "js.card.pin": "ピン留め",
