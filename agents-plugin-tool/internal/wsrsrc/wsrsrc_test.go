@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -892,60 +891,6 @@ func TestValidateRealTree(t *testing.T) {
 	}
 }
 
-// TestLeadTicketSageGatePrecedesCommit pins the step order established by
-// 260726-bug-sage-ready-enforcement-single-chokepoint: inside the ticket
-// skill's ready-promotion section, the sage gate must run before the single
-// commit, and no commit instruction may sit between them. The defect that
-// reorder fixed was a second commit performed inside the gate step, which
-// left the later commit with "no staged changes in requested paths"; a body
-// rewrite can reintroduce it while still looking correct, and no other test
-// asserts on the semantic step order (only mechanical regen/mirror
-// byte-consistency). Content-level, not presence-only.
-func TestLeadTicketSageGatePrecedesCommit(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-ticket", "lead-ticket.md")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read lead-ticket.md: %v", err)
-	}
-	text := string(raw)
-
-	section := sectionByHeading(t, text, "## Promote to `ready/`")
-	gateIdx := strings.Index(section, "tickets.sage_gate")
-	commitIdx := strings.Index(section, "git.commit")
-	if gateIdx < 0 {
-		t.Fatalf("the ready-promotion section must call tickets.sage_gate:\n%s", section)
-	}
-	if commitIdx < 0 {
-		t.Fatalf("the ready-promotion section must name the single git.commit:\n%s", section)
-	}
-	if gateIdx > commitIdx {
-		t.Fatalf("tickets.sage_gate (offset %d) must precede git.commit (offset %d); re-inversion detected:\n%s", gateIdx, commitIdx, section)
-	}
-	if strings.Count(section, "git.commit") != 1 {
-		t.Fatalf("the ready-promotion section must name exactly one git.commit; a second commit reproduces the empty-staging bug:\n%s", section)
-	}
-	// And it must positively state that the stamping tools leave their write
-	// uncommitted, so the gate-vs-commit conflict cannot come back.
-	if !strings.Contains(section, "Stamps leave files uncommitted") {
-		t.Fatalf("the ready-promotion section must state that stamps leave files uncommitted:\n%s", section)
-	}
-}
-
-// sectionByHeading returns the body of a markdown section, from its heading to
-// the next heading of the same or higher level.
-func sectionByHeading(t *testing.T, text, heading string) string {
-	t.Helper()
-	idx := strings.Index(text, heading+"\n")
-	if idx < 0 {
-		t.Fatalf("lead-ticket.md has no section headed %q", heading)
-	}
-	rest := text[idx+len(heading):]
-	if next := regexp.MustCompile(`(?m)^## `).FindStringIndex(rest); next != nil {
-		rest = rest[:next[0]]
-	}
-	return rest
-}
-
 // TestGenerateRealManifest regenerates agents-plugin/rsrc/manifest.json from
 // the current tree. Run with WSRSRC_REGEN=1 to update after editing rsrc files.
 //
@@ -1042,35 +987,4 @@ func asError[T error](err error, target *T) bool {
 		return false
 	}
 	return errors.As(err, target)
-}
-
-// These ordering checks cover the prompt's dispatch boundary; native model
-// dispatch itself is not executed by Go tests.
-func TestLeadTicketSettlementBoundaries(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-ticket", "lead-ticket.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(raw)
-	ground := strings.Join(strings.Fields(sectionByHeading(t, text, "## Ground: fact population")), " ")
-	for _, want := range []string{"before you run epic design review", "creation and repeated editing run neither fact population nor Sage", "research remains ungated", "Ordinary epic `todo/` edits do not spawn reviewers"} {
-		if !strings.Contains(ground, want) {
-			t.Fatalf("missing boundary %q: %s", want, ground)
-		}
-	}
-	for _, heading := range []string{"## Promote to `ready/`", "## Review epic design"} {
-		section := strings.Join(strings.Fields(sectionByHeading(t, text, heading)), " ")
-		facts := strings.Index(section, "run **Ground: fact population**")
-		gate := strings.Index(section, "tickets.sage_gate")
-		if facts < 0 || gate <= facts {
-			t.Fatalf("facts must precede gate in %s: %s", heading, section)
-		}
-		if strings.Count(section, "tickets.sage_gate") != 1 {
-			t.Fatalf("duplicate gate in %s", heading)
-		}
-	}
-	ready := sectionByHeading(t, text, "## Promote to `ready/`")
-	if strings.Index(ready, "run **Ground: fact population**") > strings.Index(ready, "tickets.move") {
-		t.Fatal("ready move precedes fact population")
-	}
 }

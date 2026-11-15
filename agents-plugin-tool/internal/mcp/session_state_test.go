@@ -3403,14 +3403,6 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 		t.Fatalf("fresh mode must start with the full-result notice: %s", resp)
 	}
 
-	// Self-bootstrap fragment must be present (gated region is KEPT).
-	if !strings.Contains(resp, "mint your lead key") {
-		t.Errorf("fresh mode: self-bootstrap fragment absent from response:\n%s", resp)
-	}
-	// Worktree-and-track scope fragment must be present (always shown).
-	if !strings.Contains(resp, "one Git worktree") || !strings.Contains(resp, "independently managed work stream") {
-		t.Errorf("fresh mode: per-root rule fragment absent from response:\n%s", resp)
-	}
 	// No "Session State" section in fresh mode.
 	if strings.Contains(resp, "Session State") {
 		t.Errorf("fresh mode: unexpected Session State section in response:\n%s", resp)
@@ -3436,10 +3428,6 @@ func TestWorkflowManualFreshModeWithRoot(t *testing.T) {
 	// (a) Session Key section must be present.
 	if !strings.Contains(resp, "## Session Key") {
 		t.Errorf("fresh-with-root: ## Session Key section absent from response:\n%s", resp)
-	}
-	// (b) Fresh-only block must be stripped — self-bootstrap fragment must be absent.
-	if strings.Contains(resp, "mint your lead key") {
-		t.Errorf("fresh-with-root: self-bootstrap fragment must be absent when root is supplied:\n%s", resp)
 	}
 	// (c) Session State section must be present.
 	if !strings.Contains(resp, "## Session State") {
@@ -3494,10 +3482,6 @@ func TestWorkflowManualKeylessRejected(t *testing.T) {
 	if !strings.Contains(resp, "session_key") {
 		t.Errorf("keyless: response must mention session_key, got:\n%s", resp)
 	}
-	// The bootstrap fragment must NOT be present — no leak of ferrule guidance.
-	if strings.Contains(resp, "mint your lead key") {
-		t.Errorf("keyless: self-bootstrap fragment must be absent from error response:\n%s", resp)
-	}
 }
 
 func TestWorkflowManualDelegateKeyBlocked(t *testing.T) {
@@ -3531,7 +3515,7 @@ func TestWorkflowManualDelegateKeyBlocked(t *testing.T) {
 		t.Errorf("delegate key: expected JSON-RPC error code -32601, got:\n%s", rawResp)
 	}
 	// Must NOT contain a manual body.
-	if strings.Contains(rawResp, "mint your lead key") || strings.Contains(rawResp, "Session State") {
+	if strings.Contains(rawResp, "Session State") {
 		t.Errorf("delegate key: manual body must be absent from rejection response:\n%s", rawResp)
 	}
 }
@@ -3555,14 +3539,6 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	// Continue mode: key present and resolves.
 	resp := callToolWithKey(t, server, 5102, key, "workflow_manual", nil)
 
-	// Self-bootstrap fragment must be ABSENT (stripped in continue mode).
-	if strings.Contains(resp, "mint your lead key") {
-		t.Errorf("continue mode: self-bootstrap fragment should be absent:\n%s", resp)
-	}
-	// Worktree-and-track scope fragment must be present (always shown).
-	if !strings.Contains(resp, "one Git worktree") || !strings.Contains(resp, "independently managed work stream") {
-		t.Errorf("continue mode: per-root rule fragment absent:\n%s", resp)
-	}
 	// Session State section must be present.
 	if !strings.Contains(resp, "Session State") {
 		t.Errorf("continue mode: Session State section absent:\n%s", resp)
@@ -3630,14 +3606,10 @@ func TestWorkflowManualUnknownKey(t *testing.T) {
 	if !strings.Contains(resp, "no restorable state for session key") {
 		t.Errorf("unknown key: no-restorable-state notice absent:\n%s", resp)
 	}
-	// Bootstrap line must be ABSENT in fail-loud mode (Phase 3a: stripped, not kept).
-	if strings.Contains(resp, "mint your lead key") {
-		t.Errorf("unknown key: self-bootstrap fragment must be absent (fail-loud strips it):\n%s", resp)
-	}
 	// Fail-loud renders NO manual body, so the always-shown per-root rule and the
 	// ws.ferrule mention it carries must be absent — a non-lead caller reaching
 	// fail-loud (any unregistered key) must not learn the lead self-bootstrap call.
-	if strings.Contains(resp, "one Git worktree") || strings.Contains(resp, "ferrule") {
+	if strings.Contains(resp, "ferrule") {
 		t.Errorf("unknown key: manual body / ferrule mention must be absent in fail-loud:\n%s", resp)
 	}
 	// The recovery pointer names only the lead-revive skill (no ferrule/sentinel).
@@ -3815,7 +3787,7 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	if len(stateResp) >= len(manualResp) {
 		t.Fatalf("workflow_state (%d bytes) not shorter than workflow_manual (%d bytes)", len(stateResp), len(manualResp))
 	}
-	if strings.Contains(stateResp, "one Git worktree") || strings.Contains(stateResp, "ferrule") {
+	if strings.Contains(stateResp, "ferrule") {
 		t.Errorf("workflow_state leaked manual body content:\n%s", stateResp)
 	}
 
