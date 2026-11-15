@@ -97,7 +97,7 @@
   var gen = 0, rootAttempt = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
-  var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null;
+  var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null, searchResult = null, searchPaused = false;
   var treeTop = 0, hitsTop = 0, pop = null, popFrom = null, menu = null, menuFrom = null;
   var ui = {}, api, tabs = [], active = -1, tabSeq = 0, dir = "", viewMode = "details", contentTop = 0, navAttempt = 0;
   var subscribers = { selection: [], navigation: [] }, detachAttachment = null;
@@ -134,7 +134,8 @@
   function snapshot() {
     if (!tabs[active]) return;
     tabs[active].state = { root: rootAbs, dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, view: viewMode };
-    tabs[active].live = { lists: lists, open: open, cur: cur, info: info };
+    tabs[active].live = { lists: lists, open: open, cur: cur, info: info,
+      search: { q: ui.q.value, mode: mode, caseOn: caseOn, regexOn: regexOn, result: searchResult, scroll: hitsTop } };
   }
   function persistTabs() {
     if (destroyed || !started) return;
@@ -170,7 +171,7 @@
     ui.tabs.appendChild(plus);
   }
   function switchTab(index) {
-    if (destroyed || !tabs[index]) return;
+    if (destroyed || !tabs[index] || index === active) return;
     snapshot();
     gen++; rootAttempt++; navAttempt++;
     clearSearch(); closeMenu(false); closePop(false);
@@ -187,6 +188,7 @@
       paintHead(); renderDirectory(); notify("navigation");
       loadRoot(true);
     }
+    restoreSearch(live && live.search);
     paintTabs(); persistTabs();
   }
   function closeTab(index) {
@@ -279,6 +281,9 @@
     gen++; navAttempt++;
     clearTimeout(timer);
     abort();
+    searchResult = null;
+    ui.hits.textContent = "";
+    hitsTop = 0;
     rootAbs = a.session ? "" : a.root;
     save(ROOT_KEY + rid, rootAbs || null);
     info = a;
@@ -665,6 +670,23 @@
     ui.q.setAttribute("aria-label", ui.q.placeholder);
     if (ui.q.value) search(true);
   }
+  // Search state stays live on its inner tab, never in another owner's
+  // browser record. Pending work is restarted on return, not reused across tabs.
+  function restoreSearch(s) {
+    caseOn = !!(s && s.caseOn); regexOn = !!(s && s.regexOn);
+    ui.caseBtn.setAttribute("aria-pressed", String(caseOn));
+    ui.regexBtn.setAttribute("aria-pressed", String(regexOn));
+    setMode(s && s.mode);
+    ui.q.value = s ? s.q : "";
+    searchResult = s && s.result;
+    if (!query().trim()) return;
+    if (!searchResult) { search(true); return; }
+    showHits();
+    if (mode === "name") drawNames(searchResult.items || []);
+    else drawMatches(searchResult);
+    hitsTop = s.scroll || 0;
+    ui.hits.scrollTop = hitsTop;
+  }
   function abort() {
     if (ctrl && ctrl.c) ctrl.c.abort();
     ctrl = null;
@@ -689,15 +711,22 @@
     clearTimeout(timer);
     abort();
     ui.q.value = "";
+    searchResult = null;
     ui.hits.textContent = "";
     showTree();
+    hitsTop = 0;
   }
-  // search runs the search box's query after its debounce (now: at once).
-  // A newer query aborts the request of an older one; the results shown
-  // stay until the new ones are here. An empty query shows the tree again.
+  // Invalidate immediately, before debounce: even a fetch that ignores abort
+  // cannot repaint or leave actionable results for a superseded query/mode.
   function search(now) {
     clearTimeout(timer);
-    if (!query().trim()) { abort(); ui.hits.textContent = ""; showTree(); return; }
+    abort();
+    searchResult = null;
+    ui.hits.textContent = "";
+    hitsTop = 0;
+    if (!query().trim()) { showTree(); return; }
+    if (searchPaused) return;
+    showHits();
     timer = setTimeout(runSearch, now ? 0 : mode === "name" ? NAME_WAIT : TEXT_WAIT);
   }
   function runSearch() {
@@ -710,6 +739,7 @@
     p.then(function (a) {
       if (ctrl !== tok) return;
       ctrl = null;
+      searchResult = a;
       if (m === "name") drawNames(a.items || []);
       else drawMatches(a);
     }, function (err) {
@@ -735,6 +765,7 @@
     ui.hits.appendChild(frag);
     var first = ui.hits.querySelector(".hit");
     if (first) first.tabIndex = 0;
+    hitsTop = 0;
     ui.hits.scrollTop = 0;
   }
   function drawNames(items) {
@@ -1047,6 +1078,7 @@
     // browser may use one), later it restores the scroll and refreshes.
     shown: function () {
       if (destroyed) return;
+      searchPaused = false;
       paintHead();
       if (!started) {
         started = true;
@@ -1060,12 +1092,16 @@
       }
       if (!ui.tree.hidden) ui.tree.scrollTop = treeTop;
       else ui.hits.scrollTop = hitsTop;
+      if (query().trim() && !searchResult) search(true);
       refresh();
     },
-    // hidden is called when the pane leaves the view: an open menu or
-    // popover closes.
+    // Leaving a window pauses only its own search; returning restarts any
+    // unfinished query. Other visible explorers keep their requests.
     hidden: function () {
       if (destroyed) return;
+      searchPaused = true;
+      clearTimeout(timer);
+      abort();
       closeMenu(false);
       closePop(false);
       persistTabs();
