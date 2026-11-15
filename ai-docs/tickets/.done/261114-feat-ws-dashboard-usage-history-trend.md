@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: f1f984e360088484
 sage-review-design-reviewed: f1f984e360088484
+completed: 2026-11-15
 ---
 
 # Design usage history storage and a baseline-colored popover trend chart
@@ -246,3 +247,65 @@ and deterministic age/count pruning including exact boundaries. Use fixtures
 only; live credentials, providers, daemon replacement and shared port 29417
 are not authorized by this documentation task. Final ready status is preparation
 only; MAIN owns implementation assignment. No implementation Result is claimed.
+
+### Result (5ba3975e3) - 2026-11-15
+
+Implemented the assigned phase on `impl/develop/abide-zesty-bring`:
+
+- `a3b112047` adds the separate owner-only atomic schema-1 history file,
+  supported-version extension preservation, unavailable/write-refusal behavior
+  for corrupt or unsupported files, deterministic inclusive 14-day retention
+  and a newest-5000 cap per harness/kind across partitions. Only accepted Claude
+  windows and successful GPT acquisitions enter history; fresh unchanged GPT
+  values and real decreases survive, while cache rereads and failures add none.
+- The opt-in `history=1` projection composes with the existing request and
+  refresh/coalescing rules. Latest cache types/serialization and default API
+  members remain unchanged. Frozen latest-only wire types/read-write logic
+  from the settled compatibility pin verify adjacent-history non-destruction.
+- `6147d0f19` adds pure observation-only geometry: exact baseline crossings,
+  reset/source/unknown-reset barriers (including A-to-B-to-A transitions), no
+  decreasing edge, no fabricated origin or future extrapolation, and dashed
+  linear estimates only for intervals strictly over ten minutes.
+- `5ba3975e3` renders 340px compact window cards, per-segment proportional
+  red/green gradients, excess-only red fill, estimated hover labels, truthful
+  old-server/empty/unavailable fallbacks, and stale neutral current values
+  with frozen pace. The existing single visible-page polling request carries
+  history; no sampling service or second fetch was added.
+
+Verification:
+
+- `GOPROXY=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run
+  'TestPlanUsage|TestAssetIDFollowsAssetContent' -count=1` passed after the
+  final product commit. The earlier focused `TestPlanUsageHistory` run also
+  passed. These include storage/privacy, exact pruning, acquisition acceptance,
+  default/optional API preservation and pinned mixed-version coverage.
+- The DOM leaf ran `node --test
+  agents-plugin-tool/internal/wsdashboard/usage.test.js
+  agents-plugin-tool/internal/wsdashboard/usage-trend.test.js`: 20 tests passed.
+- `git diff --check` passed. One independent lite logic/state/test-integrity
+  review of `bffec047c..5ba3975e3` was clean; no second review was run.
+- Compared source-only production DOM capture
+  `/tmp/ws-usage-history-popover-capture.html` vs
+  `ai-docs/tickets/assets/261114-feat-ws-dashboard-usage-footer-meter/mockup.html`:
+  mismatch. The 340px card and 288x113 SVG dimensions match in source; the
+  reference legend/current-time guide are absent, and the approved corrected
+  tint/excess fill intentionally replaces its blue styling. This was an HTML
+  capture and source comparison, not a rendered visual pass or screenshot.
+
+Decisions and unresolved:
+
+- MAIN's implementation assignment supersedes this ticket's preparation-only
+  hold. The latest owner UI-fast instruction supersedes its screenshot/matrix
+  procedure: none were taken. Visual acceptance belongs to owner on-screen
+  feedback after MAIN integrates through `ws/git.merge` and swaps the runtime.
+- Minor unresolved visual-reference differences are the absent legend and
+  current-time guide noted above. No logic/state review finding remains open.
+- Browser checks, full suites, real providers/credentials, external downloads,
+  shared daemon/port 29417, pushes, integration and runtime swapping were
+  omitted. MAIN retains integration ownership; no final branch sync was
+  needed for the isolated usage paths.
+
+
+## Resolution (2026-11-15)
+
+Implemented bounded private observation history, the additive opt-in projection, and observation-only popover trends. Scoped storage/compatibility/logic tests passed and one independent lite logic review was clean. MAIN retains develop integration and runtime swapping; owner on-screen feedback is visual acceptance under the UI-fast directive.
