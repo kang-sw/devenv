@@ -42,7 +42,10 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 		`Bash</span> 5`,
 		`whiteboard.update</span> 2`,
 		` · +4 other`,
-		`<span class="tsn"><b class="tf">1 failed</b> · <span class="t" data-span="75000">1m 15s</span>`,
+		`<span class="tsn"><b class="tf">1 failed</b></span>`,
+		`<span class="row-time"><span class="t" data-span="75000">1m 15s</span></span>`,
+		`<summary class="conv-row"><span class="row-icon">`,
+		`<span class="row-chevron">`,
 		`<li class="brow done">`,
 		`<li class="brow fail">`,
 		`<span title="6 calls">×6</span> · <span class="bf" title="1 failed">✗1</span>`,
@@ -85,7 +88,7 @@ func TestToolsRowWithoutNamedToolsShowsTheCallTotal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := string(set[regionEntries].HTML); !strings.Contains(html, `<span class="tsum"><span class="tsl">2 tool calls</span></span>`) {
+	if html := string(set[regionEntries].HTML); !strings.Contains(html, `<span class="row-content tsum"><span class="tsl">2 tool calls</span></span>`) {
 		t.Errorf("summary = %s", html)
 	}
 }
@@ -207,9 +210,8 @@ func TestCompactTokensAndBatchSpans(t *testing.T) {
 	}
 }
 
-// TestToolsSummarySplitsCountsFromNumbers pins the two rows: the per-tool
-// counts sit in .tsl, the failed count, duration, and usage in .tsn after it,
-// and a summary with no numbers draws no second row.
+// Counts, failures and tokens stay in the content column; duration has its
+// own time column. A summary without numbers draws no numbers span.
 func TestToolsSummarySplitsCountsFromNumbers(t *testing.T) {
 	render := func(sum *wslive.ToolSummary) string {
 		ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: sum})}
