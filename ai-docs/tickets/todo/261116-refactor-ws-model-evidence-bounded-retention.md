@@ -78,9 +78,10 @@ once per directory per process every 10 min (`observed_prune.go:39`).
 
 ## Open Decision Queue
 
-last-id: (1162)
+last-id: ODQ-5
+Board ids are minted when MAIN raises these to the owner.
 
-(1158) [open] [policy] The value of N (most recent records kept per agent)
+(ODQ-1) [open] [policy] The value of N (most recent records kept per agent)
 - Context: `Current` needs only the latest record. Any N >= 1 keeps
   `summarizeObserved` output identical, so N buys only debugging/forensic
   depth and a margin for late replays.
@@ -89,7 +90,7 @@ last-id: (1162)
 - Alternative: N configurable via a config knob.
 > Recommendation pending owner input; not decided by this capture.
 
-(1159) [open] [policy] Whether N is per agent or per directory
+(ODQ-2) [open] [policy] Whether N is per agent or per directory
 - Context: the settled direction reads "the most recent N". 127 short-lived
   children dominate the measured directory, so a per-agent N multiplies by
   the agent count, while a per-directory N could drop a child's only latest
@@ -99,7 +100,7 @@ last-id: (1162)
 - Alternative: per directory, with each agent's latest always kept.
 > Not decided by this capture.
 
-(1160) [open] [policy] Where and when pruning runs
+(ODQ-3) [open] [policy] Where and when pruning runs
 - Context: today it runs after a write in `AppendObserved` above 2256
   records, at most every 10 min per directory per process. Other places it
   could run: the daemon (single owner, no cross-process race), a dashboard
@@ -110,7 +111,7 @@ last-id: (1162)
 - Alternative: run at session close.
 > Not decided by this capture.
 
-(1161) [open] [policy] Whether the 1 h At-and-mtime guard stays
+(ODQ-4) [open] [policy] Whether the 1 h At-and-mtime guard stays
 - Context: the guard (`observed_prune.go:139-145`) is what makes every repeat
   of a short-lived agent permanent, and fresh mtimes from a replay burst hold
   old lead repeats. It exists to avoid re-dating a change when a late record
@@ -122,25 +123,25 @@ last-id: (1162)
 - Alternative: shorten it.
 > Not decided by this capture.
 
-(1162) [open] [policy] The compatibility tier of the change
+(ODQ-5) [open] [policy] The compatibility tier of the change
 - Context: the readers listed in Background fold records through the
   unchanged `summarizeObserved`. Pre-7ad4a0627 binaries never prune and
   tolerate missing files (`observed.go:312-314`). If the keep set always
   contains each agent's first, change points and latest, old and new
   binaries show identical `Current` and `History`, which supports a T0
-  reading as in 7ad4a0627. Any variant from (1159)/(1161) that can drop an
+  reading as in 7ad4a0627. Any variant from (ODQ-2)/(ODQ-4) that can drop an
   agent's latest record, or re-date a change, changes what an old binary
   shows and needs its own verdict.
 - Alternative: T0, the keep set always a superset of first + changes +
   latest.
 - Alternative: T1 or higher, if a chosen variant can change displayed
   `Current`/`History`.
-> Not decided by this capture; settle together with (1159) and (1161).
+> Not decided by this capture; settle together with (ODQ-2) and (ODQ-4).
 
 ## Constraints
 
 - Every reader must keep seeing identical `Current` and `History` for every
-  agent before and after a prune, unless (1162) settles otherwise. The
+  agent before and after a prune, unless (ODQ-5) settles otherwise. The
   7ad4a0627 equivalence tests (one agent, three agents, child replay then a
   second prune, concurrent reads, failed deletes) remain the baseline and
   must not be weakened.
