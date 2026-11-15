@@ -9,8 +9,9 @@
 .msg.user { align-self: flex-end; max-width: 86%; }
 .msg.user .mh { justify-content: flex-end; }
 .msg.user .bub { background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); border-radius: 12px 12px 4px 12px; padding: 8px 11px; }
-.msg.fromlead { max-width: 94%; }
-.msg.fromlead .bub { background: var(--wb-card); border-radius: 12px 12px 12px 4px; padding: 8px 12px; box-shadow: var(--wb-shadow); }
+.msg.fromlead { align-self: stretch; min-width: 0; }
+.msg.fromlead .mh.conv-row { margin-bottom: 0; }
+.msg.fromlead .bub { margin: 0 62px 0 36px; background: var(--wb-card); border-radius: 4px 12px 12px 12px; padding: 8px 12px; box-shadow: var(--wb-shadow); }
 /* a lead reply is markdown: block spacing comes from the board's .md rules; here only wrapping and overflow */
 .msg .bub.md { white-space: normal; min-width: 0; }
 .msg .bub.md pre { max-width: 100%; overflow-x: auto; }
@@ -24,9 +25,7 @@
 .msg.fromlead[data-entry] > .bub.md { contain: paint; }
 .msg .bub.md svg { max-width: 100%; height: auto; }
 .src { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
-.src.wb { background: var(--wb-now); color: var(--wb-on-now); }
-.src.mail { background: var(--wb-technical); color: var(--wb-on-technical); }
-.turnline { align-self: center; display: inline-flex; gap: 6px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 999px; padding: 0 10px; }
+.turnline { align-self: flex-start; display: inline-flex; gap: 6px; align-items: center; margin-left: 36px; font-size: 12px; color: var(--wb-muted-fg); }
 /* Wake notifications: quiet completion chips, expandable content cards. */
 .wake-divider { display: flex; align-items: center; gap: 10px; color: var(--wb-muted-fg); font-size: 11px; }
 .wake-divider::before, .wake-divider::after { content: ""; flex: 1; height: 1px; background: var(--wb-muted); }
@@ -38,27 +37,20 @@
 .wake-head { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); }
 .wake-caption { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .wake-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; margin: 8px 0 0; }
-.wake-turn { align-self: flex-start; box-shadow: none; padding-left: 12px; }
-/* the lead's finished tool calls between two conversation entries: one muted line like the turn line, its batch list below when open */
-.toolsline { align-self: flex-start; max-width: 100%; font-size: 11px; color: var(--wb-muted-fg); }
-.toolsline > summary { list-style: none; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; max-width: 100%; box-sizing: border-box; box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 999px; padding: 0 10px; }
-.toolsline > summary::-webkit-details-marker { display: none; }
-.toolsline > summary:hover, .toolsline[open] > summary { color: var(--wb-fg); }
-.toolsline > summary .i { width: 10px; height: 10px; flex: none; transition: transform .15s; }
-.toolsline[open] > summary .i { transform: rotate(180deg); }
-/* two rows: the per-tool counts (.tsl) truncate, the numbers (.tsn) never do; open, the batch list shows the tools, so only the numbers stay */
-.toolsline .tsum { min-width: 0; display: flex; flex-direction: column; }
-.toolsline .tsl, .toolsline .tsn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.toolsline > summary:has(.tsn) { border-radius: 12px; padding-top: 2px; padding-bottom: 2px; }
-.toolsline[open] .tsum:has(.tsn) .tsl { display: none; }
+/* Live and finished tools share the mail/lead row frame; token counts stay visible. */
+.toolsline { align-self: stretch; min-width: 0; max-width: 100%; color: var(--wb-muted-fg); }
+.toolsline .tsum { flex-wrap: wrap; gap: 0 8px; }
+.toolsline .tsl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolsline .tsn { min-width: 0; font-size: 12px; }
+.toolsline .tsl > span, .toolsline .tool { font-family: var(--wb-mono); }
 .toolsline .tf { color: var(--wb-fail); font-weight: 700; }
 .toolsline .ttok { font-variant-numeric: tabular-nums; }
 .toolsline .tool .x { font-weight: 700; margin-left: 4px; }
-.toolsline .brows { margin: 4px 0 0; padding: 6px 10px; width: max-content; max-width: 100%; box-sizing: border-box; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); }
+.toolsline .brows { margin: 4px 62px 0 36px; padding: 6px 10px; width: max-content; max-width: calc(100% - 98px); box-sizing: border-box; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); }
 .brow.more { color: var(--wb-muted-fg); }
 /* A tool summary batch row: the name stays whole, the numbers stay at the right, and the args take what is left, truncated first. */
 .brow .bp.one .tool { flex: none; }
-.brow .ba { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--wb-mono); font-size: 11.5px; }
+.brow .ba { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: inherit; font-size: 11.5px; }
 .brow .bm > span { cursor: default; }
 .brow .bm .bf { color: var(--wb-fail); font-weight: 700; }
 /* a compaction of the main conversation: running (in convlive), then landed or failed (a ring entry) in the same place */
@@ -118,41 +110,46 @@
 .cardref .crt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cardref.up { display: block; padding: 0; border: 0; background: none; box-shadow: none; }
 .cardref.up > .cref { margin-top: 0; }
-.mailline { font-size: 12.5px; }
-.mailline > summary, .mailline.nobody { display: flex; gap: 6px; align-items: baseline; padding: 3px 8px; border-radius: 8px; color: var(--wb-muted-fg); }
-.mailline > summary { list-style: none; cursor: pointer; }
-.mailline > summary::-webkit-details-marker { display: none; }
-.mailline > summary:hover { background: color-mix(in srgb, var(--wb-muted) 80%, transparent); }
+.mailline { min-width: 0; }
 .mailline .arr { font-weight: 800; flex: none; }
 .mailline.recv .arr { color: var(--wb-primary); }
 .mailline .mail-icon { width: 13px; height: 13px; flex: none; align-self: center; color: var(--wb-primary); }
-.mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: none; }
+.mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .mailline a.mpeer { color: var(--wb-primary); }
 .mailline a.mpeer:hover { text-decoration: underline; }
-.mailline .mfirst { margin-left: -6px; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mailline .t { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
-.mailline[open] > summary { color: var(--wb-fg); }
-.mailline .mbody { margin: 2px 8px 4px 22px; padding: 7px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mailline .mfirst { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailline .mbody { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mailline > .mbody { margin: 0 62px 4px 36px; padding: 8px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); }
 
 /* Display-only conversation projections; board/composer component rules stay with their owners. */
-.mail-notification, .input-record { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
+.conv-row, .msg .mh.conv-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 44px 18px; column-gap: 8px; align-items: baseline; padding: 5px 0; font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: var(--wb-muted-fg); }
+.conv-row > .row-icon { display: flex; justify-content: center; align-self: center; }
+.conv-row .row-icon > .i, .conv-row .row-chevron > .i { width: 14px; height: 14px; }
+.conv-row > .row-content { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.conv-row > .row-time { text-align: right; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
+.conv-row .row-time time { font: inherit; }
+.conv-row > .row-chevron { display: flex; justify-content: center; align-self: center; opacity: .7; transform: rotate(-90deg); transition: transform .15s; }
+summary.conv-row { list-style: none; cursor: pointer; border-radius: 8px; }
+summary.conv-row::-webkit-details-marker { display: none; }
+summary.conv-row:hover { background: color-mix(in srgb, var(--wb-muted) 70%, transparent); }
+details[open] > summary.conv-row { color: var(--wb-fg); }
+details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
+.conv-row .row-avatar { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--wb-primary); color: var(--wb-bg); }
+.conv-row .row-avatar > .i { width: 13px; height: 13px; }
+.mail-notification { align-self: stretch; min-width: 0; border: 0; background: none; }
+.row-details { margin: 0 62px 4px 36px; padding: 8px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); font-size: 12px; color: var(--wb-muted-fg); }
+.row-details .wake-body { margin: 0; }
+.row-details .mbody + .mail-delivery { margin-top: 8px; }
+.input-record { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
 .input-record { border-style: dashed; }
 .input-record .bub { white-space: pre-wrap; overflow-wrap: anywhere; }
-.mail-notification .wake-head, .input-record .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
-.mail-notification .wake-head .t, .input-record .wake-head .t { margin-left: auto; }
+.input-record .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
+.input-record .wake-head .t { margin-left: auto; }
 .mailline.child-report { min-width: 0; }
 .mailline.child-report .mfirst { margin-left: 0; }
 .child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
-.delivery-details { min-width: 0; margin-top: 3px; font-size: 11px; color: var(--wb-muted-fg); }
-.delivery-details > summary { width: fit-content; max-width: 100%; padding: 3px 0; cursor: pointer; overflow-wrap: anywhere; }
-.delivery-details .wake-body { max-width: 100%; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-muted-fg); background: var(--wb-bg); font: 11px/1.5 var(--wb-mono); }
-.delivery-meta { margin-top: 4px; overflow-wrap: anywhere; }
 .src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
 .mail-block { min-width: 0; }
-.mail-delivery { margin: 1px 8px 0 22px; }
-.mailline:has(.peer-lead) > summary { flex-wrap: wrap; }
-.mailline:has(.peer-lead) .mpeer { max-width: 100%; overflow-wrap: anywhere; }
-.mailline:has(.peer-lead) .mfirst { flex-basis: 12em; }
 .wbupdate-topic[data-wb-topic] { cursor: pointer; }
 /* Higher specificity keeps the legacy effects frame from nesting full topic cards in a summary. */
 .wbeffects.wbupdate { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
@@ -171,17 +168,13 @@
 .wbupdate-text { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .wbupdate-l { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 50%; font-size: 9px; font-weight: 800; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
 .wbupdate-item-id { font: 700 11px var(--wb-mono); color: var(--wb-muted-fg); }
-.wbupdate-class { max-width: 100%; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 10px; overflow-wrap: anywhere; }
+.wbupdate-items { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 7px; min-width: 0; padding: 2px 6px; }
 .wbupdate-panel { flex-wrap: nowrap; }
 .wbupdate-panel-label { flex: none; color: var(--wb-muted-fg); font-size: 10px; font-weight: 800; }
 .wbupdate-panel .wbupdate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wbupdate-panel a { flex: none; }
-.wbupdate-options { flex-basis: 100%; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; padding-left: 22px; }
-.wbupdate-options span { max-width: 100%; padding: 1px 8px; border-radius: 7px; background: color-mix(in srgb, var(--wb-policy) 8%, var(--wb-card)); color: var(--wb-fg); box-shadow: var(--wb-shadow); font-size: 11px; overflow-wrap: anywhere; }
 .wbupdate-status { display: block; padding: 0 12px; font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .wbupdate-status:empty { display: none; }
-.wbupdate .wbeffect-details { margin: 4px 7px 0; font-size: 11px; color: var(--wb-muted-fg); }
-.wbupdate .wbeffect-details > summary { cursor: pointer; }
 .wbeffects.wbupdate-line > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; padding: 4px 7px; border-radius: 7px; list-style: none; font-size: 12px; color: var(--wb-muted-fg); }
 .wbupdate-line > summary::-webkit-details-marker { display: none; }
 .wbupdate-line > summary:hover { background: var(--wb-muted); }
@@ -189,7 +182,7 @@
 .wbupdate-line[open] > summary .i { transform: rotate(180deg); }
 .wbupdate-preview { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wbupdate-line > .wbupdate-topic { margin: 3px 7px 5px 22px; }
-.wbupdate :is(a, summary):focus-visible, .delivery-details > summary:focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
+summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summary):focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
 .wbupdate-bar a:focus-visible { outline-color: var(--wb-on-topic); }
 
 /* ===== composer: never swapped ===== */

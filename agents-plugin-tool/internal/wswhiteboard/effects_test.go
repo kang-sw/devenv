@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -102,9 +103,8 @@ func TestSemanticEffectsImplicitWithdrawalReopenAdoptionAndEviction(t *testing.T
 		archive.Items = append(archive.Items, Item{ID: i, Topic: "archive", Class: ClassCheck, Status: StatusAnswered, Settled: i})
 	}
 	out = mustApply(t, archive, ``)
-	removed := wantEffect(t, out.Effects, "item", "presence", "present", "")
-	if removed.ID != 1 {
-		t.Fatalf("wrong archive eviction: %+v", removed)
+	if len(out.Effects) != 0 || archive.index(1) >= 0 || len(archive.Items) != ArchiveCap {
+		t.Fatalf("archive maintenance emitted command effects or stopped evicting: %+v, items %d", out.Effects, len(archive.Items))
 	}
 }
 
@@ -193,6 +193,48 @@ func TestSemanticEffectsConsecutiveGroupMetadataReversions(t *testing.T) {
 	}
 	if got := mustApply(t, s, `<wb:topic name="t" label="Original" tickets="261115-feat-first"/>`); len(got.Effects) != 0 {
 		t.Fatalf("identical group metadata produced effects: %+v", got.Effects)
+	}
+}
+
+func TestSemanticEffectsArchiveMaintenanceKeepsCommandEffectsAndPersistence(t *testing.T) {
+	seed := &State{Counter: ArchiveCap + 2, SettleSeq: ArchiveCap}
+	for id := 1; id <= ArchiveCap; id++ {
+		seed.Items = append(seed.Items, Item{ID: id, Topic: "archive", Class: ClassTechnical, Title: "old", Status: StatusAnswered, Settled: id})
+	}
+	for _, id := range []int{ArchiveCap + 1, ArchiveCap + 2} {
+		seed.Items = append(seed.Items, Item{ID: id, Topic: "current", Class: ClassTechnical, Title: "answer me", Status: StatusOpen})
+	}
+	store := FolderStore{Dir: t.TempDir()}
+	var out Outcome
+	if err := store.Update(seed, func(work *State) error {
+		out = mustApply(t, work, fmt.Sprintf(`<wb:answer id="%d" value="ok">First.</wb:answer><wb:answer id="%d" value="ok">Second.</wb:answer>`, ArchiveCap+1, ArchiveCap+2))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]bool{}
+	for _, e := range out.Effects {
+		if e.Kind == "item" {
+			if e.ID != ArchiveCap+1 && e.ID != ArchiveCap+2 {
+				t.Fatalf("untouched archive item entered command effects: %+v", e)
+			}
+			seen[e.ID] = true
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("lost target effects: %+v", out.Effects)
+	}
+	wantEffect(t, out.Effects, "item", "status", StatusOpen, StatusAnswered)
+	wantEffect(t, out.Effects, "item", "answer-quote", "", "First.")
+	wantEffect(t, out.Effects, "item", "answer-quote", "", "Second.")
+	reloaded := folderOpen(t, store.Dir, nil)
+	if len(reloaded.Items) != ArchiveCap || reloaded.index(1) >= 0 || reloaded.index(2) >= 0 || reloaded.index(3) < 0 || reloaded.Counter != ArchiveCap+2 {
+		t.Fatalf("archive cap/order/counter changed after reload: %+v", reloaded.Items)
+	}
+	for _, id := range []int{ArchiveCap + 1, ArchiveCap + 2} {
+		if got := item(t, reloaded, id); got.Status != StatusAnswered || got.Answer != "ok" || got.Settled <= ArchiveCap {
+			t.Fatalf("newly settled target lost after reload: %+v", got)
+		}
 	}
 }
 

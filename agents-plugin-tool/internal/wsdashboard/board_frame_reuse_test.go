@@ -55,7 +55,7 @@ function boardNodes(input) { return frag(input).childNodes; }
 `+src+`
 function mounted(key, text) { return mountFrame(new El("div", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text })); }
 function holder(key, text) { return new El("div", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text }); }
-function run(f) { return new El("article", {}, [new El("details", { open: "" }, [f])]); }
+function run(f) { return new El("div", { "class": "timeline-row", "data-row": f.getAttribute("data-doc-key") }, [new El("article", {}, [new El("details", { open: "" }, [f])])]); }
 function topic(th, bodyFrame, runs) {
   return new El("section", { "class": "topic", "data-topic": "A", "data-th": th }, [new El("div", { "class": "doc-body framed" }, [bodyFrame]), new El("div", { "class": "topic-stream" }, runs.map(run))]);
 }
@@ -78,7 +78,7 @@ check("the changed topic keeps its section (frameGraft)", o.board.childNodes[0] 
 var bf = walk(o.sec, []).filter(function (n) { return n.classList.contains("doc-frame") && /^topic:/.test(n.getAttribute("data-doc-key")); });
 check("the topic-body frame takes the double buffer: old kept, new mounted beside it, pending", bf.length === 2 && bf[0] === o.body && bf[1].tagName === "IFRAME" && bf[1].getAttribute("srcdoc") === "B2" && bf[1].wbNext === true);
 check("an unchanged entry frame is the same element, on the board, never reloaded", inBoard(o, o.e1) && !o.e1.reloads && !p1.parentNode);
-check("it stands where its placeholder stood", o.e1.parentNode && o.e1.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode.classList.contains("topic-stream") && o.e1.parentNode.childNodes.length === 1);
+check("it stands in the admitted whole-item timeline row", o.e1.parentNode && o.e1.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode && o.e1.parentNode.parentNode.parentNode.classList.contains("timeline-row") && o.e1.parentNode.childNodes.length === 1);
 check("a changed data-srcdoc is replaced: the placeholder stays for the mount pass", !inBoard(o, o.e2) && inBoard(o, p2) && p2.tagName === "DIV");
 check("a new entry stays a placeholder", inBoard(o, p3));
 check("duplicate keys pair off once each", inBoard(o, o.d1) && inBoard(o, o.d2) && !pd1.parentNode && !pd2.parentNode && inBoard(o, pd3) && !o.d1.reloads && !o.d2.reloads);

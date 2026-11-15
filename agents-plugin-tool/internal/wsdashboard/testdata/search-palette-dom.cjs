@@ -71,10 +71,10 @@ module.exports = function renderedEntries(source, fixture) {
   const start = source.indexOf('  function paletteText('), end = source.indexOf('  function paletteClosed(', start);
   assert(start >= 0 && end > start);
   vm.runInContext(source.slice(start, end), ctx);
-  const pages = q('template[data-history-page]');
-  assert(pages.length > 0, 'fixture has older inert history pages');
-  assert(q('details.system-run', pages[0].content).length > 0, 'an older page holds a folded system run');
-  assert(q('details.panel-versions').length > 0, 'fixture has an earlier panel version');
+  const pages = q('template[data-history-gap]');
+  assert(pages.length > 0, 'fixture has unloaded timeline gaps');
+  assert(pages.some(p => q('details.system-run', p.content).length > 0), 'a gap holds a folded system run');
+  assert(q('details.panel-versions').length > 0 || pages.some(p => q('details.panel-versions', p.content).length > 0), 'fixture has an earlier panel version');
   const before = JSON.stringify(root.snapshot()), rows = JSON.parse(JSON.stringify(ctx.paletteRows()));
   assert.equal(JSON.stringify(root.snapshot()), before, 'indexing does not mutate the rendered DOM or templates');
   const entries = rows.filter(r => r.group === 5);
@@ -102,7 +102,7 @@ module.exports = function renderedEntries(source, fixture) {
     if (article.getAttribute('data-kind') === 'system') assert(row.title.length > 0, 'folded system rows are searchable');
   }
   // Mounting changes the source attribute, not what search can read.
-  const frame = q('.doc-frame')[0], sourceDoc = frame.attrs['data-srcdoc'];
+  const frame = q('.doc-frame').concat(pages.flatMap(p => q('.doc-frame', p.content)))[0], sourceDoc = frame.attrs['data-srcdoc'];
   assert(sourceDoc);
   frame.attrs.srcdoc = sourceDoc; delete frame.attrs['data-srcdoc'];
   assert.deepEqual(JSON.parse(JSON.stringify(ctx.paletteRows())), rows);

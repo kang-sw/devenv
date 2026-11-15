@@ -50,7 +50,7 @@ func TestChildReportFoldedMailboxRow(t *testing.T) {
 	}
 }
 
-func TestConversationMailboxIconOnlyOnInboundRows(t *testing.T) {
+func TestConversationMailboxIconsFollowDirectionArrows(t *testing.T) {
 	for _, direction := range []string{wslive.MailRecv, wslive.MailSent} {
 		t.Run(direction, func(t *testing.T) {
 			ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{
@@ -58,12 +58,12 @@ func TestConversationMailboxIconOnlyOnInboundRows(t *testing.T) {
 			})}
 			for _, page := range []PageContent{{}, {MailBodies: map[string]string{"h1": "original body"}}} {
 				html := presentationHTML(t, ring, page, nil)
-				if direction == wslive.MailRecv {
-					if strings.Count(html, `class="i mail-icon"`) != 1 || !strings.Contains(html, `<span class="arr">←</span><svg class="i mail-icon"`) || !strings.Contains(html, `aria-hidden="true"`) {
-						t.Fatalf("inbound icon missing or not immediately after the arrow: %s", html)
-					}
-				} else if strings.Contains(html, "mail-icon") || !strings.Contains(html, `<span class="arr">→</span>`) {
-					t.Fatalf("outbound mailbox row changed: %s", html)
+				arrow := "←"
+				if direction == wslive.MailSent {
+					arrow = "→"
+				}
+				if strings.Count(html, `class="i mail-icon"`) != 1 || !strings.Contains(html, `<span class="arr">`+arrow+`</span><svg class="i mail-icon"`) || !strings.Contains(html, `aria-hidden="true"`) {
+					t.Fatalf("mailbox icon missing or not immediately after its direction arrow: %s", html)
 				}
 			}
 		})

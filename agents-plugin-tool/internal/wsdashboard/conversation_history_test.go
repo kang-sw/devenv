@@ -280,7 +280,7 @@ func TestWhiteboardEffectsRoutesReadSavedHistoryWithoutAnAdapter(t *testing.T) {
 	}
 	for id, text := range map[string]string{"boardsession": "offline board private", "livesession": "stale lead private"} {
 		code, page := get(t, f.base+"/s/"+id+"?frame=1")
-		if code != http.StatusOK || !strings.Contains(page, `data-mode="history"`) || !strings.Contains(page, text) || !strings.Contains(page, `data-region="entries"`) {
+		if code != http.StatusOK || !strings.Contains(page, `data-mode="history"`) || !strings.Contains(page, "Saved panel summary") || strings.Contains(page, text) || !strings.Contains(page, `data-region="entries"`) {
 			t.Fatalf("initial saved history %s: status %d, %.600s", id, code, page)
 		}
 		for _, absent := range []string{`id="composer"`, `id="ctext"`, `data-region="convlive"`, "stale streaming secret"} {
@@ -292,8 +292,8 @@ func TestWhiteboardEffectsRoutesReadSavedHistoryWithoutAnAdapter(t *testing.T) {
 			t.Error("offline registration was made live")
 		}
 		history := getHistory(t, f.base+"/s/"+id+"/history")
-		if !strings.Contains(history.HTML, text) {
-			t.Errorf("history route lost %s", text)
+		if !strings.Contains(history.HTML, "Saved panel summary") || strings.Contains(history.HTML, text) {
+			t.Errorf("history route lost recap or exposed panel payload %s", text)
 		}
 		for peer, other := range map[string]string{"boardsession": "offline board private", "livesession": "stale lead private"} {
 			if peer != id && (strings.Contains(page, other) || strings.Contains(history.HTML, other)) {
@@ -313,7 +313,7 @@ func TestWhiteboardEffectsOlderThanLiveCapRemainReachableOffline(t *testing.T) {
 	if !strings.Contains(page, `data-mode="history"`) || strings.Contains(page, "old saved effect") {
 		t.Fatal("initial cap/mode did not preserve access to older effects")
 	}
-	if history := getHistory(t, f.base+"/s/boardsession/history?n=200"); !history.End || !strings.Contains(history.HTML, "old saved effect") {
+	if history := getHistory(t, f.base+"/s/boardsession/history?n=200"); !history.End || !strings.Contains(history.HTML, "Saved panel summary") || strings.Contains(history.HTML, "old saved effect") {
 		t.Fatalf("older effect unreachable: %+v", history)
 	}
 }

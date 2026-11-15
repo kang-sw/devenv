@@ -93,20 +93,29 @@ async function until(check, message) {
       async function effectsKeys() {
         return page.locator('.wbeffects[data-entry]').evaluateAll(nodes => nodes.map(e => e.getAttribute('data-entry')));
       }
-      async function arrived(update, beforeKeys, expand) {
+      async function groupedItems(card) {
+        for (const topic of await card.locator('.wbupdate-topic').all()) {
+          assert(await topic.locator('.wbupdate-items').count() <= 1, 'one chip group per topic');
+          assert.equal(await topic.locator('.wbupdate-row .wbupdate-item-id, .wbupdate-class, .wbupdate-options').count(), 0, 'no redundant item rows');
+          for (const chip of await topic.locator('.wbupdate-items > a.wbupdate-item-id').all()) {
+            const target = await chip.getAttribute('data-wb-jump');
+            assert(/^item-[1-9]\d{0,5}$/.test(target), 'chips keep validated item targets');
+            assert.equal(await chip.getAttribute('href'), '#' + target);
+            assert.equal(await chip.getAttribute('data-wb-topic'), await topic.getAttribute('data-wb-topic'));
+          }
+        }
+      }
+      async function arrived(update, beforeKeys) {
         assert(update.key && !beforeKeys.includes(update.key), 'append returns a genuinely new effects ring key');
         const fresh = page.locator(`.wbeffects[data-entry="${update.key}"]`);
         await fresh.waitFor({ state: 'attached' });
         assert.equal(await fresh.count(), 1, 'new carrier renders as its own update card');
-        assert.equal(await fresh.locator('.wbeffect-values').count(), 1, 'log diagnostics remain inspectable; panel payload is not imported');
+        assert.equal(await fresh.locator('.wbeffect-details, .wbeffect-values').count(), 0, 'saved-change diagnostics are removed');
+        await groupedItems(fresh);
         assert(!(await fresh.textContent()).includes('PANEL-PAYLOAD-ONLY'), 'panel payload stays on the board');
         assert.equal(await fresh.locator('.wbeffect-fallback, script, img, iframe, strong').count(), 0);
-        assert((await fresh.locator('pre').allTextContents()).includes(update.payload), 'newly arriving hostile log remains exact literal text');
+        assert((await fresh.locator('.wbupdate-log .wbupdate-text').allTextContents()).includes(update.payload), 'newly arriving hostile log remains exact literal text');
         assert.equal(await page.evaluate(() => typeof window.effectsAttack), 'undefined', 'new effects payload never executes');
-        if (expand) {
-          await fresh.locator('.wbeffect-details > summary').click();
-          assert.equal(await fresh.locator('.wbeffect-details').evaluate(e => e.open), true, 'change diagnostics expand independently of the card');
-        }
       }
       async function waitStored(draft) {
         await page.waitForFunction(text => Object.keys(localStorage).some(k => (localStorage.getItem(k) || '').includes(text)), draft);
@@ -130,10 +139,10 @@ async function until(check, message) {
         const effect = () => page.locator(`.wbeffects[data-entry="${keys.focus}"]`);
         const fallback = () => page.locator(`.wbeffects[data-entry="${keys.fallback}"]`);
         await effect().waitFor({ state: 'attached' });
-        await effect().locator('.wbeffect-details > summary').click();
         await effect().evaluate(e => { e.effectsBrowserIdentity = 'original-effect-node'; });
-        assert.equal(await effect().locator('.wbeffect-details').evaluate(e => e.open), true);
-        const values = await effect().locator('pre').allTextContents();
+        assert.equal(await effect().locator('.wbeffect-details, .wbeffect-values').count(), 0, 'saved-change diagnostics are absent');
+        await groupedItems(effect());
+        const values = await effect().locator('.wbupdate-log .wbupdate-text').allTextContents();
         assert(values.some(s => s.includes('<img src=x onerror="window.effectsAttack=1">') && s.includes('**plain text**')), 'valid log stays literal, including HTML and Markdown syntax');
         assert.equal(await effect().locator('script, img, iframe, strong').count(), 0, 'effects never execute/render panel HTML or Markdown');
         assert.equal(await page.evaluate(() => typeof window.effectsAttack), 'undefined');
@@ -147,8 +156,8 @@ async function until(check, message) {
         const savedKeys = await effectsKeys();
         const refresh = await action('append');
         await page.getByText(refresh.marker, { exact: true }).waitFor({ state: 'attached' });
-        await arrived(refresh, savedKeys, true);
-        assert.equal(await effect().evaluate(e => e.querySelector('.wbeffect-details').open && e.effectsBrowserIdentity === 'original-effect-node'), true, 'real stream refresh preserves expanded diagnostics and node');
+        await arrived(refresh, savedKeys);
+        assert.equal(await effect().evaluate(e => e.effectsBrowserIdentity === 'original-effect-node'), true, 'real stream refresh preserves keyed update node');
         assert.equal(await page.getByText('old-history-marker', { exact: true }).count(), 0, 'old marker is outside initial ring window');
         const older = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/effectsession/history' && r.status() === 200);
         await page.locator('#convo').evaluate(e => { e.scrollTop = 0; e.dispatchEvent(new Event('scroll')); });
@@ -157,7 +166,7 @@ async function until(check, message) {
         assert(historyBody.html.includes('old-history-marker'), 'production history handler supplies older records');
         await page.getByText('old-history-marker', { exact: true }).waitFor({ state: 'attached' });
         assert(history.length > 0, 'real older-history paging occurred');
-        assert.equal(await effect().evaluate(e => e.querySelector('.wbeffect-details').open && e.effectsBrowserIdentity === 'original-effect-node'), true, 'paging retains diagnostics expansion and existing entry identity');
+        assert.equal(await effect().evaluate(e => e.effectsBrowserIdentity === 'original-effect-node'), true, 'paging retains existing keyed entry identity');
         await effect().scrollIntoViewIfNeeded();
         await shot('expanded-after-refresh-and-history');
 
@@ -170,7 +179,7 @@ async function until(check, message) {
         const liveKeys = await effectsKeys();
         const liveRefresh = await action('append');
         await page.getByText(liveRefresh.marker, { exact: true }).waitFor({ state: 'attached' });
-        await arrived(liveRefresh, liveKeys, true);
+        await arrived(liveRefresh, liveKeys);
         assert.equal(await page.locator('#ctext').inputValue(), draft, 'effects refresh never changes composer input');
         await action('stale');
         await page.locator('#dash-banner').waitFor({ state: 'visible' });
@@ -245,7 +254,7 @@ async function until(check, message) {
         const jumpedKeys = await effectsKeys();
         const jumpedRefresh = await action('append');
         await page.getByText(jumpedRefresh.marker, { exact: true }).waitFor({ state: 'attached' });
-        await arrived(jumpedRefresh, jumpedKeys, false);
+        await arrived(jumpedRefresh, jumpedKeys);
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         const after = await target.boundingBox();
         assert(after && Math.abs(after.y - before.y) <= 16, 'effects refresh preserves the followed board target');
@@ -289,7 +298,7 @@ async function until(check, message) {
         assert.deepEqual(errors, [], 'no production page errors');
         assert.deepEqual(consoleErrors, [], 'no browser console errors');
         assert.deepEqual(unexpected, [], 'no external network access');
-        console.log(`PASS ${width}px: real escaped effects/fallback, refresh/history expansion, no/stale/live adapter transitions, saved-history controls, drafts, board jump-follow, modal completion/generation`);
+        console.log(`PASS ${width}px: real escaped effects/fallback, refresh/history keyed identity, no/stale/live adapter transitions, saved-history controls, drafts, board jump-follow, modal completion/generation`);
       } catch (e) {
         try { await shot('failure'); } catch (_) {}
         throw e;
