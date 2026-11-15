@@ -58,7 +58,7 @@ func TestRailWorktreeAdmissionBrowser(t *testing.T) {
 	}
 	refresh()
 	render := func() renderedRegion {
-		r, err := renderRailRegion(d.railView(d.pages()), "en")
+		r, err := renderRailRegion(d.railView(d.pagesIn("ko")), "ko")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -79,7 +79,7 @@ func TestRailWorktreeAdmissionBrowser(t *testing.T) {
 			fmt.Fprint(w, `{"entries":[],"memos":[],"writable":true}`)
 			return
 		}
-		page, err := renderShellPage(shellPageData{Lang: "en", Src: "/fixture-frame", Title: "Worktree admission fixture", regions: regionSet{regionRail: render()}}, nil)
+		page, err := renderShellPage(shellPageData{Lang: "ko", Src: "/fixture-frame", Title: "Worktree admission fixture", regions: regionSet{regionRail: render()}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,13 +177,15 @@ func TestRailWorktreeAdmissionBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifacts := "/tmp/ws-worktree-admission-evidence"
-	if err := os.MkdirAll(artifacts, 0755); err != nil {
-		t.Fatal(err)
+	artifacts, shots := "/tmp/ws-worktree-admission-evidence", "/tmp/worktree-apply-notice"
+	for _, dir := range []string{artifacts, shots} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", "testdata/rail-worktree-admission.browser.cjs", server.URL, reference, artifacts)
+	cmd := exec.CommandContext(ctx, "node", "testdata/rail-worktree-admission.browser.cjs", server.URL, reference, artifacts, shots)
 	out, err := cmd.CombinedOutput()
 	t.Log(string(out))
 	if err != nil {

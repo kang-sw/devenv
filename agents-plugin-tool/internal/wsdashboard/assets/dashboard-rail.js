@@ -163,7 +163,7 @@
   // Never refresh a draft's evidence implicitly, including on a 409 or reload.
   var admissionStore = WsRail && WsRail.admissionDrafts(railStore);
   var admissionDraft = admissionStore ? admissionStore.load() : [];
-  var admissionMessage = "", admissionBusy = false;
+  var admissionMessage = "", admissionDetail = "", admissionBusy = false;
   var ADMISSION_PROMPT = "ws.dashboard.worktree-admission.prompt";
   var admissionPrompt = null;
   try { admissionPrompt = JSON.parse(load(ADMISSION_PROMPT) || "null"); } catch (_) {}
@@ -196,18 +196,18 @@
         b.disabled = admissionBusy;
       });
       var tag = row.querySelector(".tag"), fix = row.querySelector(".admission-row-correction");
-      if (tag) tag.textContent = d ? (d.action === "approve" ? "Will approve" : "Will reject") : "";
+      if (tag) tag.textContent = d ? (d.action === "approve" ? wsT("js.admission.will.approve") : wsT("js.admission.will.reject")) : "";
       if (fix) fix.hidden = !stale;
       // Rejected rows have no pending correction markup. Their draft remains
       // visible in the correction list rather than becoming an invisible undo.
-      if (stale && !fix) correctionRow(d, "Evidence changed", row);
+      if (stale && !fix) correctionRow(d, wsT("js.admission.fix.changed", d.path), row);
     });
     function correctionRow(d, reason, row) {
-      var line = mk("div", "admission-missing", reason + ": " + d.path + " ");
-      var clear = mk("button", "", "Clear selection"); clear.type = "button";
+      var line = mk("div", "admission-missing", reason + " ");
+      var clear = mk("button", "", wsT("js.admission.fix.clear")); clear.type = "button";
       clear.addEventListener("click", function () { admissionClear(d); }); line.appendChild(clear);
       if (row) {
-        var review = mk("button", "", "Use current evidence"); review.type = "button";
+        var review = mk("button", "", wsT("js.admission.fix.reselect")); review.type = "button";
         review.addEventListener("click", function () {
           var fresh = admissionEvidence(row, row.getAttribute("data-admission") === "rejected" ? "undo" : d.action);
           admissionClear(d); admissionDraft.push(fresh); admissionSave();
@@ -215,36 +215,67 @@
       }
       correction.appendChild(line);
     }
-    admissionDraft.forEach(function (d) { if (!seen[admissionKey(d)]) correctionRow(d, "No longer pending or missing from rail", null); });
+    admissionDraft.forEach(function (d) { if (!seen[admissionKey(d)]) correctionRow(d, wsT("js.admission.fix.missing", d.path), null); });
     var cap = r.querySelector(".rcap"), ap = admissionDraft.filter(function (d) { return d.action === "approve"; }).length;
     var reject = admissionDraft.filter(function (d) { return d.action === "reject"; }).length;
     cap.hidden = !admissionDraft.length; railEl.classList.toggle("capon", !!admissionDraft.length);
     var ok = cap.querySelector(".ok"), no = cap.querySelector(".no");
-    ok.hidden = !ap; ok.textContent = "Approve " + ap; no.hidden = !reject; no.textContent = "Reject " + reject;
+    ok.hidden = !ap; ok.textContent = wsT("js.admission.cap.approve", ap); no.hidden = !reject; no.textContent = wsT("js.admission.cap.reject", reject);
     cap.querySelector("[data-admission-apply]").disabled = admissionBusy;
+    // A copied prompt needs no notice (Apply toasts it, and the rejected
+    // list's header copies it again); only a failed copy stays, until its
+    // close, which outlives a reload, or a later successful copy.
     var feedback = r.querySelector(".admission-feedback"), copy = r.querySelector(".admission-copy");
-    r.querySelector(".admission-status").textContent = admissionMessage;
-    copy.hidden = !(admissionPrompt && admissionPrompt.text);
-    if (!copy.hidden) {
-      copy.querySelector("textarea").value = admissionPrompt.text;
-      copy.querySelector(".admission-copy-status").textContent = admissionPrompt.failed ? "Rejection saved. Clipboard failed; retry copy or copy the retained prompt below. " : "Investigation prompt retained. ";
-      copy.querySelector("button").textContent = admissionPrompt.failed ? "Retry copy" : "Copy prompt";
-    }
-    feedback.hidden = !admissionMessage && !correction.children.length && copy.hidden;
+    var status = r.querySelector(".admission-status"), failed = !!(admissionPrompt && admissionPrompt.text && admissionPrompt.failed && !admissionPrompt.dismissed);
+    copy.hidden = !failed;
+    if (failed) copy.querySelector("textarea").value = admissionPrompt.text;
+    status.textContent = admissionMessage || (failed ? wsT("js.admission.copyfailed") : "");
+    status.title = admissionMessage ? admissionDetail : "";
+    status.hidden = !status.textContent;
+    r.querySelector("[data-admission-dismiss]").hidden = status.hidden;
+    feedback.hidden = status.hidden && !correction.children.length;
   }
-  function admissionCopy() {
-    if (!admissionPrompt || !admissionPrompt.text) return;
-    var prompt = admissionPrompt;
-    return copyText(prompt.text).then(function (ok) {
-      if (admissionPrompt !== prompt) return;
-      admissionPrompt.failed = !ok;
-      save(ADMISSION_PROMPT, JSON.stringify(admissionPrompt));
-      admissionSync();
+  // admissionCopy copies text quietly (copyText's failure toast would show
+  // the whole prompt) and keeps it as the retained prompt: a failure shows
+  // the retry notice again, even one closed before.
+  function admissionCopy(text, done) {
+    if (!text) return;
+    var prompt = admissionPrompt = { text: text, failed: true };
+    save(ADMISSION_PROMPT, JSON.stringify(prompt));
+    return copyText(text, true).then(function (ok) {
+      if (admissionPrompt === prompt) {
+        prompt.failed = !ok;
+        save(ADMISSION_PROMPT, JSON.stringify(prompt));
+        admissionSync();
+      }
+      if (done) done(ok);
+      else if (ok) toast(wsT("js.toast.copydone"));
     });
+  }
+  function admissionDismiss() {
+    var r = region("rail"), f = r && r.querySelector(".admission-feedback");
+    var refocus = f && f.contains(doc.activeElement);
+    admissionMessage = ""; admissionDetail = "";
+    if (admissionPrompt) { admissionPrompt.dismissed = true; save(ADMISSION_PROMPT, JSON.stringify(admissionPrompt)); }
+    admissionSync();
+    var next = refocus && r.querySelector(".rrej > summary");
+    if (next) next.focus();
+  }
+  // admissionToast says what an applied batch did, the mockup's two lines:
+  // the rejection and its copy first, the rest small beneath it.
+  function admissionToast(n, copied) {
+    var lines = [];
+    if (n.reject) lines.push(wsT(copied ? "js.admission.toast.rejected" : "js.admission.toast.rejectfail", n.reject));
+    if (n.approve) lines.push(wsT("js.admission.toast.approved", n.approve));
+    if (n.undo) lines.push(wsT("js.admission.toast.undone", n.undo));
+    if (!lines.length || !window.WsToast) return;
+    var esc = function (x) { return String(x).replace(/[&<>"]/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); };
+    window.WsToast.show(esc(lines[0]) + lines.slice(1).map(function (x) { return "<small>" + esc(x) + "</small>"; }).join(""),
+      { html: true, kind: copied ? "info" : "warn" });
   }
   function admissionSubmit(selections) {
     if (admissionBusy || !selections.length) return;
-    admissionBusy = true; railSaving++; admissionMessage = "Applying worktree selections…"; admissionSync();
+    admissionBusy = true; railSaving++; admissionMessage = wsT("js.admission.applying"); admissionDetail = ""; admissionSync();
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, LAYOUT_WAIT);
     fetch("/rail/worktrees/admission", { method: "POST", credentials: "same-origin", cache: "no-store",
@@ -260,14 +291,14 @@
             return admissionKey(s) === admissionKey(d) && s.revision === d.revision && s.action === d.action;
           }); });
           admissionStore.save(admissionDraft);
-          admissionMessage = "Worktree selections saved. No worktree files were changed.";
+          admissionMessage = "";
           // Server HTML, not optimistic DOM moves, is the committed authority.
           if (v.html) swap("rail", "admission:" + v.gen + ":" + Date.now(), v.html);
-          if (v.prompt) {
-            admissionPrompt = { text: v.prompt, failed: true };
-            save(ADMISSION_PROMPT, JSON.stringify(admissionPrompt));
-            admissionCopy();
-          }
+          var n = { approve: 0, reject: 0, undo: 0 };
+          selections.forEach(function (s) { n[s.action] = (n[s.action] || 0) + 1; });
+          // The rejection is already persisted; the copy comes after it (1101).
+          if (v.prompt) admissionCopy(v.prompt, function (ok) { admissionToast(n, ok); });
+          else admissionToast(n, true);
         } else {
           (v.stale || selections).forEach(function (s) {
             var d = admissionFind(s);
@@ -275,17 +306,21 @@
             else admissionDraft.push({ repository: s.repository, path: s.path, revision: s.revision, action: s.action, stale: true });
           });
           admissionStore.save(admissionDraft);
-          admissionMessage = v.message || "Nothing applied. Refresh, clear marked selections and select again.";
+          // The route's message is English diagnostics: the title keeps it.
+          admissionMessage = wsT(answer.status === 409 ? "js.admission.stale" : answer.status === 400 ? "js.admission.invalid" : "js.admission.notwritten");
+          admissionDetail = v.message || "";
         }
-      }).catch(function () { admissionMessage = "Apply could not be confirmed. Drafts retained; refresh before retrying."; })
+      }).catch(function () { admissionMessage = wsT("js.admission.unconfirmed"); admissionDetail = ""; })
       .then(function () { clearTimeout(timer); admissionBusy = false; railSaving--; admissionSync(); railRelease(); });
   }
   function admissionClick(t) {
-    var b = t.closest && t.closest("[data-admission-action], [data-admission-clear], [data-admission-apply], [data-admission-copy], [data-admission-clear-row], [data-admission-reselect], .admission-undo");
+    var b = t.closest && t.closest("[data-admission-action], [data-admission-clear], [data-admission-apply], [data-admission-copy], [data-admission-copy-all], [data-admission-dismiss], [data-admission-clear-row], [data-admission-reselect], .admission-undo");
     if (!b) return false;
+    if (b.hasAttribute("data-admission-dismiss")) { admissionDismiss(); return true; }
     if (admissionBusy) return true;
     if (b.hasAttribute("data-admission-clear")) { admissionDraft = []; admissionMessage = ""; admissionSave(); }
-    else if (b.hasAttribute("data-admission-copy")) admissionCopy();
+    else if (b.hasAttribute("data-admission-copy")) admissionCopy(admissionPrompt && admissionPrompt.text);
+    else if (b.hasAttribute("data-admission-copy-all")) admissionCopy(b.getAttribute("data-copy"));
     else if (b.hasAttribute("data-admission-apply")) admissionSubmit(admissionDraft.slice());
     else {
       var row = b.closest(".rwt"), s = admissionEvidence(row, b.getAttribute("data-admission-action") || "undo"), old = admissionFind(s);
@@ -377,6 +412,11 @@
       railOpen(!railShown());
     });
     if (rscrim) rscrim.addEventListener("click", function () { railOpen(false); });
+    // Esc inside the admission notice closes the notice, not the rail.
+    railEl.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !e.target.closest || !e.target.closest(".admission-feedback")) return;
+      e.preventDefault(); e.stopPropagation(); admissionDismiss();
+    });
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
     // Ctrl+` (the physical key, so any layout) also opens memos beside
     // the permanent rail column.
