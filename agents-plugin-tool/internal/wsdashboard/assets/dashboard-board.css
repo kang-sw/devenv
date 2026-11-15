@@ -253,10 +253,15 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
   .board-state-radio { padding-inline: 7px; gap: 4px; }
   .board-action { padding-inline: 8px; gap: 5px; }
   .board-action kbd { display: none; }
-  /* Compact action labels with the eight-segment filter, so live boards
-     with Files do not wrap the filter onto a second row at medium widths. */
-  .board-action .board-label { display: none; }
   .board-tools { gap: 5px; }
+}
+@container board-toolbar (max-width: 760px) {
+  .board-action .board-label { display: none; }
+}
+/* The eight-filter row needs compact actions at 800px outer width (798px
+   container), but the default 1440px split has 804px and retains its labels. */
+@container board-toolbar (760px < width <= 800px) {
+  .board-action .board-label { display: none; }
 }
 @container board-toolbar (max-width: 360px) {
   .board-tools { gap: 3px; padding-inline: 5px; }

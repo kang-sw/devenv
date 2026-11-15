@@ -184,8 +184,26 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
           assert((await page.locator('#convo').textContent()).includes('Saved history entry'), 'real AppendRing conversation is present');
         }
         if (id === 'filterlive' && theme === 'dark') {
-          await tab.setViewportSize({ width: 1440, height: 1000 });
-          await settle(); await capture('filterlive-dark-1440');
+          for (const lang of ['ko', 'en']) {
+            await context.addCookies([{ name: 'ws_dashboard_lang', value: lang, url: base }]);
+            await tab.setViewportSize({ width: 1440, height: 1000 });
+            await load(id);
+            assert.equal(await page.locator('.board-overview .board-label').textContent(), lang === 'ko' ? '한 눈에 보기' : 'Overview');
+            const layout = await page.locator('.board-toolbar').evaluate(n => ({
+              outerWidth: n.getBoundingClientRect().width,
+              containerWidth: n.firstElementChild.clientWidth,
+              labels: [...n.querySelectorAll('.board-action .board-label')].map(n => ({ text: n.textContent, visible: !!n.getClientRects().length }))
+            }));
+            measurements.push({ name: 'default-split-1440', lang, ...layout }); write('measurements', measurements);
+            assert.equal(layout.labels.length, 5);
+            assert(layout.labels.every(n => n.visible), lang + ' default split retains every action label');
+            // The original 760px rule already wraps English at this width;
+            // preserve its labels while retaining Korean's single-row layout.
+            await geometry('default-split-1440-' + lang, lang === 'ko');
+            await capture('filterlive-dark-1440' + (lang === 'en' ? '-en' : ''));
+          }
+          await context.addCookies([{ name: 'ws_dashboard_lang', value: 'ko', url: base }]);
+          await load(id);
         }
         await width(800);
         for (const selector of ['.board-state-radio', '.board-state-option']) {
