@@ -210,6 +210,204 @@ Verification:
   processes only. Record exact commands, outcomes and deferred platform/live
   rollout boundaries in the Result before claiming the ticket complete.
 
+### Result (c9b8171f6) - 2026-11-16
+
+Implemented on `exec5/native-pi-payload`, based on `28cf9c7bc`; product commit
+`c9b8171f65ddcd54d81b2b82d249f175d65af7cf`. The generated bundle and both
+payloads were committed once. No installed cache, user configuration, live
+session, shared daemon, marketplace manifest, version or protocol was changed.
+Independent review is requested from EXEC5 and remains pending; this Result
+records implementation evidence, not ticket closure.
+
+**Generation.** The producer derives the closure from the canonical Pi manifest
+and lock, normalizes npm's temporary virtual root, disables scripts/automatic
+peers/bin links, then validates the physical installed tree and archive before
+replacement. The successful final producer commands were:
+
+```sh
+# Producer-only environment; all directories below are isolated scratch paths.
+export HOME=/tmp/exec5/native-pi/current/producer/home
+export USERPROFILE="$HOME"
+export WS_CACHE_HOME=/tmp/exec5/native-pi/current/producer/cache
+export WS_CONFIG_HOME=/tmp/exec5/native-pi/current/producer/config
+export npm_config_cache=/tmp/exec5/native-pi/current/producer/npm-cache
+export npm_config_userconfig=/dev/null
+(cd agents-plugin-pi && npm run bundle)
+python3 -B agents-plugin-pi/scripts/prepare-native-payload.py --offline \
+  --npm-cache /tmp/exec5/native-pi/current/producer/npm-cache
+```
+
+Both commands exited 0. The isolated cache was populated only by the preceding
+producer dependency preparation; final generation reported `9680 files, 138
+production dependencies, 19074878 compressed bytes`. Test processes never run
+npm or contact an external network. The web-search regression uses local HTTP
+fixtures, not real providers.
+
+**Verification, matching the seven Phase 1 bullets:**
+
+1. **VERIFIED (macOS fixtures); native Windows INFERRED.**
+   `TestPiPreparedPackageOnlyLayouts` in
+   `agents-plugin-tool/internal/wsagent/pi_payload_test.go:38` copies both
+   products into Claude/Codex package-only caches and shell/Windows-shaped
+   snapshot paths. Each resolves from its copied `rsrc/`, verifies the fresh
+   native entry, consumes it twice, and constructs default/isolated launches
+   with no bridge warning. The Python snapshot-body regression and offline
+   `web-package.test.ts` additionally transport and consume the prepared
+   closure without checkout-ancestor dependencies. Commands: the complete Go,
+   Python and Node commands in item 7, all successful. Windows-shaped paths
+   and the Windows installer's Python body are not native Windows execution.
+2. **VERIFIED.** The same Go fixture installs a valid repository sibling and
+   proves the package-local entry still wins; corrupt local output uses the
+   visible bridge, not that sibling. Existing source-sibling/invalid-entry
+   tests (`pi_lead_test.go:56`), missing-bundle fallback (`:123`), and bundle
+   freshness/missing-dependency fallback tests (`pi_bundle_test.go:13,46,94`)
+   passed in the full `internal/wsagent` run.
+3. **VERIFIED (actual Pi 1.5.2 SDK, macOS); native Windows INFERRED.** For each
+   product, the following loop exited 0 with `tests 1; pass 1; fail 0`:
+
+   ```sh
+   export HOME=/tmp/exec5/native-pi/current/tests/home
+   export USERPROFILE="$HOME"
+   export WS_CACHE_HOME=/tmp/exec5/native-pi/current/tests/cache
+   export WS_CONFIG_HOME=/tmp/exec5/native-pi/current/tests/config
+   export npm_config_cache=/tmp/exec5/native-pi/current/tests/npm-cache
+   for product in ws wsflow; do
+     package=agents-plugin
+     if [ "$product" = wsflow ]; then package=agents-plugin-wsflow; fi
+     native=$(python3 -I -B "$package/bin/ws-pi-payload.py" --plugin "$package" \
+       --materialize /tmp/exec5/native-pi/current/identity-native-cache)
+     fixture=$(mktemp -d /private/tmp/exec5/native-pi/current/identity-final-$product.XXXXXX)
+     hash=$(shasum -a 256 "$native/dist/index.js" | cut -d ' ' -f1)
+     env WS_PI_TEST_SDK=/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/index.js \
+       WS_PI_TEST_NATIVE_ROOT="$native" WS_PI_TEST_NATIVE_SHA256="$hash" \
+       WS_PI_TEST_FIXTURE="$fixture" \
+       node --test agents-plugin-tool/internal/wsagent/testdata/pi-native-payload-identity.test.mjs
+   done
+   ```
+
+   Both materialized entries had SHA-256
+   `32bc9519b97180749b5e7e3c500861f9e2348b871abf241e9fb1476bc74716a7`.
+   The unchanged bundle loads through the actual CLI-adjacent SDK loader.
+   Assertions establish physical RpcClient/ModelRegistry identity (`:307,354`),
+   host TUI prototypes (`:361`), host RpcClient receiver/CLI and native child
+   extension selection (`:371-380`), and use of the supplied registry (`:395`).
+   MCP, socket and child-start boundaries are mocked; no model, daemon or real
+   child starts. Default and isolated launch construction also passed in Go.
+   Dedicated logs: `/tmp/exec5/native-pi/current/identity-final-{ws,wsflow}.log`.
+4. **VERIFIED.** `ws-pi-payload.py:42-85` inspects every archive member's
+   path/type/hash, rejects host Pi package manifests and checks every physical
+   production-lock package/version, the exact web package and bundle header.
+   All 9,680 members and 138 dependency records passed. Additional archive-byte
+   inspection found zero `/Users/kang-sw/`, `/tmp/exec5/` or
+   `/private/tmp/exec5/` strings and zero host Pi packages in either archive.
+   Materialized tree verification rejects links and corruption. The Python
+   suite verifies owner-specific copied skills and wordlist equality; the Node
+   package test probes the real copied external helper with the actual host,
+   proves both package-local and Git-clone-root layouts, and rejects a wrong
+   or missing package-owned web dependency. All commands in items 3, 6 and 7
+   passed. The first producer experiment exposed temporary dependency paths
+   in esbuild labels; package-relative generation and the pre-publication
+   producer-path regression (`test_native_pi_payload.py:112`) fixed it before
+   the product commit.
+5. **VERIFIED for both embedded snapshot bodies; Windows DryRun INFERRED.**
+   `test_native_pi_payload.py:134` extracts and executes the shell and
+   PowerShell installers' actual Python bodies, each twice in a temporary
+   repository/home. Stale destination files disappear, only ws is registered,
+   the shell marker bytes survive, and the Windows marker is BOM-less UTF-8.
+   A corrupted source archive fails with `native Pi payload archive checksum
+   mismatch`, leaving the previous usable snapshot byte-identical. The failed
+   producer and producer-path injections (`:112,123`) likewise preserve usable
+   artifacts and execute no npm. The LF owner-marker test emulates CRLF text
+   translation and verifies cache reuse. The DryRun guard is checked statically
+   (`:173`); neither native PowerShell nor either full installer was executed.
+6. **VERIFIED.** `test_native_pi_payload.py:94` independently mutates source,
+   package/dependency lock, generator and both products' skills, then adds a
+   source file; the source/distribution gate rejects every stale case. Both
+   archive/manifest/materializer copies agree. The following Node-less gate
+   exited 0; its PATH has no Node/npm:
+
+   ```sh
+   for product in agents-plugin agents-plugin-wsflow; do
+     env PATH=/usr/bin:/bin HOME=/tmp/exec5/native-pi/current/tests/home \
+       WS_CACHE_HOME=/tmp/exec5/native-pi/current/tests/cache \
+       WS_CONFIG_HOME=/tmp/exec5/native-pi/current/tests/config \
+       /opt/homebrew/bin/python3 -I -B "$product/bin/ws-pi-payload.py" \
+       --plugin "$product" --check-source .
+   done
+   for artifact in native-pi/manifest.json native-pi/payload.zip bin/ws-pi-payload.py; do
+     cmp "agents-plugin/$artifact" "agents-plugin-wsflow/$artifact"
+   done
+   ```
+
+   This is the gate wired into `build-release-assets.sh:18-26` and the release
+   workflow; the cross-platform release build itself was not invoked.
+7. **VERIFIED test/build matrix; independent review UNRUN, not inferred pass.**
+   All test commands used isolated HOME/USERPROFILE, WS cache/config and npm
+   cache directories. Exact common test environment:
+
+   ```sh
+   export HOME=/tmp/exec5/native-pi/current/tests/home USERPROFILE=/tmp/exec5/native-pi/current/tests/home
+   export WS_CACHE_HOME=/tmp/exec5/native-pi/current/tests/cache
+   export WS_CONFIG_HOME=/tmp/exec5/native-pi/current/tests/config
+   export npm_config_cache=/tmp/exec5/native-pi/current/tests/npm-cache
+   python3 -B -m unittest discover -s agents-plugin/tests
+   python3 -B -m unittest discover -s agents-plugin-wsflow/tests
+   env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE -u WS_PI_DELEGATION_POLICY -u WS_PI_LEAD_MEMORY_LOG \
+     WS_PI_TEST_CLI=/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js \
+     node --test agents-plugin-pi/test/helper-host.test.mjs \
+     agents-plugin-pi/test/workflow-owner.test.ts agents-plugin-pi/test/web-package.test.ts \
+     agents-plugin-pi/test/child-launch-guard.test.ts \
+     agents-plugin-pi/test/native-tool-registration.test.ts agents-plugin-pi/test/skills-dir.test.ts
+   env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE -u WS_PI_DELEGATION_POLICY -u WS_PI_LEAD_MEMORY_LOG \
+     node --test agents-plugin-pi/test/web-search.test.ts agents-plugin-pi/test/skills-dir.test.ts \
+     agents-plugin-pi/test/child-launch-guard.test.ts agents-plugin-pi/test/native-tool-registration.test.ts
+   (
+     cd agents-plugin-tool
+     export GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local
+     export GOPATH=/Users/kang-sw/go GOCACHE=/Users/kang-sw/Library/Caches/go-build
+     export WS_CACHE_HOME=/tmp/exec5/native-pi/current/tests/go-cache
+     export WS_CONFIG_HOME=/tmp/exec5/native-pi/current/tests/go-config
+     go test ./internal/wsagent ./internal/wsrsrc -count=1
+     go build ./...
+     go vet ./...
+   )
+   git diff --check
+   bash -n install.sh
+   sh -n agents-plugin-tool/scripts/build-release-assets.sh
+   ```
+
+   Outcomes: ws Python **148 tests, OK (2 platform skips)**; wsflow Python
+   **22 tests, OK (2 platform skips)**; final Node packaging/host/skills/child
+   group **43/43 pass**; broader web-search/skills/child group **58/58 pass**;
+   Go wsagent **ok, 81.397s**, wsrsrc **ok, 2.342s**; build/vet and syntax/diff
+   checks **exit 0**. The four Python skips are the existing Windows process
+   table/cmd-wrapper tests. Python also emitted existing unclosed-stream
+   ResourceWarnings; there are no final test failures. Logs are under
+   `/tmp/exec5/native-pi/current/` (`*-final.log`, `node-regressions-r2.log`).
+   Earlier setup attempts failed on an unnormalized temporary npm virtual root
+   (`Missing: build@0.50.0 from lock file`), a dependency-directory symlink
+   correctly rejected by the web realpath guard, and `/tmp` versus canonical
+   `/private/tmp` identity-fixture paths. Corrected isolated setup and final
+   reruns passed without weakening those guards.
+
+**Payload sizes and repository delta.** Before: no `native-pi/` in either
+package (0 bytes). After, **per package**: ZIP **19,074,878 bytes** plus manifest
+**1,286,181 bytes**, total **20,361,059 bytes** (**+20,361,059**). The separate
+shared materializer is **8,571 bytes/package**. Both payload directories are
+byte-identical, so Git can deduplicate their content. The main bundle changed
+from **1,617,961** to **1,620,370 bytes** (+2,409).
+
+**Compatibility and deferred boundaries.** T0: producer writes additive assets
+(`prepare-native-payload.py:113-154`); the new reader prefers them and retains
+source siblings (`pi_lead.go:124-136`). The old `28cf9c7bc` reader at
+`pi_lead.go:121-129` ignores the new directory, retains the sibling route and
+its existing missing-sibling bridge/warning (`:41-59`), and never rewrites the
+new assets. New reopen reads the retained assets without a migration. No hard
+boundary was hit. Native Windows execution (including actual PowerShell
+DryRun), independent review, real marketplace activation and live rollout
+remain unrun. EXEC5 owns independent review; live snapshot/cache/daemon/session
+replacement remains separately owner-gated. The ticket stays in `ready/`.
+
 ## Owner Decisions (2026-11-16)
 
 - (1183)=a: commit the trimmed native Pi payload into the public repo.
