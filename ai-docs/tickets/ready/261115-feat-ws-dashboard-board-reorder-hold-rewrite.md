@@ -329,15 +329,15 @@ compared side by side with the matching state of
 `ai-docs/tickets/assets/261115-feat-ws-dashboard-board-reorder-hold-rewrite/nav-capsule-accepted.html`
 (Decision 11; replaces the v2 mockups as the badge reference).
 
-### Result (43886b2df) - 2026-11-15
+### Result (e64fcea2d) - 2026-11-15
 
 Phase 1 and both lead follow-ups are complete and committed. This report supersedes the initial interpretation that idle home could hide and top insertion freezing belonged to a later phase. The original report is retained as `/tmp/exec5/reorder1/initial-result.md` for earlier verification details.
 
 #### Commits
 
-- `b5bc1df0a` — original Phase 1 capsule, indicators, strings, owner-routed home action, and acceptance tests.
-- `5bf581d48` — follow-up item 4: home arrow always visible, including idle top; idle-top and refreshed after-click captures. Committed separately after green tests.
-- `43886b2df` — follow-up items 1-2: click-only top-origin staging, new-topic counts, mixed down-panel scroll release, browser regressions and refreshed evidence.
+- `19f8e848e` — original Phase 1 capsule, indicators, strings, owner-routed home action, and acceptance tests.
+- `b27fb28ec` — follow-up item 4: home arrow always visible, including idle top; idle-top and refreshed after-click captures. Committed separately after green tests.
+- `e64fcea2d` — follow-up items 1-2: click-only top-origin staging, new-topic counts, mixed down-panel scroll release, browser regressions and refreshed evidence.
 
 Branch: `impl/exec5/reorder-p1`. Worktree clean after commit. Ticket file untouched. No push, merge, rebase, version bump, installed-plugin rebuild, shared-daemon operation, or subagent. Runtime verification used only owned disposable fixture stores/Port 0 servers or pure production-renderer/websocket fixtures.
 
@@ -433,6 +433,21 @@ The complete path matrix is `sbs-{1440,700}-{light,dark}-{reduced,motion}-{idle-
 - Non-top rise-slot/clamp repair, complete involved-card/deferral policy, folded-close rendering/accounting refinements, and momentum/late-height policy remain the unchanged later phases.
 - Non-English translations remain unchecked. The synthetic heavy-board performance driver records user-apply long tasks separately; only its original admission and wheel gates are asserted. The stale live fixture and unrun historical/WebKit/history checks remain the verification limits above.
 (Commit hashes are after the lead rebased the branch onto the ready-ticket commit.)
+
+#### Follow-up: capsule slot (ad9397cd3)
+
+MAIN's screen review found the capsule, floating in the old zero-height sticky slot, covered the first
+card's status badge and ask count. `ad9397cd3` gives the capsule its own 44 px in-flow sticky band above
+the toolbar (`wswhiteboard/assets/page-sticky.css`), with toolbar/rail/scroll-padding clearance in
+`wsdashboard/assets/cards.js` and the existing reading-viewport owner in `wswhiteboard/assets/stream.js`
+(no new scroll writer). The band height is constant across idle/pending/chip states, so state changes cause
+no layout shift. Standalone whiteboard pages get the same reservation.
+`board-hold-pill.browser.cjs` now asserts that the capsule rect intersects no card title, status badge, or ask/ack count at top
+and scrolled. Result: 99 state checks, 896 header rects, zero intersections, plus standalone checks;
+`board_toolbar_test.go` covers the band geometry. The same focused tests pass (wsi18n,
+wswhiteboard Pill|ViewKit, BoardViewed*, ToolbarFloatingGeometry, TestBoardHoldPillBrowser,
+PanelFrameReuse/TopicUnits/ViewedUpdatePerf browsers). Full-page captures:
+`/tmp/exec5/reorder1/full-{1440,700}-{light,dark}-{top,scrolled}.png`.
 
 ### Phase 2: rise hold gaps
 Only what Phase 0 shows missing: visible topic rising holds in place, releases when all involved
