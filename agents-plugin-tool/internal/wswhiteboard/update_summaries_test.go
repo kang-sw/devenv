@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -184,6 +185,38 @@ func TestTopicUpdateAdoptionKeepsFirstTouchAndExplicitIdentity(t *testing.T) {
 	for _, e := range s.Topics[0].Entries {
 		if strings.Contains(string(e.TopicState), StateDiscussing) {
 			t.Fatal("default survived adoption/explicit")
+		}
+	}
+}
+
+func TestTopicUpdateWaitingOnNetDeclarations(t *testing.T) {
+	s := &State{}
+	stateApply(t, s, `<wb:topic name="dep"><wb:log>Blocker</wb:log></wb:topic><wb:topic name="other"><wb:log>Other blocker</wb:log></wb:topic>`, stateNow)
+	out := stateApply(t, s, `<wb:topic name="wait"><wb:log>Waiting</wb:log><wb:state value="waiting"/></wb:topic>`, stateNow)
+	wantSummaries(t, out, "topic added: wait (state: waiting, explicit)")
+	stateEntry := s.TopicStates()["wait"].State.Entry
+	for _, tc := range []struct {
+		commands string
+		targets  []string
+		changed  bool
+	}{
+		{`<wb:state value="waiting" on="topic:dep"/>`, []string{"topic:dep"}, true},
+		{`<wb:state value="waiting" on="topic:other"/>`, []string{"topic:other"}, true},
+		{`<wb:state value="waiting" on="topic:other topic:other"/>`, []string{"topic:other"}, false},
+		{`<wb:state value="waiting" on=""/>`, nil, true},
+		{`<wb:state value="waiting" on=""/>`, nil, false},
+		{`<wb:state value="waiting" on="topic:dep"/>`, []string{"topic:dep"}, true},
+		{`<wb:state value="waiting"/>`, nil, true},
+		{`<wb:state value="waiting" on="topic:dep"/><wb:state value="waiting"/>`, nil, false},
+	} {
+		out = stateApply(t, s, `<wb:topic name="wait">`+tc.commands+`</wb:topic>`, stateNow)
+		if tc.changed {
+			wantSummaries(t, out, "topic updated: wait (waiting on)")
+		} else {
+			wantSummaries(t, out)
+		}
+		if !slices.Equal(s.waitingDeclarations()["wait"].Targets, tc.targets) || s.TopicStates()["wait"].State.Entry != stateEntry {
+			t.Fatal("summary changed upstream dependency-only declaration semantics")
 		}
 	}
 }

@@ -82,7 +82,7 @@ batch may hold several `wb:topic` groups.
 | `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
 | `wb:log` | none | one nonempty agent-authored line of inline Markdown |
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
-| `wb:state` | `value`, `owner?`, `eta_minutes?` | none |
+| `wb:state` | `value`, `owner?`, `eta_minutes?`, `on?` | none |
 | `wb:eta` | `minutes`, `reason` | none |
 | `wb:close` | `result` | none |
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
@@ -137,6 +137,25 @@ Markdown up to the closing tag.
   for `implementing`, owner and ETA must match, so repeats do not reset the
   start. To change executor, exit implementing and re-enter with the new
   owner and ETA. Extend the current run with `wb:eta` instead.
+- Waiting dependencies: `wb:state value="waiting"` optionally takes `on`, a
+  space-separated list of at most 8 distinct targets, in display order:
+  `topic:<name>` (a known other topic on this board; use a stem for names
+  containing spaces), `ticket:<YYMMDD-category-name>`, `owner`, or
+  `exec:<label>` (1–32 ASCII letters, digits, dots, underscores or hyphens).
+  Each declaration replaces the whole list; omitting `on` or writing `on=""`
+  clears it. Duplicates are dropped; invalid targets refuse the batch.
+  Leaving waiting or closing clears the list. If an older daemon refuses
+  `on` as an unknown attribute, retry the batch without `on`.
+  Topic chips resolve when the target closes (reopening re-blocks); ticket
+  chips resolve at done or dropped in this worktree, with missing tickets
+  shown as unknown. `owner` resolves when the topic has no open policy or
+  check items; those asks also derive one owner chip when none is declared.
+  Executor labels remain unresolved until you replace the declaration.
+  A nonempty declared list with every target resolved and no open owner ask
+  shows “Ready to proceed” (“진행 가능”); this is presentation, not a new
+  lifecycle state or permission to skip an approval. The topic stays waiting
+  until you declare its next state. A derived-only owner wait never becomes
+  ready. Blocker topics also list the topics waiting on them.
 - `wb:eta` is an empty command inside `wb:topic`, requiring a known open,
   currently implementing topic, `minutes` and a nonempty `reason`. Minutes
   use the same positive integer range as `eta_minutes` and must be strictly
@@ -367,6 +386,13 @@ debounce. The list includes owners, original/current estimates, elapsed time,
 and extension counts/reasons. The board's full topic list repeats hourly
 only while an open implementing or waiting topic exists. When both are due,
 one message covers both.
+
+A waiting topic becoming ready also sends one unblocked nudge naming its
+resolved targets, through the same alive-lead delivery gate. It is deduped per
+dependency declaration and owning lead, including across restarts; re-blocking
+and resolving the same declaration sends no second nudge. A changed declaration
+may nudge again. Readiness is checked on board updates and the daemon's existing
+30-second reconciliation, so local ticket closure needs no open page.
 
 Deadlines and notification receipts survive daemon restarts; recovery sends
 one catch-up when due, not a replay of missed intervals. Enqueue precedes the

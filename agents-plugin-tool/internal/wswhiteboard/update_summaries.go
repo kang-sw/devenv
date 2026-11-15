@@ -189,6 +189,7 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 	}
 	effects := semanticEffects(base, after)
 	oldStates, states := base.TopicStates(), after.TopicStates()
+	oldWaiting, waiting := base.waitingDeclarations(), after.waitingDeclarations()
 	var out []string
 	for _, t := range ordered {
 		if t.base == "" && after.topicKnown(t.key) {
@@ -213,12 +214,16 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 			}
 		}
 		stateChanged := summaryState(oldStates[t.key]) != summaryState(states[t.key])
+		waitingChanged := !slices.Equal(oldWaiting[t.key].Targets, waiting[t.key].Targets)
 		renamed := t.base != "" && (t.base != t.key || before.TopicLabel(t.base) != after.TopicLabel(t.key))
 		adopted := t.base != "" && !before.stemmed(t.base) && after.stemmed(t.key)
-		if len(net) == 0 && !stateChanged && !renamed && !adopted {
+		if len(net) == 0 && !stateChanged && !waitingChanged && !renamed && !adopted {
 			continue
 		}
 		tags := summaryTags(t, net, base, after)
+		if waitingChanged {
+			tags = append(tags, "waiting on")
+		}
 		if stateChanged && !after.topicClosed(t.key) {
 			old, next := oldStates[t.key].State, states[t.key].State
 			if old != nil && next != nil && old.Value == StateImplementing && next.Value == StateImplementing && old.Run.ID == next.Run.ID {

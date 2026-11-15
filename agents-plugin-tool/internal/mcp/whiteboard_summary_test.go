@@ -68,6 +68,36 @@ func TestWhiteboardUpdateSummariesNetMixedTopicsAnswersAndLifecycle(t *testing.T
 	}
 }
 
+func TestWhiteboardUpdateSummaryWaitingOnNetDeclarations(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.update(t, `<wb:topic name="dep"><wb:log>Blocker</wb:log></wb:topic><wb:topic name="other"><wb:log>Other blocker</wb:log></wb:topic>`)
+	text := f.update(t, `<wb:topic name="wait"><wb:log>Waiting</wb:log><wb:state value="waiting" on="topic:dep"/></wb:topic>`)
+	if got := whiteboardSummaryLines(text); !reflect.DeepEqual(got, []string{"topic added: wait (state: waiting, explicit)"}) {
+		t.Fatalf("explicit dependency creation summary: %s", text)
+	}
+	for _, tc := range []struct {
+		commands string
+		changed  bool
+	}{
+		{`<wb:state value="waiting" on="topic:other"/>`, true},
+		{`<wb:state value="waiting" on="topic:other topic:other"/>`, false},
+		{`<wb:state value="waiting" on=""/>`, true},
+		{`<wb:state value="waiting"/>`, false},
+		{`<wb:state value="waiting" on="topic:dep"/>`, true},
+		{`<wb:state value="waiting"/>`, true},
+		{`<wb:state value="waiting" on="topic:dep"/><wb:state value="waiting"/>`, false},
+	} {
+		text = f.update(t, `<wb:topic name="wait">`+tc.commands+`</wb:topic>`)
+		var want []string
+		if tc.changed {
+			want = []string{"topic updated: wait (waiting on)"}
+		}
+		if got := whiteboardSummaryLines(text); !reflect.DeepEqual(got, want) {
+			t.Fatalf("dependency-only net summary: got %q, want %q", got, want)
+		}
+	}
+}
+
 func TestWhiteboardUpdateSummaryClosedAdoptionKeepsNetLifecycle(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="Old"><wb:log>History</wb:log><wb:close result="Done"/></wb:topic>`)
