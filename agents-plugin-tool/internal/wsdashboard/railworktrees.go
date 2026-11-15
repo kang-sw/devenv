@@ -59,6 +59,7 @@ type RepoWorktree struct {
 
 // railLister reads the rail's worktree lists (see the file comment).
 type railLister struct {
+	admission *railAdmissionTracker
 	// read reads one repository; it runs on the lister's goroutine, never
 	// under mu. Nil lists nothing.
 	read func(repo string, regs []Registration) (RepoWorktrees, error)
@@ -301,8 +302,13 @@ func (l *railLister) readRepo(repo string, regs []Registration) railRepo {
 		return railRepo{}
 	}
 	r := railRepo{Read: true, Pools: got.Pools}
+	var observations map[string]admissionObservation
+	if l.admission != nil {
+		observations = l.admission.observe(repo, got)
+	}
 	for _, w := range got.Worktrees {
-		r.Entries = append(r.Entries, railWorktreeEntry{Path: filepath.Clean(w.Path), Branch: w.Branch, Detached: w.Detached, Prunable: w.Prunable})
+		o := observations[filepath.Clean(w.Path)]
+		r.Entries = append(r.Entries, railWorktreeEntry{Path: filepath.Clean(w.Path), Branch: w.Branch, Detached: w.Detached, Prunable: w.Prunable, AdmissionRepository: o.identity.root, AdmissionPath: o.identity.path, Revision: o.revision})
 	}
 	return r
 }

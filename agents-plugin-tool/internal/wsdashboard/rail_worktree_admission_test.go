@@ -1,0 +1,267 @@
+package wsdashboard
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func admissionFixture(t *testing.T) (string, string, *railAdmissionTracker, func(string) (RepoWorktrees, error)) {
+	t.Helper()
+	base, root := worktreeRepo(t)
+	path := filepath.Join(base, "detected")
+	gitRun(t, root, "worktree", "add", "-q", "-b", "detected", path)
+	tracker := newRailAdmissionTracker(openRailLayoutStore(t.TempDir()))
+	read := func(root string) (RepoWorktrees, error) { return (gitWorktreeSource{}).ReadRepoWorktrees(root, nil) }
+	return root, path, tracker, read
+}
+func admissionSelection(t *testing.T, a *railAdmissionTracker, read func(string) (RepoWorktrees, error), root, path, action string) railAdmissionSelection {
+	t.Helper()
+	got, err := read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := a.observe(root, got)[path]
+	if obs.revision == "" {
+		t.Fatalf("no observation of %s", path)
+	}
+	return railAdmissionSelection{Repository: root, Path: path, Revision: obs.revision, Action: action}
+}
+func admissionRecords(t *testing.T, s *railLayoutStore) []railAdmissionRecord {
+	t.Helper()
+	doc, _ := s.current()
+	records, err := railAdmissions(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return records
+}
+func TestRailAdmissionPersistenceAndAtomicBatch(t *testing.T) {
+	root, path, a, read := admissionFixture(t)
+	selection := admissionSelection(t, a, read, root, path, "reject")
+	before := a.store.gen
+	reply, err := a.apply([]railAdmissionSelection{selection}, read)
+	if err != nil || !reply.Applied || reply.Gen <= before || !strings.Contains(reply.Prompt, path) {
+		t.Fatalf("reject: %+v %v", reply, err)
+	}
+	if _, err := os.Stat(filepath.Join(path, "a")); err != nil {
+		t.Fatalf("rejection touched worktree: %v", err)
+	}
+	reopened := openRailLayoutStore(filepath.Dir(a.store.file))
+	if r := admissionAt(admissionRecords(t, reopened), root, path); r.State != "rejected" || r.Origin != "detected" {
+		t.Fatalf("reopen: %+v", r)
+	}
+	// Another browser cannot overwrite an already applied classification.
+	if v, e := a.apply([]railAdmissionSelection{selection}, read); !errors.Is(e, errAdmissionStale) || v.Applied {
+		t.Fatalf("repeat: %+v %v", v, e)
+	}
+	selection.Action = "undo"
+	if v, e := a.apply([]railAdmissionSelection{selection}, read); e != nil || !v.Applied {
+		t.Fatalf("undo: %+v %v", v, e)
+	}
+	if admissionAt(admissionRecords(t, a.store), root, path).State != "pending" {
+		t.Fatal("undo did not return pending")
+	}
+	other := filepath.Join(filepath.Dir(root), "other")
+	gitRun(t, root, "worktree", "add", "-q", "-b", "other", other)
+	one := admissionSelection(t, a, read, root, path, "approve")
+	two := admissionSelection(t, a, read, root, other, "reject")
+	two.Revision = "old-daemon-revision"
+	raw, _ := os.ReadFile(a.store.file)
+	if v, e := a.apply([]railAdmissionSelection{one, two}, read); !errors.Is(e, errAdmissionStale) || len(v.Stale) != 1 {
+		t.Fatalf("batch: %+v %v", v, e)
+	}
+	after, _ := os.ReadFile(a.store.file)
+	if string(raw) != string(after) {
+		t.Fatal("stale batch partially wrote admission")
+	}
+	two = admissionSelection(t, a, read, root, other, "reject")
+	if _, e := a.apply([]railAdmissionSelection{one, two}, read); e != nil {
+		t.Fatal(e)
+	}
+	// Later rejection prompt includes the cumulative list, not just this batch.
+	third := filepath.Join(filepath.Dir(root), "third")
+	gitRun(t, root, "worktree", "add", "-q", "-b", "third", third)
+	three := admissionSelection(t, a, read, root, third, "reject")
+	v, e := a.apply([]railAdmissionSelection{three}, read)
+	if e != nil || !strings.Contains(v.Prompt, other) || !strings.Contains(v.Prompt, third) {
+		t.Fatalf("cumulative: %+v %v", v, e)
+	}
+}
+func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
+	root, path, a, read := admissionFixture(t)
+	selection := admissionSelection(t, a, read, root, path, "approve")
+	if _, err := a.apply([]railAdmissionSelection{selection}, read); err != nil {
+		t.Fatal(err)
+	}
+	// A failed repository list cannot prune or invent fresh observations.
+	list, _ := read(root)
+	l := newRailLister(func(string, []Registration) (RepoWorktrees, error) { return RepoWorktrees{}, errors.New("unreadable") }, nil, make(chan struct{}))
+	l.admission = a
+	if l.readRepo(root, nil).Read {
+		t.Fatal("failed read was successful")
+	}
+	if len(admissionRecords(t, a.store)) != 1 {
+		t.Fatal("failed read pruned admission")
+	}
+	// Broken association is unverifiable, not evidence that the directory is gone.
+	marker := filepath.Join(path, ".git")
+	original, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(marker, []byte("gitdir: /missing-admin\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a.observe(root, list)
+	if len(admissionRecords(t, a.store)) != 1 {
+		t.Fatal("unreadable association pruned admission")
+	}
+	selection.Action = "reject"
+	if v, e := a.apply([]railAdmissionSelection{selection}, read); !errors.Is(e, errAdmissionStale) || v.Applied {
+		t.Fatalf("association: %+v %v", v, e)
+	}
+	if err = os.WriteFile(marker, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Existing handle evidence survives a temporary probe failure, but its old
+	// revision cannot silently become fresh proof after recovery.
+	got := a.observe(root, list)[path]
+	if got.revision == selection.Revision || got.revision == "" {
+		t.Fatal("failed probe reused old revision")
+	}
+	if len(admissionRecords(t, a.store)) != 1 {
+		t.Fatal("restored association lost admission")
+	}
+	// Replace the directory while retaining the old one so filesystem IDs cannot
+	// immediately be reused. Git association bytes alone cannot hide replacement.
+	old := path + "-old"
+	if err = os.Rename(path, old); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(path, ".git"), original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	selection.Revision = got.revision
+	if v, e := a.apply([]railAdmissionSelection{selection}, read); !errors.Is(e, errAdmissionStale) || v.Applied {
+		t.Fatalf("replacement: %+v %v", v, e)
+	}
+	a.observe(root, list)
+	if len(admissionRecords(t, a.store)) != 0 {
+		t.Fatal("observed replacement retained old admission")
+	}
+	// Confirmed disappearance prunes admission; a recreation is pending.
+	fresh := admissionSelection(t, a, read, root, path, "approve")
+	if _, err = a.apply([]railAdmissionSelection{fresh}, read); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+	a.observe(root, list)
+	if len(admissionRecords(t, a.store)) != 0 {
+		t.Fatal("confirmed missing path not pruned")
+	}
+	if err = os.Rename(old, path); err != nil {
+		t.Fatal(err)
+	}
+	a.observe(root, list)
+	if admissionAt(admissionRecords(t, a.store), root, path).State != "pending" {
+		t.Fatal("recreated path not pending")
+	}
+	restarted := newRailAdmissionTracker(a.store)
+	if v, e := restarted.apply([]railAdmissionSelection{fresh}, read); !errors.Is(e, errAdmissionStale) || v.Applied {
+		t.Fatalf("restart: %+v %v", v, e)
+	}
+}
+func TestRailAdmissionUnknownFieldsAndClassification(t *testing.T) {
+	root, path, a, read := admissionFixture(t)
+	selectOne := admissionSelection(t, a, read, root, path, "approve")
+	if _, err := a.apply([]railAdmissionSelection{selectOne}, read); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := readRailLayout(a.store.file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.extra["future_root"] = json.RawMessage(`{"kept":true}`)
+	records, _ := railAdmissions(doc)
+	records[0].extra = map[string]json.RawMessage{"future_record": json.RawMessage(`42`)}
+	doc.extra[railAdmissionField], _ = json.Marshal(records)
+	raw, _ := doc.encode()
+	if err = os.WriteFile(a.store.file, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a schema-1 writer that knows only the existing layout operations.
+	if _, err = a.store.apply(railLayoutRequest{Op: "star", RID: "a1"}, railFactsOf(layoutTestView()), true); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := readRailLayout(a.store.file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := reopened.encode()
+	if !strings.Contains(string(encoded), "future_record") || !strings.Contains(string(encoded), "future_root") || reopened.SchemaVersion != 1 {
+		t.Fatalf("unknown field loss: %s", encoded)
+	}
+	pool := filepath.Join(root, ".ws-worktrees", "pooled")
+	view := buildRailView(nil, map[string]railRepo{root: {Read: true, Entries: []railWorktreeEntry{{Path: root}, {Path: path}, {Path: pool}}}}, []storedWorkspace{{Path: root, Repo: true}}, time.Now())
+	classifyRailAdmissions(&view, reopened)
+	if len(view.Workspaces) != 1 || len(view.Workspaces[0].Worktrees) != 2 {
+		t.Fatalf("pool leaked: %+v", view)
+	}
+	for _, w := range view.Workspaces[0].Worktrees {
+		if w.Admission != "admitted" {
+			t.Fatalf("classification: %+v", w)
+		}
+	}
+	empty := &railLayoutDoc{}
+	classifyRailAdmissions(&view, empty)
+	if view.Workspaces[0].Worktrees[1].Admission != "pending" || view.Workspaces[0].Worktrees[1].Origin != "detected" {
+		t.Fatal("unrecorded discovery not pending")
+	}
+}
+func TestRailAdmissionRouteAndUserAdd(t *testing.T) {
+	f := newDeleteFixture(t)
+	path := filepath.Join(f.tmp, "admission-route")
+	gitRun(t, f.root, "worktree", "add", "-q", "-b", "admission-route", path)
+	f.d.railBaseView(f.d.pages())
+	list := f.d.rail.readRepo(f.root, nil)
+	f.d.rail.mu.Lock()
+	f.d.rail.repos[f.root] = list
+	f.d.rail.mu.Unlock()
+	selection := admissionSelection(t, f.d.rail.admission, func(root string) (RepoWorktrees, error) { return f.d.rail.read(root, nil) }, f.root, path, "reject")
+	raw, _ := json.Marshal(railAdmissionRequest{Selections: []railAdmissionSelection{selection}})
+	if code, _, _ := postJSON(t, f.base+railAdmissionRoute, "http://evil.example", string(raw)); code != http.StatusForbidden {
+		t.Fatalf("origin: %d", code)
+	}
+	if code, _ := get(t, f.base+railAdmissionRoute); code != http.StatusMethodNotAllowed {
+		t.Fatalf("method: %d", code)
+	}
+	code, _, body := postJSON(t, f.base+railAdmissionRoute, f.base, string(raw))
+	var reply railAdmissionReply
+	if err := json.Unmarshal([]byte(body), &reply); err != nil || code != 200 || !reply.Applied || reply.Gen == 0 || reply.Prompt == "" {
+		t.Fatalf("route: %d %s %v", code, body, err)
+	}
+	if !pathExists(path) {
+		t.Fatal("route removed rejected worktree")
+	}
+	added := filepath.Join(f.tmp, "user-added")
+	addRaw, _ := json.Marshal(worktreeAddRequest{Workspace: f.root, Branch: "user-added", New: true, Folder: added})
+	code, _, body = postJSON(t, f.base+worktreeAddRoute, f.base, string(addRaw))
+	if code != 200 {
+		t.Fatalf("add: %d %s", code, body)
+	}
+	record := admissionAt(admissionRecords(t, f.d.layout), f.root, added)
+	if record.Origin != "user" || record.State != "admitted" {
+		t.Fatalf("user add: %+v", record)
+	}
+}

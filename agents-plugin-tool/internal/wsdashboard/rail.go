@@ -33,6 +33,7 @@ func (d *Daemon) railView(r pageReader) RailView {
 	layout, gen := d.layout.current()
 	orderRailView(&view, layout, railFactsOf(view))
 	view.LayoutGen = gen
+	classifyRailAdmissions(&view, layout)
 	for i := range view.Workspaces {
 		// Optional memo state must never prevent the rail from rendering.
 		doc, err := readMemoDoc(memoFile(d.dir, view.Workspaces[i].Path))

@@ -164,15 +164,15 @@ type NudgeBody struct {
 // port (loopback, or every interface in LAN mode), and has written its
 // endpoint file.
 type Daemon struct {
-	dir           string
-	lock          *flock.Flock
-	server        *http.Server
-	listener      net.Listener
-	endpoint      Endpoint
-	log           io.Writer
-	index         *Index
-	source        SessionSource
-	agents        AgentHost
+	dir        string
+	lock       *flock.Flock
+	server     *http.Server
+	listener   net.Listener
+	endpoint   Endpoint
+	log        io.Writer
+	index      *Index
+	source     SessionSource
+	agents     AgentHost
 	leadNudges interface {
 		Start()
 		Close()
@@ -442,6 +442,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	d.rail = newRailLister(railRead, func() { d.broker.wake(railListRepoKey) }, d.stop)
 	d.workspaces = openWorkspaceStore(opts.WorkspacesFile)
 	d.layout = openRailLayoutStore(opts.Dir)
+	d.rail.admission = newRailAdmissionTracker(d.layout)
 	d.pathHost = daemonPathHost()
 	if d.workspaces != nil {
 		d.rail.sweep = d.workspaces.sweep
@@ -720,6 +721,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/w/", d.handleWorktreePage)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	mux.HandleFunc(railLayoutRoute, d.handleRailLayout)
+	mux.HandleFunc(railAdmissionRoute, d.handleRailAdmission)
 	mux.HandleFunc(hireRoute, d.handleSessionHire)
 	mux.HandleFunc(hireRoute+"/", d.handleSessionHire)
 	mux.HandleFunc(railEventsRoute, d.handleRailEvents)
