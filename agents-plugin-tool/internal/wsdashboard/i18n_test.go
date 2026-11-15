@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/net/html"
+
 	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -78,36 +80,29 @@ func TestSessionPageFollowsTheLanguageChoice(t *testing.T) {
 	}
 }
 
-// TestEveryPageHasSettingsWithTheLanguageItem pins where the settings are:
-// the index page's gear menu, and a session page's drawer card, the gear
-// gone from its top bar. The shell around a session page holds neither (its
-// frame's drawer does), only the string table its scripts read.
+// Settings belongs to the shell's rail footer, not the framed pages.
+// Its static dialog and preferences remain available without a selection.
 func TestEveryPageHasSettingsWithTheLanguageItem(t *testing.T) {
 	f := startPageFixture(t)
 	for _, c := range []struct {
 		name, path string
-		layout     bool
+		settings   bool
 	}{
-		{"session list", "/?frame=1", false},
-		{"board-first session", "/s/boardsession?frame=1", false},
-		{"adapter session", "/s/livesession?frame=1", true},
+		{"root shell", "/", true},
+		{"board-first shell", "/s/boardsession", true},
+		{"adapter shell", "/s/livesession", true},
+		{"session list frame", "/?frame=1", false},
+		{"board-first frame", "/s/boardsession?frame=1", false},
+		{"adapter frame", "/s/livesession?frame=1", false},
 	} {
 		_, body := getLang(t, f.base+c.path, "ko", "")
-		if c.path == "/?frame=1" {
-			if !strings.Contains(body, `id="gear"`) || !strings.Contains(body, `id="gmenu"`) {
-				t.Errorf("%s: no gear", c.name)
-			}
-		} else {
-			if strings.Contains(body, `id="gear"`) || strings.Contains(body, `id="gmenu"`) {
-				t.Errorf("%s: the gear is still in the top bar", c.name)
-			}
-			if !strings.Contains(body, `<details class="panel drcard setcard" id="p-settings" open>`) || !strings.Contains(body, `<div class="gmenu gcard">`) {
-				t.Errorf("%s: no settings card in the drawer", c.name)
-			}
-		}
+		assertSettingsOwner(t, body, c.settings)
 		// The scripts call wsT on load; a page without the table breaks them.
 		if !strings.Contains(body, "window.wsT") {
 			t.Errorf("%s: no client string table", c.name)
+		}
+		if !c.settings {
+			continue
 		}
 		// The follow-the-browser option and one option per embedded language.
 		if !strings.Contains(body, `<option value="">`) {
@@ -118,18 +113,67 @@ func TestEveryPageHasSettingsWithTheLanguageItem(t *testing.T) {
 				t.Errorf("%s: no item for %s", c.name, l.Code)
 			}
 		}
-		if has := strings.Contains(body, `<button data-layout="split"`) && strings.Contains(body, `<button data-input="mod"`); has != c.layout {
-			t.Errorf("%s: layout and input items present = %v, want %v", c.name, has, c.layout)
+		for _, want := range []string{`data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`, `data-input="enter"`, `data-input="mod"`, `data-theme-set="light"`, `data-theme-set="dark"`, `id="glang"`, `aria-label="설정"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: settings lacks %q", c.name, want)
+			}
 		}
 	}
-	_, shell := getLang(t, f.base+"/s/livesession", "ko", "")
-	if !strings.Contains(shell, "window.wsT") {
-		t.Error("shell: no client string table")
+}
+
+func assertSettingsOwner(t *testing.T, body string, owns bool) {
+	t.Helper()
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, absent := range []string{`id="gear"`, `id="gmenu"`, `id="p-settings"`} {
-		if strings.Contains(shell, absent) {
-			t.Errorf("shell holds %q, which belongs to the page it frames", absent)
+	attr := func(n *html.Node, key string) string {
+		for _, a := range n.Attr {
+			if a.Key == key {
+				return a.Val
+			}
 		}
+		return ""
+	}
+	hasClass := func(n *html.Node, class string) bool {
+		return strings.Contains(" "+attr(n, "class")+" ", " "+class+" ")
+	}
+	gear, toggles, menus := 0, 0, 0
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if hasClass(n, "settings-toggle") {
+			toggles++
+		}
+		switch attr(n, "id") {
+		case "gear":
+			gear++
+			if !hasClass(n, "settings-toggle") || n.Parent == nil || !hasClass(n.Parent, "rfoot") || n.Parent.FirstChild != n {
+				t.Error("settings trigger must be first in the rail footer")
+			}
+		case "gmenu":
+			menus++
+			if attr(n, "role") != "dialog" {
+				t.Error("settings must be a dialog")
+			}
+			for p := n.Parent; p != nil; p = p.Parent {
+				if attr(p, "data-region") != "" {
+					t.Error("settings dialog must be outside every live region")
+				}
+			}
+		case "p-settings":
+			t.Error("obsolete drawer settings card remains")
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	want := 0
+	if owns {
+		want = 1
+	}
+	if gear != want || toggles != want || menus != want {
+		t.Errorf("settings ownership: gear=%d, toggles=%d, dialogs=%d; want %d each", gear, toggles, menus, want)
 	}
 }
 

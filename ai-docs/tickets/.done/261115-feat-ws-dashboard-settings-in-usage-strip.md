@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 30b1e13958d8ecb3
 sage-review-completeness-reviewed: 30b1e13958d8ecb3
+completed: 2026-11-15
 ---
 
 # Settings in the usage strip and a session-first dashboard root
@@ -90,6 +91,13 @@ Verification:
 - Cover normal and absent/expired usage states without changing values or accounting; preserve existing usage interactions. Check light/dark and Korean/English at desktop and narrow rail widths, including overlay/pinned layouts, with footer geometry and screenshots proving left gear, right gutters and approximately one-line meters without clipped essential content.
 - Run focused affected settings/usage/layout/i18n tests and retained neighboring rail/session checks. Preserve complete stdout/stderr, actual exits, omissions and owned fixture/process cleanup. Obtain independent implementation review.
 
+### Result (0bc7fcf24) - 2026-11-15
+
+- Moved Settings to the leftmost rail-footer gear; retained unrelated drawer cards, all preferences and the usage popover. Compact inline meters wrap without clipping essential values. The shell owns one static dialog outside shared regions; usage redraws cannot remove its sibling gear.
+- The single combined Lite review found one Important storage-denial regression. Fixed in `820c559f8`: normalized in-memory choices reach cached/reloaded frames through the existing origin/source-checked UI transport even when persistence fails. No daemon API, protocol or store semantics changed.
+- Verification: nine focused ownership/drawer/page Go tests and nine usage Node tests passed; final isolated Chromium checks passed keyboard/focus/dismissal, preferences, cookies/reload, hidden drafts, narrow geometry, denied/full storage and actual send-key behavior. Localization tests passed. Minor remaining coverage is tracked in `261115-chore-settings-hidden-theme-and-rail-swap-tests`.
+- Newest authority: MAIN033257 and owner899/031755 replace the older screenshot/matrix/whole-suite ceremony; MAIN034301/034648/035251 accepts the existing base without sync or repeated acceptance. No screenshots, whole suites, providers/downloads or shared-runtime operations were performed. Owner post-merge on-screen feedback is visual acceptance.
+
 ### Phase 2: Replace the home with an empty-selection session screen
 
 After Phase 1's settings destination exists, remove the distinct home/index presentation. Preserve `/` and its consumers, rendering the session-screen layout with rail, no selected session and an empty main panel. Move the version into Settings. Relocate LAN access-token information only if LAN serving remains in the landed base, preserving local-only disclosure and existing authentication semantics; otherwise show the version only without recreating LAN. Update obsolete home-directed guidance and tests. Do not implement the future worktree-only view.
@@ -100,3 +108,10 @@ Verification:
 - Exercise existing PWA start/scope, desktop origin navigation, rail destination and shell framing; exercise LAN entry URLs only while LAN serving remains. Preserve the URLs and authorized navigation applicable to the landed base, never reintroducing removed LAN behavior. Update presentation assertions while retaining security and session-route coverage.
 - Cover both cross-ticket landing orders: with LAN still present, test local LAN-on/off Settings, remote viewers and unauthorized requests; token information stays local-only/outside shared stream regions, authentication stays unchanged, and guidance names Settings. With LAN removal already landed, Settings has the version but no LAN block, token/cookie/access branch or revived entry behavior. The later removal must be able to delete an interim relocated LAN block without removing Settings/version. In both cases `/health` identity and the displayed version's existing value remain unchanged.
 - Capture desktop/narrow light/dark root-with-no-selection and settings results, including empty usage/session lists. Run affected shell, pages/pageview, access, i18n, PWA and relevant desktop endpoint/navigation tests; retain actual commands, full outputs, exits, explicit omissions and owned-process cleanup. Obtain independent implementation review before recording the phase result or handing the branch to MAIN.
+
+### Result (dfe650319) - 2026-11-15
+
+- `/` now opens the ordinary shell with no selected session and an empty main panel, retaining root/session URLs, rail navigation, framing and PWA entry. Existing missing, malformed and temporarily unavailable session handling remains distinct. The version in Settings uses the endpoint's existing value.
+- LAN serving exists at base `02a2e5722`, so its optional block moved into local-only shell Settings, outside every shared region. Local framed pages and all streams carry no token; remote viewers and unauthorized requests disclose none. Token generation/storage, query-to-HttpOnly-cookie exchange, authentication and `/health` identity are unchanged. Authoritative LAN removal remains separate and must remove only this optional LAN block, not Settings/version.
+- Verification: the relevant route/security/framing/PWA/ownership batch passed 24 checks; the final nine-test batch passed Settings Chromium, shell message/navigation/stream ownership, PWA links and finding/unavailable regressions (`go test ./internal/wsdashboard -run <focused selectors> -count=1 -v -timeout=90s`). The browser also covers no-session/no-usage Settings reachability. An initial narrow-root collapse was fixed; a separate Playwright opaque-origin blocker error was repaired using the established fixture pattern, without suppressing page errors. All final commands exited 0; complete outputs remain outside the checkout under `/tmp/ws-settings-*`.
+- One independent combined Lite pass completed; its Important finding was fixed in `820c559f8`, with no re-review under Lite. The Minor coverage follow-up is named above. Per the latest authority recorded in Phase 1, omitted visual matrices/screenshots, unchanged desktop Rust tests, whole suites, alternate already-removed-LAN execution and runtime install/build/restart/swap. Fixtures used temporary stores/config/HOME and cached dependencies; test-owned daemons and Chromium were closed. No sync, rebase or other unmerged lane was imported.
