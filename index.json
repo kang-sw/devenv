@@ -798,6 +798,9 @@
     "261115-bug-ws-worktree-pool-protected-deliverable-reuse": {
       "registered_at": "2026-11-14T23:49:42Z"
     },
+    "261115-chore-settings-hidden-theme-and-rail-swap-tests": {
+      "registered_at": "2026-11-15T04:00:54Z"
+    },
     "261115-feat-werkschaft-electron-shell": {
       "registered_at": "2026-11-15T01:09:25Z",
       "lease": {
