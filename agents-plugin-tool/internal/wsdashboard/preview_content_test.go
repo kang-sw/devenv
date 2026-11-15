@@ -13,5 +13,5 @@ func TestFilesPreviewContentRenderer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runNode(t, "preview highlighting and PDF fallback", "var PREVIEW = "+string(src)+";\n"+outsideDOM+string(fixture))
+	runNode(t, "preview highlighting and PDF/media fallback", "var PREVIEW = "+string(src)+";\n"+outsideDOM+string(fixture))
 }

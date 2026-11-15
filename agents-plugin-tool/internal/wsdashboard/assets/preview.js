@@ -2,7 +2,7 @@
   // The file preview card (window.WsPreview), a kind on the board card
   // framework (cards.js). A card shows one file under the session's browsing
   // root, as the preview route (fs_routes.go) describes it: an image or a
-  // video from the raw route, an HTML or SVG file in a sandboxed frame from
+  // video/audio from the raw route, an HTML or SVG file in a sandboxed frame from
   // the capability route, rendered markdown, a .diff or .patch through the
   // commit window's diff renderer, other text as plain text, or a "not
   // viewable" note.
@@ -57,10 +57,11 @@
     "ttf otf woff woff2 eot mp3 wav flac aac m4a mov avi mkv wmv psd heic tif tiff").split(" ").forEach(function (x) { OPAQUE[x] = true; });
   function takes(path) { return !OPAQUE[ext(path)]; }
 
-  var ICON = { image: "image", video: "film", pdf: "file-text", frame: "file-code", markdown: "file-text", diff: "file-diff", text: "file-text", none: "file" };
+  var ICON = { image: "image", video: "film", audio: "file", pdf: "file-text", frame: "file-code", markdown: "file-text", diff: "file-diff", text: "file-text", none: "file" };
   function badge(v) {
     if (v.kind === "image") return wsT("js.preview.kind.image");
     if (v.kind === "video") return wsT("js.preview.kind.video");
+    if (v.kind === "audio") return wsT("js.preview.kind.audio");
     if (v.kind === "pdf") return wsT("js.preview.kind.pdf");
     if (v.kind === "frame") return wsT("js.preview.kind.frame");
     if (v.kind === "markdown") return wsT("js.preview.kind.markdown");
@@ -72,7 +73,8 @@
   function guess(path) {
     var x = ext(path);
     if (/^(png|jpe?g|gif|webp|avif|bmp|ico)$/.test(x)) return "image";
-    if (/^(mp4|webm|ogg|ogv)$/.test(x)) return "film";
+    if (/^(mp4|webm|mov|ogv|m4v)$/.test(x)) return "film";
+    if (/^(mp3|wav|ogg|oga|flac|m4a|aac|opus)$/.test(x)) return "file";
     if (/^(html?|svg)$/.test(x)) return "file-code";
     if (/^(diff|patch)$/.test(x)) return "file-diff";
     return "file-text";
@@ -187,13 +189,19 @@
       img.alt = baseName(d.path);
       img.src = v.src;
       box.appendChild(img);
-    } else if (v.kind === "video") {
-      box = mk("div", "pv-vid");
-      var vid = mk("video");
-      vid.controls = true;
-      vid.preload = "metadata";
-      vid.src = v.src;
-      box.appendChild(vid);
+    } else if (v.kind === "video" || v.kind === "audio") {
+      box = mk("div", v.kind === "video" ? "pv-vid" : "pv-audio");
+      var media = mk(v.kind), turn = card.turn;
+      media.controls = true;
+      media.preload = "metadata";
+      media.addEventListener("error", function () {
+        // Ignore a late event from a replaced player or a pending reload.
+        if (card.turn === turn && card.body.firstChild === box) {
+          draw(card, { kind: "none", reason: wsT("js.preview.media.unsupported") });
+        }
+      });
+      media.src = v.src;
+      box.appendChild(media);
     } else if (v.kind === "pdf") {
       box = pdfView(card, v);
     } else if (v.kind === "frame") {

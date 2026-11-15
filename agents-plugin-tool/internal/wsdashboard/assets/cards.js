@@ -862,7 +862,7 @@
     if (!(c instanceof Card)) return 1440; // a topic or its entry panel
     if (kind === "preview") kind = n.getAttribute("data-preview-kind");
     var widths = { text: 1280, markdown: 1280, code: 1440, diff: 1760,
-      web: 1600, frame: 1600, image: 1600, video: 1600, topic: 1440,
+      web: 1600, frame: 1600, image: 1600, video: 1600, audio: 560, topic: 1440,
       panel: 1440, approval: 1024, system: 1024 };
     return Object.prototype.hasOwnProperty.call(widths, kind) ? widths[kind] : 1920;
   }

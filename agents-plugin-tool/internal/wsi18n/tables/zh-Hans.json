@@ -403,6 +403,8 @@
   "js.preview.kind.source": "源码",
   "js.preview.kind.text": "文本",
   "js.preview.kind.video": "视频",
+  "js.preview.kind.audio": "音频",
+  "js.preview.media.unsupported": "此浏览器无法播放此文件",
   "js.preview.missing": "根目录下没有此文件",
   "js.preview.none": "此文件无法在此显示：{0}",
   "js.preview.openext": "用默认应用打开",

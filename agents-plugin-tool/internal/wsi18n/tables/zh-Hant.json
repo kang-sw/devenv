@@ -403,6 +403,8 @@
   "js.preview.kind.source": "原始碼",
   "js.preview.kind.text": "文字",
   "js.preview.kind.video": "影片",
+  "js.preview.kind.audio": "音訊",
+  "js.preview.media.unsupported": "此瀏覽器無法播放此檔案",
   "js.preview.missing": "根目錄下沒有此檔案",
   "js.preview.none": "此檔案無法在此顯示：{0}",
   "js.preview.openext": "以預設應用程式開啟",

@@ -159,7 +159,7 @@ func TestFSPreviewAndRawStayInsideTheRoot(t *testing.T) {
 		if rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/raw?path=shot.png", ""); rec.Code != http.StatusOK || rec.Body.String() != "PNG-INSIDE" {
 			t.Errorf("%s: raw shot.png = %d %q", v.name, rec.Code, rec.Body.String())
 		}
-		// The raw route serves images and video only: a text file is not its.
+		// The raw route serves images, media, and PDF only: not a text file.
 		if rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/raw?path=notes.txt", ""); rec.Code != http.StatusNotFound {
 			t.Errorf("%s: raw notes.txt = %d, want 404", v.name, rec.Code)
 		}
@@ -253,7 +253,7 @@ func TestFSRawStreamsVideoWithRange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.project, "clip.mp4"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for name, ctype := range map[string]string{"clip.mp4": "video/mp4", "c.webm": "video/webm", "c.ogg": "video/ogg"} {
+	for name, ctype := range map[string]string{"clip.mp4": "video/mp4", "c.webm": "video/webm", "c.ogv": "video/ogg"} {
 		if name != "clip.mp4" {
 			writeFile(t, filepath.Join(f.project, name), "video")
 		}

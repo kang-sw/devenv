@@ -403,6 +403,8 @@
   "js.preview.kind.source": "ソース",
   "js.preview.kind.text": "テキスト",
   "js.preview.kind.video": "動画",
+  "js.preview.kind.audio": "音声",
+  "js.preview.media.unsupported": "このブラウザーではこのファイルを再生できません",
   "js.preview.missing": "ルート内にそのファイルはありません",
   "js.preview.none": "このファイルはここでは表示できません: {0}",
   "js.preview.openext": "既定のアプリで開く",

@@ -403,6 +403,8 @@
   "js.preview.kind.source": "소스",
   "js.preview.kind.text": "텍스트",
   "js.preview.kind.video": "영상",
+  "js.preview.kind.audio": "오디오",
+  "js.preview.media.unsupported": "이 브라우저에서는 이 파일을 재생할 수 없습니다",
   "js.preview.missing": "루트 안에 그런 파일이 없습니다",
   "js.preview.none": "이 파일은 여기서 볼 수 없습니다: {0}",
   "js.preview.openext": "기본 앱에서 열기",

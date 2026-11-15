@@ -403,6 +403,8 @@
   "js.preview.kind.source": "Código-fonte",
   "js.preview.kind.text": "Texto",
   "js.preview.kind.video": "Vídeo",
+  "js.preview.kind.audio": "Áudio",
+  "js.preview.media.unsupported": "Este navegador não consegue reproduzir este arquivo",
   "js.preview.missing": "Não há esse arquivo sob a raiz",
   "js.preview.none": "Este arquivo não pode ser exibido aqui: {0}",
   "js.preview.openext": "Abrir no aplicativo padrão",

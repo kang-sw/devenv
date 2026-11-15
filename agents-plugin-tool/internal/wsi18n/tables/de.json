@@ -403,6 +403,8 @@
   "js.preview.kind.source": "Quelltext",
   "js.preview.kind.text": "Text",
   "js.preview.kind.video": "Video",
+  "js.preview.kind.audio": "Audio",
+  "js.preview.media.unsupported": "Dieser Browser kann diese Datei nicht abspielen",
   "js.preview.missing": "Keine solche Datei unter dem Stammverzeichnis",
   "js.preview.none": "Diese Datei kann hier nicht angezeigt werden: {0}",
   "js.preview.openext": "In der Standard-App öffnen",
