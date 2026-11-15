@@ -203,14 +203,13 @@
     e.preventDefault();
     post({ wbDoc: "rail" });
   });
-  // Ctrl+K and Ctrl+Space (the host palette's keys, by the target rule of
-  // tracker.js qShortcut: an editor in the body keeps them) open the
+  // Ctrl+K, Ctrl+Space and Cmd+K (the host palette's keys, by tracker.js
+  // qShortcut: only a terminal keeps them, and a body has none) open the
   // host's search palette ({wbDoc: "search"}).
   d.addEventListener("keydown", function (e) {
-    if (!e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || e.keyCode === 229) return;
-    if (e.code !== "Space" && e.key !== " " && (e.key || "").toLowerCase() !== "k") return;
-    var t = e.target;
-    if (t && t.closest && t.closest("textarea, [contenteditable]:not([contenteditable=\"false\"])")) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    var k = (e.key || "").toLowerCase() === "k";
+    if (e.metaKey ? e.ctrlKey || !k : !k && e.code !== "Space" && e.key !== " ") return;
     e.preventDefault();
     post({ wbDoc: "search" });
   });

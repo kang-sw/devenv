@@ -131,7 +131,7 @@ async function hostCases() {
   } };
   const host = vm.createContext({ console, Date, Promise, AbortController, EventSource, doc, rid: 'session', sbody: null,
     root: { hasAttribute: () => local }, load: k => { reads.push(k); return storage[k] || null; }, save: (k, v) => { storage[k] = v; },
-    esc: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'), wsT: k => k,
+    wsT: k => k,
     paletteRows: () => [{ kind: 'board-item', id: '23', topic: 'topic' }], palettePick: (...a) => picks.push(a),
     paletteFs: (route, params) => { checks.push(params); return Promise.resolve({ kind: 'text', text: 'one\ntwo\nthree' }); },
     window: { EventSource, addEventListener() {}, WsPreview: { open: (...a) => previews.push(a) } },
@@ -149,7 +149,7 @@ async function hostCases() {
   assert.equal(streams.length, 1);
   streams[0].send('running', 'Read [[board:23]] [[file:docs/readme.md:2]] [[file:../secret:1]] [[file:docs/readme.md:8]] <img onerror=evil>'); await tick();
   let body = pane.querySelector('.tk-qanswer-text');
-  assert(body.innerHTML.includes('&lt;img onerror=evil>'), 'model HTML is text');
+  assert(body.innerHTML.includes('&lt;img onerror=evil&gt;'), 'model HTML is text');
   const board = body.querySelector('[data-answer-cite="0"]').children[0]; board.listeners.click();
   assert.equal(picks[0][0].id, '23'); assert.equal(picks[0][1].keep, true);
   const file = body.querySelector('[data-answer-cite="1"]').children[0]; file.listeners.click();

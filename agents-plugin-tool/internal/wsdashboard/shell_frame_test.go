@@ -47,7 +47,10 @@ var history = { pushState: function (s, t, u) { location.hash = u; }, replaceSta
 doc.querySelector = function () { return null; };
 doc.addEventListener = function () {};
 doc.title = "sess - ws dashboard";
-var root = { hasAttribute: function () { return false; }, clientWidth: 1200 };
+var rootAttrs = {}, bodyWatch = [];
+doc.body = {};
+var MutationObserver = window.MutationObserver = function () { var seen = new Map(); this.observe = function (node, opts) { if (node === doc.body) { if (seen.has(node)) bodyWatch[seen.get(node)] = opts; else { seen.set(node, bodyWatch.length); bodyWatch.push(opts); } } }; };
+var root = { setAttribute: function (k) { rootAttrs[k] = true; }, removeAttribute: function (k) { delete rootAttrs[k]; }, hasAttribute: function (k) { return k === "data-lifted" && !!rootAttrs[k]; }, clientWidth: 1200 };
 function region() { return null; }
 function $() { return null; }
 var searchOpens = 0, tkApi = { openSearch: function () { searchOpens++; } };
@@ -87,6 +90,8 @@ q = function (sel) {
 connect();
 shFrameInit();
 var s = sockets[0];
+check("the body is watched for appended popovers and for hidden/open toggles, neither observe() overwriting the other",
+  [bodyWatch.some(function (o) { return o.childList && !o.subtree; }), bodyWatch.some(function (o) { return o.subtree && o.attributes && o.attributeFilter.indexOf("hidden") >= 0; })], [true, true]);
 check("a framed session page streams without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1");
 s.onopen({});
 function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }
@@ -137,6 +142,7 @@ var visible = { getClientRects: function () { return [{}]; } };
 var hidden = { getClientRects: function () { return []; } };
 linkMenus = [visible];
 check("a visible link menu lifts its frame above the shell header", popover(), true);
+check("a lifted page drops its background so the shell header and rail show beneath", "data-lifted" in rootAttrs, true);
 linkMenus = [hidden];
 check("a menu with no layout does not lift the frame", popover(), false);
 linkMenus = [visible]; railPops = [visible];
@@ -145,9 +151,11 @@ linkMenus = [];
 check("closing the link menu preserves another visible popover", popover(), true);
 railPops = [];
 check("closing the last popover restores the shell layer", popover(), false);
+check("closing the last popover restores the page background", "data-lifted" in rootAttrs, false);
 var hoverCard = { classList: { contains: function (c) { return c === "shp"; } }, getClientRects: function () { return [{}]; } };
 railPops = [hoverCard];
 check("a visible read-only hover card does not lift the frame over the shell header and rail", popover(), false);
+check("a hover card keeps the page background", "data-lifted" in rootAttrs, false);
 railPops = [hoverCard, visible];
 check("an interactive popover beside a hover card still lifts the frame", popover(), true);
 railPops = [];
@@ -316,14 +324,14 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestShellHotkeyForwarderLeavesCtrlKeysToEditors pins the shell document's
-// keydown forwarder (dashboard.js shShellInit): Ctrl+K and Ctrl+Space open
-// the shown frame's palette except from an editor target (tracker.js
-// qShortcut's rule), and `/` skips any typing target. Runs under node when
+// TestShellHotkeyForwarderLeavesSearchKeysToTerminals pins the shell
+// document's keydown forwarder (dashboard.js shShellInit): Ctrl+K, Ctrl+Space
+// and Cmd+K open the shown frame's palette except from a terminal target
+// (tracker.js qShortcut's rule), and `/` skips any typing target. Runs under node when
 // it is installed.
-func TestShellHotkeyForwarderLeavesCtrlKeysToEditors(t *testing.T) {
+func TestShellHotkeyForwarderLeavesSearchKeysToTerminals(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
-	fwd := regexp.MustCompile(`(?s)stay with editors by qShortcut's target rule\.\n(    doc\.addEventListener\("keydown", function \(e\) \{.*?\n    \}\);\n)`).FindStringSubmatch(js)
+	fwd := regexp.MustCompile(`(?s)stay with a terminal by qShortcut's target rule\.\n(    doc\.addEventListener\("keydown", function \(e\) \{.*?\n    \}\);\n)`).FindStringSubmatch(js)
 	if fwd == nil {
 		t.Fatal("dashboard.js holds no shell keydown forwarder")
 	}
@@ -336,10 +344,15 @@ function fire(e, sel) { searched = 0; e.preventDefault = function () {}; e.targe
 function check(what, got, want) { if (got !== want) bad.push(what + ": got " + got + ", want " + want); }
 check("Ctrl+K on the body opens", fire({ ctrlKey: true, key: "k" }, "body"), 1);
 check("Ctrl+Space on the body opens", fire({ ctrlKey: true, key: " ", code: "Space" }, "body"), 1);
-check("Ctrl+K in a textarea is left to it", fire({ ctrlKey: true, key: "k" }, "textarea"), 0);
-check("Ctrl+Space in a textarea is left to it", fire({ ctrlKey: true, key: " ", code: "Space" }, "textarea"), 0);
-check("Ctrl+K in a contenteditable is left to it", fire({ ctrlKey: true, key: "k" }, "ce"), 0);
+check("Cmd+K on the body opens", fire({ metaKey: true, key: "k" }, "body"), 1);
+check("Cmd+Space is left to the system", fire({ metaKey: true, key: " ", code: "Space" }, "body"), 0);
+check("Ctrl+K in a textarea opens", fire({ ctrlKey: true, key: "k" }, "textarea"), 1);
+check("Ctrl+Space in a textarea opens", fire({ ctrlKey: true, key: " ", code: "Space" }, "textarea"), 1);
+check("Cmd+K in an input opens", fire({ metaKey: true, key: "k" }, "input"), 1);
+check("Ctrl+K in a contenteditable opens", fire({ ctrlKey: true, key: "k" }, "ce"), 1);
 check("Ctrl+K in the terminal is left to it", fire({ ctrlKey: true, key: "k" }, ".xterm"), 0);
+check("Cmd+K in the terminal is left to it", fire({ metaKey: true, key: "k" }, ".xterm"), 0);
+check("Cmd+/ does nothing", fire({ metaKey: true, key: "/" }, "body"), 0);
 check("/ on the body opens", fire({ key: "/" }, "body"), 1);
 check("/ in a textarea types", fire({ key: "/" }, "textarea"), 0);
 check("/ in an input types", fire({ key: "/" }, "input"), 0);

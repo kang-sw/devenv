@@ -821,6 +821,8 @@ type itemData struct {
 	// Static renders the item's options as display, not answer controls
 	// (the "opts" template), for a settled row's expanded body.
 	Static bool
+	// History is set only for the unified full-page timeline row.
+	History *EntryView
 }
 
 // ItemOf pairs an item with the page for the item templates.

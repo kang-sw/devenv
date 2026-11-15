@@ -492,6 +492,13 @@
       };
       return function () { closed = true; es.close(); };
     }
+    // The renderer's esc lives inside tracker.js, out of this bundle's
+    // scope: the answer pane escapes with its own.
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
     function inline(text) {
       return esc(text).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
     }
