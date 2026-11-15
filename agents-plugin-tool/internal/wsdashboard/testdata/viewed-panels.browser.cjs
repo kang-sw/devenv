@@ -159,6 +159,9 @@ async function cancelJump(run, id) {
     const n = document.getElementById(id), s = window.__viewedGeometry(n).scroller;
     s.dispatchEvent(new WheelEvent('wheel', { deltaY: 1, bubbles: true }));
   }, id));
+  // Baseline navigation still uses the legacy quiet window; the result
+  // cancels immediately. Wait for each real lifecycle, not a guessed delay.
+  await guard(run, run.frame.waitForFunction(id => !window.wbHistory.keeping(window.__viewedGeometry(document.getElementById(id)).scroller), id, { timeout: 1500 }));
   await quiet(run, 260);
   check(run.name + ' admission jump settled/canceled', await guard(run, run.frame.evaluate(id => !window.wbHistory.keeping(window.__viewedGeometry(document.getElementById(id)).scroller), id)), id);
 }
@@ -511,7 +514,8 @@ async function core() {
   const transaction = await guard(run, run.frame.evaluate(() => {
     const n = document.getElementById('p2'), above = document.querySelector('section[data-topic="Above"]'), w = window.wbHistory;
     const before = n.getBoundingClientRect().top, outer = w.keep(n), inner = w.keep(n);
-    above.style.marginBottom = '60px'; inner.apply(); const nested = n.getBoundingClientRect().top;
+    const margin = parseFloat(getComputedStyle(above).marginBottom) || 0;
+    above.style.marginBottom = margin + 60 + 'px'; inner.apply(); const nested = n.getBoundingClientRect().top;
     outer.apply(); return { before, nested, after: n.getBoundingClientRect().top };
   }));
   check(run.name + ' gap reference and nested outer apply once', Math.abs(transaction.nested - transaction.before - 60) <= 1 && Math.abs(transaction.after - transaction.before) <= 1, transaction);

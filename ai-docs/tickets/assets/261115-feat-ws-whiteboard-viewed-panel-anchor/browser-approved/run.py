@@ -147,9 +147,11 @@ class Batch:
                     raise RuntimeError("unsafe archive path")
                 if member.issym() and not (dest.parent / member.linkname).resolve().is_relative_to(snapshot):
                     raise RuntimeError("unsafe archive symlink")
-                if member.islnk():
-                    raise RuntimeError("unexpected hardlink in source archive")
-            source.extractall(snapshot, filter="data")
+                if not (member.isfile() or member.isdir() or member.issym()):
+                    raise RuntimeError("unexpected non-source archive member")
+            # Members/links were validated above; avoid requiring Python's
+            # newer extraction-filter argument on an otherwise stdlib runner.
+            source.extractall(snapshot)
         # Fixture and driver come from the frozen RESULT commit, not a live file.
         # Reading them by git show is logged, pinned and performed just once.
         shutil.copyfile(self.out / "fixture.go", snapshot / HELPER)

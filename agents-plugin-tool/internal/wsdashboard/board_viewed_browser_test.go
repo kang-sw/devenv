@@ -66,6 +66,10 @@ func TestBoardViewedFixture(t *testing.T) {
 			http.Error(w, "unknown immutable fixture state", http.StatusBadRequest)
 			return
 		}
+		// This endpoint is a second exact Port 0 origin. Permit only its
+		// paired dashboard document to read immutable fixture snapshots.
+		w.Header().Set("Access-Control-Allow-Origin", f.base)
+		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		json.NewEncoder(w).Encode(map[string]string{"html": html, "source_pin": pin})
