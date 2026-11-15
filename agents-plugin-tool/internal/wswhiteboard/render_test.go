@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
@@ -208,7 +209,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 			t.Errorf("%s: the body (%d) is not above the items (%d)", name, doc, items)
 		}
 		wantAll(t, block, `<summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg>`, `<div class="doc-body md">layout <strong>notes</strong></div>`)
-		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:embed layout" open>` {
+		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:embed layout" data-body-at="" open>` {
 			t.Errorf("%s: body tag = %q, want it open (changed at seq 12, after the embed at 10)", name, tag)
 		}
 		// A body that did not change since the previous embed is open only on the full page.
@@ -227,7 +228,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 		}
 		block = out[start:]
 		block = block[:strings.Index(block, "</section>")]
-		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:초기 범위">` {
+		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:초기 범위" data-body-at="">` {
 			t.Errorf("%s: closed topic's body tag = %q, want a closed fold", name, tag)
 		}
 		if !strings.Contains(block, "closed notes") {
@@ -249,18 +250,18 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic has-doc" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
-		`<details class="tdoc" data-key="doc:notes" open>`, "<h1>Plan</h1>", "<li>one</li>")
+	wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
+		`<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tbody"`)
 	// Nothing to answer: the reply bar waits hidden for a topic note.
 	wantAll(t, out, `<div class="reply solo" data-idle hidden>`)
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic closed has-doc" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic closed has-doc" id="`+topicAnchor("notes")+`" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<div class="topic-stream">`,
-		`<details class="tdoc" data-key="doc:notes"><summary`, "<h1>Plan</h1>")
-	wantNone(t, out, `data-key="doc:notes" open`)
+		`<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`"><summary`, "<h1>Plan</h1>")
+	wantNone(t, out, `<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`" open>`)
 }
 
 // TestRenderPageTopicKeyAttribute: every topic section carries its name as
@@ -310,7 +311,7 @@ func TestRenderPageEmbedOmitsCurrentBody(t *testing.T) {
 	wantAll(t, embed, `href="r/index.html">Open full board</a>`)
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantNone(t, full, `class="new"`)
-	wantAll(t, full, `data-key="doc:fresh" open>`, `data-key="doc:stale" open>`)
+	wantAll(t, full, `<details class="tdoc" data-key="doc:fresh" data-body-at="" open>`, `<details class="tdoc" data-key="doc:stale" data-body-at="" open>`)
 }
 
 // TestRenderPageEscapesItemTextButNotTopicBody pins what reaches a page as
@@ -894,18 +895,35 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 	}
 }
 
-// Static whiteboard pages never load the dashboard's tracker or explorer;
-// their strings must not consume the embed's payload budget.
-func TestPagesLeaveOutTheTrackerStrings(t *testing.T) {
+// Standalone and embed boards load no tracker, file explorer, or Git controls.
+// Every other client key stays available, including body/gutter timestamps,
+// state clocks, forms, pills, code controls, and the standalone viewer.
+func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
+	assets, err := assetFS.ReadDir("assets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range assets {
+		if !strings.HasSuffix(asset.Name(), ".js") {
+			continue
+		}
+		source, err := embeddedAsset(asset.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, prefix := range []string{trackerKeyPrefix, filesKeyPrefix, gitKeyPrefix} {
+			if strings.Contains(string(source), prefix) {
+				t.Errorf("%s consumes excluded prefix %q", asset.Name(), prefix)
+			}
+		}
+	}
 	st := &State{Seq: 1}
 	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		if !strings.Contains(out, `"js.ago"`) {
-			t.Errorf("layout %v: the page lacks its client strings", layout)
-		}
-		for _, prefix := range []string{`"js.tk.`, `"js.files.`} {
-			if strings.Contains(out, prefix) {
-				t.Errorf("layout %v: the page carries unused dashboard strings %s", layout, prefix)
+		for key := range wsi18n.ClientTable("en") {
+			want := !strings.HasPrefix(key, trackerKeyPrefix) && !strings.HasPrefix(key, filesKeyPrefix) && !strings.HasPrefix(key, gitKeyPrefix)
+			if got := strings.Contains(out, `"`+key+`":`); got != want {
+				t.Errorf("layout %v: client key %q present = %v, want %v", layout, key, got, want)
 			}
 		}
 	}

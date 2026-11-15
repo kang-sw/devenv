@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestRenderRegionsMatchThePage pins the dashboard's reuse contract: the
@@ -359,7 +360,7 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 	// it cannot end the attribute.
 	wantAll(t, string(regions.Board), `data-doc="topic:say &#34;hi&#34; &amp; &lt;go&gt;"`)
 	// Dashboard bodies use only the shared whole-card fold, closed topics too.
-	wantAll(t, string(regions.Board), `<div class="tdoc"><div class="doc-body framed">`)
+	wantAll(t, string(regions.Board), `<div class="tdoc" data-body-at="`+testNow.Format(time.RFC3339)+`"><div class="doc-body framed">`)
 	wantNone(t, string(regions.Board), `<details class="tdoc"`, `data-key="doc:closed"`, "has-doc")
 }
 
@@ -372,11 +373,11 @@ func TestDashboardTopicBodyUsesWholeCardFold(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	wantAll(t, board, `<div class="tdoc"><div class="doc-body framed">`, `<div class="topic-stream"><div class="wb-history"`, `<details class="entry-panel`)
+	wantAll(t, board, `<div class="tdoc" data-body-at="`+testNow.Format(time.RFC3339)+`"><div class="doc-body framed">`, `<div class="topic-stream"><div class="wb-history"`, `<details class="entry-panel`)
 	wantNone(t, board, `<details class="tdoc"`, `data-key="doc:shared"`, "has-doc")
 	// The standalone page has no shared card framework and keeps its toggle.
 	page := render(t, view)
-	wantAll(t, page, "has-doc", `<details class="tdoc" data-key="doc:shared" open><summary`)
+	wantAll(t, page, "has-doc", `<details class="tdoc" data-key="doc:shared" data-body-at="`+testNow.Format(time.RFC3339)+`" open><summary`)
 }
 
 // TestServedBoardFramesArePlaceholders pins the lazy mount's served form

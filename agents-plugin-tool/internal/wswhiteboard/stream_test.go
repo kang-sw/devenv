@@ -365,7 +365,7 @@ func TestExpandedQuietTopicCardCSS(t *testing.T) {
 	}
 }
 
-func TestStandaloneClosedQuietTopicWithStreamStaysCollapsed(t *testing.T) {
+func TestStandaloneClosedTopicWithHistoryKeepsBodyCollapsed(t *testing.T) {
 	st := streamFixture()
 	st.ClosedTopics = []string{"t"}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
@@ -373,12 +373,12 @@ func TestStandaloneClosedQuietTopicWithStreamStaysCollapsed(t *testing.T) {
 	if topic == "" {
 		t.Fatal("closed topic missing")
 	}
-	wantAll(t, topic, `class="topic quiet closed has-doc"`, `<details class="tdoc" data-key="doc:t"`, `<div class="topic-stream">`)
-	wantNone(t, topic, `data-size=`, `data-max`)
+	wantAll(t, topic, `class="topic closed has-doc"`, `<details class="tdoc" data-key="doc:t"`, `<div class="topic-stream">`)
+	wantNone(t, topic, `class="topic quiet`, `data-size=`, `data-max`, `<details class="topic-stream"`)
 	disclosure := regexp.MustCompile(`<details class="tdoc"[^>]*>`).FindString(topic)
 	wantNone(t, disclosure, ` open`)
-	// The CSS contract above requires data-size for dashboard expansion and
-	// open details for standalone expansion. This sibling stream supplies neither.
+	// Whole history stays visible on a closed full-page topic; only its body
+	// retains the standalone disclosure, independently of dashboard sizing.
 }
 
 // Owner rule: a log row's role marker sits on the first line beside the clock,
