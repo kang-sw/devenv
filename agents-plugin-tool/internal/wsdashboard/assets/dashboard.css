@@ -664,6 +664,13 @@ section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-rig
 .bcard[data-max] .bc-body { display: block; flex: 1 1 0; height: auto !important; }
 .bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-raise, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
 .bcard[data-max] .bc-min { display: inline-grid; }
+/* The one shared sheet owns a transient normal width and an in-sheet toggle.
+   Mobile retains its original insets; only wide sheets use the captured span. */
+.sheet-width { flex: none; }
+.sheet-width[hidden] { display: none !important; }
+details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) { grid-template-columns: 10px minmax(0, 1fr) auto auto auto; }
+details.entry-panel[data-max] > summary > .sheet-width { grid-column: 4; grid-row: 1; }
+details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) > .d-min { grid-column: 5; }
 @media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
 /* A large topic or topic panel (cards.js sheet): the board's own node, drawn
    fixed where a maximized card's box stands, over the same scrim, its
@@ -935,9 +942,12 @@ body:has(.fpane[data-max]) .dgrid.live > .fpane,
 body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }
 .board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
 .board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
-.board-toolbar[data-files] .board-files { pointer-events: auto; }
+.board-toolbar[data-files] .board-files, .board-toolbar[data-files] .sheet-width { pointer-events: auto; }
 body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 @media (max-width: 640px) { .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
+@media (min-width: 641px) {
+  .bcard[data-max] .bc-in, section.topic[data-max], details.entry-panel[data-max], .fpane[data-max] { left: var(--sheet-inset, 16px); right: var(--sheet-inset, 16px); }
+}
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
 .fhd { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
