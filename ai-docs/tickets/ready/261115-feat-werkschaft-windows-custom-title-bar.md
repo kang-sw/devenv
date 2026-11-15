@@ -378,3 +378,23 @@ The unresolved Alt core-menu failure triggered STEP B's explicit skip condition;
 were not inspected, replaced or launched. Their current values are unverified.
 `C:\Users\ki608\devenv` was untouched. Independent review remains omitted under
 the lead's override; EXEC4 owns the lite review. No merge or push was performed.
+
+##### Owner copy rebuilt (3db0b7758) - 2026-11-15
+
+- VERIFIED: under EXEC4's subsequent authorization despite the injected-input
+  Alt failure, replaced only `C:\Users\ki608\ws-electron-owner` after an empty
+  ExecutablePath-scoped CIM preflight. Bundled and cloned head
+  `3db0b775865ff1db52eaa88512b5932b1aaaf299`; one `npm ci --no-audit --no-fund`
+  and one explicit Electron `install.js` used target-local caches. Unit tests
+  passed 44/44 and offline win32-x64 packaging passed.
+- VERIFIED: executable and desktop shortcut read-back TargetPath are both
+  `C:\Users\ki608\ws-electron-owner\src\agents-plugin-tool\desktop-electron\dist\Werkschaft-win32-x64\Werkschaft.exe`.
+  The UTF-8-BOM PowerShell script resolved Desktop with `GetFolderPath`, set
+  the executable's directory as working directory and the executable as icon,
+  and cleared shortcut arguments. Neither app launch nor acceptance was run;
+  the owner will check Alt and gestures manually. Phase 1 remains open.
+- VERIFIED: both bundle files were deleted; final target-scoped CIM scan was
+  empty and the recorded build-controller PID had exited. The Mac scoped
+  process scan was empty. No GUI ran on the Mac, no process was killed, and
+  `C:\Users\ki608\devenv` was untouched. Independent review was omitted under
+  the lead override; no merge or push was performed.
