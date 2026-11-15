@@ -169,5 +169,4 @@ function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now
   memo.open(true, false); memo.open(false, false);
   release({ ok: true, json: async () => ({ memos: [], writable: true }) }); await flush();
   assert.notEqual(focused, ids['memo-input'], 'closed panel does not steal focus after delayed read');
-  console.log('memo_test.cjs: passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });

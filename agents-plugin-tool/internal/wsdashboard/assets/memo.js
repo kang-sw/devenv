@@ -73,6 +73,7 @@
     function render() {
       closePickers(); pickers = pickers.slice(0, 1);
       list.textContent = "";
+      if (window.WsCapsules && window.WsCapsules.sweep) window.WsCapsules.sweep();
       input.hidden = !writable; input.disabled = busy;
       items.forEach(function (m) {
         var row = doc.createElement("article"), text = doc.createElement("div");

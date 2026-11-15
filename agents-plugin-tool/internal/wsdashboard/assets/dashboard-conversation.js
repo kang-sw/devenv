@@ -264,6 +264,7 @@
       if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
+      bindCapsuleNotes();
       if (window.wbAgo) window.wbAgo(page);
       mermaid(page);
       if (kept) kept.h.apply();
