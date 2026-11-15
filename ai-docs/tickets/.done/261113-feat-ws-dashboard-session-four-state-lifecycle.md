@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0daf7f9a2bb31ca1
 sage-review-completeness-reviewed: 0daf7f9a2bb31ca1
+completed: 2026-11-16
 ---
 
 # Dashboard session list: four-state session lifecycle
@@ -128,3 +129,8 @@ Deferred by owner (1125)=b to MAIN's Claude agent. The mockup is approved under 
 - A 409 archive (holder scan pending) and a 500 archive (holder refused to stop; the runner rolled back) both leave the row where it was. Each shows a short toast and never retries.
 - Tests: `TestRailFourStateLifecycle` and `TestRailFourStateBrowser`. The browser test uses a fake agent host that writes the real visibility sidecar and returns 409/500 for named ids. Screenshots at 1440px and 700px, dark and light, are in `/tmp/four-state-impl/`. The scoped rail, shell and browser tests plus wsi18n pass after merging `a623176ed`. The merged-in develop change `d2921cf02` (landing logo at `/`) leaves `TestRootKeepsSessionsInTheRailOnly` red; this phase does not touch it.
 - Not shown: the mockup's queued-mail chip, because the index has no per-session queued-mail count. The prune time also does not model the handed-off pi in-directory exemption.
+
+
+## Resolution (2026-11-16)
+
+Both phases have Results (0e1b581de backend, 33d872de9 mockup-approved rail UI) and are merged on develop; closed by MAIN during post-ship cleanup.
