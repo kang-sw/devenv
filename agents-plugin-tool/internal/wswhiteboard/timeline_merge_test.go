@@ -50,7 +50,11 @@ func TestTimelineCoalescedCreationKeepsEveryQuestionAndProvenance(t *testing.T) 
 		if strings.Count(out, fmt.Sprintf(`id="item-%d"`, id)) != 1 {
 			t.Fatalf("item %d needs one permanent anchor", id)
 		}
-		wantAll(t, out, fmt.Sprintf(`data-entry="%s" data-entry-item="%d" data-history-item="%d"`, batch.ID, id, id))
+		key := fmt.Sprintf("ask:%d", id)
+		if id == 1 {
+			key = batch.ID // Retain the durable event's navigation target.
+		}
+		wantAll(t, out, fmt.Sprintf(`data-entry="%s" data-entry-item="%d" data-history-item="%d"`, key, id, id))
 	}
 	if before != string(mustMarshal(t, st)) {
 		t.Fatal("timeline projection rewrote coalesced history")
