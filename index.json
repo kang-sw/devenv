@@ -4,40 +4,13 @@
     "last_gc": "2026-10-26T10:43:26Z"
   },
   "registrations": {
-    "260513-feat-runtime-binary-staging-copy": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260513-research-streamable-http-mcp-transport": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260524-chore-exec-surface-runtime-contract": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260524-epic-async-exec-job-surface": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260605-epic-ws-playbook-factory-pivot": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260605-research-ws-native-subagent-pivot": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260626-research-playbook-print-lead-surface-leak": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260703-bug-claude-plugin-cache-stuck-below-source-version-mcp-refuses-start": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260721-bug-review-partition-empty-artifact": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260723-research-reviewer-worktree-isolation": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260724-bug-ws-mcp-local-devenv-compat-stamp-not-persisting": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260726-feat-enter-verdict-scenario-output": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260726-feat-ws-cli-call-stdin-payload": {
@@ -46,34 +19,10 @@
     "260726-feat-ws-cli-lenient-tool-name-resolution": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260727-bug-string-match-guards-miss-reworded-directives": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260728-bug-chmod-based-tests-skip-silently": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260728-research-duplicate-ticket-stem-silent-resolve": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260728-research-ticket-graph-load-cost-commit-path": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260729-feat-workflow-manual-submodule-detection": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260812-research-reload-plugins-keeps-stale-mcp-binary": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260824-epic-review-watermark-model": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260827-bug-codex-plugin-cache-missing-rsrc-manifest": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260829-research-review-checkpoint-relief-valve": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260829-research-review-watermark-multi-maintainer-model": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260831-research-ai-phase-over-granularity-review-load": {
@@ -82,16 +31,10 @@
     "260901-bug-ticket-scanner-silently-skips-noncanonical-status-dir": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260904-refactor-cli-subcommand-verb-alignment": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260908-epic-ws-pi-subagent-conversation-view": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260908-feat-ws-pi-claude-code-lead-provider": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260908-feat-ws-pi-down-arrow-into-agent-picker": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260908-research-ws-pi-lifecycle-race-monitoring": {
@@ -101,9 +44,6 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260910-feat-ws-agent-list-bounded-output": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260911-research-golden-fixture-verification-gap": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260911-research-impl-lifecycle-merge-authority-goal-loop-rehoming": {
@@ -124,13 +64,7 @@
     "260916-research-pi-ts-suite-outside-release-ci-contract-rot": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260916-research-rationale-query-ranking-precision": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260918-chore-pi-mailbox-waiter-epoch-race-test-coverage": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260919-bug-tickets-close-scope-blocked-not-noop-on-old-git": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260920-bug-pi-rpc-child-stderr-cascades-into-tui": {
@@ -151,27 +85,8 @@
     "260921-chore-pi-stabilize-flaky-lifecycle-websearch-tests": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260921-refactor-pi-shared-atomic-write-util": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260923-bug-worktree-acquire-concurrent-pool-claim": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:03:41Z"
-      }
-    },
     "260923-research-pi-parent-child-loopback-control-channel": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260924-bug-pi-removal-claim-abandonment-and-generation": {
-      "registered_at": "2026-09-24T12:38:53Z"
-    },
-    "260925-bug-ticket-index-move-guard-silent-during-absence-ttl": {
-      "registered_at": "2026-09-25T06:27:11Z"
     },
     "260925-bug-windows-remote-timeout-leaves-child-processes": {
       "registered_at": "2026-09-25T02:03:47Z"
@@ -179,21 +94,8 @@
     "260926-bug-parallel-workers-collide-on-shared-git-stash": {
       "registered_at": "2026-09-26T04:40:03Z"
     },
-    "260927-bug-code-reviewer-spawn-requires-undocumented-write-scope": {
-      "registered_at": "2026-09-27T01:49:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:06:24Z"
-      }
-    },
     "260927-bug-pi-develop-marker-static-manual-fixture-drifts": {
       "registered_at": "2026-09-27T03:33:43Z"
-    },
-    "260928-bug-pi-exec-windows-timeout-orphans-git-bash-child": {
-      "registered_at": "2026-09-28T07:57:19Z"
     },
     "260930-bug-wsconfig-writer-replaces-symlinked-config": {
       "registered_at": "2026-09-30T02:49:06Z"
@@ -201,48 +103,20 @@
     "260930-feat-git-exec-audit-log": {
       "registered_at": "2026-09-30T02:03:00Z"
     },
-    "261001-bug-config-scope-gaps-after-review-opt-in": {
-      "registered_at": "2026-10-01T07:37:37Z"
-    },
     "261002-bug-lead-run-effort-agent-type-missing-fallback": {
       "registered_at": "2026-10-02T13:27:17Z"
-    },
-    "261003-bug-pi-packed-install-offline-cache-test": {
-      "registered_at": "2026-10-03T00:30:05Z"
     },
     "261003-feat-pi-execute-readonly-auto-approval": {
       "registered_at": "2026-10-03T04:05:29Z"
     },
-    "261003-research-typed-decision-model-new-domains": {
-      "registered_at": "2026-10-03T03:19:31Z"
-    },
-    "261004-research-pi-reviewer-report-scope-discovery": {
-      "registered_at": "2026-10-04T03:10:48Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:07:06Z"
-      }
-    },
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T08:41:34Z"
-    },
-    "261007-bug-pi-mailbox-waiter-keeps-bootstrap-key-after-adoption": {
-      "registered_at": "2026-10-07T13:33:39Z"
     },
     "261007-bug-sage-gate-keeps-stale-skipped-design-posture": {
       "registered_at": "2026-10-07T05:20:30Z"
     },
     "261007-feat-stale-agenda-pruning-nudge": {
       "registered_at": "2026-10-07T05:36:00Z"
-    },
-    "261007-research-prose-pin-test-policy": {
-      "registered_at": "2026-10-07T08:41:37Z"
-    },
-    "261008-bug-pi-display-summary-silent-dogfood": {
-      "registered_at": "2026-10-08T00:33:33Z"
     },
     "261008-bug-pi-windows-python3-store-stub-blocks-release-ws": {
       "registered_at": "2026-10-08T13:23:41Z"
@@ -253,47 +127,14 @@
     "261008-bug-ws-git-merge-switches-worker-occupied-root": {
       "registered_at": "2026-10-08T04:40:47Z"
     },
-    "261016-research-claude-mod-pi-like-compaction": {
-      "registered_at": "2026-10-16T08:30:06Z"
-    },
-    "261018-bug-claude-mod-stale-mailbox-watch-after-hot-reload": {
-      "registered_at": "2026-10-18T05:36:08Z"
-    },
     "261018-bug-lead-run-wrapped-line-reads-as-heading": {
       "registered_at": "2026-10-18T04:08:20Z"
-    },
-    "261018-research-claude-mod-mid-turn-steer": {
-      "registered_at": "2026-10-18T06:42:05Z"
-    },
-    "261018-research-claude-mod-ws-manual-injection": {
-      "registered_at": "2026-10-18T01:03:43Z"
-    },
-    "261018-research-claude-mod-ws-mcp-reconnect": {
-      "registered_at": "2026-10-17T15:30:06Z"
     },
     "261020-bug-worktree-profiles-review-followups": {
       "registered_at": "2026-10-20T13:35:50Z"
     },
-    "261020-research-worktree-profiles": {
-      "registered_at": "2026-10-20T08:23:34Z"
-    },
-    "261021-bug-launcher-local-devenv-minor-bump-breaks-installed-plugin": {
-      "registered_at": "2026-10-21T04:11:37Z"
-    },
-    "261022-bug-git-status-shows-lease-of-closed-ticket": {
-      "registered_at": "2026-10-22T06:49:06Z"
-    },
-    "261022-bug-windows-ci-mcp-shard-test-flakes": {
-      "registered_at": "2026-10-22T14:38:23Z"
-    },
     "261028-bug-pi-agent-batch-summary-language-drift": {
       "registered_at": "2026-10-28T11:45:02Z"
-    },
-    "261028-bug-wsnote-windows-rename-retry": {
-      "registered_at": "2026-10-28T02:45:53Z"
-    },
-    "261028-research-claude-mod-statusline-band": {
-      "registered_at": "2026-10-28T06:25:12Z"
     },
     "261029-bug-ws-mcp-git-lookup-per-spawn-slow-path-head": {
       "registered_at": "2026-10-29T08:57:09Z"
@@ -352,9 +193,6 @@
     "261110-chore-ws-mcp-ci-windows-rest-shard-speed": {
       "registered_at": "2026-11-10T13:20:08Z"
     },
-    "261110-chore-ws-mcp-test-suite-runtime": {
-      "registered_at": "2026-11-09T15:09:05Z"
-    },
     "261110-epic-ws-dashboard-agent-host": {
       "registered_at": "2026-11-09T15:09:33Z"
     },
@@ -373,20 +211,11 @@
     "261111-bug-ws-tracker-body-merge-minor-gaps": {
       "registered_at": "2026-11-11T10:28:07Z"
     },
-    "261111-feat-ws-dashboard-hosted-usage-limit-continue": {
-      "registered_at": "2026-11-11T04:19:25Z"
-    },
-    "261111-research-ws-hosted-session-subagent-output-rate-source": {
-      "registered_at": "2026-11-11T11:38:36Z"
-    },
     "261112-epic-ws-mcp-pi-subagents": {
       "registered_at": "2026-11-12T07:22:22Z"
     },
     "261112-feat-pi-subagent-long-shell-auto-background": {
       "registered_at": "2026-11-12T07:07:20Z"
-    },
-    "261112-feat-ws-claude-mod-feed-off-mcp-call": {
-      "registered_at": "2026-11-12T14:38:02Z"
     },
     "261112-feat-ws-dashboard-agent-panel-autocollapse": {
       "registered_at": "2026-11-12T02:03:10Z"
@@ -402,15 +231,6 @@
     },
     "261112-research-ws-daemon-extension-protocol-chat-adapter": {
       "registered_at": "2026-11-12T14:01:09Z"
-    },
-    "261112-research-ws-single-lead-skill-playbook-routing": {
-      "registered_at": "2026-11-12T07:50:32Z"
-    },
-    "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
-      "registered_at": "2026-11-13T04:57:48Z"
-    },
-    "261113-bug-ws-pi-explore-local-query-fails-on-web-search-provider": {
-      "registered_at": "2026-11-13T10:25:03Z"
     },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
@@ -430,9 +250,6 @@
     "261113-feat-ws-dashboard-session-four-state-lifecycle": {
       "registered_at": "2026-11-13T10:12:43Z"
     },
-    "261113-feat-ws-pi-worker-marker-env-guard": {
-      "registered_at": "2026-11-13T01:46:15Z"
-    },
     "261113-feat-ws-tracker-calendar-multi-day-spans": {
       "registered_at": "2026-11-13T13:42:45Z"
     },
@@ -444,9 +261,6 @@
     },
     "261113-research-hosted-detection-by-session-identity": {
       "registered_at": "2026-11-13T01:12:42Z"
-    },
-    "261113-research-werkschaft-identity": {
-      "registered_at": "2026-11-13T11:38:03Z"
     },
     "261114-bug-design-review-requires-unavailable-researcher-spawn": {
       "registered_at": "2026-11-14T05:41:20Z"
@@ -469,21 +283,8 @@
     "261114-bug-pi-hosted-key-blocks-lead-worktree-context": {
       "registered_at": "2026-11-14T11:59:11Z"
     },
-    "261114-bug-pi-subagent-running-without-transcript-progress": {
-      "registered_at": "2026-11-14T12:28:26Z"
-    },
     "261114-bug-windows-bootstrap-metadata-destination-max-path": {
       "registered_at": "2026-11-14T13:57:08Z"
-    },
-    "261114-bug-ws-concurrent-worktree-acquire-pool-collision": {
-      "registered_at": "2026-11-14T13:29:12Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:05:59Z"
-      }
     },
     "261114-bug-ws-dashboard-conversation-send-follow-bottom": {
       "registered_at": "2026-11-14T11:36:43Z"
@@ -494,9 +295,6 @@
     "261114-bug-ws-dashboard-label-cross-writer-stale": {
       "registered_at": "2026-11-13T19:03:52Z"
     },
-    "261114-bug-ws-dashboard-oq-wrap-top-class-collision": {
-      "registered_at": "2026-11-13T16:00:22Z"
-    },
     "261114-bug-ws-dashboard-panel-frames-reload-on-topic-update": {
       "registered_at": "2026-11-13T16:07:55Z"
     },
@@ -506,14 +304,8 @@
     "261114-bug-ws-delegate-reviewer-render-lacks-trusted-provenance": {
       "registered_at": "2026-11-14T04:49:44Z"
     },
-    "261114-bug-ws-fork-parent-identity-loss": {
-      "registered_at": "2026-11-14T05:58:11Z"
-    },
     "261114-bug-ws-history-deep-link-capsule-offset-lag": {
       "registered_at": "2026-11-14T11:33:20Z"
-    },
-    "261114-bug-ws-hosted-close-copy-conflicts-with-reopen": {
-      "registered_at": "2026-11-14T13:13:06Z"
     },
     "261114-bug-ws-hosted-pi-default-resource-key-compat": {
       "registered_at": "2026-11-14T11:45:01Z"
@@ -530,22 +322,6 @@
           "branch": "impl/develop/chain-jelly-henna"
         }
       }
-    },
-    "261114-bug-ws-live-lead-state-prompt-compaction": {
-      "registered_at": "2026-11-14T05:58:02Z"
-    },
-    "261114-bug-ws-parallel-worktree-acquire-reuses-same-pool-entry": {
-      "registered_at": "2026-11-14T04:44:51Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:06:11Z"
-      }
-    },
-    "261114-bug-ws-pi-fork-acquired-worktree-key-authority": {
-      "registered_at": "2026-11-14T08:47:17Z"
     },
     "261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract": {
       "registered_at": "2026-11-14T14:28:20Z",
@@ -566,23 +342,8 @@
     "261114-bug-ws-proxy-predecessor-end-write-after-reconnect": {
       "registered_at": "2026-11-14T14:43:37Z"
     },
-    "261114-bug-ws-shared-actions-narrow-drag-baseline-failure": {
-      "registered_at": "2026-11-14T12:34:40Z"
-    },
-    "261114-bug-ws-shared-actions-terminal-fixture-reconciled-away": {
-      "registered_at": "2026-11-14T12:34:40Z"
-    },
-    "261114-bug-ws-shared-card-browser-verification-residuals": {
-      "registered_at": "2026-11-14T10:36:46Z"
-    },
     "261114-bug-ws-shared-daemon-restarts-without-a-swap": {
       "registered_at": "2026-11-13T15:28:36Z"
-    },
-    "261114-bug-ws-web-toolbar-popover-viewport-coordinates": {
-      "registered_at": "2026-11-14T11:25:46Z"
-    },
-    "261114-bug-ws-whiteboard-fold-reopens-on-panel-republish": {
-      "registered_at": "2026-11-14T13:05:54Z"
     },
     "261114-chore-ws-dashboard-index-removal-diagnostics": {
       "registered_at": "2026-11-14T12:12:39Z"
@@ -595,9 +356,6 @@
     },
     "261114-epic-ws-dashboard-file-explorer": {
       "registered_at": "2026-11-14T13:07:39Z"
-    },
-    "261114-feat-whiteboard-center-reference-navigation": {
-      "registered_at": "2026-11-14T02:14:24Z"
     },
     "261114-feat-ws-content-change-relative-hover": {
       "registered_at": "2026-11-14T11:47:01Z",
@@ -630,9 +388,6 @@
           "branch": "impl/docs/settled-common-contracts-660-665/flap-brink-slang"
         }
       }
-    },
-    "261114-feat-ws-hosted-antigravity-acp-adapter": {
-      "registered_at": "2026-11-14T08:45:52Z"
     },
     "261114-feat-ws-live-reasoning-summary": {
       "registered_at": "2026-11-14T11:47:01Z",
@@ -694,23 +449,8 @@
     "261114-refactor-ws-common-session-interface": {
       "registered_at": "2026-11-14T11:13:55Z"
     },
-    "261114-refactor-ws-dashboard-large-frontend-files": {
-      "registered_at": "2026-11-14T09:32:30Z"
-    },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
-    },
-    "261114-research-selection-cross-entry-capsule-count": {
-      "registered_at": "2026-11-14T11:45:08Z"
-    },
-    "261114-research-ws-dashboard-user-extensions": {
-      "registered_at": "2026-11-13T15:29:11Z"
-    },
-    "261114-research-ws-review-sweep-794-findings": {
-      "registered_at": "2026-11-14T14:51:03Z"
-    },
-    "261114-research-ws-session-hire-approval": {
-      "registered_at": "2026-11-14T13:20:16Z"
     },
     "261114-research-ws-sub-lead-session-role": {
       "registered_at": "2026-11-14T12:04:52Z"
@@ -733,30 +473,8 @@
     "261115-bug-native-windows-implementation-route-revision-path-length": {
       "registered_at": "2026-11-14T15:00:37Z"
     },
-    "261115-bug-pi-lead-local-devenv-swaps-shared-daemon": {
-      "registered_at": "2026-11-15T02:07:48Z"
-    },
     "261115-bug-pi-print-mode-empty-after-subagent-push": {
       "registered_at": "2026-11-14T23:55:38Z"
-    },
-    "261115-bug-pi-resumed-worker-worktree-authority-rebind": {
-      "registered_at": "2026-11-15T03:34:39Z"
-    },
-    "261115-bug-pi-reviewer-local-evidence-capability-gap": {
-      "registered_at": "2026-11-15T02:14:18Z"
-    },
-    "261115-bug-pi-reviewer-spawn-write-scope-contract": {
-      "registered_at": "2026-11-15T00:41:34Z"
-    },
-    "261115-bug-pi-reviewer-write-scope-discoverability": {
-      "registered_at": "2026-11-14T18:18:40Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:06:37Z"
-      }
     },
     "261115-bug-worktree-acquire-concurrent-pool-selection": {
       "registered_at": "2026-11-15T07:37:25Z"
@@ -770,41 +488,20 @@
     "261115-bug-ws-dashboard-pinned-deeplink-under-topic-header": {
       "registered_at": "2026-11-15T03:57:52Z"
     },
-    "261115-bug-ws-dashboard-remaining-browser-harness-gaps": {
-      "registered_at": "2026-11-15T04:51:43Z"
-    },
-    "261115-bug-ws-git-commit-conflicted-merge-completion-path": {
-      "registered_at": "2026-11-15T04:30:47Z"
-    },
     "261115-bug-ws-pi-bootstrap-elides-undelivered-manual": {
       "registered_at": "2026-11-14T15:17:10Z"
-    },
-    "261115-bug-ws-rail-draft-restore-undefined-mode": {
-      "registered_at": "2026-11-15T01:20:55Z"
     },
     "261115-bug-ws-selection-note-repeated-click-chip-count": {
       "registered_at": "2026-11-14T15:49:56Z"
     },
-    "261115-bug-ws-shared-card-browser-harness-bounded-readiness": {
-      "registered_at": "2026-11-14T17:50:49Z"
-    },
     "261115-bug-ws-ui-fast-worker-review-contract-conflict": {
       "registered_at": "2026-11-15T07:34:47Z"
-    },
-    "261115-bug-ws-whiteboard-viewed-first-update-longtask": {
-      "registered_at": "2026-11-15T05:02:08Z"
     },
     "261115-bug-ws-worktree-acquire-concurrent-pool-claim": {
       "registered_at": "2026-11-15T06:02:35Z"
     },
-    "261115-bug-ws-worktree-pool-protected-deliverable-reuse": {
-      "registered_at": "2026-11-14T23:49:42Z"
-    },
     "261115-chore-settings-hidden-theme-and-rail-swap-tests": {
       "registered_at": "2026-11-15T04:00:54Z"
-    },
-    "261115-feat-git-commit-owner-selected-footer-order": {
-      "registered_at": "2026-11-15T07:32:01Z"
     },
     "261115-feat-werkschaft-electron-shell": {
       "registered_at": "2026-11-15T01:09:25Z",
@@ -844,19 +541,6 @@
     },
     "261115-feat-ws-daemon-release-auto-update": {
       "registered_at": "2026-11-15T01:40:22Z"
-    },
-    "261115-feat-ws-dashboard-board-search-log-entries": {
-      "registered_at": "2026-11-15T01:54:37Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T07:43:08Z",
-        "impl": {
-          "branch": "impl/develop/expel-rural-nail"
-        }
-      }
     },
     "261115-feat-ws-dashboard-board-topic-transport": {
       "registered_at": "2026-11-15T07:28:41Z"
@@ -986,49 +670,8 @@
     "261115-research-git-commit-empty-ticket-updates": {
       "registered_at": "2026-11-15T04:35:04Z"
     },
-    "261115-research-git-merge-profile-refusal-on-bound-worktree": {
-      "registered_at": "2026-11-14T16:36:20Z"
-    },
     "261115-research-pi-reviewer-explore-capability-ceiling-rejection": {
       "registered_at": "2026-11-14T23:09:11Z"
-    },
-    "261115-research-workflow-artifact-path-reservation-contract": {
-      "registered_at": "2026-11-15T00:00:10Z"
-    },
-    "261115-research-ws-concurrent-pool-acquire-selection-race": {
-      "registered_at": "2026-11-14T22:49:06Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:05:47Z"
-      }
-    },
-    "261115-research-ws-effects-browser-unexpected-codex-child": {
-      "registered_at": "2026-11-14T23:07:59Z"
-    },
-    "261115-research-ws-mcp-baseline-full-suite-timeout": {
-      "registered_at": "2026-11-14T23:05:25Z"
-    },
-    "261115-research-ws-native-model-evidence-backfill": {
-      "registered_at": "2026-11-15T05:36:53Z"
-    },
-    "261115-research-ws-pi-explore-pinned-git-evidence-gap": {
-      "registered_at": "2026-11-14T18:03:05Z"
-    },
-    "261115-research-ws-pi-fork-acquired-worktree-key-authority-gap": {
-      "registered_at": "2026-11-14T22:45:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "docs/exec3-dedupe-1051",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:04:07Z"
-      }
-    },
-    "261115-research-ws-unified-agent-tool-surface": {
-      "registered_at": "2026-11-15T01:19:29Z"
     },
     "261115-ws-dashboard-fixture-real-home-plan-usage-probe": {
       "registered_at": "2026-11-15T02:27:24Z"
