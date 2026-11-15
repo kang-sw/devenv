@@ -121,19 +121,6 @@
     "261008-bug-servestdio-eof-exit-unbounded": {
       "registered_at": "2026-10-08T14:15:28Z"
     },
-    "261008-bug-ws-git-merge-switches-worker-occupied-root": {
-      "registered_at": "2026-10-08T04:40:47Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T09:03:17Z",
-        "impl": {
-          "branch": "impl/develop/apply-truth-dry"
-        }
-      }
-    },
     "261020-bug-worktree-profiles-review-followups": {
       "registered_at": "2026-10-20T13:35:50Z"
     },
@@ -343,19 +330,6 @@
     "261114-bug-ws-proxy-predecessor-end-write-after-reconnect": {
       "registered_at": "2026-11-14T14:43:37Z"
     },
-    "261114-bug-ws-shared-daemon-restarts-without-a-swap": {
-      "registered_at": "2026-11-13T15:28:36Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec5/daemon-fix",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:34:50Z",
-        "impl": {
-          "branch": "impl/exec5/daemon-fix/swell-couch-dizzy"
-        }
-      }
-    },
     "261114-chore-ws-dashboard-index-removal-diagnostics": {
       "registered_at": "2026-11-14T12:12:39Z"
     },
@@ -535,19 +509,6 @@
     "261115-bug-ws-ui-fast-worker-review-contract-conflict": {
       "registered_at": "2026-11-15T07:34:47Z"
     },
-    "261115-bug-ws-worktree-acquire-concurrent-pool-claim": {
-      "registered_at": "2026-11-15T06:02:35Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T09:03:21Z",
-        "impl": {
-          "branch": "impl/develop/herbs-scant-yarn"
-        }
-      }
-    },
     "261115-chore-settings-hidden-theme-and-rail-swap-tests": {
       "registered_at": "2026-11-15T04:00:54Z"
     },
@@ -724,19 +685,6 @@
     },
     "261115-feat-ws-worker-profile-session-spawn": {
       "registered_at": "2026-11-15T07:40:58Z"
-    },
-    "261115-refactor-ws-dashboard-wake-reads": {
-      "registered_at": "2026-11-15T08:30:56Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec5/wake-reads",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:45:28Z",
-        "impl": {
-          "branch": "impl/exec5/wake-reads/aging-that-rhyme"
-        }
-      }
     },
     "261115-research-git-commit-empty-ticket-updates": {
       "registered_at": "2026-11-15T04:35:04Z"
