@@ -665,7 +665,14 @@
       "registered_at": "2026-11-15T07:40:58Z"
     },
     "261115-refactor-ws-dashboard-stream-whiteboard-reread": {
-      "registered_at": "2026-11-15T07:12:07Z"
+      "registered_at": "2026-11-15T07:12:07Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec5/perf-meta-writes",
+        "phase": "closed",
+        "touched_at": "2026-11-15T08:20:58Z"
+      }
     },
     "261115-research-git-commit-empty-ticket-updates": {
       "registered_at": "2026-11-15T04:35:04Z"
