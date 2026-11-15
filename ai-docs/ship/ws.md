@@ -118,6 +118,11 @@ fetched state.
   `develop`'s tip at that decision. Proceed only when `git merge-base
   --is-ancestor <cut> main` fails; otherwise nothing is newly cleared and the
   ship stops.
+- Long tests **(lead)**: ask once, before handing off Pre-flight (and thus
+  before Publish's final gate), via a whiteboard ask: "long test 돌릴까요?"
+  Record the choice for this ship and pass it to the delegate. Default **no**
+  selects the regular group; explicit **yes** adds the long group locally and
+  in CI. This choice covers only the long group; all other gates still apply.
 - Release Branch: Cut **(lead)** at `<cut>` and hand the worktree to the
   delegate, which runs Merge release target when its guard fails and the
   steps below.
@@ -131,8 +136,10 @@ fetched state.
   bumped or reused version. A non-empty result means a concurrent release claimed the
   version; increment the patch again, commit the regenerated version edits,
   rename the branch, re-run tests, and restart the tag check.
-- `cd agents-plugin-tool && go test ./...` on the release branch head — all
-  packages green.
+- `cd agents-plugin-tool && bash scripts/ci-test-shard.sh all` on the release
+  branch head — the regular group must pass. When the owner chose **yes**,
+  also run `bash scripts/ci-test-shard.sh long` from `agents-plugin-tool` and
+  require it to pass. The script owns long-group membership; `all` excludes it.
 - Release contract on the release branch head: for
   `agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json`, assert
   `.release_tag == "v" + .plugin_version`.
@@ -163,8 +170,9 @@ approval).
 ## Publish
 
 Order is deliberate: publish the release branch first, let `ws-mcp CI`
-(`.github/workflows/ws-mcp-ci.yml`, ubuntu + sharded windows matrix) pass on
-`<release-head>`, and only then promote `main` and push the tag. Neither `main`
+(`.github/workflows/ws-mcp-ci.yml`, ubuntu + sharded windows matrix, plus the
+long legs when requested) pass on `<release-head>`, and only then promote
+`main` and push the tag. Neither `main`
 nor the tag is published before the release commit is green on Linux and
 Windows, which the local Pre-flight `go test` cannot vouch for. The final gate
 precedes every push — all pushes below are reversible-only-before-they-run.
@@ -185,11 +193,12 @@ precedes every push — all pushes below are reversible-only-before-they-run.
       ws-mcp-ci.yml --commit <release-head> --json
       databaseId,headSha,event,status,conclusion`, and take the newest entry
       whose `conclusion` is `success` and whose jobs (`gh run view <run-id>
-      --json jobs --jq '.jobs[] | [.name, .conclusion]'`) are not `skipped`.
-      Then continue with step 3 (`gh run watch` returns at once for a finished
-      run).
+      --json jobs --jq '.jobs[] | [.name, .conclusion]'`) meet step 3 for this
+      ship's long-test choice. Then continue with step 3 (`gh run watch`
+      returns at once for a finished run).
    2. No such run: dispatch one with
-      `gh workflow run ws-mcp-ci.yml --ref release/<version>`, then take the
+      `gh workflow run ws-mcp-ci.yml --ref release/<version>` (append
+      `-f long_tests=true` when the owner chose **yes**), then take the
       newest run from `gh run list --workflow ws-mcp-ci.yml --event
       workflow_dispatch --json databaseId,headSha,status,conclusion` and
       confirm its `headSha` equals `<release-head>`, the commit that gets
@@ -198,13 +207,17 @@ precedes every push — all pushes below are reversible-only-before-they-run.
       after the push: stop.
    3. `gh run watch <run-id> --exit-status` (the Windows shards run in
       parallel), then `gh run view <run-id> --json jobs --jq '.jobs[] |
-      [.name, .conclusion]'`: every `go test (<os>, <shard>)` job — the ubuntu
-      `all` leg and each Windows shard — must conclude `success`.
+      [.name, .conclusion]'`: the ubuntu `all` leg and every Windows shard
+      must conclude `success`. With **yes**, both `go test (ubuntu-latest,
+      long)` and `go test (windows-latest, long)` must also be present and
+      conclude `success`. With **no**, only those two named long legs may
+      conclude `skipped` (a successful long leg is also acceptable). Every
+      other job must conclude `success`.
 
-   **CI red, cancelled, or skipped** (any leg not `success`, including a
-   timeout): stop per Release Branch's Stops; `main` and the tag stay
-   unpushed.
-3. Once every job is green: Release Branch's Promote (`main` `--ff-only` to
+   **CI gate failure** (a failed, cancelled, timed-out, or otherwise
+   nonconforming job): stop per Release Branch's Stops; `main` and the tag
+   stay unpushed.
+3. Once the CI gate passes: Release Branch's Promote (`main` `--ff-only` to
    `<release-head>`), `git tag v<version> <release-head>`, then
    `git push origin main` and `git push origin v<version>` — the tag push
    triggers the GitHub release workflow.
