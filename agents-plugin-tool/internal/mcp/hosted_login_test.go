@@ -397,7 +397,10 @@ func TestAgentKeyStoreFindsTheLeadSessionBehindARow(t *testing.T) {
 
 	src := NewDashboardSessionSource()
 	for k, resumable := range map[string]bool{key: true, plain: false} {
-		data, ok := src.ReadSession(wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(k), Project: loginRoot})
+		data, ok, err := src.ReadSession(wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(k), Project: loginRoot})
+		if err != nil {
+			t.Fatalf("ReadSession(%s): %v", k, err)
+		}
 		if !ok || data.Resumable != resumable {
 			t.Fatalf("ReadSession(%s): resumable %v (found %v), want %v", k, data.Resumable, ok, resumable)
 		}

@@ -42,7 +42,12 @@ func TestDashboardSourceRescanBlocksNoKnownLookup(t *testing.T) {
 		misses.Add(1)
 		go func() {
 			defer misses.Done()
-			if keys := src.keysFor(d, "missingreply", false); len(keys) != 0 {
+			keys, err := src.keysFor(d, "missingreply", false)
+			if err != nil {
+				t.Errorf("missing reply-id lookup: %v", err)
+				return
+			}
+			if len(keys) != 0 {
 				t.Errorf("a missing reply-id found %v", keys)
 			}
 		}()
@@ -54,12 +59,22 @@ func TestDashboardSourceRescanBlocksNoKnownLookup(t *testing.T) {
 		t.Fatal("the miss did not rescan")
 	}
 	miss()
-	known := make(chan []string, 1)
-	go func() { known <- src.keysFor(d, "knownreply", false) }()
+	type keyResult struct {
+		keys []string
+		err  error
+	}
+	known := make(chan keyResult, 1)
+	go func() {
+		keys, err := src.keysFor(d, "knownreply", false)
+		known <- keyResult{keys: keys, err: err}
+	}()
 	select {
-	case keys := <-known:
-		if !reflect.DeepEqual(keys, []string{"known-key"}) {
-			t.Fatalf("known reply-id = %v", keys)
+	case result := <-known:
+		if result.err != nil {
+			t.Fatalf("known reply-id lookup: %v", result.err)
+		}
+		if !reflect.DeepEqual(result.keys, []string{"known-key"}) {
+			t.Fatalf("known reply-id = %v", result.keys)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a known reply-id's lookup waited on the rescan")
