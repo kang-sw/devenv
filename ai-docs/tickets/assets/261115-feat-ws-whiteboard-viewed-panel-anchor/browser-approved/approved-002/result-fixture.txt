@@ -1,3 +1,0 @@
-=== RUN   TestBoardViewedFixture
---- PASS: TestBoardViewedFixture (1.31s)
-PASS

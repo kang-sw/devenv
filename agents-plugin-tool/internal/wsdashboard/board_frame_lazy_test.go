@@ -295,7 +295,7 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 // topicResized) only when that height changes it. The cases execute under
 // node when it is installed.
 func TestBoardFrameHeightsBatch(t *testing.T) {
-	src := dashboardFuncs(t, "indexFrames", "docFrame", "queueFrameHeight", "applyFrameHeights", "boardKeep")
+	src := dashboardFuncs(t, "indexFrames", "docFrame", "queueFrameHeight", "applyFrameHeights")
 	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
@@ -308,11 +308,6 @@ func TestBoardFrameHeightsBatch(t *testing.T) {
 var bad = [];
 function check(what, ok) { if (!ok) bad.push(what); }
 var raf = [], queries = 0, themes = 0;
-var main = {wbScrollOwner:true}, pins = {wbScrollOwner:true};
-var boardHeightHeld = new Map(), boardHeightChanges = new Map();
-var exposed = false;
-function boardFrameExposed() { return exposed; }
-function boardPendingBadge() {}
 function requestAnimationFrame(fn) { raf.push(fn); return raf.length; }
 function num(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
 function str(v) { return typeof v === "string" ? v : ""; }
@@ -320,13 +315,11 @@ function postTheme() { themes++; }
 var frames = [];
 function Frame(key) {
   this.contentWindow = { id: key };
-  this.scroller = +key.slice(7) >= 10 ? pins : main;
   this.attrs = { "data-doc": key, "data-doc-key": key };
   this.style = { height: "" };
   this.anims = [];
 }
 Frame.prototype.getAttribute = function (k) { return this.attrs[k] || null; };
-Frame.prototype.closest = function () { return null; };
 Frame.prototype.getBoundingClientRect = function () { bad.push("a height message read layout"); return { height: 0 }; };
 Frame.prototype.animate = function (keys) { this.anims.push(keys.map(function (k) { return k.height; }).join(">")); };
 function boardQ(sel) { if (sel === "iframe.doc-frame") queries++; return frames.slice(); }
@@ -334,10 +327,9 @@ function inBoard(f) { return frames.indexOf(f) >= 0; }
 var frameWins = new Map(), frameSizes = new Map(), frameSizeFrame = 0, frameMessage;
 var board = { contains: function (f) { return frames.indexOf(f) >= 0; } }, keeps = [], applied = 0;
 function region(name) { return name === "board" ? board : null; }
-var window = { wbHistory: { keep: function (n, opt) {
-  if (!(opt && opt.capture === false)) keeps.push(frames.slice(7, 10).map(function (f) { return f.style.height; }).join());
-  return {scroller:n.scroller,apply:function(){applied++;}};
-} }, addEventListener: function (t, fn) { if (t === "message") frameMessage = fn; } };
+function boardKept() { return null; }
+function boardKeep(b) { keeps.push(frames.slice(7, 10).map(function (f) { return f.style.height; }).join()); return { h: { apply: function () { applied++; } } }; }
+var window = { addEventListener: function (t, fn) { if (t === "message") frameMessage = fn; } };
 `+src+listener+`
 for (var i = 0; i < 20; i++) frames.push(new Frame("entry:e" + i));
 frames[0].wbGrow = true;
@@ -350,9 +342,9 @@ check("21 messages schedule one frame callback, got " + raf.length, raf.length =
 check("no height lands before the frame callback", frames.every(function (f) { return f.style.height === "" || f === frames[1]; }));
 raf.shift()();
 check("every height lands in the one callback", frames.every(function (f, i) { return f.style.height === (i === 2 ? "300px" : Math.ceil(100 + i + 0.5) + "px"); }));
-check("a height batch captures both actual scrollers without wbKeep marks", keeps.length === 2 && applied === 2);
-check("owned height writes do not animate through frozen geometry", frames.every(function (f) { return !f.anims.length; }) && !frames[0].wbGrow);
-keeps = []; applied = 0;
+check("a frame with no set height eases from 0: " + frames[0].anims, frames[0].anims.join() === "0px>101px");
+check("a frame with a set height eases from it: " + frames[1].anims, frames[1].anims.join() === "40px>102px");
+check("only a moving swap's frames ease", frames.slice(2).every(function (f) { return !f.anims.length; }) && !frames[0].wbGrow);
 check("every frame takes the theme with its height", themes === 20);
 // A later message schedules a new callback.
 frameMessage({ source: frames[3].contentWindow, data: { wbDoc: "height", docKey: "entry:e3", height: 50 } });
@@ -370,9 +362,9 @@ check("a moved frame is indexed again on a miss", frames[5].style.height === "77
 // A window that is no board frame finds nothing.
 frameMessage({ source: { id: "stranger" }, data: { wbDoc: "height", docKey: "entry:e6", height: 1 } });
 check("a stranger's message changes nothing", raf.length === 0 && frames[6].style.height === "107px");
-// Every height batch captures before any write, once per actual scroller;
-// wbKeep is legacy metadata, not eligibility. An unchanged mark stays.
-keeps = []; applied = 0;
+// Frames a board swap brought (wbKeep) start one keep session for the
+// batch, before any height lands, applied once after; a wbKeep frame whose
+// height does not change keeps its mark for a later report.
 frames[7].wbKeep = frames[8].wbKeep = frames[9].wbKeep = true;
 [7, 8].forEach(function (i) { frameMessage({ source: frames[i].contentWindow, data: { wbDoc: "height", docKey: "entry:e" + i, height: 500 } }); });
 frameMessage({ source: frames[9].contentWindow, data: { wbDoc: "height", docKey: "entry:e9", height: 110 } });
@@ -386,16 +378,6 @@ frameMessage({ source: frames[11].contentWindow, data: { wbDoc: "height", docKey
 raf.shift()();
 check("a bands-mounted frame's first height that changes it lands once", frames[10].wbLanded === true && !frames[10].wbFirst);
 check("one landing at the height it stood at marks nothing", frames[11].style.height === "112px" && !frames[11].wbLanded && !frames[11].wbFirst);
-exposed = true;
-frames[12].closest = frames[13].closest = function () { return {}; };
-frames[12].style.height = frames[13].style.height = "";
-frames[12].wbFirst = frames[13].wbFirst = true;
-frames[13].wbKeep = true;
-frameMessage({ source: frames[12].contentWindow, data: { wbDoc: "height", docKey: "entry:e12", height: 320 } });
-frameMessage({ source: frames[13].contentWindow, data: { wbDoc: "height", docKey: "entry:e13", height: 420 } });
-raf.shift()();
-check("initial visible hydration is not a pending external update", frames[12].style.height === "320px" && !boardHeightHeld.has(frames[12]));
-check("a swapped visible frame still defers its first height", frames[13].style.height === "" && boardHeightHeld.get(frames[13]) === 420);
 if (bad.length) console.log(bad.join("\n"));
 `)
 }
