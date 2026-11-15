@@ -310,6 +310,7 @@
   "js.hd.term.attach.title": "abrir este terminal como cartão nesta página",
   "js.hd.term.stop.title": "encerrar este terminal e seu shell",
   "js.hd.term.title": "Terminais sem sessão",
+  "js.hd.term.anchor": "Terminais do host",
   "js.term.closefail": "Não fechado: {0}",
   "js.term.confirm": "Fechar este terminal? O shell, e tudo o que roda nele, será encerrado.",
   "js.term.err.failed": "O terminal não abriu: {0}",

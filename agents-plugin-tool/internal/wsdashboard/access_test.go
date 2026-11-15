@@ -104,6 +104,7 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// route refuses, so a passing request runs no host command. Its
 		// capability route is admitted by the capability, not the guard
 		// (TestFSCapabilityRoute).
+		{http.MethodGet, "/s/" + LocalBrowseAnchor + "/fs/roots", ""},
 		{http.MethodGet, "/s/livesession/fs/list", ""},
 		{http.MethodGet, "/s/livesession/fs/preview?path=shot.png", ""},
 		{http.MethodGet, "/s/livesession/fs/raw?path=shot.png", ""},

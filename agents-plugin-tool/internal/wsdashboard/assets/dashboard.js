@@ -4444,6 +4444,16 @@
       v.orphans.forEach(function (t) { box.appendChild(hdTermRow(t)); });
       hdlist.appendChild(box);
     });
+    fetch("/s/host0/terminals", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) return null;
+      return r.json();
+    }).then(function (v) {
+      if (seq !== hdSeq || !v || !v.anchor || !(v.terminals || []).length) return;
+      var box = mk("div", "hdterms");
+      box.appendChild(mk("div", "hdsub", wsT("js.hd.term.anchor")));
+      v.terminals.forEach(function (t) { box.appendChild(hdTermRow(t)); });
+      hdlist.appendChild(box);
+    }).catch(function () {});
   }
   function hdTermRow(t) {
     var row = mk("div", "wtrow hdrow hdterm"), meta = mk("span", "hdmeta"), acts = mk("span", "hdbtns");

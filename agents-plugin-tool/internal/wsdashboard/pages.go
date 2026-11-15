@@ -1110,6 +1110,13 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 // routes, and the shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
+	// The host anchor is not a session, including at the page's redirect
+	// path. Refuse before any session handler or method-specific response.
+	if replyID, sub, _ := strings.Cut(rest, "/"); replyID == LocalBrowseAnchor &&
+		!strings.HasPrefix(sub, "fs/") && sub != "terminals" && !strings.HasPrefix(sub, "terminals/") {
+		http.NotFound(w, r)
+		return
+	}
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
 		d.handleInboxWrite(w, r, replyID, sub)
 		return
