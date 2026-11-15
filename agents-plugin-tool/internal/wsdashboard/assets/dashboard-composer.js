@@ -99,14 +99,23 @@
     });
     // A board mention: "[topic] (id)" and the selected text, clipped.
     bmentions.forEach(function (m, i) {
-      var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
+      var el = doc.createElement("span"), open = doc.createElement("button"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
       el.className = "achip mchip";
       el.title = m.text;
+      open.type = "button";
+      open.className = "mchip-open";
+      open.addEventListener("click", function () {
+        // Use the same session-local navigation as the history's ID chips.
+        var topicID = "topic-" + Array.prototype.map.call(new TextEncoder().encode(m.topic), function (n) { return ("0" + n.toString(16)).slice(-2); }).join("");
+        effectJump(topicID, m.entry || (m.id ? "item-" + Number(m.id) : topicID));
+      });
       b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "");
-      el.appendChild(b);
+      open.appendChild(b);
       t.className = "anote";
       t.textContent = m.text.replace(/\s+/g, " ");
-      el.appendChild(t);
+      open.appendChild(t);
+      el.appendChild(open);
+      x.type = "button";
       x.className = "unchip";
       x.setAttribute("data-unmchip", String(i));
       x.title = wsT("js.wbmention.remove");

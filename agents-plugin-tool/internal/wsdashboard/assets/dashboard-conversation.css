@@ -252,6 +252,8 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .achip.mchip { background: var(--wb-muted); box-shadow: inset 3px 0 0 var(--wb-primary), inset 0 0 0 1px var(--wb-line); }
 .achip.mchip .anote { font-style: italic; }
 .achip.mchip .anote::before { content: none; }
+.mchip-open { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.mchip-open:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; border-radius: 999px; }
 /* a picked page element and a console block: mention capsules whose bold
    part is a selector (clipped, monospace) or the error count */
 .achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

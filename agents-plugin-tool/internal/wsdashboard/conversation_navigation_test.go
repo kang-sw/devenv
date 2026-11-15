@@ -5,13 +5,15 @@ import "testing"
 func TestConversationPresentationValidatedBoardNavigation(t *testing.T) {
 	src := whiteboardBridgeFunctions(t, string(mustAsset(t, "dashboard.js")), "effectTopic", "effectJump", "effectJumpClick")
 	runNode(t, "conversation effect navigation", `
-var bad=[],effectJumpEpoch=0,topics=[],more=null,loads=[],scrolls=[],focused=[],reveals=[],results=[],tabs=[],pendingReveal=null,closedLoads=0;
+var bad=[],effectJumpEpoch=0,topics=[],more=null,loads=[],scrolls=[],focused=[],reveals=[],results=[],tabs=[],pendingReveal=null,closedLoads=0,flashes=[],timers=[];
+function setTimeout(fn){timers.push(fn);}
 function check(label,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(label+': '+JSON.stringify(got)+' != '+JSON.stringify(want));}
 var doc={body:{classList:{contains:function(){return false;}}}},tkApi=null,grid={},root={getAttribute:function(){return '0';}};
 function tabShown(){return false;}function setTab(t){tabs.push(t);}function wsT(k){return k;}
 function inBoard(n){return !!n&&n.owned;}
 function boardQ(s){return s.indexOf('button.')===0?(more?[more]:[]):topics;}
 function node(id,topic,history){return {id:id,owned:true,tagName:'DIV',parentNode:topic||null,topic:topic,history:!!history,
+ classList:{remove:function(c){flashes.push(['remove',id,c]);},add:function(c){flashes.push(['add',id,c]);}},
  closest:function(s){return s==='.wb-history'?(this.history?{}:null):s==='section.topic[data-topic]'?(this.topic||this):null;},
  matches:function(s){return s.indexOf('.card.policy')>=0?this.id.indexOf('item-')===0:false;},
  querySelector:function(s){var m=/\[id="([^"]+)"\]/.exec(s);return m&&this.targets?this.targets[m[1]]||null:null;},
@@ -32,7 +34,9 @@ function click(){var event={target:target(),button:0,preventDefault:function(){t
  effectJump(a.id,a.id,done);
  check('topic opens board and reaches topic',[tabs,scrolls,results],[['board'],[a.id],[[true,true]]]);
  effectJump(a.id,'e7',done);effectJump(a.id,'p4',done);effectJump(a.id,'item-42',done);
- check('exact retained log/panel use topic-scoped lazy loader',loads,[[a.id,'e7'],[a.id,'p4']]);
+ check('item and retained log/panel share topic-scoped ID-chip loader',loads,[[a.id,'e7'],[a.id,'p4'],[a.id,'item-42']]);
+ check('topic-only navigation restarts the existing brief pulse',flashes.slice(0,2),[['remove',a.id,'palette-flash'],['add',a.id,'palette-flash']]);
+ timers.shift()();check('topic pulse is removed after timeout',flashes[flashes.length-1],['remove',a.id,'palette-flash']);
  check('history geometry stays owned by loader',scrolls,[a.id,'item-42']);
  check('keyboard focus does not create another scroll',focused,[[a.id,true],['e7',true],['p4',true],['item-42',true]]);
  check('exact successes',results,[[true,true],[true,true],[true,true],[true,true]]);
