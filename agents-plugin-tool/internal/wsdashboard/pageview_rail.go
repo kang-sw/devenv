@@ -25,8 +25,10 @@ import (
 // A workspace is a repository (its root worktree) or a plain non-git
 // folder. Under a repository every worktree git lists is a row, a worktree
 // with no session dimmed, except the ws pooled worktrees (under the
-// repository's worktree_pool roots), which show only while they hold a
-// listed session. A workspace the user stored (workspaces.go) shows whether
+// repository's worktree pool roots, railPooled), which never show: their
+// sessions, live or ended, are left out of the rail and its counts. Hiding
+// is presentation only; such a session's own page still serves. A
+// workspace the user stored (workspaces.go) shows whether
 // or not it holds a session, and a stored repository lists its worktrees
 // and their branches without one: any viewer who can add a workspace can
 // list its worktrees anyway. Beyond the stored workspaces the rail shows
@@ -338,6 +340,14 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 		if in.Repo != "" {
 			key = filepath.Clean(in.Repo)
 			repoOf[key] = true
+			if _, ok := byWS[key]; !ok {
+				byWS[key] = nil
+			}
+			if railPooled(repos[key], key, in.Session.Project) {
+				// Hidden, live or ended, and left out of every count; its
+				// repository still shows as it would without it.
+				continue
+			}
 		} else {
 			best := ""
 			for _, f := range folders {
@@ -459,14 +469,14 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			}
 		}
 		// Every other listed worktree shows too, dimmed, except a pooled
-		// one (it shows only while it holds a session, above) and one git
-		// marks prunable (its folder is gone).
+		// one (its sessions are hidden, above) and one git marks prunable
+		// (its folder is gone).
 		for i, e := range entries {
 			p := filepath.Clean(e.Path)
 			if _, ok := accs[p]; ok || e.Prunable {
 				continue
 			}
-			if i > 0 && p != key && railUnderAny(repo.Pools, p) {
+			if i > 0 && railPooled(repo, key, p) {
 				continue
 			}
 			addWT(e)
@@ -661,14 +671,13 @@ func railPathUnder(parent, child string) bool {
 	return strings.HasPrefix(child, strings.TrimSuffix(parent, sep)+sep)
 }
 
-// railUnderAny reports whether path is at or below one of roots.
-func railUnderAny(roots []string, path string) bool {
-	for _, r := range roots {
-		if r != "" && railPathUnder(filepath.Clean(r), path) {
-			return true
-		}
-	}
-	return false
+// railPooled reports a folder the rail hides: one at or below a ws
+// worktree pool root of the repository at root (its configured pools and
+// the default and legacy ones, worktreePoolRoots, so a session shows no
+// pooled row before the list is read either), never root itself.
+func railPooled(repo railRepo, root, path string) bool {
+	path = filepath.Clean(path)
+	return path != root && worktreePooled(worktreePoolRoots(repo.Pools, root), path)
 }
 
 // railRepoRoot is the repository root of a session: from its registered git
