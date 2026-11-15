@@ -131,6 +131,33 @@ Announced defaults relayed by MAIN (no owner objection):
 - The answer streams into the drawer through the existing SSE/WS region
   stream, with citation links to board items and file lines.
 
+Owner answers to the queue (relayed by MAIN, 2026-11-15 at 01:41Z):
+
+- **(864)=a: overrides are capped at the read-only ceiling.** An
+  `agent.profile.search-answer-*` override may change `backend`, `model`,
+  `effort` and `instructions`, and may narrow `tools`. Any tool outside the
+  read set, any `ws_tools`, `mcp_servers`, `plugins` or `skills`, `lead`, or
+  a non-default `permission_mode` makes the answer request fail with an
+  error naming the override. Rejected: trusting overrides as written, which
+  would let one silently void (849).
+- **(865)=a: the project-root boundary is best effort, applied only where
+  the harness supports it.** Owner memo: "네 best effort로 되는 도구만
+  적용으로 한정하죠." Claude answers get path-scoped read rules for the
+  project root and the per-question snapshot directory (for example
+  `Read(//<root>/**)` under `dontAsk`); the worker verifies whether those
+  rules also govern `Grep`/`Glob` and records the result. Pi answers run with
+  `cwd` at the project root and read-only tools only, because Pi rejects
+  permission-rule entries (`wsagent/pi.go:381-390`). The ticket, the code
+  comment at the launch site and the profile description state that the root
+  boundary is best effort, not a sandbox; the no-shell, no-write and
+  no-network-tool allowlist stays hard on both backends. Rejected: refusing
+  Pi-backed answers (Pi-only projects would lose the feature); a soft
+  boundary on Claude too.
+- **(866)=a: plain Enter does nothing where agent mode is absent**
+  (non-session pages, remote/LAN views); a hint points to the arrow keys, so
+  the keyboard contract is the same on every page. Rejected: Enter opens the
+  first result there.
+
 Defaults and technical calls (posted by MAIN on the owner board as
 no-answer-needed, 2026-11-15; settled):
 
@@ -228,29 +255,6 @@ no-answer-needed, 2026-11-15; settled):
   authorization; a Codex backend; the "ws-mcp provides the whole agent
   toolset" direction.
 
-## Open Decision Queue
-
-Last ID used: (866) (MAIN board IDs)
-
-(864) [open] [policy] What an override of the answer profile may change.
-- Context: an `agent.profile.search-answer-*` override replaces the whole builtin value (`structured.go:22-58`), so as written it could add `Bash`, `Edit`, MCP servers, plugins or lead mode and silently break (849)'s "no shell, no network, no writes".
-- Alternative a: the answer service enforces a ceiling: an override may change `backend`, `model`, `effort`, `instructions` and may narrow `tools`; any tool outside the read set, any `ws_tools`, `mcp_servers`, `plugins`, `skills`, `lead` or a non-default `permission_mode` makes the request fail with a clear error naming the override.
-- Alternative b: overrides are trusted as written (the user configured them); document that broadening breaks the read-only guarantee.
-> Recommend a: (849) says the read-only scope is enforced by the allowlist, which only holds if an override cannot widen it.
-
-(865) [open] [policy] How strictly "files under the project root" is enforced per backend.
-- Context: the tool allowlist removes shell, write and network tools, but neither backend confines native read tools to a directory; `cwd` alone does not stop an absolute path (`claude.go:339-343`, `pi.go:427-429`). Claude permission rules can scope reads by path (for example `Read(//<root>/**)` under `dontAsk`, which also governs Grep/Glob - INFERRED, to be verified by the worker); Pi rejects permission-rule entries (`pi.go:381-390`).
-- Alternative a: Claude answers get path-scoped read rules for the project root and the snapshot directory (hard boundary); Pi answers run with `cwd` at the root and read-only tools, with the root documented as a soft boundary.
-- Alternative b: hard boundary or nothing: refuse Pi-backed answer profiles; only Claude answers.
-- Alternative c: soft boundary for both (tools only, `cwd` at root).
-> Recommend a: hard where the backend can enforce it, and Pi-only projects still work; the agent is local-only and read-only either way.
-
-(866) [open] [policy] What plain Enter does where agent mode is absent (non-session pages, remote/LAN views).
-- Context: (851) makes plain Enter ask the agent; agent mode exists only on local session pages.
-- Alternative a: plain Enter with no arrow selection does nothing there (a hint says to use the arrows); the keyboard contract stays the same everywhere.
-- Alternative b: plain Enter opens the first result there (the old behavior).
-> Recommend a: one contract on every page; arrows plus Enter still open results.
-
 ## Phases
 
 ### Phase 1: Read-only answer service
@@ -263,8 +267,14 @@ itself unavailable (503) when no harness exists.
 
 Verification: Go tests with fake backends (`-run` only) for harness
 selection and the missing-harness 503; the exact Claude and Pi launch flags
-of the answer profiles (no shell/write/network tools; path rules where
-settled); override ceiling acceptance and refusal; snapshot content
+of the answer profiles (no shell/write/network tools on either backend;
+Claude path-scoped read rules for the project root and the snapshot
+directory; Pi `cwd` at the project root), with the observed result of
+whether the Claude rules govern `Grep`/`Glob` recorded in the phase's
+`### Result` and the best-effort boundary stated at the launch site and in
+the profile descriptions; override ceiling acceptance of backend, model,
+effort, instructions and narrowed tools, and refusal of every wider field
+with an error naming the override; snapshot content
 covering open, closed and log/panel history; close on success, failure,
 timeout and cancel with no surviving process; per-session supersede and the
 daemon-wide cap; remote viewer 404 and bad Origin 403 on creation and on the
@@ -287,7 +297,8 @@ narrow and wide widths with the git and tracker handles present; no initial
 highlight; plain Enter asks, arrow+Enter opens, Cmd/Ctrl+Enter keeps open,
 hover does not arm; reload restores open state, height, query and slot;
 answer streaming, citation link dispatch and invalid-citation fallback;
-agent mode absent on a remote view and on non-session pages; light and dark
+agent mode absent on a remote view and on non-session pages, where plain
+Enter does nothing and the arrow-key hint shows; light and dark
 screenshots at 1280 and ≤640 px. Recheck the two stacking minors of
 `261114-bug-ws-dashboard-search-palette-minors` (toast behind the modal,
 shell search-button overlap) and record whether the drawer changed them.
