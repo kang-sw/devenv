@@ -76,16 +76,7 @@ async function leftColumn(frame) {
       const card = wt.locator('.bcard[data-kind="explorer"] .fcard');
       await card.locator('.fentry[data-entry="worktree.txt"]').waitFor();
       const framed = await coreMetrics(card);
-      assert.deepEqual({ ...framed, borderColor: '' }, {
-        barPadding: '0px 12px', searchPadding: '3px 12px', footerPadding: '0px 12px 0px 16px',
-        workspaceMargin: '0px 12px 8px', borderWidth: '1px', borderStyle: 'solid', borderColor: '', radius: '8px'
-      });
-      assert.equal(await card.locator('.fworkspace').evaluate(el => {
-        const probe = document.createElement('div');
-        probe.style.border = '1px solid var(--wb-line)'; el.appendChild(probe);
-        const matches = getComputedStyle(probe).borderTopColor === getComputedStyle(el).borderTopColor;
-        probe.remove(); return matches;
-      }), true, 'frame uses the shared low-contrast line token');
+      assert.deepEqual(framed, owned, 'explorer cards are frameless and edge to edge like page-owned browsers');
       if (evidence) await card.screenshot({ path: path.join(evidence, `filecard-${theme}.png`) });
       const sticky = await card.evaluate(async el => {
         const workspace = el.querySelector('.fworkspace').getBoundingClientRect(), result = {};
@@ -95,7 +86,7 @@ async function leftColumn(frame) {
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           const r = head.getBoundingClientRect(), s = scroller.getBoundingClientRect();
           result[selector] = { scrollTop: scroller.scrollTop, height: r.height, offset: r.top - s.top,
-            withinFrame: r.left >= workspace.left + 1 && r.right <= workspace.right - 1 && r.bottom < workspace.bottom,
+            withinFrame: r.left >= workspace.left - 0.5 && r.right <= workspace.right + 0.5 && r.bottom < workspace.bottom,
             hit: head.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) };
         }
         return result;
@@ -104,14 +95,14 @@ async function leftColumn(frame) {
         assert(value.scrollTop > 0, 'fixture really scrolls');
         assert.equal(value.height, 28);
         assert.equal(value.offset, 0, 'sticky header stays at the scroller top');
-        assert.equal(value.withinFrame, true, 'header is inside the new frame');
+        assert.equal(value.withinFrame, true, 'header is inside the workspace');
         assert.equal(value.hit, true, 'header is painted and reachable, not clipped');
       }
       if (evidence) await card.screenshot({ path: path.join(evidence, `filecard-sticky-${theme}.png`) });
       await tab.setViewportSize({ width: 446, height: 1000 });
       await card.locator('.fworkspace').waitFor();
       assert((await card.boundingBox()).width <= 480, 'exercise the narrow container breakpoint');
-      assert.equal(await card.locator('.fworkspace').evaluate(el => getComputedStyle(el).margin), '0px 12px 8px');
+      assert.equal(await card.locator('.fworkspace').evaluate(el => getComputedStyle(el).margin), '0px');
       await card.evaluate(el => { el.querySelector('.ftree').scrollTop = 0; el.querySelector('.fdirectory').scrollTop = 0; });
       if (evidence) await card.screenshot({ path: path.join(evidence, `filecard-narrow-${theme}.png`) });
       assert.deepEqual(errors, []);
@@ -121,6 +112,6 @@ async function leftColumn(frame) {
     const json = JSON.stringify(results, null, 2);
     if (evidence) fs.writeFileSync(path.join(evidence, 'metrics.json'), json + '\n');
     console.log(json);
-    console.log('PASS: shared headers, card-only frame, both page-owned cores, sticky heads, dark/light and narrow.');
+    console.log('PASS: shared headers, frameless cards, both page-owned cores, sticky heads, dark/light and narrow.');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

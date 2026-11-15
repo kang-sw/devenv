@@ -173,7 +173,7 @@ async function pathBarChecks() {
   function enter(path) { p.at('.fcrumb-trail').click(); p.at('.fpath').value = path; key(p.at('.fpath'), 'Enter'); return take('paths', 'list', path); }
   async function atPath(request, dir) { await answer(request, Object.assign(listing('/paths/' + dir, [{ name: 'kept.go' }], true), { dir })); }
   check('path controls start with no history and up disabled at root', [p.at('.fback').disabled, p.at('.fforward').disabled, p.at('.fback').nextSibling === p.at('.fforward')], [true, true, true]);
-  var barButtons = p.at('.fbar').children.filter(n => n.tagName === 'BUTTON');
+  var barButtons = p.at('.fbar-ctl').children.filter(n => n.tagName === 'BUTTON');
   check('back and forward precede existing up', barButtons.map(n => n.title), ['js.files.back', 'js.files.forward', 'js.files.up']);
   check('up disabled at root', barButtons[2].disabled, true);
   p.at('.fcrumb-trail').click();
