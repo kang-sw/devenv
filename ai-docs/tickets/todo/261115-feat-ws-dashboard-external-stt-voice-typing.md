@@ -25,21 +25,30 @@ This is accepted backlog capture, not provider validation or implementation.
   Audio travels renderer -> local daemon -> provider. Browser-direct calls
   and a CORS workaround are rejected.
 - Push-to-talk records with `MediaRecorder` as webm/opus. Stopping recording
-  uploads the audio, then inserts the final transcription at the composer
-  caret. Streamed previews follow the separate owner (877) decision below.
+  uploads the audio, then inserts the completed transcription at the composer
+  caret. The caret-anchored capsule and input lock follow owner (885) below.
 - The owner's addition, verbatim: "중간중간에 만들어지는 텍스트를 스트리밍으로 돌려주는 식이면 그것도 표기".
   English translation: if intermediate text is returned as a stream, display
   it too. MAIN's official-doc research now supports OpenAI `gpt-transcribe`
   with `stream=true` [O1][O2]. Realtime WebSocket transcription remains outside
   this contract.
 - **VERIFIED:** MAIN's 2026-11-15 02:15:58 relay confirms owner (877)=a.
-  For OpenAI streaming models only, show streamed partial text in the input
-  as a dimmed preview. Replace that preview wholesale with the final transcript
-  on done; no partial text is committed. Preserve the original final insertion
-  at the composer caret. OpenRouter and Groq remain final-only; OpenAI support
-  is model-specific as documented below. Concurrent caret/selection mutation
-  behavior is not selected by this decision.
-- **VERIFIED:** The same MAIN relay confirms owner (878)=b. Keep only the
+  For supported OpenAI streaming models, show partial text as a dimmed
+  preview and commit only the completed transcript, never partial text.
+  Owner (885)=c refines this presentation and interaction contract below.
+  OpenRouter and Groq remain final-only; OpenAI support is model-specific.
+- MAIN's 2026-11-15 02:36:48 relay confirms owner (885)=c, translated verbatim:
+  "At the keyboard caret position, a dim capsule-shaped text-input preview
+  wobbles/pulses; user interaction is blocked meanwhile; when input finishes,
+  the completed text is inserted at the caret."
+  MAIN's announced reading: anchor the dim capsule at the composer caret and
+  lock the composer while it is shown. Supporting OpenAI models show their
+  streamed text inside that preview; non-streaming providers, including the
+  OpenRouter default and Groq, show a pulsing capsule without partial text,
+  then insert the final transcript. This refines (877), not an additional
+  commitment of partial text. Rejected: preserving concurrent composer edits
+  around an unlocked preview or clearing it on edit and inserting elsewhere.
+- **VERIFIED:** MAIN's 02:15:58 relay confirms owner (878)=b. Keep only the
   last recording in memory for a resend button after failure. Never write it
   to disk; drop it on a new recording or window close.
 - Browser microphone acceptance includes secure loopback
@@ -116,7 +125,7 @@ so its OpenAI evidence came from `developers.openai.com`.
 [R1]: https://openrouter.ai/docs/api/api-reference/stt/create-transcription.md
 [R2]: https://openrouter.ai/docs/guides/overview/multimodal/stt.md
 
-### Remaining readiness gaps
+### Implementation-time technical verification
 
 - **UNCONFIRMED:** Opus codec acceptance and the exact recorder MIME/content
   type need evidence for the selected provider/model pairs. Webm container
@@ -130,12 +139,13 @@ so its OpenAI evidence came from `developers.openai.com`.
 - **UNCONFIRMED:** The original OpenRouter mini-model example and any custom
   endpoint's model/field/format/streaming contract need exact official evidence.
   No replacement model or preset default is selected here.
-- **INFERRED:** Owner (877)'s preview replacement and the original caret
-  insertion contract leave concurrent editing and selection changes
-  unspecified. Their interaction needs disposition before implementation;
-  this ticket supplies no mutation policy.
 
-Return missing or contradictory evidence to the lead before ready promotion.
+MAIN's 2026-11-15 02:30:35 disposition classifies these as technical work:
+settle them at implementation time with an isolated probe or a documented
+fallback. They are not owner policy questions or a requirement for another
+owner approval round. Do not silently assert unsupported provider behavior;
+report any fallback that would change the approved product contract to the
+lead. Owner (885) settles composer interaction through the input lock above.
 
 ## Constraints
 
@@ -185,12 +195,15 @@ shell work; this capture does not edit it or claim microphone support exists.
 ### Phase 1: Daemon-mediated composer voice typing with supported partial text
 
 Implement the approved push-to-talk, provider settings, masked-key handling,
-local-daemon upload and caret insertion contract after the remaining readiness
-gaps receive evidence or lead disposition. Apply the documented endpoint,
-model and language-field differences. For documented supporting OpenAI models only,
-show dimmed partial previews and replace them wholesale with the final
-transcript on done without committing partial text. Retain final-only behavior
-otherwise. Implement the last-recording, memory-only resend button after
+local-daemon upload and caret insertion contract. Resolve the listed technical
+verification items during implementation through a probe or fallback, rather
+than returning them as owner policy questions. Apply the documented endpoint,
+model and language-field differences. Show a dim, pulsing capsule anchored at
+the composer caret and lock composer interaction while it is present. For
+supporting OpenAI streaming models, show partial text inside the capsule;
+OpenRouter/Groq show the capsule without partial text. Insert the completed
+transcript at the caret when done, without committing partial text. Implement
+the last-recording, memory-only resend button after
 failure, with discard on a new recording or window close. Coordinate scoped
 Electron permissions with EXEC4 without implementing a second frontend or
 loosening origin isolation.
@@ -200,11 +213,15 @@ including `languages` versus `language`, and actual streaming capability for
 selected OpenAI pairs versus final-only OpenRouter/Groq; renderer -> daemon ->
 provider mediation; masked settings and no key leakage to LAN viewers;
 secure-context controls; final insertion at the composer caret;
-final-only fallback; dimmed partial previews only for supported OpenAI models,
-wholesale final replacement on done and no committed partial text; last-recording
+final-only fallback; caret-anchored dim/pulsing capsule, blocked composer
+interaction while shown, partial preview only for supported OpenAI models,
+non-streaming capsule without partial text, final insertion and no committed
+partial text; last-recording
 resend after failure, no disk writes and discard on a new recording or window
 close; and packaged Electron microphone purpose text, OS permission handling
 and denial for non-daemon origins. Verify recorder format acceptance against
-the remaining codec/MIME gaps without assuming it from webm listings. Use
+the codec/MIME technical items without assuming it from webm listings. Cover
+success and failure so composer locking and capsule cleanup do not leave the
+input unusable; do not invent a broader locking scope. Use
 isolated fixtures, never the shared daemon or port 29417. This capture asserts
 no provider integration or executable acceptance.
