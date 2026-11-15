@@ -1,6 +1,8 @@
 package wsdashboard
 
 import (
+	"encoding/json"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -48,11 +50,27 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 		`.dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .fpane { display: flex; }`,
 		// the header shows the conversation's counts or the Files pane's root
 		`.dgrid[data-ctab="files"] > .chead .csum, .dgrid:not([data-ctab="files"]) > .chead .fsum { display: none; }`,
+		// The independent tab stays mounted but must not paint a second
+		// shadow or root label behind the toolbar sheet.
+		`body:has(.fpane[data-max]) .dgrid.live > .fpane,`,
+		`body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("the stylesheet lacks %q", want)
 		}
 	}
+}
+
+// TestFilesExplorerInstances executes the complete production explorer with
+// controlled promises; unlike helper extraction this covers closure ownership.
+func TestFilesExplorerInstances(t *testing.T) {
+	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
+	files, _ := json.Marshal(mustAsset(t, "files.js"))
+	fixture, err := os.ReadFile("testdata/files-explorer.test.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+";\n"+cardsDOM+string(fixture))
 }
 
 // TestFilesExplorerRows runs the explorer's pure parts (files.js) under

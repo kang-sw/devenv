@@ -82,19 +82,6 @@ func TestNormalizeMentions(t *testing.T) {
 	}
 }
 
-func TestMergeAppendsMentions(t *testing.T) {
-	base := Entry{Mentions: []Mention{{Topic: "a", Text: "1"}}}
-	add := Entry{Mentions: []Mention{{Topic: "a", Text: "1"}, {Topic: "b", Text: "2"}}}
-	got := Merge(base, add).Mentions
-	want := []Mention{{Topic: "a", Text: "1"}, {Topic: "a", Text: "1"}, {Topic: "b", Text: "2"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("merged mentions = %+v, want %+v", got, want)
-	}
-	if got := Merge(Entry{Parts: []string{"x"}}, Entry{Parts: []string{"y"}}).Mentions; got != nil {
-		t.Fatalf("no mentions merged to %+v", got)
-	}
-}
-
 // TestParseMentionsRoundTrips: a delivered message's mentions come back,
 // unescaped, after its answer block is taken out, and the typed text stays.
 func TestParseMentionsRoundTrips(t *testing.T) {
@@ -154,12 +141,9 @@ func TestEntryMentionsSurviveInboxLifecycle(t *testing.T) {
 	first := Mention{Topic: "t", Entry: "e7", Text: "same selected text"}
 	second := Mention{Topic: "t", ID: "3", Entry: "e8", Text: "same selected text"}
 	now := time.Now()
-	if _, _, err := Send(dir, Entry{Mentions: []Mention{first}}, now); err != nil {
+	name, _, err := Send(dir, Entry{Mentions: []Mention{first, second}}, now)
+	if err != nil {
 		t.Fatal(err)
-	}
-	name, merged, err := Send(dir, Entry{Mentions: []Mention{second}}, now.Add(time.Millisecond))
-	if err != nil || !merged {
-		t.Fatalf("merge = %v, %v", merged, err)
 	}
 	want := []Mention{first, second}
 	held, err := Held(dir)

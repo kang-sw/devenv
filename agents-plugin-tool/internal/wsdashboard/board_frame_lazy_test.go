@@ -164,7 +164,7 @@ var A = frame("topic:x"), B = frame("entry:e1"), C = frame("entry:e2"), D = fram
 B.setAttribute("data-entry", "e1"); B.setAttribute("data-relay", "/s/r/out?p=a"); B.setAttribute("style", "height: 40px");
 var tdoc = new El("details", { "class": "tdoc", "data-key": "doc:x" }, [new El("div", {}, [A])]);
 var versions = new El("details", { "class": "panel-versions", "data-key": "versions:e1" }, [new El("article", { id: "e2" }, [new El("details", { open: "" }, [C])])]);
-var stream = new El("details", { "class": "topic-stream", open: "" }, [new El("article", {}, [new El("details", { "class": "entry-panel", open: "" }, [B, versions])])]);
+var stream = new El("div", { "class": "topic-stream" }, [new El("article", {}, [new El("details", { "class": "entry-panel", open: "" }, [B, versions])])]);
 var board = new El("div", { id: "r-board" }, [new El("section", { "class": "topic", "data-topic": "x" }, [tdoc, stream])]);
 var pins = new El("div", { "class": "pins" }, [new El("section", { "class": "topic", "data-topic": "pinned" }, [P])]);
 var inert = new El("template", {}, [D]);

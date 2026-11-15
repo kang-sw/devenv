@@ -71,7 +71,11 @@ func (f *pageFixture) held(t *testing.T) []wsinbox.Record {
 	return held
 }
 
-func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
+// TestMessageRouteHoldsEachSendAsItsOwnEntry: every send while a message
+// is held is a new held entry, never merged (the answer's merged is false),
+// and the page shows one bubble per send, in send order, each with its own
+// cancel control; the sent data marks the newest answer.
+func TestMessageRouteHoldsEachSendAsItsOwnEntry(t *testing.T) {
 	f := startPageFixture(t)
 	first, merged := f.send(t, `{"text":"first send","chips":[{"id":"03","answer":"a"},{"id":"04","answer":"ok"}]}`)
 	if merged {
@@ -81,23 +85,24 @@ func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
 		t.Fatalf("held after one send = %+v", held)
 	}
 	second, merged := f.send(t, `{"text":"second send","chips":[{"id":"03","answer":"b","note":"changed my mind"}]}`)
-	if !merged {
-		t.Fatal("second send did not merge into the held message")
+	if merged || second == first {
+		t.Fatalf("second send merged=%v id=%s (first %s)", merged, second, first)
 	}
 	held := f.held(t)
-	if len(held) != 1 || held[0].ID() != second {
+	if len(held) != 2 || held[0].ID() != first || held[1].ID() != second {
 		t.Fatalf("held after two sends = %+v", held)
 	}
-	if got, want := held[0].Entry.Text(), "<wb:answers>\n03=b^changed my mind\n04=ok\n</wb:answers>\n\nfirst send\n\nsecond send"; got != want {
-		t.Fatalf("merged message = %q, want %q", got, want)
+	if got, want := held[1].Entry.Text(), "<wb:answers>\n03=b^changed my mind\n</wb:answers>\n\nsecond send"; got != want {
+		t.Fatalf("second message = %q, want %q", got, want)
 	}
 
-	// The held bubble shows both sends with a divider, the chips, and a
-	// cancel control; the sent data marks the held answers.
 	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
+		`class="msg user held" data-entry="` + first + `"`,
 		`class="msg user held" data-entry="` + second + `"`,
-		`<div class="hpart">first send</div><hr class="pdiv"><div class="hpart">second send</div>`,
+		`<div class="hpart">first send</div>`,
+		`<div class="hpart">second send</div>`,
+		`data-cancel="` + first + `"`,
 		`data-cancel="` + second + `"`,
 		`<i data-id="03" data-answer="b" data-note="changed my mind" data-state="held">`,
 		`<i data-id="04" data-answer="ok" data-note="" data-state="held">`,
@@ -106,6 +111,52 @@ func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("session page lacks %q", want)
 		}
+	}
+	if strings.Index(page, `data-entry="`+first+`"`) > strings.Index(page, `data-entry="`+second+`"`) {
+		t.Error("the page shows the second send's bubble before the first's")
+	}
+}
+
+// TestHeldBubblesShowTheSteerQueueAheadOfTheFollowUps: the page draws the
+// held messages in queue order: steered ones first, in the order they were
+// promoted, then the follow-ups in send order. Promoting a follow-up moves
+// its bubble to the end of the steer queue.
+func TestHeldBubblesShowTheSteerQueueAheadOfTheFollowUps(t *testing.T) {
+	f := startPageFixture(t)
+	one, _ := f.send(t, `{"text":"one"}`)
+	two, _ := f.send(t, `{"text":"two"}`)
+	three, _ := f.send(t, `{"text":"three"}`)
+	steer := func(id string) string {
+		t.Helper()
+		code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`)
+		var ans struct {
+			ID string `json:"id"`
+		}
+		if code != http.StatusOK || json.Unmarshal([]byte(raw), &ans) != nil || ans.ID == "" {
+			t.Fatalf("steer %s = %d: %s", id, code, raw)
+		}
+		return ans.ID
+	}
+	s3 := steer(three)
+	s1 := steer(one)
+	want := []string{s3, s1, two}
+	held := f.held(t)
+	if len(held) != 3 {
+		t.Fatalf("held = %+v", held)
+	}
+	for i, id := range want {
+		if held[i].ID() != id {
+			t.Fatalf("held[%d] = %s (%q), want %s", i, held[i].ID(), held[i].Entry.Text(), id)
+		}
+	}
+	_, page := get(t, f.base+"/s/livesession?frame=1")
+	last := -1
+	for _, id := range want {
+		at := strings.Index(page, `class="msg user held" data-entry="`+id+`"`)
+		if at < 0 || at < last {
+			t.Fatalf("page bubble order: %s at %d after %d; want %v", id, at, last, want)
+		}
+		last = at
 	}
 }
 
@@ -208,11 +259,7 @@ func TestMessageCarriesMentionsAsCapsules(t *testing.T) {
 
 func TestMessageEntryMentionsSurviveRouteLifecycle(t *testing.T) {
 	f := startPageFixture(t)
-	f.send(t, `{"mentions":[{"topic":"topic","entry":"e7","text":"same selected text"}]}`)
-	id, merged := f.send(t, `{"mentions":[{"topic":"topic","id":"3","entry":"e8","text":"same selected text"}]}`)
-	if !merged {
-		t.Fatal("entry mentions did not merge")
-	}
+	id, _ := f.send(t, `{"mentions":[{"topic":"topic","entry":"e7","text":"same selected text"},{"topic":"topic","id":"3","entry":"e8","text":"same selected text"}]}`)
 	want := []wsinbox.Mention{{Topic: "topic", Entry: "e7", Text: "same selected text"}, {Topic: "topic", ID: "3", Entry: "e8", Text: "same selected text"}}
 	if held := f.held(t); len(held) != 1 || !reflect.DeepEqual(held[0].Entry.Mentions, want) {
 		t.Fatalf("held mentions = %+v", held)
@@ -280,12 +327,9 @@ func TestMessageSelectionNoteBundlesSurviveRouteLifecycle(t *testing.T) {
 		}
 		return f.send(t, string(body))
 	}
-	if _, merged := send(firstText, firstMentions); merged {
-		t.Fatal("first selection bundle merged")
-	}
-	id, merged := send(secondText, secondMentions)
-	if !merged {
-		t.Fatal("second selection bundle did not merge")
+	id, merged := send(wantText, wantMentions)
+	if merged {
+		t.Fatal("selection bundles merged")
 	}
 	assertHeld := func(parts []string) wsinbox.Entry {
 		t.Helper()
@@ -299,7 +343,7 @@ func TestMessageSelectionNoteBundlesSurviveRouteLifecycle(t *testing.T) {
 		}
 		return entry
 	}
-	assertHeld([]string{firstText, secondText})
+	assertHeld([]string{wantText})
 	parsed, rest := wsinbox.ParseMentions(wantWire)
 	if !reflect.DeepEqual(parsed, wantMentions) || rest != wantText {
 		t.Fatalf("parsed mentions = %#v, rest = %q", parsed, rest)
@@ -310,7 +354,7 @@ func TestMessageSelectionNoteBundlesSurviveRouteLifecycle(t *testing.T) {
 		t.Fatalf("note attribute accepted: %#v, %q", mentions, rest)
 	}
 	_, heldPage := get(t, f.base+"/s/livesession?frame=1")
-	if want := `<div class="hpart">` + html.EscapeString(firstText) + `</div><hr class="pdiv"><div class="hpart">` + html.EscapeString(secondText) + `</div>`; !strings.Contains(heldPage, want) {
+	if want := `<div class="hpart">` + html.EscapeString(wantText) + `</div>`; !strings.Contains(heldPage, want) {
 		t.Errorf("held page lacks exact escaped selection bundles %q", want)
 	}
 	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
@@ -358,24 +402,29 @@ func TestMessageRouteRefusesEmptyAndMalformed(t *testing.T) {
 
 func TestCancelRouteReturnsTextAndChips(t *testing.T) {
 	f := startPageFixture(t)
-	f.send(t, `{"text":"one","chips":[{"id":"03","answer":"a"}]}`)
-	id, _ := f.send(t, `{"text":"two","chips":[{"id":"05","note":"why"}]}`)
+	other, _ := f.send(t, `{"text":"one","chips":[{"id":"03","answer":"a"}]}`)
+	id, _ := f.send(t, `{"text":"two","chips":[{"id":"05","note":"why"},{"id":"06","answer":"ok"}]}`)
 	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
 	if code != http.StatusOK {
 		t.Fatalf("cancel = %d: %s", code, raw)
 	}
 	var ans struct {
-		Text  string         `json:"text"`
-		Chips []wsinbox.Chip `json:"chips"`
+		Text   string         `json:"text"`
+		Chips  []wsinbox.Chip `json:"chips"`
+		SentAt int64          `json:"sentAt"`
 	}
 	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
 		t.Fatal(err)
 	}
-	if ans.Text != "one\n\ntwo" || len(ans.Chips) != 2 || ans.Chips[0] != (wsinbox.Chip{ID: "03", Answer: "a"}) || ans.Chips[1] != (wsinbox.Chip{ID: "05", Note: "why"}) {
+	if ans.SentAt == 0 {
+		t.Fatalf("cancel answer carries no sentAt: %s", raw)
+	}
+	// Only the cancelled send comes back; the other send stays held.
+	if ans.Text != "two" || len(ans.Chips) != 2 || ans.Chips[0] != (wsinbox.Chip{ID: "05", Note: "why"}) || ans.Chips[1] != (wsinbox.Chip{ID: "06", Answer: "ok"}) {
 		t.Fatalf("cancel answer = %+v", ans)
 	}
-	if held := f.held(t); len(held) != 0 {
-		t.Fatalf("cancelled entry still held: %+v", held)
+	if held := f.held(t); len(held) != 1 || held[0].ID() != other {
+		t.Fatalf("held after cancel = %+v, want only %s", held, other)
 	}
 	if code, _, _ := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`); code != http.StatusConflict {
 		t.Fatalf("second cancel = %d, want 409", code)
@@ -516,10 +565,7 @@ func TestInterruptRouteTakesBackEveryHeldMessageAndWritesTheEntry(t *testing.T) 
 	}
 	steered := f.held(t)[0].ID()
 	second, _ := f.send(t, `{"text":"see [Image #1]","images":`+imagesJSON("a.png", pngBytes)+`}`)
-	merged, ok := f.send(t, `{"text":"and more"}`)
-	if !ok {
-		t.Fatal("follow-up did not merge into the held message")
-	}
+	third, _ := f.send(t, `{"text":"and more"}`)
 	paths := f.held(t)[1].Entry.Images
 	before := time.Now().UnixMilli()
 
@@ -532,16 +578,20 @@ func TestInterruptRouteTakesBackEveryHeldMessageAndWritesTheEntry(t *testing.T) 
 	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
 		t.Fatalf("interrupt answer %q: %v", raw, err)
 	}
-	if len(ans.Held) != 2 {
-		t.Fatalf("interrupt answer = %s, want both held messages", raw)
+	if len(ans.Held) != 3 {
+		t.Fatalf("interrupt answer = %s, want every held message", raw)
 	}
-	a, b := ans.Held[0], ans.Held[1]
+	// In queue order: the steered message, then the follow-ups as sent.
+	a, b, c := ans.Held[0], ans.Held[1], ans.Held[2]
 	if a.ID != steered || a.Text != "promote me" || len(a.Chips) != 1 || a.Chips[0].ID != "03" || a.Chips[0].Answer != "a" || len(a.Images) != 0 || a.Nums == nil {
 		t.Errorf("first held = %+v", a)
 	}
-	if b.ID != merged || b.ID == second || b.Text != "see [Image #1]\n\nand more" || b.Chips == nil || len(b.Chips) != 0 ||
+	if b.ID != second || b.Text != "see [Image #1]" || b.Chips == nil || len(b.Chips) != 0 ||
 		len(b.Images) != 1 || b.Images[0] != filepath.Base(paths[0]) || len(b.Nums) != 1 || b.Nums[0] != 1 {
 		t.Errorf("second held = %+v", b)
+	}
+	if c.ID != third || c.Text != "and more" || len(c.Images) != 0 {
+		t.Errorf("third held = %+v", c)
 	}
 	// Nothing is held any more; the interrupt entry is on disk, and the image
 	// stays for a re-send to reference.

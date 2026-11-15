@@ -202,7 +202,10 @@ type TopicView struct {
 	// open or when its close gave none (a store written before results).
 	Result string
 	// UpdatedAt is the topic's latest change, the newest change time among
-	// its items, body, and recap (RFC 3339, UTC), empty when none has one. UpdatedMs
+	// its items, body, recap, and stream entries (logs, panels, and the
+	// system events of closes, reopens, item and content changes) (RFC 3339,
+	// UTC), empty when none has one. Label and tickets are metadata and do
+	// not count. UpdatedMs
 	// is the same instant in Unix milliseconds for the page script, and
 	// UpdatedClock its local HH:MM, which the embed shows.
 	UpdatedAt    string
@@ -777,7 +780,8 @@ func bumpRank(state *State, activity map[string]int) map[string]int {
 }
 
 // stampUpdated sets each block's latest change from the change times of its
-// items, body, and recap, and its recap's own update time; a time that does
+// items, body, recap, and stream entries, and its recap's own update time
+// (the latest agent log, else the legacy recap); a time that does
 // not parse (a store written before change times) counts as none.
 func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location) {
 	if loc == nil {

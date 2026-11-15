@@ -12,16 +12,12 @@ import (
 )
 
 // TestMessageCarriesPicksAndConsoles: a send's picks and console blocks are
-// held in order, merge with a later send's, are delivered as wb:pick and
-// wb:console elements after the mentions and before the text, and a cancel,
-// a steer, and an interrupt hand them back with the same field names.
+// held in order, are delivered as wb:pick and wb:console elements after the
+// mentions and before the text, and a cancel, a steer, and an interrupt hand
+// them back with the same field names.
 func TestMessageCarriesPicksAndConsoles(t *testing.T) {
 	f := startPageFixture(t)
-	f.send(t, `{"text":"see","picks":[{"url":"http://localhost:5173/settings","selector":"#save","text":"Save"}],"consoles":[{"url":"http://localhost:5173/settings","lines":["first error","second error"]}]}`)
-	id, merged := f.send(t, `{"picks":[{"url":"http://localhost:5173/settings","selector":"#empty","text":""}]}`)
-	if !merged {
-		t.Fatal("a pick-only send did not merge")
-	}
+	id, _ := f.send(t, `{"text":"see","picks":[{"url":"http://localhost:5173/settings","selector":"#save","text":"Save"},{"url":"http://localhost:5173/settings","selector":"#empty","text":""}],"consoles":[{"url":"http://localhost:5173/settings","lines":["first error","second error"]}]}`)
 	wantPicks := []wsinbox.Pick{{URL: "http://localhost:5173/settings", Selector: "#save", Text: "Save"}, {URL: "http://localhost:5173/settings", Selector: "#empty"}}
 	wantConsoles := []wsinbox.Console{{URL: "http://localhost:5173/settings", Lines: []string{"first error", "second error"}}}
 	held := f.held(t)
