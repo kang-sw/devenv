@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
@@ -207,6 +209,16 @@ func (c *SnapshotCache) HashLiveStores(h io.Writer, stateDir, replyID string, no
 		tag   string
 		names func() ([]string, error)
 	}{
+		{"model-evidence", func() ([]string, error) {
+			entries, err := os.ReadDir(filepath.Join(sessionDir, wslive.ObservedDirName))
+			var names []string
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+					names = append(names, e.Name())
+				}
+			}
+			return names, err
+		}},
 		{"ring", func() ([]string, error) { return wslive.RingNames(wslive.RingDir(sessionDir)) }},
 		{"inbox", func() ([]string, error) { return wsinbox.Names(wsinbox.Dir(sessionDir)) }},
 		{"inbox-drained", func() ([]string, error) { return wsinbox.DrainedNames(wsinbox.Dir(sessionDir)) }},

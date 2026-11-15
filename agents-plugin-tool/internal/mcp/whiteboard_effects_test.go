@@ -315,7 +315,7 @@ func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) 
 				t.Fatal(err)
 			}
 			if committed {
-				if board.Whiteboard == nil || len(board.Whiteboard.Items) != 1 || board.Whiteboard.EntrySeq != 2 {
+				if board.Whiteboard == nil || len(board.Whiteboard.Items) != 1 || board.Whiteboard.EntrySeq != 3 {
 					t.Fatalf("committed board not recovered once: %+v", board.Whiteboard)
 				}
 				wb.update(t, ``) // repair only the HTML, never resend commands

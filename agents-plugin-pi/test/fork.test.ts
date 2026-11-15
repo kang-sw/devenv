@@ -255,6 +255,8 @@ describe("buildForkSpawnCtx (the ws-fork push channel)", () => {
     assert.equal(ctx.forkFrom, "/tmp/lead-session.jsonl");
     assert.equal(ctx.explicitTools, "read,grep");
     assert.equal(ctx.parentSessionKey, "amber-otter-canyon");
+    assert.equal(ctx.parentPolicy?.sessionKey, "amber-otter-canyon");
+    assert.equal(ctx.parentPolicy?.authority, "lead");
     assert.equal(ctx.spawnRole, "fork");
     assert.equal(ctx.inheritModel, "openrouter/some-model");
     assert.equal(ctx.cwd, "/repo");

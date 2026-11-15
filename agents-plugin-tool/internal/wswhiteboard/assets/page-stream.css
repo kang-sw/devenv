@@ -1,0 +1,218 @@
+/* topic recap: author and time lead the body's first line inline; inside a
+   closed topic's fold it sits above the body. */
+.trecap { margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+/* last in its box (a closed fold's summary takes no room): keep the gutter below */
+.trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
+/* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
+.trecap { contain: paint; }
+/* Clamp topic recaps, never panel-card titles or stored text. */
+.trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.trecap .rtext { display: inline; min-width: 0; overflow-wrap: anywhere; }
+.trecap .rtext > p:first-child { display: inline; }
+.trecap .rat { font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trecap .rat .evi { display: inline-flex; vertical-align: -3px; margin-right: 5px; }
+/* An open topic's head summary line: the latest agent line as plain muted
+   text on the head's surface (no card), sharing the line with the check pill,
+   which wraps under it when narrow; a hairline under the head ends it. */
+.tsub { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); overflow: hidden; }
+/* Content chooses the height, capped at four whole lines (4 x 1.45em).
+   Use the same clamp in both sticky states: sticking itself must not reflow
+   the recap. A changed recap may legitimately grow or shrink the header. */
+.tsub > .trecap { flex: 1 1 22em; min-width: 0; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+.tsub > .trecap .rat { font-size: 10.5px; }
+/* Inline role/media boxes must fit the same line grid as the recap text. */
+.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }
+.tsub > .trecap :is(img, svg) { max-height: 1em; width: auto; vertical-align: middle; }
+/* A recap whose clock chip is a button jumps to its log row (stream.js); the
+   text is a pointer shortcut. contain: paint clips an outer outline, so the
+   chip's focus ring is drawn inside. */
+.trecap:has(> .rat[role="button"]) { cursor: pointer; }
+.tsub > .trecap:has(> .rat[role="button"]):hover { color: var(--wb-fg); }
+.trecap > .rat[role="button"]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; border-radius: 3px; }
+.ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
+.ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }
+button.ckbtn { cursor: pointer; }
+button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
+.ckbtn .i { width: 12px; height: 12px; }
+.ckbtn .prog { font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
+
+/* Linked tickets: badges at the bar's right, before its time; status is a
+   colour and a mark's shape (idea hollow, todo half, ready filled, done a
+   check, dropped a cross and struck through). The bar is dark in both
+   themes, so the hues are fixed; a quiet topic's muted bar keeps the shapes. */
+.ttix { flex: 0 1 auto; min-width: 0; max-width: min(52%, 360px); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 4px; }
+.wbtk { --c: #c9a7ff; display: inline-flex; align-items: center; gap: 5px; height: 17px; max-width: 100%; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1; color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
+.wbtk .st { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; }
+.wbtk .i { flex: none; width: 9px; height: 9px; margin: 0 -1px; stroke-width: 2.4; }
+.wbtk .nm { min-width: 0; max-width: 17ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbtk.todo { --c: #8db8ff; }
+.wbtk.todo .st { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.wbtk.ready { --c: #7fd6a8; }
+.wbtk.ready .st { background: currentColor; }
+.wbtk.done, .wbtk.dropped, .wbtk.unknown { --c: var(--wb-on-topic); opacity: .6; background: rgb(127 127 127 / .22); }
+.wbtk.dropped .nm { text-decoration: line-through; }
+.wbtk.unknown .st { border-style: dashed; }
+.topic.quiet .wbtk { color: var(--wb-muted-fg); background: rgb(127 127 127 / .18); }
+/* a topic with live work (a linked open ticket to carry out) glows in the
+   board's primary: a 1px ring and a soft halo */
+.topic.live { box-shadow: var(--wb-shadow), 0 0 0 1px color-mix(in srgb, var(--wb-primary) 38%, transparent), 0 0 18px 2px color-mix(in srgb, var(--wb-primary) 22%, transparent); }
+@media (max-width: 600px) {
+  .tbar:has(> .ttix) { flex-wrap: wrap; row-gap: 4px; }
+  .tbar > .ttix { order: 9; flex: 1 1 100%; max-width: none; }
+}
+
+/* Topic stream: one chronological column with whole-entry membership.
+   The always-shown header centers the load-older capsule between its title
+   and counts. Only the excluded prefix is hidden; selected oversized entries
+   stay whole. Shared keep sessions, not a clip, own scroll compensation. */
+.topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
+.topic-stream .mhead, .tstream > .mhead { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }
+.wb-history > .mhead > .wb-mtitle { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long localized label shortens first; the icon and the count stay whole. */
+.wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-mtitle > svg, .wb-mtitle > .n { flex: none; }
+.wb-history > .mhead > .history-older { grid-column: 2; }
+.wb-history > .mhead > .mmeta { grid-column: 3; justify-self: end; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
+.topic-stream .mhead .i, .tstream > .mhead .i { width: 12px; height: 12px; }
+.topic-stream .mhead .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream .mhead .mmeta { font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.wb-history { overflow-anchor: none; }
+.history-clip { position: relative; }
+.history-live { display: flow-root; width: 100%; }
+.history-live > [data-wb-history-before] { display: none !important; }
+.history-older { display: block; margin: 0; border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 600; letter-spacing: 0; white-space: nowrap; cursor: pointer; }
+.history-older:hover { color: var(--wb-fg); }
+.history-older:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.history-older[hidden] { display: none; }
+.wb-entry { min-width: 0; overflow-wrap: anywhere; }
+/* log rows: role badge, then body with its time inline on the first line */
+.entry-line { display: flex; align-items: baseline; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
+.entry-line:hover { background: var(--wb-wash); }
+.entry-line .entry-at { font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .8; cursor: default; }
+.entry-text { flex: 1; min-width: 0; }
+.wb-entry.agent > .entry-line { color: var(--wb-fg); font-size: 12.5px; }
+.wb-entry.system .entry-text { overflow-wrap: anywhere; }
+.wb-entry.owner > .entry-line { background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
+.wb-entry.owner .entry-text { color: color-mix(in srgb, var(--wb-accent-policy) 70%, var(--wb-fg)); }
+.evi { flex: none; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
+/* The role badge stays beside the body's first line when the text wraps. */
+.entry-line > .evi { align-self: flex-start; margin-top: 2px; }
+.evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.evi.owner { background: color-mix(in srgb, var(--wb-accent-policy) 22%, transparent); color: var(--wb-accent-policy); }
+.evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
+.ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
+.entry-imported { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); }
+/* system chips: adjacent system events behind one quiet row
+   led by a short dotted rule */
+.system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.system-run > summary::-webkit-details-marker { display: none; }
+.system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.system-run > summary > .lbl { min-width: 0; }
+/* panel: an unboxed recap with metadata and native actions on the right;
+   only its body carries a quiet guide. A recap-only panel is a message. */
+.wb-entry.panel { margin: 6px 0; }
+.entry-panel { container-type: inline-size; background: transparent; min-width: 0; }
+/* Native maximize reuses this shell; transparent renderer bodies need a sheet. */
+.entry-panel[data-max] { background: var(--wb-bg); }
+.entry-panel > summary { list-style: none; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
+/* Dashboard actions are siblings of .pmeta, not children of it. Both share
+   one slot; dashboard.css switches which action is displayed when large. */
+.entry-panel > summary:has(> button) { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+.entry-panel > summary > button { grid-column: 4; grid-row: 1; min-width: 24px; min-height: 24px; margin: 0; }
+.entry-panel > summary::-webkit-details-marker { display: none; }
+/* Owner-requested conspicuous update mark: static, high contrast, and kept
+   until an actual open. It is not cleared by a graft's temporary toggle. */
+.wb-panel-updated { flex: none; padding: 2px 7px; border: 2px solid var(--wb-primary); border-radius: 5px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 10px; line-height: 16px; font-weight: 850; letter-spacing: .04em; box-shadow: 0 0 0 2px var(--wb-bg); }
+.wb-panel-updated[hidden] { display: none; }
+.wb-panel-pending > .entry-panel { box-shadow: inset 0 0 0 2px var(--wb-primary); }
+.wb-panel-pending > .entry-panel > summary { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-bg)); }
+.entry-panel > summary:hover { background: var(--wb-wash); }
+.entry-panel > summary::before { content: "\25B8"; grid-column: 1; grid-row: 1; width: 10px; font-size: 10px; line-height: 24px; color: var(--wb-muted-fg); }
+.entry-panel[open] > summary::before { content: "\25BE"; }
+.entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+.entry-panel.msg > summary { cursor: default; }
+.entry-panel.msg > summary:hover { background: transparent; }
+.entry-panel.msg > summary::before { content: ""; width: 3px; align-self: stretch; margin: 2px 4px 2px 0; border-radius: 2px; background: var(--wb-accent-policy); }
+.entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; }
+.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }
+.entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
+.pmeta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 24px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmeta .entry-at { font: 11px var(--wb-mono); }
+.pmeta .hint { padding: 0 6px; border-radius: 999px; background: var(--wb-muted); line-height: 16px; }
+.pmeta a.mref { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.pmeta a.mref:hover { color: var(--wb-primary); }
+.entry-body.doc-body { font-size: 13.5px; }
+.entry-panel > .entry-body.doc-body { margin: 6px 0 0 18px; padding: 0 0 1px 12px; border-left: 1px solid var(--wb-line); }
+.panel-versions { margin: 0 10px 8px; }
+.entry-panel[open]:not(.msg) > .panel-versions { margin-top: 8px; }
+.panel-versions > summary { list-style: none; display: flex; align-items: center; width: fit-content; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; color: var(--wb-muted-fg); cursor: pointer; }
+.panel-versions > summary::-webkit-details-marker { display: none; }
+.panel-versions > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.historical .entry-recap { font-weight: 400; }
+/* Query the actual panel width, including inside a wide host or maximized. */
+@container (max-width: 420px) {
+  .entry-panel > summary { grid-template-columns: 10px minmax(0, 1fr); }
+  .entry-panel > summary > .pmeta { grid-column: 2; grid-row: 2; }
+  .entry-panel > summary:has(> button) { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+  .entry-panel > summary:has(> button) > .entry-recap { grid-column: 2 / 5; }
+  .entry-panel > summary:has(> button) > .pmeta { grid-column: 3; }
+  .entry-panel > summary > button { grid-row: 2; }
+}
+/* the embed: the latest panel recaps under the same quiet header */
+.tstream { margin: 0 14px; padding: 7px 0 8px; border-top: 1px solid var(--wb-line); }
+.panel-recaps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.panel-recaps li { display: flex; align-items: baseline; gap: 8px; padding: 1px 6px; border-radius: 6px; }
+.panel-recaps li > .entry-recap { font-size: 13px; font-weight: 600; }
+.panel-recaps li > .entry-at { flex: none; font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.panel-recaps li > a.mref { flex: none; font: 600 11px var(--wb-mono); text-decoration: none; }
+.full-board-link { font-size: 12px; margin: 10px 0; }
+
+/* topic body: block markdown above the topic's items, folded under its own summary */
+/* The summary is the topic bar's button: it is taken out of the details' flow
+   and pinned to the bar's right end (the bar reserves room for it), so the body
+   opens as a full-width block under the bar. */
+.topic { position: relative; }
+.topic.has-doc > .tophead > .tbar { padding-right: 46px; }
+.topic.has-doc:has(> details.tdoc > summary .new) > .tophead > .tbar { padding-right: 60px; }
+details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
+details.tdoc > summary::-webkit-details-marker { display: none; }
+details.tdoc > summary .new { background: currentColor; }
+.topic.quiet details.tdoc > summary { color: var(--wb-muted-fg); }
+.topic.quiet details.tdoc[open] { background: var(--wb-card); border-radius: var(--wb-radius); margin-top: 4px; overflow: hidden; }
+.doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
+.doc-body > :first-child { margin-top: 0; }
+.doc-body > :last-child { margin-bottom: 0; }
+.doc-body > svg { width: 100%; height: auto; display: block; }
+.doc-body img, .doc-body canvas { max-width: 100%; height: auto; }
+.doc-body pre { background: var(--wb-muted); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
+/* change marks of a topic body's latest edit (chg.js): thin bars in the gutter
+   left of the text column, so they never read as a blockquote's border */
+.wb-chg-layer { position: relative; height: 0; }
+.wb-chg-bar { position: absolute; width: 2px; border-radius: 1px; pointer-events: none; --chg: transparent; background: var(--chg); }
+.wb-chg-hit { position: absolute; pointer-events: auto; }
+.wb-chg-hit:hover > .wb-chg-bar { transform: scaleX(2); }
+.wb-chg-hit:hover > .wb-chg-bar.del { transform: scaleY(2); }
+.wb-chg-tip { position: fixed; z-index: 10; pointer-events: none; max-width: calc(100vw - 8px); box-sizing: border-box; padding: 3px 7px; border-radius: 4px; background: var(--wb-fg); color: var(--wb-bg); font: 12px/1.4 system-ui, sans-serif; }
+.wb-chg-tip[hidden] { display: none; }
+.wb-chg-bar.new { --chg: light-dark(#1a7f37, #3fb950); }
+.wb-chg-bar.mod { --chg: light-dark(#0969da, #58a6ff); }
+.wb-chg-bar.del { --chg: light-dark(#cf222e, #f85149); width: 8px; height: 2px; }
+/* a served page's topic body: a sandboxed frame sized to its content, which pads itself */
+.doc-body.framed { padding: 0; }
+iframe.doc-frame { display: block; width: 100%; height: 0; border: 0; }
+/* drawing kit for topic bodies: theme-aware classes for inline SVG (the
+   selectors key on .doc-body, which a body frame's document holds too) */
+.doc-body .box { fill: var(--wb-muted); }
+.doc-body .box.store { fill: var(--wb-now); }
+.doc-body svg text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
+.doc-body svg text.on { fill: var(--wb-on-now); }
+.doc-body svg text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
+.doc-body svg text.sub.on { fill: var(--wb-on-now); opacity: .8; }
+.doc-body .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.4; }
+.doc-body .edge.dash { stroke-dasharray: 4 3; }
+.doc-body .arrow { fill: var(--wb-muted-fg); }
+

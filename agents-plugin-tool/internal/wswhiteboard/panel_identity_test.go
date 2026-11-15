@@ -98,7 +98,7 @@ func TestPanelUpdatedMarkIsProminentAndLatestOnly(t *testing.T) {
 			wantNone(t, out, `class="wb-panel-updated"`)
 		}
 	}
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

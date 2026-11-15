@@ -17,7 +17,7 @@ import (
 // that is this session's image route for an image file name. The relayHref
 // cases execute under node when it is installed.
 func TestTopicBodyImageRelayStaysNarrow(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

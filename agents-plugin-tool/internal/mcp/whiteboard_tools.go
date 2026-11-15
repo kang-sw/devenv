@@ -317,6 +317,9 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	if err := s.enableWhiteboardKnobForSession(key); err != nil {
 		sb.WriteString("warning: " + err.Error() + "\n")
 	}
+	for _, summary := range outcome.Summaries {
+		sb.WriteString(summary + "\n")
+	}
 	return toolTextResponse(id, sb.String(), nil)
 }
 

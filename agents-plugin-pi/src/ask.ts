@@ -101,6 +101,7 @@ import {
   agentWidgetRefreshRef,
   sendToLead,
   inheritModelFromToolCtx,
+  leadParentPolicy,
   sendToAgent,
   refreshAgentTelemetry,
   spawnAgent,
@@ -995,6 +996,8 @@ export interface AskSessionCtx {
   /** Exact manifest entry module loaded by this parent, used by dormant fork resumes. */
   extensionPath: string;
   effectivePromptRef?: LeadPromptRef;
+  /** Read at each owner send or /done, since a re-login can replace the key. */
+  leadSessionKeyRef?: BridgeHandle["defaultSessionKeyRef"];
 }
 
 /**
@@ -1263,7 +1266,11 @@ function finishForkRaisedThread(pi: ExtensionAPI, handle: ThreadRegistryHandle, 
     refreshAgentWidget();
     if (failure) notify(handle.ctxRef.current, `ws: fork finish for ${thread.threadId} ended without confirmed terminal admission (${failure}).`, "warning");
   };
-  startForkFinish(record, rpcRegistry, pi, resumeCtx ?? { cwd: process.cwd(), extensionPath: process.argv[1] ?? "" });
+  startForkFinish(record, rpcRegistry, pi, {
+    cwd: resumeCtx?.cwd ?? process.cwd(),
+    extensionPath: resumeCtx?.extensionPath ?? process.argv[1] ?? "",
+    leadSessionKey: resumeCtx?.leadSessionKeyRef?.current,
+  });
 }
 
 /** Release a fork-raised thread bind when its respondent is gone or the thread is withdrawn. */
@@ -1429,17 +1436,16 @@ export function resolveChildLiveness(running: boolean, ownerHeld = false): Child
   return running ? "running" : ownerHeld ? "idle-awaiting-owner" : "settled";
 }
 
-function createForkChannel(
+export function createForkChannel(
   pi: ExtensionAPI,
   rpcRegistry: RpcAgentRegistry,
-  cwd: string,
-  extensionPath: string,
+  sessionCtx: AskSessionCtx,
   agentId: string,
   onSent?: (record: RpcAgentRecord) => void,
 ): ConversationChannel {
   return createAuditChannel(rpcRegistry, agentId, async (text) => {
     const record = rpcRegistry.get(agentId);
-    await sendToAgent(rpcRegistry, { pi, cwd, extensionPath, writer: "owner" }, agentId, text, resolveOwnerSendInterrupt(record?.streaming === true));
+    await sendToAgent(rpcRegistry, { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, leadSessionKey: sessionCtx.leadSessionKeyRef?.current, writer: "owner" }, agentId, text, resolveOwnerSendInterrupt(record?.streaming === true));
     const updated = rpcRegistry.get(agentId);
     if (updated) onSent?.(updated);
   });
@@ -1553,6 +1559,7 @@ export async function ensureRespondent(
       explicitTools: tools.join(","),
       forkContext,
       parentSessionKey: bridge.defaultSessionKeyRef.current,
+      parentPolicy: leadParentPolicy(bridge),
       // Entry B's discussion fork belongs to the owner surface, never to the
       // lead's fan-in — bound before its first turn can produce a settle.
       spawnRole: "fork",
@@ -2421,7 +2428,8 @@ async function openThread(
   // conversation and then steer a false "stalled, do not harvest" verdict
   // into the lead. Read (not imported) by `fork.ts`: the reverse import would
   // cycle.
-  const channel = createForkChannel(pi, rpcRegistry, sessionCtx.cwd, sessionCtx.extensionPath, agentId, (updated) => {
+  const resumeCtx = { ...sessionCtx, leadSessionKeyRef: bridge.defaultSessionKeyRef };
+  const channel = createForkChannel(pi, rpcRegistry, resumeCtx, agentId, (updated) => {
     thread.forkResume = captureForkResume(updated);
     thread.touchedAt = nowIso();
     persistThreads(handle);
@@ -2482,7 +2490,7 @@ async function openThread(
         overlayHandle = buildOverlayHandle(pi, handle, rpcRegistry, thread, view, done, () => {
           pendingSummarizeUnsubscribe?.();
           pendingSummarizeUnsubscribe = undefined;
-        }, sessionCtx);
+        }, resumeCtx);
         component = new OwnerSteeringComponent(tui, view, {
           done: () => overlayHandle!.close(),
           finish: () => {

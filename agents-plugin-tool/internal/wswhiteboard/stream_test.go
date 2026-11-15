@@ -151,9 +151,10 @@ func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
 	}
 	wantAll(t, out, head("long"), head("short"), head("done"),
 		`<span class="wb-mlabel">History</span><span class="n">60</span></span><button type="button" class="history-older">Load older</button><span class="mmeta">`,
-		`<span class="n">1</span></span><button type="button" class="history-older" hidden>Load older</button><span class="mmeta">`)
+		// "short" holds its log and its creation-default state event.
+		`<span class="n">2</span></span><button type="button" class="history-older" hidden>Load older</button><span class="mmeta">`)
 	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:`, `<summary class="mhead">`)
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +339,7 @@ func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 // Owner rule: a log row's role marker sits on the first line beside the clock,
 // never vertically centred against wrapped text.
 func TestStreamRoleMarkerPinsToFirstLine(t *testing.T) {
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

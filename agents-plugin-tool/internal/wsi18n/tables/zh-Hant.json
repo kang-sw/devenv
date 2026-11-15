@@ -1777,6 +1777,8 @@
   "hover.lastrate": "上一輪輸出速度",
   "hover.turn": "目前輪次",
   "hover.lastturn": "上一輪",
+  "hover.lastobserved": "最近觀測",
+  "hover.history": "已觀測模型歷史",
   "hover.children": "執行中的子代理",
   "hover.cost": "費用",
   "hover.registered": "註冊時間",

@@ -1,5 +1,6 @@
 /** Shared direct-child display projection. No lifecycle decision consumes this data. */
 import type { RpcAgentRecord } from "./spawner.ts";
+import { MODEL_OBSERVATION_CAP, parseModelObservation, type ModelObservation } from "./model-observation.ts";
 
 export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "waiting-on-children" | "pending-delivery" | "running";
 
@@ -16,6 +17,8 @@ export interface AgentDisplayDetail {
   contextTokens?: number;
   estimatedUsd?: number;
   outputTps?: number;
+  /** Bounded response evidence supplied by this row's owner, never its parent. */
+  observations?: ModelObservation[];
 }
 
 export function rowName(record: RpcAgentRecord): string {
@@ -42,6 +45,7 @@ export function agentDisplayDetail(record: RpcAgentRecord): AgentDisplayDetail |
     effort: record.telemetry?.effort ?? record.observedEffort,
     contextTokens: record.telemetry?.contextTokens ?? record.observedContextTokens,
     estimatedUsd: record.telemetry?.estimatedUsd, outputTps: record.outputRate?.rate(),
+    observations: record.modelObservations,
   });
 }
 
@@ -67,5 +71,9 @@ export function parseAgentDisplayDetail(raw: unknown): AgentDisplayDetail | unde
   if (model) result.model = model;
   if (effort) result.effort = effort;
   for (const key of ["contextTokens", "estimatedUsd", "outputTps"] as const) if (finiteNonnegative(v[key])) result[key] = v[key];
+  if (Array.isArray(v.observations)) {
+    const observations = v.observations.slice(-MODEL_OBSERVATION_CAP).map(parseModelObservation).filter((o): o is ModelObservation => o !== undefined);
+    if (observations.length) result.observations = observations;
+  }
   return result;
 }

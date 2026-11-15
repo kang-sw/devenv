@@ -1777,6 +1777,8 @@
   "hover.lastrate": "Скорость вывода за прошлый ход",
   "hover.turn": "Текущий ход",
   "hover.lastturn": "Прошлый ход",
+  "hover.lastobserved": "Последнее наблюдение",
+  "hover.history": "История наблюдаемых моделей",
   "hover.children": "Работающие субагенты",
   "hover.cost": "Стоимость",
   "hover.registered": "Регистрация",

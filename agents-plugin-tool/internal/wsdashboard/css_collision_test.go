@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // The dashboard page inlines several module stylesheets into one document, so
@@ -190,7 +192,11 @@ func TestWhiteboardPillEdgesCannotMatchHeaderTop(t *testing.T) {
 		}
 		return string(b)
 	}
-	css := read("../wswhiteboard/assets/page.css")
+	assets, err := wswhiteboard.PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(assets.CSS)
 	pill := read("../wswhiteboard/assets/pill.js")
 	rail := read("../wswhiteboard/assets/rail.js")
 	if !regexp.MustCompile(`(?m)^\.top\s*\{`).MatchString(read("assets/dashboard.css")) {
@@ -224,7 +230,15 @@ func TestWhiteboardPillEdgesCannotMatchHeaderTop(t *testing.T) {
 func TestCSSClassesDoNotCollideAcrossModules(t *testing.T) {
 	owners := map[string][]string{}
 	for _, m := range cssModules {
-		b, err := os.ReadFile(m.path)
+		var b []byte
+		var err error
+		if m.name == "whiteboard" {
+			var assets wswhiteboard.SharedAssets
+			assets, err = wswhiteboard.PageAssets()
+			b = []byte(assets.CSS)
+		} else {
+			b, err = dashboardTestAsset(m.path)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

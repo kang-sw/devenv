@@ -78,15 +78,15 @@ func TestFutureCreationCoalescingUsesOnlyKnownApplyMembership(t *testing.T) {
 	mustApply(t, st, addXML(ClassTechnical, "t", "legacy two"))
 	original := append([]Entry(nil), st.Topics[0].Entries...)
 	// The same supplied clock in separate updates does not establish a batch.
-	if len(original) != 2 || original[0].At != original[1].At {
+	if len(original) != 3 || original[0].ItemID != 1 || len(original[1].TopicState) == 0 || original[2].ItemID != 2 || original[0].At != original[2].At {
 		t.Fatal("fixture requires separate equal-time creation updates")
 	}
 	mustApply(t, st, addXML(ClassTechnical, "t", "future one")+addXML(ClassCheck, "t", "future two"))
 	entries := st.Topics[0].Entries
-	if len(entries) != 3 || !reflect.DeepEqual(entries[:2], original) {
+	if len(entries) != len(original)+1 || !reflect.DeepEqual(entries[:len(original)], original) {
 		t.Fatalf("rewrote or regrouped legacy creation logs: %+v", entries)
 	}
-	last := entries[2]
+	last := entries[len(original)]
 	if last.Kind != EntrySystem || last.ItemID != 0 || !strings.Contains(last.Text, "{{3}}") || !strings.Contains(last.Text, "{{4}}") || last.At != testNow.Format(time.RFC3339Nano) {
 		t.Fatalf("missing known future creation batch: %+v", last)
 	}
@@ -178,7 +178,7 @@ process.stdout.write(bad.join('\n'));
 }
 
 func TestHistoryCompletedCheckFilterPreservesUndatedAndAssumedRows(t *testing.T) {
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

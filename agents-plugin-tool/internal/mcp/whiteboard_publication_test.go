@@ -66,12 +66,18 @@ func TestWhiteboardPublicationDirectoryAndMermaidFailuresRepairWithoutDuplicateE
 				t.Fatal(err)
 			}
 			board := committed.Whiteboard
-			if board == nil || board.Counter != 1 || len(board.Items) != 1 || board.Items[0].Title != "committed-marker" || board.Seq != 2 || board.EntrySeq != 1 || len(board.Topics) != 1 || len(board.Topics[0].Entries) != 1 {
+			if board == nil || board.Counter != 1 || len(board.Items) != 1 || board.Items[0].Title != "committed-marker" || board.Seq != 2 || board.EntrySeq != 2 || len(board.Topics) != 1 || len(board.Topics[0].Entries) != 2 {
 				t.Fatalf("publication failure lost or duplicated accepted state: %+v", board)
 			}
 			event := board.Topics[0].Entries[0]
 			if event.Kind != wswhiteboard.EntrySystem || event.ItemID != board.Items[0].ID || !strings.Contains(event.Text, "committed-marker") {
 				t.Fatalf("accepted item lacks its single durable event: %+v", event)
+			}
+			if view := board.TopicStates()["publication"]; view.State == nil || view.State.Value != wswhiteboard.StateDiscussing || view.Diagnostic != nil {
+				t.Fatalf("committed default lost: %+v", view)
+			}
+			if len(whiteboardSummaryLines(toolText(t, resp))) != 0 {
+				t.Fatal("publication failure claimed success summaries")
 			}
 			if got := f.stamp(t); got != beforeStamp {
 				t.Fatalf("failed publication advanced the stamp: %q -> %q", beforeStamp, got)
@@ -85,6 +91,9 @@ func TestWhiteboardPublicationDirectoryAndMermaidFailuresRepairWithoutDuplicateE
 			// Repair only derived output: never replay the already accepted add.
 			whiteboardMkdirAll, whiteboardRename = origMkdir, origRename
 			text := f.update(t, ``)
+			if len(whiteboardSummaryLines(text)) != 0 {
+				t.Fatal("render-only recovery duplicated applied claims")
+			}
 			repaired, err := newSessionStore().readWhiteboard(f.key)
 			if err != nil {
 				t.Fatal(err)
