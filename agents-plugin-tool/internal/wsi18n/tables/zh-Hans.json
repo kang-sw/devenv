@@ -1987,6 +1987,7 @@
   "js.update.failed": "检查更新失败",
   "js.update.downloadfailed": "下载更新失败：{0}",
   "js.update.applyfailed": "无法应用更新：{0}",
+  "js.update.downloadpage": "打开下载页面",
   "rail.admission.pending": "待处理的工作树",
   "rail.admission.pending.hint": "在池外检测到",
   "rail.admission.approve": "批准",

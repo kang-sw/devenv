@@ -1987,6 +1987,7 @@
   "js.update.failed": "Suche nach Updates fehlgeschlagen",
   "js.update.downloadfailed": "Herunterladen des Updates fehlgeschlagen: {0}",
   "js.update.applyfailed": "Das Update kann nicht angewendet werden: {0}",
+  "js.update.downloadpage": "Download-Seite öffnen",
   "rail.admission.pending": "Ausstehende Worktrees",
   "rail.admission.pending.hint": "Außerhalb des Pools erkannt",
   "rail.admission.approve": "Annehmen",

@@ -1987,6 +1987,7 @@
   "js.update.failed": "Не удалось проверить обновления",
   "js.update.downloadfailed": "Не удалось загрузить обновление: {0}",
   "js.update.applyfailed": "Не удаётся применить обновление: {0}",
+  "js.update.downloadpage": "Открыть страницу загрузки",
   "rail.admission.pending": "Ожидающие рабочие деревья",
   "rail.admission.pending.hint": "Обнаружены вне пула",
   "rail.admission.approve": "Принять",

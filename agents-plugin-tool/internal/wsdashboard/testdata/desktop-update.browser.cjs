@@ -105,6 +105,62 @@ function stub() {
       await shot(`toast-error-${scheme}.png`);
       await page.close();
     }
+    // The download page: a shell that does not update itself (Windows) sends
+    // downloadPage on available, which replaces [Update]; a failed download
+    // or apply carries it too. The page opens through window.open, which the
+    // shell's window-open handler hands to the system browser.
+    const PAGE = 'https://github.com/kang-sw/werkschaft/releases/latest';
+    const notice = { state: 'available', version: '0.51.0', current: '0.50.0', skipped: false, manual: false, downloadPage: PAGE };
+    const manual = [
+      ['win-ready', 'dark', 1440, notice],
+      ['win-ready', 'light', 1440, notice],
+      ['win-ready', 'dark', 700, notice],
+      ['mac-ready', 'dark', 1440, { state: 'ready', version: '0.51.0' }],
+      ['mac-applyfailed', 'dark', 1440, { state: 'apply-error', version: '0.51.0', downloadPage: PAGE,
+        message: 'the app folder /Applications/Werkschaft.app is not writable' }],
+      ['mac-downloadfailed', 'dark', 1440, { state: 'download-error', version: '0.51.0', downloadPage: PAGE,
+        message: 'checksum mismatch for Werkschaft-darwin-arm64.zip' }],
+    ];
+    for (const [name, scheme, width, status] of manual) {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, locale: 'ko-KR', colorScheme: scheme });
+      page.on('pageerror', e => errors.push(e.message));
+      await page.addInitScript(stub);
+      await page.addInitScript(() => { window.open = (url, target) => { window.__calls.push('open:' + url + ' ' + target); return null; }; });
+      await page.goto(base + '/');
+      await page.waitForFunction(() => window.__calls.includes('subscribe'));
+      const phase = status.state === 'ready' ? 'ready' : 'available';
+      await page.evaluate(s => window.__emit(s), { ...status, phase: { phase, version: '0.51.0', skipped: false } });
+      const toast = page.locator('.wstoast').first();
+      await toast.waitFor({ state: 'visible' });
+      const labels = await toast.locator('.wst-act').allTextContents();
+      if (status.state === 'available') assert.deepEqual(labels, ['다운로드 페이지 열기', '이번 버전 건너뛰기'], name);
+      else if (status.state === 'ready') assert.deepEqual(labels, ['지금 다시 시작'], name);
+      else assert.deepEqual(labels, ['다운로드 페이지 열기'], name);
+      const box = await toast.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= width && box.y + box.height <= 900, `${name}: the toast fits the viewport`);
+      if (shots) await page.screenshot({ path: path.join(shots, `${name}-${scheme}-${width}.png`) });
+      await toast.locator('.wst-act').first().click();
+      const last = (await page.evaluate(() => window.__calls.slice())).at(-1);
+      assert.equal(last, status.state === 'ready' ? 'restart' : `open:${PAGE} _blank`, name);
+      if (status.state === 'available') {
+        assert.equal(await page.locator('#dupd-restart').evaluate(e => e.hidden), true, `${name}: no restart in settings`);
+      }
+      await page.close();
+    }
+    // An older shell sends no downloadPage: the toasts stay as they were.
+    {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR' });
+      page.on('pageerror', e => errors.push(e.message));
+      await page.addInitScript(stub);
+      await page.goto(base + '/');
+      await page.waitForFunction(() => window.__calls.includes('subscribe'));
+      await page.evaluate(() => window.__emit({ state: 'apply-error', version: '0.51.0', message: 'x' }));
+      await page.locator('.wstoast').first().waitFor({ state: 'visible' });
+      assert.equal(await page.locator('.wstoast .wst-act').count(), 0);
+      await page.evaluate(() => window.__emit({ state: 'available', version: '0.51.0', downloadPage: 'http://example.test/' }));
+      assert.deepEqual(await page.locator('.wstoast .wst-act').allTextContents(), ['업데이트', '이번 버전 건너뛰기'], 'a non-https page is ignored');
+      await page.close();
+    }
     assert.deepEqual(errors, []);
     console.log('desktop update browser acceptance ok');
   } finally { await browser.close(); }

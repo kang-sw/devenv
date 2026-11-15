@@ -1987,6 +1987,7 @@
   "js.update.failed": "Échec de la recherche de mises à jour",
   "js.update.downloadfailed": "Échec du téléchargement de la mise à jour : {0}",
   "js.update.applyfailed": "Impossible d'appliquer la mise à jour : {0}",
+  "js.update.downloadpage": "Ouvrir la page de téléchargement",
   "rail.admission.pending": "Worktrees en attente",
   "rail.admission.pending.hint": "Détectés hors du pool",
   "rail.admission.approve": "Approuver",

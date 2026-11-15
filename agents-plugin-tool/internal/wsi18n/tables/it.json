@@ -1987,6 +1987,7 @@
   "js.update.failed": "Controllo aggiornamenti non riuscito",
   "js.update.downloadfailed": "Download dell'aggiornamento non riuscito: {0}",
   "js.update.applyfailed": "Impossibile applicare l'aggiornamento: {0}",
+  "js.update.downloadpage": "Apri la pagina di download",
   "rail.admission.pending": "Worktree in attesa",
   "rail.admission.pending.hint": "Rilevati fuori dal pool",
   "rail.admission.approve": "Approva",

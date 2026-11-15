@@ -303,6 +303,7 @@ test('an unwritable install keeps the stage and reports; a launch apply runs onc
       assert.equal(make().applyOnLaunch(), false);
       assert.equal(sent.at(-1).state, 'apply-error');
       assert.match(sent.at(-1).message, /not writable/);
+      assert.equal(sent.at(-1).downloadPage, u.DOWNLOAD_PAGE);
       assert.ok(fs.existsSync(stage), 'an unwritable folder at launch keeps the stage and spends no attempt');
       assert.equal(detached.length, 0);
     } finally { fs.chmodSync(apps, 0o755); }
@@ -316,6 +317,67 @@ test('an unwritable install keeps the stage and reports; a launch apply runs onc
     assert.equal(make().applyOnLaunch(), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(userData, 'update-state.json'))).launchAttempt, null);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Windows announces a new version with the download page and never stages or spawns the swap helper', async () => {
+  const root = tmp('win');
+  const zip = Buffer.from('zip bytes');
+  const files = { 'Werkschaft-win32-x64.zip': zip, [u.SUMS]: `${sha(zip)}  Werkschaft-win32-x64.zip\n` };
+  const release = { tag_name: 'v0.51.0', assets: [] };
+  const server = await feed(files, () => release);
+  release.assets = [server.asset('Werkschaft-win32-x64.zip'), server.asset(u.SUMS)];
+  try {
+    const install = path.join(root, 'Werkschaft-win32-x64'), userData = path.join(root, 'userData');
+    fs.mkdirSync(install, { recursive: true });
+    // A stage left behind (an older shell staged it): never applied on Windows.
+    const stage = path.join(userData, 'update', 'extract', 'Werkschaft-win32-x64');
+    fs.mkdirSync(stage, { recursive: true });
+    fs.writeFileSync(path.join(stage, 'Werkschaft.exe'), 'new');
+    fs.writeFileSync(path.join(userData, 'update', 'staged.json'), JSON.stringify({ version: '0.51.0', app: stage }));
+    const sent = [], detached = [];
+    const updater = u.createUpdater({ version: '0.50.0', userData, packaged: true, platform: 'win32', arch: 'x64',
+      execPath: path.join(install, 'Werkschaft.exe'), argv: [], pid: 999999, feed: server.base,
+      send: s => sent.push(s), log: () => {}, detach: (command, args) => detached.push({ command, args }) });
+    assert.equal(u.DOWNLOAD_PAGE, `https://github.com/${u.REPO}/releases/latest`);
+    // The new-version notice is unchanged except that it carries the download page.
+    assert.equal(await updater.check(false), 'available');
+    assert.deepEqual(sent.pop(), { state: 'available', version: '0.51.0', current: '0.50.0', skipped: false, manual: false,
+      downloadPage: u.DOWNLOAD_PAGE, phase: { phase: 'available', version: '0.51.0', skipped: false } });
+    // Every apply path is refused, and the swap helper is never spawned.
+    assert.equal(updater.canRestart(), false);
+    assert.equal(updater.applyOnQuit(true), false);
+    assert.equal(updater.applyOnQuit(false), false);
+    assert.equal(updater.applyOnLaunch(), false);
+    assert.equal(fs.existsSync(path.join(userData, 'update')), false, 'a leftover stage is discarded at launch');
+    // An older dashboard's [Update] gets an error pointing at the page; nothing is downloaded.
+    const hits = server.hits.length;
+    assert.equal(await updater.download(), 'download-error');
+    assert.equal(sent.at(-1).state, 'download-error');
+    assert.equal(sent.at(-1).downloadPage, u.DOWNLOAD_PAGE);
+    assert.ok(sent.at(-1).message.includes(u.DOWNLOAD_PAGE));
+    assert.equal(server.hits.length, hits);
+    assert.equal(fs.existsSync(path.join(userData, 'update')), false);
+    assert.equal(updater.phase().phase, 'available');
+    assert.deepEqual(detached, []);
+  } finally { await server.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('download and apply failures carry the download page; a self-updating notice does not', async () => {
+  const userData = tmp('page');
+  const zip = Buffer.from('zip bytes');
+  const files = { 'Werkschaft-darwin-arm64.zip': zip, [u.SUMS]: `${sha(zip)}  Werkschaft-darwin-arm64.zip\n` };
+  const release = { tag_name: 'v0.51.0', assets: [] };
+  const server = await feed(files, () => release);
+  release.assets = [server.asset('Werkschaft-darwin-arm64.zip'), server.asset(u.SUMS)];
+  try {
+    const sent = [];
+    const updater = u.createUpdater({ version: '0.50.0', userData, packaged: false, platform: 'darwin', arch: 'arm64',
+      feed: server.base, send: s => sent.push(s), log: () => {} });
+    assert.equal(await updater.check(false), 'available');
+    assert.equal('downloadPage' in sent.pop(), false);
+    assert.equal(await updater.download(), 'download-error');
+    assert.equal(sent.at(-1).downloadPage, u.DOWNLOAD_PAGE);
+  } finally { await server.close(); fs.rmSync(userData, { recursive: true, force: true }); }
 });
 
 // CommandLineToArgvW's split (the rules the CRT and Electron also use), to
