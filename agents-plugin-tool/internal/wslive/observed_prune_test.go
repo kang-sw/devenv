@@ -13,13 +13,12 @@ import (
 	"time"
 )
 
-// withPruneLimit sets the prune threshold for one test, with no least time
-// between prunes.
-func withPruneLimit(t *testing.T, limit int) {
+// withoutPruneInterval allows each explicit prune in a test to run.
+func withoutPruneInterval(t *testing.T) {
 	t.Helper()
-	prev, every := observedPruneLimit, observedPruneEvery
-	observedPruneLimit, observedPruneEvery = limit, 0
-	t.Cleanup(func() { observedPruneLimit, observedPruneEvery = prev, every })
+	every := observedPruneEvery
+	observedPruneEvery = 0
+	t.Cleanup(func() { observedPruneEvery = every })
 }
 
 func evidencePath(dir string, r ObservedRecord) string {
@@ -48,10 +47,10 @@ func pruneFixture(agent string, n int, now time.Time) []ObservedRecord {
 // writeFixture appends records without pruning and dates each file at its At.
 func writeFixture(t *testing.T, dir string, records []ObservedRecord) {
 	t.Helper()
-	prev := observedPruneLimit
-	observedPruneLimit = 1 << 30
+	// A fixture write must not prune, even with no directory threshold.
+	pruneMu.Lock()
 	err := AppendObserved(dir, records)
-	observedPruneLimit = prev
+	pruneMu.Unlock()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,23 +100,22 @@ func TestObservedPruneKeepsVisibleModels(t *testing.T) {
 			}
 			writeFixture(t, dir, all)
 			wantModels, wantSnap := visibleModels(t, dir)
-			withPruneLimit(t, 20)
+			withoutPruneInterval(t)
 			pruneObserved(filepath.Join(dir, ObservedDirName))
 			gotModels, gotSnap := visibleModels(t, dir)
 			if !reflect.DeepEqual(gotModels, wantModels) || !reflect.DeepEqual(gotSnap, wantSnap) {
 				t.Fatalf("prune changed the visible models:\n%+v\n%+v", gotModels, wantModels)
 			}
-			// Per agent: the first record and the changes into m2 and back
-			// survive, and so does every record within the hour before the
-			// newest (61 at a minute apart, the change to m3 and the newest
-			// among them).
+			// Per agent: first, the changes into m2 and back, and recent eight
+			// (including the change to m3 and the latest). This replaces the
+			// old age-policy count, not the equivalence assertions above.
 			kept := evidenceCount(t, dir)
-			if want := len(tc.agents) * (3 + 61); kept != want {
+			if want := len(tc.agents) * (3 + observedPruneRecent); kept != want {
 				t.Fatalf("kept %d records, want %d", kept, want)
 			}
 			for _, r := range all {
 				_, err := os.Stat(evidencePath(dir, r))
-				if now.UnixMilli()-r.At <= observedPruneAge.Milliseconds() && err != nil {
+				if now.UnixMilli()-r.At < int64(observedPruneRecent)*time.Minute.Milliseconds() && err != nil {
 					t.Fatalf("recent record %s deleted", r.ID)
 				}
 			}
@@ -138,7 +136,7 @@ func TestObservedPruneSurvivesChildReplay(t *testing.T) {
 	all := append(pruneFixture("", 150, now), child...)
 	writeFixture(t, dir, all)
 	wantModels, wantSnap := visibleModels(t, dir)
-	withPruneLimit(t, 20)
+	withoutPruneInterval(t)
 	pruneObserved(filepath.Join(dir, ObservedDirName))
 	pruned := evidenceCount(t, dir)
 	// A child's replay re-adds the repeats its parent pruned; the models stay
@@ -156,26 +154,38 @@ func TestObservedPruneSurvivesChildReplay(t *testing.T) {
 	}
 }
 
-func TestObservedPruneGuardsRecentRecords(t *testing.T) {
+func TestObservedPruneBoundsShortLivedAgentsAndFreshReplay(t *testing.T) {
 	now := time.Now()
 	dir := t.TempDir()
-	// Sixty records a minute apart: all inside the hour before the newest.
-	records := pruneFixture("", 60, now)
-	writeFixture(t, dir, records)
-	// A repeat with an old At but a fresh file time stays too.
-	old := ObservedRecord{ModelObservation: ModelObservation{ID: "old-at", Model: "m1", Source: "claude.assistant", At: now.Add(-3 * time.Hour).UnixMilli()}}
-	first := ObservedRecord{ModelObservation: ModelObservation{ID: "older", Model: "m1", Source: "claude.assistant", At: now.Add(-4 * time.Hour).UnixMilli()}}
-	writeFixture(t, dir, []ObservedRecord{first})
-	prev := observedPruneLimit
-	observedPruneLimit = 1 << 30
-	if err := AppendObserved(dir, []ObservedRecord{old}); err != nil {
-		t.Fatal(err)
+	var records []ObservedRecord
+	for _, agent := range []string{"", "child-a", "child-b"} {
+		part := pruneFixture(agent, 150, now)
+		for i := range part {
+			// Each agent's entire life fits within three minutes.
+			part[i].At = now.Add(time.Duration(i-149) * time.Second).UnixMilli()
+		}
+		records = append(records, part...)
 	}
-	observedPruneLimit = prev
-	withPruneLimit(t, 10)
+	writeFixture(t, dir, records)
+	wantModels, wantSnap := visibleModels(t, dir)
+	withoutPruneInterval(t)
 	pruneObserved(filepath.Join(dir, ObservedDirName))
-	if got := evidenceCount(t, dir); got != 62 {
-		t.Fatalf("guard deleted records: %d left of 62", got)
+	if got := evidenceCount(t, dir); got != 3*(3+observedPruneRecent) {
+		t.Fatalf("short-lived repeats not bounded after prune: %d", got)
+	}
+	// Replay old At in a burst with fresh mtimes. Neither age guard remains.
+	writeFixture(t, dir, records)
+	for _, r := range records {
+		if err := os.Chtimes(evidencePath(dir, r), now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruneObserved(filepath.Join(dir, ObservedDirName))
+	if got := evidenceCount(t, dir); got != 3*(3+observedPruneRecent) {
+		t.Fatalf("fresh replay repeats not bounded after prune: %d", got)
+	}
+	if gotModels, gotSnap := visibleModels(t, dir); !reflect.DeepEqual(gotModels, wantModels) || !reflect.DeepEqual(gotSnap, wantSnap) {
+		t.Fatal("short-lived/fresh replay prune changed visible models")
 	}
 }
 
@@ -201,12 +211,12 @@ func TestObservedPruneToleratesFailedDeletes(t *testing.T) {
 		return os.Remove(path)
 	}
 	t.Cleanup(func() { removeObserved = prev })
-	withPruneLimit(t, 20)
+	withoutPruneInterval(t)
 	pruneObserved(filepath.Join(dir, ObservedDirName))
 	if _, err := os.Stat(locked); err != nil {
 		t.Fatal("locked record not left for a later prune")
 	}
-	if got := evidenceCount(t, dir); got != 3+61+1 {
+	if got := evidenceCount(t, dir); got != 3+observedPruneRecent+1 {
 		t.Fatalf("prune stopped at a failed delete: %d left", got)
 	}
 	if got, _ := visibleModels(t, dir); !reflect.DeepEqual(got, want) {
@@ -214,21 +224,13 @@ func TestObservedPruneToleratesFailedDeletes(t *testing.T) {
 	}
 }
 
-func TestObservedPruneOnlyAboveTheLimitAndOnlyOnAppend(t *testing.T) {
+func TestObservedPruneOnlyOnNewAppendWithoutThreshold(t *testing.T) {
 	now := time.Now()
 	dir := t.TempDir()
 	records := pruneFixture("", 100, now)
-	writeFixture(t, dir, records[:99])
-	withPruneLimit(t, 100)
-	// The directory reaches the limit: no prune.
-	if err := AppendObserved(dir, records[99:]); err != nil {
-		t.Fatal(err)
-	}
-	if got := evidenceCount(t, dir); got != 100 {
-		t.Fatalf("pruned at the limit: %d", got)
-	}
-	// Reads never prune, even over the limit.
-	withPruneLimit(t, 50)
+	writeFixture(t, dir, records)
+	withoutPruneInterval(t)
+	// Reads never prune, even when the directory has deletable repeats.
 	if _, err := ReadObserved(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -244,13 +246,13 @@ func TestObservedPruneOnlyAboveTheLimitAndOnlyOnAppend(t *testing.T) {
 	if got := evidenceCount(t, dir); got != 100 {
 		t.Fatalf("an append of a known record pruned: %d", got)
 	}
-	// The next new record over the limit prunes.
+	// A new record prunes even far below the retired 2256 threshold.
 	next := ObservedRecord{ModelObservation: ModelObservation{ID: "next", Model: "m3", Source: "claude.assistant", At: now.Add(time.Second).UnixMilli()}}
 	if err := AppendObserved(dir, []ObservedRecord{next}); err != nil {
 		t.Fatal(err)
 	}
-	if got := evidenceCount(t, dir); got >= 100 {
-		t.Fatalf("append over the limit did not prune: %d", got)
+	if got := evidenceCount(t, dir); got != 3+observedPruneRecent {
+		t.Fatalf("new append did not prune below the old threshold: %d", got)
 	}
 }
 
@@ -260,7 +262,7 @@ func TestObservedPruneConcurrentReads(t *testing.T) {
 	records := append(pruneFixture("", 200, now), pruneFixture("child-a", 200, now)...)
 	writeFixture(t, dir, records)
 	_, want := visibleModels(t, dir)
-	withPruneLimit(t, 20)
+	withoutPruneInterval(t)
 	var cache ObservedCache
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -298,12 +300,12 @@ func TestObservedPruneRunsOncePerIntervalPerDirectory(t *testing.T) {
 	dir := t.TempDir()
 	records := pruneFixture("", 150, now)
 	writeFixture(t, dir, records)
-	withPruneLimit(t, 20)
+	withoutPruneInterval(t)
 	observedPruneEvery = time.Hour
 	evidenceDir := filepath.Join(dir, ObservedDirName)
 	pruneObserved(evidenceDir)
 	pruned := evidenceCount(t, dir)
-	// The replayed repeats wait for the interval, though still over the limit.
+	// The replayed repeats exceed the keep-set until an eligible pass.
 	writeFixture(t, dir, records)
 	pruneObserved(evidenceDir)
 	if got := evidenceCount(t, dir); got != len(records) {
@@ -315,5 +317,53 @@ func TestObservedPruneRunsOncePerIntervalPerDirectory(t *testing.T) {
 	pruneObserved(evidenceDir)
 	if got := evidenceCount(t, dir); got != pruned {
 		t.Fatalf("prune after the interval kept %d, want %d", got, pruned)
+	}
+}
+
+// This is the accepted late-different-model residual, not a static-prune or
+// same-model replay equivalence assertion. Deleted original evidence cannot
+// reconstruct the earlier return transition after a new model splits its span.
+func TestObservedPruneLateDifferentModelRedatesReturn(t *testing.T) {
+	dir := t.TempDir()
+	var records []ObservedRecord
+	for i := 1; i <= 12; i++ {
+		records = append(records, ObservedRecord{ModelObservation: ModelObservation{
+			ID: fmt.Sprintf("y-%02d", i), Model: "Y", Source: "pi.assistant", At: int64(i * 1000),
+		}})
+	}
+	writeFixture(t, dir, records)
+	want, _ := visibleModels(t, dir)
+	var cache ObservedCache
+	cache.Load(dir)
+	withoutPruneInterval(t)
+	pruneObserved(filepath.Join(dir, ObservedDirName))
+	if got, _ := visibleModels(t, dir); !reflect.DeepEqual(got, want) {
+		t.Fatal("static prune changed the fold before late insertion")
+	}
+	if got := evidenceCount(t, dir); got != 1+observedPruneRecent {
+		t.Fatalf("kept %d, want first plus eight", got)
+	}
+	late := ObservedRecord{ModelObservation: ModelObservation{ID: "late-x", Model: "X", Source: "pi.assistant", At: 1500}}
+	if err := AppendObserved(dir, []ObservedRecord{late}); err != nil {
+		t.Fatal(err)
+	}
+	full := NewState("")
+	full.SeedObserved(append(records, late))
+	retained, _ := visibleModels(t, dir)
+	wantFull := []ModelChange{
+		{Model: "Y", At: 1000, Source: "pi.assistant"},
+		{Previous: "Y", Model: "X", At: 1500, Source: "pi.assistant"},
+		{Previous: "X", Model: "Y", At: 2000, Source: "pi.assistant"},
+	}
+	wantRetained := append([]ModelChange(nil), wantFull...)
+	wantRetained[2].At = 5000
+	if !reflect.DeepEqual(full.observed[""].History, wantFull) || !reflect.DeepEqual(retained[""].History, wantRetained) {
+		t.Fatalf("expected Y/X/Y return drift: full=%+v retained=%+v", full.observed[""].History, retained[""].History)
+	}
+	if !reflect.DeepEqual(retained[""].Current, records[11].ModelObservation) || !reflect.DeepEqual(full.observed[""].Current, retained[""].Current) {
+		t.Fatal("late insertion changed latest Current")
+	}
+	if got := cache.Load(dir); !reflect.DeepEqual(got.models, retained) {
+		t.Fatal("warm cache did not rebuild the accepted retained-history drift")
 	}
 }
