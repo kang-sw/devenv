@@ -64,3 +64,13 @@ read-only investigations worked and long background workers did not.
   argument is given, or time out with a diagnostic instead of hanging
   silently? Whatever guidance tells a non-Pi lead how to spawn a Pi worker
   should close stdin either way.
+
+## Addendum (2026-11-15): `ws-compact` aborts a print-mode run
+
+A headless `pi -p --mode json` design reviewer called the `ws-compact` tool
+mid-review. The tool answered "Compaction requested", the agent turn was
+aborted ("This operation was aborted", `agent_settled` with
+`aborted: true`, then `compaction_start` reason `manual`), and the process
+exited with no final message. Workaround in use: exclude `ws-compact` from
+headless runs (`--exclude-tools`).
+
