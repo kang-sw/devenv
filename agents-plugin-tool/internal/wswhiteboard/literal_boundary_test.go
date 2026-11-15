@@ -125,6 +125,33 @@ func TestLiteralBoundaryRound4Repros(t *testing.T) {
 	}
 }
 
+func TestLiteralWalkResumesDelimitersAfterCDATA(t *testing.T) {
+	// The first following-body span ends inside CDATA. After consuming the
+	// section atomically, its immediately following span quotes its own close.
+	body := "`<![CDATA[`]]>``</wb:panel>`` y ``` z"
+	input := "<wb:topic name=\"t\"><wb:panel recap=\"r\">```a</wb:panel><wb:panel recap=\"s\">" + body + "</wb:panel></wb:topic>"
+	want := "````</wb:panel>`` y ``` z"
+	for _, ordered := range []bool{false, true} {
+		p := &problems{}
+		var cmds []command
+		complete := true
+		if ordered {
+			cmds, complete = wsxmlcmd.ParseOrdered(p, grammar, input)
+			cmds = cmds[1:]
+		} else {
+			cmds = wsxmlcmd.Parse(p, grammar, input)
+		}
+		if len(p.List) != 0 || !complete || len(cmds) != 2 || cmds[0].Body != "```a" || cmds[1].Body != want {
+			t.Fatalf("ordered=%v commands=%+v complete=%v problems=%v", ordered, cmds, complete, p.List)
+		}
+	}
+	st := &State{}
+	out, p := Apply(st, input, testEnv())
+	if out.Accepted != 2 || st.PanelCounter != 2 || len(p) != 0 || out.Failed != "" || out.Unpartitioned || queryResult(t, st, `{"panel":"p2"}`).Direct.Entry.Text != want {
+		t.Fatalf("Apply=%+v panels=%d problems=%v", out, st.PanelCounter, p)
+	}
+}
+
 func TestLiteralBoundaryRound4ApplyNoSilentMerge(t *testing.T) {
 	for _, name := range []string{"CA-panel", "CA-third-panel", "CA-double-quote", "CA-known-name", "CA-fence", "CA-cdata-end", "CA-cdata-baseline", "CB-log", "CB-log-baseline", "CB-panel"} {
 		t.Run(name, func(t *testing.T) {
