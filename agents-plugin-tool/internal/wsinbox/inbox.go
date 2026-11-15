@@ -199,6 +199,9 @@ type Entry struct {
 	// SentAt is the first send's time, epoch milliseconds; an interrupt
 	// entry's creation time.
 	SentAt int64 `json:"sentAt,omitempty"`
+	// UTCOffsetMinutes is the sending browser's minutes east of UTC. Nil
+	// keeps legacy entries in the daemon host's local zone; zero is UTC.
+	UTCOffsetMinutes *int `json:"utcOffsetMinutes,omitempty"`
 	// Steer marks an entry the user promoted to steering: the adapter
 	// injects it at the session's next tool boundary instead of at the turn
 	// end. Steered entries queue ahead of the rest (queueRecords).
@@ -322,13 +325,13 @@ func NameForID(id string) (string, bool) {
 	return name, entryNamePattern.MatchString(name)
 }
 
-// Text is the message the session receives: the answer block (AnswerBlock)
+// bodyText assembles the envelope's content: the answer block (AnswerBlock)
 // first, then the mentions (MentionBlock), then the picks (PickBlock) and the
 // console blocks (ConsoleBlock) as one paragraph each, then each part as its
 // own paragraph, then one ImageLine per image. A command entry's text is its
 // typed line (Command.Line), which a host that runs a bare "/name args"
 // message as the command takes as it is.
-func (e Entry) Text() string {
+func (e Entry) bodyText() string {
 	if e.Command != nil {
 		return e.Command.Line()
 	}
@@ -375,10 +378,13 @@ func (e Entry) Text() string {
 // to send and an ErrInvalid error for a malformed one. A command entry
 // (normalizeCommand) carries its command alone.
 func Normalize(e Entry) (Entry, error) {
+	if e.UTCOffsetMinutes != nil && (*e.UTCOffsetMinutes < -720 || *e.UTCOffsetMinutes > 840) {
+		return Entry{}, fmt.Errorf("%w: UTC offset must be -720..840 minutes", ErrInvalid)
+	}
 	if e.Command != nil {
 		return normalizeCommand(e)
 	}
-	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Steer: e.Steer}
+	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Steer: e.Steer, UTCOffsetMinutes: e.UTCOffsetMinutes}
 	size, selectionMentions := 0, 0
 	for _, p := range e.Parts {
 		p = strings.TrimSpace(p)
@@ -539,7 +545,7 @@ func normalizeCommand(e Entry) (Entry, error) {
 	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.Picks) > 0 || len(e.Consoles) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
 		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, picks, console blocks, or images", ErrInvalid)
 	}
-	return Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Command: &c}, nil
+	return Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, UTCOffsetMinutes: e.UTCOffsetMinutes, Command: &c}, nil
 }
 
 // putChip replaces the chip for c.ID in place, or appends c.

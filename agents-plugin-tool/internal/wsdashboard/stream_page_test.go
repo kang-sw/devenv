@@ -75,7 +75,7 @@ func TestPageStreamsRideWebSocket(t *testing.T) {
 
 	runNode(t, "page stream", "(async function () {\n"+streamPageHarness+`
 function fetch() { return Promise.resolve({ status: 404 }); }
-var mode = "session", rid = "rid1", heldNow = "board.1,head.2", hiddenRegions = {}, modeHash = "", liveMode = false;
+var mode = "session", rid = "rid1", worktree = "", heldNow = "board.1,head.2", hiddenRegions = {}, modeHash = "", liveMode = false;
 function held() { return heldNow; }
 function boardInputFull() { return null; }
 function pageHidden() { return doc.hidden; }
@@ -197,7 +197,7 @@ func TestPageReloadsOnOtherAssets(t *testing.T) {
 	connect := block("connected ... connect", `(?s)\n  var sseOn = true;\n.*?\n  // showRegions applies`)
 
 	runNode(t, "assets identity", "(function () {\n"+streamPageHarness+`
-var mode = "session", rid = "rid1", hiddenRegions = {}, modeHash = "", liveMode = false;
+var mode = "session", rid = "rid1", worktree = "", hiddenRegions = {}, modeHash = "", liveMode = false;
 function held() { return ""; }
 function trackerLost() {}
 function trackerNudge() {}

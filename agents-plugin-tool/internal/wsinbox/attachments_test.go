@@ -44,11 +44,11 @@ func sendImages(t *testing.T, dir, text string, images ...string) (string, bool)
 func TestTextListsImagesAfterTheAnswersAndTheParts(t *testing.T) {
 	e := Entry{Parts: []string{"look [Image #1]", "and this [Image #3]"}, Images: []string{"/s/a/1.png", "/s/a/2.jpg"}, ImageNums: []int{1, 3}, Chips: []Chip{{ID: "03", Answer: "a"}}}
 	want := "<wb:answers>\n03=a\n</wb:answers>\n\nlook [Image #1]\n\nand this [Image #3]\n\nImage #1: /s/a/1.png\nImage #3: /s/a/2.jpg"
-	if got := e.Text(); got != want {
+	if got := e.testBody(t); got != want {
 		t.Fatalf("Text = %q, want %q", got, want)
 	}
 	// An entry written before images were numbered numbers them 1..n.
-	if got := (Entry{Images: []string{"/x/y.png", "/x/z.png"}}).Text(); got != "Image #1: /x/y.png\nImage #2: /x/z.png" {
+	if got := (Entry{Images: []string{"/x/y.png", "/x/z.png"}}).testBody(t); got != "Image #1: /x/y.png\nImage #2: /x/z.png" {
 		t.Fatalf("unnumbered image-only Text = %q", got)
 	}
 }
@@ -154,10 +154,10 @@ func TestEachSendKeepsItsImageNumbersAndSteerKeepsThem(t *testing.T) {
 	if len(held) != 2 || held[0].Name != steered {
 		t.Fatalf("held = %+v", held)
 	}
-	if got, want := held[0].Entry.Text(), "second [Image #1]\n\nImage #1: "+c; got != want {
+	if got, want := held[0].Entry.testBody(t), "second [Image #1]\n\nImage #1: "+c; got != want {
 		t.Fatalf("steered Text = %q, want %q", got, want)
 	}
-	if got, want := held[1].Entry.Text(), "first [Image #1] [Image #2]\n\nImage #1: "+a+"\nImage #2: "+b; got != want {
+	if got, want := held[1].Entry.testBody(t), "first [Image #1] [Image #2]\n\nImage #1: "+a+"\nImage #2: "+b; got != want {
 		t.Fatalf("follow-up Text = %q, want %q", got, want)
 	}
 }

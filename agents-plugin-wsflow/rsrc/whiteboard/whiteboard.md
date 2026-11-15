@@ -435,7 +435,7 @@ Whiteboard: <full> - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
-**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<wb:answers>` block or `<wb:mention>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
+**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block or `<wb:mention>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
 
 ## Host embed folder
 
@@ -448,9 +448,17 @@ update once it has disappeared; send `wb:embed-dir` again, or with
 
 ## Answers
 
-A message sent from the dashboard opens with the user's board answers as a
-`<wb:answers>` block, the user's typed text after it; the page's
-copy-answers button builds the same block:
+Each message sent from the dashboard is a `<ws:user at="YYYY-MM-DDThh:mm+09:00">...</ws:user>`
+block, one per queued item even in a delivered batch. `at` uses the send's
+instant at minute precision and the sending browser's UTC offset, not a fixed
+`+09:00`. Older messages may arrive unwrapped; slash commands stay bare.
+Inside each envelope, the user's board answers open the content as a
+`<wb:answers>` block when present, followed by attached context, typed text and
+image lines. Image numbers belong to their own envelope. Only closing-delimiter
+text is escaped: `</ws:user` becomes `&lt;/ws:user`, and an existing
+`&(amp;)*lt;/ws:user` gains one `amp;` after `&`; decoding removes exactly one
+level per match. Other content, including the nested answer block, is unchanged.
+The page's copy-answers button builds the answer block alone:
 
 ```text
 <wb:answers>
@@ -479,7 +487,7 @@ lines, reads the same way, each segment that item's body. A reply that
 names no ID gets your reading with `assumed="true"`.
 
 Board text the user selected and attached follows the answer block (or
-opens the message without one), before the typed text, one element per
+opens the envelope's content without one), before the typed text, one element per
 line in the order added:
 
 ```text

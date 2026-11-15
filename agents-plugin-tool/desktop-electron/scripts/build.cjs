@@ -28,12 +28,13 @@ async function build({ platform = process.platform, arch = process.arch, cache, 
       fs.copyFileSync(path.join(root, file), path.join(source, file));
     }
     fs.mkdirSync(path.join(source, 'icons'));
-    fs.copyFileSync(path.join(root, 'icons/icon.png'), path.join(source, 'icons/icon.png'));
+    for (const file of ['icon.png', 'icon.ico']) {
+      fs.copyFileSync(path.join(root, 'icons', file), path.join(source, 'icons', file));
+    }
     fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({
       name: pkg.name, productName: 'Werkschaft', version: pkg.version, main: pkg.main, author: pkg.author,
     }));
-    let icon;
-    // Windows acceptance uses Electron's default icon; custom delivery is Phase 3.
+    let icon = platform === 'win32' ? path.join(source, 'icons/icon.ico') : undefined;
     if (platform === 'darwin') {
       const iconset = path.join(stage, 'icon.iconset');
       fs.mkdirSync(iconset);

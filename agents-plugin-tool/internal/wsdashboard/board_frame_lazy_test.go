@@ -257,7 +257,8 @@ if (bad.length) console.log(bad.join("\n"));
 // frame heights are restored, for an adopted closed page, and for a
 // history load; the toggle listener is a capture listener. Every place that
 // puts topics under the shared visibility source puts them under the
-// viewport bands too (bandBoard).
+// viewport bands too (bandBoard). Capsule note editors bind between wbForm
+// initialization and the initial band/mount pass without changing that order.
 func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 	raw, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
@@ -273,7 +274,7 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 		"adopted page":   `adopted: function \(n\) \{\n[^}]*restoreOpen\(n\);\n\s+mountFrames\(n\);`,
 		"history load":   `"wbhistoryload", function \(e\) \{\n[^}]*restoreOpen\(el\);\n\s+mountFrames\(el\);`,
 		"toggle capture": `doc\.addEventListener\("toggle", frameToggle, true\);`,
-		"bands at load":  `if \(window\.wbForm\) window\.wbForm\(\);\n(\s+//[^\n]*\n)*\s+boardBoxes\(\)\.forEach\(bandBoard\);\n\s+mountFramesPaced\(doc\);`,
+		"bands at load":  `if \(window\.wbForm\) window\.wbForm\(\);\n\s+bindCapsuleNotes\(\);\n(\s+//[^\n]*\n)*\s+boardBoxes\(\)\.forEach\(bandBoard\);\n\s+mountFramesPaced\(doc\);`,
 		"bands at swap":  `ins\.forEach\(watchBoard\); \}\n\s+ins\.forEach\(bandBoard\);`,
 		"bands adopted":  `adopted: function \(n\) \{\n[^}]*watchBoard\(n\);\n\s+bandBoard\(n\);`,
 		"bands closed":   `watchBoard\(page\);\n\s+bandBoard\(page\);`,

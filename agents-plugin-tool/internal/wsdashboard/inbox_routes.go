@@ -80,9 +80,10 @@ var messageBodyLimit = inboxBodyLimit + webBodyAllowance + wsinbox.MaxImages*bas
 
 // messageRequest is the message route's body. Unknown fields are ignored.
 type messageRequest struct {
-	Text   string              `json:"text"`
-	Chips  []wsinbox.Chip      `json:"chips"`
-	Topics []wsinbox.TopicNote `json:"topics"`
+	UTCOffsetMinutes *int                `json:"utcOffsetMinutes,omitempty"`
+	Text             string              `json:"text"`
+	Chips            []wsinbox.Chip      `json:"chips"`
+	Topics           []wsinbox.TopicNote `json:"topics"`
 	// Mentions are the board text the user selected and added, in order.
 	Mentions []wsinbox.Mention `json:"mentions"`
 	// Picks are the page elements picked in a web card, and Consoles the
@@ -320,7 +321,7 @@ func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, local bool
 	if !slices.ContainsFunc(snap.Commands, func(c wslive.SlashCommand) bool { return c.Name == req.Command }) {
 		return http.StatusBadRequest, fmt.Sprintf("/%s is not a command this session runs", req.Command)
 	}
-	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Picks: req.Picks, Consoles: req.Consoles, Command: &wsinbox.Command{Name: req.Command, Args: req.Args}}
+	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Picks: req.Picks, Consoles: req.Consoles, Command: &wsinbox.Command{Name: req.Command, Args: req.Args}, UTCOffsetMinutes: req.UTCOffsetMinutes}
 	d.inboxMu.Lock()
 	name, _, err := wsinbox.Send(dir, entry, now)
 	d.inboxMu.Unlock()
@@ -398,7 +399,7 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		fmt.Fprintf(d.log, "dashboard: write attachments: %v\n", err)
 		return http.StatusInternalServerError, "could not store the images"
 	}
-	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Picks: req.Picks, Consoles: req.Consoles, Images: append(paths, written...), ImageNums: nums}
+	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Picks: req.Picks, Consoles: req.Consoles, Images: append(paths, written...), ImageNums: nums, UTCOffsetMinutes: req.UTCOffsetMinutes}
 	name, merged, err := wsinbox.Send(dir, entry, now)
 	if err != nil {
 		removeFiles(written)

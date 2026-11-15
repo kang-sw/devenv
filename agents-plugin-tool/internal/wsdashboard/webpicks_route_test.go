@@ -27,8 +27,8 @@ func TestMessageCarriesPicksAndConsoles(t *testing.T) {
 	wantText := `<wb:pick url="http://localhost:5173/settings" selector="#save">Save</wb:pick>` + "\n" +
 		`<wb:pick url="http://localhost:5173/settings" selector="#empty"></wb:pick>` + "\n\n" +
 		`<wb:console url="http://localhost:5173/settings">first error` + "\nsecond error</wb:console>\n\nsee"
-	if held[0].Entry.Text() != wantText {
-		t.Fatalf("held text = %q", held[0].Entry.Text())
+	if inboxBody(t, held[0].Entry) != wantText {
+		t.Fatalf("held text = %q", inboxBody(t, held[0].Entry))
 	}
 
 	// The held bubble shows capsules, not element text.

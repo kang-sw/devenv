@@ -14,6 +14,9 @@
   // load (luIcon, below).
   var SVGNS = "http://www.w3.org/2000/svg";
   var rid = root.getAttribute("data-rid");
+  var worktree = root.getAttribute("data-worktree") || "", cardIdentity = worktree ? "wt:" + worktree : rid;
+  // Browser identity and transport authority are deliberately separate.
+  function browsePost(route, body, done) { post("/s/host0/" + route, body, done); }
   // The iframe shell (shell.js, the shell block below): shell marks the
   // shell page, which holds the rail and the top header and no page's own
   // content; framed marks a page the shell frames (?frame=1), which leaves
@@ -60,6 +63,17 @@
     var ms = +t.getAttribute("data-ms");
     if (!ms) return;
     var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago" || f === "rel";
+    if (f === "user") {
+      var at = t.getAttribute("datetime"), minutes = Math.max(0, Math.floor((now - ms) / 60000));
+      // Absolute clocks and "today" use the envelope's sender offset, not
+      // the viewer's zone. The full original date/time/offset stays on hover.
+      var zone = at.slice(-6), offset = (+zone.slice(1, 3) * 60 + +zone.slice(4)) * (zone[0] === "-" ? -1 : 1);
+      var today = new Date(now + offset * 60000).toISOString().slice(0, 10);
+      var label = minutes < 60 ? wsT("js.user.minutes", minutes) : (at.slice(0, 10) === today ? "" : at.slice(5, 7) + "/" + at.slice(8, 10) + " ") + at.slice(11, 16);
+      if (t.textContent !== label) t.textContent = label;
+      t.title = at;
+      return;
+    }
     if (rel) {
       var s = f === "since" ? dur(now - ms) : f === "rel" ? relAge(now - ms) : wsT("js.ago", dur(now - ms));
       if (t.textContent !== s) t.textContent = s;
@@ -114,7 +128,7 @@
     if (doc.hidden || shHidden) return;
     var now = Date.now();
     if (!tickSets || !window.MutationObserver) tickSets = {
-      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]'),
+      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"], time[data-ms][data-f="user"]'),
       paces: q("em.u-pace[data-reset]")
     };
     tickSets.times.forEach(function (t) { fmtTime(t, now); });
@@ -332,7 +346,7 @@
     layoutMode = v;
     if (grid) grid.setAttribute("data-layout", v);
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
-    if (live) revealPanes();
+    if (live || worktree) revealPanes();
     if (cardBoard) window.WsCards.relayout();
   }
   // The tree and the conversation share their column at a fixed ratio; the
@@ -419,7 +433,7 @@
     q("#ctabs [data-ctab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ctab") === t)); });
     revealPanes();
   }
-  if (live) {
+  if (live || worktree) {
     // "auto" crosses its breakpoint on a resize without a click.
     window.addEventListener("resize", revealPanes);
   }

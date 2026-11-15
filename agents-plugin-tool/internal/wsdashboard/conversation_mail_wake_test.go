@@ -128,6 +128,9 @@ func TestConversationMailWakeReplyIDHeader(t *testing.T) {
 			if strings.Contains(html, "mail-notification") || strings.Count(html, `href="/s/suspectcaboosetalonunretired"`) != 1 || !strings.Contains(html, "Synthetic regression &lt;text&gt;") || !strings.Contains(html, "[ws mailbox]") || strings.Count(html, ">EXEC 4</a>") != 1 || strings.Count(html, `class="mail-block"`) != 1 || strings.Count(html, `class="mailline recv"`) != 1 {
 				t.Fatalf("missing linked presentation or raw diagnostics: %s", html)
 			}
+			if !strings.Contains(html, `<span class="arr">←</span><svg class="i mail-icon"`) || strings.Count(html, `class="i mail-icon"`) != 1 {
+				t.Fatalf("matched wake must have one mail icon immediately after its inbound arrow: %s", html)
+			}
 			matchedHash := set[regionEntries].Hash
 			marker := `<span hidden data-entry="` + ring[0].Name + `" data-mail-wake="suppressed"></span>`
 			if !strings.Contains(html, marker) || !strings.Contains(html, `<article class="mail-block" data-entry="`+ring[1].Name+`" data-mail-wake="matched">`) || strings.Count(html, "data-entry=") != 2 {
