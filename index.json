@@ -596,7 +596,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T03:19:47Z",
+        "touched_at": "2026-11-15T03:47:50Z",
         "impl": {
           "branch": "impl/develop/robin-caddy-aroma"
         }
@@ -881,9 +881,6 @@
     },
     "261115-feat-ws-whiteboard-topic-interleaved-timeline": {
       "registered_at": "2026-11-15T03:11:31Z"
-    },
-    "261115-feat-ws-whiteboard-topic-state-badge": {
-      "registered_at": "2026-11-15T02:04:07Z"
     },
     "261115-feat-ws-whiteboard-topic-waiting-on": {
       "registered_at": "2026-11-15T03:33:00Z"
