@@ -789,6 +789,28 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	h.send(id, "two")
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"), toolUseLine("u2", "toolu_1"), stateLine(HarnessWaiting), canUseToolLine("req-1", "toolu_1"))
 	eventually(t, "the prompt", func() bool { return len(h.state(id).Approvals) == 1 })
+	// Mapper control sends are asynchronous. The fake appends each answer
+	// under the input lock, so observe the launch's and both inits' asks
+	// before capturing the holder's final sequence, including ws-context-2.
+	eventually(t, "the automatic control answers to be queued", func() bool {
+		inputs := h.holders.inputs(holder, "control_request")
+		for _, request := range []string{"ws-commands", "ws-context-1", "ws-context-2"} {
+			if !slices.ContainsFunc(inputs, func(line string) bool {
+				return strings.Contains(line, `"request_id":"`+request+`"`)
+			}) {
+				return false
+			}
+		}
+		return true
+	})
+	// The answers can follow the prompt; wait for their LineEnds too.
+	target := uint64(h.holders.records(holder))
+	c := h.runner.conv(id)
+	eventually(t, "all holder records to be applied before shutdown", func() bool {
+		var applied bool
+		c.do(func() { applied = c.seq >= target })
+		return applied
+	})
 	ringBefore := h.ring(id)
 	inputsBefore := h.holders.inputs(holder, "")
 
