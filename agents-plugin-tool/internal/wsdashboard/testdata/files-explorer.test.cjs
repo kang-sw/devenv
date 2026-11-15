@@ -35,7 +35,7 @@ function event(n, type, extra) { var e = Object.assign({ target: n, preventDefau
 function key(n, key) { return event(n, 'keydown', { key }); }
 function slash(n) { var e = { target: n, key: '/', preventDefault() { this.defaultPrevented = true; } }; doc.listeners.keydown.slice().forEach(f => f(e)); }
 var doc = new Doc(), win = { WsCards: { icon: name => '<svg><use href="#l-' + name + '"/></svg>' }, AbortController, innerWidth: 1200, innerHeight: 900, listeners: {}, addEventListener: El.prototype.addEventListener, removeEventListener: El.prototype.removeEventListener };
-new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, k => k, k => k, fetchControlled, AbortController, later, cancel);
+new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, k => k, (k, n) => k === 'js.files.count' ? n + (n === 1 ? ' item' : ' items') : k, fetchControlled, AbortController, later, cancel);
 function explorer(rid, local = true, options = {}) {
   var el = doc.body.appendChild(new El('section', doc)); el.className = 'fpane';
   var store = options.store || {}, previews = [];
@@ -44,6 +44,61 @@ function explorer(rid, local = true, options = {}) {
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
 function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-root').click(); x.at('.froot-pop .fpin').value = path; x.at('.fgo .pr').click(); }
+async function sidebarToneChecks() {
+  var x = explorer('sidebar-tone'); x.instance.shown();
+  check('folder header is present while loading without a fabricated item count', [x.at('.ftree-head').textContent, x.all('.fcount').length], ['js.files.folders', 0]);
+  var root = listing('/sidebar-tone', [{ name: 'src', dir: true }, { name: 'docs', dir: true }, { name: 'README.md' }, { name: '.env' }, { name: 'ignored', dir: true, ign: true }], true);
+  await answer(take('sidebar-tone', 'list', ''), root);
+  check('localized count follows the last row and counts only visible entries', [x.at('.fcount').textContent, x.at('.fdirectory').children.slice(-1)[0] === x.at('.fcount'), x.at('.fcount').getAttribute('role'), x.all('.ftree-head').length], ['4 items', true, null, 1]);
+  x.all('.fhd button')[2].click();
+  var dot = x.all('.fpop input')[1], ign = x.all('.fpop input')[0];
+  dot.checked = true; event(dot, 'change');
+  check('count tracks hidden-dot filtering', [x.at('.fcount').textContent, x.all('.fentry').length], ['3 items', 3]);
+  ign.checked = true; event(ign, 'change');
+  check('count tracks show-ignored filtering', [x.at('.fcount').textContent, x.all('.fentry').length], ['4 items', 4]);
+  key(x.at('.fpop'), 'Escape');
+
+  x.instance.navigate('src/pkg/deep');
+  check('direct deep navigation first requests only its target', requests.filter(r => !r.taken && r.url.pathname === '/s/sidebar-tone/fs/list').map(r => r.url.searchParams.get('dir')), ['src/pkg/deep']);
+  await answer(take('sidebar-tone', 'list', 'src/pkg/deep'), listing('/sidebar-tone/src/pkg/deep', [{ name: 'leaf.go' }]));
+  check('sidebar requests only missing ancestor listings, not siblings or descendants', requests.filter(r => !r.taken && r.url.pathname === '/s/sidebar-tone/fs/list').map(r => r.url.searchParams.get('dir')).sort(), ['src', 'src/pkg']);
+  await answer(take('sidebar-tone', 'list', 'src/pkg'), listing('/sidebar-tone/src/pkg', [{ name: 'deep', dir: true }, { name: 'sibling', dir: true }]));
+  await answer(take('sidebar-tone', 'list', 'src'), listing('/sidebar-tone/src', [{ name: 'pkg', dir: true }, { name: 'other', dir: true }]));
+  check('out-of-order ancestors reveal the current directory without opening its descendants', [x.at('[data-path="src"]').getAttribute('aria-expanded'), x.at('[data-path="src/pkg"]').getAttribute('aria-expanded'), x.at('[data-path="src/pkg/deep"]').getAttribute('aria-expanded'), x.at('[data-path="src/pkg/deep"]').getAttribute('aria-current'), x.at('.fcount').textContent, x.all('.ftree-head').length], ['true', 'true', 'false', 'location', '1 item', 1]);
+  check('ancestor completion does not fetch unrelated folders', requests.filter(r => !r.taken && r.url.pathname === '/s/sidebar-tone/fs/list').length, 0);
+  x.all('.fhd button')[0].click();
+  check('explicit collapse still works', !!x.at('[data-path="src/pkg/deep"]'), false);
+  x.instance.navigate('src/pkg/deep');
+  check('cached navigation expands ancestors without refetching', [!!x.at('[data-path="src/pkg/deep"]'), requests.filter(r => !r.taken && r.url.pathname === '/s/sidebar-tone/fs/list').length], [true, 0]);
+  x.all('.fview-modes button')[4].click();
+  check('columns share cached ancestors and each count follows its entries', [x.all('.fcount').map(n => n.textContent), requests.filter(r => !r.taken && r.url.pathname === '/s/sidebar-tone/fs/list').length], [['4 items', '2 items', '2 items', '1 item'], 0]);
+  x.all('.fview-modes button')[0].click();
+  x.instance.navigate('docs');
+  var empty = listing('/sidebar-tone/docs', []); empty.more = true;
+  await answer(take('sidebar-tone', 'list', 'docs'), empty);
+  check('empty and truncated notices remain alongside a zero count', [x.at('.fcount').textContent, x.all('.fdirectory .fnote').map(n => n.textContent)], ['0 items', ['js.files.empty', 'js.files.more']]);
+
+  x.instance.newTab({ dir: 'docs/nested' });
+  await answer(take('sidebar-tone', 'list', ''), root);
+  await answer(take('sidebar-tone', 'list', 'docs/nested'), listing('/sidebar-tone/docs/nested', [{ name: 'kept.go' }]));
+  var staleTabAncestor = take('sidebar-tone', 'list', 'docs');
+  x.all('.ftab-select')[0].click();
+  await answer(staleTabAncestor, listing('/sidebar-tone/docs', [{ name: 'late', dir: true }]));
+  check('late ancestor listing cannot alter another tab', [x.instance.location().dir, !!x.at('[data-path="docs/late"]'), x.at('.fcount').textContent], ['docs', false, '0 items']);
+  x.all('.ftab-select')[1].click();
+  await answer(take('sidebar-tone', 'list', 'docs'), listing('/sidebar-tone/docs', [{ name: 'nested', dir: true }]));
+  check('resumed tab retries its missing ancestor and reveals its restored directory', [x.at('[data-path="docs"]').getAttribute('aria-expanded'), x.at('[data-path="docs/nested"]').getAttribute('aria-current'), x.at('.fcount').textContent], ['true', 'location', '1 item']);
+
+  x.instance.navigate('fresh/mid/end');
+  await answer(take('sidebar-tone', 'list', 'fresh/mid/end'), listing('/sidebar-tone/fresh/mid/end', []));
+  var staleParent = take('sidebar-tone', 'list', 'fresh/mid'), staleGrandparent = take('sidebar-tone', 'list', 'fresh');
+  rootRequest(x, '/replacement');
+  await answer(take('sidebar-tone', 'list', ''), listing('/replacement', [{ name: 'new.go' }]));
+  await answer(staleParent, listing('/sidebar-tone/fresh/mid', [{ name: 'end', dir: true }]));
+  await answer(staleGrandparent, listing('/sidebar-tone/fresh', [{ name: 'mid', dir: true }]));
+  check('late ancestors cannot repaint a replacement root', [x.instance.location(), x.all('.fr[data-path]').length, x.at('.fcount').textContent, x.all('.ftree-head').length], [{ root: '/replacement', dir: '' }, 0, '1 item', 1]);
+  x.instance.destroy();
+}
 async function pathBarChecks() {
   var notices = [], p = explorer('paths', true, { toast: s => notices.push(s) }), peer = explorer('path-peer');
   p.instance.shown(); peer.instance.shown();
@@ -487,6 +542,7 @@ async function pathBarChecks() {
   check('closed window aborts request and drops late answer without affecting peer', [closingWindow.options.signal.aborted, left.el.children.length, !!right.at('[data-path="surviving.go"]')], [true, 0, true]);
   right.q.value = 'cancel-before-start'; event(right.q, 'input'); right.instance.destroy(); await timers();
   check('destroy cancels pending debounce', requests.filter(r => !r.taken && r.url.pathname === '/s/search-tabs/fs/find').length, 0);
+  await sidebarToneChecks();
   await pathBarChecks();
   // Root suggestions belong to the open popover, never another tab or owner.
   var notices = [], choices = explorer('root-choices', true, { toast: s => notices.push(s) });
