@@ -359,9 +359,6 @@
     "261114-chore-ws-dashboard-index-removal-diagnostics": {
       "registered_at": "2026-11-14T12:12:39Z"
     },
-    "261114-chore-ws-tracker-start-date-docs-and-query-output": {
-      "registered_at": "2026-11-13T16:03:50Z"
-    },
     "261114-epic-ws-common-session-foundation": {
       "registered_at": "2026-11-14T11:13:55Z"
     },
@@ -561,7 +558,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/config-bulk-impl",
         "phase": "active",
-        "touched_at": "2026-11-15T09:21:37Z"
+        "touched_at": "2026-11-15T09:23:06Z",
+        "impl": {
+          "branch": "impl/exec4/config-bulk-impl/trade-fetal-cozy"
+        }
       }
     },
     "261115-feat-ws-daemon-release-auto-update": {
