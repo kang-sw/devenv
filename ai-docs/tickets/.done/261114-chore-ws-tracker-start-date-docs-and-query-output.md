@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: dfa74cca6e935cc5
 sage-review-completeness-reviewed: dfa74cca6e935cc5
+completed: 2026-11-15
 ---
 
 # Document the tracker start date and print it in query output
@@ -84,3 +85,12 @@ the ticket's touch points:
 ### Phase 1: Document and display the existing start date
 
 Document the existing `start` create/edit attribute, `clear="start"`, validation relationship with `due`, and hook `detail.start` field in the canonical tracker reference and its standard mirrors. Include a present start date in existing tracker query and show-card text renderers, following the adjacent due-date format; leave absent-start output unchanged. Add focused documentation/mirror and renderer coverage. Do not change storage, validation, event or API argument semantics.
+
+### Result (bd6f09350) - 2026-11-15
+
+- Documented the existing start create/edit attribute, clear values, permissive date checks, one-sided range validation, concurrent replay tolerance, and optional hook detail.start. Regenerated the canonical resource manifest and wsflow mirror; copied the two changed resource files to Pi, preserving byte identity.
+- Added present start dates immediately before due in item rows, assignment rows, item detail, and support cards. Nil-start branches retain their previous output, including card due none and the card prefix. No storage, validation, event, JSON, or API changes.
+- Verification: isolated offline `go test ./internal/mcp -count=1 -run '^TestTracker(StartDateRenderers|TeamScopeRendersTheWorkloadRollup|CallsTurnTheKnobOnOnlyWhenTheySucceed|Query.*|ManualSectionsRenderOnceAndNeverForSpawnedKeys|PlaybookReadAppendsCommandSyntax|UpdateStart|ShowCardsOwnStoreOnly)$'` passed (35.302s). `go test ./internal/wsrsrc -count=1 -run '^Test(ShippedManifestUpToDate|WsflowRsrcMirrorUpToDate|PiMirrorUpToDate)$'` passed (0.332s). Both resource regeneration entrypoints passed; `git diff --check` passed.
+- Independent one-pass Lite review of 9a6d6dade..bd6f09350 was clean, with no findings. Pre-Result/closure checkpoint was sent to the lead; integration remains lead-owned.
+- Decisions: used existing adjacent-due syntax in each renderer rather than a new formatting interface. T0 remains documentation and read-only additive text only.
+- Omitted: broad package/runtime/browser/provider/download checks and full i18n tests, as instructed; no locale keys changed. No second review or separate fresh-reader documentation audit ran. Unresolved: none.
