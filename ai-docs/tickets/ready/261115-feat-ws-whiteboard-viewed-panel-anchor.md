@@ -293,3 +293,65 @@ execution policy (no heavy-slot wait):
 
 | # | Title | Severity |
 |---|-------|----------|
+
+## Implementation Checkpoint — 2026-11-15 (incomplete)
+
+**VERIFIED:** Work remains on `impl/develop/bling-fog-scorn`, based on
+`72df121fcadb5e4e027b84c15474e402f9adfc34`. The merged (789) frontier was
+confirmed. The unlanded (793) move map was read for coordination only; no split
+commit, source repin, or change to its scheduling boundary was imported.
+
+- `2f8f34a82`: short, nested reading-line transactions replace ordinary keep
+  sessions; persistent scroller owners handle input/cooldown and retain explicit
+  jump priority. History clipping and intentional navigation use that owner.
+- `ce6ad8116`: dashboard rendering, relative placement, and frame-height staging
+  share a bottom pending-change bar. Main/pinned batches pre-capture through the
+  owner; owned scrollers skip numeric and topic-resize fallback writers.
+- `48764f937`: fetched closed-page transfers and inline pins are included.
+  Eligible fetched-panel rendering can update in place while placement remains
+  staged. Existing server-rendered owner receipts admit only owner rows when
+  a concurrent same-topic snapshot also changes external panels; a local send
+  alone grants no blanket topic exemption. Local memo/sent-state paths remain
+  immediate. The exposed viewport includes rail clearance and horizontal clips.
+
+**VERIFIED deterministic evidence at `48764f937`:** Both asset syntax checks
+passed. From `agents-plugin-tool/`, with `GOTOOLCHAIN=local GOPROXY=off
+GOSUMDB=off`, these commands passed under individual 120-second outer caps:
+
+```sh
+go test ./internal/wswhiteboard -count=1 -timeout=90s -run '^(TestViewKit.*UnderNode|TestHistoryScriptPanelChunksAndSwapUnderNode)$'
+# ok: 0.897 s
+go test ./internal/wsdashboard -count=1 -timeout=90s -run '^(TestBoardKeep.*|TestBoardFrameHeightsBatch|TestBoardTopic.*|TestBoardFramesMountLazily|Test.*Viewed.*)$'
+# ok: 11.781 s
+```
+
+Initial focused failures were diagnosed as stale test doubles/wiring or a new
+case retaining an earlier offscreen setup, then corrected without restoring the
+superseded production writers. Each bounded command's final process-group
+inspection found no survivors. These deterministic tests do not establish real
+all-visible browser geometry.
+
+**STOP (f), browser fixture non-convergence:** The new opt-in
+`TestBoardViewedBrowser` and `testdata/viewed-panels.browser.cjs` in
+`302e6e8c0` are an **UNVERIFIED checkpoint**, not acceptance. Two bounded runs of
+`go test ./internal/wsdashboard -count=1 -timeout=150s -run
+'^TestBoardViewedBrowser$' -v` failed before any current-product geometry
+predicate ran. Run 1 found zero exact inline `stream.js` occurrences during
+baseline substitution. Run 2 still recorded the missing stream prefix and
+then timed out at the 8-second startup wait. The root cause is **INFERRED** to
+be fixture interception/startup, not a demonstrated product defect. No third
+attempt was made.
+
+Full commands, environment, outputs, diagnostic capture and independent owned
+process cleanup evidence are under
+`ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser/`:
+`run-1.log`, `run-2.log`, `asset-mismatch.json`, `failure.json`, `failure.png`,
+`results.json`, `browser-cleanup.json`, and `supervisor-{1,2}.json`. Both outer
+supervisors and the browser cleanup record have empty final process lists.
+`failure.png` is a startup diagnostic, not a successful baseline/result capture.
+
+**Pending:** Repair and independently verify the offline browser fixture,
+complete the matching baseline/result geometry and captures, and run the route's
+allocated one-pass lite review. No Phase 1 Result, closure, merge, push, shared
+endpoint/daemon action, provider/holder use, installation/download, or deployment
+is claimed. MAIN owns continuation and integration.
