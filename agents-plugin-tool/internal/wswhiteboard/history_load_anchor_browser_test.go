@@ -12,7 +12,9 @@ import (
 
 // Loading above a fold keeps the row under it at the same viewport position,
 // in the page scroller and in a nested one, for a top fold and an inner fold,
-// across repeated clicks. Needs WS_PLAYWRIGHT_MODULE.
+// across repeated clicks, also while late images in the loaded rows size.
+// A wheel during that settle window ends the hold, and the hold ends by
+// itself. Needs WS_PLAYWRIGHT_MODULE.
 func TestHistoryLoadAnchorBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
@@ -51,7 +53,7 @@ func TestHistoryLoadAnchorBrowser(t *testing.T) {
 	if shots == "" {
 		shots = dir
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "testdata/history-load-anchor.cjs", top, inner, shots)
 	cmd.WaitDelay = 5 * time.Second
