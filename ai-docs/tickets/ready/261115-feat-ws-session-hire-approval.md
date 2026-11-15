@@ -417,6 +417,82 @@ raised:
   shard budget, not evidence that a full package run requires or finishes
   within 30 minutes.
 
+### Result (6607d16a5) - 2026-11-15
+
+Phase 1 landed in `6607d16a5`, with the self-review recovery correction in
+`b80fa9828`. Phases 2 and 3 remain unimplemented; this ticket stays in `ready/`.
+
+- Added daemon-owned `sessions/<reply-id>/hiring.json` for hosted and CLI
+  sessions, and `hire-proposals.json` for pending proposals, approval intent,
+  terminal outcomes, and notification retry state. The hired marker survives
+  rail detachment and typed registration/runner-record rewrites.
+- Added static lead tools `session.request_hire` and `session.roster`.
+  Requests validate both required texts and the 16 KiB recovery-context limit,
+  reject non-root/disabled/hired callers, and open the env-less reply channel.
+  The roster proxies the daemon's read-only route and projects exactly the
+  seven agreed fields from rail rows and the owner-edited rail hierarchy.
+- Added owner controls: `GET|POST /s/<rid>/hiring`,
+  `GET /session-hire`, and `POST /session-hire/<id>/approve|reject`.
+  Writes use the existing trusted dashboard gate. The flag and rail attach
+  operations are serialized; an enabled root cannot be nested. The new
+  `hiring` layout refusal has UI text in all 11 locales.
+- Pending requests retain their wall-clock deadline over restart. Registry
+  refreshes, startup recovery, and approval rechecks withdraw ended
+  requesters; live process-stopped requesters retain their requests.
+  Terminal mail echoes recovery context and wakes the existing mailbox hub.
+- Approval uses `Runner.CreateLead`, the requester's worktree, and the
+  owner's final settings. A sidecar request correlation makes creation
+  idempotent without adding ParentRef, key lineage, or a second grouping
+  field. Creation errors leave the request pending for owner retry.
+- The self-review found a provisional-creation crash edge. The correction
+  journals `creation_attempted` before creation and rolls back only a
+  non-approved proposal's correlated creation before mailing its terminal
+  outcome. Approved peers never enter rollback and remain open when their
+  requester closes. Dormant rail child links also block the hiring flag so
+  reviving a parent cannot turn an enabled root into a nested session.
+
+Compatibility remains **T0 additive**. Source references below are relative to
+`agents-plugin-tool/internal/`: the new metadata reader/writer uses only
+`hiring.json` (`wsdashboard/session_hiring.go:21-49`), and proposal reads and
+writes use only the new file (`wsdashboard/session_hire.go:18,76-95`). Older
+binaries have neither reader/writer, so their ordinary typed rewrites of
+`registration.json` (`wsdashboard/registry.go:236-256,282-315`) and
+`agent.json` (`wsagent/record.go:294`) leave these additions in place; reopening
+the new version reads the retained sidecars. The existing record shapes and
+`MintLead` authority (`mcp/agent_keys.go:38-43`) are unchanged. Tool definitions
+are appended (`mcp/server.go:5560`, `mcp/session_hire.go:115-132`); existing tool
+names, calls, key gates, mailbox schema, and rail-layout shape are retained.
+
+Verification from `agents-plugin-tool/`, all passed with
+`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+
+```text
+go test ./internal/wsdashboard -run '^(TestHiring|TestRailLayout|TestRailScript$|TestRailRow|TestSessionLabel)' -count=1 -timeout=5m
+go test ./internal/wsagent -run '^(TestHiring|TestLeadControlRoutes|TestLeadIsolation|TestLegacyLeadIsolation|TestLeadRow)' -count=1 -timeout=5m
+go test ./internal/mcp -run '^(TestHiring|TestAllowedToolsEnvLimitsListAndCall|TestLeadLoginReturnsKeyAndRoot|TestServeStdioToolsListAndCall|TestPiStop)' -count=1 -timeout=5m
+go test ./internal/wsi18n -count=1 -timeout=5m
+go test ./internal/wsmailbox -run '^TestPostSystemQueuesSenderlessMail$' -count=1 -timeout=5m
+go test ./cmd/ws-mcp -run '^TestAgentMCPHostedWorkerKeepsTokenForwarding$' -count=1 -timeout=5m
+go test -race ./internal/wsdashboard ./internal/wsagent ./internal/mcp -run '^TestHiring' -count=1 -timeout=5m
+```
+
+`git diff --check` passed. Tests used disposable daemons, fake holders, and
+scratch stores only; no shared daemon/server or installed runtime was changed.
+The worker performed the lite review itself because the caller prohibited
+subagent spawning; no independent-review claim is made.
+
+Remaining limitation (minor): `PostSystem` and the proposal's `Notified`
+checkpoint are separate atomic writes
+(`wsdashboard/session_hire.go:291-310`, `wsmailbox/replyid.go:157-165`). A crash
+between them can resend the same request-id outcome. Normal repeated
+approval, restart restoration, retained failed-mail retry, and idempotent
+creation are tested; crash-atomic exactly-once mail is not claimed. The existing
+mail channel and shared mailbox format were preserved as required.
+
+Omitted: Phase 2 UI and mockup captures, Phase 3 shipped guidance/mirrors,
+independent exploration/review, full dashboard/MCP package runs, and live
+provider/service checks. These were outside Phase 1 or prohibited by the caller.
+
 ### Phase 2: Dashboard approval modal, rail cues, and the root toggle
 
 - Build to the mockups ((951)): `ai-docs/tickets/assets/261115-feat-ws-session-hire-approval/approval-modal.html` and
