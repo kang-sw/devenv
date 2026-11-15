@@ -76,18 +76,31 @@ func pruneObserved(evidenceDir string) {
 // reads them (first file in name order wins an identity).
 func observedRepeats(evidenceDir string, entries []os.DirEntry) []string {
 	type candidate struct {
-		path string
-		r    ObservedRecord
+		path    string
+		r       ObservedRecord
+		regular bool
 	}
 	st := NewState("")
 	seen := map[string]bool{}
 	duplicates := map[string]bool{}
 	grouped := map[string][]candidate{}
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".json") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		path := filepath.Join(evidenceDir, entry.Name())
+		regular := entry.Type().IsRegular()
+		if !regular {
+			// ReadObserved follows readable symlinks. Include their records
+			// in its fold/identity order, but never delete a link or its target.
+			if entry.Type()&os.ModeSymlink == 0 {
+				continue
+			}
+			info, err := os.Stat(path)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+		}
 		r, valid, err := readObservedRecord(path, os.Open)
 		if err != nil || !valid {
 			continue
@@ -106,7 +119,7 @@ func observedRepeats(evidenceDir string, entries []os.DirEntry) []string {
 			continue
 		}
 		seen[key] = true
-		grouped[r.AgentID] = append(grouped[r.AgentID], candidate{path: path, r: r})
+		grouped[r.AgentID] = append(grouped[r.AgentID], candidate{path: path, r: r, regular: regular})
 	}
 	var out []string
 	for _, list := range grouped {
@@ -120,7 +133,7 @@ func observedRepeats(evidenceDir string, entries []os.DirEntry) []string {
 			c := list[i]
 			// Keep duplicate winners too: deleting one could expose a losing
 			// file with different contents and change the next reader's fold.
-			if c.r.Model == list[i-1].r.Model && !duplicates[observationKey(c.r)] {
+			if c.regular && c.r.Model == list[i-1].r.Model && !duplicates[observationKey(c.r)] {
 				out = append(out, c.path)
 			}
 		}

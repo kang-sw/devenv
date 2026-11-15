@@ -241,7 +241,9 @@ func TestObservedRetentionProtectedFiles(t *testing.T) {
 			continue
 		}
 		_, err := os.Stat(evidencePath(dir, r))
-		if i == 2 || i == 3 {
+		// The readable symlink aliases t3. Its regular identity winner is
+		// protected with the loser; count bounds use unique-record fixtures.
+		if i == 3 || (i == 2 && !linked) {
 			if !os.IsNotExist(err) {
 				t.Fatalf("ordinary repeat was not pruned: %s: %v", r.ID, err)
 			}
@@ -255,5 +257,57 @@ func TestObservedRetentionProtectedFiles(t *testing.T) {
 	}
 	if len(gotModels[""].History) != 1 || gotModels[""].History[0].Model != "Y" {
 		t.Fatal("different-content loser was exposed")
+	}
+}
+
+func TestObservedRetentionProtectedSymlinkChanges(t *testing.T) {
+	withoutPruneInterval(t)
+	for _, duplicate := range []bool{false, true} {
+		t.Run(fmt.Sprintf("duplicate-winner-%t", duplicate), func(t *testing.T) {
+			dir := t.TempDir()
+			records := retentionRecords("", 20)
+			writeFixture(t, dir, records)
+			x := records[1]
+			x.Model, x.At = "X", 2500
+			if !duplicate {
+				x.ID = "link-only-x"
+			}
+			raw, err := json.Marshal(x)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(dir, "outside-target.json")
+			if err := os.WriteFile(target, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(dir, ObservedDirName, "000-link.json")
+			if err := os.Symlink(target, link); err != nil {
+				if runtime.GOOS != "windows" {
+					t.Fatal(err)
+				}
+				t.Logf("symlinks unavailable on this Windows fixture: %v", err)
+				return
+			}
+			wantModels, wantSnap := visibleModels(t, dir)
+			var cache ObservedCache
+			cache.Load(dir)
+			pruneObserved(filepath.Join(dir, ObservedDirName))
+			gotModels, gotSnap := visibleModels(t, dir)
+			if !reflect.DeepEqual(gotModels, wantModels) || !reflect.DeepEqual(gotSnap, wantSnap) || !reflect.DeepEqual(cache.Load(dir).models, wantModels) {
+				t.Fatal("protected symlink transition lost its regular return point")
+			}
+			if len(gotModels[""].History) != 3 || gotModels[""].History[2].At != 3000 {
+				t.Fatalf("static Y/X/Y return re-dated: %+v", gotModels[""].History)
+			}
+			if got, err := os.ReadFile(target); err != nil || !reflect.DeepEqual(got, raw) {
+				t.Fatal("symlink target changed", err)
+			}
+			if got, err := os.Readlink(link); err != nil || got != target {
+				t.Fatal("symlink changed", err)
+			}
+			if _, err := os.Stat(evidencePath(dir, records[2])); err != nil {
+				t.Fatal("regular return transition deleted", err)
+			}
+		})
 	}
 }
