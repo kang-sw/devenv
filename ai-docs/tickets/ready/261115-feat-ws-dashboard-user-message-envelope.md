@@ -100,11 +100,16 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
   (MAIN note). Rejected: UTC; omitting `at`.
 - **Reversible delimiter escaping** (technical, acked; reversibility
   auto-confirmed from fact population): only the closing-delimiter sequence
-  is escaped. In the envelope body, a literal `</ws:user` becomes
-  `&lt;/ws:user`, and any existing `(&amp;)*&lt;/ws:user` run gains one more
-  `&amp;` level, so the view's unescape (drop one level) restores the exact
-  text, including literal entity input. The rest of the body is
-  byte-identical to today's text. Rejected: leaving it raw (forged block
+  is escaped, by nested entity levels. In the envelope body, a literal
+  `</ws:user` becomes `&lt;/ws:user`, and any existing `&(amp;)*lt;/ws:user`
+  run gains one more `amp;` right after its `&` (`&lt;/ws:user` becomes
+  `&amp;lt;/ws:user`). The view's unescape drops exactly one level per match
+  (`&lt;/ws:user` back to `</ws:user`, otherwise one `amp;` removed), which
+  restores the exact text, including literal entity input. The rest of the
+  body is byte-identical to today's text. Corrected 2026-11-15 by the lead
+  after the worker's stop (c): the earlier wording prefixed a whole `&amp;`
+  to an existing run, so literal `&amp;</ws:user` and `&lt;/ws:user` both
+  encoded to `&amp;&lt;/ws:user` and did not round-trip; intent unchanged. Rejected: leaving it raw (forged block
   boundaries); escaping every `<` (changes all delivered text).
 - **Envelope-first block split, nothing dropped** (technical, acked;
   mixed-batch clause auto-confirmed from fact population): the conversation
