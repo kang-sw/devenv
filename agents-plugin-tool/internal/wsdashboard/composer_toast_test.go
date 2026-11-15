@@ -26,6 +26,8 @@ var bad = [], toasts = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var window = { WsToast: { show: function (t, o) { toasts.push([t, (o && o.kind) || "info"]); } } };
 function wsT(k, a) { return a === undefined ? k : k + ":" + a; }
+var bselections = [], mpend = null;
+function allNums() { return {}; }
 var answer = [true, {}];
 function post(route, body, done) { done(answer[0], answer[1]); }
 var ctext = { value: "", focus: function () {} }, imgs = [], imgSeq = 0, bmentions = [], closeRequests = [], wpicks = [], wconsoles = [], chips = {}, interrupting = false, interruptedTurn = null, cmdSel = null;
@@ -58,7 +60,7 @@ func TestComposerOutcomesToast(t *testing.T) {
 	for _, name := range []string{"sendMessage", "cancelHeld", "steerHeld", "interruptTurn"} {
 		fns.WriteString(composerFunc(t, src, name))
 	}
-	runNode(t, "composer toasts", composerToastPrelude+notes+"var sending = false;\n"+fns.String()+`
+	runNode(t, "composer toasts", selectionCodecSource(t)+composerToastPrelude+notes+"var sending = false;\n"+fns.String()+`
 sendMessage();
 check("an empty send warns", toasts, [["js.send.empty", "warn"]]);
 toasts = []; ctext.value = "hi"; answer = [false, "busy"]; sendMessage();

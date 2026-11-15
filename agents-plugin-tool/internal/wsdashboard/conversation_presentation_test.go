@@ -153,7 +153,7 @@ func TestConversationPresentationInboxUserKeepsAnswersTextAndImage(t *testing.T)
 				html := string(set[regionEntries].HTML)
 				for _, want := range []string{
 					`class="msg user" data-entry="` + ring[0].Name,
-					`<span class="achip"><b>(781)</b> ok<span class="anote" title="keep visible">keep visible</span></span>`,
+					`<span class="achip" title="keep visible"><b>(781)</b> ok<span class="anote">keep visible</span></span>`,
 					`ordinary &lt;words&gt; <span class="imgtag"`,
 					`<img src="/s/self/attachment/0123456789abcdef-1.png"`,
 					`<span class="tnum">#1</span>`,
@@ -176,6 +176,11 @@ func TestConversationPresentationInboxUserKeepsAnswersTextAndImage(t *testing.T)
 	}
 }
 
+func effectHTML(t *testing.T, changes ...wswhiteboard.Effect) string {
+	t.Helper()
+	return presentationHTML(t, []wslive.RingRecord{ringRecord(1, effectPresentation(t, changes...).RingEntry)}, PageContent{}, nil)
+}
+
 func effectPresentation(t *testing.T, changes ...wswhiteboard.Effect) ConvEntry {
 	t.Helper()
 	e, ok := wslive.NewWhiteboardEffects(changes)
@@ -193,8 +198,11 @@ func TestConversationPresentationWhiteboardFoldAndTargets(t *testing.T) {
 			changes[i] = log
 		}
 		e := effectPresentation(t, changes...)
+		if html := effectHTML(t, changes...); strings.Contains(html, "<details") || !strings.Contains(html, `<article class="wbeffects wbupdate"`) {
+			t.Fatalf("log-only update must render as an expanded card, never folded: %s", html)
+		}
 		card := e.WhiteboardCard()
-		if !card.Folded || len(card.Topics) != 1 || len(card.Topics[0].Rows) != count || card.Topics[0].Rows[0].Target != "e7" || card.Topics[0].Target != "topic-706c616e" {
+		if len(card.Topics) != 1 || len(card.Topics[0].Rows) != count || card.Topics[0].Rows[0].Target != "e7" || card.Topics[0].Target != "topic-706c616e" {
 			t.Fatalf("bad log-only card: %+v", card)
 		}
 	}
@@ -204,8 +212,8 @@ func TestConversationPresentationWhiteboardFoldAndTargets(t *testing.T) {
 		{Kind: "item", Topic: "plan", ID: 42, Field: "title", After: "question"},
 		{Kind: "topic", Topic: "plan", Field: "body", After: "changed"},
 	} {
-		if effectPresentation(t, log, extra).WhiteboardCard().Folded {
-			t.Errorf("incorrectly folded %+v", extra)
+		if html := effectHTML(t, log, extra); strings.Contains(html, "<details") || !strings.Contains(html, `<article class="wbeffects wbupdate"`) {
+			t.Errorf("update rendered folded %+v: %s", extra, html)
 		}
 	}
 	e := effectPresentation(t, log,

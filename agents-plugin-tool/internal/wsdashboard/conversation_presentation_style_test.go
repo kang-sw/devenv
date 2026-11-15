@@ -35,8 +35,8 @@ func TestConversationPresentationStyleContract(t *testing.T) {
 		".src.peer-lead { color: var(--wb-ck-ok);",
 		".wbeffects.wbupdate {", ".wbupdate-bar", ".wbupdate-l",
 		".wbupdate-panel .wbupdate-text", "text-overflow: ellipsis; white-space: nowrap;",
-		".wbupdate-items { display: flex; flex-wrap: wrap;", ".wbeffects.wbupdate-line > summary",
-		".wbupdate-line[open] > summary .i", ".wbupdate-status:empty",
+		".wbupdate-items { display: flex; flex-wrap: wrap;",
+		".wbupdate-status:empty",
 		"overflow-wrap: anywhere", ":focus-visible", "outline-offset: 3px",
 	} {
 		if !strings.Contains(section, want) {

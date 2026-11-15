@@ -1,10 +1,6 @@
 package wsdashboard
 
-import (
-	"regexp"
-	"strings"
-	"testing"
-)
+import "testing"
 
 // TestComposerShowsTopicNoteChips pins the composer's topic-note chips
 // (dashboard.js renderChips with topicNotes): each non-empty topic note on
@@ -24,25 +20,12 @@ func TestComposerShowsTopicNoteChips(t *testing.T) {
 		t.Fatal(err)
 	}
 	js := string(data)
-	chips := regexp.MustCompile(`(?s)\n  function renderChips\(\) \{.*?\n  function boardAnswers\(\)`).FindString(js)
-	if chips == "" {
-		t.Fatal("dashboard.js holds no renderChips ... boardAnswers block")
-	}
-	chips = strings.TrimSuffix(chips, "function boardAnswers()")
-	notes := regexp.MustCompile(`(?s)\n  function topicNotes\(\) \{.*?\n  \}\n`).FindString(js)
-	if notes == "" {
-		t.Fatal("dashboard.js holds no topicNotes")
-	}
-	restore := regexp.MustCompile(`(?s)\n  function restoreTopics\(list\) \{.*?\n  \}\n`).FindString(js)
-	if restore == "" {
-		t.Fatal("dashboard.js holds no restoreTopics")
-	}
-	open := regexp.MustCompile(`(?s)\n  function openNote\(note, s\) \{.*?\n  \}\n`).FindString(js)
-	if open == "" {
-		t.Fatal("dashboard.js holds no openNote")
-	}
+	actual := selectionActualSource(t, js,
+		[]string{"ctext =", "chips =", "bmentions =", "closeRequests =", "bselections =", "wpicks =", "cimgs ="},
+		[]string{"$", "chipList", "putChip", "renderChips", "renderSelectionChips", "focusCloseRequest", "topicNotes", "topicNote", "clearTopicNote", "closeTopicNotes", "focusTopicNote", "restoreTopics", "openNote"}, false)
 	runNode(t, "topic-note chip", `
 function El(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.attrs = {}; this.className = ""; this.textContent = ""; this.title = ""; this.hidden = false; this.value = ""; this.events = []; this.style = {}; }
+El.prototype.addEventListener = function () {};
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 El.prototype.appendChild = function (c) { c.parentNode = this; this.children.push(c); return c; };
@@ -58,15 +41,15 @@ El.prototype.click = function () { var n = this.parentNode.querySelector(".tnote
 Object.defineProperty(El.prototype, "textContent", { get: function () { return this._t; }, set: function (v) { this._t = v; if (v === "") this.children = []; } });
 function Event(type, o) { this.type = type; this.bubbles = !!(o && o.bubbles); }
 var doc = { createElement: function (t) { return new El(t); }, createTextNode: function (s) { var e = new El("#text"); e.textContent = s; return e; } };
-var board = new El("div"), cchips = new El("div"), log = [], bad = [], live = false;
+var board = new El("div"), chipSurface = new El("div"), log = [], bad = [], live = false;
+// Native lookup boundary: this isolated chip surface has no image row.
+doc.getElementById = function(id) { return id === "cchips" ? chipSurface : null; };
 function region(name) { return name === "board" ? board : null; }
 var window = {};
 function q(sel, root) { return root.all().filter(function (e) { return e.has("tnote") && e.getAttribute("data-topic") !== null; }); }
 function wsT(k) { return k; }
 function tabShown() { return true; }
 function setTab() {}
-var answer = [{ id: "03", answer: "A", note: "" }], bmentions = [], closeRequests = [], wpicks = [], wconsoles = [];
-function chipList() { return answer; }
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 function topic(name, value, hidden) {
   var s = new El("section"), pen = new El("button"), n = new El("textarea");
@@ -76,10 +59,11 @@ function topic(name, value, hidden) {
   s.appendChild(pen); s.appendChild(n); board.appendChild(s);
   return n;
 }
-`+boardBoxSrc(t, js)+notes+chips+restore+open+`
+`+boardBoxSrc(t, js)+actual+`
+putChip({ id: "03", answer: "A", note: "" });
 var a = topic("Plan \"x\"", "  first note  ", false), b = topic("Empty", "   ", true), c = topic("Later", "closed text", true);
 renderChips();
-function row() { return cchips.children.map(function (el) { return el.className + "|" + el.children.map(function (k) { return k.textContent; }).join("|"); }); }
+function row() { return cchips.children.map(function (el) { var children = el.children[0].className === "mchip-open" ? el.children[0].children.concat(el.children.slice(1)) : el.children; return el.className + "|" + children.map(function (k) { return k.textContent; }).join("|"); }); }
 check("answer chip first, then one chip per non-empty note", row(), ["achip|(03)| A|×", "achip tchip|[Plan \"x\"]|first note|×", "achip tchip|[Later]|closed text|×"]);
 var t1 = cchips.children[1];
 check("chip carries its topic", [t1.getAttribute("data-tchip"), t1.children[2].getAttribute("data-untchip"), t1.children[2].title, t1.title], ["Plan \"x\"", "Plan \"x\"", "js.chip.tnote.remove", "js.chip.tnote.open"]);
@@ -112,7 +96,7 @@ bmentions = [{ topic: "plan", id: "07", text: "line one\n  line two" }, { topic:
 renderChips();
 check("mentions follow the topic notes, the text on one line", row().slice(-2), ["achip mchip|[plan] (07)|line one line two|×", "achip mchip|[Later]|body text|×"]);
 var mc = cchips.children[cchips.children.length - 2];
-check("a mention capsule carries its full text and its index", [mc.title, mc.children[2].getAttribute("data-unmchip"), mc.children[2].title], ["line one\n  line two", "0", "js.wbmention.remove"]);
+check("a mention capsule carries its full text and its index", [mc.title, mc.children[1].getAttribute("data-unmchip"), mc.children[1].title], ["line one\n  line two", "0", "js.wbmention.remove"]);
 process.stdout.write(bad.join("\n"));
 `)
 }
