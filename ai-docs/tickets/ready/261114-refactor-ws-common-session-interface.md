@@ -281,6 +281,61 @@ Verification boundary (fixture contracts; not provider/live-delivery acceptance)
 - runs: `go test ./internal/wsagent` in full; `./internal/mcp` and
   `./internal/wsdashboard` only with `-run` on the touched areas.
 
+### Result (306474cb0) - 2026-11-15
+
+- Added runtime-only `BackendRegistration` at the existing composition root.
+  Registry-driven profile/schema, lead and hiring admission retain production
+  Claude/Pi names and defaults; fake registrations establish extensibility.
+  Lead eligibility is checked on the resolved profile backend before minting,
+  including overridden lead profiles. Existing eligible cross-backend overrides
+  remain valid.
+- Added the approved optional HTTP choices metadata and registry-driven launch
+  buttons/permission selectors, with the legacy Claude/Pi fallback. Lead-only
+  choices do not become tracker-support selections. Typed internal errors retain
+  existing text, HTTP status and control/restart/approval behavior.
+- Extracted `resolveSession` for hosted bootstrap, re-login, manual adoption and
+  render child minting. Key records remain the identity/root/parent authority;
+  CLI and hosted entry remain distinct. Historical split and legacy records
+  are readable without a read-time rewrite. No card storage path or selector
+  was introduced; a future card bootstrap can wrap this core.
+- Compatibility: **T0**, no new MCP tool/argument/response field, hello field or
+  stored shape. Old readers still read/write the unchanged `Profile` shape
+  (`internal/wsagent/profile.go:76,219`); production schema values are pinned
+  equal to the prior builtin schema by `TestRegisteredBackendAdmission`.
+  New descriptors and the session projection are runtime-only
+  (`internal/wsagent/registration.go:14`; `internal/mcp/session_context.go:12`).
+  HTTP choices add only optional fields (`internal/wsagent/support.go:218`);
+  old JS readers ignore them, while new JS falls back when old responses have
+  no lead markers (`internal/wsdashboard/assets/dashboard-leads.js:50`).
+  Existing key readers/writers are unchanged (`internal/mcp/session_auth.go:205`;
+  `internal/mcp/session_layout.go:303`), so reopening needs no reconstruction
+  or migration. Paths in this paragraph are under `agents-plugin-tool/`.
+- One independent Lite review found one Important issue: an overridden lead
+  profile could target a worker-only backend. Fixed it and added refusal-without-
+  minting plus eligible-override fixtures. No Critical or unresolved review
+  finding remains; no second review ran, per Lite allocation.
+- Verification used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`, `-count=1`:
+  - Full `go test ./internal/wsagent -timeout 900s`: completed in 311.971 s,
+    **baseline-red**, not a passing suite. A complete repository archive of
+    exact base `f1ab88a53` completed in 319.547 s with the identical 128 failing
+    test/subtest names and identical 91 assertion locations. The stale bare-text
+    user-envelope expectations/timeouts remain untouched, per the lead's
+    baseline disposition; no added failure was observed.
+  - `go test ./internal/mcp -run 'Test(ResolveSession|HostedFerrule|HostedFlag|UnhostedFerrule|HostedWorkflowManual|Ferrule|Relogin|TheHostedSessionsOwnLogin|ConfigTuneAgentProfile|ConfigListAgentProfile|ConfigRegisteredAgentProfile|RenderMints|RenderMintsLeadScoped|PlaybookRenderDelegateImplementer|PlaybookRenderToolTierOverride|ConfigGet)' -timeout 300s -v`:
+    37 top-level tests passed (8.535 s).
+  - `go test ./internal/wsdashboard -run 'Test(Hiring|LeadPopoverLaunchBehavior|LeadIsolation)' -timeout 180s -v`:
+    15 top-level tests passed (1.568 s), including the extended Node launch UI
+    fixture and fake-registry hiring checks.
+  - `go test ./cmd/ws-mcp -run 'Test.*(Hosted|Lead|Token)' -timeout 180s`:
+    passed (33.250 s). Added registry, error, capability-absence and resolved-
+    backend regression fixtures also passed in the focused contract run and
+    introduced no failure in the final full package run. `git diff --check`
+    passed.
+- Scope: Phase 1 only. Phase 2/current-state consumer adoption and ticket
+  closure remain pending. Verification is fixture-only, not live-provider
+  acceptance; no shared daemon restart, protected port access, Electron,
+  installation, push or branch integration was performed.
+
 ### Phase 2: Adopt current access with behavior and state parity
 
 Depends on this ticket's landed Phase 1. Move existing access consumers onto
