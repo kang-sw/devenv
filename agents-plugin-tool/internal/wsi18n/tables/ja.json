@@ -431,6 +431,7 @@
   "js.pins.width": "ドラッグで幅を変更、ダブルクリックでリセット",
   "js.post.nobrowser": "このブラウザーでは送信できません",
   "js.post.unreachable": "ダッシュボードに接続できません",
+  "js.post.timeout": "応答がありません。再試行する前に、レールでセッションが作成されたか確認してください",
   "js.preview.failed": "プレビューを読み込めませんでした",
   "js.preview.gone": "このファイルはもう利用できません。ボードから開き直してください。",
   "js.preview.kind.pdf": "PDF",

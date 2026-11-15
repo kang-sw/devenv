@@ -194,7 +194,9 @@
         setErr(leadErr(st, s));
         sync();
         railPopPlace();
-      });
+        // A spawn answers at once (the process starts on the first send), so
+        // a request still open after 20s fails instead of staying busy.
+      }, 20000);
     }
     iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });

@@ -431,6 +431,7 @@
   "js.pins.width": "Arrastra para cambiar el ancho; doble clic para restablecer",
   "js.post.nobrowser": "este navegador no puede enviar",
   "js.post.unreachable": "no se puede acceder al panel",
+  "js.post.timeout": "sin respuesta; comprueba en el panel lateral si la sesión se creó antes de reintentar",
   "js.preview.failed": "No se pudo cargar la vista previa",
   "js.preview.gone": "Este archivo ya no está disponible. Vuelve a abrirlo desde el tablero.",
   "js.preview.kind.pdf": "PDF",

@@ -431,6 +431,7 @@
   "js.pins.width": "Faire glisser pour changer la largeur ; double-clic pour réinitialiser",
   "js.post.nobrowser": "ce navigateur ne peut pas envoyer",
   "js.post.unreachable": "le tableau de bord est inaccessible",
+  "js.post.timeout": "aucune réponse ; vérifiez dans le rail si la session a été créée avant de réessayer",
   "js.preview.failed": "Impossible de charger l'aperçu",
   "js.preview.gone": "Ce fichier n'est plus disponible. Rouvrez-le depuis le tableau.",
   "js.preview.kind.pdf": "PDF",
