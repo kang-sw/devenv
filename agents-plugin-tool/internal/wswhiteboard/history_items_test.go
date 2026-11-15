@@ -123,6 +123,47 @@ func TestHistoryRichDetailIsContentDrivenAndStatic(t *testing.T) {
 	}
 }
 
+func TestHistoryLongAnswersShareTitleWidth(t *testing.T) {
+	long := strings.TrimSpace(strings.Repeat("Preserve the complete policy explanation and natural wrapping. ", 12))
+	st := &State{Items: []Item{
+		{ID: 1, Topic: "t", Class: ClassPolicy, Title: "Long picked policy", Status: StatusAnswered, Answer: "a", Options: []string{long, "Other option"}, Rationale: "Keep the rationale", AnswerQuote: "Keep the owner quote"},
+		{ID: 2, Topic: "t", Class: ClassTechnical, Title: "Long free answer", Status: StatusAnswered, Answer: long},
+		{ID: 3, Topic: "t", Class: ClassTechnical, Title: "Correctable assumption", Status: StatusAssumed, Answer: long},
+	}}
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range map[string]string{"page": markup(render(t, view)), "regions": string(regions.Board)} {
+		t.Run(name, func(t *testing.T) {
+			for _, id := range []string{"item-1", "item-2", "item-3"} {
+				row := regexpHistoryArticle(out, id)
+				wantAll(t, row, long, `class="wb-hmain"`, `class="wb-hstatus"`)
+				// The answer is inline inside the title column, not a fourth grid child.
+				wantAll(t, row, `</b> <span class="wb-hstatus"`)
+				wantNone(t, row, `</b></span><span class="wb-hstatus"`)
+			}
+			picked := regexpHistoryArticle(out, "item-1")
+			wantAll(t, picked, `data-key="item:1"`, `class="pick"`, "Other option", "Keep the rationale", "Keep the owner quote")
+			wantNone(t, picked, `data-opt=`, `aria-pressed=`, `role="button"`)
+			wantAll(t, regexpHistoryArticle(out, "item-3"), `note-toggle`, `title="correction"`)
+		})
+	}
+	css, err := whiteboardTestAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(css),
+		`grid-template-columns: auto 20px minmax(0, 1fr);`,
+		`.wb-hstatus { display: inline;`,
+		`.wb-hstatus .pick { display: inline; box-decoration-break: clone; }`,
+		`.wb-hitem details.sx > summary::before { align-self: flex-start; margin-top: 8px; }`,
+		`.pick { display: inline-flex;`,
+		`.wb-hitem .wb-htext { display: block; position: relative; padding-left: 26px;`)
+	wantNone(t, string(css), `grid-template-columns: auto 20px minmax(0, 1fr) auto;`, `.wb-hstatus { max-width: 15em;`)
+}
+
 func TestHistoryAllAnsweredCheckKeepsVisibilityToggle(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassCheck, "only", "completed check"))
