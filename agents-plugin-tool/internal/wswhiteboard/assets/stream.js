@@ -146,7 +146,14 @@
     if (!row) return null;
     var kept = kit.keep(h);
     var prefix = split(gap, row);
-    load(h, gap, 'down', prefix);
+    // A bottom-window fill may be waiting for an offscreen frame's height
+    // in this same gap. Navigation must admit its known target immediately;
+    // the pending window still owns the remaining rows and resumes normally.
+    if (h._wbHistoryPending.some(function (p) { return p.gap === gap || p.fallback === gap; })) {
+      take(gap, 'down'); loadedRows.add(row); refresh(gap);
+      h._wbHistoryOut = false;
+      admitted(h);
+    } else load(h, gap, 'down', prefix);
     kept.apply();
     return find(h, id);
   }
