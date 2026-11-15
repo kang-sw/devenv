@@ -196,6 +196,10 @@ type TopicView struct {
 	// or recap showing; it collapses to one title line (and a closed body's
 	// fold).
 	Quiet bool
+	// State and StateDiagnostic project authoritative topic-state history;
+	// ordinary legacy absence leaves both nil.
+	State           *TopicState
+	StateDiagnostic *StateDiagnostic
 	// Closed marks a topic the lead closed.
 	Closed bool
 	// Result is the closed topic's close result, empty while the topic is
@@ -589,13 +593,18 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 
+	topicStates := state.TopicStates()
 	var order []string
 	blocks := map[string]*TopicView{}
 	itemsChanged := map[string]int{} // newest Item.Changed per topic
 	blockOf := func(topic string) *TopicView {
 		block, ok := blocks[topic]
 		if !ok {
-			block = &TopicView{Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic)}
+			current := topicStates[topic]
+			block = &TopicView{
+				Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic),
+				State: current.State, StateDiagnostic: current.Diagnostic,
+			}
 			blocks[topic] = block
 			order = append(order, topic)
 		}
