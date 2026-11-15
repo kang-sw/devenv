@@ -441,6 +441,17 @@ func (s *State) topicDoc(topic string) *TopicDoc {
 	return &s.Topics[i]
 }
 
+// baseDoc returns topic's entry in base, the state a batch began with, and
+// whether it had one.
+func baseDoc(base *State, topic string) (TopicDoc, bool) {
+	if base != nil {
+		if i := base.topicDocIndex(topic); i >= 0 {
+			return base.Topics[i], true
+		}
+	}
+	return TopicDoc{}, false
+}
+
 // setTopicBody sets topic's body and change marks; callers handle reopening
 // and events. Change marks are per update
 // batch: base is the state as the batch began, and the marks diff against
