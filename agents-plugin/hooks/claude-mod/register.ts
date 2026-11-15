@@ -21,6 +21,7 @@ import { HARNESS_PID_ARGV, missingKeyWarning, parseHarnessPid, resolveHostedMode
 import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
+import { createStartupSettings } from './settings'
 import { ADVISORY_KEY, LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
   createDrainLedger,
@@ -870,9 +871,17 @@ export const register: Register = (on) => {
       if (!server) throw new Error('MCP server not resolved')
       return (JSON.parse(await callText(server, 'config_get', { key, format: 'json' })) as { value?: unknown }).value
     }
+    const startupSettings = createStartupSettings(async (args) => {
+      if (!server) throw new Error('MCP server not resolved')
+      return callText(server, 'config_get', args)
+    })
+    const readStartupSetting = async (key: string) => {
+      await serverResolved
+      return startupSettings(key)
+    }
     /** A knob read for this start: a failure or a refusal is logged and settles undefined, the inert state. */
     const readKnob = (key: string): Promise<unknown> =>
-      readSetting(key).catch((err) => {
+      readStartupSetting(key).catch((err) => {
         $.ui.log(`${$.plugin.name} mod: ${key} not read (${String(err)}); its feature stays off`, { to: 'debug' })
         return undefined
       })
@@ -955,7 +964,7 @@ export const register: Register = (on) => {
         : (await $.fs.ancestors({ names: ['ai-docs/WORKFLOW.md'] })).length > 0
       if (!isWsProject) return false
       try {
-        return (await readSetting(KNOB.manual)) === true
+        return (await readStartupSetting(KNOB.manual)) === true
       } catch (err) {
         manualRetry = true
         $.ui.log(`${$.plugin.name} mod: ${KNOB.manual} not read (${String(err)}); its feature stays off until the server resolves again`, { to: 'debug' })
@@ -1246,10 +1255,10 @@ export const register: Register = (on) => {
         plugin: $.plugin.name,
         turnRunning: () => mainTurn,
         readUsage: async () => (await $.session.usage()).context,
-        // One config_get per session start with the advisory on, once its knob read settles.
+        // A conditional startup read, batched with any contemporaneous follow-up keys.
         readAdvisory: async () => {
           if (!(await advisoryRead)) throw new Error(`${KNOB.compactionAdvisory} is off`)
-          return readSetting(ADVISORY_KEY)
+          return readStartupSetting(ADVISORY_KEY)
         },
       })
       const registered = await $.tool.register({
@@ -1283,7 +1292,7 @@ export const register: Register = (on) => {
     const readWatchdogKnob = async <T,>(key: string, valid: (value: unknown) => value is T): Promise<T | undefined> => {
       let why: string
       try {
-        const value = await readSetting(key)
+        const value = await readStartupSetting(key)
         if (valid(value)) return value
         why = `invalid value ${JSON.stringify(value)}`
       } catch (err) {
@@ -1348,8 +1357,8 @@ export const register: Register = (on) => {
     // draw raw until it settles on.
     try {
       captions.start({
-        // One keyless config_get per key, once the shared server resolution settles.
-        readSetting,
+        // Keyless startup batches; captions still gate their follow-up keys.
+        readSetting: readStartupSetting,
         messages: () => $.session.messages({ as: 'api' }),
         complete: (request) => $.model.complete(request),
         redraw: () => $.ui.invalidate('ui.render'),
@@ -1380,11 +1389,18 @@ export const register: Register = (on) => {
         if (!server) throw new Error('MCP server not resolved')
         return callText(server, tool, args)
       }
+      let startupBandRead = true
       band.start({
-        // Session-keyed while a key is held, so a session-scope tune is honored.
-        readSetting: async (key, sessionKey) =>
-          (JSON.parse(await wsCall('config_get', { key, format: 'json', ...(sessionKey ? { session_key: sessionKey } : {}) })) as { value?: unknown })
-            .value,
+        // Only the first keyless read belongs to this start's batch. Adoption
+        // and model-origin tuning always issue a fresh read (even keyless).
+        readSetting: async (key, sessionKey) => {
+          if (startupBandRead && !sessionKey) {
+            startupBandRead = false
+            return readStartupSetting(key)
+          }
+          startupBandRead = false
+          return (JSON.parse(await wsCall('config_get', { key, format: 'json', ...(sessionKey ? { session_key: sessionKey } : {}) })) as { value?: unknown }).value
+        },
         call: wsCall,
         address: async (sessionKey) =>
           bandMailbox({ text: await wsCall('mailbox_lookup_peers', { session_key: sessionKey, scope: 'worktree', format: 'json' }) } as ToolCallResult),

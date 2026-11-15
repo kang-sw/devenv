@@ -59,9 +59,10 @@ type Usage = {
   cost?: { usd: number }
 }
 
-function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boolean; manual?: boolean } = {}) {
+function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boolean; manual?: boolean; hosted?: boolean; bulk?: 'valid' | 'error' | 'missing-mode' | 'count' | 'key' } = {}) {
   const clock = mock.clock(on, { now: NOW })
-  mock.env(on, {})
+  mock.env(on, opts.hosted ? { WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'hosted-key', WS_HOSTED_SESSION_ROW: '/hosted-row' } : {})
+  on('fs.read', ($, e, next) => e.path === '/hosted-row' ? { value: '{"host_pid":4242}' } : next(e))
   const w = {
     clock,
     plugin: '',
@@ -85,6 +86,8 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
     minted: 0,
     /** Every config_get's arguments, in order. */
     configCalls: [] as Record<string, unknown>[],
+    holdBulk: false,
+    releaseBulk: undefined as (() => void) | undefined,
     /** The band's ws reads: todo_list, agenda_list, mailbox_lookup_peers. */
     wsCalls: [] as { tool: string; args: Record<string, unknown> }[],
     /** Each git argv the band ran. */
@@ -103,11 +106,21 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
   const text = (t: string) => ({ value: { content: [{ type: 'text', text: t }], isError: false } })
   const error = (t: string) => ({ value: { content: [{ type: 'text', text: t }], isError: true } })
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
-  on('mcp.call', ($, e) => {
+  on('mcp.call', async ($, e) => {
     const key = e.args.session_key as string
     switch (e.tool) {
       case 'config_get': {
         w.configCalls.push({ ...e.args })
+        if (Array.isArray(e.args.keys) && opts.bulk) {
+          if (opts.bulk === 'error') return error('unknown keys')
+          const rows = (e.args.keys as string[]).map((name) => name === ENABLED_KEY && w.failKnob
+            ? { key: name, ok: false, error: { message: 'config.get: unhealthy' } }
+            : { key: name, ok: true, value: name in w.config ? w.config[name] : null, scope: 'project' })
+          if (w.holdBulk) await new Promise<void>((resolve) => { w.releaseBulk = resolve })
+          if (opts.bulk === 'count') rows.pop()
+          if (opts.bulk === 'key' && rows.length) rows[0]!.key = 'wrong'
+          return text(JSON.stringify({ ...(opts.bulk === 'missing-mode' ? {} : { mode: 'resolved-v1' }), results: rows }))
+        }
         const name = String(e.args.key)
         if (name === ENABLED_KEY && w.failKnob) return error('ws-mcp is unhealthy')
         return text(JSON.stringify({ key: name, value: name in w.config ? w.config[name] : null, scope: 'project' }))
@@ -162,6 +175,7 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
   })
   // Host commands answer git only: the mailbox push's probe fails, so no wait child runs.
   on('process.run', ($, e) => {
+    if (opts.hosted && e.argv[0] === 'python3' && e.argv[1] === '-c') return { value: { exitCode: 0, stdout: '4242\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv[0] !== 'git') return { deny: 'no host commands on this surface' }
     w.gitRuns.push([...e.argv])
     const stdout = e.argv.includes('status') ? '## main...origin/main [ahead 2]\n M a.ts\n?? n.ts\n' : '3\t1\ta.ts\n'
@@ -690,6 +704,97 @@ test('the drawn bar caps take the fill color at 0%, mid-range and 100%, and a me
   expect([full.left, full.right]).toEqual([pctColor(100), pctColor(100)])
   const label = full.runs.find((r) => shown(r).includes('100%'))
   expect(label?.props).toEqual({ color: C.onFill, backgroundColor: pctColor(100) })
+})
+
+test('startup bulk preserves project, interactive, advisory, caption and watchdog gates', async ($, on) => {
+  const w = world(on, { bulk: 'valid' })
+  await $.session.start({ cwd: '/repo/sub', surface: 'terminal', isInteractive: false })
+  await w.clock.settle()
+  const keys = w.configCalls.flatMap((args) => Array.isArray(args.keys) ? args.keys as string[] : [String(args.key)])
+  expect(keys).toContain(ENABLED_KEY)
+  expect(keys).toContain(KNOB.compactionAdvisory)
+  expect(keys).not.toContain(KNOB.manual)
+  expect(keys).not.toContain('claude.display_summary_enabled')
+  expect(keys).not.toContain('claude.display_summary_model')
+  expect(keys).not.toContain('claude.compaction_advisory_percent')
+  expect(keys).not.toContain(KNOB.watchdogInterval)
+  // A failed host-command probe never requests the drain knob.
+  expect(keys).not.toContain(KNOB.drain)
+})
+
+test('hosted startup batches never read the drain or dashboard keys', async ($, on) => {
+  const w = world(on, { bulk: 'valid', hosted: true, config: { [KNOB.dashboard]: true, [KNOB.drain]: 'direct' } })
+  await start($, w)
+  const keys = w.configCalls.flatMap((args) => args.keys as string[])
+  expect(keys).toContain(ENABLED_KEY)
+  expect(keys).not.toContain(KNOB.drain)
+  expect(keys).not.toContain(KNOB.dashboard)
+  expect(w.configCalls.every((args) => args.key === undefined && args.session_key === undefined)).toBe(true)
+})
+
+test('enabled startup switches release their conditional follow-up keys into bulk reads', async ($, on) => {
+  const w = world(on, { bulk: 'valid', config: {
+    [KNOB.compactionAdvisory]: true,
+    [KNOB.watchdog]: true,
+    [KNOB.watchdogInterval]: 10,
+    'claude.display_summary_enabled': true,
+  } })
+  await start($, w)
+  const keys = w.configCalls.flatMap((args) => args.keys as string[])
+  for (const key of ['claude.compaction_advisory_percent', KNOB.watchdogInterval, 'claude.display_summary_model', 'claude.display_summary_style', 'claude.display_summary_context_tokens', 'workflow.lang']) expect(keys).toContain(key)
+  expect(w.configCalls.every((args) => args.key === undefined && args.session_key === undefined)).toBe(true)
+  expect(w.configCalls.some((args) => (args.keys as string[]).includes('claude.display_summary_model') && (args.keys as string[]).includes('workflow.lang'))).toBe(true)
+})
+
+test('bulk startup succeeds without single startup reads; adoption and tuning remain fresh single calls', async ($, on) => {
+  const w = world(on, { bulk: 'valid', wsProject: true, manual: true })
+  await start($, w)
+  expectFrame(await draw($, w, 100), 100, 2)
+  const bulk = w.configCalls.filter((args) => Array.isArray(args.keys))
+  expect(bulk.some((args) => (args.keys as string[]).includes(ENABLED_KEY))).toBe(true)
+  expect(bulk.some((args) => (args.keys as string[]).length > 1)).toBe(true)
+  expect(w.configCalls.filter((args) => args.key !== undefined)).toEqual([{ key: ENABLED_KEY, format: 'json', session_key: 'minted-1' }])
+  expect(w.configCalls.every((args) => !(args.key !== undefined && args.keys !== undefined))).toBe(true)
+  w.config[ENABLED_KEY] = false
+  await modelCall($, w, 'config_tune')
+  expect(bandConfigCalls(w).at(-1)).toEqual({ key: ENABLED_KEY, format: 'json', session_key: 'minted-1' })
+  expect((await draw($, w, 100)).raw).toBe(true)
+})
+
+for (const bulk of ['error', 'missing-mode', 'count', 'key'] as const) {
+  test(`bulk ${bulk} falls back to exactly the legacy reads for each requested key`, async ($, on) => {
+    const w = world(on, { bulk })
+    await start($, w)
+    const batches = w.configCalls.filter((args) => Array.isArray(args.keys))
+    const singles = w.configCalls.filter((args) => args.key !== undefined)
+    expect(batches.length).toBeGreaterThan(0)
+    expect(singles.map((args) => args.key).sort()).toEqual(batches.flatMap((args) => args.keys as string[]).sort())
+    expect(singles.every((args) => args.format === 'json' && args.session_key === undefined && args.keys === undefined)).toBe(true)
+    expectFrame(await draw($, w, 100), 100, 2)
+  })
+}
+
+test('a valid bulk band error stays off without single fallback', async ($, on) => {
+  const w = world(on, { bulk: 'valid' })
+  w.failKnob = true
+  await start($, w)
+  expect((await draw($, w, 100)).raw).toBe(true)
+  expect(bandConfigCalls(w)).toEqual([])
+  expect(w.wsCalls).toEqual([])
+})
+
+test('a late startup bulk result cannot overwrite a fresh keyless tune read', async ($, on) => {
+  const w = world(on, { bulk: 'valid' })
+  w.holdBulk = true
+  await start($, w)
+  expect(typeof w.releaseBulk).toBe('function')
+  w.config[ENABLED_KEY] = false
+  await modelCall($, w, 'config_tune')
+  expect(bandConfigCalls(w)).toEqual([{ key: ENABLED_KEY, format: 'json' }])
+  w.holdBulk = false
+  w.releaseBulk?.()
+  await w.clock.settle()
+  expect((await draw($, w, 100)).raw).toBe(true)
 })
 
 test('a failed switch read draws nothing, and reads nothing past it', async ($, on) => {
