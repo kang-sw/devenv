@@ -1,4 +1,4 @@
-Historical final-source/private-copy proof; raw complete output is privately archived.
+Historical final-source/private-copy proof; raw complete output is not retained here.
 VERIFIED unchanged original assertion: prune changed the visible models: [107, 109] -> [106, 108] 1ccd151a6a8568f23217ef496bf4543bf661d65eeadd381847cf393065573db8
 VERIFIED unchanged original assertion: cached overlay of the pruned directory differs [127, 129] -> [125, 127] ffb9eeafcb8e850bd01601cc971288ff621048b1639dcdc195fc5d5a12a7dd5c
 VERIFIED unchanged original assertion: replay changed the visible models [147, 149] -> [145, 147] ab7645da2cc3d6e9dff51430fcf60da0a1a1e8c2632ad2b91444f2e6b0799105

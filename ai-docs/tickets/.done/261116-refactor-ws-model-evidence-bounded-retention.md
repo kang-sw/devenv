@@ -269,7 +269,7 @@ VERIFIED verification (complete commands, environments and outputs under
   age/threshold/count checks were updated separately, not called
   unchanged-green. The historical/current summarizer is byte-identical.
 - Final read-only enumeration captured 12 directories / 12,450 regular JSON
-  files. The largest captured directory, `sweatradartakingoverwrite`, supplied
+  files. The largest captured directory, `[redacted session identifier]`, supplied
   **3,848 -> 1,101 files**, **2,747 actual deletions**, on its isolated private
   copy only. All **141 agents** retained equal Current/History; uncached
   overlay and the already-warm cache also matched. Every per-agent bound
@@ -298,3 +298,28 @@ omitted: Shared runtime/rebuild operations, CI, integration, push, full
 MCP/dashboard/project suites and lease/worktree release were prohibited or
 MAIN-owned. No linked visual reference required a comparison. Branch and
 private fixtures are retained for MAIN's merge report.
+
+#### Edition (ad205513e) - 2026-11-16
+
+VERIFIED: E3 corrects the public evidence presentation under MAIN's explicit
+closed-ticket correction authority. The historical Result's captured session
+identifier is minimally redacted; all other historical Result text is preserved.
+Its `final-copy-manifest.json` reference is historical: that manifest and the
+private archive, scripts, overlay fixture and raw per-agent reports are not
+retained in the public evidence. Their current availability is unverified.
+The retained aggregate counts, digests and test output remain evidence of the
+reported runs, not a replacement per-file provenance receipt.
+
+Local worktree/report paths and environment dumps are omitted from public
+summaries and log headers. Removed review inputs are marked not retained,
+and the stale held-lease claim is removed from the evidence README. These are
+presentation corrections, not fresh private-copy measurements or reruns of
+historical consumer checks.
+
+VERIFIED: `ad205513e` adds a unique same-model symlink record before the most
+recent eight. Whole `go test -race ./internal/wslive -count=1 -v` passed on
+Darwin; removing only `c.regular &&` made the focused regression fail because
+the symlink was deleted. Restoring production bytes exactly to the reviewed
+base made the focused test pass. Windows skips only unavailable symlink
+creation; no native Windows run is claimed. Compatibility remains T0 with no
+production behavior, record format or reader/writer changes.

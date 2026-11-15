@@ -1,13 +1,13 @@
-Historical capture summary; raw complete output is privately archived.
-Original exact command: python3 /Users/kang-sw/.ws-worktrees/devenv/corporate-predator-shrug/ai-docs/tickets/assets/261116-refactor-ws-model-evidence-bounded-retention/copy-evidence.py final
-The original script is now private: /tmp/ws-retention-module-choosing-tartar/precleanup-01d141885/public-evidence/copy-evidence.py
+Historical capture summary; raw complete output is not retained here.
+Historical command (local path omitted): python3 copy-evidence.py final
+The original script is not retained in public evidence.
 started_utc: 2026-11-15T19:09:37Z
 completed_utc: 2026-11-15T19:10:18Z
 enumerated_directories: 12
 enumerated_regular_json_total: 12450
 captured_regular_json_count: 3848
 captured_bytes: 532428
-private_manifest: /tmp/ws-retention-module-choosing-tartar/private-manifests/final-copy-manifest.json
-Original live-store locator and per-file metadata remain private in that manifest.
+private_manifest: not retained in public evidence
+Original live-store locator and per-file metadata are not retained here.
 Source access was read-only; this was not an atomic live-tree snapshot.
 exit_code: 0

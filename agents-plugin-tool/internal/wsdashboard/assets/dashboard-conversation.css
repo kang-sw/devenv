@@ -417,7 +417,7 @@ section.selection-bundle > .thumbs { margin: 0; padding: 0 10px 8px; }
 .sentmark { font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 0 6px; border-radius: 4px; white-space: nowrap; background: var(--wb-muted); color: var(--wb-muted-fg); }
 .srow .stext > .sentmark { margin-right: 6px; }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
-/* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back. Ack rows (.arow) and check rows (.ckrow) dim alike; .aline is the agents panel's row wrapper, not a board item. */
+/* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back. Ack rows (.arow) and check rows (.ckrow) dim alike; .aline is the agents popover's row wrapper, not a board item. */
 .card.sent-sent > .cbody > :not(.note):not(.wsc-editor), .arow.sent-sent .why, .arow.sent-sent input, .ckrow.sent-sent .why, .ckrow.sent-sent input { opacity: .4; transition: opacity .15s; }
 .card.sent-held > .cbody > :not(.note):not(.wsc-editor), .arow.sent-held .why, .arow.sent-held input, .ckrow.sent-held .why, .ckrow.sent-held input { opacity: .65; transition: opacity .15s; }
 .card.sent-sent .cbar .head .title, .arow.sent-sent .head .title, .ckrow.sent-sent .head .title { opacity: .7; transition: opacity .15s; }
