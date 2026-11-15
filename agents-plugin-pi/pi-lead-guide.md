@@ -63,6 +63,14 @@ edges from the root lead; terminal workers retain execution tools but cannot
 spawn further children. Nested playbooks must come from that worker's own
 `ws__playbook_render`, and cannot exceed its capability ceiling.
 
+When an assignment requires independent review, use `ws__playbook_render` with
+`reviewer` for a single full-scope reviewer, or `code-review-correctness`,
+`code-review-fit`, and `code-review-test` for the selected partitions. Do not
+render `code-reviewer` as a delegated role: it is a shared include, so delegated
+provenance admission rejects it. This mapping adds no independent review to
+assignments that do not require it; reviewer findings-file grants follow the
+existing worker lifecycle guidance.
+
 Child results wake only their direct parent. A parent that settles while
 children remain outstanding is `waiting-on-children`, not terminal or parkable.
 It must consume those settled results and produce a fresh ordinary synthesis.
