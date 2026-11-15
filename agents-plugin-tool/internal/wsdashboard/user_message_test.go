@@ -167,7 +167,7 @@ process.stdout.write(bad.join("\n"));`)
 
 func TestUserMessageComposerSendsBrowserOffset(t *testing.T) {
 	src := mustAsset(t, "dashboard.js")
-	runNode(t, "browser offset", composerToastPrelude+composerFunc(t, src, "sendMessage")+`
+	runNode(t, "browser offset", selectionCodecSource(t)+composerToastPrelude+composerFunc(t, src, "sendMessage")+`
 var sending=false, captured=null;
 Date.prototype.getTimezoneOffset=function(){return -345;};
 post=function(route,body,done){captured=body;done(true,{});};

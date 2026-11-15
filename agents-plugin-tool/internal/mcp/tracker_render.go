@@ -289,7 +289,7 @@ func trackerLabelNames(v *wstrackerhost.StoreView, it wstracker.ItemView) []stri
 }
 
 // formatTrackerItemRow is one item on one line: alias, kind and status,
-// priority, title, then due, project, and labels.
+// priority, title, then start, due, project, and labels.
 func formatTrackerItemRow(v *wstrackerhost.StoreView, it wstracker.ItemView) string {
 	tag := it.Kind
 	if s := trackerItemStatus(it); s != "" {
@@ -300,6 +300,9 @@ func formatTrackerItemRow(v *wstrackerhost.StoreView, it wstracker.ItemView) str
 	}
 	s := fmt.Sprintf("%s [%s] P%d %s", it.Alias, tag, it.PriorityLevel, it.Title)
 	var extra []string
+	if it.Start != nil {
+		extra = append(extra, "start "+*it.Start)
+	}
 	if it.Due != nil {
 		extra = append(extra, "due "+*it.Due)
 	}
@@ -330,6 +333,9 @@ func formatTrackerItemRow(v *wstrackerhost.StoreView, it wstracker.ItemView) str
 func formatTrackerAssignmentRow(v *wstrackerhost.StoreView, a wstracker.Assignment) string {
 	it := v.Items[a.Item]
 	s := fmt.Sprintf("%s P%d %s: %s", it.Alias, it.PriorityLevel, it.Title, formatTrackerAssignment(v, a))
+	if it.Start != nil {
+		s += ", start " + *it.Start
+	}
 	if it.Due != nil {
 		s += ", due " + *it.Due
 	}
@@ -448,6 +454,9 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 		fields = append(fields, "hidden")
 	}
 	fields = append(fields, fmt.Sprintf("priority %d (%s)", it.PriorityLevel, it.PriorityName))
+	if it.Start != nil {
+		fields = append(fields, "start "+*it.Start)
+	}
 	if it.Due != nil {
 		fields = append(fields, "due "+*it.Due)
 	}

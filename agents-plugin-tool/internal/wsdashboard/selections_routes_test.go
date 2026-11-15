@@ -111,7 +111,7 @@ func TestSelectionTextTransportLifecycle(t *testing.T) {
 	}
 	for key := range cancelled {
 		switch key {
-		case "text", "chips", "topics", "mentions", "picks", "consoles", "images", "nums", "sentAt":
+		case "text", "chips", "topics", "mentions", "closeRequests", "picks", "consoles", "images", "nums", "sentAt":
 		default:
 			t.Fatalf("new grouping metadata: %q", key)
 		}
