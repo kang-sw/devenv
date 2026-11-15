@@ -162,6 +162,94 @@ func TestCommandAcceptanceUnsplittableNeverAppliesPrefix(t *testing.T) {
 	}
 }
 
+func TestCommandAcceptanceNestedGroupBoundaries(t *testing.T) {
+	for name, beforeNested := range map[string]string{
+		"text":                `junk`,
+		"whitespace":          " \n\t",
+		"cdata":               `<![CDATA[not a command </wb:topic>]]>`,
+		"comment":             `<!-- not a command </wb:topic> -->`,
+		"text-after-child":    `<wb:log>first</wb:log>junk`,
+		"cdata-after-child":   `<wb:log>first</wb:log><![CDATA[junk]]>`,
+		"comment-after-child": `<wb:log>first</wb:log><!-- junk -->`,
+		"quoted-attribute":    `<div title='<wb:topic name="literal">'>junk</div>`,
+		"unquoted-boundary":   `junk<div attr=`,
+		"raw-child":           `junk<wb:log><wb:topic name="literal"></wb:topic></wb:log>`,
+		"unclosed-comment":    `<!--`,
+		"unclosed-cdata":      `<![CDATA[`,
+		"unclosed-attribute":  `<div title='`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &State{}
+			before, _ := json.Marshal(s)
+			input := topicXML("prefix", "valid prefix") + `<wb:topic name="outer">` + beforeNested + `<wb:topic name="inner"><wb:log>inside</wb:log></wb:topic><wb:floor id="999"/></wb:topic>`
+			out, p := Apply(s, input, testEnv())
+			after, _ := json.Marshal(s)
+			if len(p) == 0 || !out.Unpartitioned || out.Accepted != 0 || string(before) != string(after) {
+				t.Fatalf("nested group applied a prefix/counter: %+v %v; state %s", out, p, after)
+			}
+		})
+	}
+	// Group-like text in attributes, comments, CDATA or raw command bodies
+	// is not a nested group and must not expose its quoted closing tag.
+	for name, rejected := range map[string]string{
+		"attribute":        `<div title='<wb:topic name="literal"></wb:topic><wb:floor id="999"/>'>junk</div>`,
+		"comment":          `<!-- <wb:topic name="literal"></wb:topic><wb:floor id="999"/> -->`,
+		"cdata":            `<![CDATA[<wb:topic name="literal"></wb:topic><wb:floor id="999"/>]]>`,
+		"double-attribute": `<div title="<wb:topic name='literal'></wb:topic><wb:floor id='999'/>">junk</div>`,
+		"raw-body":         `junk<wb:log><wb:topic name="literal"></wb:topic><wb:floor id="999"/></wb:log>`,
+		"unknown-body":     `junk<wb:unknown><wb:topic name="literal"></wb:topic><wb:floor id="999"/></wb:unknown>`,
+		"name-prefix":      `junk<wb:topic-suffix/>`,
+	} {
+		t.Run("literal-"+name, func(t *testing.T) {
+			s := &State{}
+			accepted := topicXML("prefix", "valid prefix")
+			mixed(t, s, accepted+`<wb:topic name="outer">`+rejected+`</wb:topic>`, accepted)
+		})
+	}
+	s := &State{}
+	mustApply(t, s, `<wb:topic name="t"><wb:log><![CDATA[<wb:topic name="literal"></wb:topic>]]></wb:log><wb:panel recap='<wb:topic'>raw <wb:topic name="literal"></wb:topic></wb:panel></wb:topic>`)
+}
+
+func TestCommandAcceptanceDuplicateTargetCloseGuard(t *testing.T) {
+	for name, tc := range map[string]struct {
+		attrs  string
+		blockT bool
+		blockU bool
+	}{
+		"answer-id":      {`id="999" id="1"`, true, false},
+		"answer-id-many": {`id="999" id="1" id="2"`, true, true},
+		"answer-ids":     {`ids="999" ids="1 2"`, true, true},
+		"answer-mixed":   {`id="999" ids="998" id="1" ids="bad 2 997"`, true, true},
+		"patch-id":       {`id="999" id="1"`, true, false},
+		"patch-id-many":  {`id="999" id="1" id="2"`, true, true},
+		"patch-ids":      {`id="999" ids="998" ids="bad 1 2 997"`, true, true},
+		"unknown-only":   {`id="999" id="998" ids="997"`, false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &State{}
+			mustApply(t, s, addXML(ClassPolicy, "t", "Pick", "One", "Two")+addXML(ClassPolicy, "u", "Pick", "One", "Two")+addXML(ClassPolicy, "other", "Pick", "One", "Two"))
+			bad := `<wb:answer ` + tc.attrs + ` value="a">quote</wb:answer>`
+			if strings.HasPrefix(name, "patch") {
+				bad = `<wb:patch ` + tc.attrs + ` status="answered"/>`
+			}
+			closeT := `<wb:topic name="t"><wb:close result="done"/></wb:topic>`
+			closeU := `<wb:topic name="u"><wb:close result="done"/></wb:topic>`
+			closeOther := `<wb:topic name="other"><wb:close result="allowed"/></wb:topic>`
+			accepted := closeOther
+			if !tc.blockT {
+				accepted += closeT
+			}
+			if !tc.blockU {
+				accepted += closeU
+			}
+			p := mixed(t, s, bad+closeOther+closeT+closeU, accepted)
+			if !strings.Contains(strings.Join(p, " "), "given twice") {
+				t.Fatal("fixture did not reject duplicate attributes", p)
+			}
+		})
+	}
+}
+
 func TestPolicyCommentLifecycleBookkeepingAndViews(t *testing.T) {
 	s := &State{}
 	mustApply(t, s, addXML(ClassPolicy, "t", "Pick", "One", "Two"))

@@ -486,7 +486,7 @@ func (r *parser) group(tag openTag) {
 		}
 		if commands == 0 && (rest[0] != '<' || !strings.HasPrefix(rest[1:], r.g.Prefix) && !strings.HasPrefix(rest, "</")) {
 			if r.ordered {
-				body, ok := r.readBody(tag.name, tag.at, false, nil, "")
+				body, ok := r.readBodyContent(tag.name, tag.at, false, nil, scope.Label(), &r.g)
 				if ok {
 					p.Add("%s: text before its first command: %q%s", scope.Label(), excerpt(body), hint)
 				}
@@ -672,6 +672,13 @@ type bodySegment struct {
 // sections through, and strips the one newline at each end; with decode, it
 // then decodes the text outside CDATA.
 func (t *tokenizer) readBody(name string, from int, decode bool, fields []string, label string) (string, bool) {
+	return t.readBodyContent(name, from, decode, fields, label, nil)
+}
+
+// A rejected group body still needs structural boundaries: unlike a command's
+// raw body, a nested group makes its closing tag ambiguous. Quoted attributes,
+// comments, CDATA and command payloads cannot introduce a nested group.
+func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields []string, label string, group *Grammar) (string, bool) {
 	closing := "</" + name + ">"
 	var segs []bodySegment
 	var text strings.Builder
@@ -705,6 +712,58 @@ func (t *tokenizer) readBody(name string, from int, decode bool, fields []string
 			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
 			t.i += 9 + end + 3
 		default:
+			if group != nil {
+				end := 1
+				var tagName string
+				if strings.HasPrefix(rest, "<!--") {
+					close := strings.Index(rest[4:], "-->")
+					if close < 0 {
+						t.fail(t.i, "<%s>: a comment has no closing -->", name)
+						return "", false
+					}
+					end = 4 + close + 3
+				} else {
+					for end < len(rest) && isNameByte(rest[end]) {
+						end++
+					}
+					tagName = rest[1:end]
+					if group.isGroup(tagName) {
+						t.fail(t.i, "<%s> inside %s; groups do not nest", name, label)
+						return "", false
+					}
+					if end > 1 {
+						var quote byte
+						for ; end < len(rest); end++ {
+							c := rest[end]
+							if quote != 0 {
+								if c == quote {
+									quote = 0
+								}
+							} else if c == '\'' || c == '"' {
+								quote = c
+							} else if c == '<' {
+								t.fail(t.i+end, "<%s>: uncertain tag boundary in rejected group body", name)
+								return "", false
+							} else if c == '>' {
+								end++
+								break
+							}
+						}
+					}
+				}
+				text.WriteString(rest[:end])
+				t.i += end
+				if strings.HasPrefix(tagName, group.Prefix) && !strings.HasSuffix(rest[:end], "/>") {
+					// A command's raw payload may literally contain group tags.
+					// Skip it using the ordinary CDATA-aware body boundary.
+					start := t.i
+					if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
+						return "", false
+					}
+					text.WriteString(t.s[start:t.i])
+				}
+				continue
+			}
 			for _, field := range fields {
 				if strings.HasPrefix(rest, "<"+field+">") {
 					t.p.Add("%s field <%s> (line %d): body holds an opening <%s> - missing </%s>?", label, name, t.lineAt(t.i), field, name)

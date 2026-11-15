@@ -79,7 +79,12 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 	}
 	// Refusals (including an unpartitionable valid prefix) preserve all bytes,
 	// the numeric stamp, embed baseline and conversation projection.
-	for _, bad := range []string{`<wb:patch id="999"/>`, `<wb:topic name="t"><wb:panel recap="never">prefix</wb:panel></wb:topic><wb:topic name="t"><wb:body>unterminated`} {
+	for _, bad := range []string{
+		`<wb:patch id="999"/>`,
+		`<wb:topic name="t"><wb:panel recap="never">prefix</wb:panel></wb:topic><wb:topic name="t"><wb:body>unterminated`,
+		`<wb:topic name="t"><wb:panel recap="never">prefix</wb:panel></wb:topic><wb:topic name="outer">junk<wb:topic name="inner"><wb:log>inside</wb:log></wb:topic><wb:floor id="999"/></wb:topic>`,
+		`<wb:topic name="t"><wb:panel recap="never">prefix</wb:panel></wb:topic><wb:topic name="outer"><!-- </wb:topic> --><wb:topic name="inner"><wb:log>inside</wb:log></wb:topic><wb:floor id="999"/></wb:topic>`,
+	} {
 		files := whiteboardTreeForTest(t, f.dir())
 		records := len(effectsRecords(t, live, live.replyA))
 		publications = 0

@@ -52,9 +52,13 @@ func commandTopics(s *State, cmd command, topicOf topicResolver) []string {
 		}
 	}
 	if cmd.Tag == "wb:answer" || cmd.Tag == "wb:patch" {
-		for _, name := range []string{"id", "ids"} {
-			raw, _ := cmd.Attr(name)
-			for _, token := range strings.Fields(raw) {
+		// Validation rejects duplicates, but every occurrence can still name
+		// an affected topic. Attr returns only the first occurrence.
+		for _, attr := range cmd.Attrs {
+			if attr.Name != "id" && attr.Name != "ids" {
+				continue
+			}
+			for _, token := range strings.Fields(attr.Value) {
 				id, _ := strconv.Atoi(token)
 				if i := s.index(id); i >= 0 {
 					add(s.Items[i].Topic)
