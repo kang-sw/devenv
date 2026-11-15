@@ -409,11 +409,15 @@ func TestCancelRouteReturnsTextAndChips(t *testing.T) {
 		t.Fatalf("cancel = %d: %s", code, raw)
 	}
 	var ans struct {
-		Text  string         `json:"text"`
-		Chips []wsinbox.Chip `json:"chips"`
+		Text   string         `json:"text"`
+		Chips  []wsinbox.Chip `json:"chips"`
+		SentAt int64          `json:"sentAt"`
 	}
 	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
 		t.Fatal(err)
+	}
+	if ans.SentAt == 0 {
+		t.Fatalf("cancel answer carries no sentAt: %s", raw)
 	}
 	// Only the cancelled send comes back; the other send stays held.
 	if ans.Text != "two" || len(ans.Chips) != 2 || ans.Chips[0] != (wsinbox.Chip{ID: "05", Note: "why"}) || ans.Chips[1] != (wsinbox.Chip{ID: "06", Answer: "ok"}) {

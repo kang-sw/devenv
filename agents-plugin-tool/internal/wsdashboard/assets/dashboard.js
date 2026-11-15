@@ -2595,10 +2595,12 @@
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
     Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
     imgs.forEach(function (p) { top = Math.max(top, p.n); });
-    // A later message's answer replaces an earlier one's, and a chip
-    // attached since keeps its newer answer.
-    var got = {}, order = [];
+    // The newest send's answer wins (its sentAt; a later message on a tie),
+    // whatever the list's queue order, and a chip attached since keeps its
+    // newer answer.
+    var got = {}, gotAt = {}, order = [];
     list.forEach(function (res) {
+      var at = +res.sentAt || 0;
       var names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
       names.forEach(function (name, i) {
         var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
@@ -2613,7 +2615,9 @@
         Object.keys(c).forEach(function (k) { o[k] = c[k]; });
         if (c.note) o.note = rn(c.note);
         if (!got[c.id]) order.push(c.id);
+        else if (at < gotAt[c.id]) return;
         got[c.id] = o;
+        gotAt[c.id] = at;
       });
       var stray = restoreTopics((res.topics || []).map(function (tn) { return { topic: tn.topic, note: rn(tn.note) }; }));
       if (stray.length) text += (text ? "\n\n" : "") + stray.join("\n");

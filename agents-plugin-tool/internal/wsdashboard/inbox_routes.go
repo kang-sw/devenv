@@ -484,7 +484,10 @@ func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
 	mentions := append([]wsinbox.Mention{}, entry.Mentions...)
 	picks := append([]wsinbox.Pick{}, entry.Picks...)
 	consoles := append([]wsinbox.Console{}, entry.Consoles...)
-	out := map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "topics": topics, "mentions": mentions, "picks": picks, "consoles": consoles, "images": images, "nums": nums}
+	// sentAt lets the page keep the newest send's answer when two restored
+	// messages answer one item: an interrupt answers in queue order, where a
+	// promoted older send comes first.
+	out := map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "topics": topics, "mentions": mentions, "picks": picks, "consoles": consoles, "images": images, "nums": nums, "sentAt": entry.SentAt}
 	if entry.Command != nil {
 		out["command"] = *entry.Command
 	}
