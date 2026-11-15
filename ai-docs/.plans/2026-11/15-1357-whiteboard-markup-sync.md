@@ -1,0 +1,7 @@
+# Integrate the whiteboard markup repair
+
+MAIN authorized a 900-second bounded integration after the 793 head. The existing fix/whiteboard-body-markup-tests head is 8d190b5bd935b26af2d6a0128076d40e9fcfacdb. The lead has started the one develop sync; develop advanced from the requested 54b252036 to 09998d57986f9d0f716036115452e1cb912d1f28 before the merge, which is now in progress with conflicts.
+
+Resolve the directly affected wsi18n/i18n.go, wswhiteboard/render.go and render_test.go integration, retaining both upstream waiting-on/localization/explorer behavior and the repair's approved metadata expectations plus unused standalone/embed translation exclusion. No feature expansion or budget weakening. Read matching project manuals before edits. Use edit for targeted changes.
+
+Run the full internal/wswhiteboard and internal/wsi18n packages offline from the first invocation (GOPROXY=off), check actual return codes, and complete the pending merge with AI Context. Keep fixtures/config/cache isolated; no downloads, providers, shared daemon, port29417, headless lead Pi, foreign keys/signals, or outer Go kills. No extra Lite, screenshot, full-repo suite or sync. Stop at 900 seconds with honest blocker if unresolved. Raw logs stay tmp/cache. Return exact head, conflict resolution summary, checked test outcomes and clean/quiescent checkout. Lead skims diff only; MAIN integrates develop and runtime.

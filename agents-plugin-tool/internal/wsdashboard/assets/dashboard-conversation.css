@@ -1,0 +1,361 @@
+/* ===== conversation ===== */
+.conv { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
+.conv.clive { padding-top: 0; }
+.msg { max-width: 100%; }
+.msg .mh { font-size: 11.5px; color: var(--wb-muted-fg); display: flex; gap: 6px; align-items: center; margin-bottom: 3px; }
+.msg .mh b { color: var(--wb-fg); }
+.msg .bub { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; max-width: 86%; }
+.msg.user .mh { justify-content: flex-end; }
+.msg.user .bub { background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); border-radius: 12px 12px 4px 12px; padding: 8px 11px; }
+.msg.fromlead { max-width: 94%; }
+.msg.fromlead .bub { background: var(--wb-card); border-radius: 12px 12px 12px 4px; padding: 8px 12px; box-shadow: var(--wb-shadow); }
+/* a lead reply is markdown: block spacing comes from the board's .md rules; here only wrapping and overflow */
+.msg .bub.md { white-space: normal; min-width: 0; }
+.msg .bub.md pre { max-width: 100%; overflow-x: auto; }
+/* chat bubbles keep content-sized tables that scroll sideways; the board's tables span the width (page.css) */
+.msg .bub.md table { display: block; width: fit-content; max-width: 100%; overflow-x: auto; }
+.msg .bub.md pre { white-space: pre; overflow-wrap: normal; }
+.msg .bub.md h1, .msg .bub.md h2, .msg .bub.md h3, .msg .bub.md h4, .msg .bub.md h5, .msg .bub.md h6 { font-weight: 700; margin-top: 8px; }
+.msg .bub.md > h1:first-child, .msg .bub.md > h2:first-child, .msg .bub.md > h3:first-child { margin-top: 0; }
+.msg .bub.md hr { border: 0; border-top: 1px solid var(--wb-muted); margin: 8px 0; }
+/* a finished reply keeps its sanitized inline HTML; paint containment keeps any of it from drawing over the composer or the steer controls */
+.msg.fromlead[data-entry] > .bub.md { contain: paint; }
+.msg .bub.md svg { max-width: 100%; height: auto; }
+.src { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.src.wb { background: var(--wb-now); color: var(--wb-on-now); }
+.src.mail { background: var(--wb-technical); color: var(--wb-on-technical); }
+.turnline { align-self: center; display: inline-flex; gap: 6px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 999px; padding: 0 10px; }
+/* Wake notifications: quiet completion chips, expandable content cards. */
+.wake-divider { display: flex; align-items: center; gap: 10px; color: var(--wb-muted-fg); font-size: 11px; }
+.wake-divider::before, .wake-divider::after { content: ""; flex: 1; height: 1px; background: var(--wb-muted); }
+.wake-divider > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.wake-divider.fail { color: var(--wb-fail); }
+.wake-card { align-self: stretch; border-left: 3px solid var(--wb-technical); border-radius: 4px; background: var(--wb-card); padding: 8px 12px; min-width: 0; }
+.wake-card > summary { list-style: none; cursor: pointer; }
+.wake-card > summary::-webkit-details-marker { display: none; }
+.wake-head { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); }
+.wake-caption { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.wake-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; margin: 8px 0 0; }
+.wake-turn { align-self: flex-start; box-shadow: none; padding-left: 12px; }
+/* the lead's finished tool calls between two conversation entries: one muted line like the turn line, its batch list below when open */
+.toolsline { align-self: flex-start; max-width: 100%; font-size: 11px; color: var(--wb-muted-fg); }
+.toolsline > summary { list-style: none; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; max-width: 100%; box-sizing: border-box; box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 999px; padding: 0 10px; }
+.toolsline > summary::-webkit-details-marker { display: none; }
+.toolsline > summary:hover, .toolsline[open] > summary { color: var(--wb-fg); }
+.toolsline > summary .i { width: 10px; height: 10px; flex: none; transition: transform .15s; }
+.toolsline[open] > summary .i { transform: rotate(180deg); }
+/* two rows: the per-tool counts (.tsl) truncate, the numbers (.tsn) never do; open, the batch list shows the tools, so only the numbers stay */
+.toolsline .tsum { min-width: 0; display: flex; flex-direction: column; }
+.toolsline .tsl, .toolsline .tsn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolsline > summary:has(.tsn) { border-radius: 12px; padding-top: 2px; padding-bottom: 2px; }
+.toolsline[open] .tsum:has(.tsn) .tsl { display: none; }
+.toolsline .tf { color: var(--wb-fail); font-weight: 700; }
+.toolsline .ttok { font-variant-numeric: tabular-nums; }
+.toolsline .tool .x { font-weight: 700; margin-left: 4px; }
+.toolsline .brows { margin: 4px 0 0; padding: 6px 10px; width: max-content; max-width: 100%; box-sizing: border-box; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); }
+.brow.more { color: var(--wb-muted-fg); }
+/* A tool summary batch row: the name stays whole, the numbers stay at the right, and the args take what is left, truncated first. */
+.brow .bp.one .tool { flex: none; }
+.brow .ba { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--wb-mono); font-size: 11.5px; }
+.brow .bm > span { cursor: default; }
+.brow .bm .bf { color: var(--wb-fail); font-weight: 700; }
+/* a compaction of the main conversation: running (in convlive), then landed or failed (a ring entry) in the same place */
+.sysline { align-self: center; display: inline-flex; gap: 6px; align-items: center; font-size: 11.5px; font-weight: 600; color: var(--wb-muted-fg); background: color-mix(in srgb, var(--wb-compact-ink) 9%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-compact-ink) 35%, transparent); border-radius: 999px; padding: 2px 11px; }
+.sysline .mk { display: inline-flex; font-weight: 800; color: var(--wb-ok); }
+.sysline.running .mk { color: var(--wb-compact-ink); }
+.sysline.running .spin { width: 10px; height: 10px; }
+.sysline.fail .mk { color: var(--wb-fail); }
+.sysline .t { font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+/* a support chat's ui line: a dashboard command the agent sent, drawn alike
+   whether the chat acted on it live or met it in history */
+.sysline.uiline { max-width: 92%; font-weight: 500; overflow-wrap: anywhere; }
+.sysline.uiline .mk { color: var(--wb-primary); }
+/* a slash command an adapter ran: its typed line, then the output it showed
+   as text, whitespace kept, or a note when it opened in the terminal */
+.cmdrun { align-self: stretch; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cmdecho { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; }
+.cmdecho .mk { color: var(--wb-primary); font-weight: 800; }
+.cmdecho code { font-family: var(--wb-mono); font-weight: 600; color: var(--wb-fg); overflow-wrap: anywhere; min-width: 0; }
+.cmdecho .t { font-size: 11px; font-variant-numeric: tabular-nums; }
+.cmdout { margin: 0; padding: 7px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); font: 12px/1.45 var(--wb-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.cmdnote { padding-left: 18px; font-size: 11.5px; font-style: italic; color: var(--wb-muted-fg); }
+.caret { display: inline-block; width: 7px; height: 13px; background: currentColor; vertical-align: -2px; margin-left: 2px; animation: dash-blink 1s steps(1) infinite; }
+@keyframes dash-blink { 50% { opacity: 0; } }
+.permwait { display: flex; gap: 8px; align-items: center; background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); border-radius: 10px; padding: 7px 11px; font-size: 13px; }
+.permwait > .i { color: var(--wb-perm-ink); }
+.permwait > span { min-width: 0; overflow-wrap: anywhere; }
+.permwait .t { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; flex: none; }
+.activity { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--wb-muted-fg); padding: 0 4px; }
+.activity .spin { color: var(--wb-primary); }
+/* a tracker card the agent showed: a store chat (tracker drawer) draws it as the item's mini card; elsewhere it is this line */
+.cardref { display: flex; gap: 6px; align-items: baseline; max-width: 92%; padding: 4px 8px; border-radius: 8px; border-left: 3px solid var(--wb-primary); background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); font-size: 12.5px; }
+.cardref .crk { color: var(--wb-muted-fg); flex: none; }
+.cardref .cra { flex: none; }
+.cardref .crt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cardref.up { display: block; padding: 0; border: 0; background: none; box-shadow: none; }
+.cardref.up > .cref { margin-top: 0; }
+.mailline { font-size: 12.5px; }
+.mailline > summary, .mailline.nobody { display: flex; gap: 6px; align-items: baseline; padding: 3px 8px; border-radius: 8px; color: var(--wb-muted-fg); }
+.mailline > summary { list-style: none; cursor: pointer; }
+.mailline > summary::-webkit-details-marker { display: none; }
+.mailline > summary:hover { background: color-mix(in srgb, var(--wb-muted) 80%, transparent); }
+.mailline .arr { font-weight: 800; flex: none; }
+.mailline.recv .arr { color: var(--wb-primary); }
+.mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: none; }
+.mailline a.mpeer { color: var(--wb-primary); }
+.mailline a.mpeer:hover { text-decoration: underline; }
+.mailline .mfirst { margin-left: -6px; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailline .t { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
+.mailline[open] > summary { color: var(--wb-fg); }
+.mailline .mbody { margin: 2px 8px 4px 22px; padding: 7px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Display-only conversation projections; board/composer component rules stay with their owners. */
+.mail-notification, .input-record, .wake-card.child-report { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
+.input-record { border-style: dashed; }
+.input-record .bub { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mail-notification .wake-head, .input-record .wake-head, .child-report .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
+.mail-notification .wake-head .t, .input-record .wake-head .t, .child-report .wake-head .t { margin-left: auto; }
+.child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
+.delivery-details { min-width: 0; margin-top: 3px; font-size: 11px; color: var(--wb-muted-fg); }
+.delivery-details > summary { width: fit-content; max-width: 100%; padding: 3px 0; cursor: pointer; overflow-wrap: anywhere; }
+.delivery-details .wake-body { max-width: 100%; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-muted-fg); background: var(--wb-bg); font: 11px/1.5 var(--wb-mono); }
+.delivery-meta { margin-top: 4px; overflow-wrap: anywhere; }
+.src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
+.mail-block { min-width: 0; }
+.mail-delivery { margin: 1px 8px 0 22px; }
+.mailline:has(.peer-lead) > summary { flex-wrap: wrap; }
+.mailline:has(.peer-lead) .mpeer { max-width: 100%; overflow-wrap: anywhere; }
+.mailline:has(.peer-lead) .mfirst { flex-basis: 12em; }
+.wbupdate-topic[data-wb-topic] { cursor: pointer; }
+/* Higher specificity keeps the legacy effects frame from nesting full topic cards in a summary. */
+.wbeffects.wbupdate { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
+.wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 4px 5px; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate-head .t { margin-left: auto; }
+.wbupdate-topic { min-width: 0; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); }
+.wbupdate-topic + .wbupdate-topic { margin-top: 6px; }
+.wbupdate-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; min-width: 0; padding: 4px 12px; border-radius: var(--wb-radius) var(--wb-radius) 0 0; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 13px; overflow-wrap: anywhere; }
+.wbupdate-bar b { min-width: 0; }
+.wbupdate-key { min-width: 0; font: 10.5px var(--wb-mono); opacity: .7; }
+.wbupdate-bar a { margin-left: auto; color: inherit; }
+.wbupdate a { font-size: 11px; font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.wbupdate a:hover { text-decoration: underline; }
+.wbupdate-rows { display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 0; }
+.wbupdate-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 7px; min-width: 0; padding: 2px 6px; font-size: 12.5px; }
+.wbupdate-text { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.wbupdate-l { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 50%; font-size: 9px; font-weight: 800; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
+.wbupdate-item-id { font: 700 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.wbupdate-class { max-width: 100%; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 10px; overflow-wrap: anywhere; }
+.wbupdate-panel { flex-wrap: nowrap; }
+.wbupdate-panel-label { flex: none; color: var(--wb-muted-fg); font-size: 10px; font-weight: 800; }
+.wbupdate-panel .wbupdate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbupdate-panel a { flex: none; }
+.wbupdate-options { flex-basis: 100%; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; padding-left: 22px; }
+.wbupdate-options span { max-width: 100%; padding: 1px 8px; border-radius: 7px; background: color-mix(in srgb, var(--wb-policy) 8%, var(--wb-card)); color: var(--wb-fg); box-shadow: var(--wb-shadow); font-size: 11px; overflow-wrap: anywhere; }
+.wbupdate-status { display: block; padding: 0 12px; font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.wbupdate-status:empty { display: none; }
+.wbupdate .wbeffect-details { margin: 4px 7px 0; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate .wbeffect-details > summary { cursor: pointer; }
+.wbeffects.wbupdate-line > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; padding: 4px 7px; border-radius: 7px; list-style: none; font-size: 12px; color: var(--wb-muted-fg); }
+.wbupdate-line > summary::-webkit-details-marker { display: none; }
+.wbupdate-line > summary:hover { background: var(--wb-muted); }
+.wbupdate-line > summary .i { flex: none; width: 10px; height: 10px; }
+.wbupdate-line[open] > summary .i { transform: rotate(180deg); }
+.wbupdate-preview { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbupdate-line > .wbupdate-topic { margin: 3px 7px 5px 22px; }
+.wbupdate :is(a, summary):focus-visible, .delivery-details > summary:focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
+.wbupdate-bar a:focus-visible { outline-color: var(--wb-on-topic); }
+
+/* ===== composer: never swapped ===== */
+.composer { position: relative; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+/* composer badges: a row centred on the 10px gap between the conversation and
+   the composer, out of flow, so showing a badge moves neither. The interrupt
+   badge is the left column; the page script shows it while the lead works on
+   a turn. The badge group (subagent, background) is the right column, pushed
+   to the right end, and shrinks before it can overlap the interrupt badge. A
+   hidden interrupt badge keeps its space, so the group never moves sideways
+   when the lead starts or stops working. */
+.cbadges { position: absolute; z-index: 3; left: 10px; right: 10px; top: -5px; transform: translateY(-50%); display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: center; pointer-events: none; }
+.cbadges > * { pointer-events: auto; }
+.ibadge { grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 12px 0 10px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; line-height: 1; color: var(--wb-fail); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 55%, transparent), var(--wb-shadow-hi); }
+.ibadge:not([hidden]) { animation: ibadge-rise .16s ease-out; }
+.ibadge[hidden] { display: inline-flex; visibility: hidden; }
+.ibadge:hover:not(:disabled) { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); }
+.ibadge:focus-visible { outline: 1.5px solid var(--wb-fail); outline-offset: 2px; }
+.ibadge .istop { width: 8px; height: 8px; border-radius: 2px; background: currentColor; flex: none; }
+.ibadge.busy { cursor: default; color: color-mix(in srgb, var(--wb-fail) 60%, var(--wb-muted-fg)); }
+.ibadge.busy .istop { width: 9px; height: 9px; border-radius: 50%; background: transparent; border: 2px solid currentColor; border-right-color: transparent; animation: dash-spin .8s linear infinite; }
+/* subagent badge: the running-agent look of the peer rows (spinner, robot) */
+.sbadge { grid-column: 2; justify-self: end; min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 11px 0 9px; border-radius: 999px; white-space: nowrap; overflow: hidden; font-size: 11.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 45%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
+.sbadge[hidden] { display: none; }
+.sbadge .spin { width: 10px; height: 10px; }
+.sbadge .i { width: 13px; height: 13px; }
+.sbadge .slabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@keyframes ibadge-rise { from { opacity: 0; transform: translateY(40%); } }
+@media (prefers-reduced-motion: reduce) { .ibadge:not([hidden]), .sbadge, .ibadge.busy .istop { animation: none; } }
+.crow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
+.composer textarea { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
+.composer textarea:focus { outline: 1.5px solid var(--wb-primary); }
+/* the message box over its mention layer: the layer is laid out like the
+   textarea (same font, padding, and wrapping) and drawn behind it with
+   transparent text, so only each @ mention's pill shows under the
+   textarea's own text; the page script keeps its scroll and right padding
+   (the textarea's scrollbar) in step */
+.cfield { position: relative; min-width: 0; background: var(--wb-muted); border-radius: 10px; }
+.composer .cfield textarea { position: relative; background: transparent; white-space: pre-wrap; overflow-wrap: break-word; }
+.chl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; padding: 8px 10px; border-radius: 10px; font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; white-space: pre-wrap; overflow-wrap: break-word; color: transparent; }
+/* the hidden copy grow() measures an empty box's placeholder in: the layer's
+   geometry, but in flow height and out of sight */
+.chl.chm { bottom: auto; height: auto; overflow: visible; visibility: hidden; }
+.wsm-pill { border-radius: 4px; background: color-mix(in srgb, var(--wb-primary) 20%, transparent); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 20%, transparent); }
+/* the @ file-mention popup (mention.js), fixed at the @ it completes */
+.wsm-pop { position: fixed; z-index: 80; width: min(440px, calc(100vw - 16px)); max-height: 260px; overflow: auto; list-style: none; margin: 0; padding: 4px; background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); }
+.wsm-pop[hidden] { display: none; }
+.wsm-opt { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px; font-family: var(--wb-mono); min-width: 0; }
+.wsm-opt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.wsm-name { flex: none; max-width: 65%; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsm-dir { min-width: 0; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the slash-command picker's rows: /name, the description, the source muted;
+   a heading over each layer when the host tells who may invoke a command */
+.wsm-head { padding: 6px 8px 2px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--wb-muted-fg); }
+.wsm-desc { flex: 1 1 auto; min-width: 0; font: 11.5px system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsm-src { flex: none; margin-left: auto; font-size: 10.5px; color: var(--wb-muted-fg); opacity: .8; }
+/* the composer's slash-command selection: a capsule before the message box,
+   whose text is then the command's arguments */
+.r-cmds { display: none; }
+.crow.hascmd { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ccmd { align-self: start; display: inline-flex; align-items: center; gap: 4px; max-width: 40vw; min-height: 38px; padding: 0 3px 0 10px; border-radius: 10px; font: 600 12.5px/1.2 var(--wb-mono); color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); }
+.ccmd[hidden] { display: none; }
+.ccmd-name { white-space: nowrap; }
+.ccmd-args { min-width: 0; font-weight: 400; color: var(--wb-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ccmd-args[hidden] { display: none; }
+.csend, .wbmention button { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.csend { width: 34px; padding: 0; }
+.csend:hover, .wbmention button:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
+.csend:focus-visible, .wbmention button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.csend .i, .wbmention button .i { width: 17px; height: 17px; }
+.cchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.cchips:empty { display: none; }
+.achip { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; font-size: 12px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); }
+.achip b { font-variant-numeric: tabular-nums; }
+.achip .anote { color: var(--wb-muted-fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22ch; }
+.achip .anote::before { content: "· "; }
+.achip.tchip { cursor: pointer; background: var(--wb-muted); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.achip.tchip .anote::before { content: none; }
+/* a board mention: "[topic] (id)" and the selected text, quoted */
+.achip.mchip { background: var(--wb-muted); box-shadow: inset 3px 0 0 var(--wb-primary), inset 0 0 0 1px var(--wb-line); }
+.achip.mchip .anote { font-style: italic; }
+.achip.mchip .anote::before { content: none; }
+/* a picked page element and a console block: mention capsules whose bold
+   part is a selector (clipped, monospace) or the error count */
+.achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.achip.cchip { box-shadow: inset 3px 0 0 var(--wb-warn), inset 0 0 0 1px var(--wb-line); }
+/* The selection note stays next to its attach action, within the viewport. */
+.wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.wbmention-note { flex: 1; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
+.wbmention button { flex: none; align-self: stretch; gap: 5px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; }
+.wbmention button .i { pointer-events: none; }
+.wbmention :focus-visible { outline-offset: 2px; }
+.wbmention-note:focus-visible { outline: 1.5px solid var(--wb-fg); }
+.wbmention[hidden] { display: none; }
+.unchip { border: 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 5px; border-radius: 999px; }
+.unchip:hover { background: var(--wb-muted); color: var(--wb-fg); }
+/* composer image chips and message thumbnails */
+.cimgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cimgs:empty { display: none; }
+.ichip { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; background: var(--wb-muted); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); flex: none; }
+.ichip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.unimg { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border: 0; border-radius: 999px; padding: 0; line-height: 18px; font-size: 13px; cursor: pointer; background: color-mix(in srgb, var(--wb-card) 85%, transparent); color: var(--wb-fg); }
+.unimg:hover { background: var(--wb-card); }
+.inum, .thumbs .tnum { position: absolute; left: 2px; bottom: 2px; font-size: 10px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 4px; font-variant-numeric: tabular-nums; background: color-mix(in srgb, var(--wb-card) 85%, transparent); color: var(--wb-fg); pointer-events: none; }
+.composer.drop { outline: 2px dashed var(--wb-primary); outline-offset: -4px; }
+/* A board note's image chips: a row right after its note, aligned with it,
+   hidden while the note is closed. */
+.nimgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.note[hidden] + .nimgs { display: none; }
+.arow > .nimgs, .ckrow > .nimgs { flex-basis: 100%; margin: 0 10px 8px 34px; }
+.srow > .nimgs { flex-basis: 100%; margin-top: 4px; }
+.tophead > .nimgs { margin: 0 10px 6px; }
+.topic.quiet > .tophead > .nimgs { margin: 0 6px 4px; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; white-space: normal; }
+.thumbs .thumb { position: relative; display: block; }
+.thumbs .thumb img { display: block; max-width: 160px; max-height: 120px; border-radius: 6px; object-fit: contain; background: var(--wb-muted); }
+.thumbs .ipath { font-size: 12px; color: var(--wb-muted-fg); word-break: break-all; }
+/* an "[Image #N]" marker in a message's text */
+.imgtag { display: inline-block; font-size: 11px; font-weight: 800; line-height: 1.3; padding: 0 5px; border-radius: 4px; font-variant-numeric: tabular-nums; vertical-align: 1px; background: color-mix(in srgb, var(--wb-primary) 22%, var(--wb-card)); color: var(--wb-fg); }
+/* held: sent from the page, not yet received by the session */
+.msg.held .bub { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 45%, transparent); }
+.heldtag { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+.steertag { background: var(--wb-ph-tool); color: var(--wb-on-ph-tool); }
+/* .btn.mini (page.css) pins a 24px-wide icon button; the held bubble's buttons carry a label, so they size to it. */
+.btn.mini.hcancel, .btn.mini.hsteer { width: auto; height: 20px; font-size: 11px; gap: 3px; padding: 0 7px; flex: none; white-space: nowrap; }
+.msg.held .mh { flex-wrap: wrap; row-gap: 3px; }
+.hcancel .i, .hsteer .i { width: 11px; height: 11px; }
+/* a held slash command: its typed line */
+.cmdtyped { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 600; }
+.pdiv { border: 0; border-top: 1px solid color-mix(in srgb, var(--wb-primary) 30%, transparent); margin: 6px 0; }
+/* a message's answer capsules lead its bubble, above the text */
+.hchips { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; }
+.hchips:not(:last-child) { margin-bottom: 6px; }
+.hchips .achip { padding-right: 9px; }
+.hchips .achip.tchip { cursor: default; }
+.sentmark { font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 0 6px; border-radius: 4px; white-space: nowrap; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.srow .stext > .sentmark { margin-right: 6px; }
+.sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+/* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back. Ack rows (.arow) and check rows (.ckrow) dim alike; .aline is the agents panel's row wrapper, not a board item. */
+.card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input, .ckrow.sent-sent .why, .ckrow.sent-sent input { opacity: .4; transition: opacity .15s; }
+.card.sent-held > .cbody > :not(.note), .arow.sent-held .why, .arow.sent-held input, .ckrow.sent-held .why, .ckrow.sent-held input { opacity: .65; transition: opacity .15s; }
+.card.sent-sent .cbar .head .title, .arow.sent-sent .head .title, .ckrow.sent-sent .head .title { opacity: .7; transition: opacity .15s; }
+.card.sent-held .cbar .head .title, .arow.sent-held .head .title, .ckrow.sent-held .head .title { opacity: .85; transition: opacity .15s; }
+.card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .card:is(.sent-sent, .sent-held):focus-within .cbar .head .title, .arow:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title), .ckrow:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title) { opacity: 1; }
+/* status band: the context bar above the message box (ctx), the folder,
+   usage limits, and cost below it (sline). An empty region
+   collapses. sline is a size container inside the composer's 10px padding:
+   below a 360px band (340px of sline) only the usage limit under more
+   pressure (.hi) stays. */
+.r-ctx:empty, .r-sline:empty { display: none; }
+.r-sline { container-type: inline-size; }
+/* The composer's status row collapses when its region is empty. */
+.cfoot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cfoot > .r-sline { flex: 1 1 auto; min-width: 0; }
+.cfoot:has(> .r-sline:empty) { display: none; }
+.sb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 12px; min-width: 0; font-size: 12.5px; line-height: 1.3; padding: 0 2px; }
+.sb .i { width: 13px; height: 13px; }
+.sb-top { flex-wrap: nowrap; padding-top: 2px; }
+.sb-dir { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; font-weight: 800; }
+.sb-dir > span { overflow: hidden; text-overflow: ellipsis; }
+.sb-dir .i { color: var(--wb-muted-fg); }
+.sb-tail { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; flex: none; }
+.sb-use { flex: none; display: inline-flex; align-items: center; font-size: 12px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sb-use .u-pct { display: inline-flex; align-items: center; font-weight: 700; color: var(--wb-fg); border-radius: 5px; }
+.sb-use time { font: inherit; }
+.sb-use em { font-style: normal; font-weight: 700; }
+.sb-use em.neg { color: var(--wb-ok); }
+.sb-use em.pos { color: var(--wb-warn-ink); }
+.sb-use.warn .u-pct { color: var(--wb-warn-ink); }
+.sb-use.crit .u-pct { background: var(--wb-fail); color: var(--wb-card); padding: 1px 5px; margin-right: 2px; }
+.sb-cost { flex: none; font: 700 12.5px/1 var(--wb-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sb-ctx { --c: var(--wb-primary); display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 100%; }
+.sb-ctx.warn { --c: var(--wb-warn); }
+.sb-ctx.crit { --c: var(--wb-fail); }
+.sb-pct { display: inline-flex; align-items: center; flex: none; font: 800 18px/1 system-ui, sans-serif; color: var(--c); font-variant-numeric: tabular-nums; border-radius: 6px; }
+.sb-ctx.crit .sb-pct { background: var(--c); color: var(--wb-card); padding: 3px 7px; }
+.sb-bar { position: relative; flex: 1 1 90px; min-width: 70px; height: 12px; border-radius: 999px; background: var(--wb-muted); overflow: hidden; }
+.sb-bar i { position: absolute; inset: 0 auto 0 0; background: var(--c); border-radius: 999px; }
+.sb-bar u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--wb-card); opacity: .85; }
+.sb-bar .t80 { left: 80%; }
+.sb-bar .t95 { left: 95%; }
+.sb-ctx.warn .sb-bar, .sb-ctx.crit .sb-bar { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 28%, transparent); }
+.sb-tok, .sb-cache { flex: none; font: 600 11.5px/1 var(--wb-mono); color: var(--wb-muted-fg); white-space: nowrap; }
+.sb-flag { flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--c); box-shadow: inset 0 0 0 1px var(--c); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+@container (max-width: 560px) { .sb { column-gap: 9px; } .sb-foot .sb-tail { margin-left: 0; } }
+@container (max-width: 340px) { .sb-use.both:not(.hi) { display: none; } }
+@media (max-width: 560px) { .sb-flag { display: none; } }
+
+/* ===== tabs ===== */
+.tabbar { display: flex; gap: 3px; background: var(--wb-muted); border-radius: 999px; padding: 3px; width: fit-content; }
+.tabbar button { border: 0; background: transparent; border-radius: 999px; height: 28px; padding: 0 14px; font-weight: 700; font-size: 13px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; color: var(--wb-muted-fg); }
+.tabbar button[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow); }
+.tdot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; }
+.tdot.on { display: inline-block; }
+

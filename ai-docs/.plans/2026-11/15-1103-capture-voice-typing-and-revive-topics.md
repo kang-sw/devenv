@@ -1,0 +1,31 @@
+# Capture approved voice typing and revive topic-state tickets
+
+## Authority and scope
+
+MAIN's 2026-11-15 02:01:51 peer-lead message requests docs-only capture of owner approvals (872)=a plus the owner's streaming addition, and (873)=a. TASK3 remains first; this independent capture uses the reused pooled housekeeping checkout /Users/kang-sw/.ws-worktrees/devenv/agent-lip-alto, branch docs/exec3-voice-and-revive-capture, root worktree key ashamed-grove-rehydrate. No product implementation or verification workload is authorized.
+
+Populate only the two created todo stubs:
+- ai-docs/tickets/todo/261115-feat-ws-dashboard-external-stt-voice-typing.md
+- ai-docs/tickets/todo/261115-feat-ws-revive-topic-state-summaries.md
+
+Use ticket conventions and feat template/checklists. Default one Phase 1 each, no Results, no invented ready/fact/review posture. Read constraining related tickets and source via git show when sparse checkout omits it. Capture all approved scope, T0 compatibility and relevant path-scoped manuals. No new owner decision IDs; MAIN alone assigns them. Return any unconfirmed item to root as an UNNUMBERED Open Decision Queue report, do not settle it yourself or commit an unresolved ODQ section. Do not add unapproved mechanisms or silently convert provider suggestions into verified facts. Do not edit other tickets, source, manifests or configuration.
+
+## Voice-typing approved intent
+
+One OpenAI-compatible multipart transcription client: POST {base}/audio/transcriptions with audio file, model and language selection. Presets requested by MAIN: OpenRouter base https://openrouter.ai/api/v1, suggested examples openai/whisper-large-v3 or openai/gpt-4o-mini-transcribe; OpenAI described as gpt-transcribe with a possible languages-array rather than language branch; Groq base https://api.groq.com/openai/v1 with whisper-large-v3-turbo; Custom (OpenAI-compatible) with base URL/model. These exact model IDs, field names and streaming capabilities are NOT verified in this docs-only, offline capture. Preserve MAIN's examples/claims as attributed verification prerequisites, not authoritative API facts. Before ready promotion require exact official model/API documentation; report contradictions/gaps to root without making a new policy choice. Official reference pointers supplied: OpenRouter openrouter.ai/docs/guides/overview/multimodal/stt.md; OpenAI speech-to-text guide; Groq STT docs. No external network/docs fetching/provider calls here.
+
+Key lives in daemon config; settings API returns masked representation, never exposes key to LAN viewers. Audio path renderer -> local daemon -> provider, never browser-direct/CORS workaround. Push-to-talk uses MediaRecorder webm/opus; stop -> upload -> insert at composer caret. Owner's addition verbatim: "중간중간에 만들어지는 텍스트를 스트리밍으로 돌려주는 식이면 그것도 표기". Supporting provider/model pairs show streamed partial text as it arrives (MAIN example OpenAI gpt-transcribe stream=true remains unverified); non-streaming pairs insert final text. Do not invent partial insertion/replacement or save/retention policies not approved; report any necessary choices as unnumbered issues.
+
+Browser mic works on secure loopback http://127.0.0.1; LAN HTTP origins hide/disable mic. Electron acceptance requires NSMicrophoneUsageDescription via packager extendInfo, systemPreferences.askForMediaAccess and session permission handling restricting media to the daemon origin. Reference 261115-feat-werkschaft-electron-shell, owned by EXEC4, but do not edit that ticket or its implementation. Read its actual decisions first and preserve ownership.
+
+Out of scope: realtime WebSocket; Deepgram/ElevenLabs/AssemblyAI adapters; chat-completions input_audio; diarization/timestamps; splitting audio over25MB; OS keychain. New daemon route/config keys are T0 additive; do not select exact unapproved route/manifest fields yourself. Verification expectations should include multipart request/stream capability shape, local-daemon mediation, masked key/no LAN leakage, secure-context controls, caret insertion/final-only fallback, streamed partial text where actually supported and scoped Electron permission behavior. This capture does not assert a provider integration was tested.
+
+## Revive approved intent
+
+Read agents-plugin-tool/internal/mcp/workflow_manual.go renderWhiteboardSummaries (MAIN's coordinates156–181 are hints). MAIN says it currently lists open topics as stem + latest agent log line and skips topics without an agent line; verify current source and cite it. Add per topic work state discussing/waiting/implementing/awaiting-confirmation, owner and ETA remaining/overdue for implementing, open ask IDs (nn), and include open topics without agent logs. Additive workflow_manual text only, T0; no new store/state lifecycle or schema. Locate current structured state/ETA/asks and cite actual source owners; do not invent derivations/fallback semantics. Single bounded phase plus tests alongside. Report any missing authoritative data or ambiguous mapping to root as unnumbered ODQ rather than making policy. Preserve session identity/manual rules and existing summary information.
+
+## Execution and delivery
+
+Static local source inspection and ticket guardrails/diff checks only. No builds/tests/browsers/providers/network/downloads/listeners/daemon operations. Never touch shared port29417 or any process. Keep root's checkout and unrelated untracked files untouched. Existing write-once plans and approved assets are read-only. No ready moves, source changes, runtime activation, merging, pushing, worktree release or branch switches. Root consumes actual patches and releases the checkout.
+
+Commit each settled ticket as a separate logical docs unit with explicit paths and AI Context; include this immutable shared capture plan in the first commit. If an item prevents a settled ticket, return its draft/diff plus unnumbered issue rather than committing unresolved mechanism decisions. Return exact heads/parents, full relevant diffs, verification results and all gaps/omissions in plain English, complete sentences, normal spacing, short VERIFIED/INFERRED cited bullets. Do not use telegraphic glued words. Report to root; do not contact MAIN yourself.

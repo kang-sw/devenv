@@ -211,6 +211,12 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 		ls.stop()
 	}
 	state := wslive.NewState(key)
+	if records, err := wslive.ReadObserved(dir); err == nil {
+		state.SeedObserved(records)
+	}
+	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
+		state.SeedLastTurn(prev)
+	}
 	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, debug: debug, state: state}
 	if h.host != nil && !h.closed {
 		if slot, ok := h.host.OpenHostedSlot(dir); ok {
@@ -438,6 +444,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	now := currentLiveSeams().now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry
+		observed []wslive.ObservedRecord
 		problems []string
 		applied  int
 		changed  bool
@@ -467,6 +474,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 					ls.flushNow = true
 				}
 				reset = reset || ev.Kind == wslive.KindReset
+				observed = append(observed, res.Observed...)
 				ring = append(ring, res.Ring...)
 				continue
 			}
@@ -487,6 +495,9 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	}
 	ls.ringMu.Lock()
 	ls.mu.Unlock()
+	if err := wslive.AppendObserved(ls.dir, observed); err != nil {
+		s.debugEvent("dashboard.model_evidence_write_error", map[string]any{"error": err.Error()})
+	}
 	if len(ring) > 0 {
 		s.appendLiveRing(key, ls.dir, ls.slot, ring)
 	}
@@ -684,17 +695,19 @@ func writeLiveSnapshot(dir string, data []byte) error {
 // appendLiveRing writes entries to the conversation ring in the session
 // directory dir and tells the daemon: through slot, the session's hosted
 // hand-off, or with a nudge when it is nil. A failed write is logged, never
-// surfaced.
-func (s *Server) appendLiveRing(sessionKey, dir string, slot wsdashboard.HostedSlot, entries []wslive.RingEntry) {
+// surfaced. Its return value records projection success for callers that
+// report it separately from their authoritative mutation.
+func (s *Server) appendLiveRing(sessionKey, dir string, slot wsdashboard.HostedSlot, entries []wslive.RingEntry) bool {
 	if err := currentLiveSeams().appendRing(wslive.RingDir(dir), entries); err != nil {
 		s.debugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
-		return
+		return false
 	}
 	if slot != nil {
 		slot.RingAppended()
-		return
+		return true
 	}
 	s.dashboardNudge(sessionKey)
+	return true
 }
 
 // recordLiveMail adds a mail line to the session's conversation ring for

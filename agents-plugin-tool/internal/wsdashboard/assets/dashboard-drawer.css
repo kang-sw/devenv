@@ -1,0 +1,423 @@
+/* ===== drawer: the side panels pulled down from the top =====
+   Fixed over the page on both session pages, so opening it moves nothing
+   under it. .dr-in matches .dwrap's width below 1600px and spans the
+   window from it, so the handles (the drawer's, the git chips, the
+   tracker's row) sit at the window's right edge; there the sheet is 960px
+   at most, anchored right under the handles, so it never covers the
+   session rail's column (1600px less 960px and the paddings leaves 624px
+   on its left). The git sheet, whose commit graph wants the room, is
+   1280px at most, anchored the same way (it may cover the rail's column
+   below 1668px). The clip reveals the sheet from
+   the header's bottom (--drtop) and the handle rides its bottom edge, or
+   hangs from the page's top edge while closed. The page script sets the
+   clip height, the sheet height, the handle's top, and --drhw (the handle's
+   own width, which follows its icons). .anim animates a click's open or
+   close, never a drag or a resize. The sheet shows every present panel as a
+   card in a wrapping grid (below), or the git sheet (gitbody). */
+:root { --drhw: 0px; --dpad: 16px; }
+.drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: var(--z-panels); pointer-events: none; }
+.dr-in { position: relative; max-width: 1680px; margin: 0; }
+.dr-clip { position: absolute; top: var(--drtop, 48px); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+.drawer.open .dr-clip, .drawer.drag .dr-clip { visibility: visible; }
+.drawer.anim .dr-clip { transition: height .18s ease-out, visibility 0s linear .18s; }
+.drawer.anim.open .dr-clip { transition: height .18s ease-out, visibility 0s; }
+@media (min-width: 1600px) {
+  .dr-in { max-width: none; }
+  .dash:not(.index) { --tkmaxw: none; }
+  .dr-clip { left: auto; width: min(960px, calc(100% - 2 * var(--dpad))); }
+  .dr-clip:has(> .dr-sheet > .gbody:not([hidden])) { width: min(1280px, calc(100% - 2 * var(--dpad))); }
+}
+.dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--wb-bg); border-top: 1px solid var(--wb-muted); }
+.dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; display: flex; gap: 10px; }
+/* the panels drawer's body: the panels region and the drawer's own cards
+   (drcards) share one grid of cards at least 300px wide, wrapping onto
+   further rows rather than shrinking; the rows share the body's height, each
+   at least 280px, and the body scrolls when they need more. Each card
+   scrolls on its own. One stacked column on a narrow screen, which the body
+   scrolls. */
+#drbody { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); grid-auto-rows: minmax(280px, 1fr); overflow: auto; overscroll-behavior: contain; }
+#drbody[hidden] { display: none; }
+.dr-body .r-panels { display: contents; }
+.dr-body details.panel { min-width: 0; min-height: 0; box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
+.dr-body details.panel > summary { position: sticky; top: 0; z-index: 1; cursor: default; }
+@media (max-width: 759px) {
+  #drbody { display: flex; flex-direction: column; }
+  .dr-body details.panel { flex: none; overflow: hidden; }
+  .dr-body details.panel > summary { position: static; }
+}
+/* Settings uses the rail's fixed, viewport-bounded popover. */
+.settings-pop { width: 300px; }
+.settings-pop:focus { outline: none; }
+.settings-toggle { flex: none; }
+/* A click on the framed main panel dismisses Settings in its owning shell. */
+:root[data-shell]:has(.settings-pop:not([hidden])) .frames { pointer-events: none; }
+.gmenu.gcard { position: static; width: auto; box-shadow: none; padding: 0; background: transparent; }
+/* the pooled-worktree card: leased rows first, then idle ones by profile */
+#wtcount[hidden] { display: none; }
+.wtcard .body { display: flex; flex-direction: column; gap: 8px; }
+.wtlist { display: grid; gap: 8px; }
+.wtsec { display: grid; gap: 2px; }
+.wtgrp { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px; }
+.wtrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; padding: 3px 6px; border-radius: 6px; font-size: 12.5px; }
+/* a leased row puts its branch, holder, and age on a second line, so the
+   name keeps the card's width beside its size */
+.wtrow.on { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "dot name name size" ". br who age"; row-gap: 1px; background: color-mix(in srgb, var(--wb-ok) 10%, var(--wb-card)); }
+.wtrow.on > .wtdot { grid-area: dot; }
+.wtrow.on > .wtname { grid-area: name; }
+.wtrow.on > .wtbr { grid-area: br; }
+.wtrow.on > .wtwho { grid-area: who; justify-self: end; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wtrow.on > .wtage { grid-area: age; }
+.wtrow.on > .wtsize { grid-area: size; }
+.wtdot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-muted-fg); opacity: .5; }
+.wtrow.on .wtdot { background: var(--wb-ok); opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
+.wtrow.quar .wtdot { background: var(--wb-fail); opacity: 1; }
+.wtname { font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wtbr { font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wtwho { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
+.wtage, .wtsize { font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.wtsize { min-width: 56px; }
+.wtempty { font-size: 12.5px; color: var(--wb-muted-fg); }
+.wtfoot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: auto; }
+.wtnote { font-size: 11.5px; color: var(--wb-fail); margin-right: auto; }
+.wtclean { height: 28px; padding: 0 12px; font-size: 12.5px; }
+.wtclean:disabled { opacity: .5; cursor: not-allowed; }
+/* the session-holder card: the worktree card's rows, a holder's PID, cause,
+   and restart-safe mark on a second line, its stop button at the end; a
+   failed holder start is a row of its own */
+#hdcount[hidden] { display: none; }
+.hdcard .body { display: flex; flex-direction: column; gap: 8px; }
+.hdrow { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "dot name age stop" ". meta meta stop"; row-gap: 1px; }
+.hdrow > .wtdot { grid-area: dot; }
+.hdrow > .wtname { grid-area: name; }
+.hdrow > .wtage { grid-area: age; }
+.hdrow > .hdmeta { grid-area: meta; }
+.hdrow > .hdstop { grid-area: stop; }
+.hdrow.lost { background: color-mix(in srgb, var(--wb-warn) 10%, var(--wb-card)); }
+.hdrow.lost .wtdot { background: var(--wb-warn); opacity: 1; }
+.hdmeta { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.hdcause { color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); }
+.hdunsafe { color: var(--wb-fail); font-weight: 700; cursor: help; }
+.hdstop { height: 26px; padding: 0 10px; font-size: 12px; }
+.hdstop:disabled { opacity: .5; cursor: not-allowed; }
+.hdrow.hdfail { grid-template-areas: "dot msg msg age"; background: color-mix(in srgb, var(--wb-fail) 10%, var(--wb-card)); }
+.hdfail .wtdot { background: var(--wb-fail); opacity: 1; }
+.hdmsg { grid-area: msg; font-size: 12px; color: var(--wb-fail); overflow-wrap: anywhere; }
+.dr-handle { position: absolute; top: 0; right: var(--dpad); height: 34px; padding: 2px 9px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: grab; touch-action: none; display: flex; align-items: center; justify-content: flex-end; gap: 7px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dr-handle[hidden] { display: none; }
+.dr-search-handle { right: calc(var(--dpad) + var(--shr, 0px)); width: 35px; padding: 2px 0 0; justify-content: center; }
+.dr-search-handle .li { width: 17px; height: 17px; }
+.dr-search { height: 100%; min-height: 0; }
+.dr-search[hidden] { display: none; }
+.dr-search .tk.dr-search-palette { position: static; width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+/* the inverted corner where the handle meets the page */
+.dr-handle::before { content: ""; position: absolute; left: 0; bottom: 0; width: 10px; height: 10px; border-radius: 0 0 0 8px; background: linear-gradient(45deg, var(--wb-bg) 50%, var(--wb-muted) 50%); }
+.dr-handle:hover { color: var(--wb-fg); }
+.dr-handle:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.drawer.drag .dr-handle { cursor: grabbing; }
+.drawer.anim .dr-handle { transition: top .18s ease-out; }
+.dr-handle > .i { width: 17px; height: 17px; flex: none; }
+.drawer.open .dr-handle { color: var(--wb-fg); }
+/* one hamburger; the dot on its corner says some section has something new */
+.dr-handle .tdot { position: absolute; top: 6px; right: 5px; box-shadow: 0 0 0 1.5px var(--wb-card); }
+.dr-wait { display: none; align-items: center; color: var(--wb-perm-ink); }
+.dr-wait .i { width: 13px; height: 13px; }
+/* an approval is waiting: an open drawer can cover the agents tree's row */
+.dr-handle.wait { background: color-mix(in srgb, var(--wb-ph-perm) 22%, var(--wb-card)); color: var(--wb-fg); }
+.dr-handle.wait .dr-wait { display: inline-flex; }
+/* the fold button (#drfold): while a sheet shows, it fills the slot its
+   riding handle left at the top, in the handles' shape at that handle's
+   width (--drw for the panels handle, --ghw for the git one, set by the page
+   script), quieter than a handle; a click closes the sheet */
+.dr-fold { position: absolute; top: 0; right: var(--dpad); width: var(--drw, 34px); height: 34px; padding: 2px 0 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); animation: dr-fold-in .18s ease-out; }
+.dr-fold[hidden] { display: none; }
+.dr-fold.git { right: calc(var(--dpad) + var(--ghr, 0px)); width: var(--ghw, 34px); }
+.dr-fold.search { right: calc(var(--dpad) + var(--shr, 0px)); width: 35px; }
+.dr-fold:hover { color: var(--wb-fg); }
+.dr-fold:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.dr-fold .li { width: 17px; height: 17px; }
+@keyframes dr-fold-in { from { opacity: 0; } }
+/* the git handle (the git region, gitbadge.go): left of the panels handle
+   (--ghr, set by the page script, is that handle's width and the gap), in its
+   shape: the branch abbreviated (a hammer for an impl branch, a gold trophy
+   for a goal one), the ahead and behind counts, and a dot for a dirty tree.
+   It rides the sheet's bottom edge while the frame shows the git sheet. */
+:root { --gh-gold: #b8860b; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gh-gold: #e3b341; } }
+:root[data-theme="dark"] { --gh-gold: #e3b341; }
+.dr-in > .r-git { position: absolute; top: 0; right: calc(var(--dpad) + var(--ghr, 0px)); }
+.dr-in > .r-git:empty { display: none; }
+.drawer.anim .r-git { transition: top .18s ease-out; }
+.r-git .gh { cursor: grab; touch-action: none; }
+.drawer.drag .r-git .gh { cursor: grabbing; }
+.gh { position: relative; height: 34px; max-width: min(320px, 46vw); padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; gap: 6px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.gh:hover, .gh.open { color: var(--wb-fg); }
+.gh.open { box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }
+.gh:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.gh .i { width: 15px; height: 15px; flex: none; }
+.gh-goal, .gh-impl { display: inline-flex; flex: none; }
+.gh-goal { color: var(--gh-gold); }
+.gh-impl { color: var(--wb-primary); }
+.gh-br { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--wb-mono); color: var(--wb-fg); }
+.gh.pending .gh-br, .gh.failed .gh-br { font-family: inherit; color: var(--wb-muted-fg); }
+.gh.failed .gh-br { color: var(--wb-warn-ink); }
+.gh-ab { display: inline-flex; gap: 4px; flex: none; font: 700 11px/1 var(--wb-mono); }
+.gh-ab .up, .gpanel .gref .up { color: var(--wb-primary); }
+.gh-ab .dn, .gpanel .gref .dn { color: var(--wb-warn-ink); }
+.gh-dirty { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-warn); }
+/* the git sheet (gitbody): the commit graph, and the action panel, each card
+   filling the drawer's height and scrolling inside; one column on a narrow
+   screen, the panel alone */
+.dr-body[hidden] { display: none; }
+.gbody { display: grid; grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); grid-template-rows: minmax(0, 1fr); }
+.gpanel { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+.ghead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; background: var(--wb-muted); font-size: 13px; }
+.ghead > .i { width: 14px; height: 14px; flex: none; color: var(--wb-muted-fg); }
+.gref { display: flex; align-items: center; gap: 6px; min-width: 0; font: 700 12px/1.3 var(--wb-mono); }
+.gref > * { flex: none; }
+.gref .gbr, .gref .gup { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gref .gto, .gref .gup, .gref .gnoup { color: var(--wb-muted-fg); }
+.gref .gnoup { font-family: inherit; font-weight: 600; }
+.gacts { flex: none; display: flex; gap: 6px; padding: 8px 12px 0; }
+/* the actions are chip-sized (page.css .chip): compact, beside the ref line */
+.gact { height: 20px; padding: 0 9px; gap: 3px; font-size: 12px; }
+.gact .i { width: 12px; height: 12px; }
+.gact:disabled { opacity: .55; cursor: default; }
+.gact.busy { opacity: 1; cursor: progress; background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-muted)); }
+.gact:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.gmsg { flex: none; margin: 8px 12px 0; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.gmsg.err { color: var(--wb-warn-ink); }
+.gmsg[hidden] { display: none; }
+.gfiles { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px 10px; display: grid; align-content: start; gap: 8px; }
+.gsec { display: grid; gap: 1px; }
+.ggrp { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px 2px; }
+.gf { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 2px 4px; border-radius: 5px; font-size: 12.5px; }
+.gf:hover { background: var(--wb-muted); }
+.gst { font: 800 11.5px/1 var(--wb-mono); text-align: center; color: var(--wb-warn-ink); }
+.gst.st-A, .gst.st-q { color: var(--wb-ok); }
+.gst.st-D, .gst.st-U { color: var(--wb-fail); }
+.gp { display: flex; min-width: 0; font-family: var(--wb-mono); font-size: 12px; white-space: nowrap; }
+.gdir { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--wb-muted-fg); }
+.gname { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.gd { display: inline-flex; gap: 6px; font: 700 11.5px/1 var(--wb-mono); white-space: nowrap; }
+.gd i { font-style: normal; }
+.gd .add { color: var(--wb-ok); }
+.gd .del { color: var(--wb-fail); }
+.gd .bin { color: var(--wb-muted-fg); font-weight: 600; }
+.gempty { font-size: 12.5px; color: var(--wb-muted-fg); }
+/* a clean tree: a quiet empty state centred in the list's room */
+.gfiles.clean { align-content: center; justify-items: center; }
+.gclean { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 0; font-size: 15px; font-weight: 600; color: var(--wb-muted-fg); opacity: .75; text-align: center; }
+.gclean .i { width: 28px; height: 28px; stroke-width: 1.5; }
+.gempty.err { color: var(--wb-warn-ink); }
+.gst.st-R, .gst.st-C { color: var(--wb-primary); }
+
+/* the commit graph (gitlog.go lays the lanes out; dashboard.js draws them as
+   one inline SVG under the rows). Lane colours cycle through --gl-0..7; the
+   diff viewer's line colours are --df-*, its highlight colours --hl-*. */
+:root {
+  --gl-0: #2b62d9; --gl-1: #0e7a83; --gl-2: #6a4fc4; --gl-3: #b25000;
+  --gl-4: #1d7348; --gl-5: #b0245a; --gl-6: #9a7400; --gl-7: #5f646b;
+  --df-add: color-mix(in srgb, var(--wb-ok) 11%, var(--wb-card));
+  --df-add-g: color-mix(in srgb, var(--wb-ok) 20%, var(--wb-card));
+  --df-add-x: color-mix(in srgb, var(--wb-ok) 32%, var(--wb-card));
+  --df-del: color-mix(in srgb, var(--wb-fail) 9%, var(--wb-card));
+  --df-del-g: color-mix(in srgb, var(--wb-fail) 17%, var(--wb-card));
+  --df-del-x: color-mix(in srgb, var(--wb-fail) 28%, var(--wb-card));
+  --df-hunk: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-card));
+  --hl-k: #a626a4; --hl-kt: #0e7a83; --hl-nb: #b25000; --hl-nf: #2457c5; --hl-s: #50701a;
+  --hl-c: #6e7681; --hl-mi: #b25000; --hl-nt: #2457c5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --gl-0: #7aa2ff; --gl-1: #6fcdd4; --gl-2: #b9a6f5; --gl-3: #e0a36c;
+    --gl-4: #6cc39a; --gl-5: #e48aae; --gl-6: #e3b341; --gl-7: #a2a6ad;
+    --df-add: color-mix(in srgb, var(--wb-ok) 10%, var(--wb-card));
+    --df-add-g: color-mix(in srgb, var(--wb-ok) 18%, var(--wb-card));
+    --df-add-x: color-mix(in srgb, var(--wb-ok) 34%, var(--wb-card));
+    --df-del: color-mix(in srgb, var(--wb-fail) 10%, var(--wb-card));
+    --df-del-g: color-mix(in srgb, var(--wb-fail) 18%, var(--wb-card));
+    --df-del-x: color-mix(in srgb, var(--wb-fail) 32%, var(--wb-card));
+    --df-hunk: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card));
+    --hl-k: #c792ea; --hl-kt: #6fcdd4; --hl-nb: #f2a76a; --hl-nf: #82aaff; --hl-s: #b5d88a;
+    --hl-c: #7f8590; --hl-mi: #f2a76a; --hl-nt: #82aaff;
+  }
+}
+:root[data-theme="dark"] {
+  --gl-0: #7aa2ff; --gl-1: #6fcdd4; --gl-2: #b9a6f5; --gl-3: #e0a36c;
+  --gl-4: #6cc39a; --gl-5: #e48aae; --gl-6: #e3b341; --gl-7: #a2a6ad;
+  --df-add: color-mix(in srgb, var(--wb-ok) 10%, var(--wb-card));
+  --df-add-g: color-mix(in srgb, var(--wb-ok) 18%, var(--wb-card));
+  --df-add-x: color-mix(in srgb, var(--wb-ok) 34%, var(--wb-card));
+  --df-del: color-mix(in srgb, var(--wb-fail) 10%, var(--wb-card));
+  --df-del-g: color-mix(in srgb, var(--wb-fail) 18%, var(--wb-card));
+  --df-del-x: color-mix(in srgb, var(--wb-fail) 32%, var(--wb-card));
+  --df-hunk: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card));
+  --hl-k: #c792ea; --hl-kt: #6fcdd4; --hl-nb: #f2a76a; --hl-nf: #82aaff; --hl-s: #b5d88a;
+  --hl-c: #7f8590; --hl-mi: #f2a76a; --hl-nt: #82aaff;
+}
+.glog { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+.glog .ghead .gtitle { font-weight: 700; }
+.glog .ghead .gsub { color: var(--wb-muted-fg); font-size: 12px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glog .ghead .chip[hidden] { display: none; }
+.glscroll { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.glcols, .glr { display: grid; grid-template-columns: var(--gw, 120px) minmax(0, 1fr) 96px 62px 66px; column-gap: 10px; align-items: center; padding-right: 12px; }
+.glcols { position: sticky; top: 0; z-index: 3; height: 24px; background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-line); font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.glcols span:first-child { padding-left: 10px; }
+.glcols .r { text-align: right; }
+.glrows { position: relative; }
+.glrows > .gempty { padding: 10px 12px; }
+.glsvg { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.glsvg path { fill: none; stroke-width: 2; stroke-linecap: round; }
+.glsvg .cont { stroke-dasharray: 2 4; }
+.glsvg circle.dot { stroke: var(--wb-card); stroke-width: 2; }
+.glsvg circle.mg { fill: var(--wb-card); stroke-width: 2.2; }
+.glsvg circle.rem { fill: var(--wb-card); stroke-width: 1.6; stroke-dasharray: 2 1.6; }
+.glsvg circle.head { fill: none; stroke: var(--wb-fg); stroke-width: 1.6; }
+.glr { height: 26px; font-size: 12.5px; cursor: pointer; }
+.glr:hover { background: var(--wb-wash); }
+.glr.sel { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.glr:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.gls { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; position: relative; z-index: 2; }
+.glsub { flex: 1 1 10ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glr.mg .glsub { color: var(--wb-muted-fg); }
+.glr.rem .glsub { color: var(--wb-muted-fg); font-style: italic; }
+.gla { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-muted-fg); font-size: 12px; }
+.glt { text-align: right; color: var(--wb-muted-fg); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.glh { text-align: right; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.glmore { height: 34px; display: flex; align-items: center; padding-left: calc(var(--gw, 120px) + 10px); gap: 8px; font-size: 12px; color: var(--wb-muted-fg); }
+.glmore .btn { height: 24px; font-size: 12px; position: relative; z-index: 2; }
+.glmore .btn:disabled { opacity: .55; cursor: progress; }
+/* ref pills: a local branch in its lane's colour (the handle's icon and
+   abbreviation, ahead/behind, a worktree mark), its upstream folded in when
+   on the same commit, else an outlined pill of its own; a detached
+   worktree's HEAD as an outlined folder pill */
+.rf { --lc: var(--gl-7); flex: 0 1 auto; min-width: 6ch; max-width: 36ch; display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px; border-radius: 5px; font: 700 11px/1 var(--wb-mono); white-space: nowrap; color: var(--wb-fg); background: color-mix(in srgb, var(--lc) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc) 50%, transparent); }
+.rf .i { width: 12px; height: 12px; }
+.rf .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rf .gh-impl, .rf .gh-goal { display: inline-flex; }
+.rf .hd { font: 800 9.5px/1 system-ui, sans-serif; letter-spacing: .04em; padding: 2px 4px; border-radius: 3px; background: var(--wb-fg); color: var(--wb-card); }
+.rf .ab { display: inline-flex; gap: 3px; }
+.rf .ab .up { color: var(--wb-primary); }
+.rf .ab .dn { color: var(--wb-warn-ink); }
+.rf .wt { display: inline-flex; color: var(--wb-ok); }
+.rf .ups { color: var(--wb-muted-fg); font-weight: 600; padding-left: 4px; margin-left: 1px; border-left: 1px solid color-mix(in srgb, var(--lc) 45%, transparent); }
+.rf.remote { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc) 55%, transparent); }
+.rf.head { background: color-mix(in srgb, var(--lc) 24%, var(--wb-card)); box-shadow: inset 0 0 0 1.5px var(--lc); }
+.rf.wtd { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+.rf.wtd .wt { color: var(--wb-muted-fg); }
+.rf.merged { opacity: .72; }
+@media (max-width: 759px) {
+  .gbody { grid-template-columns: minmax(0, 1fr); }
+  .glog { display: none; }
+}
+/* a commit's hover tooltip */
+.gltip { position: fixed; z-index: 60; max-width: 420px; padding: 8px 10px; border-radius: 8px; background: var(--wb-card); box-shadow: var(--wb-shadow-hi), 0 0 0 1px var(--wb-line); font-size: 12.5px; pointer-events: none; display: grid; gap: 5px; }
+.gltip[hidden] { display: none; }
+.gltip .ts { font-weight: 700; overflow-wrap: anywhere; }
+.gltip .tr { display: flex; flex-wrap: wrap; gap: 4px; }
+.gltip .tm { display: flex; gap: 6px; flex-wrap: wrap; color: var(--wb-muted-fg); font-size: 12px; }
+.gltip .tm code { color: var(--wb-fg); }
+
+/* the commit window: a centred window over the page (the tracker's item
+   window frame, wider): the header, then the diff area and the changed-file
+   list side by side */
+.gwin-back { position: fixed; inset: 0; z-index: 70; background: var(--tk-backdrop); display: flex; align-items: center; justify-content: center; padding: 3vh 12px; }
+.gwin-back[hidden] { display: none; }
+.gwin { width: min(1320px, 100%); height: 94vh; display: flex; flex-direction: column; background: var(--wb-bg); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); overflow: hidden; }
+.gwin:focus { outline: none; }
+.gw-top { flex: none; padding: 14px 18px 10px; box-shadow: 0 1px 0 var(--wb-line); display: flex; flex-direction: column; gap: 6px; }
+.gw-head { display: flex; gap: 8px; align-items: flex-start; }
+.gw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
+.gw-acts { flex: none; display: flex; align-items: center; gap: 4px; }
+.gw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.gw-chips code.hash { font-size: 12px; padding: 1px 6px; border-radius: 5px; background: var(--wb-muted); }
+.gw-chips .gw-note { font-size: 12px; color: var(--wb-muted-fg); }
+.gwin .idcopy { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 1px 7px 1px 5px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.gwin .idcopy:hover, .gwin .idcopy:focus-visible { color: var(--wb-primary); outline: none; background: var(--wb-card); }
+.gwin .idcopy.done { color: var(--wb-ok); }
+.gwin .idcopy .i { width: 12px; height: 12px; }
+.gwin .idcopy[hidden] { display: none; }
+.gwin .ia { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.gwin .ia:hover, .gwin .ia:focus-visible { background: var(--wb-card); color: var(--wb-primary); outline: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.gwin .ia .i { width: 15px; height: 15px; }
+.gw-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: 12.5px; }
+.gw-meta dt { color: var(--wb-muted-fg); font-weight: 700; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; line-height: 19px; }
+.gw-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.gw-meta .em, .gw-meta .abs { color: var(--wb-muted-fg); }
+.gw-meta .abs { font-variant-numeric: tabular-nums; }
+.gw-par { font: 12px var(--wb-mono); border: 0; background: var(--wb-muted); border-radius: 5px; padding: 0 6px; cursor: pointer; color: var(--wb-primary); }
+.gw-par:hover { text-decoration: underline; }
+.gw-msg { margin: 0; white-space: pre-wrap; font: 12.5px/1.5 var(--wb-mono); background: var(--wb-card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--wb-shadow); max-height: 9.5em; overflow: auto; }
+.gw-msg[hidden] { display: none; }
+.gw-body { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); }
+.gw-diff { position: relative; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 12px 40px 18px; display: flex; flex-direction: column; gap: 12px; }
+.gw-files { min-height: 0; overflow: auto; overscroll-behavior: contain; border-left: 1px solid var(--wb-line); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.gw-fsum { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; padding: 0 4px 4px; }
+.gw-fsum .gd { margin-left: auto; }
+.gwf { cursor: pointer; row-gap: 0; padding: 3px 4px; }
+.gwf .ren { grid-column: 2 / 4; font: 11px var(--wb-mono); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gwf.on { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.gwf.on:hover { background: color-mix(in srgb, var(--wb-primary) 18%, transparent); }
+.gfiles .gf[data-side] { cursor: pointer; border-radius: 6px; }
+.gfiles .gf[data-side]:hover { background: var(--wb-muted); }
+/* one file section of the diff viewer: a sticky header, then its unified
+   diff (or a notice, a load button, a skeleton) */
+.dfile { flex: none; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); }
+.dfh { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 8px 4px 6px; background: var(--wb-card); border-radius: 10px 10px 0 0; box-shadow: 0 1px 0 var(--wb-line); }
+.dfh .gst { width: 16px; }
+.dfh .gp { flex: 0 1 auto; font-size: 12.5px; }
+.dfh .gname { font-weight: 700; }
+.dfh .dfren { font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dfh .gd { margin-left: auto; }
+.dfh .ia .i { transition: transform .12s; }
+.dfile.fold .dfh .ia .i { transform: rotate(-90deg); }
+.dfile.fold .dfb { display: none; }
+.dfile.fold .dfh { border-radius: 10px; box-shadow: none; }
+.dfb { overflow-x: auto; border-radius: 0 0 10px 10px; }
+.dtab { tab-size: 4; display: grid; grid-template-columns: max-content max-content 18px minmax(max-content, 1fr); width: max-content; min-width: 100%; font: 12px/19px var(--wb-mono); }
+.dl { display: contents; }
+.dl > span { white-space: pre; }
+.dl .no { padding: 0 8px; min-width: 44px; text-align: right; color: var(--wb-muted-fg); user-select: none; opacity: .8; }
+.dl .sg { text-align: center; user-select: none; color: var(--wb-muted-fg); }
+.dl .cd { padding-right: 24px; }
+.dl.add > span { background: var(--df-add); }
+.dl.add .no, .dl.add .sg { background: var(--df-add-g); color: var(--wb-ok); opacity: 1; }
+.dl.del > span { background: var(--df-del); }
+.dl.del .no, .dl.del .sg { background: var(--df-del-g); color: var(--wb-fail); opacity: 1; }
+.dl.add .dx { background: var(--df-add-x); border-radius: 3px; }
+.dl.del .dx { background: var(--df-del-x); border-radius: 3px; }
+.dl.hk > span { background: var(--df-hunk); color: var(--wb-muted-fg); }
+.dl.hk .cd { padding-top: 2px; padding-bottom: 2px; }
+.dl.nl .cd { color: var(--wb-muted-fg); font-style: italic; }
+.dnote { display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.dnote .btn { height: 26px; font-size: 12.5px; color: var(--wb-fg); }
+.dnote.cut { border-top: 1px dashed var(--wb-line); color: var(--wb-warn-ink); }
+.dnote.err { color: var(--wb-fail); }
+.dskel { padding: 10px 14px; display: grid; gap: 7px; }
+.dskel i { display: block; height: 11px; border-radius: 4px; background: var(--wb-muted); animation: dash-pulse 1.1s ease-in-out infinite alternate; }
+@keyframes dash-pulse { from { opacity: .45; } to { opacity: 1; } }
+/* highlight codes (gitdiff.go hlClass), coloured from the theme tokens */
+.chroma .t-k { color: var(--hl-k); }
+.chroma .t-kt { color: var(--hl-kt); }
+.chroma .t-kc { color: var(--hl-nb); }
+.chroma .t-nf { color: var(--hl-nf); }
+.chroma .t-nt { color: var(--hl-nt); }
+.chroma .t-na { color: var(--hl-kt); }
+.chroma .t-s { color: var(--hl-s); }
+.chroma .t-m { color: var(--hl-mi); }
+.chroma .t-c { color: var(--hl-c); font-style: italic; }
+.chroma .t-cp { color: var(--hl-k); }
+@media (max-width: 900px) { .gw-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 30%; } .gw-files { border-left: 0; border-top: 1px solid var(--wb-line); } }
+/* the header keeps every line it wraps to clear of the closed handles and of
+   the tracker's handle row left of them (--drhw covers both handles; --tkhw,
+   set by tracker.js, includes its own 6px gap); tk-room marks a page the
+   tracker mounted on */
+.dwrap > .top.dr-room, .dwrap > .top.tk-room { padding-right: calc(var(--drhw) + var(--tkhw, 0px) + 6px); }
+/* the header's fixed items sit left after the title */
+.dwrap > .top .counts { margin-left: 0; }
+@media (max-width: 640px) {
+  :root { --dpad: 10px; }
+  .dr-handle { padding: 2px 7px 0; gap: 5px; }
+  .gh { padding: 2px 7px 0; gap: 5px; max-width: 42vw; }
+}
+

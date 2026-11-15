@@ -22,6 +22,7 @@ function El(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.at
 El.prototype.appendChild = function (c) { this.children.push(c); c.parentNode = this; return c; };
 El.prototype.removeChild = function (c) { this.children.splice(this.children.indexOf(c), 1); };
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
+El.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 El.prototype.hasAttribute = function (k) { return k in this.attrs; };
 El.prototype.addEventListener = function (k, f) { this.on[k] = f; };
@@ -77,11 +78,12 @@ function fetch(url, o) {
 var kinds = {}, list = [], placements = [];
 function Card(kind, data) {
   this.kind = kind; this.data = data; this.pinned = false; this.body = new El("div"); this.saves = 0;
+  this.el = new El("div");
   this.body.clientHeight = 100;
 }
 Card.prototype.title = function (t) { this.head = t; };
 Card.prototype.actions = function (a) { this.acts = a; };
-["fold", "show", "close"].forEach(function (k) { Card.prototype[k] = function () {}; });
+["fold", "show", "close", "paint"].forEach(function (k) { Card.prototype[k] = function () {}; });
 Card.prototype.bump = function (origin) { placements.push(["bump", origin]); };
 Card.prototype.save = function () { this.saves++; };
 var window = { WsCards: {
@@ -106,12 +108,15 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   check("the card's record", card.data, { path: abs, out: true });
   var fr = find(card.body, "IFRAME");
   check("the frame", fr && [fr.src, fr.attrs.sandbox], ["/s/rid1/fs/ocap/CAP1/page.html", "allow-scripts"]);
+  check("the frame's fullscreen category", card.el.getAttribute("data-preview-kind"), "frame");
   check("the card's title", [card.head.name, card.head.sub], ["page.html", abs]);
 
   // A restored card, and a reopened one, post again: no capability is kept.
   answers.push({ kind: "frame", frame: "/s/rid1/fs/ocap/CAP2/page.html" });
   kinds.preview.open(card);
+  check("a restored load clears the previous fullscreen category", card.el.getAttribute("data-preview-kind"), null);
   await settle();
+  check("the restored frame's fullscreen category", card.el.getAttribute("data-preview-kind"), "frame");
   answers.push({ kind: "frame", frame: "/s/rid1/fs/ocap/CAP3/page.html" });
   window.WsPreview.open(abs, { out: true, origin: origin });
   await settle();
@@ -143,6 +148,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   await settle();
   check("an image's load", calls, [{ url: "/s/rid1/fs/outside", method: "POST", body: JSON.stringify({ path: "C:\\away\\shot.png" }) }]);
   check("the image", find(card.body, "IMG").src, "/s/rid1/fs/ocap/CAP4/shot.png");
+  check("the image's fullscreen category", card.el.getAttribute("data-preview-kind"), "image");
   posts = [];
   card.acts[0].run(card);
   check("open a Windows path", posts[0].body, { path: "shot.png", action: "open", root: "C:\\away\\" });
@@ -150,6 +156,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   window.WsPreview.open("/away/notes.md", { out: true });
   await settle();
   check("markdown", find(card.body, "ARTICLE").innerHTML, "<h1>Title</h1>");
+  check("markdown's fullscreen category", card.el.getAttribute("data-preview-kind"), "markdown");
 
   // A refusal says the file is no longer available; any other failure and
   // a file missing under the root keep their own notes.
@@ -157,6 +164,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   window.WsPreview.open(abs, { out: true });
   await settle();
   check("a refused mint", [card.body.textContent, find(card.body, "IFRAME"), find(card.body, "BUTTON")], ["js.preview.gone", null, null]);
+  check("a refused mint leaves no stale fullscreen category", card.el.getAttribute("data-preview-kind"), null);
   answers.push({ status: 403 });
   kinds.preview.open(card);
   await settle();
@@ -176,6 +184,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   var matched = window.WsPreview.open("docs/a.md", { origin: origin, line: 12 });
   await settle();
   check("matching pinned reuse never repositions or persists origin", [matched === card, card.pinned, placements.length === before, card.data], [true, true, true, { path: "docs/a.md", line: 12 }]);
+  check("monospace text's fullscreen category", card.el.getAttribute("data-preview-kind"), "code");
   answers.push({ kind: "text", text: "x" });
   var other = window.WsPreview.open("docs/a.md", { out: true });
   await settle();
@@ -197,7 +206,7 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
 // keeps the copy-path menu and asks the route nothing. A link inside the
 // root opens as before.
 func TestOutsideLinkClickPath(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +273,7 @@ fire("click", inside, 1);
 check("a click on a link inside the root", [opened, menu()], [[["docs/a.md"]], null]);
 reset();
 fire("click", pdf, 1);
-check("a click on a file no preview shows", [opened, menu()], [[], ["js.menu.copyabs"]]);
+check("a click on a file no preview shows", [opened, menu()], [[], ["js.menu.sysopen", "js.menu.copyabs"]]);
 
 // Direct and menu paths carry the exact enclosing node, not its name.
 var exactTopic = { name: "same-name-is-not-authority" }, closest = inside.closest;
@@ -278,15 +287,15 @@ inside.closest = closest;
 // The menu: the keyboard activation and the right click.
 reset();
 fire("click", html, 0);
-check("the keyboard menu of an HTML file", [opened, menu()], [[], ["js.menu.preview", "js.menu.newtab", "js.menu.copyabs"]]);
+check("the keyboard menu of an HTML file", [opened, menu()], [[], ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"]]);
 reset();
 var ctx = fire("contextmenu", notes, 1);
-check("the right-click menu of a markdown file", [menu(), ctx.prevented], [["js.menu.preview", "js.menu.copyabs"], true]);
+check("the right-click menu of a markdown file", [menu(), ctx.prevented], [["js.menu.preview", "js.menu.sysopen", "js.menu.copyabs"], true]);
 pick("js.menu.preview");
 check("the menu's preview", opened, [["/away/notes.md", { out: true }]]);
 reset();
 fire("contextmenu", shot, 1);
-check("the menu of an image link keeps its items", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.native", "js.menu.copyabs"]);
+check("the menu of an image link keeps its items", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"]);
 pick("js.menu.newtab");
 check("an image's new tab is the image route", [tabs.map(function (t) { return [t.url, t.features]; }), posts], [[["http://127.0.0.1:1/s/rid1/image?path=%2Faway%2Fshot.png", "noopener"]], []]);
 reset();
@@ -313,7 +322,7 @@ check("no toast", toasts, []);
 // is only a path the daemon then checks.
 reset();
 openLinkMenu(frameLink({ kind: "file", href: "", abs: "/away/site/page.html" }), 1, 2);
-check("a framed link's menu", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.copyabs"]);
+check("a framed link's menu", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"]);
 reset();
 openLinkMenu(frameLink({ kind: "file", href: "/s/rid1/file?path=docs%2Fa.md", rel: "docs/a.md", abs: "/root/docs/a.md" }), 1, 2);
 check("a framed link inside the root", menu()[0], "js.menu.preview");
@@ -340,7 +349,70 @@ root.attrs["data-sysopen"] = "";
 cardBoard = null;
 reset();
 fire("click", html, 1);
-check("a click with no card board", [opened, menu()], [[], ["js.menu.copyabs"]]);
+check("a click with no card board", [opened, menu()], [[], ["js.menu.sysopen", "js.menu.copyabs"]]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestLinkMenuOpensWithSystem pins the link menu's "open with system" item
+// (js.menu.sysopen) on a page marked data-sysopen: a url link goes to the
+// system-open route (the default browser), and a file or folder link, an
+// .app bundle or an outside image included, goes to fs/act's open with its
+// own parent folder as the root and its name as the path, so the host's
+// default handler (hostFileCommand) gets the path itself, never a file view
+// URL. Any other page lists no such item and posts nothing. hostPath, the
+// split, is pinned for POSIX and drive-letter spellings.
+func TestLinkMenuOpensWithSystem(t *testing.T) {
+	data, err := dashboardTestAsset("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	from, to := "  // linkOpens reports whether this page can open", "  // An image outside the session root (img[data-out])"
+	i, j := strings.Index(js, from), strings.Index(js, to)
+	if i < 0 || j < i {
+		t.Fatalf("dashboard.js lacks the span from %q to %q", from, to)
+	}
+	runNode(t, "open with system", outsideDOM+`
+var doc = document, rid = "rid1", cardBoard = {}, lmenu = null, lmenuFrom = null;
+var posts = [], toasts = [];
+var window = { innerWidth: 800, innerHeight: 600, WsPreview: { takes: function () { return true; }, open: function () {} }, open: function () { return null; } };
+function post(route, body, done) { posts.push([route, body]); done(true); }
+function toast(s) { toasts.push(s); }
+function copyText() {}
+function closeLinkMenu() { lmenu = null; lmenuFrom = null; }
+`+js[i:j]+`
+function link(attrs, href) { var a = new El("a"); Object.keys(attrs).forEach(function (k) { a.attrs[k] = attrs[k]; }); if (href) { a.attrs.href = href; a.href = "http://127.0.0.1:1" + href; } return a; }
+function menu() { return lmenu ? lmenu.children.map(function (b) { return b.textContent; }) : null; }
+function pick(label) { var b = lmenu.children.filter(function (b) { return b.textContent === label; })[0]; if (!b) { bad.push("no item " + label + " in " + JSON.stringify(menu())); return; } b.on.click({ stopPropagation: function () {} }); }
+function sysopen(a) { posts = []; toasts = []; lmenu = null; openLinkMenu(a, 1, 2); pick("js.menu.sysopen"); return [posts, toasts]; }
+var app = link({ "data-wl": "file", "data-rel": "build/Tool.app", "data-abs": "/root/build/Tool.app" }, "/s/rid1/file?path=build%2FTool.app");
+var away = link({ "data-wl": "file", "data-abs": "/away/run.command" });
+var shot = link({ "data-wl": "file", "data-abs": "/away/shot.png", "data-img": "", "data-out": "" }, "/s/rid1/image?path=%2Faway%2Fshot.png");
+var win = link({ "data-wl": "file", "data-rel": "a b.txt", "data-abs": "C:\\p\\a b.txt" }, "/s/rid1/file?path=a+b.txt");
+var url = link({ "data-wl": "url" }, "/x");
+url.attrs.href = "https://example.com/"; url.href = "https://example.com/";
+
+root.attrs["data-sysopen"] = "";
+check("an .app bundle inside the root", sysopen(app), [[["fs/act", { path: "Tool.app", action: "open", root: "/root/build" }]], ["js.toast.openednative"]]);
+check("a file outside the root", sysopen(away), [[["fs/act", { path: "run.command", action: "open", root: "/away" }]], ["js.toast.openednative"]]);
+check("an outside image", sysopen(shot), [[["fs/act", { path: "shot.png", action: "open", root: "/away" }]], ["js.toast.openednative"]]);
+check("a Windows path", sysopen(win), [[["fs/act", { path: "a b.txt", action: "open", root: "C:\\p" }]], ["js.toast.openednative"]]);
+check("a url link", sysopen(url), [[["open", { target: "https://example.com/" }]], ["js.toast.opened"]]);
+lmenu = null; openLinkMenu(shot, 1, 2);
+check("one open item per link", menu().filter(function (l) { return l === "js.menu.sysopen"; }).length, 1);
+
+delete root.attrs["data-sysopen"];
+[app, away, url].forEach(function (a) {
+  posts = []; lmenu = null; openLinkMenu(a, 1, 2);
+  check("no open item off the daemon's machine", [(menu() || []).indexOf("js.menu.sysopen"), posts], [-1, []]);
+});
+
+[["/root/build/Tool.app", { dir: "/root/build", name: "Tool.app" }], ["/a", { dir: "/", name: "a" }], ["/", { dir: "/", name: "" }],
+ ["/a\\b/c\\d", { dir: "/a\\b", name: "c\\d" }], ["C:\\x\\y.app", { dir: "C:\\x", name: "y.app" }], ["C:\\y", { dir: "C:\\", name: "y" }],
+ ["D:/a/b", { dir: "D:/a", name: "b" }], ["rel/x", null], ["", null], [null, null], ["\\\\srv\\share\\x", null]].forEach(function (c) {
+  check("hostPath(" + JSON.stringify(c[0]) + ")", hostPath(c[0]), c[1]);
+});
 process.stdout.write(bad.join("\n"));
 `)
 }

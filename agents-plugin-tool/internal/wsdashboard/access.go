@@ -49,7 +49,7 @@ import (
 // bookmarked; deleting the file issues a new one.
 //
 // The token travels as the "token" query parameter of the address the
-// localhost index page shows. A request that passes by it gets the token back
+// localhost Settings card shows. A request that passes by it gets the token back
 // as an HttpOnly cookie, which the page's links, its stream (a WebSocket
 // handshake, like an EventSource, sends cookies but cannot set headers), its
 // images, and its message and cancel posts then carry on their own, so no
@@ -123,7 +123,7 @@ func (d *Daemon) lanGuard(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		http.Error(w, "this dashboard needs its LAN access token: on the machine it runs on, open its index page at http://localhost:"+strconv.Itoa(d.endpoint.Port)+"/ for the address that carries the token", http.StatusUnauthorized)
+		http.Error(w, "this dashboard needs its LAN access token: on the machine it runs on, open Settings (the gear in the session rail footer) at http://localhost:"+strconv.Itoa(d.endpoint.Port)+"/ for the address that carries the token", http.StatusUnauthorized)
 	})
 }
 
@@ -187,7 +187,7 @@ func loopbackPeer(remoteAddr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// LANAccess is what the index page shows a local viewer in LAN mode: the
+// LANAccess is what Settings shows a local viewer in LAN mode: the
 // addresses another device opens, each carrying the token, and the token
 // file whose deletion issues a new token.
 type LANAccess struct {

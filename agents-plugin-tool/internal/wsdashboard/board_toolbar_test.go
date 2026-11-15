@@ -7,6 +7,28 @@ import (
 	"testing"
 )
 
+func TestBoardToolbarBackdrop(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	rule := regexp.MustCompile(`(?s)\.board-toolbar\[data-floating\] \.board-toolbar-face::before\s*\{([^}]+)\}`).FindStringSubmatch(css)
+	if len(rule) != 2 {
+		t.Fatal("floating toolbar needs an opaque top-gap backing attached to its compact face")
+	}
+	// The positioned face, not the taller reserved slot, bounds the backing's
+	// zero bottom inset. Keep the upward mask without intercepting pointers.
+	face := regexp.MustCompile(`(?s)\.board-toolbar-face\s*\{([^}]+)\}`).FindStringSubmatch(css)
+	if len(face) != 2 || !strings.Contains(face[1], "position: relative") {
+		t.Fatal("backing must be positioned relative to the compact face")
+	}
+	if regexp.MustCompile(`\.board-toolbar\[data-floating\]::before\s*\{`).MatchString(css) {
+		t.Error("reserved toolbar slot must not paint a backing below the face")
+	}
+	for _, want := range []string{"position: absolute", "inset: calc(-12px - var(--toolbar-top, 0px)) 0 0", "background: var(--wb-bg)", "z-index: -1", "pointer-events: none"} {
+		if !strings.Contains(rule[1], want) {
+			t.Errorf("backdrop missing %q", want)
+		}
+	}
+}
+
 func TestBoardToolbarPlacementAndCounts(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	runNode(t, "board toolbar", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
@@ -21,11 +43,12 @@ function served() {
 boot({}, served, options);
 var bar = page.W.toolbar(), pins = page.W.pinList(), moves = 0;
 function first(what) { check(what, page.board.firstChild === bar, true); }
-function count() { return bar.querySelector(".board-count").textContent; }
+function count() { return toolbarCounts(); }
+check("separate count removed", bar.querySelector(".board-count"), null);
 first("toolbar first on a narrow board");
 check("toolbar precedes pins", bar.nextSibling === pins, true);
 check("not a card or rail item", [page.W.is(bar), bar.hasAttribute("data-rail"), bar.querySelectorAll(".tpin, .bc-hd").length], [false, false, 0]);
-check("button order and terminal slot", bar.querySelector(".board-tools").children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-search", "board-action board-files", "board-count"]);
+check("button order and terminal slot", bar.querySelector(".board-tools").children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-search", "board-action board-files", "board-state-filter"]);
 check("overview starts unpressed", bar.querySelector(".board-overview").getAttribute("aria-pressed"), "false");
 ["overview", "search", "files"].forEach(function (name) { bar.querySelector(".board-" + name).fire("click", {}); });
 check("overview and search use mount callbacks; Files without an explorer is inert", calls, ["overview", "search"]);
@@ -199,10 +222,9 @@ func TestToolbarFloatingGeometry(t *testing.T) {
 var bad=[];
 function check(name,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(name+": "+JSON.stringify(got));}
 function styles(){var p={};return {getPropertyValue:function(k){return p[k]||"";},setProperty:function(k,v){p[k]=v;},removeProperty:function(k){delete p[k];}};}
-var listeners={}, observed, resize, boardTop=0, compact=false, faceHeight=46, countHeight=18, countY=23, handles=[];
-var counts={getBoundingClientRect:function(){return {top:countY-countHeight/2,bottom:countY+countHeight/2,height:countHeight};}};
-function action(y){return {getBoundingClientRect:function(){return {top:y-12,bottom:y+12,height:compact?24:30};}};}
-var row={children:[action(23),action(23),counts]}, face={firstChild:row,getClientRects:function(){return [1];},getBoundingClientRect:function(){return {width:700,height:faceHeight,bottom:faceHeight};}};
+var listeners={}, observed, resize, boardTop=0, compact=false, faceHeight=46, handles=[];
+function action(y){return {getBoundingClientRect:function(){var h=compact?24:30;return {top:y-h/2,bottom:y+h/2,height:h};}};}
+var row={children:[action(23),action(23),action(23)]}, face={firstChild:row,getClientRects:function(){return [1];},getBoundingClientRect:function(){return {width:700,height:faceHeight,bottom:faceHeight};}};
 var toolbar={firstChild:face,style:styles(),attrs:{},toggleAttribute:function(k,on){this.attrs[k]=on;}};
 var board={getBoundingClientRect:function(){return {top:boardTop};}}, col={style:styles(),clientTop:0,getBoundingClientRect:function(){return {top:0};}}, documentScroller={style:styles()}, active=col;
 var doc={scrollingElement:documentScroller,querySelectorAll:function(){return handles;},getElementById:function(){return col;},addEventListener:function(k,fn){listeners[k]=fn;}}, window={addEventListener:function(k,fn){listeners[k]=fn;},ResizeObserver:function(fn){resize=fn;this.observe=function(n){observed=n;};}};
@@ -212,19 +234,17 @@ function scroller(){return active;}
 floatToolbar();
 check("observe the one face",observed===face,true);
 check("top reserves original",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"46px"]);
-boardTop=-100;compact=true;faceHeight=28;countHeight=14;countY=14;row.children=[action(14),action(14),counts];listeners.scroll();
+boardTop=-100;compact=true;faceHeight=28;row.children=[action(14),action(14),action(14)];listeners.scroll();
 check("compact keeps original slot",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"46px"]);
 check("face drives rail and arrivals",[col.style.getPropertyValue("--wb-rail-inset"),col.style.getPropertyValue("scroll-padding-top")],["34px","38px"]);
-// Counts alone wrap: the saved original count metrics, not compact metrics,
-// reconstruct the nonfloating footprint.
-countY=40;faceHeight=48;resize();
-check("counts-only wrap",[toolbar.attrs["data-wrapped-actions"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"70px"]);
-// In production a counts-only row has the original line-height of the font;
-// a 24px original count line yields the reference's 76px reserved slot.
-boardTop=0;compact=false;countHeight=24;faceHeight=76;resize();
-boardTop=-200;compact=true;countHeight=14;faceHeight=48;resize();
-check("original count height survives floating",toolbar.style.getPropertyValue("--toolbar-reserved"),"76px");
-row.children=[action(14),action(46),counts];countY=46;faceHeight=60;resize();
+// The filter is a direct row child just like an action. A filter-only wrap
+// reserves a second full original row even while the live face is compact.
+row.children=[action(14),action(14),action(46)];faceHeight=60;resize();
+check("filter-only wrap",[toolbar.attrs["data-wrapped-actions"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"82px"]);
+boardTop=0;compact=false;faceHeight=82;resize();
+boardTop=-200;compact=true;faceHeight=60;resize();
+check("original filter row survives floating",toolbar.style.getPropertyValue("--toolbar-reserved"),"82px");
+row.children=[action(14),action(46),action(46)];resize();
 check("wrapped actions reserve two original action rows",[toolbar.attrs["data-wrapped-actions"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"82px"]);
 active=documentScroller;resize();
 check("scroller handoff clears old padding",[col.style.getPropertyValue("scroll-padding-top"),documentScroller.style.getPropertyValue("scroll-padding-top")],["","70px"]);

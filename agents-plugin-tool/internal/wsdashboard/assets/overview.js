@@ -1,7 +1,7 @@
 (function () {
   // Overview is a view, never a card fold or a saved card arrangement. The
   // page owns swaps and the shell bridge; this module owns the picker and
-  // its one scroll writer, wbHistory.keep.
+  // its one scroll writer, wbHistory.place (passed as o.keep).
   var doc = document, root = doc.documentElement, o = null, on = false, busy = false;
   var entry = null, spacer = null, pinTop = 0, tabs = new Map(), callbacks = [];
   var ITEM = "section.topic[data-topic], .bcard[data-card]";
@@ -35,7 +35,7 @@
     var padding = s === doc.scrollingElement || s === root ? 0 : parseFloat(style.paddingTop) || 0;
     return Math.max(pad, rail + padding);
   }
-  function items() { return all(ITEM, o.board); }
+  function items() { return all(ITEM, o.board).filter(function (n) { return !n.hasAttribute("data-state-filtered"); }); }
   function anchor(list, toolbar, bounds, floating) {
     if (!floating && toolbar.bottom > bounds.top && toolbar.top < bounds.bottom) return null;
     var top = floating ? Math.max(bounds.top, toolbar.bottom) : bounds.top;
@@ -76,12 +76,13 @@
     n.classList.add("overview-flash");
     setTimeout(function () { n.classList.remove("overview-flash"); }, 1200);
   }
-  function rove(n) {
+  function rove(n, focus) {
+    tabs.forEach(function (v, x) { if (x.hasAttribute("data-state-filtered")) x.setAttribute("tabindex", "-1"); });
     items().forEach(function (x) {
       if (!tabs.has(x)) tabs.set(x, x.getAttribute("tabindex"));
       x.setAttribute("tabindex", x === n ? "0" : "-1");
     });
-    if (n) n.focus({ preventScroll: true });
+    if (n && focus !== false) n.focus({ preventScroll: true });
   }
   function unrove() {
     tabs.forEach(function (v, n) { if (v === null) n.removeAttribute("tabindex"); else n.setAttribute("tabindex", v); });
@@ -101,6 +102,25 @@
     var c = callbacks.splice(0);
     c.forEach(function (fn) { fn(); });
   }
+  // Unlike after(), a filter waits for motion without requesting an exit.
+  function filter(run) {
+    if (busy) { callbacks.push(function () { filter(run); }); return; }
+    if (!on) { run(); return; }
+    var before = all(ITEM, o.board), list = items(), current = list.filter(function (n) { return n.getAttribute("tabindex") === "0"; })[0];
+    var index = before.indexOf(current), v = view(scroller(o.toolbar)), face = o.toolbar.firstChild.getBoundingClientRect();
+    var top = o.toolbar.hasAttribute("data-floating") ? Math.max(v.top, face.bottom) : v.top;
+    var rows = list.map(function (n) { return { n: n, r: n.getBoundingClientRect() }; }).filter(function (a) { return a.r.bottom > top && a.r.top < v.bottom; });
+    var toolbarOffset = o.toolbar.getBoundingClientRect().top - v.top;
+    run();
+    list = items();
+    var next = list.indexOf(current) >= 0 ? current : list.filter(function (n) { return before.indexOf(n) >= index; })[0] || list[list.length - 1];
+    rove(next, false);
+    var row = rows.filter(function (a) { return list.indexOf(a.n) >= 0; })[0];
+    if (row) keep(row.n, row.r.top - v.top);
+    else if (list.length) keep(list[0], clearance(list[0]));
+    else keep(o.toolbar, Math.max(0, toolbarOffset));
+    save();
+  }
   function calm() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
   // The one cubic-bezier(.2,.8,.2,1) clock drives heights, the slot, scroll
   // compensation and flights. Exit traverses that same timeline backwards.
@@ -115,7 +135,7 @@
   }
   function snapshot() {
     var list = items().concat(all(ITEM, o.pins)), seen = new Set();
-    return list.filter(function (n) { if (seen.has(n)) return false; seen.add(n); return true; }).map(function (n) {
+    return list.filter(function (n) { if (seen.has(n) || n.hasAttribute("data-state-filtered")) return false; seen.add(n); return true; }).map(function (n) {
       var r = n.getBoundingClientRect(), text = n.querySelector(".trecap .rtext");
       return { n: n, r: r, height: r.height, margin: parseFloat(getComputedStyle(n).marginBottom) || 0,
         text: text, recap: text ? text.getBoundingClientRect().height : 0 };
@@ -224,6 +244,7 @@
     if (state && entry.key && !find(entry.key)) entry = { key: null, offset: 0 };
     pinTop = state ? +state.pinTop || 0 : o.pins.scrollTop;
     n = find(entry.key);
+    if (n && n.hasAttribute("data-state-filtered")) { n = items()[0] || null; entry = { key: identity(n), offset: 0 }; }
     var shown = n ? Math.max(entry.offset, clearance(n)) : entry.offset;
     var h = o.frames ? o.frames() : null, before = !state && !calm() ? snapshot() : null;
     var flights = before && o.pins.parentNode !== o.board ? before.filter(function (a) { return o.pins.contains(a.n); }) : [];
@@ -250,11 +271,14 @@
     if (!o || !on) { if (done) done(); return; }
     if (busy) { if (done) callbacks.push(done); return; }
     var n = target && target.closest ? target.closest(ITEM) : null;
+    if (n && n.hasAttribute("data-state-filtered")) n = null;
     var h = o.frames ? o.frames() : null, before = !calm() ? snapshot() : null;
     var pinRect = o.pins.getBoundingClientRect();
     var flights = before && root.hasAttribute("data-pincol") ? before.filter(function (a) { return o.pins.contains(a.n); }) : [];
     flights.height = pinRect.height;
-    var restore = find(entry.key), planned = n && !(root.hasAttribute("data-pincol") && o.pins.contains(n)) ? n : restore;
+    var restore = find(entry.key);
+    if (restore && restore.hasAttribute("data-state-filtered")) { restore = null; if (!n) n = items()[0] || null; }
+    var planned = n && !(root.hasAttribute("data-pincol") && o.pins.contains(n)) ? n : restore;
     if (planned && root.hasAttribute("data-pincol") && o.pins.contains(planned)) planned = null;
     var from = (planned || o.toolbar).getBoundingClientRect().top - view(scroller(planned || o.toolbar)).top;
     busy = !!before;
@@ -339,6 +363,7 @@
     toggle: function () { if (on) exit(null); else enter(null); },
     exit: exit,
     after: function (fn) { if (on) exit(null, fn); else if (busy) callbacks.push(fn); else fn(); },
+    filter: filter,
     pick: function (n, options) { if (!on) return false; exit(n, null, options); return true; }
   };
 })();

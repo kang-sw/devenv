@@ -36,11 +36,12 @@ type SessionData struct {
 	Resumable bool
 }
 
-// SessionSource reads a registered session's on-disk stores. ok is false
-// when the session no longer exists (its session record is gone), which
-// drops it from the index.
+// SessionSource reads a registered session's on-disk stores. With no error,
+// ok distinguishes a valid identity from genuine absence or mismatch. An
+// error is transient: the index retains its last good entry and retries on
+// the next polling backstop, even when that entry is ended.
 type SessionSource interface {
-	ReadSession(reg Registration) (data SessionData, ok bool)
+	ReadSession(reg Registration) (data SessionData, ok bool, err error)
 }
 
 // SessionForgetter is an optional interface of a SessionSource that keeps
@@ -101,8 +102,9 @@ type Index struct {
 	inflight int
 	idle     *sync.Cond
 
-	mu       sync.Mutex
-	sessions map[string]*indexEntry
+	mu         sync.Mutex
+	sessions   map[string]*indexEntry
+	readErrors map[string]bool // transient reads, including not-yet-indexed sessions
 
 	// loaded is set once a Refresh has read the whole registry (Loaded).
 	loaded atomic.Bool
@@ -130,6 +132,7 @@ type lane struct {
 type indexEntry struct {
 	session     Session
 	fingerprint string
+	retry       bool // bypass endedApplied until a successful read
 }
 
 // NewIndex returns an empty index; Refresh fills it.
@@ -140,7 +143,7 @@ func NewIndex(opts IndexOptions) *Index {
 	if opts.Log == nil {
 		opts.Log = io.Discard
 	}
-	x := &Index{opts: opts, sessions: map[string]*indexEntry{}, lanes: map[string]*lane{}}
+	x := &Index{opts: opts, sessions: map[string]*indexEntry{}, lanes: map[string]*lane{}, readErrors: map[string]bool{}}
 	x.idle = sync.NewCond(&x.lanesMu)
 	return x
 }
@@ -167,7 +170,7 @@ func (x *Index) Refresh() {
 		if x.endedApplied(reg) {
 			continue
 		}
-		x.reread(reg.ReplyID, false)
+		x.reread(reg.ReplyID)
 	}
 	x.mu.Lock()
 	var gone []string
@@ -176,10 +179,16 @@ func (x *Index) Refresh() {
 			gone = append(gone, id)
 		}
 	}
+	for id := range x.readErrors {
+		if !seen[id] && x.sessions[id] == nil {
+			gone = append(gone, id)
+		}
+	}
 	x.mu.Unlock()
 	for _, id := range gone {
-		// The listing skips an unreadable registration, which drops it.
-		x.reread(id, true)
+		// A listing omits unreadable registrations too. Confirm absence;
+		// unreadability must retain the last valid identity.
+		x.reread(id)
 	}
 	x.loaded.Store(true)
 }
@@ -201,7 +210,7 @@ func (x *Index) endedApplied(reg Registration) bool {
 	}
 	x.mu.Lock()
 	entry, ok := x.sessions[reg.ReplyID]
-	same := ok && entry.session.Registration == reg
+	same := ok && !entry.retry && entry.session.Registration == reg
 	x.mu.Unlock()
 	if !same {
 		return false
@@ -222,7 +231,7 @@ func (x *Index) Nudge(replyID, project string) bool {
 	}
 	reg, err := ReadRegistration(x.opts.Dir, replyID)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) && x.holds(replyID) {
+		if (errors.Is(err, os.ErrNotExist) || errors.Is(err, errRegistrationMismatch)) && x.holds(replyID) {
 			x.schedule(replyID)
 		}
 		return false
@@ -328,27 +337,24 @@ func (x *Index) drain(replyID string, l *lane) {
 		}
 		l.queued = false
 		x.lanesMu.Unlock()
-		x.readLane(replyID, l, false)
+		x.readLane(replyID, l)
 	}
 }
 
 // reread re-reads one session under its lane on the caller.
-func (x *Index) reread(replyID string, dropUnreadable bool) {
+func (x *Index) reread(replyID string) {
 	x.lanesMu.Lock()
 	l := x.hold(replyID)
 	x.lanesMu.Unlock()
-	x.readLane(replyID, l, dropUnreadable)
+	x.readLane(replyID, l)
 	x.lanesMu.Lock()
 	x.unhold(replyID, l)
 	x.lanesMu.Unlock()
 }
 
-// readLane re-reads one session from its registration as it is now: a
-// removed registration drops it, and so does an unreadable one when
-// dropUnreadable is set; otherwise an unreadable registration leaves the
-// entry as it is. It holds the lane's mu across the read and the change
-// hook.
-func (x *Index) readLane(replyID string, l *lane, dropUnreadable bool) {
+// readLane confirms registration absence under the session lane. An
+// unreadable registration retains the entry for the next polling backstop.
+func (x *Index) readLane(replyID string, l *lane) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	reg, err := ReadRegistration(x.opts.Dir, replyID)
@@ -356,9 +362,10 @@ func (x *Index) readLane(replyID string, l *lane, dropUnreadable bool) {
 	switch {
 	case err == nil:
 		changed = x.apply(replyID, &reg)
-	case errors.Is(err, os.ErrNotExist) || dropUnreadable:
+	case errors.Is(err, os.ErrNotExist) || errors.Is(err, errRegistrationMismatch):
 		changed = x.apply(replyID, nil)
 	default:
+		x.retry(replyID)
 		fmt.Fprintf(x.opts.Log, "dashboard: read registration %s: %v\n", replyID, err)
 	}
 	if changed && x.opts.OnChange != nil {
@@ -378,13 +385,20 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	}
 	var label string
 	if keep {
-		data, keep = x.opts.Source.ReadSession(*reg)
+		var err error
+		data, keep, err = x.opts.Source.ReadSession(*reg)
+		if err != nil {
+			x.retry(replyID)
+			fmt.Fprintf(x.opts.Log, "dashboard: read session %s: %v\n", replyID, err)
+			return false
+		}
 		label = readSessionLabel(SessionDir(x.opts.Dir, replyID))
 	}
 	now := x.opts.Now()
 
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	delete(x.readErrors, replyID)
 	entry, known := x.sessions[replyID]
 	if !keep {
 		if !known {
@@ -401,6 +415,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s added (project %s)\n", replyID, reg.Project)
 		return true
 	}
+	entry.retry = false
 	next.Rev = entry.session.Rev
 	same := next
 	same.SnapshotUpdatedAt = entry.session.SnapshotUpdatedAt
@@ -412,6 +427,34 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	entry.session = next
 	entry.fingerprint = data.Fingerprint
 	return true
+}
+
+// retry keeps ended entries eligible for the daemon's scheduled Refresh.
+// It changes no revision, invokes no removal hook, and forgets no caches.
+func (x *Index) retry(replyID string) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.readErrors[replyID] = true
+	if entry := x.sessions[replyID]; entry != nil {
+		entry.retry = true
+	}
+}
+
+// readError distinguishes a not-yet-indexed unreadable session from one
+// known to be absent. Registration errors are checked afresh for requests
+// arriving before the first successful registry sweep.
+func (x *Index) readError(replyID string) error {
+	x.mu.Lock()
+	pending := x.readErrors[replyID]
+	x.mu.Unlock()
+	if pending {
+		return errors.New("session read pending retry")
+	}
+	_, err := ReadRegistration(x.opts.Dir, replyID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errRegistrationMismatch) {
+		return err
+	}
+	return nil
 }
 
 // Sessions returns every indexed session ordered by project, then reply-id,

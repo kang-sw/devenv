@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
+import { writeFileSync } from 'node:fs'
 
 import {
   ADAPTER,
@@ -20,6 +21,7 @@ import {
   OUTPUT_RATE_MIN_SPAN_MS,
   OUTPUT_RATE_MIN_TOKENS,
   OUTPUT_RATE_WINDOW,
+  PENDING_EVENT_CAP,
   parseInboxDrain,
   parseInterruptDrain,
   PERMISSION_PROMPT,
@@ -880,6 +882,276 @@ describe('subagent telemetry', () => {
     })
     expect(lastLead(events)).toBeDefined()
     expect(events.filter((e) => e.kind === 'agent' && e.agentId === undefined).map(telemetryOf)).toEqual(events.filter((e) => e.kind === 'agent' && e.agentId === undefined).map(() => ({})))
+  })
+})
+
+describe('observed response evidence', () => {
+  type Observed = { id: string; model: string; source: string; at: number; effort?: string; effortSource?: string; outputTps?: number }
+  const observed = (events: DashboardEvent[], agentId?: string) => events
+    .filter((e) => e.observed !== undefined && e.agentId === agentId)
+    .map((e) => e.observed as Observed)
+  const negotiate = async (t: Awaited<ReturnType<typeof started>>) => {
+    t.h.accepts = 'status, task_counts'
+    t.dash.userMessage('negotiate', 'terminal')
+    await t.advance()
+    await t.advance()
+  }
+
+  test('only response usage establishes identity, independently for the lead and each child; request effort belongs to that step only', async () => {
+    const t = await started()
+    const { h, dash, advance, sent } = t
+    await negotiate(t)
+    dash.agentSpawned({ agentId: 'child', model: 'haiku', subagentType: 'ws:effort-max' })
+    dash.agentSpawned({ agentId: 'unknown', parentId: 'child', model: 'opus' })
+    dash.stepBegan(undefined, 'lead/0', { model: 'opus', effort: 'high' })
+    dash.stepEnded(undefined, 'lead/0', { usage: null })
+    dash.stepBegan('child', 'child/0', { model: 'haiku' })
+    dash.stepEnded('child', 'child/0', { usage: { output_tokens: 20 } })
+    await advance()
+    expect(observed(sent())).toEqual([])
+    expect(observed(sent(), 'child')).toEqual([])
+    expect(observed(sent(), 'unknown')).toEqual([])
+    const at = h.now
+    dash.stepBegan(undefined, 'lead/1', { model: 'opus', effort: 12000 })
+    dash.stepEnded(undefined, 'lead/1', { usage: { model: 'claude-opus-5-5' } })
+    dash.stepBegan('child', 'child/1', { model: 'haiku', effort: 'low' })
+    dash.stepEnded('child', 'child/1', { usage: { model: 'claude-sonnet-4-6' } })
+    // Two more responses finish before one flush: no transition can coalesce away.
+    h.now += 1
+    dash.stepBegan(undefined, 'lead/2', { model: 'opus' })
+    dash.stepEnded(undefined, 'lead/2', { usage: { model: 'claude-opus-4-6' } })
+    dash.stepBegan('child', 'child/2', { model: 'haiku' })
+    dash.stepEnded('child', 'child/2', { usage: { model: 'claude-haiku-4-5' } })
+    await advance()
+    expect(observed(sent())).toEqual([
+      { id: 'lead/1', model: 'claude-opus-5-5', source: 'claude.step', at, effort: '12000', effortSource: 'request' },
+      { id: 'lead/2', model: 'claude-opus-4-6', source: 'claude.step', at: at + 1 },
+    ])
+    expect(observed(sent(), 'child')).toEqual([
+      { id: 'child/1', model: 'claude-sonnet-4-6', source: 'claude.step', at, effort: 'low', effortSource: 'request' },
+      { id: 'child/2', model: 'claude-haiku-4-5', source: 'claude.step', at: at + 1 },
+    ])
+    expect(observed(sent(), 'unknown')).toEqual([])
+    expect(lastAgent(sent(), 'child')).toMatchObject({ model: 'haiku', effort: 'low' })
+    expect(sent().filter((e) => e.kind === 'agent' && e.agentId === undefined).every((e) => e.observed === undefined)).toBe(true)
+    expect(sent().filter((e) => e.observed !== undefined && e.agentId === undefined).every((e) => e.kind === 'status')).toBe(true)
+    expect(sent().flatMap((e) => batches(e)).every((b) => !('observed' in b))).toBe(true)
+  })
+
+  test('own evidence waits for status support and child evidence waits for spawn or list confirmation, never for parent evidence', async () => {
+    const t = await started()
+    const { h, dash, advance, sent } = t
+    dash.stepEnded(undefined, 'own', { usage: { model: 'lead-model' } })
+    dash.stepEnded('late', 'late/0', { usage: { model: 'child-model' } })
+    dash.stepEnded('late', 'late/1', { usage: { model: 'changed-child' } })
+    dash.stepEnded('ghost', 'ghost/0', { usage: { model: 'unconfirmed' } })
+    const at = h.now
+    await advance(10_000)
+    expect(observed(sent())).toEqual([])
+    expect(observed(sent(), 'late')).toEqual([])
+    // Child evidence uses existing agent events even with no status capability.
+    dash.agentSpawned({ agentId: 'late', model: 'alias' })
+    await advance()
+    expect(observed(sent(), 'late')).toEqual([
+      { id: 'late/0', model: 'child-model', source: 'claude.step', at },
+      { id: 'late/1', model: 'changed-child', source: 'claude.step', at },
+    ])
+    h.list = [{ id: 'listed', parentId: 'late', status: 'running' }]
+    dash.stepEnded('listed', 'listed/0', { usage: { model: 'listed-model' } })
+    await advance()
+    expect(observed(sent(), 'listed').map((o) => o.model)).toEqual(['listed-model'])
+    await negotiate(t)
+    expect(observed(sent())).toEqual([{ id: 'own', model: 'lead-model', source: 'claude.step', at }])
+    expect(observed(sent(), 'ghost')).toEqual([])
+    const calls = h.calls.length
+    await advance(10_000)
+    expect(h.calls.length).toBe(calls)
+  })
+
+  test('retries, repeated step callbacks and key resync keep immutable evidence and every unsent transition with original time', async () => {
+    for (const failure of [new Error('offline'), false, 'hang'] as Answer[]) {
+      const t = await started()
+      const { h, dash, advance, sent } = t
+      await negotiate(t)
+      dash.status({ context: { tokens: 80, window: 100 }, cost: { usd: 2, estimate: false, incomplete: false } })
+      dash.agentSpawned({ agentId: 'child' })
+      const at = h.now
+      h.answers.push(failure)
+      for (const id of [undefined, 'child']) {
+        dash.stepBegan(id, 's/0', { effort: 'high' })
+        dash.stepEnded(id, 's/0', { usage: { model: 'old' } })
+        dash.stepBegan(id, 's/1')
+        dash.stepEnded(id, 's/1', { usage: { model: 'new' } })
+      }
+      await advance()
+      // A newer status may remove an old figure while evidence waits for retry.
+      dash.status({ context: { tokens: 80, window: 100 } })
+      for (const id of [undefined, 'child']) {
+        // Repeated completion must not replace first evidence or attribute the newer request's effort.
+        dash.stepEnded(id, 's/0', { usage: { model: 'wrong-replay' } })
+        dash.stepBegan(id, 's/2')
+        dash.stepEnded(id, 's/2', { usage: { model: 'newest' } })
+      }
+      await advance((failure === 'hang' ? CALL_TIMEOUT_MS : 0) + RETRY_MS)
+      const retry = h.calls.findLast((c) => c.events[0]?.kind === 'reset')!.events
+      expect(observed(retry)).toEqual([]) // Own evidence must renegotiate status after failure.
+      expect(observed(retry, 'child').map((o) => o.model)).toEqual(['old', 'new', 'newest'])
+      await advance()
+      const own = observed(h.calls.at(-1)!.events)
+      expect(own.map((o) => o.model)).toEqual(['old', 'new', 'newest'])
+      expect(own[0]).toEqual({ id: 's/0', model: 'old', source: 'claude.step', at, effort: 'high', effortSource: 'request' })
+      expect(own[1]?.at).toBe(at)
+      expect(own[1]?.effort).toBeUndefined()
+      expect(h.calls.at(-1)!.events.filter((e) => e.observed !== undefined && e.kind === 'status').every((e) =>
+        JSON.stringify(e.context) === JSON.stringify({ tokens: 80, window: 100 }) && e.cost === undefined && e.background === 0 && e.monitors === 0,
+      )).toBe(true)
+      const last = observed(sent()).at(-1)!
+      h.key = 'new-key'
+      dash.keyChanged()
+      await advance()
+      expect(observed(h.calls.at(-1)!.events)).toEqual([last])
+      expect(observed(h.calls.at(-1)!.events, 'child')[0]?.model).toBe('newest')
+      dash.restart()
+      await advance()
+      expect(observed(h.calls.at(-1)!.events)).toEqual([])
+    }
+  })
+
+  test('lead and child rates use only current eligible block spans, retaining the existing model-sensitive rolling definition', async () => {
+    for (const id of [undefined, 'child']) {
+      const t = await started()
+      const { h, dash, advance, sent } = t
+      await negotiate(t)
+      if (id) dash.agentSpawned({ agentId: id })
+      const finish = async (step: string, ms: number, tokens: number | undefined, model = 'a') => {
+        dash.stepBegan(id, step, { model: 'alias' })
+        dash.stepChunk(id, step, { kind: 'thinking', index: 0, text: '' })
+        h.now += ms
+        dash.stepChunk(id, step, { kind: 'thinking', index: 0, text: '' })
+        dash.stepEnded(id, step, { usage: { model, output_tokens: tokens } })
+        await advance()
+        return observed(sent(), id).at(-1)!
+      }
+      expect((await finish('s/0', 1000, 100)).outputTps).toBe(100)
+      expect((await finish('s/1', 3000, 900)).outputTps).toBe(250)
+      expect((await finish('s/2', 0, 100)).outputTps).toBeUndefined()
+      expect((await finish('s/3', OUTPUT_RATE_MIN_SPAN_MS - 1, 100)).outputTps).toBeUndefined()
+      expect((await finish('s/4', 1000, OUTPUT_RATE_MIN_TOKENS - 1)).outputTps).toBeUndefined()
+      expect((await finish('s/5', 1000, undefined)).outputTps).toBeUndefined()
+      if (id) expect(lastAgent(sent(), id)?.outputTps).toBe(250) // Legacy rolling residue is unchanged.
+      expect((await finish('s/6', 1000, 40, 'b')).outputTps).toBe(40)
+      const at = observed(sent(), id).at(-1)!.at
+      dash.turnCompleted(id, '', 'answer')
+      await advance(10_000)
+      expect(observed(sent(), id).at(-1)?.at).toBe(at)
+      const done = lastAgent(sent(), id ?? '')
+      if (id) {
+        expect(done?.status).toBe('done')
+        // The server's established ended-child suppression still applies: no invented legacy clearing field.
+        expect(done?.outputTps).toBe(40)
+      }
+    }
+  })
+
+  test('evidence settled beside final replies survives failure and capability renegotiation without replacing held usage', async () => {
+    const t = await started()
+    const { h, dash, advance, sent } = t
+    await negotiate(t)
+    dash.status({ context: { tokens: 10, window: 100 } })
+    h.answers.push(new Error('offline'))
+    const at = h.now
+    for (let i = 0; i < 3; i++) {
+      dash.stepBegan(undefined, `s/${i}`)
+      dash.stepEnded(undefined, `s/${i}`, { answer: `reply ${i}`, usage: { model: `model-${i}` } })
+    }
+    dash.status({ context: { tokens: 20, window: 100 } })
+    await advance()
+    await advance(RETRY_MS)
+    const retry = h.calls.findLast((c) => c.events[0]?.kind === 'reset')!.events
+    expect(observed(retry)).toEqual([])
+    expect(retry.filter((e) => e.kind === 'reply' && e.final === true).length).toBe(0) // Replies stay ordered with their held response evidence.
+    await advance()
+    expect(h.calls.at(-1)!.events.filter((e) => e.kind === 'reply' && e.final === true).length).toBe(3)
+    expect(observed(h.calls.at(-1)!.events).map((o) => o.model)).toEqual(['model-0', 'model-1', 'model-2'])
+    expect(observed(h.calls.at(-1)!.events).every((o) => o.at === at)).toBe(true)
+    expect(sent().filter((e) => e.observed !== undefined && e.kind === 'status').at(-1)?.context).toEqual({ tokens: 20, window: 100 })
+  })
+
+  test('an eligible own response stays inside its turn across rejection and status renegotiation', async () => {
+    const t = await started()
+    const { h, dash, advance } = t
+    await negotiate(t)
+    h.answers.push(new Error('offline'))
+    const start = h.now
+    dash.turnStarted(undefined)
+    dash.stepBegan(undefined, 'rate-response', { effort: 'high' })
+    dash.stepChunk(undefined, 'rate-response', { kind: 'text', index: 0, text: '' })
+    h.now += 1000
+    dash.stepChunk(undefined, 'rate-response', { kind: 'text', index: 0, text: '' })
+    const at = h.now
+    dash.stepEnded(undefined, 'rate-response', { answer: 'done', usage: { model: 'claude-opus-5-5', output_tokens: 100 } })
+    dash.turnCompleted(undefined, 'done', 'answer')
+    await advance()
+    await advance(RETRY_MS)
+    await advance()
+    const recovery = h.calls.findLastIndex((c) => c.events[0]?.kind === 'reset')
+    const events = h.calls.slice(recovery).flatMap((c) => c.events)
+    const begin = events.findIndex((e) => e.kind === 'turn_start')
+    const output = events.findIndex((e) => e.observed !== undefined)
+    const end = events.findIndex((e) => e.kind === 'turn_end')
+    expect(begin).toBeGreaterThanOrEqual(0)
+    expect(output > begin && end > output).toBe(true)
+    expect(events[begin]?.at).toBe(start)
+    // Offline cross-language verification feeds these actual recovered adapter
+    // events through the Go intake/reducer, not a test-side model of it.
+    const capture = process.env.WS_CLAUDE_RETRY_CAPTURE
+    if (capture?.startsWith('/tmp/')) writeFileSync(capture, JSON.stringify(events))
+    expect(observed(events)).toEqual([{ id: 'rate-response', model: 'claude-opus-5-5', source: 'claude.step', at, effort: 'high', effortSource: 'request', outputTps: 100 }])
+  })
+
+  test('confirmed children keep every response through finished-tree pruning and retries; evicted unconfirmed evidence stays out', async () => {
+    const { h, dash, advance, sent } = await started()
+    for (let i = 0; i < 8; i++) {
+      const id = `child-${i}`
+      dash.agentSpawned({ agentId: id })
+      dash.stepEnded(id, `${id}/0`, { usage: { model: `m${i}` } })
+      h.now += 1
+      dash.turnCompleted(id, '', 'answer')
+    }
+    h.answers.push(false)
+    await advance()
+    expect(sent().filter((e) => e.observed !== undefined).length).toBe(8)
+    expect(sent().filter((e) => e.observed !== undefined).every((e) => e.status === 'done')).toBe(true)
+    await advance(RETRY_MS)
+    expect(h.calls.at(-1)!.events.filter((e) => e.observed !== undefined).length).toBe(8)
+    expect(h.calls.at(-1)!.events.filter((e) => e.observed !== undefined).every((e) => e.status === 'done')).toBe(true)
+    for (let i = 0; i <= HELD_AGENT_CAP; i++) dash.stepEnded(`ghost-${i}`, 's/0', { usage: { model: 'unconfirmed' } })
+    dash.agentSpawned({ agentId: 'ghost-0' })
+    await advance()
+    expect(observed(sent(), 'ghost-0')).toEqual([])
+    dash.agentSpawned({ agentId: `ghost-${HELD_AGENT_CAP}` })
+    await advance()
+    expect(observed(sent(), `ghost-${HELD_AGENT_CAP}`).map((o) => o.model)).toEqual(['unconfirmed'])
+  })
+
+  test('evidence queues are bounded like discrete events, and no-key recovery retains original response times', async () => {
+    const t = await started({ key: undefined })
+    const { h, dash, advance, sent } = t
+    dash.agentSpawned({ agentId: 'child' })
+    for (let i = 0; i < PENDING_EVENT_CAP + 3; i++) {
+      dash.stepEnded('child', `s/${i}`, { usage: { model: `m${i}` } })
+    }
+    const at = h.now
+    await advance(10_000)
+    expect(h.calls.length).toBe(0)
+    h.key = KEY
+    dash.keyChanged()
+    await advance()
+    const items = observed(sent(), 'child')
+    expect(items.length).toBe(PENDING_EVENT_CAP)
+    expect(items[0]?.id).toBe('s/3')
+    expect(items.at(-1)?.id).toBe(`s/${PENDING_EVENT_CAP + 2}`)
+    expect(items.every((o) => o.at === at)).toBe(true)
   })
 })
 

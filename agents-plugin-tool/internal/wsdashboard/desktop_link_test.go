@@ -19,7 +19,7 @@ const desktopUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/6
 // browser keep their behavior: a plain click previews, a modified click is
 // the browser's new tab.
 func TestDesktopPathClickOpensMenuAndModifiedClickPreviews(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ check("browser plain click previews", run(inside, 1), [[["docs/a.md"]], null, tr
 check("browser Cmd+click is the new tab", run(inside, 1, { meta: true }), [[], null, false]);
 
 // The desktop app.
-window.navigator = { userAgent: "` + desktopUA + `" };
+window.navigator = { userAgent: "`+desktopUA+`" };
 check("desktop plain click opens the menu", run(inside, 1), [[], insideMenu, true]);
 check("desktop Cmd+click previews", run(inside, 1, { meta: true }), [[["docs/a.md"]], null, true]);
 check("desktop Ctrl+click previews", run(inside, 1, { ctrl: true }), [[["docs/a.md"]], null, true]);
@@ -72,7 +72,7 @@ check("desktop Shift+click stays on the page", run(inside, 1, { shift: true }), 
 check("desktop keyboard activation opens the menu", run(inside, 0, { meta: true }), [[], insideMenu, true]);
 check("desktop Cmd+click on a file the card cannot show opens the menu", run(pdf, 1, { meta: true })[2], true);
 check("desktop Cmd+click on a file the card cannot show lists no preview", run(pdf, 1, { meta: true })[1].indexOf("js.menu.preview"), -1);
-check("desktop plain click on an outside file opens the menu", run(away, 1), [[], ["js.menu.preview", "js.menu.newtab", "js.menu.copyabs"], true]);
+check("desktop plain click on an outside file opens the menu", run(away, 1), [[], ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"], true]);
 check("desktop Cmd+click on an outside file previews it", run(away, 1, { meta: true }), [[["/away/site/page.html", { out: true }]], null, true]);
 check("desktop Cmd+click on a url link stays native", run(url, 1, { meta: true }), [[], null, false]);
 check("no preview without a card board", (function () { cardBoard = null; var r = run(inside, 1, { meta: true }); cardBoard = {}; return [r[0], r[2]]; })(), [[], true]);
@@ -118,7 +118,7 @@ function frame(ua) {
 }
 var file = { "data-wl": "file", href: "/s/rid1/file?path=docs%2Fa.md", "data-rel": "docs/a.md" };
 var url = { "data-wl": "url", href: "https://example.com/" };
-var browser = frame("Mozilla/5.0 Safari"), desktop = frame("` + desktopUA + `");
+var browser = frame("Mozilla/5.0 Safari"), desktop = frame("`+desktopUA+`");
 check("browser plain click", browser(file, {}), [true, [["link", "file", false]]]);
 check("browser Cmd+click is the new tab", browser(file, { meta: true }), [false, []]);
 check("desktop plain click", desktop(file, {}), [true, [["link", "file", false]]]);

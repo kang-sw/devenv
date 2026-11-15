@@ -168,15 +168,101 @@ func historicalCall(t *testing.T, binary, dir, action, commands string, refused 
 	}
 }
 
+func TestTopicStateResearchingReplayAndMalformedMetadata(t *testing.T) {
+	dir := t.TempDir()
+	f := FolderStore{Dir: dir}
+	if err := f.Update(nil, func(s *State) error {
+		stateApply(t, s, `<wb:topic name="Work"><wb:log>Research summary</wb:log><wb:state value="researching" owner="investigator" eta_minutes="7"/></wb:topic>`, stateNow)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "t1", "log.jsonl")
+	prefix := folderRead(t, path)
+	before := folderOpen(t, dir, nil).TopicStates()["Work"]
+	if before.State == nil || before.State.Owner != "investigator" || before.State.ETAMinutes != 7 || before.State.Run != nil {
+		t.Fatalf("research replay: %+v", before)
+	}
+	if err := f.Update(nil, func(s *State) error {
+		stateApply(t, s, stateCommand(StateResearching, `owner="second"`), stateNow.Add(time.Hour))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := folderOpen(t, dir, nil).clone().TopicStates()["Work"]
+	if !bytes.HasPrefix(folderRead(t, path), prefix) || got.Diagnostic != nil || got.State == nil || got.State.Owner != "second" || got.State.ETAMinutes != 0 || got.State.Run != nil || got.State.Entry == before.State.Entry {
+		t.Fatal("research history changed or metadata update lost")
+	}
+	for _, raw := range []string{
+		`{"v":1,"op":"set","value":"researching","owner":""}`,
+		`{"v":1,"op":"set","value":"researching","owner":null}`,
+		`{"v":1,"op":"set","value":"researching","owner":" padded "}`,
+		`{"v":1,"op":"set","value":"researching","eta_minutes":0}`,
+		`{"v":1,"op":"set","value":"researching","eta_minutes":null}`,
+		`{"v":1,"op":"set","value":"researching","eta_minutes":1.5}`,
+		`{"v":1,"op":"set","value":"waiting","owner":"investigator"}`,
+		`{"v":1,"op":"reset","from":"researching","eta_minutes":7}`,
+	} {
+		s := stateBoard(t)
+		stateRaw(s, "Work", "e99", raw)
+		if v := s.TopicStates()["Work"]; v.State != nil || v.Diagnostic == nil || v.Diagnostic.Code != "malformed" {
+			t.Fatalf("invalid research record %s: %+v", raw, v)
+		}
+	}
+	base := etaBoard(t)
+	run := base.TopicStates()["Work"].State.Run
+	for _, record := range []topicStateRecord{
+		{V: 1, Op: "set", Value: StateResearching, Run: run},
+		{V: 1, Op: "set", Value: StateResearching, From: StateResearching, Run: run},
+		{V: 1, Op: "extend", Value: StateResearching, Run: run, Reason: "timed research"},
+	} {
+		s := base.clone()
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stateRaw(s, "Work", "e99", string(data))
+		if v := s.TopicStates()["Work"]; v.State != nil || v.Diagnostic == nil || v.Diagnostic.Code != "malformed" {
+			t.Fatalf("timed research record accepted: %+v", record)
+		}
+	}
+}
+
 func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 	binary := buildHistoricalWriter(t)
+	t.Run("researching-opaque-prefix", func(t *testing.T) {
+		dir := t.TempDir()
+		f := FolderStore{Dir: dir}
+		if err := f.Update(nil, func(s *State) error {
+			stateApply(t, s, `<wb:topic name="Work"><wb:log>Investigating</wb:log><wb:state value="researching" owner="investigator" eta_minutes="7"/></wb:topic>`, stateNow)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "t1", "log.jsonl")
+		prefix := folderRead(t, path)
+		want := folderOpen(t, dir, nil).TopicStates()["Work"]
+		historicalCall(t, binary, dir, "update", `<wb:topic name="Work"><wb:log>Old writer content</wb:log></wb:topic>`, false)
+		if !bytes.HasPrefix(folderRead(t, path), prefix) || !reflect.DeepEqual(want, folderOpen(t, dir, nil).TopicStates()["Work"]) {
+			t.Fatal("old content writer lost research authority or raw history")
+		}
+		historicalCall(t, binary, dir, "update", `<wb:topic name="Work"><wb:close result="Old close"/><wb:log>Reopened</wb:log></wb:topic>`, false)
+		if !bytes.HasPrefix(folderRead(t, path), prefix) || folderOpen(t, dir, nil).TopicStates()["Work"].State != nil {
+			t.Fatal("old close/reopen lost history or restored research metadata")
+		}
+	})
 	t.Run("committed-prefix-and-lifecycle", func(t *testing.T) {
 		dir := t.TempDir()
 		f := FolderStore{Dir: dir}
 		if err := f.Update(nil, func(s *State) error {
 			stateApply(t, s, `<wb:topic name="Work" tickets="261114-feat-example"><wb:body>Original</wb:body><wb:log>Agent summary</wb:log><wb:state value="implementing" owner="executor" eta_minutes="40"/></wb:topic>`, stateNow)
+			stateApply(t, s, etaCommand("60", "historical first extension"), stateNow.Add(20*time.Minute))
+			stateApply(t, s, etaCommand("90", "historical second extension"), stateNow.Add(40*time.Minute))
 			return nil
 		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Notify("historical-lead", stateNow.Add(2*time.Hour), func() bool { return true }, func(string) error { return nil }, func() {}); err != nil {
 			t.Fatal(err)
 		}
 		// Add noncanonical whitespace and an opaque future member to a real
@@ -220,6 +306,24 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 			if step.active && !reflect.DeepEqual(start, view.State) {
 				t.Fatal("old write changed execution deadline")
 			}
+			if noticeReceiptCount(got) != 1 {
+				t.Fatal("historical writer lost actual board_notice receipt")
+			}
+			var reasons []string
+			for _, e := range got.Topics[0].Entries {
+				if len(e.BoardNotice) != 0 {
+					n, ok := parseBoardNotice(e, "historical-lead")
+					if !ok || len(n.Covered) != 1 || n.Covered[0].ETAEntry != start.Entry {
+						t.Fatal("historical writer changed receipt/revision accounting")
+					}
+				}
+				if r, code := parseTopicState(e); code == "" && r.Op == "extend" {
+					reasons = append(reasons, r.Reason)
+				}
+			}
+			if !reflect.DeepEqual(reasons, []string{"historical first extension", "historical second extension"}) {
+				t.Fatal("historical writer lost individual extension payloads", reasons)
+			}
 			if got.Topics[0].Entries[2].unknown["future_entry"] == nil {
 				t.Fatal("new reader lost opaque Entry member")
 			}
@@ -231,6 +335,10 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 		historicalCall(t, binary, dir, "update", `<wb:topic name="work"><wb:log>must roll back</wb:log><wb:state value="waiting"/></wb:topic>`, true)
 		if !reflect.DeepEqual(before, folderTree(t, dir)) {
 			t.Fatal("new command on old writer mutated board")
+		}
+		historicalCall(t, binary, dir, "update", `<wb:topic name="work"><wb:log>must roll back</wb:log><wb:eta minutes="100" reason="new command"/></wb:topic>`, true)
+		if !reflect.DeepEqual(before, folderTree(t, dir)) {
+			t.Fatal("ETA command on old writer mutated board")
 		}
 	})
 	t.Run("opaque-pending-partial-recovery", func(t *testing.T) {
@@ -253,6 +361,11 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 			stateApply(t, s, stateCommand("implementing", `owner="executor" eta_minutes="40"`), stateNow)
 			e := &s.Topics[0].Entries[len(s.Topics[0].Entries)-1]
 			e.TopicState = bytes.Replace(e.TopicState, []byte(`"v":1`), []byte(`"future": { "bytes": [ 1, 2 ] }, "v":1`), 1)
+			stateApply(t, s, etaCommand("60", "pending first extension"), stateNow.Add(20*time.Minute))
+			stateApply(t, s, etaCommand("90", "pending second extension"), stateNow.Add(40*time.Minute))
+			p := s.planNotice("pending-lead", map[string]string{"Work": "t1"}, stateNow.Add(2*time.Hour))
+			noticeReasons(t, p, "overdue", "hourly")
+			noticeStamp(t, s, p, stateNow.Add(2*time.Hour))
 			return nil
 		}); err != folderCrash {
 			t.Fatalf("expected partial append: %v", err)
@@ -267,9 +380,11 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 			t.Fatal("old recovery changed opaque append bytes")
 		}
 		got := folderOpen(t, dir, nil)
-		if got.TopicStates()["Work"].State.Run.ETAMinutes != 40 {
-			t.Fatal("recovered state missing")
+		run := got.TopicStates()["Work"].State.Run
+		if run.ETAMinutes != 90 || run.InitialETAMinutes != 40 || run.ExtensionCount != 2 || run.StartedAt != stateNow.Format(time.RFC3339Nano) || noticeReceiptCount(got) != 1 {
+			t.Fatal("recovered state/extensions/receipt missing")
 		}
+		noticeReasons(t, got.planNotice("pending-lead", map[string]string{"Work": "t1"}, stateNow.Add(2*time.Hour)))
 		before := folderTree(t, dir)
 		historicalCall(t, binary, dir, "open", "", false)
 		if !reflect.DeepEqual(before, folderTree(t, dir)) {

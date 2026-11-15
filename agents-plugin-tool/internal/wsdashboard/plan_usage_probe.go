@@ -58,6 +58,7 @@ func (s *planUsageStore) query(ctx context.Context, force bool) {
 		}
 	} else {
 		s.gpt = entry
+		s.appendHistoryLocked(usageSamples(entry), time.Now().UnixMilli())
 	}
 	s.saveLocked()
 	s.lastQuery = time.Now()

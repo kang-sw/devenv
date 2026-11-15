@@ -55,7 +55,11 @@ func topicUpdated(t *testing.T, st *State, name string) string {
 		if tv.Name == name {
 			// Only this topic's own bar counts: another topic's bar may show
 			// the same time.
-			_, bar, ok := strings.Cut(render(t, v), `data-topic="`+name+`"><div class="tophead"><div class="tbar">`)
+			// The section may carry data-state attributes before the bar.
+			_, bar, ok := strings.Cut(render(t, v), `data-topic="`+name+`"`)
+			if ok {
+				_, bar, ok = strings.Cut(bar, `><div class="tophead"><div class="tbar">`)
+			}
 			if ok {
 				bar, _, ok = strings.Cut(bar, `<textarea class="note tnote"`)
 			}

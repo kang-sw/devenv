@@ -694,6 +694,17 @@ func TestClaudeLeadCompaction(t *testing.T) {
 	if len(replies) != 4 || replies[0] != "OK" || !strings.HasPrefix(replies[1], "## Context Usage") || replies[2] != "DONE" || replies[3] != "PLUM" {
 		t.Fatalf("ring replies = %q; the compaction's re-emitted message must not repeat", replies)
 	}
+	// Local /context output and its compaction replay must not replace the
+	// physical answering model or manufacture a permanent transition.
+	own := r.st.Snapshot(time.Now().UnixMilli()).Lead.Observed
+	if own == nil || own.Current.Model != "claude-haiku-5-5" || len(own.History) != 1 {
+		t.Fatalf("synthetic command/replay changed observed model: %+v", own)
+	}
+	for _, o := range observedEvents(t, r.events) {
+		if o.Model == "<synthetic>" || o.ID == "3839c735-efdf-43ca-ac30-17eb1e26f2c9" {
+			t.Fatalf("synthetic command became response evidence: %+v", o)
+		}
+	}
 	// The fixture does hold the /context reply twice, under one line uuid.
 	seen := map[string]int{}
 	for _, l := range lines {

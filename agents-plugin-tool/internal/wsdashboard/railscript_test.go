@@ -467,7 +467,7 @@ var listeners = {}, winListeners = {};
 var doc = { hidden: false, addEventListener: function (t, fn) { listeners[t] = fn; } };
 window.addEventListener = function (t, fn) { winListeners[t] = fn; };
 var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
-var shell = false, framed = false;
+var shell = false, framed = false, mode = "live";
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
 var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [], wpicks = [], wconsoles = [];
@@ -506,7 +506,7 @@ func TestRailDraftRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

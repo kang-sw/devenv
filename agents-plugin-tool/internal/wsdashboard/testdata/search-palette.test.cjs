@@ -5,7 +5,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assets = path.join(__dirname, '..', 'assets');
 const tracker = fs.readFileSync(path.join(assets, 'tracker.js'), 'utf8');
-const dashboard = fs.readFileSync(path.join(assets, 'dashboard.js'), 'utf8');
+const { readAssetSource } = require('./asset-source.cjs');
+const dashboard = readAssetSource('wsdashboard', 'dashboard.js');
 function block(source, from, to) {
   const start = source.indexOf(from), end = source.indexOf(to, start);
   assert(start >= 0 && end > start, `missing block: ${from}`);
@@ -78,16 +79,13 @@ assert.deepEqual(plain(ctx.qTracker('palette').map(x => x.item)), ['a']);
 assert.deepEqual(plain(ctx.qTracker('').map(x => x.item)), ['c']);
 assert.deepEqual(plain(ctx.qTracker('status:doing').map(x => x.item)), [], 'the tracker slot sends no grammar');
 
-// The strip: sessions, stores, actions; filtered by the query.
-const rows = [{ group: 0, kind: 'session', title: 'other session', href: '/s/other' }, ...ids,
-  { group: 1, kind: 'board-topic', topic: 'pal', title: 'Palette topic', at: 5 }];
-ctx.X.qsActions = () => [{ key: 'support', title: 'Support bundle' }];
-ctx.X.dialogs = { support: {} };
+// Session switching remains in the existing rail, not in the search sheet.
+const rows = [...ids, { group: 1, kind: 'board-topic', topic: 'pal', title: 'Palette topic', at: 5 }];
 qs.rows = rows;
-assert.deepEqual(plain(ctx.qStrip('').map(x => x.kind + ':' + x.title)), ['session:other session', 'store:store', 'store:cold', 'action:Support bundle']);
-assert.deepEqual(plain(ctx.qStrip('suppo').map(x => x.title)), ['Support bundle']);
+assert.equal(ctx.qStrip, undefined, 'the deleted command-strip path is absent');
 
-// Shortcuts: / and the release-gate guard (editors keep Ctrl+K / Ctrl+Space).
+// Shortcuts: / outside text fields; Ctrl+K, Ctrl+Space and Cmd+K anywhere but a
+// terminal (owner (973)/(974): editors no longer keep them).
 function key(key, extra = {}) { return { key, target: { closest: () => null }, ...extra }; }
 assert.equal(ctx.qShortcut(key('/')), true);
 assert.equal(ctx.qShortcut(key('/', { shiftKey: true })), true, 'slash on shifted keyboard layouts');
@@ -98,10 +96,19 @@ assert.equal(ctx.qShortcut(key('k', { ctrlKey: true })), true);
 assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space' })), true);
 assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, isComposing: true })), false);
 function inside(selector) { return { closest: s => s.split(',').map(x => x.trim().split(':')[0]).includes(selector) ? {} : null }; }
-for (const target of [inside('.xterm'), inside('textarea'), inside('[contenteditable]')]) {
-  assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target })), false, 'Ctrl+K from an editor');
-  assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space', target })), false, 'Ctrl+Space from an editor');
+assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target: inside('.xterm') })), false, 'Ctrl+K from a terminal');
+assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space', target: inside('.xterm') })), false, 'Ctrl+Space from a terminal');
+assert.equal(ctx.qShortcut(key('k', { metaKey: true, target: inside('.xterm') })), false, 'Cmd+K from a terminal');
+for (const target of [inside('textarea'), inside('[contenteditable]'), inside('input')]) {
+  assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target })), true, 'Ctrl+K from an editor');
+  assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space', target })), true, 'Ctrl+Space from an editor');
+  assert.equal(ctx.qShortcut(key('k', { metaKey: true, target })), true, 'Cmd+K from an editor');
 }
+assert.equal(ctx.qShortcut(key('k', { metaKey: true })), true, 'Cmd+K');
+assert.equal(ctx.qShortcut(key(' ', { metaKey: true, code: 'Space' })), false, 'Cmd+Space stays the system\'s');
+assert.equal(ctx.qShortcut(key('k', { metaKey: true, ctrlKey: true })), false, 'Ctrl+Cmd+K');
+assert.equal(ctx.qShortcut(key('k', { metaKey: true, shiftKey: true })), false, 'Cmd+Shift+K');
+assert.equal(ctx.qShortcut(key('/', { metaKey: true })), false, 'Cmd+/');
 assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target: inside('body') })), true, 'Ctrl+K from the page body');
 assert.equal(ctx.qShortcut(key('/', { keyCode: 229 })), false);
 assert.equal(ctx.qShortcut(key('/', { altKey: true })), false);
@@ -121,10 +128,9 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   ctx.qOpen();
   assert.equal(qs.open, true);
   assert.equal(qs.step, 'wide');
-  assert(events.some(x => x[0] === 'modal'));
+  assert(!events.some(x => x[0] === 'modal'), 'search opens without a modal');
+  assert.equal(ctx.qIdx(qs.cur), -1, 'opening never arms Enter');
   assert.equal(node('tkqin').value, '');
-  assert.equal(node('tkqscope').hidden, false, 'the scope chip names the root');
-  assert(node('tkqscope').textContent.includes('repo'));
   assert.equal(S().files.state, 'idle', 'no query: async slots idle');
   assert.equal(timers.length, 0);
 
@@ -155,19 +161,28 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.equal(S().tnote.rows.length, 0);
   flush();
 
-  // Selection follows the row by its key across a late batch.
+  // Local reranking clears selection; async batches retain an explicit key.
   qs.cur = 'board';
   press('ArrowDown');
   assert.equal(selKey('board'), 'board|board-topic:pal');
   qs.rows = [{ group: 1, kind: 'board-topic', topic: 'new', title: 'Palette new' }].concat(rows);
   ctx.qLocal();
-  assert.equal(ctx.qIdx('board'), 1, 'the re-rank put a row above the selected one');
-  assert.equal(selKey('board'), 'board|board-topic:pal', 'and the selection stayed on its row');
+  assert.equal(ctx.qIdx('board'), -1, 'local reranking disarms Enter');
+  ctx.qHover({ getAttribute: () => '0' });
+  assert.equal(ctx.qIdx('board'), -1, 'hover never arms Enter');
   qs.cur = 'files';
   settle('find', { items: [{ path: 'src/palette.js' }] }); await tick();
   assert.equal(S().files.stale, false);
   assert.deepEqual(plain(S().files.rows.map(x => x.path)), ['src/palette.js'], 'the first batch replaces the stale rows');
   assert.equal(S().files.state, 'done');
+  press('ArrowDown');
+  assert.equal(selKey('files'), 'files|src/palette.js');
+  ctx.qBatch(qs.gen, 'files', [{ path: 'aaa.js', key: 'aaa.js' }], true);
+  assert.equal(selKey('files'), 'files|src/palette.js', 'late async batches retain the arrow-selected key');
+  assert.deepEqual(plain(S().files.rows.map(x => x.path)), ['src/palette.js', 'aaa.js'], 'batches append rather than replace');
+  ctx.qFail(qs.gen, 'files', 'unavailable');
+  ctx.qBatch(qs.gen, 'files', [{ path: 'aaa.js', key: 'aaa.js' }], true);
+  assert.equal(ctx.qIdx('files'), -1, 'a missing selected key never selects its replacement');
 
   // Content: a capped answer shows the limit state.
   const many = Array.from({ length: 210 }, (_, i) => ({ path: 'f' + i + '.go', matches: [{ line: i + 1, pre: 'a ', hit: 'palette', post: ' b' }] }));
@@ -212,7 +227,7 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   searches.splice(0);
   pend.splice(0);
 
-  // Keys: Tab skips empty slots, Alt+digit by e.code, Alt+0 and Up from the top enter the strip.
+  // Keys: Tab skips empty slots, Alt+1–5 use e.code; deleted strip shortcuts stay absent.
   type('palette'); flush();
   settle('find', { items: [] }); settle('search', { files: [] });
   searches.splice(0).forEach(s => s.done({ ok: true, ids: [], hits: [] }));
@@ -220,6 +235,7 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   qs.cur = 'board';
   press('Tab');
   assert.equal(qs.cur, 'tracker', 'Tab skips the empty files and content slots');
+  assert.equal(ctx.qIdx('tracker'), -1, 'slot changes disarm Enter');
   press('Tab', { shiftKey: true });
   assert.equal(qs.cur, 'board');
   press('¢', { altKey: true, code: 'Digit4' });
@@ -227,23 +243,42 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   const altGr = press('²', { altKey: true, ctrlKey: true, code: 'Digit2' });
   assert.equal(qs.cur, 'tracker', 'AltGr+2 (Ctrl+Alt) types instead of jumping');
   assert(!altGr.prevented);
-  press('º', { altKey: true, code: 'Digit0' });
-  assert.equal(qs.cur, 'jump');
-  press('ArrowDown');
-  assert.equal(qs.cur, 'tracker', 'Down leaves the strip for the view it came from');
+  const altZero = press('º', { altKey: true, code: 'Digit0' });
+  assert.equal(qs.cur, 'tracker');
+  assert(!altZero.prevented, 'Alt+0 no longer routes to a deleted strip');
   press('ArrowUp');
-  assert.equal(qs.cur, 'jump', 'Up from the first row enters the strip');
-  press('ArrowDown');
+  assert.equal(ctx.qIdx('tracker'), 0, 'the first arrow selects the first row');
+  press('ArrowUp');
+  assert.equal(qs.cur, 'tracker', 'Up at the first row stays in its result slot');
+  assert.equal(ctx.qIdx('tracker'), 0);
   qs.cur = 'board';
 
-  // Enter opens and closes; Ctrl+Enter opens the board target behind the open palette.
+  // Plain Enter asks only with a nonempty query and an answer hook.
+  const asks = [];
+  ctx.O.searchAsk = text => asks.push(text);
+  press('Enter');
+  assert.deepEqual(asks, ['palette']);
+  press('Enter', { ctrlKey: true });
+  press('Enter', { metaKey: true });
+  assert.equal(asks.length, 1, 'modified Enter without selection does nothing');
+  delete ctx.O.searchAsk;
+  const before = events.length;
+  press('Enter');
+  assert.equal(events.length, before, 'remote/non-agent Enter does nothing');
+  assert.equal(qs.open, true);
+  ctx.O.searchAsk = text => asks.push(text);
+  type('  '); press('Enter');
+  assert.equal(asks.length, 1, 'empty Enter never asks');
+  type('palette');
+  assert.equal(ctx.qIdx('board'), -1, 'query edits clear selection');
+  press('ArrowDown');
+  // Ctrl/Cmd+Enter open the arrow-selected board target behind the sheet.
+  press('Enter', { metaKey: true });
+  assert.deepEqual(events.filter(x => x[0] === 'board').pop()[2], { keep: true });
   press('Enter', { ctrlKey: true });
   assert.deepEqual(events.filter(x => x[0] === 'board').pop()[2], { keep: true });
   assert.equal(qs.open, true);
   assert.deepEqual(events[events.length - 1], ['focus', 'tkqin']);
-  ctx.qPickEntry({ slot: 'jump', row: { kind: 'session', title: 'other session', href: '/s/other', row: rows[0] } }, true);
-  assert(events.some(x => x[0] === 'window' && x[1] === '/s/other' && x[2] === '_blank'), 'Ctrl+Enter on a session opens a tab');
-  assert.equal(qs.open, true);
   press('Enter');
   assert.equal(qs.open, false);
   assert.deepEqual(events.filter(x => x[0] === 'board').pop()[2], { keep: false });
@@ -258,13 +293,15 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   press('Escape');
   assert.equal(qs.open, false);
 
-  // (n) preselects its one hit.
+  // (n) focuses its slot, but exact matches still require an arrow.
   width = 820;
   ctx.qOpen();
   assert.equal(qs.step, 'medium');
   type('(153)');
   assert.deepEqual(plain(S().board.rows.map(x => x.id)), ['153']);
   assert.equal(qs.cur, 'board');
+  assert.equal(ctx.qIdx('board'), -1);
+  press('ArrowDown');
   assert.equal(selKey('board'), 'board|board-item:153');
   assert(node('tkqlist').innerHTML.includes('tk-qexact'));
   ctx.qClose();
@@ -273,6 +310,8 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.equal(qs.step, 'narrow');
   type('(153)');
   assert.equal(qs.cur, 'all');
+  assert.equal(ctx.qIdx('all'), -1);
+  press('ArrowDown');
   assert.equal(selKey('all'), 'board|board-item:153');
   assert.equal(node('tkqtabs').hidden, false);
 
@@ -285,18 +324,19 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.deepEqual(plain(qs.path), { dir: '/tmp/', leaf: 'fo', sep: '/' });
   assert.equal(S().content.state, 'idle', 'path mode pauses content');
   assert.equal(ctx.qState('content'), wsT('js.tk.qs.st.path'));
-  assert(node('tkqscope').textContent.includes(wsT('js.tk.qs.scopepath', '/tmp/')));
   flush();
   assert.deepEqual(plain(calls.filter(c => c[0] !== 'search')), [['list', '/tmp/']]);
   settle('list', { entries: [{ name: 'bar', dir: false }, { name: 'xfoy' }, { name: 'food', dir: true }, { name: 'fo.txt' }, { name: 'fold', link: true }, { name: 'fogone', gone: true }] }); await tick();
   assert.deepEqual(plain(S().files.rows.map(r => r.name)), ['food', 'fo.txt', 'xfoy'], 'prefix matches first, then fuzzy; links and gone files dropped');
   qs.cur = 'files';
+  press('ArrowDown');
   press('Enter');
   assert.equal(node('tkqin').value, '/tmp/food/', 'Enter on a folder completes the path');
   assert.equal(qs.open, true);
   flush();
   assert.equal(pend[pend.length - 1].q, '/tmp/food/');
   settle('list', { entries: [{ name: 'a.txt' }] }); await tick();
+  press('ArrowDown');
   press('Enter', { ctrlKey: true });
   assert.deepEqual(events[events.length - 2], ['open', 'a.txt', '/tmp/food/'], 'Ctrl+Enter opens a file natively');
   assert.equal(qs.open, true);
@@ -304,7 +344,7 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.equal(qs.open, false);
   assert.deepEqual(events.filter(x => x[0] === 'preview').pop(), ['preview', 'a.txt', { root: '/tmp/food/' }]);
   ctx.qOpen();
-  assert.equal(qs.cur, 'all', 'each opening starts on the first view');
+  assert.equal(qs.cur, 'files', 'reopening preserves the selected slot');
   type('C:\\Users\\');
   assert.deepEqual(plain(qs.path), { dir: 'C:\\Users\\', leaf: '', sep: '\\' });
   type('/nope/');
@@ -336,6 +376,7 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   // A content pick previews the file at its line.
   settle('find', { items: [] }); settle('search', { files: [{ path: 'a/b.go', matches: [{ line: 7, hit: 'fo' }] }] }); await tick();
   qs.cur = 'content';
+  press('ArrowDown');
   press('Enter');
   assert.deepEqual(events.filter(x => x[0] === 'preview').pop(), ['preview', 'a/b.go', { line: 7 }]);
   assert.equal(qs.open, false);
@@ -350,18 +391,33 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   ctx.qOpen(); type('');
   ctx.qPickEntry({ slot: 'tracker', row: { store: 'store', item: 'b' } });
   assert(events.some(x => x[0] === 'toast'));
-  ctx.qOpen();
-  ctx.qPickEntry({ slot: 'jump', row: { kind: 'action', key: 'support' } }, true);
-  assert(events.some(x => x[0] === 'dialog' && x[1] === 'support'));
-  assert.equal(qs.open, false, 'strip actions always close');
-  ctx.qOpen();
-  ctx.qPickEntry({ slot: 'jump', row: { kind: 'store', store: 'cold' } });
-  assert.equal(ctx.location.hash, '#/cold');
 
   // The production keyboard handler rejects IME confirmation before qKey.
   const inputKey = block(tracker, "    $('tkqin').addEventListener('keydown'", '    // the caret moved without an edit');
   assert(inputKey.indexOf('e.isComposing || e.keyCode === 229') < inputKey.indexOf('qKey(e)'));
-  assert(tracker.includes("$('tkqpop').addEventListener('cancel'"));
+  assert(!tracker.includes("$('tkqpop').addEventListener('cancel'"), 'no dialog cancel handler remains');
+
+  // A fresh renderer restores browser-owned query/slot, never arrow selection.
+  let saved = { query: 'palette', slot: 'tracker' };
+  const hostOpen = [];
+  ctx.qClose();
+  ctx.O.searchState = { load: () => saved, save: value => { saved = plain(value); } };
+  ctx.O.searchHost = { setOpen: open => hostOpen.push(open) };
+  qs.loaded = false;
+  ctx.qOpen();
+  assert.equal(node('tkqin').value, 'palette');
+  assert.equal(qs.cur, 'tracker');
+  assert.equal(ctx.qIdx('tracker'), -1);
+  press('ArrowDown');
+  press('¢', { altKey: true, code: 'Digit1' });
+  assert.equal(ctx.qIdx('tracker'), -1, 'Alt slot switches clear previous selection');
+  assert.deepEqual(saved, { query: 'palette', slot: 'board' });
+  const imeBefore = events.length;
+  press('Enter', { isComposing: true });
+  press('Enter', { keyCode: 229 });
+  assert.equal(events.length, imeBefore, 'IME confirmation does not open a row');
+  ctx.qClose();
+  assert.deepEqual(hostOpen, [true, false], 'renderer delegates sheet open/close to host');
 
   await hostCases();
   console.log('search palette: scorer, slots, ids, generations, keys, picks, path mode, and host hooks passed');
@@ -451,7 +507,7 @@ async function hostCases() {
     window: { fetch: true, WsPreview: { open: (p, o) => posts.push(['preview', p, o]) } }, wsT, toast: t => posts.push(['toast', t]),
     post: (r, b, done) => { posts.push(['post', r, b]); done(false, 'denied'); },
     fetch: (url, o) => { fetched.push([url, !!o.signal]); return Promise.resolve(url.includes('nope') ? { ok: false, status: 400, text: () => Promise.resolve('bad root\n') } : { ok: true, json: () => Promise.resolve({ items: [] }) }); } });
-  vm.runInContext(block(dashboard, '  function paletteFs(', '\n  function tkMount('), fsCtx);
+  vm.runInContext(block(dashboard, '  function paletteFs(', '\n  // Browser-owned rolling context.'), fsCtx);
   const hooks = fsCtx.paletteFiles({});
   assert.equal(hooks.fileLocal(), true);
   assert.equal(hooks.fileScope(), '~/repo');
@@ -464,6 +520,37 @@ async function hostCases() {
   assert.deepEqual(plain(posts), [['preview', 'a.txt', { root: '/tmp/' }], ['post', 'fs/act', { path: 'a.txt', action: 'open', root: '/tmp/' }], ['toast', wsT('js.toast.openfail', 'denied')]]);
   fsCtx.rid = '';
   assert.deepEqual(Object.keys(fsCtx.paletteFiles({ a: 1 })), ['a'], 'a page without a session has no file hooks');
+
+  // Remote/non-session hosts retain persistence and shared-sheet hooks only.
+  const storage = {}, sheetCalls = [];
+  const searchCtx = vm.createContext({ rid: '', root: { hasAttribute: () => false }, window: {}, sbody: {},
+    drOpen: false, drMode: 'panels', load: k => storage[k], save: (k, v) => { storage[k] = v; },
+    drSetOpen: (open, mode) => { sheetCalls.push([open, mode]); searchCtx.drOpen = open; if (mode) searchCtx.drMode = mode; } });
+  vm.runInContext(block(dashboard, '  function paletteSearch(', '\n  function tkMount('), searchCtx);
+  const remote = searchCtx.paletteSearch({});
+  assert.equal(remote.searchAsk, undefined);
+  remote.searchState.save({ query: 'remember', slot: 'content' });
+  const reloaded = searchCtx.paletteSearch({});
+  assert.deepEqual(plain(reloaded.searchState.load()), { query: 'remember', slot: 'content' });
+  reloaded.searchHost.setOpen(true); reloaded.searchHost.setOpen(true); reloaded.searchHost.setOpen(false);
+  assert.deepEqual(sheetCalls, [[true, 'search'], [false, undefined]], 'sheet hooks are idempotent');
+  searchCtx.rid = 'session';
+  assert.equal(searchCtx.paletteSearch({}).searchAsk, undefined, 'remote session has no agent hook');
+  storage['ws.dashboard.drawer.search.state'] = 'invalid JSON';
+  assert.equal(searchCtx.paletteSearch({}).searchState.load(), null);
+  assert(dashboard.includes('if (load(DR_SEARCH) === "1" || tkWantSearch) tkApi.openSearch();'), 'reload restores the open search sheet');
+
+  // The shortcut before the first store list mounts the palette is a pending
+  // open that mount honours, never a dropped key.
+  const pendCtx = vm.createContext({ tkApi: null });
+  vm.runInContext(block(dashboard, '  var tkWantSearch = false;', '\n  function trackerStart('), pendCtx);
+  pendCtx.tkSearch();
+  assert.equal(pendCtx.tkWantSearch, true, 'a shortcut before mount is kept');
+  let opened = 0;
+  pendCtx.tkApi = { openSearch: () => { opened++; } };
+  pendCtx.tkSearch();
+  assert.equal(opened, 1, 'after mount the shortcut opens at once');
+  assert(/function trackerStart\(\) \{[\s\S]*?doc\.addEventListener\("keydown", function \(e\) \{\n      if \(tkApi \|\| e\.defaultPrevented \|\| !window\.WsTracker\.searchKey[\s\S]*?tkSearch\(\);[\s\S]*?\}, true\);\n    tkReload\(\);/.test(dashboard), 'the page counts the shortcut before mount with the palette\'s own target rule');
 
   // The store search adapter asks for excerpts and passes the abort signal and the status.
   const adapter = block(dashboard, '    search: function (id, q, done, o) {', "    // The store's wiki branches");

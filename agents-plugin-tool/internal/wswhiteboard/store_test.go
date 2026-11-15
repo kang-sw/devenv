@@ -482,12 +482,12 @@ func TestRotationKeepsTenMostRecentSettledBoardWide(t *testing.T) {
 			t.Fatalf("oldest item %d must be collapsed", id)
 		}
 	}
-	// Closing a topic collapses it at once; the freed slots go to no one
-	// else here because topic b already shows all of its items.
+	// Closing a topic releases its recent-settled slots without hiding its
+	// full HISTORY; topic b already has all of its recent-settled slots.
 	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
 	view = BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	for _, topic := range view.Topics {
-		if topic.Name == "a" && (len(topic.Expanded) != 0 || len(topic.Collapsed) != 8 || !topic.Quiet || !topic.Closed) {
+		if topic.Name == "a" && (len(topic.Expanded) != 0 || len(topic.Collapsed) != 8 || topic.Quiet || !topic.Closed || topic.Stream.Count == 0) {
 			t.Fatalf("closed topic a = %+v", topic)
 		}
 	}
@@ -879,7 +879,7 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 		st := &State{}
 		mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
 		mustApply(t, st, clear)
-		if st.TopicBody("t") != "" || len(st.Topics) != 1 || len(st.Topics[0].Entries) != 3 {
+		if st.TopicBody("t") != "" || len(st.Topics) != 1 || len(st.Topics[0].Entries) != 4 {
 			t.Fatalf("%s: topics = %+v", name, st.Topics)
 		}
 		if len(st.Items) != 1 {
@@ -1022,7 +1022,7 @@ func TestApplyEditReplaceAllAndDelete(t *testing.T) {
 	}
 	// An edit that leaves nothing clears the body like an empty wb:body.
 	mustApply(t, st, `<wb:topic name="t"><wb:edit replace_all="true"><wb:old>A</wb:old><wb:new/></wb:edit></wb:topic>`)
-	if st.TopicBody("t") != "" || len(entries(t, st, "t")) != 6 {
+	if st.TopicBody("t") != "" || len(entries(t, st, "t")) != 7 {
 		t.Fatalf("clearing must keep edit history: %+v", st.Topics)
 	}
 }

@@ -8,7 +8,7 @@ import (
 // Exercise the actual panel helpers and capture toggle listener, including the
 // storage round trip with fresh page state. frameDOM queues browser-like toggles.
 func TestPanelShutPersistence(t *testing.T) {
-	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
+	raw, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,8 +23,9 @@ var rid = "session-a", openState = {}, PEER_KEY = "p.", railSets = null;
 var storage = {};
 function load(k) { return Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : null; }
 function save(k, v) { if (v === null) delete storage[k]; else storage[k] = v; }
-function panel(key, open) {
+function panel(key, open, id) {
   var attrs = { "class": "entry-panel", "data-key": key };
+  if (id) attrs.id = id;
   if (open) attrs.open = "";
   return new El("details", attrs);
 }
@@ -79,13 +80,31 @@ var ctext = null, cchips = null, ccmd = null, live = false, restoring = false;
 function region() { return null; }
 var draftStore = { load: function (id) {
   check("the draft is loaded for this session", id === rid);
-  return { open: { "k:entry:draft-folded": true, "k:entry:draft-control": true } };
+  return { open: { "k:entry:draft-folded": true, "k:entry:draft-control": true, "k:history:obsolete": true } };
 } };
 var draftControl = panel("entry:draft-control", false); doc.appendChild(draftControl);
 restoreDraft();
 check("a stored draft cannot reopen a hand-folded entry panel", !draftFolded.open && !openState["k:entry:draft-folded"]);
 check("a stored draft opens an entry panel not in the shut list", draftControl.open && openState["k:entry:draft-control"]);
+check("whole-history state is ignored without dropping descendant keys", !openState["k:history:obsolete"] && openKey(new El("details", { "data-key": "history:obsolete" })) === null);
 tick();
+
+// Current panels use stable pN; historical versions keep their entry keys.
+var latest = panel("entry:e754", true, "p754"), past = panel("entry:e753:history", false);
+check("latest fold identity follows pN", openKey(latest) === "k:panel:p754" && shutId(latest) === "session-a/panel:p754");
+check("historical fold identity remains independent", openKey(past) === "k:entry:e753:history");
+var restored = 0, accepted = false;
+var window = { wbHistory: {
+  restorePanel: function (d) { if (d !== latest) return false; restored++; d.open = false; return true; },
+  panelToggle: function () { return accepted; }
+} };
+doc.appendChild(latest);restoreOpenOne(latest);
+check("host restore delegates current panel identity to shared policy", restored === 1 && !latest.open);
+latest.open = true;tick();
+check("transient host toggle cannot overwrite shared fold state", !openState["k:panel:p754"]);
+accepted = true;latest.open = false;tick();
+check("accepted reader fold uses stable panel storage", shutHas("session-a/panel:p754") && openState["k:panel:p754"] === false);
+window.wbHistory = null;
 
 // LRU: touching an existing id moves it to the newest end without duplicates.
 save(SHUT_KEY, null); shutSet = null;

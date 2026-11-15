@@ -31,6 +31,7 @@ func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 	tick := block("tickTimes", `(?s)\n  function tickTimes\(\) \{.*?\n  \}\n`)
 	frame := block("shFrameInit", `(?s)\n  function shFrameInit\(\) \{.*?\n  \}\n  // shShellInit`)
 	post := block("shPost", `(?s)\n  function shPost\(kind, m\) \{.*?\n  \}\n`)
+	search := block("tkSearch", `(?s)\n  var tkWantSearch = false;\n  function tkSearch\(\) \{.*?\n  \}\n`)
 
 	runNode(t, "hidden frame", "(function () {\n"+streamPageHarness+`
 framed = true;
@@ -46,7 +47,10 @@ var history = { pushState: function (s, t, u) { location.hash = u; }, replaceSta
 doc.querySelector = function () { return null; };
 doc.addEventListener = function () {};
 doc.title = "sess - ws dashboard";
-var root = { hasAttribute: function () { return false; }, clientWidth: 1200 };
+var rootAttrs = {}, bodyWatch = [];
+doc.body = {};
+var MutationObserver = window.MutationObserver = function () { var seen = new Map(); this.observe = function (node, opts) { if (node === doc.body) { if (seen.has(node)) bodyWatch[seen.get(node)] = opts; else { seen.set(node, bodyWatch.length); bodyWatch.push(opts); } } }; };
+var root = { setAttribute: function (k) { rootAttrs[k] = true; }, removeAttribute: function (k) { delete rootAttrs[k]; }, hasAttribute: function (k) { return k === "data-lifted" && !!rootAttrs[k]; }, clientWidth: 1200 };
 function region() { return null; }
 function $() { return null; }
 var searchOpens = 0, tkApi = { openSearch: function () { searchOpens++; } };
@@ -67,6 +71,9 @@ function frag() {}
 function railKey() {}
 function railPopOpen() {}
 function setTheme() {}
+var settings = [];
+function setLayout(v) { settings.push(["layout", v]); }
+function setInput(v) { settings.push(["input", v]); }
 var times = 0, tickSets = null;
 function fmtTime() { times++; }
 function pace() {}
@@ -79,13 +86,19 @@ q = function (sel) {
   if (sel === ".rpop:not([hidden]), .lmenu") return railPops.concat(linkMenus);
   return [];
 };
-`+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+frame+`
+`+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+search+frame+`
 connect();
 shFrameInit();
 var s = sockets[0];
+check("the body is watched for appended popovers and for hidden/open toggles, neither observe() overwriting the other",
+  [bodyWatch.some(function (o) { return o.childList && !o.subtree; }), bodyWatch.some(function (o) { return o.subtree && o.attributes && o.attributeFilter.indexOf("hidden") >= 0; })], [true, true]);
 check("a framed session page streams without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1");
 s.onopen({});
 function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }
+fromShell({ wsShell: "settings", layout: "tabs", input: "mod" }, otherWin);
+check("another window cannot change settings", settings, []);
+fromShell({ wsShell: "settings", layout: "tabs", input: "mod" });
+check("shell settings apply without consulting storage", settings, [["layout", "tabs"], ["input", "mod"]]);
 fromShell({ wsShell: "search" }, otherWin);
 check("another window cannot open search", searchOpens, 0);
 fromShell({ wsShell: "search" });
@@ -129,6 +142,7 @@ var visible = { getClientRects: function () { return [{}]; } };
 var hidden = { getClientRects: function () { return []; } };
 linkMenus = [visible];
 check("a visible link menu lifts its frame above the shell header", popover(), true);
+check("a lifted page drops its background so the shell header and rail show beneath", "data-lifted" in rootAttrs, true);
 linkMenus = [hidden];
 check("a menu with no layout does not lift the frame", popover(), false);
 linkMenus = [visible]; railPops = [visible];
@@ -137,6 +151,14 @@ linkMenus = [];
 check("closing the link menu preserves another visible popover", popover(), true);
 railPops = [];
 check("closing the last popover restores the shell layer", popover(), false);
+check("closing the last popover restores the page background", "data-lifted" in rootAttrs, false);
+var hoverCard = { classList: { contains: function (c) { return c === "shp"; } }, getClientRects: function () { return [{}]; } };
+railPops = [hoverCard];
+check("a visible read-only hover card does not lift the frame over the shell header and rail", popover(), false);
+check("a hover card keeps the page background", "data-lifted" in rootAttrs, false);
+railPops = [hoverCard, visible];
+check("an interactive popover beside a hover card still lifts the frame", popover(), true);
+railPops = [];
 process.stdout.write(bad.join("\n"));
 })();
 `)
@@ -210,7 +232,7 @@ var doc = { title: "a - ws dashboard",
 function $(id) { return id === "frames" ? framesBox : null; }
 var attrs = {};
 var root = { setAttribute: function (k, v) { attrs[k] = v; }, removeAttribute: function (k) { delete attrs[k]; }, hasAttribute: function (k) { return k in attrs; }, style: { setProperty: function () {} } };
-var shell = true, framed = false, rid = "a", headHeld = null, log = [];
+var shell = true, framed = false, rid = "a", headHeld = null, log = [], layoutMode = "tabs", inputMode = "mod";
 function region() { return null; }
 function labelEditing() { return false; }
 function labelEnd() {}
@@ -252,7 +274,7 @@ func TestShellSwitchesFramesThroughItsGlue(t *testing.T) {
 	runNode(t, "shell glue", shellGlueHarness+mustAsset(t, "shell.js")+"\n(function () {\n"+glue+init+`
 first.contentDocument.readyState = "complete";
 shShellInit();
-check("the first frame is taken by its path despite a query, loaded, and asked to sync", [shOn && shOn.el === first, shOn && shOn.loaded, first.got], [true, true, ["sync"]]);
+check("the first frame is taken by its path despite a query, loaded, and asked to sync", [shOn && shOn.el === first, shOn && shOn.loaded, first.got], [true, true, ["sync", "settings"]]);
 from(first.contentWindow, { wsShell: "head", html: "<b>a</b>", qs: "", pad: 0, top: 40 });
 check("the shown frame's head is shown", log, ["swap:head:<b>a</b>"]);
 log = [];
@@ -272,7 +294,7 @@ check("a plain click on a session link is taken", click("/s/b"), true);
 var b = frameOf("/s/b");
 check("a new frame loads hidden while the shown one stays", [pushed, live(), on(), attrs["data-rid"]], [["/s/b"], ["/s/a", "/s/b"], ["/s/a?frame=1"], "b"]);
 b.load();
-check("once loaded it shows; each frame is told", [on(), first.got, b.got], [["/s/b?frame=1"], ["sync", "shown:false"], ["shown:true"]]);
+check("once loaded it shows; each frame is told", [on(), first.got, b.got], [["/s/b?frame=1"], ["sync", "settings", "shown:false"], ["settings", "shown:true"]]);
 check("a modified click and another route are left to the browser", [click("/s/c", { ctrlKey: true }), click("/tracker/x"), click("https://example.com/")], [false, false, false]);
 
 from(first.contentWindow, { wsShell: "nav", href: "/s/c" });
@@ -281,7 +303,7 @@ from(b.contentWindow, { wsShell: "nav", href: "/s/c" });
 from(b.contentWindow, { wsShell: "nav", href: "/s/d" });
 var c = frameOf("/s/c"), d = frameOf("/s/d");
 c.load();
-check("a frame superseded before it showed is told it is hidden", [c.got, on()], [["shown:false"], ["/s/b?frame=1"]]);
+check("a frame superseded before it showed is told it is hidden", [c.got, on()], [["settings", "shown:false"], ["/s/b?frame=1"]]);
 d.load();
 check("the last pick shows", on(), ["/s/d?frame=1"]);
 first.load();
@@ -302,14 +324,14 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestShellHotkeyForwarderLeavesCtrlKeysToEditors pins the shell document's
-// keydown forwarder (dashboard.js shShellInit): Ctrl+K and Ctrl+Space open
-// the shown frame's palette except from an editor target (tracker.js
-// qShortcut's rule), and `/` skips any typing target. Runs under node when
+// TestShellHotkeyForwarderLeavesSearchKeysToTerminals pins the shell
+// document's keydown forwarder (dashboard.js shShellInit): Ctrl+K, Ctrl+Space
+// and Cmd+K open the shown frame's palette except from a terminal target
+// (tracker.js qShortcut's rule), and `/` skips any typing target. Runs under node when
 // it is installed.
-func TestShellHotkeyForwarderLeavesCtrlKeysToEditors(t *testing.T) {
+func TestShellHotkeyForwarderLeavesSearchKeysToTerminals(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
-	fwd := regexp.MustCompile(`(?s)stay with editors by qShortcut's target rule\.\n(    doc\.addEventListener\("keydown", function \(e\) \{.*?\n    \}\);\n)`).FindStringSubmatch(js)
+	fwd := regexp.MustCompile(`(?s)stay with a terminal by qShortcut's target rule\.\n(    doc\.addEventListener\("keydown", function \(e\) \{.*?\n    \}\);\n)`).FindStringSubmatch(js)
 	if fwd == nil {
 		t.Fatal("dashboard.js holds no shell keydown forwarder")
 	}
@@ -322,10 +344,15 @@ function fire(e, sel) { searched = 0; e.preventDefault = function () {}; e.targe
 function check(what, got, want) { if (got !== want) bad.push(what + ": got " + got + ", want " + want); }
 check("Ctrl+K on the body opens", fire({ ctrlKey: true, key: "k" }, "body"), 1);
 check("Ctrl+Space on the body opens", fire({ ctrlKey: true, key: " ", code: "Space" }, "body"), 1);
-check("Ctrl+K in a textarea is left to it", fire({ ctrlKey: true, key: "k" }, "textarea"), 0);
-check("Ctrl+Space in a textarea is left to it", fire({ ctrlKey: true, key: " ", code: "Space" }, "textarea"), 0);
-check("Ctrl+K in a contenteditable is left to it", fire({ ctrlKey: true, key: "k" }, "ce"), 0);
+check("Cmd+K on the body opens", fire({ metaKey: true, key: "k" }, "body"), 1);
+check("Cmd+Space is left to the system", fire({ metaKey: true, key: " ", code: "Space" }, "body"), 0);
+check("Ctrl+K in a textarea opens", fire({ ctrlKey: true, key: "k" }, "textarea"), 1);
+check("Ctrl+Space in a textarea opens", fire({ ctrlKey: true, key: " ", code: "Space" }, "textarea"), 1);
+check("Cmd+K in an input opens", fire({ metaKey: true, key: "k" }, "input"), 1);
+check("Ctrl+K in a contenteditable opens", fire({ ctrlKey: true, key: "k" }, "ce"), 1);
 check("Ctrl+K in the terminal is left to it", fire({ ctrlKey: true, key: "k" }, ".xterm"), 0);
+check("Cmd+K in the terminal is left to it", fire({ metaKey: true, key: "k" }, ".xterm"), 0);
+check("Cmd+/ does nothing", fire({ metaKey: true, key: "/" }, "body"), 0);
 check("/ on the body opens", fire({ key: "/" }, "body"), 1);
 check("/ in a textarea types", fire({ key: "/" }, "textarea"), 0);
 check("/ in an input types", fire({ key: "/" }, "input"), 0);

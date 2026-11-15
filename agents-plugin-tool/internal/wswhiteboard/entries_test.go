@@ -39,12 +39,13 @@ func TestEntryStreamPanelsLogsAndDurableIDs(t *testing.T) {
 	want := []Entry{
 		{ID: "e1", Kind: EntryPanel, PanelID: "p1", Recap: "First & recap", Text: "  payload &amp; <b>raw</b>  ", At: testNow.Format(time.RFC3339)},
 		{ID: "e2", Kind: EntrySystem, Text: "Panel [p1](#p1) added: First & recap", At: testNow.Format(time.RFC3339)},
-		{ID: "e3", Kind: EntryAgent, Text: "**ready**; {{1}}", At: testNow.Format(time.RFC3339)},
+		{ID: "e3", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)},
+		{ID: "e4", Kind: EntryAgent, Text: "**ready**; {{1}}", At: testNow.Format(time.RFC3339)},
 	}
 	if got := entries(t, st, "a"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("entries = %+v, want %+v", got, want)
 	}
-	if st.EntrySeq != 5 || st.PanelCounter != 2 || entries(t, st, "b")[0].PanelID != "p2" || entries(t, st, "b")[0].ID != "e4" {
+	if st.EntrySeq != 7 || st.PanelCounter != 2 || entries(t, st, "b")[0].PanelID != "p2" || entries(t, st, "b")[0].ID != "e5" {
 		t.Fatalf("board-wide counters/IDs: %+v", st)
 	}
 	var loaded State
@@ -56,10 +57,10 @@ func TestEntryStreamPanelsLogsAndDurableIDs(t *testing.T) {
 	}
 	mustApply(t, &loaded, `<wb:topic name="a"><wb:panel id="p1" recap="Later"/><wb:panel id="p1" recap="Later"/></wb:topic>`+panelXML("b", "Third", ""))
 	got := entries(t, &loaded, "a")
-	if !reflect.DeepEqual(got[:3], want) || got[3].ID != "e6" || got[5].ID != "e8" || got[3].PanelID != "p1" || got[5].PanelID != "p1" || got[3].Text != "" {
+	if !reflect.DeepEqual(got[:4], want) || got[4].ID != "e8" || got[6].ID != "e10" || got[4].PanelID != "p1" || got[6].PanelID != "p1" || got[4].Text != "" {
 		t.Fatalf("re-post must append independent full versions, including identical re-posts: %+v", got)
 	}
-	if loaded.EntrySeq != 11 || loaded.PanelCounter != 3 || entries(t, &loaded, "b")[2].PanelID != "p3" {
+	if loaded.EntrySeq != 13 || loaded.PanelCounter != 3 || entries(t, &loaded, "b")[3].PanelID != "p3" {
 		t.Fatalf("restart reused IDs: %+v", loaded)
 	}
 	if st.Topics[0].Recap != "" || loaded.Topics[0].Recap != "" {
@@ -91,7 +92,7 @@ func TestEntryCommandRefusalsAreAtomic(t *testing.T) {
 	}
 	// Even an event from an otherwise successful earlier command is refused.
 	refused(t, st, addXML(ClassTechnical, "a", "not committed")+logXML("a", "not committed")+`<wb:nope/>`)
-	if st.EntrySeq != 2 || st.PanelCounter != 1 || len(st.Items) != 0 {
+	if st.EntrySeq != 3 || st.PanelCounter != 1 || len(st.Items) != 0 {
 		t.Fatalf("refused batch consumed IDs or emitted events: %+v", st)
 	}
 }
@@ -110,7 +111,11 @@ func TestAgentLogIsInlineOnly(t *testing.T) {
 	} {
 		st := &State{}
 		mustApply(t, st, logXML("t", line))
-		if got := entries(t, st, "t"); len(got) != 1 || got[0].Kind != EntryAgent || got[0].Text != line {
+		want := []Entry{
+			{ID: "e1", Kind: EntryAgent, Text: line, At: testNow.Format(time.RFC3339)},
+			{ID: "e2", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)},
+		}
+		if got := entries(t, st, "t"); !reflect.DeepEqual(got, want) {
 			t.Fatalf("agent line = %+v", got)
 		}
 	}
@@ -150,7 +155,7 @@ func TestLatestAgentIgnoresPanelsAndSystemEvents(t *testing.T) {
 	}
 	mustApply(t, st, logXML("t", "first")+logXML("t", "second")+panelXML("t", "not a summary", "")+addXML(ClassTechnical, "t", "new"))
 	got, ok := st.LatestAgent("t")
-	if !ok || got.ID != "e2" || got.Text != "second" {
+	if !ok || got.ID != "e3" || got.Text != "second" {
 		t.Fatalf("latest = %+v, %v", got, ok)
 	}
 	d := TopicDoc{Entries: []Entry{{ID: "e1", Kind: EntryAgent, Text: "imported", Imported: true}, {ID: "e2", Kind: EntrySystem, Text: "later"}}}
@@ -191,7 +196,7 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	mustApply(t, st, `<wb:answer ids="1 2" value="a" assumed="true">seems good</wb:answer><wb:answer ids="1 2" value="a">yes, ship</wb:answer>`)
 	mustApply(t, st, `<wb:patch id="3"><wb:why>correction</wb:why></wb:patch><wb:patch id="3" status="withdrawn"/>`+topicXML("t", "alpha")+`<wb:topic name="t"><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit><wb:close result="Shipped."/></wb:topic>`)
 	want := []string{
-		"Item {{1}} added [policy]: pick", "Item {{2}} added [check]: look", "Item {{3}} added [technical]: withdraw later",
+		"Item {{1}} added [policy]: pick", "Topic state: discussing", "Items added: check {{2}}, technical {{3}}.",
 		`Item {{1}} assumed [policy]: a; owner quote: "seems good"`, `Item {{2}} assumed [check]: a; owner quote: "seems good"`,
 		`Item {{1}} answered [policy]: a; owner quote: "yes, ship"`, `Item {{2}} answered [check]: a; owner quote: "yes, ship"`,
 		"Item {{3}} patched [technical] (open -> open): withdraw later", "Item {{3}} patched [technical] (open -> withdrawn): withdraw later",
@@ -200,9 +205,15 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	if got := eventTexts(t, st, "t"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %q, want %q", got, want)
 	}
-	itemIDs := []int{1, 2, 3, 1, 2, 1, 2, 3, 3, 0, 0, 0}
+	// The default-state event separates the first creation from the remaining
+	// contiguous creations in the same accepted batch; neither is reordered.
+	itemIDs := []int{1, 0, 0, 1, 2, 1, 2, 3, 3, 0, 0, 0}
+	entryIDs := []string{"e1", "e2", "e3", "e5", "e6", "e7", "e8", "e9", "e10", "e11", "e12", "e13"}
+	if st.EntrySeq != 13 {
+		t.Fatalf("coalescing must not recycle allocated event IDs: %d", st.EntrySeq)
+	}
 	for i, entry := range entries(t, st, "t") {
-		if entry.ID != fmt.Sprintf("e%d", i+1) || entry.ItemID != itemIDs[i] || entry.At != testNow.Format(time.RFC3339) {
+		if entry.ID != entryIDs[i] || entry.ItemID != itemIDs[i] || entry.At != testNow.Format(time.RFC3339) {
 			t.Fatalf("event order/attribution/time %d = %+v", i, entry)
 		}
 	}
@@ -215,6 +226,37 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	}
 	if !st.topicClosed("t") || item(t, st, 1).Status != StatusAnswered || item(t, st, 2).Status != StatusAnswered {
 		t.Fatal("closing after grouped answers must not withdraw answered items")
+	}
+}
+
+// Only adjacent creation events in one accepting update are a known batch.
+// Equal clocks across updates and intervening logs do not establish one.
+func TestCreationBatchStopsAtUpdatesAndInterveningEvents(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "t", "first"))
+	mustApply(t, st, addXML(ClassCheck, "t", "second"))
+	before := append([]Entry(nil), entries(t, st, "t")...)
+	mustApply(t, st, addXML(ClassPolicy, "t", "third", "x", "y")+
+		logXML("t", "between creations")+addXML(ClassTechnical, "t", "fourth")+
+		addXML(ClassCheck, "t", "fifth"))
+	got := entries(t, st, "t")
+	if len(got) != len(before)+3 || !reflect.DeepEqual(got[:len(before)], before) {
+		t.Fatalf("separate equal-time updates were regrouped: %+v", got)
+	}
+	added := got[len(before):]
+	if added[0].ItemID != 3 || added[0].Text != "Item {{3}} added [policy]: third" ||
+		added[1].Kind != EntryAgent || added[1].Text != "between creations" ||
+		added[2].ItemID != 0 || added[2].Text != "Items added: technical {{4}}, check {{5}}." {
+		t.Fatalf("creation batch crossed an intervening event: %+v", got)
+	}
+	for _, e := range got {
+		if e.At != testNow.Format(time.RFC3339) {
+			t.Fatalf("recorded creation clock changed: %+v", e)
+		}
+	}
+	refused(t, st, addXML(ClassTechnical, "t", "not accepted")+`<wb:nope/>`)
+	if !reflect.DeepEqual(entries(t, st, "t"), got) {
+		t.Fatal("refused creation changed retained history")
 	}
 }
 
@@ -265,12 +307,12 @@ func TestContentClearAndRevertKeepHistory(t *testing.T) {
 	before := topicEntry(t, st, "t")
 	mustApply(t, st, topicXML("t", "beta")+topicXML("t", "alpha"))
 	got := topicEntry(t, st, "t")
-	if got.Changed != before.Changed || got.ChangedAt != before.ChangedAt || len(got.Entries) != 3 {
+	if got.Changed != before.Changed || got.ChangedAt != before.ChangedAt || len(got.Entries) != 4 {
 		t.Fatalf("revert must preserve body marks but record both real transitions: %+v", got)
 	}
 	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/><wb:body/></wb:topic>`)
 	got = topicEntry(t, st, "t")
-	if got.Body != "" || got.Changed != 0 || got.ChangedAt != "" || !st.topicClosed("t") || len(got.Entries) != 5 {
+	if got.Body != "" || got.Changed != 0 || got.ChangedAt != "" || !st.topicClosed("t") || len(got.Entries) != 6 {
 		t.Fatalf("clearing content must keep history without reopening: %+v", got)
 	}
 	seq := st.EntrySeq

@@ -13,7 +13,7 @@ import (
 // reopened topic and a topic first seen closed keep the remembered state.
 // The cases execute under node when it is installed.
 func TestBoardClosingTopicFolds(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

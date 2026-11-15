@@ -1,0 +1,28 @@
+/* Selected layout A rules from the owner-approved 917 mockup inject.css.
+   The dashboard supplies the existing five-source result grid.
+   Idle, streaming and answered states retain the same answer-left geometry. */
+.dr-handle.mk-sh { right: calc(var(--dpad) + 41px); width: 35px; padding: 2px 0 0; justify-content: center; cursor: grab; }
+.dr-in { --ghr: 82px !important; }
+#tkhandles { transform: translateX(-41px); }
+.dr-fold.mk-fold { right: calc(var(--dpad) + 41px); width: 35px; animation: none; }
+.dr-body.mk-sbody { padding: 8px 10px 6px; display: block; }
+#mkpal.tk.tk-palette { position: static; inset: auto; margin: 0; width: auto; max-width: none; max-height: none; height: 100%; border: 0; border-radius: 0; box-shadow: none; padding: 0; background: transparent; display: flex; flex-direction: column; gap: 6px; }
+.mk-qbar { display: flex; align-items: center; gap: 6px; flex: none; }
+.mk-qf { display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 0; height: 30px; box-sizing: border-box; padding: 0 4px 0 9px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--wb-primary) 70%, var(--wb-line)); background: var(--wb-card); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-primary) 18%, transparent); }
+.mk-agent { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 30px; box-sizing: border-box; padding: 0 10px 0 8px; border-radius: 8px; font: 600 11.5px var(--wb-sans); color: var(--wb-muted-fg); background: var(--wb-muted); white-space: nowrap; }
+.mk-main { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 2fr); gap: 8px; flex: 1 1 auto; min-height: 0; }
+#mkpal .tk-qgrid { min-height: 0; gap: 6px; }
+#mkpal .tk-qpane > .tk-qsh { padding: 4px 8px; }
+#mkpal .tk-qscroll { padding: 2px 3px 4px; }
+#mkpal .qopt { padding: 4px 7px; font-size: 12.5px; }
+#mkpal .qopt.tk-qtall { gap: 0; }
+#mkpal .tk-qcode { font-size: 11.5px; }
+#mkpal .qnone { padding: 6px 8px; font-size: 12px; }
+.mk-ans { display: flex; flex-direction: column; min-height: 0; border: 1px solid color-mix(in srgb, var(--wb-primary) 45%, var(--wb-line)); border-radius: 10px; overflow: hidden; background: color-mix(in srgb, var(--wb-primary) 4%, var(--wb-card)); }
+.mk-ah { display: flex; align-items: center; gap: 6px; flex: none; padding: 4px 6px 4px 9px; min-height: 18px; border-bottom: 1px solid var(--wb-line); font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); letter-spacing: .03em; }
+.mk-ab { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px 11px 8px; font-size: 13px; line-height: 1.6; color: var(--wb-fg); }
+.mk-cite { display: inline-flex; align-items: center; gap: 3px; vertical-align: 1px; height: 17px; padding: 0 5px; margin: 0 1px; border-radius: 5px; font: 600 10.5px var(--wb-mono); line-height: 17px; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); text-decoration: none; white-space: nowrap; cursor: pointer; }
+.mk-src { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--wb-line); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 8px; }
+.mk-af { display: flex; align-items: center; gap: 6px; flex: none; padding: 5px 6px; border-top: 1px solid var(--wb-line); }
+.mk-fu { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; height: 26px; box-sizing: border-box; padding: 0 3px 0 8px; border-radius: 7px; border: 1px solid var(--wb-line); background: var(--wb-bg); font-size: 12px; color: var(--wb-muted-fg); }
+.mk-hint { display: flex; align-items: center; gap: 5px; flex: none; flex-wrap: nowrap; overflow: hidden; padding: 0 2px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; }

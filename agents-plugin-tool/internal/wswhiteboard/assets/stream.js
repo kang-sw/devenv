@@ -17,12 +17,13 @@
     if (root.matches && root.matches('.wb-history')) out.unshift(root);
     return out;
   }
-  function valid(id) { return /^(?:p|e)[1-9][0-9]*$/.test(id || ''); }
+  function valid(id) { return /^(?:(?:p|e)[1-9][0-9]*|item-[1-9][0-9]*)$/.test(id || ''); }
   function find(root, id) {
     if (!valid(id)) return null;
     var node = root.querySelector('[id="' + id + '"]');
     if (!node) return null;
     if (id[0] === 'e') return node.matches('.wb-entry[data-entry="' + id + '"]') ? node : null;
+    if (id.indexOf('item-') === 0) return node.closest('.wb-entry[data-history-item="' + id.slice(5) + '"]') ? node : null;
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
   var LIMIT = 1000, PANELS = 3, LINES = 30;
@@ -37,7 +38,8 @@
   // Republishing moves an immutable boundary into Versions. Its eN still
   // defines the chronological cut, not the newer card that now contains it.
   // Entry IDs increase at append; compare decimal lengths before digits.
-  function newer(id, before) { return id.length > before.length || (id.length === before.length && id > before); }
+  // Undated item-N display anchors are not recorded events or successors.
+  function newer(id, before) { return /^e[1-9][0-9]*$/.test(id) && (id.length > before.length || (id.length === before.length && id > before)); }
   function boundaryRow(h, id) {
     var node = id && find(h, id);
     if (!node || !node.closest('.panel-versions')) return node;
@@ -86,10 +88,19 @@
   function fit(h) {
     var node = boundaryRow(h, boundary(h)), live = h.querySelector('.history-live');
     if (!node) return;
+    var kept = kit.keep(h);
     node = splitAt(h, node);
-    // Only the saved boundary's geometry changes on resize, never its ID.
-    var height = Math.max(0, live.getBoundingClientRect().bottom - node.getBoundingClientRect().top);
-    h.style.setProperty('--wb-history-height', Math.ceil(height) + 'px');
+    // Membership, not pixels: hide only whole top-level rows before the
+    // saved boundary. splitAt preserves independently open log/system folds.
+    // No height, overflow clip, fade, or partially visible oldest entry.
+    var before = true;
+    Array.from(live.children).forEach(function (row) {
+      if (row === node) before = false;
+      if (before && !row.hasAttribute('data-wb-history-before')) row.setAttribute('data-wb-history-before', '');
+      if (!before && row.hasAttribute('data-wb-history-before')) row.removeAttribute('data-wb-history-before');
+    });
+    h._wbHistoryHeight = Math.ceil(live.getBoundingClientRect().height);
+    kept.apply();
   }
   function later(h) {
     if (h._wbHistoryFrame) return;
@@ -100,7 +111,9 @@
         var target = h._wbHistoryTarget;
         if (target && target.isConnected && h.contains(target)) reveal(h, target);
         else if (target) h._wbHistoryTarget = null;
+        var kept = kit.keep(h);
         choose(h); fit(h); updateControl(h);
+        kept.apply();
       }
     });
   }
@@ -123,6 +136,9 @@
     if (!h._wbHistoryPending || h._wbHistoryChoosing) return;
     h._wbHistoryChoosing = true;
     try {
+      // Measure candidates in ordinary flow, then fit hides the excluded
+      // prefix synchronously before paint. Disclosure state is not changed.
+      h.querySelectorAll('[data-wb-history-before]').forEach(function (row) { row.removeAttribute('data-wb-history-before'); });
       var all = rows(h), before = h._wbHistoryPending.before, node = before && boundaryRow(h, before);
       var end = before ? all.indexOf(node) : all.length;
       if (end < 0) {
@@ -165,6 +181,7 @@
     } finally { h._wbHistoryChoosing = false; }
   }
   function reset(h) {
+    h._wbHistoryHeld = false;
     h._wbHistoryChunks = [null];
     h._wbHistorySteps = 1;
     h._wbHistoryPending = { before: null };
@@ -212,7 +229,7 @@
     }).sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; })[0];
   }
   function collapse(h) {
-    if (!h._wbHistoryOut || (h._wbHistorySteps || 1) === 1) return;
+    if (!h._wbHistoryOut || ((h._wbHistorySteps || 1) === 1 && !h._wbHistoryHeld)) return;
     var topic = h.closest('.topic'), a = document.activeElement;
     if (!topic || !topic.isConnected || topic.hasAttribute('data-max')) return;
     if (a && (h.contains(a) || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.closest('.topic')))) return;
@@ -230,7 +247,7 @@
       }
       return;
     }
-    var anchor = below(topic), kept = anchor && kit.keep(anchor, { observe: [h.querySelector('.history-live')] });
+    var kept = kit.keep(topic);
     h._wbHistoryOut = false;
     h._wbHistoryTarget = null;
     reset(h);
@@ -265,13 +282,23 @@
     reveal(h, node);
     arm(h);
     h._wbHistoryTarget = node;
-    // Page navigation must clear the topic's sticky head AND the rail/host
-    // stack above it. A fixed page-top offset can leave keyboard focus
-    // inside the clip but hidden behind those capsules on either surface.
-    var head = h.closest('.topic').querySelector('.tophead'), offset = 12;
+    // Clear both independent obstructions: the sticky head/rail and the
+    // open-question pill below that head. Merely landing within history
+    // bounds does not expose a control's center (including a short summary).
+    var topic = h.closest('.topic'), head = topic.querySelector('.tophead'), offset = 12;
     var style = head && window.getComputedStyle(head);
-    if (style && style.position === 'sticky') offset += (parseFloat(style.top) || 0) + head.offsetHeight;
-    kit.keep(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
+    var sticky = style && style.position === 'sticky';
+    if (sticky) offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    var host = topic.closest('#bpins') || topic.closest('#bcol') || topic.closest('.wrap');
+    var wrap = host && host.querySelector('.oq-wrap.wb-oq-top'), pill = wrap && wrap.querySelector('.oq-pill');
+    if (pill && !pill.hidden) {
+      // The 10px gap mirrors page.css. Predict this topic's pill position
+      // as well as reading the current one: the rail changes its current
+      // head during the scroll, so the old pill's geometry alone can lie.
+      var pillTop = parseFloat(window.getComputedStyle(wrap).top) || 0;
+      offset = Math.max(offset + (sticky ? 10 + pill.offsetHeight : 0), pillTop + pill.offsetHeight + 12);
+    }
+    kit.jump(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
       if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
     } });
   }
@@ -353,6 +380,8 @@
       var panel = node.querySelector('.entry-panel');
       if (panel) { panel.open = true; mark = panel; }
     }
+    var openedPanel = node.matches('.entry-panel') ? node : node.matches('.wb-entry.panel') ? node.querySelector('.entry-panel') : null;
+    if (panelState && openedPanel) panelState.opened(openedPanel);
     // Highlight the reached target once, restarting a running flash.
     mark.classList.toggle('flash', false); void mark.offsetWidth; mark.classList.toggle('flash', true);
     var h = node.closest('.wb-history');
@@ -364,6 +393,7 @@
       var first = h.querySelector('.wb-entry');
       return { key: h.getAttribute('data-history'), first: first && first.id, steps: h._wbHistorySteps || 1,
         chunks: h._wbHistoryChunks.slice(), heights: Object.assign({}, h._wbHistoryHeights), pending: h._wbHistoryPending && Object.assign({}, h._wbHistoryPending),
+        panels: panelState ? panelState.capture(h) : [],
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (e) { return [e.id, e.closest('.system-run').open]; }) };
     });
@@ -371,10 +401,16 @@
   function restore(root, snapshot) {
     // A navigated closed topic may be inert again in the replacement board.
     (snapshot || []).forEach(function (saved) { if (saved.first) materialize(root || document, saved.first); });
+    if (panelState) histories(root).forEach(function (h) {
+      var saved = (snapshot || []).find(function (s) { return s.key === h.getAttribute('data-history'); });
+      if (saved) panelState.snapshot(h, saved);
+    });
     init(root);
     histories(root).forEach(function (h) {
       var saved = (snapshot || []).find(function (s) { return s.key === h.getAttribute('data-history'); });
       if (!saved) return;
+      // Old snapshots' whole-history open flag is obsolete. Descendant
+      // disclosures below are still independently restored.
       if (saved.first) materialize(h, saved.first);
       if (saved.chunks && saved.chunks.length > 1) saved.chunks.forEach(function (id) {
         if (!id) return;
@@ -407,13 +443,25 @@
       h.querySelectorAll('details[data-key]').forEach(function (d) {
         if (folds.has(d.getAttribute('data-key'))) d.open = folds.get(d.getAttribute('data-key'));
       });
+      // Latest pN identity wins over an obsolete latest-version entry key.
+      // Historical-version/item/system fold keys remain independent.
+      if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
       var systems = new Map(saved.systems || []);
       h.querySelectorAll('.system-run').forEach(function (run) {
         var entry = Array.from(run.querySelectorAll('.wb-entry')).find(function (e) { return systems.has(e.id); });
         if (entry) run.open = systems.get(entry.id);
       });
       h._wbHistoryHeights = Object.assign({}, saved.heights || {});
-      if (saved.chunks && saved.chunks.length > 1) {
+      // A settled default cut is the reader's window while its clip is in
+      // view: re-choosing the tail would slide every visible row up inside
+      // the flex-end clip, which no scroll write can repair. Keep the cut and
+      // let the clip grow below; leaving the view collapses it (arm, collapse).
+      var inView = saved.chunks && saved.chunks.length === 1 && saved.chunks[0] && !saved.pending && find(h, saved.chunks[0]) &&
+        kit.keep(h, { capture: false }).visible(h.querySelector('.history-clip'));
+      if (saved.chunks && (saved.chunks.length > 1 || inView)) {
+        // A held default cut is not an Older step, but leaving the view must
+        // still return it to the tail (collapse).
+        h._wbHistoryHeld = saved.chunks.length === 1;
         h._wbHistoryChunks = saved.chunks.slice();
         h._wbHistorySteps = saved.chunks.length;
         h._wbHistoryPending = saved.pending || null;
@@ -425,20 +473,22 @@
   }
   function init(root) {
     histories(root).forEach(function (h) {
+      if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
       if (h._wbHistoryBound) { updateControl(h); return; }
       h._wbHistoryBound = true;
       h._wbHistoryHeights = {};
       reset(h);
       updateControl(h);
       arm(h);
-      // Hidden overflow is not keyboard navigation: a clipped summary is
-      // still tabbable. Reveal focused controls through the same page keep
-      // path as deep links, never by scrolling the clipped box.
+      // Excluded whole rows are not tab stops. For a selected control,
+      // native Tab must also clear sticky overlays, not just history bounds.
+      // Deep links reveal excluded entries through the same keep path.
       h.addEventListener('focusin', function (e) {
         var live = h.querySelector('.history-live'), node = e.target;
         if (!live.contains(node)) return;
         var r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
-        if (r.top < clip.top || r.bottom > clip.bottom) navigate(h, node);
+        var hit = document.elementFromPoint && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (r.top < clip.top || r.bottom > clip.bottom || (hit && hit !== node && !node.contains(hit))) navigate(h, node);
       });
       // Frame grafts keep this container but replace its older-page button.
       h.addEventListener('click', function (e) {
@@ -462,8 +512,8 @@
           if (h.isConnected === false) { observer.disconnect(); return; }
           h._wbHistoryResizing = true;
           try {
-            // Changing the clip during resize can resize shallower watched
-            // ancestors. Apply it after this delivery, not inside it.
+            // Changing membership during resize can resize shallower
+            // watched ancestors. Apply it after this delivery, not inside it.
             later(h);
             updateControl(h);
           } finally { h._wbHistoryResizing = false; }
@@ -491,26 +541,18 @@
   // has not left view). seen(node) reads the node's last report without a
   // layout. sweep() drops the subscriptions of nodes no longer on the page.
   //
-  // keep(node, {offset, observe, onEnd}) keeps node at its offset from its
-  // nearest scroller's top until layout settles: measured now, in layout
-  // terms (a running transform, as a slide's, does not count), so it is
-  // called before the DOM change it compensates, and apply() right after
-  // it. An offset given puts node there instead. A ResizeObserver over the
-  // scroller's content (and observe) re-applies on every layout change. The
-  // session ends 500 ms after the last change ("quiet"), 5 s after it began
-  // ("cap"), on a scroll it did not write ("user"), or on end() ("ended").
-  // One session per scroller: a keep on a scroller that has one re-anchors
-  // it (node, offset, observed nodes) and restarts both windows, so two
-  // callers never take each other's writes for a user scroll. keeping(el)
-  // returns the session el has, which other scroll writers leave alone.
-  // While a session runs its scroller takes overflow-anchor: none, so the
-  // browser's own anchoring does not compensate a second time.
-  // jump(node, {block, behavior}) gives an explicit navigation priority over
-  // keeps until 150 ms / five stable frames, at most 2 s. Scroll intent wins;
-  // ordinary keep policy is unchanged once the jump session ends.
+  // keep(node) captures the reading-line panel on node's actual scroller.
+  // Nested synchronous mutations share one transaction; the last apply()
+  // resolves that identity and writes at most once. There is no ordinary
+  // resize session or substituted reference. capture:false only inspects
+  // exposed geometry. Owners retain native-anchor suppression and input
+  // listeners; input/momentum suppress captures until 200 ms after scrolling.
+  // jump(node, {block, behavior}) alone follows asynchronous layout, until
+  // 150 ms / five stable frames or its non-renewing 2 s cap. It has priority
+  // over ordinary transactions, and input cancels it immediately.
   function viewKit(win) {
-    var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map();
-    var QUIET = 500, CAP = 5000, IO = win.IntersectionObserver, bands = !!(IO && IO.prototype && "scrollMargin" in IO.prototype);
+    var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map(), owners = new Map();
+    var IO = win.IntersectionObserver, bands = !!(IO && IO.prototype && "scrollMargin" in IO.prototype);
     function observer(margin) {
       if (observers[margin]) return observers[margin];
       var o = observers[margin] = { subs: new Map(), io: null };
@@ -547,6 +589,7 @@
       var sub = { node: node, margin: opt.margin || "0px", onChange: opt.onChange, onOut: opt.onOut, ratio: undefined, gone: false };
       var handle = { node: node, unwatch: function () { drop(sub); } };
       if (!node || !win.IntersectionObserver) { sub.gone = true; return handle; }
+      owner(scrollerOf(node));
       var o = observer(sub.margin), list = o.subs.get(node);
       // A node already observed reports only on a change: observing it
       // again gives the new subscription its first report.
@@ -591,40 +634,147 @@
       return y;
     }
     function scrollerTop(scroller) { return scroller === docScroller() ? 0 : scroller.getBoundingClientRect().top + (scroller.clientTop || 0); }
+    function viewport(scroller) {
+      var main = scroller === docScroller(), r = main ? { top: 0, bottom: win.innerHeight || scroller.clientHeight } : scroller.getBoundingClientRect();
+      var top = Math.max(0, r.top + (main ? 0 : scroller.clientTop || 0));
+      var bottom = Math.min(win.innerHeight || scroller.clientHeight, main ? r.bottom : r.top + (scroller.clientTop || 0) + scroller.clientHeight);
+      var style = win.getComputedStyle(scroller);
+      top += parseFloat(style.scrollPaddingTop) || 0;
+      // The rail publishes its clearance on sticky heads, not on the host.
+      Array.from((main ? doc : scroller).querySelectorAll('.tophead, .bc-hd, .wb-rail-wrap.up .wb-rail-stack')).forEach(function (head) {
+        var hs = win.getComputedStyle(head), h = head.getBoundingClientRect();
+        if ((hs.position === 'sticky' || head.matches('.wb-rail-stack')) && h.height && h.top <= top + (parseFloat(hs.top) || 0) + 1 && h.bottom > top)
+          top = Math.max(top, h.bottom);
+      });
+      return { top: top, bottom: bottom, left: main ? 0 : Math.max(0, r.left + (scroller.clientLeft || 0)),
+        right: Math.min(win.innerWidth || r.right || Infinity, main ? win.innerWidth || Infinity : r.left + (scroller.clientLeft || 0) + scroller.clientWidth) };
+    }
+    function exposed(node, scroller, view) {
+      var v = view || viewport(scroller), r = node.getBoundingClientRect(), top = Math.max(v.top, r.top), bottom = Math.min(v.bottom, r.bottom);
+      var left = Math.max(v.left, r.left), right = Math.min(v.right, r.right);
+      if (!(r.height > 0 && bottom - top >= 1 && right - left >= 1)) return false;
+      for (var p = node.parentElement; p && p !== scroller && p !== doc.body; p = p.parentElement) {
+        if (p.tagName === 'DETAILS' && !p.open) return false;
+        if (/hidden|clip|auto|scroll/.test(win.getComputedStyle(p).overflowY)) {
+          var box = p.getBoundingClientRect(); top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom);
+          left = Math.max(left, box.left); right = Math.min(right, box.right);
+        }
+      }
+      return r.height > 0 && bottom - top >= 1 && right - left >= 1;
+    }
+    function reading(scroller) {
+      // One synchronous capture has one viewport. Re-scanning every sticky
+      // head for every candidate makes history initialization/resize cubic
+      // in board size; reject offscreen boxes before walking their ancestry.
+      var root = scroller === docScroller() ? doc : scroller, view = viewport(scroller), line = view.top + 1;
+      var nodes = Array.from(root.querySelectorAll('.entry-panel, .wb-entry:not(.panel), .doc-frame, [data-card]')).filter(function (n) {
+        if (!exposed(n, scroller, view) || scrollerOf(n) !== scroller) return false;
+        // An opaque frame is represented by its host panel, never its DOM.
+        return !(n.matches('.doc-frame') && n.closest('.entry-panel'));
+      });
+      nodes.sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+      return nodes.find(function (n) { var r = n.getBoundingClientRect(); return r.top <= line && r.bottom > line; }) ||
+        nodes.find(function (n) { return n.getBoundingClientRect().top > line; }) || null;
+    }
+    function owner(scroller) {
+      var o = owners.get(scroller);
+      if (o) return o;
+      var main = scroller === docScroller(), target = main ? win : scroller;
+      o = { state: 'idle', until: 0, wrote: scroller.scrollTop, transaction: null };
+      owners.set(scroller, o);
+      scroller.wbScrollOwner = true;
+      (main ? doc.documentElement : scroller).style.overflowAnchor = 'none';
+      function clock() { return win.performance ? win.performance.now() : Date.now(); }
+      function intent() {
+        o.state = 'user-scrolling'; o.until = clock() + 200;
+        if (o.transaction) o.transaction.cancel();
+        var s = sessions.get(scroller);
+        if (s && s.follow) { scroller.scrollTo({ top: scroller.scrollTop, left: scroller.scrollLeft, behavior: 'instant' }); s.cancel(); }
+      }
+      ['wheel', 'touchstart', 'touchmove', 'pointerdown'].forEach(function (type) { target.addEventListener(type, intent, { passive: true, capture: true }); });
+      win.addEventListener('keydown', function (e) {
+        if (!main && e.target && !scroller.contains(e.target) && doc.activeElement && !scroller.contains(doc.activeElement)) return;
+        if (/^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) intent();
+      }, true);
+      target.addEventListener('scroll', function () {
+        if (Math.abs(scroller.scrollTop - o.wrote) <= 1) return;
+        var s = sessions.get(scroller);
+        if (s && s.follow) return; // Native initial smooth navigation is not input.
+        if (o.state === 'user-scrolling') o.until = clock() + 200;
+        else intent();
+        o.wrote = scroller.scrollTop;
+      }, { passive: true });
+      o.ready = function () {
+        if (o.state === 'user-scrolling' && clock() >= o.until) o.state = 'idle';
+        return o.state === 'idle';
+      };
+      return o;
+    }
     function keep(node, opt) {
       opt = opt || {};
-      var scroller = scrollerOf(node), s = sessions.get(scroller);
-      if (s && s.follow) {
-        if (opt.onEnd) s.ends.push(opt.onEnd);
-        return s.handle;
+      var scroller = scrollerOf(node), o = owner(scroller), s = sessions.get(scroller);
+      var inspect = { scroller: scroller, visible: function (n) { return exposed(n, scroller); }, viewport: function () { return viewport(scroller); }, apply: function () {}, end: function () {} };
+      if (opt.capture === false) return inspect;
+      if (s && s.follow) return s.handle;
+      if (!o.ready()) return inspect;
+      var t = o.transaction;
+      if (!t) {
+        var ref = typeof opt.offset === 'number' ? node : reading(scroller);
+        var id = ref && ref.id, topic = ref && ref.closest('.topic'), name = topic && topic.getAttribute('data-topic');
+        var key = ref && ref.getAttribute('data-doc-key');
+        var offset = ref && (typeof opt.offset === 'number' ? opt.offset + scrollerTop(scroller) : layoutTop(ref, scroller));
+        t = o.transaction = { depth: 0, done: false };
+        t.cancel = function () { t.done = true; o.transaction = null; sessions.delete(scroller); };
+        t.apply = function () {
+          if (t.done || --t.depth > 0) return;
+          t.cancel();
+          if (!o.ready() || !ref) return;
+          if (!ref.isConnected) {
+            ref = id ? doc.getElementById(id) : null;
+            if (!ref && key) ref = Array.from(doc.querySelectorAll('.doc-frame[data-doc-key]')).find(function (n) {
+              var p = n.closest('.topic'); return n.getAttribute('data-doc-key') === key && p && p.getAttribute('data-topic') === name;
+            });
+          }
+          if (!ref || !ref.isConnected || scrollerOf(ref) !== scroller || (name && (!ref.closest('.topic') || ref.closest('.topic').getAttribute('data-topic') !== name))) return;
+          var delta = layoutTop(ref, scroller) - offset;
+          if (Math.abs(delta) >= 0.5) scroller.scrollTop += delta;
+          o.wrote = scroller.scrollTop;
+          if (opt.onEnd) opt.onEnd('settled');
+        };
+        sessions.set(scroller, { handle: inspect });
       }
-      var offset = typeof opt.offset === "number" ? opt.offset : layoutTop(node, scroller) - scrollerTop(scroller);
-      if (!s) s = start(scroller);
-      s.node = node;
-      s.offset = offset;
-      if (opt.onEnd) s.ends.push(opt.onEnd);
-      if (s.ro) (opt.observe || []).forEach(function (el) { if (el) s.ro.observe(el); });
-      s.restart(true);
-      if (typeof opt.offset === "number") s.handle.apply();
-      return s.handle;
+      t.depth++;
+      var used = false;
+      inspect.apply = function () { if (!used) { used = true; t.apply(); } };
+      inspect.end = function () { if (!used) { used = true; if (!t.done && --t.depth === 0) t.cancel(); } };
+      return inspect;
+    }
+    // place puts node at opt.offset below its scroller's top now and holds it
+    // there while late layout (unfolding cards, lazy bodies) settles: an
+    // instant offset jump. It is navigation the user asked for (Overview's
+    // enter, pick and exit), so, like any jump, the cooldown that same click
+    // started does not hold it back, and the user's next scroll ends it.
+    // keep with an offset only records a capture for a later apply.
+    function place(node, opt) {
+      return jump(node, { offset: opt && typeof opt.offset === 'number' ? opt.offset : 0, behavior: 'instant' });
     }
     function jump(node, opt) {
-      var scroller = scrollerOf(node), s = sessions.get(scroller) || start(scroller);
+      var scroller = scrollerOf(node), s = sessions.get(scroller);
+      if (!s || !s.follow) s = start(scroller);
+      if (opt && opt.onEnd) s.ends.push(opt.onEnd);
       s.jump(node, opt || {});
       return s.handle;
     }
     function start(scroller) {
-      var s = { node: null, offset: 0, ends: [], ro: null, quiet: 0, cap: 0, done: false, wrote: scroller.scrollTop };
-      var main = scroller === docScroller(), anchorEl = main ? doc.documentElement : scroller, target = main ? win : scroller;
-      var was = anchorEl.style.overflowAnchor;
-      anchorEl.style.overflowAnchor = "none";
+      var o = owner(scroller);
+      if (o.transaction) o.transaction.cancel();
+      o.state = 'explicit-jump-follow';
+      var s = { ends: [], ro: null, done: false };
+      var main = scroller === docScroller();
       function apply() {
         if (s.done) return;
-        if (s.follow) { s.follow.align(); return; }
-        if (!s.node.isConnected) { end("ended"); return; }
-        var d = layoutTop(s.node, scroller) - scrollerTop(scroller) - s.offset;
-        if (Math.abs(d) >= 0.5) scroller.scrollTop += d;
-        s.wrote = scroller.scrollTop;
+        if (s.follow) s.follow.align();
+        o.wrote = scroller.scrollTop;
       }
       function end(reason) {
         if (s.done) return;
@@ -632,49 +782,21 @@
         if (s.follow) s.follow.off();
         sessions.delete(scroller);
         if (s.ro) s.ro.disconnect();
-        win.clearTimeout(s.quiet);
-        win.clearTimeout(s.cap);
-        target.removeEventListener("scroll", onScroll);
-        anchorEl.style.overflowAnchor = was;
+        if (o.state === 'explicit-jump-follow') o.state = 'idle';
+        o.wrote = scroller.scrollTop;
         s.ends.forEach(function (fn) { fn(reason); });
       }
-      function onScroll() {
-        if (s.done || s.follow || Math.abs(scroller.scrollTop - s.wrote) <= 1) return;
-        // Content that shrank under the scroll clamps it: not the user's.
-        var max = scroller.scrollHeight - scroller.clientHeight;
-        if (s.wrote > max + 1 && Math.abs(scroller.scrollTop - max) <= 1) { apply(); return; }
-        end("user");
-      }
-      s.restart = function (both) {
-        if (s.follow) return;
-        win.clearTimeout(s.quiet);
-        s.quiet = win.setTimeout(function () { end("quiet"); }, QUIET);
-        if (!both) return;
-        win.clearTimeout(s.cap);
-        s.cap = win.setTimeout(function () { end("cap"); }, CAP);
-      };
+      s.cancel = function () { end('user'); };
       s.jump = function (node, opt) {
         if (s.follow) s.follow.off();
-        win.clearTimeout(s.quiet);
-        win.clearTimeout(s.cap);
         var block = opt.block || "center", raf = 0, cap = 0, stable = 0, quiet = 0, last, position;
-        var intents = ["wheel", "touchstart", "touchmove", "pointerdown"];
-        function cancel() {
-          // Stop an initial native smooth scroll too; pointer/touch intent
-          // need not itself produce a scroll event that would interrupt it.
-          scroller.scrollTo({ top: scroller.scrollTop, left: scroller.scrollLeft, behavior: "instant" });
-          end("user");
-        }
-        function key(e) { if (/^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) cancel(); }
         function off() {
           win.cancelAnimationFrame(raf);
           win.clearTimeout(cap);
-          intents.forEach(function (t) { target.removeEventListener(t, cancel, true); });
-          win.removeEventListener("keydown", key, true);
         }
         function measure() {
           var r = node.getBoundingClientRect();
-          return r.top - scrollerTop(scroller) + scroller.scrollTop - (block === "center" ? (scroller.clientHeight - r.height) / 2 : 0);
+          return r.top - scrollerTop(scroller) + scroller.scrollTop - (typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0);
         }
         function align() {
           // A board morph may replace the item but retain its stable ID.
@@ -684,7 +806,7 @@
           // Smooth scrolling changes the viewport rect, not this content-space
           // destination. Only layout movement interrupts it with an instant fix.
           if (Math.abs(next - position) >= 0.5) {
-            node.scrollIntoView({ block: block, behavior: "instant" });
+            land('instant');
             stable = 0; quiet = 0;
             position = next;
           }
@@ -701,31 +823,194 @@
           last = current;
           raf = win.requestAnimationFrame(frame);
         }
+        function land(behavior) {
+          if (typeof opt.offset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
+          else node.scrollIntoView({ block: block, behavior: behavior });
+          o.wrote = scroller.scrollTop;
+        }
         s.follow = { align: align, off: off };
         position = measure();
-        intents.forEach(function (t) { target.addEventListener(t, cancel, { passive: true, capture: true }); });
-        win.addEventListener("keydown", key, true);
         var reduced = win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        node.scrollIntoView({ block: block, behavior: reduced ? "instant" : opt.behavior || "instant" });
+        land(reduced ? "instant" : opt.behavior || "instant");
         cap = win.setTimeout(function () { end("cap"); }, 2000);
         raf = win.requestAnimationFrame(frame);
       };
       // A swap settling on another anchor must not end explicit navigation.
       s.handle = { scroller: scroller, apply: apply, end: function () { if (!s.follow) end("ended"); } };
       if (win.ResizeObserver) {
-        s.ro = new win.ResizeObserver(function () { if (s.done) return; apply(); s.restart(false); });
+        s.ro = new win.ResizeObserver(function () { if (!s.done) apply(); });
         (main ? [doc.body] : Array.prototype.slice.call(scroller.children)).forEach(function (el) { if (el) s.ro.observe(el); });
       }
-      target.addEventListener("scroll", onScroll, { passive: true });
       sessions.set(scroller, s);
       return s;
     }
     function keeping(scroller) { var s = sessions.get(scroller); return s ? s.handle : null; }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, jump: jump, bands: bands };
+    // snapshot() is a read-only exposure view for one synchronous pass with
+    // no DOM write inside it: each scroller's viewport and each ancestor's
+    // scroller are measured once. Per-node keep(capture:false).visible
+    // rescans every sticky head, which over a whole board's panels froze
+    // every board update for ~1 s (100 topics).
+    function snapshot() {
+      var views = new Map(), under = new Map();
+      function scroller(node) {
+        var chain = [], found = null;
+        for (var p = node && node.parentElement; p && p !== doc.body && p !== doc.documentElement; p = p.parentElement) {
+          if (under.has(p)) { found = under.get(p); break; }
+          chain.push(p);
+          var oy = win.getComputedStyle(p).overflowY;
+          if ((oy === "auto" || oy === "scroll" || oy === "overlay") && p.scrollHeight > p.clientHeight) { found = p; break; }
+        }
+        if (!found) found = docScroller();
+        chain.forEach(function (c) { under.set(c, found); });
+        return found;
+      }
+      function visible(node) {
+        if (!node || node.isConnected === false) return false;
+        var s = scroller(node), v = views.get(s);
+        if (!v) { v = viewport(s); views.set(s, v); }
+        return exposed(node, s, v);
+      }
+      return { scroller: scroller, visible: visible };
+    }
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+  }
+  // Current panel folds follow pN; historical-version folds still use their
+  // independent entry keys. The additive browser record is not board data.
+  function panelStateKit(win) {
+    var doc = win.document || document, html = doc.documentElement;
+    var scope = html && html.getAttribute && (html.getAttribute('data-rid') || html.getAttribute('data-wb-reply'));
+    if (!scope) return null;
+    var KEY = 'ws.whiteboard.panels', CAP = 200, records = new Map(), loaded = new Set(), storage = null;
+    try {
+      storage = win.localStorage;
+      var saved = JSON.parse(storage.getItem(KEY) || '[]');
+      if (Array.isArray(saved)) saved.forEach(function (r) {
+        if (r && typeof r.key === 'string' && /\/p[1-9][0-9]*$/.test(r.key) && typeof r.folded === 'boolean' && /^e[1-9][0-9]*$/.test(r.read || '') && /^e[1-9][0-9]*$/.test(r.seen || '')) {
+          records.set(r.key, r); loaded.add(r.key);
+        }
+      });
+    } catch (_) {}
+    function put(r) {
+      records.delete(r.key); records.set(r.key, r);
+      // Open-panel read marks must not evict the existing 200-fold budget.
+      var same = Array.from(records.values()).filter(function (v) { return v.folded === r.folded; });
+      same.slice(0, Math.max(0, same.length - CAP)).forEach(function (v) { records.delete(v.key); });
+      try { if (storage) storage.setItem(KEY, JSON.stringify(Array.from(records.values()))); } catch (_) {}
+    }
+    function info(panel) {
+      if (!panel || !panel.classList.contains('entry-panel')) return null;
+      var article = panel.closest('.wb-entry[data-panel]');
+      if (!article || article.classList.contains('historical')) return null;
+      var id = article.getAttribute('data-panel'), entry = article.getAttribute('data-entry');
+      if (!/^p[1-9][0-9]*$/.test(id || '') || !/^e[1-9][0-9]*$/.test(entry || '')) return null;
+      return { panel: panel, article: article, id: id, entry: entry, key: scope + '/' + id };
+    }
+    function legacy(i) {
+      var shut;
+      try { shut = JSON.parse(storage && storage.getItem('ws.dashboard.panelshut') || '[]'); } catch (_) { return null; }
+      if (!Array.isArray(shut)) return null;
+      var versions = [i.article].concat(Array.from(i.article.querySelectorAll('.wb-entry[data-entry]')));
+      var old = versions.find(function (a) {
+        return a.getAttribute('data-panel') === i.id && shut.indexOf(scope + '/entry:' + a.getAttribute('data-entry')) >= 0;
+      });
+      return old && old.getAttribute('data-entry');
+    }
+    function record(i) {
+      var r = records.get(i.key);
+      if (!r) {
+        var old = legacy(i);
+        r = { key: i.key, folded: !!old || !i.panel.open, read: old || i.entry, seen: i.entry };
+        put(r);
+      }
+      return r;
+    }
+    function badge(i, r) {
+      var pending = r.folded && r.read !== i.entry, b = i.panel.querySelector('.wb-panel-updated');
+      if (b) b.hidden = !pending;
+      i.article.classList.toggle('wb-panel-pending', pending);
+    }
+    function restorePanel(panel) {
+      var i = info(panel);
+      if (!i) return false;
+      var intent = panel._wbPanelIntent;
+      if (panel.open && intent && intent.open && intent.entry === i.entry) toggle(panel);
+      var r = record(i), changed = r.seen !== i.entry;
+      r.seen = i.entry;
+      if (!r.folded && r.read !== i.entry) { r.read = i.entry; changed = true; }
+      panel.open = !r.folded;
+      badge(i, r);
+      if (changed) put(r);
+      return true;
+    }
+    function toggle(panel) {
+      var i = info(panel);
+      if (!i) return false;
+      var r = record(i), intent = panel._wbPanelIntent;
+      // Native toggle is also emitted for programmatic attribute changes.
+      // Only explicit opening intent may acknowledge a pending new version.
+      if (panel.open && (!intent || !intent.open || intent.entry !== i.entry)) { badge(i, r); return false; }
+      r.folded = !panel.open; r.seen = i.entry;
+      if (panel.open) r.read = i.entry;
+      delete panel._wbPanelIntent;
+      put(r); badge(i, r);
+      return true;
+    }
+    function opened(panel) {
+      var i = info(panel);
+      if (!i) return;
+      panel._wbPanelIntent = { entry: i.entry, open: true };
+      panel.open = true;
+      toggle(panel);
+    }
+    function panels(root) { return Array.from(root.querySelectorAll('.entry-panel[data-key]')).filter(function (p) { return !!info(p); }); }
+    function capturePanels(root) {
+      return panels(root).map(function (p) {
+        var i = info(p), r = record(i);
+        if (!p.open && !r.folded) { r.folded = true; put(r); }
+        return { key: r.key, folded: r.folded, read: r.read, seen: i.entry };
+      });
+    }
+    function restoreSnapshot(root, saved) {
+      if (Array.isArray(saved.panels)) {
+        saved.panels.forEach(function (r) {
+          if (r && typeof r.key === 'string' && r.key.indexOf(scope + '/') === 0 && !loaded.has(r.key) && typeof r.folded === 'boolean' && /^e[1-9][0-9]*$/.test(r.read || '') && /^e[1-9][0-9]*$/.test(r.seen || '')) put(Object.assign({}, r));
+        });
+      } else {
+        // Old standalone snapshots knew entry keys only. Resolve those
+        // against trusted renderer metadata, including earlier versions.
+        (saved.folds || []).forEach(function (f) {
+          var m = /^entry:(e[1-9][0-9]*)$/.exec(f[0]);
+          if (!m || f[1] !== false) return;
+          var a = root.querySelector('.wb-entry[data-entry="' + m[1] + '"]'), id = a && a.getAttribute('data-panel');
+          panels(root).forEach(function (p) {
+            var i = info(p);
+            if (i.id === id && !loaded.has(i.key)) {
+              put({ key: i.key, folded: true, read: m[1], seen: i.entry }); loaded.add(i.key);
+            }
+          });
+        });
+      }
+    }
+    doc.addEventListener('click', function (e) {
+      var summary = e.target.closest && e.target.closest('summary'), panel = summary && summary.parentElement;
+      var i = info(panel);
+      if (!i || (e.target.closest && e.target.closest('a,button,input,textarea'))) return;
+      panel._wbPanelIntent = { entry: i.entry, open: !panel.open };
+      // Record a fold before the next observer/host restore can see the
+      // native default action. An open still waits for actual open DOM.
+      if (panel.open) { var r = record(i); r.folded = true; put(r); }
+    }, true);
+    // The dashboard already owns the toggle listener and calls this kit.
+    // Standalone pages have no host listener, so bind the same policy here.
+    if (!html.getAttribute('data-rid')) doc.addEventListener('toggle', function (e) { toggle(e.target); }, true);
+    return { restore: restorePanel, toggle: toggle, opened: opened, capture: capturePanels, snapshot: restoreSnapshot };
   }
   var kit = viewKit(window);
+  var panelState = panelStateKit(window);
   window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, jump: kit.jump, bands: kit.bands };
+    restorePanel: function (p) { return !!panelState && panelState.restore(p); },
+    panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {

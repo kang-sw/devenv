@@ -35,7 +35,7 @@ function topicNotes() { return []; }
 function grow() {} function clearMentions() {} function dropImg() {} function release() {} function clearTrash() {}
 function renderImgs() {} function dropChip() {} function setItem() {} function closeTopicNotes() {} function renderChips() {}
 function clearDraft() {} function restoreHeld() {} function syncBadge() {} function leadTurn() { return 1; }
-function followConvo() {}
+function followConvo() {} function boardFlushViewed() {}
 function btn() { return { disabled: false, getAttribute: function () { return "h1"; } }; }
 `
 
@@ -45,7 +45,7 @@ function btn() { return { disabled: false, getAttribute: function () { return "h
 // successful send shows none. The cases execute under node when it is
 // installed.
 func TestComposerOutcomesToast(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

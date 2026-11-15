@@ -31,8 +31,61 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
 var dashboardFS embed.FS
+
+// These are ordered source fragments, not independently loaded scripts or
+// stylesheets. Joining without separators preserves the original single IIFE,
+// declaration hoisting, initialization order, CSS cascade and asset identity.
+var dashboardScriptFiles = []string{
+	"dashboard.js",
+	"dashboard-board.js",
+	"dashboard-conversation.js",
+	"dashboard-composer.js",
+	"dashboard-actions.js",
+	"dashboard-drawer.js",
+	"dashboard-frames.js",
+	"dashboard-git.js",
+	"dashboard-tracker.js",
+	"dashboard-selection.js",
+	"dashboard-stream.js",
+	"dashboard-rail.js",
+	"dashboard-rail-popovers.js",
+	"dashboard-leads.js",
+	"dashboard-lifecycle.js",
+}
+
+var dashboardStyleFiles = []string{
+	"dashboard.css",
+	"dashboard-conversation.css",
+	"dashboard-board.css",
+	"dashboard-layout.css",
+	"dashboard-drawer.css",
+	"dashboard-menus.css",
+	"dashboard-rail.css",
+	"dashboard-shell.css",
+}
+
+func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte, error) {
+	var files []string
+	switch name {
+	case "dashboard.js":
+		files = dashboardScriptFiles
+	case "dashboard.css":
+		files = dashboardStyleFiles
+	default:
+		return read(name)
+	}
+	var source bytes.Buffer
+	for _, file := range files {
+		raw, err := read(file)
+		if err != nil {
+			return nil, err
+		}
+		source.Write(raw)
+	}
+	return source.Bytes(), nil
+}
 
 // Region names. The session page's regions in order; the index page has one.
 //
@@ -65,6 +118,9 @@ const (
 func sessionRegions(mode string) []string {
 	if mode == modeLive {
 		return []string{regionHead, regionGit, regionTree, regionEntries, regionConvLive, regionCtx, regionCmds, regionSLine, regionBoard, regionPanels}
+	}
+	if mode == modeHistory {
+		return []string{regionHead, regionGit, regionEntries, regionBoard, regionPanels}
 	}
 	return []string{regionHead, regionGit, regionBoard, regionPanels}
 }
@@ -195,7 +251,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 			return ""
 		}
 		var raw []byte
-		raw, err = read(name)
+		raw, err = readDashboardSource(read, name)
 		return string(raw)
 	}
 	wb, werr := wswhiteboard.PageAssets()
@@ -579,7 +635,9 @@ func renderRegionElement(host regionHost, name string) template.HTML {
 type sessionPageData struct {
 	SessionView
 	Assets pageAssetsData
-	// SysOpen offers the link menu's "open in system browser" item: the
+	// LAN is used only by standalone local Settings, never a shared region.
+	LAN *LANAccess
+	// SysOpen offers the link menu's "open with system" item: the
 	// page was asked for by a browser on this machine. It is outside every
 	// region, since regions are shared by every viewer's stream.
 	SysOpen bool
@@ -601,16 +659,18 @@ func (p sessionPageData) regionByName(name string) renderedRegion { return p.reg
 // shellPageData is the iframe shell (the "shell" template): the session
 // rail and the top header, which stay across navigations, over the frames
 // the dashboard's pages load in (shell.js, dashboard.js). RID is the
-// session it opens on, empty on the index; Src is the first frame's path,
+// session it opens on, empty at the root; Src is the first frame's path,
 // Title the tab's title until that frame names one. Its regions are the
 // rail and, on a session, the opening session's head; later heads come
-// from the frames. OwnHead marks a first page that keeps its own header
-// (the index), beside which the shell shows only its rail button.
+// from the frames. Settings and its local-only LAN block are outside those
+// regions, so no shared stream ever discloses the token.
 type shellPageData struct {
 	Lang, LangPref, Theme string
 	Assets                pageAssetsData
 	SysOpen, OwnHead      bool
 	RID, Src, Title       string
+	Version               string
+	LAN                   *LANAccess
 	regions               regionSet
 }
 
@@ -619,8 +679,8 @@ func (p shellPageData) regionByName(name string) renderedRegion { return p.regio
 type indexPageData struct {
 	IndexView
 	Assets pageAssetsData
-	// LAN is the LAN access block, set only for a local viewer in LAN mode.
-	// It is outside every region, so no SSE update ever carries the token.
+	// LAN is only used if rendering standalone local Settings. The root's
+	// framed response gets none; the owning shell has the local-only block.
 	LAN *LANAccess
 	// Local marks a page asked for by a browser on this machine, like
 	// sessionPageData.SysOpen.
@@ -795,31 +855,33 @@ func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
 	return r.snapshots.Snapshot(r.dir, replyID)
 }
 
-func (r pageReader) readPage(s Session) (PageContent, bool) {
+func (r pageReader) readPage(s Session) (PageContent, bool, error) {
 	if ls, ok := r.source.(LangPageSource); ok {
 		return ls.ReadPageLang(s.Registration, r.lang)
 	}
 	if ps, ok := r.source.(PageSource); ok {
 		return ps.ReadPage(s.Registration)
 	}
-	return PageContent{HasBoard: s.HasBoard}, true
+	return PageContent{HasBoard: s.HasBoard}, true, nil
 }
 
 // served reads a session this daemon serves and its page content; false
 // when it does not serve that reply-id.
 func (r pageReader) served(replyID string) (Session, PageContent, bool) {
+	s, page, ok, err := r.servedWithError(replyID)
+	return s, page, ok && err == nil
+}
+
+func (r pageReader) servedWithError(replyID string) (Session, PageContent, bool, error) {
 	if r.index == nil || !ValidReplyID(replyID) {
-		return Session{}, PageContent{}, false
+		return Session{}, PageContent{}, false, nil
 	}
 	s, ok := r.index.Session(replyID)
 	if !ok {
-		return Session{}, PageContent{}, false
+		return Session{}, PageContent{}, false, r.index.readError(replyID)
 	}
-	page, ok := r.readPage(s)
-	if !ok {
-		return Session{}, PageContent{}, false
-	}
-	return s, page, true
+	page, ok, err := r.readPage(s)
+	return s, page, ok, err
 }
 
 // lookup resolves served sessions, reading a session's snapshot only when
@@ -854,16 +916,16 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 // readSession is session with the page's refresh inputs: every session the
 // view looked up (replyID first among them, sorted), the files its page
 // source named and the attachments directory its conversation reads, and
-// whether it shows contacts (only a live page does).
+// whether it shows contacts (live or saved conversation history).
 func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, bool) {
-	view, inputs, _, ok := r.readSessionWith(replyID, nil, true)
-	return view, inputs, ok
+	view, inputs, _, ok, err := r.readSessionWith(replyID, nil, true)
+	return view, inputs, ok && err == nil
 }
 
 // sessionReads are the store reads one session page read made, which a
 // live render reuses (liveRender): the page source's content (the board
-// panels, the contacts) and, once an adapter showed, the conversation's
-// ring and the board-answer inbox's held and drained entries.
+// panels, the contacts), the saved ring, and (only with an adapter) the
+// board-answer inbox's held and drained entries.
 type sessionReads struct {
 	page          PageContent
 	conversation  bool
@@ -874,20 +936,22 @@ type sessionReads struct {
 // readSessionWith is readSession for a render that may reuse prev, the
 // reads of the page's previous render (nil reads everything): the index
 // entry and the snapshots are read again, every other store is taken from
-// prev, the ring included unless ringChanged. A conversation prev did not
-// read (no adapter showed then) is read now. It returns the reads it used.
-func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged bool) (SessionView, refreshInputs, *sessionReads, bool) {
+// prev, the ring included unless ringChanged. An inbox prev did not read
+// (no adapter showed then) is read when an adapter arrives. It returns the
+// reads it used.
+func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged bool) (SessionView, refreshInputs, *sessionReads, bool, error) {
 	var s Session
 	var page PageContent
+	var err error
 	ok := false
 	if prev != nil && r.index != nil && ValidReplyID(replyID) {
 		s, ok = r.index.Session(replyID)
 		page = prev.page
 	} else {
-		s, page, ok = r.served(replyID)
+		s, page, ok, err = r.servedWithError(replyID)
 	}
-	if !ok {
-		return SessionView{}, refreshInputs{}, nil, false
+	if !ok || err != nil {
+		return SessionView{}, refreshInputs{}, nil, false, err
 	}
 	reads := &sessionReads{page: page}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
@@ -900,18 +964,22 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	if s.Registration.Hosted && s.Registration.HostPID > 0 {
 		inputs.pids = append(inputs.pids, s.Registration.HostPID)
 	}
-	if adapterPresent(in.Snapshot, in.Now) {
+	present := adapterPresent(in.Snapshot, in.Now)
+	if present || !s.Agent {
 		inbox := sessionInbox(r.dir, replyID)
-		reads.conversation = true
-		if prev != nil && prev.conversation {
-			reads.held, reads.drained, reads.ring = prev.held, prev.drained, prev.ring
-			if ringChanged {
-				reads.ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
-			}
+		if prev != nil && !ringChanged && (prev.conversation || !s.Agent) {
+			reads.ring = prev.ring
 		} else {
 			reads.ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
-			reads.held, _ = r.entries.readHeld(inbox)
-			reads.drained, _ = r.entries.readDrained(replyID, inbox)
+		}
+		if present {
+			reads.conversation = true
+			if prev != nil && prev.conversation {
+				reads.held, reads.drained = prev.held, prev.drained
+			} else {
+				reads.held, _ = r.entries.readHeld(inbox)
+				reads.drained, _ = r.entries.readDrained(replyID, inbox)
+			}
 		}
 		in.Ring, in.Held, in.Drained = reads.ring, reads.held, reads.drained
 		in.AttachDir = wsinbox.AttachmentsDir(inbox)
@@ -938,7 +1006,7 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	inputs.watch = slices.Compact(inputs.watch)
 	slices.Sort(inputs.pids)
 	inputs.pids = slices.Compact(inputs.pids)
-	return view, inputs, reads, true
+	return view, inputs, reads, true, nil
 }
 
 // sessionStamp is the refresh stamp of replyID's session page over the
@@ -1059,8 +1127,9 @@ func (d *Daemon) pagesIn(lang string) pageReader {
 	return r
 }
 
-// handleIndex serves /: the iframe shell, which loads the index in a frame
-// of its own, or with ?frame=1 the index as the shell frames it.
+// handleIndex serves / as an empty-selection session layout. The shell
+// owns the rail and Settings; its frame has an empty main panel, not a
+// missing-session finding or a silently chosen session.
 func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -1074,16 +1143,12 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lang, pref := requestLang(r)
-	view := d.pagesIn(lang).indexView()
-	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
-	regions, err := renderIndexRegions(view)
+	view := IndexView{Version: d.endpoint.Version, Lang: lang, LangPref: pref, Theme: requestTheme(r)}
+	html, err := renderIndexPage(view, nil, nil, localViewer(r), true)
 	if err == nil {
-		var html string
-		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r), localViewer(r), true); err == nil {
-			admitShellFrame(w, frameAncestorsSelf)
-			writeHTML(w, html)
-			return
-		}
+		admitShellFrame(w, frameAncestorsSelf)
+		writeHTML(w, html)
+		return
 	}
 	fmt.Fprintf(d.log, "dashboard: render index: %v\n", err)
 	http.Error(w, "render failed", http.StatusInternalServerError)
@@ -1098,6 +1163,13 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 // routes, and the shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
+	// The host anchor is not a session, including at the page's redirect
+	// path. Refuse before any session handler or method-specific response.
+	if replyID, sub, _ := strings.Cut(rest, "/"); replyID == LocalBrowseAnchor &&
+		!strings.HasPrefix(sub, "fs/") && sub != "terminals" && !strings.HasPrefix(sub, "terminals/") {
+		http.NotFound(w, r)
+		return
+	}
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
 		d.handleInboxWrite(w, r, replyID, sub)
 		return
@@ -1196,7 +1268,11 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
 	frame := framedRequest(r)
 	lang, pref := requestLang(r)
-	view, ok := d.pagesIn(lang).session(replyID)
+	view, _, _, ok, readErr := d.pagesIn(lang).readSessionWith(replyID, nil, true)
+	if readErr != nil {
+		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if !ok {
 		if ValidReplyID(replyID) {
 			d.serveFindingSession(w, r, replyID, lang)
@@ -1233,10 +1309,10 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 // serveShell serves the iframe shell whose first frame loads src: the
 // session rail, rendered as its stream renders it (railPageSource), and the
 // top header, holding view's head when the shell opens on a session; with
-// no view (the index) the first page keeps its own header.
+// no view, the root has an empty header and no selected session.
 func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *SessionView, src string) {
 	lang, pref := requestLang(r)
-	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), OwnHead: view == nil, Src: src, Title: "ws dashboard"}
+	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "ws dashboard", Version: d.endpoint.Version, LAN: d.lanAccessFor(r)}
 	if view != nil {
 		page.RID = view.ReplyID
 		page.Title = view.Label

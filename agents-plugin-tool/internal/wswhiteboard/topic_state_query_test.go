@@ -18,6 +18,32 @@ func topicStateQueryBoard() *State {
 	return st
 }
 
+func TestTopicStateQueryResearching(t *testing.T) {
+	st := topicStateQueryBoard()
+	stateApply(t, st, `<wb:topic name="a"><wb:state value="researching" owner="query investigator" eta_minutes="7"/></wb:topic>`, stateNow)
+	for _, raw := range []string{`{"topic":"a","body":true}`, `{"topic":"a"}`, `{"topic":"a","entries":"log","kind":"agent","last":1}`, `{"id":1,"depth":"full"}`} {
+		r := queryResult(t, st, raw)
+		q := r.Topics[0]
+		if q.State == nil || q.State.Value != StateResearching || q.State.Run != nil || q.State.Owner != "query investigator" || q.State.ETAMinutes != 7 || q.StateDiagnostic != nil || q.LatestAgent.ID != "e15" {
+			t.Fatalf("research query: %+v", q)
+		}
+		wantText(t, "informational research", FormatQuery(r), []string{"state: researching; entry: " + q.State.Entry, `owner: "query investigator"`, "eta_minutes: 7 (informational)"}, []string{"run:", "deadline_at:", "started_at:", "extension_count:"})
+		data, err := json.Marshal(q.State)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(data, &fields); err != nil || fields["owner"] != "query investigator" || fields["eta_minutes"] != float64(7) || fields["run"] != nil {
+			t.Fatalf("research JSON: %s; %v", data, err)
+		}
+	}
+	stateApply(t, st, `<wb:topic name="a"><wb:state value="researching"/></wb:topic>`, stateNow)
+	data, _ := json.Marshal(queryResult(t, st, `{"topic":"a"}`).Topics[0].State)
+	if strings.Contains(string(data), "owner") || strings.Contains(string(data), "eta_minutes") || strings.Contains(string(data), "run") {
+		t.Fatalf("absent research metadata serialized: %s", data)
+	}
+}
+
 func TestTopicStateQueryImplementing(t *testing.T) {
 	st := topicStateQueryBoard()
 	wantRun := TopicRun{ID: "e19", StartedAt: queryEntryTime, Owner: "query executor", InitialETAMinutes: 40, ETAMinutes: 40, DeadlineAt: "2026-11-13T12:40:00Z"}
