@@ -1211,7 +1211,8 @@ func TestPeerRowBranch(t *testing.T) {
 func TestAgentRowStats(t *testing.T) {
 	full := wslive.Agent{ID: "a", Status: wslive.StatusRunning, Model: "claude-opus-5-5", Effort: "high", ContextTokens: 48_211, OutputTps: 61.6}
 	html := renderNamed(t, "agent", AgentNode{Agent: full})
-	for _, want := range []string{`<span class="astat">`, `<span class="amodel" title="model: claude-opus-5-5 high">claude-opus-5-5 high</span>`,
+	// effort is its own stat after the model, outside the model's ellipsis
+	for _, want := range []string{`<span class="astat"><span class="amodel" title="model: claude-opus-5-5">claude-opus-5-5</span><span class="aeff" title="effort: high">high</span><span class="actx"`,
 		`<span class="actx" title="context: 48211 tokens">48.2k</span>`, `<span class="atps" title="output: 62 tokens/s">62 t/s</span>`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("full row lacks %s: %s", want, html)
@@ -1220,8 +1221,13 @@ func TestAgentRowStats(t *testing.T) {
 
 	partial := wslive.Agent{ID: "b", Status: wslive.StatusRunning, Effort: "low"}
 	html = renderNamed(t, "agent", AgentNode{Agent: partial})
-	if !strings.Contains(html, `<span class="amodel" title="model: low">low</span>`) || strings.Contains(html, "actx") || strings.Contains(html, "atps") {
-		t.Errorf("partial row = %s", html)
+	if !strings.Contains(html, `<span class="astat"><span class="aeff" title="effort: low">low</span></span>`) || strings.Contains(html, "amodel") {
+		t.Errorf("effort-only row = %s", html)
+	}
+	noEffort := wslive.Agent{ID: "d", Status: wslive.StatusRunning, Model: "claude-sonnet-4-5", ContextTokens: 41_000}
+	html = renderNamed(t, "agent", AgentNode{Agent: noEffort})
+	if !strings.Contains(html, `<span class="amodel" title="model: claude-sonnet-4-5">claude-sonnet-4-5</span><span class="actx"`) || strings.Contains(html, "aeff") {
+		t.Errorf("a row without a recorded effort renders one: %s", html)
 	}
 	if html = renderNamed(t, "agent", AgentNode{Agent: wslive.Agent{ID: "c", Status: wslive.StatusRunning}}); strings.Contains(html, "astat") {
 		t.Errorf("a row without telemetry has a stats box: %s", html)
@@ -1230,7 +1236,7 @@ func TestAgentRowStats(t *testing.T) {
 	ended := full
 	ended.Status, ended.EndedAt = wslive.StatusDone, testNow.UnixMilli()
 	html = renderNamed(t, "agent", AgentNode{Agent: ended})
-	if !strings.Contains(html, `class="amodel"`) || !strings.Contains(html, `class="actx"`) || strings.Contains(html, "atps") {
+	if !strings.Contains(html, `class="amodel"`) || !strings.Contains(html, `class="aeff"`) || !strings.Contains(html, `class="actx"`) || strings.Contains(html, "atps") {
 		t.Errorf("ended row = %s", html)
 	}
 
@@ -1240,7 +1246,7 @@ func TestAgentRowStats(t *testing.T) {
 
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{".r-tree { container: atree / inline-size; }", ".aline { display: contents; }", "@container atree (max-width: 559px) {",
-		".ahead:has(> .aline) { flex-wrap: wrap;", ".ahead > .astat { order: 1; flex: 0 0 100%;"} {
+		".ahead:has(> .aline) { flex-wrap: wrap;", ".ahead > .astat { order: 1; flex: 0 0 100%;", ".ahead > .astat .aeff, .ahead > .astat .actx, .ahead > .astat .atps { flex: none; }"} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}

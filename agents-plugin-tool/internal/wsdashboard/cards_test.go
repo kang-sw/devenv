@@ -725,17 +725,19 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestFilesToolbarSheet keeps the existing explorer in place through the
-// shared sheet lifecycle, including board swaps and card/preview reveal.
+// TestFilesToolbarSheet keeps the page-owned explorer separate from the tab
+// through the shared sheet lifecycle, board swaps and card/preview reveal.
 func TestFilesToolbarSheet(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	runNode(t, "Files toolbar sheet", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
 El.prototype.focus = function () { this.ownerDocument.activeElement = this; };
-var notices = 0, A;
-boot({}, function () { A = topic("a", 300); return [A]; }, { toolbar: { files: function () { notices++; } } });
+var notices = 0, A, owner = { el: null, shown: function () { notices++; }, hidden: function () { notices++; } };
+boot({}, function () { A = topic("a", 300); return [A]; }, { toolbar: { files: owner } });
 var grid = page.doc.body.appendChild(mk("div", { "data-tab": "board", "data-ctab": "convo" }));
 var slot = grid.appendChild(mk("span.fsum")), root = slot.appendChild(mk("span.froot"));
-var pane = grid.appendChild(mk("section.fpane", { id: "files" }, [mk("div.fhd"), mk("input.fq"), mk("div.ftree")]));
+var tab = grid.appendChild(mk("section.fpane", { id: "files" }));
+var pane = owner.el = page.doc.body.appendChild(mk("section.fpane", { id: "toolbar-files" }, [mk("div.fhd"), mk("input.fq"), mk("div.ftree")]));
+pane.hidden = true;
 page.doc.querySelector = function (s) { return s === "#chead .fsum" ? slot : null; };
 var filter = pane.querySelector(".fq"), tree = pane.querySelector(".ftree"), bar = page.W.toolbar(), btn = bar.querySelector(".board-files");
 filter.value = "keep query"; tree.scrollTop = 73;
@@ -747,8 +749,8 @@ function esc(consumed) {
 }
 function state() { return [pane.hasAttribute("data-max"), btn.getAttribute("aria-expanded"), !!bar.hasAttribute("data-files")]; }
 toggle();
-check("Files toggles the one explorer into the shared sheet", state(), [true, "true", true]);
-check("opening focuses search and borrows the existing root label", [page.doc.activeElement === filter, root.parentNode === pane.querySelector(".fhd"), pane.parentNode === grid], [true, true, true]);
+check("Files toggles its owned explorer into the shared sheet", [state(), pane.hidden], [[true, "true", true], false]);
+check("opening focuses search without borrowing the tab or root label", [page.doc.activeElement === filter, root.parentNode === slot, tab.parentNode === grid, pane.parentNode === page.doc.body], [true, true, true, true]);
 check("no tab switch", [grid.getAttribute("data-tab"), grid.getAttribute("data-ctab")], ["board", "convo"]);
 swap([A, topic("b", 400)]);
 check("a board swap does not mistake Files for a removed topic", state(), [true, "true", true]);
@@ -756,19 +758,19 @@ esc(true);
 check("consumed Escape does not close the sheet", state(), [true, "true", true]);
 toggle();
 check("second click closes", state(), [false, "false", false]);
-check("dismissal returns label and focus without rebuilding explorer state", [root.parentNode === slot, page.doc.activeElement === btn, pane.querySelector(".fq") === filter, filter.value, tree.scrollTop, notices], [true, true, true, "keep query", 73, 2]);
+check("dismissal hides its owner and returns focus without rebuilding state", [root.parentNode === slot, pane.hidden, page.doc.activeElement === btn, pane.querySelector(".fq") === filter, filter.value, tree.scrollTop, notices], [true, true, true, true, "keep query", 73, 2]);
 toggle(); esc(false);
 check("unconsumed Escape dismisses and returns focus", [state(), page.doc.activeElement === btn], [[false, "false", false], true]);
 page.board.fire("click", { target: A.querySelector(".d-max"), preventDefault: function () {} });
 toggle();
 check("Files replaces another maximized sheet", [pane.hasAttribute("data-max"), A.hasAttribute("data-max")], [true, false]);
 page.board.fire("click", { target: A.querySelector(".d-max"), preventDefault: function () {} });
-check("another sheet replaces Files and restores its label", [pane.hasAttribute("data-max"), A.hasAttribute("data-max"), root.parentNode === slot], [false, true, true]);
+check("another sheet replaces Files without moving its label", [pane.hasAttribute("data-max"), A.hasAttribute("data-max"), root.parentNode === slot, pane.hidden], [false, true, true, true]);
 toggle();
 var c = page.W.open("k", { name: "preview" }); c.show();
 check("preview reveal dismisses Files instead of hiding the preview behind it", state(), [false, "false", false]);
 grid.setAttribute("data-ctab", "files"); toggle(); esc(false);
-check("existing Files-tab access remains selected on dismissal", [grid.getAttribute("data-ctab"), pane.parentNode === grid], ["files", true]);
+check("existing Files-tab access remains selected on dismissal", [grid.getAttribute("data-ctab"), tab.parentNode === grid, root.parentNode === slot], ["files", true, true]);
 process.stdout.write(bad.join("\n"));
 `)
 }

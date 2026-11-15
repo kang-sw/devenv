@@ -131,68 +131,10 @@ func TestNormalizeNumbersImages(t *testing.T) {
 	}
 }
 
-// TestMergeRenumbersTheLaterSendsImagesAndMarkers: the later send's images
-// continue the earlier ones' numbers, gaps included, and its markers follow;
-// a marker naming none of its images and an image the earlier send already
-// lists keep the earlier numbering; the earlier send's text is untouched.
-func TestMergeRenumbersTheLaterSendsImagesAndMarkers(t *testing.T) {
-	base := Entry{Parts: []string{"one [Image #1] two [Image #3]"}, Images: []string{"/a.png", "/b.png"}, ImageNums: []int{1, 3}}
-	add := Entry{Parts: []string{"[Image #2] then [Image #1] and [Image #1], old [Image #9], same [Image #3]"}, Images: []string{"/c.png", "/d.png", "/b.png"}, ImageNums: []int{1, 2, 3}}
-	got := Merge(base, add)
-	if want := []string{"one [Image #1] two [Image #3]", "[Image #5] then [Image #4] and [Image #4], old [Image #9], same [Image #3]"}; len(got.Parts) != 2 || got.Parts[0] != want[0] || got.Parts[1] != want[1] {
-		t.Fatalf("merged parts = %q, want %q", got.Parts, want)
-	}
-	if len(got.Images) != 4 || got.Images[2] != "/c.png" || got.Images[3] != "/d.png" {
-		t.Fatalf("merged images = %v", got.Images)
-	}
-	if want := []int{1, 3, 4, 5}; len(got.ImageNums) != 4 || got.ImageNums[0] != want[0] || got.ImageNums[1] != want[1] || got.ImageNums[2] != want[2] || got.ImageNums[3] != want[3] {
-		t.Fatalf("merged numbers = %v, want %v", got.ImageNums, want)
-	}
-	// An entry written before numbering counts as 1..n.
-	legacy := Merge(Entry{Parts: []string{"old"}, Images: []string{"/a.png", "/b.png"}}, Entry{Parts: []string{"[Image #1]"}, Images: []string{"/c.png"}, ImageNums: []int{1}})
-	if legacy.Parts[1] != "[Image #3]" || len(legacy.ImageNums) != 3 || legacy.ImageNums[2] != 3 {
-		t.Fatalf("merge onto an unnumbered entry = %+v", legacy)
-	}
-}
-
-// TestMergeRenumbersMarkersInNotes: the later send's markers in its chip
-// notes and topic notes follow its images' new numbers, as its text's do,
-// so one merged message never names a number twice; the earlier send's
-// notes are untouched.
-func TestMergeRenumbersMarkersInNotes(t *testing.T) {
-	base := Entry{
-		Parts:     []string{"base [Image #1]"},
-		Chips:     []Chip{{ID: "03", Answer: "a", Note: "see [Image #2]"}},
-		Topics:    []TopicNote{{Topic: "plan", Note: "old [Image #1]"}},
-		Images:    []string{"/a.png", "/b.png"},
-		ImageNums: []int{1, 2},
-	}
-	add := Entry{
-		Parts:     []string{"text [Image #3]"},
-		Chips:     []Chip{{ID: "04", Note: "item [Image #1] [Image #2]"}},
-		Topics:    []TopicNote{{Topic: "risk", Note: "topic [Image #2], stray [Image #9]"}},
-		Images:    []string{"/c.png", "/d.png", "/e.png"},
-		ImageNums: []int{1, 2, 3},
-	}
-	got := Merge(base, add)
-	if want := []string{"base [Image #1]", "text [Image #5]"}; len(got.Parts) != 2 || got.Parts[0] != want[0] || got.Parts[1] != want[1] {
-		t.Fatalf("merged parts = %q, want %q", got.Parts, want)
-	}
-	if len(got.Chips) != 2 || got.Chips[0].Note != "see [Image #2]" || got.Chips[1].Note != "item [Image #3] [Image #4]" {
-		t.Fatalf("merged chips = %+v", got.Chips)
-	}
-	if len(got.Topics) != 2 || got.Topics[0].Note != "old [Image #1]" || got.Topics[1].Note != "topic [Image #4], stray [Image #9]" {
-		t.Fatalf("merged topics = %+v", got.Topics)
-	}
-	if want := []int{1, 2, 3, 4, 5}; len(got.ImageNums) != 5 || got.ImageNums[2] != want[2] || got.ImageNums[4] != want[4] {
-		t.Fatalf("merged numbers = %v, want %v", got.ImageNums, want)
-	}
-}
-
-// TestSendMergesWithRenumberingAndSteerKeepsIt: the second send into a held
-// entry delivers its image as the next number, marker included, and a steer
-// keeps the numbering.
-func TestSendMergesWithRenumberingAndSteerKeepsIt(t *testing.T) {
+// TestEachSendKeepsItsImageNumbersAndSteerKeepsThem: a second send is its
+// own entry, so its images keep the numbers its text names them by, and a
+// steer keeps the numbering.
+func TestEachSendKeepsItsImageNumbersAndSteerKeepsThem(t *testing.T) {
 	dir := Dir(t.TempDir())
 	a := attach(t, dir, "0123456789abcdef-1.png")
 	b := attach(t, dir, "0123456789abcdef-2.png")
@@ -201,7 +143,7 @@ func TestSendMergesWithRenumberingAndSteerKeepsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	name, merged, err := Send(dir, Entry{Parts: []string{"second [Image #1]"}, Images: []string{c}, ImageNums: []int{1}}, time.Now())
-	if err != nil || !merged {
+	if err != nil || merged {
 		t.Fatalf("second Send = %v, merged %v", err, merged)
 	}
 	steered, err := Steer(dir, name)
@@ -209,27 +151,32 @@ func TestSendMergesWithRenumberingAndSteerKeepsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	held, _ := Held(dir)
-	if len(held) != 1 || held[0].Name != steered {
+	if len(held) != 2 || held[0].Name != steered {
 		t.Fatalf("held = %+v", held)
 	}
-	want := "first [Image #1] [Image #2]\n\nsecond [Image #3]\n\nImage #1: " + a + "\nImage #2: " + b + "\nImage #3: " + c
-	if got := held[0].Entry.Text(); got != want {
-		t.Fatalf("steered merged Text = %q, want %q", got, want)
+	if got, want := held[0].Entry.Text(), "second [Image #1]\n\nImage #1: "+c; got != want {
+		t.Fatalf("steered Text = %q, want %q", got, want)
+	}
+	if got, want := held[1].Entry.Text(), "first [Image #1] [Image #2]\n\nImage #1: "+a+"\nImage #2: "+b; got != want {
+		t.Fatalf("follow-up Text = %q, want %q", got, want)
 	}
 }
 
-func TestMergeAccumulatesImagesAndCancelKeepsTheFiles(t *testing.T) {
+// TestEachSendCarriesItsOwnImagesAndCancelKeepsTheFiles: a second send's
+// images stay in its own entry, even one the first send also attached, and
+// a cancel of either leaves every file in place.
+func TestEachSendCarriesItsOwnImagesAndCancelKeepsTheFiles(t *testing.T) {
 	dir := Dir(t.TempDir())
 	a := attach(t, dir, "0123456789abcdef-1.png")
 	b := attach(t, dir, "fedcba9876543210-1.webp")
-	sendImages(t, dir, "first", a)
+	first, _ := sendImages(t, dir, "first", a)
 	name, merged := sendImages(t, dir, "", b, a)
-	if !merged {
-		t.Fatal("second send did not merge")
+	if merged {
+		t.Fatal("second send merged")
 	}
 	held, _ := Held(dir)
-	if len(held) != 1 || len(held[0].Entry.Images) != 2 || held[0].Entry.Images[0] != a || held[0].Entry.Images[1] != b {
-		t.Fatalf("merged images = %+v", held)
+	if len(held) != 2 || len(held[0].Entry.Images) != 1 || held[0].Entry.Images[0] != a || len(held[1].Entry.Images) != 2 || held[1].Entry.Images[0] != b || held[1].Entry.Images[1] != a {
+		t.Fatalf("held images = %+v", held)
 	}
 	e, err := Cancel(dir, name)
 	if err != nil || len(e.Images) != 2 {
@@ -237,6 +184,9 @@ func TestMergeAccumulatesImagesAndCancelKeepsTheFiles(t *testing.T) {
 	}
 	if !exists(a) || !exists(b) {
 		t.Fatal("cancel deleted an attachment")
+	}
+	if held, _ := Held(dir); len(held) != 1 || held[0].Name != first {
+		t.Fatalf("held after cancel = %+v", held)
 	}
 }
 
