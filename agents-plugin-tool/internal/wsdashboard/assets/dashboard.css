@@ -306,7 +306,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .rail .pn { padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--wb-warn) 20%, transparent); }
 .rail .phint { margin-left: auto; font-weight: 500; letter-spacing: 0; color: var(--wb-muted-fg); font-size: 10.5px; }
 .rail .rwt.pend .wthd > .i { color: var(--wb-warn); }
-.rail .wtpath { display: flex; gap: 6px; padding: 0 12px 2px 46px; font: 10.5px var(--wb-mono); color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rail .wtpath { display: flex; gap: 6px; min-width: 0; padding: 0 12px 2px 46px; font: 10.5px var(--wb-mono); color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .rail .wtpath .pt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; opacity: .85; }
 .rail .wtpath .tag { flex: none; margin-left: auto; font: 700 10.5px var(--wb-sans); }
 .rail .tgs { display: inline-flex; gap: 3px; flex: none; margin-left: auto; }
@@ -321,29 +321,76 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .rail .rwt.m-rj .wthd > .i { color: var(--wb-fail); }
 .rail .rwt.m-rj .br, .rail .rwt.m-rj .wf { text-decoration: line-through; text-decoration-color: var(--wb-fail); opacity: .7; }
 .rail .rwt.m-rj .rsessions { opacity: .55; }
-.rail .rfold { margin-top: 4px; }
-.rail .rfold > summary { list-style: none; cursor: pointer; display: flex; gap: 6px; padding: 3px 12px 3px 28px; font-size: 11.5px; color: var(--wb-muted-fg); }
-.rail .rfold > summary::-webkit-details-marker { display: none; }
-.rail .rfold > summary::after { content: " ▸"; }
-.rail .rfold[open] > summary::after { content: " ▾"; }
-.rail .rfold .wthd { padding-left: 40px; }
-.rail .rfold .wtpath { padding-left: 58px; }
-.rail .admission-undo { margin-left: auto; flex: none; padding: 2px 7px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font: 600 11px var(--wb-sans); cursor: pointer; }
+/* the rejected list: a folded heading at the group's foot, its rows drawn
+   like the other worktree rows (dimmed), each with an undo pill */
+.rail .rrej { margin-top: 4px; }
+.rail .rrej > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 3px 12px 3px 28px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rail .rrej > summary::-webkit-details-marker { display: none; }
+.rail .rrej > summary:hover { color: var(--wb-primary); }
+.rail .rrej > summary:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; border-radius: 3px; }
+.rail .rrej > summary > .i { width: 12px; height: 12px; color: var(--wb-fail); }
+.rail .rrej .fl { white-space: nowrap; }
+.rail .rrej .fl::after { content: " \25b8"; }
+.rail .rrej[open] .fl::after { content: " \25be"; }
+.rail .rrej .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rail .rrej-copy { flex: none; margin-left: auto; width: 22px; height: 20px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rrej-copy:hover { color: var(--wb-primary); background: var(--wb-muted); }
+.rail .rrej-copy:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.rail .rrej-copy .i { width: 12px; height: 12px; }
+.rail .rrej .rwt { padding: 2px 0; }
+.rail .rrej .wthd { padding-left: 40px; }
+.rail .rrej .wthd > .i, .rail .rrej .wthd .br, .rail .rrej .wthd .wf, .rail .rrej .wthd .gs { opacity: .65; }
+.rail .rrej .wtpath { padding-left: 58px; }
+.rail .wthd .gs + .tgs, .rail .wthd .gs + .admission-undo { margin-left: 0; }
+.rail .admission-undo { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font: 600 11px var(--wb-sans); white-space: nowrap; cursor: pointer; }
+.rail .admission-undo:hover { background: var(--wb-muted); }
+.rail .admission-undo .i { width: 11px; height: 11px; stroke-width: 1.8; }
 .rail .rcap { position: absolute; z-index: 2; left: 50%; bottom: 52px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 4px 0 6px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 .rail .rcap .seg { padding: 4px 8px; border-radius: 999px; font-size: 11.5px; }
 .rail .rcap .ok { background: color-mix(in srgb, var(--wb-ok) 18%, var(--wb-card)); color: var(--wb-ok); }
 .rail .rcap .no { background: color-mix(in srgb, var(--wb-fail) 18%, var(--wb-card)); color: var(--wb-fail); }
 .rail .rcap button { border: 0; border-radius: 999px; cursor: pointer; font: inherit; }
-.rail .rcap .clr { width: 22px; height: 22px; padding: 0; background: transparent; color: var(--wb-muted-fg); }
-.rail .rcap .go { height: 24px; padding: 0 13px; background: var(--wb-primary); color: var(--wb-primary-fg); }
+.rail .rcap .clr { width: 22px; height: 22px; display: inline-grid; place-items: center; padding: 0; background: transparent; color: var(--wb-muted-fg); }
+.rail .rcap .clr:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.rail .rcap .clr .i { width: 12px; height: 12px; }
+.rail .rcap .go { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 13px 0 10px; background: var(--wb-primary); color: var(--wb-primary-fg); font-weight: 800; }
+.rail .rcap .go .i { width: 13px; height: 13px; stroke-width: 2.2; }
 .rail.capon .rlist { padding-bottom: 60px; }
-.rail .admission-feedback { flex: none; max-height: 32%; overflow: auto; padding: 8px 12px; border-top: 1px solid var(--wb-warn); font-size: 12px; background: var(--wb-card); }
-.rail .admission-feedback button, .rail .admission-row-correction button { font: inherit; color: var(--wb-primary); background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 6px; padding: 2px 6px; cursor: pointer; }
-.rail.capon .admission-feedback:not([hidden]) { margin-bottom: 42px; }
-.rail .admission-feedback textarea { box-sizing: border-box; width: 100%; min-height: 90px; color: var(--wb-fg); background: var(--wb-bg); font: 11px var(--wb-mono); }
+/* the apply notice: refusals and a failed prompt copy, a card in the toast
+   language (warning bar, 8px radius) with a close button; Esc inside closes */
+.rail .admission-feedback { flex: none; max-height: 40%; overflow: auto; margin: 0 8px 8px; padding: 6px 6px 7px 13px; border-radius: 8px; background: color-mix(in srgb, var(--wb-warn) 7%, var(--wb-card)); box-shadow: inset 3px 0 0 var(--wb-toast-warn), 0 0 0 1px var(--wb-line); font-size: 12px; line-height: 1.4; }
+.rail .afrow { display: flex; align-items: flex-start; gap: 6px; }
+.rail .admission-status { flex: 1 1 auto; min-width: 0; padding-top: 2px; color: var(--wb-fg); overflow-wrap: anywhere; }
+.rail .afx { flex: none; width: 20px; height: 20px; display: inline-grid; place-items: center; margin-left: auto; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .afx:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.rail .afx .i { width: 12px; height: 12px; stroke-width: 2; }
+.rail .admission-copy { margin: 5px 6px 0 0; }
+.rail .admission-copy .afcopy { float: right; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font: 600 11px var(--wb-sans); white-space: nowrap; cursor: pointer; }
+.rail .admission-copy .afcopy:hover { background: var(--wb-muted); }
+.rail .admission-copy .afcopy .i { width: 11px; height: 11px; }
+.rail .admission-copy summary { list-style: none; display: flex; align-items: center; min-height: 22px; font-size: 11.5px; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .admission-copy summary::-webkit-details-marker { display: none; }
+.rail .admission-copy summary::before { content: "\25b8"; width: 12px; flex: none; }
+.rail .admission-copy details[open] summary::before { content: "\25be"; }
+.rail .admission-copy summary:hover { color: var(--wb-primary); }
+.rail .admission-feedback :focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.rail .admission-feedback textarea { display: block; box-sizing: border-box; width: 100%; height: 112px; margin-top: 4px; padding: 6px 8px; resize: vertical; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-fg); background: var(--wb-bg); font: 11px/1.45 var(--wb-mono); }
+.rail .admission-feedback .admission-corrections button, .rail .admission-row-correction button { font: inherit; color: var(--wb-primary); background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 6px; padding: 1px 6px; margin-left: 4px; cursor: pointer; }
+.rail.capon .admission-feedback:not([hidden]) { margin-bottom: 50px; }
+/* Apply's result toast (the 847 mockup): the shared toast surface, anchored
+   in the rail above its foot, the capsule or the notice (admissionToast sets
+   bottom), with an amber bar, green when nothing was rejected. A zero-
+   specificity position keeps every breakpoint's own rail position and only
+   gives the static column a containing block. */
+:where(.rail) { position: relative; }
+.rail .rtoast { position: absolute; z-index: 4; left: 12px; right: 12px; bottom: 56px; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px 7px 15px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow: hidden; overflow-wrap: anywhere; opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s; pointer-events: none; }
+.rail .rtoast::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--wb-toast-warn); }
+.rail .rtoast.ok::before { background: var(--wb-ok); }
+.rail .rtoast.on { opacity: 1; transform: none; pointer-events: auto; }
+.rail .rtoast small { display: block; margin-top: 1px; font-size: 11px; opacity: .7; }
 .rail .admission-row-correction { margin: 3px 12px 3px 28px; color: var(--wb-fail); font-size: 11px; }
 .rail .admission-stale { outline: 1px dashed var(--wb-fail); outline-offset: -1px; }
 .rail .admission-missing { overflow-wrap: anywhere; margin: 5px 0; color: var(--wb-fail); }
-.rail .rcap[hidden], .rail .rcap .seg[hidden], .rail .admission-feedback[hidden], .rail .admission-copy[hidden], .rail .admission-row-correction[hidden] { display: none; }
+.rail .rcap[hidden], .rail .rcap .seg[hidden], .rail .admission-feedback[hidden], .rail .admission-copy[hidden], .rail .admission-row-correction[hidden], .rail .admission-status[hidden], .rail .afx[hidden] { display: none; }
 .rail [data-admission-apply]:disabled { opacity: .5; cursor: progress; }
 

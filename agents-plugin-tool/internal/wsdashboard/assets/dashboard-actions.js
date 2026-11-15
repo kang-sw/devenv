@@ -87,7 +87,8 @@
   // else (a LAN address over plain http has no navigator.clipboard) a hidden
   // textarea and the copy command. Success shows fixed text (copydone), not
   // the payload: a copied prompt can be long enough to cover the rail.
-  function copyText(s) {
+  // quiet leaves both toasts to the caller.
+  function copyText(s, quiet) {
     function fallback() {
       var t = doc.createElement("textarea");
       t.value = s;
@@ -98,11 +99,11 @@
       var ok = false;
       try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
       doc.body.removeChild(t);
-      toast(ok ? wsT("js.toast.copydone") : wsT("js.toast.copyfail", s));
+      if (!quiet) toast(ok ? wsT("js.toast.copydone") : wsT("js.toast.copyfail", s));
       return ok;
     }
     if (navigator.clipboard && window.isSecureContext) {
-      return navigator.clipboard.writeText(s).then(function () { toast(wsT("js.toast.copydone")); return true; }, fallback);
+      return navigator.clipboard.writeText(s).then(function () { if (!quiet) toast(wsT("js.toast.copydone")); return true; }, fallback);
     }
     return Promise.resolve(fallback());
   }
