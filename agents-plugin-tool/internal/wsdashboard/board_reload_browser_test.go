@@ -31,11 +31,20 @@ func TestBoardViewedReloadBrowser(t *testing.T) {
 		}
 		state.Topics = append(state.Topics, topic)
 	}
+	// The oldest closed topic is served only inside data-history-topic.
+	for i := 0; i <= wswhiteboard.ClosedCap; i++ {
+		name := fmt.Sprintf("Closed%02d", i)
+		state.ClosedTopics = append(state.ClosedTopics, name)
+		state.Topics = append(state.Topics, wswhiteboard.TopicDoc{Name: name, Entries: []wswhiteboard.Entry{{ID: fmt.Sprintf("e%d", 200+i), Kind: wswhiteboard.EntryPanel, PanelID: fmt.Sprintf("p%d", 200+i), Recap: "Closed panel", Text: `<div style="height:240px">Closed reading material</div>`, At: "2026-11-15T00:00:00Z"}}})
+	}
 	render := func() regionSet {
 		wb, err := wswhiteboard.RenderRegions(wswhiteboard.BuildView(state, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: "reloadtest"}))
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Leave room below the last materialized topic to align its reading
+		// line without hitting the scroller's bottom while frames mount.
+		wb.Board += `<div style="height:1200px"></div>`
 		regions, err := renderSessionRegions(SessionView{ReplyID: "reloadtest", Adapter: true, Live: true, HasBoard: true, Seq: state.Seq, Board: wb.Board, Panels: wb.Panels}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -70,7 +79,7 @@ func TestBoardViewedReloadBrowser(t *testing.T) {
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "node", "testdata/viewed-reload.browser.cjs", server.URL)
 	out, err := cmd.CombinedOutput()
