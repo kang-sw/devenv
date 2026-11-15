@@ -392,6 +392,36 @@ Decisions from verification:
   suppresses its default CDP auto-accept, which otherwise races the already
   resolved native Stay/Leave decision. App-exit assertions are bounded.
 
+#### Edition (c0bf0ef53) - 2026-11-15
+
+Owner directive (relayed by MAIN, 2026-11-15): every Electron run and visual
+check runs on the Windows ThinkPad host, never on the owner's Mac (Electron
+windows steal focus there). Headless steps that open no window (unit tests,
+the macOS package build) may stay on the Mac. MAIN technical call, announced
+to the owner: Phase 1's smoke/visual acceptance reruns on the Windows host,
+which pulls forward only a win32 package step and a platform switch in the
+smoke harness; Phase 3 keeps zip delivery, missing-daemon start, external
+links and the platform report.
+
+- `scripts/build.cjs` gains a win32-x64 path (`@electron/packager`
+  `platform: 'win32'`; an `.ico` derived from the retained PNG, or no
+  custom icon with that recorded); the darwin path is unchanged.
+- `test/smoke.cjs` switches the built executable and the fixture daemon
+  name (`.exe`) by platform and keeps every assertion; a Windows-only delta
+  (Ctrl accelerators, the window menu bar, dialog shape, second-instance
+  focus) is reported, not papered over.
+- Host run (approved by MAIN): git-sync the branch into
+  `C:\Users\ki608\devenv`; one networked `npm ci` in that clone (may
+  download `electron-win32-x64` 44.11.3), no global installs; the smoke runs
+  in the logged-in console session via `schtasks /create ... /it /ru ki608`
+  then `/run` (a GUI started straight from SSH lands in session 0 and shows
+  nothing), and screenshots come from that session; a process scan on the
+  host at the end, killing only what the run launched. Playwright comes from
+  a copied module directory (no networked install).
+- P9 physical zoom keys stay recorded as unverified unless a cheap Windows
+  check delivers them.
+- Never launch Electron, the smoke, or the built app on the Mac.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
