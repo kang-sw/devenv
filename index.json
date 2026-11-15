@@ -752,6 +752,9 @@
     "261115-bug-pi-print-mode-empty-after-subagent-push": {
       "registered_at": "2026-11-14T23:55:38Z"
     },
+    "261115-bug-pi-resumed-worker-worktree-authority-rebind": {
+      "registered_at": "2026-11-15T03:34:39Z"
+    },
     "261115-bug-pi-reviewer-local-evidence-capability-gap": {
       "registered_at": "2026-11-15T02:14:18Z"
     },
