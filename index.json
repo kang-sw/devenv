@@ -240,7 +240,14 @@
       }
     },
     "261110-research-ws-dashboard-agent-host-foundations": {
-      "registered_at": "2026-11-09T15:09:40Z"
+      "registered_at": "2026-11-09T15:09:40Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:51:00Z"
+      }
     },
     "261110-research-ws-dashboard-background-task-visibility": {
       "registered_at": "2026-11-09T15:23:36Z",
