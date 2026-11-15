@@ -1245,18 +1245,25 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 
 	case "config.get":
-		// Read-only single-key read for adapters: resolves one key through the
+		// Read-only config reads for adapters: resolve each key through the
 		// session-anchored resolver (session parent chain, project, repo,
 		// global, builtin) without config.list's playbook scan. Callable by
 		// delegate and leaf keys (roleAllowsTool) so a spawned child reads the
 		// value its lead tuned at session scope.
-		key, _ := params.Arguments["key"].(string)
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.get: key is required"))
+		keys, bulk, err := configGetKeys(params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		sessionKey, _ := params.Arguments["session_key"].(string)
-		result, err := s.resolveConfigGet(strings.TrimSpace(sessionKey), key)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if bulk {
+			result, text := s.resolveConfigGetBulk(sessionKey, keys)
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, result, nil)
+			}
+			return toolTextResponse(req.ID, text, nil)
+		}
+		result, err := s.resolveConfigGet(sessionKey, keys[0])
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.get: %w", err))
 		}
@@ -1465,35 +1472,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
-		result, err := provisionWorktree(context.Background(), s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value)
+		result, err := acquireWorktree(ctx, s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value, key, func(mintPath string) (string, error) {
+			return s.sessions.mint(mintPath, roleLead, key)
+		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// Bind the worker key to the canonical worktree root so the worker's
-		// root-aware ws calls resolve against its own worktree, not the lead's.
-		mintPath := result.Path
-		if canon, cerr := canonicalGitRoot(s.gitRunner(), result.Path); cerr == nil {
-			mintPath = canon
-		}
-		workerKey, err := s.sessions.mint(mintPath, roleLead, key)
-		if err != nil {
-			// Detach the freshly provisioned worktree so a failed mint does not
-			// leave it branch-checked-out and thus ineligible for pool reuse.
-			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
-			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
-		}
-		// The lease is written only after a successful mint, so the failed-mint
-		// path above never leaves one behind. A failed lease write detaches the
-		// worktree like a failed mint: succeeding without a lease would list it
-		// as "no lease record", indistinguishable from a released worktree. The
-		// minted key is left unused and ages out through key pruning.
-		lease := worktreeLease{WorkerKey: workerKey, ParentKey: key, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
-		if err := writeWorktreeLease(context.Background(), s.gitRunner(), result.Path, lease); err != nil {
-			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
-			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: record worktree lease: %w", err))
-		}
-		result.Path = mintPath
-		result.WorkerKey = workerKey
 		staleAfter, preservedLimit := worktreeNudgeThresholds(&resolver, key)
 		if nudge, err := poolNudge(context.Background(), s.gitRunner(), entry.root, result.Pool, staleAfter, preservedLimit, time.Now()); err != nil {
 			result.Warnings = append(result.Warnings, "stale-pool check failed: "+err.Error())
@@ -4721,15 +4705,19 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.get",
-			"description": "Read-only: resolve one config key and report the scope that supplied it (session, including the session's parent chain, then project, repo, global, builtin). A key declared by an adapter key manifest returns a value of its declared type (number, boolean, or string), and a stored value that fails that type returns the declared default with a warning; every other key returns its stored string, or scope unset when nothing holds or declares it. Defaults to compact text; use format=json for structured output.",
+			"description": "Read-only: resolve config keys and report the scope that supplied each (session, including the session's parent chain, then project, repo, global, builtin). Supply exactly one of key or nonempty keys (unique, nonblank strings). Bulk JSON returns mode=resolved-v1 and ordered results with ok and either value/scope/warnings or error.message; per-key errors do not fail siblings. A key declared by an adapter key manifest returns a value of its declared type (number, boolean, or string), and a stored value that fails that type returns the declared default with a warning; every other key returns its stored string, or scope unset when nothing holds or declares it. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config key to read, e.g. review_phase or an adapter-declared key listed by config.list."),
+					"key":         stringProperty("Legacy single config key to read; mutually exclusive with keys."),
+					"keys":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "uniqueItems": true, "description": "Config keys to resolve independently in request order; mutually exclusive with key. Entries must be nonblank and unique."},
 					"session_key": stringProperty("Optional ws session key. When supplied, session-scope values (including those inherited from the session's parent chain) and the session's committed repo scope take part in resolution."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
-				"required": []string{"key"},
+				"oneOf": []any{
+					map[string]any{"required": []string{"key"}, "not": map[string]any{"required": []string{"keys"}}},
+					map[string]any{"required": []string{"keys"}, "not": map[string]any{"required": []string{"key"}}},
+				},
 			},
 		},
 		{

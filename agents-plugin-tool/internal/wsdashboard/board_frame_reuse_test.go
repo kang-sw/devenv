@@ -7,7 +7,7 @@ import "testing"
 // entry placeholder (entry:eN) with the old frame's data-doc-key and
 // data-srcdoc takes that old frame, the same element, moved (moveBefore)
 // rather than detached, so it never reloads; one whose data-srcdoc changed
-// stays a placeholder for the mount pass; the topic-body frame (topic:)
+// stays a placeholder for the mount pass; a changed topic-body frame (topic:)
 // still takes frameGraft's double buffer; a panel-only topic's first frame
 // takes keyed reuse too; duplicate keys pair off once each; and without
 // moveBefore nothing is kept. The cases execute under node
@@ -98,6 +98,17 @@ var overwrite = holder("entry:e1", "replacement"), same = holder("entry:e2", "S2
 morphBoard(o.board, [topic("h3", null, [overwrite, same])]);
 check("the same first-panel key with changed bytes is replaced, never double-buffered", !inBoard(o, o.e1) && inBoard(o, overwrite) && !overwrite.wbNext);
 check("overwriting the first panel leaves its unchanged sibling running", inBoard(o, o.e2) && !o.e2.reloads && !same.parentNode);
+
+// A log changes the section, not the body document it still carries.
+o = setup();
+var unchangedBody = holder("topic:A", "B1");
+morphBoard(o.board, [topic("h2", unchangedBody, [holder("entry:e1", "S1")])]);
+check("an unchanged body keeps its live document without a pending replacement", inBoard(o, o.body) && !o.body.reloads && !o.body.wbOut && !inBoard(o, unchangedBody) && walk(o.sec, []).filter(function (n) { return isFrame(n) && n.getAttribute("data-doc-key") === "topic:A"; }).length === 1);
+
+morphBoard(o.board, [topic("h3", holder("topic:A", "B2"), [])]);
+check("a changed body still prepares a replacement", o.body.wbOut === true);
+morphBoard(o.board, [topic("h4", holder("topic:A", "B1"), [])]);
+check("returning to the live body cancels the obsolete replacement", inBoard(o, o.body) && !o.body.reloads && !o.body.wbOut && walk(o.sec, []).filter(function (n) { return isFrame(n); }).length === 1);
 
 // Without moveBefore nothing is kept.
 var mb = El.prototype.moveBefore;

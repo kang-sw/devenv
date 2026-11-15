@@ -7,11 +7,10 @@
   // commit window's diff renderer, other text as plain text, or a "not
   // viewable" note.
   //
-  // There is one preview slot: opening a file replaces the content of the
-  // one unpinned preview card, which counts as an open (the card moves to
-  // the head of the unpinned flow). Pinning the slot makes it a pinned
-  // card, and the next file opens a new slot. Opening a file that already
-  // has a pinned card shows that card and loads it again.
+  // Files have three states: one replaceable preview, durable open cards,
+  // and pinned cards. Preview is browser-memory-only: the unchanged card
+  // record restores as open (or pinned). Opening an already open/pinned
+  // file reuses it without demoting it.
   //
   // A card's record is the file's path (and the root, when the explorer
   // changed it), never the capability URL: every load asks the preview
@@ -277,16 +276,44 @@
       note(card, status === 404 ? wsT(d.out ? "js.preview.gone" : "js.preview.missing") : wsT("js.preview.failed"), false);
     });
   }
-  function slots() { return cards.list(KIND).filter(function (c) { return !c.pinned; }); }
+  function slots() { return cards.list(KIND).filter(function (c) { return c.preview && !c.pinned; }); }
+  function state(card) { return card.pinned ? "pinned" : card.preview ? "preview" : "open"; }
+  function changed(card) {
+    card.el.setAttribute("data-file-state", state(card));
+    var label = card.fileState;
+    if (label) {
+      label.textContent = wsT("js.preview.state.preview");
+      label.hidden = state(card) !== "preview";
+    }
+    doc.dispatchEvent(new Event("ws-file-cards"));
+  }
+  function promote(card) {
+    if (!card.preview) return;
+    card.preview = false;
+    changed(card);
+    cards.relayout();
+  }
+  function matches(card, data) {
+    return card.data.path === data.path && !card.data.out === !data.out && (card.data.root || "") === (data.root || "");
+  }
 
   cards.register(KIND, {
-    open: load,
-    close: function (card) { card.turn = -1; card.mediaError = null; },
-    // Unpinning a card makes it the slot again: the slot it replaces goes.
-    pinned: function (card) {
-      if (card.pinned) return;
-      slots().forEach(function (c) { if (c !== card) c.close(); });
-    }
+    open: function (card) {
+      // The flag and state label never enter card.data or the stored record.
+      if (!card.fileState) {
+        card.preview = false;
+        card.fileState = mk("span", "pv-state");
+        card.name.parentNode.insertBefore(card.fileState, card.name.nextSibling);
+        card.el.addEventListener("dblclick", function (e) {
+          if (e.target.closest(".bc-hd") && !e.target.closest("button")) promote(card);
+        });
+      }
+      changed(card);
+      load(card);
+    },
+    close: function (card) { card.turn = -1; card.mediaError = null; doc.dispatchEvent(new Event("ws-file-cards")); },
+    // Both pinning and unpinning end the transient preview state.
+    pinned: function (card) { card.preview = false; changed(card); }
   });
 
   window.WsPreview = {
@@ -294,6 +321,11 @@
     // window's file diff renderer), post (a session write route), toast.
     setup: function (h) { hooks = h || {}; },
     takes: takes,
+    state: function (path, o) {
+      var data = { path: path, root: o && o.root, out: o && o.out };
+      var card = cards.list(KIND).filter(function (c) { return matches(c, data); })[0];
+      return card ? state(card) : "";
+    },
     // open shows the file at path (relative to the browsing root) in a
     // preview card. o.root is a root the explorer changed to; o.line a line
     // to show, which also asks for the file as plain text; o.out marks path
@@ -301,7 +333,8 @@
     // o.origin is the exact validated topic node for one-time placement;
     // it is never part of the kind's persisted data or sandbox capability.
     // o.answer reuses explorer preflight; o.mediaError offers its row menu.
-    // Neither is persisted: restored cards request fresh content as usual.
+    // o.keep opens for real (double click/Enter); default callers preview.
+    // None is persisted: restored cards request fresh content as usual.
     open: function (path, o) {
       o = o || {};
       var data = { path: path };
@@ -312,18 +345,25 @@
       }
       if (o.answer) answers.set(data, o.answer);
       var card = cards.list(KIND).filter(function (c) {
-        return c.pinned && c.data.path === path && !c.data.out === !data.out && (c.data.root || "") === (data.root || "");
+        return matches(c, data);
       })[0];
       if (card) {
+        if (o.keep) promote(card);
         card.data = data;
         card.save();
+        if (card.preview && !card.pinned) card.bump(o.origin);
         load(card);
-      } else if ((card = slots()[0])) {
+      } else if (!o.keep && (card = slots()[0])) {
         card.data = data;
         card.bump(o.origin);
         load(card);
-      } else card = cards.open(KIND, data, undefined, o.origin);
+      } else {
+        card = cards.open(KIND, data, undefined, o.origin);
+        if (card) card.preview = !o.keep;
+      }
       if (!card) return null;
+      changed(card);
+      cards.relayout();
       card.mediaError = o.mediaError || null;
       card.fold(false);
       card.show();

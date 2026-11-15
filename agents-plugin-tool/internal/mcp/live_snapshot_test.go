@@ -708,6 +708,19 @@ func TestDashboardSnapshotRepoFields(t *testing.T) {
 func TestDashboardRepoReadOncePerHeartbeat(t *testing.T) {
 	f := newLiveFixture(t, true)
 	fastLive(t, 5*time.Millisecond)
+	t.Cleanup(func() {
+		ls := f.server.live.existing(f.keyA)
+		f.server.Close()
+		if ls != nil {
+			// The final repo-read assertion can precede its snapshot write.
+			// Drain that timer before TempDir removes the fixture's files.
+			waitFor(t, "pending snapshot effects", func() bool {
+				ls.mu.Lock()
+				defer ls.mu.Unlock()
+				return len(ls.effects) == 0
+			})
+		}
+	})
 	var reads, writes atomic.Int32
 	orig := currentLiveSeams()
 	setLiveSeams(func(s *liveSeams) {

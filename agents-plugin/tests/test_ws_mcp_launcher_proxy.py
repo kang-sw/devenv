@@ -422,8 +422,8 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(self.launcher.read_runtime_metadata(staged)["version"], "0.48.16")
         self.assertEqual(sorted(p.name for p in (self.daemon_dir / "bin").iterdir()), sorted([staged.name, staged.name + ".metadata.json"]))
 
-    def test_an_older_daemon_or_an_older_build_is_replaced_a_newer_one_is_used(self):
-        for version, build_time, want_start in [("0.48.15", 5000, True), ("0.48.16", 1999999999999, True), ("0.48.16", 2000000000000, False), ("0.48.16-dev", 1, True), ("0.48.16-dev", 2000000000000, False), ("0.48.20", 1, False)]:
+    def test_only_an_older_numeric_core_is_replaced(self):
+        for version, build_time, want_start in [("0.48.15", 5000, True), ("0.48.16", 1999999999999, False), ("0.48.16", 2000000000000, False), ("0.48.16-dev", 1, False), ("0.48.16-dev", 2000000000000, False), ("0.48.20", 1, False)]:
             with self.subTest(version=version, build_time=build_time):
                 health = {"version": version, "build_time": build_time}
                 self.assertEqual(self.link().needs_start(health), want_start)
@@ -477,9 +477,9 @@ class LauncherProxyTest(unittest.TestCase):
 
     def test_a_start_that_leaves_the_older_daemon_answering_errors(self):
         # M1: daemon-start reports success, but the daemon answering is still
-        # the older build (it refused to stop, or won the lock race). The
+        # the older numeric core (it refused to stop, or won the lock race). The
         # launcher must not settle on it.
-        old = self.daemon(build_time=1_000_000_000_000)
+        old = self.daemon(version="0.48.15", build_time=1_000_000_000_000)
         old.write_endpoint(self.daemon_dir)
         self.point_start_at(old)
         stderr = io.StringIO()
@@ -489,9 +489,7 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(old.hellos, [], "the older daemon never hosted the session")
 
     def test_a_same_version_daemon_of_the_same_content_is_kept_whatever_its_build_time(self):
-        # L1: Claude, Codex, and Pi install separate copies of one binary,
-        # so their mtimes differ; only a different content hash lets the
-        # build time replace the daemon.
+        # Ordinary equal-core startup never authorizes replacement.
         digest = self.launcher.sha256_file(self.binary)
         same = self.daemon(build_time=1_000_000_000_000, content_hash=digest)
         same.write_endpoint(self.daemon_dir)
@@ -502,27 +500,23 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(self.runtime_log(), [], "same content: no replacement")
         link = self.link()
         self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000, "content_hash": digest}))
-        self.assertTrue(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000, "content_hash": "0" * 64}), "another content, older build: replaced")
-        self.assertTrue(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000}), "a daemon that reports no hash: the build time decides")
+        self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000, "content_hash": "0" * 64}), "different content: kept")
+        self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000}), "missing hash: kept")
         self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 2_000_000_000_000, "content_hash": "0" * 64}), "an equal build is never replaced")
         self.assertFalse(link.needs_start({"version": "0.48.17", "build_time": 1, "content_hash": "0" * 64}), "a newer version is never replaced")
 
-    def test_a_dev_daemon_at_the_contract_core_is_replaced_by_a_newer_build(self):
-        # The contract's plugin_version carries no suffix while a local-devenv
-        # build reports "-dev"; the suffix order alone would read every such
-        # daemon as newer and never let a reinstall at that core replace it.
+    def test_a_dev_daemon_at_the_contract_core_is_kept_for_a_newer_build(self):
+        # Suffixes and hashes do not authorize equal-core replacement.
         digest = self.launcher.sha256_file(self.binary)
         link = self.link()
-        self.assertTrue(link.needs_start({"version": "0.48.16-dev", "build_time": 1_000_000_000_000, "content_hash": "0" * 64}), "-dev daemon, older build of other content: replaced")
+        self.assertFalse(link.needs_start({"version": "0.48.16-dev", "build_time": 1_000_000_000_000, "content_hash": "0" * 64}), "-dev daemon, older build of other content: kept")
         self.assertFalse(link.needs_start({"version": "0.48.16-dev", "build_time": 1_000_000_000_000, "content_hash": digest}), "-dev daemon of the same content: kept")
         self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000, "content_hash": digest}), "same version, same content: kept")
         self.assertTrue(link.needs_start({"version": "0.48.15-dev", "build_time": 3_000_000_000_000, "content_hash": "0" * 64}), "an older core: replaced")
         self.assertFalse(link.needs_start({"version": "0.48.17-dev", "build_time": 1, "content_hash": "0" * 64}), "a newer core: kept")
 
     def test_a_dev_daemon_that_daemon_start_keeps_is_used_not_fallen_back_from(self):
-        # A bare release runtime asks to replace an older-built "-dev" daemon
-        # of its core, but daemon-start (wsdashboard.keepRunning) ranks the
-        # "-dev" daemon newer and keeps it; the launcher then uses it.
+        # A bare release runtime directly reuses an equal-core dev daemon.
         dev = self.daemon(version="0.48.16-dev", build_time=1_000_000_000_000, content_hash="0" * 64)
         dev.write_endpoint(self.daemon_dir)
         self.point_start_at(dev)
@@ -530,7 +524,7 @@ class LauncherProxyTest(unittest.TestCase):
         client.send("initialize")
         self.assertEqual(client.recv()["result"]["served_by"], "daemon")
         self.assertEqual(client.close(), 0)
-        self.assertEqual([r["args"][0] for r in self.runtime_log()], ["daemon-start"])
+        self.assertEqual(self.runtime_log(), [])
         self.assertEqual(len(dev.hellos), 1)
 
     # --- the paths under traffic --------------------------------------------------
@@ -901,7 +895,7 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertFalse(hasattr(self.launcher, "ProcessStream"))
         self.assertFalse(hasattr(self.launcher, "proxy_disabled"))
 
-    def run_main(self, argv, *, input_text="", input_encoding="utf-8", forbid_install=False, allow_build=False):
+    def run_main(self, argv, *, input_text="", input_encoding="utf-8", forbid_install=False, allow_build=False, local_devenv=False, allow_lifecycle=False):
         stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         stderr = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         env = dict(self.env, WS_MCP_RUNTIME_DIR=str(self.root), WS_MCP_LAUNCHER_DIRECT="1")
@@ -910,11 +904,14 @@ class LauncherProxyTest(unittest.TestCase):
              mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(input_text.encode("utf-8")), encoding=input_encoding)), \
              mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr), \
              mock.patch.object(self.launcher, "detect_project_root"), \
+             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=local_devenv), \
              mock.patch.object(self.launcher, "read_runtime_contract", return_value={"plugin_version": "0.48.16"}), \
              mock.patch.object(self.launcher, "runtime_binary_name", return_value=self.binary.name), \
              mock.patch.multiple(self.launcher.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT) as processes, \
              mock.patch.multiple(self.launcher.os, execv=mock.DEFAULT, execve=mock.DEFAULT, execvpe=mock.DEFAULT) as execs, \
              mock.patch.object(self.launcher, "install_runtime", side_effect=AssertionError("unexpected repair")) if forbid_install else mock.patch.object(self.launcher, "note"):
+            if allow_lifecycle:
+                processes["call"].return_value = 0
             if allow_build:
                 processes["run"].side_effect = self.launcher.subprocess.TimeoutExpired(["fake-go", "build"], 0.05)
             code = self.launcher.main()
@@ -924,6 +921,9 @@ class LauncherProxyTest(unittest.TestCase):
                     for call in process.call_args_list:
                         self.assertEqual(call.args[0][0], "fake-go")
                         self.assertEqual(call.kwargs["timeout"], self.launcher.RUNTIME_BUILD_TIMEOUT)
+                elif allow_lifecycle and name == "call":
+                    process.assert_called_once()
+                    self.assertEqual(process.call_args.args[0][1:], argv)
                 else:
                     process.assert_not_called()
             for process in execs.values():
@@ -931,6 +931,27 @@ class LauncherProxyTest(unittest.TestCase):
         stdout.flush()
         stderr.flush()
         return code, stdout.buffer.getvalue(), stderr.buffer.getvalue()
+
+    def test_run_main_ignores_an_active_local_devenv_marker(self):
+        plugin_dir = self.root / "marked-plugin"
+        plugin_dir.mkdir()
+        (self.root / "cmd" / "ws-mcp").mkdir(parents=True)
+        (plugin_dir / ".local-devenv-runtime").write_text(json.dumps({
+            "schema_version": 1, "source_root": str(self.root),
+            "tool_dir": str(self.root), "go": str(self.binary),
+        }), encoding="utf-8")
+        self.assertTrue(self.launcher.local_devenv_runtime_enabled(plugin_dir, self.launcher.host_os()))
+        daemon = self.daemon()
+        daemon.write_endpoint(self.daemon_dir)
+        payload = '{"jsonrpc":"2.0","id":"marked","method":"initialize"}\n'
+        with mock.patch.object(self.launcher, "__file__", str(plugin_dir / "bin" / "ws-mcp-launcher.py")), \
+             mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False):
+            code, output, _ = self.run_main(["serve", "--stdio"], input_text=payload, forbid_install=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output)["id"], "marked")
+        self.assertEqual(self.runtime_log(), [])
+        # The helper's default must not leak into explicit local-devenv cases.
+        self.assertTrue(self.launcher.local_devenv_runtime_enabled(plugin_dir, self.launcher.host_os()))
 
     def test_main_never_restores_direct_bypass_or_catch_all_exec(self):
         daemon = self.daemon(cli_exit_code=0)
@@ -960,7 +981,6 @@ class LauncherProxyTest(unittest.TestCase):
         daemon = self.daemon(cli_exit_code=0, build_time=1)
         daemon.write_endpoint(self.daemon_dir)
         with mock.patch.object(self.launcher, "runtime_install_forced", return_value=True), \
-             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=True), \
              mock.patch.object(self.launcher, "local_devenv_source_fingerprint", return_value="changed-source"), \
              mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False), \
              mock.patch.object(self.launcher, "runtime_fully_compatible", return_value=False) as compatible, \
@@ -968,7 +988,7 @@ class LauncherProxyTest(unittest.TestCase):
             for argv, payload in ((["mailbox", "wait", "--session-key", "test-key"], ""),
                                   (["mailbox", "codex-stop-hook"], '{"stop_hook_active":true}')):
                 with self.subTest(argv=argv):
-                    code, stdout, _ = self.run_main(argv, input_text=payload, forbid_install=True)
+                    code, stdout, _ = self.run_main(argv, input_text=payload, forbid_install=True, local_devenv=True)
                     self.assertEqual(code, 0)
                     self.assertEqual(json.loads(stdout)["served_by"], "daemon")
                     self.assertEqual(daemon.hellos[-1]["argv"], argv)
@@ -977,22 +997,42 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(self.runtime_log(), [])
         self.assertFalse((self.daemon_dir / "bin").exists())
 
-    def test_forced_local_install_still_repairs_interactive_stdio_with_a_usable_daemon(self):
+    def test_stale_source_reuses_compatible_runtime_for_interactive_stdio(self):
         daemon = self.daemon()
         daemon.write_endpoint(self.daemon_dir)
         with mock.patch.object(self.launcher, "runtime_install_forced", return_value=True), \
-             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=True), \
              mock.patch.object(self.launcher, "local_devenv_source_fingerprint", return_value="changed-source"), \
              mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False), \
              mock.patch.object(self.launcher, "runtime_fully_compatible", return_value=True), \
              mock.patch.object(self.launcher, "write_compatibility_stamp"), \
              mock.patch.object(self.launcher, "install_runtime") as install, \
              mock.patch.object(self.launcher, "proxy_serve", return_value=0) as serve:
-            code, _, _ = self.run_main(["serve", "--stdio"])
+            code, _, stderr = self.run_main(["serve", "--stdio"], local_devenv=True)
             self.assertEqual(code, 0)
-            install.assert_called_once()
-            self.assertTrue(install.call_args.kwargs["force_local"])
+            install.assert_not_called()
+            self.assertEqual(stderr.count(b"python3 scripts/dev.py rerun daemon"), 1)
             self.assertTrue(serve.call_args.args[0].allow_start)
+            self.assertFalse(serve.call_args.args[0].needs_start({"version": "0.48.16-dev", "build_time": 1}))
+
+    def test_lifecycle_explicit_replace_bypasses_the_healthy_daemon_shortcut(self):
+        daemon = self.daemon(build_time=1, content_hash=self.launcher.sha256_file(self.binary))
+        daemon.write_endpoint(self.daemon_dir)
+        code, stdout, _ = self.run_main(["daemon-start"], forbid_install=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["outcome"], "kept")
+        for flag in ("--replace", "--replace=true", "-replace"):
+            with self.subTest(flag=flag):
+                code, _, _ = self.run_main(["daemon-start", flag, "--build-time", "123"], forbid_install=True, allow_lifecycle=True)
+                self.assertEqual(code, 0)
+
+    def test_equal_core_build_hash_and_suffix_matrix_never_requests_replacement(self):
+        digest = self.launcher.sha256_file(self.binary)
+        link = self.link()
+        for version in ("0.48.16", "0.48.16-dev", "0.48.16-other"):
+            for build_time in (None, 0, 1, 3_000_000_000_000):
+                for content_hash in (None, "", digest, "other"):
+                    with self.subTest(version=version, time=build_time, hash=content_hash):
+                        self.assertFalse(link.needs_start({"version": version, "build_time": build_time, "content_hash": content_hash}))
 
     def test_version_inspection_never_starts_or_probes_a_ws_process(self):
         code, stdout, _ = self.run_main(["version"], forbid_install=True)

@@ -228,7 +228,7 @@ func TestTokenSpawnRecordsTheHolderAsParent(t *testing.T) {
 	if rec := h.record(gc.ID); rec.Parent == nil || *rec.Parent != want || rec.Tier != "small" {
 		t.Fatalf("the child's record = %+v", rec)
 	}
-	if got := h.backend.waitProc(t, 1).nextSent(t); got != "sub task" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != h.envelope("sub task") {
 		t.Fatalf("the child's first turn = %q", got)
 	}
 	if tok := h.token(1); tok == "" || tok == token {

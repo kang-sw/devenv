@@ -256,6 +256,7 @@
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
+      leading: function (c) { return worktree && c.preview && !(PIN_WIDE && PIN_WIDE.matches); },
       layout: function (on) {
         if (on) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
         railOpen(false);
@@ -511,6 +512,10 @@
     if (!changed.length || !doc.body || !doc.body.moveBefore) return null;
     var pairs = [];
     changed.forEach(function (c) {
+      // Timeline anchors can become inert gaps after an append. Replay only
+      // already-admitted rows before looking for their frame placeholders;
+      // the normal post-morph restore still owns folds, mounting and layout.
+      if (window.wbHistory) window.wbHistory.prepare(c.n, window.wbHistory.capture(c.old));
       var held = c.g ? c.g.oc[0] : null, olds = {};
       q('iframe.doc-frame[data-doc-key^="entry:"]:not(.doc-frame-next)', c.old).forEach(function (f) {
         if (f === held || !f.hasAttribute("data-srcdoc")) return;
@@ -620,30 +625,33 @@
   // frameGraft moves g's new section content into its old section, level by
   // level down the frame's path: each kept element takes the new element's
   // attributes and children, except its child on the path, which stays.
-  // At the bottom the new frame goes in after the old one, pending.
+  // At the bottom an unchanged document stays live; a changed frame goes
+  // in after the old one, pending.
   function frameGraft(g) {
     var of = g.oc[0], mounted = of.tagName === "IFRAME";
+    var same = of.getAttribute("data-doc-key") === g.nc[0].getAttribute("data-doc-key") && of.getAttribute("data-srcdoc") === g.nc[0].getAttribute("data-srcdoc");
+    if (same) of.wbOut = false;
     // The next frame of a mounted frame is mounted before it goes in, and
     // before anything holds it (expandos, the load listener): a placeholder
     // would show nothing to reveal. The next frame of an unmounted one (a
     // closed fold, a topic far from the view) is a placeholder that simply
     // takes the old one's place: the topic mounts it once it comes near
     // (viewport bands).
-    if (mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
+    if (!same && mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
     var nf = g.nc[0];
-    if (mounted) frameNext(nf, of);
+    if (!same && mounted) frameNext(nf, of);
     for (var i = g.oc.length - 1; i > 0; i--) {
       var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
       Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
       Array.prototype.forEach.call(na.attributes, function (a) { if (oa.getAttribute(a.name) !== a.value) oa.setAttribute(a.name, a.value); });
       Array.prototype.slice.call(oa.childNodes).forEach(function (c) { if (c !== oc) oa.removeChild(c); });
       Array.prototype.slice.call(na.childNodes).forEach(function (c) {
-        if (c === nc) { before = false; if (c === nf) oa.appendChild(c); }
+        if (c === nc) { before = false; if (c === nf && !same) oa.appendChild(c); }
         else if (before) oa.insertBefore(c, oc);
         else oa.appendChild(c);
       });
     }
-    if (!mounted) of.parentNode.removeChild(of);
+    if (!same && !mounted) of.parentNode.removeChild(of);
   }
   // frameNext makes nf the pending next frame of mounted frame of.
   function frameNext(nf, of) {
@@ -795,6 +803,108 @@
       handles.push(w.keep(n));
     });
     return { h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
+  }
+  // Asset reloads cross a document boundary. Keep only tab-local, short-lived
+  // identities; placement and late frame layout still belong to wbHistory.
+  var BOARD_RELOAD = "ws.dashboard.board-reload." + location.pathname + location.search;
+  var boardReloadCanceled = false, boardReloadStop = null;
+  function boardReloadInput(e) {
+    // Revealing the hidden board is navigation, not a scroll override.
+    if ((e.type === "pointerdown" || e.type === "touchstart" || (e.type === "keydown" && /^( |Spacebar)$/.test(e.key))) &&
+        e.target.closest && e.target.closest('#tabbar [data-tab="board"]')) return;
+    if (e.type === "scroll" && e.target !== doc && e.target !== doc.scrollingElement && e.target.id !== "bcol" && e.target.id !== "bpins") return;
+    if (e.type === "keydown" && !/^(ArrowUp|ArrowDown|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) return;
+    boardReloadCanceled = true;
+    if (boardReloadStop) boardReloadStop();
+  }
+  ["wheel", "touchstart", "pointerdown", "keydown", "scroll"].forEach(function (type) {
+    doc.addEventListener(type, boardReloadInput, { capture: true, passive: true });
+  });
+  function boardSaveReload() {
+    // A shell and its frame can both receive the asset event. A second
+    // reload before placement must carry the original reference forward.
+    try {
+      var pending = JSON.parse(window.sessionStorage.getItem(BOARD_RELOAD));
+      if (!boardReloadCanceled && pending && Number.isFinite(pending.at) && pending.page === location.pathname + location.search &&
+          Date.now() >= pending.at && Date.now() - pending.at < 60000 && Array.isArray(pending.records)) return;
+    } catch (e) {}
+    var w = window.wbHistory, records = [], seen = new Set();
+    if (!w || !w.keep) return;
+    boardBoxes().forEach(function (box) {
+      var h = w.keep(box.firstElementChild || box, { capture: false }), s = h.scroller;
+      if (seen.has(s)) return;
+      seen.add(s);
+      var view = h.viewport(), line = view.top + 1;
+      var panels = boardWithSnap(function () { return boardViewedPanels(s); });
+      panels.sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+      var n = panels.find(function (p) { var r = p.getBoundingClientRect(); return r.top <= line && r.bottom > line; }) ||
+        panels.find(function (p) { return p.getBoundingClientRect().top > line; });
+      var topic = n && n.closest(".topic");
+      records.push({ scroller: s === doc.scrollingElement ? "document" : s.id, top: s.scrollTop, key: n && boardPanelKey(n), topic: topic && topicKey(topic),
+        offset: n ? n.getBoundingClientRect().top - line : 0 });
+    });
+    try { window.sessionStorage.setItem(BOARD_RELOAD, JSON.stringify({ at: Date.now(), page: location.pathname + location.search, records: records })); } catch (e) {}
+  }
+  if (framed) window.wsSaveBoardReload = boardSaveReload;
+  function boardRestoreReload() {
+    var saved = null;
+    try {
+      saved = JSON.parse(window.sessionStorage.getItem(BOARD_RELOAD));
+    } catch (e) {}
+    var observer = null, expiry = null, done = false;
+    function stop() {
+      done = true;
+      if (observer) observer.disconnect();
+      clearTimeout(expiry);
+      boardReloadStop = null;
+      try { window.sessionStorage.removeItem(BOARD_RELOAD); } catch (e) {}
+      ["wheel", "touchstart", "pointerdown", "keydown", "scroll"].forEach(function (type) { doc.removeEventListener(type, boardReloadInput, true); });
+    }
+    function restore() {
+      if (done) return;
+      if (boardReloadCanceled || !saved || saved.page !== location.pathname + location.search || !Number.isFinite(saved.at) ||
+          Date.now() - saved.at < 0 || Date.now() - saved.at >= 60000 || !Array.isArray(saved.records)) { stop(); return; }
+      var w = window.wbHistory;
+      if (!w || !w.place) { stop(); return; }
+      saved.records = saved.records.filter(function (r) {
+        if (!r || !Number.isFinite(r.top) || !Number.isFinite(r.offset)) return false;
+        var s = r.scroller === "document" ? doc.scrollingElement : $(r.scroller);
+        // Hidden panes have no scroller geometry: handing their nodes to
+        // place now would incorrectly select the document as scroll owner.
+        if (!s || !visible(s) || !s.clientHeight || !s.clientWidth || !boardBoxes().some(function (b) {
+          return visible(b) && b.getBoundingClientRect().height > 0 && (s === doc.scrollingElement || s.contains(b));
+        })) return true;
+        var topic = boardBoxes().flatMap(function (b) { return q("section.topic[data-topic]", b); }).find(function (n) { return topicKey(n) === r.topic; });
+        var n = topic && boardLivePanels(topic).find(function (p) { return boardPanelKey(p) === r.key; });
+        if ((!n || !n.getBoundingClientRect().height) && /^(p|e)[1-9][0-9]*$/.test(r.key || "") && w.loadTarget) {
+          // The history owner also resolves topics served in inert templates.
+          (topic ? [topic] : boardBoxes()).some(function (b) {
+            n = w.loadTarget(b, r.key, window.WsCards && window.WsCards.unfoldTopic);
+            return !!n;
+          });
+        }
+        n = n || topic;
+        if (n) {
+          w.place(n, { readingOffset: r.offset });
+        } else {
+          // Missing identities fall back numerically through the SAME owner.
+          var ref = s.firstElementChild;
+          if (!ref) return false;
+          var top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
+          w.place(ref, { offset: ref.getBoundingClientRect().top - top + s.scrollTop - r.top });
+        }
+        return false;
+      });
+      if (!saved.records.length) { stop(); return; }
+      try { window.sessionStorage.setItem(BOARD_RELOAD, JSON.stringify(saved)); } catch (e) {}
+      if (!observer && window.ResizeObserver) {
+        observer = new ResizeObserver(restore);
+        boardBoxes().concat([$("bcol"), $("bpins")]).forEach(function (b) { if (b) observer.observe(b); });
+      }
+      if (!expiry) expiry = setTimeout(stop, 60000 - (Date.now() - saved.at));
+    }
+    boardReloadStop = stop;
+    requestAnimationFrame(restore);
   }
   // A staging pass reads exposure through one wbHistory.snapshot: nothing
   // writes the DOM inside it, so each scroller's viewport (a scan of every

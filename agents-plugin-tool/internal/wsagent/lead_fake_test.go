@@ -721,7 +721,10 @@ func newLeadHarness(t *testing.T) *leadHarness {
 	restore := environ
 	environ = func() []string { return slices.Clone(leadDaemonEnv) }
 	t.Cleanup(func() { environ = restore })
+	// Every send and restart in this harness shares the same envelope time.
+	now := time.Now()
 	h.opts = Options{
+		Now:       func() time.Time { return now },
 		Dir:       h.dir,
 		Backends:  map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi}},
 		Keys:      &fakeKeys{},
@@ -974,7 +977,7 @@ func (h *leadHarness) runLead(text string) (id, holder string) {
 	id = h.lead(BackendClaude, LeadOptions{}).ID
 	h.send(id, text)
 	holder = h.holder(id)
-	eventually(h.t, "the first message", func() bool { return slices.Equal(h.userInputs(holder), []string{text}) })
+	eventually(h.t, "the first message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes(text)) })
 	return id, holder
 }
 

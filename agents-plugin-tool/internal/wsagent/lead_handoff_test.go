@@ -241,7 +241,7 @@ func TestLeadRowOfAnEarlierDaemonIsNotATerminals(t *testing.T) {
 		return row.Hosted && !row.Agent && row.HostPID == rec.HostPID
 	})
 	h.send(id, "two")
-	eventually(t, "the rejoined process to take the message", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the rejoined process to take the message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	if st, rec := h.state(id), h.record(id); st.Status == StatusHandedOff || rec.HandedOffAt != "" || h.holders.opCount("stop") != 0 {
 		t.Fatalf("the session was let go: %+v, record %+v, holder calls %v", st, rec, h.holders.opList())
 	}

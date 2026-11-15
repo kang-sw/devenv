@@ -56,9 +56,18 @@ agent log line, retaining a human current-state summary:
 | Awaiting confirmation | Keep one live confirmation check for the finished artifact. |
 
 Keep at most one open ask per topic, counting checks as asks; reuse or patch
-its item as the work changes. Close a topic only after the user's final
-answer, so unfinished work stays visible. These ask and summary obligations
-remain lead judgment alongside the machine state.
+its item as the work changes. Close a topic only after the user's final answer
+when an ask exists, so unfinished work stays visible; a topic whose work is
+finished and that has no open ask is closed with a one-line `wb:close result`
+instead of left open. Moving a topic from implementing to awaiting confirmation
+or waiting with no open ask returns a nudge naming the topic: close it if
+finished, or add a check or question. These ask and summary obligations remain
+lead judgment alongside the machine state.
+
+A one-off report that asks the user nothing (a status breakdown, an
+investigation summary) is created and closed in the same batch: the report is
+a panel and the `wb:close` result is its one-line conclusion. A report that
+carries an ask stays open until the answer arrives, then closes.
 
 Approval of a concrete deliverable is execution authority: start the approved
 build or change rather than ask permission again. A request to build or change

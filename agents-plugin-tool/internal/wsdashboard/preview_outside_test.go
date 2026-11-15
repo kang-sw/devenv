@@ -21,6 +21,7 @@ function check(name, got, want) {
 function El(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.attrs = {}; this.on = {}; this.style = {}; this.className = ""; this.offsetWidth = 10; this.offsetHeight = 10; }
 El.prototype.appendChild = function (c) { this.children.push(c); c.parentNode = this; return c; };
 El.prototype.removeChild = function (c) { this.children.splice(this.children.indexOf(c), 1); };
+El.prototype.insertBefore = function (c, ref) { var i = this.children.indexOf(ref); this.children.splice(i < 0 ? this.children.length : i, 0, c); c.parentNode = this; return c; };
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 El.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
@@ -48,7 +49,8 @@ root.attrs["data-rid"] = "rid1";
 var document = {
   documentElement: root, body: new El("body"),
   createElement: function (tag) { return new El(tag); },
-  addEventListener: function (k, f) { (listeners[k] = listeners[k] || []).push(f); }
+  addEventListener: function (k, f) { (listeners[k] = listeners[k] || []).push(f); },
+  dispatchEvent: function (e) { (listeners[e.type] || []).forEach(function (f) { f(e); }); }
 };
 function wsT(k) { return k; }
 `
@@ -79,6 +81,7 @@ var kinds = {}, list = [], placements = [];
 function Card(kind, data) {
   this.kind = kind; this.data = data; this.pinned = false; this.body = new El("div"); this.saves = 0;
   this.el = new El("div");
+  this.name = this.el.appendChild(new El("span"));
   this.body.clientHeight = 100;
 }
 Card.prototype.title = function (t) { this.head = t; };
@@ -88,6 +91,7 @@ Card.prototype.bump = function (origin) { placements.push(["bump", origin]); };
 Card.prototype.save = function () { this.saves++; };
 var window = { WsCards: {
   register: function (name, kind) { kinds[name] = kind; },
+  relayout: function () {},
   list: function (kind) { return list.filter(function (c) { return c.kind === kind; }); },
   open: function (kind, data, at, origin) { placements.push(["open", origin]); var c = new Card(kind, data); list.push(c); kinds[kind].open(c); return c; }
 } };

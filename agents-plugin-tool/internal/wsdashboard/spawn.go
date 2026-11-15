@@ -21,7 +21,14 @@ const stagedBinDir = "bin"
 // on the null device, and dir as its working directory. It returns once the
 // process has started and reaps it in the background if it exits while the
 // caller lives.
+//
+// On macOS the process is first offered to launchd (see launchdSpawn) so it
+// escapes a utility QoS clamp inherited from the caller's tree; any launchd
+// failure falls back to the plain spawn.
 func SpawnDetached(exe string, args []string, dir string) error {
+	if launchdSpawn(exe, args, dir) == nil {
+		return nil
+	}
 	cmd, err := startDetached(exe, args, dir)
 	if err != nil {
 		return err

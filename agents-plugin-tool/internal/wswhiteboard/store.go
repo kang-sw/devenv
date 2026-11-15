@@ -247,6 +247,9 @@ func (d TopicDoc) Recency() int { return max(d.Changed, d.RecapChanged) }
 // State is the pure in-memory whiteboard of one session. The host owns its
 // persistence boundary; a nil State means the session has no board.
 type State struct {
+	// shared marks backing data retained by FolderCache. Each open owns its
+	// small State header; mutators detach the backing data before writing.
+	shared bool
 	// Counter is the highest ID the store has minted, adopted, or been
 	// floored to; a minted ID is Counter+1.
 	Counter int `json:"counter"`
@@ -563,6 +566,9 @@ func (s *State) LastAnswerSeq() int {
 // BeginRender advances the render sequence for a render that changes no item
 // (the implicit todo and agenda refresh).
 func (s *State) BeginRender() {
+	if s.shared {
+		*s = *s.clone()
+	}
 	s.Seq++
 }
 
@@ -618,12 +624,15 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		}
 	}
 	out.Summaries = updates.summaries(state, work)
+	// work is already a deep private copy, including when state is a shared
+	// cache read. Commit only to this caller's header, never the cache's.
 	*state = *work
 	return out, nil
 }
 
 func applyCommands(state *State, cmds []command, env Env, p *problems, defaults map[int]bool) (*State, Outcome, *topicUpdates) {
 	work := state.clone()
+	statesBefore := state.TopicStates()
 	updates := newTopicUpdates(state)
 	origins := bodyOrigins{}
 	for _, doc := range state.Topics {
@@ -745,7 +754,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
-	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.structuralWarnings())
+	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
 	return work, out, updates
 }
 

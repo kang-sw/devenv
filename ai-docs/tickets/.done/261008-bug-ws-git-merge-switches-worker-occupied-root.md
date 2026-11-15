@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7c7c8708a8616e3f
 sage-review-completeness-reviewed: 7c7c8708a8616e3f
+completed: 2026-11-15
 ---
 
 # ws git.merge switches a root that a worker occupies on an impl/* branch
@@ -127,6 +128,42 @@ The bounded approval below does not authorize general rollback or a new API.
 | risk.test | high | clean/dirty refusal byte preservation, stale records and interleaving require new regressions beyond own-source fixtures |
 | risk.security_or_contract | high | the settled branch/caller predicate must preserve legacy permitted merges and worker own-checkout moves without a new required argument |
 
+## Implementation Checkpoint (2026-11-15)
+
+- Shared guard and merge integration: `01f878689`. The internal
+  `guardOccupiedRoot(ctx, runner, root, allowedBranches...)` in
+  `agents-plugin-tool/internal/mcp/occupied_root.go` observes symbolic HEAD,
+  rejects other `impl/` checkouts, and fails closed on inspection errors.
+  Merge passes its resolved source and target; the follow-on ticket consumer
+  must retain its approved parented-session exception outside this guard and
+  call it with no allowed branches for parent-less callers. No ticket-write
+  dispatch behavior is changed here.
+- Regression coverage in `git_merge_occupied_root_test.go` snapshots all file
+  bytes, including Git admin files, across clean and staged/unstaged/untracked
+  refusals, rootless branches, packed refs, missing/stale leases, a checkout
+  interleaving during the final tip check, and MCP calls from parent-less and
+  parented keys. It also covers allowed source/target checkouts, inspection
+  failures, and non-waivable occupancy with release acknowledgement.
+- VERIFIED: from `agents-plugin-tool/`,
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMerge|GenericMerge|GitMerge)' -count=1 -timeout=8m`
+  passed (`ok`, 422.478s). The narrower new guard/occupancy/banner run with
+  `-run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMergeOccupiedRoot)' -count=1 -v -timeout=8m`
+  passed (`ok`, 25.555s). An earlier affected run exceeded the shell's 180s
+  budget; the same suite passed with a 600s shell budget (184.940s).
+- Independent Lite review has not run. Per MAIN coordination, pause at the
+  clean implementation commit before review so MAIN can synchronize latest
+  `develop`; do not move HEAD during that synchronization. The intended fresh
+  reviewer scope is the Git-computed ticket diff, guard ordering and exact
+  predicate, refusal byte preservation and diagnostics, allowed merge paths,
+  and regression integrity. Ticket verification passed with a Sage freshness
+  warning, accepted because this checkpoint adds evidence without changing the
+  approved decisions or phase plan. Full `go test ./...` remains pending; coordination
+  limited this checkpoint to bounded local regressions.
+- Implementer-leaf rendering was refused by the host with
+  `child capability exceeds parent ceiling (ws__session_request_hire, ws__session_roster)`.
+  The bounded regression leaf ran directly; no permissions or runtime were
+  changed, and independent review remains required rather than self-review.
+
 ## Phases
 
 ### Phase 1: Refuse occupied-root merge switches before mutation
@@ -145,3 +182,60 @@ elsewhere, release-target acknowledgement and conflicts. Test through MCP as
 well as the reusable guard. Run affected `internal/mcp` tests and
 `cd agents-plugin-tool && go test ./...`; use local temporary repositories,
 not the shared root/pool. This draft records no implementation or test result.
+
+### Result (01f878689) - 2026-11-15
+
+- Implemented the shared symbolic-HEAD guard and merge integration in
+  `01f878689`; added byte-preservation and MCP regressions in `113714514`.
+  Merge permits the exact resolved source or target on an `impl/` checkout,
+  otherwise refuses before status and rechecks immediately before switch.
+  The banner shares the same observer. Inspection errors fail closed, missing
+  or stale leases do not change the predicate, and no occupant identity is
+  inferred from them. The follow-on ticket consumer can reuse the internal
+  guard without a second occupancy policy; its dispatch is unchanged here.
+- MAIN synchronized local `develop` at
+  `87e9d75dcac7e1fa392725fe42934fe531105734` into the implementation branch
+  with conflict-free merge `70b0bebf5427fbcebcfdd01201978ee8b95ba331`.
+  VERIFIED: the diff from `113714514` to that merge is empty across
+  `occupied_root.go`, `occupied_root_test.go`,
+  `occupied_root_announcement.go`, `git_merge.go`, and
+  `git_merge_occupied_root_test.go` under `agents-plugin-tool/internal/mcp/`.
+- VERIFIED pre-sync, with complete outputs read, from `agents-plugin-tool/`:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMerge|GenericMerge|GitMerge)' -count=1 -timeout=8m`
+    passed (`ok`, 422.478s).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMergeOccupiedRoot)' -count=1 -v -timeout=8m`
+    passed (`ok`, 25.555s).
+  These cover clean/dirty refusal bytes, staged/unstaged/untracked files,
+  packed refs, rootless branches, missing/stale records, the final interleaving
+  check, inspection failures, allowed checkouts, held targets, release
+  acknowledgement, conflicts, and parented MCP callers.
+- Independent one-pass Lite review of
+  `87e9d75dcac7e1fa392725fe42934fe531105734..70b0bebf5427fbcebcfdd01201978ee8b95ba331`
+  found no Critical, Important, or Minor findings. MAIN rendered and dispatched
+  the fresh reviewer directly; the worker read its complete report at
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/e1edcb22-01-fix6-occupied-lite.md`.
+  The reviewer inspected source and tests and did not execute tests. No fix
+  pass or re-review was needed.
+- The authorized post-sync attempt
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./... -p 2 -count=1 -timeout=30m`
+  ran with isolated cache/config/runtime directories under
+  `/tmp/ws-occupied-root-verify.Vn7JrY` and the checkout's shipped resource root.
+  MAIN intentionally cancelled the safely identified owned process; exit 143
+  is cancellation, not an assertion failure or test timeout. Its entire
+  299-byte log, `/tmp/ws-occupied-root-verify.Vn7JrY/go-test-all.log`, was read:
+  `cmd/ws-mcp` passed (283.339s), `internal/claudeagents` passed (1.271s),
+  `internal/execjob` passed (52.171s), `internal/gitbatch` passed (0.505s), and
+  `desktop-electron/test/daemon` had no test files. No failing name or MCP
+  package result was emitted before cancellation.
+- MAIN's amended gate (2026-11-15, 09:30:24, confirmed at closure) supersedes
+  the whole-suite expectation: it accepts the recorded focused passes on the
+  byte-identical touched files plus the synchronized independent Lite review.
+  No observed failing name requires a baseline control. No post-sync focused
+  or full-suite pass is claimed, and no retry or further test was authorized
+  or run. `git diff --check` and changed-Go-file formatting checks were clean.
+- Decisions and limits: retain the T0 call/data formats and external-Git-race
+  boundary; no rollback, new argument, lease/liveness policy, runtime change,
+  permission change, network operation, or integration into `develop` was
+  added. The implementer-leaf rendering limitation recorded above was not
+  bypassed; independent Lite still ran through MAIN. Unresolved: none under
+  the amended gate.

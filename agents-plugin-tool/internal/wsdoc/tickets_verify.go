@@ -287,14 +287,31 @@ func ticketCloseDateFieldProblem(fm map[string]any, status string) string {
 // ticketPhaseHeadingProblems runs a stricter well-formedness pass over
 // "### Phase ", "### Result", and "#### Edition" heading lines than
 // ticketPhases' lenient prefix-only match: any line with one of these
-// prefixes must fully match the AGENTS.md commit-rule heading format.
+// prefixes outside fenced code and quoted lines must fully match the
+// AGENTS.md commit-rule heading format.
 // ticketPhases itself is left untouched so its existing lenient callers
 // (ticket listing) are undisturbed; append-only ordering of phase/Result
 // content is a diff-level property and out of scope here.
 func ticketPhaseHeadingProblems(raw string) []string {
 	var problems []string
+	var fenceChar byte
+	fenceLen := 0
 	for i, line := range strings.Split(raw, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, ">") {
+			continue
+		}
+		if char, n, info := markdownFence(line); n > 0 {
+			if fenceLen == 0 {
+				fenceChar, fenceLen = char, n
+			} else if char == fenceChar && n >= fenceLen && info == "" {
+				fenceLen = 0
+			}
+			continue
+		}
+		if fenceLen > 0 {
+			continue
+		}
 		switch {
 		case strings.HasPrefix(trimmed, "### Phase "):
 			if !ticketPhaseHeadingRE.MatchString(trimmed) {

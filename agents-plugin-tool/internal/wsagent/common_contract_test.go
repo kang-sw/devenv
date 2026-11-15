@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -57,7 +58,11 @@ func (tc commonContractCase) assertResume(h *leadHarness, id, holder string) {
 func TestCommonContractLifecycle(t *testing.T) {
 	for _, tc := range commonContractCases() {
 		t.Run(tc.backend, func(t *testing.T) {
-			h := newLeadHarness(t).start()
+			now := time.Date(2026, 11, 15, 9, 35, 42, 0, time.UTC)
+			envelope := func(text string) string { return expectedUserEnvelope(now, text) }
+			h := newLeadHarness(t)
+			h.opts.Now = func() time.Time { return now }
+			h.start()
 			id := h.lead(tc.backend, LeadOptions{}).ID
 			key := h.record(id).WSKey
 			if key == "" || len(h.holders.opList()) != 0 {
@@ -65,7 +70,7 @@ func TestCommonContractLifecycle(t *testing.T) {
 			}
 			h.send(id, "one")
 			holder := h.holder(id)
-			if got := tc.inputs(h, holder); !slices.Equal(got, []string{"one"}) {
+			if got := tc.inputs(h, holder); !slices.Equal(got, []string{envelope("one")}) {
 				t.Fatalf("fresh input = %q", got)
 			}
 			h.holders.out(holder, tc.start...)
@@ -76,17 +81,17 @@ func TestCommonContractLifecycle(t *testing.T) {
 			h.send(id, "held-a")
 			h.send(id, "held-b")
 			h.mail.deliver(key, "From a@x: mail-a")
-			eventually(t, "held messages and mail", func() bool { return h.state(id).Held == 2 })
+			eventually(t, "two held messages and mail", func() bool { return h.state(id).Held == 3 })
 			h.mailSettled(id)
 			h.send(id, "held-c")
-			if got := tc.inputs(h, holder); !slices.Equal(got, []string{"one", "two"}) {
+			if got := tc.inputs(h, holder); !slices.Equal(got, []string{envelope("one"), envelope("two")}) {
 				t.Fatalf("held input reached a running turn: %q", got)
 			}
 
 			h.restart()
 			eventually(t, "rejoin", func() bool {
 				st := h.state(id)
-				return st.Process && st.Status == StatusRunning && st.Held == 2
+				return st.Process && st.Status == StatusRunning && st.Held == 4
 			})
 			if rec := h.record(id); rec.WSKey != key || rec.HolderID != holder {
 				t.Fatalf("rejoin changed identity: %+v", rec)
@@ -95,7 +100,8 @@ func TestCommonContractLifecycle(t *testing.T) {
 				t.Fatalf("rejoin changed process: %v", h.holders.opList())
 			}
 			h.holders.out(holder, tc.finish("second")...)
-			wantInputs := []string{"one", "two", "held-a\n\nheld-b\n\nheld-c\n\nFrom a@x: mail-a"}
+			held := envelope("held-a") + "\n\n" + envelope("held-b") + "\n\n" + envelope("held-c")
+			wantInputs := []string{envelope("one"), envelope("two"), held + "\n\nFrom a@x: mail-a"}
 			eventually(t, "one ordered merged delivery", func() bool { return slices.Equal(tc.inputs(h, holder), wantInputs) })
 			h.holders.out(holder, tc.start...)
 			tc.end(h, id, holder, "third")
@@ -109,7 +115,7 @@ func TestCommonContractLifecycle(t *testing.T) {
 					conversation = append(conversation, entry.Kind+":"+entry.Text)
 				}
 			}
-			want := []string{"user:one", "reply:first", "turn:", "user:two", "reply:second", "turn:", "user:held-a\n\nheld-b\n\nheld-c", "reply:third", "turn:"}
+			want := []string{"user:" + envelope("one"), "reply:first", "turn:", "user:" + envelope("two"), "reply:second", "turn:", "user:" + held, "reply:third", "turn:"}
 			if !slices.Equal(conversation, want) {
 				t.Fatalf("ordered user/reply/end meanings = %q, want %q", conversation, want)
 			}
@@ -122,7 +128,7 @@ func TestCommonContractLifecycle(t *testing.T) {
 				t.Fatalf("stop/resume identity or lifecycle changed: %v", h.holders.opList())
 			}
 			tc.assertResume(h, id, second)
-			if got := tc.inputs(h, second); !slices.Equal(got, []string{"resume"}) {
+			if got := tc.inputs(h, second); !slices.Equal(got, []string{envelope("resume")}) {
 				t.Fatalf("resumed input = %q", got)
 			}
 		})

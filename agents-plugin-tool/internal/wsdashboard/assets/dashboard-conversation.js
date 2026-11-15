@@ -116,8 +116,8 @@
         if (effectTopic(topicID) !== topic) { step(); return; }
         var target = topic;
         if (id !== topicID) {
-          if (/^[ep]/.test(id)) target = window.wbHistory && window.wbHistory.loadTarget ? window.wbHistory.loadTarget(topic, id, unfold) : null;
-          else target = topic.querySelector('[id="' + id + '"]');
+          if (window.wbHistory && window.wbHistory.loadTarget) target = window.wbHistory.loadTarget(topic, id, unfold);
+          else target = /^item-/.test(id) ? topic.querySelector('[id="' + id + '"]') : null;
           if (!target || target.id !== id || !inBoard(target) || target.closest("section.topic[data-topic]") !== topic ||
               (/^item-/.test(id) && !target.matches(".card.policy[data-id], .arow[data-id], .ckrow[data-id], .srow"))) target = null;
         }
@@ -133,6 +133,14 @@
         if (!target.closest(".wb-history")) {
           target.scrollIntoView({ block: "start" });
           if (window.wbHistory && window.wbHistory.keep) window.wbHistory.keep(target);
+          // Entry/item flashes belong to loadTarget; topic-only navigation
+          // (including an absent element's fallback) uses the existing pulse.
+          if (target === topic || !window.wbHistory || !window.wbHistory.loadTarget) {
+            target.classList.remove("palette-flash");
+            void target.offsetWidth;
+            target.classList.add("palette-flash");
+            setTimeout(function () { target.classList.remove("palette-flash"); }, 1600);
+          }
         }
         target.setAttribute("tabindex", "-1");
         target.focus({ preventScroll: true });

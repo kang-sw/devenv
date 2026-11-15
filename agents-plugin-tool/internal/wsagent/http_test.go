@@ -115,7 +115,7 @@ func TestRESTRoutesEndToEnd(t *testing.T) {
 	}
 	eventually(t, "start", func() bool { return d.backend.startCount() == 1 })
 	p := d.backend.waitProc(t, 0)
-	if got := p.nextSent(t); got != "hello" {
+	if got := p.nextSent(t); got != d.envelope("hello") {
 		t.Fatalf("turn = %q", got)
 	}
 	if st := decodeState(t, d.do(http.MethodGet, "/agents/"+id, "", "", nil)); st.Status != StatusRunning {
@@ -131,9 +131,7 @@ func TestRESTRoutesEndToEnd(t *testing.T) {
 	if page.status != http.StatusOK {
 		t.Fatalf("page message: %d %s", page.status, page.body)
 	}
-	if got := p.nextSent(t); got != "from the page" {
-		t.Fatalf("page turn = %q", got)
-	}
+	assertUserEnvelopeText(t, p.nextSent(t), "from the page")
 
 	if r := d.post("/agents/"+id+"/send", map[string]string{"text": "queued"}); decodeState(t, r).Held != 1 {
 		t.Fatalf("a send during a turn is held: %s", r.body)
@@ -143,7 +141,7 @@ func TestRESTRoutesEndToEnd(t *testing.T) {
 		Returned []string `json:"returned"`
 		Held     int      `json:"held"`
 	}
-	if err := json.Unmarshal([]byte(r.body), &ia); err != nil || r.status != http.StatusOK || len(ia.Returned) != 1 || ia.Returned[0] != "queued" || ia.Held != 0 {
+	if err := json.Unmarshal([]byte(r.body), &ia); err != nil || r.status != http.StatusOK || len(ia.Returned) != 1 || ia.Returned[0] != d.envelope("queued") || ia.Held != 0 {
 		t.Fatalf("interrupt: %d %s", r.status, r.body)
 	}
 	p.events <- Event{TurnEnd: true}

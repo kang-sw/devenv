@@ -37,6 +37,7 @@ type FileCache[T any] struct {
 }
 
 type fileCacheEntry[T any] struct {
+	info      os.FileInfo // retained for identity-checked reads
 	size, mod int64
 	val       T
 }
@@ -50,6 +51,18 @@ const fileCacheRacyWindow = 2 * time.Second
 // Load returns the value load reads from path, from the cache while path
 // stats as it did before that read.
 func (c *FileCache[T]) Load(path string, load func(path string) (T, error)) (T, error) {
+	return c.load(path, load, false)
+}
+
+// LoadIdentity checks same-file identity and mode as well as size and mtime,
+// including recently written files. Atomic replacements invalidate immediately;
+// an in-place edit preserving all four properties is outside this contract.
+// Dashboard freshness and contact stamps use this rather than a time window.
+func (c *FileCache[T]) LoadIdentity(path string, load func(path string) (T, error)) (T, error) {
+	return c.load(path, load, true)
+}
+
+func (c *FileCache[T]) load(path string, load func(path string) (T, error), identity bool) (T, error) {
 	if c == nil {
 		return load(path)
 	}
@@ -63,7 +76,7 @@ func (c *FileCache[T]) Load(path string, load func(path string) (T, error)) (T, 
 	c.mu.Lock()
 	e, ok := c.entries[path]
 	c.mu.Unlock()
-	if ok && e.size == size && e.mod == mod {
+	if ok && e.size == size && e.mod == mod && (!identity || (e.info != nil && os.SameFile(e.info, info) && e.info.Mode() == info.Mode())) {
 		c.hits.Add(1)
 		return e.val, nil
 	}
@@ -75,14 +88,14 @@ func (c *FileCache[T]) Load(path string, load func(path string) (T, error)) (T, 
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err != nil || now().Sub(info.ModTime()) < fileCacheRacyWindow {
+	if err != nil || (!identity && now().Sub(info.ModTime()) < fileCacheRacyWindow) {
 		delete(c.entries, path)
 		return v, err
 	}
 	if c.entries == nil {
 		c.entries = map[string]fileCacheEntry[T]{}
 	}
-	c.entries[path] = fileCacheEntry[T]{size: size, mod: mod, val: v}
+	c.entries[path] = fileCacheEntry[T]{info: info, size: size, mod: mod, val: v}
 	return v, nil
 }
 

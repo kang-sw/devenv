@@ -5,8 +5,8 @@
  * preflight; this file drives the production `startBridge` (only the
  * `BridgeOptions.runBuild` seam stands in for `go build`) and the production
  * `registerAgentTools`, then launches children through the registry it
- * returns. That pins what neither unit suite sees: the gate on a startup
- * build, the baseline hashed from the startup `runtime.json` bytes, the
+ * returns. That pins what neither unit suite sees: the marker gate (including
+ * startup repair when no runtime exists), the baseline hashed from the startup `runtime.json` bytes, the
  * ensurer on the returned handle, its registration as the registry's launch
  * preflight, and the real `runLauncherOnce` argv and cwd.
  *
@@ -45,7 +45,7 @@ function writeLauncher(pluginDir: string): { launcher: string; installs: () => I
   mkdirSync(join(pluginDir, "bin"));
   const launcher = join(pluginDir, "bin", "ws-mcp-launcher.py");
   const journal = join(pluginDir, "install-runs.jsonl");
-  writeFileSync(launcher, `import json,os,sys
+  const script = `import json,os,sys
 if sys.argv[1:]!=['serve','--stdio']:
  binary=os.environ.get('WS_MCP_BOOTSTRAP_BINARY','')
  with open(${JSON.stringify(journal)},'a') as f: f.write(json.dumps({'argv':sys.argv,'cwd':os.getcwd(),'binary':binary,'binaryExisted':os.path.isfile(binary)})+'\\n')
@@ -64,7 +64,10 @@ for line in sys.stdin:
   else: r=ok('# Workflow Manual\\nstatic body\\n\\n## Session Key\\nwiring-lead')
  else: r={}
  print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)
-`);
+`;
+  // The read-only startup inspection imports the production helper authority;
+  // only executing this script serves the fixture's MCP/install protocol.
+  writeFileSync(launcher, `if __name__ != '__main__':\n import runpy\n globals().update(runpy.run_path(${JSON.stringify(join(PACKAGE_ROOT, "bin", "ws-mcp-launcher.py"))}))\nelse:\n${script.split("\n").map(line => " " + line).join("\n")}`);
   return {
     launcher,
     installs: () => (existsSync(journal) ? readFileSync(journal, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as InstallRun) : []),

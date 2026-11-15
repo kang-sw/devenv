@@ -113,6 +113,14 @@ func hirePost(d *Daemon, path, body string) *httptest.ResponseRecorder {
 }
 func enableHiring(t *testing.T, d *Daemon, id string) {
 	t.Helper()
+	// The fixture's background index load can still be running; enabling
+	// requires a loaded index (503 otherwise), so load it synchronously.
+	if d.index != nil && !d.index.Loaded() {
+		d.index.Refresh()
+	}
+	if d.index == nil || !d.index.Loaded() {
+		t.Fatal("enable: session index did not load")
+	}
 	res := hirePost(d, "/s/"+id+"/hiring", `{"enabled":true}`)
 	if res.Code != 200 {
 		t.Fatalf("enable: %d %s", res.Code, res.Body)

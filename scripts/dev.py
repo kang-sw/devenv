@@ -30,7 +30,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -54,10 +53,9 @@ SEED_PACKAGES = ("agents-plugin", "agents-plugin-wsflow")
 # workers run.
 DAEMON_PACKAGE = REPO / "agents-plugin-wsflow"
 
-# How long to wait for a daemon to leave, and for daemon-start to finish. The
+# How long to wait for daemon-start to finish. The
 # launcher gives a replacement DefaultStartWait plus a margin; a drain adds up
 # to its own 10s.
-GONE_WAIT_SECONDS = 30.0
 START_TIMEOUT_SECONDS = 60.0
 
 
@@ -196,29 +194,6 @@ def current_health(launcher, daemon_dir: Path) -> tuple[dict | None, dict | None
         raise RuntimeError(f"the running daemon is wedged: {exc}") from exc
 
 
-def shutdown_and_wait(launcher, daemon_dir: Path, endpoint: dict, old_pid) -> None:
-    """Ask the running daemon to drain and exit through /shutdown, then wait for it to go.
-
-    Used only when daemon-start would keep a daemon whose content equals the
-    new build, which it never replaces by itself.
-    """
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{int(endpoint['port'])}/shutdown",
-        method="POST",
-        headers={"Authorization": f"Bearer {endpoint['token']}"},
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        if resp.status != 202:
-            raise RuntimeError(f"/shutdown answered {resp.status}")
-    deadline = time.monotonic() + GONE_WAIT_SECONDS
-    while time.monotonic() < deadline:
-        _, health = current_health(launcher, daemon_dir)
-        if health is None or health.get("pid") != old_pid:
-            return
-        time.sleep(0.3)
-    raise RuntimeError(f"daemon pid {old_pid} did not exit within {GONE_WAIT_SECONDS:.0f}s of /shutdown")
-
-
 def run_daemon_start(launcher, staged: Path, build_time: int, plugin_dir: Path = DAEMON_PACKAGE) -> dict:
     env = dict(os.environ)
     # Set, not defaulted: a shell inside a harness session can inherit a
@@ -228,7 +203,7 @@ def run_daemon_start(launcher, staged: Path, build_time: int, plugin_dir: Path =
     # The daemon starts session holders with the interpreter that started it.
     if not env.get("WS_MCP_HOLDER_PYTHON") and sys.executable:
         env["WS_MCP_HOLDER_PYTHON"] = sys.executable
-    argv = [str(staged), "daemon-start", "--build-time", str(build_time)]
+    argv = [str(staged), "daemon-start", "--replace", "--build-time", str(build_time)]
     print("running: " + " ".join(argv))
     proc = subprocess.run(
         argv,
@@ -311,14 +286,8 @@ def rerun_daemon(local: bool, seed: bool = True) -> int:
         staged = launcher.stage_daemon_binary(built, bin_dir)
     print(f"staged: {staged}")
 
-    endpoint, before = current_health(launcher, daemon_dir)
+    _, before = current_health(launcher, daemon_dir)
     print(f"daemon before: {describe(before)}")
-    if before is not None and before.get("content_hash") == digest:
-        # The same content is the same build to the newer-build-wins rule;
-        # a rerun still means replace, so drain it through /shutdown.
-        print("running daemon has identical content; replacing it through /shutdown")
-        shutdown_and_wait(launcher, daemon_dir, endpoint, before.get("pid"))
-
     report = run_daemon_start(launcher, staged, int(time.time() * 1000))
     _, after = current_health(launcher, daemon_dir)
     print(f"daemon after:  {describe(after)}")
