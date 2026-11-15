@@ -475,6 +475,30 @@ and Pi regression selectors. MAIN owns final merge/swap and owner live-screen
 acceptance; the worker neither swaps a shared daemon nor calls the flag alone
 acceptance.
 
+## Blocked (2026-11-15)
+
+Phase 1 stopped with worker stop (f) after two bounded interactive PTY-driver
+attempts timed out (220 seconds and 40 seconds). Neither produced a
+`session.start` observer aggregate; the second reached native interactive UI
+but sent no input. No third launch or automatic retry was made. Interactive
+public-summary provenance, effective mode and request/attempt mapping remain
+unverified, so Phase 2 is not executable. This is a verification-driver failure,
+not proof that every supported public surface lacks summaries or provenance.
+
+Installed-source inspection of Claude Code 2.1.325 found `turn.step` thinking
+chunks shaped as `{kind, index, text, ref}`, while internal stream envelopes
+carry `thinkingDisplay`. No Phase 1 Result, runtime edits, settings mutation,
+acceptance screenshots, tests, independent implementation review or Phase 2
+implementation was completed. The settings before/after comparison also did
+not complete; unchanged settings are not certified by this attempt.
+
+The worker found no matching probe processes, and the second probe PID was
+absent; no cleanup signals were needed. The first probe PID was not captured,
+so complete descendant cleanup is not independently certified. Scratch evidence
+is temporary and is not an implementation dependency. MAIN received the stop;
+a new bounded verification approach or explicit re-dispatch is needed before
+continuation. Hosted Phases 3+4 remain outside this assignment.
+
 ## Focused Verification Contract
 
 These are existing anchors to extend and proposed acceptance names, **not checks
