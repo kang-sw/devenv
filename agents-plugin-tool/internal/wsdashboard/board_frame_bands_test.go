@@ -1,7 +1,6 @@
 package wsdashboard
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -224,7 +223,7 @@ if (bad.length) console.log(bad.join("\n"));
 // rendering. Overview's `content-visibility: visible` overrides
 // (261114-feat-ws-dashboard-board-toolbar-overview) are harmless and stay.
 func TestBoardTopicsDoNotSkipRendering(t *testing.T) {
-	css, err := os.ReadFile("assets/dashboard.css")
+	css, err := dashboardTestAsset("assets/dashboard.css")
 	if err != nil {
 		t.Fatal(err)
 	}

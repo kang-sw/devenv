@@ -34,6 +34,9 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 - **Publish a move map.** Record each old file and recognizable region/symbol group against its new file, plus the changed embedding/template sites and load order. Ongoing workers use this map to rebase without re-deriving the extraction.
 - **Compatibility: T0 (asset content).** This work changes internal asset organization, not MCP tools/arguments, protocol behavior, tracker events, store shape or configuration fields. Existing caller-visible behavior remains unchanged.
 - **Acceptance includes tests and before/after screenshots.** Capture the actual cut-line baseline, not an older visual reference, and compare the result side by side at matching routes, viewports, state and motion settings. Neither a file move nor syntax checks alone prove behavior preservation.
+- **MAIN's 17:59:12 repin.** Integrate exact develop `aac39c69f381a82677f0ee6857e8f8fc5bc89322` before the split's future slot, preserving its landed UI-C2 history-boundary and UI-C3 topic-unfold/beforeGeometry changes. That exact source is now the actual BEFORE comparison pin, replacing historical `d0ad8a9f1`; unmerged 777 and UI-T5 remain excluded. MAIN owns integration; reconciliation and recipe edits remain static-only while H runs.
+
+- **MAIN's 2026-11-15 exact-099 rework supersedes the earlier verification allocation.** Mechanically reconstruct/re-extract all four originals from `09998d57986f9d0f716036115452e1cb912d1f28`, preserving every upstream edit. MAIN owns the started merge; finish its conflict resolution without re-pinning to newer develop. Run the same seven Node commands and both complete Go packages offline by approximately 06:00Z. No new browser matrix, screenshots, old-baseline harness/Lite chase or shared-runtime work is allocated; old Lite evidence applies only to its old head. Preserve the combined browser-gap ticket and all original failures. Publish the [current map](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/move-map-09998d579.md) and record fresh command exits separately from historical results.
 
 ## Constraints
 
@@ -72,8 +75,38 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 | complexity.side_effect_risk | high | INFERRED: Moving initialization and shared closure regions can reorder handlers, break storage ownership or change CSS cascade across standalone, dashboard and frame consumers. |
 | risk.correctness | high | INFERRED: Phase 1 must preserve scroll/focus, frame identity and asynchronous live updates; existing board_keep_test.go#L15-L65 pins ordering across morph, history restore and late frame height compensation. |
 | risk.fit | moderate | INFERRED: Existing builders and responsibility sections support mechanical extraction, but closure boundaries must be retained rather than replaced with a new exported API. |
-| risk.test | high | INFERRED: Many tests extract source spans from a single file; syntax checks cannot prove assembled behavior or visual equality. The actual d0ad8a9f1 visual baseline is still to be captured in a separately granted heavy slot, not an already-approved mockup. git show -s --format=%B cacd771c1 records owner-accepted open picker/card Important and an incomparable earlier baseline, not full 652 acceptance. |
+| risk.test | high | INFERRED: Many tests extract source spans from a single file; syntax checks cannot prove assembled behavior or visual equality. The actual comparison baseline, repinned by MAIN to exact aac39c69f381a82677f0ee6857e8f8fc5bc89322, is still to be captured in the split's separately granted heavy slot, not an already-approved mockup. git show -s --format=%B cacd771c1 records owner-accepted open picker/card Important and an incomparable earlier baseline, not full 652 acceptance. |
 | risk.security_or_contract | moderate | INFERRED: T0 asset organization must retain trusted frame dispatch, sandboxed document loading and existing action availability; agents-plugin-tool/internal/wswhiteboard/render.go and agents-plugin-tool/internal/wsdashboard/pages.go are assembly boundaries, not authority to change those contracts. |
+
+## Historical Static Preparation — Before MAIN's Heavy-Slot START
+
+Static move-only T0 preparation is retained on `impl/develop/map-yoga-coach`.
+MAIN started integration of exact `aac39c69f381a82677f0ee6857e8f8fc5bc89322`
+into preparation `961c8e3bf1a243b602e9c541b101747a6df8ea26`; the worker resolves
+that existing merge, not a rebase or another integration. The new source pin
+includes landed UI-C2/UI-C3. This is not a Phase 1 Result or acceptance.
+No tests, syntax/byte checks, imports, formatters, generators, builds, browsers,
+network/daemon/owner operations or process signals ran. H's actual slot grants
+no split execution. MAIN already acquired the lease; no acquisition was repeated.
+
+- [Move map and peer patch landing points](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/move-map.md).
+- [One bounded offline verification/baseline recipe, not run](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/verification-recipe.md).
+- The merge retains landed UI-C2 history-boundary handling, UI-C3 owner export and
+  pre-geometry callback ordering, and all incoming regression assertions. The two
+  dashboard changes land in `dashboard-frames.js`/`dashboard-tracker.js`; source
+  readers remain assembled. Unmerged 777/UI-T5 changes stay excluded.
+- Independent static lite review 8092 covered `b8989519a..961c8e3bf`, found no
+  Critical and three Important recipe issues. Static corrections select the
+  narrow board tab before visible-topic waiting, mark shared-controls blocked
+  without its separately approved coherent exited-terminal fixture, and specify
+  cumulative deadlines/operation budgets/cleanup reserve/owned-exit handoff.
+  No re-review is requested under lite's one-pass allocation.
+- The one combined recipe remains NOT START-ready: its actual enforcement runner
+  and exited-terminal prerequisite are not supplied by this asset-only scope.
+  Baseline-first failures can leave all candidate coverage explicitly omitted.
+  Exact source/behavior preservation remains unverified; executable verification,
+  side-by-side comparison, Result and closure are deferred. The UI-start pause
+  remains MAIN-owned; peer test receipts are not this ticket's acceptance.
 
 ## Phases
 
@@ -90,3 +123,58 @@ Verification:
 - Exercise affected initialization, controls, scroll/focus preservation and frame/card identity paths using the existing harness. Keep all assertions and report any known baseline failure distinctly from a new failure.
 - Verify the published move map covers every moved region and all registration changes, so ongoing TASK3/TASK5/723/675 and other branches can rebase mechanically.
 - Report the pause boundary and hand control back to MAIN before new UI starts resume. MAIN alone chooses and performs any daemon deployment; a worker does not infer deployment authority from this ticket.
+
+## Integration Result (0c46ba103) - 2026-11-15
+
+This records MAIN's bounded exact-099 rework/handoff, not a completed Phase 1 or
+full browser acceptance. The ticket remains ready; fresh whiteboard verification
+is explicitly pending and MAIN owns the next disposition.
+
+- **Integration:** `0c46ba103ccab58f8c432dbe7f0a2f998e879d91` concludes MAIN's
+  pending merge, parents `922a2d81abbbd7c6351f6a782c38c0db533f58a8` and exact
+  `09998d57986f9d0f716036115452e1cb912d1f28`. All four originals were rebuilt
+  from 099 before re-extraction. The [current map](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/move-map-09998d579.md)
+  records every range; no newer develop head or old split side was substituted.
+- **Verified source contract:** the three separator-free assembled assets equal
+  exact 099 byte-for-byte; the entire upstream harness is reconstructed by
+  inversing only the explicit factory/source-reader adapters. Single-IIFE scope,
+  evaluation order, CSS cascade and upstream fixture/history edits are retained.
+- **Seven Node commands, all exit 0 at tested head 0c46ba103:**
+  `node --test scripts/board-headless/split.test.mjs` (5 tests, none skipped),
+  `node --check scripts/board-headless.mjs`,
+  `node --check scripts/board-headless/toolbar-overview.mjs`,
+  `node --check scripts/board-headless/shared-actions.mjs`,
+  `node agents-plugin-tool/internal/wsdashboard/testdata/lead-popover.test.cjs`,
+  `node agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs`,
+  `node --test agents-plugin-tool/internal/wsdashboard/testdata/task_badges.test.cjs`.
+  `BOARD_SPLIT_BASELINE` was the full exact-099 hash.
+- **Full dashboard:** `go test ./internal/wsdashboard -count=1 -timeout=5m`
+  exited 1 (172.457s). Failing tests: `TestCSSClassesDoNotCollideAcrossModules`
+  (.d/.over/.wait), `TestLabelRouteSavesShowsAndResets`,
+  `TestOverviewPageIntegration`, `TestGearHoldsTheThemeSection`. This is not PASS.
+- **Required attribution:** on MAIN's clean exact-099 checkout and candidate
+  0c46ba103, `go test ./internal/wsdashboard -run
+  '^Test(LabelRouteSavesShowsAndResets|OverviewPageIntegration|GearHoldsTheThemeSection)$'
+  -count=1 -timeout=60s` exited 1 on both. All three fail with the same 213
+  assertion lines; no candidate-only failure or repair. MAIN's 05:45:57 relay
+  independently classifies the CSS failure as pre-split baseline/nonblocking;
+  this worker did not rerun or repair CSS.
+- **Whiteboard remains unrun:** the continuation refused whole-operation
+  admission at 05:52:06Z. No fresh `go test ./internal/wswhiteboard -count=1
+  -timeout=5m` package exit exists; its controller's exit 1 is not a test result.
+  MAIN accepted the honest pending-verification handoff and forbade more launches.
+- **Environment/evidence:** all execution was offline (`GOPROXY=off`,
+  `GOSUMDB=off`, `GOTOOLCHAIN=local`). The first launch stopped before its Node
+  suite because the private recorder still guarded the old pin pair. Only those
+  two private constants were rebound for the fresh run; original failed evidence
+  and product/tests were not repaired. Raw records remain private under cache
+  roots `3e3bef94`, `d3e55baa` and `615b494e`, not committed log bundles. Complete
+  stdout/stderr was read. Every executed controller has complete owned cleanup,
+  I/O, external exit and post-scan evidence; retained-identity matches/unknowns
+  are empty, not an exhaustive global-process absence claim.
+- **Omitted:** whiteboard execution after admission refusal; new browsers,
+  screenshots/visual comparison, Lite, resync, runtime actions, phase closure and
+  ticket closure. Old Lite proves only its old head; original browser failures
+  remain in `261115-bug-ws-dashboard-remaining-browser-harness-gaps`, unchanged.
+  MAIN retains merging, UI-start pause, baseline follow-ups and worktree release.
+

@@ -106,7 +106,7 @@ func pageScripts(t *testing.T) (mention, dashboard string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := dashboardFS.ReadFile("assets/dashboard.js")
+	d, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 // Exercise the actual panel helpers and capture toggle listener, including the
 // storage round trip with fresh page state. frameDOM queues browser-like toggles.
 func TestPanelShutPersistence(t *testing.T) {
-	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
+	raw, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

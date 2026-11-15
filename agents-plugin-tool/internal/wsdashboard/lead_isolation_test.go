@@ -23,7 +23,7 @@ func TestLeadPopoverLaunchBehavior(t *testing.T) {
 // the control and P exist), the neighbouring popover makers never name it,
 // and the create request carries the pick.
 func TestLeadPopoverIsolationWiring(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
