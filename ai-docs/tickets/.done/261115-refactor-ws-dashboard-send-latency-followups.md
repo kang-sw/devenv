@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e6be5428f3366229
 sage-review-completeness-reviewed: e6be5428f3366229
+completed: 2026-11-16
 ---
 
 # Dashboard send latency: post-ship snapshot overlay and render fan-out
@@ -187,3 +188,87 @@ Acceptance:
   wire or store contract is selected.
 - Before/after daemon CPU and snapshot-read rate are measured on an
   isolated daemon with a large evidence fixture.
+
+### Result (632db1e7a) - 2026-11-16
+
+- Completed C/D/E in `118a0790b`, `98db7ba47` and `632db1e7a`.
+  Detail, rail (including inert transition hovers), and served,
+  adapter-present non-compact peer-child hovers retain overlays. Index,
+  usage, answer checks, command availability, outside links, compact peers
+  and count-only delegate lookups use overlay-free snapshots. Live evidence
+  already present in a snapshot is not stripped; absent evidence stays unknown.
+- New trailing evidence normalizes only on intake and incrementally publishes
+  copied touched models, sharing untouched producer projections. Deletion,
+  replacement, earlier lexical duplicate winners and late arrivals deliberately
+  use the canonical retained-record rebuild. Tests preserve ordering, equal-time
+  ties, duplicate precedence, newer live evidence and old-projection immutability.
+  No retention/pruning code or persisted/wire shape changed (T0).
+- Rail wakes still freshly read clock/liveness, layout, worktrees, metadata and
+  hover inputs; equal complete views reuse their HTML/row decomposition without
+  another template render. Landed row transport is unchanged. Replaced the
+  Phase 2 every-wake expectation with invisible-wake suppression and an actual
+  source-render clock/hover test. The older shared-rail test used a board-only
+  change: its diagnosed stale trigger now also renames a row, preserving proof
+  that multiple streams share one actual rail render.
+- Inbox-only live renders refresh both held and drained reads, never just the
+  wake classification. Mixed full-store wakes retain full reads. Index/source
+  rereads may still conservatively raise a full store wake; this does not change
+  source fingerprint semantics or reuse stale page reads.
+- MAIN additionally authorized local fixture-home isolation in `075fa3ffc`:
+  optional `DaemonOptions.Home` selects private account-reader roots without
+  inherited config-root escapes; empty retains the production default. Indexed
+  and common daemon test helpers pass private homes. The empty-home test proves
+  no usage query/HTTP call with fake inherited login-presence configuration.
+  Every later fixture command isolates HOME, CLAUDE_CONFIG_DIR, CODEX_HOME,
+  WS_CACHE_HOME and WS_CONFIG_HOME. Earlier captures remain preserved in
+  `/tmp/send-latency-cde/{before,after}/` but are not valid isolation evidence.
+
+Verification:
+
+- Offline focused cache/projection and dashboard overlay/inbox/rail/stream,
+  clock/layout/peer/command/outside-link checks passed, with the stale shared-rail
+  trigger corrected and its exact test passing separately. Focused race checks
+  passed for both packages. Chromium history (1440/420px), hover, metadata,
+  child-busy and live drag (20/20 drops) regressions passed. Commands, complete
+  outputs and preserved failure diagnoses: `/tmp/send-latency-cde/`.
+- Independent one-pass lite review of `c53c5b573..632db1e7a`: clean, no actionable
+  findings. Report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@a93cfe66/review-paths/cb458547-01-send-latency-cde-lite.md`.
+- Benchmark: Apple M3 Max, darwin/arm64, 50 measured new-response loads after
+  4000 initial records (4000–4049 retained before each load); fixture writes
+  excluded. Load **4.683 ms → 2.432 ms**, allocation **7.47 MB → 1.60 MB**,
+  below the ticket's ~10.6 ms threshold. Raw output is retained in the
+  [before](../assets/261115-refactor-ws-dashboard-send-latency-followups/before/benchmark.txt)
+  and [after](../assets/261115-refactor-ws-dashboard-send-latency-followups/after/benchmark.txt) evidence.
+- Isolated comparison: seven sessions × 4000 initial records, three SSE streams,
+  24 ticks × 300 ms, 24 inbox wakes, 24 git wakes and six new evidence files.
+  Across 7.201 s each, process CPU **0.661841 s → 0.443213 s**
+  (**9.191% → 6.155%** of one core); snapshot cache requests
+  **119.986/s → 117.906/s** (864 → 849), rail renders **27 → 6**, live renders
+  **0 → 21**. Counters are cache requests, not disk opens. CPU includes the
+  in-process fixture/SSE client, excludes setup/browser, and uses a fake page
+  source; this single short workload is not a shared-runtime or production CPU
+  claim. The isolated baseline is archived `c53c5b573` source plus only the
+  authorized home-isolation seam and identical fixture, retaken after the
+  original pre-source baseline's isolation issue. Raw
+  [before](../assets/261115-refactor-ws-dashboard-send-latency-followups/before/daemon.txt)
+  and [after](../assets/261115-refactor-ws-dashboard-send-latency-followups/after/daemon.txt) logs record PIDs and commands.
+- Compared paired captures under
+  `ai-docs/tickets/assets/261115-refactor-ws-dashboard-send-latency-followups/`:
+  `after/index-dark.png` vs `before/index-dark.png`: match;
+  `after/index-light.png` vs `before/index-light.png`: match;
+  `after/session-dark.png` vs `before/session-dark.png`: match;
+  `after/session-light.png` vs `before/session-light.png`: match.
+  Layout, model histories and transition hover output match; generated fixture
+  registration/snapshot timestamps differ. No UI redesign or template change.
+- All recorded disposable PIDs were absent at the final read-only process check.
+  The original pre-isolation runs did not record numeric PIDs; their test/Node
+  commands exited, but their historical PID numbers cannot be recovered from
+  retained logs. No shared-daemon operation, push, swap or pruning edit ran.
+
+- Ticket verification passed with a sage-review freshness warning after this
+  append-only Result. Accepted: the original approved Decisions/phase plan are
+  unchanged; independent implementation review covers the delivered changes.
+
+Omitted: full Go/dashboard/MCP suites, provider/live-runtime measurement and
+retention work, as required by scope. No unresolved review findings.

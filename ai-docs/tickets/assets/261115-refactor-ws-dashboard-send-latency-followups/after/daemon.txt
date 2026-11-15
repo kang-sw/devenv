@@ -1,0 +1,15 @@
+isolation=/tmp/ws-send-isolated.uycaMD cwd=/Users/kang-sw/.ws-worktrees/devenv/closable-lurk-stubborn/agents-plugin-tool wrapper_pid=3479 command=go test -exec /tmp/send-latency-cde/record-test-pid.sh ./internal/wsdashboard -run \^TestSendLatencyEvidenceFixture\$ -count=1 -v 
+go_driver_pid=3511
+test_pid=3817
+=== RUN   TestSendLatencyEvidenceFixture
+    send_latency_measure_test.go:26: fixture_pid=3817
+    send_latency_measure_test.go:87: fixture_node_pid=4225 chromium_pid=4285
+        capture /tmp/send-latency-cde/after-isolated/index-dark.png
+        capture /tmp/send-latency-cde/after-isolated/session-dark.png
+        capture /tmp/send-latency-cde/after-isolated/index-light.png
+        capture /tmp/send-latency-cde/after-isolated/session-light.png
+        
+    send_latency_measure_test.go:133: MEASURE sessions=7 records_per_session=4000 streams=3 ticks=24 interval_ms=300 inbox_wakes=24 git_wakes=24 new_evidence=6 wall_seconds=7.201 process_cpu_seconds=0.443213 core_percent=6.155 snapshot_requests=849 snapshot_requests_per_second=117.906 rail_renders=6 session_renders=27 live_renders=21
+--- PASS: TestSendLatencyEvidenceFixture (14.01s)
+PASS
+ok  	github.com/kang-sw/devenv/internal/wsdashboard	14.743s

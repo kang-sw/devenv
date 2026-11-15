@@ -1,0 +1,7 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/kang-sw/devenv/internal/wslive
+cpu: Apple M3 Max
+BenchmarkObservedCacheNewResponse4000-16    	      50	   4683032 ns/op	 7471007 B/op	   52502 allocs/op
+PASS
+ok  	github.com/kang-sw/devenv/internal/wslive	1.836s
