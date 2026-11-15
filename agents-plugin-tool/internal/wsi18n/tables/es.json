@@ -118,6 +118,7 @@
   "file.outside.gone": "Este archivo ya no está disponible aquí. Vuelve a abrirlo desde el tablero.",
   "file.reason.binary": "no es texto",
   "file.reason.large": "es mayor de {0} MiB",
+  "gear.github": "Repositorio en GitHub",
   "gear.input": "Modo de entrada",
   "gear.input.enter": "Enter envía",
   "gear.input.enter.sub": "Shift+Enter añade una línea nueva",

@@ -111,6 +111,8 @@
 .gmenu .gh { padding: 0 4px; }
 .gmenu .gn { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; white-space: nowrap; }
 .gmenu .gn .settings-version { margin-left: auto; flex: none; }
+.gmenu .gn .d-settings-github { flex: none; display: inline-flex; margin-left: -2px; color: var(--wb-muted-fg); border-radius: 3px; }
+.gmenu .gn .d-settings-github:hover, .gmenu .gn .d-settings-github:focus-visible { color: var(--wb-fg); }
 
 /* LAN access block: Settings shows it to this machine only. */
 .lanbox { min-width: 0; overflow-wrap: anywhere; margin: 0 0 12px; padding: 8px 14px; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); font-size: 13px; line-height: 1.5; }

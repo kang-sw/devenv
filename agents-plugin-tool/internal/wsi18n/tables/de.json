@@ -118,6 +118,7 @@
   "file.outside.gone": "Diese Datei ist hier nicht mehr verfügbar. Öffne sie erneut vom Board aus.",
   "file.reason.binary": "sie ist kein Text",
   "file.reason.large": "sie ist größer als {0} MiB",
+  "gear.github": "GitHub-Repository",
   "gear.input": "Eingabemodus",
   "gear.input.enter": "Enter sendet",
   "gear.input.enter.sub": "Shift+Enter fügt einen Zeilenumbruch ein",

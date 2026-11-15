@@ -342,6 +342,13 @@ func assetID(data pageAssetsData, source string) string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
+// releaseRepository is the GitHub owner/name the ws binary is released from,
+// the Settings footer's repository link. The plugin's runtime.json
+// release_repository says the same for the launcher's binary download, but the
+// shared daemon never reads runtime.json, so the value is restated here and a
+// test pins the two together.
+const releaseRepository = "kang-sw/devenv"
+
 // pageFuncs is the template FuncMap for one language: the page helpers and
 // the translation funcs t, tn, and tcode, with the Go-built display strings
 // (token usage, batch lines, phase and band words) bound to lang.
@@ -381,6 +388,8 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"i18n":  func() template.JS { return wsi18n.Script(lang) },
 		// pwa is a page head's manifest link and theme-color metas (pwa.go).
 		"pwa": pwaHead,
+		// repoURL is the Settings footer's link to the ws repository.
+		"repoURL": func() string { return "https://github.com/" + releaseRepository },
 		// guideshot is a landing guide step's screenshot (landing_guide.go).
 		"guideshot": func(step, alt string) template.HTML { return guideShotHTML(lang, step, alt) },
 	}

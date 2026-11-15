@@ -118,6 +118,7 @@
   "file.outside.gone": "此檔案在這裡已無法使用。請從看板重新開啟。",
   "file.reason.binary": "它不是文字檔",
   "file.reason.large": "它大於 {0} MiB",
+  "gear.github": "GitHub 儲存庫",
   "gear.input": "輸入方式",
   "gear.input.enter": "按 Enter 傳送",
   "gear.input.enter.sub": "Shift+Enter 換行",

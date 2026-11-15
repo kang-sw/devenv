@@ -118,6 +118,7 @@
   "file.outside.gone": "此文件在这里已不可用。请从看板重新打开。",
   "file.reason.binary": "它不是文本",
   "file.reason.large": "它大于 {0} MiB",
+  "gear.github": "GitHub 仓库",
   "gear.input": "输入方式",
   "gear.input.enter": "按 Enter 发送",
   "gear.input.enter.sub": "Shift+Enter 换行",

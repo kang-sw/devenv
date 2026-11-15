@@ -118,6 +118,7 @@
   "file.outside.gone": "Ce fichier n'est plus disponible ici. Rouvrez-le depuis le tableau.",
   "file.reason.binary": "ce n'est pas du texte",
   "file.reason.large": "il dépasse {0} MiB",
+  "gear.github": "Dépôt GitHub",
   "gear.input": "Mode de saisie",
   "gear.input.enter": "Entrée envoie",
   "gear.input.enter.sub": "Shift+Enter ajoute un saut de ligne",

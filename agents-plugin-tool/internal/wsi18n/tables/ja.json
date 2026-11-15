@@ -118,6 +118,7 @@
   "file.outside.gone": "このファイルはここではもう利用できません。ボードから開き直してください。",
   "file.reason.binary": "テキストではありません",
   "file.reason.large": "{0} MiB を超えています",
+  "gear.github": "GitHub リポジトリ",
   "gear.input": "入力モード",
   "gear.input.enter": "Enter で送信",
   "gear.input.enter.sub": "Shift+Enter で改行",

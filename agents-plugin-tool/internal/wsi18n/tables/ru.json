@@ -118,6 +118,7 @@
   "file.outside.gone": "Этот файл здесь больше недоступен. Откройте его снова с доски.",
   "file.reason.binary": "это не текст",
   "file.reason.large": "он больше {0} MiB",
+  "gear.github": "Репозиторий на GitHub",
   "gear.input": "Режим ввода",
   "gear.input.enter": "Enter отправляет",
   "gear.input.enter.sub": "Shift+Enter добавляет новую строку",
