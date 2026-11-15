@@ -93,7 +93,6 @@
 .host.sse.stopped .dot { background: var(--wb-muted-fg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
 .top:has(.host.sse) > #sse { display: none; }
 .dash.index .sse { margin-left: auto; }
-.gearwrap { position: relative; }
 .gear { height: 28px; width: 32px; padding: 0; }
 .gear .i { width: 17px; height: 17px; }
 .gmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: 270px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; display: grid; gap: 3px; }
@@ -1139,7 +1138,10 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
   .dr-body details.panel { flex: none; overflow: hidden; }
   .dr-body details.panel > summary { position: static; }
 }
-/* the settings card: the gear menu's items, laid flat in the card */
+/* Settings uses the rail's fixed, viewport-bounded popover. */
+.settings-pop { width: 300px; }
+.settings-pop:focus { outline: none; }
+.settings-toggle { flex: none; }
 .gmenu.gcard { position: static; width: auto; box-shadow: none; padding: 0; background: transparent; }
 /* the pooled-worktree card: leased rows first, then idle ones by profile */
 #wtcount[hidden] { display: none; }
