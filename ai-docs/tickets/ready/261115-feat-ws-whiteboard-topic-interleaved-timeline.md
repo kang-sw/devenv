@@ -415,3 +415,17 @@ syncs the later develop tip `aa07206c0` (including its folder cache).
 - Unresolved: the existing embed-budget failure; visual fit remains INFERRED
   pending the owner's check. No browser, daemon, child agent, push, merge into
   develop, ticket-plan edit, or ticket closure was performed.
+
+#### Edition (1b8e95cae) - 2026-11-15
+
+- Restored board search over inert timeline gaps while retaining legacy
+  history-page indexing and the existing history-owner reveal/jump path.
+- Secondary coalesced and eventless question articles now have distinct,
+  stable, namespaced render keys, so Viewed deferral compares the exposed
+  question. The first question retains its event navigation anchor. T0:
+  display-only changes; stored data is unchanged.
+- VERIFIED: regression tests reproduce both issues and pass after the fixes.
+  Focused dashboard search, Viewed, frame, history and timeline tests and
+  whiteboard timeline/gap tests pass. Full whiteboard testing retains only
+  the known embed-budget failure; embed size is unchanged. No browser,
+  daemon, child agent, merge or push was used.
