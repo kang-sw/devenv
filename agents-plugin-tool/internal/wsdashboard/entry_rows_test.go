@@ -64,9 +64,9 @@ func TestEntryRowsBoundariesAndFallback(t *testing.T) {
 	}
 	nextRaw := strings.Replace(raw, "one", "two", 1)
 	next := splitEntryRows(nextRaw)
-	state := &entryRowState{previous: rows, initialized: true}
+	state := &keyedRowState{name: regionEntries, previous: rows, initialized: true}
 	name, payload := state.event(newRegion(nextRaw), next)
-	event, ok := payload.(entryRowsEvent)
+	event, ok := payload.(keyedRowsEvent)
 	if name != "entry-rows" || !ok || len(event.Rows) != 1 || event.Rows[0].Key != "a" || event.Hash != newRegion(nextRaw).Hash {
 		t.Fatalf("one complete changed row: %s %#v", name, payload)
 	}
@@ -95,7 +95,7 @@ func TestEntryRowsBoundariesAndFallback(t *testing.T) {
 	if splitEntryRows(`<div class="thead">empty</div><div class="centries"></div>`) == nil {
 		t.Fatal("empty keyed container should be a valid baseline")
 	}
-	if name, _ := (&entryRowState{}).event(newRegion(raw), rows); name != "region" {
+	if name, _ := (&keyedRowState{name: regionEntries}).event(newRegion(raw), rows); name != "region" {
 		t.Fatal("first send must be full")
 	}
 	if name, _ := state.event(newRegion(raw), nil); name != "region" {

@@ -29,7 +29,7 @@ func TestRailRowsDiff(t *testing.T) {
 	if rebuilt.String() != raw {
 		t.Fatal("decomposition changed bytes")
 	}
-	state := railRowState{}
+	state := keyedRowState{name: regionRail}
 	r := newRegion(raw)
 	if name, _ := state.event(r, first); name != "region" {
 		t.Fatal("first event must be full")
@@ -37,7 +37,7 @@ func TestRailRowsDiff(t *testing.T) {
 	state.previous = first
 	next := splitRailRows(`<div id="rlist"><section>` + row("b", "B") + row("a", "new A") + `</section></div>`)
 	name, data := state.event(newRegion("next"), next)
-	patch, ok := data.(railRowsEvent)
+	patch, ok := data.(keyedRowsEvent)
 	if name != "rail-rows" || !ok || !reflect.DeepEqual(patch.Order, []string{"b", "a"}) || len(patch.Rows) != 1 || patch.Rows[0].Key != "a" || patch.Rows[0].Hash == first.rows["a"].Hash {
 		t.Fatalf("bad delta: %s %+v", name, data)
 	}
@@ -73,9 +73,9 @@ func TestRailRowsClockOnlyLiveness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := railRowState{previous: splitRailRows(string(first.HTML))}
+	state := keyedRowState{name: regionRail, previous: splitRailRows(string(first.HTML))}
 	name, data := state.event(second, splitRailRows(string(second.HTML)))
-	patch, ok := data.(railRowsEvent)
+	patch, ok := data.(keyedRowsEvent)
 	if name != "rail-rows" || !ok {
 		t.Fatalf("clock wake did not use row delta: %s", name)
 	}
@@ -174,28 +174,28 @@ func TestRailRowsFailedSendAndUncertainBaseline(t *testing.T) {
 	d := &Daemon{stats: &streamStats{}}
 	r := newRegion(`<div class="rs" data-rid="a">A</div>`)
 	rows := splitRailRows(string(r.HTML))
-	sink, state := &railRowsSink{fail: true}, &railRowState{}
+	sink, state := &railRowsSink{fail: true}, &keyedRowState{name: regionRail}
 	held := map[string]string{regionRail: r.Hash}
-	if _, ok := d.sendRowRegions(sink, regionSet{regionRail: r}, held, nil, nil, state, rows); ok || state.initialized || state.previous != nil {
+	if _, ok := d.sendRegions(sink, regionSet{regionRail: r}, held, nil, nil, []rowRegion{{state: state, next: rows}}); ok || state.initialized || state.previous != nil {
 		t.Fatal("failed write advanced the baseline")
 	}
 	sink.fail = false
-	if _, ok := d.sendRowRegions(sink, regionSet{regionRail: r}, held, nil, nil, state, rows); !ok || !state.initialized || state.previous != rows || sink.events[0].name != "region" {
+	if _, ok := d.sendRegions(sink, regionSet{regionRail: r}, held, nil, nil, []rowRegion{{state: state, next: rows}}); !ok || !state.initialized || state.previous != rows || sink.events[0].name != "region" {
 		t.Fatal("first successful send was not full")
 	}
 	// A malformed/unfamiliar render clears the row baseline by a full send.
 	r = newRegion("unfamiliar rail")
-	d.sendRowRegions(sink, regionSet{regionRail: r}, held, nil, nil, state, nil)
+	d.sendRegions(sink, regionSet{regionRail: r}, held, nil, nil, []rowRegion{{state: state}})
 	if state.previous != nil || sink.events[len(sink.events)-1].name != "region" {
 		t.Fatal("uncertain render did not reset baseline")
 	}
 	count := len(sink.events)
-	d.sendRowRegions(sink, regionSet{regionRail: r}, held, nil, nil, state, nil)
+	d.sendRegions(sink, regionSet{regionRail: r}, held, nil, nil, []rowRegion{{state: state}})
 	if len(sink.events) != count {
 		t.Fatal("unchanged uncertain full render resent")
 	}
 	r = newRegion(`<div class="rs" data-rid="a">back</div>`)
-	d.sendRowRegions(sink, regionSet{regionRail: r}, held, nil, nil, state, splitRailRows(string(r.HTML)))
+	d.sendRegions(sink, regionSet{regionRail: r}, held, nil, nil, []rowRegion{{state: state, next: splitRailRows(string(r.HTML))}})
 	if sink.events[len(sink.events)-1].name != "region" {
 		t.Fatal("recovered decomposition assumed an unproven baseline")
 	}
@@ -293,7 +293,7 @@ func TestRailRowsStreams(t *testing.T) {
 	if e := railEvent(old); e.name != "region" {
 		t.Fatal("legacy connection lost full region")
 	}
-	var patch railRowsEvent
+	var patch keyedRowsEvent
 	json.Unmarshal([]byte(delta.data), &patch)
 	if len(patch.Rows) != 1 || patch.Rows[0].Key != "livesession" || len(patch.Order) != 2 || strings.Contains(patch.Rows[0].HTML, `data-rid="boardsession"`) {
 		t.Fatalf("not changed rows plus order: %+v", patch)

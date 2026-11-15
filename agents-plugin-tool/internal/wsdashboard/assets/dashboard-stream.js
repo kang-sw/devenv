@@ -210,32 +210,43 @@
     var n = box.firstElementChild;
     return box.childNodes.length === 1 && n && treeRowKey(n) === key && !n.querySelector("div.agent, details.peer[data-peer]") ? n : null;
   }
-  function treeSame(a, b) { return a.length === b.length && a.every(function (v, i) { return v === b[i]; }); }
-  function treeInputPatch(base, ev) {
-    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !treeSame(base.order, ev.order) || !Array.isArray(ev.rows)) return null;
+  function keyedSame(a, b) { return a.length === b.length && a.every(function (v, i) { return v === b[i]; }); }
+  function keyedInputPatch(base, ev, rowNode, validate) {
+    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !keyedSame(base.order, ev.order) || !Array.isArray(ev.rows)) return null;
     var rows = Object.create(null), changed = Object.create(null);
     Object.keys(base.rows).forEach(function (key) { rows[key] = base.rows[key]; });
     if (ev.rows.some(function (r) {
       if (!r || typeof r.key !== "string" || !rows[r.key] || changed[r.key] || typeof r.hash !== "string") return true;
-      var n = treeRowNode(r.html, r.key);
-      if (!n || !treeSame(treeSlots(n.outerHTML), treeSlots(base.rows[r.key].html))) return true;
+      var n = rowNode(r.html, r.key);
+      if (!n || (validate && !validate(n, r.key))) return true;
       changed[r.key] = true; rows[r.key] = { html: n.outerHTML };
       return false;
     })) return null;
-    return { shell: base.shell, order: base.order, parents: base.parents, rows: rows };
+    var next = { shell: base.shell, order: base.order, rows: rows };
+    if (base.parents) next.parents = base.parents;
+    return next;
   }
-  function treeInputHTML(input) {
+  function keyedInputHTML(input, slot, recursive) {
     if (typeof input === "string") return input;
     function fill(html) {
-      return html.replace(TREE_SLOT, function (_, i) { return fill(input.rows[input.order[+i]].html); });
+      return html.replace(slot, function (_, i) {
+        var row = input.rows[input.order[+i]].html;
+        return recursive ? fill(row) : row;
+      });
     }
     return fill(input.shell);
   }
+  function treeInputPatch(base, ev) {
+    return keyedInputPatch(base, ev, treeRowNode, function (n, key) {
+      return keyedSame(treeSlots(n.outerHTML), treeSlots(base.rows[key].html));
+    });
+  }
+  function treeInputHTML(input) { return keyedInputHTML(input, TREE_SLOT, true); }
   // Validate every replacement before touching the live tree. Moving retained
   // children into a changed parent's slots preserves their node identities,
   // disclosure state, spinner and focus, even across simultaneous row changes.
   function mergeTreeRows(root, previous, next) {
-    if (!previous || !next || previous.shell !== next.shell || !treeSame(previous.order, next.order) || !treeSame(previous.parents, next.parents)) return null;
+    if (!previous || !next || previous.shell !== next.shell || !keyedSame(previous.order, next.order) || !keyedSame(previous.parents, next.parents)) return null;
     var nodes = q("div.agent, details.peer[data-peer]", root), live = Object.create(null), updates = Object.create(null), inserted = [];
     if (nodes.length !== previous.order.length || nodes.some(function (n, i) {
       var key = treeRowKey(n), p = n.parentElement && n.parentElement.closest("div.agent, details.peer[data-peer]");
@@ -245,7 +256,7 @@
     if (next.order.some(function (key) {
       if (previous.rows[key].html === next.rows[key].html) return false;
       var n = treeRowNode(next.rows[key].html, key);
-      if (!n || !treeSame(treeSlots(n.outerHTML), treeSlots(previous.rows[key].html))) return true;
+      if (!n || !keyedSame(treeSlots(n.outerHTML), treeSlots(previous.rows[key].html))) return true;
       updates[key] = n; return false;
     })) return null;
     next.order.slice().reverse().forEach(function (key) {
@@ -284,24 +295,10 @@
     var n = box.firstElementChild;
     return box.childNodes.length === 1 && n && panelRowKey(n) === key && !n.querySelector(".panel") ? n : null;
   }
-  function panelInputPatch(base, ev) {
-    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !treeSame(base.order, ev.order) || !Array.isArray(ev.rows)) return null;
-    var rows = Object.create(null), changed = Object.create(null);
-    Object.keys(base.rows).forEach(function (key) { rows[key] = base.rows[key]; });
-    if (ev.rows.some(function (r) {
-      if (!r || typeof r.key !== "string" || !rows[r.key] || changed[r.key] || typeof r.hash !== "string") return true;
-      var n = panelRowNode(r.html, r.key);
-      if (!n) return true;
-      changed[r.key] = true; rows[r.key] = { html: n.outerHTML };
-      return false;
-    })) return null;
-    return { shell: base.shell, order: base.order, rows: rows };
-  }
-  function panelInputHTML(input) {
-    return typeof input === "string" ? input : input.shell.replace(PANEL_SLOT, function (_, i) { return input.rows[input.order[+i]].html; });
-  }
+  function panelInputPatch(base, ev) { return keyedInputPatch(base, ev, panelRowNode); }
+  function panelInputHTML(input) { return keyedInputHTML(input, PANEL_SLOT); }
   function mergePanelRows(root, previous, next) {
-    if (!previous || !next || previous.shell !== next.shell || !treeSame(previous.order, next.order)) return null;
+    if (!previous || !next || previous.shell !== next.shell || !keyedSame(previous.order, next.order)) return null;
     var live = Object.create(null), updates = [], nodes = Array.from(root.children);
     if (nodes.length !== previous.order.length || nodes.some(function (n, i) {
       var key = panelRowKey(n);

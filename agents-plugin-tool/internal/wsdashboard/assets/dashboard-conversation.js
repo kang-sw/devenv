@@ -67,7 +67,6 @@
   // live DOM. A full event establishes the shell and newest window; a delta
   // must prove the same order and replace only complete single keyed rows.
   var ENTRY_SLOT = /<!--ws-entry-row-(\d+)-->/g;
-  function entrySame(a, b) { return a.length === b.length && a.every(function (v, i) { return v === b[i]; }); }
   function entryInputFull(html) {
     if (typeof html !== "string" || html.indexOf("<!--ws-entry-row-") >= 0) return null;
     var src = frag(html), boxes = src.querySelectorAll(".centries");
@@ -89,22 +88,8 @@
     var src = frag(html), n = src.firstElementChild;
     return src.childNodes.length === 1 && n && n.getAttribute("data-entry") === key && !n.matches(".centries") && !n.querySelector(".centries") ? n : null;
   }
-  function entryInputPatch(base, ev) {
-    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !entrySame(base.order, ev.order) || !Array.isArray(ev.rows)) return null;
-    var rows = Object.create(null), changed = Object.create(null);
-    Object.keys(base.rows).forEach(function (key) { rows[key] = base.rows[key]; });
-    if (ev.rows.some(function (r) {
-      if (!r || typeof r.key !== "string" || !rows[r.key] || changed[r.key] || typeof r.hash !== "string") return true;
-      var n = entryRowNode(r.html, r.key);
-      if (!n) return true;
-      changed[r.key] = true; rows[r.key] = { html: n.outerHTML };
-      return false;
-    })) return null;
-    return { shell: base.shell, order: base.order, rows: rows };
-  }
-  function entryInputHTML(input) {
-    return typeof input === "string" ? input : input.shell.replace(ENTRY_SLOT, function (_, i) { return input.rows[input.order[+i]].html; });
-  }
+  function entryInputPatch(base, ev) { return keyedInputPatch(base, ev, entryRowNode); }
+  function entryInputHTML(input) { return keyedInputHTML(input, ENTRY_SLOT); }
 
   // mergeEntriesRegion applies an entries region event: the title bar (its
   // counts) and model history are synced, and the entries are merged. A window
@@ -113,10 +98,13 @@
   // what the box then holds.
   function mergeEntriesRegion(el, html, pin, previous) {
     var next = typeof html === "string" ? null : html, box = entriesBox(), changed = Object.create(null);
-    if (next && previous) next.order.forEach(function (key) {
-      if (previous.rows[key] && previous.rows[key].html !== next.rows[key].html) changed[key] = true;
+    // Without a rendered baseline, the differing full's same-key rows may
+    // have changed since page render (or an unparseable full). The swap owner
+    // already bypasses this merge for equal hashes, preserving no-remount.
+    if (next) next.order.forEach(function (key) {
+      if (!previous || (previous.rows[key] && previous.rows[key].html !== next.rows[key].html)) changed[key] = true;
     });
-    if (box && next && previous && next.shell === previous.shell && entrySame(next.order, previous.order)) {
+    if (box && next && previous && next.shell === previous.shell && keyedSame(next.order, previous.order)) {
       var incoming = doc.createElement("div"), have = entryKeys(box);
       next.order.forEach(function (key) {
         if (!have[key] || changed[key]) incoming.appendChild(entryRowNode(next.rows[key].html, key));

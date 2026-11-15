@@ -2,37 +2,20 @@ package wsdashboard
 
 import (
 	"io"
-	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
 )
 
-// panelRows keys the native top-level panel cards by their existing p-* IDs.
+// splitPanelRows keys the native top-level panel cards by their existing p-* IDs.
 // Nested agenda disclosures belong to the card, not independent transport rows.
 // Complete rendered HTML is hashed; shell/order changes and unfamiliar markup
 // reset to full regions. The source still renders panels as before.
-type panelRows struct {
-	order []string
-	rows  map[string]panelRowUnit
-	shell []string
-}
-type panelRowUnit struct {
-	Key  string `json:"key"`
-	Hash string `json:"hash"`
-	HTML string `json:"html"`
-}
-type panelRowsEvent struct {
-	Hash  string         `json:"hash"`
-	Order []string       `json:"order"`
-	Rows  []panelRowUnit `json:"rows"`
-}
-
-func splitPanelRows(raw string) *panelRows {
+func splitPanelRows(raw string) *keyedRows {
 	if strings.Contains(raw, "<!--ws-panel-row-") {
 		return nil
 	}
-	out := &panelRows{order: []string{}, rows: map[string]panelRowUnit{}}
+	out := &keyedRows{order: []string{}, rows: map[string]keyedRow{}}
 	z := html.NewTokenizer(strings.NewReader(raw))
 	var stack []string
 	offset, start, end := 0, -1, 0
@@ -84,7 +67,7 @@ func splitPanelRows(raw string) *panelRows {
 				end = offset + n
 				markup := raw[start:end]
 				out.order = append(out.order, key)
-				out.rows[key] = panelRowUnit{Key: key, Hash: newRegion(markup).Hash, HTML: markup}
+				out.rows[key] = keyedRow{Key: key, Hash: newRegion(markup).Hash, HTML: markup}
 				start = -1
 			}
 		case html.TextToken:
@@ -96,23 +79,4 @@ func splitPanelRows(raw string) *panelRows {
 		}
 		offset += n
 	}
-}
-
-type panelRowState struct {
-	previous    *panelRows
-	initialized bool
-}
-
-func (s *panelRowState) event(region renderedRegion, next *panelRows) (string, any) {
-	if next != nil && s.previous != nil && slices.Equal(next.shell, s.previous.shell) && slices.Equal(next.order, s.previous.order) {
-		e := panelRowsEvent{Hash: region.Hash, Order: next.order, Rows: []panelRowUnit{}}
-		for _, key := range next.order {
-			row := next.rows[key]
-			if row.Hash != s.previous.rows[key].Hash {
-				e.Rows = append(e.Rows, row)
-			}
-		}
-		return "panel-rows", e
-	}
-	return "region", regionEvent{Name: regionPanels, Hash: region.Hash, HTML: string(region.HTML)}
 }

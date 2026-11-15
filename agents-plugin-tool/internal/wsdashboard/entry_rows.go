@@ -2,37 +2,18 @@ package wsdashboard
 
 import (
 	"io"
-	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
 )
 
-// entryRows decomposes only the direct children of .centries. The title bar
+// splitEntryRows decomposes only the direct children of .centries. The title bar
 // and model history stay in the shell, outside the keyed history container.
 // Hash every byte of each rendered row: mail availability, peer presentation
 // and wake associations can change without a new ring entry or revision.
 // Unfamiliar markup, shell changes or a different window/order use full regions.
-type entryRows struct {
-	order []string
-	rows  map[string]entryRowUnit
-	shell []string
-}
-
-type entryRowUnit struct {
-	Key  string `json:"key"`
-	Hash string `json:"hash"`
-	HTML string `json:"html"`
-}
-
-type entryRowsEvent struct {
-	Hash  string         `json:"hash"`
-	Order []string       `json:"order"`
-	Rows  []entryRowUnit `json:"rows"`
-}
-
-func splitEntryRows(raw string) *entryRows {
-	out := &entryRows{order: []string{}, rows: map[string]entryRowUnit{}}
+func splitEntryRows(raw string) *keyedRows {
+	out := &keyedRows{order: []string{}, rows: map[string]keyedRow{}}
 	z := html.NewTokenizer(strings.NewReader(raw))
 	depth, offset, boxDepth, start, end := 0, 0, -1, -1, 0
 	seen := false
@@ -82,7 +63,7 @@ func splitEntryRows(raw string) *entryRows {
 				end = offset + n
 				markup := raw[start:end]
 				out.order = append(out.order, key)
-				out.rows[key] = entryRowUnit{Key: key, Hash: newRegion(markup).Hash, HTML: markup}
+				out.rows[key] = keyedRow{Key: key, Hash: newRegion(markup).Hash, HTML: markup}
 				start = -1
 			}
 			if boxDepth >= 0 && depth < boxDepth {
@@ -95,23 +76,4 @@ func splitEntryRows(raw string) *entryRows {
 		}
 		offset += n
 	}
-}
-
-type entryRowState struct {
-	previous    *entryRows
-	initialized bool
-}
-
-func (s *entryRowState) event(region renderedRegion, next *entryRows) (string, any) {
-	if next != nil && s.previous != nil && slices.Equal(next.shell, s.previous.shell) && slices.Equal(next.order, s.previous.order) {
-		e := entryRowsEvent{Hash: region.Hash, Order: next.order, Rows: []entryRowUnit{}}
-		for _, key := range next.order {
-			row := next.rows[key]
-			if row.Hash != s.previous.rows[key].Hash {
-				e.Rows = append(e.Rows, row)
-			}
-		}
-		return "entry-rows", e
-	}
-	return "region", regionEvent{Name: regionEntries, Hash: region.Hash, HTML: string(region.HTML)}
 }

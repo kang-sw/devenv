@@ -3,36 +3,16 @@ package wsdashboard
 import (
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
 )
 
-// treeRows separates each agent and expandable peer from its descendants.
+// splitTreeRows separates each agent and expandable peer from its descendants.
 // Child slots exist only in immutable transport inputs, never in rendered HTML.
 // A child edit therefore hashes/sends that child, not its ancestor's subtree.
 // Shell or topology changes conservatively reset the connection with a full tree.
 // Like the rail, rows hash the complete rendered input, not snapshot revisions.
-type treeRows struct {
-	order   []string
-	parents []int
-	rows    map[string]treeRowUnit
-	shell   string
-}
-
-type treeRowUnit struct {
-	Key  string `json:"key"`
-	Hash string `json:"hash"`
-	HTML string `json:"html"`
-}
-
-type treeRowsEvent struct {
-	Hash  string        `json:"hash"`
-	Order []string      `json:"order"`
-	Rows  []treeRowUnit `json:"rows"`
-}
-
 func treeRowSlot(i int) string { return fmt.Sprintf("<!--ws-tree-row-%d-->", i) }
 
 type treeRowSpan struct {
@@ -41,11 +21,11 @@ type treeRowSpan struct {
 	children                         []*treeRowSpan
 }
 
-func splitTreeRows(raw string) *treeRows {
+func splitTreeRows(raw string) *keyedRows {
 	if strings.Contains(raw, "<!--ws-tree-row-") {
 		return nil
 	}
-	out := &treeRows{order: []string{}, parents: []int{}, rows: map[string]treeRowUnit{}}
+	out := &keyedRows{order: []string{}, parents: []int{}, rows: map[string]keyedRow{}}
 	var all, roots, active []*treeRowSpan
 	z := html.NewTokenizer(strings.NewReader(raw))
 	depth, offset := 0, 0
@@ -134,27 +114,8 @@ func splitTreeRows(raw string) *treeRows {
 		markup := skeleton(span.start, span.end, span.children)
 		out.order = append(out.order, span.key)
 		out.parents = append(out.parents, span.parent)
-		out.rows[span.key] = treeRowUnit{Key: span.key, Hash: newRegion(markup).Hash, HTML: markup}
+		out.rows[span.key] = keyedRow{Key: span.key, Hash: newRegion(markup).Hash, HTML: markup}
 	}
-	out.shell = skeleton(0, len(raw), roots)
+	out.shell = []string{skeleton(0, len(raw), roots)}
 	return out
-}
-
-type treeRowState struct {
-	previous    *treeRows
-	initialized bool
-}
-
-func (s *treeRowState) event(region renderedRegion, next *treeRows) (string, any) {
-	if next != nil && s.previous != nil && next.shell == s.previous.shell && slices.Equal(next.order, s.previous.order) && slices.Equal(next.parents, s.previous.parents) {
-		e := treeRowsEvent{Hash: region.Hash, Order: next.order, Rows: []treeRowUnit{}}
-		for _, key := range next.order {
-			row := next.rows[key]
-			if row.Hash != s.previous.rows[key].Hash {
-				e.Rows = append(e.Rows, row)
-			}
-		}
-		return "tree-rows", e
-	}
-	return "region", regionEvent{Name: regionTree, Hash: region.Hash, HTML: string(region.HTML)}
 }
