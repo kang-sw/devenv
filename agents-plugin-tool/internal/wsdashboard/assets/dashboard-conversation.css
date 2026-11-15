@@ -110,6 +110,55 @@
 .mailline[open] > summary { color: var(--wb-fg); }
 .mailline .mbody { margin: 2px 8px 4px 22px; padding: 7px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Display-only conversation projections; board/composer component rules stay with their owners. */
+.mail-notification, .input-record, .wake-card.child-report { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
+.input-record { border-style: dashed; }
+.mail-notification .wake-head, .input-record .wake-head, .child-report .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
+.mail-notification .wake-head .t, .input-record .wake-head .t, .child-report .wake-head .t { margin-left: auto; }
+.child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
+.delivery-details { min-width: 0; margin-top: 3px; font-size: 11px; color: var(--wb-muted-fg); }
+.delivery-details > summary { width: fit-content; max-width: 100%; padding: 3px 0; cursor: pointer; overflow-wrap: anywhere; }
+.delivery-details .wake-body { max-width: 100%; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-muted-fg); background: var(--wb-bg); font: 11px/1.5 var(--wb-mono); }
+.delivery-meta { margin-top: 4px; overflow-wrap: anywhere; }
+.src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
+/* Higher specificity keeps the legacy effects frame from nesting full topic cards in a summary. */
+.wbeffects.wbupdate { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
+.wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 4px 5px; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate-head .t { margin-left: auto; }
+.wbupdate-topic { min-width: 0; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); }
+.wbupdate-topic + .wbupdate-topic { margin-top: 6px; }
+.wbupdate-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; min-width: 0; padding: 4px 12px; border-radius: var(--wb-radius) var(--wb-radius) 0 0; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 13px; overflow-wrap: anywhere; }
+.wbupdate-bar b { min-width: 0; }
+.wbupdate-key { min-width: 0; font: 10.5px var(--wb-mono); opacity: .7; }
+.wbupdate-bar a { margin-left: auto; color: inherit; }
+.wbupdate a { font-size: 11px; font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.wbupdate a:hover { text-decoration: underline; }
+.wbupdate-rows { display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 0; }
+.wbupdate-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 7px; min-width: 0; padding: 2px 6px; font-size: 12.5px; }
+.wbupdate-text { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.wbupdate-l { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 50%; font-size: 9px; font-weight: 800; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
+.wbupdate-item-id { font: 700 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.wbupdate-class { max-width: 100%; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 10px; overflow-wrap: anywhere; }
+.wbupdate-panel { flex-wrap: nowrap; }
+.wbupdate-panel-label { flex: none; color: var(--wb-muted-fg); font-size: 10px; font-weight: 800; }
+.wbupdate-panel .wbupdate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbupdate-panel a { flex: none; }
+.wbupdate-options { flex-basis: 100%; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; padding-left: 22px; }
+.wbupdate-options span { max-width: 100%; padding: 1px 8px; border-radius: 7px; background: color-mix(in srgb, var(--wb-policy) 8%, var(--wb-card)); color: var(--wb-fg); box-shadow: var(--wb-shadow); font-size: 11px; overflow-wrap: anywhere; }
+.wbupdate-status { display: block; padding: 0 12px; font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.wbupdate-status:empty { display: none; }
+.wbupdate .wbeffect-details { margin: 4px 7px 0; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate .wbeffect-details > summary { cursor: pointer; }
+.wbeffects.wbupdate-line > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; padding: 4px 7px; border-radius: 7px; list-style: none; font-size: 12px; color: var(--wb-muted-fg); }
+.wbupdate-line > summary::-webkit-details-marker { display: none; }
+.wbupdate-line > summary:hover { background: var(--wb-muted); }
+.wbupdate-line > summary .i { flex: none; width: 10px; height: 10px; }
+.wbupdate-line[open] > summary .i { transform: rotate(180deg); }
+.wbupdate-preview { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbupdate-line > .wbupdate-topic { margin: 3px 7px 5px 22px; }
+.wbupdate :is(a, summary):focus-visible, .delivery-details > summary:focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
+.wbupdate-bar a:focus-visible { outline-color: var(--wb-on-topic); }
+
 /* ===== composer: never swapped ===== */
 .composer { position: relative; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 /* composer badges: a row centred on the 10px gap between the conversation and
