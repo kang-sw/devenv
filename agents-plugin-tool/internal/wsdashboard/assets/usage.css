@@ -47,12 +47,13 @@
 .usage-help:hover .usage-chart-legend, .usage-help:focus-within .usage-chart-legend { display: grid; }
 .usage-chart-legend > span { display: inline-flex; align-items: center; gap: 5px; }
 .usage-swatch { display: inline-block; flex: none; width: 15px; border-top: 2px solid var(--wb-muted-fg); }
-.usage-swatch-actual { height: 2px; border: 0; background: linear-gradient(to right, var(--wb-ok), var(--wb-muted-fg), var(--wb-fail)); }
+.usage-swatch-actual { height: 8px; border: 0; border-top: 2px solid var(--wb-muted-fg); background: linear-gradient(to bottom, color-mix(in srgb, var(--wb-muted-fg) 22%, transparent), transparent); }
 .usage-swatch-ideal { border-top: 1px dashed var(--wb-muted-fg); }
 .usage-swatch-estimated { border-top-style: dashed; }
 .usage-swatch-point { width: 6px; height: 6px; border: 0; border-radius: 50%; background: var(--wb-muted-fg); }
 .usage-actual { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .usage-area { stroke: none; opacity: .14; }
+.usage-excess { stroke: none; opacity: .22; }
 .usage-point { stroke: var(--wb-card); stroke-width: 1; }
 .usage-point-current { stroke-width: 2; }
 .usage-meta { font-size: 11px; }

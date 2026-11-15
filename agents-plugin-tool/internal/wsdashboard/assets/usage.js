@@ -232,10 +232,13 @@
         return out;
       }
       function d(pts) { return pts.map(function (p, i) { return (i ? "L" : "M") + p.x.toFixed(1) + " " + p.y.toFixed(1); }).join(""); }
+      var clipId = id + "-above", defs = svgNode("defs"), clip = svgNode("clipPath", { id: clipId });
+      clip.appendChild(svgNode("polygon", { points: "24,88 270,12 270,0 24,0" })); defs.appendChild(clip); chart.appendChild(defs);
       runs.forEach(function (r) {
         var pts = r.gap ? r.pts : decimate(r.pts), last = pts[pts.length - 1];
         var color = old && last.current ? "var(--wb-muted-fg)" : tint(last.delta);
         if (!r.gap) chart.appendChild(svgNode("path", { "class": "usage-area", d: d(pts) + "L" + last.x.toFixed(1) + " 88L" + pts[0].x.toFixed(1) + " 88Z", fill: color }));
+        if (!r.gap && geometry.knownReset) chart.appendChild(svgNode("path", { "class": "usage-excess", d: d(pts) + "L" + last.x.toFixed(1) + " 88L" + pts[0].x.toFixed(1) + " 88Z", fill: "var(--wb-fail)", "clip-path": "url(#" + clipId + ")" }));
         var line = svgNode("path", { "class": "usage-actual", d: d(pts), stroke: color, "stroke-width": 2 });
         if (r.gap) line.setAttribute("stroke-dasharray", "4 3");
         line.appendChild(svgNode("title", {}, t(r.gap ? "estimatedTitle" : "interval"))); chart.appendChild(line);
