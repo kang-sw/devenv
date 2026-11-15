@@ -836,7 +836,17 @@
       }
     },
     "261115-feat-ws-dashboard-settings-in-usage-strip": {
-      "registered_at": "2026-11-15T02:26:58Z"
+      "registered_at": "2026-11-15T02:26:58Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T03:33:59Z",
+        "impl": {
+          "branch": "impl/develop/crop-treat-opium"
+        }
+      }
     },
     "261115-feat-ws-dashboard-user-message-envelope": {
       "registered_at": "2026-11-15T02:43:38Z"
