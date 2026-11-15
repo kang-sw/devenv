@@ -810,17 +810,7 @@
       "registered_at": "2026-11-15T02:02:38Z"
     },
     "261115-feat-ws-dashboard-observed-session-model": {
-      "registered_at": "2026-11-14T23:03:59Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-11-15T04:04:12Z",
-        "impl": {
-          "branch": "impl/develop/shove-stem-disk"
-        }
-      }
+      "registered_at": "2026-11-14T23:03:59Z"
     },
     "261115-feat-ws-dashboard-search-drawer-answer-agent": {
       "registered_at": "2026-11-15T01:15:10Z",
@@ -852,9 +842,6 @@
     },
     "261115-feat-ws-whiteboard-topic-close-request": {
       "registered_at": "2026-11-15T02:43:44Z"
-    },
-    "261115-feat-ws-whiteboard-topic-default-and-update-summaries": {
-      "registered_at": "2026-11-15T03:50:38Z"
     },
     "261115-feat-ws-whiteboard-topic-interleaved-timeline": {
       "registered_at": "2026-11-15T03:11:31Z"
