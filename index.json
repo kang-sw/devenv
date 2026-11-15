@@ -614,19 +614,6 @@
     "261114-feat-ws-dashboard-worktree-view": {
       "registered_at": "2026-11-14T14:32:38Z"
     },
-    "261114-feat-ws-fullscreen-panel-width": {
-      "registered_at": "2026-11-14T12:36:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec4/fullscreen-panel-width",
-        "phase": "closed",
-        "touched_at": "2026-11-15T01:30:21Z",
-        "impl": {
-          "branch": "impl/exec4/fullscreen-panel-width/chug-diner-dill"
-        }
-      }
-    },
     "261114-feat-ws-hosted-antigravity-acp-adapter": {
       "registered_at": "2026-11-14T08:45:52Z"
     },
@@ -792,13 +779,17 @@
       "registered_at": "2026-11-14T23:03:59Z"
     },
     "261115-feat-ws-dashboard-search-drawer-answer-agent": {
-      "registered_at": "2026-11-15T01:15:10Z"
+      "registered_at": "2026-11-15T01:15:10Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec4/search-drawer-impl",
+        "phase": "active",
+        "touched_at": "2026-11-15T01:59:25Z"
+      }
     },
     "261115-feat-ws-hosted-codex-adapter-contract": {
       "registered_at": "2026-11-14T15:20:26Z"
-    },
-    "261115-feat-ws-whiteboard-toolbar-state-filter": {
-      "registered_at": "2026-11-15T00:54:28Z"
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
