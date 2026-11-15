@@ -1602,6 +1602,8 @@
   "rail.kids.other": "{0} sessioni sotto questa: mostra o nascondi",
   "rail.kids.approval.one": "{0} sessione sotto questa attende l'approvazione",
   "rail.kids.approval.other": "{0} sessioni sotto questa attendono l'approvazione",
+  "rail.kids.busy.one": "{0} sessione sotto questa sta lavorando",
+  "rail.kids.busy.other": "{0} sessioni sotto questa stanno lavorando",
   "rail.title": "Sessioni",
   "rail.waiting": "lead in attesa",
   "rail.working": "lead al lavoro",

@@ -1602,6 +1602,8 @@
   "rail.kids.other": "이 세션 아래 세션 {0}개: 펼치기 또는 접기",
   "rail.kids.approval.one": "이 세션 아래 승인 대기 중인 세션 {0}개",
   "rail.kids.approval.other": "이 세션 아래 승인 대기 중인 세션 {0}개",
+  "rail.kids.busy.one": "이 세션 아래 작업 중인 세션 {0}개",
+  "rail.kids.busy.other": "이 세션 아래 작업 중인 세션 {0}개",
   "rail.title": "세션",
   "rail.waiting": "리드 대기",
   "rail.working": "리드 작업 중",

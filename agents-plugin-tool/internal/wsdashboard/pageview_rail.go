@@ -172,7 +172,9 @@ type RailRow struct {
 	// so the row shows none. HasChildren marks a stored parent of a live or
 	// an ended child, which can never become a child. KidApprovals and
 	// KidWorking roll the children's approval waits and work up onto the
-	// parent, shown while the page collapses it.
+	// parent, shown while the page collapses it. KidBusy counts the
+	// descendants at work (railKidBusy), shown beside the toggle whatever
+	// the collapse state.
 	Group        string
 	Children     []RailRow
 	Child        bool
@@ -181,6 +183,7 @@ type RailRow struct {
 	HasChildren  bool
 	KidApprovals int
 	KidWorking   bool
+	KidBusy      int
 	// Revive is how the dashboard brings an ended session back, on a daemon
 	// that hosts lead sessions: ReviveReopen for a closed hosted session,
 	// ReviveTakeover for a session a terminal harness ran, empty when it
