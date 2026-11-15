@@ -21,14 +21,16 @@ function environment(now = Date.UTC(2026, 10, 15)) {
     }
   }
   const button = new Element('button'); button.className = 'usage-toggle';
-  const rail = new Element('aside'); rail.appendChild(button);
+  const gear = new Element('button'); gear.className = 'settings-toggle'; gear.textContent = 'Settings';
+  const footer = new Element('div'); footer.className = 'rfoot'; footer.appendChild(gear); footer.appendChild(button);
+  const rail = new Element('aside'); rail.appendChild(footer);
   const doc = { hidden: false, events: {}, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), addEventListener(key, fn) { this.events[key] = fn; } };
   const calls = [], ticks = [];
   let payload = { entries: [], warnPercent: 80, critPercent: 95 }, fail = false;
   const window = { setInterval(fn, ms) { ticks.push({ fn, ms }); }, fetch(url, options) { calls.push({ url, options }); return fail ? Promise.reject(new Error('fake failure')) : Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); } };
   class Clock extends Date { static now() { return now; } }
   vm.runInNewContext(fs.readFileSync(__dirname + '/assets/usage.js', 'utf8'), { window, Date: Clock });
-  return { window, rail, doc, button, calls, ticks, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
+  return { window, rail, doc, button, gear, footer, calls, ticks, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
@@ -164,6 +166,47 @@ test('missing and expired windows never create placeholder columns or fabricated
   entry.windows = []; mounted.sync();
   assert.equal(env.button.querySelector('.usage-column'), null);
   assert.ok(env.button.textContent.includes('usage unavailable'));
+});
+
+test('footer redraw and sync preserve the sibling settings gear', async () => {
+  const at = Date.UTC(2026, 10, 15), env = environment(at);
+  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const unchanged = () => {
+    assert.deepEqual(env.footer.children, [env.gear, env.button]);
+    assert.equal(env.gear.textContent, 'Settings');
+    assert.equal(env.gear.className, 'settings-toggle');
+  };
+  unchanged(); // empty usage still leaves settings reachable
+  env.set({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent: 38, asOf: at, resetsAt: at + 86400000 }] }] });
+  env.ticks[0].fn(); await flush();
+  assert.equal(env.button.querySelector('.usage-number').textContent, '38%');
+  unchanged();
+  env.button.textContent = ''; mounted.sync();
+  assert.equal(env.button.querySelector('.usage-number').textContent, '38%');
+  unchanged();
+  env.set({ entries: [] }); env.ticks[0].fn(); await flush();
+  assert.equal(env.button.textContent, 'Plan usage');
+  unchanged();
+});
+
+test('compact footer keeps percent, period and pace inline with wrapping rather than clipping', () => {
+  const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');
+  const rule = selector => {
+    const start = css.indexOf(selector + ' {');
+    assert.ok(start >= 0, selector);
+    return css.slice(start, css.indexOf('}', start) + 1);
+  };
+  assert.match(rule('.rail .rfoot'), /flex-wrap: wrap/);
+  const toggle = rule('.rail .usage-toggle');
+  for (const part of ['flex: 1 1 180px', 'min-width: 0', 'flex-wrap: wrap', 'justify-content: flex-end', 'margin-left: auto']) assert.ok(toggle.includes(part), part);
+  for (const selector of ['.usage-harness', '.usage-columns']) assert.match(rule(selector), /flex-wrap: wrap/);
+  const column = rule('.usage-column');
+  assert.match(column, /display: inline-flex/);
+  assert.doesNotMatch(column, /flex-direction: column/);
+  assert.match(rule('.usage-number'), /11px\/1\.2/);
+  assert.match(rule('.usage-pace'), /10px\/1\.2/);
+  assert.match(rule('.usage-key'), /9px\/1\.2/);
+  assert.doesNotMatch(css, /overflow:\s*hidden|text-overflow:\s*ellipsis/);
 });
 
 test('empty login state and hidden-page cadence', async () => {

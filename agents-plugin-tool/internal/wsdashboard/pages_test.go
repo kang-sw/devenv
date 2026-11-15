@@ -187,10 +187,10 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 	}
 	for _, want := range []string{
 		`data-region="tree"`, `data-region="entries"`, `data-region="convlive"`, `data-region="board"`, `data-region="panels"`,
-		`id="composer"`, `id="p-settings"`, "live board text",
+		`id="composer"`, "live board text",
 		// A topic body sits in its sandboxed frame; there is no Now slot.
 		`<div class="doc-frame" title="Plan" data-doc="topic:Plan" data-doc-key="topic:Plan"`,
-		`id="splitter"`, `data-input="enter"`, `data-input="mod"`,
+		`id="splitter"`,
 		`<span class="src wb">whiteboard</span>`, `<span class="src">terminal</span>`,
 		"streamed &lt;partial&gt; reply",
 		// The mail whose history entry exists expands to its body; the
@@ -203,6 +203,7 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 			t.Errorf("session page lacks %q", want)
 		}
 	}
+	assertSettingsOwner(t, body, false)
 	for _, leak := range []string{"hist-1.json", "hist-gone.json", f.project + "/", `id="wb-now"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("session page carries %q", leak)
@@ -270,7 +271,6 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	for _, want := range []string{
 		`<div id="bcol" class="bcol"><div id="r-board" class="region r-board" data-region="board"`,
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
-		`class="gmenu gcard"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
 		`id="ctext"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
 		`<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
 		`</button><span class="sbwrap"><span class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span><span class="bgbadge" id="bgbadge" title="background tasks the harness runs: shells, monitors, and background subagents" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span><span class="bgbadge" id="monbadge" title="running monitors" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span></span></div>`,
@@ -299,6 +299,8 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	if !strings.Contains(board, `<div id="bcol" class="bcol"><div id="r-board"`) {
 		t.Errorf("board-first page lacks the board column")
 	}
+	assertSettingsOwner(t, live, false)
+	assertSettingsOwner(t, board, false)
 	// Both pages carry the drawer: the panels region sits in its body, out
 	// of the board column.
 	for name, page := range map[string]string{"live": live, "board-first": board} {
@@ -380,12 +382,8 @@ func TestPagesCarryTheTracker(t *testing.T) {
 				t.Errorf("%s page lacks the wiki hook %q", name, hook)
 			}
 		}
-		// In the header, at its end: before the gear menu on the index
-		// page, and last on a session page, whose settings are a drawer card.
+		// Settings is shell-owned; search is last in every framed header.
 		tail := `id="qsslot"></span></div>`
-		if name == "index" {
-			tail = `id="qsslot"></span><span class="gearwrap">`
-		}
 		if i, j := strings.Index(page, `<div class="top">`), strings.Index(page, tail); i < 0 || j < i {
 			t.Errorf("%s page: the search-palette button slot is not at the header's end", name)
 		}
@@ -401,13 +399,8 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	if !strings.Contains(body, "only the board") || !strings.Contains(body, `data-mode="board"`) {
 		t.Errorf("board-first page lacks its board")
 	}
-	// The settings card is there for the theme and language items alone:
-	// no layout or input choice, which only a live layout has.
-	for _, present := range []string{`id="p-settings"`, `<option value="ko">`, `<option value="">`} {
-		if !strings.Contains(body, present) {
-			t.Errorf("board-first page lacks %q", present)
-		}
-	}
+	// The shell owns all preferences, including those for future live sessions.
+	assertSettingsOwner(t, body, false)
 	for _, absent := range []string{`<button data-layout=`, `<button data-input=`, `id="composer"`, `id="splitter"`, `id="convo"`, `data-region="entries"`, `data-region="convlive"`, `id="tabbar"`, `id="ibadge"`} {
 		if strings.Contains(body, absent) {
 			t.Errorf("board-first page carries %q", absent)
