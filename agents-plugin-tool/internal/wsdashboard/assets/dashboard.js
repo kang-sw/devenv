@@ -660,7 +660,10 @@
     if (name === "git") gitSwapped();
     restoreScroll(scroll);
     if (kept) kept.h.apply();
-    if (board) { boardRecordPending(); boardPendingBadge(); }
+    if (board) {
+      boardRecordPending(); boardPendingBadge();
+      boardExposedUnits = Object.keys(boardPending).length ? boardWithSnap(boardExposureUnits) : null;
+    }
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
       var dot = tabDot(TAB[name]);
@@ -693,7 +696,7 @@
   // The server stamps each section with data-th, a hash of its rendered
   // bytes (TopicHTML, render.go), compared in place of the HTML (topicSeen).
   var boardSeen = {}, boardRendered = null, boardLatest = null, boardPending = Object.create(null), boardFrozen = [], boardRelease = false;
-  var boardOwn = Object.create(null), boardImmediate = Object.create(null), boardHeightHeld = new Map(), boardHeightChanges = new Map();
+  var boardOwn = Object.create(null), boardImmediate = Object.create(null), boardSnap = null, boardExposedUnits = null;
   var boardChanges = [], boardOffered = null, boardBadge = null, boardReleaseFrame = 0;
   var boardPaged = Object.create(null), boardPagedEdits = [];
   function topicKey(n) {
@@ -1323,10 +1326,21 @@
     });
     return { h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
   }
-  function boardExposed(n) {
-    var w = window.wbHistory;
-    return !!(n && n.isConnected !== false && w && w.keep && w.keep(n, { capture: false }).visible(n));
+  // A staging pass reads exposure through one wbHistory.snapshot: nothing
+  // writes the DOM inside it, so each scroller's viewport (a scan of every
+  // sticky head) is measured once rather than once per node checked.
+  function boardWithSnap(fn) {
+    var outer = boardSnap, w = window.wbHistory;
+    if (!outer && w && w.snapshot) boardSnap = w.snapshot();
+    try { return fn(); } finally { boardSnap = outer; }
   }
+  function boardExposed(n) {
+    if (!n || n.isConnected === false) return false;
+    if (boardSnap) return boardSnap.visible(n);
+    var w = window.wbHistory;
+    return !!(w && w.keep && w.keep(n, { capture: false }).visible(n));
+  }
+  function boardScroller(n) { return boardSnap ? boardSnap.scroller(n) : window.wbHistory.keep(n, { capture: false }).scroller; }
   // Freeze the interval, not just the reading reference. A single scroll
   // delta cannot repair an insertion/reorder between two visible units.
   // Units outside the interval retain canonical order and render normally.
@@ -1361,24 +1375,39 @@
     q("template", n).forEach(function (t) { if (t.content) nodes = nodes.concat(boardPanelNodes(t.content)); });
     return nodes;
   }
+  // The mounted panels only: inert history pages are never exposed.
+  function boardLivePanels(n) {
+    return q(".entry-panel, .wb-entry:not(.panel), .doc-frame", n).filter(function (p) {
+      return !p.classList.contains("doc-frame") || !p.closest(".entry-panel");
+    });
+  }
   function boardPanelKey(n) { return n.id || n.getAttribute("data-key") || n.getAttribute("data-entry") || n.getAttribute("data-doc-key"); }
+  function boardPanelMap(list) {
+    var m = new Map();
+    list.forEach(function (p) { var k = boardPanelKey(p); if (!m.has(k)) m.set(k, p); });
+    return m;
+  }
+  // The exposed panels on scroller, in document order, once per snapshot.
+  function boardViewedPanels(scroller) {
+    var memo = boardSnap && (boardSnap.viewed = boardSnap.viewed || new Map());
+    if (memo && memo.has(scroller)) return memo.get(scroller);
+    var list = boardLivePanels(scroller).filter(function (p) { return boardExposed(p) && boardScroller(p) === scroller; });
+    if (memo) memo.set(scroller, list);
+    return list;
+  }
   function boardRenderBlockers(live, old, incoming) {
-    var exposed = boardPanelNodes(live).filter(boardExposed);
+    var exposed = boardLivePanels(live).filter(boardExposed);
     if (!incoming) return exposed.length ? exposed : boardExposed(live) ? [live] : [];
-    var before = boardPanelNodes(old), after = boardPanelNodes(incoming);
-    function find(list, key) { return list.find(function (p) { return boardPanelKey(p) === key; }); }
+    var before = boardPanelNodes(old), after = boardPanelNodes(incoming), was = boardPanelMap(before), now = boardPanelMap(after);
     var changed = exposed.filter(function (p) {
-      var key = boardPanelKey(p), a = find(before, key), b = find(after, key);
+      var key = boardPanelKey(p), a = was.get(key), b = now.get(key);
       return !a || !b || a.outerHTML !== b.outerHTML;
     });
     // The frozen interval crosses topic boundaries, but never scrollers.
     // Extend this topic's canonical span toward other exposed units.
     var leading = false, trailing = false;
     if (exposed.length) {
-      var w = window.wbHistory, scroller = w.keep(live, { capture: false }).scroller;
-      var viewed = boardPanelNodes(scroller).filter(function (p) {
-        return boardExposed(p) && w.keep(p, { capture: false }).scroller === scroller;
-      });
+      var viewed = boardViewedPanels(boardScroller(live));
       var first = viewed.indexOf(exposed[0]), last = viewed.indexOf(exposed[exposed.length - 1]);
       leading = first > 0;
       trailing = last >= 0 && last < viewed.length - 1;
@@ -1450,7 +1479,8 @@
       });
     });
   }
-  function boardStageInput(input) {
+  function boardStageInput(input) { return boardWithSnap(function () { return boardStageSnap(input); }); }
+  function boardStageSnap(input) {
     boardPending = Object.create(null);
     boardImmediate = Object.create(null);
     boardFrozen = [];
@@ -1498,19 +1528,8 @@
     boardRendered = { topics: topics, order: order, before: input.before, after: input.after };
     return boardRendered;
   }
-  function boardFrameExposed(f) {
-    // The host panel, not its opaque child document, is the release unit.
-    return boardExposed(f.closest(".entry-panel") || f);
-  }
   function boardPendingBadge() {
-    var pending = Object.assign(Object.create(null), boardPending);
-    boardHeightHeld.forEach(function (h, f) {
-      if (!f.isConnected) { boardHeightHeld.delete(f); boardHeightChanges.delete(f); return; }
-      var t = f.closest("section.topic[data-topic]");
-      if (t) pending[topicKey(t)] = true;
-    });
-    var names = Object.keys(pending), count = boardChanges.length;
-    boardHeightChanges.forEach(function (n) { count += n; });
+    var names = Object.keys(boardPending), count = boardChanges.length;
     if (!boardBadge && names.length) {
       boardBadge = doc.createElement("button");
       boardBadge.type = "button";
@@ -1525,19 +1544,43 @@
   }
   function boardFlushViewed(explicit) {
     boardReleaseFrame = 0;
-    if (!Object.keys(boardPending).length && !boardHeightHeld.size) return;
+    if (!Object.keys(boardPending).length) return;
     boardRelease = !!explicit;
     try {
       if (boardLatest) swap("board", boardLatest.hash, boardLatest.html, true);
-      boardHeightHeld.forEach(function (h, f) {
-        if (!f.isConnected) { boardHeightHeld.delete(f); boardHeightChanges.delete(f); }
-        else if (explicit || !boardFrameExposed(f)) { boardHeightHeld.delete(f); boardHeightChanges.delete(f); f.wbHeightRelease = !!explicit; queueFrameHeight(f, h); }
-      });
       boardPendingBadge();
     } finally { boardRelease = false; }
   }
+  // The exposed units a staged release can depend on: top-level topics,
+  // cards and groups, the pin list's topics and fetched closed-page topics.
+  function boardExposureUnits() {
+    var pins = window.WsCards && window.WsCards.pinList && window.WsCards.pinList(), units = [];
+    boardBoxes().concat(pins && boardBoxes().indexOf(pins) < 0 ? [pins] : []).forEach(function (box) {
+      units = units.concat(Array.prototype.slice.call(box.children), q(".closed-page section.topic[data-topic]", box));
+    });
+    return units.filter(boardExposed);
+  }
+  // A scroll or resize re-stages only when a release can follow: a pending
+  // panel left the view (its topic's rendering may release), or the exposed
+  // unit set changed (a frozen interval or staged placement may release).
+  // Re-staging on every scroll frame repeated a whole board swap per frame
+  // while anything was pending.
+  function boardReleaseDue() {
+    return boardWithSnap(function () {
+      var gone = Object.keys(boardPending).some(function (k) {
+        var b = boardPending[k];
+        return Array.isArray(b) && b.some(function (n) { return !boardExposed(n); });
+      });
+      if (gone || !boardExposedUnits) return true;
+      var units = boardExposureUnits();
+      return units.length !== boardExposedUnits.length || units.some(function (n, i) { return n !== boardExposedUnits[i]; });
+    });
+  }
   function boardViewedScroll() {
-    if (!boardReleaseFrame && (Object.keys(boardPending).length || boardHeightHeld.size)) boardReleaseFrame = requestAnimationFrame(function () { boardFlushViewed(false); });
+    if (!boardReleaseFrame && Object.keys(boardPending).length) boardReleaseFrame = requestAnimationFrame(function () {
+      boardReleaseFrame = 0;
+      if (Object.keys(boardPending).length && boardReleaseDue()) boardFlushViewed(false);
+    });
   }
   doc.addEventListener("scroll", boardViewedScroll, { capture: true, passive: true });
   window.addEventListener("resize", boardViewedScroll);
@@ -4124,7 +4167,6 @@
     if (!p.style.height || p.wbUnmounted) f.wbFirst = true;
     if (p.wbKeep) f.wbKeep = true;
     if (p.wbGrow) f.wbGrow = true;
-    if (p.wbHeightRelease) f.wbHeightRelease = true;
     if (p.parentNode) p.parentNode.replaceChild(f, p);
     return f;
   }
@@ -4227,7 +4269,6 @@
     p.wbUnmounted = true;
     if (f.wbKeep) p.wbKeep = true;
     if (f.wbGrow) p.wbGrow = true;
-    if (f.wbHeightRelease) p.wbHeightRelease = true;
     Array.prototype.forEach.call(f.attributes, function (a) { if (a.name !== "srcdoc" && a.name !== "sandbox") p.setAttribute(a.name, a.value); });
     p.setAttribute("data-sandbox", f.getAttribute("sandbox") || "");
     if (frameSizes.has(f)) { p.style.height = Math.ceil(frameSizes.get(f)) + "px"; frameSizes.delete(f); }
@@ -4420,24 +4461,16 @@
     var batch = frameSizes;
     frameSizes = new Map();
     frameSizeFrame = 0;
-    // Inspect before writing any height. Visible topic geometry is staged
-    // with rendering/placement; all remaining heights share one capture per
-    // actual scroller, including old frames and independent pinned columns.
+    // Every height applies at once, under one capture per actual scroller,
+    // including old frames and independent pinned columns. A frame's srcdoc
+    // never changes, so its height reports are the rendering of content the
+    // board already admitted (late images, fonts, a narrower column), never
+    // a pending external change: staging holds those as whole sections.
+    // Holding a visible frame's height left a swapped-in frame at 0 px, a
+    // blank card, until it fully left the view.
     batch.forEach(function (h, f) {
       if (f.isConnected === false) { batch.delete(f); return; }
-      var changed = Math.abs(Math.ceil(h) - (parseFloat(f.style.height) || 0)) >= 1;
-      var t = f.closest("section.topic[data-topic]");
-      // Initial hydration has no previous rendered body to defer. A swapped
-      // frame carries wbKeep even before its first height, so external
-      // visible updates still wait for the shared pending-change release.
-      var initial = f.wbFirst && !f.wbKeep && !f.style.height;
-      if (changed && !initial && !f.wbHeightRelease && t && boardFrameExposed(f)) {
-        if (boardHeightHeld.get(f) !== h) boardHeightChanges.set(f, (boardHeightChanges.get(f) || 0) + 1);
-        boardHeightHeld.set(f, h); batch.delete(f); return;
-      }
-      boardHeightHeld.delete(f); boardHeightChanges.delete(f);
-      if (changed) f.wbKeep = false;
-      f.wbHeightRelease = false;
+      if (Math.abs(Math.ceil(h) - (parseFloat(f.style.height) || 0)) >= 1) f.wbKeep = false;
     });
     var kept = batch.size ? boardKeep(Array.from(batch.keys())) : null;
     batch.forEach(function (h, f) {
@@ -4461,7 +4494,6 @@
       postTheme(f);
     });
     if (kept) kept.h.apply();
-    boardPendingBadge();
   }
   window.addEventListener("message", function (e) {
     var f = docFrame(e.source), m = e.data;

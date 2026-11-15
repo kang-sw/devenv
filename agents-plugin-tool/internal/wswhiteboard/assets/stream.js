@@ -417,7 +417,13 @@
         if (entry) run.open = systems.get(entry.id);
       });
       h._wbHistoryHeights = Object.assign({}, saved.heights || {});
-      if (saved.chunks && saved.chunks.length > 1) {
+      // A settled default cut is the reader's window while its clip is in
+      // view: re-choosing the tail would slide every visible row up inside
+      // the flex-end clip, which no scroll write can repair. Keep the cut and
+      // let the clip grow below; leaving the view collapses it (arm).
+      var inView = saved.chunks && saved.chunks.length === 1 && saved.chunks[0] && !saved.pending && find(h, saved.chunks[0]) &&
+        kit.keep(h, { capture: false }).visible(h.querySelector('.history-clip'));
+      if (saved.chunks && (saved.chunks.length > 1 || inView)) {
         h._wbHistoryChunks = saved.chunks.slice();
         h._wbHistorySteps = saved.chunks.length;
         h._wbHistoryPending = saved.pending || null;
@@ -790,11 +796,38 @@
       return s;
     }
     function keeping(scroller) { var s = sessions.get(scroller); return s ? s.handle : null; }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, jump: jump, bands: bands };
+    // snapshot() is a read-only exposure view for one synchronous pass with
+    // no DOM write inside it: each scroller's viewport and each ancestor's
+    // scroller are measured once. Per-node keep(capture:false).visible
+    // rescans every sticky head, which over a whole board's panels froze
+    // every board update for ~1 s (100 topics).
+    function snapshot() {
+      var views = new Map(), under = new Map();
+      function scroller(node) {
+        var chain = [], found = null;
+        for (var p = node && node.parentElement; p && p !== doc.body && p !== doc.documentElement; p = p.parentElement) {
+          if (under.has(p)) { found = under.get(p); break; }
+          chain.push(p);
+          var oy = win.getComputedStyle(p).overflowY;
+          if ((oy === "auto" || oy === "scroll" || oy === "overlay") && p.scrollHeight > p.clientHeight) { found = p; break; }
+        }
+        if (!found) found = docScroller();
+        chain.forEach(function (c) { under.set(c, found); });
+        return found;
+      }
+      function visible(node) {
+        if (!node || node.isConnected === false) return false;
+        var s = scroller(node), v = views.get(s);
+        if (!v) { v = viewport(s); views.set(s, v); }
+        return exposed(node, s, v);
+      }
+      return { scroller: scroller, visible: visible };
+    }
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
   }
   var kit = viewKit(window);
   window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, jump: kit.jump, bands: kit.bands };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {

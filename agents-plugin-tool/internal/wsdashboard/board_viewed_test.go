@@ -12,7 +12,7 @@ func viewedHarness(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFrameExposed", "boardFlushViewed")
+	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFlushViewed", "boardWithSnap", "boardScroller", "boardLivePanels", "boardPanelMap", "boardViewedPanels", "boardStageSnap", "boardExposureUnits", "boardReleaseDue")
 }
 
 func TestBoardViewedCrossTopicInsertion(t *testing.T) {
@@ -141,15 +141,12 @@ boardOffered={previous:one,input:two};boardRecordPending();
 boardOffered={previous:two,input:three};boardRecordPending();
 boardRecordPending();boardPendingBadge();
 check("two revisions of same topic count as two changes",boardBadge.textContent==="최신 변경 2건 반영 · A");
-var held={isConnected:true,closest:function(){return A;}};
-boardHeightHeld.set(held,250);boardHeightChanges.set(held,2);boardPendingBadge();
-check("same badge includes queued height changes",boardBadge.textContent==="최신 변경 4건 반영 · A");
-boardPending={};boardRecordPending();boardHeightHeld.clear();boardHeightChanges.clear();boardPendingBadge();
+boardPending={};boardRecordPending();boardPendingBadge();
 check("release clears pending ledger and shared control",boardChanges.length===0 && boardBadge.hidden);
 process.stdout.write(bad.join("\n"));`)
 }
 
-func TestBoardViewedInternalGeometryAndHeightRelease(t *testing.T) {
+func TestBoardViewedInternalGeometry(t *testing.T) {
 	runNode(t, "viewed internal geometry", viewedHarness(t)+`
 var old=topic("large","old",[panel("p1","one"),panel("p2","two")]);
 var live=topic("large","old",[panel("p1","one",true),panel("p2","two",true)]);live.exposed=true;
@@ -157,24 +154,32 @@ var next=topic("large","new",[panel("p1","one"),panel("inserted","new"),panel("p
 check("insertion between visible unchanged panels is incompatible",boardRenderBlockers(live,old,next).length===2);
 live.panels[0].exposed=false;
 check("after earlier panel leaves, remaining panel can be owner-compensated",boardRenderBlockers(live,old,next).length===0);
-var p1=panel("p1","one",true),f={isConnected:true,exposed:false,closest:function(sel){return sel===".entry-panel" ? p1 : live;}};
-check("opaque frame release follows its exposed host panel",boardFrameExposed(f));
-var queued=[];
-function queueFrameHeight(frame,h){queued.push([frame,h]);}
-boardHeightHeld.set(f,300);boardHeightChanges.set(f,1);boardPending={};boardLatest=null;
-boardFlushViewed(false);
-check("partly exposed panel holds height",queued.length===0 && boardHeightHeld.size===1);
-p1.exposed=false;
-boardFlushViewed(false);
-check("panel fully offscreen releases even though topic remains exposed",queued.length===1 && queued[0][1]===300 && live.exposed && boardHeightHeld.size===0);
-p1.exposed=true;boardHeightHeld.set(f,400);boardHeightChanges.set(f,1);
-boardFlushViewed(true);
-check("badge click releases visible height explicitly",queued.length===2 && f.wbHeightRelease && !boardRelease);
 // Initial inert canonical history is consulted, never sandbox child DOM.
 var history=topic("large","history",[]);history.templates=[{content:{panels:[panel("p9","old9")]}}];
 var nextHistory=topic("large","newHistory",[]);nextHistory.templates=[{content:{panels:[panel("p9","new9")]}}];
 var liveHistory=topic("large","history",[panel("p9","live9",true)]);
 check("materialized history panel uses immutable template source",boardRenderBlockers(liveHistory,history,nextHistory).length===1);
+process.stdout.write(bad.join("\n"));`)
+}
+
+// A scroll re-stages only when a release can follow, never per frame.
+func TestBoardViewedScrollReleaseGate(t *testing.T) {
+	runNode(t, "viewed scroll release gate", viewedHarness(t)+`
+var A=topic("A","a1",[panel("p1","one",true),panel("p2","two",true)]),B=topic("B","b1",[panel("p3","three")]);
+A.exposed=true;setLive([A,B]);
+boardPending={A:[A.panels[0]]};boardExposedUnits=boardExposureUnits();
+check("exposed units are the visible top-level topics",boardExposedUnits.length===1 && boardExposedUnits[0]===A);
+check("an unchanged view does not re-stage",!boardReleaseDue());
+A.panels[1].exposed=false;
+check("a non-blocking panel leaving does not re-stage",!boardReleaseDue());
+A.panels[0].exposed=false;
+check("a pending panel leaving re-stages",boardReleaseDue());
+A.panels[0].exposed=true;boardPending={A:true};B.exposed=true;
+check("a changed exposed unit set re-stages staged placement",boardReleaseDue());
+B.exposed=false;
+check("placement stays staged while the interval is unchanged",!boardReleaseDue());
+boardExposedUnits=null;
+check("no recorded view re-stages",boardReleaseDue());
 process.stdout.write(bad.join("\n"));`)
 }
 
