@@ -36,11 +36,11 @@ function key(n, key) { return event(n, 'keydown', { key }); }
 function slash(n) { var e = { target: n, key: '/', preventDefault() { this.defaultPrevented = true; } }; doc.listeners.keydown.slice().forEach(f => f(e)); }
 var doc = new Doc(), win = { WsCards: { icon: () => '' }, AbortController, innerWidth: 1200, innerHeight: 900, listeners: {}, addEventListener: El.prototype.addEventListener, removeEventListener: El.prototype.removeEventListener };
 new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, k => k, k => k, fetchControlled, AbortController, later, cancel);
-function explorer(rid, local = true) {
+function explorer(rid, local = true, options = {}) {
   var el = doc.body.appendChild(new El('section', doc)); el.className = 'fpane';
-  var store = {}, previews = [];
+  var store = options.store || {}, previews = [];
   win.WsPreview = { open: (path, o) => previews.push([path, o]) };
-  var instance = win.WsFiles.create(el, { rid, local, load: k => store[k], save: (k, v) => store[k] = v });
+  var instance = win.WsFiles.create(el, Object.assign({ rid, local, load: k => store[k], save: (k, v) => store[k] = v }, options));
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
 function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd button')[0].click(); x.at('.fpin').value = path; x.at('.fgo .pr').click(); }
@@ -73,7 +73,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   event(a.tree, 'click', { target: a.at('[data-path="src"]') });
   await answer(take('alpha', 'list', 'src'), listing('/alpha/src', [{ name: 'a.go' }]));
   event(a.tree, 'click', { target: a.at('[data-path="src/a.go"]') });
-  check('expansion and selection stay local', [!!a.at('[aria-selected="true"]'), !!b.at('[aria-selected="true"]'), b.at('[data-path="src"]').getAttribute('aria-expanded')], [true, false, 'false']);
+  check('expansion and selection stay local', [!!a.at('.fr[aria-selected="true"]'), !!b.at('.fr[aria-selected="true"]'), b.at('[data-path="src"]').getAttribute('aria-expanded')], [true, false, 'false']);
   a.all('.fhd button')[3].click();
   var ign = a.all('.fpop input')[0]; ign.checked = true; event(ign, 'change');
   check('view and storage isolated', [!!a.at('[data-path="ignored"]'), !!b.at('[data-path="ignored"]'), Object.keys(a.store).length > 0, Object.keys(b.store).some(k => k.includes('.view'))], [true, false, true, false]);
@@ -89,7 +89,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   a.instance.hidden(); a.instance.shown();
   await answer(take('alpha', 'list', 'src'), listing('/alpha/src', [{ name: 'a.go' }]));
   await answer(take('alpha', 'list', ''), listing('/alpha', undefined, true));
-  check('reopen refresh preserves expansion selection and scroll', [a.tree.scrollTop, b.tree.scrollTop, !!a.at('[data-path="src/a.go"]'), !!a.at('[aria-selected="true"]')], [73, 19, true, true]);
+  check('reopen refresh preserves expansion selection and scroll', [a.tree.scrollTop, b.tree.scrollTop, !!a.at('[data-path="src/a.go"]'), !!a.at('.fr[aria-selected="true"]')], [73, 19, true, true]);
   a.all('.fseg button')[1].click(); a.all('.fopts button').forEach(n => n.click());
   a.q.value = 'needle'; event(a.q, 'input'); await timers(); var old = take('alpha', 'search');
   b.q.value = 'beta'; event(b.q, 'input'); await timers(); var br = take('beta', 'find');
@@ -129,5 +129,83 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   await answer(lateDir, listing('/beta/src', [{ name: 'after-destroy.go' }]));
   check('late child listing cannot rebuild a destroyed explorer', b.el.children.length, 0);
   check('all global listeners retired', [doc.listeners.keydown.length, doc.listeners.mousedown.length, doc.listeners.wheel.length, win.listeners.resize.length, win.listeners.blur.length, pendingTimers.size], [0, 0, 0, 0, 0, 0]);
+  var sent = [], copied = [], opened = [], events = [];
+  var core = explorer('core', true, { send: p => sent.push(p), copy: p => copied.push(p), openCard: p => opened.push(p) });
+  core.instance.on('navigation', p => events.push(['nav', p.path]));
+  core.instance.on('selection', p => events.push(['sel', p.path]));
+  core.instance.shown();
+  await answer(take('core', 'list', ''), listing('/core', [{ name: 'src', dir: true }, { name: 'photo space.png' }, { name: 'report.pdf' }, { name: 'unsafe.svg' }, { name: 'linked.png', link: true }] , true));
+  event(core.at('[data-entry="src"]'), 'auxclick', { button: 1 });
+  check('directory grid middle-click also opens a background tab', [core.all('.ftab-select').length, core.instance.location().dir], [2, '']);
+  core.all('.ftab-close')[1].click();
+  event(core.tree, 'auxclick', { target: core.at('[data-path="src"]'), button: 1 });
+  check('middle-click folder opens background tab without request or navigation', [core.all('.ftab-select').length, core.all('.ftab-select')[0].getAttribute('aria-selected'), core.instance.location().dir, requests.filter(r => !r.taken && r.url.pathname === '/s/core/fs/list').length], [2, 'true', '', 0]);
+  event(core.all('.fentry').find(n => n.getAttribute('data-entry') === 'photo space.png'), 'click');
+  core.all('.fattachment button')[0].click(); core.all('.fattachment button')[1].click();
+  check('browse actions emit session-relative path and selection event', [sent, copied, events.some(e => e[0] === 'sel' && e[1] === 'photo space.png')], [['photo space.png'], ['photo space.png'], true]);
+  core.all('.fview-modes button')[3].click();
+  check('gallery uses guarded raw route only for supported unlinked image', core.all('.fthumb').map(n => n.src), ['/s/core/fs/raw?path=photo%20space.png']);
+  core.at('.fdirectory').scrollTop = 41; event(core.at('.fdirectory'), 'scroll');
+  core.tree.scrollTop = 17; event(core.tree, 'scroll');
+  core.all('.ftab-select')[1].click();
+  check('loading tab retires previous actionable rows and browse buttons', [core.all('.fentry').length, core.all('.fr[data-path]').length, core.all('.fattachment button')[0].disabled], [0, 0, true]);
+  await answer(take('core', 'list', ''), listing('/core', undefined, true));
+  await answer(take('core', 'list', 'src'), listing('/core/src', [{ name: 'child.go' }], true));
+  check('background tab activates at its folder', core.instance.location(), { root: '', dir: 'src' });
+  core.all('.fview-modes button')[1].click(); core.at('.fopen-card').click();
+  check('open-as-card forwards active directory', opened, [{ root: '', dir: 'src' }]);
+  core.all('.ftab-select')[0].click();
+  check('tabs restore selection mode and scroll independently', [core.at('.fdirectory').getAttribute('data-view'), core.instance.selection().path, core.at('.fdirectory').scrollTop, core.tree.scrollTop], ['gallery', 'photo space.png', 41, 17]);
+  core.all('.ftab-select')[1].click();
+  check('second tab retains its own view', core.at('.fdirectory').getAttribute('data-view'), 'list');
+  core.instance.hidden(); var roundtrip = JSON.parse(JSON.stringify(core.store)); core.instance.destroy();
+  var restored = explorer('core', true, { store: roundtrip }); restored.instance.shown();
+  await answer(take('core', 'list', ''), listing('/core', undefined, true));
+  await answer(take('core', 'list', 'src'), listing('/core/src', [{ name: 'child.go' }], true));
+  check('storage roundtrip restores tabs active directory and mode', [restored.all('.ftab-select').length, restored.all('.ftab-select')[1].getAttribute('aria-selected'), restored.instance.location().dir, restored.at('.fdirectory').getAttribute('data-view')], [2, 'true', 'src', 'list']);
+  restored.all('.ftab-close')[0].click();
+  check('closing background tab preserves active tab and disables last close', [restored.all('.ftab-select').length, restored.instance.location().dir, restored.at('.ftab-close').disabled], [1, 'src', true]);
+  restored.instance.destroy();
+
+  var legacy = explorer('legacy', true, { store: { 'ws.dashboard.files.root.legacy': '/other', 'ws.dashboard.files.view': JSON.stringify({ '/other': { ign: true } }) }, send: p => sent.push(p), copy: p => copied.push(p) });
+  legacy.instance.shown(); var lr = take('legacy', 'list', '');
+  check('legacy root record still loads', lr.url.searchParams.get('root'), '/other');
+  await answer(lr, listing('/other', [{ name: 'ignored.png', ign: true }]));
+  check('legacy view record still loads', !!legacy.at('[data-entry="ignored.png"]'), true);
+  event(legacy.at('[data-entry="ignored.png"]'), 'click'); legacy.all('.fattachment button')[0].click(); legacy.all('.fattachment button')[1].click();
+  check('outside-root send and copy use absolute host path', [sent.slice(-1), copied.slice(-1)], [['/other/ignored.png'], ['/other/ignored.png']]);
+  var retired = 0, off = legacy.instance.on('selection', () => retired++), disposed = 0;
+  legacy.instance.setAttachment((slot, api) => { slot.appendChild(new El('button', doc)); check('attachment gets same core API', api === legacy.instance, true); return () => disposed++; });
+  off(); event(legacy.at('[data-entry="ignored.png"]'), 'click');
+  legacy.instance.setAttachment(() => () => disposed++); legacy.instance.destroy();
+  check('swappable attachment disposes on replacement and destroy; unsubscribe works', [disposed, retired], [2, 0]);
+
+  var tabRace = explorer('tab-race'); tabRace.instance.shown(); var oldRoot = take('tab-race', 'list');
+  tabRace.instance.newTab({ dir: 'src' }); var currentRoot = take('tab-race', 'list');
+  await answer(currentRoot, listing('/tab-race', undefined, true)); var restoreDir = take('tab-race', 'list', 'src');
+  tabRace.instance.navigate(''); await answer(restoreDir, listing('/tab-race/src', [{ name: 'late.go' }], true));
+  await answer(oldRoot, listing('/obsolete'));
+  check('tab switch and later navigation reject stale root and restore answers', [tabRace.instance.location(), !!tabRace.at('[data-entry="src/late.go"]')], [{ root: '', dir: '' }, false]);
+  tabRace.instance.newTab({ dir: 'src' }); var closingRoot = take('tab-race', 'list');
+  tabRace.all('.ftab-close')[2].click(); await answer(closingRoot, listing('/closed'));
+  check('closed active tab cannot repaint surviving tab', tabRace.at('.froot').textContent, 'tab-race');
+  tabRace.instance.destroy();
+  var hostile = explorer('hostile', false, { store: { 'ws.dashboard.files.tabs.hostile': JSON.stringify({ active: 0, tabs: [{ root: '/secret', dir: '../escape', view: 'invalid' }] }) } });
+  hostile.instance.shown(); var hr = take('hostile', 'list');
+  check('remote restored records cannot select local root or traversal', [hr.url.searchParams.has('root'), hr.url.searchParams.has('dir'), hostile.instance.location()], [false, false, { root: '', dir: '' }]);
+  await answer(hr, listing('/hostile', undefined, true)); hostile.instance.destroy();
+  var candidate = explorer('candidate'); candidate.instance.shown(); var initialCandidate = take('candidate', 'list');
+  rootRequest(candidate, '/chosen'); var choice = take('candidate', 'list');
+  await answer(initialCandidate, listing('/candidate', undefined, true));
+  await answer(choice, listing('/chosen'));
+  check('initial root completion cannot cancel an in-flight candidate root', candidate.instance.location().root, '/chosen');
+  candidate.instance.destroy();
+  var navRace = explorer('nav-race'); navRace.instance.shown();
+  await answer(take('nav-race', 'list'), listing('/nav-race', undefined, true));
+  event(navRace.tree, 'click', { target: navRace.at('[data-path="src"]') }); var pendingFolder = take('nav-race', 'list', 'src');
+  navRace.instance.navigate(''); await answer(pendingFolder, listing('/nav-race/src', [{ name: 'late.go' }], true));
+  check('late sidebar expansion cannot undo a later directory navigation', navRace.instance.location().dir, '');
+  navRace.instance.destroy();
+  check('extended core leaves no global handlers or timers', [doc.listeners.keydown.length, win.listeners.resize.length, pendingTimers.size], [0, 0, 0]);
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });

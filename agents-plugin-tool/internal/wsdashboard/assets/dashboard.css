@@ -1081,6 +1081,61 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .lmenu .msep { height: 1px; background: var(--wb-line); margin: 3px 4px; }
 @media (prefers-reduced-motion: reduce) { .fpane .fr .ch .li { transition: none; } }
 
+/* Explorer cards and both page-owned browsers share the same inner core. */
+.fpane { container-type: inline-size; }
+.fcard { display: flex; height: 100%; border-radius: 0; box-shadow: none; }
+.ftabs { display: flex; flex: none; align-items: center; gap: 3px; overflow-x: auto; padding: 3px 8px 0; border-bottom: 1px solid var(--wb-line); background: var(--wb-wash); }
+.ftab { display: inline-flex; flex: none; align-items: center; max-width: 220px; }
+.ftab-select { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-bottom: 2px solid transparent; padding: 5px 8px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
+.ftab-select[aria-selected="true"] { color: var(--wb-fg); background: var(--wb-muted); border-bottom-color: var(--wb-primary); border-radius: 5px 5px 0 0; }
+.ftab-close.ibtn, .ftab-new.ibtn { width: 22px; height: 22px; }
+.ftab-close:disabled { visibility: hidden; }
+.fnav { display: flex; flex: none; align-items: center; gap: 5px; padding: 3px 8px; }
+.flocation { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.fview-modes { display: flex; flex: none; flex-wrap: wrap; gap: 3px; padding: 4px 8px; border-block: 1px solid var(--wb-line); }
+.fview-modes button { border: 0; border-radius: 5px; padding: 4px 6px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; cursor: pointer; }
+.fview-modes button[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.fworkspace { display: grid; grid-template-columns: 145px minmax(0, 1fr); flex: 1 1 0; min-height: 0; overflow: hidden; }
+.fworkspace[hidden] { display: none; }
+.fworkspace > .ftree { min-width: 0; border-right: 1px solid var(--wb-line); font-size: 11px; }
+.fdirectory { min-width: 0; overflow: auto; padding: 7px 8px; }
+.fentry, .fdetail-head { display: grid; grid-template-columns: 18px minmax(0, 1fr) 64px; align-items: center; gap: 5px; padding: 6px 5px; border-bottom: 1px solid var(--wb-line); font: 11px var(--wb-mono); }
+.fdetail-head { position: sticky; top: -7px; background: var(--wb-card); color: var(--wb-muted-fg); font-size: 10px; }
+.fdetail-head .fn { grid-column: 2; }
+.fentry { cursor: pointer; border-radius: 5px; }
+.fentry .fn, .fentry .ftype { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fentry .ftype { color: var(--wb-muted-fg); font-size: 10px; }
+.fentry:hover { background: var(--wb-muted); }
+.fentry.sel { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.fentry.ign { opacity: .5; }
+.fentry:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
+.fdirectory[data-view="list"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); align-content: start; gap: 3px; }
+.fdirectory[data-view="list"] .fentry { display: flex; border: 0; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); align-content: start; gap: 8px; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) .fentry { display: flex; flex-direction: column; justify-content: center; text-align: center; border: 0; padding: 9px 5px; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) .fentry .fi .li { width: 32px; height: 32px; }
+.fdirectory:is([data-view="icon"], [data-view="gallery"]) .fentry .fn { max-width: 100%; }
+.fdirectory[data-view="gallery"] { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.fdirectory[data-view="gallery"] .fi { align-items: center; justify-content: center; height: 100px; }
+.fthumb { display: block; width: 100%; height: 100px; object-fit: contain; background: var(--wb-bg); border-radius: 5px; }
+.fattachment { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 5px; padding: 7px 9px; border-top: 1px solid var(--wb-line); }
+.fattachment .btn { font-size: 11px; }
+.fattachment .pr { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+@container (max-width: 480px) {
+  .fworkspace { grid-template-columns: 110px minmax(0, 1fr); }
+  .fentry, .fdetail-head { grid-template-columns: 18px minmax(0, 1fr); }
+  .fentry .ftype, .fdetail-head .ftype { display: none; }
+}
+@container (max-width: 340px) {
+  .fworkspace { grid-template-columns: minmax(0, 1fr); }
+  .fworkspace > .ftree { display: none; }
+}
+/* Float is a transient explorer-only sheet, using the same node and scrim. */
+.bcard[data-kind="explorer"][data-float] .bc-in { top: max(52px, 10vh); bottom: 8vh; }
+.bcard[data-kind="explorer"][data-float] .bc-max { display: inline-grid; }
+.bcard[data-kind="explorer"][data-float] .bc-float { display: none; }
+body:has(.bcard[data-kind="explorer"][data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
+
 /* board-first page: no live layer; the board in one readable column that
    the page scrolls. As in the live board column, topicResized owns band
    height compensation: native document anchoring must not add it again. */

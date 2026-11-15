@@ -896,16 +896,25 @@
       before.parentNode.insertBefore(c.widthBtn, before);
       if (focused) c.widthBtn.focus({ preventScroll: true });
     }
-    c.widthBtn.hidden = !wide;
+    c.widthBtn.hidden = !wide || c.el.hasAttribute("data-float");
     c.widthBtn.setAttribute("aria-pressed", String(!!c.extended));
     var label = c.extended ? wsT("js.card.width.normal") : wsT("js.card.width.extend");
     c.widthBtn.title = label;
     c.widthBtn.setAttribute("aria-label", label);
   }
   window.addEventListener("resize", function () { sizeSheet(maxed); });
-  function maximize(c) {
-    if (c && window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(function () { maximize(c); }); return; }
-    if (maxed === c) return;
+  function maximize(c, floating) {
+    if (c && window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(function () { maximize(c, floating); }); return; }
+    var floatOn = !!(floating && c instanceof Card && c.kind === "explorer");
+    if (maxed === c) {
+      if (c && c.el.hasAttribute("data-float") !== floatOn) {
+        if (floatOn) c.el.setAttribute("data-float", ""); else c.el.removeAttribute("data-float");
+        c.normalWidth = floatOn ? 1100 : sheetWidth(c);
+        c.extended = false;
+        sizeSheet(c); c.sized();
+      }
+      return;
+    }
     if (maxed) {
       var was = maxed;
       maxed = null;
@@ -921,6 +930,7 @@
         if (was.back.isConnected) was.back.focus({ preventScroll: true });
       } else if (was instanceof Card) {
         was.el.removeAttribute("data-max");
+        was.el.removeAttribute("data-float");
         was.el.style.height = "";
         was.sized();
         if (was.maxBtn.isConnected) was.maxBtn.focus();
@@ -932,7 +942,7 @@
       }
     }
     if (!c) return;
-    c.normalWidth = sheetWidth(c);
+    c.normalWidth = floatOn ? 1100 : sheetWidth(c);
     c.extended = false;
     if (!scrim) {
       scrim = mk("div", "bc-scrim");
@@ -963,6 +973,7 @@
     }
     c.el.style.height = c.el.getBoundingClientRect().height + "px";
     c.el.setAttribute("data-max", "");
+    if (floatOn) c.el.setAttribute("data-float", "");
     sizeSheet(c);
     c.sized();
     c.minBtn.focus();
@@ -1410,6 +1421,9 @@
       return c;
     },
     list: function (kind) { return cards.filter(function (c) { return !kind || c.kind === kind; }); },
+    // Explorer float shares the sheet lifecycle; it never owns another card node.
+    float: function (c) { if (c instanceof Card && c.kind === "explorer" && cards.indexOf(c) >= 0) maximize(c, true); },
+    dismissFiles: function () { if (maxed && maxed.files) maximize(null); },
     // weave and settle are the board morph's two steps (dashboard.js
     // morphBoard): weave takes the nodes the board wants and returns the
     // placement, {pins, board} (the pin list's nodes and the board

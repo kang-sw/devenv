@@ -725,13 +725,24 @@
   // Two owners, not two views onto one explorer. Keep the tab's existing
   // storage keys; the toolbar uses the same records in its own namespace.
   if (live && fpane && window.WsFiles) {
+    var fileHooks = {
+      rid: rid, post: post, toast: toast, copy: copyText, load: load, save: save,
+      local: function () { return root.hasAttribute("data-sysopen"); },
+      send: attachExplorerPath,
+      openCard: function (location) {
+        // Dismiss before constructing/revealing the new card, not afterward.
+        window.WsCards.dismissFiles();
+        window.WsFiles.open(location);
+      }
+    };
+    // Register adapters before board mount restores explorer card IDs.
+    window.WsFiles.setup(fileHooks);
     function createFiles(node, rootSlot, toolbar) {
-      return window.WsFiles.create(node, {
-        rid: rid, post: post, toast: toast, copy: copyText, rootSlot: rootSlot,
+      return window.WsFiles.create(node, Object.assign({}, fileHooks, {
+        rootSlot: rootSlot,
         load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : load,
-        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : save,
-        local: function () { return root.hasAttribute("data-sysopen"); }
-      });
+        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : save
+      }));
     }
     filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false);
     var sheet = doc.createElement("section");
@@ -2092,6 +2103,17 @@
   }
   // editText is editField on the composer's text.
   function editText(start, end, s) { editField(ctext, start, end, s); }
+  // The explorer has already resolved the path against its active tab root.
+  // Use the composer's mention syntax and edit path; this never submits.
+  function attachExplorerPath(path) {
+    if (!ctext || !window.wsMention) return;
+    window.WsCards.dismissFiles();
+    var v = ctext.value, a = ctext.selectionStart, b = ctext.selectionEnd;
+    var s = window.wsMention.mentionParts(path).text;
+    if (a > 0 && !/\s/.test(v.charAt(a - 1))) s = " " + s;
+    if (b >= v.length || !/\s/.test(v.charAt(b))) s += " ";
+    editText(a, b, s);
+  }
   // insertMarkers puts the markers for nums at el's cursor (the composer's
   // by default), spaced from the text around them.
   function insertMarkers(nums, el) {
