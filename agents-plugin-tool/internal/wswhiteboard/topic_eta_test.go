@@ -20,6 +20,36 @@ func etaBoard(t *testing.T) *State {
 	return s
 }
 
+func TestTopicETAResearchIsUntimedAndImplementationStartsFresh(t *testing.T) {
+	s := etaBoard(t)
+	oldRun := *s.TopicStates()["Work"].State.Run
+	stateApply(t, s, stateCommand(StateResearching, `owner="investigator" eta_minutes="1"`), stateNow.Add(10*time.Minute))
+	e := s.Topics[0].Entries[len(s.Topics[0].Entries)-1]
+	r, code := parseTopicState(e)
+	if code != "" || r.From != StateImplementing || r.Run == nil || r.Run.ID != oldRun.ID || r.ElapsedMS == nil || *r.ElapsedMS != 10*60*1000 || s.TopicStates()["Work"].State.Run != nil {
+		t.Fatalf("implementing completion into research: %+v %s", r, code)
+	}
+	before := s.clone()
+	if _, p := Apply(s, etaCommand("60", "research is not a run"), Env{Now: stateNow.Add(time.Hour)}); len(p) == 0 || !reflect.DeepEqual(before, s) {
+		t.Fatal("research accepted timed extension")
+	}
+	start := stateNow.Add(2 * time.Hour)
+	stateApply(t, s, stateCommand(StateImplementing, `owner="executor2" eta_minutes="5"`), start)
+	run := s.TopicStates()["Work"].State.Run
+	if run.ID == oldRun.ID || run.StartedAt != start.Format(time.RFC3339Nano) || run.Owner != "executor2" || run.InitialETAMinutes != 5 || run.ETAMinutes != 5 || run.ExtensionCount != 0 || run.DeadlineAt != start.Add(5*time.Minute).Format(time.RFC3339Nano) {
+		t.Fatalf("research clock leaked into implementing: %+v", run)
+	}
+	if state := s.TopicStates()["Work"].State; state.Owner != "" || state.ETAMinutes != 0 {
+		t.Fatal("research attributes leaked into implementing")
+	}
+	stateApply(t, s, etaCommand("8", "implementation extension"), start.Add(time.Minute))
+	stateApply(t, s, `<wb:topic name="Work"><wb:close result="Done"/></wb:topic>`, start.Add(3*time.Minute))
+	r, code = parseTopicState(s.Topics[0].Entries[len(s.Topics[0].Entries)-1])
+	if code != "" || r.Run.ID != run.ID || r.Run.InitialETAMinutes != 5 || r.Run.ETAMinutes != 8 || r.Run.ExtensionCount != 1 || *r.ElapsedMS != 3*60*1000 {
+		t.Fatalf("fresh implementation completion: %+v %s", r, code)
+	}
+}
+
 func TestTopicETACumulativeHistoryAndNoop(t *testing.T) {
 	s := etaBoard(t)
 	original := *s.TopicStates()["Work"].State.Run
@@ -116,7 +146,7 @@ func TestTopicETAGrammarBoundsAndAtomicity(t *testing.T) {
 }
 
 func TestTopicETAKnownOpenOrderedBatch(t *testing.T) {
-	for _, setup := range []string{"", stateCommand(StateWaiting, ""), `<wb:topic name="Work"><wb:close result="done"/></wb:topic>`} {
+	for _, setup := range []string{"", stateCommand(StateWaiting, ""), stateCommand(StateResearching, `eta_minutes="40"`), `<wb:topic name="Work"><wb:close result="done"/></wb:topic>`} {
 		s := stateBoard(t)
 		stateApply(t, s, setup, stateNow)
 		before := s.clone()

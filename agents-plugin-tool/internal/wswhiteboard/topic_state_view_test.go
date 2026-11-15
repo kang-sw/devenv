@@ -33,8 +33,27 @@ func stateViewOutputs(t *testing.T, view View) []string {
 	return outputs
 }
 
+func TestTopicStateViewResearchingProjection(t *testing.T) {
+	s := stateBoard(t)
+	stateApply(t, s, stateCommand(StateResearching, `owner="investigator &quot;&lt;&amp;&gt;&#39;" eta_minutes="7"`), stateNow)
+	for name, layout := range layouts() {
+		view := BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})
+		if len(view.Topics) != 1 || !reflect.DeepEqual(view.Topics[0].State, s.TopicStates()["Work"].State) || view.Topics[0].State.Run != nil || view.Topics[0].StateDiagnostic != nil {
+			t.Fatalf("%s: research projection: %+v", name, view.Topics)
+		}
+	}
+	stateApply(t, s, `<wb:topic name="Work"><wb:close result="Done"/></wb:topic>`, stateNow)
+	for _, layout := range layouts() {
+		view := BuildView(s, ViewInput{Layout: layout})
+		if len(view.Topics) != 1 || !view.Topics[0].Closed || view.Topics[0].State != nil {
+			t.Fatalf("closed research projection: %+v", view.Topics)
+		}
+	}
+}
+
 func TestTopicStateViewOperationalStates(t *testing.T) {
-	for _, value := range topicStateValues {
+	// Phase 1 adds research projection above; its badge is a Phase 2 deliverable.
+	for _, value := range []string{StateDiscussing, StateWaiting, StateImplementing, StateAwaitingConfirmation} {
 		t.Run(value, func(t *testing.T) {
 			s := stateBoard(t)
 			attrs := ""

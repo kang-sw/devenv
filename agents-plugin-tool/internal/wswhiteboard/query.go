@@ -340,6 +340,12 @@ func writeQueryState(sb *strings.Builder, t QueryTopic) {
 	if t.State != nil {
 		s := t.State
 		line := fmt.Sprintf("state: %s; entry: %s", s.Value, s.Entry)
+		if s.Owner != "" {
+			line += fmt.Sprintf("; owner: %q", s.Owner)
+		}
+		if s.ETAMinutes != 0 {
+			line += fmt.Sprintf("; eta_minutes: %d (informational)", s.ETAMinutes)
+		}
 		if run := s.Run; run != nil {
 			line += fmt.Sprintf("; run: %s; started_at: %s; owner: %q; initial_eta_minutes: %d; eta_minutes: %d; extension_count: %d; deadline_at: %s", run.ID, run.StartedAt, run.Owner, run.InitialETAMinutes, run.ETAMinutes, run.ExtensionCount, run.DeadlineAt)
 		}
