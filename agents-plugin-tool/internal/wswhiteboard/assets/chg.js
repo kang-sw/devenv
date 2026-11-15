@@ -10,7 +10,12 @@ function wbChangeBars(body) {
   while ((c = walk.nextNode())) if (c.data.indexOf("wbchg:") === 0) marks.push(c);
   var layer = body.nextElementSibling;
   if (layer && !layer.classList.contains("wb-chg-layer")) layer = null;
-  if (layer && layer.wbTip) layer.wbTip.hidden = true;
+  function hideTip() {
+    if (!layer || !layer.wbTip) return;
+    layer.wbTip.hidden = true;
+    if (layer.wbTip.wbBodyAgeEnd) layer.wbTip.wbBodyAgeEnd();
+  }
+  hideTip();
   if (!marks.length) { if (layer) layer.remove(); return; }
   if (!layer) {
     layer = document.createElement("div");
@@ -44,10 +49,12 @@ function wbChangeBars(body) {
     hit.appendChild(b);
     layer.appendChild(hit);
     hit.addEventListener("pointerenter", function () {
+      hideTip();
       var tip = layer.wbTip;
       if (!tip) {
         tip = document.createElement("div");
         tip.className = "wb-chg-tip";
+        tip.hidden = true;
         tip.setAttribute("role", "tooltip");
         tip.setAttribute("data-body-age", "");
         document.body.appendChild(tip);
@@ -59,17 +66,19 @@ function wbChangeBars(body) {
       var source = root.querySelector(".body-age, meta[name=wb-body-at]");
       var at = source ? source.getAttribute("data-body-at") : "";
       tip.setAttribute("data-body-at", at);
-      tip.textContent = window.wbBodyTimeText(at);
-      tip.hidden = false;
-      // Fixed overlay, clamped inside this document (including short opaque
-      // frames). It never changes body height or asks the host to scroll.
-      tip.style.left = "0px";
-      tip.style.top = "0px";
-      var r = hit.getBoundingClientRect(), tr = tip.getBoundingClientRect();
-      tip.style.left = Math.max(0, Math.min(r.right + 6, window.innerWidth - tr.width)) + "px";
-      tip.style.top = Math.max(0, Math.min(r.top, window.innerHeight - tr.height)) + "px";
+      window.wbBodyAgeHover(tip, function (value) {
+        tip.textContent = value;
+        tip.hidden = false;
+        // Fixed overlay, clamped inside this document (including short opaque
+        // frames). It never changes body height or asks the host to scroll.
+        tip.style.left = "0px";
+        tip.style.top = "0px";
+        var r = hit.getBoundingClientRect(), tr = tip.getBoundingClientRect();
+        tip.style.left = Math.max(0, Math.min(r.right + 6, window.innerWidth - tr.width)) + "px";
+        tip.style.top = Math.max(0, Math.min(r.top, window.innerHeight - tr.height)) + "px";
+      });
     });
-    hit.addEventListener("pointerleave", function () { if (layer.wbTip) layer.wbTip.hidden = true; });
+    hit.addEventListener("pointerleave", hideTip);
   }
   marks.forEach(function (m) {
     var kind = m.data.slice(6), el = kind === "delafter" ? m.previousElementSibling : m.nextElementSibling;
