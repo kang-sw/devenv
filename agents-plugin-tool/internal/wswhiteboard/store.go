@@ -308,6 +308,9 @@ type Outcome struct {
 	// Effects holds typed semantic transitions, in command order. It is
 	// meaningful only after the enclosing store commits, never on refusal.
 	Effects []Effect
+	// Summaries are transient net-per-topic result lines, in first-touch order.
+	// Like Effects, they describe applied work only after the store commits.
+	Summaries []string
 	// IDs holds the ID of every wb:add command, in command order.
 	IDs []int
 	// Withdrawn holds the ID of every item a wb:close withdrew, in command
@@ -600,8 +603,28 @@ func (s *State) evictArchive() {
 func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	p := &problems{}
 	cmds := parseCommands(p, commands)
+	work, out, updates := applyCommands(state, cmds, env, p, nil)
+	if len(p.List) > 0 {
+		return Outcome{}, p.List
+	}
+	// Plan on the ordinary ordered transaction first: a same-batch explicit
+	// declaration suppresses the default, without making state-before-creation
+	// valid. Replay only batches needing defaults, before committing either
+	// copy, so close/reset history observes the default at creation time.
+	if defaults := updates.defaults(); len(defaults) > 0 {
+		work, out, updates = applyCommands(state, cmds, env, p, defaults)
+		if len(p.List) > 0 {
+			return Outcome{}, p.List
+		}
+	}
+	out.Summaries = updates.summaries(state, work)
+	*state = *work
+	return out, nil
+}
 
+func applyCommands(state *State, cmds []command, env Env, p *problems, defaults map[int]bool) (*State, Outcome, *topicUpdates) {
 	work := state.clone()
+	updates := newTopicUpdates(state)
 	origins := bodyOrigins{}
 	for _, doc := range state.Topics {
 		origins[doc.Name] = doc
@@ -631,13 +654,17 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		return key, key != ""
 	}
 
-	for _, cmd := range cmds {
+	for index, cmd := range cmds {
 		if cmd.IsGroup() {
-			keys[cmd.Scope] = applyGroup(p, work, origins, cmd)
+			key := applyGroup(p, work, origins, cmd)
+			keys[cmd.Scope] = key
+			updates.group(previous, work, cmd, key)
+			updates.created(previous, work, key, index, defaults[index], env.Now, p)
 			out.Effects = append(out.Effects, semanticEffects(previous, work)...)
 			previous = effectSnapshot(work)
 			continue
 		}
+		topics := updates.touchCommand(work, cmd, topicOf)
 		switch cmd.Tag {
 		case "wb:add":
 			id := applyAdd(p, work, cmd, topicOf, mark, env.Now)
@@ -685,6 +712,12 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 				work.EmbedDir = dir
 			}
 		}
+		for _, topic := range topics {
+			updates.created(previous, work, topic, index, defaults[index], env.Now, p)
+			if cmd.Tag == "wb:state" {
+				updates.byKey[topic].explicit = true
+			}
+		}
 		out.Effects = append(out.Effects, semanticEffects(previous, work)...)
 		previous = effectSnapshot(work)
 	}
@@ -693,7 +726,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	}
 
 	if len(p.List) > 0 {
-		return Outcome{}, p.List
+		return work, Outcome{}, updates
 	}
 	work.evictArchive()
 	work.pruneLabels()
@@ -701,8 +734,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
 	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.structuralWarnings())
-	*state = *work
-	return out, nil
+	return work, out, updates
 }
 
 // applyClose closes a topic with its result. Closing a closed topic again
