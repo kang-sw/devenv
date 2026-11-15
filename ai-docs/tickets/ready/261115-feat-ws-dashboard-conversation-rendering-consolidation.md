@@ -1,5 +1,13 @@
 ---
 title: Consolidate conversation mail delivery and report presentation
+related:
+  261114-refactor-ws-dashboard-whiteboard-asset-split: prerequisite; consume its landed move map before Phase 1 starts
+  261115-feat-ws-whiteboard-committed-effects-in-conversation: accepted committed-effects substrate; preserve its producer contract and no-panel-HTML boundary
+blocked-by: 261114-refactor-ws-dashboard-whiteboard-asset-split
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 42eff2aed293f527
+sage-review-completeness-reviewed: 42eff2aed293f527
 ---
 
 # Consolidate conversation mail delivery and report presentation
@@ -11,6 +19,13 @@ The dashboard can show a structured mailbox-history row and a separate mailbox w
 The owner approved one ticket with two phases under (781)=a: a mockup-first, T0 asset/display-only Phase 1, followed by an optional, separately settled Phase 2 for delivery IDs and typed reports. MAIN relayed (804)=ok on 2026-11-14 at 22:42:15 UTC, approving the Phase 1 mockup and authorizing ticket finalization. This capture preserves that settled baseline; it does not authorize implementation or claim browser acceptance.
 
 The supporting rendering inventory was a static investigation, not approval of its entire five-family consolidation proposal. MAIN's 2026-11-14 23:23:53 UTC relay supplies the owner-approved (811)/(812) unified chat/mailbox/whiteboard mockup and settlements (826), (827) and (828). This explicitly extends the display-only Phase 1 baseline with peer-lead mail presentation and whiteboard-update cards/navigation, while retaining the original mail-correlation safeguards and the optional, separately settled Phase 2 boundary. The approved visual extension is not implementation or runtime acceptance.
+
+MAIN's 2026-11-15 02:04:18 UTC instruction requests ready promotion of Phase 1
+against the approved references merged at `64f1c3c3a1b791626bb086110c82e24eb5685faf`,
+after fact population and design/completeness review. Implementation remains
+blocked on the asset-split prerequisite landing and consumption of its move map.
+The optional Phase 2 is still deferred; ready promotion does not settle it or
+claim that the approved mockup has shipped.
 
 ## Decisions
 
@@ -30,16 +45,18 @@ The supporting rendering inventory was a static investigation, not approval of i
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - Phase 1 includes the approved mail/transport-detail and report/source-label baseline plus the (826)–(828) unified display extension: peer-lead badge, committed whiteboard-update cards/folding and board navigation. It does not authorize the inventory's broader human/assistant/work/system-family redesign, composer changes, tool or turn regrouping, approval-control changes, or assistant-bubble redesign. Existing surrounding bubbles/tool/turn elements in the unified reference are context, not a new redesign scope.
 - Preserve raw delivery diagnostics and meaningful failures as inspectable escaped text. Do not execute diagnostic text as HTML or infer identity from presentation copy.
 - Preserve existing stable entry keys/cursors and separate messages. Presentation grouping must survive initial rendering, live insertion, historical insertion and reconnect without altering stored history or model input.
 - Preserve disclosure state and existing conversation scroll ownership/anchoring. This ticket does not choose a second scroll owner or change the viewed-panel golden rules.
 - Where current record metadata cannot support a proposed association or source distinction safely, preserve the compact/neutral fallback instead of silently widening scope to producer or storage changes. Any new product choice is returned to MAIN for its decision ID; this capture mints none.
 - The approved HTML is a visual reference, not evidence that a matcher, classifier, history reconciliation or accessibility behavior already works. No browser or runtime verification was performed for ticket finalization.
-- Respect the separately approved asset-split start pause and consume the landed split's move map before a new UI implementation starts. The split's overlap does not authorize source import or bypass its coordination gate.
+- Respect the separately approved asset-split start pause and consume the landed split's move map before a new UI implementation starts. Ready status is preparation only: the declared `blocked-by` prerequisite must land before dispatch, and MAIN owns implementation assignment. The split's overlap does not authorize source import or bypass its coordination gate.
 - Read `ai-docs/manuals/shipped-surface-boundary.md` before eventual tooling/asset edits, and `ai-docs/manuals/release-compatibility.md` for any eventual cross-version surface change. Phase 1 does not authorize shipped playbook edits.
 - MAIN supplied the owner-approved (811)/(812) extension under (826)–(828); attach its exact approved bytes without regenerating or editing the reference. The extension changes display/navigation requirements only. It does not reopen optional Phase 2 producer/storage mechanisms or supply new implementation/rollout authority.
-- Reuse the existing committed-effects data only where it can truthfully support the approved cards. This capture does not add missing effect fields, alter their producer contract, or claim that the still-unverified committed-effects candidate is accepted. Return any requirement for new stored IDs, producer data, wire fields or protocol semantics to MAIN before widening Phase 1.
+- Reuse the existing committed-effects data only where it can truthfully support the approved cards. MAIN accepted `261115-feat-ws-whiteboard-committed-effects-in-conversation` at `1b815bf67`, with its result/closure merged at `0757abf2ae08f205e4c2522880f05afe50d7f6d6`. That acceptance is not acceptance of these unimplemented conversation cards or their combined navigation. Do not add missing effect fields or alter the producer contract; return any requirement for new stored IDs, producer data, wire fields or protocol semantics to MAIN before widening Phase 1.
 - Best-effort element targeting must preserve validated IDs, source/session isolation and lazy-history/scroll ownership. Existing anchor names are feasibility evidence, not permission to interpret arbitrary selectors or execute markup from mail/effect text.
 
 ## Approved Visual Reference
@@ -78,6 +95,31 @@ Static navigation inspection at `07c94a0954dac86607bf20d524124b2bd4bc5c54` estab
 - Decisions (805) and (806) concern `261115-feat-ws-whiteboard-committed-effects-in-conversation`, not this ticket; its no-panel-HTML boundary is preserved, not re-decided here.
 - MAIN's 2026-11-14 23:23:53 UTC relay confirms unified direction/badge wording and color (826)=ok, one-topic/log-only fold (827)=a, and panel recap-plus-board-link without in-chat expansion (828)=ok. The same relay adds required topic-card navigation and best-effort exact-element navigation. This amendment records those settled requirements without minting another decision ID.
 - The HTML and four PNGs were supplied as approved immutable artifacts, not generated acceptance evidence. Its synthetic states, placeholder links and historical “approval pending” annotations do not prove real card navigation, correlation, lazy-history recovery or browser correctness.
+
+## Prior Decisions
+
+- 261115-feat-ws-whiteboard-committed-effects-in-conversation (2026-11-15, Resolution): "MAIN explicitly accepted develop 1b815bf67 and authorized this docs-only Result/closure on 2026-11-15 at 01:15:31 UTC." — bearing: supports
+- 38f9ae7e (2026-11-15, commit): "Implementation continues on impl/develop/map-yoga-coach (move-only T0)." — bearing: constrains
+- 261114-research-ws-review-sweep-794-findings (2026-11-15, commit): "Keep one named internal owner export rather than changing data-size directly" — bearing: constrains
+- 261113-feat-ws-whiteboard-topic-panels-and-log (2026-11-13, commit): "Reuse board SSE regions and trusted frame metadata; materialize inert older/closed history only for known targets and preserve viewport anchors." — bearing: constrains
+- 261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart (2026-11-13, commit): "A crash exactly between append and mark can duplicate one completion mail; no exactly-once delivery claim." — bearing: constrains
+- 7c476499 (2026-11-06, commit): "(283): first-line-only for aged-out mail over copying bodies into the conversation ring - one body store, bounded conversation entries." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | VERIFIED: Phase 1 names agents-plugin-tool/internal/wsdashboard/assets/dashboard.js and agents-plugin-tool/internal/wswhiteboard/assets/stream.js and existing conversation rendering paths. All six tracked reference links resolve; git show 64f1c3c3a1b791626bb086110c82e24eb5685faf:<asset> matches HEAD byte-for-byte. The five unified assets match supplied originals, all listed byte counts/full SHA-256 hashes and PNG widths. The original six-case HTML matches its cache source (16,310 bytes; SHA-256 6f2196bc9d95ff053d2f9e9dbc5e9cebe598b796c583f25b194ada44ef9bf61b). |
+| scope.surface | cross-module | VERIFIED: Dashboard conversation presentation consumes wslive ring data and wswhiteboard effects/history navigation; agents-plugin-tool/internal/wsdashboard/pageview.go#L425-L473 and #L909-L951. No external API change is authorized. |
+| scope.new_public_symbol | no | VERIFIED: Phase 1 reuses existing presentation/data paths and authorizes no new producer, wire, store or anchor mechanism; optional Phase 2 is explicitly deferred. |
+| scope.new_type_contract | no | VERIFIED: Phase 1 preserves existing stored events, lead-input text and producer contracts; existing Effect fields are in agents-plugin-tool/internal/wswhiteboard/effects.go#L9-L38. Phase 2 has no selected executable contract. |
+| scope.test_surface | existing | VERIFIED: Existing agents-plugin-tool/internal/wsdashboard/conversation_history_test.go, conversation_follow_test.go, whiteboard_effects_test.go and whiteboard_effects_browser_test.go cover adjacent rendering/history/scroll/effects behavior. Static source inspection only; no tests or browsers run for this population. |
+| complexity.reuse_points | confirmed | VERIFIED at 40f96ea17: mail/body lookup and escaped mail/wake/effect templates in agents-plugin-tool/internal/wsdashboard/pageview.go#L909-L951 and assets/dashboard.tmpl#L296-L311; boardJump in assets/dashboard.js#L4062-L4080; validated lazy-history loadTarget in agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L20-L26 and #L313-L360. These are pre-split coordinates, not a chosen implementation; consume the prerequisite's landed move map before editing (pending 261114-refactor-ws-dashboard-whiteboard-asset-split). |
+| complexity.side_effect_risk | high | INFERRED: Grouping across initial/live/older-history/reconnect insertion can orphan diagnostics or lose independent disclosure and scroll state despite unchanged persistence. |
+| risk.correctness | high | VERIFIED: RingMail has HistoryKey but wake fields have no matching delivery identity (agents-plugin-tool/internal/wslive/ring.go#L65-L97); reports can share a whiteboard KindUser record (agents-plugin-tool/internal/wsagent/runner.go#L1918-L1933 and children.go#L607-L629). INFERRED: safe matching/source labeling must retain the approved ambiguous/mixed fallback rather than fabricate provenance. |
+| risk.fit | moderate | INFERRED: Existing effects and validated navigation support reuse, but approved topic cards/folding and best-effort exact targets are not the current flat escaped effects list (agents-plugin-tool/internal/wsdashboard/assets/dashboard.tmpl#L298-L300). boardJump still excludes eN; use the landed split map and existing fold owner, not a competing navigation/scroll owner. |
+| risk.test | high | VERIFIED: References are synthetic, not implementation acceptance; six original cases and unified light/dark 1280/360 captures are present. INFERRED: combined correlation, pagination/reconnect, keyboard/focus, overflow and lazy-board navigation need new assertions and side-by-side result evidence beyond the accepted 777 substrate. |
+| risk.security_or_contract | high | VERIFIED: Decision 9 treats the stored peer-note first line as display-only, not trusted identity metadata; effects include plain panel payloads that consumers must not execute (agents-plugin-tool/internal/wswhiteboard/effects.go#L9-L21). INFERRED: presentation must preserve escaping, validated IDs, source/session isolation and T0 producer/store/input boundaries. |
 
 ## Phases
 
