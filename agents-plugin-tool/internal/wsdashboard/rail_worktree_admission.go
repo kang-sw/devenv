@@ -334,6 +334,16 @@ func (a *railAdmissionTracker) observe(root string, got RepoWorktrees) map[strin
 		a.observations[key] = old
 		revisions[filepath.Clean(w.Path)] = old
 	}
+	// Git may omit a removed worktree entirely. Retire its observation as well
+	// as its admission once the directory is confirmed absent, so a later Add
+	// cannot be compared with the previous incarnation's retained identity.
+	for key, old := range a.observations {
+		if samePath(old.identity.root, canonicalRoot) && !present[old.identity.path] {
+			if _, e := os.Lstat(old.identity.path); errors.Is(e, fs.ErrNotExist) {
+				delete(a.observations, key)
+			}
+		}
+	}
 	// Only a positively missing directory, not an unreadable association, proves
 	// removal. Keep ordering retention separate from admission pruning.
 	_, _ = a.store.mutateAdmissions(func(records []railAdmissionRecord) ([]railAdmissionRecord, error) {

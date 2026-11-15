@@ -229,6 +229,157 @@ func TestRailAdmissionUnknownFieldsAndClassification(t *testing.T) {
 		t.Fatal("unrecorded discovery not pending")
 	}
 }
+
+// A successful fresh Git list can omit a removed worktree entirely. This is
+// different from the retained/prunable entry exercised by the earlier test.
+func TestRailAdmissionRecreatedUserAddKeepsAdmission(t *testing.T) {
+	f := newDeleteFixture(t)
+	path := filepath.Join(f.tmp, "recreated-user")
+	add := func(branch string) {
+		t.Helper()
+		raw, _ := json.Marshal(worktreeAddRequest{Workspace: f.root, Branch: branch, New: true, Folder: path})
+		code, _, body := postJSON(t, f.base+worktreeAddRoute, f.base, string(raw))
+		if code != http.StatusOK {
+			t.Fatalf("dashboard Add %s: %d %s", branch, code, body)
+		}
+	}
+	add("old-user")
+	f.d.railBaseView(f.d.pages())
+	f.d.rail.readRepo(f.root, nil)
+	old, err := probeAdmission(f.root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Retain the old directory at another path so the recreation cannot
+	// indistinguishably reuse its filesystem identity during this regression.
+	if err = os.Rename(path, path+"-retained-old"); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, f.root, "worktree", "remove", "--force", path)
+	fresh, err := f.d.rail.read(f.root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range fresh.Worktrees {
+		if samePath(w.Path, path) {
+			t.Fatal("fresh post-removal Git list still includes old path")
+		}
+	}
+	if _, err = os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old path not confirmed absent: %v", err)
+	}
+	f.d.rail.readRepo(f.root, nil)
+	if admissionAt(admissionRecords(t, f.d.layout), f.root, path).State != "pending" {
+		t.Fatal("confirmed disappearance did not prune old admission")
+	}
+	t.Log("fresh Git list omitted the confirmed-absent old path; old admission was pruned")
+	add("recreated-user")
+	record := admissionAt(admissionRecords(t, f.d.layout), f.root, path)
+	if record.Origin != "user" || record.State != "admitted" {
+		t.Fatalf("actual dashboard Add did not save user/admitted: %+v", record)
+	}
+	current, err := probeAdmission(f.root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sameAdmissionIdentity(old, current) {
+		t.Fatal("fixture did not produce a distinguishable new incarnation")
+	}
+	t.Log("actual dashboard Add saved user/admitted for a distinguishable recreation")
+	f.d.rail.readRepo(f.root, nil)
+	record = admissionAt(admissionRecords(t, f.d.layout), f.root, path)
+	if record.Origin != "user" || record.State != "admitted" {
+		t.Fatalf("Add-triggered reread downgraded the recreated user worktree: %+v", record)
+	}
+	reopened := openRailLayoutStore(f.dir)
+	record = admissionAt(admissionRecords(t, reopened), f.root, path)
+	if record.Origin != "user" || record.State != "admitted" {
+		t.Fatalf("reopened recreation admission: %+v", record)
+	}
+}
+
+func TestRailAdmissionPromptMatchesVisibleRejectedWorktrees(t *testing.T) {
+	f := newDeleteFixture(t)
+	baseB, rootB := worktreeRepo(t)
+	if _, err := f.d.workspaces.add(rootB, false); err != nil {
+		t.Fatal(err)
+	}
+	forgotten := filepath.Join(f.tmp, "forgotten-rejection")
+	pooled := filepath.Join(baseB, "pooled-rejection")
+	visible := filepath.Join(baseB, "visible-rejection")
+	newest := filepath.Join(baseB, "new-rejection")
+	gitRun(t, f.root, "worktree", "add", "-q", "-b", "forgotten-rejection", forgotten)
+	for name, path := range map[string]string{"pooled-rejection": pooled, "visible-rejection": visible, "new-rejection": newest} {
+		gitRun(t, rootB, "worktree", "add", "-q", "-b", name, path)
+	}
+	refresh := func() {
+		f.d.railBaseView(f.d.pages())
+		for _, root := range []string{f.root, rootB} {
+			list := f.d.rail.readRepo(root, nil)
+			f.d.rail.mu.Lock()
+			f.d.rail.repos[root] = list
+			f.d.rail.mu.Unlock()
+		}
+	}
+	refresh()
+	reject := func(root, path string) railAdmissionReply {
+		t.Helper()
+		selection := admissionSelection(t, f.d.rail.admission, func(root string) (RepoWorktrees, error) { return f.d.rail.read(root, nil) }, root, path, "reject")
+		raw, _ := json.Marshal(railAdmissionRequest{Selections: []railAdmissionSelection{selection}})
+		code, _, body := postJSON(t, f.base+railAdmissionRoute, f.base, string(raw))
+		var reply railAdmissionReply
+		if err := json.Unmarshal([]byte(body), &reply); err != nil || code != 200 || !reply.Applied {
+			t.Fatalf("reject: %d %s %v", code, body, err)
+		}
+		return reply
+	}
+	reject(f.root, forgotten)
+	reject(rootB, pooled)
+	reject(rootB, visible)
+	forgetRaw, _ := json.Marshal(workspacePathRequest{Path: f.root})
+	if code, _, body := postJSON(t, f.base+workspaceForgetRoute, f.base, string(forgetRaw)); code != http.StatusNoContent {
+		t.Fatalf("forget repository: %d %s", code, body)
+	}
+	originalRead := f.d.rail.read
+	f.d.rail.read = func(root string, regs []Registration) (RepoWorktrees, error) {
+		got, err := originalRead(root, regs)
+		if samePath(root, rootB) {
+			got.Pools = append(got.Pools, pooled)
+		}
+		return got, err
+	}
+	refresh()
+	reply := reject(rootB, newest)
+	view := f.d.railView(f.d.pages())
+	want := map[string]bool{}
+	for _, ws := range view.Workspaces {
+		for _, wt := range ws.RejectedWorktrees() {
+			want[wt.Path] = true
+		}
+	}
+	if len(want) != 2 || !want[visible] || !want[newest] {
+		t.Fatalf("fixture visible rejected list: %v", want)
+	}
+	if len(admissionRecords(t, f.d.layout)) != 4 {
+		t.Fatal("hidden rejection records must remain durable")
+	}
+	_, raw, ok := strings.Cut(reply.Prompt, "\n\n")
+	var prompt []railAdmissionRecord
+	if !ok {
+		t.Fatalf("prompt has no JSON list: %s", reply.Prompt)
+	}
+	if err := json.Unmarshal([]byte(raw), &prompt); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range prompt {
+		got[r.Path] = true
+	}
+	if len(got) != len(want) || got[forgotten] || got[pooled] || !got[visible] || !got[newest] {
+		t.Fatalf("prompt does not match visible collapsed rejections: got=%v want=%v", got, want)
+	}
+}
+
 func TestRailAdmissionRouteAndUserAdd(t *testing.T) {
 	f := newDeleteFixture(t)
 	path := filepath.Join(f.tmp, "admission-route")

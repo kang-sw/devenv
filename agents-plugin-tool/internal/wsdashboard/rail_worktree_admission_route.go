@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -197,7 +198,26 @@ func (d *Daemon) handleRailAdmission(w http.ResponseWriter, r *http.Request) {
 	if reply.Applied {
 		d.broker.wake(railListRepoKey)
 		lang, _ := requestLang(r)
-		region, e := renderRailRegion(d.railView(d.pagesIn(lang)), lang)
+		view := d.railView(d.pagesIn(lang))
+		// Durable rejections outlive forgotten repositories and pool changes. Copy
+		// only the committed rejected rows this same render actually displays.
+		if reply.Prompt != "" {
+			var visible []railAdmissionRecord
+			for _, ws := range view.Workspaces {
+				for _, wt := range ws.RejectedWorktrees() {
+					root, path := wt.AdmissionRepository, wt.AdmissionPath
+					if root == "" {
+						root = ws.Path
+					}
+					if path == "" {
+						path = wt.Path
+					}
+					visible = append(visible, railAdmissionRecord{Repository: root, Path: path, Origin: wt.Origin, State: "rejected", Branch: wt.Branch})
+				}
+			}
+			reply.Prompt = railRejectedPrompt(visible)
+		}
+		region, e := renderRailRegion(view, lang)
 		if e == nil {
 			reply.HTML = string(region.HTML)
 		}
@@ -214,7 +234,16 @@ func (d *Daemon) recordUserWorktree(root, path, branch string) error {
 	if err != nil {
 		return err
 	}
-	if _, err = probeAdmission(root, path); err != nil {
+	var tracker *railAdmissionTracker
+	if d.rail != nil {
+		tracker = d.rail.admission
+	}
+	if tracker != nil {
+		tracker.mu.Lock()
+		defer tracker.mu.Unlock()
+	}
+	identity, err := probeAdmission(root, path)
+	if err != nil {
 		return err
 	}
 	_, err = d.layout.mutateAdmissions(func(records []railAdmissionRecord) ([]railAdmissionRecord, error) {
@@ -228,5 +257,13 @@ func (d *Daemon) recordUserWorktree(root, path, branch string) error {
 		prior.Repository, prior.Path, prior.Origin, prior.State, prior.Branch = root, path, "user", "admitted", branch
 		return append(out, prior), nil
 	})
+	if err == nil && tracker != nil {
+		key := admissionKey(root, path)
+		old, had := tracker.observations[key]
+		if !had || old.revision == "" || !sameAdmissionIdentity(old.identity, identity) {
+			tracker.seq++
+			tracker.observations[key] = admissionObservation{identity: identity, revision: fmt.Sprintf("%s-%d", tracker.epoch, tracker.seq)}
+		}
+	}
 	return err
 }
