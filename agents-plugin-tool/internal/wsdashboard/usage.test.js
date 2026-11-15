@@ -150,9 +150,18 @@ test('all eleven locales localize popup labels, chart titles, accessible text an
     const weekly = cards[1].querySelector('.usage-chart');
     const reset = payload.entries[0].windows[0].resetsAt;
     const formatter = new Intl.DateTimeFormat(locale, { weekday: 'short' });
-    const labels = nodes(weekly, 'text').map(n => n.textContent);
-    assert.ok(labels.includes(formatter.format(new Date(reset - 7 * 86400000))), locale);
-    assert.ok(labels.includes(formatter.format(new Date(reset))), locale);
+    const labels = nodes(weekly, '.usage-day-label');
+    assert.ok(labels.length >= 3, locale);
+    for (const label of labels) {
+      const x = Number(label.attributes.x);
+      const at = reset - 7 * 86400000 + (x - 24) / 246 * 7 * 86400000;
+      assert.equal(label.textContent, formatter.format(new Date(at)), locale);
+      assert.equal(label.attributes['text-anchor'], 'middle');
+      assert.ok(x > 24 && x < 270);
+    }
+    assert.equal(nodes(weekly, '.usage-day-grid').length, 7);
+    assert.equal(nodes(cards[0], '.usage-day-grid').length, 0);
+    assert.equal(nodes(cards[0], '.usage-day-label').length, 0);
     assert.doesNotMatch(pop.el.textContent, /js\.usage\.|<safe-source>/);
   }
   const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');

@@ -251,6 +251,7 @@ import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { MISSING_HOSTED_KEY_WARNING, hostedMode, unconfirmedHostedWarning, type HostedMode } from "./hosted-session.ts";
 import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
+import { ownModelObservations } from "./model-observation.ts";
 import { countBackgroundTasks } from "./background-tasks.ts";
 import { createHostedDashboardEvents } from "./hosted-dashboard-events.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
@@ -652,7 +653,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   const mailboxStreamSupport: { unsupported?: boolean } = {};
   // The owner lead's own turn, from Pi `agent_start` to `agent_settled`: a
   // dashboard message that arrives inside it stays held in the inbox until
-  // the settle, so the page can still merge into or cancel it, unless the
+  // the settle, so the page can still cancel or steer it, unless the
   // user promotes it to steering. Compaction also blocks a prompt, so its
   // end (or failure) releases a held message the same way, once the
   // compaction hold itself has cleared, and restores steer mode mid-turn.
@@ -958,6 +959,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         agents: () => dashboardAgentEntries(feedRegistry),
         // Cost and cache rate come from the TUI footer's estimate; without a footer only context is sent.
         status: () => dashboardStatus(ctx.getContextUsage(), ctx.model?.contextWindow, agentFooterLifecycle.usage()),
+        observations: () => ownModelObservations(ctx.sessionManager.getBranch(), ctx.sessionManager.getHeader()),
         taskCounts: countBackgroundTasks,
       });
       dashboardFeed = feed;

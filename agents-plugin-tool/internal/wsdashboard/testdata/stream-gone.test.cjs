@@ -1,10 +1,9 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readAssetSource } = require('./asset-source.cjs');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../assets/dashboard.js'), 'utf8');
+const source = readAssetSource('wsdashboard', 'dashboard.js');
 const stream = source.match(/\n  var sseOn = true;\n[\s\S]*?\n  \/\/ showRegions applies/)[0];
 
 function fixture(framed = false) {

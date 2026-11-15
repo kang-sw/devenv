@@ -13,9 +13,6 @@ behind them. A lead session talks with you, settles decisions, and captures
 work as tickets; worker agents execute those tickets, independent reviewers
 check the result, and the lead carries it to merge and release.
 
-> The repository is still published as `kang-sw/devenv`. Install commands
-> below use that path until the rename.
-
 ## How It Works
 
 ```text
@@ -52,7 +49,7 @@ Release:        ship <project> -> release gate -> execute
 ### Claude Code
 
 ```sh
-claude plugin marketplace add kang-sw/devenv
+claude plugin marketplace add kang-sw/werkschaft
 claude plugin install ws@kang-sw-devenv
 ```
 
@@ -71,7 +68,7 @@ The `ws` workflow tools are also available inside Pi
 Install it straight from this repo with Pi's own git package manager:
 
 ```sh
-pi install git:github.com/kang-sw/devenv@<tag>
+pi install git:github.com/kang-sw/werkschaft@<tag>
 ```
 
 Replace `<tag>` with a published release tag (for example `v0.49.1`). The
@@ -111,7 +108,7 @@ tmux, WezTerm, Starship, zsh, shell helpers, and the local `claude-watch` and
 `claude-dash` TUIs under `tools/`.
 
 ```sh
-git clone https://github.com/kang-sw/devenv.git ~/devenv
+git clone https://github.com/kang-sw/werkschaft.git ~/devenv
 cd ~/devenv
 bash install.sh          # idempotent; safe to re-run
 bash install.sh update   # skip packages & sudo, refresh config and symlinks
@@ -124,6 +121,18 @@ also registers a Claude-compatible snapshot of `agents-plugin/`; it does not
 install `wsflow` into Claude.
 
 > Neovim 0.10+ is required but not installed by the script.
+
+## Contributing
+
+All code in this repository is authored by AI agents. Human-authored code is
+not accepted.
+
+Contributions follow the workflow described in
+[`ai-docs/WORKFLOW.md`](ai-docs/WORKFLOW.md) and the project's
+[`AGENTS.md`](AGENTS.md). Every change must have a corresponding ticket under
+`ai-docs/tickets/` before implementation begins. A lead session settles the
+design, a worker agent implements, and an independent reviewer checks the
+result.
 
 ## License
 

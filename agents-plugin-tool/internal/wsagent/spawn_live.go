@@ -26,7 +26,7 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 	}
 	ev := wslive.Event{Kind: wslive.KindAgent, AgentID: "pi:" + st.ID,
 		AgentKind: wslive.AgentKindPi, Label: label, Status: status,
-		Model: st.Model, Effort: st.Effort, SessionKey: key,
+		Model: st.Model, Effort: st.Effort, Observed: st.Observed, SessionKey: key,
 		ContextTokens: st.ContextTokens, OutputTps: st.OutputTps,
 		ActiveMs: st.ActiveMs}
 	if st.Status == StatusRunning {
@@ -42,6 +42,25 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 		ev.ParentID = "pi:" + st.Parent.ReplyID
 	}
 	return ev
+}
+
+// SpawnAgentEvents reconciles all own response evidence after a coalesced
+// parent wake or holder replay, while projecting the lifecycle only once.
+func SpawnAgentEvents(st State, key string) []wslive.Event {
+	row := SpawnAgentEvent(st, key)
+	if len(st.Observations) == 0 {
+		return []wslive.Event{row}
+	}
+	row.Observed = nil
+	out := []wslive.Event{row}
+	for _, o := range st.Observations {
+		ev := row
+		ev.Batches, ev.Model, ev.Effort, ev.ContextTokens, ev.OutputTps = nil, "", "", nil, nil
+		observed := o
+		ev.Observed = &observed
+		out = append(out, ev)
+	}
+	return out
 }
 
 // SpawnLead traces a spawned conversation to its owning lead, failing closed
@@ -122,7 +141,9 @@ func (c *conv) seedSpawnRows() {
 		}
 		rec, ok := c.r.recordOf(st.ID)
 		if ok {
-			c.live.applyQuiet(SpawnAgentEvent(st, rec.WSKey))
+			for _, ev := range SpawnAgentEvents(st, rec.WSKey) {
+				c.live.applyQuiet(ev)
+			}
 		}
 	}
 }

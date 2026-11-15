@@ -9,7 +9,7 @@ import (
 // The dashboard consumes short owner transactions without selecting another
 // reference after the morph, and never numerically restores an owned scroller.
 func TestBoardKeepWiring(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

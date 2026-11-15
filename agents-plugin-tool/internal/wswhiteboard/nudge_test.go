@@ -18,6 +18,20 @@ func applyAt(t *testing.T, st *State, commands string, now time.Time) Outcome {
 	return out
 }
 
+// nudgeOf is the stale-nudge part of an update's info. New topics default to
+// discussing, so content-only fixtures also raise the structural
+// discussing_without_open_items warning, which joins after the nudge; it is
+// a separate contract and is not what these tests pin.
+func nudgeOf(out Outcome) string {
+	info := out.Info
+	for _, prefix := range []string{"discussing_without_open_items: ", "waiting_without_implementing: "} {
+		if i := strings.Index(info, prefix); i >= 0 {
+			info = info[:i]
+		}
+	}
+	return strings.TrimSpace(info)
+}
+
 func bodies(names ...string) string {
 	var sb strings.Builder
 	for _, name := range names {
@@ -46,25 +60,29 @@ const wantStaleInfo = "5 of 7 open topics unchanged for 60+ min (S, A, B, D, E);
 
 func TestStaleNudgeNamesStaleTopicsOnly(t *testing.T) {
 	st := staleBoard(t)
-	if out := applyAt(t, st, ``, testNow.Add(59*time.Minute)); out.Info != "" {
-		t.Fatalf("no topic is 60 min old yet; info = %q", out.Info)
+	if out := applyAt(t, st, ``, testNow.Add(59*time.Minute)); nudgeOf(out) != "" {
+		t.Fatalf("no topic is 60 min old yet; info = %q", nudgeOf(out))
 	}
 	out := applyAt(t, st, ``, testNow.Add(61*time.Minute))
-	if out.Info != wantStaleInfo {
-		t.Fatalf("info = %q\nwant  %q", out.Info, wantStaleInfo)
+	if nudgeOf(out) != wantStaleInfo {
+		t.Fatalf("info = %q\nwant  %q", nudgeOf(out), wantStaleInfo)
 	}
 }
 
 func TestStaleNudgeNeedsFiveOpenTopics(t *testing.T) {
 	st := &State{}
 	applyAt(t, st, bodies("A", "B", "C", "D", "E")+`<wb:topic name="E"><wb:close result="done"/></wb:topic>`, testNow)
-	if out := applyAt(t, st, ``, testNow.Add(2*time.Hour)); out.Info != "" {
+	out := applyAt(t, st, ``, testNow.Add(2*time.Hour))
+	if nudgeOf(out) != "" {
 		t.Fatalf("four open topics must not nudge; info = %q", out.Info)
 	}
+	if want := `discussing_without_open_items: "A", "B", "C", "D"`; out.Info != want {
+		t.Fatalf("default-discussing topics keep the structural warning; info = %q\nwant  %q", out.Info, want)
+	}
 	// Reopening the fifth makes it fresh, but the four stale ones now nudge.
-	out := applyAt(t, st, `<wb:topic name="E"><wb:body>reopened</wb:body></wb:topic>`, testNow.Add(2*time.Hour))
-	if want := "4 of 5 open topics unchanged for 60+ min (A, B, C, D); if finished, close them with wb:close and a one-line result."; out.Info != want {
-		t.Fatalf("info = %q\nwant  %q", out.Info, want)
+	out = applyAt(t, st, `<wb:topic name="E"><wb:body>reopened</wb:body></wb:topic>`, testNow.Add(2*time.Hour))
+	if want := "4 of 5 open topics unchanged for 60+ min (A, B, C, D); if finished, close them with wb:close and a one-line result."; nudgeOf(out) != want {
+		t.Fatalf("info = %q\nwant  %q", nudgeOf(out), want)
 	}
 }
 
@@ -72,21 +90,21 @@ func TestStaleNudgeCapsListedNames(t *testing.T) {
 	st := &State{}
 	applyAt(t, st, bodies("A", "B", "C", "D", "E", "F", "G"), testNow)
 	out := applyAt(t, st, ``, testNow.Add(time.Hour))
-	if want := "7 of 7 open topics unchanged for 60+ min (A, B, C, D, E, ...); if finished, close them with wb:close and a one-line result."; out.Info != want {
-		t.Fatalf("info = %q\nwant  %q", out.Info, want)
+	if want := "7 of 7 open topics unchanged for 60+ min (A, B, C, D, E, ...); if finished, close them with wb:close and a one-line result."; nudgeOf(out) != want {
+		t.Fatalf("info = %q\nwant  %q", nudgeOf(out), want)
 	}
 }
 
 func TestStaleNudgeAtMostOncePerHour(t *testing.T) {
 	st := staleBoard(t)
 	first := testNow.Add(61 * time.Minute)
-	if out := applyAt(t, st, ``, first); out.Info == "" {
+	if out := applyAt(t, st, ``, first); nudgeOf(out) == "" {
 		t.Fatalf("first stale update must nudge")
 	}
-	if out := applyAt(t, st, ``, first.Add(59*time.Minute)); out.Info != "" {
-		t.Fatalf("a nudge within the hour must not repeat; info = %q", out.Info)
+	if out := applyAt(t, st, ``, first.Add(59*time.Minute)); nudgeOf(out) != "" {
+		t.Fatalf("a nudge within the hour must not repeat; info = %q", nudgeOf(out))
 	}
-	if out := applyAt(t, st, ``, first.Add(60*time.Minute)); out.Info == "" {
+	if out := applyAt(t, st, ``, first.Add(60*time.Minute)); nudgeOf(out) == "" {
 		t.Fatalf("after the hour the nudge must return")
 	}
 }
@@ -94,7 +112,7 @@ func TestStaleNudgeAtMostOncePerHour(t *testing.T) {
 func TestStaleNudgeTimeSurvivesReload(t *testing.T) {
 	st := staleBoard(t)
 	first := testNow.Add(61 * time.Minute)
-	if out := applyAt(t, st, ``, first); out.Info == "" {
+	if out := applyAt(t, st, ``, first); nudgeOf(out) == "" {
 		t.Fatalf("first stale update must nudge")
 	}
 	data, err := json.Marshal(st)
@@ -105,8 +123,8 @@ func TestStaleNudgeTimeSurvivesReload(t *testing.T) {
 	if err := json.Unmarshal(data, &reloaded); err != nil {
 		t.Fatal(err)
 	}
-	if out := applyAt(t, &reloaded, ``, first.Add(30*time.Minute)); out.Info != "" {
-		t.Fatalf("the last-nudge time must survive a reload; info = %q", out.Info)
+	if out := applyAt(t, &reloaded, ``, first.Add(30*time.Minute)); nudgeOf(out) != "" {
+		t.Fatalf("the last-nudge time must survive a reload; info = %q", nudgeOf(out))
 	}
 }
 
@@ -120,10 +138,10 @@ func TestStaleNudgeLegacyStore(t *testing.T) {
 	if err := json.Unmarshal([]byte(legacy), &st); err != nil {
 		t.Fatal(err)
 	}
-	if out := applyAt(t, &st, ``, testNow); out.Info != "" {
-		t.Fatalf("a legacy board's topics have no known age yet; info = %q", out.Info)
+	if out := applyAt(t, &st, ``, testNow); nudgeOf(out) != "" {
+		t.Fatalf("a legacy board's topics have no known age yet; info = %q", nudgeOf(out))
 	}
-	if out := applyAt(t, &st, ``, testNow.Add(time.Hour)); out.Info == "" {
+	if out := applyAt(t, &st, ``, testNow.Add(time.Hour)); nudgeOf(out) == "" {
 		t.Fatalf("a legacy board must nudge once its topics are an hour past first sight")
 	}
 }
@@ -141,22 +159,22 @@ func TestStaleNudgeUsesLogAndPanelActivity(t *testing.T) {
 				commands.WriteString(`<wb:topic name="` + name + `">` + tc.command + `</wb:topic>`)
 			}
 			st := &State{}
-			if out := applyAt(t, st, commands.String(), testNow); out.Info != "" {
-				t.Fatalf("fresh entry-only topics must not nudge: %s", out.Info)
+			if out := applyAt(t, st, commands.String(), testNow); nudgeOf(out) != "" {
+				t.Fatalf("fresh entry-only topics must not nudge: %s", nudgeOf(out))
 			}
-			if out := applyAt(t, st, "", testNow.Add(59*time.Minute)); out.Info != "" {
-				t.Fatalf("entry activity is not stale before an hour: %s", out.Info)
+			if out := applyAt(t, st, "", testNow.Add(59*time.Minute)); nudgeOf(out) != "" {
+				t.Fatalf("entry activity is not stale before an hour: %s", nudgeOf(out))
 			}
 			// Refreshing only the stream must reset a topic's stale age just as
 			// changing the retired recap did, without needing content or items.
-			if out := applyAt(t, st, commands.String(), testNow.Add(61*time.Minute)); out.Info != "" {
-				t.Fatalf("new entries must refresh their topics: %s", out.Info)
+			if out := applyAt(t, st, commands.String(), testNow.Add(61*time.Minute)); nudgeOf(out) != "" {
+				t.Fatalf("new entries must refresh their topics: %s", nudgeOf(out))
 			}
-			if out := applyAt(t, st, "", testNow.Add(120*time.Minute)); out.Info != "" {
-				t.Fatalf("refreshed entries are not an hour old: %s", out.Info)
+			if out := applyAt(t, st, "", testNow.Add(120*time.Minute)); nudgeOf(out) != "" {
+				t.Fatalf("refreshed entries are not an hour old: %s", nudgeOf(out))
 			}
-			if out := applyAt(t, st, "", testNow.Add(121*time.Minute)); !strings.HasPrefix(out.Info, "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E)") {
-				t.Fatalf("entry-only topics must eventually become stale: %q", out.Info)
+			if out := applyAt(t, st, "", testNow.Add(121*time.Minute)); !strings.HasPrefix(nudgeOf(out), "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E)") {
+				t.Fatalf("entry-only topics must eventually become stale: %q", nudgeOf(out))
 			}
 		})
 	}
@@ -177,17 +195,17 @@ func TestStaleNudgeUsesConvertedRecapActivity(t *testing.T) {
 			t.Fatalf("fixture must carry its original recap time only in the imported entry: %+v", doc)
 		}
 	}
-	if out := applyAt(t, converted, "", testNow.Add(59*time.Minute)); out.Info != "" {
-		t.Fatalf("conversion must preserve recap freshness: %s", out.Info)
+	if out := applyAt(t, converted, "", testNow.Add(59*time.Minute)); nudgeOf(out) != "" {
+		t.Fatalf("conversion must preserve recap freshness: %s", nudgeOf(out))
 	}
-	if out := applyAt(t, converted, "", testNow.Add(61*time.Minute)); !strings.HasPrefix(out.Info, "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E)") {
-		t.Fatalf("converted recap topics must age from their recorded time: %q", out.Info)
+	if out := applyAt(t, converted, "", testNow.Add(61*time.Minute)); !strings.HasPrefix(nudgeOf(out), "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E)") {
+		t.Fatalf("converted recap topics must age from their recorded time: %q", nudgeOf(out))
 	}
 }
 
 func TestStaleNudgeNeverRenders(t *testing.T) {
 	st := staleBoard(t)
-	if out := applyAt(t, st, ``, testNow.Add(61*time.Minute)); out.Info == "" {
+	if out := applyAt(t, st, ``, testNow.Add(61*time.Minute)); nudgeOf(out) == "" {
 		t.Fatalf("stale update must nudge")
 	}
 	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {

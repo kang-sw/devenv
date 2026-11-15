@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,56 @@ func TestSessionHoverExistingEvidence(t *testing.T) {
 			contains(t, "stale source", out, `data-stale="1"`, "Unknown")
 		})
 	}
+}
+
+func TestSessionHoverObservedIdentityAndLastTurnRate(t *testing.T) {
+	now := testNow
+	at := now.Add(-time.Second).UnixMilli()
+	rate := 41.6
+	observed := &wslive.ObservedModel{Current: wslive.ModelObservation{ID: "answer", Model: `<physical>`, Source: "pi.assistant", At: at, Effort: "low", EffortSource: "message", OutputTps: &rate}, History: []wslive.ModelChange{{Model: "first-model", At: at - 2000}, {Previous: "first-model", Model: "previous-model", At: at - 1000}, {Previous: "previous-model", Model: `<physical>`, At: at}}}
+	snap := &wslive.Snapshot{Adapter: "pi", UpdatedAt: now.UnixMilli(), Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseIdle}, Observed: observed, LastTurnOutput: &observed.Current}}
+	reg := Registration{ReplyID: "lead1", Harness: "pi"}
+	row := railRow(railInput{Session: Session{Registration: reg}, Snapshot: snap}, true, now)
+	html := renderNamed(t, "session-hover", row)
+	contains(t, "observed hover", html, "&lt;physical&gt;", "Last observed", "pi.assistant", `data-ms="`+fmt.Sprint(at)+`"`, "previous-model → &lt;physical&gt;", `class="tps">42`, "Last-turn output rate", "message")
+	if strings.Contains(html, "first-model") || strings.Contains(html, "Unknown") {
+		t.Fatalf("popup showed full history or unknown: %s", html)
+	}
+	history := renderNamed(t, "r-entries", SessionView{ModelHistory: []ModelHistoryRow{{Observed: observed}}})
+	contains(t, "detail history", history, "Observed model history", "first-model", "previous-model", "&lt;physical&gt;")
+	snap.Lead.Phase, snap.Lead.TurnStartedAt = wslive.PhaseThinking, at+1
+	row = railRow(railInput{Session: Session{Registration: reg}, Snapshot: snap}, true, now)
+	if row.Hover.Rate != 0 {
+		t.Fatal("new working turn borrowed last-turn rate")
+	}
+	reg.HostStopped = true
+	row = railRow(railInput{Session: Session{Registration: reg}, Snapshot: snap}, true, now)
+	if row.Hover.Rate != 0 || row.Hover.Observed.Current.At != at {
+		t.Fatalf("stopped rate/evidence: %+v", row.Hover)
+	}
+	contains(t, "stopped provenance", renderNamed(t, "session-hover", row), "Last observed", "&lt;physical&gt;")
+}
+
+func TestAgentModelHoverOwnEvidenceOverridesReportedModel(t *testing.T) {
+	observed := &wslive.ObservedModel{Current: wslive.ModelObservation{ID: "answer", Model: "child-output", Source: "pi.assistant", At: 1000}}
+	child := AgentNode{Agent: wslive.Agent{ID: "child", Status: wslive.StatusRunning, Model: "state-only", Effort: "high", Observed: observed}}
+	if child.DisplayModel() != "child-output" {
+		t.Fatal("row still shows requested/state identity")
+	}
+	html := renderNamed(t, "agent", child)
+	contains(t, "observed agent row", html, `class="amodel" title="Observed output model">child-output`, `class="aeff" title="effort: high"`, "Last observed", "Adapter-reported model · state-only")
+	if strings.Contains(html, "Unknown") || strings.Contains(html, "latest output identity unverified") {
+		t.Fatalf("own response left unverified: %s", html)
+	}
+}
+
+func TestObservedHistoryIsReadableWithoutLiveActivity(t *testing.T) {
+	o := &wslive.ObservedModel{Current: wslive.ModelObservation{ID: "answer", Model: "physical", Source: "pi.assistant", At: 1000}, History: []wslive.ModelChange{{Model: "physical", Source: "pi.assistant", At: 1000}}}
+	v := buildSessionView(pageInputs{Now: testNow, Session: Session{Registration: Registration{ReplyID: "saved", Harness: "pi"}}, Snapshot: &wslive.Snapshot{Lead: wslive.Lead{Observed: o}, ObservedAgents: map[string]*wslive.ObservedModel{"retired-child": o}}})
+	if !v.SavedConversation || v.Adapter || len(v.ModelHistory) != 2 || len(v.Tree.Agents) != 0 || v.Lead.Phase != "" {
+		t.Fatalf("history became activity: %+v", v)
+	}
+	contains(t, "saved model history", renderNamed(t, "r-entries", v), "Observed model history", "retired-child", "physical")
 }
 
 func TestSessionHoverTooltipBoundary(t *testing.T) {

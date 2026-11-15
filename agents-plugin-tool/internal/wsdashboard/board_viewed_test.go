@@ -205,7 +205,7 @@ process.stdout.write(bad.join("\n"));`)
 }
 
 func TestBoardViewedBoundaryAndBatchWiring(t *testing.T) {
-	js, err := dashboardFS.ReadFile("assets/dashboard.js")
+	js, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
