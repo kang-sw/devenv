@@ -632,6 +632,7 @@
   boardBoxes().forEach(bandBoard);
   mountFramesPaced(doc);
   if (cardBoard) mountBoardOverview();
+  boardRestoreReload();
   applySent();
   restoreDraft();
   tlCount();

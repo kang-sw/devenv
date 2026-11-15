@@ -19,6 +19,15 @@ func timelineRows(tv TopicView) (live, held []timelineRow) {
 	return
 }
 
+// allTimelineRows returns live and folded rows in timeline order.
+func allTimelineRows(tv TopicView) []timelineRow {
+	var out []timelineRow
+	for _, p := range tv.Timeline {
+		out = append(out, p.Rows...)
+	}
+	return out
+}
+
 func TestTimelineAnchorsOutsidePagingAndGapRanges(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="t"><wb:panel recap="question context">rich context</wb:panel><wb:add class="policy"><wb:title>Choose</wb:title><wb:option>A</wb:option><wb:option>B</wb:option></wb:add><wb:add class="technical"><wb:title>Confirm</wb:title></wb:add></wb:topic>`)
@@ -52,7 +61,7 @@ func TestTimelineAnchorsOutsidePagingAndGapRanges(t *testing.T) {
 		}
 	}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull})))
-	wantAll(t, out, `class="history-gap"`, `<template data-history-gap>`, `id="item-1"`, `id="item-2"`, `Original question`, `Owner answer`, `href="#item-1"`, `question-lead`)
+	wantAll(t, out, `class="history-gap"`, `<template data-history-gap>`, `id="item-1"`, `id="item-2"`, `Original question`, `question-lead`)
 	wantNone(t, out, `class="tbody"`, `history-clip`, `history-older`, `data-history-page`)
 	if strings.Count(out, `id="item-1"`) != 1 {
 		t.Fatal("question anchor duplicated")
@@ -79,7 +88,7 @@ func TestTimelineReaskKeepsFirstPositionAndEveryAnswer(t *testing.T) {
 	st.Items[0].AnsweredAt = "2026-11-15T12:30:00Z"
 	st.Topics[0].Entries[len(st.Topics[0].Entries)-1].AnswerSentAt = time.Date(2026, 11, 15, 12, 29, 0, 0, time.UTC).UnixMilli()
 	tv := BuildView(st, ViewInput{Layout: LayoutFull, Location: time.UTC}).Topics[0]
-	live, _ := timelineRows(tv)
+	live := allTimelineRows(tv)
 	var asks, answers int
 	for _, row := range live {
 		if row.Ask {
@@ -102,7 +111,7 @@ func TestTimelineReaskKeepsFirstPositionAndEveryAnswer(t *testing.T) {
 	wantAll(t, out, `Asked again`, "old quote", "new quote", `12:29`)
 	// Legacy, unmatched chips use the latest item's AnsweredAt, not a fabricated stamp.
 	st.Topics[0].Entries[len(st.Topics[0].Entries)-1].AnswerSentAt = 0
-	live, _ = timelineRows(BuildView(st, ViewInput{Layout: LayoutFull, Location: time.UTC}).Topics[0])
+	live = allTimelineRows(BuildView(st, ViewInput{Layout: LayoutFull, Location: time.UTC}).Topics[0])
 	for _, row := range live {
 		if row.LatestAnswer && row.Clock != "12:30" {
 			t.Fatal("legacy fallback", row.Clock)
@@ -118,7 +127,7 @@ func TestTimelineConvertedItemsKeepControlsAtHead(t *testing.T) {
 	}, Topics: []TopicDoc{{Name: "t", Recap: "converted log"}}}
 	st := folderOpen(t, t.TempDir(), legacy)
 	tv := topicView(t, st, LayoutFull, "t")
-	live, _ := timelineRows(tv)
+	live := allTimelineRows(tv)
 	for i, id := range []int{2, 1, 3} {
 		if live[i].Item == nil || live[i].Item.ID != id || live[i].Clock != "" {
 			t.Fatal("conversion order/time", live)

@@ -164,10 +164,10 @@ func TestHistoryAnswersUseSingleLineChipsAndCompleteDisclosure(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAll(t, string(css),
-		`grid-template-columns: auto 20px minmax(0, 1fr) minmax(0, auto);`,
+		`grid-template-columns: var(--h-av, 18px) var(--h-time, 38px) minmax(0, 1fr) minmax(0, auto);`,
 		`.wb-hstatus { display: block; min-width: 0; max-width: min(24em, 35vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`,
-		`.wb-hstatus .pick { display: inline; white-space: nowrap; }`,
-		`.wb-hitem details.sx > summary::before { align-self: flex-start; margin-top: 8px; }`,
+		`.wb-hstatus .pick { display: inline; white-space: nowrap; background: none;`,
+		`.wb-hitem details.sx > summary::before { position: absolute; left: -11px; top: 6px; }`,
 		`.pick { display: inline-flex;`,
 		`.wb-hitem .wb-htext { grid-template-columns: minmax(0, 1fr) minmax(0, auto); position: relative; padding-left: 26px;`)
 	wantNone(t, string(css), `.wb-hstatus { display: inline;`, `.wb-hstatus { max-width: 15em;`)
