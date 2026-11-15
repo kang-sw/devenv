@@ -444,7 +444,7 @@ Whiteboard: <full> - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
-**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
+**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.** A successful update's result ends with an `info:` line saying the board already shows the content; its text is not repeated in the conversation.
 
 ## Host embed folder
 
