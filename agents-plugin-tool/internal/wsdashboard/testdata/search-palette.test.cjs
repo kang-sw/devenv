@@ -73,6 +73,18 @@ const recent = [{ group: 3, kind: 'board-item', id: '1', title: 'old', at: 1 }, 
   { group: 3, kind: 'board-item', id: '2', title: 'new', at: 3 }, { group: 0, kind: 'session', title: 'session' }, { group: 2, kind: 'board-body', title: 'body' }];
 assert.deepEqual(plain(ctx.qBoard(recent, '').map(x => x.title)), ['topic', 'new', 'old'], 'empty: topics, then items newest first');
 assert(!ctx.qBoard(recent, 'session').length, 'sessions belong to the strip');
+const entryRows = [1, 2, 3, 4, 5].reverse().map(group => ({ group, kind: group === 5 ? 'board-entry' : 'other', topic: 't', entry: group === 5 ? 'entry-a' : undefined, title: 'needle' }));
+assert.deepEqual(plain(ctx.qBoard(entryRows, 'needle').map(r => r.group)), [1, 2, 3, 4, 5], 'entries sort last on equal score');
+assert(!ctx.qBoard(entryRows, '').some(r => r.group === 5), 'entries are not empty-query recents');
+assert.equal(ctx.qBoard([{ group: 5, title: 'a' + 'x'.repeat(100) + 'b' }], 'ab').length, 0, 'entries use compact prose matching');
+assert.equal(ctx.qBoard([{ group: 5, title: 'prefix '.repeat(30) + 'needle' }], 'needle').length, 1, 'late entry text is searchable');
+assert.notEqual(ctx.qKeyOf('board', { kind: 'board-entry', topic: 't', entry: 'entry-a' }), ctx.qKeyOf('board', { kind: 'board-entry', topic: 't', entry: 'entry-b' }), 'same-topic entry selection keys are distinct');
+assert.notEqual(ctx.qKeyOf('board', { kind: 'board-entry', topic: 't', entry: 'entry-a' }), ctx.qKeyOf('board', { kind: 'board-entry', topic: 'other', entry: 'entry-a' }), 'keys include the owning topic');
+qs.q = 'needle';
+const excerptTitle = 'prefix '.repeat(30) + 'needle ' + 'suffix '.repeat(30);
+assert(ctx.qRowHtml('board', { group: 5, title: excerptTitle }).includes(ctx.qExcerpt(excerptTitle, 'needle')), 'entry renderer uses an excerpt');
+assert(!ctx.qRowHtml('board', { group: 5, title: excerptTitle }).includes(excerptTitle));
+qs.q = '';
 
 // The tracker slot: hidden items dropped; no query lists the items in progress.
 assert.deepEqual(plain(ctx.qTracker('palette').map(x => x.item)), ['a']);
@@ -413,6 +425,7 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.deepEqual(hostOpen, [true, false], 'renderer delegates sheet open/close to host');
 
   await hostCases();
+  if (process.argv[2]) require('./search-palette-dom.cjs')(dashboard, JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
   console.log('search palette: scorer, slots, ids, generations, keys, picks, path mode, and host hooks passed');
 })().catch(e => { console.error(e); process.exit(1); });
 
@@ -425,7 +438,7 @@ async function hostCases() {
   const frames = { iframe: { getAttribute: k => k === 'srcdoc' ? '<div class="doc-body">Mounted body</div>' : null },
     placeholder: { getAttribute: k => k === 'data-srcdoc' ? '<div class="doc-body">Deferred body</div>' : null } };
   let frame = null, parsedFrom = '';
-  const boardTopic = { getAttribute: () => 'example', querySelector: s => s === '.tname' ? textNode('Example') : s === '.doc-body' ? { querySelector: f => f === '.doc-frame' ? frame : null } : null };
+  const boardTopic = { getAttribute: () => 'example', querySelector: s => s === '.tname' ? textNode('Example') : s === ':scope > .tdoc > .doc-body' ? { querySelector: f => f === '.doc-frame' ? frame : null } : null };
   const rowsCtx = vm.createContext({ framed: false, readItem: () => null, boardQ: () => [boardTopic],
     doc: { createElement: () => ({ set innerHTML(v) { parsedFrom = v; }, content: { querySelector: () => textNode(parsedFrom) } }) },
     q: (s, root) => s === '[id^="item-"]' && root === boardTopic ? [unanswered] : [] });
@@ -436,6 +449,64 @@ async function hostCases() {
     assert.deepEqual(plain(got.map(x => x.group)), [1, 2, 3]);
     assert(got[1].title.includes(text), 'the ' + kind + ' frame body is searched');
   }
+
+  // Entry extraction uses each article's own payload, not its nested versions.
+  // History-page contents are read without adopting nodes or opening disclosures.
+  const leaf = (text, owner) => ({ textContent: text, closest: () => owner,
+    cloneNode() { return leaf(this.textContent, owner); }, querySelector: () => null });
+  function article(id, fields) {
+    const e = { id, fields: {}, querySelector: () => null };
+    for (const [key, text] of Object.entries(fields)) e.fields[key] = [leaf(text, e)];
+    return e;
+  }
+  const log = article('entry-log', { '.entry-text': 'Live log phrase', 'time.entry-at': '10:01' });
+  const system = article('entry-system', { '.entry-text': 'Folded system phrase', 'time.entry-at': '10:02' });
+  const old = article('entry-version', { '.entry-recap': 'Earlier version', '.entry-body': 'Historical payload', 'time.entry-at': '09:00' });
+  const panel = article('entry-panel', { '.entry-recap': 'Latest panel recap', '.entry-body': 'Latest body phrase', 'time.entry-at': '10:03' });
+  for (const key of Object.keys(old.fields)) panel.fields[key] = (panel.fields[key] || []).concat(old.fields[key]);
+  const earlier = article('entry-older', { '.entry-text': 'Older-page-only phrase', 'time.entry-at': '08:00' });
+  // The time lives inside entry-text in real log rows. Remove from the clone,
+  // not from the original article or its time chip.
+  const timedLine = log.fields['.entry-text'][0];
+  timedLine.textContent = '10:01 — Live log phrase';
+  timedLine.cloneNode = () => {
+    const copy = leaf(timedLine.textContent, log);
+    copy.times = [{ remove() { copy.textContent = '— Live log phrase'; } }];
+    return copy;
+  };
+  const pageContent = { entries: [earlier] }, historyPage = { content: pageContent };
+  const stream = { entries: [log, system, panel, old] };
+  let ownBody = null;
+  const topicWithStream = { getAttribute: () => 'stream-topic', querySelector: selector => selector === '.tname' ? leaf('Stream topic') :
+    selector === ':scope > .tdoc > .doc-body' ? ownBody : selector === '.rtext' ? leaf('Topic recap') : null };
+  function query(selector, root) {
+    if (selector === '.topic-stream' && root === topicWithStream) return [stream];
+    if (selector === 'template[data-history-page]' && root === stream) return [historyPage];
+    if (selector === 'article.wb-entry') return root.entries || [];
+    if (selector === 'time') return root.times || [];
+    return root.fields && root.fields[selector] || [];
+  }
+  const entryCtx = vm.createContext({ framed: false, readItem: () => null, boardQ: () => [topicWithStream], q: query, doc: rowsCtx.doc });
+  vm.runInContext(block(dashboard, '  function paletteText(', '  function paletteClosed('), entryCtx);
+  const beforeIndex = JSON.stringify([stream, pageContent, timedLine.textContent]);
+  const indexed = plain(entryCtx.paletteRows());
+  assert(!indexed.some(r => r.group === 2), 'a recap-only topic has no body row even when its stream has a body');
+  assert.deepEqual(indexed.filter(r => r.group === 5).map(r => [r.entry, r.title]), [
+    ['entry-log', 'Live log phrase'], ['entry-system', 'Folded system phrase'], ['entry-panel', 'Latest panel recap Latest body phrase'],
+    ['entry-version', 'Earlier version Historical payload'], ['entry-older', 'Older-page-only phrase']]);
+  assert.equal(indexed.find(r => r.entry === 'entry-log').hint, 'Stream topic · 10:01');
+  assert.equal(JSON.stringify([stream, pageContent, timedLine.textContent]), beforeIndex, 'indexing does not mutate live rows or history templates');
+  ownBody = leaf('Topic-owned body');
+  assert.equal(entryCtx.paletteRows().find(r => r.group === 2).title, 'Topic recap Topic-owned body', 'topic body excludes panel text');
+  // Nested versions cannot donate their recap/body to a payload-less current panel.
+  const emptyPanel = article('entry-empty', {});
+  emptyPanel.fields = old.fields;
+  assert.equal(entryCtx.paletteEntryText(emptyPanel), '');
+  // A panel frame uses the same inert source path as a topic frame.
+  const framedBody = leaf('opaque frame contents', panel);
+  framedBody.querySelector = () => frames.placeholder;
+  panel.fields['.entry-body'] = [framedBody, ...old.fields['.entry-body']];
+  assert.equal(entryCtx.paletteEntryText(panel), 'Latest panel recap <div class="doc-body">Deferred body</div>');
 
   // Jump against a fresh node; the whole-topic owner must run before any
   // landing geometry or focus, without opening unrelated disclosures.
@@ -455,9 +526,10 @@ async function hostCases() {
   }
   const body = landing('DETAILS', topic), target = landing('DIV', fold);
   fold.parentElement = topic;
+  let pickTopic = topic;
   const pickCtx = vm.createContext({ doc: { body: { classList: { contains: () => false } }, documentElement: {} },
-    window: { WsCards: { unfoldTopic(node) { assert.equal(node, topic); folded = false; events.push(['unfold']); } } },
-    boardQ: () => [topic], $: () => target, live: true, tabShown: () => false,
+    window: { WsCards: { unfoldTopic(node) { assert.equal(node, pickTopic); folded = false; events.push(['unfold']); } } },
+    boardQ: () => pickTopic ? [pickTopic] : [], $: () => target, live: true, tabShown: () => false,
     setTab: tab => { assert.equal(folded, false, 'owner reveals before tab handoff'); events.push(['tab', tab]); },
     setTimeout: fn => fn(), location: {}, go: href => { pickCtx.location.href = href; } });
   vm.runInContext(block(dashboard, '  function palettePick(', "  // The palette's file hooks"), pickCtx);
@@ -485,6 +557,73 @@ async function hostCases() {
   assert.equal(active, 'palette');
   pickCtx.palettePick({ kind: 'session', href: '/s/other' });
   assert.equal(pickCtx.location.href, '/s/other');
+
+  const entryTarget = { setAttribute(k, v) { assert.equal(k, 'tabindex'); assert.equal(v, '-1'); },
+    focus(opt) { assert.equal(folded, false); assert.deepEqual(plain(opt), { preventScroll: true }); active = 'entry'; events.push(['entry-focus']); },
+    scrollIntoView() { assert.fail('entry picks must never scroll the history clip'); },
+    get offsetWidth() { assert.fail('loadTarget alone owns entry flash geometry'); } };
+  const entryRow = { group: 5, kind: 'board-entry', topic: 'closed', entry: 'entry-older' };
+  let loads = 0, paged = true;
+  pickCtx.tkApi = { leavePage() { assert.equal(folded, false); events.push(['leave-page']); } };
+  pickCtx.doc.body.classList.contains = () => paged;
+  pickCtx.window.wbHistory = { loadTarget(owner, id, beforeGeometry) {
+    loads++;
+    assert.equal(owner, pickTopic, 'the current owning topic is the history root, including a pinned topic');
+    assert.equal(id, entryRow.entry);
+    beforeGeometry(owner); beforeGeometry(entryTarget);
+    assert.equal(events.filter(e => e[0] === 'unfold').length, 1, 'prepare runs once despite repeated pre-geometry callbacks');
+    assert.equal(events.filter(e => e[0] === 'leave-page').length, 1);
+    assert.equal(folded, false, 'topic is revealed before history geometry');
+    return entryTarget;
+  } };
+  pickCtx.window.WsOverview = { pick: () => false };
+  for (const keep of [false, true]) {
+    folded = true; active = 'palette'; events.length = 0; loads = 0;
+    pickCtx.palettePick(entryRow, { keep });
+    assert.equal(loads, 1, 'declined Overview goes straight to loadTarget');
+    assert.equal(active, keep ? 'palette' : 'entry', 'modified entry Enter keeps focus in search');
+    assert(!events.some(e => e[0] === 'scroll' || e[0] === 'width'), 'no generic entry scrolling or flash');
+  }
+  const after = [], handoffs = [];
+  let holding = true;
+  pickCtx.window.WsOverview = { pick(node, opt) { handoffs.push([node, opt]); return true; },
+    after: fn => after.push(fn), holding: () => holding };
+  events.length = 0; loads = 0; folded = true; active = 'palette';
+  pickCtx.palettePick(entryRow, { keep: true });
+  assert.equal(handoffs[0][0], topic);
+  assert.equal(handoffs[0][1].keep, true);
+  assert.equal(loads, 0);
+  assert.equal(events.length, 0, 'no loadTarget, folds, page or tab writes before Overview after');
+  after.shift()();
+  assert.equal(handoffs.length, 2, 'an entering Overview repeats its handoff');
+  assert.equal(loads, 0);
+  assert.equal(events.length, 0, 'still-held callback does not reach history or fold owners');
+  // The board (or pinned column) may be replaced while Overview holds swaps.
+  pickTopic = { ...topic };
+  holding = false;
+  after.shift()();
+  assert.equal(loads, 1, 'after exit, navigation reaches the entry in the replacement topic');
+  assert.equal(active, 'palette');
+  assert.equal(handoffs.length, 2, 'the completed exit is not handed off a third time');
+  // Reduced motion exits synchronously, so after may navigate immediately.
+  pickCtx.window.WsOverview = { pick: () => true, holding: () => false, after: fn => fn() };
+  events.length = 0; loads = 0; folded = true; active = 'palette';
+  pickCtx.palettePick(entryRow);
+  assert.equal(loads, 1);
+  assert.equal(active, 'entry', 'synchronous Overview exit still focuses the article without scrolling it');
+
+  const originalPick = pickCtx.palettePick, fallbacks = [];
+  pickCtx.palettePick = (row, opt) => fallbacks.push([plain(row), plain(opt)]);
+  pickCtx.window.WsOverview = { pick: () => false };
+  pickCtx.window.wbHistory.loadTarget = () => null;
+  originalPick(entryRow, { keep: true });
+  assert.deepEqual(fallbacks, [[{ kind: 'board-topic', topic: 'closed' }, { keep: true }]], 'a disappeared entry falls back to its topic');
+  pickCtx.palettePick = originalPick;
+  pickTopic = null;
+  events.length = 0;
+  pickCtx.palettePick(entryRow);
+  assert.equal(events.length, 0, 'a disappeared topic is ignored');
+  paged = false;
 
   let more = {}, updates = 0;
   const closedCtx = vm.createContext({ boardQ: () => more ? [more] : [], paletteRows: () => ['older rows'],
