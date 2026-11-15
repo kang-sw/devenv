@@ -22,19 +22,19 @@ func TestChildReportFoldedMailboxRow(t *testing.T) {
 				Caption: tc.caption, Text: tc.text, Truncated: tc.truncated,
 			})}
 			html := presentationHTML(t, ring, PageContent{}, newEntryCache())
-			start := `<details class="mailline recv child-report" data-entry="` + ring[0].Name + `" data-key="wake-` + ring[0].Name + `">`
+			start := `<details class="mailline recv child-report" data-entry="` + ring[0].Name + `" data-key="wake-` + ring[0].Name + `"><summary class="conv-row"`
 			_, row, ok := strings.Cut(html, start)
 			if !ok {
 				t.Fatalf("missing closed, stably keyed mailbox disclosure: %s", html)
 			}
 			summary, body, ok := strings.Cut(row, "</summary>")
-			if !ok || !strings.Contains(summary, `<span class="arr">←</span><b class="mfirst">Triage idea tickets part 00</b>`) || !strings.Contains(summary, `<time class="t"`) {
+			if !ok || !strings.Contains(summary, `<span class="arr">←</span>`) || !strings.Contains(summary, `<span class="mpeer">Triage idea tickets part 00</span>`) || !strings.Contains(summary, `<span class="row-time">`) || !strings.Contains(summary, `<span class="row-chevron">`) {
 				t.Fatalf("folded report must show only arrow, title and clock: %s", html)
 			}
-			if strings.Contains(summary, "wake-caption") || strings.Contains(summary, "wake-body") || strings.Contains(summary, "mbody") || strings.Contains(html, "mail-icon") || strings.Contains(html, "wake-card") || strings.Contains(html, "data-mail-wake=") {
+			if strings.Contains(summary, "wake-caption") || strings.Contains(summary, "wake-body") || strings.Contains(summary, "mbody") || strings.Contains(html, "mail-icon") || strings.Contains(summary, "wake-body") || strings.Contains(html, "wake-card") || strings.Contains(html, "data-mail-wake=") {
 				t.Fatalf("report leaked body, mail icon or mail association into folded row: %s", html)
 			}
-			if !strings.HasPrefix(body, `<div class="mbody">`) || !strings.Contains(body, "</div></details>") {
+			if !strings.HasPrefix(body, `<div class="row-details"><div class="mbody">`) || !strings.Contains(body, "</div></div></details>") {
 				t.Fatalf("report body must remain inside the disclosure: %s", html)
 			}
 			if tc.caption != "" && !strings.Contains(body, `<span class="wake-caption">`) {

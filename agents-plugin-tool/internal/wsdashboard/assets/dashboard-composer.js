@@ -9,6 +9,38 @@
   // bmentions are the board mentions the composer holds, in the order added
   // (board mentions, below).
   var bmentions = [];
+  // New pushes retain their source, one memo, and image references together.
+  // Drafts and requests serialize these views into the existing text field.
+  var bselections = [];
+  var closeRequests = [];
+  function validCloseRequests(list) {
+    var out = [];
+    (Array.isArray(list) ? list : []).forEach(function (r) {
+      if (!r || typeof r.topic !== "string" || !r.topic.trim() || /[\r\n\x00]/.test(r.topic) || typeof r.reason !== "string") return;
+      var next = { topic: r.topic.trim(), reason: r.reason }, i = out.findIndex(function (v) { return v.topic === next.topic; });
+      if (i < 0) out.push(next); else out[i] = next;
+    });
+    return out;
+  }
+  function focusCloseRequest(topic) {
+    if (!cchips) return;
+    var input = q("[data-close-reason]", cchips).filter(function (el) { return el.getAttribute("data-close-reason") === topic; })[0];
+    if (input) input.focus();
+  }
+  function addCloseRequest(topic) {
+    if (!ctext || !cchips || !topic) return;
+    if (!closeRequests.some(function (r) { return r.topic === topic; })) {
+      closeRequests.push({ topic: topic, reason: "" });
+      renderChips();
+      queueDraft();
+    }
+    focusCloseRequest(topic);
+  }
+  function removeCloseRequest(topic) {
+    closeRequests = closeRequests.filter(function (r) { return r.topic !== topic; });
+    renderChips();
+    queueDraft();
+  }
   // wpicks and wconsoles are the web card's picked elements and console
   // blocks the composer holds, in the order added (web picks, below).
   var wpicks = [], wconsoles = [];
@@ -58,6 +90,8 @@
   }
   function renderChips() {
     if (!cchips) return;
+    var active = doc.activeElement, focused = active && active.getAttribute("data-close-reason");
+    var selection = focused != null ? [active.selectionStart, active.selectionEnd] : null;
     cchips.textContent = "";
     chipList().forEach(function (c) {
       var el = doc.createElement("span"), b = doc.createElement("b"), x = doc.createElement("button");
@@ -123,6 +157,29 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
+    renderSelectionChips();
+    closeRequests.forEach(function (r) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), input = doc.createElement("textarea"), x = doc.createElement("button");
+      el.className = "achip close-request-chip";
+      b.textContent = wsT("js.closerequest.label", r.topic);
+      el.appendChild(b);
+      input.className = "close-request-reason";
+      input.rows = 1;
+      input.value = r.reason;
+      input.placeholder = wsT("js.closerequest.reason");
+      input.setAttribute("aria-label", wsT("js.closerequest.reasonfor", r.topic));
+      input.setAttribute("data-close-reason", r.topic);
+      input.addEventListener("input", function () { r.reason = input.value; queueDraft(); });
+      el.appendChild(input);
+      x.type = "button";
+      x.className = "unchip";
+      x.setAttribute("data-unclose-request", r.topic);
+      x.title = wsT("js.closerequest.remove");
+      x.setAttribute("aria-label", x.title);
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
     // A web card's picked element: its selector and text; a console block:
     // its error count and page. The held message shows the same capsules
     // (dashboard.tmpl achips).
@@ -161,6 +218,57 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
+    if (focused != null) {
+      focusCloseRequest(focused);
+      var next = doc.activeElement;
+      if (next && next.getAttribute("data-close-reason") === focused) next.setSelectionRange(selection[0], selection[1]);
+    }
+    if (cimgs) renderImgs();
+  }
+  function renderSelectionChips() {
+    bselections.forEach(function (s, index) {
+      var group = doc.createElement("section"), sources = doc.createElement("div"), edit = doc.createElement("button"), remove = doc.createElement("button");
+      group.className = "selection-bundle";
+      sources.className = "hchips";
+      sources.setAttribute("aria-label", wsT("js.wbmention.context"));
+      s.mentions.forEach(function (m) {
+        var source = doc.createElement("span");
+        source.className = "achip mchip";
+        source.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "") + " " + m.text;
+        source.title = m.text;
+        if (m.entry) source.setAttribute("data-wb-entry", m.entry);
+        sources.appendChild(source);
+      });
+      edit.type = "button"; edit.className = "selection-edit";
+      edit.setAttribute("data-selection-edit", String(index));
+      edit.textContent = s.comment || wsT("js.wbmention.input");
+      edit.title = wsT("js.wbmention.note");
+      remove.type = "button"; remove.className = "unchip";
+      remove.setAttribute("data-unselection", String(index));
+      remove.title = wsT("js.wbmention.remove"); remove.textContent = "×";
+      group.appendChild(sources); group.appendChild(remove); group.appendChild(edit);
+      s.row = doc.createElement("div"); s.row.className = "selection-images";
+      group.appendChild(s.row); cchips.appendChild(group);
+    });
+  }
+  function dropSelection(index) {
+    var s = bselections[index];
+    if (!s) return;
+    bselections.splice(index, 1);
+    if (mpend && mpend.edit === s) hideMention();
+    s.images.slice().forEach(function (n) {
+      var it = imgs.filter(function (p) { return p.n === n; })[0];
+      if (it) unattach(it);
+    });
+    renderChips(); queueDraft();
+  }
+  function editSelection(index) {
+    var s = bselections[index];
+    if (!s) return;
+    hideMention();
+    var row = s.row && s.row.parentNode, rect = row ? row.getBoundingClientRect() : { right: 4, bottom: 4 };
+    placeMention({ ms: s.mentions, x: rect.right, y: rect.bottom, edit: s, comment: s.comment, images: s.images.slice() });
+    lockMention(); mnote.focus();
   }
   // --- web picks: what a web card (webcard.js) attaches -------------------------
   // A picked element and a console block are chips beside the mentions,
@@ -353,7 +461,10 @@
   // the composer text, every note on the board, and the stray chips' notes.
   function allNums() {
     var text = [ctext.value].concat(boardNotes().map(function (n) { return n.value; }), strayChips().map(function (c) { return c.note; }));
-    return markerNums(text.join("\n"));
+    var nums = markerNums(text.join("\n"));
+    bselections.forEach(function (s) { s.images.forEach(function (n) { nums[n] = true; }); });
+    if (mpend) (mpend.images || []).forEach(function (n) { nums[n] = true; });
+    return nums;
   }
   // nextNum is a number no image, dropped image, or marker of this draft
   // has used.
@@ -406,6 +517,8 @@
   // note. The stray chips go first: each field edit re-syncs the images,
   // which a marker left in a stray chip would bring back.
   function deleteMarkers(n) {
+    bselections.forEach(function (s) { s.images = s.images.filter(function (k) { return k !== n; }); });
+    if (mpend) mpend.images = (mpend.images || []).filter(function (k) { return k !== n; });
     var src = "\\[Image #" + n + "\\] ?";
     var stray = strayChips().filter(function (c) { return new RegExp(src).test(c.note); });
     stray.forEach(function (c) {
@@ -422,6 +535,9 @@
   // addFiles attaches image files, their markers going in at el's cursor
   // (the composer's by default).
   function addFiles(files, el) {
+    var owner = el === mnote ? mpend : null;
+    if (el === mnote && (!owner || owner.rid !== rid)) return;
+    if (owner) lockMention();
     var refused = "", added = [];
     files.forEach(function (f) {
       if (!IMG_TYPES[f.type]) { refused = wsT("js.img.type", f.name || wsT("js.img.thefile")); return; }
@@ -430,13 +546,15 @@
       var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "", n: nextNum() };
       imgs.push(it);
       added.push(it.n);
+      if (owner) owner.images.push(it.n);
       var rd = new FileReader();
       rd.onload = function () { var v = String(rd.result); it.data = v.slice(v.indexOf(",") + 1); };
       rd.onerror = function () { dropImg(it); release(it); deleteMarkers(it.n); renderImgs(); noteWarn(wsT("js.img.readfail", it.name)); };
       rd.readAsDataURL(f);
     });
     renderImgs();
-    insertMarkers(added, el);
+    if (!owner) insertMarkers(added, el);
+    queueDraft();
     if (refused) noteWarn(wsT("js.img.refused", refused));
   }
   function dropImg(it) {
@@ -482,6 +600,8 @@
   function imgHomes(notes) {
     var own = markerNums(ctext.value), names = notes.map(function (n) { return markerNums(n.value); });
     return imgs.map(function (it) {
+      if (mpend && (mpend.images || []).indexOf(it.n) >= 0) return -2;
+      for (var s = 0; s < bselections.length; s++) if (bselections[s].images.indexOf(it.n) >= 0) return -3 - s;
       if (own[it.n]) return -1;
       for (var i = 0; i < names.length; i++) if (names[i][it.n]) return i;
       return -1;
@@ -492,6 +612,8 @@
     var notes = boardNotes(), homes = imgHomes(notes), rows = {};
     imgLayout = JSON.stringify(homes);
     cimgs.textContent = "";
+    if (mimgs) mimgs.textContent = "";
+    bselections.forEach(function (s) { if (s.row) s.row.textContent = ""; });
     boardQ(".nimgs").forEach(function (r) { r.parentNode.removeChild(r); });
     imgs.forEach(function (it, i) {
       var el = doc.createElement("span"), im = doc.createElement("img"), x = doc.createElement("button"), num = doc.createElement("span");
@@ -509,6 +631,8 @@
       x.textContent = "×";
       el.appendChild(x);
       var h = homes[i];
+      if (h === -2) { if (mimgs) mimgs.appendChild(el); return; }
+      if (h <= -3) { var group = bselections[-3 - h]; if (group && group.row) group.row.appendChild(el); return; }
       if (h < 0) { cimgs.appendChild(el); return; }
       // A note's row follows the note, so it hides with it (CSS) and
       // leaves with it when a board swap replaces its topic.
@@ -554,7 +678,8 @@
     // once the paste is done, after any pasted text.
     var types = Array.prototype.slice.call(e.clipboardData.types || []);
     if (types.indexOf("text/plain") < 0) e.preventDefault();
-    setTimeout(function () { addFiles(files, el); }, 0);
+    var owner = el === mnote ? mpend : null;
+    setTimeout(function () { if (el !== mnote || owner && owner === mpend && owner.rid === rid) addFiles(files, el); }, 0);
   }
   var composer = $("composer");
   if (ctext && cimgs && composer) {
@@ -814,7 +939,7 @@
   // lists after its answer block (wsinbox mentions). A topic body is a
   // sandboxed frame whose selection this page cannot read, so the frame
   // reports it ({wbDoc: "sel"}, doc-frame.js) and the button stands over it.
-  var mbtn = null, mnote = null, mpend = null, mraf = 0, mcomposing = false;
+  var mbtn = null, mnote = null, mimgs = null, mpend = null, mraf = 0, mcomposing = false;
   // mentionOf is the mention a selection makes: the topic card's key, the
   // item ID when both ends lie in one item (or trusted system-event
   // provenance), the optional immutable entry locator, and selected text.
@@ -833,11 +958,12 @@
   function selEl(n) { return n && (n.nodeType === 1 ? n : n.parentNode); }
   // itemIdAt is the ID of the item card n lies in, "" outside every card; the
   // card's element id carries it on every kind (a settled row has no data-id).
+  // Lifted check controls use check-<ID>; item-<ID> stays on their summary.
   function itemIdAt(n) {
     var el = selEl(n), entry = entryAt(n), provenance = entry && entry.getAttribute("data-entry-item");
     if (entry) return /^[0-9]{1,6}$/.test(provenance || "") ? provenance : "";
     var item = el && el.closest && el.closest(".card[id], .arow[id], .ckrow[id], .srow[id]");
-    var m = item && /^item-([0-9]{1,6})$/.exec(item.getAttribute("id") || "");
+    var m = item && /^(?:item|check)-([0-9]{1,6})$/.exec(item.getAttribute("id") || "");
     return m ? m[1] : "";
   }
   // endRect is where a range ends on screen: its last line box.
@@ -897,25 +1023,22 @@
     var r = endRect(range);
     return mentions.length === 1 ? { m: mentions[0], x: r.right, y: r.bottom } : { ms: mentions, x: r.right, y: r.bottom };
   }
-  function hideMention() {
+  function hideMention(keep) {
+    var p = mpend;
     mpend = null;
+    if (p && !keep) (p.images || []).forEach(function (n) {
+      if (p.edit && p.edit.images.indexOf(n) >= 0) return;
+      var it = imgs.filter(function (it) { return it.n === n; })[0];
+      if (it) { dropImg(it); release(it); }
+    });
     mcomposing = false;
     if (mnote) mnote.value = "";
     if (mbtn) mbtn.hidden = true;
+    if (cimgs) renderImgs();
   }
   // Once the input takes focus, live selection reports may no longer replace
   // this bundle. The copied mentions and owning session outlive DOM updates.
   function lockMention() { if (mpend) mpend.locked = true; }
-  // This context is ordinary, editable user text, not wire metadata. Include
-  // the excerpts as well as their locators: ordinal references become wrong
-  // after chip removal, another attachment, or an inbox merge.
-  function selectionNote(ms, note) {
-    note = (note || "").trim();
-    if (!note) return "";
-    return wsT("js.wbmention.context") + "\n" + ms.map(function (m) {
-      return "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "") + "\n> " + m.text.replace(/\r?\n/g, "\n> ");
-    }).join("\n\n") + "\n\n" + wsT("js.wbmention.note") + "\n" + note;
-  }
   // placeMention shows a snapshot beside its selection. An input-held bundle
   // keeps its last screen position if its source disappears.
   function placeMention(p) {
@@ -946,13 +1069,25 @@
       add.appendChild(doc.createTextNode(wsT("js.wbmention.add")));
       add.title = wsT("js.wbmention.add.title");
       mbtn.appendChild(mnote);
+      mimgs = doc.createElement("div"); mimgs.className = "selection-images";
+      mbtn.appendChild(mimgs);
       mbtn.appendChild(add);
+      if (window.WsCapsules) window.WsCapsules.topicPicker(mnote, capsuleTopics);
+      mnote.addEventListener("paste", function (e) { pasteImages(e, mnote); });
+      mbtn.addEventListener("dragover", function (e) {
+        if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0) e.preventDefault();
+      });
+      mbtn.addEventListener("drop", function (e) {
+        var files = imageFiles(e.dataTransfer);
+        if (!files.length) return;
+        e.preventDefault(); e.stopPropagation(); addFiles(files, mnote);
+      });
       // Capture before focus collapses the host or sandbox selection. Only
       // the action prevents focus; the input must remain normally editable.
       mbtn.addEventListener("mousedown", function (e) { lockMention(); if (e.target === add) e.preventDefault(); });
       mbtn.addEventListener("focusin", lockMention);
-      mnote.addEventListener("compositionstart", function () { mcomposing = true; });
-      mnote.addEventListener("compositionend", function () { mcomposing = false; });
+      mbtn.addEventListener("compositionstart", function () { mcomposing = true; });
+      mbtn.addEventListener("compositionend", function () { mcomposing = false; });
       mbtn.addEventListener("keydown", function (e) {
         if (e.isComposing || e.keyCode === 229 || mcomposing) { if (e.target === add) e.preventDefault(); e.stopPropagation(); return; }
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideMention(); ctext.focus(); }
@@ -961,11 +1096,13 @@
       doc.body.appendChild(mbtn);
     }
     if (p !== mpend) {
-      p = Object.assign({}, p, { ms: validMentions(p.ms || [p.m]), rid: rid });
-      mnote.value = "";
+      if (mpend) hideMention();
+      p = Object.assign({}, p, { ms: validMentions(p.ms || [p.m]), rid: rid, images: (p.images || []).slice() });
+      mnote.value = p.comment || "";
     }
     p.screenX = x; p.screenY = y;
     mpend = p;
+    renderImgs();
     mbtn.hidden = false;
     var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
     mbtn.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x + 4)) + "px";
@@ -981,14 +1118,13 @@
   function addMention() {
     var p = mpend;
     if (!p || p.rid !== rid || mcomposing) return;
-    var text = selectionNote(p.ms, mnote.value);
-    hideMention();
-    bmentions = bmentions.concat(p.ms);
+    if (!p.ms.length) return;
+    var s = { mentions: validMentions(p.ms), comment: mnote.value, images: p.images.slice() }, index = bselections.indexOf(p.edit);
+    if (index >= 0) bselections[index] = s;
+    else bselections.push(s);
+    hideMention(true);
     if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
-    // Append rather than replace the composer's selected text. The context
-    // stays readable after ordinary edits, restoration, and merged sends.
-    if (text) editText(ctext.value.length, ctext.value.length, (ctext.value ? "\n\n" : "") + text);
     renderChips();
     queueDraft();
     ctext.focus();
@@ -1045,11 +1181,16 @@
     if (cmdSel) { sendCommand(); return; }
     var inline = window.WsCapsules && window.WsCapsules.command(ctext);
     if (inline) { sendInlineCommand(inline); return; }
-    var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
+    var raw = ctext.value.trim(), groups = bselections.slice(), t = selectionPrefix(groups) + sendText().trim(), list = chipList(), notes = topicNotes(), said = bmentions.slice();
+    var committed = {};
+    groups.forEach(function (s) { s.images.forEach(function (n) { committed[n] = true; }); });
+    var pics = imgs.filter(function (p) { return !mpend || (mpend.images || []).indexOf(p.n) < 0 || committed[p.n]; });
     var wp = wpicks.slice(), wc = wconsoles.slice();
-    if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length) { noteWarn(wsT("js.send.empty")); return; }
+    var closing = closeRequests.map(function (r) { return { ref: r, topic: r.topic, reason: r.reason }; });
+    if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length && !closing.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
     var body = { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
+    if (closing.length) body.closeRequests = closing.map(function (r) { return { topic: r.topic, reason: r.reason }; });
     if (wp.length) body.picks = wp;
     if (wc.length) body.consoles = wc;
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
@@ -1070,8 +1211,6 @@
       if (!ok) { ownTopics.forEach(function (k) { delete boardOwn[k]; }); noteWarn(wsT("js.send.fail", res)); return; }
       boardFlushViewed(false);
       if (ctext.value.trim() === raw) { ctext.value = ""; grow(); clearMentions(); }
-      pics.forEach(function (p) { dropImg(p); release(p); });
-      clearTrash();
       // Compare by value: a board event during the send, or clearing one
       // card, re-reads the chips into new objects. Drop every sent chip
       // before clearing any card, since clearing one re-syncs the rest.
@@ -1080,6 +1219,11 @@
       sent.forEach(function (c) { setItem(c.id, null); });
       // A mention added during the send stays for the next one.
       bmentions = bmentions.filter(function (m) { return said.indexOf(m) < 0; });
+      bselections = bselections.filter(function (s) { return groups.indexOf(s) < 0; });
+      // Edited, removed/re-added, or newly attached requests belong to the next send.
+      closeRequests = closeRequests.filter(function (r) {
+        return !closing.some(function (sent) { return sent.ref === r && sent.reason === r.reason; });
+      });
       wpicks = wpicks.filter(function (p) { return wp.indexOf(p) < 0; });
       wconsoles = wconsoles.filter(function (c) { return wc.indexOf(c) < 0; });
       // A topic note edited during the send stays for the next one.
@@ -1090,6 +1234,9 @@
       });
       // A send closes the open notes; one edited during it keeps its text.
       closeTopicNotes();
+      var remaining = allNums();
+      pics.forEach(function (p) { if (!remaining[p.n]) { dropImg(p); release(p); } });
+      clearTrash();
       renderChips();
       // A fresh draft numbers its images from 1 again: nothing is left that
       // a marker or an image could name.
@@ -1147,7 +1294,7 @@
       astext++;
       return { text: "/" + c.name + (c.args ? " " + c.args : "") };
     });
-    var cur = ctext.value.trim(), top = imgSeq, backs = [], back;
+    var cur = ctext.value.trim(), top = imgSeq, backs = [], back, restoredSelections = [];
     // The draft's mentions move with it, past its leading whitespace's trim.
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
     Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
@@ -1166,7 +1313,8 @@
         top = Math.max(top, renum[n]);
       });
       var rn = function (s) { return (s || "").replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; }); };
-      var text = rn(res.text);
+      var split = splitSelectionText(res.text || ""), text = rn(split.text);
+      split.groups.forEach(function (s) { s.images = s.images.map(function (n) { return renum[n] || n; }); restoredSelections.push(s); });
       (res.chips || []).forEach(function (c) {
         var o = {};
         Object.keys(c).forEach(function (k) { o[k] = c[k]; });
@@ -1183,6 +1331,7 @@
     imgSeq = top;
     order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
     back = backs.join("\n\n");
+    bselections = restoredSelections.concat(bselections);
     var named = allNums(), inBack = markerNums(back), missing = [];
     imgs.forEach(function (p) { if (!named[p.n] && !inBack[p.n]) missing.push(marker(p.n)); });
     if (missing.length) back += (back ? "\n" : "") + missing.join(" ");
@@ -1194,6 +1343,15 @@
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
+    var requests = [];
+    list.slice().sort(function (a, b) { return (+a.sentAt || 0) - (+b.sentAt || 0); }).forEach(function (res) { requests = requests.concat(validCloseRequests(res.closeRequests)); });
+    requests = validCloseRequests(requests);
+    // Keep current capsules intact: an in-flight send compares their identity.
+    closeRequests.forEach(function (r) {
+      var i = requests.findIndex(function (v) { return v.topic === r.topic; });
+      if (i < 0) requests.push(r); else requests[i] = r;
+    });
+    closeRequests = requests;
     // So do their picked elements and console blocks.
     var hp = [], hc = [];
     list.forEach(function (res) { hp = hp.concat(validPicks(res.picks)); hc = hc.concat(validConsoles(res.consoles)); });

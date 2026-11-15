@@ -180,11 +180,14 @@ type TopicView struct {
 	// LatestAgent supplies the current-state summary, never a system event.
 	// Recap remains a read-only fallback for unconverted legacy views.
 	LatestAgent *Entry
-	// Stream is the newest HistoryWindow entries; Older holds inert pages,
-	// nearest first. PanelRecaps lists latest distinct panels for the embed.
+	// Stream/Older retain the complete, internally chunked entry projection
+	// (Older nearest first). Timeline selects anchors across these chunks;
+	// PanelRecaps lists latest distinct panels for the embed.
 	Stream      EntryPage
 	Older       []EntryPage
 	PanelRecaps []EntryView
+	// Timeline carries live anchors and inert gaps over the complete stream.
+	Timeline []timelinePart
 	// Policy and Acks are the topic's items waiting on the user; they never
 	// collapse.
 	Policy []ItemView
@@ -683,6 +686,13 @@ func BuildView(state *State, in ViewInput) View {
 		block := blocks[name]
 		if block.Stream.Count == 0 {
 			block.PanelRecaps, block.Stream, block.Older = streamView(TopicDoc{Name: name}, block.Closed, in.Location, items)
+		}
+	}
+	if in.Layout == LayoutFull {
+		inputs := boardInputs(state)
+		for _, name := range order {
+			block := blocks[name]
+			block.Timeline = timelineView(*block, state.Items, inputs, in.Location)
 		}
 	}
 	stampUpdated(state, blocks, in.Location)

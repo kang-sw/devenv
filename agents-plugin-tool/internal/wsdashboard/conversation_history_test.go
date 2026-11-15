@@ -313,7 +313,7 @@ func TestWhiteboardEffectsOlderThanLiveCapRemainReachableOffline(t *testing.T) {
 	if !strings.Contains(page, `data-mode="history"`) || strings.Contains(page, "old saved effect") {
 		t.Fatal("initial cap/mode did not preserve access to older effects")
 	}
-	if history := getHistory(t, f.base+"/s/boardsession/history?n=200"); !history.End || !strings.Contains(history.HTML, "old saved effect") {
+	if history := getHistory(t, f.base+"/s/boardsession/history?n=200"); !history.End || !strings.Contains(history.HTML, "Saved panel summary") || strings.Contains(history.HTML, "old saved effect") {
 		t.Fatalf("older effect unreachable: %+v", history)
 	}
 }

@@ -361,6 +361,7 @@ type ConversationView struct {
 	// ReplyHTML is its text rendered as markdown with raw HTML escaped.
 	Reply     *wslive.Reply
 	ReplyHTML template.HTML
+	Summary   *SummaryView
 	// Phase and Permission drive the trailing activity or approval line.
 	Phase      string
 	Permission *wslive.Permission
@@ -457,13 +458,17 @@ type ConvEntry struct {
 	HTML template.HTML
 	// Images are a user message's attached images, taken out of its text.
 	Images []AttachmentView
+	// Content keeps grouped source/memo/image display in message order;
+	// nil retains the legacy Text rendering path.
+	Content []SelectionContentPart
 	// Answers are the lines of the answer block a user message starts with,
 	// taken out of its text; the bubble shows them as capsules.
 	Answers []wsinbox.AnswerLine
 	// Mentions are the mention elements after that block (or opening the
 	// message), taken out of its text and shown as capsules after the
 	// answer capsules.
-	Mentions []wsinbox.Mention
+	Mentions      []wsinbox.Mention
+	CloseRequests []wsinbox.CloseRequest
 	// Picks and Consoles are the web card's pick and console elements after
 	// the mentions, taken out of its text and shown as capsules after them.
 	Picks    []wsinbox.Pick
@@ -967,7 +972,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 			byAddress[c.Address] = c.ReplyID
 		}
 	}
-	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render.finished}
+	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, Summary: liveSummary(lead.ReasoningSummary), markdown: render.finished}
 	if lead.Reply != nil {
 		cv.ReplyHTML = render.streaming(lead.Reply.Text)
 	}

@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, ownershipPath, pruneStaleAgentHomes, readOwnerArtifacts, readOwnership, removeOwnedAgentHome, reportOwnershipDiagnostic, touchOwnership, writeOwnerArtifact, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { ownerNotifyRef, validateForkReadiness } from "../src/spawner.ts";
 import { symlinkSkip } from "./fixtures/symlink-probe.ts";
+import { parseDelegationPolicy } from "../src/delegation-policy.ts";
+import { normalizeWriteScopes } from "../src/write-scopes.ts";
 
 describe("agent storage", () => {
   test("ownership diagnostics are bounded per reporter session and never expose raw errors", () => {
@@ -38,12 +41,44 @@ describe("agent storage", () => {
       assert.equal(owned.home, join(context.root, "ws-agents", "lead_1", "agent-1"));
       assert.equal(owned.sessionPath, join(owned.home, "session.jsonl"));
       const before = readOwnership(owned.home)!;
+      assert.equal(Object.hasOwn(owned, "delegation"), false, "omitted delegation keeps the legacy allocation shape");
+      assert.equal(Object.hasOwn(JSON.parse(readFileSync(ownershipPath(owned.home), "utf8")), "delegation"), false);
       touchOwnership(owned.home);
       assert.ok(readOwnership(owned.home)!.lastActivityAt >= before.lastActivityAt);
       writeFileSync(owned.sessionPath!, "session write\n");
       observeSessionWrite(owned.home, owned.sessionPath!);
       assert.equal(readOwnership(owned.home)!.sessionSignature?.size, 14);
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("allocation includes normalized delegation in the first durable descriptor", t => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    const rename = fs.renameSync;
+    const firstWrites: unknown[] = [];
+    t.mock.method(fs, "renameSync", (from, to) => {
+      if (String(to).endsWith("ownership.json")) firstWrites.push(JSON.parse(readFileSync(from, "utf8")));
+      return rename(from, to);
+    });
+    syncBuiltinESMExports();
+    try {
+      const context = createAgentStorageContext("lead", root);
+      const delegation = parseDelegationPolicy({
+        version: 1, depth: 1, maxDepth: 2, authority: "delegate", tools: ["read", "edit", "write", "read"],
+        write: normalizeWriteScopes([{ kind: "file", path: join(context.root, "result.md") }]),
+      });
+      const owned = allocateAgentHome(context, "scoped-child", "explore", "search", delegation);
+      assert.equal(firstWrites.length, 1, "allocation has exactly one atomic persistence boundary");
+      assert.deepEqual(delegation.tools, ["read", "edit", "write"]);
+      assert.deepEqual(owned.delegation, delegation);
+      const first = firstWrites[0] as Record<string, unknown>;
+      assert.deepEqual(first.delegation, delegation, "the initial JSON already contains the normalized authority");
+      assert.equal(first.exploreMode, "search", "the existing fourth argument is unchanged");
+      assert.deepEqual(JSON.parse(readFileSync(ownershipPath(owned.home), "utf8")), first);
+      assert.deepEqual(readOwnership(owned.home)?.delegation, delegation, "the version-1 reader needs no migration");
+    } finally {
+      t.mock.restoreAll(); syncBuiltinESMExports();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("accepts former public Explore modes in persisted ownership without rewriting their labels", () => {

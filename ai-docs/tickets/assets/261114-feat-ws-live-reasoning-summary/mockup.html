@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:">
+<title>대화 · 리드 실시간 추론 요약 시안</title>
+<style>
+/* Real shared tokens: internal/wswhiteboard/assets/page.css.
+   Conversation/composer rules: internal/wsdashboard/assets/dashboard.css.
+   Structure: dashboard.tmpl r-entries, r-convlive, entry, chead, composer.
+   Commit 370934c6a ticket read; owner choices 710=a, 711=b, 712=a.
+   Mock-only class prefixes: mock-, d-summary. No provider/session connection. */
+:root {
+ --wb-bg:#f3f3f0; --wb-fg:#1b1d21; --wb-card:#fff;
+ --wb-muted:#e9e8e3; --wb-muted-fg:#5f646b;
+ --wb-primary:#2b62d9; --wb-primary-fg:#fff;
+ --wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);
+ --wb-shadow:0 1px 2px rgb(0 0 0 / .14),0 2px 6px rgb(0 0 0 / .06);
+ --wb-shadow-hi:0 2px 4px rgb(0 0 0 / .16),0 6px 18px rgb(0 0 0 / .10);
+ --wb-radius:12px;
+ --wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ --wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+ --wb-ph-think:#6a4fc4; --wb-on-ph-think:#fff;
+ --wb-ok:#1d7348; --wb-fail:#c0262d;
+ color-scheme:light;
+}
+* { box-sizing:border-box; }
+html,body { margin:0; background:var(--wb-bg); color:var(--wb-fg); }
+body { font:14px/1.5 var(--wb-sans); }
+button { font:inherit; color:inherit; }
+.i { width:14px; height:14px; flex:none; display:block; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.chip { display:inline-flex; align-items:center; gap:3px; height:20px; font-size:12px; font-weight:700; line-height:1; padding:0 9px; border-radius:999px; background:var(--wb-muted); color:var(--wb-muted-fg); white-space:nowrap; }
+.host { font-size:11px; font-weight:800; letter-spacing:.04em; padding:1px 7px; border-radius:4px; background:var(--wb-muted); color:var(--wb-muted-fg); white-space:nowrap; }
+.sse { display:inline-flex; align-items:center; white-space:nowrap; }
+.host.sse { gap:5px; }
+.sse .dot { width:6px; height:6px; border-radius:50%; background:var(--wb-ok); box-shadow:0 0 0 2px color-mix(in srgb,var(--wb-ok) 25%,transparent); }
+.phase { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 10px 0 8px; border-radius:999px; font-size:12px; font-weight:800; white-space:nowrap; flex:none; }
+.phase.thinking { background:var(--wb-ph-think); color:var(--wb-on-ph-think); }
+.phase.idle { background:var(--wb-muted); color:var(--wb-muted-fg); }
+.spin { width:11px; height:11px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation:dash-spin .8s linear infinite; flex:none; display:inline-block; }
+@keyframes dash-spin { to { transform:rotate(360deg); } }
+.convo { background:color-mix(in srgb,var(--wb-muted) 45%,var(--wb-bg)); border-radius:var(--wb-radius); box-shadow:var(--wb-shadow); }
+.thead { padding:4px 8px 4px 12px; min-height:30px; display:flex; gap:8px; align-items:center; font-weight:700; font-size:13px; background:var(--wb-muted); }
+.chead { position:static; padding:0 8px 0 4px; border-radius:var(--wb-radius) var(--wb-radius) 0 0; box-shadow:var(--wb-shadow); min-width:0; }
+.chead .csum { margin-left:auto; min-width:0; display:flex; align-items:center; justify-content:flex-end; }
+.ctabs { display:flex; gap:2px; align-items:stretch; align-self:stretch; flex:none; }
+.ctabs button { border:0; background:transparent; height:30px; padding:0 8px; font:inherit; font-size:13px; font-weight:700; color:var(--wb-muted-fg); display:inline-flex; align-items:center; gap:6px; border-bottom:2px solid transparent; }
+.ctabs button[aria-pressed="true"] { color:var(--wb-fg); border-bottom-color:var(--wb-primary); }
+.conv { display:flex; flex-direction:column; gap:10px; padding:10px 12px; }
+.conv.clive { padding-top:0; }
+.msg { max-width:100%; }
+.msg .mh { font-size:11.5px; color:var(--wb-muted-fg); display:flex; gap:6px; align-items:center; margin-bottom:3px; }
+.msg .mh b { color:var(--wb-fg); }
+.msg .bub { white-space:pre-wrap; overflow-wrap:anywhere; }
+.msg.user { align-self:flex-end; max-width:86%; }
+.msg.user .mh { justify-content:flex-end; }
+.msg.user .bub { background:color-mix(in srgb,var(--wb-primary) 13%,var(--wb-card)); border-radius:12px 12px 4px 12px; padding:8px 11px; }
+.msg.fromlead { max-width:94%; }
+.msg.fromlead .bub { background:var(--wb-card); border-radius:12px 12px 12px 4px; padding:8px 12px; box-shadow:var(--wb-shadow); }
+.msg .bub.md { white-space:normal; min-width:0; }
+.md p { margin:0 0 6px; }
+.md > :last-child { margin-bottom:0; }
+.src { font-size:10px; font-weight:800; letter-spacing:.04em; padding:0 6px; border-radius:4px; background:var(--wb-muted); color:var(--wb-muted-fg); white-space:nowrap; }
+.turnline { align-self:center; display:inline-flex; gap:6px; align-items:center; font-size:11px; color:var(--wb-muted-fg); box-shadow:inset 0 0 0 1px var(--wb-muted); border-radius:999px; padding:0 10px; }
+.activity { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--wb-muted-fg); padding:0 4px; }
+.activity .spin { color:var(--wb-primary); width:10px; height:10px; }
+.caret { display:inline-block; width:7px; height:13px; background:currentColor; vertical-align:-2px; margin-left:2px; animation:dash-blink 1s steps(1) infinite; }
+@keyframes dash-blink { 50% { opacity:0; } }
+.composer { position:relative; background:var(--wb-card); border-radius:var(--wb-radius); box-shadow:var(--wb-shadow-hi); padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
+.cbadges { position:absolute; z-index:3; left:10px; right:10px; top:-5px; transform:translateY(-50%); display:grid; grid-template-columns:auto minmax(0,1fr); column-gap:8px; align-items:center; pointer-events:none; }
+.ibadge { grid-column:1; justify-self:start; display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 12px 0 10px; border:0; border-radius:999px; white-space:nowrap; font-size:11.5px; font-weight:800; letter-spacing:.03em; line-height:1; color:var(--wb-fail); background:var(--wb-card); box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--wb-fail) 55%,transparent),var(--wb-shadow-hi); }
+.ibadge .istop { width:8px; height:8px; border-radius:2px; background:currentColor; flex:none; }
+.crow { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; align-items:stretch; }
+.composer textarea { font:13.5px/1.45 var(--wb-sans); color:inherit; background:var(--wb-muted); border:0; border-radius:10px; padding:8px 10px; resize:none; min-height:38px; max-height:160px; width:100%; display:block; }
+.csend { display:inline-flex; align-items:center; justify-content:center; width:34px; padding:0; border:0; border-radius:10px; color:var(--wb-primary); background:color-mix(in srgb,var(--wb-primary) 14%,var(--wb-card)); }
+.csend .i { width:17px; height:17px; }
+.sb { display:flex; align-items:center; flex-wrap:wrap; gap:3px 12px; min-width:0; font-size:12.5px; line-height:1.3; padding:0 2px; }
+.sb .i { width:13px; height:13px; }
+.sb-dir { display:inline-flex; align-items:center; gap:4px; min-width:0; white-space:nowrap; font-weight:800; }
+.sb-dir .i { color:var(--wb-muted-fg); }
+/* Feature proposal. Live summary belongs to the activity region, not to
+   the assistant answer. Completed summary belongs under its own answer.
+   Only explicitly identified provider summaries may populate either. */
+.d-summary { min-width:0; color:var(--wb-muted-fg); font-size:12px; }
+.d-summary > summary { display:flex; align-items:center; flex-wrap:wrap; gap:4px 6px; list-style:none; cursor:pointer; padding:4px 0; width:fit-content; max-width:100%; border-radius:6px; }
+.d-summary > summary::-webkit-details-marker { display:none; }
+.d-summary > summary .i { width:11px; height:11px; transition:transform .15s; }
+.d-summary[open] > summary .d-chevron { transform:rotate(90deg); }
+.d-summary .d-label { font-weight:700; }
+.d-summary .d-meta { font-size:10.5px; color:var(--wb-muted-fg); }
+.d-summary .d-body { margin-top:4px; padding:8px 11px; border-left:2px solid color-mix(in srgb,var(--wb-ph-think) 55%,transparent); border-radius:0 8px 8px 0; background:var(--wb-card); font-size:12.5px; line-height:1.65; color:var(--wb-muted-fg); overflow-wrap:anywhere; }
+.d-summary .d-body p { margin:0; }
+.d-summary.live > summary .d-label { color:var(--wb-ph-think); }
+.d-summary.live > summary { width:100%; }
+.d-summary .d-updating { margin-left:auto; display:inline-flex; gap:4px; align-items:center; font-size:10.5px; color:var(--wb-ph-think); }
+.d-updating::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.d-summary .caret { width:5px; height:12px; color:var(--wb-ph-think); }
+.d-summary.saved { margin:6px 0 0; }
+.d-summary.saved .d-body { background:color-mix(in srgb,var(--wb-card) 65%,transparent); border-left-color:var(--wb-muted-fg); }
+.d-summary .d-provenance { display:block; margin-top:7px; font-size:10px; color:var(--wb-muted-fg); }
+.d-summary .d-close, .d-summary[open] .d-open { display:none; }
+.d-summary[open] .d-close { display:inline; }
+.d-summary summary:focus-visible { outline:1.5px solid var(--wb-primary); outline-offset:2px; }
+/* Presentation sheet only: four focused crops of the real conversation
+   column, grouped into three requested states. Not a dashboard redesign. */
+.mock-sheet { max-width:1248px; margin:0 auto; padding:24px 16px; }
+.mock-top { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; }
+.mock-top h1 { font-size:20px; margin:0; letter-spacing:-.03em; }
+.mock-top .chip { margin-left:auto; font-size:11px; }
+.mock-intro { font-size:12px; color:var(--wb-muted-fg); margin:8px 0 20px; }
+.mock-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:24px 20px; align-items:start; }
+.mock-state { min-width:0; }
+.mock-state > h2 { margin:0 0 3px; font-size:14px; display:flex; align-items:center; gap:7px; }
+.mock-index { display:inline-grid; place-items:center; width:20px; height:20px; border-radius:6px; background:var(--wb-muted); font:700 11px var(--wb-mono); color:var(--wb-muted-fg); }
+.mock-caption { font-size:11.5px; color:var(--wb-muted-fg); margin:0 0 10px; }
+.mock-session { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin:0 0 8px; font-size:12px; }
+.mock-session strong { margin-right:auto; font-size:12.5px; }
+.mock-screen .convo { border-top-left-radius:0; border-top-right-radius:0; min-height:288px; display:flex; flex-direction:column; }
+.mock-screen .conv.clive { margin-top:auto; padding-bottom:20px; }
+.mock-screen .composer { margin-top:10px; }
+.mock-screen .convo .centries { flex:1; }
+.mock-complete { grid-column:1/-1; }
+.mock-comparison { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+.mock-view-label { margin:0 0 7px; font-size:11px; color:var(--wb-muted-fg); }
+.mock-view-label b { color:var(--wb-fg); }
+.mock-complete .convo { min-height:0; }
+.mock-footer { margin:20px 0 0; border-top:1px solid var(--wb-line); padding-top:10px; color:var(--wb-muted-fg); font-size:11px; }
+.mock-note { margin:10px 2px 0; font-size:11px; color:var(--wb-muted-fg); }
+.mock-screen button { cursor:default; }
+@media(max-width:760px) {
+ .mock-sheet { padding:16px 10px; }
+ .mock-grid,.mock-comparison { grid-template-columns:minmax(0,1fr); }
+ .mock-grid { gap:24px; }
+ .mock-top h1 { font-size:18px; }
+ .mock-top .chip { margin-left:0; }
+ .mock-screen .convo { min-height:0; }
+ .mock-screen .conv.clive { margin-top:14px; }
+ .mock-intro { margin-bottom:16px; }
+}
+@media(prefers-reduced-motion:reduce) { .spin,.caret { animation:none; } }
+</style>
+</head>
+<body>
+<!-- Existing dashboard sprite paths; no agent/subagent imagery. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></symbol>
+<symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.2h4l1.4 1.6H14v6.7H2z"/></symbol>
+<symbol id="i-send" viewBox="0 0 16 16"><path d="M2.5 8L13.5 2.8 10.6 13.4 7.6 9.1z"/><path d="M7.6 9.1l5.9-6.3"/></symbol>
+<symbol id="i-right" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+</svg>
+<div class="mock-sheet">
+<header class="mock-top"><h1>대화 · 실시간 추론 요약</h1><span class="chip">리드 세션 전용</span></header>
+<p class="mock-intro">675 디자인 시안 · 기존 대화 화면에 요약만 추가합니다. 아래 문구는 제공자의 명시적 공개 요약을 가정한 예시이며, 실제 세션 데이터가 아닙니다.</p>
+<main class="mock-grid">
+<section class="mock-state" aria-labelledby="live-title">
+<h2 id="live-title"><span class="mock-index">1</span>실행 중 · 요약 갱신</h2>
+<p class="mock-caption">명시적 요약 이벤트가 검증된 모드에서만 표시</p>
+<div class="mock-screen" data-example="live">
+<div class="mock-session"><strong>대화 화면 검토</strong><span class="host sse"><span class="dot"></span>Pi</span><span class="phase thinking"><span class="spin"></span>생각 중</span></div>
+<div class="thead chead"><nav class="ctabs" aria-label="화면 탭"><button aria-pressed="true"><svg class="i"><use href="#i-chat"/></svg>대화</button><button aria-pressed="false"><svg class="i"><use href="#i-folder"/></svg>파일</button></nav><span class="csum"><span class="chip">사용자 1</span></span></div>
+<div class="convo"><div class="conv centries"><div class="msg user"><div class="mh"><span class="src">터미널</span><time>14:30</time></div><div class="bub">기존 대화 화면에 진행 요약을 어떻게 보여줄지 정리해 주세요.</div></div></div>
+<div class="conv clive" data-phase="thinking"><div class="activity"><span class="spin"></span>리드 생각 중</div>
+<details class="d-summary live" open><summary><svg class="i d-chevron"><use href="#i-right"/></svg><span class="d-label">추론 요약</span><span class="d-meta">제공자 명시 요약</span><span class="d-updating">갱신 중 · 방금</span></summary><div class="d-body"><p><span id="live-summary-text">기존 대화 화면과 활동 표시를 확인했습니다. 지원 모드의 요약 표시와 미지원 모드의 기본 활동 표시를 구분하는 구성을 검토하고 있습니다.</span><span class="caret" aria-hidden="true"></span></p></div></details>
+</div></div>
+<div class="composer"><div class="cbadges"><button class="ibadge" disabled><span class="istop"></span>중단</button></div><div class="crow"><textarea rows="1" readonly aria-label="메시지 입력 예시" placeholder="이 세션에 메시지를 보냅니다."></textarea><button class="csend" disabled aria-label="전송 예시"><svg class="i"><use href="#i-send"/></svg></button></div><div class="sb"><span class="sb-dir"><svg class="i"><use href="#i-folder"/></svg><span>agents-plugin-tool</span></span></div></div>
+</div>
+<p class="mock-note">활동 표시 아래에 누적 요약을 갱신합니다. 본문 답변과는 분리합니다.</p>
+</section>
+<section class="mock-state" aria-labelledby="fallback-title">
+<h2 id="fallback-title"><span class="mock-index">2</span>미지원 모드 · 기존 표시 유지</h2>
+<p class="mock-caption">명시적 요약이 검증되지 않았거나 요약 텍스트가 없는 경우</p>
+<div class="mock-screen" data-example="unsupported">
+<div class="mock-session"><strong>대화 화면 검토</strong><span class="host sse"><span class="dot"></span>Pi</span><span class="phase thinking"><span class="spin"></span>생각 중</span></div>
+<div class="thead chead"><nav class="ctabs" aria-label="화면 탭"><button aria-pressed="true"><svg class="i"><use href="#i-chat"/></svg>대화</button><button aria-pressed="false"><svg class="i"><use href="#i-folder"/></svg>파일</button></nav><span class="csum"><span class="chip">사용자 1</span></span></div>
+<div class="convo"><div class="conv centries"><div class="msg user"><div class="mh"><span class="src">터미널</span><time>14:30</time></div><div class="bub">기존 대화 화면에 진행 요약을 어떻게 보여줄지 정리해 주세요.</div></div></div><div class="conv clive" data-phase="thinking"><div class="activity"><span class="spin"></span>리드 생각 중</div></div></div>
+<div class="composer"><div class="cbadges"><button class="ibadge" disabled><span class="istop"></span>중단</button></div><div class="crow"><textarea rows="1" readonly aria-label="메시지 입력 예시" placeholder="이 세션에 메시지를 보냅니다."></textarea><button class="csend" disabled aria-label="전송 예시"><svg class="i"><use href="#i-send"/></svg></button></div><div class="sb"><span class="sb-dir"><svg class="i"><use href="#i-folder"/></svg><span>agents-plugin-tool</span></span></div></div>
+</div>
+<p class="mock-note">요약 영역·빈 카드·미지원 경고를 추가하지 않습니다. 기존 스피너만 유지합니다.</p>
+</section>
+<section class="mock-state mock-complete" aria-labelledby="completed-title">
+<h2 id="completed-title"><span class="mock-index">3</span>턴 완료 · 요약을 기록에 보존</h2>
+<p class="mock-caption">같은 완료 턴의 접힌 모습과 펼친 모습 · 답변 아래에서 다시 열어볼 수 있습니다.</p>
+<div class="mock-comparison">
+<div class="mock-screen" data-example="completed-collapsed">
+<p class="mock-view-label"><b>기본 상태</b> · 접힘</p>
+<div class="mock-session"><strong>대화 화면 검토</strong><span class="host">Pi</span><span class="phase idle">대기</span></div>
+<div class="thead chead"><nav class="ctabs" aria-label="화면 탭"><button aria-pressed="true"><svg class="i"><use href="#i-chat"/></svg>대화</button><button aria-pressed="false"><svg class="i"><use href="#i-folder"/></svg>파일</button></nav><span class="csum"><span class="chip">사용자 1</span></span></div>
+<div class="convo"><div class="conv centries"><div class="msg user"><div class="mh"><span class="src">터미널</span><time>14:30</time></div><div class="bub">기존 대화 화면에 진행 요약을 어떻게 보여줄지 정리해 주세요.</div></div>
+<div class="msg fromlead"><div class="mh"><b>리드</b><time>14:31</time></div><div class="bub md"><p>요약은 기존 활동 표시 아래에 배치하고, 완료 후에는 이 답변 아래에 접어서 보관하는 구성을 제안합니다.</p><p>미지원 모드에서는 기존 활동 표시를 그대로 유지합니다.</p></div>
+<details class="d-summary saved"><summary><svg class="i d-chevron"><use href="#i-right"/></svg><span class="d-label">추론 요약</span><span class="d-meta">완료 · 저장됨</span><span class="d-meta d-open">펼치기</span><span class="d-meta d-close">접기</span></summary><div class="d-body"><p>기존 대화 흐름을 유지하면서 요약을 활동 표시 아래에 두는 구성을 검토했습니다. 지원 여부에 따른 표시와 완료 후 요약의 접힘 동작을 정리했습니다.</p><span class="d-provenance">제공자가 명시적으로 공개한 요약</span></div></details></div>
+<div class="turnline">턴 · 도구 호출 2회 · 42초</div>
+</div></div>
+<div class="composer"><div class="crow"><textarea rows="1" readonly aria-label="메시지 입력 예시" placeholder="이 세션에 메시지를 보냅니다."></textarea><button class="csend" disabled aria-label="전송 예시"><svg class="i"><use href="#i-send"/></svg></button></div><div class="sb"><span class="sb-dir"><svg class="i"><use href="#i-folder"/></svg><span>agents-plugin-tool</span></span></div></div>
+</div>
+<div class="mock-screen" data-example="completed-expanded">
+<p class="mock-view-label"><b>열어본 상태</b> · 펼침</p>
+<div class="mock-session"><strong>대화 화면 검토</strong><span class="host">Pi</span><span class="phase idle">대기</span></div>
+<div class="thead chead"><nav class="ctabs" aria-label="화면 탭"><button aria-pressed="true"><svg class="i"><use href="#i-chat"/></svg>대화</button><button aria-pressed="false"><svg class="i"><use href="#i-folder"/></svg>파일</button></nav><span class="csum"><span class="chip">사용자 1</span></span></div>
+<div class="convo"><div class="conv centries"><div class="msg user"><div class="mh"><span class="src">터미널</span><time>14:30</time></div><div class="bub">기존 대화 화면에 진행 요약을 어떻게 보여줄지 정리해 주세요.</div></div>
+<div class="msg fromlead"><div class="mh"><b>리드</b><time>14:31</time></div><div class="bub md"><p>요약은 기존 활동 표시 아래에 배치하고, 완료 후에는 이 답변 아래에 접어서 보관하는 구성을 제안합니다.</p><p>미지원 모드에서는 기존 활동 표시를 그대로 유지합니다.</p></div>
+<details class="d-summary saved" open><summary><svg class="i d-chevron"><use href="#i-right"/></svg><span class="d-label">추론 요약</span><span class="d-meta">완료 · 저장됨</span><span class="d-meta d-open">펼치기</span><span class="d-meta d-close">접기</span></summary><div class="d-body"><p>기존 대화 흐름을 유지하면서 요약을 활동 표시 아래에 두는 구성을 검토했습니다. 지원 여부에 따른 표시와 완료 후 요약의 접힘 동작을 정리했습니다.</p><span class="d-provenance">제공자가 명시적으로 공개한 요약</span></div></details></div>
+<div class="turnline">턴 · 도구 호출 2회 · 42초</div>
+</div></div>
+<div class="composer"><div class="crow"><textarea rows="1" readonly aria-label="메시지 입력 예시" placeholder="이 세션에 메시지를 보냅니다."></textarea><button class="csend" disabled aria-label="전송 예시"><svg class="i"><use href="#i-send"/></svg></button></div><div class="sb"><span class="sb-dir"><svg class="i"><use href="#i-folder"/></svg><span>agents-plugin-tool</span></span></div></div>
+</div>
+</div>
+</section>
+</main>
+<footer class="mock-footer">제공자 명시 요약만 표시 · 비공개 추론 원문 표시 없음 · 실제 전송·중단 기능 없음 · 실시간 영역은 예시 문구로 자동 갱신</footer>
+</div>
+<script>
+// Local visual fixture only. These are authored public-summary placeholders,
+// not model thinking, provider output, or actual session data. No networking.
+(function () {
+ const text = document.getElementById('live-summary-text');
+ const first = text.textContent;
+ window.setTimeout(function () {
+   text.textContent = first + ' 완료 기록에서 요약을 다시 여는 동작도 확인하고 있습니다.';
+ }, 3500);
+})();
+</script>
+</body>
+</html>

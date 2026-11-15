@@ -49,6 +49,9 @@ type Server struct {
 	// live holds the dashboard live state of the sessions this process
 	// received adapter intake for (live_snapshot.go).
 	live liveHub
+	// intake tracks canonical operations from connection open; direct/file-only
+	// handler callers do not negotiate reasoning_summary_v1.
+	intake *intakeOrder
 	// dashboard is the dashboard session registry and nudge state
 	// (dashboard_sessions.go).
 	dashboard dashboardLink
@@ -227,6 +230,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
+	s.intake = &intakeOrder{}
 	// Restoring the launcher's dashboard rows scans the registry and the
 	// session store; run it beside the serve loop so requests are read (and
 	// refused while draining) at once, even when a drain starts right after
@@ -288,6 +292,12 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			}
 			continue
 		}
+		if _, v1 := canonicalIntake(req); v1 && len(line)+1 > wslive.SummaryFrameBytes {
+			if err := writeResponse(errorResponse(req.ID, -32602, "reasoning summary JSONL frame exceeds 49152 bytes")); err != nil {
+				return err
+			}
+			continue
+		}
 		if len(req.ID) == 0 {
 			s.handleNotification(req, &requests)
 			continue
@@ -304,11 +314,13 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			}
 			continue
 		}
+		op := s.intake.ingress(req)
 		reqCtx, cancel := context.WithCancel(ctx)
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer op.finish()
 			defer finish()
 			defer cancel()
 			defer requests.Delete(id)
@@ -330,6 +342,10 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			// Answer only once the launcher's rows are restored, so the
 			// replayed initialize's reply means the rail sees them live.
 			<-reconnectDone
+			if err := op.await(s); err != nil {
+				_ = writeResponse(toolTextResponse(req.ID, "", err))
+				return
+			}
 			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
 				s.debugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 			}

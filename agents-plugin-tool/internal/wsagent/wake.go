@@ -164,11 +164,30 @@ func piHostedEvents(raw json.RawMessage) []Event {
 				}
 				out = append(out, wakeEvent(ev.Cause, ev.Source, caption, ev.Text))
 			}
+		case wslive.KindAgent:
+			// Construct a fresh internal event. Every unrelated wire field is
+			// ignored: the widget owns no turn/reset/batch/key authority.
+			if len(lines) == 1 && ev.ReasoningSummary != nil && wslive.ValidateReasoningSummary(ev.ReasoningSummary) == nil {
+				out = append(out, Event{ReasoningSummary: ev.ReasoningSummary})
+			}
 		case wslive.KindStatus:
 			if ev.Background != nil && ev.Monitors != nil && *ev.Background >= 0 && *ev.Monitors >= 0 {
 				n := *ev.Background + *ev.Monitors
 				if n >= *ev.Background { // reject overflow
-					out = append(out, Event{BackgroundTasks: &n, Background: ev.Background, Monitors: ev.Monitors})
+					status := Event{BackgroundTasks: &n, Background: ev.Background, Monitors: ev.Monitors}
+					// Old bundles omit capabilities. An explicit empty list revokes
+					// support; malformed optional metadata cannot break legacy counts.
+					var hello struct {
+						Capabilities []string `json:"capabilities"`
+					}
+					if json.Unmarshal([]byte(line), &hello) == nil && hello.Capabilities != nil && len(hello.Capabilities) <= 16 {
+						capable := false
+						for _, capability := range hello.Capabilities {
+							capable = capable || capability == wslive.ReasoningSummaryCapability
+						}
+						status.summaryCapability = &capable
+					}
+					out = append(out, status)
 				}
 			}
 		}

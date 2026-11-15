@@ -62,6 +62,8 @@ d.save("a", { text: "hello", mentions: [], sel: [5, 5] });
 check("a saved draft loads", d.load("a"), { text: "hello", mentions: [], sel: [5, 5] });
 d.save("a", { text: "", mentions: [], answers: {}, chips: [], bmentions: [], refs: [], lost: [], open: {}, tab: "convo" });
 check("an empty draft clears", [d.load("a"), st.load("ws.dashboard.drafts")], [null, null]);
+d.save("a", { closeRequests: [{ topic: "gone", reason: "" }] });
+check("an empty-reason close request alone is a draft", d.load("a").closeRequests, [{ topic: "gone", reason: "" }]);
 d.save("a", { bmentions: [{ topic: "t", text: "x" }] });
 check("board mentions alone are a draft", !!d.load("a"), true);
 d.clear("a");
@@ -470,8 +472,9 @@ var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
 var shell = false, framed = false, mode = "live";
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
-var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [], wpicks = [], wconsoles = [];
-var ccmd = {}, cmdSel = null;
+var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [], closeRequests = [], wpicks = [], wconsoles = [];
+var ccmd = {}, cmdSel = null, bselections = [];
+function marker(n) { return "[Image #" + n + "]"; }
 function setCommand(name, args) { cmdSel = { name: name, args: typeof args === "string" ? args : null }; }
 function validMentions(l) { return Array.isArray(l) ? l.filter(function (m) { return m && m.topic && m.text; }) : []; }
 function validPicks(l) { return Array.isArray(l) ? l.filter(function (p) { return p && p.url && p.selector; }) : []; }
@@ -519,7 +522,7 @@ func TestRailDraftRestore(t *testing.T) {
 	if !regexp.MustCompile(`(?s)\n  function sendMessage\(\) \{.*?post\("message", body, function \(ok, res\) \{\n[^\n]*\n      if \(!ok\) \{[^\n]*return; \}\n.*?\n      clearDraft\(\);\n    \}\);\n  \}\n`).MatchString(src) {
 		t.Error("a successful send no longer clears the draft")
 	}
-	runNode(t, "draft restore", railJSHarness+string(rail)+railDraftPrelude+boardBoxSrc(t, src)+block+`
+	runNode(t, "draft restore", selectionCodecSource(t)+railJSHarness+string(rail)+railDraftPrelude+composerFunc(t, src, "validCloseRequests")+boardBoxSrc(t, src)+block+`
 // type, pick, open, and switch tab; the debounce saves it
 ctext.value = "hi @bob see [Image #1] and [Image #2] end";
 ctext.selectionStart = ctext.selectionEnd = 6;
@@ -528,6 +531,7 @@ imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", 
 boardAnswers = { "3": { answer: "yes" }, "topic:2": { note: "keep it" } };
 chips = { "3": { id: "3", answer: "yes" } };
 bmentions = [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }];
+closeRequests = [{ topic: "gone", reason: "" }, { topic: "plan", reason: "done" }];
 wpicks = [{ url: "http://localhost:5173/", selector: "#a", text: "A" }]; wconsoles = [{ url: "http://localhost:5173/", lines: ["e1"] }];
 openState = { "rended:/w": true, "gone": false };
 grid.setAttribute("data-tab", "board");
@@ -538,13 +542,16 @@ var saved = JSON.parse(railStore.load("ws.dashboard.draft.sess1"));
 check("the saved draft", [saved.text, saved.mentions, saved.sel, saved.refs, saved.lost, saved.open, saved.tab],
   [ctext.value, [{ start: 3, end: 7, text: "@bob" }], [6, 6], [{ ref: "00aa-1.png", name: "a.png", n: 1 }], [2], { "rended:/w": true }, "board"]);
 check("the saved board mentions", saved.bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
+check("the saved close requests", saved.closeRequests, [{ topic: "gone", reason: "" }, { topic: "plan", reason: "done" }]);
 check("the saved web picks", [saved.wpicks, saved.wconsoles], [[{ url: "http://localhost:5173/", selector: "#a", text: "A" }], [{ url: "http://localhost:5173/", lines: ["e1"] }]]);
 check("the guard asks while a pasted image is held", (function () { var e = { preventDefault: function () {} }; winListeners.beforeunload(e); return e.returnValue; })(), "");
 
 // a reload of the page: empty composer and state, then the restore
-ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
+ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; closeRequests = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
 restoreDraft();
 check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
+check("close requests survive reload without needing their topics", closeRequests, [{ topic: "gone", reason: "" }, { topic: "plan", reason: "done" }]);
+closeRequests = [];
 check("the web picks come back", [wpicks, wconsoles], [[{ url: "http://localhost:5173/", selector: "#a", text: "A" }], [{ url: "http://localhost:5173/", lines: ["e1"] }]]);
 check("text without the pasted image's marker", ctext.value, "hi @bob see [Image #1] and end");
 check("mentions, selection, the reference image", [mentions, [ctext.selectionStart, ctext.selectionEnd], imgs.map(function (p) { return [p.n, p.ref, p.url]; })],
@@ -560,6 +567,7 @@ ctext.value = "typed"; restoreDraft();
 check("a non-empty composer keeps its text", ctext.value, "typed");
 
 // a slash command selection alone is a draft, kept with its arguments
+closeRequests = [];
 ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
 cmdSel = { name: "compact", args: "keep the plan" };
 listeners.input(); advance(400);
@@ -583,6 +591,7 @@ check("the restore counts every lost image", notes, ["js.draft.imgslost:2"]);
 ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
 
 // a send clears the draft; what is left is saved again as the next draft
+closeRequests = [];
 ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
 clearDraft();
 check("cleared at once", railStore.load("ws.dashboard.draft.sess1"), null);

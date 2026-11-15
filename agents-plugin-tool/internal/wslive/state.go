@@ -141,7 +141,8 @@ type Event struct {
 	// mod: answer, aborted, or error); the turn's ring entry keeps it.
 	// Absent when the adapter names none (an older adapter, the hosted
 	// runner).
-	Reason string `json:"reason,omitempty"`
+	Reason           string            `json:"reason,omitempty"`
+	ReasoningSummary *ReasoningSummary `json:"reasoningSummary,omitempty"`
 }
 
 // TurnAborted is the turn_end reason of a turn the user stopped.
@@ -198,6 +199,7 @@ type State struct {
 	pendingWake    bool
 	turnWake       bool
 	previousTurnMs int64
+	summary        summaryState
 	lastTurnOutput *ModelObservation
 	reply          *Reply
 	// compactStartedAt is the running compaction's start, 0 when none runs;
@@ -277,11 +279,15 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	if ev.SessionKey != "" {
 		st.scrub.add(ev.SessionKey)
 	}
+	if err := st.checkSummary(ev); err != nil {
+		return Result{}, err
+	}
 	leadPhase, leadReply := st.lead.phase, st.reply
 	var res Result
 	switch ev.Kind {
 	case KindReset:
-		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, observations: st.observations, observed: st.observed, lastTurnOutput: st.lastTurnOutput}
+		st.summary.resync = st.turnStartedAt > 0
+		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, summary: st.summary, observations: st.observations, observed: st.observed, lastTurnOutput: st.lastTurnOutput}
 		st.lead.phase = PhaseIdle
 		res.Changed = true
 	case KindTurnStart:
@@ -293,6 +299,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			st.flushTools(&res)
 			res.Ring = append(res.Ring, st.finishReply(""))
 		}
+		st.beginSummaryTurn()
 		st.turnWake = st.pendingWake && (origin == "" || origin == OriginMail)
 		st.pendingWake = false
 		st.turnStartedAt, st.turnOrigin = at, origin
@@ -303,6 +310,8 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		st.compactStartedAt, st.compactTrigger = 0, ""
 		res.Changed = true
 	case KindTurnEnd:
+		// Validate final data before any lifecycle/accounting mutation.
+		st.acceptSummary(ev.ReasoningSummary)
 		if st.reply != nil {
 			st.flushTools(&res)
 			res.Ring = append(res.Ring, st.finishReply(""))
@@ -315,7 +324,10 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		if st.turnStartedAt > 0 {
 			duration := max(at-st.turnStartedAt, 0)
 			done, failed := st.lead.totals()
-			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration, Reason: ev.Reason})
+			// Preserve aggregate clipping without extending summaryHistory's
+			// selected v/commit/requests shape or changing provider status.
+			truncated := st.summary.current != nil && st.summary.current.Truncated
+			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration, Reason: ev.Reason, Truncated: truncated, SummaryHistory: st.finishSummary(ev.Reason)})
 			st.previousTurnMs = duration
 			st.lastTurnOutput = nil
 			if o := st.observed[""]; o != nil && o.Current.At >= st.turnStartedAt {
@@ -332,6 +344,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		if err := st.applyAgent(ev, at); err != nil {
 			return Result{}, err
 		}
+		st.acceptSummary(ev.ReasoningSummary)
 		res.Changed = true
 	case KindPermission:
 		if !ev.Clear && strings.TrimSpace(ev.Tool) == "" {
@@ -1002,12 +1015,13 @@ func (st *State) Snapshot(now int64) Snapshot {
 		UpdatedAt:     now,
 		HeartbeatMs:   HeartbeatInterval.Milliseconds(),
 		Lead: Lead{
-			Observed:       st.observed[""].clone(),
-			LastTurnOutput: cloneObservation(st.lastTurnOutput),
-			Activity:       st.lead.view(),
-			TurnStartedAt:  st.turnStartedAt,
-			TurnOrigin:     st.turnOrigin,
-			PreviousTurnMs: st.previousTurnMs,
+			Observed:         st.observed[""].clone(),
+			LastTurnOutput:   cloneObservation(st.lastTurnOutput),
+			Activity:         st.lead.view(),
+			TurnStartedAt:    st.turnStartedAt,
+			TurnOrigin:       st.turnOrigin,
+			PreviousTurnMs:   st.previousTurnMs,
+			ReasoningSummary: cloneSummary(st.summary.current),
 		},
 	}
 	if st.reply != nil {

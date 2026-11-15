@@ -25,7 +25,7 @@ func TestInlineCapsulesPageAndDraftOwners(t *testing.T) {
 	}
 	for _, want := range []string{
 		"window.WsCapsules.attach(ctext)", "bindCapsuleNotes();", "s.capsules = note.wsc.snapshot()",
-		"capsules: ctext && ctext.wsc ? ctext.wsc.snapshot() : []",
+		"capsules: ctext && ctext.wsc ? ctext.wsc.snapshot().map(shift) : []",
 		"ctext.wsc.restore(window.WsCapsules.stripMarkers(d.text, d.capsules, lost).ranges)",
 		"window.WsCapsules.attach(note).restore(s.capsules)", "a.isContentEditable",
 		"after.parentNode.insertBefore(rows[h], after.nextSibling)",

@@ -9,10 +9,29 @@
     if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); return; }
     u = t.closest("[data-unmchip]");
     if (u) { bmentions.splice(+u.getAttribute("data-unmchip"), 1); renderChips(); return; }
+    u = t.closest("[data-unselection]");
+    if (u) { dropSelection(+u.getAttribute("data-unselection")); return; }
+    u = t.closest("[data-selection-edit]");
+    if (u) { editSelection(+u.getAttribute("data-selection-edit")); return; }
     u = t.closest("[data-unwpick]");
     if (u) { wpicks.splice(+u.getAttribute("data-unwpick"), 1); renderChips(); return; }
     u = t.closest("[data-unwcon]");
     if (u) { wconsoles.splice(+u.getAttribute("data-unwcon"), 1); renderChips(); return; }
+    u = t.closest("[data-unclose-request]");
+    if (u) { removeCloseRequest(u.getAttribute("data-unclose-request")); return; }
+    u = t.closest(".t-close-request");
+    if (u && inBoard(u)) {
+      var topic = u.closest("section.topic[data-topic]");
+      if (topic && !topic.classList.contains("closed")) {
+        // Restore through the sheet owner so its scrim cannot cover the reason field.
+        if (topic.hasAttribute("data-max")) {
+          var back = topic.querySelector(".d-min");
+          if (back) back.click();
+        }
+        addCloseRequest(topic.getAttribute("data-topic"));
+      }
+      return;
+    }
     if (t.closest("[data-wbmention]")) { addMention(); return; }
     u = t.closest("[data-tchip]");
     if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }

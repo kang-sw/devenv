@@ -44,6 +44,28 @@ func TestShippedManifestUpToDate(t *testing.T) {
 	}
 }
 
+// TestLeadRunResumeExampleHasNoHeading guards the resume inline-code example
+// against a physical wrap that Markdown and heading-list extractors read as ATX.
+func TestLeadRunResumeExampleHasNoHeading(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(shippedRsrcRoot(), "lead-run", "lead-run.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, found := strings.Cut(string(data), "`Resume:")
+	if !found {
+		t.Fatal("resume inline-code example not found")
+	}
+	example, _, closed := strings.Cut(rest, "`")
+	if !closed {
+		t.Fatal("resume inline-code example is not closed")
+	}
+	for _, line := range strings.Split(example, "\n")[1:] {
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "#") {
+			t.Fatalf("resume inline-code continuation reads as a heading: %q", line)
+		}
+	}
+}
+
 // TestRetiredAPIGuidanceNotShipped scans the shipped trees only. It used to
 // scan ai-docs/spec and ai-docs/mental-model too; those layers were retired and
 // their corpus now sits unchanged under the ai-docs/.old archive. Scanning an

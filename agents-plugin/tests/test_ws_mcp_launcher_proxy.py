@@ -901,7 +901,7 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertFalse(hasattr(self.launcher, "ProcessStream"))
         self.assertFalse(hasattr(self.launcher, "proxy_disabled"))
 
-    def run_main(self, argv, *, input_text="", input_encoding="utf-8", forbid_install=False, allow_build=False):
+    def run_main(self, argv, *, input_text="", input_encoding="utf-8", forbid_install=False, allow_build=False, local_devenv=False):
         stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         stderr = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         env = dict(self.env, WS_MCP_RUNTIME_DIR=str(self.root), WS_MCP_LAUNCHER_DIRECT="1")
@@ -910,6 +910,7 @@ class LauncherProxyTest(unittest.TestCase):
              mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(input_text.encode("utf-8")), encoding=input_encoding)), \
              mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr), \
              mock.patch.object(self.launcher, "detect_project_root"), \
+             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=local_devenv), \
              mock.patch.object(self.launcher, "read_runtime_contract", return_value={"plugin_version": "0.48.16"}), \
              mock.patch.object(self.launcher, "runtime_binary_name", return_value=self.binary.name), \
              mock.patch.multiple(self.launcher.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT) as processes, \
@@ -931,6 +932,27 @@ class LauncherProxyTest(unittest.TestCase):
         stdout.flush()
         stderr.flush()
         return code, stdout.buffer.getvalue(), stderr.buffer.getvalue()
+
+    def test_run_main_ignores_an_active_local_devenv_marker(self):
+        plugin_dir = self.root / "marked-plugin"
+        plugin_dir.mkdir()
+        (self.root / "cmd" / "ws-mcp").mkdir(parents=True)
+        (plugin_dir / ".local-devenv-runtime").write_text(json.dumps({
+            "schema_version": 1, "source_root": str(self.root),
+            "tool_dir": str(self.root), "go": str(self.binary),
+        }), encoding="utf-8")
+        self.assertTrue(self.launcher.local_devenv_runtime_enabled(plugin_dir, self.launcher.host_os()))
+        daemon = self.daemon()
+        daemon.write_endpoint(self.daemon_dir)
+        payload = '{"jsonrpc":"2.0","id":"marked","method":"initialize"}\n'
+        with mock.patch.object(self.launcher, "__file__", str(plugin_dir / "bin" / "ws-mcp-launcher.py")), \
+             mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False):
+            code, output, _ = self.run_main(["serve", "--stdio"], input_text=payload, forbid_install=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output)["id"], "marked")
+        self.assertEqual(self.runtime_log(), [])
+        # The helper's default must not leak into explicit local-devenv cases.
+        self.assertTrue(self.launcher.local_devenv_runtime_enabled(plugin_dir, self.launcher.host_os()))
 
     def test_main_never_restores_direct_bypass_or_catch_all_exec(self):
         daemon = self.daemon(cli_exit_code=0)
@@ -960,7 +982,6 @@ class LauncherProxyTest(unittest.TestCase):
         daemon = self.daemon(cli_exit_code=0, build_time=1)
         daemon.write_endpoint(self.daemon_dir)
         with mock.patch.object(self.launcher, "runtime_install_forced", return_value=True), \
-             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=True), \
              mock.patch.object(self.launcher, "local_devenv_source_fingerprint", return_value="changed-source"), \
              mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False), \
              mock.patch.object(self.launcher, "runtime_fully_compatible", return_value=False) as compatible, \
@@ -968,7 +989,7 @@ class LauncherProxyTest(unittest.TestCase):
             for argv, payload in ((["mailbox", "wait", "--session-key", "test-key"], ""),
                                   (["mailbox", "codex-stop-hook"], '{"stop_hook_active":true}')):
                 with self.subTest(argv=argv):
-                    code, stdout, _ = self.run_main(argv, input_text=payload, forbid_install=True)
+                    code, stdout, _ = self.run_main(argv, input_text=payload, forbid_install=True, local_devenv=True)
                     self.assertEqual(code, 0)
                     self.assertEqual(json.loads(stdout)["served_by"], "daemon")
                     self.assertEqual(daemon.hellos[-1]["argv"], argv)
@@ -981,14 +1002,13 @@ class LauncherProxyTest(unittest.TestCase):
         daemon = self.daemon()
         daemon.write_endpoint(self.daemon_dir)
         with mock.patch.object(self.launcher, "runtime_install_forced", return_value=True), \
-             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=True), \
              mock.patch.object(self.launcher, "local_devenv_source_fingerprint", return_value="changed-source"), \
              mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False), \
              mock.patch.object(self.launcher, "runtime_fully_compatible", return_value=True), \
              mock.patch.object(self.launcher, "write_compatibility_stamp"), \
              mock.patch.object(self.launcher, "install_runtime") as install, \
              mock.patch.object(self.launcher, "proxy_serve", return_value=0) as serve:
-            code, _, _ = self.run_main(["serve", "--stdio"])
+            code, _, _ = self.run_main(["serve", "--stdio"], local_devenv=True)
             self.assertEqual(code, 0)
             install.assert_called_once()
             self.assertTrue(install.call_args.kwargs["force_local"])

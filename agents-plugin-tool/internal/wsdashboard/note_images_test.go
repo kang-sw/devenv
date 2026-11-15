@@ -88,7 +88,10 @@ function restoreTopics(list) {
   list.forEach(function (tn) { if (tn.topic !== "plan") { stray.push("[" + tn.topic + "] " + tn.note); return; } tnote.value = tn.note; tnote.dispatchEvent(new Event("input")); });
   return stray;
 }
-var cmdSel = null, bmentions = [], wpicks = [], wconsoles = [];
+var cmdSel = null, bmentions = [], closeRequests = [], wpicks = [], wconsoles = [];
+var bselections = [], mpend = null, mnote = null, mimgs = null;
+function validCloseRequests(list) { return Array.isArray(list) ? list : []; }
+function queueDraft() {}
 function grow() {} function shiftMentions() {} function clearMentions() {} function setCommand() {}
 function validMentions() { return []; }
 function validPicks() { return []; } function validConsoles() { return []; }
@@ -122,7 +125,7 @@ func TestBoardNoteImages(t *testing.T) {
 		t.Fatal("dashboard.js holds no composer images section before the file mentions one")
 	}
 	restore := composerFunc(t, js, "restoreHeld") + composerFunc(t, js, "restoreHeldNow")
-	runNode(t, "board note images", noteImagesDOM+section+restore+`
+	runNode(t, "board note images", selectionCodecSource(t)+noteImagesDOM+section+restore+`
 // one sequence across the composer and the notes
 ctext.value = "see "; ctext.selectionStart = ctext.selectionEnd = 4;
 addFiles([file("a.png")]);
@@ -212,7 +215,7 @@ func TestRestoreHeldKeepsTheNewestSendsAnswer(t *testing.T) {
 		t.Fatal("dashboard.js holds no composer images section before the file mentions one")
 	}
 	restore := composerFunc(t, js, "restoreHeld") + composerFunc(t, js, "restoreHeldNow")
-	runNode(t, "restore keeps the newest answer", noteImagesDOM+section+restore+`
+	runNode(t, "restore keeps the newest answer", selectionCodecSource(t)+noteImagesDOM+section+restore+`
 restoreHeld([
   { text: "promoted", sentAt: 100, chips: [{ id: "7", answer: "a" }, { id: "8", answer: "x" }] },
   { text: "newer", sentAt: 200, chips: [{ id: "7", answer: "b" }] },
