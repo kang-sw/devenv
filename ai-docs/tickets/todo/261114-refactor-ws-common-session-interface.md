@@ -117,6 +117,30 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
 - MAIN (682): audit's exact foundation producer is this ticket's Phase 2;
   current-state adoption is not a new store format — bearing: constrains.
 
+## Blocked (2026-11-15)
+
+Parked at the 2026-11-15 wrap-up with no code merge. State for the next session:
+
+- The settled `ready/` version of this ticket (Decisions 8-19, Phase 1
+  verification list) is not on `develop`: it lives on branch
+  `exec4/csi-design` (ticket commit `19573be27`, synced to `f1ab88a53`).
+  This `todo/` copy predates it.
+- Phase 1 is implemented and unmerged on
+  `impl/exec4/csi-design/suing-usage-cold` @ `53c2e52f0`
+  (`306474cb0` implementation, `53c2e52f0` Phase 1 `### Result`): runtime-only
+  `BackendRegistration`, registry-driven admission, optional `/support/choices`
+  lead and permission metadata, typed errors, and the internal `resolveSession`
+  adoption core. The worker reported T0 compatibility and one lite review
+  finding fixed.
+- The worker's full `wsagent` run was red only on the stale user-envelope
+  expectations later fixed on `develop` by `7e61f82a7`; that is not re-verified
+  on the branch.
+- To resume: sync the impl branch onto `develop` (one known trivial conflict in
+  `internal/wsagent/support_test.go`: keep the frozen harness clock and the
+  `BackendRegistration` map), rerun the Phase 1 verification list, then merge.
+  Per Decision 19, permission-profile D14 waits for this merge and needs the
+  admission entrypoints sent to its owner.
+
 ## Phases
 
 ### Phase 1: Establish the minimum shared access contract
