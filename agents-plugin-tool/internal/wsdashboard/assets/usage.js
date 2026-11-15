@@ -71,8 +71,28 @@
     });
     return { knownReset: knownReset, start: knownReset ? start : null, reset: reset, at: at, points: points, segments: segments };
   }
+  // Calendar stepping keeps the grid on local midnight even on 23/25-hour days.
+  function weeklyAxis(start, reset, locale, measure) {
+    var midnight = new Date(start), grid = [], labels = [], right = -Infinity;
+    var formatter = new Intl.DateTimeFormat(locale, { weekday: "short" });
+    var x = function (at) { return 24 + (at - start) / (reset - start) * 246; };
+    midnight.setHours(0, 0, 0, 0);
+    while (midnight.getTime() < reset) {
+      var day = midnight.getTime();
+      midnight.setDate(midnight.getDate() + 1);
+      var next = midnight.getTime();
+      if (day > start) grid.push(x(day));
+      // Use the true day center, never clamp a label to a window edge.
+      var center = x(day + (next - day) / 2), text = formatter.format(new Date(day));
+      var width = measure(text), left = center - width / 2;
+      if (left >= 24 && center + width / 2 <= 270 && left >= right + 3) {
+        labels.push({ x: center, text: text }); right = center + width / 2;
+      }
+    }
+    return { grid: grid, labels: labels };
+  }
   var chartSerial = 0;
-  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, mount: function (doc, rail) {
+  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, weeklyAxis: weeklyAxis, mount: function (doc, rail) {
     var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, popover = null, shown = false, place = function () {};
     function el(tag, cls, text) {
       var n = doc.createElement(tag); n.className = cls || "";
@@ -155,6 +175,18 @@
       var geometry = trend(entry, w, data.history), id = "usage-chart-" + (++chartSerial);
       var chart = svgNode("svg", { "class": "usage-chart", viewBox: "0 0 288 113", role: "img", "aria-label": t("chart", windowLabel(w.kind), t(geometry.knownReset ? "baseline" : "unknownReset")) });
       chart.appendChild(svgNode("title", {}, windowLabel(w.kind) + ": " + Math.round(w.percent) + "%; " + observedAge(geometry.at, now) + (old ? "; " + t("stalePace") : "")));
+      var axis = null;
+      if (geometry.knownReset && w.kind === "seven_day") {
+        var canvas = doc.createElement("canvas"), context = canvas.getContext && canvas.getContext("2d");
+        if (context) {
+          var font = window.getComputedStyle(rail).getPropertyValue("--wb-sans").trim() || "sans-serif";
+          context.font = "9px " + font;
+        }
+        axis = weeklyAxis(geometry.start, geometry.reset, locale(), function (text) {
+          return context ? context.measureText(text).width : Array.from(text).length * 9;
+        });
+        axis.grid.forEach(function (x) { chart.appendChild(svgNode("line", { "class": "usage-day-grid", x1: x, x2: x, y1: 12, y2: 88 })); });
+      }
       [12, 50, 88].forEach(function (y) { chart.appendChild(svgNode("line", { "class": "usage-grid", x1: 24, x2: 270, y1: y, y2: y })); });
       chart.appendChild(svgNode("text", { x: 0, y: 15 }, "100"));
       chart.appendChild(svgNode("text", { x: 5, y: 91 }, "0"));
@@ -165,8 +197,12 @@
       if (geometry.knownReset) {
         var ideal = svgNode("path", { "class": "usage-ideal", d: "M24 88L270 12", "stroke-dasharray": "4 4" });
         ideal.appendChild(svgNode("title", {}, t("idealTitle"))); chart.appendChild(ideal);
-        chart.appendChild(svgNode("text", { x: 24, y: 106 }, timeLabel(geometry.start)));
-        chart.appendChild(svgNode("text", { x: 270, y: 106, "text-anchor": "end" }, timeLabel(geometry.reset)));
+        if (axis) {
+          axis.labels.forEach(function (label) { chart.appendChild(svgNode("text", { "class": "usage-day-label", x: label.x, y: 106, "text-anchor": "middle" }, label.text)); });
+        } else {
+          chart.appendChild(svgNode("text", { x: 24, y: 106 }, timeLabel(geometry.start)));
+          chart.appendChild(svgNode("text", { x: 270, y: 106, "text-anchor": "end" }, timeLabel(geometry.reset)));
+        }
         // Wall-clock context only; never extend the observed series to now.
         if (now >= geometry.start && now <= geometry.reset) {
           var nowX = 24 + (now - geometry.start) / (geometry.reset - geometry.start) * 246;
