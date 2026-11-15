@@ -819,6 +819,117 @@ regenerates only `agents-plugin-pi/dist/index.js`. Commit hashes in this
 ticket were repointed to the rewritten commits. The final tree is
 byte-identical to the pre-rewrite head `0fd0711ba`.
 
+#### Edition (dcd677d08) - 2026-11-16
+
+Round 4 fixes: `dcd677d08`.
+The single post-code producer run changed only the two small first-party
+manifests in `6d840e2f3`; no closure blob,
+closure files hash, key, prune version, bundle or runtime file changed.
+The earlier Result, Editions and lead history-rewrite note are unchanged.
+
+- **Important 1 VERIFIED.** All plain-file inventory walks used by validation,
+  source checking and materialization now use the shared junk filter, including
+  staged and cached entries. Listed file hashes remain mandatory; real extras
+  remain invalid. `test_plain_first_party_ignores_junk_but_rejects_unlisted_files`
+  (`agents-plugin/tests/test_native_pi_payload.py:68`) adds `.DS_Store`,
+  `dist/Thumbs.db` and `__pycache__/x.pyc` under first-party, proves validate,
+  check_source and materialize succeed, checks junk is not copied, and proves
+  an unlisted non-junk file fails all three operations. It also checks benign
+  junk in an existing cache entry does not invalidate that entry.
+- **Important 2 VERIFIED.** `retain_committed_closure`
+  (`agents-plugin-pi/scripts/prepare-native-payload.py:170`) compares a same-key
+  candidate's complete uncompressed path-to-SHA map, not its compressed bytes.
+  It reuses both committed ZIP and raw manifest bytes and skips the compressor.
+  Different content is a hard error: `same closure key, different CONTENT:
+  key-input bug or prune change without a version bump`. Existing mirrored
+  committed copies must agree; retained data is validated before publication.
+  The unit test uses a stored/creator-0 candidate versus a deflated/creator-3
+  committed archive with identical contents, proves both committed files and
+  the retained output stay byte-exact, and separately rejects a changed hash.
+  The producer integration regression makes any same-key call to write_zip
+  fail, proving generation never recompresses in that case. For a new key,
+  write_zip explicitly sets `create_system = 3`, fixed external_attr and fixed
+  timestamps; a simulated Windows-default ZipInfo test verifies the output.
+  Native Windows and zlib-ng execution were not available; alternate-encoding
+  and creator-default behavior were exercised by these controlled tests.
+- **Minor 3 VERIFIED; correction to the preceding Edition.** The statement
+  that prepared freshness used `pi_bundle.go:98-115` was incorrect: prepared
+  package manifests declare `dist/index.js`, while piBundledEntries calls
+  piBundleFresh only for `src/index.ts`. That branch and its synthetic test
+  were unreachable from prepared launch and are removed as requested.
+  **Prepared freshness rests on the reachable Python header/manifest check and
+  cache_matches hashes**, not a Go prepared-record branch. The source-only
+  `pi_bundle.go` is now byte-identical to develop `998cb3fe3`; its source
+  freshness path is untouched. The prepared invalid-header-to-bridge regression
+  remains, and the package-only test now asserts no TypeScript source is shipped
+  instead of manually calling the source-only freshness function.
+- **Minor 5 VERIFIED.** The legal matcher now preserves case-insensitive
+  LICENSING prefixes, camel-case/separated ThirdPartyNotice families,
+  COPYRIGHT/PATENTS prefixes and related legal filename families before other
+  prune rules. New synthetic cases include legal files under docs and files
+  whose extensions would otherwise trigger pruning. The real producer's entire
+  closure files map remains equal to the pre-round map. Minor 4's literal-scan
+  heuristic and Minor 6's cache GC were not changed.
+
+**Verification.** All test processes used isolated HOME/USERPROFILE,
+WS_CACHE_HOME/WS_CONFIG_HOME and npm cache under `/tmp/exec5/native-pi/round4/`.
+The producer alone reused the existing isolated warmed cache, with `--offline`.
+
+- `python3 -B -m unittest discover -s agents-plugin/tests`: **162 tests OK,
+  2 existing Windows skips**; wsflow equivalent: **22 tests OK, 2 existing
+  Windows skips**. The seven pruning/encoding/legal tests also passed alone.
+  Existing unclosed-stream ResourceWarnings remain non-failing.
+- From agents-plugin-tool, with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` and
+  existing offline Go caches: `go test -count=1 ./internal/wsagent -run 'Pi'`
+  **ok, 39.672s**; `go test -count=1 ./internal/wsrsrc` **ok, 0.899s**;
+  `go build ./...` and `go vet ./...` **exit 0**.
+- `node --test agents-plugin-pi/test/web-package.test.ts
+  agents-plugin-pi/test/helper-host.test.mjs agents-plugin-pi/test/workflow-owner.test.ts`,
+  with role flags, WS_PI_TEST_CLI and WS_PI_TEST_NETWORK unset:
+  **6 passed, 1 intentional network-install skip, 0 failed**. Default offline
+  package-owned helper probes ran; no provider query or external network ran.
+- Both actual Pi **1.5.2 CLI-adjacent SDK** identity/skill fixtures passed,
+  one test per package and no skips, using canonical
+  `/private/tmp/exec5/native-pi/round4/identity-<product>.XXXXXX` fixture roots
+  and `native-cache`, with isolated HOME/WS cache/config. The entry SHA remains
+  `af1e77fb4a83b50be87da5e518f1509c5b2787bcadd43a8fd9b375a245b732fd`.
+  The standard prior identity loop and `pi-native-payload-identity.test.mjs`
+  were used; MCP/socket/child-start boundaries stayed mocked.
+- Both Node-less `python3 -I -B <pkg>/bin/ws-pi-payload.py --plugin <pkg>
+  --check-source "$PWD"` gates passed. `diff -rq agents-plugin/native-pi
+  agents-plugin-wsflow/native-pi` and cmp of both materializers passed.
+- The single producer command was
+  `python3 -B agents-plugin-pi/scripts/prepare-native-payload.py --offline --npm-cache /tmp/exec5/native-pi/current/producer/npm-cache --report /tmp/exec5/native-pi/round4/producer-report.json`.
+  It exited 0. Only the producer source-input hash in each 11,990-byte
+  first-party manifest changed: **2 files, 2 insertions, 2 deletions**.
+
+**Required blob proof, both packages, before and after regeneration/commit:**
+
+```text
+git rev-parse HEAD:<pkg>/native-pi/closure.zip
+  d10ad375fefcd209b493024bf6f44dfef8586bb3
+git rev-parse HEAD:<pkg>/native-pi/closure-manifest.json
+  032d5a1750fe8212bd9436a031993a40e562d10c
+```
+
+`git hash-object` of each worktree file matched the same pins. Both complete
+files maps compare equal to the pre-round map. Closure sizes remain **7,284,712
+bytes ZIP / 725,054 bytes manifest / 5,571 files / 21,547,906 unpacked bytes**.
+The preceding size table therefore remains valid, with **zero large-blob growth**
+in this round. Logs/receipts are in the round4 scratch directory. Commit message
+spacing was checked using `git log -1 --format=%B`.
+
+**Compatibility and boundaries:** T0. The old `998cb3fe3` reader at
+`pi_lead.go:123-129` ignores native-pi and retains its sibling/bridge at `:41-58`;
+new `pi_lead.go:125-137` retains those fallbacks. Producer publication reads the
+committed closure and updates only package-local first-party metadata; neither
+binary changes shared data, MCP/config/protocol semantics or version boundaries,
+and reopen needs no migration. No history rewrite, push, install hook,
+marketplace semantic change, version bump, T3 boundary, forbidden whiteboard
+edit, live install or daemon operation occurred. Native Windows/zlib-ng,
+PowerShell, the opt-in network-install lane and live rollout remain unrun.
+The ticket remains ready for EXEC5 review and owner-gated rollout.
+
 ## Owner Decisions (2026-11-16)
 
 - (1183)=a: commit the trimmed native Pi payload into the public repo.
