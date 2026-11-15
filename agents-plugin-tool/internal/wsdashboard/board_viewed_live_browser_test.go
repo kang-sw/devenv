@@ -87,6 +87,18 @@ func TestBoardViewedLiveBrowser(t *testing.T) {
 		wrapper := "function " + name + "(){var t=performance.now();try{return __measured_" + name + ".apply(this,arguments);}finally{var m=window.__viewed;m.calls['" + name + "']=(m.calls['" + name + "']||0)+1;m.ms['" + name + "']=(m.ms['" + name + "']||0)+performance.now()-t;}} function __measured_" + name + "("
 		page = strings.Replace(page, needle, wrapper, 1)
 	}
+	// Record the production admission measurements: late frame shrink/growth
+	// must not reinterpret a window after stream.js has already settled it.
+	for name, wrapper := range map[string]string{
+		"readyHeight": `function readyHeight(row){var height=__admission_readyHeight(row),m=window.__viewed;if(m.historyActive)m.historyActive.rows.push({id:row.getAttribute('data-row'),height:height});return height;} function __admission_readyHeight(`,
+		"progress":    `function progress(h,op){var m=window.__viewed;if(!m.historyAdmission)return __admission_progress(h,op);var record={topic:h.getAttribute('data-history'),base:op.height,rows:[]};m.historyActive=record;try{return __admission_progress(h,op);}finally{m.historyActive=null;record.height=op.height;record.done=!!op.done;record.waiting=op.row&&op.row.getAttribute('data-row');record.remaining=op.gap.querySelector('template[data-history-gap]').content.children.length;m.historyAdmission.push(record);}} function __admission_progress(`,
+	} {
+		needle := "function " + name + "("
+		if strings.Count(page, needle) != 1 {
+			t.Fatalf("missing unique history admission instrumentation site: %s", name)
+		}
+		page = strings.Replace(page, needle, wrapper, 1)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/s/viewedlive", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
