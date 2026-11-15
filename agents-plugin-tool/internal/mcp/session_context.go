@@ -1,0 +1,97 @@
+package mcp
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// sessionContext is an in-process projection, not a new stored or wire shape.
+// Authority and lineage come only from the key store. Display nesting and a
+// conversation's ParentRef never participate in selection.
+type sessionContext struct {
+	key            string
+	scope          toolRole
+	parent         string
+	canonicalRoot  string
+	root           string
+	hosted         bool
+	harness        string
+	harnessSession string
+	harnessCwd     string
+	found          bool
+}
+
+type sessionAccess struct {
+	mode   string // lookup, bootstrap, relogin, manual, or mint
+	key    string
+	root   string // already canonicalized by the caller, preserving its error order
+	scope  toolRole
+	parent string
+}
+
+// resolveSession is the shared adoption core. It deliberately owns no storage
+// selector, delivery loop, or render side effects, so a card bootstrap can wrap
+// it without acquiring a second authority source. Mint callers retain their
+// existing timing (manual renders and validates before it mints).
+func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
+	in.key, in.parent = strings.TrimSpace(in.key), strings.TrimSpace(in.parent)
+	hosted := s.hostedSessionKey() // validates registration.host_pid once
+	switch in.mode {
+	case "bootstrap":
+		if hosted != "" && in.parent == "" && in.scope == roleLead {
+			if reason := s.leadKeyRefusal(hosted, in.root); reason != "" {
+				return sessionContext{}, fmt.Errorf("session bootstrap: this session is hosted and its session key is fixed, but %s %q %s", envHostedSessionKey, hosted, reason)
+			}
+			in.key = hosted
+		} else {
+			if in.parent != "" {
+				if _, ok := s.sessions.lookup(in.parent); !ok {
+					return sessionContext{}, fmt.Errorf("session bootstrap: parent_session_key %q is not a known session key", in.parent)
+				}
+			}
+			key, err := s.sessions.mint(in.root, in.scope, in.parent)
+			if err != nil {
+				return sessionContext{}, err
+			}
+			in.key = key
+		}
+	case "relogin":
+		if hosted != "" && in.key != hosted {
+			return sessionContext{}, hostedKeyRefusal("session bootstrap", hosted, in.key)
+		}
+		if in.parent != "" {
+			return sessionContext{}, errors.New("session bootstrap: relogin_session_key cannot be combined with parent_session_key")
+		}
+		if in.scope != roleLead {
+			return sessionContext{}, errors.New("session bootstrap: relogin_session_key requires lead capability")
+		}
+		if reason := s.leadKeyRefusal(in.key, in.root); reason != "" {
+			return sessionContext{}, fmt.Errorf("session bootstrap: relogin_session_key %q %s", in.key, reason)
+		}
+		if err := s.hostedLoginGuard(in.key, in.root); err != nil {
+			return sessionContext{}, err
+		}
+	case "manual":
+		if hosted != "" && in.key != hosted {
+			if entry, ok := s.sessions.lookup(in.key); !ok || entry.parent == "" {
+				return sessionContext{}, hostedKeyRefusal("workflow_manual", hosted, in.key)
+			}
+		}
+	case "mint":
+		key, err := s.sessions.mint(in.root, in.scope, in.parent)
+		if err != nil {
+			return sessionContext{}, err
+		}
+		in.key = key
+	}
+	out := sessionContext{key: in.key, hosted: hosted != "" && in.key == hosted}
+	if entry, ok := s.sessions.lookup(in.key); ok {
+		out.found = true
+		out.root, out.canonicalRoot, out.scope, out.parent = entry.root, entry.root, entry.scope, entry.parent
+		if rec, err := s.sessions.readStateWithError(in.key, partKey); err == nil {
+			out.harness, out.harnessSession, out.harnessCwd = rec.Harness, rec.HarnessSession, rec.HarnessCwd
+		}
+	}
+	return out, nil
+}

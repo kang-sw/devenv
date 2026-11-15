@@ -1009,10 +1009,11 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, ca
 	// Unit 1: render-minted child key — only when caller is lead (mintRoot != "").
 	if strings.TrimSpace(mintRoot) != "" {
 		if childScope, ok := childRoleForPlaybookRole(pb.Meta.Role); ok {
-			childKey, err := s.sessions.mint(mintRoot, childScope, parentKey)
+			resolved, err := s.resolveSession(sessionAccess{mode: "mint", root: mintRoot, scope: childScope, parent: parentKey})
 			if err != nil {
 				return "", "", fmt.Errorf("mint child session key: %w", err)
 			}
+			childKey := resolved.key
 			// Splice a clearly-delimited credential block into the body so the
 			// delegate's ws calls are pre-keyed. Prepended so the delegate sees
 			// the key before any procedure text.

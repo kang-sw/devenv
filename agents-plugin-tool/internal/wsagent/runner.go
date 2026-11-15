@@ -111,7 +111,7 @@ type Options struct {
 	// Dir is the dashboard daemon's state directory; conversations live in
 	// its session registry (wsdashboard.SessionDir).
 	Dir      string
-	Backends map[string]Backend
+	Backends map[string]BackendRegistration
 	Keys     KeyStore
 	// Config is the base of each profile resolution; RepoRoot is replaced by
 	// the conversation's working root.
@@ -578,22 +578,27 @@ func (r *Runner) Create(profile, root string) (State, error) {
 // the builtin lead profile of that harness (or the user's definition of the
 // same name). The caller has passed the trusted gate.
 func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, error) {
-	profile := LeadProfileFor(strings.TrimSpace(backend))
+	profile := LeadProfileFor(strings.TrimSpace(backend), r.opts.Backends)
 	if profile == "" {
-		return State{}, badRequest("harness must be %q or %q; got %q", BackendClaude, BackendPi, backend)
+		return State{}, categorized(ErrInvalidProfile, badRequest("harness must be %q or %q; got %q", BackendClaude, BackendPi, backend))
 	}
 	if opts.Model != "" && !modelPattern.MatchString(opts.Model) {
-		return State{}, badRequest("model %q must match %s", opts.Model, modelPattern.String())
+		return State{}, categorized(ErrInvalidProfile, badRequest("model %q must match %s", opts.Model, modelPattern.String()))
 	}
 	if opts.Effort != "" && !effortPattern.MatchString(opts.Effort) {
-		return State{}, badRequest("effort %q must be a lowercase word", opts.Effort)
+		return State{}, categorized(ErrInvalidProfile, badRequest("effort %q must be a lowercase word", opts.Effort))
 	}
-	if opts.PermissionMode != "" && !ValidLeadPermissionMode(opts.PermissionMode) {
-		return State{}, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(LeadPermissionModes, ", "))
+	modes := permissionModes(strings.TrimSpace(backend), []map[string]BackendRegistration{r.opts.Backends})
+	// Existing Pi callers may send a Claude mode; it remains ignored.
+	if strings.TrimSpace(backend) == BackendPi {
+		modes = LeadPermissionModes
+	}
+	if opts.PermissionMode != "" && !slices.Contains(modes, opts.PermissionMode) {
+		return State{}, categorized(ErrInvalidProfile, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(modes, ", ")))
 	}
 	opts.PluginIsolation = leadPluginIsolation(opts.PluginIsolation)
 	if opts.PluginIsolation != "default" && opts.PluginIsolation != "isolated" {
-		return State{}, badRequest("plugin_isolation must be default or isolated; got %q", opts.PluginIsolation)
+		return State{}, categorized(ErrInvalidProfile, badRequest("plugin_isolation must be default or isolated; got %q", opts.PluginIsolation))
 	}
 	return r.create(profile, root, &opts, nil)
 }
@@ -671,7 +676,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		if lead.PermissionMode != "" {
 			rec.PermissionMode = lead.PermissionMode
 		}
-		if rec.Backend != BackendClaude {
+		if len(r.opts.Backends[rec.Backend].PermissionModes) == 0 {
 			rec.PermissionMode = ""
 		}
 	}
@@ -753,10 +758,10 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 		}
 		rp = *r.fixedProfile
 	} else {
-		rp, err = ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile))
+		rp, err = ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile), r.opts.Backends)
 	}
 	if err != nil {
-		return ResolvedProfile{}, badRequest("%v", err)
+		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("%v", err))
 	}
 	if _, err := r.backend(rp.Name, rp.Definition.Backend); err != nil {
 		return ResolvedProfile{}, err
@@ -764,14 +769,14 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 	if path := rp.Definition.InstructionsPath(root); path != "" {
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
-			return ResolvedProfile{}, badRequest("agent profile %q: instruction file %s does not exist", rp.Name, path)
+			return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q: instruction file %s does not exist", rp.Name, path))
 		}
 	}
 	if len(rp.Definition.WSTools) > 0 && r.opts.WSMCP == nil {
-		return ResolvedProfile{}, badRequest("agent profile %q allows ws tools, but this daemon cannot attach ws-mcp", rp.Name)
+		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q allows ws tools, but this daemon cannot attach ws-mcp", rp.Name))
 	}
 	if rp.Definition.Lead && (r.opts.Holders == nil || r.opts.LeadKeys == nil) {
-		return ResolvedProfile{}, badRequest("agent profile %q is a lead profile, but this daemon runs no session holders", rp.Name)
+		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q is a lead profile, but this daemon runs no session holders", rp.Name))
 	}
 	return rp, nil
 }
@@ -779,9 +784,9 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 // backend is shared by profile validation and both launch paths. Keep
 // unavailable backends explicit, including when rejoining a held process.
 func (r *Runner) backend(profile, name string) (Backend, error) {
-	backend := r.opts.Backends[name]
+	backend := r.opts.Backends[name].Backend
 	if backend == nil {
-		return nil, badRequest("agent profile %q: backend %q is not available in this daemon", profile, name)
+		return nil, categorized(ErrBackendUnavailable, badRequest("agent profile %q: backend %q is not available in this daemon", profile, name))
 	}
 	return backend, nil
 }
@@ -791,7 +796,8 @@ func (c *conv) startBackend(spec StartSpec) (Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	return backend.Start(context.Background(), spec)
+	proc, err := backend.Start(context.Background(), spec)
+	return proc, categorized(ErrLaunchFailed, err)
 }
 
 // Get reads one conversation's state.
@@ -955,17 +961,21 @@ func (r *Runner) AnswerApproval(id, requestID string, allow bool, message string
 	})
 }
 
-// SetPermissionMode changes a claude lead conversation's permission mode.
+// SetPermissionMode changes an admitted lead conversation's permission mode.
 // Like a model or effort change it applies at the next turn boundary,
 // in-stream when the harness takes it; the mode the harness then reports is
 // State.ActiveMode.
 func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
-	if !ValidLeadPermissionMode(mode) {
-		return State{}, badRequest("permission_mode %q must be one of %s", mode, strings.Join(LeadPermissionModes, ", "))
+	modes := LeadPermissionModes
+	if rec, ok := r.recordOf(id); ok && rec.Backend != BackendPi {
+		modes = r.opts.Backends[rec.Backend].PermissionModes
+	}
+	if !slices.Contains(modes, mode) {
+		return State{}, categorized(ErrInvalidProfile, badRequest("permission_mode %q must be one of %s", mode, strings.Join(modes, ", ")))
 	}
 	return r.act(id, func(c *conv) error {
-		if !c.rec.Lead || c.rec.Backend != BackendClaude {
-			return badRequest("the permission mode applies to a claude lead session only")
+		if !c.rec.Lead || len(c.r.opts.Backends[c.rec.Backend].PermissionModes) == 0 {
+			return categorized(ErrUnsupported, badRequest("the permission mode applies to a claude lead session only"))
 		}
 		if mode == c.rec.PermissionMode {
 			return nil

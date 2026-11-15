@@ -392,7 +392,7 @@ func newHarness(t *testing.T, profiles map[string]string) *harness {
 	}
 	h.config = Options{
 		Dir:      h.dir,
-		Backends: map[string]Backend{suiteBackend: h.backend},
+		Backends: map[string]BackendRegistration{suiteBackend: {Backend: h.backend}, otherBackend(): {}},
 		Keys:     h.keys,
 		Config:   testConfig(t),
 		WSMCP: func(root string) (MCPCommand, error) {

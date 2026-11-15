@@ -325,10 +325,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	//     refused before anything renders or mints. A key that carries a
 	//     parent passes: it is a child key a subagent on this connection
 	//     holds, and its worker playbooks read this manual.
-	if hosted := s.hostedSessionKey(); hosted != "" && key != hosted {
-		if entry, ok := s.sessions.lookup(key); !ok || entry.parent == "" {
-			return toolTextResponse(id, "", hostedKeyRefusal("workflow_manual", hosted, key))
-		}
+	if _, err := s.resolveSession(sessionAccess{mode: "manual", key: key}); err != nil {
+		return toolTextResponse(id, "", err)
 	}
 
 	// 2. FAIL-LOUD up front, BEFORE rendering: a syntactically valid but
@@ -426,10 +424,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			if err != nil {
 				return toolTextResponse(id, "", err)
 			}
-			mintedKey, err := s.sessions.mint(canonical, roleLead, "")
+			resolved, err := s.resolveSession(sessionAccess{mode: "mint", root: canonical, scope: roleLead})
 			if err != nil {
 				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: mint session: %w", err))
 			}
+			mintedKey := resolved.key
 			// Ferrule owner binding (mailbox core Decision 3): this FRESH-
 			// with-root path is itself a parent-less top-lead bootstrap,
 			// exactly like handleLeadLogin's own ws.ferrule path — it must

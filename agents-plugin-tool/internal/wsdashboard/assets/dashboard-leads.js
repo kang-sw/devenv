@@ -46,13 +46,23 @@
       done();
     });
   }
+  // Older daemons have no lead markers; retain their Claude/Pi controls.
+  function leadHarnesses() {
+    var hs = ((supChoices && supChoices.harnesses) || []).filter(function (h) { return h.lead === true; });
+    return hs.length ? hs : [supHarness("claude") || { harness: "claude" }, supHarness("pi") || { harness: "pi" }];
+  }
+  function leadModes(harness) {
+    var h = supHarness(harness);
+    if (leadHarnesses().some(function (x) { return x.lead === true; })) return h && Array.isArray(h.permission_modes) ? h.permission_modes : [];
+    return harness === "claude" ? LEAD_MODES : [];
+  }
   function leadModels(harness) {
     var h = supHarness(harness);
     return ((h && h.models) || []).map(function (m) { return String(m.id); });
   }
   function leadEfforts(harness) {
     var h = supHarness(harness);
-    return h && Array.isArray(h.efforts) && h.efforts.length ? h.efforts.map(String) : LEAD_EFFORTS[harness] || [];
+    return h && Array.isArray(h.efforts) && h.efforts.length ? h.efforts.map(String) : (harness === "claude" || harness === "pi" ? LEAD_EFFORTS[harness] : []);
   }
   // leadOptions lists "default" and list in sel with cur picked (added when
   // the list lacks it). An unchanged list is left alone, so a redraw never
@@ -86,28 +96,40 @@
     var pd = box.appendChild(mk("p", "spdesc"));
     var e = row(wsT("js.sup.effort"));
     var ed = box.appendChild(mk("p", "spdesc"));
-    LEAD_MODES.forEach(function (v) { p.sel.appendChild(mk("option", null, v)).value = v; });
     pd.id = rpId();
     p.sel.setAttribute("aria-describedby", pd.id);
     R.model = m.sel; R.mode = p.sel; R.effort = e.sel;
     // set shows harness's choices with v's model, effort, and mode picked.
-    // Only a Claude session has a permission mode.
     R.set = function (harness, v) {
-      var claude = harness === "claude";
-      leadOptions(m.sel, leadModels(harness), v.model);
-      leadOptions(e.sel, leadEfforts(harness), v.effort);
-      p.row.classList.toggle("off", !claude);
-      p.sel.disabled = !claude;
-      p.sel.value = claude ? v.mode || "auto" : "";
+      var h = supHarness(harness), models = leadModels(harness), efforts = leadEfforts(harness), modes = leadModes(harness);
+      leadOptions(m.sel, models, v.model);
+      leadOptions(e.sel, efforts, v.effort);
+      var sig = modes.join("\n");
+      if (p.sel.wsSig !== sig) {
+        p.sel.wsSig = sig;
+        p.sel.textContent = "";
+        modes.forEach(function (mode) { p.sel.appendChild(mk("option", null, mode)).value = mode; });
+      }
+      p.row.classList.toggle("off", !modes.length);
+      var initial = harness === "claude" && modes.indexOf("auto") >= 0 ? "auto" : modes[0] || "";
+      p.sel.value = modes.indexOf(v.mode) >= 0 ? v.mode : initial;
+      R.disable = function (busy) {
+        var unavailable = !!h && (h.lead === true ? h.available !== true : h.available === false);
+        m.sel.disabled = busy || unavailable || !models.length;
+        e.sel.disabled = busy || unavailable || !efforts.length;
+        p.sel.disabled = busy || unavailable || !modes.length;
+      };
+      R.disable(false);
       R.notes(harness, v.active);
     };
     // notes writes the lines under the mode and the effort; active is the
     // mode a running harness reported, named when it is not the picked one.
     R.notes = function (harness, active) {
       var claude = harness === "claude", mode = p.sel.value;
-      pd.textContent = !claude ? wsT("js.lead.mode.pi") : wsT(LEAD_MODE_NOTE[mode] || "js.lead.mode.auto") + (active && active !== mode ? " " + wsT("js.lead.mode.active", active) : "");
+      pd.hidden = !mode && harness !== "pi";
+      pd.textContent = !mode ? (harness === "pi" ? wsT("js.lead.mode.pi") : "") : (claude && LEAD_MODE_NOTE[mode] ? wsT(LEAD_MODE_NOTE[mode]) : mode) + (active && active !== mode ? " " + wsT("js.lead.mode.active", active) : "");
       pd.classList.toggle("warn", claude && mode === "bypassPermissions");
-      ed.textContent = e.sel.value ? (claude ? "--effort " : "--thinking ") + e.sel.value : wsT("js.lead.effort.default");
+      ed.textContent = e.sel.value ? (claude ? "--effort " : harness === "pi" ? "--thinking " : "") + e.sel.value : wsT("js.lead.effort.default");
     };
     return R;
   }
@@ -126,8 +148,24 @@
     var seg = hsec.appendChild(mk("div", "spseg"));
     seg.setAttribute("role", "radiogroup");
     seg.setAttribute("aria-label", wsT("js.sup.harness"));
-    var hbtn = { claude: rpBtn("", "Claude"), pi: rpBtn("", "Pi") };
-    Object.keys(hbtn).forEach(function (k) { hbtn[k].setAttribute("role", "radio"); hbtn[k].setAttribute("data-harness", k); seg.appendChild(hbtn[k]); });
+    var hbtn = Object.create(null), harnessSig = "";
+    function harnessButtons() {
+      var hs = leadHarnesses(), sig = hs.map(function (h) { return h.harness; }).join("\n");
+      if (harnessSig !== sig) {
+        harnessSig = sig;
+        seg.textContent = "";
+        hbtn = Object.create(null);
+        hs.forEach(function (h) {
+          var k = h.harness, b = hbtn[k] = rpBtn("", k === "claude" ? "Claude" : k === "pi" ? "Pi" : k);
+          b.setAttribute("role", "radio");
+          b.setAttribute("data-harness", k);
+          seg.appendChild(b);
+        });
+      }
+      if (!hbtn[P.harness] || off(P.harness)) {
+        P.harness = hs.filter(function (h) { return !off(h.harness); }).map(function (h) { return h.harness; })[0] || hs[0].harness;
+      }
+    }
     var rows = leadRows(el.appendChild(mk("div", "spopts")), edited);
     // Plugin isolation: which plugins the hosted session loads. The pick goes
     // out as plugin_isolation; Pi's standalone binary supports only isolated.
@@ -146,13 +184,16 @@
     var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
     var start = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
     function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
-    function off(k) { var h = supHarness(k); return !!h && h.available === false; }
+    function off(k) {
+      var h = supHarness(k);
+      return !hbtn[k] || (!!h && (h.lead === true ? h.available !== true : h.available === false));
+    }
     function sync() {
       Object.keys(hbtn).forEach(function (k) {
         var h = supHarness(k);
         hbtn[k].setAttribute("aria-checked", String(P.harness === k));
         hbtn[k].disabled = off(k);
-        hbtn[k].title = off(k) ? wsT("js.sup.unavail", k, h.error || "") : "";
+        hbtn[k].title = off(k) ? wsT("js.sup.unavail", k, h && h.error || "") : "";
       });
       Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
       idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
@@ -168,7 +209,7 @@
     function setHarness(k) {
       if (P.harness === k) return;
       P.harness = k;
-      rows.set(k, { model: "", effort: "", mode: "auto" });
+      rows.set(k, { model: "", effort: "", mode: "" });
       edited();
     }
     function submit() {
@@ -180,7 +221,7 @@
       setErr("");
       status.textContent = wsT("js.lead.starting");
       sync();
-      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
+      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.disabled ? "" : rows.model.value, effort: rows.effort.disabled ? "" : rows.effort.value, mode: rows.mode.disabled ? "" : rows.mode.value, isolation: P.iso }), function (st, v, s) {
         P.busy = false;
         status.textContent = "";
         sync();
@@ -215,13 +256,16 @@
       loc.appendChild(mk("code", null, key)).title = key;
       setErr("");
       status.textContent = "";
-      rows.set(P.harness, { model: "", effort: "", mode: "auto" });
+      harnessButtons();
+      rows.set(P.harness, { model: "", effort: "", mode: "" });
       sync();
       leadChoices(function () {
         if (!rpLive(P, gen)) return;
-        // Claude is the first pick; Pi when only Pi can run.
-        if (off(P.harness) && !off("pi")) P.harness = "pi";
-        rows.set(P.harness, { model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value || "auto" });
+        // Keep the current pick when available, otherwise the first available lead.
+        var previous = P.harness;
+        harnessButtons();
+        var same = previous === P.harness;
+        rows.set(P.harness, { model: same ? rows.model.value : "", effort: same ? rows.effort.value : "", mode: same ? rows.mode.value : "" });
         sync();
         railPopPlace();
       });
@@ -356,8 +400,7 @@
       if (!st) return;
       var text = failed || (st.error ? String(st.error) : "");
       rows.set(String(st.backend || ""), { model: String(st.model || ""), effort: String(st.effort || ""), mode: String(st.permission_mode || ""), active: st.process ? String(st.active_mode || "") : "" });
-      rows.model.disabled = rows.effort.disabled = P.busy;
-      if (st.backend === "claude") rows.mode.disabled = P.busy;
+      rows.disable(P.busy);
       stop.b.disabled = P.busy || !st.process;
       stop.note.textContent = wsT(st.process ? "js.lead.stop.note" : "js.lead.stopped");
       var broken = Array.isArray(st.mcp_broken) ? st.mcp_broken.map(String) : [];

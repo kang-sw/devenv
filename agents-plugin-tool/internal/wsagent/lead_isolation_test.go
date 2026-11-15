@@ -39,7 +39,9 @@ func TestLeadIsolationRequestAndRelaunch(t *testing.T) {
 			t.Run(harness+"/"+isolation, func(t *testing.T) {
 				h := newLeadHarness(t)
 				backend := &isolationBackend{starts: make(chan StartSpec, 2)}
-				h.opts.Backends[harness] = backend
+				reg := h.opts.Backends[harness]
+				reg.Backend = backend
+				h.opts.Backends[harness] = reg
 				h.opts.WSMCP = func(root string) (MCPCommand, error) {
 					if root != h.root {
 						t.Errorf("MCP root = %q, want %q", root, h.root)
@@ -98,7 +100,7 @@ func TestLeadIsolationRejectsUnknownValue(t *testing.T) {
 func TestLegacyLeadIsolationDefaultsAtLaunch(t *testing.T) {
 	h := newLeadHarness(t)
 	backend := &isolationBackend{starts: make(chan StartSpec, 1)}
-	h.opts.Backends[BackendPi] = backend
+	h.opts.Backends[BackendPi] = BackendRegistration{Backend: backend, LeadProfile: LeadProfilePi}
 	h.start()
 	st := h.lead(BackendPi, LeadOptions{})
 	_, err := h.runner.act(st.ID, func(c *conv) error {
@@ -155,7 +157,7 @@ func TestLegacyPiLeadWithoutSDKStartsIsolated(t *testing.T) {
 			}
 			piLeadFile(t, command, "")
 			backend := &piLaunchBackend{command: command, starts: make(chan piLaunch, 1)}
-			h.opts.Backends[BackendPi] = backend
+			h.opts.Backends[BackendPi] = BackendRegistration{Backend: backend, LeadProfile: LeadProfilePi}
 			h.start()
 			st := h.lead(BackendPi, LeadOptions{})
 			if _, err := h.runner.act(st.ID, func(c *conv) error {

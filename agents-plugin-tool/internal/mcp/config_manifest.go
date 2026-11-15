@@ -526,7 +526,7 @@ func (s *Server) resolveConfigGet(sessionKey, key string) (configGetResult, erro
 		return configGetResult{Key: key, Scope: configGetUnsetScope}, nil
 	}
 	if strings.HasPrefix(key, wsagent.ProfilePrefix) {
-		profiles, err := wsagent.ResolveProfiles(&resolver)
+		profiles, err := wsagent.ResolveProfiles(&resolver, s.agentBackends()...)
 		if err != nil {
 			return configGetResult{}, err
 		}
