@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ {0} entradas do histórico",
+  "wb.timeline.up": "▲ Carregar acima",
+  "wb.timeline.down": "▼ Carregar abaixo",
+  "wb.timeline.asked": "Pergunta",
+  "wb.timeline.reasked": "Perguntado novamente",
+  "wb.timeline.answer": "Resposta do proprietário",
+  "wb.timeline.original": "Pergunta original",
   "js.usage.heading": "Uso do plano",
   "js.usage.close": "Fechar uso do plano",
   "js.usage.legend": "Legenda do gráfico de uso",

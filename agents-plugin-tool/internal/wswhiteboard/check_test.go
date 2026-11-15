@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -177,9 +178,9 @@ func TestCheckRowsRenderTheirStates(t *testing.T) {
 	if !strings.Contains(page, `answered 3 / 4`) {
 		t.Fatal("the check list header carries its progress")
 	}
-	// Placement: recap, check list, then the policy and ack items.
+	// The recap stays in the head; items retain their chronological add order.
 	recap, list, policy := strings.Index(page, `class="trecap"`), strings.Index(page, `class="checks"`), strings.Index(page, `class="card policy"`)
-	if !(recap >= 0 && recap < list && list < policy) {
+	if !(recap >= 0 && recap < policy && policy < list) {
 		t.Fatalf("placement recap %d, checks %d, policy %d", recap, list, policy)
 	}
 }
@@ -210,7 +211,7 @@ func TestCheckStampReadsALoneOkOrNo(t *testing.T) {
 	}
 }
 
-func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
+func TestClosedTopicKeepsChecksAtTheirTimelinePositions(t *testing.T) {
 	st := checkBoard(t)
 	mustApply(t, st, `<wb:answer id="1" value="a">a</wb:answer><wb:answer id="2" value="ok">ok</wb:answer><wb:answer id="3" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="done"/></wb:topic>`)
 	topic := topicView(t, st, LayoutFull, "t")
@@ -218,10 +219,13 @@ func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
 		t.Fatalf("closed topic: shown %v, checks %d, settled %d", topic.ChecksShown(), len(topic.Checks), topic.SettledCount())
 	}
 	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	fold := regexp.MustCompile(`(?s)<details class="settled".*?</details>`).FindString(page)
-	if !strings.Contains(fold, `class="checks"`) {
-		t.Fatalf("the check list folds into the settled details:\n%s", fold)
+	for _, id := range []int{3, 4, 5, 6} {
+		if strings.Count(page, fmt.Sprintf(`id="item-%d"`, id)) != 1 {
+			t.Fatalf("closed timeline lost/duplicated check %d", id)
+		}
 	}
+	wantAll(t, page, `class="checks"`, `class="history-live"`)
+	wantNone(t, markup(page), `<details class="settled"`)
 }
 
 // TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide pins where the

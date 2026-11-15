@@ -220,10 +220,10 @@
     f = frameWins.get(win);
     return f && inBoard(f) ? f : undefined;
   }
-  // Only existing board items, latest stable panels and encoded topic anchors
+  // Only existing board items, stream entries, stable panels and topic anchors
   // may be navigated. Topic chips never materialize unloaded closed topics.
   function boardJump(id) {
-    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*|topic-(?:[0-9a-f]{2})+)$/.test(id)) return;
+    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|[pe][1-9][0-9]*|topic-(?:[0-9a-f]{2})+)$/.test(id)) return;
     var isTopic = id.indexOf("topic-") === 0;
     var target = null, unfoldTopic = window.WsCards && window.WsCards.unfoldTopic;
     if (!isTopic && window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });

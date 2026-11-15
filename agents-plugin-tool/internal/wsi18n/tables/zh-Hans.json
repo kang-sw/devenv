@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ {0} 条历史记录",
+  "wb.timeline.up": "▲ 加载上方",
+  "wb.timeline.down": "▼ 加载下方",
+  "wb.timeline.asked": "提问",
+  "wb.timeline.reasked": "再次提问",
+  "wb.timeline.answer": "用户回答",
+  "wb.timeline.original": "原始问题",
   "js.usage.heading": "套餐用量",
   "js.usage.close": "关闭套餐用量",
   "js.usage.legend": "用量图表图例",

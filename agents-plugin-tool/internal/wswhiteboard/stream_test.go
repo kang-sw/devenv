@@ -117,9 +117,9 @@ func TestStreamHistoryWindowsAreFiftyChronologicalEntries(t *testing.T) {
 		}
 	}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
-	live := out[strings.Index(out, `<div class="history-live">`):strings.Index(out, `<template data-history-page`)]
-	if strings.Count(live, `class="wb-entry agent`) != 50 || !strings.Contains(live, `id="e74"`) || strings.Contains(live, `id="e73"`) {
-		t.Fatal("initial live DOM does not hold exactly the newest 50 entries")
+	live := regexp.MustCompile(`(?s)<template data-history-gap>.*?</template>`).ReplaceAllString(out, "")
+	if strings.Count(live, `class="wb-entry agent`) != 1 || !strings.Contains(live, `id="e123"`) || strings.Contains(live, `id="e122"`) {
+		t.Fatal("initial live DOM must hold the current line and legacy latest entry, not a fifty-entry tail")
 	}
 	// All log entries are visible (no run-fold disclosure); only e123 is current.
 	wantAll(t, live, `class="wb-entry agent current" id="e123"`)
@@ -127,14 +127,11 @@ func TestStreamHistoryWindowsAreFiftyChronologicalEntries(t *testing.T) {
 	if strings.Count(live, ` current"`) != 1 {
 		t.Fatal("more than one line is current")
 	}
-	wantAll(t, out, `<template data-history-page data-count="50">`, `<template data-history-page data-count="23">`, ">Load older<")
+	wantAll(t, out, `<div class="history-gap" data-count="122"`, `<template data-history-gap>`, `data-load="up"`, `data-load="down" hidden`)
 }
 
-// TestStreamHistoryHeaderIsOneRow pins the history header as one plain row,
-// never a disclosure: title and count, then the load-older capsule (hidden
-// when nothing older is held), then the counts meta, all inside the history
-// so its delegated click still owns the capsule. A closed topic's history is
-// shown like an open one's, and no fade covers the first visible entry.
+// The history header stays a plain row. Loading controls now belong to
+// individual gaps, never a global older button or a clipped tail.
 func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
 	st := &State{Topics: []TopicDoc{{Name: "long"}}}
 	for i := 1; i <= 60; i++ {
@@ -147,16 +144,16 @@ func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
 		return `<div class="topic-stream"><div class="wb-history" data-history="` + name + `" aria-label="History"><div class="mhead"><span class="wb-mtitle">`
 	}
 	wantAll(t, out, head("long"), head("short"), head("done"),
-		`<span class="wb-mlabel">History</span><span class="n">60</span></span><button type="button" class="history-older">Load older</button><span class="mmeta">`,
+		`<span class="wb-mlabel">History</span><span class="n">60</span></span><span></span><span class="mmeta">`,
 		// "short" holds its log and its creation-default state event.
-		`<span class="n">2</span></span><button type="button" class="history-older" hidden>Load older</button><span class="mmeta">`)
-	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:`, `<summary class="mhead">`)
+		`<span class="n">2</span></span><span></span><span class="mmeta">`)
+	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:`, `<summary class="mhead">`, `class="history-older"`)
 	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantAll(t, string(css), `.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }`,
-		`.wb-history > .mhead > .history-older { grid-column: 2; }`,
+		`.gap-actions { display: inline-flex; gap: 4px; margin-left: auto; }`,
 		`min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
 		`.wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }`,
 		`.wb-mtitle > svg, .wb-mtitle > .n { flex: none; }`)

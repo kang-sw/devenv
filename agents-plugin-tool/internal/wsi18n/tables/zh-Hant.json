@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ {0} 筆歷史記錄",
+  "wb.timeline.up": "▲ 載入上方",
+  "wb.timeline.down": "▼ 載入下方",
+  "wb.timeline.asked": "提問",
+  "wb.timeline.reasked": "再次提問",
+  "wb.timeline.answer": "使用者回答",
+  "wb.timeline.original": "原始問題",
   "js.usage.heading": "方案用量",
   "js.usage.close": "關閉方案用量",
   "js.usage.legend": "用量圖表圖例",

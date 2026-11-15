@@ -455,6 +455,16 @@
     var l = lifted;
     lifted = null;
     if (!l) return;
+    if (l.parts) {
+      l.parts.forEach(function (p) {
+        if (p.spacer.parentNode) p.spacer.parentNode.replaceChild(p.list, p.spacer);
+        else if (p.list.parentNode) p.list.parentNode.removeChild(p.list);
+        p.list.hidden = p.hid;
+      });
+      if (l.list.parentNode) l.list.parentNode.removeChild(l.list);
+      l.btn.setAttribute('aria-expanded', l.parts.every(function (p) { return p.hid; }) ? 'false' : 'true');
+      return;
+    }
     if (l.spacer.parentNode) l.spacer.parentNode.replaceChild(l.list, l.spacer);
     else if (l.list.parentNode) l.list.parentNode.removeChild(l.list);
     l.list.hidden = l.hid;
@@ -465,7 +475,31 @@
     if (!head || !box.contains(head)) return;
     if (lifted && lifted.head === head) return drop();
     var list = head.parentNode.querySelector(":scope > .checks");
-    if (!list) return;
+    if (!list) {
+      // Interleaved checks keep their own chronological positions. Lift the
+      // real lists together, with one spacer at each original position.
+      var lists = Array.from(head.parentNode.querySelectorAll('.timeline-row .checks'));
+      if (!lists.length) return;
+      if (!head.classList.contains('wb-stuck')) {
+        var hide = lists.some(function (n) { return !n.hidden; });
+        lists.forEach(function (n) { n.hidden = hide; });
+        btn.setAttribute('aria-expanded', hide ? 'false' : 'true');
+        return;
+      }
+      if (!lists.some(function (n) { return Array.from(n.querySelectorAll('.ckrow')).some(function (r) { return getComputedStyle(r).display !== 'none'; }); })) return;
+      drop();
+      list = d.createElement('div'); list.className = 'checks';
+      var parts = lists.map(function (n) {
+        var cs = getComputedStyle(n), spacer = d.createElement('div'), hid = n.hidden;
+        spacer.className = 'ckspace'; spacer.setAttribute('aria-hidden', 'true');
+        if (!hid) spacer.style.cssText = 'height:' + n.offsetHeight + 'px;margin:' + cs.marginTop + ' 0 ' + cs.marginBottom;
+        n.parentNode.replaceChild(spacer, n); n.hidden = false; list.appendChild(n);
+        return { list: n, spacer: spacer, hid: hid };
+      });
+      lifted = { head: head, list: list, parts: parts, btn: btn };
+      head.appendChild(list); btn.setAttribute('aria-expanded', 'true');
+      return;
+    }
     if (!head.classList.contains("wb-stuck")) {
       list.hidden = !list.hidden;
       btn.setAttribute("aria-expanded", list.hidden ? "false" : "true");

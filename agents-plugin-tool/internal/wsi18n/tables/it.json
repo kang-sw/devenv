@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ {0} voci della cronologia",
+  "wb.timeline.up": "▲ Carica sopra",
+  "wb.timeline.down": "▼ Carica sotto",
+  "wb.timeline.asked": "Domanda",
+  "wb.timeline.reasked": "Chiesto di nuovo",
+  "wb.timeline.answer": "Risposta del proprietario",
+  "wb.timeline.original": "Domanda originale",
   "js.usage.heading": "Utilizzo del piano",
   "js.usage.close": "Chiudi utilizzo del piano",
   "js.usage.legend": "Legenda del grafico di utilizzo",

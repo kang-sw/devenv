@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ {0}개 로그 항목",
+  "wb.timeline.up": "▲ 위쪽 더 불러오기",
+  "wb.timeline.down": "▼ 아래쪽 더 불러오기",
+  "wb.timeline.asked": "질문",
+  "wb.timeline.reasked": "다시 물음",
+  "wb.timeline.answer": "사용자 답변",
+  "wb.timeline.original": "원래 질문",
   "js.usage.heading": "플랜 사용량",
   "js.usage.close": "플랜 사용량 닫기",
   "js.usage.legend": "사용량 차트 범례",

@@ -188,7 +188,7 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 		// committed line. This is fixture construction, not a caller API.
 		path := filepath.Join(dir, "t1", "log.jsonl")
 		log := folderRead(t, path)
-		log = bytes.Replace(log, []byte(`"topic_state":{`), []byte(`"future_entry": { "opaque": [1, 2] }, "topic_state":{`), 1)
+		log = bytes.Replace(log, []byte(`"topic_state":{`), []byte(`"inputs":[{"inbox_id":"kept","sent_at":123,"excerpt":"owner","chip_ids":["1"]}],"inputs_floor":"floor","seq":7,"answer_sent_at":123,"future_entry": { "opaque": [1, 2] }, "topic_state":{`), 1)
 		if err := os.WriteFile(path, log, 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -243,8 +243,9 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 			if !reflect.DeepEqual(reasons, []string{"historical first extension", "historical second extension"}) {
 				t.Fatal("historical writer lost individual extension payloads", reasons)
 			}
-			if got.Topics[0].Entries[2].unknown["future_entry"] == nil {
-				t.Fatal("new reader lost opaque Entry member")
+			e := got.Topics[0].Entries[2]
+			if e.unknown["future_entry"] == nil || e.Seq != 7 || e.AnswerSentAt != 123 || e.InputsFloor != "floor" || !bytes.Contains(e.Inputs, []byte(`"kept"`)) {
+				t.Fatal("historical append/render lost optional Entry metadata")
 			}
 			if !reflect.DeepEqual(got.Topics[0].Tickets, []string{"261114-feat-example"}) {
 				t.Fatal("old writer lost ticket semantics")
@@ -279,6 +280,8 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 		if err := f.Update(nil, func(s *State) error {
 			stateApply(t, s, stateCommand("implementing", `owner="executor" eta_minutes="40"`), stateNow)
 			e := &s.Topics[0].Entries[len(s.Topics[0].Entries)-1]
+			e.Inputs = json.RawMessage(`[]`)
+			e.InputsFloor, e.Seq, e.AnswerSentAt = "pending-floor", s.Seq, 456
 			e.TopicState = bytes.Replace(e.TopicState, []byte(`"v":1`), []byte(`"future": { "bytes": [ 1, 2 ] }, "v":1`), 1)
 			stateApply(t, s, etaCommand("60", "pending first extension"), stateNow.Add(20*time.Minute))
 			stateApply(t, s, etaCommand("90", "pending second extension"), stateNow.Add(40*time.Minute))
@@ -299,6 +302,13 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 			t.Fatal("old recovery changed opaque append bytes")
 		}
 		got := folderOpen(t, dir, nil)
+		var stamp bool
+		for _, e := range got.Topics[0].Entries {
+			stamp = stamp || (string(e.Inputs) == "[]" && e.InputsFloor == "pending-floor" && e.Seq > 0 && e.AnswerSentAt == 456)
+		}
+		if !stamp {
+			t.Fatal("old pending recovery lost input activation")
+		}
 		run := got.TopicStates()["Work"].State.Run
 		if run.ETAMinutes != 90 || run.InitialETAMinutes != 40 || run.ExtensionCount != 2 || run.StartedAt != stateNow.Format(time.RFC3339Nano) || noticeReceiptCount(got) != 1 {
 			t.Fatal("recovered state/extensions/receipt missing")

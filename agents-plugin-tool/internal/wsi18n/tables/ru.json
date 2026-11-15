@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ Записей истории: {0}",
+  "wb.timeline.up": "▲ Загрузить выше",
+  "wb.timeline.down": "▼ Загрузить ниже",
+  "wb.timeline.asked": "Вопрос",
+  "wb.timeline.reasked": "Повторный вопрос",
+  "wb.timeline.answer": "Ответ владельца",
+  "wb.timeline.original": "Исходный вопрос",
   "js.usage.heading": "Использование тарифа",
   "js.usage.close": "Закрыть использование тарифа",
   "js.usage.legend": "Легенда графика использования",

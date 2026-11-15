@@ -199,7 +199,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 		start := strings.Index(out, `<span class="tname">embed layout</span>`)
 		block := out[start:]
 		block = block[:strings.Index(block, "</section>")]
-		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="tbody"`)
+		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="topic-stream"`)
 		if doc < 0 || items < 0 || doc > items {
 			t.Errorf("%s: the body (%d) is not above the items (%d)", name, doc, items)
 		}
@@ -452,11 +452,12 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	}
 	block := out[start:]
 	block = block[:strings.Index(block, "</section>")]
-	// The assumed item is the newest settled row, above the older ones.
-	policy, list, assumed, settled := strings.Index(block, `id="item-73"`), strings.Index(block, `<details class="settled"`), strings.Index(block, `id="item-76"`), strings.Index(block, `id="item-72"`)
-	if !(policy >= 0 && policy < list && list < assumed && assumed < settled) {
-		t.Errorf("block order policy %d, settled list %d, assumed %d, settled %d", policy, list, assumed, settled)
+	// Items without add events render at the timeline head in item-number order.
+	policy, assumed, settled := strings.Index(block, `id="item-73"`), strings.Index(block, `id="item-76"`), strings.Index(block, `id="item-72"`)
+	if !(settled >= 0 && settled < policy && policy < assumed) {
+		t.Errorf("converted item order settled %d, policy %d, assumed %d", settled, policy, assumed)
 	}
+	wantNone(t, block, `<details class="settled"`)
 	if !strings.Contains(block, `<span class="chip policy" title="to answer">`) || strings.Contains(block, "chip assumed") {
 		t.Errorf("title bar chips: want the policy count and no assumed count")
 	}
@@ -465,7 +466,7 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	block = out[start:]
 	block = block[:strings.Index(block, "</section>")]
 	policy, ack, settled := strings.Index(block, `id="item-77"`), strings.Index(block, `id="item-78"`), strings.Index(block, `id="item-69"`)
-	if !(policy >= 0 && policy < ack && ack < settled) {
+	if !(settled >= 0 && settled < policy && policy < ack) {
 		t.Errorf("block order policy %d, ack %d, settled %d", policy, ack, settled)
 	}
 }
@@ -611,8 +612,7 @@ func TestRenderPagePickedChipKeepsInlineMarkupInOneTextItem(t *testing.T) {
 
 func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
-	// The closed topic's settled items sit behind a collapsed chip in its one
-	// title line.
+	// Closed converted items keep one stable anchor each at the timeline head.
 	start := strings.Index(full, `<section class="topic quiet closed" id="`+topicAnchor("초기 범위")+`" data-topic="초기 범위">`)
 	if start < 0 {
 		t.Fatal("closed settled-only topic is not quiet")
@@ -622,35 +622,25 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	if strings.Contains(block, `class="tbody"`) {
 		t.Errorf("quiet topic renders a body")
 	}
-	if !strings.HasPrefix(block[strings.Index(block, `<details class="settled"`):], `<details class="settled"><summary title="settled">`) {
-		t.Errorf("quiet topic's settled chip is not collapsed")
-	}
+	wantAll(t, block, `class="history-live"`)
+	wantNone(t, block, `<details class="settled"`)
 	for _, id := range []int{40, 41, 42} {
 		if !strings.Contains(block, fmt.Sprintf(`id="item-%d"`, id)) {
 			t.Errorf("collapsed settled item %d missing from the quiet topic", id)
 		}
 	}
 
-	// tool surface: its two most recent settled items are among the ten
-	// expanded board-wide (the assumed (76) rotates with them), the other six
-	// sit in a nested collapsed +6.
+	// Every converted item is retained at the head, not in the old newest-ten fold.
 	start = strings.Index(full, `<span class="tname">tool surface</span>`)
 	block = full[start:]
 	block = block[:strings.Index(block, "</section>")]
-	if !strings.Contains(block, `<details class="settled" open><summary title="settled">`) {
-		t.Errorf("expanded settled rows are not shown open")
-	}
-	more := strings.Index(block, `<details class="more"><summary title="older settled items">+6</summary>`)
-	if more < 0 {
-		t.Fatalf("nested +6 details missing: %s", block)
-	}
+	previous := -1
 	for id := 52; id < 60; id++ {
 		at := strings.Index(block, fmt.Sprintf(`id="item-%d"`, id))
-		if at < 0 {
-			t.Errorf("settled item %d missing", id)
-		} else if collapsed := id < 58; collapsed != (at > more) {
-			t.Errorf("settled item %d collapsed=%v but sits at %d against +N at %d", id, collapsed, at, more)
+		if at <= previous {
+			t.Errorf("converted item %d missing/out of order", id)
 		}
+		previous = at
 	}
 
 	embed := render(t, sampleView(LayoutEmbed))

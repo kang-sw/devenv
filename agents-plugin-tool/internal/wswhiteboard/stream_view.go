@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-// HistoryWindow is the initial topic window and each explicit older page.
+// HistoryWindow chunks the complete entry projection internally. The public
+// timeline selects anchors across all chunks and ships the rest as inert gaps.
 const HistoryWindow = 50
 
 // EntryView is an immutable entry with display-only disclosure and clock data.
