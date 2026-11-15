@@ -2,14 +2,15 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
-func TestConfigRegisteredAgentProfile(t *testing.T) {
-	s, _, key := profileServer(t)
+func registerFixtureAgentBackends(s *Server) {
 	// Real runner metadata, no process start. The extra backend exists only
 	// in this fixture's private config; production still admits Claude/Pi.
 	s.pi.agents = wsagent.NewRunner(wsagent.Options{Backends: map[string]wsagent.BackendRegistration{
@@ -17,6 +18,11 @@ func TestConfigRegisteredAgentProfile(t *testing.T) {
 		wsagent.BackendPi:     {LeadProfile: wsagent.LeadProfilePi},
 		"fixture":             {LeadProfile: "fixture-lead", PermissionModes: []string{"review"}},
 	}})
+}
+
+func TestConfigRegisteredAgentProfile(t *testing.T) {
+	s, _, key := profileServer(t)
+	registerFixtureAgentBackends(s)
 	resp := keyedCall(t, s, 1, key, "config.tune", map[string]any{
 		"key": "agent.profile.fixture-lead", "scope": "project",
 		"value": map[string]any{"backend": "fixture", "lead": true, "permission_mode": "review"},
@@ -62,4 +68,62 @@ func TestConfigRegisteredAgentProfile(t *testing.T) {
 		}
 	}
 	t.Fatal("catalog has no profile family")
+}
+
+func TestTrackerSupportRegisteredAgentBackend(t *testing.T) {
+	f := newTrackerSupportFixture(t)
+	registerFixtureAgentBackends(f.s)
+	writeGlobalProfiles(t, map[string]string{
+		"fixture-support": `{"backend":"fixture","ws_tools":["tracker.query"]}`,
+	})
+	key, rec := f.conversation(t, f.meDir, "fixture-support")
+	rec.Backend = "fixture"
+	if err := wsagent.WriteRecordForTest(f.dashDir, rec); err != nil {
+		t.Fatal(err)
+	}
+	rp, err := wsagent.ResolveProfile(f.s.configOptions(), rec.Root, rec.Profile, f.s.agentBackends()...)
+	if err != nil || rp.Definition.Backend != "fixture" {
+		t.Fatalf("registered profile = %+v, %v", rp, err)
+	}
+	entry, ok := f.s.sessions.lookup(key)
+	if !ok {
+		t.Fatal("missing support key")
+	}
+	scope, ok := f.s.trackerSupport(key, entry)
+	if !ok || scope.store != "me" || !scope.tools["tracker.query"] || scope.tools["tracker.update"] {
+		t.Fatalf("registered support scope = %+v, %v", scope, ok)
+	}
+	resp := f.call(t, "tracker.query", f.as(key, map[string]any{}))
+	if isToolError(resp) {
+		t.Fatalf("registered support query refused: %s", resp)
+	}
+}
+
+func TestPlaybookRegisteredAgentBackendProfileFallback(t *testing.T) {
+	f := newPiRecordFixture(t)
+	registerFixtureAgentBackends(f.s)
+	extension := filepath.Join(f.root, "native-extension")
+	if err := os.MkdirAll(extension, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extension, "package.json"), []byte(`{"name":"ws-pi-bridge"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGlobalProfiles(t, map[string]string{
+		"fixture-worker": `{"backend":"fixture","plugins":["native-extension"]}`,
+	})
+	// A pre-snapshot Pi record resolves its named profile as configured now,
+	// even when that profile has since moved to a registered extension backend.
+	key, err := NewAgentKeyStore().Mint(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.record(t, key, wsagent.Record{Backend: wsagent.BackendPi, Profile: "fixture-worker"})
+	rp, err := wsagent.ResolveProfile(f.s.configOptions(), f.root, "fixture-worker", f.s.agentBackends()...)
+	if err != nil || rp.Definition.Backend != "fixture" || wsagent.PiMCPOnly(wsagent.Record{Backend: wsagent.BackendPi, Root: f.root}, &rp.Definition) {
+		t.Fatalf("registered fallback profile = %+v, %v", rp, err)
+	}
+	if f.s.callerPiMCPOnly(key) {
+		t.Fatal("playbook fallback failed to resolve the registered profile's native extension")
+	}
 }
