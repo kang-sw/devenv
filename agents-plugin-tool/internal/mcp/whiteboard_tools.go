@@ -251,6 +251,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		problems []string
 		outcome  wswhiteboard.Outcome
 		render   whiteboardRender
+		root     string
 	)
 	err = s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
@@ -264,6 +265,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 			},
 			IsAbs: filepath.IsAbs,
 		}
+		root = rec.Root
 		outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, env)
 		if len(problems) > 0 {
 			return errWhiteboardRefused
@@ -277,6 +279,9 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	if s.whiteboardChanged != nil {
+		s.whiteboardChanged(s.getenv(wsstate.EnvCacheHome), root, key)
 	}
 	var sb strings.Builder
 	if len(outcome.IDs) > 0 {

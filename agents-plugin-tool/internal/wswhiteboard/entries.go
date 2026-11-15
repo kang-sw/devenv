@@ -38,8 +38,9 @@ type Entry struct {
 	At       string `json:"at"`
 	Imported bool   `json:"imported,omitempty"`
 	// TopicState is immutable machine metadata, parsed separately from Text.
-	TopicState json.RawMessage `json:"topic_state,omitempty"`
-	unknown    map[string]json.RawMessage
+	TopicState  json.RawMessage `json:"topic_state,omitempty"`
+	BoardNotice json.RawMessage `json:"board_notice,omitempty"`
+	unknown     map[string]json.RawMessage
 }
 
 // LatestAgent returns the last agent-authored log entry, never a panel or

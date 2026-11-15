@@ -17,9 +17,9 @@ import (
 // Nothing a PageSource returns may carry a session key: all of it reaches a
 // browser.
 type PageSource interface {
-	// ReadPage reads the session reg names. ok is false when the session no
-	// longer exists, as for SessionSource.ReadSession.
-	ReadPage(reg Registration) (page PageContent, ok bool)
+	// ReadPage follows SessionSource.ReadSession's three-way result: a
+	// transient error must not invalidate a page's last good content.
+	ReadPage(reg Registration) (page PageContent, ok bool, err error)
 }
 
 // LangPageSource is a PageSource whose page text follows the viewer's
@@ -28,7 +28,7 @@ type PageSource interface {
 // when the source has one; lang is a wsi18n code, empty for the default.
 type LangPageSource interface {
 	PageSource
-	ReadPageLang(reg Registration, lang string) (page PageContent, ok bool)
+	ReadPageLang(reg Registration, lang string) (page PageContent, ok bool, err error)
 }
 
 // ClosedTopicsSource is a PageSource that also renders the closed topics a

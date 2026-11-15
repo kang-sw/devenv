@@ -171,9 +171,9 @@ type Chip struct {
 // Entry is one held message.
 type Entry struct {
 	SchemaVersion int `json:"schemaVersion"`
-	// Parts holds the send's typed text; an entry merged before sends
-	// stopped merging holds one part per send, in order, each kept as its
-	// own paragraph.
+	// Parts holds the send's text, including server-serialized selections
+	// (selections.go). An older combined entry may hold several parts,
+	// each kept as its own paragraph; no new stored field is needed.
 	Parts []string `json:"parts,omitempty"`
 	// Chips holds one answer per board item.
 	Chips []Chip `json:"chips,omitempty"`
@@ -379,16 +379,19 @@ func Normalize(e Entry) (Entry, error) {
 		return normalizeCommand(e)
 	}
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Steer: e.Steer}
-	size := 0
+	size, selectionMentions := 0, 0
 	for _, p := range e.Parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
+		var count int
+		p, count = normalizeSelectionText(p)
+		selectionMentions += count
 		size += len(p)
 		out.Parts = append(out.Parts, p)
 	}
-	if len(e.Mentions) > maxMentions {
+	if len(e.Mentions)+selectionMentions > maxMentions {
 		return Entry{}, fmt.Errorf("%w: more than %d mentions", ErrInvalid, maxMentions)
 	}
 	for _, m := range e.Mentions {
@@ -497,6 +500,18 @@ func Normalize(e Entry) (Entry, error) {
 			}
 		}
 		out.ImageNums = nums
+	}
+	for _, p := range out.Parts {
+		for _, part := range ParseSelections(p) {
+			if part.Selection == nil {
+				continue
+			}
+			for _, n := range part.Selection.Images {
+				if !containsInt(out.ImageNums, n) {
+					return Entry{}, fmt.Errorf("%w: selection image %d is not attached", ErrInvalid, n)
+				}
+			}
+		}
 	}
 	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.Picks) == 0 && len(out.Consoles) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty

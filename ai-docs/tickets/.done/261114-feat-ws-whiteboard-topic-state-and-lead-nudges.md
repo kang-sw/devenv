@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: fcd1471d8572a596
 sage-review-completeness-reviewed: fcd1471d8572a596
+completed: 2026-11-15
 ---
 
 # Whiteboard: explicit topic state, execution signals, and lead nudges
@@ -941,6 +942,137 @@ when both clocks are due. Verify all existing supported delivery paths without
 claiming automatic idle-turn injection on hosts/configurations that lack it.
 Policy and technical selections are complete; implementation and executable
 verification remain pending. This ticket update activates no scheduler.
+
+### Result (0203cff95) - 2026-11-15
+
+Phase 3 is complete. The first reviewable integrated checkpoint is
+`0203cff958bac2c6b5372b697623a6d7f4bfab38`; final covered product HEAD is
+`3cddcdee9a70e1b83149ef737c35f33e091ff380` on retained branch
+`impl/develop/swarm-easel-clay`. The lead, not this worker, integrated develop
+through `5585844a7` and then exact `088ecf679e30940a2c806f569baa445b0b03a9cb`
+before final verification/review. No runtime deployment or parent integration
+is claimed by this Result.
+
+Delivered:
+
+- Scoped cumulative `wb:eta` preserves original start, run identity, owner and
+  initial estimate, validates strictly increasing totals and records every
+  extension reason/count. Immutable state history and query projections retain
+  completion accounting; legacy absence and atomic refusal remain valid.
+- Immutable raw `board_notice` receipts account for every included overdue
+  topic by stable folder/run/ETA revision, including hourly-only sends. Numeric
+  global history anchors independent hourly eligibility epochs. Restart,
+  resume and copied-board recovery produce one combined catch-up, not missed
+  intervals; copied source-reply receipts do not suppress destination delivery.
+- A daemon-owned scheduler discovers only existing parentless lead identities
+  and boards, reconciles every 30 seconds and invalidates precise timers after
+  accepted updates. It starts/stops under the daemon's single-instance lock,
+  independently of pages and MCP connections, without touching/ensuring keys,
+  creating absent boards or running git for discovery.
+- Direct identity/registration reads revalidate positive live process evidence
+  immediately before enqueue. Hosted delivery additionally requires owning open
+  runner/record agreement; stopped/closed/unknown recipients are suppressed
+  without moving notification receipts. Idle live terminal processes remain
+  eligible despite stale heartbeat or ended MCP connection. A missing terminal
+  registration, including a dashboard-disabled login, supplies no process proof
+  and therefore suppresses production rather than creating a new lifecycle API.
+- Under the existing folder transaction: reload/recover, validate, low-level
+  `PostSystem`, nonblocking `Wake`, append receipt to supplied State, commit.
+  Runner access and path resolution precede the lock. No sessionStore mutex,
+  nested board open, high-level mailbox/session call, render or delivery wait
+  is acquired underneath it. Enqueue-before-receipt failures may duplicate,
+  matching the approved preference for retry over loss.
+- Canonical ETA/nudge/copy guidance, generated manifests and byte-identical
+  wsflow/Pi copies preserve the landed ask-only-via-items rule. No board
+  display, badge, ordering, grouping or toolbar-filter work was authored;
+  owner decision 839 remains outside this Phase 3 assignment.
+
+Compatibility and decisions:
+
+- T0 remains demonstrated at the selected persistence boundary. The actual
+  unchanged historical schema-2 writer preserves committed extension/receipt
+  prefixes byte-for-byte through content/item/render/adoption/close/reopen;
+  historical recovery completes opaque pending append bytes once. New-reader
+  clone retention is covered. Typed legacy conversion remains separately lossy
+  for already-dropped unknown members; no schema/protocol bump or sidecar was
+  introduced.
+- `extend` derives implementing from its run snapshot and need not carry a
+  `value`; conflicting explicit values are malformed. Current declarations
+  remain idempotent and neither declaration repetition nor extension restarts
+  elapsed time. Every full overdue section advances included-topic coverage,
+  regardless of whether the trigger was hourly or overdue.
+- Cache paths can acquire a different canonical spelling after first creation
+  on macOS. Poke compares both paths after current canonicalization; tests cover
+  explicit absent-to-created symlink parents and the actual `/var` versus
+  `/private/var` pair. This does not change cache/key authority.
+- PID reuse is not authenticated; process exit/stop can race enqueue, and queued
+  mail retains existing transport semantics. Local-file producer fields remain
+  forgeable. Source board/timer cessation before copy remains a caller
+  obligation, not a new transfer command or lease. Unsupported/manual/off push
+  configurations retain queue/recv/armed-wait behavior, not an autonomous idle
+  injection guarantee.
+
+Verification and provenance:
+
+All commands used the local Go toolchain, `GOPROXY=off`, `GOSUMDB=off` and
+isolated cache/config fixtures. Go tests used their own bounded timeouts; no
+outer Go timeout/kill runner or unknown-process signal was used. Complete
+outputs and exits were read by the worker or its serial verification leaf.
+Local evidence directory (untracked, not a claim that raw logs travel in Git):
+`ai-docs/.plans/2026-11/15-topic-state-phase3-evidence.logs/`.
+The complete command/path/provenance index is `15-evidence-index.md` there;
+each command stem below has `.stdout`, `.stderr` and `.receipt.json`.
+
+- On final product HEAD `3cddcdee9`: `16-current-mcp` exited 0 in 40.124s,
+  with 73 top-level/55 subtest passes. Its selection covers whiteboard tools,
+  scheduler discovery/gates/deadlines/pokes, actual local queue/Wake/Watch/
+  Drain/manual recv, guidance and new transient-read coupling. Only the
+  opt-in browser-fixture exporter skipped.
+- `17-current-dashboard` exited 0 in 6.166s: seven top-level/two subtest
+  passes for scheduler lock lifecycle and transient 503/index/content retention.
+  The command package compiled with no matching selected tests.
+  `18-current-gone-probe` passed eight Node VM tests without live ports.
+- `21-current-runner` exited 0 in 6.495s: 35 top-level/23 subtest passes for
+  mail-as-turn, busy/rejoin, idle-stop/reopen, preserved Pi native activity and
+  mailbox wait/wake/stream/sweep behavior. Runner-turn fixtures use fake holders;
+  scheduler delivery fixtures use real local mailbox files and wake/watch/drain.
+- `19-current-vet` and `20-current-diff-check` exited 0 with no diagnostics.
+  This is targeted package verification, not a full dashboard suite.
+- Full whiteboard `08-integrated-whiteboard` passed 341 top-level/319 subtests
+  with no skips; `11-integrated-resource-guards` passed four guards. These ran
+  on the preceding integrated snapshot and are reused only because Git proves
+  their covered source/dependencies/generated/module inputs unchanged through
+  final HEAD. Changed MCP/dashboard/runner dependencies were freshly checked
+  above. Ordered required generators and both product-mode guidance checks,
+  plus twelve static wsflow package tests, are retained under stems 04–06.
+- Original `02-model-hourly-coverage` failed because hourly-only coverage was
+  not folded; implementation was corrected without weakening its assertion.
+  Original `07-scheduler` failed on the first precise update poke because of
+  cache canonicalization before/after directory creation; the implementation
+  repair and explicit regression pass in fresh final MCP verification. Both
+  first failures remain intact, not relabelled as passes.
+- `22-current-owned-readback.json` and `22-current-process-snapshot.txt`
+  found no matching rows across all 24 recorded command process groups. This
+  establishes recorded-group absence only, not arbitrary detached-process
+  absence or PID-start authentication. Earlier readbacks remain preserved.
+
+Independent review:
+
+- One fresh xlarge/xhigh Lite reviewer completed a single interrupted pass,
+  paused without a verdict for the required `088ecf679` integration, then
+  continued on the final candidate. It independently resolved
+  `088ecf679e30940a2c806f569baa445b0b03a9cb..3cddcdee9a70e1b83149ef737c35f33e091ff380`
+  and returned **clean**, no findings. Its sole bound write grant was exactly:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@e9caa154/review-paths/c83d1b4f-01-topic-state-phase3-lite.md`.
+- Review inspected code, Git and retained evidence only. No second reviewer or
+  second broad round ran. Fit/style and a separate fresh-reader prose audit
+  were not allocated. There are no unresolved review findings.
+
+Omitted by the authorized boundary: installed-host/real-provider acceptance,
+shared-daemon build/restart/swap/smoke/pprof, live port 29417, downloads and the
+full dashboard suite. The worker did not merge, release or reset. MAIN/lead
+retain final integration and runtime activation. All three ticket phases now
+have Results; no additional display phase is implied.
 
 ## Readiness and Verification Boundary
 
