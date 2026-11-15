@@ -264,7 +264,7 @@ fire("click", inside, 1);
 check("a click on a link inside the root", [opened, menu()], [[["docs/a.md"]], null]);
 reset();
 fire("click", pdf, 1);
-check("a click on a file no preview shows", [opened, menu()], [[], ["js.menu.copyabs"]]);
+check("a click on a file no preview shows", [opened, menu()], [[], ["js.menu.sysopen", "js.menu.copyabs"]]);
 
 // Direct and menu paths carry the exact enclosing node, not its name.
 var exactTopic = { name: "same-name-is-not-authority" }, closest = inside.closest;
@@ -278,15 +278,15 @@ inside.closest = closest;
 // The menu: the keyboard activation and the right click.
 reset();
 fire("click", html, 0);
-check("the keyboard menu of an HTML file", [opened, menu()], [[], ["js.menu.preview", "js.menu.newtab", "js.menu.copyabs"]]);
+check("the keyboard menu of an HTML file", [opened, menu()], [[], ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"]]);
 reset();
 var ctx = fire("contextmenu", notes, 1);
-check("the right-click menu of a markdown file", [menu(), ctx.prevented], [["js.menu.preview", "js.menu.copyabs"], true]);
+check("the right-click menu of a markdown file", [menu(), ctx.prevented], [["js.menu.preview", "js.menu.sysopen", "js.menu.copyabs"], true]);
 pick("js.menu.preview");
 check("the menu's preview", opened, [["/away/notes.md", { out: true }]]);
 reset();
 fire("contextmenu", shot, 1);
-check("the menu of an image link keeps its items", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.native", "js.menu.copyabs"]);
+check("the menu of an image link keeps its items", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"]);
 pick("js.menu.newtab");
 check("an image's new tab is the image route", [tabs.map(function (t) { return [t.url, t.features]; }), posts], [[["http://127.0.0.1:1/s/rid1/image?path=%2Faway%2Fshot.png", "noopener"]], []]);
 reset();
@@ -313,7 +313,7 @@ check("no toast", toasts, []);
 // is only a path the daemon then checks.
 reset();
 openLinkMenu(frameLink({ kind: "file", href: "", abs: "/away/site/page.html" }), 1, 2);
-check("a framed link's menu", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.copyabs"]);
+check("a framed link's menu", menu(), ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"]);
 reset();
 openLinkMenu(frameLink({ kind: "file", href: "/s/rid1/file?path=docs%2Fa.md", rel: "docs/a.md", abs: "/root/docs/a.md" }), 1, 2);
 check("a framed link inside the root", menu()[0], "js.menu.preview");
@@ -340,7 +340,70 @@ root.attrs["data-sysopen"] = "";
 cardBoard = null;
 reset();
 fire("click", html, 1);
-check("a click with no card board", [opened, menu()], [[], ["js.menu.copyabs"]]);
+check("a click with no card board", [opened, menu()], [[], ["js.menu.sysopen", "js.menu.copyabs"]]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestLinkMenuOpensWithSystem pins the link menu's "open with system" item
+// (js.menu.sysopen) on a page marked data-sysopen: a url link goes to the
+// system-open route (the default browser), and a file or folder link, an
+// .app bundle or an outside image included, goes to fs/act's open with its
+// own parent folder as the root and its name as the path, so the host's
+// default handler (hostFileCommand) gets the path itself, never a file view
+// URL. Any other page lists no such item and posts nothing. hostPath, the
+// split, is pinned for POSIX and drive-letter spellings.
+func TestLinkMenuOpensWithSystem(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	from, to := "  // linkOpens reports whether this page can open", "  // An image outside the session root (img[data-out])"
+	i, j := strings.Index(js, from), strings.Index(js, to)
+	if i < 0 || j < i {
+		t.Fatalf("dashboard.js lacks the span from %q to %q", from, to)
+	}
+	runNode(t, "open with system", outsideDOM+`
+var doc = document, rid = "rid1", cardBoard = {}, lmenu = null, lmenuFrom = null;
+var posts = [], toasts = [];
+var window = { innerWidth: 800, innerHeight: 600, WsPreview: { takes: function () { return true; }, open: function () {} }, open: function () { return null; } };
+function post(route, body, done) { posts.push([route, body]); done(true); }
+function toast(s) { toasts.push(s); }
+function copyText() {}
+function closeLinkMenu() { lmenu = null; lmenuFrom = null; }
+`+js[i:j]+`
+function link(attrs, href) { var a = new El("a"); Object.keys(attrs).forEach(function (k) { a.attrs[k] = attrs[k]; }); if (href) { a.attrs.href = href; a.href = "http://127.0.0.1:1" + href; } return a; }
+function menu() { return lmenu ? lmenu.children.map(function (b) { return b.textContent; }) : null; }
+function pick(label) { var b = lmenu.children.filter(function (b) { return b.textContent === label; })[0]; if (!b) { bad.push("no item " + label + " in " + JSON.stringify(menu())); return; } b.on.click({ stopPropagation: function () {} }); }
+function sysopen(a) { posts = []; toasts = []; lmenu = null; openLinkMenu(a, 1, 2); pick("js.menu.sysopen"); return [posts, toasts]; }
+var app = link({ "data-wl": "file", "data-rel": "build/Tool.app", "data-abs": "/root/build/Tool.app" }, "/s/rid1/file?path=build%2FTool.app");
+var away = link({ "data-wl": "file", "data-abs": "/away/run.command" });
+var shot = link({ "data-wl": "file", "data-abs": "/away/shot.png", "data-img": "", "data-out": "" }, "/s/rid1/image?path=%2Faway%2Fshot.png");
+var win = link({ "data-wl": "file", "data-rel": "a b.txt", "data-abs": "C:\\p\\a b.txt" }, "/s/rid1/file?path=a+b.txt");
+var url = link({ "data-wl": "url" }, "/x");
+url.attrs.href = "https://example.com/"; url.href = "https://example.com/";
+
+root.attrs["data-sysopen"] = "";
+check("an .app bundle inside the root", sysopen(app), [[["fs/act", { path: "Tool.app", action: "open", root: "/root/build" }]], ["js.toast.openednative"]]);
+check("a file outside the root", sysopen(away), [[["fs/act", { path: "run.command", action: "open", root: "/away" }]], ["js.toast.openednative"]]);
+check("an outside image", sysopen(shot), [[["fs/act", { path: "shot.png", action: "open", root: "/away" }]], ["js.toast.openednative"]]);
+check("a Windows path", sysopen(win), [[["fs/act", { path: "a b.txt", action: "open", root: "C:\\p" }]], ["js.toast.openednative"]]);
+check("a url link", sysopen(url), [[["open", { target: "https://example.com/" }]], ["js.toast.opened"]]);
+lmenu = null; openLinkMenu(shot, 1, 2);
+check("one open item per link", menu().filter(function (l) { return l === "js.menu.sysopen"; }).length, 1);
+
+delete root.attrs["data-sysopen"];
+[app, away, url].forEach(function (a) {
+  posts = []; lmenu = null; openLinkMenu(a, 1, 2);
+  check("no open item off the daemon's machine", [(menu() || []).indexOf("js.menu.sysopen"), posts], [-1, []]);
+});
+
+[["/root/build/Tool.app", { dir: "/root/build", name: "Tool.app" }], ["/a", { dir: "/", name: "a" }], ["/", { dir: "/", name: "" }],
+ ["/a\\b/c\\d", { dir: "/a\\b", name: "c\\d" }], ["C:\\x\\y.app", { dir: "C:\\x", name: "y.app" }], ["C:\\y", { dir: "C:\\", name: "y" }],
+ ["D:/a/b", { dir: "D:/a", name: "b" }], ["rel/x", null], ["", null], [null, null], ["\\\\srv\\share\\x", null]].forEach(function (c) {
+  check("hostPath(" + JSON.stringify(c[0]) + ")", hostPath(c[0]), c[1]);
+});
 process.stdout.write(bad.join("\n"));
 `)
 }
