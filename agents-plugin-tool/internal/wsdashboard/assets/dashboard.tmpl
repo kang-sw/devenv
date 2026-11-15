@@ -298,7 +298,7 @@ as "console xN" and the page's URL. */}}
 
 {{/* Selection source and memo stay plain escaped text; only the parser's
 image-reference tail owns thumbnails. A failed group remains wholly literal. */}}
-{{define "selection-content"}}{{range .}}{{with .Selection}}<section class="selection-bundle"><div class="hchips">{{range .Mentions}}<span class="achip mchip"{{with .Entry}} data-wb-entry="{{.}}"{{end}} title="{{.Text}}"><b>[{{.Topic}}]{{with .ID}} ({{.}}){{end}}</b><span class="anote">{{.Text}}</span></span>{{end}}</div><div class="selection-comment">{{.Comment}}</div>{{with .Images}}{{template "thumbs" .}}{{end}}</section>{{else}}{{if .Plain}}{{.Text}}{{else}}{{marked .Text}}{{end}}{{end}}{{end}}{{end}}
+{{define "selection-content"}}{{range .}}{{with .Selection}}<section class="selection-bundle"><div class="selection-quotes">{{range .Mentions}}<p class="selection-quote"{{with .Entry}} data-wb-entry="{{.}}"{{end}}><b class="selection-topic">[{{.Topic}}]{{with .ID}} ({{.}}){{end}}</b> <span class="anote">{{.Text}}</span></p>{{end}}</div><div class="selection-comment">{{.Comment}}</div>{{with .Images}}{{template "thumbs" .}}{{end}}</section>{{else}}{{if .Plain}}{{.Text}}{{else}}{{marked .Text}}{{end}}{{end}}{{end}}{{end}}
 
 {{define "thumbs"}}<div class="thumbs">{{range .}}{{if .Src}}<a class="thumb" href="{{.Src}}" target="_blank" rel="noopener noreferrer" title="{{.Path}}"><img src="{{.Src}}" alt="{{.Name}}" loading="lazy">{{with .Num}}<span class="tnum">#{{.}}</span>{{end}}</a>{{else if .Path}}<span class="ipath">{{if .Num}}Image #{{.Num}}: {{.Path}}{{else}}[image: {{.Path}}]{{end}}</span>{{else}}<span class="ipath">[Image #{{.Num}}]</span>{{end}}{{end}}</div>{{end}}
 
