@@ -73,7 +73,7 @@
   var pins = null, col = null, colOn = false, boardw = 0, zone = null;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
-  var filterValues = ["all", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed"];
+  var filterValues = ["all", "researching", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed", "cards"];
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -180,10 +180,15 @@
     new window.ResizeObserver(update).observe(face);
     update();
   }
+  function filterMark(value) {
+    var n = mk("span", value === "cards" ? "board-state-icon" : "board-state-dot");
+    if (value === "cards") n.innerHTML = '<svg class="li" aria-hidden="true"><use href="#i-hammer"/></svg>';
+    return n;
+  }
   function buildStateFilter() {
     var root = mk("div", "board-state-filter"), inline = mk("div", "board-state-inline");
     var trigger = mk("button", "board-action board-state-trigger"), pop = mk("div", "tpop board-state-pop");
-    var labels = [wsT("js.board.filter.all"), wsT("js.board.filter.discuss"), wsT("js.board.filter.wait"), wsT("js.board.filter.implement"), wsT("js.board.filter.confirm"), wsT("js.board.filter.closed")];
+    var labels = [wsT("js.board.filter.all"), wsT("js.board.filter.researching"), wsT("js.board.filter.discuss"), wsT("js.board.filter.wait"), wsT("js.board.filter.implement"), wsT("js.board.filter.confirm"), wsT("js.board.filter.closed"), wsT("js.board.filter.cards")];
     var label = wsT("js.board.filter.label");
     stateFilter = opt.load(opt.key + ".state-filter");
     if (filterValues.indexOf(stateFilter) < 0) stateFilter = "all";
@@ -208,7 +213,7 @@
         b.setAttribute("role", "radio");
         b.setAttribute("data-filter", value);
         if (g) b.appendChild(mk("span", "board-state-ring"));
-        b.appendChild(mk("span", "board-state-dot"));
+        b.appendChild(filterMark(value));
         b.appendChild(mk("span", "board-state-label", labels[i]));
         b.appendChild(mk("span", "board-state-count"));
         b.addEventListener("click", function () { selectFilter(value, b, !!g); });
@@ -295,13 +300,19 @@
     [board, pins].forEach(function (box) {
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (n) {
         var closed = n.classList.contains("closed"), state = n.getAttribute("data-state"), name = n.getAttribute("data-topic");
-        filtered(n, stateFilter !== "all" && (closed ? stateFilter !== "closed" : stateFilter === "closed" || stateFilter !== state));
+        filtered(n, stateFilter === "cards" || stateFilter !== "all" && (closed ? stateFilter !== "closed" : stateFilter === "closed" || stateFilter !== state));
         if (seen.has(name)) return;
         seen.add(name);
         totals.all++;
         if (closed) totals.closed++;
-        else if (filterValues.indexOf(state) > 0 && state !== "closed") totals[state]++;
+        else if (filterValues.indexOf(state) > 0 && state !== "closed" && state !== "cards") totals[state]++;
       });
+    });
+    // Registry entries are framework roots, never panels or logs within a topic.
+    // Count identities rather than paths; pinning changes placement, not membership.
+    cards.forEach(function (c) {
+      totals.cards++;
+      filtered(c.el, stateFilter !== "all" && stateFilter !== "cards");
     });
     var more = board.querySelector("button.closed-more[data-closed-more]");
     if (more) {
@@ -321,7 +332,7 @@
     var i = filterValues.indexOf(stateFilter), trigger = stateUI.trigger;
     trigger.setAttribute("data-filter", stateFilter);
     trigger.innerHTML = licon("list-filter");
-    trigger.appendChild(mk("span", "board-state-dot"));
+    trigger.appendChild(filterMark(stateFilter));
     trigger.appendChild(mk("span", "board-state-label", stateUI.labels[i]));
     trigger.appendChild(mk("span", "board-state-count", String(totals[stateFilter])));
     trigger.appendChild(mk("span", "term-arrow", "▾"));
@@ -808,7 +819,7 @@
     cards.splice(i, 1);
     if (this.k.close) this.k.close(this);
     if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
-    if (this.pinned) arrange(null);
+    if (this.pinned) arrange(null); else countTopics();
     persist();
   };
   // The handle under the body drags its height; the pointer is captured, so

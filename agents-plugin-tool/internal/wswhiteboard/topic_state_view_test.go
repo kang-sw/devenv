@@ -33,8 +33,37 @@ func stateViewOutputs(t *testing.T, view View) []string {
 	return outputs
 }
 
+func TestTopicStateViewResearchingProjection(t *testing.T) {
+	s := stateBoard(t)
+	stateApply(t, s, stateCommand(StateResearching, `owner="investigator &quot;&lt;&amp;&gt;&#39;" eta_minutes="7"`), stateNow)
+	for name, layout := range layouts() {
+		view := BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})
+		if len(view.Topics) != 1 || !reflect.DeepEqual(view.Topics[0].State, s.TopicStates()["Work"].State) || view.Topics[0].State.Run != nil || view.Topics[0].StateDiagnostic != nil {
+			t.Fatalf("%s: research projection: %+v", name, view.Topics)
+		}
+	}
+	stateApply(t, s, `<wb:topic name="Work"><wb:close result="Done"/></wb:topic>`, stateNow)
+	for _, layout := range layouts() {
+		view := BuildView(s, ViewInput{Layout: layout})
+		if len(view.Topics) != 1 || !view.Topics[0].Closed || view.Topics[0].State != nil {
+			t.Fatalf("closed research projection: %+v", view.Topics)
+		}
+		for _, out := range stateViewOutputs(t, view) {
+			wantNone(t, stateTopicTag(t, out, "Work"), "data-state")
+			wantNone(t, out, `<span class="topic-state">`, `<span class="state-estimate">`)
+		}
+	}
+	stateApply(t, s, `<wb:topic name="Work"><wb:log>Reopened</wb:log></wb:topic>`, stateNow.Add(time.Hour))
+	for _, layout := range layouts() {
+		for _, out := range stateViewOutputs(t, BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})) {
+			wantNone(t, stateTopicTag(t, out, "Work"), "data-state")
+			wantNone(t, out, `<span class="topic-state">`, `<span class="state-estimate">`)
+		}
+	}
+}
+
 func TestTopicStateViewOperationalStates(t *testing.T) {
-	for _, value := range topicStateValues {
+	for _, value := range []string{StateDiscussing, StateWaiting, StateResearching, StateImplementing, StateAwaitingConfirmation} {
 		t.Run(value, func(t *testing.T) {
 			s := stateBoard(t)
 			attrs := ""
@@ -59,6 +88,7 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 							StateWaiting:              "Waiting",
 							StateDiscussing:           "Discussing",
 							StateImplementing:         "Implementing",
+							StateResearching:          "Researching",
 						}
 						if lang == "ko" {
 							labels = map[string]string{
@@ -66,10 +96,11 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 								StateWaiting:              "대기",
 								StateDiscussing:           "논의 중",
 								StateImplementing:         "구현 중",
+								StateResearching:          "연구 중",
 							}
 						}
-						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wait", StateDiscussing: "discuss", StateImplementing: "impl"}
-						badge := `<span class="topic-state"><span class="stb ` + classes[value] + `"><span class="d" aria-hidden="true"></span>` + labels[value]
+						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wb-state-wait", StateDiscussing: "discuss", StateImplementing: "impl", StateResearching: "research"}
+						badge := `<span class="topic-state"><span class="stb ` + classes[value] + `"><span class="wb-state-dot" aria-hidden="true"></span>` + labels[value]
 						if value == StateImplementing {
 							badge += ` · <span class="own">executor &#34;&lt;&amp;&gt;&#39;</span>`
 						}
@@ -89,6 +120,64 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTopicStateViewResearchingBadgeMetadata(t *testing.T) {
+	s := stateBoard(t)
+	// Successive declarations replace metadata; omission clears each field
+	// independently. Every server layout and live-region projection agrees.
+	for _, attrs := range []string{
+		`owner="&lt;img src=x onerror=attack()&gt;" eta_minutes="7"`,
+		`eta_minutes="11"`, `owner="next investigator"`, "",
+	} {
+		stateApply(t, s, stateCommand(StateResearching, attrs), stateNow)
+		current := s.TopicStates()["Work"].State
+		for _, lang := range []string{"en", "ko"} {
+			for name, layout := range layouts() {
+				view := BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})
+				view.Lang = lang
+				for _, out := range stateViewOutputs(t, view) {
+					tag := stateTopicTag(t, out, "Work")
+					wantAll(t, tag, `data-state="researching"`)
+					wantNone(t, tag, "data-state-run", "data-state-started-at", "data-state-deadline-at")
+					wantNone(t, out, `<span class="eta`, `<span class="own"><img`)
+					label, estimate := "Researching", fmt.Sprintf("Estimate %d min", current.ETAMinutes)
+					if lang == "ko" {
+						label, estimate = "연구 중", fmt.Sprintf("예상 %d분", current.ETAMinutes)
+					}
+					wantAll(t, out, `<span class="stb research"><span class="wb-state-dot" aria-hidden="true"></span>`+label)
+					if current.Owner == "" {
+						wantNone(t, tag, "data-state-owner")
+						wantNone(t, out, `<span class="own">`)
+					} else {
+						owner := current.Owner
+						if strings.HasPrefix(owner, "<img") {
+							owner = "&lt;img src=x onerror=attack()&gt;"
+						}
+						wantAll(t, tag, `data-state-owner="`+owner+`"`)
+						wantAll(t, out, ` · <span class="own">`+owner+`</span>`)
+					}
+					if current.ETAMinutes == 0 {
+						wantNone(t, tag, "data-state-eta-minutes")
+						wantNone(t, out, `<span class="state-estimate">`)
+					} else {
+						wantAll(t, tag, fmt.Sprintf(`data-state-eta-minutes="%d"`, current.ETAMinutes))
+						wantAll(t, out, `<span class="state-estimate">`+estimate+`</span>`)
+					}
+					if current.Run != nil {
+						t.Fatalf("%s: research acquired a run", name)
+					}
+				}
+			}
+		}
+	}
+	stateApply(t, s, stateCommand(StateImplementing, `owner="executor" eta_minutes="3"`), stateNow.Add(time.Hour))
+	for _, layout := range layouts() {
+		for _, out := range stateViewOutputs(t, BuildView(s, ViewInput{Layout: layout, ReplyID: "r"})) {
+			wantNone(t, out, `<span class="state-estimate">`, `<span class="stb research">`)
+			wantAll(t, stateTopicTag(t, out, "Work"), `data-state-started-at="`+s.TopicStates()["Work"].State.Run.StartedAt+`"`)
+		}
 	}
 }
 
@@ -131,7 +220,11 @@ func TestTopicStateViewCloseResetAndClosedWindows(t *testing.T) {
 	s := &State{}
 	for i := 0; i <= ClosedCap; i++ {
 		name := fmt.Sprintf("closed-%d", i)
-		stateApply(t, s, `<wb:topic name="`+name+`"><wb:log>Work</wb:log><wb:state value="implementing" owner="executor" eta_minutes="7"/><wb:close result="Done"/></wb:topic>`, stateNow)
+		value := StateImplementing
+		if i%2 == 0 {
+			value = StateResearching
+		}
+		stateApply(t, s, `<wb:topic name="`+name+`"><wb:log>Work</wb:log><wb:state value="`+value+`" owner="executor" eta_minutes="7"/><wb:close result="Done"/></wb:topic>`, stateNow)
 	}
 	view := BuildView(s, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	if len(view.Topics) != ClosedCap || len(view.DeferredTopics) != 1 || view.ClosedMore != 1 {

@@ -292,8 +292,9 @@ func SubsetScript(lang, prefix string) template.JS {
 	return filteredScript(lang, func(k string) bool { return strings.HasPrefix(k, prefix) })
 }
 
-// ScriptExcept is Script without client keys starting with any supplied prefix,
-// for a page that never loads the scripts those keys belong to.
+// ScriptExcept is Script without the client keys that start with any prefix,
+// for a page that never loads the scripts those keys belong to, so their
+// text neither weighs on the page nor shows in its source.
 func ScriptExcept(lang string, prefixes ...string) template.JS {
 	return filteredScript(lang, func(k string) bool {
 		for _, prefix := range prefixes {

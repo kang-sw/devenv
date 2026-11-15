@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>Worktree page mockup</title>
+<style>
+:root{--bg:#f3f3ef;--card:#fff;--fg:#1f2328;--mut:#6b6f76;--line:#e4e4de;--muted:#ecece6;--pri:#2457d6;--warn:#c27a10;--mono:"SF Mono",ui-monospace,Menlo,monospace;--sans:-apple-system,"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:13px var(--sans);width:1440px;height:900px;overflow:hidden;position:relative}
+.top{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px 0 316px}
+.top .back{color:var(--mut);font-size:16px}
+.top .ws{font:12.5px var(--mono);color:var(--mut)}
+.top .br{display:flex;align-items:center;gap:6px;font:700 13px var(--mono)}
+.top .path{font:12px var(--mono);color:var(--mut)}
+.pill{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--mut)}
+.pill.loc{border-style:dashed}
+.top .r{margin-left:auto;display:flex;gap:6px}
+.ibtn{width:34px;height:34px;border-radius:10px;background:var(--card);box-shadow:0 1px 2px #0001;display:grid;place-items:center;color:var(--mut)}
+/* rail */
+.rail{position:absolute;left:12px;top:12px;bottom:12px;width:290px;background:var(--card);border-radius:14px;box-shadow:0 2px 10px #0000000f;overflow:hidden}
+.rail .hd{display:flex;align-items:center;padding:14px 14px 10px;font-weight:800;color:var(--mut)}
+.rail .hd .n{margin-left:auto;background:var(--muted);border-radius:999px;padding:1px 8px;font-size:11.5px}
+.wsbar{background:#2b2f36;color:#fff;padding:9px 14px;display:flex;align-items:center;gap:8px;font-weight:700}
+.wsbar .pp{font:11px var(--mono);color:#b9bec7;font-weight:400}
+.rwt{padding:8px 10px 4px 14px}
+.wthd{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;font:700 12.5px var(--mono);cursor:pointer}
+.wthd .wf{font:400 11.5px var(--sans);color:var(--mut)}
+.wthd .d{margin-left:auto;font:11px var(--mono);color:var(--mut)}
+.wthd.on{background:color-mix(in srgb,var(--pri) 12%,transparent);box-shadow:inset 0 0 0 1.5px var(--pri)}
+.wthd.hov{background:var(--muted)}
+.wthd.dim{color:var(--mut)}
+.ses{margin:2px 0 2px 22px;border-left:2px solid var(--line);padding:4px 0 4px 10px}
+.ses .s{display:flex;gap:7px;align-items:center;padding:5px 6px;border-radius:7px;font-size:12px}
+.ses .s b{font:600 12px var(--mono);color:var(--pri)}
+.av{width:17px;height:17px;border-radius:4px;display:grid;place-items:center;color:#fff;font:700 10px var(--sans)}
+.ses .t{margin-left:auto;font:11px var(--mono);color:var(--mut)}
+/* main */
+.main{position:absolute;left:316px;right:12px;top:56px;bottom:12px;display:grid;grid-template-columns:400px 1fr;gap:12px}
+.panel{background:var(--card);border-radius:12px;box-shadow:0 1px 3px #0000000d;overflow:hidden;display:flex;flex-direction:column}
+.chead{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.chead .tab{font-weight:700;display:flex;gap:6px;align-items:center}
+.chead .tab.on{color:var(--fg)}
+.chead .note{margin-left:auto;font-size:11px;color:var(--mut)}
+.frow{display:flex;gap:6px;align-items:center;padding:8px 10px}
+.froot{display:flex;align-items:center;gap:6px;background:var(--muted);border-radius:7px;padding:4px 8px;font:700 11.5px var(--mono)}
+.crumb{flex:1;background:var(--muted);border-radius:7px;padding:4px 8px;font:11.5px var(--mono);color:var(--mut)}
+.srch{margin:0 10px 6px;background:var(--muted);border-radius:7px;padding:5px 8px;color:var(--mut);font-size:12px}
+.tree{flex:1;padding:4px 6px;font:12px var(--mono);overflow:hidden}
+.tree div{padding:4px 8px;border-radius:6px;display:flex;gap:7px;align-items:center;white-space:nowrap}
+.tree .sel{background:color-mix(in srgb,var(--pri) 12%,transparent)}
+.tree .g{margin-left:auto;font-size:10.5px;color:var(--warn);font-weight:700}
+.tree .ind{padding-left:24px}.tree .ind2{padding-left:40px}
+.ffoot{border-top:1px solid var(--line);padding:6px 12px;font-size:11px;color:var(--mut);display:flex;justify-content:space-between}
+.bcol{display:flex;flex-direction:column;gap:10px;min-width:0}
+.tbar{background:var(--card);border-radius:12px;padding:7px;display:flex;gap:6px;box-shadow:0 1px 3px #0000000d}
+.tbtn{display:flex;align-items:center;gap:6px;background:var(--muted);border-radius:8px;padding:6px 11px;font-weight:700;font-size:12.5px}
+.tbar .sp{margin-left:auto;font-size:11px;color:var(--mut);align-self:center;padding-right:6px}
+.cards{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 250px;gap:10px;flex:1;min-height:0}
+.card{background:var(--card);border-radius:12px;box-shadow:0 1px 3px #0000000d;display:flex;flex-direction:column;overflow:hidden}
+.card .h{display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--line);font-weight:700}
+.card .h .k{font-weight:400;color:var(--mut);font-size:11.5px}
+.card .h .ic{margin-left:auto;display:flex;gap:9px;color:var(--mut);font-size:12px}
+.pin{color:var(--pri)!important}
+.term{flex:1;background:#16181d;color:#d6d9df;font:12px/1.55 var(--mono);padding:10px 12px;white-space:pre}
+.term .p{color:#7fc1ff}.term .b{color:#e6b450}.term .ok{color:#7ee787}
+.pv{flex:1;font:12px/1.6 var(--mono);padding:8px 0;white-space:pre;overflow:hidden}
+.pv .ln{display:inline-block;width:38px;text-align:right;color:#aab;padding-right:10px}
+.span2{grid-column:1 / span 2}
+/* callouts */
+.co{position:absolute;width:24px;height:24px;border-radius:50%;background:#e8590c;color:#fff;font:800 13px var(--sans);display:grid;place-items:center;box-shadow:0 0 0 3px #fff}
+.legend{position:absolute;left:332px;bottom:52px;background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:12px;line-height:1.7;box-shadow:0 4px 18px #0000001a;width:360px}
+.legend b{color:#e8590c}
+</style></head><body>
+
+<aside class="rail">
+  <div class="hd">세션 <span class="n">실시간 2</span></div>
+  <div class="wsbar">▣ devenv <span class="pp">/Users/kang-sw/devenv</span></div>
+  <div class="rwt">
+    <div class="wthd on">⑂ develop <span class="wf">· 루트</span><span class="d">±2</span></div>
+    <div class="ses">
+      <div class="s"><span class="av" style="background:#d96b46">C</span><b>caretaker-aerosol-pod</b><span class="t">15:20</span></div>
+      <div class="s"><span class="av" style="background:#111">P</span><b>quiet-heron-ledger</b><span class="t">15:02</span></div>
+    </div>
+  </div>
+  <div class="rwt">
+    <div class="wthd hov">⑂ exec5/wt-prep <span class="wf">· dynasty</span><span class="d">±1</span></div>
+    <div class="ses"><div class="s"><span class="av" style="background:#111">P</span><b>populator-pi</b><span class="t">15:21</span></div></div>
+  </div>
+  <div class="rwt">
+    <div class="wthd dim">⑂ feature/check <span class="wf">· manual</span><span class="d">±0</span></div>
+  </div>
+</aside>
+
+<div class="top">
+  <span class="back">‹</span><span class="ws">devenv</span>
+  <span class="br">⑂ develop</span><span class="path">/Users/kang-sw/devenv</span>
+  <span class="pill">워크트리</span><span class="pill loc">이 PC에서만</span>
+  <div class="r"><span class="ibtn">⌕</span><span class="ibtn">≡</span></div>
+</div>
+
+<div class="main">
+  <section class="panel">
+    <div class="chead"><span class="tab on">🗀 파일</span><span class="note">대화 · 에이전트 패널 없음</span></div>
+    <div class="frow"><span class="froot">⑂ develop ▾</span><span class="crumb">agents-plugin-tool / internal / wsdashboard</span></div>
+    <div class="srch">⌕ 이 창에서 검색</div>
+    <div class="tree">
+      <div>▾ agents-plugin-tool</div>
+      <div class="ind">▾ internal</div>
+      <div class="ind2">▸ mcp</div>
+      <div class="ind2">▾ wsdashboard</div>
+      <div class="ind2" style="padding-left:56px">▸ assets</div>
+      <div class="ind2 sel" style="padding-left:56px">⟨⟩ pages.go <span class="g">M</span></div>
+      <div class="ind2" style="padding-left:56px">⟨⟩ local_browse.go</div>
+      <div class="ind2" style="padding-left:56px">⟨⟩ terminal_routes.go <span class="g">M</span></div>
+      <div class="ind2" style="padding-left:56px">⟨⟩ rail.go</div>
+      <div class="ind2">▸ wswhiteboard</div>
+      <div class="ind">▸ cmd</div>
+      <div>▸ agents-plugin</div>
+      <div>▸ ai-docs</div>
+      <div>⟨⟩ AGENTS.md</div>
+      <div>⟨⟩ install.sh</div>
+    </div>
+    <div class="ffoot"><span>읽기 전용 · 실시간</span><span>Space 빠른 보기</span></div>
+  </section>
+
+  <div class="bcol">
+    <div class="tbar">
+      <span class="tbtn">▣ 새 터미널 ▾</span><span class="tbtn">🗀 새 탐색기</span><span class="tbtn">⌕ 검색</span>
+      <span class="sp">카드 · 고정은 세션 화면과 같은 방식, 워크트리별로 저장</span>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <div class="h">▣ 터미널 1 <span class="k">~/devenv</span><span class="ic"><span class="pin">📌</span><span>⤢</span><span>✕</span></span></div>
+        <div class="term"><span class="p">~/devenv</span> <span class="b">(develop)</span> $ git status -sb
+## develop...origin/develop [ahead 30]
+ M agents-plugin-tool/internal/wsdashboard/pages.go
+ M agents-plugin-tool/internal/wsdashboard/terminal_routes.go
+<span class="p">~/devenv</span> <span class="b">(develop)</span> $ go test ./internal/wsdashboard/ -run Local
+<span class="ok">ok</span>  github.com/kang-sw/devenv/internal/wsdashboard  0.912s
+<span class="p">~/devenv</span> <span class="b">(develop)</span> $ ▌</div>
+      </div>
+      <div class="card">
+        <div class="h">⟨⟩ pages.go <span class="k">미리보기 · 읽기 전용</span><span class="ic"><span>📌</span><span>⤢</span><span>✕</span></span></div>
+        <div class="pv"><span class="ln">1130</span>// handleIndex serves the shell or its frame.
+<span class="ln">1131</span>func (d *Daemon) handleIndex(w http.ResponseWriter,
+<span class="ln">1132</span>    r *http.Request) {
+<span class="ln">1133</span>    if r.URL.Path != "/" {
+<span class="ln">1134</span>        http.NotFound(w, r)
+<span class="ln">1135</span>        return
+<span class="ln">1136</span>    }
+<span class="ln">1137</span>    if !d.frameRequest(r) {
+<span class="ln">1138</span>        d.serveShell(w, r)
+<span class="ln">1139</span>        return
+<span class="ln">1140</span>    }</div>
+      </div>
+      <div class="card span2">
+        <div class="h">▣ 터미널 2 <span class="k">~/devenv · go test</span><span class="ic"><span>📌</span><span>⤢</span><span>✕</span></span></div>
+        <div class="term"><span class="p">~/devenv</span> <span class="b">(develop)</span> $ go test ./internal/wsdashboard/ -run 'Terminal|Anchor'
+<span class="ok">ok</span>  github.com/kang-sw/devenv/internal/wsdashboard  1.204s
+<span class="p">~/devenv</span> <span class="b">(develop)</span> $ ▌</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<span class="co" style="left:2px;top:94px">1</span>
+<span class="co" style="left:782px;top:14px">2</span>
+<span class="co" style="left:297px;top:150px">3</span>
+<span class="co" style="left:710px;top:150px">4</span>
+
+<div class="legend">
+<b>1</b> 사이드바의 워크트리 이름(브랜치 헤더)을 클릭하면 이 페이지가 열림. 선택된 행이 강조됨.<br>
+<b>2</b> 헤더: 워크스페이스 · 브랜치 · 경로. 세션 이름·하네스 칩 대신 "워크트리" 표시.<br>
+<b>3</b> 왼쪽 열: 파일 탐색기만 남김 (대화 탭 · 입력창 · 에이전트 패널 없음). 루트 = 이 워크트리.<br>
+<b>4</b> 카드 영역: 세션 화면과 같은 카드 · 고정. 새 터미널은 이 워크트리 경로에서 시작, 목록도 이 경로의 터미널만.
+</div>
+</body></html>

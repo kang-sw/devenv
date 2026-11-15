@@ -33,6 +33,10 @@
     // a row's rename is open, and while a layout change posts (railGate),
     // and lands when that ends (railRelease).
     if (name === "rail" && railGate && railGate.offer({ hash: hash, html: html })) return;
+    if (name === "rail" && railHoverUpdates && railHoverUpdates(html)) {
+      el.setAttribute("data-h", hash);
+      return;
+    }
     if (name === "head") {
       if (labelEditing()) { headHeld = { hash: hash, html: html }; return; }
       headHeld = null;
@@ -94,6 +98,7 @@
     if (board) {
       indexFrames();
       if (window.wbForm) window.wbForm();
+      bindCapsuleNotes();
       mermaid(ins);
       syncChips();
       // The notes came back with their markers (writeAnswers); their image
@@ -281,7 +286,7 @@
       if (!window.WsOverview || !window.wbHistory) return;
       window.WsOverview.mount({
       rid: rid, board: cardBoard, toolbar: window.WsCards.toolbar(), pins: window.WsCards.pinList(),
-      keep: window.wbHistory.keep, place: window.WsCards.overview, toast: toast, rail: railKey,
+      keep: window.wbHistory.place, place: window.WsCards.overview, toast: toast, rail: railKey,
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       frames: function () { return boardRead(frameHeights); },
       restoreFrames: function (h) { var kept = boardKeep(); boardBoxes().forEach(function (b) { setFrameHeights(b, h); }); if (kept) kept.h.apply(); },

@@ -232,3 +232,27 @@ k.jump(p,{block:'start'});p.y+=80;advance(16);check('pinned correction',bpins.sc
 check('jumps do not add permanent input hooks',(winOn.keydown||[]).length,nHooks+2);
 `)
 }
+
+// Overview's enter, pick and exit place a card at an offset right away. The
+// click that asked for it already started the user-scroll cooldown, so place
+// must write through it (keep would only record a capture), hold the card
+// while late layout above it settles, and yield to the user's next scroll.
+func TestViewKitPlaceUnderNode(t *testing.T) {
+	runViewKit(t, `
+win.matchMedia = function () { return { matches: false }; };
+El.prototype.scrollTo = function (opt) { this.scrollTop = opt.top; };
+var k = viewKit(win), a = topic(board, 'a', bcol, 900), b = topic(board, 'b', bcol, 2400);
+k.keep(a, { capture: false });
+bcol.fire('pointerdown');
+k.place(b, { offset: 30 });
+check('place writes through the click cooldown', bcol.scrollTop, 2400 - 30);
+bcol.fire('scroll'); b.y += 176; advance(48);
+check('late layout above is followed', bcol.scrollTop, 2576 - 30);
+advance(400);
+check('it settles and releases the scroller', k.keeping(bcol), null);
+var h = k.keep(b); b.y += 40; writes = 0; h.apply();
+check('a capture after it settles writes again', writes, 1);
+k.place(a, { offset: 0 }); var held = bcol.scrollTop; bcol.fire('wheel'); a.y += 60; advance(48);
+check('the user scroll ends the hold', [bcol.scrollTop, k.keeping(bcol)], [held, null]);
+`)
+}

@@ -155,7 +155,10 @@
   // it; beyond SHUT_CAP the least recently folded is dropped.
   var SHUT_KEY = "ws.dashboard.panelshut", SHUT_CAP = 200, shutSet = null;
   function isPanel(d) { return d.classList.contains("entry-panel") && d.hasAttribute("data-key"); }
-  function shutId(d) { return rid + "/" + d.getAttribute("data-key"); }
+  function shutId(d) {
+    var id = d.getAttribute("id");
+    return rid + "/" + (/^p[1-9][0-9]*$/.test(id || "") ? "panel:" + id : d.getAttribute("data-key"));
+  }
   function shutList() {
     try {
       var v = JSON.parse(load(SHUT_KEY) || "[]");
@@ -179,6 +182,12 @@
   function openKey(d) {
     // The rail's ended folds keep their state in storage (rail.js marks).
     if (d.classList.contains("rended")) return null;
+    // Whole HISTORY is no longer a disclosure. Ignore only its obsolete
+    // key; item/panel/version/system/run/topic folds keep their own owners.
+    if ((d.getAttribute("data-key") || "").indexOf("history:") === 0) return null;
+    // Latest panels carry pN as id; historical versions have only their
+    // independent entry key. Republish changes eN, not this fold identity.
+    if (d.classList.contains("entry-panel") && /^p[1-9][0-9]*$/.test(d.getAttribute("id") || "")) return "k:panel:" + d.getAttribute("id");
     if (d.hasAttribute("data-key")) return "k:" + d.getAttribute("data-key");
     if (d.classList.contains("panel") && d.id) return "p:" + d.id;
     return null;
@@ -188,12 +197,17 @@
     if (!d || d.tagName !== "DETAILS") return;
     if (isPeer(d)) { save(PEER_KEY + d.getAttribute("data-peer"), d.open ? "1" : null); return; }
     if (d.classList.contains("rended") && d.hasAttribute("data-key") && railSets) { railSets.ended.put(d.getAttribute("data-key"), d.open); return; }
+    // A graft's temporary open attribute is not an actual reader open.
+    // Shared panel policy accepts folds, but acknowledges updates only on
+    // explicit summary/navigation intent. Historical folds keep this path.
+    if (isPanel(d) && /^p[1-9][0-9]*$/.test(d.getAttribute("id") || "") && window.wbHistory && window.wbHistory.panelToggle && !window.wbHistory.panelToggle(d)) return;
     var k = openKey(d);
     if (k) openState[k] = d.open;
     if (isPanel(d)) shutPut(shutId(d), !d.open);
   }, true);
   function restoreOpenOne(d) {
     if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
+    if (d.classList.contains("entry-panel") && typeof window !== "undefined" && window.wbHistory && window.wbHistory.restorePanel && window.wbHistory.restorePanel(d)) return;
     var k = openKey(d);
     if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
     else if (isPanel(d) && shutHas(shutId(d))) d.open = false;
@@ -491,6 +505,7 @@
       var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
       if (pick) s.pick = pickKey(pick);
       if (note && note.value) s.note = note.value;
+      if (note && note.wsc) s.capsules = note.wsc.snapshot();
       if (note && !note.hidden) s.noteOpen = true;
       if (box && box.checked) s.checked = true;
       if (item.hasAttribute("data-no")) s.no = true;
@@ -498,12 +513,17 @@
     });
     // A topic note carries over by topic name, keyed apart from item numbers.
     q(".tnote[data-topic]", el).forEach(function (note) {
-      if (note.value || !note.hidden) out["t:" + note.getAttribute("data-topic")] = { note: note.value, noteOpen: !note.hidden };
+      if (note.value || !note.hidden) {
+        var saved = { note: note.value, noteOpen: !note.hidden };
+        if (note.wsc) saved.capsules = note.wsc.snapshot();
+        out["t:" + note.getAttribute("data-topic")] = saved;
+      }
     });
     return out;
   }
   function openNote(note, s) {
     note.value = s.note || "";
+    if (s.capsules && window.WsCapsules) window.WsCapsules.attach(note).restore(s.capsules);
     note.hidden = false;
     note.style.height = "auto";
     if (note.scrollHeight) note.style.height = note.scrollHeight + "px";
@@ -530,7 +550,10 @@
       var s = saved["t:" + note.getAttribute("data-topic")];
       // A note a send closed (closeTopicNotes) keeps its text closed.
       if (s && s.noteOpen) openNote(note, s);
-      else if (s) note.value = s.note || "";
+      else if (s) {
+        note.value = s.note || "";
+        if (s.capsules && window.WsCapsules) window.WsCapsules.attach(note).restore(s.capsules);
+      }
     });
   }
   // A board swap waits while the user is typing in the answer form, and
@@ -538,7 +561,7 @@
   var deferred = null;
   function editing() {
     var a = doc.activeElement;
-    return !!(a && inBoard(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"));
+    return !!(a && inBoard(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable));
   }
   doc.addEventListener("focusout", function () {
     if (!deferred) return;

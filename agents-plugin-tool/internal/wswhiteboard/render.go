@@ -154,8 +154,13 @@ const devAssetDir = "internal/wswhiteboard/assets"
 // client table leaves them out.
 const trackerKeyPrefix = "js.tk."
 
-// File-explorer controls also belong only to the dashboard, not static boards.
+// filesKeyPrefix belongs to the dashboard's file explorer (files.js), which
+// standalone and embed boards never load. Keep its growing table off both.
 const filesKeyPrefix = "js.files."
+
+// gitKeyPrefix belongs to dashboard-git.js, which static boards never load.
+// Its controls must not consume the standalone or embed translation budget.
+const gitKeyPrefix = "js.git."
 
 // codeKeyPrefix is the copy button's standalone client subset (code.js).
 const codeKeyPrefix = "js.wb.copy"
@@ -241,7 +246,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 			"href":        rowHref,
 			"actionAttrs": panelActionAttrs,
 			"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
-			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix) },
+			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix, gitKeyPrefix) },
 		}
 		// The file's template is "page.tmpl" under the root "page", as
 		// ParseFS names it.
@@ -816,6 +821,8 @@ type itemData struct {
 	// Static renders the item's options as display, not answer controls
 	// (the "opts" template), for a settled row's expanded body.
 	Static bool
+	// History is set only for the unified full-page timeline row.
+	History *EntryView
 }
 
 // ItemOf pairs an item with the page for the item templates.
@@ -856,7 +863,7 @@ func (d itemData) AsStatic() itemData {
 // TimelineCheck keeps the check's summary anchored while its real controls
 // can fold or lift into the sticky pill. Embeds retain their compact list.
 func (d itemData) TimelineCheck() bool {
-	return d.Page != nil && d.Page.Full && d.Class == ClassCheck && !d.Void()
+	return d.Page != nil && d.Page.Full && d.Class == ClassCheck && d.HistoryAnchor() && (d.Status == StatusOpen || d.Assumed())
 }
 
 // Expandable reports whether a row has controls, options or rationale beyond
@@ -949,7 +956,7 @@ func (d itemData) CheckReading() string {
 // Reading is the lead's reading of the answer beyond a picked option: the
 // text after the option letter, or the whole answer when it names none.
 func (d itemData) Reading() string {
-	if d.TimelineCheck() {
+	if d.Page != nil && d.Page.Full && d.Class == ClassCheck {
 		return d.CheckReading()
 	}
 	if d.PickedOption() != nil {

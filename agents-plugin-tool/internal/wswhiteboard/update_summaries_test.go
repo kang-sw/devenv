@@ -26,7 +26,7 @@ func TestTopicUpdateDefaultCreationPathsAndExplicitOverrides(t *testing.T) {
 		{"tickets", `tickets="261115-feat-example"`, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, explicit := range []string{"", StateDiscussing, StateWaiting, StateImplementing, StateAwaitingConfirmation} {
+			for _, explicit := range []string{"", StateDiscussing, StateWaiting, StateResearching, StateImplementing, StateAwaitingConfirmation} {
 				s := &State{}
 				command := `<wb:topic name="fresh" label="Fresh" ` + tc.attrs + `>` + tc.command
 				value, source := StateDiscussing, "default"
@@ -65,6 +65,38 @@ func TestTopicUpdateDefaultCreationPathsAndExplicitOverrides(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTopicUpdateResearchingMetadataNetChanges(t *testing.T) {
+	s := &State{}
+	out := stateApply(t, s, `<wb:topic name="Work"><wb:log>Investigate</wb:log><wb:state value="researching" owner="first" eta_minutes="7"/></wb:topic>`, stateNow)
+	wantSummaries(t, out, "topic added: Work (state: researching, explicit)")
+	for _, e := range s.Topics[0].Entries {
+		if strings.Contains(string(e.TopicState), StateDiscussing) {
+			t.Fatal("explicit research retained intermediate default")
+		}
+	}
+	for _, tc := range []struct {
+		attrs, owner string
+		eta          int64
+	}{
+		{`owner="second" eta_minutes="7"`, "second", 7},
+		{`owner="second" eta_minutes="9"`, "second", 9},
+		{`eta_minutes="9"`, "", 9},
+		{"", "", 0},
+	} {
+		out = stateApply(t, s, stateCommand(StateResearching, tc.attrs), stateNow)
+		wantSummaries(t, out, "topic updated: Work (state: researching)")
+		state := s.TopicStates()["Work"].State
+		if state.Owner != tc.owner || state.ETAMinutes != tc.eta || state.Run != nil {
+			t.Fatalf("summary lost metadata: %+v", state)
+		}
+		wantSummaries(t, stateApply(t, s, stateCommand(StateResearching, tc.attrs), stateNow))
+	}
+	out = stateApply(t, s, `<wb:topic name="Work"><wb:state value="researching" owner="interim" eta_minutes="1"/><wb:state value="researching"/></wb:topic>`, stateNow)
+	wantSummaries(t, out)
+	out = stateApply(t, s, `<wb:topic name="Work"><wb:state value="waiting"/><wb:state value="researching"/></wb:topic>`, stateNow)
+	wantSummaries(t, out)
 }
 
 func TestTopicUpdateAtomicRefusalAndProvisionalGroups(t *testing.T) {

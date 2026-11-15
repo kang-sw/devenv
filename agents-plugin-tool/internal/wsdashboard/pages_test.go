@@ -371,7 +371,7 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if strings.Count(page, `<span class="qsslot" id="qsslot"></span>`) != 1 {
 			t.Errorf("%s page lacks the search-palette button slot", name)
 		}
-		if !strings.Contains(page, "class: 'tk tk-palette'") || strings.Contains(page, `class="tk-qpop"`) {
+		if !strings.Contains(page, "class: 'tk tk-palette dr-search-palette'") || strings.Contains(page, `class="tk-qpop"`) {
 			t.Errorf("%s page: centered search modal missing or old popover remains", name)
 		}
 		// The wiki in the Items panel: its stylesheet block, the renderer's

@@ -32,6 +32,7 @@
     "awaiting-confirmation": ["confirm", "js.wb.state.awaiting-confirmation"],
     waiting: ["wait", "js.wb.state.waiting"],
     discussing: ["discuss", "js.wb.state.discussing"],
+    researching: ["research", "js.wb.state.researching"],
     implementing: ["impl", "js.wb.state.implementing"]
   };
   function badge(topic, now) {
@@ -48,31 +49,33 @@
       bar.insertBefore(box, lead ? lead.nextSibling : bar.firstChild);
     }
     var owner = topic.getAttribute("data-state-owner") || "", run = topic.getAttribute("data-state-run") || "";
-    var own = state === "implementing" && owner.trim() && run.trim() ? owner : "";
+    var own = owner.trim() && (state === "researching" || state === "implementing" && run.trim()) ? owner : "";
+    var raw = topic.getAttribute("data-state-eta-minutes") || "", eta = Number(raw);
+    var estimate = state === "researching" && /^\d+$/.test(raw) && Number.isSafeInteger(eta) && eta > 0 ? eta : 0;
     // Only rebuild state text when authority changes, not on periodic ticks.
-    var key = JSON.stringify([state, own]);
+    var key = JSON.stringify([state, own, estimate]);
     if (box.wbStateKey !== key) {
       box.textContent = "";
       var pill = span("stb " + spec[0]);
-      var dot = span("d");
+      var dot = span("wb-state-dot");
       dot.setAttribute("aria-hidden", "true");
       pill.appendChild(dot);
       pill.appendChild(span("state-label", wsT(spec[1]) + (own ? " · " : "")));
       if (own) pill.appendChild(span("own", own));
       box.appendChild(pill);
+      if (estimate) box.appendChild(span("state-estimate", wsT("js.wb.state.estimate", estimate)));
       box.wbStateKey = key;
     }
-    var raw = topic.getAttribute("data-state-eta-minutes") || "", eta = Number(raw);
     var start = instant(topic.getAttribute("data-state-started-at")), deadline = instant(topic.getAttribute("data-state-deadline-at"));
     var timer = box.querySelector(".eta");
-    if (!own || !/^\d+$/.test(raw) || !Number.isSafeInteger(eta) || eta <= 0 || !Number.isFinite(start) || !Number.isFinite(deadline) || deadline - start !== eta * 60000) {
+    if (state !== "implementing" || !own || !/^\d+$/.test(raw) || !Number.isSafeInteger(eta) || eta <= 0 || !Number.isFinite(start) || !Number.isFinite(deadline) || deadline - start !== eta * 60000) {
       if (timer) timer.parentNode.removeChild(timer);
       return;
     }
     if (!timer) { timer = span("eta"); box.appendChild(timer); }
     var elapsed = Math.max(0, Math.floor((now - start) / 60000)), over = elapsed > eta;
     put(timer, wsT("js.wb.state.eta", eta, elapsed) + (over ? " (+" + (elapsed - eta) + ")" : ""));
-    timer.classList.toggle("over", over);
+    timer.classList.toggle("wb-state-over", over);
   }
   // BodyUpdatedAt is already validated by BuildView. No activity/clock
   // fallback: an absent body time stays unknown in the gutter.

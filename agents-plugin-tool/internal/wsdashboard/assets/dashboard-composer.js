@@ -4,6 +4,7 @@
   // acknowledgement on a card attaches (or replaces) that item's chip; the
   // chips live here, so a chip outlives its card leaving the board.
   var ctext = $("ctext"), cchips = $("cchips");
+  if (ctext && window.WsCapsules) window.WsCapsules.attach(ctext);
   var chips = {}, chipOrder = [];
   // bmentions are the board mentions the composer holds, in the order added
   // (board mentions, below).
@@ -207,7 +208,7 @@
   function closeTopicNotes() {
     boardQ(".tnote[data-topic]").forEach(function (el) {
       if (el.hidden) return;
-      if (doc.activeElement === el) el.blur();
+      if (doc.activeElement === el || el.wsc && doc.activeElement === el.wsc.editor) el.blur();
       el.hidden = true;
     });
   }
@@ -256,6 +257,12 @@
     return cmeasure.offsetHeight;
   }
   function grow() {
+    if (ctext.wsc) {
+      var editor = ctext.wsc.editor;
+      editor.style.height = "auto";
+      editor.style.height = Math.min(160, Math.max(38, editor.scrollHeight)) + "px";
+      return;
+    }
     ctext.style.height = "auto";
     var h = ctext.scrollHeight;
     if (!ctext.value) h = Math.max(h, placeholderHeight());
@@ -269,11 +276,11 @@
   if (ctext) {
     var ctextW = -1;
     if (window.ResizeObserver) new ResizeObserver(function () {
-      var w = ctext.offsetWidth;
+      var w = (ctext.wsc ? ctext.wsc.editor : ctext).offsetWidth;
       if (w === ctextW) return;
       ctextW = w;
       grow();
-    }).observe(ctext);
+    }).observe(ctext.wsc ? ctext.wsc.editor : ctext);
     if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(growCtext);
     growCtext();
   }
@@ -351,10 +358,10 @@
   // cannot take the focus (a closed note) takes setRangeText, so the
   // command never edits whatever else holds the focus.
   function editField(el, start, end, s) {
-    if (doc.activeElement !== el) el.focus();
+    if (!(doc.activeElement === el || el.wsc && doc.activeElement === el.wsc.editor)) el.focus();
     el.setSelectionRange(start, end);
     var done = false;
-    if (doc.activeElement === el) {
+    if (doc.activeElement === el || el.wsc && doc.activeElement === el.wsc.editor) {
       try { done = s ? doc.execCommand("insertText", false, s) : start === end || doc.execCommand("delete"); } catch (e) { done = false; }
     }
     if (!done) {
@@ -499,7 +506,8 @@
       if (!rows[h]) {
         rows[h] = doc.createElement("span");
         rows[h].className = "nimgs";
-        notes[h].parentNode.insertBefore(rows[h], notes[h].nextSibling);
+        var after = notes[h].wsc ? notes[h].wsc.editor : notes[h];
+        after.parentNode.insertBefore(rows[h], after.nextSibling);
       }
       rows[h].appendChild(el);
     });
@@ -609,6 +617,7 @@
   }
   function paintMentions() {
     if (!chl || !window.wsMention) return;
+    if (ctext.wsc) { chl.hidden = true; return; }
     // The textarea's scrollbar narrows its text; the layer narrows alike.
     chl.style.paddingRight = (parseFloat(getComputedStyle(ctext).paddingRight) + ctext.offsetWidth - ctext.clientWidth) + "px";
     window.wsMention.paint(chl, ctext.value, mentions);
@@ -648,12 +657,11 @@
   // A session whose adapter runs slash commands lists them in the composer's
   // cmds region (one <i> each: data-name, data-desc, data-src, and data-layer
   // when the host tells who may invoke the command), which the stream keeps
-  // current. Typing / in an empty message box opens their picker (mention.js
-  // with this token, row, and pick), filtered by the name prefix typed after
-  // the /; a session with no list gets no picker, and / is plain text. A pick
-  // makes the composer hold the command as a selection, the capsule before
-  // the message box, whose text is then the command's arguments; a send posts
-  // {command, args}, never text the daemon parses. A selection is sent alone:
+  // current. A caret-local / token opens their fuzzy picker. Picks are atomic
+  // inline capsules: only one at position zero invokes through {command,args};
+  // a mid-text capsule sends its literal name, without a slash. The legacy
+  // separate selection remains for returned commands holding fixed arguments.
+  // A command selection is sent alone:
   // answer chips, topic notes, and board mentions stay in the composer for
   // the next message, and a send with images attached is refused (the
   // markers would read as arguments). Backspace in an empty box, or the
@@ -670,12 +678,10 @@
       return { name: el.getAttribute("data-name"), description: el.getAttribute("data-desc") || "", source: el.getAttribute("data-src") || "", layer: el.getAttribute("data-layer") || "" };
     });
   }
-  // commandRows is the picker's rows for q: the commands whose name starts
-  // with q (case-insensitive), in the host's order; when any command names
-  // its layer, the user-layer ones, then the agent-layer ones, then the rest,
-  // each group under its heading.
+  // Fuzzy rows keep stable host order on ties and retain the advertised
+  // user/agent layer headings.
   function commandRows(list, q) {
-    var lq = q.toLowerCase(), rows = list.filter(function (c) { return c.name.toLowerCase().indexOf(lq) === 0; });
+    var rows = window.WsCapsules ? window.WsCapsules.rank(list, q, function (c) { return c.name; }) : list.filter(function (c) { return c.name.toLowerCase().indexOf(q.toLowerCase()) === 0; });
     if (!list.some(function (c) { return c.layer; })) return rows;
     var user = [], agent = [], other = [];
     rows.forEach(function (c) { (c.layer === "user" ? user : c.layer === "agent" ? agent : other).push(c); });
@@ -685,11 +691,12 @@
     });
     return out;
   }
-  // slashToken is the picker's token: the whole message box while it is a /
-  // and the name typed after it, the caret past the /, no command selected,
-  // and the session listing commands.
+  // A slash token is local to the caret; only whitespace may follow it.
+  // Sessions without advertised commands never offer an invocation picker.
   function slashToken(v, caret) {
-    if (cmdSel || !/^\/\S*$/.test(v) || caret < 1 || !commandList().length) return null;
+    if (cmdSel || !commandList().length) return null;
+    if (window.WsCapsules) return window.WsCapsules.token(v, caret, "/");
+    if (!/^\/\S*$/.test(v) || caret < 1) return null;
     return { start: 0, end: v.length, q: v.slice(1, caret) };
   }
   function commandRow(li, c) {
@@ -764,12 +771,33 @@
       render: commandRow,
       exact: function (c, q) { return c.name === q; },
       choose: function (c, at) {
-        setCommand(c.name);
-        editText(at.start, at.end, "");
+        if (ctext.wsc) ctext.wsc.insert("skill", c.name, c.name, at);
+        else { setCommand(c.name); editText(at.start, at.end, ""); }
         queueDraft();
       }
     });
   }
+  function sendInlineCommand(sel) {
+    if (imgs.length) { noteWarn(wsT("js.cmd.images")); return; }
+    var raw = ctext.value, args = sendText().slice(sel.end).trim();
+    followConvo(); sending = true;
+    post("message", { command: sel.name, args: args }, function (ok, res) {
+      sending = false;
+      if (!ok) { noteWarn(wsT("js.send.fail", res)); return; }
+      if (ctext.value === raw) { ctext.value = ""; grow(); clearMentions(); }
+      clearDraft();
+    });
+  }
+  // Topic-only editors keep their textarea owner and canonical [stem] strings.
+  function bindCapsuleNotes() {
+    if (!window.WsCapsules) return;
+    window.WsCapsules.sweep();
+    boardNotes().forEach(function (note) {
+      if (note.wscTopicPicker) return;
+      note.wscTopicPicker = window.WsCapsules.topicPicker(note, capsuleTopics);
+    });
+  }
+  if (ctext && window.WsCapsules) window.WsCapsules.topicPicker(ctext, capsuleTopics);
   // --- board mentions: selected board text added to the message ------------
   // On the live board, selecting text inside one topic card shows a floating
   // mention button by the selection's end; clicking it adds a mention
@@ -853,7 +881,7 @@
     if (!region("board") || !sel || sel.isCollapsed || !sel.rangeCount) return null;
     var a = selEl(sel.anchorNode), f = selEl(sel.focusNode), act = doc.activeElement;
     if (!a || !f || !inBoard(a) || !inBoard(f)) return null;
-    if (act && /^(TEXTAREA|INPUT)$/.test(act.tagName) && inBoard(act)) return null;
+    if (act && (/^(TEXTAREA|INPUT)$/.test(act.tagName) || act.isContentEditable) && inBoard(act)) return null;
     var ta = a.closest("section.topic[data-topic]"), tf = f.closest("section.topic[data-topic]");
     if (!ta || !tf) return null;
     var range = sel.getRangeAt(0), mentions = selectionMentions(range, ta, tf, sel.toString());
@@ -1007,6 +1035,8 @@
   function sendMessage() {
     if (sending) return;
     if (cmdSel) { sendCommand(); return; }
+    var inline = window.WsCapsules && window.WsCapsules.command(ctext);
+    if (inline) { sendInlineCommand(inline); return; }
     var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
     var wp = wpicks.slice(), wc = wconsoles.slice();
     if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length) { noteWarn(wsT("js.send.empty")); return; }
@@ -1368,7 +1398,7 @@
       // A key that confirms an IME composition (Korean, Japanese, Chinese)
       // must never send or indent: browsers report it as isComposing, and
       // Safari reports the first keydown after compositionend as keyCode 229.
-      if (e.isComposing || e.keyCode === 229) return;
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       // While the file popup shows, it takes Up/Down, Tab and Enter (which
       // pick, never send), and Escape (which closes it without arming
       // Tab-out).

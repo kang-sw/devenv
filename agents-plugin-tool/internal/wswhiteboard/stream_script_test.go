@@ -24,6 +24,7 @@ Object.defineProperty(E.prototype,'parentElement',{get:function(){return this.pa
 Object.defineProperty(E.prototype,'nextElementSibling',{get:function(){return this.parent&&this.parent.children[this.parent.children.indexOf(this)+1]||null;}});
 Object.defineProperty(E.prototype,'open',{get:function(){return 'open' in this.attrs;},set:function(v){if(v)this.attrs.open='';else delete this.attrs.open;}});
 Object.defineProperty(E.prototype,'isConnected',{get:function(){for(var p=this;p;p=p.parent)if(p===root)return true;return false;}});
+var baseClosest=E.prototype.closest;E.prototype.closest=function(s){return s[0]==='#'?baseClosest.call(this,'[id="'+s.slice(1)+'"]'):baseClosest.call(this,s);};
 E.prototype.matches=function(s){var self=this;return s.split(',').some(function(p){return one(self,p.trim());});};
 E.prototype.remove=function(){if(this.parent){this.parent.children.splice(this.parent.children.indexOf(this),1);this.parent=null;}};
 E.prototype.cloneNode=function(deep){var n=new E(this.tag,Object.assign({},this.attrs));n.style=Object.assign({},this.style);n.textContent=this.textContent;if(deep)this.children.forEach(function(c){n.appendChild(c.cloneNode(true));});if(this.content)n.content=this.content.cloneNode(deep);return n;};
@@ -40,7 +41,7 @@ function flush(){var batch=frames.splice(0);batch.forEach(function(fn){fn();});}
 function CustomEvent(type,opt){this.type=type;Object.assign(this,opt||{});}
 E.prototype.dispatchEvent=function(e){e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null)(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});if(e.type==='wbhistoryload')loads++;};
 fire=function(n,type){n.dispatchEvent(new CustomEvent(type,{bubbles:true}));};
-window.historyKit={keep:function(n){var k={applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;},jump:function(n,opt){jumps.push([n.id,opt.offset]);}};
+window.historyKit={keep:function(n,opt){if(opt&&opt.capture===false)return {scroller:n.closest('.test-scroller')||root};var k={applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;},jump:function(n,opt){jumps.push([n.id,opt.offset]);}};
 function ResizeObserver(fn){this.fn=fn;};ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
 function row(i,height,body){return '<div class="timeline-row" data-row="e'+i+'" data-count="1" data-from="10:00" data-to="10:01" data-height="'+height+'">'+(body||'<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'">line</article>')+'</div>';}
 function rows(from,to,height){var s='';for(var i=from;i<=to;i++)s+=row(i,height);return s;}
@@ -92,6 +93,18 @@ h=board(row(1,20,'<article class="wb-entry system" id="e1" data-entry="e1"><div 
 h=board(row(5,20,'<details class="system-run" open><article class="wb-entry system" id="e5" data-entry="e5"></article></details>'));window.wbHistory.init(document);var foldSnapshot=window.wbHistory.capture(document);
 h=board(gap(row(1,20,'<details class="system-run"><article class="wb-entry system" id="e1" data-entry="e1"></article><article class="wb-entry system" id="e5" data-entry="e5"></article></details>'),true)+row(6,20));window.wbHistory.restore(document,foldSnapshot);
 check('regrouped system event remains admitted and open',[!!h.querySelector('[id="e5"]'),h.querySelector('.system-run').open],[true,true]);
+// The landed initializer still shares one capture per actual scroller.
+var batchHistories=[];for(var i=0;i<8;i++)batchHistories.push(board(gap(rows(1,10,400),true)+row(11,20)));
+root=new E('div');
+for(var c=0;c<2;c++){var column=new E('div',{'class':'test-scroller'});root.appendChild(column);batchHistories.slice(c*4,c*4+4).forEach(function(h){column.appendChild(h.closest('.topic'));});}
+var initialKeeps=keeps.length,initialReads=0,rect=E.prototype.getBoundingClientRect;
+E.prototype.getBoundingClientRect=function(){initialReads++;return rect.call(this);};
+window.wbHistory.init(document);E.prototype.getBoundingClientRect=rect;
+check('eight histories share two reading captures',keeps.length-initialKeeps,2);
+check('initial result geometry is one read per history',initialReads,8);
+check('server anchors remain unchanged by batched init',batchHistories.map(liveIDs),Array.from({length:8},function(){return ['e11'];}));
+window.wbHistory.init(document);check('bound histories never capture again',keeps.length-initialKeeps,2);
+check('every actual capture applies once',keeps.every(function(k){return k.applied===1;}),true);
 if(bad.length)throw Error(bad.join('\n'));
 `
 	if out, err := nodeScript(node, script).CombinedOutput(); err != nil {

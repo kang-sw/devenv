@@ -55,7 +55,7 @@ func TestTimelineChecksUseQuestionAnchorsAtAddPosition(t *testing.T) {
 				t.Fatalf("check anchor/paging: asks=%d held=%d", asks, len(held))
 			}
 			out := markup(render(t, view))
-			start := strings.Index(out, `class="srow" id="item-1"`)
+			start := strings.Index(out, `class="srow wb-hitem check`)
 			if start < 0 {
 				t.Fatal("check lacks the shared question row")
 			}
@@ -64,17 +64,21 @@ func TestTimelineChecksUseQuestionAnchorsAtAddPosition(t *testing.T) {
 				t.Fatal("check lacks the shared question summary")
 			}
 			summary := out[start : start+end]
-			wantAll(t, summary, `class="sx" data-key="item:1"`, `<summary><span class="stext"><span class="id">(01)</span>`, `<b>held</b> <span class="pick"`, `<span class="pt">`+tc.chip+`</span></span>`)
+			wantAll(t, summary, `id="item-1"`, `class="sx" data-key="question:1"`, `<summary><span class="stext wb-htext">`, `<span class="id">(01)</span>`, `<b>held</b>`, `<span class="pick"`, `<span class="pt">`+tc.chip+`</span></span>`)
 			if tc.answer == "" || tc.assumed {
-				wantAll(t, summary, `data-key="item:1" open`)
+				wantAll(t, summary, `data-key="question:1" open`)
 			} else {
-				wantNone(t, summary, `data-key="item:1" open`)
+				wantNone(t, summary, `data-key="question:1" open`)
 			}
 			if tc.reading != "" {
-				wantAll(t, summary, `<span class="ans"`, `>`+tc.reading+`</span>`)
+				wantAll(t, out, `class="ans"`, `>`+tc.reading+`</div>`)
 			}
-			wantAll(t, out, `<div class="sbody"><div class="checks"><div class="ckrow`, `id="check-1"`)
-			if strings.Count(out, `id="item-1"`) != 1 || strings.Count(out, `id="check-1"`) != 1 {
+			controls := 0
+			if tc.answer == "" || tc.assumed {
+				controls = 1
+				wantAll(t, out, `<div class="sbody"><div class="checks"><div class="ckrow`, `id="check-1"`)
+			}
+			if strings.Count(out, `id="item-1"`) != 1 || strings.Count(out, `id="check-1"`) != controls {
 				t.Fatal("check anchor or real controls duplicated")
 			}
 			before, event, after := strings.Index(out, `id="`+beforeID+`"`), strings.Index(out, `id="`+added.ID+`"`), strings.Index(out, `id="`+afterID+`"`)

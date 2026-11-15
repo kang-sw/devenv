@@ -31,7 +31,7 @@ func TestTimelineAnchorsOutsidePagingAndGapRanges(t *testing.T) {
 	asks, answers, preceding := 0, 0, 0
 	for _, row := range live {
 		if row.Ask {
-			asks++
+			asks += max(1, len(row.Created))
 		}
 		if row.Answer {
 			answers++
@@ -119,7 +119,7 @@ func TestTimelineConvertedItemsKeepControlsAtHead(t *testing.T) {
 	st := folderOpen(t, t.TempDir(), legacy)
 	tv := topicView(t, st, LayoutFull, "t")
 	live, _ := timelineRows(tv)
-	for i, id := range []int{1, 2, 3} {
+	for i, id := range []int{2, 1, 3} {
 		if live[i].Item == nil || live[i].Item.ID != id || live[i].Clock != "" {
 			t.Fatal("conversion order/time", live)
 		}

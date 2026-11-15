@@ -6535,11 +6535,13 @@
   // Editors keep their own keys: a terminal card (its .xterm helper textarea),
   // the composer, and any textarea or contenteditable never lose Ctrl+K or
   // Ctrl+Space to the palette; / also stays typed in inputs and selects.
+  // Ctrl+K, Ctrl+Space and Cmd+K open it from anywhere but a terminal, which
+  // keeps its own keys; '/' only outside a text field.
   function qShortcut(e) {
-    if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey) return false;
-    var t = e.target && e.target.closest ? e.target : null;
-    if (e.ctrlKey) return !e.shiftKey && (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k') &&
-      !(t && t.closest('.xterm, textarea, [contenteditable]:not([contenteditable="false"])'));
+    if (e.isComposing || e.keyCode === 229 || e.altKey) return false;
+    var t = e.target && e.target.closest ? e.target : null, k = (e.key || '').toLowerCase() === 'k';
+    if (e.ctrlKey || e.metaKey) return !e.shiftKey && (e.metaKey ? !e.ctrlKey && k : k || e.code === 'Space' || e.key === ' ') &&
+      !(t && t.closest('.xterm'));
     return e.key === '/' && !(t && t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
   }
 
@@ -6690,7 +6692,7 @@
     b.appendChild(el('button', { type: 'button', class: 'tk tk-mcap', id: 'tkcap', hidden: '' }, '<svg class="i"><use href="#tki-trash"/></svg><span>' + wsT("js.tk.menu.discard") + '</span>'));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
       '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-controls="tkqpop" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
-    (O.searchHost ? O.searchHost.parent : b).appendChild(el('section', { class: 'tk tk-palette', id: 'tkqpop', role: 'region', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
+    (O.searchHost ? O.searchHost.parent : b).appendChild(el('section', { class: 'tk tk-palette dr-search-palette', id: 'tkqpop', role: 'region', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
       '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '</label>' +
       '<div class="tk-qrow"><input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
       '</div>' +
@@ -7212,4 +7214,7 @@
   }
 
   window.WsTracker = { mount: mount };
+  // searchKey is the palette's shortcut test (qShortcut), for a host that
+  // must recognize the key before mount installs the palette's listener.
+  window.WsTracker.searchKey = qShortcut;
 })();

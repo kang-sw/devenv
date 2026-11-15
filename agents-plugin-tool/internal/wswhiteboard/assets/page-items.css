@@ -4,22 +4,23 @@
 .tbar .tlead { margin-right: auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 .tbar .tname { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
 .tbar .tresult { font-size: 12.5px; opacity: .7; overflow-wrap: anywhere; }
-.topic-state,.stb,.eta{display:inline-flex;align-items:center}
+.topic-state,.stb,.eta,.state-estimate{display:inline-flex;align-items:center}
 .topic-state{flex-wrap:wrap;gap:4px 6px;min-width:0}
-.stb,.eta{min-height:18px;border-radius:999px;font-size:11px}
+.stb,.eta,.state-estimate{min-height:18px;border-radius:999px;font-size:11px}
 .stb{--c:#b9bdc6;gap:5px;padding:0 8px 0 6px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 20%,transparent)}
-.stb .d{width:7px;height:7px;flex:none;border-radius:50%;background:currentColor}
+.stb .wb-state-dot{width:7px;height:7px;flex:none;border-radius:50%;background:currentColor}
 .stb.confirm{--c:#7fd6a8}
 .stb.discuss{--c:#ffb36b}
 .stb.impl{--c:#8db8ff}
-.stb.wait .d{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+.stb.research{--c:#c6a5f7}
+.stb.wb-state-wait .wb-state-dot{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
 .state-label{white-space:nowrap}
 .stb .own{font:10.5px var(--wb-mono);min-width:0;overflow-wrap:anywhere}
-.eta{padding:0 7px;font-weight:600;white-space:nowrap;color:#cfd3da;background:rgb(127 127 127 / .26)}
-.eta.over{color:#ffd2cd;background:rgb(255 110 96 / .34);font-weight:800}
+.eta,.state-estimate{padding:0 7px;font-weight:600;white-space:nowrap;color:#cfd3da;background:rgb(127 127 127 / .26)}
+.eta.wb-state-over{color:#ffd2cd;background:rgb(255 110 96 / .34);font-weight:800}
 .quiet .stb{color:color-mix(in srgb,var(--c) 40%,var(--wb-fg))}
-.quiet .eta{color:var(--wb-fg)}
-.quiet .eta.over{color:var(--wb-ck-no)}
+.quiet .eta,.quiet .state-estimate{color:var(--wb-fg)}
+.quiet .eta.wb-state-over{color:var(--wb-ck-no)}
 @media(max-width:600px){.topic-state{order:2;flex-basis:100%}}
 /* Dependency popovers are fixed to escape the topic's overflow clipping. */
 .dw { position: relative; display: inline-flex; align-self: center; }
@@ -274,6 +275,9 @@ label.ck { cursor: pointer; }
 .ckhide[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
 html:not([data-ck-hide]) .ckhide { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }
+/* Completed checks moved to HISTORY with the same hide control. Assumed
+   correction rows and explicitly undated legacy rows remain visible. */
+html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not([data-check-live]):not(.void):not(:has(.wb-hunknown)) { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:nth-child(1 of .ckrow[data-id]) { border-top: 0; }
 
 /* settled: collapsed tonal chip */
@@ -313,4 +317,36 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .opt.static.picked, .opt.static.picked:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent-policy) 40%, transparent); font-weight: 500; }
 .opt.static:not(.picked) { opacity: .75; }
 .srow.void .stext > b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
+
+/* Unified history question rows. Useful rich fields keep their natural
+   height; the existing sx/item disclosure key and correction controls remain. */
+.wb-hitem { --wb-haccent: var(--wb-primary); margin: 3px 0; }
+.wb-hitem.policy { --wb-haccent: var(--wb-accent-policy); }
+.wb-hitem.announced { --wb-haccent: var(--wb-ck-ok); }
+.wb-hitem.wb-hassumed { --wb-haccent: var(--wb-accent-assumed); }
+.wb-hitem.void { --wb-haccent: var(--wb-muted-fg); }
+.wb-hitem .wb-htext { display: grid; grid-template-columns: auto 20px minmax(0, 1fr) minmax(0, auto); align-items: start; gap: 7px; width: 100%; line-height: 24px; }
+.wb-hitem details.sx > summary::before { align-self: flex-start; margin-top: 8px; }
+.wb-htime { color: var(--wb-muted-fg); font: 10px/24px var(--wb-mono); white-space: nowrap; }
+.wb-hunknown { font: 10px/1.4 var(--wb-sans); max-width: 7em; white-space: normal; padding-top: 5px; }
+.wb-hmark { display: inline-flex; justify-content: center; align-items: center; width: 20px; height: 20px; margin-top: 2px; border-radius: 50%; background: color-mix(in srgb, var(--wb-haccent) 16%, transparent); color: var(--wb-haccent); font-size: 10px; font-weight: 700; }
+.wb-hmain { min-width: 0; overflow-wrap: anywhere; }
+.wb-hmain .id, .wb-hclass { margin-right: 6px; color: var(--wb-haccent); }
+.wb-hclass { font-size: 9px; font-weight: 600; }
+.wb-hmain > b { font-weight: 500; }
+.wb-hitem.void .wb-hmain > b { text-decoration: line-through; color: var(--wb-muted-fg); }
+.wb-hstatus:has(.pick) { background: none; padding: 0; }
+/* The complete answer belongs to the disclosure, not a multiline chip. */
+.wb-hstatus { display: block; min-width: 0; max-width: min(24em, 35vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 5px; line-height: 20px; margin-top: 2px; font-size: 10px; font-weight: 600; background: color-mix(in srgb, var(--wb-haccent) 13%, transparent); color: var(--wb-haccent); }
+.wb-hstatus .pick { display: inline; white-space: nowrap; }
+.wb-hitem .sbody { margin-left: 68px; padding-left: 12px; border-left: 1px solid color-mix(in srgb, var(--wb-haccent) 45%, transparent); }
+.wb-hitem .quote { margin: 7px 0 0; padding-left: 9px; border-left: 2px solid var(--wb-haccent); white-space: pre-wrap; overflow-wrap: anywhere; }
+.wb-hanswer-at { margin-top: 6px; color: var(--wb-muted-fg); font-size: 10px; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .wb-hitem .wb-htext { grid-template-columns: minmax(0, 1fr) minmax(0, auto); position: relative; padding-left: 26px; line-height: 22px; }
+  .wb-hitem .wb-htime { grid-column: 1 / -1; max-width: none; line-height: inherit; padding-top: 0; }
+  .wb-hmark { position: absolute; left: 0; top: 0; }
+  .wb-hmain { display: inline; }
+  .wb-hitem .sbody { margin-left: 29px; padding-left: 10px; }
+}
 

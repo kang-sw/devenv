@@ -168,8 +168,89 @@ func historicalCall(t *testing.T, binary, dir, action, commands string, refused 
 	}
 }
 
+func TestTopicStateResearchingReplayAndMalformedMetadata(t *testing.T) {
+	dir := t.TempDir()
+	f := FolderStore{Dir: dir}
+	if err := f.Update(nil, func(s *State) error {
+		stateApply(t, s, `<wb:topic name="Work"><wb:log>Research summary</wb:log><wb:state value="researching" owner="investigator" eta_minutes="7"/></wb:topic>`, stateNow)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "t1", "log.jsonl")
+	prefix := folderRead(t, path)
+	before := folderOpen(t, dir, nil).TopicStates()["Work"]
+	if before.State == nil || before.State.Owner != "investigator" || before.State.ETAMinutes != 7 || before.State.Run != nil {
+		t.Fatalf("research replay: %+v", before)
+	}
+	if err := f.Update(nil, func(s *State) error {
+		stateApply(t, s, stateCommand(StateResearching, `owner="second"`), stateNow.Add(time.Hour))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := folderOpen(t, dir, nil).clone().TopicStates()["Work"]
+	if !bytes.HasPrefix(folderRead(t, path), prefix) || got.Diagnostic != nil || got.State == nil || got.State.Owner != "second" || got.State.ETAMinutes != 0 || got.State.Run != nil || got.State.Entry == before.State.Entry {
+		t.Fatal("research history changed or metadata update lost")
+	}
+	for _, raw := range []string{
+		`{"v":1,"op":"set","value":"researching","owner":""}`,
+		`{"v":1,"op":"set","value":"researching","owner":null}`,
+		`{"v":1,"op":"set","value":"researching","owner":" padded "}`,
+		`{"v":1,"op":"set","value":"researching","eta_minutes":0}`,
+		`{"v":1,"op":"set","value":"researching","eta_minutes":null}`,
+		`{"v":1,"op":"set","value":"researching","eta_minutes":1.5}`,
+		`{"v":1,"op":"set","value":"waiting","owner":"investigator"}`,
+		`{"v":1,"op":"reset","from":"researching","eta_minutes":7}`,
+	} {
+		s := stateBoard(t)
+		stateRaw(s, "Work", "e99", raw)
+		if v := s.TopicStates()["Work"]; v.State != nil || v.Diagnostic == nil || v.Diagnostic.Code != "malformed" {
+			t.Fatalf("invalid research record %s: %+v", raw, v)
+		}
+	}
+	base := etaBoard(t)
+	run := base.TopicStates()["Work"].State.Run
+	for _, record := range []topicStateRecord{
+		{V: 1, Op: "set", Value: StateResearching, Run: run},
+		{V: 1, Op: "set", Value: StateResearching, From: StateResearching, Run: run},
+		{V: 1, Op: "extend", Value: StateResearching, Run: run, Reason: "timed research"},
+	} {
+		s := base.clone()
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stateRaw(s, "Work", "e99", string(data))
+		if v := s.TopicStates()["Work"]; v.State != nil || v.Diagnostic == nil || v.Diagnostic.Code != "malformed" {
+			t.Fatalf("timed research record accepted: %+v", record)
+		}
+	}
+}
+
 func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 	binary := buildHistoricalWriter(t)
+	t.Run("researching-opaque-prefix", func(t *testing.T) {
+		dir := t.TempDir()
+		f := FolderStore{Dir: dir}
+		if err := f.Update(nil, func(s *State) error {
+			stateApply(t, s, `<wb:topic name="Work"><wb:log>Investigating</wb:log><wb:state value="researching" owner="investigator" eta_minutes="7"/></wb:topic>`, stateNow)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "t1", "log.jsonl")
+		prefix := folderRead(t, path)
+		want := folderOpen(t, dir, nil).TopicStates()["Work"]
+		historicalCall(t, binary, dir, "update", `<wb:topic name="Work"><wb:log>Old writer content</wb:log></wb:topic>`, false)
+		if !bytes.HasPrefix(folderRead(t, path), prefix) || !reflect.DeepEqual(want, folderOpen(t, dir, nil).TopicStates()["Work"]) {
+			t.Fatal("old content writer lost research authority or raw history")
+		}
+		historicalCall(t, binary, dir, "update", `<wb:topic name="Work"><wb:close result="Old close"/><wb:log>Reopened</wb:log></wb:topic>`, false)
+		if !bytes.HasPrefix(folderRead(t, path), prefix) || folderOpen(t, dir, nil).TopicStates()["Work"].State != nil {
+			t.Fatal("old close/reopen lost history or restored research metadata")
+		}
+	})
 	t.Run("committed-prefix-and-lifecycle", func(t *testing.T) {
 		dir := t.TempDir()
 		f := FolderStore{Dir: dir}

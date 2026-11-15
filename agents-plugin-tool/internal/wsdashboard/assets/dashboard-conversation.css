@@ -110,6 +110,62 @@
 .mailline[open] > summary { color: var(--wb-fg); }
 .mailline .mbody { margin: 2px 8px 4px 22px; padding: 7px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Display-only conversation projections; board/composer component rules stay with their owners. */
+.mail-notification, .input-record, .wake-card.child-report { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
+.input-record { border-style: dashed; }
+.input-record .bub { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mail-notification .wake-head, .input-record .wake-head, .child-report .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
+.mail-notification .wake-head .t, .input-record .wake-head .t, .child-report .wake-head .t { margin-left: auto; }
+.child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
+.delivery-details { min-width: 0; margin-top: 3px; font-size: 11px; color: var(--wb-muted-fg); }
+.delivery-details > summary { width: fit-content; max-width: 100%; padding: 3px 0; cursor: pointer; overflow-wrap: anywhere; }
+.delivery-details .wake-body { max-width: 100%; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-muted-fg); background: var(--wb-bg); font: 11px/1.5 var(--wb-mono); }
+.delivery-meta { margin-top: 4px; overflow-wrap: anywhere; }
+.src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
+.mail-block { min-width: 0; }
+.mail-delivery { margin: 1px 8px 0 22px; }
+.mailline:has(.peer-lead) > summary { flex-wrap: wrap; }
+.mailline:has(.peer-lead) .mpeer { max-width: 100%; overflow-wrap: anywhere; }
+.mailline:has(.peer-lead) .mfirst { flex-basis: 12em; }
+.wbupdate-topic[data-wb-topic] { cursor: pointer; }
+/* Higher specificity keeps the legacy effects frame from nesting full topic cards in a summary. */
+.wbeffects.wbupdate { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
+.wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 4px 5px; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate-head .t { margin-left: auto; }
+.wbupdate-topic { min-width: 0; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); }
+.wbupdate-topic + .wbupdate-topic { margin-top: 6px; }
+.wbupdate-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; min-width: 0; padding: 4px 12px; border-radius: var(--wb-radius) var(--wb-radius) 0 0; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 13px; overflow-wrap: anywhere; }
+.wbupdate-bar b { min-width: 0; }
+.wbupdate-key { min-width: 0; font: 10.5px var(--wb-mono); opacity: .7; }
+.wbupdate-bar a { margin-left: auto; color: inherit; }
+.wbupdate a { font-size: 11px; font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.wbupdate a:hover { text-decoration: underline; }
+.wbupdate-rows { display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 0; }
+.wbupdate-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 7px; min-width: 0; padding: 2px 6px; font-size: 12.5px; }
+.wbupdate-text { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.wbupdate-l { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 50%; font-size: 9px; font-weight: 800; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
+.wbupdate-item-id { font: 700 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.wbupdate-class { max-width: 100%; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 10px; overflow-wrap: anywhere; }
+.wbupdate-panel { flex-wrap: nowrap; }
+.wbupdate-panel-label { flex: none; color: var(--wb-muted-fg); font-size: 10px; font-weight: 800; }
+.wbupdate-panel .wbupdate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbupdate-panel a { flex: none; }
+.wbupdate-options { flex-basis: 100%; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; padding-left: 22px; }
+.wbupdate-options span { max-width: 100%; padding: 1px 8px; border-radius: 7px; background: color-mix(in srgb, var(--wb-policy) 8%, var(--wb-card)); color: var(--wb-fg); box-shadow: var(--wb-shadow); font-size: 11px; overflow-wrap: anywhere; }
+.wbupdate-status { display: block; padding: 0 12px; font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.wbupdate-status:empty { display: none; }
+.wbupdate .wbeffect-details { margin: 4px 7px 0; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate .wbeffect-details > summary { cursor: pointer; }
+.wbeffects.wbupdate-line > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; padding: 4px 7px; border-radius: 7px; list-style: none; font-size: 12px; color: var(--wb-muted-fg); }
+.wbupdate-line > summary::-webkit-details-marker { display: none; }
+.wbupdate-line > summary:hover { background: var(--wb-muted); }
+.wbupdate-line > summary .i { flex: none; width: 10px; height: 10px; }
+.wbupdate-line[open] > summary .i { transform: rotate(180deg); }
+.wbupdate-preview { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbupdate-line > .wbupdate-topic { margin: 3px 7px 5px 22px; }
+.wbupdate :is(a, summary):focus-visible, .delivery-details > summary:focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
+.wbupdate-bar a:focus-visible { outline-color: var(--wb-on-topic); }
+
 /* ===== composer: never swapped ===== */
 .composer { position: relative; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 /* composer badges: a row centred on the 10px gap between the conversation and
@@ -138,7 +194,16 @@
 @keyframes ibadge-rise { from { opacity: 0; transform: translateY(40%); } }
 @media (prefers-reduced-motion: reduce) { .ibadge:not([hidden]), .sbadge, .ibadge.busy .istop { animation: none; } }
 .crow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
-.composer textarea { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
+.wsc-backing { display: none !important; }
+.wsc-editor { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.wsc-editor:empty::before { content: attr(data-placeholder); color: var(--wb-muted-fg); pointer-events: none; }
+.wsc-editor:focus { outline: 1.5px solid var(--wb-primary); }
+.wsc-backing[hidden] + .wsc-editor { display: none; }
+.wsc-editor[aria-disabled="true"] { opacity: .6; cursor: default; }
+.wsc-capsule { display: inline; white-space: nowrap; font-size: 12px; line-height: 1.5; padding: 0 6px; border-radius: 5px; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 28%, transparent); }
+.wsc-skill { font: 11.5px/1.5 var(--wb-mono); }
+.composer textarea, .composer textarea + .wsc-editor { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
+.composer textarea + .wsc-editor { box-sizing: border-box; overflow: auto; }
 .composer textarea:focus { outline: 1.5px solid var(--wb-primary); }
 /* the message box over its mention layer: the layer is laid out like the
    textarea (same font, padding, and wrapping) and drawn behind it with
@@ -216,7 +281,11 @@
 /* A board note's image chips: a row right after its note, aligned with it,
    hidden while the note is closed. */
 .nimgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.note[hidden] + .nimgs { display: none; }
+.note + .wsc-editor { width: 100%; box-sizing: border-box; margin-top: 8px; font: inherit; line-height: 1.4; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; }
+.note + .wsc-editor:focus { outline: none; border-bottom-color: var(--wb-primary); }
+.arow > .note + .wsc-editor, .ckrow > .note + .wsc-editor { flex-basis: 100%; width: auto; margin: 0 10px 8px 34px; }
+.srow .note + .wsc-editor { flex-basis: 100%; margin-top: 4px; }
+.note[hidden] + .nimgs, .note[hidden] + .wsc-editor + .nimgs { display: none; }
 .arow > .nimgs, .ckrow > .nimgs { flex-basis: 100%; margin: 0 10px 8px 34px; }
 .srow > .nimgs { flex-basis: 100%; margin-top: 4px; }
 .tophead > .nimgs { margin: 0 10px 6px; }
@@ -247,8 +316,8 @@
 .srow .stext > .sentmark { margin-right: 6px; }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
 /* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back. Ack rows (.arow) and check rows (.ckrow) dim alike; .aline is the agents panel's row wrapper, not a board item. */
-.card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input, .ckrow.sent-sent .why, .ckrow.sent-sent input { opacity: .4; transition: opacity .15s; }
-.card.sent-held > .cbody > :not(.note), .arow.sent-held .why, .arow.sent-held input, .ckrow.sent-held .why, .ckrow.sent-held input { opacity: .65; transition: opacity .15s; }
+.card.sent-sent > .cbody > :not(.note):not(.wsc-editor), .arow.sent-sent .why, .arow.sent-sent input, .ckrow.sent-sent .why, .ckrow.sent-sent input { opacity: .4; transition: opacity .15s; }
+.card.sent-held > .cbody > :not(.note):not(.wsc-editor), .arow.sent-held .why, .arow.sent-held input, .ckrow.sent-held .why, .ckrow.sent-held input { opacity: .65; transition: opacity .15s; }
 .card.sent-sent .cbar .head .title, .arow.sent-sent .head .title, .ckrow.sent-sent .head .title { opacity: .7; transition: opacity .15s; }
 .card.sent-held .cbar .head .title, .arow.sent-held .head .title, .ckrow.sent-held .head .title { opacity: .85; transition: opacity .15s; }
 .card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .card:is(.sent-sent, .sent-held):focus-within .cbar .head .title, .arow:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title), .ckrow:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title) { opacity: 1; }

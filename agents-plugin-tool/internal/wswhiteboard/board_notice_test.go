@@ -54,6 +54,41 @@ func noticeReasons(t *testing.T, p noticePlan, reasons ...string) {
 	}
 }
 
+func TestBoardNoticeResearchingBodyWithoutTriggerOrOverdue(t *testing.T) {
+	s := stateBoard(t)
+	stateApply(t, s, stateCommand(StateResearching, `owner="investigator" eta_minutes="1"`), stateNow)
+	dirs := map[string]string{"Work": "t1"}
+	p := s.planNotice("lead", dirs, stateNow.Add(2*time.Hour))
+	noticeReasons(t, p)
+	if !p.next.IsZero() || len(p.receipt.Covered) != 0 || eligibleState(s.TopicStates()["Work"]) {
+		t.Fatal("informational research activated a clock")
+	}
+	if epoch, _ := s.hourlyEpoch(); epoch != "" {
+		t.Fatal("research activated hourly epoch")
+	}
+	noticeTopic(t, s, "Wait", StateWaiting, 0, stateNow.Add(2*time.Hour))
+	dirs["Wait"] = "t2"
+	noticeReasons(t, s.planNotice("lead", dirs, stateNow.Add(179*time.Minute)))
+	p = s.planNotice("lead", dirs, stateNow.Add(3*time.Hour))
+	noticeReasons(t, p, "hourly")
+	if !strings.Contains(p.message, "- Work: researching\n") || !strings.Contains(p.message, "- Wait: waiting\n") || !strings.Contains(p.message, "Overdue topics:\n- none\n") || len(p.receipt.Covered) != 0 {
+		t.Fatalf("hourly research body/coverage: %+v", p)
+	}
+	stateApply(t, s, `<wb:topic name="Wait"><wb:state value="researching" eta_minutes="1"/></wb:topic>`, stateNow.Add(3*time.Hour))
+	p = s.planNotice("lead", dirs, stateNow.Add(4*time.Hour))
+	noticeReasons(t, p)
+	if epoch, _ := s.hourlyEpoch(); epoch != "" {
+		t.Fatal("research retained waiting hourly epoch")
+	}
+	stateApply(t, s, stateCommand(StateImplementing, `owner="executor" eta_minutes="2"`), stateNow.Add(4*time.Hour))
+	noticeReasons(t, s.planNotice("lead", dirs, stateNow.Add(4*time.Hour+time.Minute)))
+	p = s.planNotice("lead", dirs, stateNow.Add(4*time.Hour+2*time.Minute))
+	noticeReasons(t, p, "overdue")
+	if len(p.receipt.Covered) != 1 || p.receipt.Covered[0].TopicDir != "t1" || strings.Contains(p.message, "investigator") {
+		t.Fatal("research metadata leaked into implementation overdue notice")
+	}
+}
+
 func TestBoardNoticePerTopicFullListDebounceAndRevision(t *testing.T) {
 	s := &State{}
 	noticeTopic(t, s, "A", StateImplementing, 10, stateNow)

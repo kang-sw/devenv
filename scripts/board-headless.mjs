@@ -125,10 +125,18 @@
 //             --capture-dir retains measurements and responsive screenshots.
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
-//   history-regressions  Chunks through renderer-produced closed system chips (thirty
-//             short lines: the line cap binds before the 1000px budget),
-//             collapse cancellation, and real Tab into clipped summaries.
-//   history-fit  Controlled row-budget geometry (all/two-panel/one-panel/
+//   history-regressions  Thirty-entry chunks through renderer-produced closed
+//             system chips (short rows bind the line cap before 1000px),
+//             collapse cancellation, and real Tab past sticky pills.
+//             Use serve --topics 8 --history-entries 180 --shared-actions for
+//             the original e320 / p156 / e519 regression identities.
+//   history-unified  Real EN/KO renderer fixtures, whole-entry/header/rich
+//             contracts, 754 pN folds/unread updates and both-reference captures.
+//             Generate with WS_HISTORY_FIXTURE_DIR + TestHistoryCaptureFixtures;
+//             serve without --history-entries (an empty panel inventory), then
+//             pass --fixtures DIR. Standalone uses a disposable live HTML copy.
+//             --before captures baseline evidence without a TASK3 verdict.
+//   history-fit  Controlled whole-row-budget geometry (all/two-panel/one-panel/
 //             oversized), cached/first heights, wrapping without recutting.
 //
 // History samples retain rAF geometry as diagnostic evidence and assert <=1px
@@ -166,6 +174,7 @@ import { createHash } from 'node:crypto';
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { scenarioHistoryUnified } from "./board-history-unified.mjs";
 import { createToolbarOverview } from './board-headless/toolbar-overview.mjs';
 import assetSource from '../agents-plugin-tool/internal/wsdashboard/testdata/asset-source.cjs';
 
@@ -173,6 +182,7 @@ const { readAssetSource } = assetSource;
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TOOL_DIR = path.join(REPO, "agents-plugin-tool");
+const LOGIC_ONLY = process.env.WS_BOARD_ACCEPTANCE_LOGIC_ONLY === '1';
 
 // --- arguments ---------------------------------------------------------------
 
@@ -692,7 +702,7 @@ async function openBoard(ctx) {
     BROWSERS.push(browser);
   }
   const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height }, locale: ctx.language === 'ko' ? 'ko-KR' : undefined });
-  if (ctx.language) await tab.context().addCookies([{ name: 'ws_dashboard_lang', value: ctx.language, url: new URL(ctx.args.url).origin }]);
+  if (ctx.language && /^https?:/.test(ctx.args.url)) await tab.context().addCookies([{ name: 'ws_dashboard_lang', value: ctx.language, url: new URL(ctx.args.url).origin }]);
   tab.on("pageerror", (e) => ctx.errors.push(String(e)));
   if (ctx.args['menu-hit-targets']) {
     ctx.menuHits = [];
@@ -704,6 +714,13 @@ async function openBoard(ctx) {
   const consoleErrors = [];
   tab.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   await tab.addInitScript(INIT, { menuHitTargets: !!ctx.args['menu-hit-targets'] });
+  if (ctx.legacyPanelFold) await tab.addInitScript((legacyKey) => {
+    // Seed only the fresh top document, before production reads browser state.
+    // Subsequent reloads keep the migrated record rather than reseeding it.
+    if (window !== window.top || localStorage.getItem('ws.dashboard.panelshut') !== null) return;
+    if (localStorage.length || sessionStorage.length) throw new Error('legacy-only fixture requires empty browser storage');
+    localStorage.setItem('ws.dashboard.panelshut', JSON.stringify([legacyKey]));
+  }, ctx.legacyPanelFold);
   if (ctx.assetRef) {
     const files = ['wsdashboard/assets/cards.js', 'wsdashboard/assets/dashboard.css', 'wsdashboard/assets/overview.js', 'wsdashboard/assets/terminal.js', 'wswhiteboard/assets/rail.js'];
     ctx.assetReplacements = []; ctx.assetHashes = {};
@@ -1303,7 +1320,7 @@ async function scenarioPill(ctx) {
       await sleep(3000);
       const result = await page.evaluate(async ({ name, expected }) => {
         const bh = window.__bh, s = bh.scroller(), host = document.getElementById('bcol') || document.querySelector('.wrap');
-        const pill = host.querySelector('.oq-wrap.top .oq-pill'), seg = pill?.querySelector('.oq-seg.open');
+        const pill = host.querySelector('.oq-wrap.wb-oq-top .oq-pill'), seg = pill?.querySelector('.oq-seg.open');
         const count = () => !pill || pill.hidden || !seg || seg.hidden ? 0 : Number(seg.querySelector('.n').textContent);
         bh.pillMO.takeRecords();
         bh.pillChurn = { mounts: 0, unmounts: 0 };
@@ -1348,7 +1365,12 @@ const HISTORY_PAGE = () => {
     const panels = Array.from(live.querySelectorAll(':scope > .wb-entry.panel'));
     const entries = Array.from(live.querySelectorAll('.wb-entry:not(.historical)'));
     return { includedRows: entries.length - entries.findIndex((e) => e.id === h._wbHistoryChunks.at(-1)), steps: h._wbHistorySteps, chunks: h._wbHistoryChunks.slice(), pending: !!h._wbHistoryPending,
-      visiblePanels: panels.filter((p) => p.getBoundingClientRect().bottom > r.top + 1).length,
+      visiblePanels: panels.filter((p) => p.getBoundingClientRect().height > 0).length,
+      excludedRows: live.querySelectorAll(':scope > [data-wb-history-before]').length,
+      whole: Array.from(live.children).filter((n) => n.getBoundingClientRect().height > 0).every((n) => {
+        const b = n.getBoundingClientRect(); return b.top >= r.top - 1 && b.bottom <= r.bottom + 1;
+      }),
+      fade: getComputedStyle(clip, '::after').content,
       pages: h.querySelectorAll('template[data-history-page]').length,
       rows: live.querySelectorAll('.wb-entry').length, live: live.scrollHeight, height: r.height,
       top: r.top, bottom: r.bottom, scrollTop: clip.scrollTop,
@@ -1364,13 +1386,13 @@ const HISTORY_PAGE = () => {
     const cr = rect(control), x = cr && (cr.left + cr.right) / 2, y = cr && (cr.top + cr.bottom) / 2;
     let owner = cr && document.elementFromPoint(x, y), ancestry = [];
     for (let p = owner; p && ancestry.length < 7; p = p.parentElement) ancestry.push({ tag: p.tagName, id: p.id, cls: p.className });
-    const hs = getComputedStyle(head), keep = bh.keeping();
+    const hs = getComputedStyle(head), keep = bh.keeping(), column = document.querySelector('#bcol');
     return { id, target: rect(node), control: cr, point: { x, y }, ancestry,
       head: { rect: rect(head), position: hs.position, styleTop: hs.top, railTop: hs.getPropertyValue('--wb-rail-top'), height: head.offsetHeight },
       computedNavigateOffset: 12 + (hs.position === 'sticky' ? (parseFloat(hs.top) || 0) + head.offsetHeight : 0),
       face: rect(document.querySelector('.board-toolbar-face')), toolbar: rect(document.querySelector('.board-toolbar')),
       floating: document.querySelector('.board-toolbar')?.hasAttribute('data-floating'),
-      railInset: getComputedStyle(document.querySelector('#bcol')).getPropertyValue('--wb-rail-inset'), padding: getComputedStyle(s).scrollPaddingTop,
+      railInset: column ? getComputedStyle(column).getPropertyValue('--wb-rail-inset') : null, padding: getComputedStyle(s).scrollPaddingTop,
       capsules: [...document.querySelectorAll('.wb-cap')].filter((n) => !n.hidden && n.getClientRects().length).map((n) => ({ cls: n.className, rect: rect(n) })),
       keeping: !!keep, targetOffsetObserved: node && node.getBoundingClientRect().top - bh.viewTop(s), scrollTop: s.scrollTop };
   };
@@ -1387,6 +1409,16 @@ const HISTORY_PAGE = () => {
 
 async function growEntry(page, id, px) {
   await page.evaluate(([id, px]) => window.__bh.mark(`late payload height (${id} +${px}px)`), [id, px]);
+  const excluded = await page.evaluate(([id, px]) => {
+    const entry = document.getElementById(id);
+    if (!entry?.closest('[data-wb-history-before]')) return false;
+    const body = entry.querySelector('.entry-body');
+    if (!body || entry.getBoundingClientRect().height !== 0) throw new Error('excluded whole-entry growth fixture is not actually hidden');
+    body.style.paddingBottom = (parseFloat(getComputedStyle(body).paddingBottom) + px) + 'px';
+    if (entry.getBoundingClientRect().height !== 0) throw new Error('excluded payload growth leaked a partial entry');
+    return true;
+  }, [id, px]);
+  if (excluded) return; // no rendered height can arrive from a display:none prefix
   const selector = `#${id} .entry-body iframe.doc-frame`;
   const framed = await page.locator(selector).count();
   if (framed) return growFrame(page, id, px, selector);
@@ -1443,7 +1475,7 @@ async function scenarioHistory(ctx) {
     measure(label, { maxDy: worst, rafMaxDy: rafWorst, frames: painted.filter((s) => s.y).length });
     assert(worst <= 1, `${label}: post-paint screen y moved ${worst.toFixed(2)}px (>1px); evidence ${dir}/${label}.json`);
   };
-  const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
+  const capture = async (name) => { if (LOGIC_ONLY) return; const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
   async function cards() {
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
@@ -1452,7 +1484,7 @@ async function scenarioHistory(ctx) {
     assert(first.steps === 1 && !first.pending && first.visiblePanels >= 1 && first.visiblePanels <= 3 &&
       (first.height <= 1000 || first.visiblePanels === 1), `invalid first panel chunk: ${JSON.stringify(first)}`);
     assert(first.pages >= 2 && first.rows === 50, 'need 50 live entries and at least two inert older pages');
-    assert(first.overflow !== 'auto' && first.overflow !== 'scroll' && first.scrollTop === 0, 'history has an inner scroll');
+    assert(first.overflow !== 'auto' && first.overflow !== 'scroll' && first.scrollTop === 0 && first.maxHeight === 'none' && first.whole && (first.fade === 'none' || first.fade === 'normal'), 'history must show whole entries without an inner scroll, height clip or fade');
     await capture('before-load-more');
 
     // Watch the oldest intersecting row and the newest row through a real
@@ -1496,9 +1528,9 @@ async function scenarioHistory(ctx) {
     measure('paging', { clicks: paging.map((r) => ({ steps: r.after.steps, pagesBefore: r.before.pages, pagesSync: r.after.pages, pagesAfterResize: r.settled.pages, liveBefore: r.before.live })) });
     assert(paging.some((r) => r.after.pages < r.before.pages), 'no embedded page was materialized');
 
-    // Open an older payload still above the bottom-anchored window. Opening
-    // and then growing it are distinct real layout changes. Check after the
-    // keep quiet window as well as within it.
+    // An excluded whole payload remains excluded through payload growth,
+    // before and after keep's quiet window. Its rendered height is zero;
+    // genuine visible inline/frame height arrivals are covered below.
     const older = await page.evaluate(() => {
       const entries = Array.from(window.__bh.history().querySelectorAll('.history-live > .wb-entry'));
       entries[0].querySelector('details').open = true;
@@ -1600,9 +1632,12 @@ async function scenarioHistory(ctx) {
     assert(belowAfter.rows === belowCollapse.before.rows && JSON.stringify(belowAfter.folds) === JSON.stringify(belowCollapse.before.folds),
       'below collapse lost rows or disclosure choices');
 
-    // Reuse the dashboard's actual pin button and its real #bpins scroller.
-    if (kind !== 'standalone') {
-      assert(ctx.width >= 1600, 'history dashboard pinned-column check requires --width 1800');
+    if (kind !== 'standalone') await pinnedSetup();
+  }
+  // Shared by the full history scenario and the comparable A/B arrival probe.
+  // No TASK3-only whole-entry/count precheck belongs in this host setup.
+  async function pinnedSetup() {
+      assert(kind !== 'standalone' && ctx.width >= 1600, 'history dashboard pinned-column check requires --width 1800');
       await page.evaluate(() => {
         const bh = window.__bh, topic = bh.history().closest('.topic');
         // A single panel chunk may fit the column. Pin a tall peer as well,
@@ -1632,7 +1667,6 @@ async function scenarioHistory(ctx) {
         bh.section(bh.pinPeer).querySelector('.tpin').click(); bh.focus = null;
       });
       await waitQuiet(page);
-    }
   }
   try {
     if (ctx.args['verify-ref']) {
@@ -1649,7 +1683,8 @@ async function scenarioHistory(ctx) {
       const bar = document.querySelector('.board-toolbar'); bar.style.width = width + 'px'; bar.style.maxWidth = '100%';
     }, +ctx.args['face-width']);
     assert(await page.evaluate(() => !!window.__bh.history()), 'seed HISTORY with serve --history-entries 180');
-    if (ctx.navigationOnly) {
+    if (ctx.pinnedArrivalOnly) await pinnedSetup();
+    else if (ctx.navigationOnly) {
       // Recreate the previous 214px rAF excursion's near-full clip: load a
       // page and let an older payload grow before navigating. This is fixture
       // setup, not an alternative history implementation or keep session.
@@ -1725,7 +1760,7 @@ async function scenarioHistory(ctx) {
       if (!equivalent) throw failure;
       (ctx.knownBaselineFailures ||= []).push(classification);
     }
-    if (ctx.args.case === 'arrival') {
+    if (ctx.args.case === 'arrival' || ctx.pinnedArrivalOnly) {
       report.omissions.push('Focused arrival case excludes subsequent late-height, collapse and live-arrival assertions.');
       return;
     }
@@ -1796,7 +1831,7 @@ async function scenarioHistory(ctx) {
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
     const exhausted = await page.evaluate(() => window.__bh.historyState());
-    assert(exhausted.pages === 0 && exhausted.button && exhausted.live > exhausted.height, 'exhausted pages hid the button while clipped content remained');
+    assert(exhausted.pages === 0 && exhausted.button && exhausted.includedRows < exhausted.rows && exhausted.excludedRows > 0, 'exhausted pages hid the button while excluded whole entries remained');
     let fitted = exhausted, controlClicks = 0;
     while (fitted.button && controlClicks < 100) {
       const before = fitted;
@@ -1838,6 +1873,7 @@ async function scenarioHistory(ctx) {
       const chip = src.cloneNode(true), entry = chip.querySelector('.wb-entry'), old = entry.id;
       chip.innerHTML = chip.innerHTML.replaceAll(old, 'e999001');
       chip.dataset.key = 'system:e999001'; chip.dataset.historyAnchor = 'e999001'; chip.open = false;
+      chip.removeAttribute('data-wb-history-before'); // a fresh server row has no private prefix marker
       chip.querySelector('.entry-text').textContent = 'Live arrival fixture';
       chip.id = 'bh-live-chip'; live.appendChild(chip);
       return before;
@@ -1874,7 +1910,7 @@ async function scenarioHistoryRegressions(ctx) {
   fs.mkdirSync(dir, { recursive: true });
   const report = { url: ctx.args.url, kind, measurements: [], omissions: [] };
   const measure = (label, data) => { report.measurements.push({ label, ...data }); log(`${label}: ${JSON.stringify(data)}`); };
-  const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
+  const capture = async (name) => { if (LOGIC_ONLY) return; const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
   const paint = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0))));
   try {
     await page.evaluate(HISTORY_PAGE);
@@ -1882,40 +1918,83 @@ async function scenarioHistoryRegressions(ctx) {
     assert(await page.evaluate(() => ['HISTORY', 'LOGCHAIN', 'LOGCANCEL'].every((n) => !!window.__bh.history(n))),
       'seed renderer-produced panel/log histories with serve --history-entries 180');
 
-    async function clippedFoldTab(name, selector) {
-      await page.evaluate((name) => {
-        const bh = window.__bh, s = bh.scroller(), clip = bh.history(name).querySelector('.history-clip');
-        s.scrollTop += clip.getBoundingClientRect().top - bh.viewTop(s) - 100;
-      }, name);
+    // Whole-entry selection intentionally removes clipped tabbable content.
+    // Retain the original three identities and the strict 691 hit test: first
+    // reveal the real boundary, position it under the actual pill, then reach
+    // it only with native Tab. No direct focus() or synthetic focusin on it.
+    async function boundaryTab(name, id, selector) {
+      await page.evaluate(([name, id, selector]) => {
+        const bh = window.__bh, h = bh.history(name), node = window.wbHistory.loadTarget(document, id);
+        if (!node || !h.contains(node)) throw new Error(`missing original 691 target ${id}; seed --topics 8 --history-entries 180 --shared-actions`);
+        const fold = node.matches(selector) ? node : node.closest(selector);
+        if (!fold) throw new Error(`${id} is not the expected ${selector}`);
+        fold.open = false;
+        bh.foldTab = { summary: fold.querySelector(':scope > summary'), fold };
+        const sentinel = document.createElement('button'); sentinel.textContent = 'Tab starting point';
+        sentinel.style.cssText = 'position:absolute;height:1px;width:1px;padding:0;border:0;opacity:0';
+        fold.before(sentinel); sentinel.focus({ preventScroll: true }); bh.foldTab.sentinel = sentinel;
+      }, [name, id, selector]);
       await waitQuiet(page);
-      const before = await page.evaluate(([name, selector]) => {
-        const bh = window.__bh, h = bh.history(name), clip = h.querySelector('.history-clip').getBoundingClientRect();
-        const fold = Array.from(h.querySelectorAll(selector)).find((f) => f.querySelector('summary').getBoundingClientRect().top < clip.top - 1);
-        if (!fold) throw new Error(`no clipped ${selector} in ${name}`);
-        const summary = fold.querySelector('summary'), sentinel = document.createElement('button');
-        sentinel.textContent = 'Tab starting point';
-        // Positioned inside the clip without changing the renderer's rows.
-        // Only the subsequent real Tab reaches the clipped disclosure.
-        sentinel.style.cssText = 'position:absolute;bottom:0;height:1px;width:1px;padding:0;border:0;opacity:0';
-        fold.before(sentinel); sentinel.focus({ preventScroll: true });
-        bh.foldTab = { summary, sentinel };
-        return { anchor: fold.dataset.historyAnchor, steps: h._wbHistorySteps, clipped: summary.getBoundingClientRect().top < clip.top - 1 };
-      }, [name, selector]);
-      assert(before.clipped, `${selector} summary must start above the clip`);
+      let setupAttempts = 0;
+      for (; setupAttempts < 3; setupAttempts++) {
+        const positioned = await page.evaluate(() => {
+          const bh = window.__bh, s = bh.scroller(), node = bh.foldTab.summary;
+          const pill = document.querySelector('.oq-wrap.wb-oq-top .oq-pill:not([hidden])');
+          if (!pill) return false;
+          const r = node.getBoundingClientRect(), p = pill.getBoundingClientRect();
+          if (!r.height || !p.height) return false;
+          // The sticky pill can change owners/position during the scroll.
+          // Use its real settled rectangle again rather than stale geometry.
+          s.scrollTop += (r.top + r.height / 2) - (p.top + p.height / 2);
+          return true;
+        });
+        if (!positioned) break;
+        await waitQuiet(page);
+        if (await page.evaluate(() => {
+          const r = window.__bh.foldTab.summary.getBoundingClientRect();
+          return !!document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('.oq-pill');
+        })) break;
+      }
+      const before = await page.evaluate((name) => {
+        const bh = window.__bh, h = bh.history(name), node = bh.foldTab.summary, r = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        const wrap = document.querySelector('.oq-wrap.wb-oq-top');
+        const rectPill = () => wrap?.querySelector('.oq-pill:not([hidden])')?.getBoundingClientRect().toJSON() || null;
+        return { boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
+          centerCoveredByPill: !!hit?.closest('.oq-pill'), height: r.height,
+          control: r.toJSON(), pill: rectPill(), centerHit: hit && { tag: hit.tagName, classes: hit.className },
+          collisionGone: !!wrap && !wrap.classList.contains('top') && parseFloat(getComputedStyle(wrap).marginBottom) === 0,
+          whole: h.querySelector('.history-clip').scrollTop === 0 && getComputedStyle(h.querySelector('.history-clip')).maxHeight === 'none' };
+      }, name);
+      measure(`${id}-before-real-tab`, { ...before, setupAttempts: Math.min(setupAttempts + 1, 3) });
+      if (!(before.height > 0 && before.centerCoveredByPill)) {
+        const reason = `Skipped: precondition not met for ${id} at ${ctx.width}x${ctx.height}; real pill obstruction could not be established: ` +
+          JSON.stringify({ control: before.control, pill: before.pill, centerHit: before.centerHit });
+        report.omissions.push(reason); (ctx.skips ||= []).push(reason); log(reason);
+        await page.evaluate(() => { window.__bh.foldTab.sentinel.blur(); window.__bh.foldTab.sentinel.remove(); });
+        return;
+      }
+      assert(before.height > 0 && before.centerCoveredByPill && before.collisionGone && before.whole,
+        `${id}: setup must prove genuine pill obstruction separately from the removed .top collision`);
+      await capture(`${id}-before-tab`);
       await tab.keyboard.press('Tab');
       await paint();
+      await waitQuiet(page);
       const after = await page.evaluate((name) => {
-        const bh = window.__bh, h = bh.history(name), node = document.activeElement, r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+        const bh = window.__bh, h = bh.history(name), node = document.activeElement, r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect(), s = bh.scroller();
         const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
         return { expected: node === bh.foldTab.summary, boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
+          centerExposed: !!hit && (hit === node || node.contains(hit)), pillCoverage: !!hit?.closest('.oq-wrap,.oq-pill'),
+          centerHit: hit && { tag: hit.tagName, id: hit.id, classes: hit.className },
           top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-          centerExposed: !!hit && (hit === node || node.contains(hit)), clipScrollTop: h.querySelector('.history-clip').scrollTop,
+          viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), clipScrollTop: h.querySelector('.history-clip').scrollTop,
           hit: hit && `${hit.tagName.toLowerCase()}.${hit.className}`, hitParent: hit?.parentElement && `${hit.parentElement.tagName.toLowerCase()}.${hit.parentElement.className}` };
       }, name);
-      measure(`${selector}-real-tab`, { before, after });
-      assert(after.expected && after.boundary === before.anchor && after.steps === before.steps + 1 &&
-        after.top >= after.clipTop - 1 && after.bottom <= after.clipBottom + 1 && after.centerExposed && after.clipScrollTop === 0,
-        `real Tab did not reveal clipped ${selector} summary`);
+      measure(`${id}-after-real-tab`, after);
+      await capture(`${id}-after-tab`);
+      assert(after.expected && after.boundary === before.boundary && after.steps === before.steps && after.centerExposed && !after.pillCoverage &&
+        after.top >= after.clipTop - 1 && after.bottom <= after.clipBottom + 1 && after.top >= after.viewTop - 1 && after.bottom <= after.viewBottom + 1 && after.clipScrollTop === 0,
+        `${id}: native Tab did not expose the actual boundary control center`);
       await page.evaluate(() => { document.activeElement.blur(); window.__bh.foldTab.sentinel.remove(); });
       await page.waitForFunction((name) => window.wbHistory.seen(window.__bh.history(name).closest('.topic'), '0px')?.visible, name, { timeout: 2000 });
       await page.evaluate((name) => {
@@ -1924,46 +2003,11 @@ async function scenarioHistoryRegressions(ctx) {
       }, name);
       await page.waitForFunction((name) => window.__bh.history(name)._wbHistorySteps === 1, name, { timeout: 2000 });
     }
-    await clippedFoldTab('HISTORY', '.system-run');
-
-    // The old failure was a real Tab into the first clipped summary, not an
-    // explicit focus() on the desired row or a synthetic focusin callback.
-    await page.evaluate(() => window.__bh.positionHistory());
-    await waitQuiet(page);
-    await page.locator('.wb-history[data-history="HISTORY"] > .mhead > .history-older').focus();
-    const keyboardBefore = await page.evaluate(() => {
-      const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect();
-      const node = h.querySelector('.history-live .entry-panel > summary'), r = node.getBoundingClientRect();
-      bh.expectedTab = node;
-      return { buttonFocused: document.activeElement === h.querySelector('.history-older'),
-        panel: node.closest('.entry-panel').id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-        clipped: r.bottom <= clip.top, clipScrollTop: h.querySelector('.history-clip').scrollTop };
-    });
-    measure('keyboard-before-tab', keyboardBefore);
-    assert(keyboardBefore.buttonFocused && keyboardBefore.clipped && keyboardBefore.clipScrollTop === 0, 'Tab fixture must start at load-more with the next summary clipped');
-    await capture('before-tab');
-    await tab.keyboard.press('Tab');
-    await paint();
-    await sleep(100);
-    const keyboardAfter = await page.evaluate(() => {
-      const bh = window.__bh, h = bh.history(), node = document.activeElement, r = node.getBoundingClientRect();
-      const clip = h.querySelector('.history-clip').getBoundingClientRect(), s = bh.scroller();
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return { expected: node === bh.expectedTab, summary: node.matches('.entry-panel > summary'),
-        centerExposed: !!hit && (hit === node || node.contains(hit)),
-        centerHit: hit && { tag: hit.tagName, id: hit.id, classes: hit.className },
-        panel: node.closest('.entry-panel')?.id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-        viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), clipScrollTop: h.querySelector('.history-clip').scrollTop,
-        steps: h._wbHistorySteps };
-    });
-    measure('keyboard-after-tab', keyboardAfter);
-    await capture('after-tab');
-    assert(keyboardAfter.expected && keyboardAfter.summary && keyboardAfter.top >= keyboardAfter.clipTop - 1 &&
-      keyboardAfter.bottom <= keyboardAfter.clipBottom + 1 && keyboardAfter.top >= keyboardAfter.viewTop - 1 &&
-      keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0 && keyboardAfter.centerExposed,
-      'actual Tab focused a summary outside the clip/page, under a sticky overlay, or scrolled the clip');
-    await page.evaluate(() => document.activeElement.blur());
-    await clippedFoldTab('LOGCHAIN', '.system-run');
+    await boundaryTab('HISTORY', 'e320', '.system-run');
+    await boundaryTab('HISTORY', 'p156', '.entry-panel');
+    // Log auto-fold is gone; e519 now belongs to the renderer's system chip.
+    // Keep its exact identity and the same native Tab/center-hit predicate.
+    await boundaryTab('LOGCHAIN', 'e519', '.system-run');
 
     async function settledLog(name) {
       await page.evaluate((name) => {
@@ -2188,7 +2232,7 @@ async function scenarioPanelHeader(ctx) {
     });
     assert(JSON.stringify(intrinsic) === JSON.stringify(['23px', '17px', true]), 'intrinsic body spacing/disclosure changed');
   }
-  for (const width of [1440, 800, 360, 320]) {
+  for (const width of (LOGIC_ONLY ? [ctx.width] : [1440, 800, 360, 320])) {
     await viewport(width);
     await measure(`viewport-${width}-open`);
     // Native keyboard disclosure, with focus in the real clipped history.
@@ -2202,7 +2246,7 @@ async function scenarioPanelHeader(ctx) {
     await page.evaluate(() => { window.__bh.headerPanels[1].open = true; });
   }
   await viewport(1440);
-  for (const width of [420, 421]) {
+  for (const width of (LOGIC_ONLY ? [] : [420, 421])) {
     await page.evaluate((w) => { document.querySelector('[data-history="HISTORY"]').style.width = w + 'px'; }, width);
     await measure(`wide-host-content-${width}`);
   }
@@ -2259,6 +2303,7 @@ async function scenarioHistoryFit(ctx) {
         const row = (panel, height) => {
           const n = (panel ? bh.fitPanel : bh.fitLog).cloneNode(true);
           n.id = 'e' + (++id); n.dataset.entry = n.id; n.dataset.historyAnchor = n.id;
+          n.removeAttribute('data-wb-history-before');
           n.style.cssText = `height:${height}px;margin:0;padding:0;box-sizing:border-box;overflow:hidden`;
           if (panel) {
             n.dataset.panel = 'p' + id;
@@ -2384,13 +2429,16 @@ const SCENARIOS = {
   'history-fit': scenarioHistoryFit,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
+  'history-pinned-arrival': (ctx) => scenarioHistory({ ...ctx, pinnedArrivalOnly: true }),
   'history-regressions': scenarioHistoryRegressions,
+  'history-unified': (ctx) => scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFor, bindPage: IN_PAGE, log, assert }),
 };
 
 // --- main ----------------------------------------------------------------------
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (LOGIC_ONLY) delete args['capture-dir'];
   const name = args._[0];
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
@@ -2400,7 +2448,7 @@ async function main() {
   }
   // check records a failed expectation and lets the scenario go on, so one
   // run reports every part; assert stops the scenario.
-  const ctx = { args, width: +(args.width || 1440), height: +(args.height || 900), errors: [], failures: [], knownBaselineFailures: [] };
+  const ctx = { args, language: args.lang, width: +(args.width || 1440), height: +(args.height || 900), errors: [], failures: [], knownBaselineFailures: [] };
   ctx.check = (cond, msg) => { if (!cond) { ctx.failures.push(msg); console.error(`FAILED: ${msg}`); } return !!cond; };
   try {
     const t0 = Date.now();
@@ -2413,7 +2461,9 @@ async function main() {
     }
     if (ctx.errors.length) ctx.failures.push(`page errors: ${ctx.errors.join(" | ")}`);
     if (ctx.failures.length) throw new Failure(`${ctx.failures.length} check(s) failed:\n  - ${ctx.failures.join("\n  - ")}`);
-    log(`${ctx.knownBaselineFailures?.length ? 'REGRESSION-PASS with ' + ctx.knownBaselineFailures.length + ' known-baseline-failure(s)' : 'PASS'} ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    const verdict = ctx.skips?.length ? 'COMPLETED WITH ' + ctx.skips.length + ' SETUP SKIP(S)' :
+      ctx.knownBaselineFailures?.length ? 'REGRESSION-PASS with ' + ctx.knownBaselineFailures.length + ' known-baseline-failure(s)' : 'PASS';
+    log(`${verdict} ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   } catch (e) {
     console.error(`FAIL ${name}: ${e instanceof Failure ? e.message : e.stack || e}`);
     process.exitCode = 1;

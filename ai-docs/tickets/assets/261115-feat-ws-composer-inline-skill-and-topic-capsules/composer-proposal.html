@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Composer capsules · proposal for owner review</title>
+<style>
+:root{color-scheme:light dark;--bg:#f3f3f0;--fg:#1b1d21;--card:#fff;--muted:#e9e8e3;--dim:#5f646b;--primary:#2b62d9;--warn:#b25000;--line:color-mix(in srgb,var(--fg) 16%,transparent);--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#141518;--fg:#e7e7e4;--card:#1e2024;--muted:#2b2d32;--dim:#a2a6ad;--primary:#7aa2ff;--warn:#e0a36c}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:1080px;margin:40px auto;padding:0 24px 40px}h1{font-size:25px;letter-spacing:-.6px;margin:8px 0}h2{font-size:15px;margin:0 0 12px}.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:750;color:var(--dim)}.muted,small{color:var(--dim)}.notice{border-left:3px solid var(--warn);padding:10px 14px;background:color-mix(in srgb,var(--warn) 6%,var(--card));margin:20px 0 28px}.badge{display:inline-block;font-size:10px;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--warn);font-weight:750}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.scene{min-width:0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}.wide{grid-column:1/-1}.editor{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:14px;line-height:2.1;min-height:93px}.capsule{display:inline-flex;align-items:center;gap:4px;vertical-align:baseline;white-space:nowrap;border-radius:5px;padding:0 6px;font-size:12px;line-height:1.65;background:color-mix(in srgb,var(--primary) 11%,var(--card));color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 25%,transparent)}.capsule.skill{font-family:var(--mono);font-size:11.5px}.sigil{opacity:.7}.caret{border-left:1.5px solid var(--primary);margin-left:2px}.toolbar{display:flex;align-items:center;justify-content:space-between;margin-top:10px;color:var(--dim);font-size:11px}.send{border-radius:6px;padding:3px 11px;background:var(--primary);color:var(--card);font-weight:650}.popup{margin:9px 0 12px;border:1px solid var(--line);border-radius:10px;padding:5px;background:var(--card);box-shadow:0 2px 4px #00000016,0 6px 18px #00000012}.popup-head{padding:4px 8px;font-size:11px;color:var(--dim);font-weight:700;display:flex;justify-content:space-between}.row{padding:7px 9px;display:flex;align-items:center;gap:10px;border-radius:6px}.row.active{background:color-mix(in srgb,var(--primary) 10%,var(--card))}.icon{display:grid;place-items:center;width:24px;height:24px;background:var(--muted);border-radius:5px;color:var(--dim);flex:none}.row b{font-weight:600}.row small{display:block;font-size:11px;line-height:1.4}.match{color:var(--primary);font-weight:750}.key{font:10px var(--mono);color:var(--dim);border:1px solid var(--line);border-radius:3px;padding:1px 4px}.foot{border-top:1px solid var(--line);margin-top:4px;padding:6px 8px 2px;font-size:10px;color:var(--dim)}.preview{margin:12px 0 0;padding:9px 12px;background:var(--muted);border-radius:6px;font:11px/1.7 var(--mono);overflow-wrap:anywhere}.proposal{font-size:12px;margin:12px 0 0}.examples{display:grid;grid-template-columns:1fr 1fr;gap:18px}footer{margin-top:24px;font-size:11px;color:var(--dim)}@media(max-width:760px){main{margin:22px auto;padding:0 16px 24px}.grid,.examples{grid-template-columns:1fr}.wide{grid-column:auto}}
+</style>
+</head>
+<body><main>
+<div class="eyebrow">ws dashboard / preparation only</div>
+<h1>References stay in the sentence.</h1>
+<p class="muted">Compact skill and topic capsules, with a quiet fuzzy picker in the existing palette tone.</p>
+<div class="notice"><strong>Visual proposal — not implemented or visually approved.</strong><br>Confirmed rules, relayed by MAIN064034: (991=c) a skill executes only at the very start of a session message; mid-text skills send their literal name and never invoke. (992=b) topic pickers cover the session composer, memos and whiteboard answer notes. MAIN selected no slash picker in memos or answer notes: those editors are topic-only.</div>
+<div class="grid">
+<section class="scene wide"><div class="eyebrow">01 / selected inline state</div><h2>Session composer</h2>
+<div class="editor">Please <span class="capsule skill"><span class="sigil">/</span>lead-review</span> check the changes around <span class="capsule"><span class="sigil">#</span>Composer UX</span> before merging.<span class="caret">&nbsp;</span></div>
+<div class="toolbar"><span>＋ Attach · existing answer / selection attachments remain separate</span><span class="send" aria-disabled="true">Send ↑</span></div>
+<p class="proposal"><strong>Atomic selection:</strong> each capsule hugs its label at a slightly smaller size. Proposed one-Backspace removal deletes the whole capsule, not one letter. Static illustration; no editor or send behavior runs here.</p>
+<div class="preview">Mid-text → ordinary message text: “Please lead-review check the changes around [composer-ux] before merging.”<br>No command invocation. The slash in the capsule is a visual skill marker, not a slash-prefixed wire command.</div>
+<h2 style="margin-top:20px">Only at the very start: command execution</h2>
+<div class="editor"><span class="capsule skill"><span class="sigil">/</span>lead-review</span> check the changes around <span class="capsule"><span class="sigil">#</span>Composer UX</span> before merging.</div>
+<div class="preview">Existing structured command request:<br>{"command":"lead-review","args":"check the changes around [composer-ux] before merging."}<br>Never replace this request with literal /skill args on the wire.</div>
+</section>
+<section class="scene"><div class="eyebrow">02 / slash anywhere in the sentence</div><h2>Fuzzy skill picker</h2>
+<div class="editor">Please /lrv<span class="caret">&nbsp;</span></div>
+<div class="popup"><div class="popup-head"><span>Skills</span><span>lrv · fuzzy matches</span></div>
+<div class="row active"><span class="icon">/</span><div><b><span class="match">l</span>ead-<span class="match">r</span>e<span class="match">v</span>iew</b><small>Review a contributor branch or range</small></div></div>
+<div class="foot"><span class="key">↑ ↓</span> Navigate &nbsp; <span class="key">Enter</span> Insert &nbsp; <span class="key">Esc</span> Close</div></div>
+<small>Illustrative result, not a fetched skill inventory or approved ranking. Slash token is before the caret; remaining suffix is empty or whitespace.</small>
+</section>
+<section class="scene"><div class="eyebrow">03 / search labels, send stems</div><h2>Fuzzy topic picker</h2>
+<div class="editor">Check the notes for #cux<span class="caret">&nbsp;</span></div>
+<div class="popup"><div class="popup-head"><span>Topics</span><span>cux · fuzzy matches</span></div>
+<div class="row active"><span class="icon">#</span><div><b><span class="match">C</span>omposer <span class="match">UX</span></b><small>composer-ux</small></div></div>
+<div class="row"><span class="icon">#</span><div><b><span class="match">C</span>ommand men<span class="match">u</span> e<span class="match">x</span>perience</b><small>command-menu</small></div></div>
+<div class="foot"><span class="key">↑ ↓</span> Navigate &nbsp; <span class="key">Enter</span> Insert &nbsp; <span class="key">Esc</span> Close</div></div>
+<small>Fixture labels and stems. The selected label stays readable; sending substitutes <code>[composer-ux]</code>. No new topic is created.</small>
+</section>
+<section class="scene wide"><div class="eyebrow">04 / confirmed (992=b) · visual proposal</div><h2>Topic-only pickers in other editors <span class="badge"># only</span></h2><div class="examples">
+<div><small>Memo draft</small><div class="editor">Keep the rationale with <span class="capsule"><span class="sigil">#</span>Composer UX</span> for the next review.</div></div>
+<div><small>Whiteboard answer note</small><div class="editor">Compare this with <span class="capsule"><span class="sigil">#</span>Composer UX</span> before answering.</div></div>
+</div><p class="proposal">Type # to search topic labels in either editor. MAIN selected no slash picker here; skill execution belongs only to the session composer. Serialize a selected topic as its bracketed stem in the existing text/note string. This visual proposal does not implement persistence or alter saved-draft and wire contracts.</p></section>
+</div>
+<footer>Self-contained offline HTML · no scripts, fonts, remote assets, persistence, or live controls. Palette basis: wswhiteboard/assets/page.css and wsdashboard/assets/tracker.css. This is a visual reference, not browser-tested acceptance evidence.</footer>
+</main></body></html>

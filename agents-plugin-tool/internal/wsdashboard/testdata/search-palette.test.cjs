@@ -84,7 +84,8 @@ const rows = [...ids, { group: 1, kind: 'board-topic', topic: 'pal', title: 'Pal
 qs.rows = rows;
 assert.equal(ctx.qStrip, undefined, 'the deleted command-strip path is absent');
 
-// Shortcuts: / and the release-gate guard (editors keep Ctrl+K / Ctrl+Space).
+// Shortcuts: / outside text fields; Ctrl+K, Ctrl+Space and Cmd+K anywhere but a
+// terminal (owner (973)/(974): editors no longer keep them).
 function key(key, extra = {}) { return { key, target: { closest: () => null }, ...extra }; }
 assert.equal(ctx.qShortcut(key('/')), true);
 assert.equal(ctx.qShortcut(key('/', { shiftKey: true })), true, 'slash on shifted keyboard layouts');
@@ -95,10 +96,19 @@ assert.equal(ctx.qShortcut(key('k', { ctrlKey: true })), true);
 assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space' })), true);
 assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, isComposing: true })), false);
 function inside(selector) { return { closest: s => s.split(',').map(x => x.trim().split(':')[0]).includes(selector) ? {} : null }; }
-for (const target of [inside('.xterm'), inside('textarea'), inside('[contenteditable]')]) {
-  assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target })), false, 'Ctrl+K from an editor');
-  assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space', target })), false, 'Ctrl+Space from an editor');
+assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target: inside('.xterm') })), false, 'Ctrl+K from a terminal');
+assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space', target: inside('.xterm') })), false, 'Ctrl+Space from a terminal');
+assert.equal(ctx.qShortcut(key('k', { metaKey: true, target: inside('.xterm') })), false, 'Cmd+K from a terminal');
+for (const target of [inside('textarea'), inside('[contenteditable]'), inside('input')]) {
+  assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target })), true, 'Ctrl+K from an editor');
+  assert.equal(ctx.qShortcut(key(' ', { ctrlKey: true, code: 'Space', target })), true, 'Ctrl+Space from an editor');
+  assert.equal(ctx.qShortcut(key('k', { metaKey: true, target })), true, 'Cmd+K from an editor');
 }
+assert.equal(ctx.qShortcut(key('k', { metaKey: true })), true, 'Cmd+K');
+assert.equal(ctx.qShortcut(key(' ', { metaKey: true, code: 'Space' })), false, 'Cmd+Space stays the system\'s');
+assert.equal(ctx.qShortcut(key('k', { metaKey: true, ctrlKey: true })), false, 'Ctrl+Cmd+K');
+assert.equal(ctx.qShortcut(key('k', { metaKey: true, shiftKey: true })), false, 'Cmd+Shift+K');
+assert.equal(ctx.qShortcut(key('/', { metaKey: true })), false, 'Cmd+/');
 assert.equal(ctx.qShortcut(key('k', { ctrlKey: true, target: inside('body') })), true, 'Ctrl+K from the page body');
 assert.equal(ctx.qShortcut(key('/', { keyCode: 229 })), false);
 assert.equal(ctx.qShortcut(key('/', { altKey: true })), false);
@@ -528,7 +538,19 @@ async function hostCases() {
   assert.equal(searchCtx.paletteSearch({}).searchAsk, undefined, 'remote session has no agent hook');
   storage['ws.dashboard.drawer.search.state'] = 'invalid JSON';
   assert.equal(searchCtx.paletteSearch({}).searchState.load(), null);
-  assert(dashboard.includes('if (load(DR_SEARCH) === "1") tkApi.openSearch();'), 'reload restores the open search sheet');
+  assert(dashboard.includes('if (load(DR_SEARCH) === "1" || tkWantSearch) tkApi.openSearch();'), 'reload restores the open search sheet');
+
+  // The shortcut before the first store list mounts the palette is a pending
+  // open that mount honours, never a dropped key.
+  const pendCtx = vm.createContext({ tkApi: null });
+  vm.runInContext(block(dashboard, '  var tkWantSearch = false;', '\n  function trackerStart('), pendCtx);
+  pendCtx.tkSearch();
+  assert.equal(pendCtx.tkWantSearch, true, 'a shortcut before mount is kept');
+  let opened = 0;
+  pendCtx.tkApi = { openSearch: () => { opened++; } };
+  pendCtx.tkSearch();
+  assert.equal(opened, 1, 'after mount the shortcut opens at once');
+  assert(/function trackerStart\(\) \{[\s\S]*?doc\.addEventListener\("keydown", function \(e\) \{\n      if \(tkApi \|\| e\.defaultPrevented \|\| !window\.WsTracker\.searchKey[\s\S]*?tkSearch\(\);[\s\S]*?\}, true\);\n    tkReload\(\);/.test(dashboard), 'the page counts the shortcut before mount with the palette\'s own target rule');
 
   // The store search adapter asks for excerpts and passes the abort signal and the status.
   const adapter = block(dashboard, '    search: function (id, q, done, o) {', "    // The store's wiki branches");

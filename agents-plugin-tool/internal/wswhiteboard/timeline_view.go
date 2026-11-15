@@ -3,7 +3,6 @@ package wswhiteboard
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ type timelineRow struct {
 	Key, From, To, Reasked, AnswerTarget string
 	Page                                 EntryPage
 	Item                                 *ItemView
+	Created                              []timelineRow
 	Ask, Answer, Preceding, LatestAnswer bool
 	Clock, At                            string
 	Inputs                               []inputHeader
@@ -75,9 +75,13 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 	all = append(all, timelineEntries(t.Stream)...)
 	firstAsk, lastAnswer, panel := map[int]string{}, map[int]string{}, map[string]string{}
 	changed := map[int]bool{}
+	createdAt := map[string][]int{}
 	for _, e := range all {
-		if _, ok := byID[e.ItemID]; ok && e.Kind == EntrySystem && strings.HasPrefix(e.Text, fmt.Sprintf("Item {{%d}} added [", e.ItemID)) && firstAsk[e.ItemID] == "" {
-			firstAsk[e.ItemID] = e.ID
+		createdAt[e.ID] = timelineCreated(e, byID)
+		for _, id := range createdAt[e.ID] {
+			if firstAsk[id] == "" {
+				firstAsk[id] = e.ID
+			}
 		}
 		if e.OwnerAnswer() {
 			lastAnswer[e.ItemID] = e.ID
@@ -85,7 +89,7 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		if e.Kind == EntryPanel && !e.Historical {
 			panel[e.PanelID] = e.ID
 		}
-		if e.Kind == EntryAgent || e.Kind == EntryPanel || e.ItemID > 0 {
+		if e.Kind == EntryAgent || e.Kind == EntryPanel || e.ItemID > 0 || len(createdAt[e.ID]) > 0 {
 			changed[e.Seq] = true
 		}
 	}
@@ -93,15 +97,12 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 	anchors := map[string]bool{}
 	leads, openPanels := map[string]bool{}, map[string]bool{}
 	// Converted items deliberately have no synthetic add event or clock.
-	var orphan []int
-	for id := range byID {
-		if firstAsk[id] == "" {
-			orphan = append(orphan, id)
+	for _, item := range items {
+		id := item.ID
+		if item.Topic != t.Name || firstAsk[id] != "" {
+			continue
 		}
-	}
-	sort.Ints(orphan)
-	for _, id := range orphan {
-		iv := itemView(byID[id])
+		iv := itemView(item)
 		key := "item-" + strconv.Itoa(id)
 		rows = append(rows, timelineRow{Key: key, Item: &iv, Ask: true, AnswerTarget: lastAnswer[id]})
 		anchors[key] = true
@@ -109,10 +110,9 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 	seenBatch := map[int]bool{}
 	preceding, cluster := "", false
 	for _, e := range all {
-		if e.Historical {
-			// The nearest preceding version is represented at the latest
-			// version's position, preserving the panel disclosure contract.
-			preceding, cluster = panel[e.PanelID], false
+		// The unified stream already carries undated settled-item prefixes.
+		// The timeline's permanent head rows above also include open items.
+		if e.Kind == "item" {
 			continue
 		}
 		r := timelineRow{Key: e.ID, From: e.Clock, To: e.Clock, Page: EntryPage{Count: 1, Runs: []EntryRun{{Entry: e}}}}
@@ -139,6 +139,37 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 				}
 			}
 		}
+		if e.Historical {
+			// Versions stay nested at the latest panel, but their owner-input
+			// headers still start the original iteration at its append position.
+			preceding, cluster = panel[e.PanelID], false
+			if len(r.Inputs) > 0 {
+				r.Key, r.Page = "input-"+e.ID, EntryPage{}
+				anchors[r.Key] = true
+				rows = append(rows, r)
+			}
+			continue
+		}
+		for _, id := range createdAt[e.ID] {
+			if firstAsk[id] == e.ID {
+				iv := itemView(byID[id])
+				r.Created = append(r.Created, timelineRow{Item: &iv, Ask: true, AnswerTarget: lastAnswer[id], Reasked: clock(byID[id].ReaskedAt)})
+			}
+		}
+		if len(r.Created) > 0 && e.ItemID == 0 {
+			r.Ask = true
+			r.Clock, r.At = e.Clock, e.At
+			anchors[e.ID] = true
+			if !cluster && preceding != "" {
+				anchors[preceding], leads[preceding] = true, true
+			}
+			for _, row := range r.Created {
+				if row.Item.Status == StatusOpen && preceding != "" {
+					openPanels[preceding] = true
+				}
+			}
+			cluster = true
+		}
 		if firstAsk[e.ItemID] == e.ID || e.OwnerAnswer() {
 			if item, ok := byID[e.ItemID]; ok {
 				iv := itemView(item)
@@ -155,6 +186,11 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 						at = time.UnixMilli(e.AnswerSentAt).UTC().Format(time.RFC3339Nano)
 					}
 					r.Clock, r.At = clock(at), at
+					r.Page.Runs[0].Entry.Clock, r.Page.Runs[0].Entry.At = r.Clock, at
+					if displayAt, err := time.Parse(time.RFC3339Nano, at); err == nil {
+						r.Page.Runs[0].Entry.Ms = displayAt.UnixMilli()
+						r.Page.Runs[0].Entry.Stamp = displayAt.In(loc).Format("2006-01-02 15:04")
+					}
 					// Earlier answers use their immutable event text, never
 					// the mutable latest answer/quote on the item.
 					r.LatestAnswer = currentAnswer
@@ -177,10 +213,10 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		if e.Kind == EntryAgent || e.Kind == EntryPanel {
 			preceding, cluster = e.ID, false
 		}
-		if e.Current {
+		if e.Current || e.Item != nil {
 			anchors[e.ID] = true
 		}
-		if e.Kind == EntrySystem && !r.Ask && !r.Answer && !e.OwnerAnswer() {
+		if e.Kind == EntrySystem && e.Item == nil && !r.Ask && !r.Answer && !e.OwnerAnswer() {
 			r.Page.Runs = []EntryRun{{Systems: []EntryView{e}}}
 		}
 		rows = append(rows, r)
@@ -245,7 +281,54 @@ type timelineData struct {
 
 func (p *pageData) TimelineOf(r timelineRow) timelineData { return timelineData{r, p} }
 func (r timelineData) EntryPage() entryPageData           { return r.Page.EntryPageOf(r.timelineRow.Page) }
-func (r timelineData) ItemData() itemData                 { return r.Page.ItemOf(*r.Item) }
+func (r timelineData) ItemData() itemData {
+	d := r.Page.ItemOf(*r.Item)
+	if r.Event().ID == "" {
+		d.History = &EntryView{}
+	}
+	return d
+}
+func (r timelineData) CreatedRows() []timelineData {
+	var out []timelineData
+	for i, child := range r.Created {
+		row := r.timelineRow
+		if i > 0 {
+			row.Key = ""
+		}
+		row.Item, row.Created = child.Item, nil
+		row.AnswerTarget, row.Reasked = child.AnswerTarget, child.Reasked
+		out = append(out, timelineData{row, r.Page})
+	}
+	return out
+}
+
+// Creation coalescing keeps one durable event. Expand only its server-written
+// class/ID list for display, retaining that event's position and clock.
+func timelineCreated(e EntryView, items map[int]Item) []int {
+	if e.Kind != EntrySystem {
+		return nil
+	}
+	if _, ok := items[e.ItemID]; ok && e.ItemID > 0 && strings.HasPrefix(e.Text, fmt.Sprintf("Item {{%d}} added [", e.ItemID)) {
+		return []int{e.ItemID}
+	}
+	if !strings.HasPrefix(e.Text, "Items added: ") {
+		return nil
+	}
+	var ids []int
+	for _, part := range strings.Split(strings.TrimSuffix(strings.TrimPrefix(e.Text, "Items added: "), "."), ", ") {
+		class, ref, ok := strings.Cut(part, " {{")
+		if !ok || (class != ClassPolicy && class != ClassTechnical && class != ClassAnnounced && class != ClassCheck) || !strings.HasSuffix(ref, "}}") {
+			continue
+		}
+		text := strings.TrimSuffix(ref, "}}")
+		id, err := strconv.Atoi(text)
+		if _, exists := items[id]; err == nil && exists && id > 0 && strconv.Itoa(id) == text {
+			// Current class patches do not rewrite the immutable add event.
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
 func (r timelineData) Event() EntryView {
 	if len(r.timelineRow.Page.Runs) == 0 {
 		return EntryView{}

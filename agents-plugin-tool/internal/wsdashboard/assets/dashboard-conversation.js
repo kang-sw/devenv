@@ -1,4 +1,4 @@
-  // --- conversation entries: merged by key, never re-rendered ----------------
+  // --- conversation entries: merged by key ----------------------------------
   // Each entry element carries data-entry, its ring entry name; names sort in
   // time order. Only the entries container is searched: held bubbles in the
   // convlive region carry data-entry too (their inbox id) and are not
@@ -9,25 +9,32 @@
   function entryKeys(box) {
     if (!box.wsKeys) {
       box.wsKeys = Object.create(null);
-      Array.prototype.forEach.call(box.children, function (c) { var k = c.getAttribute("data-entry"); if (k) box.wsKeys[k] = true; });
+      Array.prototype.forEach.call(box.children, function (c) { var k = c.getAttribute("data-entry"); if (k) box.wsKeys[k] = c; });
     }
     return box.wsKeys;
   }
   function resetEntries(box) { box.textContent = ""; box.wsKeys = Object.create(null); }
   // mergeEntries inserts each node of src whose name box lacks at its sorted
-  // place and returns the inserted nodes, in order; an entry already shown
-  // is kept as it is.
+  // place and returns inserted/replaced nodes, in order. Existing entries
+  // stay put unless their mail-wake presentation changes: a hidden mail
+  // marker must replace its row (and restore it when the association expires).
   function mergeEntries(box, src) {
     var have = entryKeys(box), added = [];
     Array.prototype.slice.call(src.children).forEach(function (n) {
       var k = n.getAttribute("data-entry");
-      if (!k || have[k]) return;
-      // New entries are usually the newest (live) or the oldest (history),
-      // so walk back from the end only past entries that sort after k.
-      var c = box.lastElementChild;
-      while (c && (c.getAttribute("data-entry") || "") > k) c = c.previousElementSibling;
-      box.insertBefore(n, c ? c.nextSibling : box.firstChild);
-      have[k] = true;
+      if (!k) return;
+      var old = have[k];
+      if (old) {
+        if (old.getAttribute("data-mail-wake") === n.getAttribute("data-mail-wake")) return;
+        box.replaceChild(n, old);
+      } else {
+        // New entries are usually the newest (live) or the oldest (history),
+        // so walk back from the end only past entries that sort after k.
+        var c = box.lastElementChild;
+        while (c && (c.getAttribute("data-entry") || "") > k) c = c.previousElementSibling;
+        box.insertBefore(n, c ? c.nextSibling : box.firstChild);
+      }
+      have[k] = n;
       added.push(n);
       restoreOpen(n);
       fmtTimes(n);
@@ -72,6 +79,88 @@
     mermaid(added);
     if (pin && evictEntries(box)) histReset();
   }
+
+  // Conversation cards navigate only this session's board and validated IDs.
+  // The existing card/filter and history owners retain all geometry decisions.
+  var effectJumpEpoch = 0;
+  function effectTopic(id) {
+    if (typeof id !== "string" || !/^topic-(?:[0-9a-f]{2})+$/.test(id)) return null;
+    return boardQ("section.topic[data-topic]").filter(function (n) { return n.id === id && inBoard(n); })[0] || null;
+  }
+  function effectJump(topicID, id, done) {
+    if (typeof topicID !== "string" || !/^topic-(?:[0-9a-f]{2})+$/.test(topicID) ||
+        typeof id !== "string" || (id !== topicID && !/^(?:item-[1-9][0-9]{0,5}|[ep][1-9][0-9]*)$/.test(id))) return;
+    var epoch = ++effectJumpEpoch, seen = Object.create(null);
+    if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
+    if (grid && !tabShown("board")) setTab("board");
+    function result(topic, exact) { if (epoch === effectJumpEpoch && done) done(topic, exact); }
+    function step() {
+      if (epoch !== effectJumpEpoch) return;
+      var topic = effectTopic(topicID);
+      if (!topic) {
+        // Closed topics already have a paginated route. Do not invent a new
+        // anchor/store API or search another session when a target is absent.
+        var more = boardQ("button.closed-more[data-closed-next]")[0];
+        var cursor = more && more.getAttribute("data-closed-next");
+        if (!more || more.disabled || seen[cursor]) { result(false, false); return; }
+        seen[cursor] = true;
+        var pending = loadClosed(more);
+        if (!pending || !pending.then) { result(false, false); return; }
+        pending.then(function (loaded) { if (loaded) step(); else result(false, false); });
+        return;
+      }
+      var cards = window.WsCards, unfold = cards && cards.unfoldTopic;
+      function reveal() {
+        if (epoch !== effectJumpEpoch) return;
+        // SSE may have replaced the topic while overview/filter restore ran.
+        if (effectTopic(topicID) !== topic) { step(); return; }
+        var target = topic;
+        if (id !== topicID) {
+          if (/^[ep]/.test(id)) target = window.wbHistory && window.wbHistory.loadTarget ? window.wbHistory.loadTarget(topic, id, unfold) : null;
+          else target = topic.querySelector('[id="' + id + '"]');
+          if (!target || target.id !== id || !inBoard(target) || target.closest("section.topic[data-topic]") !== topic ||
+              (/^item-/.test(id) && !target.matches(".card.policy[data-id], .arow[data-id], .ckrow[data-id], .srow"))) target = null;
+        }
+        var exact = !!target;
+        if (!target) target = topic;
+        if (unfold) unfold(target);
+        for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
+        if (target.matches(".ckrow.done, .ckrow.no") && root.getAttribute("data-ck-hide") === "1") {
+          var toggle = topic.querySelector("button.ckhide[aria-pressed=true]");
+          if (toggle) toggle.click();
+        }
+        // loadTarget owns lazy-history positioning, including version folds.
+        if (!target.closest(".wb-history")) {
+          target.scrollIntoView({ block: "start" });
+          if (window.wbHistory && window.wbHistory.keep) window.wbHistory.keep(target);
+        }
+        target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+        result(true, exact);
+      }
+      if (cards && cards.revealTopic) cards.revealTopic(topic, reveal); else reveal();
+    }
+    step();
+  }
+  function effectJumpClick(e) {
+    var t = e.target, box = entriesBox();
+    if (!t || !t.closest || !box || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var card = t.closest(".wbupdate-topic[data-wb-topic]");
+    if (!card || !box.contains(card)) return;
+    var link = t.closest("a[data-wb-jump]");
+    if (!link && t.closest("a, summary, button, input, textarea, select")) return;
+    var selection = window.getSelection && window.getSelection();
+    if (!link && selection && !selection.isCollapsed) return;
+    e.preventDefault();
+    var row = t.closest(".wbupdate-row[data-wb-element]");
+    var topicID = card.getAttribute("data-wb-topic");
+    var id = link ? link.getAttribute("data-wb-jump") : row ? row.getAttribute("data-wb-element") : topicID;
+    effectJump(topicID, id, function (found, exact) {
+      var status = card.querySelector(".wbupdate-status");
+      if (status) status.textContent = !found ? wsT("js.whiteboard.jump.missing") : !exact ? wsT("js.whiteboard.jump.elementmissing") : "";
+    });
+  }
+  doc.addEventListener("click", effectJumpClick);
 
   // --- older history: loaded a page at a time when scrolled to the top -------
   // The region draws the newest entries; older ones come from the history
@@ -182,6 +271,7 @@
       if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
+      bindCapsuleNotes();
       if (window.wbAgo) window.wbAgo(page);
       mermaid(page);
       if (kept) kept.h.apply();

@@ -3,8 +3,9 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { discover } = require('./endpoint');
 const { nextZoom, destination } = require('./policy');
+const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 
-function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
+function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
   app.setName('Werkschaft');
   if (!app.requestSingleInstanceLock()) { app.quit(); return; }
   let window, pin = null, connecting = false, title = 'Werkschaft — Connecting…';
@@ -20,16 +21,79 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
   app.on('window-all-closed', () => app.quit());
 
   app.whenReady().then(() => {
-    // No preload, IPC handlers, webview, Node, or permissions for any document.
+    // The remote dashboard never receives a preload or renderer authority.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
-    window = new BrowserWindow({
+    const Window = platform === 'win32' ? BaseWindow : BrowserWindow;
+    window = new Window({
       title, width: 1280, height: 860, minWidth: 760, minHeight: 520,
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false },
+      ...(platform === 'win32'
+        ? { icon: path.join(__dirname, 'icons/icon.ico'), titleBarStyle: 'hidden',
+          titleBarOverlay: { ...colors(null, nativeTheme.shouldUseDarkColors), height: HEIGHT } }
+        : { webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false } }),
     });
-    const wc = window.webContents;
+    const dashboardView = platform === 'win32' ? new WebContentsView({ webPreferences: {
+      contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false,
+    } }) : null;
+    // All page behavior uses this accessor, regardless of who owns the content.
+    const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
+    const wc = dashboardContents();
+    let bar, applicationMenu, menuOpen = false, dialogOpen = false;
+    function focusDashboard(afterInteraction = false) {
+      if (!dashboardView || window.isDestroyed() || wc.isDestroyed() || !window.isFocused()) return;
+      if (menuOpen || dialogOpen || (!afterInteraction && bar?.view.webContents.isFocused())) return;
+      wc.focus();
+    }
+    function openMenu() {
+      if (menuOpen) return;
+      menuOpen = true;
+      // Native edit roles must target the page, not the hamburger document.
+      wc.focus();
+      applicationMenu.popup({ window, x: 32, y: HEIGHT, callback: () => {
+        menuOpen = false;
+        focusDashboard(true);
+      } });
+    }
+    if (dashboardView) {
+      bar = createBar({ window, WebContentsView, ipcMain, nativeTheme, openMenu });
+      window.contentView.addChildView(dashboardView);
+      window.contentView.addChildView(bar.view);
+      const layout = () => {
+        const [width, height] = window.getContentSize();
+        bar.view.setBounds({ x: 0, y: 0, width, height: HEIGHT });
+        dashboardView.setBounds({ x: 0, y: HEIGHT, width, height: Math.max(0, height - HEIGHT) });
+      };
+      layout();
+      window.on('resize', layout);
+      window.on('focus', () => focusDashboard());
+      wc.once('did-finish-load', () => focusDashboard());
+      window.on('closed', () => { if (!wc.isDestroyed()) wc.close(); });
+      window.setMenuBarVisibility(false);
+      // Bare Alt opens the same menu as the hamburger, from either view.
+      for (const contents of [wc, bar.view.webContents]) {
+        let altOnly = false;
+        contents.on('before-input-event', (event, input) => {
+          if (input.type === 'keyDown') {
+            altOnly = input.key === 'Alt' && !input.control && !input.shift && !input.meta;
+            if (altOnly) event.preventDefault();
+          }
+          if (input.key === 'Alt' && input.type === 'keyUp' && altOnly) {
+            event.preventDefault(); altOnly = false; openMenu();
+          }
+        });
+      }
+      trackDashboardTheme(wc, color => bar.setTheme(color));
+    }
     let navigation, closing = false, retained = { pin, title };
-    window.on('close', () => { closing = true; });
+    window.on('close', event => {
+      closing = true;
+      if (dashboardView && !wc.isDestroyed()) {
+        // BaseWindow.close does not run its views' beforeunload.
+        event.preventDefault();
+        wc.close({ waitForBeforeUnload: true });
+      }
+    });
+    if (dashboardView) wc.on('destroyed', () => { if (!window.isDestroyed()) window.close(); });
     function beginNavigation() {
       const attempt = { loading: false, stayed: false };
       navigation = attempt;
@@ -37,7 +101,13 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
     }
     const isCurrent = attempt => navigation === attempt && !window.isDestroyed();
     wc.setUserAgent(`${wc.getUserAgent()} Werkschaft/${app.getVersion()}`);
-    wc.on('page-title-updated', event => { event.preventDefault(); window.setTitle(title); });
+    wc.on('page-title-updated', (event, value) => {
+      event.preventDefault();
+      if (pin && typeof value === 'string') {
+        setTitle(value);
+        retained.title = value;
+      } else window.setTitle(title);
+    });
     wc.on('will-attach-webview', event => event.preventDefault());
     const openExternal = url => {
       // Classification is repeated at the authority boundary; never open a scheme
@@ -82,17 +152,24 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       // Capture the load before the synchronous native dialog: a newer attempt
       // must never inherit an older load's Stay (or an unrelated X-close veto).
       const attempt = !closing && navigation?.loading ? navigation : null;
-      const leave = dialog.showMessageBoxSync(window, {
-        type: 'question', buttons: ['Stay', 'Leave'], defaultId: 0, cancelId: 0,
-        title: 'Leave Werkschaft?', message: 'Leave this page?',
-        detail: 'Changes you made may not be saved.', noLink: true,
-      });
+      let leave;
+      dialogOpen = true;
+      try {
+        leave = dialog.showMessageBoxSync(window, {
+          type: 'question', buttons: ['Stay', 'Leave'], defaultId: 0, cancelId: 0,
+          title: 'Leave Werkschaft?', message: 'Leave this page?',
+          detail: 'Changes you made may not be saved.', noLink: true,
+        });
+      } finally { dialogOpen = false; focusDashboard(true); }
       closing = false;
       // Electron's preventDefault here means ignore the page's veto, not stay.
       if (leave === 1) event.preventDefault();
       else if (attempt && isCurrent(attempt)) attempt.stayed = true;
     });
-    function setTitle(value) { title = value; if (!window.isDestroyed()) window.setTitle(title); }
+    function setTitle(value) {
+      title = value;
+      if (!window.isDestroyed()) { window.setTitle(title); bar?.setTitle(title); }
+    }
     function navigationFailed(attempt) {
       pin = null;
       const failureTitle = 'Werkschaft — Navigation failed — ⌘R to retry';
@@ -163,7 +240,8 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       { role: 'windowMenu' }, { role: 'help', submenu: [] },
       { label: 'Connection', submenu: [{ id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: connect }] },
     ];
-    Menu.setApplicationMenu(Menu.buildFromTemplate(menu));
+    applicationMenu = Menu.buildFromTemplate(menu);
+    Menu.setApplicationMenu(applicationMenu);
     connect();
   });
 }

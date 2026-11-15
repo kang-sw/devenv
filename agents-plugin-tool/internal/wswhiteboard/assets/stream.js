@@ -40,6 +40,7 @@
     gap.querySelector('[data-load="down"]').hidden = !before.some(function (n) { return n.matches('.timeline-row'); });
   }
   function admitted(h) {
+    if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
   }
@@ -147,18 +148,30 @@
     if (!node) return null;
     openTarget(node);
     var panel = node.matches('.wb-entry.panel') ? node.querySelector('.entry-panel') : node.matches('.entry-panel') ? node : null;
-    if (panel) panel.open = true;
+    if (panel) { panel.open = true; if (panelState) panelState.opened(panel); }
     var mark = panel || node;
     mark.classList.toggle('flash', false); void mark.offsetWidth; mark.classList.toggle('flash', true);
+    navigate(node);
+    return node;
+  }
+  function navigate(node) {
     var topic = node.closest('.topic'), head = topic && topic.querySelector('.tophead'), offset = 12;
     var style = head && window.getComputedStyle(head);
-    if (style && style.position === 'sticky') offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    var sticky = style && style.position === 'sticky';
+    if (sticky) offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    var host = topic && (topic.closest('#bpins') || topic.closest('#bcol') || topic.closest('.wrap'));
+    var wrap = host && host.querySelector('.oq-wrap.wb-oq-top'), pill = wrap && wrap.querySelector('.oq-pill');
+    if (pill && !pill.hidden) {
+      var pillTop = parseFloat(window.getComputedStyle(wrap).top) || 0;
+      offset = Math.max(offset + (sticky ? 10 + pill.offsetHeight : 0), pillTop + pill.offsetHeight + 12);
+    }
     kit.jump(node, { offset: offset });
     return node;
   }
   function capture(root) {
     return histories(root).map(function (h) {
       return { key: h.getAttribute('data-history'),
+        panels: panelState ? panelState.capture(h) : [],
         rows: Array.from(h.querySelectorAll('.timeline-row')).map(function (n) { return n.getAttribute('data-row'); }),
         entries: Array.from(h.querySelectorAll('.wb-entry')).map(function (n) { return n.id; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (n) { return [n.id, n.closest('.system-run').open]; }),
@@ -185,6 +198,7 @@
         }
       }
       if (!h) return;
+      if (panelState) panelState.snapshot(h, saved);
       var wanted = new Set(saved.rows || []), entries = new Set(saved.entries || []), kept = kit.keep(h), changed = false;
       gaps(h).forEach(function (gap) {
         Array.from(payload(gap).children).forEach(function (row) {
@@ -198,6 +212,8 @@
       h.querySelectorAll('details[data-key]').forEach(function (d) {
         if (folds.has(d.getAttribute('data-key'))) d.open = folds.get(d.getAttribute('data-key'));
       });
+      // Latest pN identity wins over obsolete latest-version entry keys.
+      if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
       var systems = new Map(saved.systems || []);
       h.querySelectorAll('.system-run').forEach(function (fold) {
         var entry = Array.from(fold.querySelectorAll('.wb-entry')).find(function (n) { return systems.has(n.id); });
@@ -217,10 +233,35 @@
     });
   }
   function init(root) {
+    var fresh = [];
     histories(root).forEach(function (h) {
-      if (h._wbHistoryBound) return;
+      if (h._wbHistoryBound) {
+        if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
+        return;
+      }
       h._wbHistoryBound = true;
       h._wbHistoryPending = [];
+      fresh.push(h);
+    });
+    // Anchor/gap membership is selected on the server. Batch disclosure
+    // writes before any result reads and share one capture per scroller,
+    // retaining the landed initialization cost shape without a client cut.
+    var kept = new Map();
+    fresh.forEach(function (h) {
+      var scroller = kit.keep(h, { capture: false }).scroller;
+      if (!kept.has(scroller)) kept.set(scroller, kit.keep(h));
+    });
+    if (panelState) fresh.forEach(function (h) { h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore); });
+    fresh.forEach(function (h) { h._wbHistoryHeight = Math.ceil(h.querySelector('.history-live').getBoundingClientRect().height); });
+    kept.forEach(function (k) { k.apply(); });
+    fresh.forEach(function (h) {
+      h.addEventListener('focusin', function (e) {
+        var node = e.target, live = h.querySelector('.history-live');
+        if (!live.contains(node)) return;
+        var r = node.getBoundingClientRect();
+        var hit = document.elementFromPoint && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (hit && hit !== node && !node.contains(hit)) navigate(node);
+      });
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('[data-load]');
         if (!button || button.hidden || button.closest('.wb-history') !== h) return;
@@ -467,6 +508,11 @@
       inspect.end = function () { if (!used) { used = true; if (!t.done && --t.depth === 0) t.cancel(); } };
       return inspect;
     }
+    // Explicit Overview placement uses the navigation owner, including its
+    // late-layout follow and input cancellation, never an ordinary capture.
+    function place(node, opt) {
+      return jump(node, { offset: opt && typeof opt.offset === 'number' ? opt.offset : 0, behavior: 'instant' });
+    }
     function jump(node, opt) {
       var scroller = scrollerOf(node), s = sessions.get(scroller);
       if (!s || !s.follow) s = start(scroller);
@@ -581,11 +627,145 @@
       }
       return { scroller: scroller, visible: visible };
     }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+  }
+  // Current panel folds follow pN; historical-version folds still use their
+  // independent entry keys. The additive browser record is not board data.
+  function panelStateKit(win) {
+    var doc = win.document || document, html = doc.documentElement;
+    var scope = html && html.getAttribute && (html.getAttribute('data-rid') || html.getAttribute('data-wb-reply'));
+    if (!scope) return null;
+    var KEY = 'ws.whiteboard.panels', CAP = 200, records = new Map(), loaded = new Set(), storage = null;
+    try {
+      storage = win.localStorage;
+      var saved = JSON.parse(storage.getItem(KEY) || '[]');
+      if (Array.isArray(saved)) saved.forEach(function (r) {
+        if (r && typeof r.key === 'string' && /\/p[1-9][0-9]*$/.test(r.key) && typeof r.folded === 'boolean' && /^e[1-9][0-9]*$/.test(r.read || '') && /^e[1-9][0-9]*$/.test(r.seen || '')) {
+          records.set(r.key, r); loaded.add(r.key);
+        }
+      });
+    } catch (_) {}
+    function put(r) {
+      records.delete(r.key); records.set(r.key, r);
+      // Open-panel read marks must not evict the existing 200-fold budget.
+      var same = Array.from(records.values()).filter(function (v) { return v.folded === r.folded; });
+      same.slice(0, Math.max(0, same.length - CAP)).forEach(function (v) { records.delete(v.key); });
+      try { if (storage) storage.setItem(KEY, JSON.stringify(Array.from(records.values()))); } catch (_) {}
+    }
+    function info(panel) {
+      if (!panel || !panel.classList.contains('entry-panel')) return null;
+      var article = panel.closest('.wb-entry[data-panel]');
+      if (!article || article.classList.contains('historical')) return null;
+      var id = article.getAttribute('data-panel'), entry = article.getAttribute('data-entry');
+      if (!/^p[1-9][0-9]*$/.test(id || '') || !/^e[1-9][0-9]*$/.test(entry || '')) return null;
+      return { panel: panel, article: article, id: id, entry: entry, key: scope + '/' + id };
+    }
+    function legacy(i) {
+      var shut;
+      try { shut = JSON.parse(storage && storage.getItem('ws.dashboard.panelshut') || '[]'); } catch (_) { return null; }
+      if (!Array.isArray(shut)) return null;
+      var versions = [i.article].concat(Array.from(i.article.querySelectorAll('.wb-entry[data-entry]')));
+      var old = versions.find(function (a) {
+        return a.getAttribute('data-panel') === i.id && shut.indexOf(scope + '/entry:' + a.getAttribute('data-entry')) >= 0;
+      });
+      return old && old.getAttribute('data-entry');
+    }
+    function record(i) {
+      var r = records.get(i.key);
+      if (!r) {
+        var old = legacy(i);
+        r = { key: i.key, folded: !!old || !i.panel.open, read: old || i.entry, seen: i.entry };
+        put(r);
+      }
+      return r;
+    }
+    function badge(i, r) {
+      var pending = r.folded && r.read !== i.entry, b = i.panel.querySelector('.wb-panel-updated');
+      if (b) b.hidden = !pending;
+      i.article.classList.toggle('wb-panel-pending', pending);
+    }
+    function restorePanel(panel) {
+      var i = info(panel);
+      if (!i) return false;
+      var intent = panel._wbPanelIntent;
+      if (panel.open && intent && intent.open && intent.entry === i.entry) toggle(panel);
+      var r = record(i), changed = r.seen !== i.entry;
+      r.seen = i.entry;
+      if (!r.folded && r.read !== i.entry) { r.read = i.entry; changed = true; }
+      panel.open = !r.folded;
+      badge(i, r);
+      if (changed) put(r);
+      return true;
+    }
+    function toggle(panel) {
+      var i = info(panel);
+      if (!i) return false;
+      var r = record(i), intent = panel._wbPanelIntent;
+      // Native toggle is also emitted for programmatic attribute changes.
+      // Only explicit opening intent may acknowledge a pending new version.
+      if (panel.open && (!intent || !intent.open || intent.entry !== i.entry)) { badge(i, r); return false; }
+      r.folded = !panel.open; r.seen = i.entry;
+      if (panel.open) r.read = i.entry;
+      delete panel._wbPanelIntent;
+      put(r); badge(i, r);
+      return true;
+    }
+    function opened(panel) {
+      var i = info(panel);
+      if (!i) return;
+      panel._wbPanelIntent = { entry: i.entry, open: true };
+      panel.open = true;
+      toggle(panel);
+    }
+    function panels(root) { return Array.from(root.querySelectorAll('.entry-panel[data-key]')).filter(function (p) { return !!info(p); }); }
+    function capturePanels(root) {
+      return panels(root).map(function (p) {
+        var i = info(p), r = record(i);
+        if (!p.open && !r.folded) { r.folded = true; put(r); }
+        return { key: r.key, folded: r.folded, read: r.read, seen: i.entry };
+      });
+    }
+    function restoreSnapshot(root, saved) {
+      if (Array.isArray(saved.panels)) {
+        saved.panels.forEach(function (r) {
+          if (r && typeof r.key === 'string' && r.key.indexOf(scope + '/') === 0 && !loaded.has(r.key) && typeof r.folded === 'boolean' && /^e[1-9][0-9]*$/.test(r.read || '') && /^e[1-9][0-9]*$/.test(r.seen || '')) put(Object.assign({}, r));
+        });
+      } else {
+        // Old standalone snapshots knew entry keys only. Resolve those
+        // against trusted renderer metadata, including earlier versions.
+        (saved.folds || []).forEach(function (f) {
+          var m = /^entry:(e[1-9][0-9]*)$/.exec(f[0]);
+          if (!m || f[1] !== false) return;
+          var a = root.querySelector('.wb-entry[data-entry="' + m[1] + '"]'), id = a && a.getAttribute('data-panel');
+          panels(root).forEach(function (p) {
+            var i = info(p);
+            if (i.id === id && !loaded.has(i.key)) {
+              put({ key: i.key, folded: true, read: m[1], seen: i.entry }); loaded.add(i.key);
+            }
+          });
+        });
+      }
+    }
+    doc.addEventListener('click', function (e) {
+      var summary = e.target.closest && e.target.closest('summary'), panel = summary && summary.parentElement;
+      var i = info(panel);
+      if (!i || (e.target.closest && e.target.closest('a,button,input,textarea'))) return;
+      panel._wbPanelIntent = { entry: i.entry, open: !panel.open };
+      // Record a fold before the next observer/host restore can see the
+      // native default action. An open still waits for actual open DOM.
+      if (panel.open) { var r = record(i); r.folded = true; put(r); }
+    }, true);
+    // The dashboard already owns the toggle listener and calls this kit.
+    // Standalone pages have no host listener, so bind the same policy here.
+    if (!html.getAttribute('data-rid')) doc.addEventListener('toggle', function (e) { toggle(e.target); }, true);
+    return { restore: restorePanel, toggle: toggle, opened: opened, capture: capturePanels, snapshot: restoreSnapshot };
   }
   var kit = viewKit(window);
+  var panelState = panelStateKit(window);
   window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
+    restorePanel: function (p) { return !!panelState && panelState.restore(p); },
+    panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {
