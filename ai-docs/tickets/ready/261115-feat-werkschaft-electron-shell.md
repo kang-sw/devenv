@@ -546,6 +546,80 @@ evidence were left in place. Only this ticket outcome is committed; evidence
 and binaries are not staged. Any repair and renewed Windows run return to the
 lead; this run grants neither.
 
+##### Windows acceptance run (59da5ae7c) - 2026-11-15
+
+The owner-authorized rerun **passed Windows unit tests and offline packaging,
+but stopped at the first built-app launch**. Commit `59da5ae7c` fixes only
+W1/W2 from the preceding run: the package and staged app manifest use author
+`kang-sw`, matching the plugin manifest without email; cache-root assertions
+use native path resolution while retaining exact equality. The existing
+packaging test asserts the staged author. Dependency pins and
+`package-lock.json` are unchanged. Mac headless `npm test` passed **33/33**;
+the offline darwin-arm64 build passed with only the existing optional `.icon`
+warning. No Electron, smoke or GUI ran on the Mac.
+
+Owner rule (893)=a governed this run. The branch at `59da5ae7c` was bundled on
+the Mac and cloned only into
+`C:\Users\ki608\ws-electron-verify-20261115T033507\src`.
+The pre-existing host clone and other pre-existing host files were not
+accessed or modified. All run-controlled caches, temp/profile/config paths,
+Playwright copies, binaries and logs stayed under the new run folder.
+
+- Exactly one `npm ci --no-audit --no-fund` and one `node
+  node_modules/electron/install.js` succeeded. The official Electron
+  **44.11.3 win32-x64** zip has SHA256
+  `97fca9b8e9b90cdc88c1efd44160ca4b89b15101721d93c8befcbeb35b93fb59`.
+  Subsequent npm steps were offline; there were no other downloads or global
+  installs. Cached Mac Playwright modules were copied, not installed.
+- The fixture was cross-compiled on the Mac with `GOOS=windows GOARCH=amd64
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build` and copied into the
+  isolated clone. It started as PID **10044** on free port **56432**, using
+  the run's own `WS_CACHE_HOME`; the smoke read its endpoint and health
+  before attempting Electron. No shared daemon or port 29417 was used.
+- The smoke was invoked **once** through task `ewv-20261115T033507`, with
+  `ki608` / interactive-token logon. It exited **1** in Playwright's
+  `Electron.launch` / `waitForLine`: **`Process failed to launch!`**.
+  No first window, screenshot, smoke checks or normal smoke summary was
+  obtained. The log does not establish a mechanical cause, so no additional
+  source fix, launch retry or `b`-stamp run was attempted. No host source was
+  edited; its final Git status was clean.
+
+Windows-versus-Mac deltas (evidence paths below are relative to
+`agents-plugin-tool/desktop-electron/dist/evidence/windows/20261115T033507/`):
+
+- **W1 resolved — offline win32 packaging now passes**, as does this run's
+  darwin build. The packaged Windows executable reports CompanyName
+  **`kang-sw`**, product `Werkschaft`, version `0.1.0`. Evidence:
+  `build.log`, `packaged-metadata.json`, `mac-build.log`.
+- **W2 resolved — Windows and Mac both pass all 33 tests**, including exact
+  cache-root expectations and staged author metadata. Evidence:
+  `unit-tests.log`, `mac-unit-tests.log`.
+- **W3 unresolved — Windows built-app Playwright launch fails**, whereas
+  the historical Mac live smoke passed at `5beffc47a`; this run did not
+  repeat Mac live acceptance. Evidence: `smoke.log`, `smoke-exit.txt`,
+  `task-status-before-cleanup.json`, `fixture.json`, `process-scans.jsonl`.
+  The cause remains undetermined; no shell-policy or security assertion was
+  relaxed to proceed.
+
+**Unverified:** all live Windows shell/visual contracts: attachment, renderer
+isolation, navigation/Stay rollback, dashboard file-link opening, X-close
+Stay/Leave and draft preservation, second-instance focus, daemon survival and
+fresh-process zoom reset. Native menu/dialog appearance, default Windows icon
+and the unchanged `⌘R` retry title were not observed. The cheap P9 physical
+Ctrl-key probe was enabled but never reached. No screenshot exists because
+launch failed before window acquisition; `acceptance-summary.json` records
+that absence rather than claiming visual acceptance.
+
+All **24 host evidence files** were copied back and SHA256-verified against
+`host-manifest.json` before cleanup. The exact scheduled task was deleted;
+folder-scoped CIM scans were empty before and after removing the entire
+unique host folder. No process was signalled. The Mac temporary bundle and
+cross-compiled exe were deleted; its final owned-process scan was empty.
+Evidence: `failure-process-scan.json`, `task-status-after-cleanup.json`,
+`cleanup.log`, `mac-final-process-scan.txt`. Only this ticket outcome is
+committed after the fix commit; ignored evidence and binaries are not staged.
+The ticket remains in `ready/`; Phases 2-4 are untouched.
+
 #### Edition (7525029be) - 2026-11-15
 
 Fixed the independent lite review's Critical cancelled-navigation finding.
