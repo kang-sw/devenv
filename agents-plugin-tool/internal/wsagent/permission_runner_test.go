@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,6 +26,7 @@ func permissionHarness(t *testing.T) *leadHarness {
 }
 
 func TestPermissionLaunchMatrix(t *testing.T) {
+	literalModes := map[PermissionLevel]string{PermissionReadOnly: "plan", PermissionWorkdirWrite: "acceptEdits", PermissionFull: "bypassPermissions"}
 	for _, backend := range []string{BackendClaude, BackendPi} {
 		for _, level := range LeadPermissionLevels() {
 			t.Run(backend+"/"+string(level), func(t *testing.T) {
@@ -37,7 +39,7 @@ func TestPermissionLaunchMatrix(t *testing.T) {
 				holder := h.holder(st.ID)
 				args := h.holders.spawned(holder).Argv
 				mode, present := flagValue(args, "--permission-mode")
-				if backend == BackendClaude && (!present || mode != nativePermissionMode(backend, level)) {
+				if backend == BackendClaude && (!present || mode != literalModes[level]) {
 					t.Fatalf("Claude launch: %v", args)
 				}
 				if backend == BackendPi && present {
@@ -290,5 +292,143 @@ func TestPermissionWorkersRemainUnapplied(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, st.ID), "permission.json")); !os.IsNotExist(err) {
 		t.Fatalf("worker sidecar: %v", err)
+	}
+}
+
+func permissionDeliveredModes(h *leadHarness, holder string) []string {
+	var modes []string
+	for _, control := range h.controls(holder) {
+		if body, ok := control.(map[string]any); ok && body["subtype"] == "set_permission_mode" {
+			modes = append(modes, body["mode"].(string))
+		}
+	}
+	return modes
+}
+
+func permissionRejoined(h *leadHarness, id string) {
+	h.t.Helper()
+	eventually(h.t, "permission holder replay to finish", func() bool {
+		ready := false
+		c := h.runner.conv(id)
+		return c != nil && c.do(func() { ready = !c.replaying }) && ready
+	})
+}
+
+func TestPermissionNativeModeLiteralDelivery(t *testing.T) {
+	h := permissionHarness(t).start()
+	st := h.lead(BackendClaude, LeadOptions{PermissionLevel: PermissionWorkdirWrite})
+	h.send(st.ID, "native mode")
+	holder := h.holder(st.ID)
+	h.holders.out(holder, initLine("native-literal", "acceptEdits"), resultLine(), stateLine(HarnessIdle))
+	h.idle(st.ID)
+	res := h.route(localBrowser, http.MethodPost, "/agents/"+st.ID+"/settings", map[string]any{"permission_mode": "auto"})
+	if res.status != http.StatusOK {
+		t.Fatalf("trusted native auto: %d %s", res.status, res.body)
+	}
+	if modes := permissionDeliveredModes(h, holder); !slices.Equal(modes, []string{"auto"}) {
+		t.Fatalf("delivered modes = %v; want literal auto", modes)
+	}
+	if got := h.record(st.ID); got.PermissionMode != "auto" {
+		t.Fatalf("recorded native target: %+v", got)
+	}
+	if got := h.state(st.ID); got.PermissionLevel != PermissionWorkdirWrite || got.ActiveMode != "acceptEdits" {
+		t.Fatalf("intent/observation conflated: %+v", got)
+	}
+	h.holders.out(holder, initLine("native-literal", "auto"))
+	h.sync(st.ID, holder)
+	h.restart()
+	h.sync(st.ID, holder)
+	permissionRejoined(h, st.ID)
+	if modes := permissionDeliveredModes(h, holder); !slices.Equal(modes, []string{"auto"}) {
+		t.Fatalf("satisfied native target was remapped on attach: %v", modes)
+	}
+	if h.holders.opCount("launch") != 1 || h.holder(st.ID) != holder {
+		t.Fatalf("native control/reattach replaced process: %v", h.holders.opList())
+	}
+	assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), PermissionWorkdirWrite, false)
+}
+
+func TestPermissionPendingLoweringReattachDelivery(t *testing.T) {
+	for _, refuse := range []bool{false, true} {
+		t.Run(map[bool]string{false: "delivered", true: "unenforceable"}[refuse], func(t *testing.T) {
+			h := permissionHarness(t).start()
+			st := h.lead(BackendClaude, LeadOptions{PermissionLevel: PermissionFull, PermissionFullAck: true, permissionUser: true})
+			h.send(st.ID, "original input")
+			holder := h.holder(st.ID)
+			h.holders.out(holder, initLine("pending-lower", "bypassPermissions"), stateLine(HarnessRunning))
+			h.sync(st.ID, holder)
+			original := h.userInputs(holder)
+			if len(original) != 1 {
+				t.Fatalf("original input count: %q", original)
+			}
+			if _, err := h.runner.SetPermissionLevel(st.ID, PermissionReadOnly); err != nil {
+				t.Fatal(err)
+			}
+			if modes := permissionDeliveredModes(h, holder); len(modes) != 0 {
+				t.Fatalf("control ran during active turn: %v", modes)
+			}
+			if got := h.state(st.ID); got.ActiveMode != "bypassPermissions" || got.PermissionEnforcement != "advisory" {
+				t.Fatalf("premature enforcement: %+v", got)
+			}
+			// No plan observation or idle boundary exists before replacement.
+			// The successor must replay the old bypass observation and reconstruct
+			// the pending control through this same holder, not its ignored flags.
+			h.restart()
+			h.sync(st.ID, holder)
+			permissionRejoined(h, st.ID)
+			if got := h.state(st.ID); got.ActiveMode != "bypassPermissions" || got.Status != StatusRunning {
+				t.Fatalf("old bypass replay missing: %+v", got)
+			}
+			if modes := permissionDeliveredModes(h, holder); len(modes) != 0 {
+				t.Fatalf("replay crossed unsafe boundary: %v", modes)
+			}
+			if refuse {
+				h.holders.setControl("set_permission_mode", "mode cannot be enforced", "")
+			}
+			h.holders.out(holder, replyLine("pending1", "done"), resultLine(), stateLine(HarnessIdle))
+			h.idle(st.ID)
+			if modes := permissionDeliveredModes(h, holder); !slices.Equal(modes, []string{"plan"}) {
+				t.Fatalf("recovered control = %v; want literal plan", modes)
+			}
+			if h.holders.opCount("launch") != 1 || h.holder(st.ID) != holder || !slices.Equal(h.userInputs(holder), original) {
+				t.Fatalf("reconciliation duplicated process/input: %v; %q", h.holders.opList(), h.userInputs(holder))
+			}
+			if got := h.state(st.ID); !got.Process || got.ActiveMode != "bypassPermissions" || got.PermissionEnforcement != "advisory" {
+				t.Fatalf("control acknowledgement fabricated observation: %+v", got)
+			}
+			if refuse && !strings.Contains(h.log.String(), "permission reconciliation:") {
+				t.Fatalf("unenforceability not reported: %s", h.log.String())
+			}
+			assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), PermissionReadOnly, false)
+			if refuse {
+				return
+			}
+			// Stop before a plan report, then resume and reopen: each deliberate
+			// new process still launches the durable lower level with one input.
+			if _, err := h.runner.Stop(st.ID); err != nil {
+				t.Fatal(err)
+			}
+			h.send(st.ID, "after stop")
+			resumed := h.holder(st.ID)
+			mode, _ := flagValue(h.holders.spawned(resumed).Argv, "--permission-mode")
+			// fakeHolders.Stop deletes the old holder and its input history. Its
+			// no-duplicate assertion was made above, before the deliberate stop.
+			if mode != "plan" || !slices.Equal(h.userInputs(resumed), h.envelopes("after stop")) || h.holders.opCount("launch") != 2 {
+				t.Fatalf("stop/resume changed selection or input: %s %q", mode, h.userInputs(resumed))
+			}
+			if _, err := h.runner.CloseConversation(st.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.runner.Reopen(st.ID); err != nil {
+				t.Fatal(err)
+			}
+			h.send(st.ID, "after reopen")
+			revived := h.holder(st.ID)
+			mode, _ = flagValue(h.holders.spawned(revived).Argv, "--permission-mode")
+			if mode != "plan" || !slices.Equal(h.userInputs(revived), h.envelopes("after reopen")) || h.holders.opCount("launch") != 3 {
+				t.Fatalf("revive: %s %q", mode, h.userInputs(revived))
+			}
+			assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), PermissionReadOnly, false)
+		})
 	}
 }

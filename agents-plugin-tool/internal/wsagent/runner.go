@@ -1340,7 +1340,10 @@ type conv struct {
 	dirtyModel  bool
 	dirtyEffort bool
 	dirtyMode   bool
-	lastReg     time.Time
+	// reconcileMode marks replay-reconstructed intent, not a new user setting.
+	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
+	reconcileMode bool
+	lastReg       time.Time
 
 	// A lead's own, loop-owned. mailC (one slot) tells the loop the
 	// mailbox may hold mail (signalMail); stopMail ends the watch.
@@ -2440,7 +2443,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.replaying, c.seq = true, rec.HolderSeq
 		return nil
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode = false, false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
 	c.seq, c.seqDirty, c.ringDirty = 0, false, false
 	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0 })
 	c.writeRegistration()
@@ -2590,6 +2593,7 @@ func (c *conv) replayDone(lost bool) {
 			c.probeWrapHold()
 		}
 	}
+	c.reconcileLeadPermission()
 	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
@@ -3370,11 +3374,11 @@ func (c *conv) setSettings(model, effort *string) error {
 // backend session. A restart ends the session's background work with the
 // process, so it is the last resort.
 func (c *conv) applySettings() {
-	model, effort, mode := c.dirtyModel, c.dirtyEffort, c.dirtyMode
+	model, effort, mode, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode
 	if c.replaying {
 		return
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode = false, false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
 	if c.proc == nil || (!model && !effort && !mode) {
 		return
 	}
@@ -3388,16 +3392,21 @@ func (c *conv) applySettings() {
 		restart = true
 	}
 	if mode && !restart {
-		level, source, err := c.r.leadPermission(rec, c.dir)
+		level, _, err := c.r.leadPermission(rec, c.dir)
 		if err != nil {
 			c.setStatus(func() { c.lastErr = err.Error() })
 			return
 		}
-		if source == "explicit" {
-			rec.PermissionMode = nativePermissionMode(rec.Backend, level)
-		}
-		if controls.setPermissionMode(rec.PermissionMode) != nil {
-			restart = true
+		// The accepted native target is already in Record. Common selection
+		// writes its mapping there; a permitted native control keeps its literal
+		// mode. Only an actual new launch remaps explicit common intent.
+		if err := controls.setPermissionMode(rec.PermissionMode); err != nil {
+			if reconcile {
+				fmt.Fprintf(c.r.opts.Log, "agent %s: permission reconciliation: %v\n", rec.ReplyID, err)
+				c.permissionNudge(level, false, c.activeMode)
+			} else {
+				restart = true
+			}
 		}
 	}
 	if restart {

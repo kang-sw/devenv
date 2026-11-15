@@ -15,9 +15,12 @@ func TestPermissionLeadMapping(t *testing.T) {
 			t.Fatalf("%s = %s, want %s", tc.mode, got, tc.level)
 		}
 	}
+	// Pin the contract independently: inverse projection accepts multiple native
+	// modes for workdir-write and cannot establish the required launch flag.
+	literalModes := map[PermissionLevel]string{PermissionReadOnly: "plan", PermissionWorkdirWrite: "acceptEdits", PermissionFull: "bypassPermissions"}
 	for _, level := range LeadPermissionLevels() {
-		if got := nativePermissionMode(BackendClaude, level); got == "" || legacyLeadPermission(Record{Lead: true, Backend: BackendClaude, PermissionMode: got}) != level {
-			t.Fatalf("mapping %s = %s", level, got)
+		if got := nativePermissionMode(BackendClaude, level); got != literalModes[level] {
+			t.Fatalf("mapping %s = %s, want literal %s", level, got, literalModes[level])
 		}
 		if got := nativePermissionMode(BackendPi, level); got != "" {
 			t.Fatalf("invented Pi mode %s", got)

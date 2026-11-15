@@ -198,7 +198,7 @@ func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 	}
 	if mode := nativePermissionMode(c.rec.Backend, level); mode != "" {
 		c.update(func(rec *Record) { rec.PermissionMode = mode })
-		c.dirtyMode = true
+		c.dirtyMode, c.reconcileMode = true, false
 	}
 	if !c.turn {
 		c.applySettings()
@@ -237,10 +237,38 @@ func (c *conv) setNativePermissionMode(mode string, user bool) error {
 	}
 	if mode != c.rec.PermissionMode {
 		c.update(func(rec *Record) { rec.PermissionMode = mode })
-		c.dirtyMode = true
+		c.dirtyMode, c.reconcileMode = true, false
 		if !c.turn {
 			c.applySettings()
 		}
 	}
 	return nil
+}
+
+// A holder attach ignores launch flags. After replay, reconstruct delivery from
+// the durable selection/native target instead of trusting a lost dirty flag.
+// Replay observations remain evidence, never an acknowledgement of that target.
+func (c *conv) reconcileLeadPermission() {
+	if !c.rec.Lead || c.rec.Backend != BackendClaude || c.dirtyMode {
+		return
+	}
+	level, source, err := c.r.leadPermission(c.rec, c.dir)
+	if err != nil {
+		c.setStatus(func() { c.lastErr = err.Error() })
+		return
+	}
+	if source != "explicit" {
+		return
+	}
+	target := c.rec.PermissionMode
+	if legacyLeadPermission(c.rec) != level {
+		target = nativePermissionMode(c.rec.Backend, level)
+	}
+	if target == c.activeMode {
+		return
+	}
+	if target != c.rec.PermissionMode {
+		c.update(func(rec *Record) { rec.PermissionMode = target })
+	}
+	c.dirtyMode, c.reconcileMode = true, true
 }
