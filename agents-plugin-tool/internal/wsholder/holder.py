@@ -1271,6 +1271,24 @@ def _file_sha256(path: str) -> str:
         return ""
 
 
+def lift_qos_default() -> None:
+    """On macOS, raise this thread to the DEFAULT QoS class (0x15).
+
+    A holder started under a utility-clamped ancestor would otherwise pass that
+    clamp to every child it spawns and run them on efficiency cores. Threads
+    and children created after this call inherit the class. Best effort: any
+    failure, and every other OS, is a no-op.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import ctypes
+
+        ctypes.CDLL(None).pthread_set_qos_class_self_np(0x15, 0)
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ws session holder")
     parser.add_argument("--dir", required=True, help="this holder's state directory")
@@ -1282,6 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-grace-seconds", type=float, default=STOP_GRACE_SECONDS)
     parser.add_argument("--restart-unsafe", action="store_true", help="record that this holder may end with its starter")
     args = parser.parse_args(argv)
+    lift_qos_default()
     try:
         session = json.loads(args.session)
         if not isinstance(session, dict):

@@ -31,6 +31,14 @@
 .bc-sub { font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 0; }
 .bc-kind { flex: none; font-size: 10.5px; font-weight: 800; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
 .bc-acts { display: inline-flex; flex: none; }
+/* Preview is transient; open and pinned cards retain their normal headers. */
+.bcard[data-file-state="preview"] > .bc-in { outline: 1px dashed var(--pv-line); outline-offset: -1px; }
+.bcard[data-file-state="preview"] > .bc-in > .bc-hd { background: var(--pv-bg); color: var(--pv-fg); box-shadow: inset 0 -2px 0 var(--pv-line); }
+.bcard[data-file-state="preview"] .bc-nm { font-style: italic; }
+.pv-state { flex: none; border: 1px dashed var(--pv-line); border-radius: 99px; padding: 0 7px; font-size: 10.5px; font-weight: 700; color: var(--pv-fg); }
+.pv-state[hidden], .fstate[hidden] { display: none; }
+.fstate { display: inline-block; vertical-align: middle; margin-left: 6px; border-radius: 99px; padding: 0 5px; font: 10px/1.4 var(--wb-sans); background: color-mix(in srgb, var(--wb-primary) 20%, transparent); color: var(--wb-primary); }
+.fstate[data-state="preview"] { background: var(--pv-bg); color: var(--pv-fg); }
 .bc-min { display: none; }
 .bc-folded:empty { display: none; }
 .bc-folded { display: none; font: 11.5px/1.4 var(--wb-mono); color: var(--wb-muted-fg); padding: 0 12px 6px 33px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -11,7 +11,8 @@ import (
 // writer's flock and checks every authoritative file's identity, size, mode and
 // mtime. A pending intent always misses, so recovery and schema guards run under
 // the same lock as an uncached Open. The zero value is ready for use.
-// No writer uses this cache; returned states are independent copies.
+// No writer uses this cache. Opens share read-only backing data; each caller
+// owns a small State header so mutation entry points can detach it safely.
 type FolderCache struct {
 	mu      sync.Mutex
 	entries map[string]*folderCacheSlot
@@ -103,7 +104,7 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 	var out *State
 	err := f.withGuard(true, guard, func() error {
 		if hit {
-			out = entry.state.clone()
+			out = entry.state.sharedRead()
 			return nil
 		}
 		slot.read = folderCachedRead{}
@@ -116,8 +117,9 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 		if err == nil && stampErr == nil && out != nil {
 			next := folderCachedRead{state: out, files: files}
 			if next.unchanged(f.Dir) {
+				out.shared = true
 				slot.read = next
-				out = out.clone()
+				out = out.sharedRead()
 			}
 		}
 		return err
@@ -126,6 +128,13 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 		slot.read = folderCachedRead{}
 	}
 	return out, err
+}
+
+// sharedRead copies only the header. Returning the cache's actual pointer
+// would make Apply's final assignment and BeginRender race with other readers.
+func (s *State) sharedRead() *State {
+	out := *s
+	return &out
 }
 
 // Forget drops a board when its session leaves the dashboard's index.

@@ -221,7 +221,7 @@ iframe.doc-frame { display: block; width: 100%; height: 0; border: 0; }
    time (38px), then content. Time-less rows keep the empty cell so content
    aligns. Secondary text is muted; only content that needs grouping (a
    nested control card) keeps a surface. */
-.history-live { --h-av: 18px; --h-time: 38px; --h-gap: 8px; margin-left: 12px; width: auto; }
+.history-live { --h-av: 18px; --h-time: 64px; --h-gap: 8px; margin-left: 12px; width: auto; }
 .history-live .evi, .history-live .wb-hmark { width: var(--h-av); height: var(--h-av); font-size: 9px; }
 .history-live .evi.lead, .history-live .evi.owner, .history-live .wb-hmark { background: color-mix(in srgb, var(--wb-haccent, var(--wb-primary)) 12%, transparent); }
 .history-live .evi.owner { --wb-haccent: var(--wb-accent-policy); color: var(--wb-accent-policy); }

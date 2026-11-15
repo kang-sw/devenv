@@ -256,6 +256,7 @@
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
+      leading: function (c) { return worktree && c.preview && !(PIN_WIDE && PIN_WIDE.matches); },
       layout: function (on) {
         if (on) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
         railOpen(false);
@@ -511,6 +512,10 @@
     if (!changed.length || !doc.body || !doc.body.moveBefore) return null;
     var pairs = [];
     changed.forEach(function (c) {
+      // Timeline anchors can become inert gaps after an append. Replay only
+      // already-admitted rows before looking for their frame placeholders;
+      // the normal post-morph restore still owns folds, mounting and layout.
+      if (window.wbHistory) window.wbHistory.prepare(c.n, window.wbHistory.capture(c.old));
       var held = c.g ? c.g.oc[0] : null, olds = {};
       q('iframe.doc-frame[data-doc-key^="entry:"]:not(.doc-frame-next)', c.old).forEach(function (f) {
         if (f === held || !f.hasAttribute("data-srcdoc")) return;
@@ -620,30 +625,33 @@
   // frameGraft moves g's new section content into its old section, level by
   // level down the frame's path: each kept element takes the new element's
   // attributes and children, except its child on the path, which stays.
-  // At the bottom the new frame goes in after the old one, pending.
+  // At the bottom an unchanged document stays live; a changed frame goes
+  // in after the old one, pending.
   function frameGraft(g) {
     var of = g.oc[0], mounted = of.tagName === "IFRAME";
+    var same = of.getAttribute("data-doc-key") === g.nc[0].getAttribute("data-doc-key") && of.getAttribute("data-srcdoc") === g.nc[0].getAttribute("data-srcdoc");
+    if (same) of.wbOut = false;
     // The next frame of a mounted frame is mounted before it goes in, and
     // before anything holds it (expandos, the load listener): a placeholder
     // would show nothing to reveal. The next frame of an unmounted one (a
     // closed fold, a topic far from the view) is a placeholder that simply
     // takes the old one's place: the topic mounts it once it comes near
     // (viewport bands).
-    if (mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
+    if (!same && mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
     var nf = g.nc[0];
-    if (mounted) frameNext(nf, of);
+    if (!same && mounted) frameNext(nf, of);
     for (var i = g.oc.length - 1; i > 0; i--) {
       var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
       Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
       Array.prototype.forEach.call(na.attributes, function (a) { if (oa.getAttribute(a.name) !== a.value) oa.setAttribute(a.name, a.value); });
       Array.prototype.slice.call(oa.childNodes).forEach(function (c) { if (c !== oc) oa.removeChild(c); });
       Array.prototype.slice.call(na.childNodes).forEach(function (c) {
-        if (c === nc) { before = false; if (c === nf) oa.appendChild(c); }
+        if (c === nc) { before = false; if (c === nf && !same) oa.appendChild(c); }
         else if (before) oa.insertBefore(c, oc);
         else oa.appendChild(c);
       });
     }
-    if (!mounted) of.parentNode.removeChild(of);
+    if (!same && !mounted) of.parentNode.removeChild(of);
   }
   // frameNext makes nf the pending next frame of mounted frame of.
   function frameNext(nf, of) {

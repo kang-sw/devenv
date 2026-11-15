@@ -31,7 +31,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
-import { buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type LocalDevenvBuildDeps, type LocalDevenvContext } from "./local-devenv.ts";
+import { prepareLocalDevenvStartup, createChildRuntimeEnsurer, runtimeContractHash, type LocalDevenvBuildDeps, type LocalDevenvContext } from "./local-devenv.ts";
 import { ADAPTER_CONFIG_MANIFEST_FILE, DASHBOARD_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "./adapter-config.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 import { HOSTED_KEY_ENV, hostedSessionKey } from "./hosted-session.ts";
@@ -919,20 +919,22 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // launcher is spawned so a defined result's env fragment can be threaded
   // into spawnWsMcpClient below.
   let localDevenvContext: LocalDevenvContext | undefined;
+  let ownsLocalBootstrap = false;
   let launcherEnv: Record<string, string> | undefined;
   const runBuild = opts.runBuild ?? runGoBuild;
   if (isLeadOrFork(readSpawnRole(process.env))) {
-    const bootstrap = await buildLocalDevenvBootstrap(opts.pluginDir, runtime.plugin_version, {
+    const bootstrap = await prepareLocalDevenvStartup(opts.pluginDir, opts.launcherPath, opts.runtimeJsonPath, runtime.plugin_version, {
       runBuild,
       notify: (m) => notify(opts.ui, `ws-pi-bridge: ${m}`),
     });
     if (bootstrap) {
       launcherEnv = bootstrap.env;
       localDevenvContext = bootstrap.context;
+      ownsLocalBootstrap = bootstrap.ownedBootstrap;
     }
   }
-  // Only a session that built at startup has a marker to rebuild from; with
-  // no marker every child launch stays exactly as before.
+  // A reused runtime still has a valid marker: keep child contract validation
+  // active even though ordinary startup did not build.
   const ensureChildRuntime = localDevenvContext
     ? createChildRuntimeEnsurer({
         role: readSpawnRole(process.env),
@@ -963,7 +965,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   let shutdownCalled = false;
   let bootstrapReleased = false;
   const releaseLocalBootstrap = () => {
-    if (bootstrapReleased || !localDevenvContext) return;
+    if (bootstrapReleased || !ownsLocalBootstrap || !localDevenvContext) return;
     bootstrapReleased = true;
     for (const path of [localDevenvContext.builtPath, `${localDevenvContext.builtPath}.metadata.json`]) {
       try { unlinkSync(path); } catch (error) {

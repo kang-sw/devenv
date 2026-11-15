@@ -16,6 +16,9 @@ func TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	asset = []byte(strings.Replace(string(asset), "var kit = viewKit(window);", "var kit = window.historyKit;", 1))
+	// These cases drive gaps explicitly from hand-set layouts; the initial
+	// 1000px fill has its own browser test (TestHistoryInitialWindowBrowser).
+	asset = []byte(strings.Replace(string(asset), "h._wbHistoryFilling = true; fill(h);", "", 1))
 	script := `var BOARD='',BODY_CLASS='';` + formPrelude + `
 Object.defineProperty(E.prototype,'id',{get:function(){return this.attrs.id||'';}});
 Object.defineProperty(E.prototype,'tagName',{get:function(){return this.tag.toUpperCase();}});
@@ -41,7 +44,7 @@ function flush(){var batch=frames.splice(0);batch.forEach(function(fn){fn();});}
 function CustomEvent(type,opt){this.type=type;Object.assign(this,opt||{});}
 E.prototype.dispatchEvent=function(e){e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null)(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});if(e.type==='wbhistoryload')loads++;};
 fire=function(n,type){n.dispatchEvent(new CustomEvent(type,{bubbles:true}));};
-window.historyKit={keep:function(n,opt){if(opt&&opt.capture===false)return {scroller:n.closest('.test-scroller')||root};var k={applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;},jump:function(n,opt){jumps.push([n.id,opt.offset]);}};
+window.historyKit={pin:function(){return {apply:function(){}};},keep:function(n,opt){if(opt&&opt.capture===false)return {scroller:n.closest('.test-scroller')||root};var k={applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;},jump:function(n,opt){jumps.push([n.id,opt.offset]);}};
 function ResizeObserver(fn){this.fn=fn;};ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
 function row(i,height,body){return '<div class="timeline-row" data-row="e'+i+'" data-count="1" data-from="10:00" data-to="10:01" data-height="'+height+'">'+(body||'<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'">line</article>')+'</div>';}
 function rows(from,to,height){var s='';for(var i=from;i<=to;i++)s+=row(i,height);return s;}
@@ -69,6 +72,14 @@ check('jump goes through scroll owner',jumps.at(-1),['e17',12]);
 check('known target consumed minimum whole-row window',liveIDs(h).filter(function(id){return ['e17','e18','e19'].includes(id);}),['e17','e18','e19']);
 var saved=window.wbHistory.capture(document),before=liveIDs(h);
 h=board(gap(rows(1,10,400),true)+row(11,50)+gap(rows(12,24,400),false)+row(25,50)+row(26,50));
+var pre=[loads,bound,keeps.length],rect=E.prototype.getBoundingClientRect;
+E.prototype.getBoundingClientRect=function(){throw Error('prepare must not read layout');};
+window.wbHistory.prepare(document,saved);
+window.wbHistory.prepare(document,saved);
+E.prototype.getBoundingClientRect=rect;
+check('pre-morph preparation restores admitted rows from inert gaps exactly once',liveIDs(h),before.concat(['e26']));
+check('preparation neither mounts nor binds nor captures scroll',[loads,bound,keeps.length],pre);
+check('unadmitted history remains inert',!!h.querySelector('[id="e1"]'),false);
 window.wbHistory.restore(document,saved);check('swap restores exact membership without eviction or extra window',liveIDs(h),before.concat(['e26']));
 window.wbHistory.init(document);check('one listener after repeated init',h.on.click.length,1);
 h=board(gap(rows(1,10,400),true)+row(11,20));window.wbHistory.init(document);window.wbHistory.loadTarget(document,'e10');
