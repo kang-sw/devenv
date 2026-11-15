@@ -473,6 +473,79 @@ protocol/API was changed. The ticket remains in `ready/`.
   explicit Electron download authorizations, then complete the original
   Windows interactive-session smoke and evidence cleanup.
 
+##### Windows acceptance run (687ca9e3f) - 2026-11-15
+
+The owner-authorized single Windows run **stopped before smoke/visual
+acceptance**: the offline win32 package build failed. No source was fixed,
+no second build was attempted, and no Electron app, smoke or daemon fixture
+was launched on either host. This does not establish Windows parity; the
+ticket remains in `ready/`, with Phases 2-4 untouched.
+
+Owner rule (893)=a superseded the earlier host-clone instructions. A full
+bundle of `impl/exec4/electron-phase1/cake-ember-ramp` at `687ca9e3f` was
+cloned only into
+`C:\Users\ki608\ws-electron-verify-20261115T032312\src`.
+The pre-existing `C:\Users\ki608\devenv` clone was never read, synced or
+modified. Run-controlled npm/Electron caches, temp/profile/config paths,
+Playwright modules and logs were isolated under the unique run folder.
+
+Prerequisites and commands:
+
+- Exactly one `npm ci --no-audit --no-fund` and one `node
+  node_modules/electron/install.js` succeeded in the isolated desktop package.
+  Electron is **44.11.3 win32-x64**, packager **20.3.0**; the cached official
+  release zip's SHA256 matches the pinned package's checksum
+  (`97fca9b8e9b90cdc88c1efd44160ca4b89b15101721d93c8befcbeb35b93fb59`).
+  There were no global installs or additional downloads.
+- Cached Mac `playwright` and `playwright-core` were copied to the isolated
+  `pw/node_modules/`. The daemon fixture was cross-compiled on the Mac with
+  `GOOS=windows GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go
+  build -o <temporary-exe> ./desktop-electron/test/daemon` and copied to the
+  isolated `dist/smoke-daemon.exe`; it was never started. No shared daemon or
+  port 29417 was accessed.
+- Windows headless `npm test`: **32 passed, 1 failed**. The subsequent single
+  offline `npm run build` exited **1**. The host clone remained clean.
+
+Windows-versus-Mac deltas (evidence below is relative to
+`agents-plugin-tool/desktop-electron/dist/evidence/windows/20261115T032312/`):
+
+- **W1 — Windows packaging is blocked; the prior darwin build passed.**
+  Packager reports `Could not locate a package.json file ... for an Electron
+  app with the following fields: author`. Its win32-only metadata inference
+  requires `author` when `win32metadata.CompanyName` is absent; `build.cjs`
+  supplies neither in its staged package/options. Evidence: `build.log`,
+  `packager-author-inference.txt`, `build-source.txt`. The Mac comparison is
+  the preceding `0c9961c6f` Edition's offline darwin success, not a new Mac run.
+- **W2 — Windows tests are 32/33 versus the prior Mac 33/33.**
+  `test/endpoint.test.js:23` expects the POSIX string
+  `/home/user/.cache/ws@kang-sw-devenv`; Windows correctly resolves the input
+  through its native path implementation to
+  `C:\home\user\.cache\ws@kang-sw-devenv`. This is an observed test-portability
+  failure, not proof of an attach failure. Evidence: `unit-tests.log`,
+  `endpoint-test-source.txt`; Mac baseline: the `0c9961c6f` Edition.
+
+**Unverified:** all live Windows smoke/visual contracts, including attachment,
+renderer isolation, navigation/Stay rollback, real dashboard file-link opening,
+X-close draft preservation, single-instance focus, daemon survival and P9
+physical Ctrl zoom delivery. No scheduled task was created because packaging
+failed first; there is no interactive screenshot. `smoke.log` explicitly records
+**NOT RUN**, not a smoke failure/pass. Native menu/dialog rendering and the
+configured default Windows icon / unchanged `⌘R` retry title were not observed.
+No assertion or metadata was patched to get past either delta.
+
+Evidence was copied back and all **19 host evidence files** were SHA256-checked
+against `host-manifest.json` before cleanup. `prerequisites.json`,
+`source-status.json`, the logs and host `summary.json` retain the capture;
+`acceptance-summary.json` includes the final cleanup outcome. Folder-scoped CIM
+scans were empty before and after removing the entire unique host folder.
+The exact task `ewv-20261115T032312` was confirmed absent (never created), no
+processes were signalled, and both the Mac temporary bundle and cross-compiled
+exe were deleted. Evidence: `final-host-process-scan.json`, `task-status.json`,
+`cleanup.log`, `mac-final-process-scan.txt`. Existing host work and prior Mac
+evidence were left in place. Only this ticket outcome is committed; evidence
+and binaries are not staged. Any repair and renewed Windows run return to the
+lead; this run grants neither.
+
 #### Edition (7525029be) - 2026-11-15
 
 Fixed the independent lite review's Critical cancelled-navigation finding.
