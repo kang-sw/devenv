@@ -23,7 +23,7 @@
     "lead-review/lead-review.md": "87460eee7f786233a8ceea12d37ee86563f74b21e85f0da0d30f3cf614b47e0f",
     "lead-run/lead-run.md": "97117df954838b248ec88e89da9a8c15a8dfb2f0451be7b9f910ed03208baca3",
     "lead-ship/lead-ship.md": "040956778692d47ae6242c198ad9ca38f35964111c42a0e2b2c304dc8083b322",
-    "lead-ticket/lead-ticket.md": "98169d369afd7076a8ed28fc4fe3fea5f1f64262d923eaaf4821fb6dd836565e",
+    "lead-ticket/lead-ticket.md": "12ff773cb2fc7184ff66a0a7457600fd26541d1079dc8c98bfc1346013d3d2fb",
     "lead-tune/lead-tune.md": "947b10ec5df377e79807206f5fe5e793ab2e9fa01683b0588896f946f5ec617c",
     "lead-use-mailbox/arm-the-wait.claude.md": "16670754315019116cc80f47258d2cde957def7fc6b45df74b952f9b79ae7946",
     "lead-use-mailbox/arm-the-wait.md": "f47a20a40dc9bc072bac056d843d3deb9e2ee36ccce228e1a9994c1bc4d0a618",
@@ -49,7 +49,7 @@
     "ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
     "ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
     "tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
-    "whiteboard/whiteboard.md": "d6beed89cd259fc49d337f1abed5d0b9a83f6990d641c1e4f2874a5a085e1382",
+    "whiteboard/whiteboard.md": "c1461e2a2af8c1e6366e06fdab51f8dabcccfa73e82807bd0ea728c2421f3e84",
     "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
   }
 }

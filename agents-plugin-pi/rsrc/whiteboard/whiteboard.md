@@ -283,7 +283,8 @@ Markdown up to the closing tag.
   never a full HTML document: inline SVG, or canvas 2D drawn by an inline
   script, with no external `src`, `href`, or fetch. Served payloads run in
   isolated sandboxes. Put a standalone document in a
-  `{{.McpNamespace}}/path.generate` file and link it from the board.
+  `{{.McpNamespace}}/path.generate` file and link it from the board; mockup
+  sources use the tracked location below.
 - HTML in a body: a line that starts with a block tag such as `<div>` or
   `<details>`, or holds a lone tag such as `<svg ...>`, starts raw HTML that
   runs to the next blank line, so put a blank line between HTML and the
@@ -301,6 +302,13 @@ Markdown up to the closing tag.
   Split content-heavy material into several (sub)panels rather than one
   huge panel; payloads are capped at 2 MiB of UTF-8 bytes, with an external
   file link as the alternative.
+- Save every text mockup (HTML/SVG) under
+  `ai-docs/assets/mockups/YYMMDD/<topic name>/`, keeping its creation date
+  and using the board topic name before a ticket exists; the saving lead
+  includes the source in its next commit so it survives cleanup. Multi-state
+  HTML provides a state selector (URL hash or on-page switch) for reproducible
+  renders. PNG renders are reproduced from HTML, not stored there; panel
+  screenshots keep their existing location.
 - Agent log: `wb:log` appends one line of inline Markdown, without images,
   HTML, or block structures. Append a current-state line when the work's
   state changes, so the latest agent line remains a useful summary; put
