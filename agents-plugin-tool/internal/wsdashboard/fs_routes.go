@@ -179,6 +179,13 @@ func browseRootParam(raw string) (string, bool) {
 // machine. session reports the session's own root, the only one an HTML
 // preview capability is minted for.
 func (d *Daemon) browseRoot(r *http.Request, replyID string) (root string, session, ok bool) {
+	if replyID == LocalBrowseAnchor {
+		if !localBrowseViewer(r) {
+			return "", false, false
+		}
+		root, ok = browseRootParam(r.URL.Query().Get("root"))
+		return root, false, ok
+	}
 	if d.index == nil || !ValidReplyID(replyID) {
 		return "", false, false
 	}
@@ -419,6 +426,10 @@ func writeFSJSON(w http.ResponseWriter, outside bool, v any) {
 // handleFSRoutes serves the file browser's read routes of one session; sub
 // is the path under /s/<reply-id>/fs/.
 func (d *Daemon) handleFSRoutes(w http.ResponseWriter, r *http.Request, replyID, sub string) {
+	if replyID == LocalBrowseAnchor && sub == "roots" {
+		d.handleBrowseRoots(w, r)
+		return
+	}
 	switch {
 	case sub == "list":
 		d.handleFSList(w, r, replyID)

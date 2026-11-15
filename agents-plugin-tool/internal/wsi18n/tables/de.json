@@ -309,6 +309,7 @@
   "js.hd.term.attach.title": "dieses Terminal als Karte auf dieser Seite öffnen",
   "js.hd.term.stop.title": "dieses Terminal und seine Shell beenden",
   "js.hd.term.title": "Terminals ohne Sitzung",
+  "js.hd.term.anchor": "Hosteigene Terminals",
   "js.term.closefail": "Nicht geschlossen: {0}",
   "js.term.confirm": "Dieses Terminal schließen? Seine Shell und alles, was darin läuft, wird beendet.",
   "js.term.err.failed": "Das Terminal wurde nicht geöffnet: {0}",

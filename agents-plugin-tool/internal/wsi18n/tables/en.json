@@ -309,6 +309,7 @@
   "js.hd.term.attach.title": "open this terminal as a card on this page",
   "js.hd.term.stop.title": "end this terminal and its shell",
   "js.hd.term.title": "Terminals without a session",
+  "js.hd.term.anchor": "Host-owned terminals",
   "js.term.closefail": "Not closed: {0}",
   "js.term.confirm": "Close this terminal? Its shell, and whatever runs in it, ends.",
   "js.term.err.failed": "The terminal did not open: {0}",

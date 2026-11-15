@@ -309,6 +309,7 @@
   "js.hd.term.attach.title": "ouvrir ce terminal comme carte sur cette page",
   "js.hd.term.stop.title": "arrêter ce terminal et son shell",
   "js.hd.term.title": "Terminaux sans session",
+  "js.hd.term.anchor": "Terminaux de l’hôte",
   "js.term.closefail": "Non fermé : {0}",
   "js.term.confirm": "Fermer ce terminal ? Son shell, et tout ce qui s'y exécute, s'arrête.",
   "js.term.err.failed": "Le terminal ne s'est pas ouvert : {0}",

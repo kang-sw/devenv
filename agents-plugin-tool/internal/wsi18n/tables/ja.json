@@ -309,6 +309,7 @@
   "js.hd.term.attach.title": "このターミナルをこのページのカードとして開きます",
   "js.hd.term.stop.title": "このターミナルとシェルを終了します",
   "js.hd.term.title": "セッションのないターミナル",
+  "js.hd.term.anchor": "ホスト所有のターミナル",
   "js.term.closefail": "閉じられませんでした: {0}",
   "js.term.confirm": "このターミナルを閉じますか？シェルとその中で動いているものはすべて終了します。",
   "js.term.err.failed": "ターミナルを開けませんでした: {0}",
