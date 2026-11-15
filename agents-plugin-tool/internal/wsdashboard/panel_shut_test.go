@@ -18,7 +18,7 @@ func TestPanelShutPersistence(t *testing.T) {
 		t.Fatal("dashboard.js holds no panel shut constants or toggle listener")
 	}
 	src := dashboardFuncs(t, "isPanel", "shutId", "shutList", "shutHas", "shutPut", "isPeer", "openKey", "restoreOpenOne", "restoreOpen", "restoreDraft")
-	runNode(t, "panel shut persistence", frameDOM+constants+src+`
+	runNode(t, "panel shut persistence", selectionCodecSource(t)+`var bselections = []; function marker(n) { return "[Image #" + n + "]"; }`+frameDOM+constants+src+`
 var rid = "session-a", openState = {}, PEER_KEY = "p.", railSets = null;
 var storage = {};
 function load(k) { return Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : null; }

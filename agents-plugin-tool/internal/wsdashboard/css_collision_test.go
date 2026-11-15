@@ -33,6 +33,9 @@ var cssModules = []struct {
 // those modules may both define it. A new module joining the class is a new
 // collision and fails.
 var allowedCSSOverlaps = map[string]string{
+	"wsc-backing dashboard,memo":        "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
+	"wsc-capsule dashboard,memo":        "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
+	"wsc-editor dashboard,memo":         "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
 	"rtext dashboard,whiteboard":        "overview clamps the existing whiteboard recap, scoped to data-overview",
 	"trecap dashboard,whiteboard":       "overview clamps the existing whiteboard recap, scoped to data-overview",
 	"tnote dashboard,whiteboard":        "overview hides existing whiteboard note fields without changing their state",

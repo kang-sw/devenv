@@ -36,7 +36,7 @@ func TestConversationSendRearmsBottomFollow(t *testing.T) {
 		composerFunc(t, src, "sendCommand"),
 		composerFunc(t, src, "sendMessage"),
 	}, "\n")
-	runNode(t, "conversation send follow", composerToastPrelude+`var sending = false;
+	runNode(t, "conversation send follow", selectionCodecSource(t)+composerToastPrelude+`var sending = false;
 function noteWarn(t) { toasts.push([t, "warn"]); }
 var convo = { scrollTop: 700, clientHeight: 100, scrollHeight: 1000 };
 function visible(el) { return el === convo; }

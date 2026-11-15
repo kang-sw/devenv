@@ -22,7 +22,7 @@ func TestComposerCarriesWebPicks(t *testing.T) {
 		t.Fatal("dashboard.js holds no noteWarn / noteOk pair, or no web pick caps at the inbox's 50 picks and 10 console blocks")
 	}
 	fns := composerFunc(t, src, "sendMessage") + composerFunc(t, src, "addWebPick") + composerFunc(t, src, "addWebConsole")
-	runNode(t, "web picks", composerToastPrelude+notes+caps+"var sending = false, drafts = 0;\nfunction queueDraft() { drafts++; }\n"+fns+`
+	runNode(t, "web picks", selectionCodecSource(t)+composerToastPrelude+notes+caps+"var sending = false, drafts = 0;\nfunction queueDraft() { drafts++; }\n"+fns+`
 var bodies = [];
 post = function (route, body, done) { bodies.push([route, JSON.parse(JSON.stringify(body))]); done(answer[0], answer[1]); };
 var p1 = { url: "http://localhost:5173/", selector: "#a", text: "A" }, c1 = { url: "http://localhost:5173/", lines: ["e1"] };

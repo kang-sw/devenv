@@ -39,7 +39,8 @@
 .wake-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; margin: 8px 0 0; }
 /* Live and finished tools share the mail/lead row frame; token counts stay visible. */
 .toolsline { align-self: stretch; min-width: 0; max-width: 100%; color: var(--wb-muted-fg); }
-.toolsline .tsum { flex-wrap: wrap; gap: 0 8px; }
+.toolsline .tsum { flex-wrap: wrap; gap: 0 8px; line-height: 1.3; }
+.toolsline > summary.conv-row { padding-top: 2px; padding-bottom: 2px; }
 .toolsline .tsl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolsline .tsn { min-width: 0; font-size: 12px; }
 .toolsline .tsl > span, .toolsline .tool { font-family: var(--wb-mono); }
@@ -113,7 +114,7 @@
 .mailline { min-width: 0; }
 .mailline .arr { font-weight: 800; flex: none; }
 .mailline.recv .arr { color: var(--wb-primary); }
-.mailline .mail-icon { width: 13px; height: 13px; flex: none; align-self: center; color: var(--wb-primary); }
+.mailline .row-icon > .i, .mailline .mail-icon { width: 13px; height: 13px; flex: none; align-self: center; color: var(--wb-primary); }
 .mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .mailline a.mpeer { color: var(--wb-primary); }
 .mailline a.mpeer:hover { text-decoration: underline; }
@@ -147,13 +148,15 @@ details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
 .input-record .wake-head .t { margin-left: auto; }
 .mailline.child-report { min-width: 0; }
 .mailline.child-report .mfirst { margin-left: 0; }
+.mailline.agent-note.fail .mpeer, .mailline.agent-note.fail .mfirst { color: var(--wb-fail); }
+.mailline .row-details .mbody { margin: 0; padding: 0; background: none; box-shadow: none; }
 .child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
 .src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
 .mail-block { min-width: 0; }
 .wbupdate-topic[data-wb-topic] { cursor: pointer; }
 /* Higher specificity keeps the legacy effects frame from nesting full topic cards in a summary. */
 .wbeffects.wbupdate { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
-.wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 4px 5px; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 26px 5px 8px; font-size: 11px; color: var(--wb-muted-fg); }
 .wbupdate-head .t { margin-left: auto; }
 .wbupdate-topic { min-width: 0; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); }
 .wbupdate-topic + .wbupdate-topic { margin-top: 6px; }
@@ -175,13 +178,6 @@ details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
 .wbupdate-panel a { flex: none; }
 .wbupdate-status { display: block; padding: 0 12px; font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .wbupdate-status:empty { display: none; }
-.wbeffects.wbupdate-line > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; padding: 4px 7px; border-radius: 7px; list-style: none; font-size: 12px; color: var(--wb-muted-fg); }
-.wbupdate-line > summary::-webkit-details-marker { display: none; }
-.wbupdate-line > summary:hover { background: var(--wb-muted); }
-.wbupdate-line > summary .i { flex: none; width: 10px; height: 10px; }
-.wbupdate-line[open] > summary .i { transform: rotate(180deg); }
-.wbupdate-preview { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wbupdate-line > .wbupdate-topic { margin: 3px 7px 5px 22px; }
 summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summary):focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
 .wbupdate-bar a:focus-visible { outline-color: var(--wb-on-topic); }
 
@@ -283,11 +279,27 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
    part is a selector (clipped, monospace) or the error count */
 .achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .achip.cchip { box-shadow: inset 3px 0 0 var(--wb-warn), inset 0 0 0 1px var(--wb-line); }
+/* One captured selection keeps its sources, memo and images together. */
+.selection-bundle { position: relative; box-sizing: border-box; min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--wb-line); border-left: 3px solid var(--wb-primary); border-radius: 9px; background: var(--wb-muted); }
+.selection-bundle + .selection-bundle { margin-top: 6px; }
+.cchips > .selection-bundle { flex: 1 1 280px; }
+.selection-bundle > .hchips { padding-right: 20px; }
+.selection-bundle .achip { border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.selection-bundle .anote { max-width: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.selection-bundle > .unchip { position: absolute; top: 6px; right: 4px; }
+.selection-comment, .selection-edit { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--wb-fg); }
+.selection-edit { padding: 5px 7px; text-align: left; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); cursor: pointer; }
+.selection-edit:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.selection-images { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 6px; }
+.selection-images:empty { display: none; }
 /* The selection note stays next to its attach action, within the viewport. */
-.wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
-.wbmention-note { flex: 1; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
+.wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.wbmention-note { flex: 1 1 180px; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
 .wbmention button { flex: none; align-self: stretch; gap: 5px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; }
 .wbmention button .i { pointer-events: none; }
+.wbmention-note + .wsc-editor { flex: 1 1 180px; min-width: 0; max-height: 30vh; overflow: auto; box-sizing: border-box; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.wbmention > .selection-images { flex-basis: 100%; order: 1; margin-top: 0; }
+.wbmention .unimg { padding: 0; border-radius: 999px; align-self: auto; font-size: 13px; }
 .wbmention :focus-visible { outline-offset: 2px; }
 .wbmention-note:focus-visible { outline: 1.5px solid var(--wb-fg); }
 .wbmention[hidden] { display: none; }
