@@ -110,19 +110,6 @@
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
-    "261030-bug-tickets-move-stages-on-occupied-root": {
-      "registered_at": "2026-10-30T06:10:05Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T16:27:03Z",
-        "impl": {
-          "branch": "impl/develop/flame-maybe-ninja"
-        }
-      }
-    },
     "261030-bug-workflow-manual-sentinel-mints-lead-key-for-subagents": {
       "registered_at": "2026-10-30T14:07:33Z"
     },
@@ -204,7 +191,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T10:54:09Z",
         "impl": {
           "branch": "impl/develop/baggy-cake-oak"
@@ -428,19 +415,6 @@
     },
     "261115-bug-ws-dashboard-pinned-deeplink-under-topic-header": {
       "registered_at": "2026-11-15T03:57:52Z"
-    },
-    "261115-bug-ws-git-commit-empty-ticket-updates": {
-      "registered_at": "2026-11-15T08:45:02Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T16:26:54Z",
-        "impl": {
-          "branch": "impl/develop/wham-vowel-nacho"
-        }
-      }
     },
     "261115-bug-ws-pi-bootstrap-elides-undelivered-manual": {
       "registered_at": "2026-11-14T15:17:10Z"
