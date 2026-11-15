@@ -390,6 +390,16 @@
     "261115-bug-ws-dashboard-pinned-deeplink-under-topic-header": {
       "registered_at": "2026-11-15T03:57:52Z"
     },
+    "261115-bug-ws-dashboard-pre-existing-test-reds": {
+      "registered_at": "2026-11-15T18:02:12Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T18:02:12Z"
+      }
+    },
     "261115-bug-ws-pi-bootstrap-elides-undelivered-manual": {
       "registered_at": "2026-11-14T15:17:10Z"
     },
