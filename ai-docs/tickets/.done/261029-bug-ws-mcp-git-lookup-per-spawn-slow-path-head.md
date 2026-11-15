@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0cd6dae8e825272a
 sage-review-completeness-reviewed: 0cd6dae8e825272a
+completed: 2026-11-16
 ---
 
 # ws-mcp repeats runtime Git lookup, so a slow PATH head multiplies its cost
@@ -246,3 +247,90 @@ not promise the historical timing or the unrelated stall is fixed. Run affected
 `internal/wsgit`, `internal/wsexec`, `internal/wsindex`, `internal/wsdoc`,
 `internal/wsstate`, `internal/mcp` and any changed tracker/badge tests, then
 `cd agents-plugin-tool && go test ./...`. This draft ran no implementation tests.
+
+### Result (3ce674be6) - 2026-11-16
+
+- VERIFIED: implemented decisions (1064)/(1066) in `954368e28`, runtime
+  integration in `198e6b879`, platform/hosted tests in `3ce674be6`, and the
+  independent review's test-integrity correction in `74c0aa622`.
+  `internal/wsexec/gitpath.go:10-73` owns one mutex-protected successful Git
+  entry, keyed by nil/explicit mode and the resolver's effective last
+  PATH/PATHEXT values. Cold eligible searches serialize; failures retry.
+  Relative searched entries, Unix process empty entries and Windows implicit
+  cwd search bypass reuse. Absolute-only searches require no cwd identity;
+  relative results are neither normalized nor cached.
+- VERIFIED: `wsgit.Executable` and `LookPathEnv` retain their signatures over
+  that owner (`internal/wsgit/executable.go:9-24`). Existing wsdoc/wsstate
+  command helpers, hosted Git search, tracker and badge inherit it; remaining
+  process runner/diff/action sites now use the facade. Generic non-Git lookup
+  stays uncached. Command argv, environment, Dir, streams and cancellation/
+  process bounds remain outside the cache. No explicit-environment snapshot
+  repair, transport diagnosis or lifecycle change was made.
+- VERIFIED: deterministic count tests cover concurrent identical cold calls,
+  alternating/concurrent callers, effective keys, failures/repair and stale
+  successes. Runner tests cover argv/environment/streams, cancellation,
+  timeout bounds and no launch-error re-resolution. Hosted tests execute two
+  distinct shims alternately and concurrently. The review found their original
+  environment-selected logs could mask wrong-executable reuse; each shim now
+  embeds its log destination, with a negative control running alpha's binary
+  under beta's environment (`internal/mcp/hosted_env_paths_test.go:19-129`).
+- Independent **lite** review: no Critical findings; the sole Important
+  hosted-provenance test finding was fixed in `74c0aa622`, and its affected
+  tests passed. No re-review, as allocated. Findings artifact:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@720b5b1f/review-paths/668568f6-01-git-lookup-lite.md`.
+
+Verification (full command output read):
+
+- Every macOS Go/gofmt invocation used the absolute-module runner
+  `/tmp/ws-git-lookup-sustained.5TzUVu/run-go`, with isolated HOME,
+  config/cache/runtime/temp and nested environment, warm Go caches,
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOENV=off`.
+- VERIFIED macOS: the following filtered race run passed all six packages:
+  ```text
+  go test -race ./internal/wsexec ./internal/wsgit ./internal/wsindex ./internal/wsdoc ./internal/wsstate ./internal/wstrackerhost -run 'Test(GitPath.*|GitCommand.*|LookPath.*|Command.*|ExecutableResolvesOnce|ExecRunnerGitLookup|MissingRefIsAbsentNotError|BatchSSHCommand.*|BatchRunnerRunsGitFromItsEnvironment|RunnerTimeoutKillsTransportChildren|RunnerBatchesOnlyRemoteCommands|ProjectTreeSkipsGitIgnoredEntries|SageGateFreshness.*|SageGateWarnsOnUncommittedPostStampEdit|Scope.*|Ensure.*|LinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState|Resolve.*)$' -count=1 -timeout=120s
+  ```
+- VERIFIED macOS: the following filtered race run passed both packages:
+  ```text
+  go test -race ./internal/mcp ./internal/wsdashboard -run 'Test(HostedGitLookupKeepsCallerExecutables|HostedToolsRunGitOnTheConnectionPATH|HostedServerCanonicalizesRootsThroughItsOwnGit|HostedConnectionsActOnTheirOwnRoots|HostedServerSubprocessUsesHelloEnvironment|AcquireWarningRelaySuffix|GitSearchCommands|GitSearchCapsOutput|GitSearchNeutralisesAHostileRepoConfig|DashboardGitLookup.*|ReadCommitFileDiff.*|ReadWorktreeFileDiff|DiffPathsAreLiteralFromTheTop|ReadGitChanges|GitReadsParseStdoutOnly|ReadGitBadge.*|BadgeGitCommandUsesResolvedGit|GitActionCommandBoundsRemoteCommands)$' -count=1 -timeout=180s
+  ```
+  After the review fix, the same MCP alternatives (excluding dashboard-only
+  names) passed again with `-race`, `-count=1`, `-timeout=180s` in 15.381 s.
+  Other covered source inputs remained unchanged.
+- VERIFIED native Windows at exact source `74c0aa622`: fresh own-HEAD archive
+  in `C:\Users\ki608\AppData\Local\Temp\ws-git-lookup-sustained-20261115-74c0aa622-ef9802`,
+  absolute module cwd, private HOME/USERPROFILE/APPDATA/config/runtime/temp,
+  offline local toolchain and existing warm caches. Ran:
+  ```text
+  go test ./internal/wsexec ./internal/wsgit ./internal/wsdashboard -run 'Test(GitPath.*|GitCommandUsesSharedResolver|LookPathNeverFallsBackToTheProcessPATH|CommandWithAMissingProgramDoesNotStart|ExecutableResolvesOnce|LookPathEnvNonGitIsUncached|DashboardGitLookupConstruction)$' -count=1 -timeout=90s -v
+  ```
+  All 14 selected tests passed; exit 0, stderr empty. This includes Windows
+  PATHEXT order/default/case, drive/root-relative bypass, present-empty versus
+  absent implicit-cwd policy, ErrDot/GODEBUG, concurrency and command selection.
+  Owned Go PID 12464, CIM creation ticks `639303580465715570`; no process was
+  killed and no shared runtime was touched. Logs and ownership record are in
+  that root and `/tmp/ws-git-lookup-sustained.5TzUVu/windows-evidence/` on macOS.
+  An earlier native selection compiled wsindex without selecting a test;
+  wsindex behavioral verification is the macOS race run, not native coverage.
+- VERIFIED: `git diff --check` clean; source inventory contains no remaining
+  direct bare-name runtime Git spawn outside the corrected command helpers.
+- **Explicit lead override:** all macOS Go tests were `-run` filtered. The
+  phase's final `go test ./...`, full `internal/mcp` and full
+  `internal/wsdashboard` runs were prohibited and were not run. Native Windows
+  verification was limited to the executable-selection contract. Optional
+  timing corroboration was omitted; historical timings were not remeasured
+  and the unrelated 30-minute transport stall is not claimed fixed.
+
+Decisions / compatibility:
+
+- Preserved Go 1.23 compatibility with scoped `os.Chdir` test cleanup rather
+  than the newer `testing.T.Chdir`. Resolver-count assertions moved to the
+  single leaf owner; `TestExecutableResolvesOnce` remains a facade regression.
+- INFERRED **T0**, matching the approved target: existing/new runners execute
+  ordinary Git with unchanged argv/environment (`internal/wsgit/git.go:35-60`,
+  `internal/wsindex/git.go:114-145`). No MCP argument, hello, persisted shape,
+  Git data format or version gate changed; reopening needs no reconstruction.
+- Successful unchanged eligible keys intentionally retain the approved stale
+  window, including executable installation/removal/permission/symlink changes.
+  There is no new freshness guarantee, TTL or retry-on-launch-failure policy.
+
+Unresolved: none.
