@@ -250,6 +250,34 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+func TestSelectionComposerMemoCaretAndAnchor(t *testing.T) {
+	runSelectionRuntime(t, "saved memo caret and chip anchor", `
+var memo = "Saved memo 한글\nSecond line 😀";
+bselections = [{mentions:[{topic:"plan",entry:"e7",text:"source"}],comment:memo,images:[]}];
+renderChips();
+var group = cchips.children[0];
+group.getBoundingClientRect = function(){return {left:140,right:390,bottom:210};};
+editSelection(0);
+check("saved memo opens focused at its exact end", [doc.activeElement===mnote.wsc.editor,mnote.value,mnote.selectionStart,mnote.selectionEnd], [true,memo,memo.length,memo.length]);
+check("editor starts below chip left edge", [mbtn.style.left,mbtn.style.top], ["140px","216px"]);
+mnote.setSelectionRange(2,2); hideMention(); editSelection(0);
+check("reopening resets an old caret to memo end", [mnote.selectionStart,mnote.selectionEnd], [memo.length,memo.length]);
+hideMention();
+group.getBoundingClientRect = function(){return {left:990,right:1100,bottom:795};};
+editSelection(0);
+check("saved editor still clamps at right and bottom viewport edges", [mbtn.style.left,mbtn.style.top], ["896px","776px"]);
+hideMention();
+group.getBoundingClientRect = function(){return {left:-20,right:80,bottom:-20};};
+editSelection(0);
+check("saved editor still clamps at left and top viewport edges", [mbtn.style.left,mbtn.style.top], ["4px","4px"]);
+hideMention();
+placeMention({ms:[{topic:"plan",text:"new selection"}],x:140,y:210});
+check("normal selection attachment keeps its position offsets", [mbtn.style.left,mbtn.style.top], ["144px","216px"]);
+check("opening editors changes no saved memo or composer bytes", [bselections[0].comment,ctext.value,sent], [memo,"",0]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 func TestSelectionComposerMemoBlurPreservesImageRemoval(t *testing.T) {
 	js := string(mustAsset(t, "dashboard.js"))
 	click := regexp.MustCompile(`(?s)  // --- clicks: delegated.*?\n  doc.addEventListener\("click", function \(e\) \{.*?\n  \}\);`).FindString(js)

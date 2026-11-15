@@ -275,9 +275,10 @@
     var s = bselections[index];
     if (!s) return;
     hideMention();
-    var row = s.row && s.row.parentNode, rect = row ? row.getBoundingClientRect() : { right: 4, bottom: 4 };
-    placeMention({ ms: s.mentions, x: rect.right, y: rect.bottom, edit: s, comment: s.comment, images: s.images.slice() });
+    var row = s.row && s.row.parentNode, rect = row ? row.getBoundingClientRect() : { left: 4, bottom: 4 };
+    placeMention({ ms: s.mentions, x: rect.left, y: rect.bottom, edit: s, comment: s.comment, images: s.images.slice() });
     lockMention(); mnote.focus();
+    mnote.setSelectionRange(mnote.value.length, mnote.value.length);
   }
   // --- web picks: what a web card (webcard.js) attaches -------------------------
   // A picked element and a console block are chips beside the mentions,
@@ -1132,7 +1133,7 @@
     mbtn.hidden = false;
     mbtn.querySelector("[data-wbmention]").hidden = !!p.edit;
     var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
-    mbtn.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x + 4)) + "px";
+    mbtn.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x + (p.edit ? 0 : 4))) + "px";
     mbtn.style.top = Math.max(4, Math.min(window.innerHeight - h - 4, y + 6)) + "px";
   }
   function syncHostMention() {
