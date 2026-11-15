@@ -304,7 +304,10 @@ func (l *railLister) readRepo(repo string, regs []Registration) railRepo {
 	r := railRepo{Read: true, Pools: got.Pools}
 	var observations map[string]admissionObservation
 	if l.admission != nil {
-		observations = l.admission.observe(repo, got)
+		observations, err = l.admission.observe(repo, got)
+		if err != nil {
+			return railRepo{}
+		}
 	}
 	for _, w := range got.Worktrees {
 		o := observations[filepath.Clean(w.Path)]

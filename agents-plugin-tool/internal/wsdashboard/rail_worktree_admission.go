@@ -291,14 +291,21 @@ func newRailAdmissionTracker(store *railLayoutStore) *railAdmissionTracker {
 
 // observe runs only after successful existing viewer-gated list reads, after
 // pool exclusion. Failed reads never prove absence or prune persisted records.
-func (a *railAdmissionTracker) observe(root string, got RepoWorktrees) map[string]admissionObservation {
+func (a *railAdmissionTracker) observe(root string, got RepoWorktrees) (map[string]admissionObservation, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	revisions := map[string]admissionObservation{}
 	canonicalRoot, err := canonicalAdmissionPath(root)
 	if err != nil {
-		return revisions
+		return nil, err
 	}
+	// Stage identity changes until their corresponding durable invalidations
+	// commit. A failed write must leave the old evidence for the next scan.
+	next := make(map[string]admissionObservation, len(a.observations))
+	for key, old := range a.observations {
+		next[key] = old
+	}
+	nextSeq := a.seq
 	remove := map[string]bool{}
 	present := map[string]bool{}
 	for _, w := range got.Worktrees {
@@ -311,16 +318,16 @@ func (a *railAdmissionTracker) observe(root string, got RepoWorktrees) map[strin
 			canonicalPath = filepath.Clean(w.Path)
 		}
 		key := admissionKey(canonicalRoot, canonicalPath)
-		old, had := a.observations[key]
+		old, had := next[key]
 		id, err := probeAdmission(root, w.Path)
 		if err != nil {
 			old.revision = ""
 			if had {
-				a.observations[key] = old
+				next[key] = old
 			}
 			if _, e := os.Lstat(w.Path); errors.Is(e, fs.ErrNotExist) {
 				remove[filepath.Clean(w.Path)] = true
-				delete(a.observations, key)
+				delete(next, key)
 			}
 			continue
 		}
@@ -328,25 +335,25 @@ func (a *railAdmissionTracker) observe(root string, got RepoWorktrees) map[strin
 			if had && !sameAdmissionIdentity(old.identity, id) {
 				remove[id.path] = true
 			}
-			a.seq++
-			old = admissionObservation{identity: id, revision: fmt.Sprintf("%s-%d", a.epoch, a.seq)}
+			nextSeq++
+			old = admissionObservation{identity: id, revision: fmt.Sprintf("%s-%d", a.epoch, nextSeq)}
 		}
-		a.observations[key] = old
+		next[key] = old
 		revisions[filepath.Clean(w.Path)] = old
 	}
 	// Git may omit a removed worktree entirely. Retire its observation as well
 	// as its admission once the directory is confirmed absent, so a later Add
 	// cannot be compared with the previous incarnation's retained identity.
-	for key, old := range a.observations {
+	for key, old := range next {
 		if samePath(old.identity.root, canonicalRoot) && !present[old.identity.path] {
 			if _, e := os.Lstat(old.identity.path); errors.Is(e, fs.ErrNotExist) {
-				delete(a.observations, key)
+				delete(next, key)
 			}
 		}
 	}
 	// Only a positively missing directory, not an unreadable association, proves
 	// removal. Keep ordering retention separate from admission pruning.
-	_, _ = a.store.mutateAdmissions(func(records []railAdmissionRecord) ([]railAdmissionRecord, error) {
+	_, err = a.store.mutateAdmissions(func(records []railAdmissionRecord) ([]railAdmissionRecord, error) {
 		out := make([]railAdmissionRecord, 0, len(records))
 		for _, r := range records {
 			gone := false
@@ -364,7 +371,11 @@ func (a *railAdmissionTracker) observe(root string, got RepoWorktrees) map[strin
 		}
 		return out, nil
 	})
-	return revisions
+	if err != nil {
+		return nil, err
+	}
+	a.observations, a.seq = next, nextSeq
+	return revisions, nil
 }
 
 func classifyRailAdmissions(view *RailView, doc *railLayoutDoc) {

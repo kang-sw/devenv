@@ -20,13 +20,22 @@ func admissionFixture(t *testing.T) (string, string, *railAdmissionTracker, func
 	read := func(root string) (RepoWorktrees, error) { return (gitWorktreeSource{}).ReadRepoWorktrees(root, nil) }
 	return root, path, tracker, read
 }
+func observeAdmissions(t *testing.T, a *railAdmissionTracker, root string, got RepoWorktrees) map[string]admissionObservation {
+	t.Helper()
+	observed, err := a.observe(root, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return observed
+}
+
 func admissionSelection(t *testing.T, a *railAdmissionTracker, read func(string) (RepoWorktrees, error), root, path, action string) railAdmissionSelection {
 	t.Helper()
 	got, err := read(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	obs := a.observe(root, got)[path]
+	obs := observeAdmissions(t, a, root, got)[path]
 	if obs.revision == "" {
 		t.Fatalf("no observation of %s", path)
 	}
@@ -118,7 +127,7 @@ func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
 	if err = os.WriteFile(marker, []byte("gitdir: /missing-admin\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a.observe(root, list)
+	observeAdmissions(t, a, root, list)
 	if len(admissionRecords(t, a.store)) != 1 {
 		t.Fatal("unreadable association pruned admission")
 	}
@@ -131,7 +140,7 @@ func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
 	}
 	// Existing handle evidence survives a temporary probe failure, but its old
 	// revision cannot silently become fresh proof after recovery.
-	got := a.observe(root, list)[path]
+	got := observeAdmissions(t, a, root, list)[path]
 	if got.revision == selection.Revision || got.revision == "" {
 		t.Fatal("failed probe reused old revision")
 	}
@@ -154,7 +163,7 @@ func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
 	if v, e := a.apply([]railAdmissionSelection{selection}, read); !errors.Is(e, errAdmissionStale) || v.Applied {
 		t.Fatalf("replacement: %+v %v", v, e)
 	}
-	a.observe(root, list)
+	observeAdmissions(t, a, root, list)
 	if len(admissionRecords(t, a.store)) != 0 {
 		t.Fatal("observed replacement retained old admission")
 	}
@@ -166,14 +175,14 @@ func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
 	if err = os.RemoveAll(path); err != nil {
 		t.Fatal(err)
 	}
-	a.observe(root, list)
+	observeAdmissions(t, a, root, list)
 	if len(admissionRecords(t, a.store)) != 0 {
 		t.Fatal("confirmed missing path not pruned")
 	}
 	if err = os.Rename(old, path); err != nil {
 		t.Fatal(err)
 	}
-	a.observe(root, list)
+	observeAdmissions(t, a, root, list)
 	if admissionAt(admissionRecords(t, a.store), root, path).State != "pending" {
 		t.Fatal("recreated path not pending")
 	}
@@ -182,6 +191,52 @@ func TestRailAdmissionIdentityFailureAndPruning(t *testing.T) {
 		t.Fatalf("restart: %+v %v", v, e)
 	}
 }
+func TestRailAdmissionRetriesInvalidationAfterWriteFailure(t *testing.T) {
+	root, path, a, read := admissionFixture(t)
+	selection := admissionSelection(t, a, read, root, path, "reject")
+	if _, err := a.apply([]railAdmissionSelection{selection}, read); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := os.ReadFile(filepath.Join(path, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(path, path+"-old"); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(path, ".git"), marker, 0600); err != nil {
+		t.Fatal(err)
+	}
+	l := newRailLister(func(root string, _ []Registration) (RepoWorktrees, error) { return read(root) }, nil, make(chan struct{}))
+	l.admission = a
+	dir := filepath.Dir(a.store.file)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	if err = os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	failed := l.readRepo(root, nil)
+	if admissionAt(admissionRecords(t, a.store), root, path).State != "rejected" {
+		t.Fatal("fixture did not inject a durable write failure")
+	}
+	t.Logf("injected prune write failure retained the durable rejection; reported Read=%v", failed.Read)
+	if err = os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	recovered := l.readRepo(root, nil)
+	if !recovered.Read {
+		t.Fatal("read did not recover after writes were restored")
+	}
+	if record := admissionAt(admissionRecords(t, a.store), root, path); record.State != "pending" {
+		t.Fatalf("old rejection survived recreated-path recovery after failed prune: %+v", record)
+	}
+	if failed.Read {
+		t.Fatal("prune write failure was not propagated as an unavailable read")
+	}
+}
+
 func TestRailAdmissionUnknownFieldsAndClassification(t *testing.T) {
 	root, path, a, read := admissionFixture(t)
 	selectOne := admissionSelection(t, a, read, root, path, "approve")
