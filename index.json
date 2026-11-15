@@ -541,7 +541,14 @@
       "registered_at": "2026-11-14T08:47:17Z"
     },
     "261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract": {
-      "registered_at": "2026-11-14T14:28:20Z"
+      "registered_at": "2026-11-14T14:28:20Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "docs/exec3-dedupe-1051",
+        "phase": "closed",
+        "touched_at": "2026-11-15T08:06:50Z"
+      }
     },
     "261114-bug-ws-pi-settled-executor-resume-home-unavailable": {
       "registered_at": "2026-11-14T06:22:54Z"
