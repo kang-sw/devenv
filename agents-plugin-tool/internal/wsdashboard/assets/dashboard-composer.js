@@ -9,6 +9,35 @@
   // bmentions are the board mentions the composer holds, in the order added
   // (board mentions, below).
   var bmentions = [];
+  var closeRequests = [];
+  function validCloseRequests(list) {
+    var out = [];
+    (Array.isArray(list) ? list : []).forEach(function (r) {
+      if (!r || typeof r.topic !== "string" || !r.topic.trim() || /[\r\n\x00]/.test(r.topic) || typeof r.reason !== "string") return;
+      var next = { topic: r.topic.trim(), reason: r.reason }, i = out.findIndex(function (v) { return v.topic === next.topic; });
+      if (i < 0) out.push(next); else out[i] = next;
+    });
+    return out;
+  }
+  function focusCloseRequest(topic) {
+    if (!cchips) return;
+    var input = q("[data-close-reason]", cchips).filter(function (el) { return el.getAttribute("data-close-reason") === topic; })[0];
+    if (input) input.focus();
+  }
+  function addCloseRequest(topic) {
+    if (!ctext || !cchips || !topic) return;
+    if (!closeRequests.some(function (r) { return r.topic === topic; })) {
+      closeRequests.push({ topic: topic, reason: "" });
+      renderChips();
+      queueDraft();
+    }
+    focusCloseRequest(topic);
+  }
+  function removeCloseRequest(topic) {
+    closeRequests = closeRequests.filter(function (r) { return r.topic !== topic; });
+    renderChips();
+    queueDraft();
+  }
   // wpicks and wconsoles are the web card's picked elements and console
   // blocks the composer holds, in the order added (web picks, below).
   var wpicks = [], wconsoles = [];
@@ -58,6 +87,8 @@
   }
   function renderChips() {
     if (!cchips) return;
+    var active = doc.activeElement, focused = active && active.getAttribute("data-close-reason");
+    var selection = focused != null ? [active.selectionStart, active.selectionEnd] : null;
     cchips.textContent = "";
     chipList().forEach(function (c) {
       var el = doc.createElement("span"), b = doc.createElement("b"), x = doc.createElement("button");
@@ -114,6 +145,28 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
+    closeRequests.forEach(function (r) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), input = doc.createElement("textarea"), x = doc.createElement("button");
+      el.className = "achip close-request-chip";
+      b.textContent = wsT("js.closerequest.label", r.topic);
+      el.appendChild(b);
+      input.className = "close-request-reason";
+      input.rows = 1;
+      input.value = r.reason;
+      input.placeholder = wsT("js.closerequest.reason");
+      input.setAttribute("aria-label", wsT("js.closerequest.reasonfor", r.topic));
+      input.setAttribute("data-close-reason", r.topic);
+      input.addEventListener("input", function () { r.reason = input.value; queueDraft(); });
+      el.appendChild(input);
+      x.type = "button";
+      x.className = "unchip";
+      x.setAttribute("data-unclose-request", r.topic);
+      x.title = wsT("js.closerequest.remove");
+      x.setAttribute("aria-label", x.title);
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
     // A web card's picked element: its selector and text; a console block:
     // its error count and page. The held message shows the same capsules
     // (dashboard.tmpl achips).
@@ -152,6 +205,11 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
+    if (focused != null) {
+      focusCloseRequest(focused);
+      var next = doc.activeElement;
+      if (next && next.getAttribute("data-close-reason") === focused) next.setSelectionRange(selection[0], selection[1]);
+    }
   }
   // --- web picks: what a web card (webcard.js) attaches -------------------------
   // A picked element and a console block are chips beside the mentions,
@@ -1038,9 +1096,11 @@
     if (inline) { sendInlineCommand(inline); return; }
     var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
     var wp = wpicks.slice(), wc = wconsoles.slice();
-    if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length) { noteWarn(wsT("js.send.empty")); return; }
+    var closing = closeRequests.map(function (r) { return { ref: r, topic: r.topic, reason: r.reason }; });
+    if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length && !closing.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
     var body = { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
+    if (closing.length) body.closeRequests = closing.map(function (r) { return { topic: r.topic, reason: r.reason }; });
     if (wp.length) body.picks = wp;
     if (wc.length) body.consoles = wc;
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
@@ -1071,6 +1131,10 @@
       sent.forEach(function (c) { setItem(c.id, null); });
       // A mention added during the send stays for the next one.
       bmentions = bmentions.filter(function (m) { return said.indexOf(m) < 0; });
+      // Edited, removed/re-added, or newly attached requests belong to the next send.
+      closeRequests = closeRequests.filter(function (r) {
+        return !closing.some(function (sent) { return sent.ref === r && sent.reason === r.reason; });
+      });
       wpicks = wpicks.filter(function (p) { return wp.indexOf(p) < 0; });
       wconsoles = wconsoles.filter(function (c) { return wc.indexOf(c) < 0; });
       // A topic note edited during the send stays for the next one.
@@ -1185,6 +1249,9 @@
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
+    var requests = [];
+    list.slice().sort(function (a, b) { return (+a.sentAt || 0) - (+b.sentAt || 0); }).forEach(function (res) { requests = requests.concat(validCloseRequests(res.closeRequests)); });
+    closeRequests = validCloseRequests(requests.concat(closeRequests));
     // So do their picked elements and console blocks.
     var hp = [], hc = [];
     list.forEach(function (res) { hp = hp.concat(validPicks(res.picks)); hc = hc.concat(validConsoles(res.consoles)); });
