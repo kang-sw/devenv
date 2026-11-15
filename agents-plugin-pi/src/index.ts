@@ -652,7 +652,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   const mailboxStreamSupport: { unsupported?: boolean } = {};
   // The owner lead's own turn, from Pi `agent_start` to `agent_settled`: a
   // dashboard message that arrives inside it stays held in the inbox until
-  // the settle, so the page can still merge into or cancel it, unless the
+  // the settle, so the page can still cancel or steer it, unless the
   // user promotes it to steering. Compaction also blocks a prompt, so its
   // end (or failure) releases a held message the same way, once the
   // compaction hold itself has cleared, and restores steer mode mid-turn.

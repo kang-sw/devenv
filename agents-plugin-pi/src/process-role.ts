@@ -8,10 +8,8 @@
  * child now carries a role value (`"worker"` for the RPC-backed
  * `ws-agent-spawn` path, `"explore"` for a persistent researcher); the host
  * lead process carries no marker at all (`readSpawnRole` returns `undefined`
- * there). `"fork"` is reserved by this phase for a not-yet-implemented
- * side-thread fork spawn (`260904-feat-ws-pi-side-thread-fork-question-surface`,
- * out of scope here) — only the role value and its parent-key env var are
- * reserved; nothing in this tree sets `"fork"` yet.
+ * there). `"fork"` identifies a side-thread fork, whose lead capability
+ * is parent-bound like a ticket worker's.
  *
  * Standalone module (not folded into spawner.ts): bridge.ts also needs
  * `isLeadOrFork`/`readSpawnRole` (for the workflow_manual->workflow_state
@@ -72,9 +70,9 @@ export function readExploreMode(env: NodeJS.ProcessEnv): ExploreMode | undefined
 }
 
 /**
- * Env var carrying the lead's own session key, delivered to a `fork` child
- * only (reserved by this phase — no spawn path sets it yet; see this file's
- * top-of-file doc comment).
+ * Immediate launching lead's session key. Every child launch supplies it;
+ * role-only launches (including headless pi -p workers) use it at bootstrap.
+ * The fork-only refusal guard also reads it to reject use of the parent's key.
  */
 export const WS_PI_PARENT_SESSION_KEY_ENV = "WS_PI_PARENT_SESSION_KEY";
 

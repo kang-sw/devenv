@@ -17,18 +17,21 @@ func TestRecapJumpButtonNamesItsLogRow(t *testing.T) {
 	mustApply(t, st, `<wb:topic name="open"><wb:log>old</wb:log><wb:log>latest [see](https://example.com)</wb:log></wb:topic>`+
 		`<wb:topic name="done"><wb:log>final</wb:log><wb:close result="Shipped."/></wb:topic>`+
 		addXML(ClassTechnical, "quiet", "no log yet"))
+	// Each created topic gets a default state event right after its creating
+	// log: open is e1 old, e2 default, e3 latest; done is e4 final, e5
+	// default, e6 close.
 	chip := `<span class="rat" role="button" tabindex="0" title=`
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, full, `class="trecap" data-entry="e2" data-kind="agent"><span class="rat" role="button" tabindex="0" title=`,
-		`class="wb-entry agent current" id="e2" data-history-anchor="e2" data-entry="e2"`,
+	wantAll(t, full, `class="trecap" data-entry="e3" data-kind="agent"><span class="rat" role="button" tabindex="0" title=`,
+		`class="wb-entry agent current" id="e3" data-history-anchor="e3" data-entry="e3"`,
 		// A closed topic's folded recap jumps into its (closed) stream too.
-		`class="trecap" data-entry="e3" data-kind="agent"><span class="rat" role="button" tabindex="0" title=`, `id="e3"`)
+		`class="trecap" data-entry="e4" data-kind="agent"><span class="rat" role="button" tabindex="0" title=`, `id="e4"`)
 	if n := strings.Count(full, chip); n != 2 {
 		t.Fatalf("full page recap chips = %d, want 2 (one per agent recap)", n)
 	}
-	wantNone(t, full, `class="trecap" data-entry="e2" data-kind="agent" role=`, `class="trecap" data-entry="e3" data-kind="agent" role=`)
+	wantNone(t, full, `class="trecap" data-entry="e3" data-kind="agent" role=`, `class="trecap" data-entry="e4" data-kind="agent" role=`)
 	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, embed, `class="trecap" data-entry="e2" data-kind="agent"><span class="rat" title=`)
+	wantAll(t, embed, `class="trecap" data-entry="e3" data-kind="agent"><span class="rat" title=`)
 	if strings.Contains(embed, chip) {
 		t.Fatal("embed recap chip must not be a jump button: the embed has no log rows")
 	}
