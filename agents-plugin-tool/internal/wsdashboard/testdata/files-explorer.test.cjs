@@ -45,6 +45,67 @@ function explorer(rid, local = true, options = {}) {
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
 function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-root').click(); x.at('.froot-pop .fpin').value = path; x.at('.fgo .pr').click(); }
+async function rootFilterChecks() {
+  var x = explorer('root-filter'), peer = explorer('root-filter-peer');
+  x.instance.shown(); peer.instance.shown();
+  await answer(take('root-filter', 'list'), listing('/project', undefined, true));
+  await answer(take('root-filter-peer', 'list'), listing('/peer', undefined, true));
+  var offered = { roots: [
+    { path: '/project', branch: 'main', pooled: true },
+    { path: '/pool/ab-build', branch: 'impl/a-very-long-branch/topic', pooled: true },
+    { path: '/other-a', branch: 'xaxb' },
+    { path: '/ab-first', branch: 'other' },
+    { path: '/nonpool-detached', detached: true },
+    { path: '/cab', branch: 'topic' },
+    { path: '/ab-second', branch: 'other' },
+    { path: '/pool/beta', branch: 'lab', pooled: true },
+    { path: '/pool/detached', detached: true, pooled: true }
+  ] };
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  peer.at('.fchange-root').click(); await answer(take('root-filter-peer', 'worktrees'), { roots: [{ path: '/peer' }, { path: '/untouched', branch: 'keep' }] });
+  var pop = x.at('.froot-pop'), filter = x.at('.froot-filter');
+  function paths() { return x.all('.froot-list button').map(n => n.title); }
+  function search(q) { filter.value = q; event(filter, 'input'); }
+  function press(k, target = filter) { return event(pop, 'keydown', { key: k, target }); }
+  check('current pooled root is pinned with a check above filter and scroll list', [x.at('.froot-current button').title, x.at('.froot-check').textContent, pop.children.indexOf(x.at('.froot-current')) < pop.children.indexOf(filter), pop.children.indexOf(filter) < pop.children.indexOf(x.at('.froot-list'))], ['/project', '✓', true, true]);
+  check('only pool membership groups rows, preserving base order including detached', paths(), ['/other-a', '/ab-first', '/nonpool-detached', '/cab', '/ab-second', '/pool/ab-build', '/pool/beta', '/pool/detached']);
+  var sep = x.at('.froot-separator');
+  check('exactly one separator separates non-pooled from pooled', [x.all('.froot-separator').length, sep.getAttribute('role'), sep.previousElementSibling.title, sep.nextElementSibling.title], [1, 'separator', '/ab-second', '/pool/ab-build']);
+  check('branch markup isolates LTR text inside the front-trimmed branch column', [x.at('.froot-list .froot-branch bdi').tagName, x.all('.froot-branch bdi').map(n => n.textContent).includes('impl/a-very-long-branch/topic')], ['BDI', true]);
+  search('AB');
+  check('fuzzy matches name and branch, ranks prefix contiguous before scattered with stable ties and non-pooled first', paths(), ['/ab-first', '/ab-second', '/cab', '/other-a', '/pool/ab-build', '/pool/beta']);
+  check('filter never removes the pinned current row', x.at('.froot-current button').title, '/project');
+  search('tpc');
+  check('subsequence branch filtering ranks earlier matches first inside each group', paths(), ['/cab', '/pool/ab-build']);
+  search('npdt');
+  check('subsequence folder filtering works without a matching branch', paths(), ['/nonpool-detached']);
+  check('one remaining group has no orphan separator', x.all('.froot-separator').length, 0);
+  search('no-such-worktree');
+  check('empty filter results retain pinned row and manual path input', [paths(), x.all('.froot-separator').length, x.at('.froot-pop .fpin').value], [[], 0, '/project']);
+  check('Enter with no matches does not reselect current', [press('Enter').defaultPrevented, pop.hidden], [true, false]);
+  search('ab');
+  press('ArrowUp'); check('ArrowUp from filter reaches last visible row', doc.activeElement.title, '/pool/beta');
+  press('ArrowDown', doc.activeElement); check('ArrowDown wraps to pinned row', doc.activeElement.title, '/project');
+  press('ArrowDown', doc.activeElement); check('ArrowDown reaches first ranked row', doc.activeElement.title, '/ab-first');
+  press('Enter', doc.activeElement); var picked = take('root-filter', 'list');
+  check('keyboard Enter uses existing guarded root navigation', picked.url.searchParams.get('root'), '/ab-first');
+  await answer(picked, listing('/ab-first'));
+  check('filter and root selection stay isolated from another card', [peer.at('.froot-filter').value, peer.at('.froot-pop .fpin').value, peer.all('.froot-row').map(n => n.title), peer.instance.location().root], ['', '/peer', ['/peer', '/untouched'], '']);
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  check('reopen clears filter and focuses it', [filter.value, doc.activeElement === filter], ['', true]);
+  search('tpc'); press('Enter'); var filteredPick = take('root-filter', 'list');
+  check('Enter directly from filter picks first ranked match rather than pinned root', filteredPick.url.searchParams.get('root'), '/cab');
+  await answer(filteredPick, listing('/cab'));
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  press('Escape'); check('Escape closes and restores root-switcher focus', [pop.hidden, doc.activeElement === x.at('.fchange-root')], [true, true]);
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  x.at('.froot-pop .fpin').value = '/manual'; key(x.at('.froot-pop .fpin'), 'Enter');
+  await refuse(take('root-filter', 'list'));
+  check('manual path Enter still validates and displays refusal per card', [x.at('.ferr').textContent, pop.hidden, peer.at('.ferr').textContent], ['js.files.root.refused', false, '']);
+  key(x.at('.froot-pop .fpin'), 'Enter'); await answer(take('root-filter', 'list'), listing('/manual'));
+  check('manual path Enter still accepts an arbitrary folder', x.instance.location().root, '/manual');
+  x.instance.destroy(); peer.instance.destroy();
+}
 async function sidebarToneChecks() {
   var x = explorer('sidebar-tone'); x.instance.shown();
   check('folder header is present while loading without a fabricated item count', [x.at('.ftree-head').textContent, x.all('.fcount').length], ['js.files.folders', 0]);
@@ -656,22 +717,22 @@ async function multiSelectChecks() {
   check('root list request is session scoped', firstChoices.url.searchParams.has('root'), false);
   var offered = { roots: [{ path: '/project', branch: 'main', detached: false }, { path: '/linked', branch: 'topic', detached: false }, { path: '/detached', branch: '', detached: true }] };
   await answer(firstChoices, offered);
-  check('root choices can precede the initial listing and still mark the session root', choices.all('.froot-list button')[0].getAttribute('aria-pressed'), 'true');
+  check('root choices can precede the initial listing and still mark the session root', choices.at('.froot-current button').getAttribute('aria-pressed'), 'true');
   await answer(initialChoiceRoot, listing('/project', undefined, true));
-  check('root rows show folder branch detached and current root', choices.all('.froot-list button').map(n => [n.textContent, n.title, n.getAttribute('aria-pressed')]), [['✓ project · main', '/project', 'true'], ['linked · topic', '/linked', 'false'], ['detached · js.wt.detached', '/detached', 'false']]);
+  check('root rows show folder branch detached and current root', choices.all('.froot-row').map(n => [n.querySelector('.froot-name').textContent, n.querySelector('.froot-branch').textContent, n.title, n.getAttribute('aria-pressed')]), [['project', 'main', '/project', 'true'], ['linked', 'topic', '/linked', 'false'], ['detached', 'js.wt.detached', '/detached', 'false']]);
   check('root suggestions precede the retained free-text input', choices.at('.froot-pop').children.indexOf(choices.at('.froot-list')) < choices.at('.froot-pop').children.indexOf(choices.at('.froot-pop .fpin')), true);
-  choices.all('.froot-list button')[1].click(); var linkedChoice = take('root-choices', 'list');
+  choices.all('.froot-list button')[0].click(); var linkedChoice = take('root-choices', 'list');
   check('suggestion switches through the existing root parameter', linkedChoice.url.searchParams.get('root'), '/linked');
   await answer(linkedChoice, listing('/linked'));
   choices.at('.fchange-root').click(); await answer(take('root-choices', 'worktrees'), offered);
-  check('reopening marks the accepted root', choices.all('.froot-list button').map(n => n.getAttribute('aria-pressed')), ['false', 'true', 'false']);
+  check('reopening pins the accepted root above remaining suggestions', choices.all('.froot-row').map(n => [n.title, n.getAttribute('aria-pressed')]), [['/linked', 'true'], ['/project', 'false'], ['/detached', 'false']]);
   choices.all('.froot-list button')[0].click(); var homeChoice = take('root-choices', 'list');
   check('session suggestion restores implicit session routing', homeChoice.url.searchParams.has('root'), false);
   await answer(homeChoice, listing('/project', undefined, true));
   choices.at('.fchange-root').click(); var staleChoices = take('root-choices', 'worktrees');
   key(choices.at('.froot-pop'), 'Escape'); choices.at('.fchange-root').click(); var freshChoices = take('root-choices', 'worktrees');
   await answer(freshChoices, offered); await answer(staleChoices, { roots: [{ path: '/stale' }] });
-  check('late roots cannot overwrite a reopened popover', choices.all('.froot-list button').length, 3);
+  check('late roots cannot overwrite a reopened popover', choices.all('.froot-row').length, 3);
   key(choices.at('.froot-pop'), 'Escape'); choices.at('.fchange-root').click(); var tabChoices = take('root-choices', 'worktrees');
   choices.instance.newTab({ root: '/linked' }); await answer(take('root-choices', 'list'), listing('/linked'));
   await answer(tabChoices, offered);
@@ -686,7 +747,7 @@ async function multiSelectChecks() {
   restoredGone.instance.shown(); var removedListing = take('gone-root', 'list');
   restoredGone.at('.fchange-root').click(); await answer(take('gone-root', 'worktrees'), offered);
   await refuse(removedListing); await answer(take('gone-root', 'list'), listing('/project', undefined, true));
-  check('fallback updates the current marker in an already-open root popover', restoredGone.all('.froot-list button')[0].getAttribute('aria-pressed'), 'true');
+  check('fallback updates the current marker in an already-open root popover', [restoredGone.at('.froot-current button').title, restoredGone.at('.froot-current button').getAttribute('aria-pressed')], ['/project', 'true']);
   check('refused persisted worktree falls back and notifies', [restoredGone.instance.location(), notices, JSON.parse(restoredGone.store['ws.dashboard.files.tabs.gone-root']).tabs[0].root], [{ root: '', dir: '' }, ['js.files.root.dropped'], '']);
   restoredGone.instance.destroy();
   var remoteChoices = explorer('remote-choices', false); remoteChoices.instance.shown(); await answer(take('remote-choices', 'list'), listing('/project', undefined, true));
@@ -694,6 +755,7 @@ async function multiSelectChecks() {
   remoteChoices.at('.fchange-root').click();
   check('remote viewer has disabled root control and no suggestions or enumeration', [remoteChoices.at('.fchange-root').disabled, remoteChoices.at('.froot-list').hidden, requests.some(r => r.url.pathname === '/s/remote-choices/fs/worktrees')], [true, true, false]);
   remoteChoices.instance.destroy();
+  await rootFilterChecks();
   await workspacePickerChecks();
   check('extended core leaves no global handlers or timers', [doc.listeners.keydown.length, win.listeners.resize.length, pendingTimers.size], [0, 0, 0]);
   // Run both production modules together: activation preflights before card

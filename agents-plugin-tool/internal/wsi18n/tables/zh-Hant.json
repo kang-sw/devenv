@@ -260,6 +260,7 @@
   "js.files.root.dropped": "儲存的根目錄無法使用，已顯示工作階段根目錄",
   "js.files.root.label": "瀏覽根目錄",
   "js.files.root.placeholder": "資料夾的絕對路徑",
+  "js.files.root.filter": "搜尋工作樹",
   "js.files.root.refused": "無法在此瀏覽此資料夾",
   "js.files.root.session": "回到工作階段根目錄",
   "js.files.st.a": "已新增",

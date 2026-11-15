@@ -260,6 +260,7 @@
   "js.files.root.dropped": "La raíz guardada no está disponible; se muestra la raíz de la sesión",
   "js.files.root.label": "Raíz de exploración",
   "js.files.root.placeholder": "Ruta absoluta de la carpeta",
+  "js.files.root.filter": "Buscar árboles de trabajo",
   "js.files.root.refused": "Esta carpeta no se puede explorar aquí",
   "js.files.root.session": "Volver a la raíz de la sesión",
   "js.files.st.a": "Añadido",

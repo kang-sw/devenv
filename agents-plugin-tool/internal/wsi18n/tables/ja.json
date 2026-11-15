@@ -260,6 +260,7 @@
   "js.files.root.dropped": "保存したルートが使えないため、セッションのルートを表示します",
   "js.files.root.label": "閲覧のルート",
   "js.files.root.placeholder": "フォルダーの絶対パス",
+  "js.files.root.filter": "ワークツリーを検索",
   "js.files.root.refused": "このフォルダーはここでは閲覧できません",
   "js.files.root.session": "セッションのルートに戻る",
   "js.files.st.a": "追加",

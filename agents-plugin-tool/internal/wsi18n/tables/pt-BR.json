@@ -260,6 +260,7 @@
   "js.files.root.dropped": "A raiz salva não está disponível; mostrando a raiz da sessão",
   "js.files.root.label": "Raiz de navegação",
   "js.files.root.placeholder": "Caminho absoluto da pasta",
+  "js.files.root.filter": "Pesquisar árvores de trabalho",
   "js.files.root.refused": "Esta pasta não pode ser navegada aqui",
   "js.files.root.session": "Voltar à raiz da sessão",
   "js.files.st.a": "Adicionado",

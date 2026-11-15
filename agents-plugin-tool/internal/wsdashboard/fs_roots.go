@@ -11,6 +11,7 @@ type fsRootChoice struct {
 	Path     string `json:"path"`
 	Branch   string `json:"branch"`
 	Detached bool   `json:"detached"`
+	Pooled   bool   `json:"pooled,omitempty"`
 }
 
 type fsRootsAnswer struct {
@@ -39,10 +40,11 @@ func (d *Daemon) handleFSRoots(w http.ResponseWriter, r *http.Request, replyID s
 	a := fsRootsAnswer{Roots: []fsRootChoice{{Path: filepath.ToSlash(root)}}}
 	if src, ok := d.worktrees.(RepoWorktreeSource); ok {
 		if repo, err := src.ReadRepoWorktrees(s.Project, []Registration{s.Registration}); err == nil {
+			a.Roots[0].Pooled = worktreePooled(repo.Pools, root)
 			seen := map[string]bool{root: true}
 			for _, wt := range repo.Worktrees {
 				path := filepath.Clean(wt.Path)
-				choice := fsRootChoice{Path: filepath.ToSlash(path), Branch: wt.Branch, Detached: wt.Detached}
+				choice := fsRootChoice{Path: filepath.ToSlash(path), Branch: wt.Branch, Detached: wt.Detached, Pooled: worktreePooled(repo.Pools, path)}
 				if path == root {
 					a.Roots[0] = choice
 					continue

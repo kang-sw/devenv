@@ -260,6 +260,7 @@
   "js.files.root.dropped": "La racine enregistrée n'est pas disponible ; affichage de la racine de la session",
   "js.files.root.label": "Racine de navigation",
   "js.files.root.placeholder": "Chemin absolu du dossier",
+  "js.files.root.filter": "Rechercher des arbres de travail",
   "js.files.root.refused": "Ce dossier ne peut pas être parcouru ici",
   "js.files.root.session": "Revenir à la racine de la session",
   "js.files.st.a": "Ajouté",
