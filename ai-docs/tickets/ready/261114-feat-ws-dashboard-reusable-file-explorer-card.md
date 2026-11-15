@@ -342,6 +342,56 @@ the viewer is absent - if no full-Chromium channel is available, record the
 render check as not run instead of passing it; side-by-side against the PDF layout of frame 04 and the code
 highlighting of frame 07 (the quick-look overlay itself is excluded).
 
+### Result (576d1ad1b) - 2026-11-15
+
+- Delivered Phase 3 only. Text preview answers optionally include
+  `highlighted_lines` using the existing `highlightLines` Chroma path and
+  `GitPiece` tokens. The shared preview renderer uses the existing `--hl-*`
+  styles without new rows or controls. Unknown languages, files above the
+  256 KiB highlighting cap, and lexer-normalized text retain plain source;
+  token rendering uses text nodes and preserves blank lines and line jumps.
+- PDF answers carry `kind: pdf` and the guarded raw URL. Raw PDF reads retain
+  `browseRoot`/`openContained`, byte ranges, nosniff, and existing root rules;
+  only PDF uses the native-viewer CSP without the image sandbox. Image/video
+  headers and HTML/SVG capability sandboxing are unchanged (T0).
+- The shared preview area contains the same-origin native PDF frame and a
+  localized open/download escape link, with no extra toolbar or row. Missing
+  viewer support shows only the link; a frame error removes the frame. The
+  link remains available even if a browser advertises a viewer but fails to
+  render. PDF stays opaque to other link consumers, and gallery file tiles
+  remain unchanged. No `files.js` edits were needed: its existing preview
+  delegation already reaches this renderer.
+- Verification passed:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run 'TestFS|TestFiles|TestCards|TestImage|TestToolbar|TestBoardToolbar|TestOutsidePreviewCardRemintsOnEveryLoad|TestOutsideLinkClickPath|TestDesktopPathClick|TestFullscreenPanel|TestFileView' -count=1 -timeout=3m`
+    (6.498s), including production-JS highlighting/fallback tests, PDF
+    containment and symlink refusal for local/LAN viewers, explicit-root
+    local/cross-site guards, range reads, unchanged media headers, and
+    existing capability/HTML/SVG regressions.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -count=1`
+    (1.813s); both PDF labels are present in all 11 language tables.
+  - The single full-Chromium attempt passed:
+    `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local WS_PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright go test ./internal/wsdashboard -run '^TestFSPDFBrowser$' -count=1 -v -timeout=1m`
+    (4.567s). The new-headless `chromium` channel's native viewer reported
+    `loadState_: success` and one page using the real raw response's bytes and
+    headers on an owned loopback listener. Disabling `pdfViewerEnabled`
+    exposed the fallback link without a frame request. No screenshots.
+  - Node syntax checks for the renderer and both new fixtures, gofmt, and
+    `git diff --check` passed.
+- The initial focused run exposed a test-fixture mistake: two new tests used
+  `fsViewers` without LAN mode, so its token read failed before exercising
+  behavior. Corrected those fixture setups; subsequent focused runs passed.
+- Lead authorization explicitly retained the assigned Phase 3 branch after
+  the route's canonical-branch safety stop. With child agents disabled, brief
+  self-review covered unchanged root/open guards, PDF-only CSP selection,
+  token/source fidelity, detached-frame errors, and existing per-card
+  persistence/cleanup and mention-path delegation. No independent-review
+  pass is claimed. Screenshot/reference comparisons were omitted under the
+  owner's fast-UI principle; on-screen acceptance remains with the owner.
+- Owned-process scan after verification found no remaining worker-started
+  server/browser/test processes; fixtures closed their listener and browser.
+  No shared daemon rebuild/restart, push, merge, or ticket closure. The ticket
+  stays in `ready/`; Phase 4 is untouched.
+
 ### Phase 4: Directories-only workspace-picker consumer
 
 Depends on Phase 1 and on `261115-feat-ws-dashboard-local-browse-anchor`
