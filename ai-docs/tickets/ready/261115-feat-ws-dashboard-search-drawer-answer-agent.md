@@ -628,3 +628,50 @@ runtime swap, ticket closure or merge.
   visual acceptance remain for the owner's on-screen check after lead integration.
   The branch touches frozen `wsdashboard/assets/dashboard.js` and `dashboard.css`;
   the lead coordinates its split re-sync and integration. No self-sync occurred.
+
+#### Edition (0203ca279) - 2026-11-15
+
+Completed the lead-started merge of exact develop
+`81382b09389a5979fb47c7810a4f1edd5ba840d1` after the split freeze lifted.
+This is continuation of the existing conflicted merge, not a new worker merge,
+rebase or sync. Its parents are the prior feature head `cfaafdc001` and that
+exact develop head; the merge state is cleared.
+
+- Read the exact-099 move map and verification recipe. The two conflicts were
+  the old `dashboard.js` and `dashboard.css` tails against the new opening
+  fragments. Kept only the unchanged 553-line JS and 296-line CSS openings.
+  Ported the drawer region into `dashboard-drawer.js`, answer/state/citation
+  integration into `dashboard-tracker.js`, and six host rules into
+  `dashboard-drawer.css`. No monolith or extra IIFE was reintroduced.
+- Before transplanting, verified both incoming owner regions exactly matched
+  their mapped base-099 bytes, so no later landed regional changes were
+  overwritten. After assembly, the entire logical dashboard JS and CSS are
+  byte-identical to the prior feature head. Other staged upstream changes and
+  the landed explorer, whiteboard and process-boundary changes remain intact.
+  No whiteboard `page-*.css` edit was needed for this feature.
+- Adapted the answer-client CJS fixture and host-CSS assertion to the split's
+  logical-source readers. Added `TestSearchDrawerSplitOwnership` to require each
+  drawer/answer marker exactly once in its new owner and never in the opening
+  fragment. Existing behavior assertions, 26px/scope/strip deletions, layout A,
+  rolling context, citations and authorization remain unchanged.
+- Passing offline verification from `agents-plugin-tool/`, each with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+  `go test ./internal/wsdashboard -run
+  '^Test(SearchAnswerDrawerBehavior|SearchDrawerSplitOwnership|SearchPalette|DrawerRoomResizeFrame|DrawersShareOneHeight|DrawerFoldButtons|DashboardSourceAssembly)'
+  -count=1 -timeout=90s` (1.217s);
+  `go test ./internal/wsagent -run '^TestSearchAnswer' -count=1 -timeout=90s`
+  (4.951s); `go test ./internal/wsi18n -count=1` (1.067s).
+  Assembled JS and tracker syntax checks passed; the owned test/Node process
+  scan was empty. Logs and the mechanical port script remain only in
+  `/tmp/search-drawer-phase2/`.
+- The feature delta whitespace check against incoming `81382b093` passed.
+  An initial unfiltered check against the old monolith reported the split's
+  existing trailing boundary blank lines as new EOF blanks; these were
+  diagnosed as inherited extraction formatting and preserved for exact
+  separator-free assembly, not trimmed as a feature fix.
+- The prior single clean logic-lite remains the accepted baseline; no new
+  review, broad suite/build/audit, screenshot matrix, real Pi/provider/network,
+  install or daemon action was performed. Compatibility remains T0 optional
+  additive context fields; existing read-only, Origin, remote and process
+  semantics are unchanged. The worktree was clean after the merge. The lead
+  retains final integration/runtime swap and owner on-screen acceptance.
