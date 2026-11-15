@@ -1,0 +1,15 @@
+# Finish selection memo polish on current develop
+
+## Authority and implementation boundary
+
+MAIN 2026-11-15 10:14:33Z assigns this as EXEC1's only task: finish retained checkpoint ad52e3a2dc16dd44cfe6aa857a08aac35695f6de from fix/selection-memo-popover-polish into a head on current develop. Reopening saved bundle memos places the caret at the end; the memo popover anchors below the chip's left edge with existing viewport clamping. No functionality removal. The checkpoint already passed twelve scoped tests and one bounded independent logic review. Transplant only that follow-up commit and its unchanged earlier plan onto this fresh branch, preserving all current-develop functionality, especially stronger reasoning-summary assertions, selection serialization/grouping, Escape/blur saving, ×-only removal, image-pointer ordering, and IME behavior. Do not replay old 1089 implementation history or alter review/admission policy.
+
+This new pool lease is buffalo-disbelief-boney on amused-earthy-tribune, branch fix/selection-memo-popover-polish-current. MAIN explicitly cleared its historical hold at 10:19:42Z: prior EXEC4 work is preserved on exec4/viewed-growth at 57dba951c. Never touch that branch or resume prior workers. The lead refreshed this clean branch to develop5314fb8e7 before dispatch.
+
+## Verification and visual handoff
+
+Read current AGENTS, matching manuals and applicable Pi documentation/examples before changes. Run only targeted existing selection/mention-note browser tests with anchored -run selectors, never the full internal/wsdashboard package. Discover the exact relevant existing test names from source; preserve their payload/composer-text assertions and report the selected tests. Use installed Playwright only, no downloads, isolated fixtures, no shared daemon/provider/port29417. New unknown browser failures block rather than trigger repeated attempts or assertion weakening.
+
+This UI head requires actual 1440px screenshots in light and dark themes of each changed memo-editor state, with one sentence per screenshot explaining the change versus develop. Reuse the source-built offline handoff fixture and existing local browser tooling. Cover reopened saved memo caret-end and left-edge anchoring, without a broader viewport/theme matrix. Keep screenshots and generated evidence outside the checkout so cleanup preserves them; include the absolute paths and explanations in the handoff.
+
+Run focused affected regressions and full wsi18n if locale/template usage changes. Reuse the existing clean review if the transplanted production delta is unchanged; no duplicate independent review. Every Go shell call explicitly cd to this checkout's agents-plugin-tool and set GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local, with isolated HOME/config/runtime fixtures and warm caches. No forks, foreign keys/signals, outer Go kills or unrelated tasks. Return a clean committed tested checkpoint with screenshots before the lead's mandatory current-develop pre-head sync; only integration-affected checks and screenshot refresh if affected follow. Commit this unchanged plan and preserve the earlier checkpoint plan unchanged.

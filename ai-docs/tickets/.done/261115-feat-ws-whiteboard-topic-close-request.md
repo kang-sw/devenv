@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 74261bee3882af99
 sage-review-design-reviewed: 74261bee3882af99
+completed: 2026-11-15
 ---
 
 # Topic card x button attaches a close-topic request to the composer

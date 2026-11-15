@@ -64,15 +64,21 @@
     return true;
   }
   // mergeEntriesRegion applies an entries region event: the title bar (its
-  // counts) is replaced, and the entries are merged. A window past a gap
-  // starts the box over; a box at the bottom (pin) sheds its oldest entries
-  // past the cap. Either way the older history is loaded again from what the
-  // box then holds.
+  // counts) and model history are synced, and the entries are merged. A window
+  // past a gap starts the box over; a box at the bottom (pin) sheds its oldest
+  // entries past the cap. Either way the older history is loaded again from
+  // what the box then holds.
   function mergeEntriesRegion(el, html, pin) {
     var src = frag(html), box = entriesBox(), head = el.querySelector(".thead"), nhead = src.querySelector(".thead");
     var nbox = src.querySelector(".centries");
     if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); sweepOutImgs(el); mermaid(el); histReset(); return; }
     if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
+    var history = el.querySelector(".modelhistory"), nhistory = src.querySelector(".modelhistory");
+    if (history) {
+      if (nhistory) history.parentNode.replaceChild(nhistory, history);
+      else history.parentNode.removeChild(history);
+    } else if (nhistory) box.parentNode.insertBefore(nhistory, box);
+    if (nhistory) { restoreOpen(nhistory); fmtTimes(nhistory); }
     if (gapped(box, nbox)) { resetEntries(box); histReset(); }
     var added = mergeEntries(box, nbox);
     added.forEach(sweepOutImgs);

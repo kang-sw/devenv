@@ -1233,14 +1233,15 @@
     var bar = mk("div", "fbar");
     ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
     ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
-    bar.appendChild(mk("span", "fbar-sep"));
+    var ctl = mk("div", "fbar-ctl"); bar.appendChild(ctl);
+    ctl.appendChild(mk("span", "fbar-sep"));
     ui.back = iconBtn("chevron-right", wsT("js.files.back")); ui.back.classList.add("fback");
     ui.forward = iconBtn("chevron-right", wsT("js.files.forward")); ui.forward.classList.add("fforward");
     ui.back.addEventListener("click", function () { traverseHistory(-1); });
     ui.forward.addEventListener("click", function () { traverseHistory(1); });
-    bar.appendChild(ui.back); bar.appendChild(ui.forward);
+    ctl.appendChild(ui.back); ctl.appendChild(ui.forward);
     ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
-    bar.appendChild(ui.up);
+    ctl.appendChild(ui.up);
     ui.location = mk("div", "flocation");
     ui.rootBtn = mk("button", "fcrumb fcrumb-root fchange-root"); ui.rootBtn.type = "button";
     ui.rootBtn.setAttribute("aria-label", wsT("js.files.root.change"));
@@ -1264,7 +1265,7 @@
       if (e.key === "Enter") navigate(path, null, null, { typed: true });
     });
     ui.path.addEventListener("blur", function () { closePath(false); });
-    ui.location.appendChild(ui.path); bar.appendChild(ui.location);
+    ui.location.appendChild(ui.path); ctl.appendChild(ui.location);
     var head = mk("div", "fhd");
     ui.collapse = iconBtn("chevrons-down-up", wsT("js.files.collapse"));
     ui.refresh = iconBtn("refresh-cw", wsT("js.files.refresh"));
@@ -1284,9 +1285,9 @@
         var option = mk("option", "", h.roots.host + " · " + path); option.value = path; ui.roots.appendChild(option);
       });
       ui.roots.addEventListener("change", function () { applyRoot(ui.roots.value); });
-      bar.appendChild(ui.roots);
+      ctl.appendChild(ui.roots);
     }
-    bar.appendChild(head); el.appendChild(bar);
+    ctl.appendChild(head); el.appendChild(bar);
 
     var searchRow = mk("div", "fsrow"), row = mk("div", "fsr");
     var seg = mk("div", "fseg");

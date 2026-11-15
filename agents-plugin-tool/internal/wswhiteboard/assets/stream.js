@@ -498,6 +498,7 @@
       function intent() {
         o.state = 'user-scrolling'; o.until = clock() + 200;
         if (o.transaction) o.transaction.cancel();
+        if (o.pin) o.pin.end();
         var s = sessions.get(scroller);
         if (s && s.follow) { scroller.scrollTo({ top: scroller.scrollTop, left: scroller.scrollLeft, behavior: 'instant' }); s.cancel(); }
       }
@@ -520,18 +521,42 @@
       };
       return o;
     }
-    // pin(ref) holds ref's place in its scroller: apply() scrolls by however
-    // far ref moved since the call. It writes through the scroll owner so the
-    // write is not taken for user input.
+    // pin(ref) holds ref's place in its scroller for a settle window: apply()
+    // scrolls by however far ref moved since the call, and a ResizeObserver
+    // re-applies it before paint while late content (images, panel frames)
+    // sizes. The window ends at its non-renewing cap, on owner input, or when
+    // a jump takes the scroller; after that apply() is a no-op and ordinary
+    // keep() transactions own the scroller again. Writes go through the scroll
+    // owner so they are not taken for user input.
+    var pins = new Set(), PIN_MS = 1500;
     function pin(ref) {
       var scroller = scrollerOf(ref), o = owner(scroller), top = layoutTop(ref, scroller);
-      return { apply: function () {
-        if (!ref.isConnected) return;
+      if (o.pin) o.pin.end();
+      var p = { done: false, ro: null, cap: 0 };
+      p.apply = function () {
+        if (p.done) return;
+        if (!ref.isConnected) { p.end(); return; }
         var delta = layoutTop(ref, scroller) - top;
         if (Math.abs(delta) >= 0.5) scroller.scrollTop += delta;
         o.wrote = scroller.scrollTop;
-      } };
+      };
+      p.end = function () {
+        if (p.done) return;
+        p.done = true; pins.delete(p);
+        if (o.pin === p) o.pin = null;
+        if (p.ro) p.ro.disconnect();
+        win.clearTimeout(p.cap);
+      };
+      o.pin = p; pins.add(p);
+      p.cap = win.setTimeout(p.end, PIN_MS);
+      if (win.ResizeObserver) {
+        p.ro = new win.ResizeObserver(p.apply);
+        var content = scroller === docScroller() ? [doc.body] : Array.prototype.slice.call(scroller.children);
+        content.concat([ref.parentElement]).forEach(function (el) { if (el) p.ro.observe(el); });
+      }
+      return p;
     }
+    function pinning() { return pins.size; }
     function keep(node, opt) {
       opt = opt || {};
       var scroller = scrollerOf(node), o = owner(scroller), s = sessions.get(scroller);
@@ -589,6 +614,7 @@
     function start(scroller) {
       var o = owner(scroller);
       if (o.transaction) o.transaction.cancel();
+      if (o.pin) o.pin.end();
       o.state = 'explicit-jump-follow';
       var s = { ends: [], ro: null, done: false };
       var main = scroller === docScroller();
@@ -695,7 +721,7 @@
       }
       return { scroller: scroller, visible: visible };
     }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, pin: pin, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, pin: pin, pinning: pinning, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
   }
   // Current panel folds follow pN; historical-version folds still use their
   // independent entry keys. The additive browser record is not board data.
@@ -833,7 +859,7 @@
   window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, pinning: kit.pinning, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {

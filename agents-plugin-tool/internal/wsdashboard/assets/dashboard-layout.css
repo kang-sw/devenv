@@ -141,10 +141,11 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
   .bcard[data-max] .bc-in, section.topic[data-max], details.entry-panel[data-max], .fpane[data-max] { left: var(--sheet-inset, 16px); right: var(--sheet-inset, 16px); }
 }
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
-.fbar { display: flex; align-items: center; gap: 4px; flex: none; min-width: 0; height: 30px; box-sizing: border-box; padding: 0 6px 0 4px; border-bottom: 1px solid var(--wb-line); background: var(--l2-side); }
+.fbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; flex: none; min-width: 0; min-height: 30px; box-sizing: border-box; padding: 0 6px 0 4px; border-bottom: 1px solid var(--wb-line); background: var(--l2-side); }
+.fbar-ctl { display: flex; align-items: center; align-self: stretch; gap: 4px; flex: 1 1 320px; min-width: 0; min-height: 29px; }
 .fbar-sep { flex: none; width: 1px; height: 16px; margin: 0 3px; background: var(--wb-line); }
 .fhd { display: inline-flex; flex: none; align-items: center; gap: 1px; }
-.fbar > .ibtn, .fhd .ibtn { width: 24px; height: 24px; }
+.fbar-ctl > .ibtn, .fhd .ibtn { width: 24px; height: 24px; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .froot.alt { color: var(--wb-primary); }
 .fseg { display: inline-flex; flex: none; gap: 1px; padding: 2px; border-radius: 5px; background: color-mix(in srgb, var(--wb-fg) 7%, transparent); }
@@ -233,13 +234,8 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 :root[data-theme="light"] .fpane { --l2-side: color-mix(in srgb, var(--wb-bg) 75%, var(--wb-card)); --l2-band: color-mix(in srgb, var(--wb-fg) 3%, var(--wb-card)); --l2-zebra: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
 .fpane:focus-within { outline: 1px solid color-mix(in srgb, var(--wb-primary) 28%, var(--wb-line)); outline-offset: -1px; }
 .fcard { display: flex; height: 100%; border-radius: 0; box-shadow: none; }
-.fcard .fbar { padding: 0 12px; }
-.fcard .fsrow { padding: 3px 12px; }
-.fcard .ffooter { padding: 0 12px 0 16px; }
-.fcard .fworkspace { margin: 0 12px 8px; border: 1px solid var(--wb-line); border-radius: 8px; }
-.ftabs { display: flex; align-self: stretch; align-items: flex-end; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 40%; overflow-x: auto; scrollbar-width: none; padding-top: 3px; }
-.ftabs::-webkit-scrollbar { display: none; }
-.ftab { display: inline-flex; flex: 0 0 auto; align-items: center; min-width: 0; max-width: 170px; height: 100%; box-sizing: border-box; padding: 0 2px 0 9px; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
+.ftabs { display: flex; align-self: stretch; align-items: flex-end; gap: 1px; flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.ftab { display: inline-flex; flex: 0 0 auto; align-items: center; min-width: 0; max-width: 170px; height: 26px; margin-top: 3px; box-sizing: border-box; padding: 0 2px 0 9px; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
 .ftab:has(.ftab-select[aria-selected="true"]) { background: var(--wb-muted); border-bottom-color: var(--wb-primary); }
 .ftab-select { display: inline-flex; align-items: center; gap: 4px; min-width: 0; border: 0; padding: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
 .ftab-select .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -247,7 +243,7 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .ftab-select[aria-selected="true"] { color: var(--wb-fg); }
 .ftab-close.ibtn { width: 18px; height: 18px; }
 .ftab-close.ibtn .li { width: 11px; height: 11px; }
-.ftab-new.ibtn { width: 22px; height: 22px; align-self: center; }
+.ftab-new.ibtn { width: 22px; height: 22px; align-self: flex-start; margin-top: 5px; }
 .ftab-close:disabled { visibility: hidden; }
 .flocation, .fcrumb-trail { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
 .flocation { flex: 1 1 0; }

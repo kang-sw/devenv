@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ec3915233443fdfe
 sage-review-completeness-reviewed: ec3915233443fdfe
+completed: 2026-11-15
 ---
 
 # Show the observed current model for dashboard sessions and subagents

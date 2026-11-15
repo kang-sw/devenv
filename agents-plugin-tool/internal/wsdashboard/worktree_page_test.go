@@ -156,6 +156,25 @@ func TestWorktreePageFileCardStyleBrowser(t *testing.T) {
 	}
 }
 
+func TestExplorerCardFramelessTabWrapBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
+	}
+	f, root, _ := worktreePageFixture(t)
+	// Tabs are labelled by their folder; a long name makes 12 tabs overflow one row.
+	if err := os.Mkdir(filepath.Join(root, "devenv-explorer-workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "testdata/explorer-tab-wrap.browser.cjs", f.base, worktreePagePath(root))
+	out, err := cmd.CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatalf("explorer frameless tab-wrap acceptance: %v", err)
+	}
+}
+
 // This is also the visual acceptance fixture: only disposable directories,
 // holder processes and ports are used. Screenshots stay outside the repository.
 func TestWorktreePageBrowser(t *testing.T) {

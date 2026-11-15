@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a75219a810ad218d
 sage-review-completeness-reviewed: a75219a810ad218d
+completed: 2026-11-15
 ---
 
 # ws/git.commit cannot conclude a conflicted merge; native fallback strips ## AI Context
@@ -184,3 +185,93 @@ non-merge unrelated-staging, sparse-path and ticket-move regressions. Run the
 affected `internal/wsgit` and `internal/mcp` tests and
 `cd agents-plugin-tool && go test ./...` in local temporary repositories. This
 draft records no implementation, cleanup-policy choice or verification pass.
+
+### Result (201977e8) - 2026-11-15
+
+Implemented in `778c4493` and `201977e8`, then synchronized by MAIN at
+`4451563ab4757ed3aa24733111c365739edd75ca` before independent review.
+
+- Decision (1063) is implemented in
+  `agents-plugin-tool/internal/wsgit/commit_merge.go:32`: outside-grant
+  staging is admitted only through pinned HEAD/base and staged/incoming
+  object-and-mode equality. The fallback never stages admitted paths.
+- Pure incoming renames require equality at both endpoints. Composite
+  content, unsupported rename/file-directory relationships, missing or invalid
+  merge state, multiple heads/bases, unrelated staging and contaminated bytes
+  or modes remain actionable refusals using the existing explicit grant.
+- Admitted paths join normal delete-side-filtered verification. An unstaged
+  replacement of admitted content is refused because the verifier reads
+  working files. The branch, merge heads and whole staged index are rechecked
+  after verification/message callbacks (`commit_merge.go:149`).
+- Real-Git client and MCP regressions cover merge parents, intended content,
+  retained AI Context, cleared merge state, incoming ticket additions/moves/
+  deletions and verifier vetoes, refusal preservation, snapshot mutation and
+  explicit composite-content recovery. Existing non-merge, ticket-move and
+  sparse-path regressions remain covered by the focused selection.
+- Structured commits use `--cleanup=whitespace` to preserve Markdown headings
+  even under `commit.cleanup=strip`, while retaining Git's prior non-editing
+  whitespace normalization (`agents-plugin-tool/internal/wsgit/git.go:728`).
+  No native fallback, new argument, provenance store, git.merge change or
+  empty-ticket-update behavior change was introduced. Compatibility remains T0:
+  the result is an ordinary Git merge commit with unchanged readers and history.
+
+Verification was run from `agents-plugin-tool` against the implementation tree
+committed as `201977e8`. Full command output was read:
+
+```sh
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsgit -run 'TestCommit|TestStagingCommandsForCommit|TestFilterIndexDeleteSidePaths|TestParseTicketNameStatus' -count=1 -timeout 5m
+# PASS: ok github.com/kang-sw/devenv/internal/wsgit 21.143s
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run 'TestGitCommitMerge|TestServeStdioGitToolCalls|TestServeStdioGitCommit|TestTicketsVerifyGitCommit|TestTicketsVerifyNoSpecAddressing|TestTicketsVerifySageFreshnessWarningDoesNotBlockCommit|TestGitCommitIgnoresStaleSageReviewOnUntouchedTicket|TestGitCommitFollowups|TestGitCommitResolves' -count=1 -timeout 30m
+# PASS: ok github.com/kang-sw/devenv/internal/mcp 15.197s
+```
+
+`git diff --check` also passed before the clean implementation checkpoint.
+
+Two observed failures were diagnosed and corrected before those final passes:
+
+- `TestCommitStillRefusesUnrelatedStagedRenameOldPath` passed on pinned develop
+  `4ffa8c47aaa3a82119e6ee8146324e996adc1ace` but initially failed the
+  implementation's additional read-only MERGE_HEAD probe call count. Only the
+  stale four-call assertion changed; its refusal and verifier assertions remain.
+- `TestServeStdioGitToolCalls` passed on that same pinned develop but initially
+  exposed implementation-only extra blank lines from verbatim cleanup. The
+  implementation changed to whitespace cleanup; the existing MCP message
+  expectation was not relaxed.
+
+Each exact-name baseline comparison used a temporary Go source overlay of
+pinned develop's wsgit sources/tests with the new files excluded; the temporary
+artifacts were removed afterward. The comparison commands, from
+`agents-plugin-tool`, were:
+
+```sh
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -overlay /Users/kang-sw/.ws-worktrees/devenv/bountiful-dress-energy/.merge-commit-baseline-6kchny2m/overlay.json ./internal/wsgit -run '^TestCommitStillRefusesUnrelatedStagedRenameOldPath$' -count=1 -timeout 5m
+# PASS: ok github.com/kang-sw/devenv/internal/wsgit 0.411s
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -overlay /Users/kang-sw/.ws-worktrees/devenv/bountiful-dress-energy/.merge-commit-baseline-3mz_fe27/overlay.json ./internal/mcp -run '^TestServeStdioGitToolCalls$' -count=1 -timeout 30m
+# PASS: ok github.com/kang-sw/devenv/internal/mcp 1.485s
+```
+
+MAIN synchronized exact local develop
+`ec869a2fc704862c883a2045b37041dbee5b2d89` into this implementation branch at
+`4451563ab4757ed3aa24733111c365739edd75ca` and verified all five touched
+source/test files byte-identical across that synchronization, with a clean
+worktree. MAIN explicitly accepted the focused pre-sync evidence under its
+amended gate; this is not a claim of post-sync test execution.
+
+The fresh independent Lite reviewer `b4937afd` (`fix6-merge-lite`) reviewed the
+entire five-file delta `ec869a2f..4451563a` for correctness and test integrity.
+Its full artifact was read: no actionable findings; remaining none. Artifact:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/6c40efc8-01-fix6-merge-lite.md`.
+
+Limitations and omissions:
+
+- No post-sync test rerun, broad Go suite, whole dashboard-package test,
+  reviewer-executed test, network or shared-runtime operation was performed.
+  MAIN's session instructions superseded the phase's broad-suite wording.
+- The implementer-child render was refused by the known capability ceiling
+  (`ws__session_request_hire`, `ws__session_roster`). MAIN authorized the bounded
+  MCP test implementation directly. Permissions were not changed, the rejected
+  render was not retried, and independent review was not replaced by self-review.
+- Arbitrary concurrent external Git mutation is not serialized. Unsupported
+  automatic admission still requires explicit grants rather than reconstruction.
+- No unresolved findings or follow-on work are included. MAIN retains ownership
+  of integration into develop; this worker retains its implementation branch.

@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0a88e882326c5b4a
 sage-review-completeness-reviewed: 0a88e882326c5b4a
+completed: 2026-11-15
 ---
 
 # Whiteboard topic card as one interleaved timeline with windowed loading and owner-input headers
