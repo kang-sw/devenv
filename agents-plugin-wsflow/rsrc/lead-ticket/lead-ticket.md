@@ -5,7 +5,8 @@ kind: print
 # Ticket
 
 Every lead-side ticket write: drafting, settling decisions with the user, and handing
-promotion and epic design review to a `ticket-handler` worker. A ticket is the
+promotion, epic design review, and revision of a broken `ready/` ticket to a
+`ticket-handler` worker. A ticket is the
 plan a worker executes without asking, so whatever it leaves unsettled
 becomes a guess at run time.
 
@@ -147,7 +148,7 @@ everything else follows the user's language.
 - No Outcome Ledger: stop and ask whether to add one or settle the child's
   decisions through the queue.
 
-## Promote or review an epic
+## Promote, review an epic, or revise
 
 When:
 - `ready/` promotion of actionable tickets; a batch of related tickets,
@@ -156,6 +157,9 @@ When:
   drifted materially; never a status step. A material cross-child change
   makes the epic's design stamp stale: run `epic-review` again before
   promoting a child that depends on the changed design.
+- `revise`: a `{{.SkillNamespace}}:lead-run` worker stopped on a broken
+  ticket contract (stop (c)); the handler applies its `proposed_resolution:`
+  under a design review.
 - Not: ordinary `todo/` creation and edits, epic or actionable. Epics and
   research never enter `ready/`.
 
@@ -165,8 +169,9 @@ Handler loop:
 2. `{{.McpNamespace}}/playbook.render(name: "ticket-handler", session_key:
    <your key>)`; pass the path on without reading it. Spawn at the tier the
    render returns: `Read <rendered-path> as your system prompt.` plus the task block:
-   operation (`promote` or `epic-review`), the stems, and the branch to commit
-   on.
+   operation (`promote`, `epic-review`, or `revise`), the stems, and the
+   branch to commit on (`revise`: the worker's impl branch); `revise` adds the
+   worker's `proposed_resolution:` verbatim and the worker's tier.
 3. Act on each report by its `status`:
    - `decisions`: the handler wrote its items into the tickets' queue
      sections, in the same ID space. Ask them in Response format, in the
@@ -178,7 +183,8 @@ Handler loop:
      confirmed intent is there. Send corrections back; never edit the ticket
      yourself, since the stamp digests the body. No corrections: send
      `confirm`. This check is yours; it needs no fresh user round.
-   - `done`: relay the settlement report and auto-confirmed items.
+   - `done`: relay the settlement report and auto-confirmed items; after
+     `revise`, return to `{{.SkillNamespace}}:lead-run` to resume the worker.
    - `blocked`: relay the blocker and the affected stems.
 4. Continue the same handler across rounds; it holds the review baseline.
 
@@ -203,7 +209,9 @@ Handler loop:
   checkout moved). The handler commits its own work.
 - Root occupied by a worker (`HEAD` on `impl/*`): no ticket write there.
   Author and commit in the sparse worktree the workflow manual's `### Git`
-  describes, and render the handler in that worktree.
+  describes, and render the handler in that worktree. Exception: `revise`
+  writes the stopped worker's ticket on its impl branch, which the worker
+  resumes from.
 - Suggest the next action: a child ticket for an epic;
   `{{.SkillNamespace}}:lead-run` for a ticket now in `ready/`.
 - End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket written,
