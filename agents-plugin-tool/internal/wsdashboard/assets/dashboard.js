@@ -763,6 +763,7 @@
       key: "ws.dashboard.cards." + rid, load: load, save: save,
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
+        filter: function (run) { afterOverview(run); },
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
         files: filesSheet
       },
