@@ -38,6 +38,8 @@ export interface LauncherConfig {
   failManual?: string[];
   /** When true, playbook.read fails so the bridge takes the verbatim workflow_manual path. */
   noSnapshot?: boolean;
+  /** Parent keys ferrule refuses, with the supplied tool error text. */
+  parentErrors?: Record<string, string>;
 }
 
 export interface Call { name: string; args: Record<string, unknown> }
@@ -50,6 +52,7 @@ function writeLauncher(directory: string, config: LauncherConfig): { launcher: s
   writeFileSync(launcher, `import json,sys,os
 accept=set(${JSON.stringify(config.accept ?? [])})
 held=json.loads(${JSON.stringify(JSON.stringify(held))})
+parent_errors=json.loads(${JSON.stringify(JSON.stringify(config.parentErrors ?? {}))})
 fail_manual=set(${JSON.stringify(config.failManual ?? [])})
 no_snapshot=${config.noSnapshot ? "True" : "False"}
 calls_file=${JSON.stringify(callsFile)}
@@ -66,6 +69,7 @@ for line in sys.stdin:
   if n=='ferrule':
    k=a.get('relogin_session_key')
    if k is not None: r=ok(json.dumps({'session_key':k})) if k in accept else err(held[k]) if k in held else err('session bootstrap: relogin_session_key %r is not a known session key'%k)
+   elif a.get('parent_session_key') in parent_errors: r=err(parent_errors[a['parent_session_key']])
    else:
     c=int(open(count_file).read()) if os.path.exists(count_file) else 0
     c+=1; open(count_file,'w').write(str(c)); r=ok(json.dumps({'session_key':'minted-%d'%c}))
@@ -98,7 +102,7 @@ export interface Harness {
   restore: () => void;
 }
 
-export async function boot(config: LauncherConfig, options: { entries?: unknown[]; sessionId?: string; sessionFile?: string; policy?: Record<string, unknown> }): Promise<Harness> {
+export async function boot(config: LauncherConfig, options: { entries?: unknown[]; sessionId?: string; sessionFile?: string; policy?: Record<string, unknown>; role?: string; parentKey?: string }): Promise<Harness> {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-lead-key-"));
   const cwd = join(directory, HARNESS_CWD_SUFFIX);
   mkdirSync(cwd, { recursive: true });
@@ -113,11 +117,14 @@ export async function boot(config: LauncherConfig, options: { entries?: unknown[
   } as unknown as ExtensionAPI;
   const oldRole = process.env.WS_PI_SPAWN_ROLE;
   const oldPolicy = process.env[DELEGATION_ENV];
-  delete process.env.WS_PI_SPAWN_ROLE;
+  const oldParent = process.env.WS_PI_PARENT_SESSION_KEY;
+  if (options.role) process.env.WS_PI_SPAWN_ROLE = options.role; else delete process.env.WS_PI_SPAWN_ROLE;
+  if (options.parentKey !== undefined) process.env.WS_PI_PARENT_SESSION_KEY = options.parentKey; else delete process.env.WS_PI_PARENT_SESSION_KEY;
   if (options.policy) process.env[DELEGATION_ENV] = JSON.stringify(options.policy); else delete process.env[DELEGATION_ENV];
   const restore = () => {
     if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
     if (oldPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = oldPolicy;
+    if (oldParent === undefined) delete process.env.WS_PI_PARENT_SESSION_KEY; else process.env.WS_PI_PARENT_SESSION_KEY = oldParent;
   };
   const before = calls().length;
   try {

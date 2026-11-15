@@ -235,3 +235,24 @@ Verification:
   included), it can still call `workflow_manual`, and a top-level lead still
   registers.
 - The existing Pi test suite for bridge, fork, spawner, and relaunch passes.
+
+### Result
+
+- `bridge.ts`: a role-marker process with no policy mints with
+  `parent_session_key` from `WS_PI_PARENT_SESSION_KEY` (lead capability);
+  without it, or on the server's unknown-parent refusal, it mints the legacy
+  top-level key and warns once: "ws-pi-bridge: non-main Pi process has no
+  known parent; set WS_PI_PARENT_SESSION_KEY to the launching lead's session
+  key. Falling back to a top-level lead key."
+- `fork.ts` and the `ask.ts` discussion fork pass `leadParentPolicy(bridge)`;
+  `relaunchDelegation` no longer exempts forks; the owner-thread send and the
+  `/done` Finish path carry the live lead key. `buildRpcClientOptions` sets
+  `WS_PI_PARENT_SESSION_KEY` for every child to its immediate parent (the fork
+  refusal guard stays fork-only).
+- Stale comments fixed; Pi bundle regenerated.
+- Verification: Pi `child-key-bootstrap`, `relaunch-parent-key`, `bridge`,
+  `fork`, `spawner` suites 361/361 pass; Go `-run TestDashboard` (mcp,
+  including the new parent-bound no-registration test) and wsagent bundle-hash
+  tests pass.
+- Headless `pi -p` launches outside the spawner have no checked-in launch
+  site; their launchers must set `WS_PI_PARENT_SESSION_KEY`.

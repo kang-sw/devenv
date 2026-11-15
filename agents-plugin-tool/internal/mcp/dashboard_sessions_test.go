@@ -185,6 +185,42 @@ func TestDashboardRegistersATopLevelLeadSessionWithTheKeyOn(t *testing.T) {
 	}
 }
 
+func TestDashboardParentBoundLeadKeepsWorkflowAccessWithoutRegistration(t *testing.T) {
+	dir := dashboardSessionEnv(t)
+	root := dashboardGitRoot(t)
+	s, parent, _ := dashboardSessionServer(t, root, true)
+	s.sessionHarness = "pi"
+
+	for _, capability := range []string{"", "lead", "delegate", "leaf"} {
+		t.Run("capability="+capability, func(t *testing.T) {
+			args := map[string]any{"parent_session_key": parent}
+			if capability != "" {
+				args["capability"] = capability
+			}
+			child, _ := parseLoginResponse(t, callLogin(t, s, 900001, root, args))
+			// Explicit and bridge-default-filled keys have the same wire shape;
+			// child-key-bootstrap.test.ts exercises the omitted-key adapter half.
+			if resp := dashCall(t, s, "todo.list", map[string]any{"session_key": child}); isToolError(resp) {
+				t.Fatalf("keyed call: %s", resp)
+			}
+			resp := dashCall(t, s, "workflow_manual", map[string]any{"session_key": child})
+			wantAccess := capability == "" || capability == "lead"
+			if isToolError(resp) == wantAccess {
+				t.Fatalf("workflow_manual access=%v: %s", wantAccess, resp)
+			}
+			if _, ok := readRegistration(t, dir, child); ok {
+				t.Fatal("a parent-bound child registered a dashboard root row")
+			}
+		})
+	}
+	if resp := dashCall(t, s, "workflow_manual", map[string]any{"session_key": parent}); isToolError(resp) {
+		t.Fatalf("top-level workflow_manual: %s", resp)
+	}
+	if _, ok := readRegistration(t, dir, parent); !ok {
+		t.Fatal("the top-level lead did not register")
+	}
+}
+
 func TestDashboardKeyOffAndKeyOnServersOnOneRoot(t *testing.T) {
 	dir := dashboardSessionEnv(t)
 	fake := startFakeDaemon(t, dir, http.StatusNoContent, false)

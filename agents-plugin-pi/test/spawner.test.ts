@@ -2778,6 +2778,16 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
     assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "lead-key-123");
   });
 
+  test("every role exports its policy parent, preferring it over a stale fork-context parent", () => {
+    for (const role of ["worker", "explore", "fork"] as const) {
+      const policy = { version: 1 as const, depth: 1, maxDepth: 2, authority: "lead" as const, tools: ["read"], parentSessionKey: "current-lead" };
+      const options = buildRpcClientOptions("/repo", undefined, "/tmp/child/session.jsonl", undefined, "read", undefined, "old-lead", role, undefined, undefined, policy);
+      assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "current-lead");
+    }
+    const roleOnly = buildRpcClientOptions("/repo", undefined, "/tmp/child/session.jsonl", undefined, "read", undefined, "current-lead", "worker");
+    assert.equal(roleOnly.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "current-lead");
+  });
+
   test("forkFrom without a parentSessionKey clears inherited WS_PI_PARENT_SESSION_KEY_ENV", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w3/session.jsonl", "/tmp/system.md", "read", "/lead/session.jsonl");
     assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "");
