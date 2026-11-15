@@ -502,7 +502,14 @@
       "registered_at": "2026-11-15T02:12:43Z"
     },
     "261115-feat-ws-whiteboard-panel-first-stream": {
-      "registered_at": "2026-11-15T12:16:10Z"
+      "registered_at": "2026-11-15T12:16:10Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "docs/whiteboard-panel-first-readiness",
+        "phase": "active",
+        "touched_at": "2026-11-15T18:33:23Z"
+      }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
