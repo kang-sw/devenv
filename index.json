@@ -876,7 +876,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec5/session-hire-p1",
         "phase": "active",
-        "touched_at": "2026-11-15T07:40:12Z",
+        "touched_at": "2026-11-15T07:41:30Z",
         "impl": {
           "branch": "impl/exec5/session-hire-p1/swarm-straw-lens"
         }
@@ -884,19 +884,6 @@
     },
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
-    },
-    "261115-feat-ws-whiteboard-researching-state": {
-      "registered_at": "2026-11-15T05:51:36Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T06:51:26Z",
-        "impl": {
-          "branch": "impl/develop/lend-lens-shack"
-        }
-      }
     },
     "261115-feat-ws-whiteboard-topic-close-request": {
       "registered_at": "2026-11-15T02:43:44Z"
