@@ -80,9 +80,12 @@ func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 			t.Fatal("closed topic expanded a panel")
 		}
 	}
-	if !closed.Quiet {
-		t.Fatal("closed topic must keep its stream folded")
+	if closed.Quiet {
+		t.Fatal("closed topic's whole history must remain visible")
 	}
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	wantAll(t, out, `<div class="topic-stream">`, `data-key="entry:e3:history"`, `data-key="versions:e9"`, `<details class="system-run`)
+	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:t"`, `<details class="settled"`)
 }
 
 // A previously expanded latest version must not inherit that open state once
@@ -331,6 +334,51 @@ func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 	if len(last.Rows[0].Systems) != 1 || last.Rows[0].Systems[0].ID != "s3" || last.Rows[1].Entry.ID != "o" || !last.Rows[1].Owner() || len(last.Rows[2].Systems) != 1 || last.Rows[2].Systems[0].ID != "s4" {
 		t.Fatal("an owner answer is not its own row between system chips")
 	}
+}
+
+func TestExpandedQuietTopicCardCSS(t *testing.T) {
+	css, err := whiteboardTestAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One section surface aligns both body variants and the stream with the
+	// bar. A dashboard fold stays transparent unless temporarily maximized;
+	// standalone details acquire the surface only while open.
+	wantAll(t, string(css),
+		`.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow);`,
+		`.topic.quiet { box-shadow: none; background: transparent; }`,
+		`.topic.quiet[data-size]:not([data-size="fold"]),
+.topic.quiet:not([data-size]):has(> details.tdoc[open]),
+.topic.quiet[data-max] { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }`,
+		`.entry-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }`,
+		`.topic.quiet .tbar details.settled[open] { flex: 1 0 100%; width: 100%; min-width: 0; padding-bottom: 4px; }`,
+		`.topic.quiet .tbar details.settled .chead { flex-wrap: wrap; }`,
+	)
+	// The native disclosure must not draw a second, inset card inside the
+	// section; framed div.tdoc has no native open attribute at all.
+	wantNone(t, string(css), `.topic.quiet details.tdoc[open] {`)
+	for _, selector := range regexp.MustCompile(`\.topic\.quiet[^,{]*:has\([^)]*(?:div\.tdoc|\.topic-stream)[^)]*\)`).FindAllString(string(css), -1) {
+		guard := strings.SplitN(selector, ":has(", 2)[0]
+		if !strings.Contains(guard, "[data-size]") {
+			t.Errorf("quiet surface has a body/stream condition without an explicit dashboard size: %s", selector)
+		}
+	}
+}
+
+func TestStandaloneClosedTopicWithHistoryKeepsBodyCollapsed(t *testing.T) {
+	st := streamFixture()
+	st.ClosedTopics = []string{"t"}
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	topic := regexp.MustCompile(`<section class="topic[^>]* data-topic="t"[^>]*>.*?</section>`).FindString(out)
+	if topic == "" {
+		t.Fatal("closed topic missing")
+	}
+	wantAll(t, topic, `class="topic closed has-doc"`, `<details class="tdoc" data-key="doc:t"`, `<div class="topic-stream">`)
+	wantNone(t, topic, `class="topic quiet`, `data-size=`, `data-max`, `<details class="topic-stream"`)
+	disclosure := regexp.MustCompile(`<details class="tdoc"[^>]*>`).FindString(topic)
+	wantNone(t, disclosure, ` open`)
+	// Whole history stays visible on a closed full-page topic; only its body
+	// retains the standalone disclosure, independently of dashboard sizing.
 }
 
 // Owner rule: a log row's role marker sits on the first line beside the clock,

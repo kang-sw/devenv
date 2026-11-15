@@ -243,8 +243,8 @@
   function offsets() {
     fresh = false;
     found.forEach(function (t) { put(stickOf(t), "--wb-rail-top", vals.top); });
-    put(host.querySelector(".oq-wrap.top"), "--wb-rail-h", vals.h);
-    put(host.querySelector(".oq-wrap.bot"), "--wb-rail-bot", vals.bot);
+    put(host.querySelector(".oq-wrap.wb-oq-top"), "--wb-rail-h", vals.h);
+    put(host.querySelector(".oq-wrap.wb-oq-bot"), "--wb-rail-bot", vals.bot);
   }
 
   // --- motion: a bar turning into a capsule and back --------------------------

@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,7 +17,7 @@ import (
 // ("class prefix: ..."); a NEW class takes its module's prefix. Existing
 // classes are not renamed, so intentional overlaps are allowlisted below.
 
-// root, when set, is the module's scope class: a selector that starts with it
+// root, when set, is a module-local scope class: a selector that starts with it
 // only matches inside the module's own subtree, so only the first compound
 // (the root and its variants) is a page-global name.
 var cssModules = []struct {
@@ -25,7 +26,7 @@ var cssModules = []struct {
 	{"dashboard", "assets/dashboard.css", "d", ""},
 	{"memo", "assets/memo.css", "memo", ""},
 	{"tracker", "assets/tracker.css", "tk", "tk"},
-	{"whiteboard", "../wswhiteboard/assets/page.css", "wb", ""},
+	{"whiteboard", "../wswhiteboard/assets/page.css", "wb", "dw"},
 }
 
 // allowedCSSOverlaps maps "class module,module" (modules sorted) to the reason
@@ -178,6 +179,52 @@ func cssClasses(css, root string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// The header's allowlisted .top remains valid, but a sticky pill wrapper
+// must never carry that bare class: both stylesheets share the same DOM.
+func TestWhiteboardPillEdgesCannotMatchHeaderTop(t *testing.T) {
+	read := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	assets, err := wswhiteboard.PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(assets.CSS)
+	pill := read("../wswhiteboard/assets/pill.js")
+	rail := read("../wswhiteboard/assets/rail.js")
+	if !regexp.MustCompile(`(?m)^\.top\s*\{`).MatchString(read("assets/dashboard.css")) {
+		t.Fatal("fixture no longer includes the dashboard's bare .top collision source")
+	}
+	for _, modifier := range []string{"wb-oq-top", "wb-oq-bot"} {
+		// Exact class tokens, not suffixes, determine a .top selector match.
+		for _, class := range strings.Fields("oq-wrap " + modifier) {
+			if class == "top" || class == "bot" {
+				t.Fatalf("pill modifier %s can match a bare header edge class", modifier)
+			}
+		}
+		if !strings.Contains(css, ".oq-wrap."+modifier+" {") || !strings.Contains(css, ".oq-wrap."+modifier+" .oq-pill {") ||
+			!strings.Contains(rail, `host.querySelector(".oq-wrap.`+modifier+`")`) || !strings.Contains(pill, `"`+modifier+`"`) {
+			t.Errorf("pill construction, rail offsets and CSS disagree on %s", modifier)
+		}
+	}
+	for _, fragment := range []string{`var modifier = edge === "top" ? "wb-oq-top" : "wb-oq-bot";`,
+		`host.querySelector(".oq-wrap." + modifier)`, `w.className = "oq-wrap " + modifier;`} {
+		if !strings.Contains(pill, fragment) {
+			t.Errorf("pill wrapper does not use isolated edge modifier: %s", fragment)
+		}
+	}
+	for name, source := range map[string]string{"css": css, "pill": pill, "rail": rail} {
+		if regexp.MustCompile(`\.oq-wrap\.(?:top|bot)\b`).MatchString(source) || strings.Contains(source, `w.className = "oq-wrap " + edge`) {
+			t.Errorf("%s retains an unnamespaced pill edge", name)
+		}
+	}
 }
 
 func TestCSSClassesDoNotCollideAcrossModules(t *testing.T) {

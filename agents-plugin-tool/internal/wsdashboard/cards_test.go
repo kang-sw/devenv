@@ -86,7 +86,9 @@ func TestBoardCardPlacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(board), "var plan = window.WsCards.weave(want), woven = plan.board;") || !strings.Contains(string(board), "window.WsCards.settle(el, plan);") {
+	// Frozen viewed staging may reorder plan lists between the weave and the
+	// read of the woven board order, so the two are separate statements.
+	if !strings.Contains(string(board), "var plan = window.WsCards.weave(want);") || !strings.Contains(string(board), "var woven = plan.board;") || !strings.Contains(string(board), "window.WsCards.settle(el, plan);") {
 		t.Error("the board morph does not weave the cards in and settle around them")
 	}
 	runNode(t, "board card placement", `

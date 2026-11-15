@@ -1019,11 +1019,17 @@
       body.refs = refs.map(function (p) { return p.ref; });
       body.refNums = refs.map(function (p) { return p.n; });
     }
+    // A send arms only receipt matching for its topics, never a blanket
+    // exemption for a concurrent external panel rewrite.
+    var ownTopics = notes.map(function (n) { return n.topic; });
+    list.forEach(function (c) { var item = boardItem(c.id), topic = item && item.closest("section.topic[data-topic]"); if (topic) ownTopics.push(topicKey(topic)); });
+    ownTopics.forEach(function (k) { boardOwn[k] = true; });
     followConvo();
     sending = true;
     post("message", body, function (ok, res) {
       sending = false;
-      if (!ok) { noteWarn(wsT("js.send.fail", res)); return; }
+      if (!ok) { ownTopics.forEach(function (k) { delete boardOwn[k]; }); noteWarn(wsT("js.send.fail", res)); return; }
+      boardFlushViewed(false);
       if (ctext.value.trim() === raw) { ctext.value = ""; grow(); clearMentions(); }
       pics.forEach(function (p) { dropImg(p); release(p); });
       clearTrash();

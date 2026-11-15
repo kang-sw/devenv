@@ -101,7 +101,7 @@
   var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
-    Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
+    Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
     var d = {
       text: ctext ? ctext.value : "",
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
@@ -152,7 +152,7 @@
       if (d.open && typeof d.open === "object") {
         Object.keys(d.open).forEach(function (k) {
           // A panel folded by hand outranks a draft saved while it was open.
-          if (!Object.prototype.hasOwnProperty.call(openState, k) && !(k.indexOf("k:entry:") === 0 && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
+          if (k.indexOf("k:history:") !== 0 && !Object.prototype.hasOwnProperty.call(openState, k) && !((k.indexOf("k:entry:") === 0 || k.indexOf("k:panel:") === 0) && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
         });
         restoreOpen(doc);
       }
@@ -494,9 +494,11 @@
         top: top.offsetHeight
       });
       // A link menu's local z-index cannot outrank the shell header either;
-      // lift its frame through the same layer as the other popovers.
+      // lift its frame through the same layer as the other popovers. The
+      // read-only hover card (rail.js, .shp) never lifts: the lifted frame's
+      // opaque layer would cover the shell's header and rail while it shows.
       send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
-        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return el.getClientRects().length > 0; }) });
+        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; }) });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);
@@ -544,7 +546,7 @@
         queue();
       } else if (m.wsShell === "search") {
         // Open, do not toggle a hidden header button via a synthetic click.
-        if (tkApi) tkApi.openSearch();
+        tkSearch();
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);

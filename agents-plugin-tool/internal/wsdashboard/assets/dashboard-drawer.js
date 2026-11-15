@@ -27,13 +27,21 @@
   var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
   var drhandle = $("drhandle"), drheader = doc.querySelector(".dwrap > .top");
   var gbody = $("gbody"), gitRegion = region("git");
-  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h";
+  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h", DR_SEARCH = "ws.dashboard.drawer.search";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
   var drMode = "panels", drShown = "", drfold = null, drFoldW = -1, drFoldGw = -1;
   // The stored height is read with or without the frame: a page with no
   // session drawer still shares it with the tracker's store drawers.
   (function () { var h = parseFloat(load(DR_H)); if (isFinite(h) && h > 0) drH = h; })();
+  var sbody = null, shandle = null;
+  if (drawer) {
+    sbody = doc.createElement("div"); sbody.id = "sbody"; sbody.className = "dr-search"; sbody.hidden = true;
+    drsheet.appendChild(sbody);
+    shandle = doc.createElement("button"); shandle.type = "button"; shandle.id = "shandle"; shandle.className = "dr-handle dr-search-handle";
+    shandle.title = wsT("js.tk.qs.tip") + " (Ctrl+K)"; shandle.setAttribute("aria-label", shandle.title); shandle.setAttribute("aria-controls", "drsheet");
+    shandle.appendChild(luIcon("search")); drhandle.parentNode.insertBefore(shandle, drhandle);
+  }
   // ghandle is the git handle now: a region swap replaces it.
   function ghandle() { return $("ghandle"); }
   var drBadge = false, drSwap = false; // the handle's dot: a section badge, or a panels change while closed
@@ -167,7 +175,10 @@
   function drRoom() {
     var w = drHas ? Math.ceil(drhandle.getBoundingClientRect().width) : 0;
     var gw = ghandle() ? Math.ceil(gitRegion.getBoundingClientRect().width) : 0;
-    var off = w && gw ? w + 6 : 0, all = gw ? off + gw : w;
+    var sw = shandle ? Math.ceil(shandle.getBoundingClientRect().width) : 0;
+    var so = w && sw ? w + 6 : 0, beforeGit = sw ? so + sw : w;
+    var off = beforeGit && gw ? beforeGit + 6 : 0, all = gw ? off + gw : beforeGit;
+    doc.documentElement.style.setProperty("--shr", so + "px");
     if (all !== drRoomW || off !== drGhOff) {
       drRoomW = all;
       drGhOff = off;
@@ -188,6 +199,7 @@
     if (!drfold) return;
     drfold.hidden = !mode;
     drfold.classList.toggle("git", mode === "git");
+    drfold.classList.toggle("search", mode === "search");
   }
   function drTitle() {
     var t = wsT(drOpen && drMode === "panels" ? "js.drawer.close" : "js.drawer.open"), tip = drhandle.getAttribute("data-tip");
@@ -230,16 +242,22 @@
   function drApply(anim) {
     if (!drawer) return;
     drMeasure();
-    var h = drClamp(drH), git = drMode === "git";
+    var h = drClamp(drH), git = drMode === "git", search = drMode === "search";
     drawer.classList.toggle("anim", !!anim);
     drawer.classList.toggle("open", drOpen);
-    drbody.hidden = git;
+    drbody.hidden = git || search;
     if (gbody) gbody.hidden = !git;
+    if (sbody) sbody.hidden = !search;
+    drsheet.setAttribute("aria-label", wsT(search ? "js.tk.qs.tip" : "js.drawer.open"));
     drsheet.style.height = h + "px";
     drclip.style.height = (drOpen ? h : 0) + "px";
-    drhandle.style.top = (drOpen && !git ? drTop + h : 0) + "px";
+    drhandle.style.top = (drOpen && !git && !search ? drTop + h : 0) + "px";
+    if (shandle) {
+      shandle.style.top = (drOpen && search ? drTop + h : 0) + "px";
+      shandle.setAttribute("aria-expanded", String(drOpen && search));
+    }
     if (gitRegion) gitRegion.style.top = (drOpen && git ? drTop + h : 0) + "px";
-    drhandle.setAttribute("aria-expanded", String(drOpen && !git));
+    drhandle.setAttribute("aria-expanded", String(drOpen && !git && !search));
     drFoldShow(drOpen ? drMode : "");
     ghSync();
     drTitle();
@@ -252,6 +270,7 @@
       drShown = shown;
       if (shown === "panels") { wtLoad(); hdLoad(); }
       else if (shown === "git") gitOpened();
+      if (tkApi) { if (shown === "search") tkApi.openSearch(); else tkApi.closeSearch(); }
     }
   }
   // ghSync marks the git handle open or closed; a swap draws it closed.
@@ -277,13 +296,14 @@
   // or closes it. Only the panels sheet's open state is kept.
   function drSetOpen(open, mode) {
     mode = mode || drMode;
-    if (open && !(mode === "git" ? ghandle() : drHas)) return;
+    if (open && !(mode === "git" ? ghandle() : mode === "search" ? shandle : drHas)) return;
     if (open && !drOpen) drAnnounce();
-    if (!open && drsheet.contains(doc.activeElement)) (drMode === "git" && ghandle() || drhandle).focus();
+    if (!open && drsheet.contains(doc.activeElement)) (drMode === "search" && shandle || drMode === "git" && ghandle() || drhandle).focus();
     drMode = mode;
     drOpen = open;
     drWant = open && mode === "panels";
     save(DR_OPEN, drWant ? "1" : null);
+    save(DR_SEARCH, open && mode === "search" ? "1" : null);
     if (drWant) { drSwap = false; drDot(); }
     drApply(true);
   }
@@ -292,7 +312,7 @@
   // the button hides.
   function drFold() {
     if (drDragged || !drOpen) return;
-    var back = drMode === "git" && ghandle() || drhandle, kb = doc.activeElement === drfold;
+    var back = drMode === "search" && shandle || drMode === "git" && ghandle() || drhandle, kb = doc.activeElement === drfold;
     drSetOpen(false);
     if (kb) back.focus();
   }
@@ -320,11 +340,11 @@
     // the document.
     var drDrag = null, drDragged = false;
     function drDragStart(e) {
-      var h = e.target.closest && e.target.closest("#drhandle, #ghandle");
+      var h = e.target.closest && e.target.closest("#drhandle, #ghandle, #shandle");
       if (!h || (e.button !== undefined && e.button !== 0)) return;
-      var git = h.id === "ghandle", rider = git ? gitRegion : drhandle;
+      var git = h.id === "ghandle", search = h.id === "shandle", rider = git ? gitRegion : search ? shandle : drhandle;
       drMeasure();
-      drDrag = { mode: git ? "git" : "panels", rider: rider, id: e.pointerId, y0: e.clientY, off: e.clientY - rider.getBoundingClientRect().top, moved: false, ext: 0 };
+      drDrag = { mode: git ? "git" : search ? "search" : "panels", rider: rider, id: e.pointerId, y0: e.clientY, off: e.clientY - rider.getBoundingClientRect().top, moved: false, ext: 0 };
       if (!git) try { h.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
     }
     function drDragMove(e) {
@@ -379,6 +399,7 @@
       drOpen = true;
       drWant = d.mode === "panels";
       save(DR_OPEN, drWant ? "1" : null);
+      save(DR_SEARCH, d.mode === "search" ? "1" : null);
       if (drWant) { drSwap = false; drDot(); }
       drApply(false);
     }
@@ -389,6 +410,9 @@
     drhandle.addEventListener("click", function () {
       if (drDragged) return;
       drSetOpen(!(drOpen && drMode === "panels"), "panels");
+    });
+    shandle.addEventListener("click", function () {
+      if (!drDragged) drSetOpen(!(drOpen && drMode === "search"), "search");
     });
     // The git handle toggles the git sheet, or brings it in place of the
     // panels; it is looked up per click, since a swap replaces it.
@@ -414,6 +438,7 @@
       if (e.key !== "Escape" || !drOpen || e.defaultPrevented) return;
       if (lmenu || (gmenu && !gmenu.hidden)) return;
       if (ctext && doc.activeElement === ctext) return;
+      if (drMode === "search" && sbody.contains(doc.activeElement)) return;
       drSetOpen(false);
     }, true);
     // A click outside the drawer closes it; the link menu a drawer link
@@ -421,7 +446,7 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!drOpen || drDragged || !t || !t.closest) return;
-      if (t.closest("#drclip, #drhandle, #drfold, #r-git, .lmenu, .gwin-back")) return;
+      if (t.closest("#drclip, #drhandle, #shandle, #drfold, #r-git, .lmenu, .gwin-back")) return;
       drSetOpen(false);
     }, true);
     // The header can wrap or change height (a chip appears): the sheet

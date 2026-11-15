@@ -104,6 +104,11 @@
 .hdmsg { grid-area: msg; font-size: 12px; color: var(--wb-fail); overflow-wrap: anywhere; }
 .dr-handle { position: absolute; top: 0; right: var(--dpad); height: 34px; padding: 2px 9px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: grab; touch-action: none; display: flex; align-items: center; justify-content: flex-end; gap: 7px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .dr-handle[hidden] { display: none; }
+.dr-search-handle { right: calc(var(--dpad) + var(--shr, 0px)); width: 35px; padding: 2px 0 0; justify-content: center; }
+.dr-search-handle .li { width: 17px; height: 17px; }
+.dr-search { height: 100%; min-height: 0; }
+.dr-search[hidden] { display: none; }
+.dr-search .tk.dr-search-palette { position: static; width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 /* the inverted corner where the handle meets the page */
 .dr-handle::before { content: ""; position: absolute; left: 0; bottom: 0; width: 10px; height: 10px; border-radius: 0 0 0 8px; background: linear-gradient(45deg, var(--wb-bg) 50%, var(--wb-muted) 50%); }
 .dr-handle:hover { color: var(--wb-fg); }
@@ -126,6 +131,7 @@
 .dr-fold { position: absolute; top: 0; right: var(--dpad); width: var(--drw, 34px); height: 34px; padding: 2px 0 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); animation: dr-fold-in .18s ease-out; }
 .dr-fold[hidden] { display: none; }
 .dr-fold.git { right: calc(var(--dpad) + var(--ghr, 0px)); width: var(--ghw, 34px); }
+.dr-fold.search { right: calc(var(--dpad) + var(--shr, 0px)); width: 35px; }
 .dr-fold:hover { color: var(--wb-fg); }
 .dr-fold:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
 .dr-fold .li { width: 17px; height: 17px; }

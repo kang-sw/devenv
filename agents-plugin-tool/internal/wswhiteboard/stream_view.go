@@ -23,6 +23,9 @@ type EntryView struct {
 	Historical   bool
 	Current      bool
 	Versions     []EntryView
+	// Item is the current settled item projected at its recorded transition.
+	// It is display-only; Entry and durable item/event records stay unchanged.
+	Item *ItemView
 }
 
 // OwnerAnswer reports a system event that records the owner's answer. The
@@ -134,6 +137,9 @@ func (p EntryPage) Segments() []StreamSegment {
 					rows = append(rows, StreamRow{Systems: []EntryView{e}})
 				}
 			}
+		case run.Entry.Item != nil:
+			flush()
+			out = append(out, StreamSegment{Rows: []StreamRow{{Entry: run.Entry}}})
 		case run.Entry.Kind == EntryPanel:
 			if run.Entry.Historical {
 				continue
@@ -172,7 +178,7 @@ func (t TopicView) StreamLines() int {
 	return n
 }
 
-func streamView(doc TopicDoc, closed bool, loc *time.Location) (latest []EntryView, stream EntryPage, older []EntryPage) {
+func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView) (latest []EntryView, stream EntryPage, older []EntryPage) {
 	if loc == nil {
 		loc = time.Local
 	}
@@ -224,11 +230,12 @@ func streamView(doc TopicDoc, closed bool, loc *time.Location) (latest []EntryVi
 			all[i].Versions = versions[all[i].PanelID]
 		}
 	}
+	all = projectHistoryItems(all, items)
 	page := func(entries []EntryView) EntryPage {
 		out := EntryPage{Count: len(entries)}
 		for _, entry := range entries {
 			n := len(out.Runs)
-			if entry.Kind == EntrySystem {
+			if entry.Kind == EntrySystem && entry.Item == nil {
 				if n == 0 || len(out.Runs[n-1].Systems) == 0 {
 					out.Runs = append(out.Runs, EntryRun{})
 					n++

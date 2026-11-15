@@ -46,7 +46,12 @@
 .dgrid.live > .splitter { grid-area: split; }
 .dgrid.live > .convo { grid-area: convo; overflow: auto; }
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
-/* A scrolling board column and the pinned column (.bpins) take no native scroll anchoring: a board swap compensates them itself (wbHistory.keep). */
+/* One shared release control for staged rendering, placement and heights.
+   Fixed outside the board flow so the badge itself changes no reading geometry. */
+.board-viewed-pending { position: fixed; z-index: 90; bottom: max(16px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); max-width: min(680px, calc(100vw - 32px)); padding: 10px 16px; border: 1px solid var(--wb-primary); border-radius: 24px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 4px 18px #0003; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-viewed-pending[hidden] { display: none; }
+.board-viewed-pending:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
+/* Owned board scrollers use permanent manual anchoring (wbHistory.keep). */
 .dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
 .dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
 /* The conversation panel's header (chead) carries its own tabs (ctabs):
@@ -180,8 +185,23 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .hnote.err { color: var(--wb-fail); font-family: var(--wb-mono); white-space: pre-wrap; }
 .fpop { position: absolute; z-index: 20; top: 40px; right: 8px; width: 240px; max-width: calc(100% - 16px); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
 .fpop[hidden] { display: none; }
-.froot-pop { width: 320px; }
+.froot-pop { width: 336px; }
 .froot-pop > .lb { display: flex; align-items: center; gap: 5px; }
+.froot-pop .froot-current { margin-bottom: 6px; }
+.froot-pop .froot-filter { display: block; width: 100%; box-sizing: border-box; height: 26px; margin-bottom: 6px; padding: 0 8px; border: 0; border-radius: 6px; outline: none; background: var(--wb-muted); color: var(--wb-fg); font: 12px var(--wb-sans); }
+.froot-pop .froot-filter::placeholder { color: var(--wb-muted-fg); }
+.froot-pop .froot-filter:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.froot-pop .froot-list { max-height: 300px; overflow-y: auto; scrollbar-width: thin; margin-bottom: 6px; }
+.froot-pop .froot-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; box-sizing: border-box; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); font: 12px var(--wb-sans); text-align: left; cursor: pointer; }
+.froot-pop .froot-row:hover, .froot-pop .froot-row:focus-visible { background: var(--wb-muted); }
+.froot-pop .froot-row:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1.5px; }
+.froot-pop .froot-row.froot-row-current { background: color-mix(in srgb, var(--wb-primary) 14%, transparent); font-weight: 700; }
+.froot-pop .froot-check { width: 14px; flex: none; color: var(--wb-primary); }
+.froot-pop .froot-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.froot-pop .froot-branch { flex: 0 1 46%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; direction: rtl; color: var(--wb-muted-fg); font: 11px var(--wb-mono); }
+.froot-pop .froot-branch bdi { direction: ltr; unicode-bidi: isolate; }
+.froot-pop .froot-separator { height: 1px; background: var(--wb-line); margin: 5px 4px; }
+.froot-pop .froot-current[hidden], .froot-pop .froot-filter[hidden], .froot-pop .froot-list[hidden] { display: none; }
 .fpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
 .fpop .opt { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
 .fpop .opt:hover { background: var(--wb-muted); }

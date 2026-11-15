@@ -11,18 +11,29 @@
   // railPost posts body to a rail route; done(status, answer, text) gets the
   // HTTP status (0: the daemon was not reached), the parsed JSON answer of a
   // success ({} when there is none), and the body text of a failure.
-  function railPost(route, body, done) {
+  // timeout (ms, optional) ends a request that never answers: done runs
+  // once with status 0 and the timeout text, and the fetch is aborted, so a
+  // caller's busy state can never stay on. The server may still have acted.
+  function railPost(route, body, done, timeout) {
     if (!window.fetch) { done(0, {}, wsT("js.post.nobrowser")); return; }
+    var ended = false, ctl = timeout && window.AbortController ? new window.AbortController() : null, timer = 0;
+    function end(st, v, s) {
+      if (ended) return;
+      ended = true;
+      if (timer) clearTimeout(timer);
+      done(st, v, s);
+    }
+    if (timeout) timer = setTimeout(function () { if (ctl) ctl.abort(); end(0, {}, wsT("js.post.timeout")); }, timeout);
     fetch(route, {
-      method: "POST", credentials: "same-origin", cache: "no-store",
+      method: "POST", credentials: "same-origin", cache: "no-store", signal: ctl ? ctl.signal : undefined,
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     }).then(function (r) {
       return r.text().then(function (s) {
         var v = {};
         if (r.ok) { try { v = s ? JSON.parse(s) : {}; } catch (e) { v = {}; } }
-        done(r.status, v && typeof v === "object" ? v : {}, r.ok ? "" : s.trim());
+        end(r.status, v && typeof v === "object" ? v : {}, r.ok ? "" : s.trim());
       });
-    }, function () { done(0, {}, ""); });
+    }).then(null, function () { end(0, {}, ""); });
   }
   // railErr is a failed rail route's line: its own text, except a 404, which
   // names a workspace the rail no longer shows.

@@ -14,7 +14,8 @@
   // ({wbDoc: "img"}, see relay below); and a text selection, which the
   // dashboard's live board offers to add to the message as a mention
   // ({wbDoc: "sel"}, see below); and the host's rail key, Ctrl+`
-  // ({wbDoc: "rail"}, see the end).
+  // ({wbDoc: "rail"}, see the end); and the palette shortcut, Ctrl+K or
+  // Ctrl+Space ({wbDoc: "search"}, see the end).
   // A plain link needs no help: <base target="_blank"> opens it in a new tab.
   var d = document, body = d.querySelector(".doc-body");
 
@@ -201,5 +202,16 @@
     if (e.code !== "Backquote" || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
     e.preventDefault();
     post({ wbDoc: "rail" });
+  });
+  // Ctrl+K and Ctrl+Space (the host palette's keys, by the target rule of
+  // tracker.js qShortcut: an editor in the body keeps them) open the
+  // host's search palette ({wbDoc: "search"}).
+  d.addEventListener("keydown", function (e) {
+    if (!e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    if (e.code !== "Space" && e.key !== " " && (e.key || "").toLowerCase() !== "k") return;
+    var t = e.target;
+    if (t && t.closest && t.closest("textarea, [contenteditable]:not([contenteditable=\"false\"])")) return;
+    e.preventDefault();
+    post({ wbDoc: "search" });
   });
 })();
