@@ -3,6 +3,7 @@ title: "Worktree page reusing session cards and the file explorer without agent 
 related:
   261114-feat-ws-dashboard-reusable-file-explorer-card: "prerequisite component reuse approved by (785); source capture 3d2e3463d"
   261114-refactor-ws-dashboard-whiteboard-asset-split: "new UI starts pause during the owner-approved mechanical split"
+  261115-feat-ws-dashboard-local-browse-anchor: "prerequisite: the daemon-owned host anchor (894=a) this page browses and opens terminals through"
 ---
 
 # Worktree page reusing session cards and the file explorer without agent panels
@@ -21,6 +22,15 @@ This is an idea capture only. It does not authorize implementation, a new sessio
 - **Reuse the session mechanism.** Keep the existing card and pinning mechanisms; omit the conversation and agent panels. Do not implement a second card system or a separate simplified pinning model.
 - **Reuse the explorer — (785)=ok.** Consume the reusable explorer component owned by `261114-feat-ws-dashboard-reusable-file-explorer-card` (the approved capture was committed as `3d2e3463d`). The worktree page is another consumer, not a competing explorer or workspace-picker UI.
 - **Worktree-bound terminals — (785)=ok.** Terminals created from this page spawn with `cwd` equal to the selected worktree path. File viewing and terminal operations remain live rather than being a static directory snapshot.
+- **Files and terminals through the host anchor — (894)=a.** With no agent
+  session, the page browses its worktree and opens terminals through the
+  daemon-owned host anchor delivered by
+  `261115-feat-ws-dashboard-local-browse-anchor`: local viewer only, an
+  explicit root (explorer) and folder (terminal) equal to the selected
+  worktree path, and the page lists only that worktree's anchor terminals.
+  Rejected: borrowing a live session of the same repository (unusable for a
+  stored workspace with no live session; terminals tied to the borrowed
+  session) and a separate session-less route family.
 - **Respect the split pause.** This is one of the new UI starts paused while `261114-refactor-ws-dashboard-whiteboard-asset-split` is active. Capturing the idea does not bypass MAIN's cut-line scheduling or start signal.
 
 ## Constraints
@@ -28,7 +38,7 @@ This is an idea capture only. It does not authorize implementation, a new sessio
 - Preserve the explorer's existing read-only file-viewing scope and guarded-root/host-action boundaries. A selected worktree and a new page do not authorize broader filesystem access, filesystem mutation, new symlink permissions or a new terminal authority model.
 - Preserve the reusable explorer component's state and attachment boundaries rather than copying its internals. This idea does not override its approved feature scope or select new storage fields, libraries or component event names.
 - A worktree page is not authority to create an agent session, enable a root flag, control another session or add a new conversation/agent panel under a different name.
-- No URL shape, endpoint, wire schema, persistence model, additional view policy or new public component API is selected by this capture. Those remain outside this settled page concept until separately designed.
+- Apart from the host anchor above, no URL shape, endpoint, wire schema, persistence model, additional view policy or new public component API is selected by this capture. Remote (LAN) viewers get no worktree-page files or terminals, since the anchor is local-viewer only. Those remain outside this settled page concept until separately designed.
 - Before future tooling implementation, read the matching `ai-docs/manuals/shipped-surface-boundary.md` and `ai-docs/manuals/release-compatibility.md` rules. This documentation-only idea changes no cross-version surface.
 
 ## Phases

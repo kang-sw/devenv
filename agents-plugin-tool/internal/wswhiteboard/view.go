@@ -147,6 +147,10 @@ type TopicView struct {
 	// DocMarks are the change marks of the body's latest edit, in the block
 	// numbering of bodyUnits.
 	DocMarks []BlockMark
+	// BodyUpdatedAt is the locally validated actual body mutation time,
+	// shared by the header and both gutter render paths. Empty means unknown;
+	// ChangedAt alone (possibly a legacy backfill) never supplies this value.
+	BodyUpdatedAt string
 	// DocStale marks the body's change marks as no longer fresh: an item of
 	// the topic changed after the body's latest edit (Item.Changed above
 	// the body's Changed; a recap change does not count). The marks stay,
@@ -196,6 +200,10 @@ type TopicView struct {
 	// or recap showing; it collapses to one title line (and a closed body's
 	// fold).
 	Quiet bool
+	// State and StateDiagnostic project authoritative topic-state history;
+	// ordinary legacy absence leaves both nil.
+	State           *TopicState
+	StateDiagnostic *StateDiagnostic
 	// Closed marks a topic the lead closed.
 	Closed bool
 	// Result is the closed topic's close result, empty while the topic is
@@ -589,13 +597,18 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 
+	topicStates := state.TopicStates()
 	var order []string
 	blocks := map[string]*TopicView{}
 	itemsChanged := map[string]int{} // newest Item.Changed per topic
 	blockOf := func(topic string) *TopicView {
 		block, ok := blocks[topic]
 		if !ok {
-			block = &TopicView{Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic)}
+			current := topicStates[topic]
+			block = &TopicView{
+				Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic),
+				State: current.State, StateDiagnostic: current.Diagnostic,
+			}
 			blocks[topic] = block
 			order = append(order, topic)
 		}
@@ -636,6 +649,7 @@ func BuildView(state *State, in ViewInput) View {
 		block.Live = slices.ContainsFunc(block.Tickets, TicketBadge.live)
 		block.Doc = doc.Body
 		block.DocMarks = doc.Marks
+		block.BodyUpdatedAt = doc.validatedBodyTime()
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap

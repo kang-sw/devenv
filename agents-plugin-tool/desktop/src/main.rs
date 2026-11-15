@@ -5,6 +5,7 @@ compile_error!("This first-window slice supports macOS only");
 
 mod endpoint;
 mod navigation;
+mod zoom;
 
 use navigation::{destination, Destination, CONNECT_VIEW};
 use std::sync::{
@@ -12,7 +13,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use tauri::{
-    menu::{Menu, MenuItem, Submenu},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     webview::NewWindowResponse,
     AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
@@ -95,17 +96,60 @@ fn connect(app: AppHandle, state: Arc<Connection>) {
 fn main() {
     let connection = Arc::new(Connection::default());
     let menu_state = connection.clone();
+    let zoom_level = Mutex::new(1.0_f64);
     tauri::Builder::default()
         // No invoke_handler, plugins, remote capabilities, or JS initialization.
         .on_menu_event(move |app, event| {
             if event.id().as_ref() == "retry" {
                 connect(app.clone(), menu_state.clone());
+            } else if let Some(step) = zoom::Step::from_menu_id(event.id().as_ref()) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let mut level = zoom_level.lock().unwrap();
+                    let target = zoom::next(*level, step);
+                    if window.set_zoom(target).is_ok() {
+                        *level = target;
+                    }
+                }
             }
         })
         .setup(move |app| {
             let menu = Menu::default(app.handle())?;
             let retry = MenuItem::with_id(app, "retry", "Retry", true, Some("CmdOrCtrl+R"))?;
             menu.append(&Submenu::with_items(app, "Connection", true, &[&retry])?)?;
+            // Cmd+= and Cmd+Shift+= (Cmd++) both zoom in, as in browsers;
+            // AppKit matches Shift exactly, so each needs its own item.
+            let zoom_items = [
+                MenuItem::with_id(app, "zoom_reset", "Actual Size", true, Some("CmdOrCtrl+0"))?,
+                MenuItem::with_id(app, "zoom_in", "Zoom In", true, Some("CmdOrCtrl+="))?,
+                MenuItem::with_id(
+                    app,
+                    "zoom_in_shifted",
+                    "Zoom In",
+                    true,
+                    Some("CmdOrCtrl+Shift+="),
+                )?,
+                MenuItem::with_id(app, "zoom_out", "Zoom Out", true, Some("CmdOrCtrl+-"))?,
+            ];
+            let separator = PredefinedMenuItem::separator(app)?;
+            let view = menu.items()?.into_iter().find_map(|item| {
+                item.as_submenu()
+                    .filter(|submenu| submenu.text().ok().as_deref() == Some("View"))
+                    .cloned()
+            });
+            let view = match view {
+                Some(view) => {
+                    view.append(&separator)?;
+                    view
+                }
+                None => {
+                    let view = Submenu::new(app, "View", true)?;
+                    menu.append(&view)?;
+                    view
+                }
+            };
+            for item in &zoom_items {
+                view.append(item)?;
+            }
             app.set_menu(menu)?;
 
             let navigation_state = connection.clone();

@@ -61,6 +61,7 @@ type topicStateRecord struct {
 	From      string    `json:"from,omitempty"`
 	Run       *TopicRun `json:"run,omitempty"`
 	ElapsedMS *int64    `json:"elapsed_ms,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
 }
 
 type stateEvent struct {
@@ -93,32 +94,40 @@ func (s *State) stateEvents() []stateEvent {
 func (s *State) TopicStates() map[string]TopicStateView {
 	out := map[string]TopicStateView{}
 	for _, event := range s.stateEvents() {
-		e, topic := event.entry, event.topic
-		prior := out[topic]
-		if len(e.TopicState) == 0 {
-			// Bounded adapter for the schema-2 applyClose producer. Authored
-			// log/panel/item/answer text cannot choose this kind/attribution.
-			if (prior.State != nil || prior.Diagnostic != nil) && strings.HasPrefix(e.Text, "Topic closed: ") {
-				out[topic] = TopicStateView{}
-			}
-			continue
-		}
-		r, code := parseTopicState(e)
-		if code != "" {
-			out[topic] = TopicStateView{Diagnostic: &StateDiagnostic{Entry: e.ID, Code: code}}
-			continue
-		}
-		if r.Op == "reset" {
-			out[topic] = TopicStateView{}
-			continue
-		}
-		out[topic] = TopicStateView{State: &TopicState{Value: r.Value, Entry: e.ID, Run: r.Run}}
-		// A completed run belongs to history, not to the new work state.
-		if r.Value != StateImplementing {
-			out[topic].State.Run = nil
-		}
+		foldStateEvent(out, event)
 	}
 	return out
+}
+
+func foldStateEvent(out map[string]TopicStateView, event stateEvent) {
+	e, topic := event.entry, event.topic
+	prior := out[topic]
+	if len(e.TopicState) == 0 {
+		// Bounded adapter for the schema-2 applyClose producer. Authored
+		// log/panel/item/answer text cannot choose this kind/attribution.
+		if (prior.State != nil || prior.Diagnostic != nil) && strings.HasPrefix(e.Text, "Topic closed: ") {
+			out[topic] = TopicStateView{}
+		}
+		return
+	}
+	r, code := parseTopicState(e)
+	if code != "" {
+		out[topic] = TopicStateView{Diagnostic: &StateDiagnostic{Entry: e.ID, Code: code}}
+		return
+	}
+	if r.Op == "reset" {
+		out[topic] = TopicStateView{}
+		return
+	}
+	if r.Op == "extend" && !validExtension(prior, r) {
+		out[topic] = TopicStateView{Diagnostic: &StateDiagnostic{Entry: e.ID, Code: "malformed"}}
+		return
+	}
+	out[topic] = TopicStateView{State: &TopicState{Value: r.Value, Entry: e.ID, Run: r.Run}}
+	// A completed run belongs to history, not to the new work state.
+	if r.Value != StateImplementing {
+		out[topic].State.Run = nil
+	}
 }
 
 func validStateText(value string, maxBytes int) bool {
@@ -183,9 +192,7 @@ func parseTopicState(e Entry) (topicStateRecord, string) {
 	if json.Unmarshal(fields["op"], &op) != nil || op == "" {
 		return topicStateRecord{}, "malformed"
 	}
-	// Extensions are reserved by v1 but are not produced or interpreted until
-	// the cumulative ETA phase. Do not silently fall back to an older deadline.
-	if op != "set" && op != "reset" {
+	if op != "set" && op != "reset" && op != "extend" {
 		return topicStateRecord{}, "unsupported"
 	}
 	var r topicStateRecord
@@ -215,6 +222,16 @@ func parseTopicState(e Entry) (topicStateRecord, string) {
 		if !validRun(r.Run, e) {
 			return r, "malformed"
 		}
+	}
+	if r.Op == "extend" {
+		if r.Value != "" && r.Value != StateImplementing || r.From != "" || r.Run == nil || r.Run.ID == e.ID || r.ElapsedMS != nil || !validStateText(r.Reason, 2048) {
+			return r, "malformed"
+		}
+		r.Value = StateImplementing // extend carries the run, not another state set
+		return r, ""
+	}
+	if r.Reason != "" {
+		return r, "malformed"
 	}
 	if r.Op == "reset" {
 		if r.Value != "" || r.Run != nil && (r.From != StateImplementing || r.ElapsedMS == nil) || r.ElapsedMS != nil && r.Run == nil || r.From == StateImplementing && r.Run == nil {
@@ -272,7 +289,7 @@ func applyTopicState(p *problems, work *State, cmd command, topicOf topicResolve
 	}
 	if prior.State != nil && prior.State.Value == value {
 		if value == StateImplementing && (prior.State.Run.Owner != owner || prior.State.Run.ETAMinutes != eta) {
-			p.Add("%s: implementing owner/ETA differs; change ETA with wb:eta when supported, or explicitly exit/re-enter to replace the executor", cmd.Label())
+			p.Add("%s: implementing owner/ETA differs; change ETA with wb:eta, or explicitly exit/re-enter to replace the executor", cmd.Label())
 		}
 		return
 	}

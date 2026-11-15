@@ -26,9 +26,9 @@ Workers and subagents do not use the board.
 ## Taking over another session's board
 
 - Use this recipe only for a fully committed folder board: the source folder's root `meta.json` and `committed.json` must both have `schema_version: 2` and matching `generation` values, with no `pending.json`. Otherwise stop; `pending.json` is a durable commit intent that normal store recovery must finish, not a file to edit or delete for takeover.
-- Keep both boards quiescent, including dashboard reads and automatic refreshes, until destination preparation is complete. Back up both boards as independent copies, preserve your own board by renaming `ai-docs/whiteboards/<own stem>` to a backup name, then copy the source folder into that path as independent files, not symbolic or hard links. Your stem is the last path segment of the `full:` URL printed by `{{.McpNamespace}}/whiteboard.update` (the parent folder of `index.html` for a file path).
+- Cease source board writes and timer production before copying; keep both boards quiescent, including dashboard reads and automatic refreshes, until destination preparation is complete. Back up both boards as independent copies, preserve your own board by renaming `ai-docs/whiteboards/<own stem>` to a backup name, then copy the source folder into that path as independent files, not symbolic or hard links. Your stem is the last path segment of the `full:` URL printed by `{{.McpNamespace}}/whiteboard.update` (the parent folder of `index.html` for a file path).
 - Before any destination open or regeneration, edit only the copied destination's root `meta.json`: remove `state.embed_dir`, `state.embeds`, and `state.last_embed_seq` if present. These are render bookkeeping; retaining them can target the source host folder or evict source-named historical snapshots. Use a targeted JSON edit and atomic file replacement, preserving every other value, including schema, generation, topic references, item order, and all counters. Leave topic metadata, logs, and immutable panel files unchanged. Compare against the source backup: only those three keys may differ. Leave source metadata, source host output, and shared historical snapshot files untouched; clearing retention bookkeeping does not mean deleting snapshot files.
-- Only after that comparison, call `{{.McpNamespace}}/whiteboard.update` with `commands: ""` to regenerate into the repository folder, or send `wb:embed-dir` naming an existing destination-owned host folder distinct from the source's. If output publication fails after commit, keep the committed folder and retry with empty commands after fixing the output problem; do not restore stale metadata over it. Inbox attachments, mailbox history, and agenda do not come along.
+- Only after that comparison, call `{{.McpNamespace}}/whiteboard.update` with `commands: ""` to regenerate into the repository folder, or send `wb:embed-dir` naming an existing destination-owned host folder distinct from the source's. If output publication fails after commit, keep the committed folder and retry with empty commands after fixing the output problem; do not restore stale metadata over it. Inbox attachments, mailbox history, and agenda do not come along. The destination inherits topic deadlines but ignores copied notification receipts scoped to the source reply-id; when alive and due, it sends one catch-up, not missed intervals. Copying does not revoke source authority; source cessation remains your responsibility, not a transfer command or lease.
 
 ## Open-topic work state
 
@@ -59,18 +59,19 @@ Write authored board text in the conversation language, the `workflow.lang` valu
 
 Every tag carries the prefix `wb:` and follows the command syntax rules.
 `wb:topic` is the group: its `name` names the topic once for the
-`wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, and `wb:close` inside it. A
+`wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:eta`, and `wb:close` inside it. A
 batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:close`; none with `label` |
+| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:eta`, `wb:close`; none with `label` |
 | `wb:body` | none | current content, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
 | `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
 | `wb:log` | none | one nonempty agent-authored line of inline Markdown |
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
 | `wb:state` | `value`, `owner?`, `eta_minutes?` | none |
+| `wb:eta` | `minutes`, `reason` | none |
 | `wb:close` | `result` | none |
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
 | `wb:patch` | `id`, `status?`, `class?`, `clear?` | any `wb:add` field, each replacing that field |
@@ -123,7 +124,14 @@ Markdown up to the closing tag.
   `wb:state` alone does neither. Repeating the current declaration is a no-op;
   for `implementing`, owner and ETA must match, so repeats do not reset the
   start. To change executor, exit implementing and re-enter with the new
-  owner and ETA. ETA changes within a run are not available.
+  owner and ETA. Extend the current run with `wb:eta` instead.
+- `wb:eta` is an empty command inside `wb:topic`, requiring a known open,
+  currently implementing topic, `minutes` and a nonempty `reason`. Minutes
+  use the same positive integer range as `eta_minutes` and must be strictly
+  greater than the current cumulative total, measured from the original
+  implementing start, not from the extension. Extensions retain the owner,
+  original start and initial estimate, increment the extension count and
+  preserve every individual reason; they never restart the ETA clock.
 - `class`: `policy`, `technical`, `announced`, or `check`, the kinds of ask
   in the workflow manual's `### Asking the user`. A `check` is a gate, not a
   decision class: a request that the user look at, verify, or confirm a
@@ -337,6 +345,32 @@ Updates return response-only structural warnings for discussing topics with
 zero open items and waiting topics when this board has no open implementing
 topic. Every open item, including a check, counts as an ask. These warnings
 neither refuse the update nor create asks; they are not timed notifications.
+
+## Timed mailbox nudges
+
+The daemon uses existing mailbox delivery to nudge the owning lead about its
+own board. Each overdue implementing topic has a 30-minute debounce; a newly
+overdue topic triggers the full overdue list even during another topic's
+debounce. The list includes owners, original/current estimates, elapsed time,
+and extension counts/reasons. The board's full topic list repeats hourly
+only while an open implementing or waiting topic exists. When both are due,
+one message covers both.
+
+Deadlines and notification receipts survive daemon restarts; recovery sends
+one catch-up when due, not a replay of missed intervals. Enqueue precedes the
+receipt, so a crash may duplicate a nudge rather than lose it.
+
+Timer production requires an alive owning lead: associated live harness
+process evidence, and for hosted leads an open owning runner/row that is not
+stopped. Stopped, closed, dead or unknown/missing/contradictory process evidence
+suppresses enqueue without advancing receipts; live idle leads remain eligible.
+A key, board or heartbeat alone is not proof of life. PID reuse and a stop
+racing enqueue remain possible; already queued mail keeps ordinary transport
+semantics, not a delivery-time liveness guarantee.
+
+Delivery follows the host's existing mailbox push, armed wait or manual receive
+path. Off/manual modes and hosts without supported push do not gain autonomous
+idle-turn injection; do not rely on a timer to resume work there.
 
 ## Each turn
 

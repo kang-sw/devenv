@@ -167,7 +167,7 @@ func TestTopicStateDiagnosticsAndRawRetention(t *testing.T) {
 		{`{"v":1,"op":"set","value":"waiting","run":{}}`, "malformed"},
 		{`{"v":2,"op":"set","value":"waiting"}`, "unsupported"},
 		{`{"v":1,"op":"future"}`, "unsupported"},
-		{`{"v":1,"op":"extend"}`, "unsupported"},
+		{`{"v":1,"op":"extend"}`, "malformed"},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			s := stateBoard(t)

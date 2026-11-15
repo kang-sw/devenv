@@ -664,6 +664,13 @@ section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-rig
 .bcard[data-max] .bc-body { display: block; flex: 1 1 0; height: auto !important; }
 .bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-raise, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
 .bcard[data-max] .bc-min { display: inline-grid; }
+/* The one shared sheet owns a transient normal width and an in-sheet toggle.
+   Mobile retains its original insets; only wide sheets use the captured span. */
+.sheet-width { flex: none; }
+.sheet-width[hidden] { display: none !important; }
+details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) { grid-template-columns: 10px minmax(0, 1fr) auto auto auto; }
+details.entry-panel[data-max] > summary > .sheet-width { grid-column: 4; grid-row: 1; }
+details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) > .d-min { grid-column: 5; }
 @media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
 /* A large topic or topic panel (cards.js sheet): the board's own node, drawn
    fixed where a maximized card's box stands, over the same scrim, its
@@ -781,7 +788,48 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
 .board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
 .board-action kbd { font: 600 10.5px ui-monospace, Menlo, monospace; color: var(--wb-muted-fg); border: 1px solid var(--wb-line); border-radius: 4px; padding: 0 4px; }
-.board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+/* Visibility is view state only: topic nodes, frames, pin order and history stay intact. */
+[data-state-filtered] { display: none !important; }
+.board-state-filter { margin-left: auto; position: relative; display: flex; flex: none; --state-color: var(--wb-fg); }
+.board-state-filter [data-filter="awaiting-confirmation"] { --state-color: light-dark(#1d7348, #6cc39a); }
+.board-state-filter [data-filter="discussing"] { --state-color: light-dark(#b25000, #e0a36c); }
+.board-state-filter [data-filter="implementing"] { --state-color: light-dark(#2457c5, #7aa2ff); }
+.board-state-filter [data-filter="waiting"], .board-state-filter [data-filter="closed"] { --state-color: var(--wb-muted-fg); }
+.board-state-inline { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 2px; border-radius: 8px; background: var(--wb-muted); }
+.board-state-inline > .li { width: 13px; height: 13px; margin-inline: 5px 3px; color: var(--wb-muted-fg); }
+.board-state-radio { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font: 600 12.5px var(--wb-sans); white-space: nowrap; cursor: pointer; }
+.board-state-radio:hover { color: var(--wb-fg); }
+.board-state-radio[aria-checked="true"], .board-state-trigger:not([data-filter="all"]) { background: color-mix(in srgb, var(--state-color) 15%, var(--wb-card)); color: color-mix(in srgb, var(--state-color) 78%, var(--wb-fg)); border-color: color-mix(in srgb, var(--state-color) 38%, transparent); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.board-state-radio[data-filter="all"][aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); border-color: var(--wb-line); }
+.board-state-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--state-color); flex: none; }
+[data-filter="waiting"] > .board-state-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--state-color); }
+[data-filter="closed"] > .board-state-dot { border-radius: 2px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--state-color); }
+[data-filter="all"] > .board-state-dot { display: none; }
+.board-state-count { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; opacity: .72; }
+.board-state-radio[aria-checked="true"] .board-state-count { opacity: .9; }
+.board-state-inline[hidden], .board-state-trigger[hidden], .board-state-pop[hidden] { display: none; }
+.board-state-radio:focus-visible, .board-state-option:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+.board-state-pop.tpop { position: fixed; box-sizing: border-box; z-index: 20; }
+.board-state-options { display: grid; gap: 2px; }
+.board-state-option { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-fg); font: 13px var(--wb-sans); text-align: left; cursor: pointer; }
+.board-state-option:hover { background: var(--wb-muted); }
+.board-state-option .board-state-label { flex: 1; font-weight: 700; }
+.board-state-ring { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
+.board-state-option[aria-checked="true"] .board-state-ring { box-shadow: inset 0 0 0 1.5px var(--wb-primary), inset 0 0 0 4px var(--wb-card), inset 0 0 0 8px var(--wb-primary); }
+@container board-toolbar (max-width: 1000px) {
+  .board-state-radio:not([aria-checked="true"]):not([data-filter="all"]) .board-state-label { display: none; }
+  .board-state-radio { padding-inline: 7px; gap: 4px; }
+  .board-action { padding-inline: 8px; gap: 5px; }
+  .board-action kbd { display: none; }
+  .board-tools { gap: 5px; }
+}
+@container board-toolbar (max-width: 760px) {
+  .board-action .board-label { display: none; }
+}
+@container board-toolbar (max-width: 360px) {
+  .board-tools { gap: 3px; padding-inline: 5px; }
+  .board-action { padding-inline: 6px; }
+}
 .board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
 .board-term-slot:empty, .board-web-slot:empty { display: none; }
 .board-toolbar[data-floating] .board-toolbar-face { border-radius: 8px; }
@@ -791,7 +839,8 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
    an outer 30px hit box, 1px above and 5px below the visible 24px face. */
 .board-toolbar[data-floating] .board-action::after { content: ""; position: absolute; inset: -2px -1px -6px; border-radius: inherit; }
 .board-toolbar[data-floating] .board-action :is(.li, .term-arrow) { transform: scale(.857142857143); transform-origin: center; }
-.board-toolbar[data-floating] .board-count { line-height: 14px; }
+.board-toolbar[data-floating] .board-state-inline { height: 24px; }
+.board-toolbar[data-floating] .board-state-radio { height: 22px; border-radius: 4px; }
 .board-toolbar[data-floating][data-wrapped-actions] .board-tools { row-gap: 8px; }
 .board-action:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 @container board-toolbar (max-width: 540px) {
@@ -853,6 +902,31 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
    ratio: --sa and --sb are fr shares the page script sets from the saved
    splitter position, so neither pane resizes with its content; the px floors
    keep either from collapsing on a short window. */
+/* Saved lead history has its own layout, not a synthetic live adapter. */
+.dash.history .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+.dash.history .top { flex: none; }
+.dgrid.history { flex: 1 1 0; min-height: 0; display: grid; gap: 10px 16px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+.dgrid.history > * { min-width: 0; min-height: 0; }
+.dgrid.history > .tabbar { grid-column: 1 / -1; }
+.dgrid.history > .convo, .dgrid.history > .bcol { grid-column: 1; grid-row: 2; overflow: auto; }
+.dgrid.history > .bcol { overflow-anchor: none; }
+.dgrid.history[data-tab="board"] > .convo, .dgrid.history:not([data-tab="board"]) > .bcol { display: none; }
+@media (min-width: 1100px) {
+  .dgrid.history { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(0, 1fr); }
+  .dgrid.history > .tabbar { display: none; }
+  .dgrid.history[data-tab] > .convo, .dgrid.history[data-tab] > .bcol { display: block; grid-row: 1; }
+  .dgrid.history > .bcol { grid-column: 2; }
+}
+.wbeffects { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 8px; min-width: 0; }
+.wbeffects > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.wbeffects > summary time { margin-left: auto; flex: none; }
+.wbeffects > ol { margin: 10px 0 0; padding-left: 20px; }
+.wbeffects li { margin: 8px 0; min-width: 0; }
+.wbeffect-id { overflow-wrap: anywhere; }
+.wbeffect-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.wbeffect-values pre, .wbeffect-fallback { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; padding: 6px; background: var(--wb-muted); }
+.wbeffect-note { color: var(--wb-muted-fg); font-size: 12px; }
+@media (max-width: 640px) { .wbeffect-values { grid-template-columns: minmax(0, 1fr); } }
 .dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.live .top { flex: none; }
 .dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
@@ -940,9 +1014,12 @@ body:has(.fpane[data-max]) .dgrid.live > .fpane,
 body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }
 .board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
 .board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
-.board-toolbar[data-files] .board-files { pointer-events: auto; }
+.board-toolbar[data-files] .board-files, .board-toolbar[data-files] .sheet-width { pointer-events: auto; }
 body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 @media (max-width: 640px) { .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
+@media (min-width: 641px) {
+  .bcard[data-max] .bc-in, section.topic[data-max], details.entry-panel[data-max], .fpane[data-max] { left: var(--sheet-inset, 16px); right: var(--sheet-inset, 16px); }
+}
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
 .fhd { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1577,11 +1654,11 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rscrim { display: none; }
 @media (min-width: 1600px) {
   .dbody { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0 16px; align-items: start; }
-  .dash.live .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
-  .dash.live .dbody > .dgrid.live { min-height: 0; }
+  .dash.live .dbody, .dash.history .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
+  .dash.live .dbody > .dgrid.live, .dash.history .dbody > .dgrid.history { min-height: 0; }
   body.tk-paged .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
   .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
-  .dash:not(.live) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  .dash:not(.live):not(.history) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
   .top > .back { display: none; }
 }
 @media (max-width: 1599.98px) {
@@ -1631,7 +1708,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
   :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
-  .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  .dash:not(.live):not(.history) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
   :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
 }
 @media (min-width: 1600px) and (max-width: 2199.98px) {
