@@ -14,12 +14,12 @@ const pillSegPrelude = `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 function E(tag) { this.tag = tag; this.children = []; this.style = {}; this.attrs = {}; this.cls = {}; this.q = {}; this.parent = null; this.top = 0; this.hidden = false; this.textContent = ""; var me = this;
-  this.classList = { contains: function (c) { return !!me.cls[c]; } }; }
+  this.classList = { contains: function (c) { return !!me.cls[c]; }, toggle: function (c, on) { me.cls[c] = on; } }; }
 Object.defineProperty(E.prototype, "className", { set: function (v) { var me = this; me.cls = {}; v.split(" ").forEach(function (c) { if (c) me.cls[c] = true; }); } });
 E.prototype.all = function (out) { this.children.forEach(function (c) { out.push(c); c.all(out); }); return out; };
 E.prototype.querySelectorAll = function (sel) { if (sel in this.q) return this.q[sel]; var c = sel.slice(1); return this.all([]).filter(function (e) { return e.cls[c]; }); };
 E.prototype.querySelector = function (sel) { if (sel in this.q) return this.q[sel][0] || null; if (sel[0] !== ".") return null; return this.querySelectorAll(sel)[0] || null; };
-E.prototype.closest = function (sel) { for (var e = this; e; e = e.parent) if (e.cls[sel.slice(1)]) return e; return null; };
+E.prototype.closest = function (sel) { var names = sel.split(', ').map(function(s){return s.slice(1);}); for (var e = this; e; e = e.parent) if (names.some(function(c){return e.cls[c];})) return e; return null; };
 E.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 E.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 E.prototype.hasAttribute = function (k) { return k in this.attrs; };
@@ -31,6 +31,8 @@ E.prototype.removeEventListener = function () {};
 E.prototype.getBoundingClientRect = function () { return { top: this.top, bottom: this.top + 40, width: 100, height: 40 }; };
 E.prototype.scrollIntoView = function () { jumped.push(this.attrs.id); };
 var fire = null, jumped = [], observed = [];
+function requestAnimationFrame() { return 1; }
+function cancelAnimationFrame() {}
 function IntersectionObserver(cb) { fire = cb; this.observe = function (el) { observed.push(el); }; this.disconnect = function () {}; }
 function getComputedStyle() { return { overflowY: "visible" }; }
 function wsT(k) { return k; }

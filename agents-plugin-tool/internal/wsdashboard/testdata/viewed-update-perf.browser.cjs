@@ -164,7 +164,7 @@ function gate(name, ok) {
     await emit('img', 'vis');
     await settle();
     summary.scroll = await frame.evaluate(() => {
-      const badge = document.querySelector('.board-viewed-pending');
+      const badge = document.querySelector('.wb-oq-top .oq-updates');
       const visible = !!badge && !badge.hidden && badge.getBoundingClientRect().height > 0;
       const s = window.scroller();
       const changedPanelVisible = ['T001', 'T002'].map(topic => {

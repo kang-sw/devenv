@@ -705,8 +705,13 @@
     }
     function jump(node, opt) {
       var scroller = scrollerOf(node), s = sessions.get(scroller);
+      if (opt && opt.prepare && s) {
+        if (s.cancel) s.cancel(); else s.handle.end();
+        s = null;
+      }
       if (!s || !s.follow) s = start(scroller);
       if (opt && opt.onEnd) s.ends.push(opt.onEnd);
+      if (opt && opt.prepare) opt.prepare();
       s.jump(node, opt || {});
       return s.handle;
     }
@@ -741,6 +746,7 @@
           win.clearTimeout(cap);
         }
         function measure() {
+          if (typeof opt.top === 'number') return opt.top;
           var r = node.getBoundingClientRect();
           var offset = typeof opt.readingOffset === 'number' ? viewport(scroller).top + 1 - scrollerTop(scroller) + opt.readingOffset :
             typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0;
@@ -772,7 +778,7 @@
           raf = win.requestAnimationFrame(frame);
         }
         function land(behavior) {
-          if (typeof opt.offset === 'number' || typeof opt.readingOffset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
+          if (typeof opt.top === 'number' || typeof opt.offset === 'number' || typeof opt.readingOffset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
           else node.scrollIntoView({ block: block, behavior: behavior });
           o.wrote = scroller.scrollTop;
         }
