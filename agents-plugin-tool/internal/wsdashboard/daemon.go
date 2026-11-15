@@ -44,6 +44,10 @@ const (
 type DaemonOptions struct {
 	// Dir is the state directory (Dir's result); it is created when absent.
 	Dir string
+	// Home isolates the daemon's local account-usage reader, including its
+	// config search roots. Empty uses os.UserHomeDir and config environment
+	// overrides; an explicit home uses only that home's .claude/.codex/.pi.
+	Home string
 	// Port is the preferred port; 0 asks the OS for one. A taken port falls
 	// back to the port the last daemon bound (last-port file), then to an
 	// OS-assigned one, so a restart keeps its origin while the preferred
@@ -399,8 +403,15 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
 	}
-	home, _ := os.UserHomeDir()
-	d.planUsage = newPlanUsageStore(opts.Dir, home, os.Getenv)
+	home, getenv := opts.Home, os.Getenv
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	} else {
+		// Explicit embedding/fixture homes must not escape through inherited
+		// CLAUDE_CONFIG_DIR or CODEX_HOME overrides.
+		getenv = func(string) string { return "" }
+	}
+	d.planUsage = newPlanUsageStore(opts.Dir, home, getenv)
 	d.cache = newPageCache(d.broker, stats)
 	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)
 	if d.refreshInterval <= 0 {

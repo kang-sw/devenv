@@ -24,7 +24,7 @@ func testClient() *http.Client {
 
 func startTestDaemon(t *testing.T, dir, version string) *Daemon {
 	t.Helper()
-	d, err := StartDaemon(DaemonOptions{Dir: dir, Port: 0, Version: version, LockWait: 200 * time.Millisecond})
+	d, err := StartDaemon(DaemonOptions{Dir: dir, Home: t.TempDir(), Port: 0, Version: version, LockWait: 200 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("StartDaemon(%s): %v", version, err)
 	}
@@ -462,7 +462,7 @@ func startBuiltDaemon(t *testing.T, dir, version string, buildTime int64, conten
 	if len(contentHash) > 0 {
 		hash = contentHash[0]
 	}
-	d, err := StartDaemon(DaemonOptions{Dir: dir, Port: 0, Version: version, BuildTime: buildTime, ContentHash: hash, LockWait: 200 * time.Millisecond})
+	d, err := StartDaemon(DaemonOptions{Dir: dir, Home: t.TempDir(), Port: 0, Version: version, BuildTime: buildTime, ContentHash: hash, LockWait: 200 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("StartDaemon(%s): %v", version, err)
 	}
