@@ -21,8 +21,8 @@ func TestComposerShowsTopicNoteChips(t *testing.T) {
 	}
 	js := string(data)
 	actual := selectionActualSource(t, js,
-		[]string{"ctext =", "chips =", "bmentions =", "bselections =", "wpicks =", "cimgs ="},
-		[]string{"$", "chipList", "putChip", "renderChips", "renderSelectionChips", "topicNotes", "topicNote", "clearTopicNote", "closeTopicNotes", "focusTopicNote", "restoreTopics", "openNote"}, false)
+		[]string{"ctext =", "chips =", "bmentions =", "closeRequests =", "bselections =", "wpicks =", "cimgs ="},
+		[]string{"$", "chipList", "putChip", "renderChips", "renderSelectionChips", "focusCloseRequest", "topicNotes", "topicNote", "clearTopicNote", "closeTopicNotes", "focusTopicNote", "restoreTopics", "openNote"}, false)
 	runNode(t, "topic-note chip", `
 function El(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.attrs = {}; this.className = ""; this.textContent = ""; this.title = ""; this.hidden = false; this.value = ""; this.events = []; this.style = {}; }
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };

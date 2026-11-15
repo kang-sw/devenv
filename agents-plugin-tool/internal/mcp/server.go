@@ -49,6 +49,9 @@ type Server struct {
 	// live holds the dashboard live state of the sessions this process
 	// received adapter intake for (live_snapshot.go).
 	live liveHub
+	// intake tracks canonical operations from connection open; direct/file-only
+	// handler callers do not negotiate reasoning_summary_v1.
+	intake *intakeOrder
 	// dashboard is the dashboard session registry and nudge state
 	// (dashboard_sessions.go).
 	dashboard dashboardLink
@@ -141,7 +144,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return isPiTool(name) || name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return sessionHireTool(name) || isPiTool(name) || name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -227,6 +230,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
+	s.intake = &intakeOrder{}
 	// Restoring the launcher's dashboard rows scans the registry and the
 	// session store; run it beside the serve loop so requests are read (and
 	// refused while draining) at once, even when a drain starts right after
@@ -288,6 +292,12 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			}
 			continue
 		}
+		if _, v1 := canonicalIntake(req); v1 && len(line)+1 > wslive.SummaryFrameBytes {
+			if err := writeResponse(errorResponse(req.ID, -32602, "reasoning summary JSONL frame exceeds 49152 bytes")); err != nil {
+				return err
+			}
+			continue
+		}
 		if len(req.ID) == 0 {
 			s.handleNotification(req, &requests)
 			continue
@@ -304,11 +314,13 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			}
 			continue
 		}
+		op := s.intake.ingress(req)
 		reqCtx, cancel := context.WithCancel(ctx)
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer op.finish()
 			defer finish()
 			defer cancel()
 			defer requests.Delete(id)
@@ -330,6 +342,10 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			// Answer only once the launcher's rows are restored, so the
 			// replayed initialize's reply means the rail sees them live.
 			<-reconnectDone
+			if err := op.await(s); err != nil {
+				_ = writeResponse(toolTextResponse(req.ID, "", err))
+				return
+			}
 			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
 				s.debugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 			}
@@ -827,6 +843,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.children":
 		return s.handleSessionChildren(req.ID, params.Arguments)
+	case "session.request_hire", "session.roster":
+		return s.handleSessionHire(req.ID, params.Name, params.Arguments)
 	case "agenda.set":
 		return s.handleAgendaSet(req.ID, params.Arguments)
 	case "agenda.clear":
@@ -5276,7 +5294,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        dashboardInboxDrainTool,
-			"description": `Adapter-only: a host adapter (the extension or mod that runs inside the agent host) calls this at the end of a turn to collect the messages the user sent from the dashboard page; an agent never calls it, because a model call would claim a held message that is then never injected into the conversation. It atomically claims every held whiteboard message of the session (the user's messages sent from the dashboard page, one per send), in queue order: the messages promoted to steering first, in the order they were promoted, then the rest, oldest first; and returns each message's text: the answer block of any board answers and topic notes sent along (a <wb:answers> block, one line per entry), then the board text the user pointed at (one <wb:mention topic="..." id="...">text</wb:mention> element per line, id only when the selection lay in one item card), then the page elements the user picked in a web card (one <wb:pick url="..." selector="...">text</wb:pick> element per line) and the console errors attached from one (<wb:console url="...">one error per line</wb:console>), then the typed text. A command entry is a slash command the user picked on the page: its text is the typed line (/name or /name args), and the adapter runs it natively, not as a message; a drained batch splits at a command, so the messages before it reach the session first, then it runs, then the messages after it. A claimed message can no longer be cancelled or steered from the page, and no call returns it twice. The adapter injects each returned message as the user's own message. steer_only: true claims only the messages the user promoted to steering, leaving every other one held; the adapter calls it that way at a tool boundary of a running turn and injects what it returns into that turn. interrupt_only: true claims only the interrupt entries, each the user's request from the dashboard page to stop the running turn, and leaves every message held; an interrupt entry carries no text, only its creation time as sent_at, and the adapter stops a turn that started before that time and drops an older entry. steer_only and interrupt_only cannot be combined. A full drain (neither flag) drops every interrupt entry and never returns one. Works whether or not the session's dashboard is on; an empty inbox reports so. Default output is compact text: "inbox empty", or "drained N" and then per message a "message <id> <time>" line (a command entry's headed "command <id> <time>" instead), its text, and a blank line. format: "json" returns {messages: [{id, sent_at (epoch milliseconds), text, parts, chips: [{id, answer, note}], topics: [{topic, note}], mentions: [{topic, id?, text}], picks: [{url, selector, text}], consoles: [{url, lines}], interrupt (true on an interrupt entry, absent otherwise), command ({name, args?} on a command entry, absent otherwise)}]}.`,
+			"description": `Adapter-only: a host adapter (the extension or mod that runs inside the agent host) calls this at the end of a turn to collect the messages the user sent from the dashboard page; an agent never calls it, because a model call would claim a held message that is then never injected into the conversation. It atomically claims every held whiteboard message of the session (the user's messages sent from the dashboard page, one per send), in queue order: the messages promoted to steering first, in the order they were promoted, then the rest, oldest first; and returns each nonempty message's text inside its own <ws:user at="YYYY-MM-DDThh:mm+09:00">...</ws:user> envelope, with the send's instant at minute precision and the sending browser's UTC offset (the daemon's local zone for older entries). The envelope contains the answer block of any board answers and topic notes sent along (a <wb:answers> block, one line per entry), then the board text the user pointed at (one <wb:mention topic="..." id="...">text</wb:mention> element per line, id only when the selection lay in one item card), then the page elements the user picked in a web card (one <wb:pick url="..." selector="...">text</wb:pick> element per line) and the console errors attached from one (<wb:console url="...">one error per line</wb:console>), then the typed text. A command entry is a slash command the user picked on the page: its text is the typed line (/name or /name args), and the adapter runs it natively, not as a message; a drained batch splits at a command, so the messages before it reach the session first, then it runs, then the messages after it. A claimed message can no longer be cancelled or steered from the page, and no call returns it twice. The adapter injects each returned message as the user's own message. steer_only: true claims only the messages the user promoted to steering, leaving every other one held; the adapter calls it that way at a tool boundary of a running turn and injects what it returns into that turn. interrupt_only: true claims only the interrupt entries, each the user's request from the dashboard page to stop the running turn, and leaves every message held; an interrupt entry carries no text, only its creation time as sent_at, and the adapter stops a turn that started before that time and drops an older entry. steer_only and interrupt_only cannot be combined. A full drain (neither flag) drops every interrupt entry and never returns one. Works whether or not the session's dashboard is on; an empty inbox reports so. Default output is compact text: "inbox empty", or "drained N" and then per message a "message <id> <time>" line (a command entry's headed "command <id> <time>" instead), its text, and a blank line. format: "json" returns {messages: [{id, sent_at (epoch milliseconds), text, parts, chips: [{id, answer, note}], topics: [{topic, note}], mentions: [{topic, id?, text}], picks: [{url, selector, text}], consoles: [{url, lines}], interrupt (true on an interrupt entry, absent otherwise), command ({name, args?} on a command entry, absent otherwise)}]}.`,
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -5555,6 +5573,7 @@ func tools() []map[string]any {
 			},
 		},
 	}
+	toolList = append(toolList, sessionHireTools()...)
 	return withSessionKeyToolSchemas(append(toolList, piToolDefinitions()...))
 }
 

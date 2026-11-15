@@ -42,7 +42,10 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 		`Bash</span> 5`,
 		`whiteboard.update</span> 2`,
 		` · +4 other`,
-		`<span class="tsn"><b class="tf">1 failed</b> · <span class="t" data-span="75000">1m 15s</span>`,
+		`<span class="tsn"><b class="tf">1 failed</b></span>`,
+		`<span class="row-time"><span class="t" data-span="75000">1m 15s</span></span>`,
+		`<summary class="conv-row"><span class="row-icon">`,
+		`<span class="row-chevron">`,
 		`<li class="brow done">`,
 		`<li class="brow fail">`,
 		`<span title="6 calls">×6</span> · <span class="bf" title="1 failed">✗1</span>`,
@@ -72,8 +75,12 @@ func TestWhiteboardEffectsDoNotReplaceLegacyToolSummaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(regions[regionEntries].HTML)
-	if strings.Count(html, `<details class="toolsline"`) != 1 || strings.Count(html, `<details class="wbeffects"`) != 1 || !strings.Contains(html, "whiteboard.update") || !strings.Contains(html, "committed payload") || !strings.Contains(html, "old command output") {
+	if strings.Count(html, `<details class="toolsline"`) != 1 || strings.Count(html, `<article class="wbeffects wbupdate"`) != 1 || !strings.Contains(html, "whiteboard.update") || !strings.Contains(html, "Saved panel summary") || !strings.Contains(html, "old command output") {
 		t.Fatalf("effects replaced/misclassified legacy history: %s", html)
+	}
+	// Conversation cards expose committed panel recaps, not panel payloads.
+	if strings.Contains(html, "committed payload") {
+		t.Fatal("panel payload escaped its board-only surface")
 	}
 }
 
@@ -85,7 +92,7 @@ func TestToolsRowWithoutNamedToolsShowsTheCallTotal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := string(set[regionEntries].HTML); !strings.Contains(html, `<span class="tsum"><span class="tsl">2 tool calls</span></span>`) {
+	if html := string(set[regionEntries].HTML); !strings.Contains(html, `<span class="row-content tsum"><span class="tsl">2 tool calls</span></span>`) {
 		t.Errorf("summary = %s", html)
 	}
 }
@@ -207,9 +214,8 @@ func TestCompactTokensAndBatchSpans(t *testing.T) {
 	}
 }
 
-// TestToolsSummarySplitsCountsFromNumbers pins the two rows: the per-tool
-// counts sit in .tsl, the failed count, duration, and usage in .tsn after it,
-// and a summary with no numbers draws no second row.
+// Counts, failures and tokens stay in the content column; duration has its
+// own time column. A summary without numbers draws no numbers span.
 func TestToolsSummarySplitsCountsFromNumbers(t *testing.T) {
 	render := func(sum *wslive.ToolSummary) string {
 		ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: sum})}

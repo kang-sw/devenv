@@ -107,6 +107,13 @@ sel = selection(tTitle, tOpt, "Ship it?\nyes");
 check("within one item card", hostMention(), { m: { topic: "ship-gate", text: "Ship it?\nyes", id: "5" }, x: 30, y: 40 });
 sel = selection(tRow, tRow, "settled");
 check("within a settled row", hostMention().m, { topic: "ship-gate", text: "settled", id: "6" });
+var checkSummary = t1.add(new El("div", "srow", { id: "item-7" }));
+var checkControls = checkSummary.add(new El("div", "ckrow", { id: "check-7", "data-id": "07" }));
+var checkText = new Text(checkControls, "check title");
+sel = selection(checkText, checkText, "check title");
+check("within nested real check controls", hostMention().m, { topic: "ship-gate", text: "check title", id: "7" });
+checkControls.parentNode = t1; // the sticky pill lifts the real controls out of their summary
+check("lifted check controls retain item identity", hostMention().m, { topic: "ship-gate", text: "check title", id: "7" });
 sel = selection(tOpt, tRow, "yes ... row");
 check("across two item cards", hostMention().m, { topic: "ship-gate", text: "yes ... row" });
 sel = selection(tRecap, tTitle, "recap Ship");

@@ -2,12 +2,11 @@ package wsdashboard
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/kang-sw/devenv/internal/wswhiteboard"
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // Child reports require a typed wake cause. Whiteboard-origin user records
@@ -17,6 +16,31 @@ func (e ConvEntry) ChildReport() bool { return e.Kind == "wake" && e.Cause == "s
 // Wakes without an unambiguous display association keep compact diagnostics.
 // Repeated/reclaimed records lack shared delivery identity and stay separate.
 func (e ConvEntry) MailWake() bool { return e.Kind == "wake" && e.Cause == "mail" }
+
+func (e ConvEntry) BoardNudgeSummary() string {
+	reasons, topics := e.boardNudge()
+	if len(topics) == 0 {
+		return ""
+	}
+	for i, reason := range reasons {
+		switch reason {
+		case "overdue":
+			reasons[i] = wsi18n.T(e.Lang, "entry.board.nudge.overdue")
+		case "unblocked":
+			reasons[i] = wsi18n.T(e.Lang, "entry.board.nudge.unblocked")
+		case "hourly":
+			reasons[i] = wsi18n.T(e.Lang, "entry.board.nudge.hourly")
+		}
+	}
+	preview := strings.Join(topics[:min(2, len(topics))], ", ")
+	if len(topics) > 2 {
+		preview += " +" + strconv.Itoa(len(topics)-2)
+	}
+	if len(e.BoardNudgeMails) > 1 {
+		return wsi18n.T(e.Lang, "entry.board.nudge.batch", strings.Join(reasons, ", "), len(e.BoardNudgeMails), preview)
+	}
+	return wsi18n.T(e.Lang, "entry.board.nudge", strings.Join(reasons, ", "), preview)
+}
 
 var peerLeadFirstLine = regexp.MustCompile(`^\[(?:ws|wsflow) note: from a peer lead session \((?:(?:claude|codex|pi), )?not a worker\), with the same authority as yours\]$`)
 
@@ -48,13 +72,13 @@ func (e ConvEntry) MailPreview() string {
 }
 
 type conversationEffectRow struct {
-	Kind, Target, ID, Text, Class string
-	Options                       []string
+	Kind, Target, ID, Text string
 }
 
 type conversationEffectTopic struct {
 	Name, Label, Target string
 	Rows                []conversationEffectRow
+	Items               []conversationEffectRow
 }
 
 type conversationEffectCard struct {
@@ -113,14 +137,7 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			if effect.ID > 0 && effect.ID <= 999999 {
 				row.Target = "item-" + strconv.Itoa(effect.ID)
 			}
-			switch effect.Field {
-			case "title":
-				row.Text = effect.After
-			case "class":
-				row.Class = effect.After
-			case "options":
-				_ = json.Unmarshal([]byte(effect.After), &row.Options)
-			}
+
 		case "topic":
 			if effect.Field == "label" && effect.After != "" {
 				topic.Label = effect.After
@@ -132,25 +149,17 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 }
 
 func effectRow(topic *conversationEffectTopic, kind, id string) *conversationEffectRow {
-	for i := range topic.Rows {
-		if topic.Rows[i].Kind == kind && topic.Rows[i].ID == id {
-			return &topic.Rows[i]
+	rows := &topic.Rows
+	if kind == "item" {
+		rows = &topic.Items
+	}
+	for i := range *rows {
+		if (*rows)[i].Kind == kind && (*rows)[i].ID == id {
+			return &(*rows)[i]
 		}
 	}
-	topic.Rows = append(topic.Rows, conversationEffectRow{Kind: kind, ID: id})
-	return &topic.Rows[len(topic.Rows)-1]
-}
-
-// Panel inspection stays on the board. Other transitions retain escaped
-// before/after diagnostics independently of the update card's fold state.
-func (e ConvEntry) WhiteboardDetails() []wswhiteboard.Effect {
-	var out []wswhiteboard.Effect
-	for _, effect := range e.WhiteboardChanges() {
-		if effect.Kind != "panel" {
-			out = append(out, effect)
-		}
-	}
-	return out
+	*rows = append(*rows, conversationEffectRow{Kind: kind, ID: id})
+	return &(*rows)[len(*rows)-1]
 }
 
 func firstEffectLine(text string) string {

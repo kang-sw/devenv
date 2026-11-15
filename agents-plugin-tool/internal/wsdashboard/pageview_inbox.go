@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsinbox"
@@ -34,7 +35,8 @@ type HeldView struct {
 	Topics  []wsinbox.TopicNote
 	// Mentions are the board text the message points at, shown as capsules
 	// after the answer capsules.
-	Mentions []wsinbox.Mention
+	Mentions      []wsinbox.Mention
+	CloseRequests []wsinbox.CloseRequest
 	// Picks and Consoles are the picked page elements and attached console
 	// errors, shown as capsules after the mentions.
 	Picks    []wsinbox.Pick
@@ -178,23 +180,56 @@ func splitSelectionContent(text, attachDir, replyID string) (string, []Selection
 	return rest.String(), content, loose
 }
 
-// splitUserEntries takes each user entry's answer block
-// (wsinbox.ParseAnswerBlock), the mentions after it (wsinbox.ParseMentions),
-// the picks and console blocks after those (wsinbox.ParseWebElements), and
-// attached images (userImages) out of its text; a malformed block or element
-// stays in the text.
+// splitUserEntries unwraps each inbox item before the leading-anchored
+// capsule parsers run. A batch retains one stream key; its bubbles keep
+// independent timestamps and attachment numbers. Malformed envelopes stay
+// wholly plain, as does report/mail text outside a valid batch's envelopes.
 func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 	for i, e := range entries {
-		if e.Kind == wslive.RingUser {
-			text := e.Text
-			if lines, rest, ok := wsinbox.ParseAnswerBlock(text); ok {
-				entries[i].Answers, text = lines, rest
+		if e.Kind != wslive.RingUser {
+			continue
+		}
+		blocks, ok := wsinbox.ParseUserMessages(e.Text)
+		if !ok {
+			continue
+		}
+		hasEnvelope := false
+		for _, b := range blocks {
+			hasEnvelope = hasEnvelope || b.At != ""
+		}
+		if !hasEnvelope {
+			parseUserContent(&entries[i], attachDir, replyID)
+			continue
+		}
+		var views []ConvEntry
+		for _, b := range blocks {
+			v := e
+			v.Key, v.Text, v.EnvelopeAt = "", b.Text, b.At
+			if b.At != "" {
+				at, _ := time.Parse("2006-01-02T15:04-07:00", b.At)
+				v.At = at.UnixMilli()
+				parseUserContent(&v, attachDir, replyID)
 			}
-			entries[i].Mentions, text = wsinbox.ParseMentions(text)
-			entries[i].Picks, entries[i].Consoles, text = wsinbox.ParseWebElements(text)
-			entries[i].Text, entries[i].Content, entries[i].Images = splitSelectionContent(text, attachDir, replyID)
+			views = append(views, v)
+		}
+		if len(views) == 1 {
+			views[0].Key = e.Key
+			entries[i] = views[0]
+		} else {
+			entries[i].UserBlocks = views
 		}
 	}
+}
+
+func parseUserContent(e *ConvEntry, attachDir, replyID string) {
+	text := e.Text
+	if lines, rest, ok := wsinbox.ParseAnswerBlock(text); ok {
+		e.Answers, text = lines, rest
+	}
+	e.Mentions, text = wsinbox.ParseMentions(text)
+	e.CloseRequests, text = wsinbox.ParseCloseRequests(text)
+	e.Picks, e.Consoles, text = wsinbox.ParseWebElements(text)
+	e.Text, e.Content, e.Images = splitSelectionContent(text, attachDir, replyID)
 }
 
 // userImages takes the image lines (wsinbox.ParseImageLine: the numbered
@@ -240,7 +275,7 @@ type SentMark struct {
 func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
-		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips, Topics: r.Entry.Topics, Mentions: r.Entry.Mentions, Picks: r.Entry.Picks, Consoles: r.Entry.Consoles, Command: r.Entry.Command}
+		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips, Topics: r.Entry.Topics, Mentions: r.Entry.Mentions, CloseRequests: r.Entry.CloseRequests, Picks: r.Entry.Picks, Consoles: r.Entry.Consoles, Command: r.Entry.Command}
 		nums := r.Entry.Nums()
 		for i, path := range r.Entry.Images {
 			v.Images = append(v.Images, attachmentView(attachDir, replyID, nums[i], path))

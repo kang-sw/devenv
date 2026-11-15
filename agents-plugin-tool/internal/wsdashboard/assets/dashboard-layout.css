@@ -11,6 +11,24 @@
 /* Saved lead history has its own layout, not a synthetic live adapter. */
 .dash.history .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.history .top { flex: none; }
+/* Session cards and files, without the session's conversation or agents. */
+.fattachment .btn[hidden] { display: none; }
+.dgrid.worktree { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; gap: 0 12px;
+  grid-template-columns: minmax(300px, 4fr) minmax(0, 7fr); grid-template-rows: auto minmax(0, 1fr); }
+.dgrid.worktree > * { min-width: 0; min-height: 0; }
+.dgrid.worktree > .chead { grid-column: 1; grid-row: 1; }
+.dgrid.worktree > .chead .fsum { display: flex; }
+.dgrid.worktree > .fpane { grid-column: 1; grid-row: 2; display: flex; border-top-left-radius: 0; border-top-right-radius: 0; }
+.dgrid.worktree > .bcol { grid-column: 2; grid-row: 1 / -1; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
+.worktree-branch { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.worktree-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root[data-sysopen] .wthd { cursor: pointer; }
+.wthd.worktree-selected, :root[data-sysopen] .wthd:focus-visible { outline: 1.5px solid var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); border-radius: 6px; }
+@media (max-width: 760px) {
+  .dgrid.worktree { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 2fr) minmax(220px, 3fr); gap: 0; }
+  .dgrid.worktree > .bcol { grid-column: 1; grid-row: 3; margin-top: 10px; }
+  .worktree-path { display: none; }
+}
 .dgrid.history { flex: 1 1 0; min-height: 0; display: grid; gap: 10px 16px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
 .dgrid.history > * { min-width: 0; min-height: 0; }
 .dgrid.history > .tabbar { grid-column: 1 / -1; }
@@ -26,13 +44,8 @@
 .wbeffects { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 8px; min-width: 0; }
 .wbeffects > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
 .wbeffects > summary time { margin-left: auto; flex: none; }
-.wbeffects > ol { margin: 10px 0 0; padding-left: 20px; }
-.wbeffects li { margin: 8px 0; min-width: 0; }
-.wbeffect-id { overflow-wrap: anywhere; }
-.wbeffect-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
-.wbeffect-values pre, .wbeffect-fallback { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; padding: 6px; background: var(--wb-muted); }
+.wbeffect-fallback { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; padding: 6px; background: var(--wb-muted); }
 .wbeffect-note { color: var(--wb-muted-fg); font-size: 12px; }
-@media (max-width: 640px) { .wbeffect-values { grid-template-columns: minmax(0, 1fr); } }
 .dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.live .top { flex: none; }
 /* Empty selection keeps a full main panel even while the rail overlays. */

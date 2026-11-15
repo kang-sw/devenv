@@ -435,7 +435,7 @@ Whiteboard: <full> - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
-**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<wb:answers>` block, a `<wb:selection>` block or `<wb:mention>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
+**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
 
 ## Host embed folder
 
@@ -448,9 +448,17 @@ update once it has disappeared; send `wb:embed-dir` again, or with
 
 ## Answers
 
-A message sent from the dashboard opens with the user's board answers as a
-`<wb:answers>` block, the user's typed text after it; the page's
-copy-answers button builds the same block:
+Each message sent from the dashboard is a `<ws:user at="YYYY-MM-DDThh:mm+09:00">...</ws:user>`
+block, one per queued item even in a delivered batch. `at` uses the send's
+instant at minute precision and the sending browser's UTC offset, not a fixed
+`+09:00`. Older messages may arrive unwrapped; slash commands stay bare.
+Inside each envelope, the user's board answers open the content as a
+`<wb:answers>` block when present, followed by attached context, typed text and
+image lines. Image numbers belong to their own envelope. Only closing-delimiter
+text is escaped: `</ws:user` becomes `&lt;/ws:user`, and an existing
+`&(amp;)*lt;/ws:user` gains one `amp;` after `&`; decoding removes exactly one
+level per match. Other content, including the nested answer block, is unchanged.
+The page's copy-answers button builds the answer block alone:
 
 ```text
 <wb:answers>
@@ -479,7 +487,7 @@ lines, reads the same way, each segment that item's body. A reply that
 names no ID gets your reading with `assumed="true"`.
 
 Legacy messages carry selected board text as leading `wb:mention` elements
-after any answer block and before independently typed text, one element per
+after any answer block (or at the start of the envelope's content without one) and before independently typed text, one element per
 line in the order added. This form remains valid:
 
 ```text
@@ -531,9 +539,25 @@ This guidance comes from the connecting plugin's resources. Sessions using
 an older plugin need the updated plugin and a fresh playbook read; changing
 the daemon alone does not refresh guidance already loaded in a session.
 
+A topic card's x attaches the user's request to close that topic, after
+mentions inside its `<ws:user>` envelope:
+
+```text
+<wb:close-request topic="<topic>">optional reason</wb:close-request>
+```
+
+The body is that request's own reason, empty when none was given, escaped
+like a mention; the topic attribute escapes `&`, `<`, `>` and `"`.
+Close the named topic through the normal whiteboard update path unless it
+still has open work you must not abandon; in that case, reply in that topic
+with why you kept it open. Act without an extra confirmation. An already
+closed or unknown topic is a no-op you report briefly, since a request may
+outlive its card. The x itself only attaches the request; it never changes
+the topic's state.
+
 A web card on the dashboard shows a localhost dev server's page or a
 workspace HTML file; a localhost link you write opens one for the user.
-What the user takes from it follows the mentions, one element per line:
+What the user takes from it follows mentions and close requests, one element per line:
 `<wb:pick url="..." selector="...">text</wb:pick>` for a page element the
 user picked, and `<wb:console url="...">errors</wb:console>` for the
 page's console errors the user attached, one error per line. `url` is the

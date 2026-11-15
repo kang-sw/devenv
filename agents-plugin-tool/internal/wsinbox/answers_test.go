@@ -44,7 +44,7 @@ func TestParseAnswerBlockRoundTrips(t *testing.T) {
 		{ID: "130", Answer: "ok", Note: "a^b"}, {ID: "131", Note: "multi\nline \\n literal \\ end"},
 	}
 	topics := []TopicNote{{Topic: "ship-gate", Note: "topic\nnote"}}
-	text := Entry{Parts: []string{"user message here"}, Chips: chips, Topics: topics}.Text()
+	text := Entry{Parts: []string{"user message here"}, Chips: chips, Topics: topics}.testBody(t)
 	lines, rest, ok := ParseAnswerBlock(text)
 	if !ok {
 		t.Fatalf("ParseAnswerBlock(%q) not ok", text)

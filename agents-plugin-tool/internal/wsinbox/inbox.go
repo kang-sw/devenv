@@ -184,6 +184,8 @@ type Entry struct {
 	// Mentions holds the text the user selected on the board and added to
 	// the message (mentions.go), in the order added.
 	Mentions []Mention `json:"mentions,omitempty"`
+	// CloseRequests holds optional per-topic close requests, including empty reasons.
+	CloseRequests []CloseRequest `json:"closeRequests,omitempty"`
 	// Picks and Consoles hold the page elements the user picked in a web
 	// card and the console errors it attached (webpicks.go), in the order
 	// added.
@@ -199,6 +201,9 @@ type Entry struct {
 	// SentAt is the first send's time, epoch milliseconds; an interrupt
 	// entry's creation time.
 	SentAt int64 `json:"sentAt,omitempty"`
+	// UTCOffsetMinutes is the sending browser's minutes east of UTC. Nil
+	// keeps legacy entries in the daemon host's local zone; zero is UTC.
+	UTCOffsetMinutes *int `json:"utcOffsetMinutes,omitempty"`
 	// Steer marks an entry the user promoted to steering: the adapter
 	// injects it at the session's next tool boundary instead of at the turn
 	// end. Steered entries queue ahead of the rest (queueRecords).
@@ -322,13 +327,13 @@ func NameForID(id string) (string, bool) {
 	return name, entryNamePattern.MatchString(name)
 }
 
-// Text is the message the session receives: the answer block (AnswerBlock)
-// first, then the mentions (MentionBlock), then the picks (PickBlock) and the
+// bodyText assembles the envelope's content: the answer block (AnswerBlock)
+// first, then mentions and close requests, then the picks (PickBlock) and the
 // console blocks (ConsoleBlock) as one paragraph each, then each part as its
 // own paragraph, then one ImageLine per image. A command entry's text is its
 // typed line (Command.Line), which a host that runs a bare "/name args"
 // message as the command takes as it is.
-func (e Entry) Text() string {
+func (e Entry) bodyText() string {
 	if e.Command != nil {
 		return e.Command.Line()
 	}
@@ -337,6 +342,9 @@ func (e Entry) Text() string {
 		paras = append(paras, block)
 	}
 	if block := MentionBlock(e.Mentions); block != "" {
+		paras = append(paras, block)
+	}
+	if block := CloseRequestBlock(e.CloseRequests); block != "" {
 		paras = append(paras, block)
 	}
 	if block := PickBlock(e.Picks); block != "" {
@@ -366,7 +374,9 @@ func (e Entry) Text() string {
 // earlier one, an empty topic note is dropped, a mention is trimmed and
 // dropped when blank (its text counts toward the text limit), a pick and a
 // console block are validated and capped (normalizeWeb; they do not count
-// toward the text limit), and a repeated image path is dropped with its
+// toward the text limit). Close requests dedupe by topic (last reason wins),
+// count as content even without a reason, and their reasons count toward the
+// text limit. A repeated image path is dropped with its
 // number. An image, a pick, and a console block count as content. Image
 // numbers are optional: ImageNums is empty or parallel to Images, a number is
 // unique and at most maxImageNum, and an image numbered 0 (or every image,
@@ -375,10 +385,13 @@ func (e Entry) Text() string {
 // to send and an ErrInvalid error for a malformed one. A command entry
 // (normalizeCommand) carries its command alone.
 func Normalize(e Entry) (Entry, error) {
+	if e.UTCOffsetMinutes != nil && (*e.UTCOffsetMinutes < -720 || *e.UTCOffsetMinutes > 840) {
+		return Entry{}, fmt.Errorf("%w: UTC offset must be -720..840 minutes", ErrInvalid)
+	}
 	if e.Command != nil {
 		return normalizeCommand(e)
 	}
-	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Steer: e.Steer}
+	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Steer: e.Steer, UTCOffsetMinutes: e.UTCOffsetMinutes}
 	size, selectionMentions := 0, 0
 	for _, p := range e.Parts {
 		p = strings.TrimSpace(p)
@@ -413,6 +426,32 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		size += len(m.Text)
 		out.Mentions = append(out.Mentions, m)
+	}
+	if len(e.CloseRequests) > maxTopics {
+		return Entry{}, fmt.Errorf("%w: more than %d close requests", ErrInvalid, maxTopics)
+	}
+	for _, r := range e.CloseRequests {
+		r.Topic, r.Reason = strings.TrimSpace(r.Topic), strings.TrimSpace(r.Reason)
+		if r.Topic == "" || len(r.Topic) > maxTopicLen || strings.ContainsAny(r.Topic, "\x00\r\n") {
+			return Entry{}, fmt.Errorf("%w: close request topic %q", ErrInvalid, r.Topic)
+		}
+		if len(r.Reason) > maxNoteBytes {
+			return Entry{}, fmt.Errorf("%w: close reason for %s is longer than %d bytes", ErrInvalid, r.Topic, maxNoteBytes)
+		}
+		found := false
+		for i := range out.CloseRequests {
+			if out.CloseRequests[i].Topic == r.Topic {
+				out.CloseRequests[i] = r
+				found = true
+				break
+			}
+		}
+		if !found {
+			out.CloseRequests = append(out.CloseRequests, r)
+		}
+	}
+	for _, r := range out.CloseRequests {
+		size += len(r.Reason)
 	}
 	if size > maxTextBytes {
 		return Entry{}, fmt.Errorf("%w: text is longer than %d bytes", ErrInvalid, maxTextBytes)
@@ -513,7 +552,7 @@ func Normalize(e Entry) (Entry, error) {
 			}
 		}
 	}
-	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.Picks) == 0 && len(out.Consoles) == 0 && len(out.Images) == 0 {
+	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.CloseRequests) == 0 && len(out.Picks) == 0 && len(out.Consoles) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
 	}
 	return out, nil
@@ -536,10 +575,10 @@ func normalizeCommand(e Entry) (Entry, error) {
 			return Entry{}, fmt.Errorf("%w: a command carries no text", ErrInvalid)
 		}
 	}
-	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.Picks) > 0 || len(e.Consoles) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
-		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, picks, console blocks, or images", ErrInvalid)
+	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.CloseRequests) > 0 || len(e.Picks) > 0 || len(e.Consoles) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
+		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, close requests, picks, console blocks, or images", ErrInvalid)
 	}
-	return Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Command: &c}, nil
+	return Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, UTCOffsetMinutes: e.UTCOffsetMinutes, Command: &c}, nil
 }
 
 // putChip replaces the chip for c.ID in place, or appends c.

@@ -400,7 +400,7 @@ func TestAnswerCheckWaitsOutHeldInput(t *testing.T) {
 	through, _ := f.batch(ackID, 7, "")
 	f.sendHeld(ackID, time.Now(), wsinbox.Entry{Parts: []string{"one more thing"}})
 	f.d.checkAnswers(ackID)
-	if held := f.held(ackID); len(held) != 1 || held[0].Entry.Text() != "one more thing" {
+	if held := f.held(ackID); len(held) != 1 || inboxBody(t, held[0].Entry) != "one more thing" {
 		t.Fatalf("held = %+v, want the user's message alone", held)
 	}
 	f.wantThrough(ackID, through)
@@ -511,6 +511,35 @@ func TestAnswerCheckSkipsATerminalStop(t *testing.T) {
 			}
 			f.wantNudge(ackID, "(07)")
 			f.wantThrough(ackID, start)
+		})
+	}
+}
+
+// The old-bundle producer regression in wsagent pins its hosted reason to
+// empty even after abort/error/length. Pin that exact value at the real
+// answer-check consumer too: only an opted-in aborted reason suppresses it.
+func TestAnswerCheckHostedBundleReasonOptInPreservesLegacySuppression(t *testing.T) {
+	for _, c := range []struct {
+		name, reason string
+		nudge        bool
+	}{
+		{"old-summary-free-bundle", "", true},
+		{"capable-bundle-abort", wslive.TurnAborted, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAckFixture(t)
+			f.lead(ackID, "pi", time.Now(), wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseIdle}})
+			f.start(time.Hour)
+			f.src.setOpen(ackID, 7)
+			through, start := f.batch(ackID, 7, c.reason)
+			f.d.checkAnswers(ackID)
+			if c.nudge {
+				f.wantNudge(ackID, "(07)")
+				f.wantThrough(ackID, start)
+			} else {
+				f.wantNone(ackID)
+				f.wantThrough(ackID, through)
+			}
 		})
 	}
 }

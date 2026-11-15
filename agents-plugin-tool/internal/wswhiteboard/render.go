@@ -860,10 +860,16 @@ func (d itemData) AsStatic() itemData {
 	return d
 }
 
-// Expandable reports whether a settled row has more to show than its compact
-// text: options or a rationale. Links never count; the compact row prints them.
+// TimelineCheck keeps the check's summary anchored while its real controls
+// can fold or lift into the sticky pill. Embeds retain their compact list.
+func (d itemData) TimelineCheck() bool {
+	return d.Page != nil && d.Page.Full && d.Class == ClassCheck && d.HistoryAnchor() && (d.Status == StatusOpen || d.Assumed())
+}
+
+// Expandable reports whether a row has controls, options or rationale beyond
+// its compact text. Links never count; the compact row prints them.
 func (d itemData) Expandable() bool {
-	return len(d.Options) > 0 || d.Rationale != ""
+	return d.TimelineCheck() || len(d.Options) > 0 || d.Rationale != ""
 }
 
 // OptionHTML, RationaleHTML, and RecHTML render the item's block fields
@@ -950,6 +956,9 @@ func (d itemData) CheckReading() string {
 // Reading is the lead's reading of the answer beyond a picked option: the
 // text after the option letter, or the whole answer when it names none.
 func (d itemData) Reading() string {
+	if d.Page != nil && d.Page.Full && d.Class == ClassCheck {
+		return d.CheckReading()
+	}
 	if d.PickedOption() != nil {
 		return d.AnswerText
 	}

@@ -267,10 +267,12 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 			IsAbs: filepath.IsAbs,
 		}
 		root = rec.Root
+		beforeEntry := rec.Whiteboard.EntrySeq
 		outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, env)
 		if len(problems) > 0 {
 			return errWhiteboardRefused
 		}
+		s.stampBoardInputs(key, rec.Whiteboard, beforeEntry)
 		var renderErr error
 		render, renderErr = s.renderWhiteboard(rec, key, true)
 		return renderErr

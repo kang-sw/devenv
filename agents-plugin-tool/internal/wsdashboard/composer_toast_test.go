@@ -30,7 +30,7 @@ var bselections = [], mpend = null;
 function allNums() { return {}; }
 var answer = [true, {}];
 function post(route, body, done) { done(answer[0], answer[1]); }
-var ctext = { value: "", focus: function () {} }, imgs = [], imgSeq = 0, bmentions = [], wpicks = [], wconsoles = [], chips = {}, interrupting = false, interruptedTurn = null, cmdSel = null;
+var ctext = { value: "", focus: function () {} }, imgs = [], imgSeq = 0, bmentions = [], closeRequests = [], wpicks = [], wconsoles = [], chips = {}, interrupting = false, interruptedTurn = null, cmdSel = null;
 function sendText() { return ctext.value; }
 function chipList() { return []; }
 function topicNotes() { return []; }

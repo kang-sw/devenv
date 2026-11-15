@@ -45,7 +45,7 @@
   // the tab shown. emptyDraft reports one that holds nothing to restore.
   function emptyDraft(d) {
     if (!d || typeof d !== "object") return true;
-    return !d.text && !d.cmd && !(d.chips && d.chips.length) && !(d.bmentions && d.bmentions.length) &&
+    return !d.text && !d.cmd && !(d.chips && d.chips.length) && !(d.bmentions && d.bmentions.length) && !(d.closeRequests && d.closeRequests.length) &&
       !(d.wpicks && d.wpicks.length) && !(d.wconsoles && d.wconsoles.length) && !keys(d.answers).length && !(d.refs && d.refs.length) &&
       !(d.lost && d.lost.length) && !keys(d.open).length && (!d.tab || d.tab === "convo");
   }
@@ -166,7 +166,7 @@
     depth: "js.rail.layout.depth", workspace: "js.rail.layout.workspace", group: "js.rail.layout.group",
     level: "js.rail.layout.level", stars: "js.rail.layout.stars", child: "js.rail.layout.child",
     toplevel: "js.rail.layout.toplevel", invalid: "js.rail.layout.invalid", retry: "js.rail.layout.retry",
-    store: "js.rail.layout.store"
+    store: "js.rail.layout.store", hiring: "js.rail.layout.hiring"
   };
   function layoutRefusal(reason) {
     return LAYOUT_REFUSALS.hasOwnProperty(reason) ? LAYOUT_REFUSALS[reason] : LAYOUT_REFUSALS.invalid;

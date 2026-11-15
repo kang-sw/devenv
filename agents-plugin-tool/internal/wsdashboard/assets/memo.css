@@ -9,14 +9,10 @@
 .memo-pad header b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .memo-pad button { cursor: pointer; color: inherit; background: transparent; border: 0; border-radius: 4px; padding: 3px 6px; }
 .memo-pad button:hover { background: rgb(127 127 127 / .2); }
-.memo-pad textarea, .memo-pad textarea + .wsc-editor { box-sizing: border-box; width: 100%; min-height: 64px; padding: 10px; resize: vertical; font: inherit; color: inherit; background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 6px; }
-.memo-pad textarea + .wsc-editor { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
-.memo-pad .wsc-backing { display: none !important; }
-.memo-pad .wsc-editor:empty::before { content: attr(data-placeholder); color: var(--wb-muted-fg); pointer-events: none; }
-.memo-pad .wsc-editor:focus { outline: 1.5px solid var(--wb-primary); }
-.memo-pad .wsc-editor[aria-disabled="true"] { opacity: .6; cursor: default; }
-.memo-pad .wsc-capsule { display: inline; white-space: nowrap; font-size: 12px; line-height: 1.5; padding: 0 6px; border-radius: 5px; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 28%, transparent); }
-.memo-pad [hidden], .memo-pad .wsc-backing[hidden] + .wsc-editor { display: none; }
+/* Shared editor atoms come from dashboard.css, included before memo.css. */
+.memo-pad textarea, .memo-pad textarea + [contenteditable] { box-sizing: border-box; width: 100%; min-height: 64px; padding: 10px; resize: vertical; font: inherit; color: inherit; background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 6px; }
+.memo-pad textarea + [contenteditable] { max-height: 240px; overflow: auto; }
+.memo-pad [hidden], .memo-pad textarea[hidden] + [contenteditable] { display: none; }
 #memo-status { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 #memo-status:empty { display: none; }
 .memo-list { flex: 1; min-height: 0; overflow: auto; }
