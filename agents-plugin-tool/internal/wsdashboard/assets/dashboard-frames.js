@@ -146,6 +146,7 @@
   // a board swap left for its first height (wbKeep, wbGrow), which the
   // frame mounted again takes; it is marked as unmounted (wbUnmounted).
   function unmountFrame(f) {
+    var w = window.wbHistory, kept = frameSizes.has(f) && w && w.keep ? w.keep(f) : null;
     var p = doc.createElement("div");
     p.wbUnmounted = true;
     if (f.wbKeep) p.wbKeep = true;
@@ -154,6 +155,7 @@
     p.setAttribute("data-sandbox", f.getAttribute("sandbox") || "");
     if (frameSizes.has(f)) { p.style.height = Math.ceil(frameSizes.get(f)) + "px"; frameSizes.delete(f); }
     if (f.parentNode) f.parentNode.replaceChild(p, f);
+    if (kept) kept.apply();
     return p;
   }
   // The board's scrollers take no native scroll anchoring (dashboard.css),
@@ -175,7 +177,7 @@
       var banded = topicSettling(t);
       if (!banded || !was || !h || Math.abs(h - was) < 0.5 || t.hasAttribute("data-max")) return;
       var s = topicScroller(t);
-      if (w && w.keeping && w.keeping(s)) return;
+      if (s.wbScrollOwner || (w && w.keeping && w.keeping(s))) return;
       var r = t.getBoundingClientRect(), top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
       if (r.height && r.bottom - (h - was) <= top) s.scrollTop += h - was;
     });
@@ -340,20 +342,21 @@
       frameSizeFrame = requestAnimationFrame(applyFrameHeights);
       return;
     }
-    var batch = frameSizes, b = region("board"), kept = null;
+    var batch = frameSizes;
     frameSizes = new Map();
     frameSizeFrame = 0;
-    // A frame a board swap brought (wbKeep) reports its height late, after
-    // the swap's keep session may have ended: its first change keeps the
-    // board in place as the swap did, one session for the whole batch,
-    // started before any height lands. A session still running keeps the
-    // anchor the swap picked (the topmost entry in view may be one the swap
-    // moved).
+    // Every height applies at once, under one capture per actual scroller,
+    // including old frames and independent pinned columns. A frame's srcdoc
+    // never changes, so its height reports are the rendering of content the
+    // board already admitted (late images, fonts, a narrower column), never
+    // a pending external change: staging holds those as whole sections.
+    // Holding a visible frame's height left a swapped-in frame at 0 px, a
+    // blank card, until it fully left the view.
     batch.forEach(function (h, f) {
-      if (!f.wbKeep || Math.abs(Math.ceil(h) - (parseFloat(f.style.height) || 0)) < 1 || !b || !b.contains(f)) return;
-      if (!kept) kept = boardKept() || boardKeep(b);
-      if (kept) f.wbKeep = false;
+      if (f.isConnected === false) { batch.delete(f); return; }
+      if (Math.abs(Math.ceil(h) - (parseFloat(f.style.height) || 0)) >= 1) f.wbKeep = false;
     });
+    var kept = batch.size ? boardKeep(Array.from(batch.keys())) : null;
     batch.forEach(function (h, f) {
       var from = parseFloat(f.style.height) || 0, to = Math.ceil(h);
       f.style.height = to + "px";
@@ -367,7 +370,8 @@
       // from the height the frame stood at (board motion, slideBoard).
       if (f.wbGrow) {
         f.wbGrow = false;
-        if (f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
+        var w = window.wbHistory, s = w && w.keep && w.keep(f, { capture: false }).scroller;
+        if (!(s && s.wbScrollOwner) && f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
       }
       // A frame rendered before a theme switch (a board swap on a stream
       // opened earlier) takes the current theme when it first reports.
