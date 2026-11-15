@@ -556,3 +556,117 @@ shrinks for current models in mature harnesses. Evidence:
 5. Owner hypothesis: vendor model-card statements on tool-shape training;
    independent replication of the harness-problem numbers; SWE-bench harness
    ablations other than SWE-agent's.
+
+## Runtime checks (2026-11-15)
+
+Owner approved runtime checks (board (960)=a). Scope: can each harness run with
+all native tools disabled so only MCP tools remain. Versions: `codex-cli
+0.160.0` (model `gpt-6-sol`), `agy 1.5.9` (default model of the logged-in
+account). Every probe ran in a fresh `/tmp` dir with `< /dev/null`; no global
+config was edited (`~/.codex/config.toml` and `~/.gemini` untouched; `agy mcp
+list` is still empty). Pi and Claude were not probed here.
+
+### Codex
+
+Commands (all `codex exec --ephemeral --skip-git-repo-check -s read-only`):
+
+- Model catalog override: `codex debug models` dumps the catalog JSON; copy it
+  and, for every model, set `shell_type: "disabled"`, `apply_patch_tool_type:
+  null`, `experimental_supported_tools: []`, `tool_mode:
+  "non_code_mode_only"`, `multi_agent_version: null`, `supports_search_tool:
+  false`; point at it with `-c model_catalog_json="/tmp/.../cat.json"`.
+- Flags: `-c web_search="disabled" --disable view_image --disable goals
+  --disable multi_agent --disable image_generation --disable apps --disable
+  tool_suggest --disable skill_search --disable browser_use --disable
+  in_app_browser --disable shell_tool --disable unified_exec`.
+- Probe MCP: `-c 'mcp_servers.probe.command="python3"' -c
+  'mcp_servers.probe.args=["/tmp/mcpsrv/srv.py"]'` (a 30-line stdio echo
+  server with one tool `probe_echo`); `-c
+  'mcp_servers.probe.default_tools_approval_mode="approve"'` was needed for
+  the call to run (without it: "MCP tool call requires approval, but approval
+  policy is never").
+
+Observed tool lists (model self-report, prompt: list every tool verbatim):
+
+| step | tools the model reported |
+|---|---|
+| baseline | `functions.exec/wait/request_user_input(+_async)`, `clock.sleep`, 6 `collaboration.*`, `tools.apply_patch/exec_command/write_stdin/view_image/web__run/image_gen__imagegen/clock__curr_time`, goal tools, MCP resource tools, `request_plugin_install` |
+| catalog: shell off, apply_patch null | `exec_command`, `write_stdin`, `apply_patch`, `curr_time`, `request_user_input_async` gone; JS `functions.exec`/`wait` (code mode) remain |
+| + `tool_mode: non_code_mode_only` | code-mode `exec`/`wait` gone; tools become direct `functions.*`; `tool_search` appears |
+| + flags above | view_image, goals, web, image_gen, `request_plugin_install` gone |
+| + `multi_agent_version: null` | `collaboration.*` gone |
+| + `supports_search_tool: false` | MCP tools listed directly instead of deferred behind `tool_search` |
+
+Final list with probe + ws plugin MCP attached: `functions.list_mcp_resources`,
+`functions.list_mcp_resource_templates`, `functions.read_mcp_resource`,
+`functions.request_user_input`, `mcp__probe.probe_echo`, and 156 listed
+entries for the ws plugin (`mcp__ws.*`; the plugin MCP loaded in the temp
+dir). The `probe_echo` call returned `echo:hi`.
+
+Findings:
+
+- `apply_patch` CAN be removed, but only through the model catalog
+  (`model_catalog_json`, a supported config key); there is no feature flag for
+  it. The same catalog route removes the shell (`shell_type: "disabled"`).
+  The `features.shell_tool` / `features.unified_exec` toggles were only tried
+  together with the catalog override, so their solo effect is not isolated;
+  the catalog route is the verified one.
+- Not removable by anything tried: `request_user_input` (the
+  `collaboration_modes` feature is removed; `default_mode_request_user_input`
+  is the opposite switch) and the three `*_mcp_resource*` tools (generic MCP
+  plumbing, harmless for a MCP-only design).
+- Without `supports_search_tool: false`, the catalog default defers MCP tools
+  behind `tool_search`, which errored `unsupported call: tool_searchtool_search_tool`
+  in the non-code-mode configuration: MCP tools were unusable until the
+  catalog flag was cleared.
+- Caveats: the catalog override replaces the shipped model catalog file for
+  the process (it must be regenerated per Codex version; format is internal,
+  unversioned); `codex debug prompt-input` renders messages, not the tool
+  schema, so no schema dump was obtained; the lists above are model
+  self-reports (weaker evidence than a schema dump), though the removed tools
+  also stopped being callable. A sandbox/approval path still applies to MCP
+  calls (annotation-less tools need the approval-mode key in `exec`).
+
+Verdict: Codex - full replacement possible, with residual
+`request_user_input` and MCP-resource tools, via an internal-format catalog
+override (fragile across versions).
+
+### agy
+
+- `agy --help` has no tool flag. Built-in tool names (baseline, self-report):
+  `read_file`, `run_command`, `manage_task`, `send_message`, `schedule`,
+  `invoke_subagent`, `define_subagent`, `manage_subagents`, `write_file`,
+  `edit_file`, `search_web`, `run_workflow`, `swarm`, `ask_question`.
+- The binary string `Session asked to disable built-in tools; not supported by
+  the default agent yet, keeping them` shows the ACP `disableBuiltInTools`
+  request is ignored for the default agent. `--settings` rejects unknown keys
+  (`mcpServers`, arbitrary keys) and has no tool key found.
+- Working route: a project custom agent, `.agents/agents/bare.md`, with
+  frontmatter `excludeDefaultComponents: true`, `tools: []` (or an explicit
+  list), `enable_mcp_tools: true`, run as `agy --agent bare -p ...`. The
+  changelog documents `excludeDefaultComponents` ("opt out of default prompt
+  sections and built-in tools") and `tools` lists.
+- Observed with `tools: []`: `manage_task` only (cannot be removed). With
+  `enable_mcp_tools: true`: `call_mcp_tool`, `list_resources`,
+  `read_resource`, `manage_task`. With `tools: [read_file]`, `read_file` is
+  added, so the `tools` list is honored.
+- MCP: `agy mcp add` writes the user-level `~/.gemini/config/mcp_config.json`
+  (not touched). A fake `HOME` loses auth (login is not copyable), so the
+  probe server was attached as a project plugin instead:
+  `.agents/plugins/probe/{plugin.json,mcp_config.json}`. Plugin servers are
+  namespaced `<plugin>_<server>`: `call_mcp_tool(ServerName="probe_probe",
+  ToolName="probe_echo")` returned `echo:hi` with `--settings
+  '{"permissions":{"allow":["mcp(*)"]}}'`. A wrong server name gives "tool
+  probe_echo is not enabled for server ...".
+- MCP tools are not separate model-visible tools: they go through the generic
+  `call_mcp_tool` dispatcher (server name + tool name + args), unlike Codex.
+  The model needs the server/tool names from the prompt or `list_resources`.
+- Headless `-p` auto-denies anything not pre-allowed
+  (`permissions.allow` in `--settings`); `--dangerously-skip-permissions` was
+  not used.
+- Caveats: self-report only, no schema dump; `agy` agent-file frontmatter
+  keys were learned from changelog text, not a spec; project agents may need
+  folder trust; the `manage_task` residual and the dispatcher shape remain.
+
+Verdict: agy - partial: all file/shell/web tools can be removed via a custom
+agent, but `manage_task` remains and MCP tools sit behind `call_mcp_tool`.
