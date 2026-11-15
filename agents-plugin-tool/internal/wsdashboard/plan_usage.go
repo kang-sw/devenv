@@ -76,6 +76,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	changed := false
+	var samples []planUsageSample
 	for _, v := range snap.Usage.Limits {
 		if (v.Kind != wslive.LimitFiveHour && v.Kind != wslive.LimitSevenDay) || !validUsage(v.Percent) {
 			continue
@@ -103,6 +104,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 			s.claude.Windows = append(s.claude.Windows, next)
 		}
 		changed = true
+		samples = append(samples, planUsageSample{Harness: "claude", Kind: next.Kind, Source: "Claude push", ResetsAt: next.ResetsAt, AsOf: next.AsOf, Percent: next.Percent})
 		if next.AsOf > s.claude.AsOf {
 			s.claude.AsOf = next.AsOf
 		}
@@ -111,6 +113,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		s.claude.Harness = "claude"
 		s.claude.Source = "Claude push"
 		s.saveLocked()
+		s.appendHistoryLocked(samples, time.Now().UnixMilli())
 	}
 }
 
@@ -207,7 +210,11 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	if d.planUsage == nil {
-		_ = json.NewEncoder(w).Encode(map[string]any{"entries": []planUsageEntry{}, "warnPercent": bandWarnPercent, "critPercent": bandCritPercent})
+		body := map[string]any{"entries": []planUsageEntry{}, "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
+		if r.URL.Query().Get("history") == "1" {
+			body["history"] = d.planUsage.history(time.Now().UnixMilli())
+		}
+		_ = json.NewEncoder(w).Encode(body)
 		return
 	}
 	if d.index != nil {
@@ -220,5 +227,9 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	// Cross-origin pages cannot set the custom header without a CORS preflight, which the daemon does not grant.
 	refresh := r.URL.Query().Get("refresh") == "1" && (r.Header.Get("Sec-Fetch-Site") == "same-origin" || sameOrigin(r) || r.Header.Get("X-WS-Usage-Refresh") == "1")
 	d.planUsage.query(r.Context(), refresh)
-	_ = json.NewEncoder(w).Encode(map[string]any{"entries": d.planUsage.entries(), "warnPercent": bandWarnPercent, "critPercent": bandCritPercent})
+	body := map[string]any{"entries": d.planUsage.entries(), "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
+	if r.URL.Query().Get("history") == "1" {
+		body["history"] = d.planUsage.history(time.Now().UnixMilli())
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
