@@ -140,3 +140,41 @@ func TestWorktreeReleaseWithoutALeaseRefusesOnlyADirtyTree(t *testing.T) {
 		t.Fatalf("release of a clean unleased worktree failed: %s", rel)
 	}
 }
+
+// TestWorktreeReleaseByTheHoldersOwnSessionKey: the worker key an acquire
+// minted is a session key of its own, and releasing by path under it is the
+// holder's own release.
+func TestWorktreeReleaseByTheHoldersOwnSessionKey(t *testing.T) {
+	s, base, leadA, _ := releaseGuardServer(t)
+	acq := acquireForTest(t, s, 1, leadA, base, "impl/test/alpha")
+	if rel := callToolOnce(t, s, 2, "worktree.release", map[string]any{"session_key": acq.WorkerKey, "path": acq.Path}); toolIsError(t, rel) {
+		t.Fatalf("the holder's release under its own worker key failed: %s", rel)
+	}
+	if b := wtBranch(t, acq.Path); b != "HEAD" {
+		t.Fatalf("released worktree not detached: %q", b)
+	}
+}
+
+// TestWorktreeReleaseWaitsOutAnAcquire: a release takes the pool's
+// acquisition lock before its holder check, so while an acquire holds it the
+// release fails with nothing changed.
+func TestWorktreeReleaseWaitsOutAnAcquire(t *testing.T) {
+	s, base, leadA, _ := releaseGuardServer(t)
+	acq := acquireForTest(t, s, 1, leadA, base, "impl/test/alpha")
+	draft := writeDraft(t, acq.Path)
+	unlock, err := lockWorktreeAcquire(context.Background(), s.gitRunner(), acq.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := callToolOnce(t, s, 2, "worktree.release", map[string]any{"session_key": leadA, "path": acq.Path})
+	unlock()
+	if !toolIsError(t, rel) || !strings.Contains(toolText(t, rel), "nothing was changed") {
+		t.Fatalf("a release during an acquire must fail with nothing changed: %s", rel)
+	}
+	if _, err := os.Stat(draft); err != nil {
+		t.Fatalf("a failed release must keep the tree: %v", err)
+	}
+	if rel := callToolOnce(t, s, 3, "worktree.release", map[string]any{"session_key": leadA, "path": acq.Path}); toolIsError(t, rel) {
+		t.Fatalf("release after the acquire let go failed: %s", rel)
+	}
+}

@@ -774,7 +774,7 @@ func releaseHolderCheck(ctx context.Context, runner wsgit.Runner, target string,
 		return fmt.Errorf("worktree.release: %w", err)
 	}
 	if lease != nil && (lease.ParentKey != "" || lease.WorkerKey != "") {
-		if (lease.ParentKey != "" && lease.ParentKey == caller.LeadKey) || (lease.WorkerKey != "" && lease.WorkerKey == caller.WorkerKey) {
+		if (lease.ParentKey != "" && lease.ParentKey == caller.LeadKey) || (lease.WorkerKey != "" && (lease.WorkerKey == caller.LeadKey || lease.WorkerKey == caller.WorkerKey)) {
 			return nil
 		}
 		return fmt.Errorf("worktree.release refuses %s: it is leased to worker %s under lead %s (acquired %s), not to this caller; another session may have acquired it since you last held it. Nothing was changed. Re-check worktree.list against your own state. Cleaning up a worktree whose owner is gone: pass force: true, once you have confirmed that leaseholder is gone or agreed", target, lease.WorkerKey, lease.ParentKey, lease.AcquiredAt)
@@ -812,8 +812,9 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtP
 	return releaseWorktreeAs(ctx, runner, env, wtPath, poolConfigValue, lookup, nil)
 }
 
-// worktreeReleaseCaller is who asks worktree.release: the caller's lead key,
-// the worker key it named (empty when it named a path), and force.
+// worktreeReleaseCaller is who asks worktree.release: the caller's session
+// key (a lead's, or the worker key an acquire minted, which is a lead key
+// too), the worker key it named (empty when it named a path), and force.
 type worktreeReleaseCaller struct {
 	LeadKey   string
 	WorkerKey string
@@ -822,19 +823,29 @@ type worktreeReleaseCaller struct {
 
 // releaseWorktreeAs is releaseWorktree on behalf of caller (nil: no lease
 // check). Without force it refuses, changing nothing, a worktree leased to
-// anyone but the caller (its lead key is the lease's parent_key, or the
-// worker key it named is the lease's worker_key), and a dirty worktree with
-// no lease, whose holder is unknown. A pool worktree is reused once released,
-// so a release from stale state would otherwise wipe the next holder's work.
+// anyone but the caller (its session key is the lease's parent_key or
+// worker_key, or the worker key it named is the lease's worker_key), and a
+// dirty worktree with no lease, whose holder is unknown. A pool worktree is
+// reused once released, so a release from stale state would otherwise wipe
+// the next holder's work. For a caller it holds the pool's acquisition lock
+// from the check until the lease is gone, so no acquire can take the
+// worktree over in between and lose its work or its lease.
 func releaseWorktreeAs(ctx context.Context, runner wsgit.Runner, env []string, wtPath, poolConfigValue string, lookup worktreeProfileLookup, caller *worktreeReleaseCaller) (worktreeReleaseResult, error) {
 	var res worktreeReleaseResult
 	target, entry, _, err := ownedPoolWorktree(ctx, runner, wtPath, poolConfigValue, "worktree.release")
 	if err != nil {
 		return res, err
 	}
-	if caller != nil && !caller.Force {
-		if err := releaseHolderCheck(ctx, runner, target, *caller); err != nil {
-			return res, err
+	if caller != nil {
+		unlock, err := lockWorktreeAcquire(ctx, runner, target)
+		if err != nil {
+			return res, fmt.Errorf("worktree.release: %w; nothing was changed, release again", err)
+		}
+		defer unlock()
+		if !caller.Force {
+			if err := releaseHolderCheck(ctx, runner, target, *caller); err != nil {
+				return res, err
+			}
 		}
 	}
 	var branch string
