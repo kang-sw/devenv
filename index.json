@@ -248,7 +248,17 @@
       "registered_at": "2026-11-13T10:22:34Z"
     },
     "261113-feat-ws-dashboard-session-four-state-lifecycle": {
-      "registered_at": "2026-11-13T10:12:43Z"
+      "registered_at": "2026-11-13T10:12:43Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T10:53:19Z",
+        "impl": {
+          "branch": "impl/develop/baggy-cake-oak"
+        }
+      }
     },
     "261113-feat-ws-tracker-calendar-multi-day-spans": {
       "registered_at": "2026-11-13T13:42:45Z"
