@@ -3832,9 +3832,7 @@ export async function spawnAgent(
     const eviction = runSpawnGuards(registry, alias, resolveAgentRegistryCap());
     if (!eviction.ok) throw new Error(eviction.error);
     const agentId = randomUUID();
-    const ownership = allocateAgentHome(storage, agentId, role, ctx.exploreMode);
-    ownership.delegation = delegation;
-    updateOwnership(ownership.home, { delegation });
+    const ownership = allocateAgentHome(storage, agentId, role, ctx.exploreMode, delegation);
     const sessionPath = ownership.sessionPath!;
     let forkSourcePath = ctx.forkFrom;
     forkLaunch = ctx.forkFrom || ctx.spawnRole === "fork" ? prepareForkLaunch(ctx.forkContext) : undefined;
