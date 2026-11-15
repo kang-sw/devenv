@@ -1010,7 +1010,7 @@
     var wp = wpicks.slice(), wc = wconsoles.slice();
     if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
-    var body = { text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
+    var body = { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
     if (wp.length) body.picks = wp;
     if (wc.length) body.consoles = wc;
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });

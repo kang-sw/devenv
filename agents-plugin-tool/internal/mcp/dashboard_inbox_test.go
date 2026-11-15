@@ -39,6 +39,44 @@ func directDrain(t *testing.T, s *Server, key string, args map[string]any) (text
 	return content[0]["text"], isError
 }
 
+func drainedBody(t *testing.T, text string) string {
+	t.Helper()
+	blocks, ok := wsinbox.ParseUserMessages(text)
+	if !ok || len(blocks) != 1 || blocks[0].At == "" {
+		t.Fatalf("invalid drained envelope: %q", text)
+	}
+	return blocks[0].Text
+}
+
+func TestDashboardInboxDrainThreeUserEnvelopesInOrder(t *testing.T) {
+	f := newLiveFixture(t, true)
+	offset := 540
+	for i, text := range []string{"one", "two", "three"} {
+		_, _, err := wsinbox.Send(f.inboxDir(f.replyA), wsinbox.Entry{Parts: []string{text}, UTCOffsetMinutes: &offset}, time.Date(2026, 11, 15, 2, 40+i, 59, 0, time.UTC))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, isError := directDrain(t, f.server, f.keyA, map[string]any{"format": "json"})
+	var got struct {
+		Messages []struct {
+			Text string `json:"text"`
+		} `json:"messages"`
+	}
+	if isError || json.Unmarshal([]byte(out), &got) != nil || len(got.Messages) != 3 {
+		t.Fatal(out)
+	}
+	for i, want := range []string{"one", "two", "three"} {
+		if drainedBody(t, got.Messages[i].Text) != want || strings.Count(got.Messages[i].Text, "<ws:user at=") != 1 || !strings.Contains(got.Messages[i].Text, "+09:00") {
+			t.Fatal(out)
+		}
+	}
+	bundle := got.Messages[0].Text + "\n\n" + got.Messages[1].Text + "\n\n" + got.Messages[2].Text
+	if blocks, ok := wsinbox.ParseUserMessages(bundle); !ok || len(blocks) != 3 {
+		t.Fatalf("batch = %+v (%v)", blocks, ok)
+	}
+}
+
 func TestDashboardInboxDrainDescriptionIsAdapterOnly(t *testing.T) {
 	var desc string
 	for _, tool := range tools() {
@@ -49,7 +87,7 @@ func TestDashboardInboxDrainDescriptionIsAdapterOnly(t *testing.T) {
 	if !strings.HasPrefix(desc, "Adapter-only:") {
 		t.Fatalf("description = %q", desc)
 	}
-	for _, want := range []string{"an agent never calls it", "atomically claims", "oldest first", "promoted to steering first", "can no longer be cancelled or steered"} {
+	for _, want := range []string{"an agent never calls it", "atomically claims", "oldest first", "promoted to steering first", "can no longer be cancelled or steered", `<ws:user at="YYYY-MM-DDThh:mm+09:00">`, "sending browser's UTC offset"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description lacks %q: %s", want, desc)
 		}
@@ -79,7 +117,7 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 	}
 
 	out := callToolWithKey(t, f.server, 5, f.keyA, dashboardInboxDrainTool, nil)
-	want := "drained 2\n" + line(rec[0]) + "<wb:answers>\n3=b\n</wb:answers>\n\nfirst\n\n" + line(rec[1]) + "second\n\n"
+	want := "drained 2\n" + line(rec[0]) + rec[0].Entry.Text() + "\n\n" + line(rec[1]) + rec[1].Entry.Text() + "\n\n"
 	if out != want {
 		t.Fatalf("drain text = %q, want %q", out, want)
 	}
@@ -107,7 +145,7 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 		t.Fatalf("messages = %+v", got)
 	}
 	m := got.Messages[0]
-	if m.ID == "" || m.SentAt == 0 || m.Text != "<wb:answers>\n7=ok^fine\n</wb:answers>\n\nagain" || len(m.Parts) != 1 || m.Parts[0] != "again" || len(m.Chips) != 1 || m.Chips[0].Note != "fine" {
+	if m.ID == "" || m.SentAt == 0 || drainedBody(t, m.Text) != "<wb:answers>\n7=ok^fine\n</wb:answers>\n\nagain" || len(m.Parts) != 1 || m.Parts[0] != "again" || len(m.Chips) != 1 || m.Chips[0].Note != "fine" {
 		t.Fatalf("message = %+v", m)
 	}
 
@@ -173,7 +211,7 @@ func TestDashboardInboxDrainCarriesPicksAndConsoles(t *testing.T) {
 	wantText := `<wb:mention topic="t">m</wb:mention>` + "\n\n" +
 		`<wb:pick url="http://localhost:5173/settings" selector="#save">Save</wb:pick>` + "\n\n" +
 		`<wb:console url="http://localhost:5173/settings">first error` + "\nsecond error</wb:console>\n\nlook at this"
-	if m.Text != wantText {
+	if drainedBody(t, m.Text) != wantText {
 		t.Fatalf("text = %q, want %q", m.Text, wantText)
 	}
 	if len(m.Picks) != 1 || m.Picks[0] != entry.Picks[0] || len(m.Consoles) != 1 || m.Consoles[0].URL != entry.Consoles[0].URL || strings.Join(m.Consoles[0].Lines, "|") != "first error|second error" {
@@ -202,14 +240,14 @@ func TestDashboardInboxDrainSteerOnlyTakesOnlySteeredMessages(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("json: %v\n%s", err, out)
 	}
-	if len(got.Messages) != 1 || got.Messages[0].Text != "promoted" || got.Messages[0].ID != strings.TrimSuffix(steered, ".json") {
+	if len(got.Messages) != 1 || drainedBody(t, got.Messages[0].Text) != "promoted" || got.Messages[0].ID != strings.TrimSuffix(steered, ".json") {
 		t.Fatalf("steer-only drain = %+v", got)
 	}
 	if out := callToolWithKey(t, f.server, 4, f.keyA, dashboardInboxDrainTool, map[string]any{"steer_only": true}); out != "inbox empty\n" {
 		t.Fatalf("second steer-only drain = %q", out)
 	}
 	// The follow-up stayed held; the full drain takes it.
-	if held, _ := wsinbox.Held(dir); len(held) != 1 || held[0].Entry.Text() != "follow-up" {
+	if held, _ := wsinbox.Held(dir); len(held) != 1 || drainedBody(t, held[0].Entry.Text()) != "follow-up" {
 		t.Fatalf("held after the steer-only drain = %+v", held)
 	}
 	out = callToolWithKey(t, f.server, 5, f.keyA, dashboardInboxDrainTool, map[string]any{"steer_only": false})
@@ -429,7 +467,15 @@ func TestDashboardInboxDrainInterruptOnlyTakesOnlyInterruptEntries(t *testing.T)
 	// The follow-up stayed held; a full drain returns it without an
 	// interrupt field.
 	out = callToolWithKey(t, f.server, 5, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
-	if !strings.Contains(out, `"text":"follow-up"`) || strings.Contains(out, `"interrupt"`) {
+	var follow struct {
+		Messages []struct {
+			Text string `json:"text"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(out), &follow); err != nil || len(follow.Messages) != 1 {
+		t.Fatalf("full drain = %s: %v", out, err)
+	}
+	if drainedBody(t, follow.Messages[0].Text) != "follow-up" || strings.Contains(out, `"interrupt"`) {
 		t.Fatalf("full drain = %s", out)
 	}
 }
@@ -488,9 +534,9 @@ func TestDashboardInboxDrainCarriesACommandInOrder(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("json: %v\n%s", err, out)
 	}
-	if len(got.Messages) != 3 || got.Messages[0].Text != "A" || got.Messages[0].Command != nil ||
+	if len(got.Messages) != 3 || drainedBody(t, got.Messages[0].Text) != "A" || got.Messages[0].Command != nil ||
 		got.Messages[1].Command == nil || *got.Messages[1].Command != (wsinbox.Command{Name: "compact", Args: "keep the plan"}) || got.Messages[1].Text != "/compact keep the plan" ||
-		got.Messages[2].Text != "B" || got.Messages[2].Command != nil {
+		drainedBody(t, got.Messages[2].Text) != "B" || got.Messages[2].Command != nil {
 		t.Fatalf("messages = %s", out)
 	}
 	if strings.Count(out, `"command"`) != 1 {

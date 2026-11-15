@@ -28,12 +28,12 @@ post = function (route, body, done) { bodies.push([route, JSON.parse(JSON.string
 var p1 = { url: "http://localhost:5173/", selector: "#a", text: "A" }, c1 = { url: "http://localhost:5173/", lines: ["e1"] };
 check("a pick is taken", [addWebPick(p1), wpicks, drafts], [true, [p1], 1]);
 sendMessage();
-check("a pick alone is a message", bodies, [["message", { text: "", chips: [], topics: [], mentions: [], picks: [p1] }]]);
+check("a pick alone is a message", bodies, [["message", { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: "", chips: [], topics: [], mentions: [], picks: [p1] }]]);
 check("the sent pick is dropped", wpicks, []);
 bodies = [];
 addWebConsole(c1); ctext.value = "see";
 sendMessage();
-check("a console block rides with the text", bodies, [["message", { text: "see", chips: [], topics: [], mentions: [], consoles: [c1] }]]);
+check("a console block rides with the text", bodies, [["message", { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: "see", chips: [], topics: [], mentions: [], consoles: [c1] }]]);
 check("the sent console block is dropped", wconsoles, []);
 bodies = []; toasts = [];
 answer = [false, "busy"]; addWebPick(p1); sendMessage();

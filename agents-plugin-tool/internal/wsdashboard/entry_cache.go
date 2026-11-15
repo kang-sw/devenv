@@ -53,6 +53,11 @@ func entryCacheKey(e ConvEntry) string {
 	for _, img := range e.Images {
 		b.WriteString("\x00" + img.Src)
 	}
+	for _, block := range e.UserBlocks {
+		for _, img := range block.Images {
+			b.WriteString("\x00" + img.Src)
+		}
+	}
 	return b.String()
 }
 

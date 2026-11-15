@@ -52,7 +52,7 @@ func TestEntryTextPlacesWebElements(t *testing.T) {
 		`<wb:pick url="http://localhost:1/" selector="#a">A</wb:pick>` + "\n" + `<wb:pick url="http://localhost:1/" selector="#b">B</wb:pick>` + "\n\n" +
 		`<wb:console url="http://localhost:1/">e1` + "\ne2</wb:console>\n" + `<wb:console url="http://localhost:2/">e3</wb:console>` +
 		"\n\nmy text\n\nImage #1: /x/a.png"
-	if got := e.Text(); got != want {
+	if got := e.testBody(t); got != want {
 		t.Fatalf("Text =\n%s\nwant\n%s", got, want)
 	}
 }
@@ -71,7 +71,7 @@ func TestParseWebElementsRoundTrips(t *testing.T) {
 		{URL: "http://localhost:5173/other", Lines: []string{"one"}},
 	}
 	mentions := []Mention{{Topic: "t", ID: "3", Text: "m"}}
-	text := Entry{Parts: []string{"user text"}, Mentions: mentions, Picks: picks, Consoles: consoles}.Text()
+	text := Entry{Parts: []string{"user text"}, Mentions: mentions, Picks: picks, Consoles: consoles}.testBody(t)
 	gotMentions, rest := ParseMentions(text)
 	if len(gotMentions) != 1 {
 		t.Fatalf("mentions not parsed:\n%s", text)
@@ -269,7 +269,7 @@ func TestWebElementsSurviveInboxLifecycle(t *testing.T) {
 	if err != nil || len(drained) != 1 || !reflect.DeepEqual(drained[0].Entry.Picks, wantP) || !reflect.DeepEqual(drained[0].Entry.Consoles, wantC) {
 		t.Fatalf("drain = %+v, %v", drained, err)
 	}
-	gotP, gotC, rest := ParseWebElements(drained[0].Entry.Text())
+	gotP, gotC, rest := ParseWebElements(drained[0].Entry.testBody(t))
 	if !reflect.DeepEqual(gotP, wantP) || !reflect.DeepEqual(gotC, wantC) || rest != "look" {
 		t.Fatalf("delivered = %+v, %+v, %q", gotP, gotC, rest)
 	}

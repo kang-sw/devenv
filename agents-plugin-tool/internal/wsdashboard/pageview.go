@@ -446,6 +446,10 @@ type ConvEntry struct {
 	Key string
 	// At is the entry's time (epoch ms).
 	At int64
+	// UserBlocks keeps per-envelope bubbles under one stable ring/stream key.
+	// EnvelopeAt is the original offset-bearing timestamp of one such bubble.
+	UserBlocks []ConvEntry
+	EnvelopeAt string
 	// HTML is a lead reply's text rendered as markdown with its inline HTML
 	// sanitized; user messages, mail bodies, and turn lines stay plain text,
 	// raw HTML included. It is set only while the entry renders on an entry
