@@ -273,7 +273,14 @@ Verification (implementation, not performed by this preparation):
 
 ### Phase 2: Approved compact session hover and current-agent model provenance
 
-Depends on Phase 1. Render approved A from the tracked references, using existing
+MAIN's explicit 2026-11-15 03:33:37Z execution grant supersedes the original
+Phase 1 dependency: implement Phase 2 first as a UI-only head; Phase 1 follows
+separately and remains unfinished. Render approved A using existing RailRow,
+context/cost/turn-time and per-agent telemetry only. Missing output identity,
+recorded effort, eligible last-turn rate and history stay unknown or omitted;
+request/state model values are labelled separately, never promoted to observed
+output. No new intake, persistence, protocol, history or adapter collection is
+a prerequisite for this head. Render approved A from the tracked references, using existing
 RailRow association and snapshot context/cost/turn-time figures. Keep rail rows,
 last-message text and header height unchanged. Retain the current agent panel's
 landed layout/separate effort stat while exposing the correct per-agent model
