@@ -22,7 +22,7 @@
 
 {{define "closedmore"}}{{with .ClosedMore}}{{if $.DocFramed}}<button class="btn closed-more" data-closed-next="{{$.ClosedNext}}" data-closed-more="{{.}}">{{t "wb.closed.showmore" .}}</button>{{else}}<div class="closed-more">{{t "wb.closed.more" .}}</div>{{end}}{{end}}{{end}}
 
-{{define "tago"}}{{with .UpdatedAt}}<time class="tago" datetime="{{.}}" title="{{t "wb.updated"}}"{{if $.Page.Full}} data-at="{{$.UpdatedMs}}"{{end}}>{{$.UpdatedClock}}</time>{{end}}{{end}}
+{{define "tago"}}{{with .UpdatedAt}}<time class="tago" datetime="{{.}}" title="{{t "wb.updated"}}"{{if $.Page.Full}} data-at="{{$.UpdatedMs}}"{{end}}>{{$.UpdatedClock}}</time>{{end}}{{if and .Page.Full .Doc}}<span class="body-age" data-body-age{{with .BodyUpdatedAt}} data-body-at="{{.}}"{{end}}>{{t "js.wb.body.unknown"}}</span>{{end}}{{end}}
 
 {{/* recap is the topic's current-state line, the latest agent log line (a
 legacy recap until converted): its inline author and time, then text, in the topic bar's

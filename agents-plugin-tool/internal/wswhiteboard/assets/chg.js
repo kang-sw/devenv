@@ -10,6 +10,7 @@ function wbChangeBars(body) {
   while ((c = walk.nextNode())) if (c.data.indexOf("wbchg:") === 0) marks.push(c);
   var layer = body.nextElementSibling;
   if (layer && !layer.classList.contains("wb-chg-layer")) layer = null;
+  if (layer && layer.wbTip) layer.wbTip.hidden = true;
   if (!marks.length) { if (layer) layer.remove(); return; }
   if (!layer) {
     layer = document.createElement("div");
@@ -27,10 +28,48 @@ function wbChangeBars(body) {
   function bar(kind, top, height, wide) {
     var b = document.createElement("div");
     b.className = "wb-chg-bar " + kind;
-    b.style.left = (wide ? x - 3 : x) + "px";
-    b.style.top = top + "px";
     if (height) b.style.height = height + "px";
-    layer.appendChild(b);
+    // Keep the painted bar's resting geometry. A separate, stable hit box
+    // grows neither on hover nor into the text column.
+    var hit = document.createElement("div"), hitHeight = Math.max(12, height || 2), pad = (hitHeight - (height || 2)) / 2;
+    hit.className = "wb-chg-hit";
+    var paintedLeft = wide ? x - 3 : x;
+    var hitLeft = wide ? Math.max(box.left - origin.left, x - 8) : x - 5;
+    hit.style.left = hitLeft + "px";
+    hit.style.top = (top - pad) + "px";
+    hit.style.height = hitHeight + "px";
+    hit.style.width = "12px";
+    b.style.left = (paintedLeft - hitLeft) + "px";
+    b.style.top = pad + "px";
+    hit.appendChild(b);
+    layer.appendChild(hit);
+    hit.addEventListener("pointerenter", function () {
+      var tip = layer.wbTip;
+      if (!tip) {
+        tip = document.createElement("div");
+        tip.className = "wb-chg-tip";
+        tip.setAttribute("role", "tooltip");
+        tip.setAttribute("data-body-age", "");
+        document.body.appendChild(tip);
+        layer.wbTip = tip;
+      }
+      // Same validated view value: the unframed topic header, or the
+      // frame's own metadata. Never read overall topic activity or parent.
+      var root = body.closest(".topic") || document;
+      var source = root.querySelector(".body-age, meta[name=wb-body-at]");
+      var at = source ? source.getAttribute("data-body-at") : "";
+      tip.setAttribute("data-body-at", at);
+      tip.textContent = window.wbBodyTimeText(at);
+      tip.hidden = false;
+      // Fixed overlay, clamped inside this document (including short opaque
+      // frames). It never changes body height or asks the host to scroll.
+      tip.style.left = "0px";
+      tip.style.top = "0px";
+      var r = hit.getBoundingClientRect(), tr = tip.getBoundingClientRect();
+      tip.style.left = Math.max(0, Math.min(r.right + 6, window.innerWidth - tr.width)) + "px";
+      tip.style.top = Math.max(0, Math.min(r.top, window.innerHeight - tr.height)) + "px";
+    });
+    hit.addEventListener("pointerleave", function () { if (layer.wbTip) layer.wbTip.hidden = true; });
   }
   marks.forEach(function (m) {
     var kind = m.data.slice(6), el = kind === "delafter" ? m.previousElementSibling : m.nextElementSibling;
