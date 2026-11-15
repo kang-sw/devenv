@@ -56,7 +56,8 @@ type ObservedRecord struct {
 
 // ObservedDirName is intentionally separate from snapshot.json: both older
 // typed snapshot writers replace that file and discard unknown fields. They
-// neither rewrite nor prune this additive directory (unlike the bounded ring).
+// neither rewrite nor prune this additive directory (unlike the bounded ring);
+// only an append prunes it, deleting repeats no reader can see (observed_prune.go).
 const ObservedDirName = "model-evidence"
 
 // Change is the latest transition, absent before a second model was observed.
@@ -259,6 +260,14 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
+	written := false
+	// Retention follows a write, never a read: only a new record grows the
+	// directory (observed_prune.go).
+	defer func() {
+		if written {
+			pruneObserved(dir)
+		}
+	}()
 	for _, r := range records {
 		sum := sha256.Sum256([]byte(observationKey(r)))
 		path := filepath.Join(dir, hex.EncodeToString(sum[:])+".json")
@@ -295,6 +304,7 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 		if err != nil {
 			return fmt.Errorf("model evidence: %w", err)
 		}
+		written = true
 	}
 	return nil
 }
