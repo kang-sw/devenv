@@ -60,39 +60,52 @@ func TestComposerChipHandoffFixture(t *testing.T) {
 	if remove == "" {
 		t.Fatal("missing production mention removal action")
 	}
-	functions := dashboardFuncs(t, "region", "boardBoxes", "boardQ", "inBoard", "effectTopic", "effectJump", "renderChips", "renderSelectionChips")
+	functions := dashboardFuncs(t, "region", "boardBoxes", "boardQ", "inBoard", "effectTopic", "effectJump", "renderChips", "renderSelectionChips", "selectionNote", "editSelection", "dropSelection", "validMentions", "hideMention", "placeMention", "lockMention", "addMention")
 	page := `<!doctype html><html lang="en" data-theme="light" data-rid="chip-fixture"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">
-<title>Composer chip navigation and full-note hover — source fixture</title><style>` + string(d.WhiteboardCSS) + string(d.CSS) + string(d.TrackerCSS) + `
+<title>Composer chips and bundle memo popover — source fixture</title><style>` + string(d.WhiteboardCSS) + string(d.CSS) + string(d.TrackerCSS) + `
 body { margin: 0; padding: 24px; background: var(--wb-bg); color: var(--wb-fg); font: 14px/1.5 system-ui; }
 .handoff { max-width: 1280px; margin: auto; }
 .handoff-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 24px; }
 #bcol { height: 65vh; overflow: auto; border: 1px solid var(--wb-line); border-radius: 12px; padding: 12px; }
 #r-board { padding-top: 180px; }
 #cchips { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
+.handoff-composer { width: 100%; box-sizing: border-box; padding: 8px; color: var(--wb-fg); background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 8px; }
 .handoff-history { margin-top: 24px; }
 .handoff .hchips { display: flex; flex-wrap: wrap; gap: 8px; }
 .handoff .boardbar, .handoff .t-close-request { display: none; }
 </style></head><body>` + string(d.WhiteboardSprite) + string(d.Sprite) + string(d.LucideSprite) + `
 <main class="handoff"><h1>Composer chips · source-built offline fixture</h1>
-<p>Click a chip body: reveal and briefly highlight its item, immutable entry, or topic on the left. Only its small right-hand × removes it. Reload resets all three chips.</p>
+<p>The first three mention chips reveal and briefly highlight their item, immutable entry, or topic on the left. Selection bundles below open their memo instead. Only a small right-hand × removes a chip. Reload resets the fixture.</p>
 <div class="handoff-grid"><section><h2>Selected session board</h2><div id="bcol" class="bcol"><div id="r-board">` + string(board.Board) + `</div></div></section>
-<section><h2>Composer board mentions</h2><div id="cchips"></div>
+<section><h2>Composer mentions and selection bundles</h2><p>The first three chips navigate. Each selection bundle is one compact chip: its body opens a memo popover; Escape or blur saves. Only × deletes. A pen marks a nonempty memo. Try clearing a memo or switching between chips.</p><div id="cchips" class="cchips"></div>
+<textarea id="ctext" class="handoff-composer" rows="2" aria-label="Fixture composer">Ordinary composer text stays unchanged by bundle edits.</textarea>
 <div class="handoff-history"><h2>Compact history answer chips</h2><p>Hover the bold ID/topic or the clipped note: each whole chip has the same full original multiline title. Inspect its title attribute to compare the complete text (native tooltip display is browser-owned).</p>` + history + `</div>
 <p><small>Real renderer, CSS, chip controls, ID navigation, card disclosure and history loader. No session transport, draft persistence, network access or shared runtime. Unrelated controls are outside this fixture's acceptance scope.</small></p></section></div></main>
-<script>` + string(wsi18n.Script(wsi18n.Default)) + `</script><script>` + string(d.AnswersScript) + `</script><script>(function () {` + string(d.FormScript) + `})();</script><script>` + string(d.CardsScript) + `</script>
+<script>` + string(wsi18n.Script(wsi18n.Default)) + `</script><script>` + string(d.MentionScript) + `</script><script>` + string(d.AnswersScript) + `</script><script>(function () {` + string(d.FormScript) + `})();</script><script>` + string(d.CardsScript) + `</script>
 <script>(function () {
 var doc=document,root=doc.documentElement,grid=null,tkApi=null,effectJumpEpoch=0;
 function q(s,el){return Array.prototype.slice.call((el||doc).querySelectorAll(s));}
 function $(id){return doc.getElementById(id);}
-var cchips=$('cchips'),cimgs=null,closeRequests=[],bselections=[],wpicks=[],wconsoles=[],bmentions=` + string(mentions) + `;
+var cchips=$('cchips'),ctext=$('ctext'),closeRequests=[],wpicks=[],wconsoles=[],bmentions=` + string(mentions) + `;
+var rid='chip-fixture',mbtn=null,mnote=null,mimgs=null,mpend=null,mcomposing=false;
+var bselections=[
+{mentions:[{topic:'handoff',id:'1089',entry:'e7',text:'Selection with no memo yet'}],comment:'',images:[]},
+{mentions:[{topic:'handoff',entry:'e8',text:'A second captured quote with its own saved memo'}],comment:'Saved memo 한글\nSecond line stays intact.',images:[]},
+{mentions:[{topic:'handoff',entry:'e9',text:'First source in a multi-entry push'},{topic:'handoff',entry:'e10',text:'Second source in the same push'}],comment:'One memo for both sources.',images:[]}
+];
+function queueDraft(){}
+function capsuleTopics(q,done){done([]);}
+` + selectionImagesSource(t) + `
 function chipList(){return [];}
 function topicNotes(){return [];}
 ` + functions + `
 window.WsCards.mount(region('board'),{key:'chip-fixture',column:$('bcol'),load:function(){return null;},save:function(){}});
 doc.addEventListener('click',function(e){var t=e.target,u;if(!t||!t.closest)return;
 ` + remove + `
+u=t.closest('[data-unselection]');if(u){dropSelection(+u.getAttribute('data-unselection'));return;}
+u=t.closest('[data-selection-edit]');if(u){editSelection(+u.getAttribute('data-selection-edit'));return;}
 });
 renderChips();root.setAttribute('data-fixture-ready','true');
 })();</script></body></html>`

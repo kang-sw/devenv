@@ -177,7 +177,7 @@ func TestReasoningSummaryPreservesUserRolesAndUnifiedHistoryKeys(t *testing.T) {
 				baseline := string(before[regionEntries].HTML)
 				userStart := strings.Index(baseline, `<div class="msg user"`)
 				replyStart := strings.Index(baseline, `<div class="msg fromlead"`)
-				if userStart < 0 || replyStart <= userStart || !strings.Contains(baseline, `<span class="achip"><b>(781)</b> ok`) || !strings.Contains(baseline, "ordinary &lt;words&gt;") || strings.Contains(baseline, "input-record") || strings.Count(baseline, `class="msg user"`) != batch.users || strings.Count(baseline, `data-entry="`+ring[0].Name+`"`) != 1 {
+				if userStart < 0 || replyStart <= userStart || !strings.Contains(baseline, `<span class="achip" title="keep visible"><b>(781)</b> ok`) || !strings.Contains(baseline, "ordinary &lt;words&gt;") || strings.Contains(baseline, "input-record") || strings.Count(baseline, `class="msg user"`) != batch.users || strings.Count(baseline, `data-entry="`+ring[0].Name+`"`) != 1 {
 					t.Fatalf("user role, answer chip or escaped text lost: %s", baseline)
 				}
 				s := rendererSummary()

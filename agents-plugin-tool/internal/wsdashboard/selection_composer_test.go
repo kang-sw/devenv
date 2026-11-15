@@ -194,7 +194,7 @@ check("thumbnail removal touches only actual ref", [mpend.images,mnote.value,mpe
 addMention();
 check("one push one group with one memo", [bselections.length,bselections[0].comment,bselections[0].images,ctext.value,doc.contains(sourceFrame)], [1,"memo [Image #1]",[2],"",false]);
 check("attached source bytes remain copied",bselections[0].mentions[0].text,"captured <source> [Image #1]");
-check("group shows source identity and editable memo", [cchips.children[0].children[0].children[0].getAttribute("data-wb-entry"),cchips.children[0].children[2].textContent,rowNums(bselections[0].row)], ["e7","memo [Image #1]",["#2"]]);
+check("group shows source identity and editable memo", [cchips.querySelector(".selection-source").getAttribute("data-wb-entry"),cchips.querySelector(".selection-note").title,rowNums(bselections[0].row)], ["e7","memo [Image #1]",["#2"]]);
 var original = bselections[0];
 editSelection(0); mnote.value = "edited"; addMention();
 check("editing replaces the group object", [bselections[0] !== original,bselections[0].comment,bselections[0].images], [true,"edited",[2]]);
@@ -215,6 +215,36 @@ for(var i=0;i<8;i++) addFiles([file("cap"+i)],mnote);
 check("shared eight-image cap includes attached group", [imgs.length,mpend.images.length,toastTexts()[0]], [8,7,"js.img.refused:js.img.max:8"]);
 hideMention();
 check("cancel cap popup releases only its images", imgs.map(function(p){return p.n;}), [4]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+func TestSelectionComposerCompactMemoEditor(t *testing.T) {
+	runSelectionRuntime(t, "compact selection memo editor", `
+ctext.value = "ordinary text stays exact";
+var first = {mentions:[{topic:"plan",entry:"e7",text:"first"},{topic:"plan",entry:"e8",text:"second"}],comment:"",images:[]};
+bselections = [first]; renderChips();
+var group = cchips.children[0], open = group.querySelector("[data-selection-edit]"), remove = group.querySelector("[data-unselection]");
+check("one compact body holds all sources with separate remove", [cchips.children.length,group.classList.contains("selection-chip"),open.querySelectorAll(".selection-source").length,remove.textContent], [1,true,2,"×"]);
+check("empty memo has no indicator or inline input", [open.querySelector(".selection-note").hidden,group.querySelectorAll("textarea").length], [true,0]);
+editSelection(0);
+check("body opens existing anchored editor, not attachment", [mpend.edit===first,mbtn.hidden,mbtn.querySelector("[data-wbmention]").hidden,mnote.value,bselections.length], [true,false,true,"",1]);
+mnote.value = "saved on Escape\n한글";
+mbtn.dispatchEvent(new Event("keydown",{key:"Escape"}));
+check("Escape saves without changing composer or source grouping", [mpend,mbtn.hidden,bselections.length,bselections[0].comment,bselections[0].mentions,ctext.value], [null,true,1,"saved on Escape\n한글",first.mentions,"ordinary text stays exact"]);
+check("memo is a subtle titled indicator", [cchips.querySelector(".selection-note").hidden,cchips.querySelector(".selection-note").title], [false,"saved on Escape\n한글"]);
+editSelection(0); mnote.value = "saved on blur";
+mbtn.dispatchEvent(new Event("focusout",{relatedTarget:mnote.wsc.editor}));
+check("internal focus does not save or dismiss", [!!mpend,mbtn.hidden], [true,false]);
+var before = bselections[0], retained = cchips.children[0], retainedRemove = retained.querySelector("[data-unselection]");
+mbtn.dispatchEvent(new Event("focusout",{relatedTarget:retainedRemove}));
+check("blur replaces snapshot but keeps pressed chip controls", [mpend,bselections[0]!==before,bselections[0].comment,cchips.children[0]===retained,cchips.querySelector("[data-unselection]")===retainedRemove,cchips.querySelector(".selection-note").title], [null,true,"saved on blur",true,true,"saved on blur"]);
+editSelection(0); mnote.value = "   ";
+mbtn.dispatchEvent(new Event("focusout",{relatedTarget:ctext.wsc.editor}));
+check("whitespace memo hides indicator without trimming saved bytes", [bselections[0].comment,cchips.querySelector(".selection-note").hidden], ["   ",true]);
+check("presentation edits do not send or write composer text", [sent,ctext.value], [0,"ordinary text stays exact"]);
+// The only deletion action remains the existing explicit remove control.
+dropSelection(0); check("explicit remove deletes bundle", bselections.length,0);
 process.stdout.write(bad.join("\n"));
 `)
 }

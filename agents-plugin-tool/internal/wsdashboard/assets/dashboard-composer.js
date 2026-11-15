@@ -227,29 +227,38 @@
   }
   function renderSelectionChips() {
     bselections.forEach(function (s, index) {
-      var group = doc.createElement("section"), sources = doc.createElement("div"), edit = doc.createElement("button"), remove = doc.createElement("button");
-      group.className = "selection-bundle";
-      sources.className = "hchips";
-      sources.setAttribute("aria-label", wsT("js.wbmention.context"));
-      s.mentions.forEach(function (m) {
-        var source = doc.createElement("span");
-        source.className = "achip mchip";
-        source.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "") + " " + m.text;
-        source.title = m.text;
-        if (m.entry) source.setAttribute("data-wb-entry", m.entry);
-        sources.appendChild(source);
-      });
-      edit.type = "button"; edit.className = "selection-edit";
+      var group = doc.createElement("span"), edit = doc.createElement("button"), note = doc.createElement("span"), remove = doc.createElement("button");
+      group.className = "selection-bundle achip mchip selection-chip";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", wsT("js.wbmention.context"));
+      edit.type = "button"; edit.className = "mchip-open selection-edit";
       edit.setAttribute("data-selection-edit", String(index));
-      edit.textContent = s.comment || wsT("js.wbmention.input");
-      edit.title = wsT("js.wbmention.note");
+      edit.title = s.mentions.map(function (m) { return m.text; }).join("\n") + (s.comment ? "\n" + s.comment : "");
+      edit.setAttribute("aria-label", wsT("js.wbmention.note") + ": " + edit.title);
+      s.mentions.forEach(function (m) {
+        var source = doc.createElement("span"), b = doc.createElement("b"), text = doc.createElement("span");
+        source.className = "selection-source";
+        b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "");
+        text.className = "anote"; text.textContent = m.text.replace(/\s+/g, " ");
+        source.appendChild(b); source.appendChild(text);
+        if (m.entry) source.setAttribute("data-wb-entry", m.entry);
+        edit.appendChild(source);
+      });
+      note.className = "selection-note"; note.textContent = "✎";
+      selectionNote(s, note);
+      edit.appendChild(note);
       remove.type = "button"; remove.className = "unchip";
       remove.setAttribute("data-unselection", String(index));
       remove.title = wsT("js.wbmention.remove"); remove.textContent = "×";
-      group.appendChild(sources); group.appendChild(remove); group.appendChild(edit);
+      group.appendChild(edit); group.appendChild(remove);
       s.row = doc.createElement("div"); s.row.className = "selection-images";
       group.appendChild(s.row); cchips.appendChild(group);
     });
+  }
+  function selectionNote(s, note) {
+    note.hidden = !s.comment.trim();
+    note.title = s.comment;
+    note.setAttribute("aria-label", wsT("js.wbmention.note"));
   }
   function dropSelection(index) {
     var s = bselections[index];
@@ -1090,8 +1099,17 @@
       mbtn.addEventListener("compositionend", function () { mcomposing = false; });
       mbtn.addEventListener("keydown", function (e) {
         if (e.isComposing || e.keyCode === 229 || mcomposing) { if (e.target === add) e.preventDefault(); e.stopPropagation(); return; }
-        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideMention(); ctext.focus(); }
+        if (e.key === "Escape") {
+          e.preventDefault(); e.stopPropagation();
+          if (mpend && mpend.edit) addMention();
+          else { hideMention(); ctext.focus(); }
+        }
         // Enter edits the note; attachment always uses the explicit action.
+      });
+      // Saving on blur must not replace the chip DOM under an in-flight
+      // pointer press (notably its remove button), or steal the new focus.
+      mbtn.addEventListener("focusout", function (e) {
+        if (mpend && mpend.edit && !mbtn.contains(e.relatedTarget)) addMention(true);
       });
       doc.body.appendChild(mbtn);
     }
@@ -1104,6 +1122,7 @@
     mpend = p;
     renderImgs();
     mbtn.hidden = false;
+    mbtn.querySelector("[data-wbmention]").hidden = !!p.edit;
     var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
     mbtn.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x + 4)) + "px";
     mbtn.style.top = Math.max(4, Math.min(window.innerHeight - h - 4, y + 6)) + "px";
@@ -1115,19 +1134,24 @@
     if (p) placeMention(p);
     else if (mpend && !mpend.frame) hideMention();
   }
-  function addMention() {
+  function addMention(keepFocus) {
     var p = mpend;
     if (!p || p.rid !== rid || mcomposing) return;
     if (!p.ms.length) return;
     var s = { mentions: validMentions(p.ms), comment: mnote.value, images: p.images.slice() }, index = bselections.indexOf(p.edit);
-    if (index >= 0) bselections[index] = s;
+    if (index >= 0) { s.row = p.edit.row; bselections[index] = s; }
     else bselections.push(s);
     hideMention(true);
     if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
-    renderChips();
+    if (keepFocus && index >= 0 && s.row && s.row.parentNode) {
+      var edit = s.row.parentNode.querySelector("[data-selection-edit]");
+      edit.title = s.mentions.map(function (m) { return m.text; }).join("\n") + (s.comment ? "\n" + s.comment : "");
+      edit.setAttribute("aria-label", wsT("js.wbmention.note") + ": " + edit.title);
+      selectionNote(s, edit.querySelector(".selection-note"));
+    } else renderChips();
     queueDraft();
-    ctext.focus();
+    if (!keepFocus) ctext.focus();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
