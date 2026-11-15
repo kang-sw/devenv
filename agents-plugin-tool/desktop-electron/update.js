@@ -186,41 +186,47 @@ if [ "$relaunch" = 1 ]; then /usr/bin/open -n "$target" --args "$@"; fi
 exit $code
 `;
 // RelaunchArgs is base64 (UTF-8) of the app's command line, already quoted
-// for Windows by windowsCommandLine, or "-" for none: one opaque token, so no
-// argument text is ever parsed by PowerShell.
-const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch, [string]$RelaunchArgs = '-')
-$ErrorActionPreference = 'Stop'
-try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
-if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { 'app did not exit'; exit 1 }
-$moved = $false
-# Helper processes can hold files for a moment after the main process exits.
-for ($i = 0; $i -lt 50 -and -not $moved; $i++) {
-  try {
-    if (Test-Path -LiteralPath $Backup) { Remove-Item -LiteralPath $Backup -Recurse -Force }
-    Move-Item -LiteralPath $Target -Destination $Backup
-    $moved = $true
-  } catch { Start-Sleep -Milliseconds 200 }
-}
-if (-not $moved) { 'could not move the old app aside'; exit 1 }
+// for Windows by windowsCommandLine: one opaque token, so no argument text
+// is ever parsed by PowerShell. Empty command lines use the parameter default.
+const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch, [string]$Log, [string]$RelaunchArgs = '-')
 try {
-  Move-Item -LiteralPath $Staged -Destination $Target
-  Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
-  $code = 0; "updated $Target"
+  Add-Content -LiteralPath $Log -Value "helper started pid=$PID app=$AppPid"
+  $ErrorActionPreference = 'Stop'
+  try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
+  if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { Add-Content -LiteralPath $Log -Value 'app did not exit'; exit 1 }
+  $moved = $false
+  # Helper processes can hold files for a moment after the main process exits.
+  for ($i = 0; $i -lt 50 -and -not $moved; $i++) {
+    try {
+      if (Test-Path -LiteralPath $Backup) { Remove-Item -LiteralPath $Backup -Recurse -Force }
+      Move-Item -LiteralPath $Target -Destination $Backup
+      $moved = $true
+    } catch { Start-Sleep -Milliseconds 200 }
+  }
+  if (-not $moved) { Add-Content -LiteralPath $Log -Value 'could not move the old app aside'; exit 1 }
+  try {
+    Move-Item -LiteralPath $Staged -Destination $Target
+    Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
+    $code = 0; Add-Content -LiteralPath $Log -Value "updated $Target"
+  } catch {
+    if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $Backup -Destination $Target
+    $code = 1; Add-Content -LiteralPath $Log -Value "update failed; restored the previous app: $_"
+  }
+  if ($Relaunch -eq 1) {
+    $exe = Join-Path $Target 'Werkschaft.exe'
+    if ($RelaunchArgs -and $RelaunchArgs -ne '-') {
+      # A single string goes to the new process verbatim as its command line tail.
+      $argLine = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))
+      Start-Process -FilePath $exe -ArgumentList $argLine
+    } else { Start-Process -FilePath $exe }
+  }
+  exit $code
 } catch {
-  if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction SilentlyContinue }
-  Move-Item -LiteralPath $Backup -Destination $Target
-  $code = 1; "update failed; restored the previous app: $_"
+  Add-Content -LiteralPath $Log -Value "helper failed: $_"
+  exit 1
 }
-if ($Relaunch -eq 1) {
-  $exe = Join-Path $Target 'Werkschaft.exe'
-  if ($RelaunchArgs -and $RelaunchArgs -ne '-') {
-    # A single string goes to the new process verbatim as its command line tail.
-    $argLine = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))
-    Start-Process -FilePath $exe -ArgumentList $argLine
-  } else { Start-Process -FilePath $exe }
-}
-exit $code
 `;
 function helperScript(platform) { return platform === 'win32' ? PS_HELPER : SH_HELPER; }
 // The arguments a relaunch repeats: the original ones (process.argv.slice(1)
@@ -243,14 +249,15 @@ function windowsCommandLine(args) {
     return out + '\\'.repeat(slashes * 2) + '"';
   }).join(' ');
 }
-function helperCommand(platform, script, { pid, target, staged, backup, staging, relaunch, args = [] }, env = process.env) {
+function helperCommand(platform, script, { pid, target, staged, backup, staging, relaunch, args = [],
+  logFile = path.join(path.dirname(staging), 'update-apply.log') }, env = process.env) {
   const flag = relaunch ? '1' : '0';
   if (platform === 'win32') {
     const line = windowsCommandLine(args);
     return [path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script,
-        '-AppPid', String(pid), '-Target', target, '-Staged', staged, '-Backup', backup, '-Staging', staging, '-Relaunch', flag,
-        '-RelaunchArgs', line ? Buffer.from(line, 'utf8').toString('base64') : '-']];
+        '-AppPid', String(pid), '-Target', target, '-Staged', staged, '-Backup', backup, '-Staging', staging, '-Relaunch', flag, '-Log', logFile,
+        ...(line ? ['-RelaunchArgs', Buffer.from(line, 'utf8').toString('base64')] : [])]];
   }
   return ['/bin/sh', [script, String(pid), target, staged, backup, staging, flag, ...args]];
 }
