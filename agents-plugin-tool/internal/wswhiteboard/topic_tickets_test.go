@@ -1,10 +1,13 @@
 package wswhiteboard
 
 import (
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeTickets resolves stems from a map; a stem it lacks is not found.
@@ -58,7 +61,7 @@ func TestTopicTicketsRoundTrip(t *testing.T) {
 }
 
 // TestTopicWithOnlyTicketsPersists pins that a topic whose only content is
-// its linked tickets is kept (dropTopicDoc), and dropped once they clear.
+// its linked tickets is kept, including its default state history after clearing.
 func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="links" tickets="261112-feat-a"/>`)
@@ -78,9 +81,20 @@ func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 			t.Errorf("%s: tickets-only topic missing or ticket slot rendered", name)
 		}
 	}
+	want := []Entry{{ID: "e1", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)}}
 	mustApply(t, st, `<wb:topic name="links" tickets=""/>`)
-	if st.topicKnown("links") {
-		t.Fatal("a topic left with nothing persisted")
+	if !st.topicKnown("links") || topicTickets(st, "links") != nil || st.EntrySeq != 1 || !reflect.DeepEqual(entries(t, st, "links"), want) {
+		t.Fatalf("clearing tickets lost or changed default history: %+v", st)
+	}
+	if view := st.TopicStates()["links"]; view.State == nil || view.State.Value != StateDiscussing || view.State.Entry != "e1" || view.Diagnostic != nil {
+		t.Fatalf("clearing tickets lost default authority: %+v", view)
+	}
+
+	// Literal pre-default metadata has no history to retain once tickets clear.
+	legacy := &State{Topics: []TopicDoc{{Name: "links", Tickets: []string{"261112-feat-a"}}}}
+	mustApply(t, legacy, `<wb:topic name="links" tickets=""/>`)
+	if legacy.topicKnown("links") || len(legacy.Topics) != 0 || legacy.EntrySeq != 0 || len(legacy.TopicStates()) != 0 {
+		t.Fatalf("legacy empty topic persisted or gained history: %+v", legacy)
 	}
 }
 
@@ -284,7 +298,7 @@ func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
 func TestTopicHeadClassIsTheBoardsOwn(t *testing.T) {
 	thead := regexp.MustCompile(`\bthead\b`)
 	for _, name := range []string{"assets/page.css", "assets/page.tmpl", "assets/rail.js", "assets/form.js"} {
-		raw, err := assetFS.ReadFile(name)
+		raw, err := whiteboardTestAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -293,7 +307,7 @@ func TestTopicHeadClassIsTheBoardsOwn(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"assets/page.css", "assets/page.tmpl", "assets/rail.js"} {
-		raw, _ := assetFS.ReadFile(name)
+		raw, _ := whiteboardTestAsset(name)
 		if !strings.Contains(string(raw), "tophead") {
 			t.Errorf("%s does not name the head tophead", name)
 		}
@@ -324,7 +338,7 @@ func TestTopicTicketsSurviveTheFolderStore(t *testing.T) {
 // the tracker's own .tk root and dialogs (the Ctrl+K palette squashed into a
 // 17px pill once).
 func TestPageCSSLeavesTrackerTkAlone(t *testing.T) {
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

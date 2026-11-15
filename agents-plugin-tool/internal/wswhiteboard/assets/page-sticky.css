@@ -1,0 +1,108 @@
+/* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar; rail.js sets --wb-rail-h and --wb-rail-bot on the wrappers themselves */
+.oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
+.oq-wrap.top { top: calc(10px + var(--wb-rail-h, 0px)); }
+.oq-wrap.bot { bottom: 10px; }
+.oq-pill { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 3px 0 10px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.oq-pill[hidden], .oq-seg[hidden] { display: none; }
+.oq-wrap.top .oq-pill { top: 0; }
+.oq-wrap.bot .oq-pill { bottom: 0; }
+/* one inset capsule per state (pill.js): open, answered, answered with a note */
+.oq-arr { color: var(--wb-muted-fg); margin-right: 3px; }
+.oq-seg { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; font: inherit; line-height: 1; cursor: pointer; }
+.oq-seg.open { background: var(--wb-policy); color: var(--wb-on-policy); }
+.oq-seg.ans { background: var(--wb-announced); color: var(--wb-on-announced); }
+.oq-seg.nt { background: var(--wb-muted); color: var(--wb-muted-fg); font-weight: 600; }
+.oq-seg .n { font-variant-numeric: tabular-nums; }
+.oq-seg:hover { filter: brightness(1.1); }
+.oq-seg:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+
+/* topic rail (rail.js): the current topic's head (.tophead: its bar, note,
+   and summary line, one sticky unit) sticks under the top capsules
+   (--wb-rail-top, which rail.js sets on each head itself: on the host it
+   would restyle the whole board on every redraw), and zero-height sticky
+   wrappers at each end of the board carry the jump capsules. A host that keeps a sticky row of its own at the
+   top of its scroll area sets --wb-rail-inset to its height: the top
+   capsules and the head stick below it. The topic clips rather than hides its overflow, so
+   it is no scroll container and its head sticks to the board's scroller. The
+   capsule height, gap, and paddings are mirrored in rail.js (CAP, GAP, PAD,
+   FADE): change them together. A host that rails its own board nodes
+   (data-rail, rail.js) sticks their bars itself, at --wb-rail-top (set on
+   each data-rail-bar), and
+   styles their .wb-stuck shadow. */
+.wb-rail .topic { overflow: hidden; overflow: clip; }
+.wb-rail .topic > .tophead { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }
+.wb-rail .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+/* A stuck head stays under the top capsule stack (z-index 2 < the wrapper's
+   3): a head that its card's end pushes up slides under the stack, and the
+   morph copy (rail.js motion) draws the turn into a capsule over it. Drawn
+   above the stack, a short topic (a quiet one is all bar, so its bar cannot
+   stick lower) straddling the stick line covered every capsule. The
+   second shadow fills the bar's rounded top corners with the page colour
+   (offset up by its spread, so it reaches the corners and not below the
+   bar; the topic clips its sides): the card scrolling under a stuck bar
+   showed through them. */
+.wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
+/* the book button stays at the card's top and scrolls away under a stuck head, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
+.wb-rail .topic.has-doc:has(> details.tdoc) > .tophead.wb-stuck > .tbar { padding-right: 12px; }
+/* The check pill of a stuck head lifts the topic's check list into the head
+   (rail.js): it hangs under the head as a popover over the body. */
+.tophead > .checks { position: absolute; left: 10px; right: 10px; top: 100%; z-index: 1; margin: 4px 0 0; max-height: 46vh; overflow-y: auto; box-shadow: var(--wb-shadow-hi), 0 0 0 1px var(--wb-line); }
+.wb-rail .topic > details.tdoc > summary { z-index: 2; }
+.wb-rail-wrap { position: sticky; height: 0; z-index: 2; pointer-events: none; }
+.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }
+/* The bottom wrapper ends the board, so its top margin is the board's
+   bottom scroll margin: room for the last item to scroll fully clear of
+   the bottom stack (rail.js BOT: FADE + 2 CAP + GAP + PAD) with a 16px gap. */
+.wb-rail-wrap.dn { bottom: 0; margin-top: calc(14px + 2 * 17px + 3px + 4px + 16px); }
+.wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
+.wb-rail-stack[hidden] { display: none; }
+/* the solid copy that morphs between a bar and its capsule by height alone
+   (rail.js morph): it clips the bar's and the capsule's content, both
+   centred in it and crossfading; it carries their fill, so theirs drops */
+.wb-rail-wrap .wb-rail-ghost { position: absolute; margin: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.wb-rail-ghost > * { position: absolute; left: 0; top: 50%; width: 100%; margin: 0; transform: translateY(-50%); background: transparent; box-shadow: none; border-radius: 0; opacity: 1; }
+/* the shadow carries the band's fill over the scroller's top padding, which a sticky inset counts from */
+.wb-rail-wrap.up .wb-rail-stack { top: 0; padding: 4px 0 3px; background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg); }
+.wb-rail-wrap.dn .wb-rail-stack { bottom: 0; padding: 14px 0 4px; background: linear-gradient(to bottom, transparent, var(--wb-bg) 14px); }
+/* A capsule is as wide as its item's bar (the stack spans the board, as the
+   items do), so it reads as the bar collapsed, and the morph between the
+   two (rail.js) changes only height; the far one stands back by type and
+   opacity alone. */
+.wb-cap { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 17px; margin: 0; padding: 0 10px; border: 0; border-radius: 999px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 10.5px; font-weight: 700; line-height: 1; text-align: left; cursor: pointer; }
+.wb-cap.far { font-size: 10px; font-weight: 600; opacity: .6; }
+.wb-cap.quiet { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.wb-cap:hover { opacity: 1; }
+.wb-cap:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; opacity: 1; }
+.wb-cap .ci { flex: none; display: inline-flex; }
+.wb-cap .ci svg { width: 11px; height: 11px; }
+.wb-cap .cn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-cap .cp { flex: none; display: inline-flex; align-items: center; height: 12px; padding: 0 5px; border-radius: 999px; background: var(--wb-policy); color: var(--wb-on-policy); font-size: 9.5px; font-weight: 700; }
+.wb-cap .cx { flex: none; opacity: .75; font-variant-numeric: tabular-nums; }
+.wb-cap[hidden], .wb-cap > [hidden] { display: none; }
+
+/* update banner (full page) and in-page link target highlight */
+.banner { display: none; position: sticky; top: 0; z-index: 5; margin: -16px -16px 12px; padding: 6px 16px; background: var(--wb-now); color: var(--wb-on-now); text-align: center; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: var(--wb-shadow-hi); }
+.banner.show { display: block; }
+.banner .i { width: 20px; height: 20px; margin: 0 auto; stroke-width: 2; }
+.flash { animation: wb-flash 1.6s ease-out; }
+@keyframes wb-flash {
+  from { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+  to { outline: 2px solid transparent; outline-offset: -2px; }
+}
+
+/* image viewer (viewer.js): a modal over the whole page. The chrome is dark in
+   both themes; the content sits on the card colour, so a diagram drawn in the
+   theme's ink stays readable. */
+.md img, .doc-body img, .md svg:not(.i), .doc-body svg:not(.i), .md pre.mermaid svg { cursor: zoom-in; }
+.wbv { position: fixed; inset: 0; z-index: 100000; background: rgb(8 9 11 / .88); color: #fff; outline: 0; }
+.wbv[hidden] { display: none; }
+.wbv-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; overscroll-behavior: contain; }
+.wbv-stage.drag { cursor: grabbing; }
+.wbv-content { position: absolute; left: 0; top: 0; max-width: none; max-height: none; margin: 0; border-radius: 6px; background: var(--wb-card); box-shadow: 0 8px 40px rgb(0 0 0 / .5); -webkit-user-drag: none; }
+.wbv-bar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 10px; background: rgb(28 30 34 / .9); box-shadow: 0 2px 12px rgb(0 0 0 / .4); }
+.wbv-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; text-decoration: none; }
+.wbv-btn:hover { background: rgb(255 255 255 / .16); }
+.wbv-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.wbv-btn[hidden] { display: none; }
+.wbv-btn .i { width: 16px; height: 16px; }
+.wbv-pct { min-width: 46px; text-align: center; font: 600 12px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; opacity: .85; }

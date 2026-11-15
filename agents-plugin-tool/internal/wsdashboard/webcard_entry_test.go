@@ -13,7 +13,7 @@ import (
 // link report only under user activation, and the preview card's action
 // on an HTML file.
 func TestWebCardEntryPoints(t *testing.T) {
-	src, err := os.ReadFile("assets/dashboard.js")
+	src, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

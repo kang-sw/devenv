@@ -1,9 +1,8 @@
 // Run locally: node agents-plugin-tool/internal/wsdashboard/testdata/lead-popover.test.cjs
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readAssetSource } = require('./asset-source.cjs');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '..', 'assets', 'dashboard.js'), 'utf8');
+const source = readAssetSource('wsdashboard', 'dashboard.js');
 const maker = source.match(/\n  function rpLeadMake\(\) \{[\s\S]*?\n  \}\n/);
 assert(maker, 'production lead popover maker exists');
 

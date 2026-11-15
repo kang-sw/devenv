@@ -7,7 +7,7 @@ import (
 )
 
 func TestRecapDisplayClampAndContentSizedHeader(t *testing.T) {
-	data, err := embeddedAsset("page.css")
+	data, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestRecapDisplayClampAndContentSizedHeader(t *testing.T) {
 }
 
 func TestRecapDisplayPanelTitleIsNotClipped(t *testing.T) {
-	data, err := embeddedAsset("page.css")
+	data, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

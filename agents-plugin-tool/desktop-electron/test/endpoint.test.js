@@ -22,7 +22,10 @@ async function fixture(t, handle) {
 test('cache override, relative root, symlink, default and missing home', t => {
   assert.equal(cacheRoot({ HOME: '/home/user' }, '/'), path.resolve('/home/user', '.cache', 'ws@kang-sw-devenv'));
   assert.equal(cacheRoot({ WS_CACHE_HOME: 'cache' }, '/work'), path.resolve('/work', 'cache'));
-  assert.throws(() => cacheRoot({}, '/'), /Home directory/);
+  assert.throws(() => cacheRoot({}, '/', () => ''), /Home directory/);
+  // No HOME (Windows): fall back to the OS home directory; HOME still wins.
+  assert.equal(cacheRoot({}, '/', () => '/users/ki'), path.resolve('/users/ki', '.cache', 'ws@kang-sw-devenv'));
+  assert.equal(cacheRoot({ HOME: '/home/user' }, '/', () => '/users/ki'), path.resolve('/home/user', '.cache', 'ws@kang-sw-devenv'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.symlinkSync(root, root + '/link');

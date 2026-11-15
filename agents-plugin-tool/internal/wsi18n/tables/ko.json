@@ -1767,6 +1767,8 @@
   "hover.lastrate": "지난 턴 출력 속도",
   "hover.turn": "현재 턴",
   "hover.lastturn": "지난 턴",
+  "hover.lastobserved": "마지막 관측",
+  "hover.history": "관측 모델 변경 이력",
   "hover.children": "실행 중 하위 에이전트",
   "hover.cost": "비용",
   "hover.registered": "등록",

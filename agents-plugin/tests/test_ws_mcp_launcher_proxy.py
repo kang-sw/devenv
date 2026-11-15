@@ -1312,5 +1312,33 @@ class LauncherProxyReviewTest(unittest.TestCase):
         self.binary.chmod(0o755)
 
 
+class WhiteboardSummaryForwardingTest(unittest.TestCase):
+    def test_appended_summary_and_old_prefix_lines_survive_byte_for_byte(self):
+        launcher = load_launcher()
+        prefix = "ids: (01)\nfull: /workspace/board/index.html\nembed: board-01.html\n"
+        text = prefix + "topic added: rollout (state: discussing, default)\n"
+        envelope = {"isError": False, "content": [{"type": "text", "text": text}], "_meta": {"fixture": "whiteboard"}}
+        request = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "whiteboard.update", "arguments": {"commands": '<wb:topic name="rollout"><wb:log>Ready</wb:log></wb:topic>'}}}
+        request_line = json.dumps(request).encode() + b"\n"
+        # Non-default JSON spacing also detects parse-and-reserialize forwarding.
+        response_line = json.dumps({"jsonrpc": "2.0", "id": 7, "result": envelope}, separators=(",", ":")).encode() + b"\n"
+        stdout = io.BytesIO()
+        proxy = launcher.McpProxy(mock.Mock(), {}, io.BytesIO(), stdout, io.StringIO())
+        proxy.stream = mock.Mock()
+        proxy.stream.write.return_value = True
+        with proxy.lock:
+            proxy.forward(request_line, request)
+        proxy.stream.write.assert_called_once_with(request_line)
+        self.assertIn(launcher.json_id_key(7), proxy.inflight)
+        self.assertTrue(proxy.deliver(response_line))
+        self.assertEqual(proxy.inflight, {})
+        self.assertTrue(proxy.output(response_line))
+        self.assertEqual(stdout.getvalue(), response_line)
+        result = json.loads(stdout.getvalue())["result"]
+        self.assertEqual(result, envelope)
+        self.assertEqual(result["content"][0]["text"].encode(), text.encode())
+        self.assertEqual(result["content"][0]["text"][:len(prefix)].encode(), prefix.encode())
+
+
 if __name__ == "__main__":
     unittest.main()

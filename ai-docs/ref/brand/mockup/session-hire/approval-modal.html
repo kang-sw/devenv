@@ -1,0 +1,131 @@
+<!doctype html>
+<!-- Mockup (not approved): owner approval modal for a hosted-session hire
+     request, plus the rail cues and the hiring-root toggle. Static HTML;
+     render with headless Chromium at 1360x860. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Session hire approval - mockup</title>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --fg: #1d2129; --muted: #eef0f3; --muted-fg: #636b78;
+  --line: #dde1e7; --primary: #2457c5; --ok: #1d7348; --fail: #c0262d; --warn: #c27a00; --warn-ink: #a35f00;
+  --radius: 10px; --shadow: 0 1px 2px rgb(0 0 0 / .06), 0 2px 8px rgb(0 0 0 / .05);
+  --shadow-hi: 0 12px 40px rgb(0 0 0 / .22), 0 2px 8px rgb(0 0 0 / .08);
+  --sans: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; width: 1360px; height: 860px; font: 13px/1.45 var(--sans); color: var(--fg); background: var(--bg); overflow: hidden; }
+.top { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--card); border-bottom: 1px solid var(--line); font-weight: 700; }
+.top .brand { font-size: 14px; }
+.top .crumb { color: var(--muted-fg); font-weight: 500; }
+.wrap { display: grid; grid-template-columns: 280px 1fr; height: calc(100% - 44px); }
+#rail { background: var(--card); border-right: 1px solid var(--line); padding: 10px 8px; }
+.rh { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted-fg); padding: 6px 8px; }
+.row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; }
+.row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.row .dot.idle { background: #a9b0bb; }
+.row .nm { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .h { font: 600 10.5px/1 var(--mono); color: var(--muted-fg); background: var(--muted); padding: 3px 5px; border-radius: 4px; }
+.row.child { margin-left: 18px; position: relative; }
+.row.child::before { content: ""; position: absolute; left: -10px; top: 0; bottom: 50%; width: 8px; border-left: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); border-bottom-left-radius: 6px; }
+.row.req { background: color-mix(in srgb, var(--warn) 10%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--warn) 55%, transparent); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font: 700 10.5px/1 var(--sans); padding: 3px 6px; border-radius: 999px; }
+.chip.hire { color: #fff; background: var(--warn-ink); }
+.chip.root { color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.row.ghost { margin-left: 18px; border: 1.5px dashed color-mix(in srgb, var(--warn) 60%, transparent); color: var(--warn-ink); font-style: italic; }
+.main { position: relative; padding: 18px; }
+.convo { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); height: 100%; padding: 16px 18px; color: var(--muted-fg); }
+.convo p { margin: 0 0 10px; }
+.scrim { position: absolute; inset: 0; background: rgb(20 24 31 / .38); }
+.modal { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); width: 640px; background: var(--card); border-radius: 12px; box-shadow: var(--shadow-hi); overflow: hidden; }
+.mh { display: flex; align-items: center; gap: 10px; padding: 14px 18px 12px; border-bottom: 1px solid var(--line); }
+.mh .title { font-size: 15px; font-weight: 700; flex: 1; }
+.mh .exp { font: 600 11.5px/1 var(--mono); color: var(--warn-ink); background: color-mix(in srgb, var(--warn) 12%, transparent); padding: 5px 8px; border-radius: 6px; }
+.mb { padding: 14px 18px 4px; display: grid; gap: 12px; }
+.who { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.who .k { color: var(--muted-fg); }
+.who code, .addr { font: 12px var(--mono); background: var(--muted); padding: 2px 6px; border-radius: 5px; }
+.lab { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted-fg); margin-bottom: 4px; }
+.reason { font-size: 13.5px; line-height: 1.5; padding: 10px 12px; border-radius: 8px; background: var(--muted); }
+details.ctx { border: 1px solid var(--line); border-radius: 8px; }
+details.ctx summary { list-style: none; cursor: pointer; display: flex; gap: 8px; align-items: center; padding: 8px 12px; font-weight: 600; font-size: 12.5px; }
+details.ctx summary::before { content: "\25B8"; color: var(--muted-fg); }
+details.ctx summary .n { color: var(--muted-fg); font-weight: 500; margin-left: auto; font-size: 11.5px; }
+details.ctx .preview { padding: 0 12px 10px 28px; color: var(--muted-fg); font-size: 12px; max-height: 38px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 40%, transparent); }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.field label { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted-fg); margin-bottom: 4px; }
+.field .ctl { height: 32px; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--card); font-size: 13px; }
+.field .ctl.sel::after { content: "\25BE"; margin-left: auto; color: var(--muted-fg); }
+.field .ctl.mono { font-family: var(--mono); font-size: 12px; }
+.field .hint { font-size: 11px; color: var(--muted-fg); margin-top: 3px; }
+.field .hint .chg { color: var(--primary); font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; height: 32px; }
+.seg span { padding: 0 14px; display: flex; align-items: center; font-weight: 600; color: var(--muted-fg); }
+.seg span.on { background: var(--primary); color: #fff; }
+.span2 { grid-column: span 2; }
+.note { font-size: 11.5px; color: var(--muted-fg); display: flex; gap: 6px; align-items: flex-start; padding: 8px 10px; border-radius: 7px; background: color-mix(in srgb, var(--primary) 6%, transparent); }
+.mf { display: flex; align-items: center; gap: 8px; padding: 12px 18px 14px; }
+.mf textarea { flex: 1; height: 34px; resize: none; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: 12.5px var(--sans); color: var(--muted-fg); }
+.btn { height: 34px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); font: 600 13px var(--sans); display: inline-flex; align-items: center; }
+.btn.rej { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 45%, var(--line)); }
+.btn.ok { background: var(--primary); color: #fff; border-color: var(--primary); }
+.inset { position: absolute; right: 18px; bottom: 10px; width: 300px; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-hi); padding: 12px 14px; }
+.inset .t { font-weight: 700; margin-bottom: 8px; display: flex; gap: 6px; align-items: center; }
+.inset .t .tag { font: 600 10px/1 var(--mono); color: var(--muted-fg); background: var(--muted); padding: 3px 5px; border-radius: 4px; }
+.tg { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.sw { width: 32px; height: 18px; border-radius: 999px; background: var(--primary); position: relative; flex: none; margin-top: 2px; }
+.sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+.sw.off { background: #c4cad3; } .sw.off::after { right: auto; left: 2px; }
+.sw.dis { opacity: .45; }
+.tg .d { font-size: 11.5px; color: var(--muted-fg); }
+.tg b { font-size: 12.5px; }
+.cap { position: absolute; left: 298px; bottom: 10px; font-size: 11px; color: #fff; opacity: .85; }
+</style>
+</head>
+<body>
+<div class="top"><span class="brand">ws dashboard</span><span class="crumb">devenv</span></div>
+<div class="wrap">
+  <aside id="rail">
+    <div class="rh">Sessions</div>
+    <div class="row"><span class="dot"></span><span class="nm">MAIN</span><span class="chip root">root</span><span class="h">claude</span></div>
+    <div class="row child"><span class="dot"></span><span class="nm">EXEC1 - split 793</span><span class="h">pi</span></div>
+    <div class="row req"><span class="dot"></span><span class="nm">EXEC5 - explorer</span><span class="chip root">root</span><span class="chip hire">hire 1</span><span class="h">claude</span></div>
+    <div class="row ghost"><span class="nm">pending: pdf preview spike</span></div>
+    <div class="row child"><span class="dot idle"></span><span class="nm">EXEC5 / css look pass</span><span class="h">pi</span></div>
+    <div class="row"><span class="dot idle"></span><span class="nm">wiki clerk</span><span class="h">claude</span></div>
+  </aside>
+  <section class="main">
+    <div class="convo"><p>EXEC5 conversation ...</p><p>&gt; ws/daemon.request_hosted_session sent. The owner will approve or reject; the outcome arrives by mail.</p></div>
+    <div class="scrim"></div>
+    <div class="modal" role="dialog" aria-label="Session hire request">
+      <div class="mh"><span class="title">Session hire request</span><span class="exp">expires in 27:41</span></div>
+      <div class="mb">
+        <div class="who"><span class="k">from</span><b>EXEC5 - explorer</b><code>id:caretakeraerosolpod</code><span class="k">claude &middot; opus</span></div>
+        <div>
+          <div class="lab">Reason</div>
+          <div class="reason">Need a parallel session to spike PDF preview in the file explorer while I keep the multi-select work moving. Small, isolated, report by mail.</div>
+        </div>
+        <details class="ctx"><summary>Recovery context (sent back to the requester)<span class="n">2,184 chars</span></summary>
+          <div class="preview">Epic 261114-epic-ws-dashboard-file-explorer, phase 3. Owner approved (930) media preview; PDF was deferred. Spike should compare pdf.js vs native object embed ...</div>
+        </details>
+        <div class="grid">
+          <div class="field"><label>Harness</label><div class="seg"><span>Claude</span><span class="on">Pi</span></div><div class="hint">requested: claude &middot; <span class="chg">changed</span></div></div>
+          <div class="field"><label>Label</label><div class="ctl">pdf preview spike</div></div>
+          <div class="field"><label>Model</label><div class="ctl sel mono">openai-codex/gpt-6.1-sol</div></div>
+          <div class="field"><label>Effort</label><div class="ctl sel">high</div></div>
+          <div class="field span2"><label>Root</label><div class="ctl mono">/Users/owner/devenv</div><div class="hint">the requester's root; a git worktree</div></div>
+        </div>
+        <div class="note">Created as if you added it from the rail: it shows under EXEC5 and EXEC5 gets its mail, but EXEC5 cannot stop or close it, and it cannot hire.</div>
+      </div>
+      <div class="mf"><textarea>Reason (sent to the requester on reject)</textarea><span class="btn rej">Reject</span><span class="btn ok">Approve &amp; create</span></div>
+    </div>
+    <div class="inset">
+      <div class="t">Session settings <span class="tag">rail row &rsaquo; settings</span></div>
+      <div class="tg"><span class="sw"></span><div><b>Can request sessions</b><div class="d">Root only. The session may ask you to create sessions; each request opens an approval.</div></div></div>
+      <div class="tg"><span class="sw off dis"></span><div><b>Can request sessions</b><div class="d">Unavailable while this session is grouped under a requester.</div></div></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

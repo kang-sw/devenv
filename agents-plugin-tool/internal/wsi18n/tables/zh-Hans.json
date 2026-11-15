@@ -1767,6 +1767,8 @@
   "hover.lastrate": "上一轮输出速度",
   "hover.turn": "当前轮次",
   "hover.lastturn": "上一轮",
+  "hover.lastobserved": "最近观测",
+  "hover.history": "已观测模型历史",
   "hover.children": "运行中的子代理",
   "hover.cost": "费用",
   "hover.registered": "注册时间",

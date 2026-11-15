@@ -392,8 +392,12 @@ func TestWhiteboardGenericMutationKeepsEntryLocatorsAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := append([]wswhiteboard.Entry(nil), first.Whiteboard.Topics[0].Entries...)
-	if len(entries) != 4 || entries[0].ID == entries[1].ID || entries[0].At != entries[1].At || entries[2].PanelID != "p1" {
+	if len(entries) != 5 || entries[0].ID == entries[2].ID || entries[0].At != entries[2].At || entries[3].PanelID != "p1" {
 		t.Fatalf("equal-time entries lost durable identities: %+v", entries)
+	}
+	wantDefault := wswhiteboard.Entry{ID: "e2", Kind: wswhiteboard.EntrySystem, At: at.Format(time.RFC3339Nano), Text: "Topic state: discussing", TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)}
+	if !reflect.DeepEqual(entries[1], wantDefault) {
+		t.Fatalf("default event metadata changed: %+v", entries[1])
 	}
 	apply(`<wb:topic name="t"><wb:panel id="p1" recap="version two">second payload</wb:panel></wb:topic>`)
 	restarted := NewServer(f.root, "restart")
@@ -402,7 +406,7 @@ func TestWhiteboardGenericMutationKeepsEntryLocatorsAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := rec.Whiteboard.Topics[0].Entries
-	if len(got) != 6 || got[4].PanelID != "p1" || got[4].ID == entries[2].ID || got[4].Text != "second payload" {
+	if len(got) != 7 || got[5].PanelID != "p1" || got[5].ID == entries[3].ID || got[5].Text != "second payload" {
 		t.Fatalf("panel re-post did not retain distinct durable versions: %+v", got)
 	}
 	for i, entry := range entries {

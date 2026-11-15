@@ -29,7 +29,9 @@
 //   only while the latest intake result names it on its `accepts:` line: an
 //   older ws-mcp skips the kind, and a "dashboard off" or error result names
 //   nothing. The latest figures are held and sent again after a resync, since
-//   `reset` clears them on the server;
+//   `reset` clears them on the server. Completed steps also carry optional
+//   response-model evidence here for the lead, or on confirmed child events;
+//   each step keeps its own identity and first callback time, never a heartbeat;
 // - `compact` around each compaction of the main conversation: `start` when
 //   it begins, then `end` when it lands or `failed` when it fails or is
 //   vetoed, with its trigger (`auto` or `manual`; none for a plugin's), gated
@@ -562,8 +564,8 @@ export interface OutputRate {
   begin: () => void
   /** A chunk of block `index` arrived at `now`. */
   chunk: (index: number, now: number) => void
-  /** The request ended with `outputTokens` (undefined when it reported no usage), answered by `model`. */
-  finish: (outputTokens: number | undefined, model: string | undefined) => void
+  /** The request ended; returns whether this request supplied an eligible sample, not just a held rate. */
+  finish: (outputTokens: number | undefined, model: string | undefined) => boolean
   /** Tokens per second over the window, or undefined before the first eligible request. */
   rate: () => number | undefined
 }
@@ -585,8 +587,8 @@ export function createOutputRate(): OutputRate {
       let ms = 0
       for (const block of blocks.values()) ms += block.last - block.first
       blocks = new Map()
-      if (outputTokens === undefined || !Number.isFinite(outputTokens)) return
-      if (ms < OUTPUT_RATE_MIN_SPAN_MS || outputTokens < OUTPUT_RATE_MIN_TOKENS) return
+      if (outputTokens === undefined || !Number.isFinite(outputTokens)) return false
+      if (ms < OUTPUT_RATE_MIN_SPAN_MS || outputTokens < OUTPUT_RATE_MIN_TOKENS) return false
       const answered = model ?? ''
       if (answered !== windowModel) {
         window = []
@@ -594,6 +596,7 @@ export function createOutputRate(): OutputRate {
       }
       window.push({ tokens: outputTokens, ms })
       if (window.length > OUTPUT_RATE_WINDOW) window.shift()
+      return true
     },
     rate() {
       if (window.length === 0) return undefined
@@ -738,6 +741,17 @@ export interface DashboardEdges {
 
 type Ask = { agentId: string; tool: string; preview: string; marked: boolean }
 
+/** Immutable response evidence; requested identity is kept separately in legacy telemetry. */
+type Observation = {
+  id: string
+  model: string
+  source: 'claude.step'
+  at: number
+  effort?: string
+  effortSource?: 'request'
+  outputTps?: number
+}
+
 type AgentRec = {
   buf: Buffer
   dirty: boolean
@@ -756,8 +770,12 @@ type AgentRec = {
   effort?: string
   /** A subagent's context size as its latest request that reported usage left it. */
   contextTokens?: number
-  /** A subagent's output rate tracker; the lead keeps none. */
+  /** Each agent's rate tracker; the lead exposes only response-attributed samples. */
   rate?: OutputRate
+  /** Only this step's recorded request effort may accompany its response. */
+  request?: { step: string; effort?: string }
+  /** Bounded first-write-wins evidence, including the latest for resync. */
+  observations: Map<string, Observation>
 }
 
 /** Agent list statuses seeded into the tree at start: a loop running a turn or held on its own work. */
@@ -842,6 +860,8 @@ const LEAD = ''
 export function createDashboard(edges: DashboardEdges): Dashboard {
   let stopped = true
   let pending: DashboardEvent[] = []
+  /** Evidence waits independently for status negotiation or child confirmation, with the discrete queue's cap. */
+  let evidence: { event: DashboardEvent; agent?: AgentRec; confirmed: boolean }[] = []
   let agents = new Map<string, AgentRec>()
   let asks = new Map<string, Ask>()
   /** The lead's streamed reply: text per block of the streaming step. */
@@ -911,7 +931,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   /** A new record; a held one evicts the oldest held past the cap and asks the agent list about itself. */
   function addRec(id: string, announced: boolean): AgentRec {
-    const r: AgentRec = { buf: createBuffer(edges.epoch()), dirty: true, status: 'running', permissionSent: '', announced }
+    const r: AgentRec = { buf: createBuffer(edges.epoch()), dirty: true, status: 'running', permissionSent: '', announced, observations: new Map() }
     agents.set(id, r)
     if (!announced) {
       dropOldestHeld()
@@ -988,6 +1008,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     const held = [...agents.entries()].filter(([, r]) => !r.announced)
     for (const [id] of held.slice(0, Math.max(0, held.length - HELD_AGENT_CAP))) {
       agents.delete(id)
+      evidence = evidence.filter((e) => e.event.agentId !== id)
       clearAsksOf(id)
     }
   }
@@ -1002,13 +1023,15 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   const compactDue = () => compactDirty && compactAccepted && compacting !== undefined
   const commandsDue = () => commandsDirty && commandsAccepted && commands !== undefined
 
+  const evidenceDue = (e: typeof evidence[number]) => e.event.kind === STATUS_KIND ? statusAccepted : e.confirmed || e.agent?.announced === true
+
   function hasWork(): boolean {
-    return pending.length > 0 || replyDirty || statusDue() || compactDue() || commandsDue() || anyDue()
+    return pending.length > 0 || evidence.some(evidenceDue) || replyDirty || statusDue() || compactDue() || commandsDue() || anyDue()
   }
 
   /** Whether streamed reply text is the only pending change, so the slow cadence applies. */
   function textOnly(): boolean {
-    return replyDirty && pending.length === 0 && !statusDue() && !compactDue() && !commandsDue() && !anyDue()
+    return replyDirty && pending.length === 0 && !evidence.some(evidenceDue) && !statusDue() && !compactDue() && !commandsDue() && !anyDue()
   }
 
   function scheduleFlush(): void {
@@ -1033,6 +1056,23 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   function push(event: DashboardEvent): void {
     pending.push(event)
     if (pending.length > PENDING_EVENT_CAP) pending.splice(0, pending.length - PENDING_EVENT_CAP)
+  }
+
+  /** Keeps response transitions separate from coalesced state; retries retain their original payloads. */
+  function holdEvidence(events: DashboardEvent[], prepend = false, confirmed = false): void {
+    const queued = events.map((event) => ({ event, agent: agents.get(event.agentId as string), confirmed }))
+    const all = prepend ? [...queued, ...evidence] : [...evidence, ...queued]
+    const seen = new Set<string>()
+    evidence = all.filter(({ event }) => {
+      const key = JSON.stringify([event.agentId, (event.observed as Observation).id])
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).slice(-PENDING_EVENT_CAP)
+  }
+
+  function observationEvent(id: string, observed: Observation): DashboardEvent {
+    return id === LEAD ? { kind: STATUS_KIND, observed } : { kind: 'agent', agentId: id, observed }
   }
 
   /** The permission wait an agent shows: its latest marked ask. */
@@ -1111,7 +1151,11 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply, a running compaction, the usage status, the command list. */
   function dirtyEvents(): DashboardEvent[] {
-    const out: DashboardEvent[] = []
+    // Keep a confirmed child's final status even if it left the bounded local tree before flush.
+    const out = evidence.filter(evidenceDue).map(({ event, agent }) =>
+      agent === undefined ? event : { ...event, status: agent.status },
+    )
+    evidence = evidence.filter((e) => !evidenceDue(e))
     for (const [id, r] of agents) if (due(r)) out.push(...agentEvents(id, r))
     const stream = streamEvent()
     if (stream) out.push(stream)
@@ -1146,9 +1190,11 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   /** What ws-mcp holds is stale or gone: resend everything with the next call. */
   function markResync(): void {
     resyncDue = true
-    for (const r of agents.values()) {
+    for (const [id, r] of agents) {
       r.dirty = true
       r.permissionSent = ''
+      const latest = [...r.observations.values()].at(-1)
+      if (latest) holdEvidence([observationEvent(id, latest)])
     }
     lead()
     lastReplySent = undefined
@@ -1161,8 +1207,9 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
   function requeue(events: DashboardEvent[]): void {
+    holdEvidence(events.filter((e) => e.observed !== undefined && e.kind !== STATUS_KIND), true, true)
     const kept = events.filter(
-      (e) => e.kind === 'user' || e.kind === 'turn_start' || e.kind === 'turn_end' || (e.kind === 'reply' && e.final === true) || (e.kind === COMPACT_KIND && e.phase !== 'start') ||
+      (e) => (e.kind === STATUS_KIND && e.observed !== undefined) || e.kind === 'user' || e.kind === 'turn_start' || e.kind === 'turn_end' || (e.kind === 'reply' && e.final === true) || (e.kind === COMPACT_KIND && e.phase !== 'start') ||
         e.kind === COMMAND_KIND || e.kind === 'wake',
     )
     pending = [...kept, ...pending]
@@ -1205,14 +1252,29 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     // answer (or a replacement daemon). Old status readers reject new fields.
     // Retain the entire discrete prefix during recovery negotiation so a
     // turn cannot overtake the wake that started it.
-    const hold = !wakeAccepted && pending.some((event) => event.kind === 'wake')
+    const hold = (!wakeAccepted && pending.some((event) => event.kind === 'wake')) || (!statusAccepted && pending.some((event) => event.kind === STATUS_KIND && event.observed !== undefined))
     const discrete = hold ? [] : pending
     if (!hold) pending = []
+    const seenEvidence = new Set<string>()
     let events = [...discrete, ...dirtyEvents()].flatMap((event): DashboardEvent[] => {
+      if (event.observed !== undefined) {
+        const o = event.observed as Observation
+        const identity = JSON.stringify([event.agentId, o.source, o.id])
+        if (seenEvidence.has(identity)) return []
+        seenEvidence.add(identity)
+      }
       if (event.kind !== STATUS_KIND) return [event]
-      if (!statusAccepted) return []
-      if (countsAccepted) return [event]
-      const { background, monitors, ...legacy } = event
+      if (!statusAccepted) {
+        if (event.observed !== undefined) holdEvidence([event])
+        return []
+      }
+      // Status replaces usage wholesale: evidence-only updates must keep the latest figures and counts.
+      const current = event.observed === undefined ? event : {
+        kind: STATUS_KIND, observed: event.observed,
+        ...(status === undefined ? {} : JSON.parse(status) as StatusFigures), ...(countsAccepted ? tasks.counts() : {}),
+      }
+      if (countsAccepted) return [current]
+      const { background, monitors, ...legacy } = current
       return [legacy as DashboardEvent]
     })
     if (events.length === 0) return
@@ -1246,8 +1308,15 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       if (delivered) markSent(events)
       // Only an answered call's `accepts:` line turns status on; any other outcome turns it off.
       const accepted = accepts.includes(STATUS_KIND)
-      if (accepted && !statusAccepted) statusDirty = status !== undefined
+      if (accepted && !statusAccepted) {
+        statusDirty = status !== undefined
+        holdEvidence([...lead().observations.values()].map((o) => observationEvent(LEAD,o)))
+      }
       statusAccepted = accepted
+      if (delivered && !accepted) {
+        pending = pending.filter((event) => event.kind !== STATUS_KIND || event.observed === undefined)
+        evidence = evidence.filter(({ event }) => event.kind !== STATUS_KIND)
+      }
       wakeAccepted = accepts.includes('wake')
       if (delivered && !wakeAccepted) pending = pending.filter((event) => event.kind !== 'wake')
       const countsOn = accepted && accepts.includes('task_counts')
@@ -1294,6 +1363,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     cancelFlush?.()
     cancelFlush = undefined
     pending = []
+    evidence = []
     agents = new Map()
     asks = new Map()
     tasks.clear()
@@ -1497,11 +1567,12 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       const id = idOf(agentId)
       const r = rec(id)
       stepBegan(r.buf, step, edges.now())
+      r.request = { step, effort: effortText(request?.effort) }
+      ;(r.rate ??= createOutputRate()).begin()
       if (id === LEAD) reply = { step, blocks: new Map() }
       else {
         const model = typeof request?.model === 'string' && request.model.trim() !== '' ? request.model.trim() : undefined
         setModel(r, model, effortText(request?.effort))
-        ;(r.rate ??= createOutputRate()).begin()
       }
       markDirty(id)
     }),
@@ -1521,12 +1592,27 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       const id = idOf(agentId)
       const r = rec(id)
       const tokens = stepTokens(result.usage)
-      const telemetry = id !== LEAD && r.buf.streaming === step
-      if (telemetry) {
-        // A request with no usage keeps the context size and adds no rate sample.
-        if (tokens) r.contextTokens = contextTokensOf(tokens)
-        const answered = result.usage?.model
-        r.rate?.finish(tokens?.output, typeof answered === 'string' && answered !== '' ? answered : r.model)
+      const current = r.buf.streaming === step
+      const telemetry = id !== LEAD && current
+      const answered = result.usage?.model
+      const model = typeof answered === 'string' && answered.trim() !== '' ? answered : undefined
+      const eligible = current && r.rate?.finish(tokens?.output, typeof answered === 'string' && answered !== '' ? answered : r.model) === true
+      if (telemetry && tokens) r.contextTokens = contextTokensOf(tokens)
+      if (model !== undefined && !r.observations.has(step)) {
+        const effort = r.request?.step === step ? r.request.effort : undefined
+        const observed: Observation = {
+          id: step, model, source: 'claude.step', at: edges.now(),
+          ...(effort !== undefined ? { effort, effortSource: 'request' as const } : {}),
+          ...(eligible ? { outputTps: r.rate!.rate() } : {}),
+        }
+        r.observations.set(step, observed)
+        if (r.observations.size > PENDING_EVENT_CAP) r.observations.delete(r.observations.keys().next().value!)
+        if (id === LEAD && statusAccepted) {
+          // Keep own evidence between its original turn boundaries, including
+          // an undelivered call held while status support is renegotiated.
+          push(observationEvent(id, observed))
+        } else holdEvidence([observationEvent(id, observed)])
+        scheduleFlush()
       }
       if (stepEnded(r.buf, step, result.toolUses ?? [], edges.now(), tokens) || telemetry) markDirty(id)
       if (id !== LEAD) return

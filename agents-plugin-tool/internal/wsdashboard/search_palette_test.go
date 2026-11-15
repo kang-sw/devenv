@@ -11,7 +11,7 @@ func TestSearchPaletteAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := dashboardFS.ReadFile("assets/dashboard.js")
+	page, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
