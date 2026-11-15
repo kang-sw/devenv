@@ -284,11 +284,20 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 /* One captured selection keeps its sources, memo and images together. */
 .selection-bundle { position: relative; box-sizing: border-box; min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--wb-line); border-left: 3px solid var(--wb-primary); border-radius: 9px; background: var(--wb-muted); }
 .selection-bundle + .selection-bundle { margin-top: 6px; }
-.selection-bundle > .hchips { padding-right: 20px; }
-.selection-bundle .achip { border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .selection-bundle .anote { max-width: none; white-space: pre-wrap; overflow-wrap: anywhere; }
 .selection-bundle > .unchip { position: absolute; top: 6px; right: 4px; }
-.selection-comment { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--wb-fg); }
+/* In the history the bundle is one capsule split top and bottom: each source
+   is a paragraph whose topic tag flows inline with its quote, and the memo,
+   when there is one, sits below a divider. */
+section.selection-bundle { padding: 0; }
+.selection-quotes { padding: 7px 10px; font-size: 12px; }
+.selection-quote { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.selection-quote + .selection-quote { margin-top: 5px; }
+.selection-topic { font-variant-numeric: tabular-nums; }
+.selection-quote .anote { font-style: italic; color: var(--wb-muted-fg); }
+.selection-comment { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 7px 10px; border-top: 1px solid var(--wb-line); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--wb-fg); }
+.selection-comment:empty { display: none; }
+section.selection-bundle > .thumbs { margin: 0; padding: 0 10px 8px; }
 /* Composer bundles use the mention capsule, not the history's outer frame. */
 .cchips > .selection-chip { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; align-items: baseline; gap: 4px; margin: 0; padding: 2px 4px 2px 9px; border: 0; border-radius: 999px; }
 .selection-chip > .selection-edit { flex: 1; }
