@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 49d333d8218e9f10
 sage-review-completeness-reviewed: 49d333d8218e9f10
+completed: 2026-11-15
 ---
 
 # Isolate dashboard file explorer instances
@@ -109,7 +110,79 @@ to the later user-facing feature slice. Product source changes, tests, and
 runtime verification belong to the later implementation run; this draft
 records no implementation or verification result.
 
+### Result (64ba9308c) - 2026-11-15
+
+- VERIFIED: independent `WsFiles.create` closures and explicit tab/toolbar
+  lifecycle owners landed in `8129e7bc6`; retained commits preserve sheet paint,
+  lazy toolbar construction, existing browser record shapes and guarded storage
+  adapters. No backend, filesystem authority, root guard or capability changed.
+  The existing one-pass lite review's Important root-refusal race is fixed in
+  `1f7363b4f`, with its controlled-refusal regressions retained. No re-review ran.
+- VERIFIED: the elevated retry changed only the browser fixture (`64ba9308c`).
+  Playwright's default screenshot preparation rewrites every input/textarea's
+  inline `caret-color`, even after explicit blur. The cached source is
+  `/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright-core/lib/coreBundle.js`,
+  lines 19074–19087; line 19222 bypasses this with `caret: 'initial'`.
+  The fixture now uses that setting, waits for fonts, mock responses and
+  animations to settle, and asserts exact before/after DOM, computed styles,
+  layout, requests, focus and scroll. Cross-revision logical/layout contracts
+  and unchanged-composer assertions supplement the unchanged strict zero-pixel
+  comparison. No root hide/restore, field normalization or tolerance was added.
+- VERIFIED: all three failed diagnostic snapshot comparisons were inspected
+  recursively without suppressing fields. Only empty input/textarea style
+  attributes and root-style presence differed; computed properties, rectangles,
+  focus, scroll, pending requests and animations were equal. The root repaint
+  experiment was rejected. Its original pixel assertion passed, but its added
+  snapshot-restoration check failed; it is diagnostic evidence, not acceptance.
+  Exact differences and screenshot-window composer Paint events are retained in
+  `/tmp/ws-files-elevated-evidence/go/raw-snapshot-diffs.json` and
+  `/tmp/ws-files-elevated-evidence/go/original-paint-windows.json`.
+- VERIFIED: selected offline verification passed on unchanged product/test
+  sources at `2f428729f`:
+  `GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOFLAGS=-p=2 GOMAXPROCS=2 go test ./internal/wsdashboard -count=1 -timeout=80s -run '^(TestFiles|TestToolbar|TestBoardToolbar|TestFS)'`
+  from `agents-plugin-tool` (4.294s). The approved 120s total wrapper reserved
+  cleanup time; its entire batch, including static evidence comparison, took
+  9.27s. Log and source hashes: `/tmp/ws-files-elevated-evidence/go/`.
+- VERIFIED: `python3 /tmp/ws-files-elevated-wrapper.py final` passed within
+  9.48s total, including cleanup, versus a 120s total cap. The actual baseline
+  remains `e86f22a82189ac6bb556e7cad84352b566a65b8b`; all product and Go-test
+  input hashes match the clean Go run. Final harness SHA256:
+  `a07a13762a7bee235c6fa2eea92a19e46ccd944126efa73e8c3be42ecf402990`.
+  All four states have **0/1296000** differing pixels, all eight exact snapshot
+  checks pass, and all four cross-revision logical/layout contracts pass.
+  The final source manifest records the exact harness diff and cached dependency
+  hash before launch. Evidence: `/tmp/ws-files-elevated-evidence/final/`
+  (`command.log`, `source-manifest.json`, `results.json`, `state-checks.json`,
+  `contracts.json`, eight `*-state.json` files and captures).
+- VERIFIED: all four final side-by-side comparison images were read:
+  - compared `/tmp/ws-files-elevated-evidence/final/result-tab-tree.png` vs
+    `/tmp/ws-files-elevated-evidence/final/baseline-tab-tree.png`: match.
+  - compared `/tmp/ws-files-elevated-evidence/final/result-tab-view.png` vs
+    `/tmp/ws-files-elevated-evidence/final/baseline-tab-view.png`: match.
+  - compared `/tmp/ws-files-elevated-evidence/final/result-toolbar-tree.png` vs
+    `/tmp/ws-files-elevated-evidence/final/baseline-toolbar-tree.png`: match.
+  - compared `/tmp/ws-files-elevated-evidence/final/result-toolbar-view.png` vs
+    `/tmp/ws-files-elevated-evidence/final/baseline-toolbar-view.png`: match.
+- VERIFIED: the one elevated retry consumed exactly four approved executable
+  batches and two browser launches; none remain. Diagnostic driver/Chromium
+  groups 79572/79721, Go group 33907 and final driver/Chromium groups 49715/49837
+  are empty, with no cleanup signals or timeouts (`diagnostic/`, `go/`, and
+  `final/lifecycle.json` under the evidence root). Each browser had an 85s work
+  deadline within the total 120s wrapper, leaving teardown time inside the cap.
+- Limitation: historical four-pixel Files-tab View causality remains unproven.
+  The original failing captures and all diagnostic artifacts remain untouched;
+  final success proves current strict equality and equivalent nonmutating states,
+  not that the earlier mismatch was a Chromium or product bug. MAIN owns final
+  integration/acceptance/deployment.
+- Omitted by the authorized bounded scope: full-package tests/build, other
+  viewport/theme combinations, new review sweep, real holders/providers,
+  shared daemon/endpoint 29417, dependency install/download, merge/push and
+  worktree cleanup. Only workflow ticket validation follows the final run;
+  no executable verification is repeated after this documentation-only record.
+
 ## Execution checkpoint — retained implementation, acceptance incomplete
+
+Historical checkpoint from the previous worker, superseded by the Result above.
 
 - Implementation is retained on `impl/develop/haste-serve-defy` through
   `1f7363b4f`: per-instance factory/lifecycle and separate tab/toolbar ownership
