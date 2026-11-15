@@ -353,7 +353,17 @@
       "registered_at": "2026-11-14T14:43:37Z"
     },
     "261114-bug-ws-shared-daemon-restarts-without-a-swap": {
-      "registered_at": "2026-11-13T15:28:36Z"
+      "registered_at": "2026-11-13T15:28:36Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec5/daemon-fix",
+        "phase": "active",
+        "touched_at": "2026-11-15T08:33:54Z",
+        "impl": {
+          "branch": "impl/exec5/daemon-fix/swell-couch-dizzy"
+        }
+      }
     },
     "261114-chore-ws-dashboard-index-removal-diagnostics": {
       "registered_at": "2026-11-14T12:12:39Z"
