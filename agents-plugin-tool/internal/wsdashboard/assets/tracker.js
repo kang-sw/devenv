@@ -153,8 +153,6 @@
 //   searchHost       optional {parent, setOpen(bool), contains(target)} sheet host;
 //                    the returned API's openSearch/closeSearch follows host switches
 //   searchState      optional {load(), save({query, slot})} browser persistence
-//   searchAsk(text)  optional answer action for Enter without an arrow selection
-//   searchAnswerMount(element) optional host-owned answer pane and transport
 //   searchRows(update) optional host rows: {group (1..4), kind, title, text?,
 //                    hint?, id?, topic?, at?}: topics, bodies, items and answers.
 //                    Legacy group-0 session rows are ignored.
@@ -6527,7 +6525,6 @@
       if (!$('tkqin').value.trim()) return;
       var selected = qIdx(v);
       if (selected >= 0) qPick(v, selected, e.ctrlKey || e.metaKey);
-      else if (!e.ctrlKey && !e.metaKey && O.searchAsk) O.searchAsk($('tkqin').value.trim());
       return;
     }
     if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); qEsc(); }
@@ -6696,10 +6693,9 @@
       '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '</label>' +
       '<div class="tk-qrow"><input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
       '</div>' +
-      '<div class="tk-qmain' + (O.searchAsk ? ' with-answer' : '') + '"><section id="tkqanswer" class="tk-qanswer"' + (O.searchAsk ? '' : ' hidden') + '></section><div class="tk-qresults"><div class="tk-qtabs" id="tkqtabs" role="tablist" hidden></div>' +
+      '<div class="tk-qmain"><div class="tk-qresults"><div class="tk-qtabs" id="tkqtabs" role="tablist" hidden></div>' +
       '<div class="tk-qgrid" id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></div></div></div>' +
-      '<span class="tk-qhint">' + (O.searchAsk ? wsT("js.search.askhint") + ' · ' : '') + wsT("js.tk.qs.hint") + '</span>'));
-    if (O.searchAnswerMount) O.searchAnswerMount($('tkqanswer'));
+      '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span>'));
   }
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
   // changes, and keys stay the host's.
