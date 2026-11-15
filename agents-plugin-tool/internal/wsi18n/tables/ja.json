@@ -1718,6 +1718,7 @@
   "js.rail.layout.unknown": "これはもう一覧にありません",
   "js.rail.layout.ended": "終了したセッションではできません",
   "js.rail.layout.self": "自分自身の上には移動できません",
+  "js.rail.layout.hiring": "雇用が有効なセッションは他のセッションの下に配置できません",
   "js.rail.layout.depth": "セッションの入れ子は1段までです",
   "js.rail.layout.level": "同じ階層のセッション間でのみ移動できます",
   "js.rail.layout.child": "他のセッションの下にあるセッションにはスターを付けられません",

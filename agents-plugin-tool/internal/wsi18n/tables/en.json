@@ -1718,6 +1718,7 @@
   "js.rail.layout.unknown": "That is no longer on the rail",
   "js.rail.layout.ended": "Not possible with an ended session",
   "js.rail.layout.self": "Can't move onto itself",
+  "js.rail.layout.hiring": "A session with hiring enabled cannot be nested",
   "js.rail.layout.depth": "Sessions nest only one level deep",
   "js.rail.layout.level": "Can only move among sessions at the same level",
   "js.rail.layout.child": "A session under another can't be starred",

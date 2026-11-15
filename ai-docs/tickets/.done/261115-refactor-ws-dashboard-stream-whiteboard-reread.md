@@ -1,5 +1,6 @@
 ---
 title: Dashboard non-board wakes reload unchanged whiteboard folders
+completed: 2026-11-15
 ---
 
 # Dashboard non-board wakes reload unchanged whiteboard folders
@@ -66,6 +67,36 @@ Source references below are relative to `agents-plugin-tool/internal/`.
 
 ## Decisions
 
+- **Phase 2 compatibility: T0, VERIFIED.** Only the pending intent's existing
+  optional topic-write list becomes sparse. At base `8145ec935`,
+  `wswhiteboard/folders.go:685,711-799` writes every topic and publishes the
+  session/receipt; its reader/replayer already iterates only supplied topic
+  writes (`:306-324,384-481,767-799`). The new planner omits identical bytes
+  (`folders.go:685-702`); serialization, schema and publication/recovery shapes
+  are unchanged (`:376-382,727-820`). Old readers consume new committed files
+  normally and old replay accepts sparse intents. Old writers may rewrite
+  unchanged files again but cannot lose new data because no new fields exist.
+  A new process reopens old/new stores through the unchanged load/readState
+  path; no migration or lost-field recovery is needed.
+- **Phase 2 comparison source: exact on-disk bytes, VERIFIED.** Read the current
+  topic's metadata with `wsstate.ReadFile` and compare it with `folderJSON(topic)`
+  while holding the existing writer flock (`folders.go:149-167,187-215,685-702`).
+  This costs one read per stable mapping but avoids assuming that a decoded
+  `before` State can reproduce the exact committed bytes. A new/changed
+  `(Key, Dir, HasDoc)` mapping always publishes, including an identical orphan
+  at a newly assigned path. Non-absence read errors abort planning before any
+  intent. Missing files still schedule a write rather than an omission.
+- **Phase 2 recovery invariant: VERIFIED.** `load` completes any earlier pending
+  decision before planning (`folders.go:306-324`); flock excludes cooperating
+  writers through comparison, intent installation and replay (`:149-167,187-215`).
+  Every omitted file already contains the exact target bytes at the durable
+  decision. The intent retains all session topic refs and changed metadata;
+  replay publishes included files before session metadata and receipt
+  (`:702,727-820`). An opener replays before `readState` checks mappings,
+  close state and log lengths (`:306-324,384-438`), and recovery never re-runs the
+  mutation or observer. External edits that bypass flock during a transaction
+  remain outside the writer contract. Log append selection is already
+  conditional (`:681-684`), including zero-length initialization; leave it intact.
 - **Compatibility: T0, VERIFIED.** In-process read caching only; no file shape,
   schema number, MCP tool, argument, protocol, or notification change. At base
   `b6ef094dd`, `wswhiteboard/folders.go:704-797` writes pending intent, topic/log
@@ -162,3 +193,81 @@ tests.
   assets. The shared runtime was not rebuilt/replaced, so a live after-deploy
   CPU reduction is **INFERRED**, not measured. The exact per-page live wake
   origin and the unrelated baseline MCP failure remain unresolved here.
+
+### Phase 2: Skip unchanged topic meta writes
+
+Owner/MAIN-approved follow-up to Phase 1. A live single-board update rewrote
+all 112 topic metadata files, amplifying atomic replacements and invalidating
+the read cache even for unchanged topics.
+
+Compare each planned topic's exact `folderJSON(topic)` bytes with its existing
+committed metadata under the folder lock. Omit byte-identical topic metadata
+from both publication and pending intent. New or remapped topics must still
+publish metadata; preserve changed documents, items, labels, and close/reopen
+state. Keep session metadata and receipt publication, log append conditions,
+and durable-decision/replay ordering unchanged. Stop if omission violates a
+recovery invariant rather than changing the recovery protocol.
+
+Compatibility target: T0, with no file shape, new file, schema, or MCP change.
+Verify a 112-topic single-topic update, recovery after pending/partial
+publication, adoption/rename/close/label paths, and scoped folder/race/MCP tests
+with offline Go flags. Capture before/after atomic replacement counts and raw
+evidence in `/tmp/exec5/perfD/`. Do not touch the shared daemon, run a daemon on
+real state, kill processes, push, or run the full dashboard package.
+
+### Result (123594fae) - 2026-11-15
+
+- **VERIFIED:** implemented Phase 2 in `123594fae`. Exact serialized topic
+  metadata is compared with the current file under flock; only unchanged,
+  stable mappings are omitted from pending intent/publication
+  (`wswhiteboard/folders.go:685-702`). The Decisions section records the
+  comparison-source trade-off, recovery argument and directional T0 verdict.
+  Phase 1's plan and Result are byte-for-byte unchanged.
+- **VERIFIED:** the same single-document mutation on a 112-topic fixture
+  performs **112 -> 1 topic metadata replacements**, **115 -> 4 total atomic
+  replacements**, and carries **112 -> 1 pending topic writes**. Pending intent
+  size is **24,374 -> 7,164 bytes**; neither arm appends a log. The other three
+  replacements are pending.json, session meta.json and committed.json. Counts
+  use existing post-replacement Fault boundaries, inspect the durable intent,
+  and check file identities, not merely final byte equality
+  (`wswhiteboard/folders_writes_test.go:34-117`; `folders.go:927`). Initial
+  fixture creation, lock opens, pending removal and append fsyncs are excluded.
+- **VERIFIED:** document/item changes each replace only their topic metadata;
+  session-only and log-only updates replace no topic metadata (three atomic
+  replacements total). New topics, adoption, label changes, close/reopen, and
+  rename to a new directory still publish metadata. An identical orphan at a
+  newly assigned path does not suppress publication, and equivalent but
+  byte-different committed JSON is rewritten to the planned exact bytes
+  (`wswhiteboard/folders_writes_test.go:87-117,172-239`). The log-selection
+  condition, including zero-length initialization, remains unchanged
+  (`folders.go:681-684`).
+- **VERIFIED:** crashes at intent installation, partial log append, topic
+  metadata publication, session metadata publication and receipt/cleanup
+  recover the exact 112-topic state on two consecutive opens while retaining
+  the other 111 metadata file identities. Pending retains all 112 refs and
+  just one topic write; the durable-decision observer runs exactly once
+  (`wswhiteboard/folders_writes_test.go:120-170`). Existing exhaustive folder
+  recovery/observation tests also pass. Replay still precedes readState and
+  publishes changed topic bytes before session metadata/receipt
+  (`folders.go:306-324,727-820`).
+- **VERIFIED:** from `agents-plugin-tool`, every Go command prefixed with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+  - `go test ./internal/wswhiteboard/ -run 'Folder|Open|Store|Recover|Replay|Pending|Crash' -count=1 -v`:
+    PASS (128.006 s).
+  - `go test -race ./internal/wswhiteboard/ -run 'Folder|Open|Store|Recover|Replay|Pending|Crash' -count=1 -v`:
+    PASS (136.809 s; concurrent with the preceding run).
+  - `go test ./internal/wswhiteboard/ -run '^TestFolderChangedTopicMeta' -count=1 -v`:
+    PASS (46.988 s).
+  - `go test ./internal/mcp/ -run 'Whiteboard' -count=1 -v`:
+    only the owner-declared pre-existing
+    `TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation` failure
+    (`mcp/whiteboard_effects_test.go:154`, extra topic-state event; 91.921 s).
+  - The same MCP selection with
+    `-skip '^TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation$'`:
+    PASS (85.939 s). No assertion was weakened.
+- Raw source snapshots, commands, counting methodology, before/after output
+  and test logs are in `/tmp/exec5/perfD/` (machine-local evidence). No dashboard
+  package tests or daemon lifecycle operations were run, and nothing was
+  pushed. Phase 2 has no unresolved implementation issue; the known MCP red
+  remains outside scope. Live fseventsd/daemon CPU improvement is **INFERRED**,
+  not measured: the shared runtime was not rebuilt or replaced.

@@ -1718,6 +1718,7 @@
   "js.rail.layout.unknown": "側欄已不再顯示此項",
   "js.rail.layout.ended": "已結束的工作階段無法執行此操作",
   "js.rail.layout.self": "無法移到自身上",
+  "js.rail.layout.hiring": "已啟用僱用的工作階段不能巢狀置於其他工作階段下",
   "js.rail.layout.depth": "工作階段只能巢狀一層",
   "js.rail.layout.level": "只能在同一層級的工作階段之間移動",
   "js.rail.layout.child": "位於其他工作階段之下的工作階段無法加星號",

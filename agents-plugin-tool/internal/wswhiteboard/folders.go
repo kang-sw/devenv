@@ -682,7 +682,23 @@ func (f FolderStore) plan(meta *folderSession, before, after *State) (*folderInt
 			intent.Logs = append(intent.Logs, folderAppend{Path: ref.Dir + "/log.jsonl", Offset: ref.LogBytes, Data: log.Bytes()})
 		}
 		ref.LogBytes += int64(log.Len())
-		intent.Topics = append(intent.Topics, folderWrite{Path: ref.Dir + "/meta.json", Data: folderJSON(topic)})
+		path, data := ref.Dir+"/meta.json", folderJSON(topic)
+		var previous []byte
+		if meta != nil && slices.ContainsFunc(meta.Topics, func(old folderTopicRef) bool {
+			return old.Key == ref.Key && old.Dir == ref.Dir && old.HasDoc == ref.HasDoc
+		}) {
+			// Compare exact committed bytes under the writer lock, not a State
+			// reconstruction that may normalize metadata. New/remapped topics
+			// always publish. Omitted files already hold replay's target bytes.
+			var err error
+			previous, err = wsstate.ReadFile(filepath.Join(f.Dir, filepath.FromSlash(path)))
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+		}
+		if !bytes.Equal(previous, data) {
+			intent.Topics = append(intent.Topics, folderWrite{Path: path, Data: data})
+		}
 		intent.Session.Topics = append(intent.Session.Topics, ref)
 	}
 	if meta != nil {

@@ -114,6 +114,12 @@ check('growing batch replaces merged diagnostics but preserves absorbed markers'
 var restoredFirst=entry('10'),restoredSecond=entry('11');
 mergeEntries(nudges,box([restoredFirst,restoredSecond,entry('12')]));
 check('nudge window expiry restores ordinary keyed rows',[nudges.children[0]===restoredFirst,nudges.children[1]===restoredSecond,nudges.children.map(function(n){return n.state;})],[true,true,[null,null,null]]);
+var report=entry('20'),reports=box([report]);
+mergeEntries(reports,box([entry('20')]));
+check('open child report survives live merge at the same entry key',[reports.children[0]===report,report.open],[true,true]);
+report.open=false;
+mergeEntries(reports,box([entry('20')]));
+check('closed child report stays closed on reconnect',[reports.children[0]===report,report.open],[true,false]);
 var windowed=box([entry('02','suppressed'),entry('03','matched')]);
 check('hidden oldest marker remains the initial paging cursor',windowed.firstElementChild.getAttribute('data-entry'),'02');
 mergeEntries(windowed,box([entry('01')]));

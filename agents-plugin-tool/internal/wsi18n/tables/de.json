@@ -1718,6 +1718,7 @@
   "js.rail.layout.unknown": "Das zeigt die Leiste nicht mehr",
   "js.rail.layout.ended": "Mit einer beendeten Sitzung nicht möglich",
   "js.rail.layout.self": "Kann nicht auf sich selbst verschoben werden",
+  "js.rail.layout.hiring": "Eine Sitzung mit aktivierter Anwerbung kann nicht untergeordnet werden",
   "js.rail.layout.depth": "Sitzungen lassen sich nur eine Ebene tief verschachteln",
   "js.rail.layout.level": "Nur zwischen Sitzungen derselben Ebene verschiebbar",
   "js.rail.layout.child": "Eine Sitzung unter einer anderen kann keinen Stern bekommen",
