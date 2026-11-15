@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e81fc648d8cbe482
 sage-review-completeness-reviewed: e81fc648d8cbe482
+completed: 2026-11-15
 ---
 
 # lead-run playbook: a wrapped line starting with ### reads as a heading
@@ -70,3 +71,27 @@ Rewrap the sentence in `lead-run.md` (and its wsflow mirror) so no line starts
 with `#`. Consider a cheap check in the existing rsrc tests that flags a line
 starting with `#` inside a paragraph or inline code span, if one fits the
 current test layout; otherwise the rewrap alone closes this.
+
+### Result (72f722649) - 2026-11-15
+
+- Rewrapped the resume example without changing any words or workflow semantics;
+  its continuation no longer becomes an ATX heading. Regenerated the canonical
+  manifest and maintained byte-identical wsflow/Pi resource copies.
+- Added a focused shipped-resource regression for heading-like continuation lines
+  inside that example; no general Markdown parser or extractor logic changed.
+- Offline scoped verification passed: `TestLeadRunResumeExampleHasNoHeading`,
+  `TestShippedManifestUpToDate`, `TestWsflowRsrcMirrorUpToDate`, and
+  `TestPiMirrorUpToDate`. Whitespace-token comparison confirmed unchanged wording;
+  actual heading extraction removed only the accidental heading. Diff checks passed.
+- The wsflow package run failed at the unrelated pre-existing runtime contract:
+  `test_wsflow_runtime_contract.py:95` reports capabilities containing
+  `session.request_hire` and `session.roster` absent from `runtime.json`.
+  It was not fixed or rerun. Full failure output and command/environment evidence:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@128075b7/review-paths/07e5b2d4-01-lead-run-heading-verification.md`.
+- The already-dispatched one-pass Lite review found no findings; no further review
+  ran. Lead approved closure after conflict-free develop synchronization at
+  `54372070adf557c92274ec7967f2a8a0d1d5bd93`. Incoming changes did not touch
+  resource, test, manifest, dependency, or build inputs covered by the scoped
+  checks, so their passing evidence was retained without a redundant rerun.
+- Omitted: full-suite/build, further package/runtime checks, browser/provider
+  execution, and broader Markdown policy; none is needed for this physical rewrap.
