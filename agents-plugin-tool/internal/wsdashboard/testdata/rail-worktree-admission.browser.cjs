@@ -9,7 +9,7 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
 
 (async () => {
  const browser = await chromium.launch({ headless: true });
- const results = [];
+ const results = [], toastGeometry = [];
  try {
   const page = await browser.newPage({ viewport:{width:1440,height:1000}, locale:'en-US' });
   const errors = [];
@@ -42,6 +42,20 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
    const res = await response; assert.equal(res.status(),status); const v = await res.json();
    await page.waitForFunction(() => !document.querySelector('[data-admission-apply]').disabled);
    return v;
+  }
+  async function assertCopyToast(label) {
+   await page.waitForFunction(() => document.querySelector('#wstoasts .wstoast .wst-body')?.textContent === 'Copied.');
+   const geometry = await page.evaluate(() => {
+    const toast = document.querySelector('#wstoasts .wstoast').getBoundingClientRect();
+    const rail = document.querySelector('#rail').getBoundingClientRect();
+    const rect = r => ({left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height});
+    return {toast:rect(toast),rail:rect(rail),viewport:{width:innerWidth,height:innerHeight}};
+   });
+   const {toast,rail,viewport} = geometry;
+   assert.ok(toast.left >= 0 && toast.top >= 0 && toast.right <= viewport.width && toast.bottom <= viewport.height, label + ': toast stays inside viewport');
+   assert.ok(toast.height <= 40, label + ': fixed success feedback stays one line');
+   assert.ok(toast.left >= rail.right || toast.right <= rail.left || toast.top >= rail.bottom || toast.bottom <= rail.top, label + ': toast does not cover the rail');
+   toastGeometry.push({label,...geometry});
   }
   await page.goto(base+'/'); await open();
   await toggle('agent-a82f81f3','approve').click();
@@ -81,7 +95,14 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
   await page.locator('[data-admission-copy]').click();
   await page.waitForFunction(()=>window.copied.length===1);
   assert.equal(await page.evaluate(()=>window.copied[0]),first.prompt);
+  await assertCopyToast('Clipboard API retry');
+  await page.evaluate(()=>{window.copyFail=true;window.fallbackCopies=0;document.execCommand=()=>{window.fallbackCopies++;return true;};});
+  await page.locator('[data-admission-copy]').click();
+  await page.waitForFunction(k=>window.fallbackCopies===1 && JSON.parse(localStorage.getItem(k)).failed===false,promptKey);
+  await assertCopyToast('execCommand fallback');
+  await page.evaluate(()=>{window.copyFail=false;document.execCommand=()=>false;});
   results.push('1101: persisted rejection survives failed clipboard/reload; explicit retry succeeds');
+  results.push('Toast regression: Clipboard API and fallback success use fixed text without the copied prompt; geometry does not overlap the rail');
   await toggle('tmp.Xk2','reject').click();
   const second = await apply();
   assert.ok(second.prompt.includes(paths['agent-a82f81f3']) && second.prompt.includes(paths['tmp.Xk2']));
@@ -152,17 +173,20 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
    await row('agent-a82f81f3').locator('[data-admission-reselect]').click();
    await page.evaluate(()=>window.copyFail=false);
    const applied = await apply(); assert.equal(applied.applied,true);
+   await assertCopyToast(`${width}-${theme}-applied`);
    await page.locator('.rfold > summary').click();
    await capture(width,theme,'rejected-list-with-undo','applied');
    await page.screenshot({path:`${artifacts}/production-${width}-${theme}-applied.png`});
   }
   assert.deepEqual(errors,[]);
+  fs.writeFileSync(artifacts+'/toast-geometry.json',JSON.stringify(toastGeometry,null,2)+'\n');
   const summary = ['# Worktree admission production-browser evidence','',...results.map(x=>'- PASS '+x),'',
    'Production shell, templates, CSS, JavaScript and admission handler were served by a private httptest fixture; no daemon or provider was started.',
    'All 16 required production captures: production-{1440,700}-{light,dark}-{pending,selected,rejected-list-with-undo,stale-refusal}.png.',
    'Each capture has reference-* and comparison-* counterparts. comparison-* places production and approved HTML rails side by side. The reference has no stale UI; stale comparisons intentionally use its selected state.',
    'Applied-state comparisons: comparison-{1440,700}-{light,dark}-rejected-list-with-undo.png; additional full production applied captures: production-{1440,700}-{light,dark}-applied.png.',
    'Visual differences: production retains the existing 340px responsive rail, English labels and canonical fixture paths; the approved HTML uses a 396px Korean mock rail. Amber grouping, reversible toggles, capsule, collapsed rejected fold and undo retain its hierarchy. Stale correction and retained clipboard prompt are additional settled error states.',
+   'Copy-success feedback: fixed "Copied." text. Clipboard API/fallback and all four applied width/theme variants assert viewport containment, single-line height and zero overlap with the rail; measured rectangles are in toast-geometry.json.',
    'Reference: '+reference,'Artifacts: '+artifacts,'',...fs.readdirSync(artifacts).filter(x=>x.endsWith('.png')).sort().map(x=>artifacts+'/'+x)].join('\n');
   fs.writeFileSync(artifacts+'/summary.md',summary+'\n');
   console.log(results.join('\n')); console.log('PASS: 16 production states, reference side-by-side comparisons and 4 applied captures. '+artifacts+'/summary.md');

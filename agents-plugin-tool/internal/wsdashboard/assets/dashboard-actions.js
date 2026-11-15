@@ -97,11 +97,11 @@
       var ok = false;
       try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
       doc.body.removeChild(t);
-      toast(wsT(ok ? "js.toast.copied" : "js.toast.copyfail", s));
+      toast(ok ? "Copied." : wsT("js.toast.copyfail", s));
       return ok;
     }
     if (navigator.clipboard && window.isSecureContext) {
-      return navigator.clipboard.writeText(s).then(function () { toast(wsT("js.toast.copied", s)); return true; }, fallback);
+      return navigator.clipboard.writeText(s).then(function () { toast("Copied."); return true; }, fallback);
     }
     return Promise.resolve(fallback());
   }
