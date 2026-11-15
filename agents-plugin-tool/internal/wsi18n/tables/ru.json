@@ -1,4 +1,5 @@
 {
+  "js.capsule.topics": "Темы",
   "js.usage.heading": "Использование тарифа",
   "js.usage.close": "Закрыть использование тарифа",
   "js.usage.legend": "Легенда графика использования",
@@ -376,6 +377,7 @@
   "js.wb.state.researching": "Исследуются",
   "js.wb.state.discussing": "Обсуждаются",
   "js.wb.state.implementing": "В реализации",
+  "js.wb.state.estimate": "Оценка: {0} мин",
   "js.wb.state.eta": "Оценка: {0} мин · Прошло: {1} мин",
   "js.board.filter.label": "Фильтр по состоянию темы",
   "js.board.filter.all": "Все",
@@ -385,6 +387,7 @@
   "js.board.filter.implement": "В реализации",
   "js.board.filter.wait": "Ожидают",
   "js.board.filter.closed": "Закрыты",
+  "js.board.filter.cards": "Карточки",
   "js.term.new": "Новый терминал",
   "js.term.new.title": "Открыть терминал на этом компьютере",
   "js.term.pop.label": "Открыть терминал в",

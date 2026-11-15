@@ -311,6 +311,44 @@
     });
     return rows;
   }
+  // Capsule candidates share the selected board's labels and closed-page route.
+  // Parse older pages inertly rather than opening folds or changing reader history.
+  var capsuleTopicLoad = null, capsuleTopicKey = "";
+  function capsuleTopics(done) {
+    if (!rid || shell) { done([]); return; }
+    var board = region("board"), more = boardQ("button.closed-more[data-closed-next]")[0];
+    var key = (board && board.getAttribute("data-h") || "") + ":" + (more ? more.getAttribute("data-closed-next") : "end");
+    if (!capsuleTopicLoad || key !== capsuleTopicKey) {
+      capsuleTopicKey = key;
+      var rows = [], seen = {};
+      function add(topics) {
+        topics.forEach(function (topic) {
+          var id = topic.getAttribute("data-topic");
+          if (!id || seen[id]) return;
+          seen[id] = true; rows.push({ id: id, label: paletteText(topic.querySelector(".tname")) || id });
+        });
+      }
+      add(boardQ("section.topic[data-topic]"));
+      function page(next) {
+        if (next == null || !window.fetch) return Promise.resolve(rows);
+        return fetch("/s/" + rid + "/closed?from=" + encodeURIComponent(next), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function (res) {
+          var parsed = frag(res.html || "");
+          add(q("section.topic[data-topic]", parsed));
+          var button = parsed.querySelector("button.closed-more[data-closed-next]"), after = button && button.getAttribute("data-closed-next");
+          return after != null && Number(after) > Number(next) ? page(after) : rows;
+        });
+      }
+      capsuleTopicLoad = page(more ? more.getAttribute("data-closed-next") : null).catch(function () {
+        capsuleTopicLoad = null;
+        // A failed closed-page load is not a complete topic inventory.
+        return [];
+      });
+    }
+    capsuleTopicLoad.then(done);
+  }
   function paletteClosed(update) {
     var more = boardQ("button.closed-more[data-closed-next]")[0];
     if (!more || more.disabled) return;
@@ -595,6 +633,7 @@
     else tkWantSearch = true;
   }
   function trackerStart() {
+    window.wsCapsuleTopics = capsuleTopics;
     if (!window.WsTracker || !window.fetch) return;
     // Until mount installs the palette's own key listener, the shortcut
     // still counts (the same target rule), as a pending open.
