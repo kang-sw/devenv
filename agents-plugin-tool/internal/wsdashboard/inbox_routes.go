@@ -255,6 +255,14 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		status, answer = d.inboxWrite(dir, route, raw, now)
 		d.inboxMu.Unlock()
 	}
+	if route == "message" && status == http.StatusOK && s.Hosted {
+		if host, ok := d.agents.(AgentPageInputHost); ok {
+			if err := host.PageInput(replyID); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
 	d.inboxAnswered(w, s, status, answer)
 }
 

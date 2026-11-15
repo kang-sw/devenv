@@ -33,6 +33,8 @@ Recorded as todo for later; the UI track (dashboard web frontend owner) is the e
 
 - (1117)=a (owner via MAIN 10:48:58, 2026-11-15): manual unhide returns the session to asleep (visible, no process). Queued mail or the next message then wakes it through the ordinary path; manual visibility restoration alone does not launch an empty interaction. Rejected: an unconditional process launch on manual unhide.
 
+- (1125)=b (owner via MAIN, 2026-11-15T10:58:49Z): mockup first. MAIN's Claude agent owns the mockup and later approved visual implementation. This worker completes only separable backend Phase 1: atomic T1 sidecar, non-visual lifecycle derivation/data paths, archive no-wake/queued delivery, own-page direct-message exception, manual-unhide asleep and focused Go tests. No rail/rendering/CSS/browser fixture/screenshot work is authorized; those remain deferred to Phase 2.
+
 ## Constraints
 
 - Compatibility: any store change must be T0/T1 (owner 2026-11-13). No minor bump. AGENTS.md `### Compatibility Tiers` now permits T0–T2 patches; the owner's narrower T0/T1 constraint still applies here. MAIN 10:44:49 settles the separate dashboard-owned sidecar as T1; do not put hidden state in agent.json or Registration, add a disk T3 guard, or infer a supported-version exclusion.
@@ -41,11 +43,11 @@ Recorded as todo for later; the UI track (dashboard web frontend owner) is the e
 - Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
 - Do not change MCP tool or protocol semantics (MAIN, 2026-11-15). Keep existing stop, close, reopen, ownership and input/mail delivery boundaries unless an explicitly confirmed lifecycle transition requires a bounded change.
-- Fact population is ticket-only. No runtime implementation, commit, move, stamp, provider launch, network/install/download, shared daemon swap or broad tests is authorized in this pass.
+- The earlier fact-population pass authorized ticket-only work. The current implementation grant permits backend Phase 1 edits, commits, independent review and scoped provider-free Go tests only. MAIN alone merges develop and swaps the shared daemon. No installs/downloads, live provider/auth/network operations, unrelated process stops, or broad/full/long/Windows checks without MAIN's shared heavy slot.
 
 ## Assignment and Acceptance
 
-MAIN10:33:16 (2026-11-15) assigns this ticket alone: promote to ready after the required gates, then implement Phase 1. Decisions (402)–(405) remain authoritative; no genuinely open policy is inferred.
+MAIN10:33:16 (2026-11-15) assigns this ticket alone. The 10:58:49Z owner revision (1125)=b limits the current implementation to backend Phase 1; the visual acceptance below remains Phase 2 work after MAIN's Claude-owned mockup approval. Decisions (402)–(405) remain authoritative; no genuinely open policy is inferred.
 
 - The left list distinctly shows active-on, active-off, inactive-hidden and pending-deletion.
 - The existing stopped-sessions slot splits into 보관 on the left and 종료됨 on the right (archived versus ended/pending deletion), acting as one tri-state radio: none expanded / hidden expanded / stopped expanded. Include this split and the hide/unhide controls in the required screenshots.
@@ -93,6 +95,10 @@ MAIN10:33:16 (2026-11-15) assigns this ticket alone: promote to ready after the 
 
 ## Phases
 
-### Phase 1: Four-state session list
+### Phase 1: Non-visual four-state lifecycle backend
 
-Show the four states in the left session list with distinct indicators. Add hide/unhide and the transitions between states. Decisions (402)–(405), (1117), (1118) and (1120) are settled; no Open Decision Queue remains. Verify the explicit Assignment and Acceptance matrix, revised (405)'s separate atomic dashboard-owned sidecar and T1 old-write/new-reopen trace, restart survival, archived incoming-message/mail no-start behavior, hosted-only controls and existing prune exemptions with focused fixtures. Do not store hidden state in agent.json or Registration or add a T3 disk boundary; implement settled (1120)'s queued-mail delivery after unhide and explicit own-page-input unhide/start exception separately from passive incoming messages/mail. Implement (1117)'s visible-asleep manual-unhide target, then ordinary wake when queued mail or the next message is available.
+Under owner (1125)=b, implement the atomic dashboard-owned T1 hidden sidecar and non-visual four-state derivation through existing data paths. Verify retained sidecar loading after legacy record rewrites, restart/reopen, passive archived message/mail no-start, queued delivery after unhide, trusted hosted-only controls and unchanged prune exemptions. Preserve MCP semantics and external terminal controls. Implement (1120)'s explicit own-page direct-message unhide/start separately from passive notifications, and (1117)'s manual-unhide asleep target without an unconditional process launch. Use focused provider-free Go tests and independent backend-only review; make no visual edits or browser/screenshot claims.
+
+### Phase 2: Mockup-approved four-state session list
+
+Deferred by owner (1125)=b to MAIN's Claude agent: produce and obtain approval of the mockup before implementing the distinct indicators, hosted hide/unhide controls and split 보관/종료됨 tri-state disclosure under (402). Then verify the original browser acceptance matrix and supply separate hidden-expanded/stopped-expanded captures at 1440px and 700px in light/dark. Phase 1 backend completion does not satisfy these visual acceptance criteria.
