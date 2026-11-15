@@ -506,7 +506,7 @@ func TestRailDraftRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

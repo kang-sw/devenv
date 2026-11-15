@@ -35,7 +35,7 @@ func TestRecapJumpButtonNamesItsLogRow(t *testing.T) {
 	if strings.Contains(embed, chip) {
 		t.Fatal("embed recap chip must not be a jump button: the embed has no log rows")
 	}
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}
