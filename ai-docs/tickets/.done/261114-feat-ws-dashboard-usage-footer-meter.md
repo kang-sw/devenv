@@ -3,6 +3,7 @@ title: Dashboard footer usage meter with per-window pace and stale-state display
 related:
   261113-feat-ws-dashboard-rail-usage-gutter: Existing latest-value usage sources and footer/popover contract
   261114-feat-ws-dashboard-usage-history-trend: Separate phase-2 history and popover trend design
+completed: 2026-11-15
 ---
 
 # Dashboard footer usage meter with per-window pace and stale-state display
@@ -92,3 +93,8 @@ Capture the result and compare side by side with A's approved variants at
 matching dimensions, including the narrow rail; preserve existing popover and
 keyboard behavior. Run appropriate focused checks only in the assigned slot.
 No implementation Result is claimed by this documentation capture.
+
+
+## Resolution (2026-11-15)
+
+MAIN requested board hygiene on 2026-11-15 after the implementation landed in merge 21a9d0ee6b7ae02429b348a7837a4a3555c7f4f2 (`feat(dashboard): merge usage footer meter phase 1`). That merge records the latest-value footer, signed pace, stale clock/dotted/neutral treatment, weekly-only behavior, focused Node/Go checks and corrected browser acceptance with 16 matching visual comparisons. These are the implementation merge's recorded results, not tests rerun by this documentation lane. Source/ticket/mockup path comparison between 1234358fe7b9096ea9dec518193d78dbf510dd7c and 55b50bd534ba5246d64f9597d6296e2308612705 is empty. Phase-2 history storage and the baseline-colored graph remain separate under 261114-feat-ws-dashboard-usage-history-trend; this closure grants no graph implementation or runtime authority.

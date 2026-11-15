@@ -288,8 +288,22 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         const overview = await page.evaluate(() => ({ pressed: document.querySelector('.board-overview').getAttribute('aria-pressed'), hiddenFocus: !!document.activeElement.closest('[data-state-filtered]') }));
         assert.equal(overview.pressed, 'true'); assert.equal(overview.hiddenFocus, false, 'Overview keyboard excludes hidden topics');
         await select('awaiting-confirmation');
-        await until(async () => await page.locator('.board-overview').getAttribute('aria-pressed') === 'false', 'filter safely exits Overview');
+        assert.equal(await page.locator('.board-overview').getAttribute('aria-pressed'), 'true', 'filter keeps Overview pressed');
+        assert.equal(await page.locator('html').evaluate(n => n.hasAttribute('data-overview')), true, 'filter keeps one-line view');
         await eligible('awaiting-confirmation');
+        assert.equal(await page.locator('.board-state-radio[data-filter="awaiting-confirmation"]').evaluate(n => document.activeElement === n), true, 'filter retains control focus');
+        const filteredNames = await page.locator('section.topic:not([data-state-filtered])').evaluateAll(nodes => nodes.map(n => n.dataset.topic));
+        const roved = page.locator('section.topic[tabindex="0"]');
+        assert.equal(await roved.count(), 1, 'one eligible roving target after filter');
+        assert.equal(await roved.getAttribute('data-topic'), filteredNames[0]);
+        await roved.focus();
+        await tab.keyboard.press('ArrowDown');
+        assert.equal(await page.evaluate(() => document.activeElement.dataset.topic), filteredNames[1], 'filtered Overview ArrowDown skips hidden rows');
+        await tab.keyboard.press('ArrowUp');
+        assert.equal(await page.evaluate(() => document.activeElement.dataset.topic), filteredNames[0], 'filtered Overview ArrowUp skips hidden rows');
+        await tab.keyboard.press('Enter');
+        assert.equal(await page.locator('.board-overview').getAttribute('aria-pressed'), 'false', 'topic selection still exits Overview');
+        assert.equal(await page.evaluate(() => document.activeElement.dataset.topic), filteredNames[0], 'topic selection expands selected eligible row');
         checks.push({ theme, id, matrix: '800 all six selected labels; 540 inline; 539 pop keyboard; 360 pill; reload; stream transition/close; real closed paging; floating; Overview' });
       }
       // Wide pin column uses real production pin actions and keeps hidden nodes.

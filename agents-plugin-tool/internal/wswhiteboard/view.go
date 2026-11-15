@@ -147,6 +147,10 @@ type TopicView struct {
 	// DocMarks are the change marks of the body's latest edit, in the block
 	// numbering of bodyUnits.
 	DocMarks []BlockMark
+	// BodyUpdatedAt is the locally validated actual body mutation time,
+	// shared by the header and both gutter render paths. Empty means unknown;
+	// ChangedAt alone (possibly a legacy backfill) never supplies this value.
+	BodyUpdatedAt string
 	// DocStale marks the body's change marks as no longer fresh: an item of
 	// the topic changed after the body's latest edit (Item.Changed above
 	// the body's Changed; a recap change does not count). The marks stay,
@@ -645,6 +649,7 @@ func BuildView(state *State, in ViewInput) View {
 		block.Live = slices.ContainsFunc(block.Tickets, TicketBadge.live)
 		block.Doc = doc.Body
 		block.DocMarks = doc.Marks
+		block.BodyUpdatedAt = doc.validatedBodyTime()
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap

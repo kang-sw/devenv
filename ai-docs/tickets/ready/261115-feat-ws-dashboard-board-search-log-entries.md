@@ -3,8 +3,10 @@ title: "Board search: index topic log entries and panels, including older histor
 related:
   261115-feat-ws-dashboard-search-drawer-answer-agent: "sequenced before this ticket (MAIN, 2026-11-15): both edit paletteRows/palettePick in dashboard.js and the drawer moves the palette; not a technical prerequisite"
   261114-feat-ws-dashboard-unified-search-palette: "predecessor: built the board slot (paletteRows, qBoard) this ticket extends"
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: d0ac60f68b97fff6
+sage-review-completeness-reviewed: d0ac60f68b97fff6
 ---
 
 # Board search: index topic log entries and panels, including older history pages
@@ -57,15 +59,6 @@ at `9ea13ec19`); paths are relative to `agents-plugin-tool/internal/`.
   text as the topic's "body" row; `palettePick` then scrolls to the topic,
   not the panel.
 
-## Open Decision Queue
-last-id: (pending MAIN mint)
-
-(pending) [open] [policy] Entry picks while Overview is active keep Overview's consuming handoff, then navigate the entry after Overview's exit completes.
-- Context: design reviewer (block, `missing`): Decisions put `WsOverview.pick` inside `loadTarget`'s `beforeGeometry` callback, but `loadTarget` (`agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L345-L360`) ignores the callback's return and keeps materializing, flashing and navigating through `wbHistory.keep`, competing with Overview's exit, which is the one scroll writer during its animation (`3a13a3693`, `442cbdc9b`; `agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs#L425-L436`).
-- Alternative a: gate before `loadTarget`; when `WsOverview.pick(topic, o)` consumes, return, so an entry pick under Overview lands on the owning topic only and the entry is not reached.
-- Alternative b: gate before `loadTarget`; when Overview consumes, chain `WsOverview.after(fn)` so `fn` runs `loadTarget` with the remaining preparation once Overview's exit animation has finished (immediately under reduced motion, where exit is synchronous); outside Overview the path is unchanged.
-> Recommend b: it preserves the existing handoff (Overview owns the topic landing, the fold owner is bypassed during exit) and still reaches the entry, with no competing scroll writes.
-
 ## Decisions
 
 Owner decision (relayed by MAIN, 2026-11-15 at 01:50Z):
@@ -108,8 +101,8 @@ Technical calls (EXEC4):
   `window.wbHistory.loadTarget(<the live owning topic>, row.entry,
   beforeGeometry)`; the topic is looked up again by `row.topic` through
   `boardQ` as item picks do, so a topic in the pinned column works too.
-  The callback runs the existing topic preparation (`WsOverview.pick`,
-  `WsCards.unfoldTopic`, leaving a tracker page, showing the board tab)
+  The callback runs the remaining topic preparation
+  (`WsCards.unfoldTopic`, leaving a tracker page, showing the board tab)
   once per pick. `loadTarget` itself opens the enclosing `<details>`,
   flashes the target and navigates the history scroller with the sticky-head
   offset (`agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L264-L277`,
@@ -125,6 +118,28 @@ Technical calls (EXEC4):
   Rejected: the generic focus/`scrollIntoView`/flash path for entries
   (breaks the clip's bottom anchoring); a second loader in `dashboard.js`
   that duplicates the page-materialization and system-run merge logic.
+- **Overview handoff first, entry navigation after the exit.** An entry
+  pick calls `WsOverview.pick(topic, o)` before `loadTarget`, as item picks
+  do (`agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L5640`).
+  When Overview consumes it, the pick chains `WsOverview.after(fn)` and
+  returns; `fn` looks the owning topic up again by `row.topic` (the board
+  swap Overview held is released when its exit finishes, before `after`
+  callbacks run) and then runs the `loadTarget` path above. `after` is not
+  an exit barrier while Overview is entering (`on` and `busy` are both
+  true, `exit` only queues, and `fn` runs at the entry animation's
+  `finish()` with Overview still on), so `fn` first checks
+  `WsOverview.holding()` and, while it still holds, re-runs the whole entry
+  pick (the handoff again) instead of navigating. Under reduced
+  motion the exit is synchronous and `fn` runs at once. Outside Overview the
+  path is unchanged. Overview keeps owning the topic landing and the fold
+  owner stays bypassed during its exit (`3a13a3693`, `442cbdc9b`,
+  `agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs#L425-L436`).
+  Rejected: running `WsOverview.pick` inside `loadTarget`'s
+  `beforeGeometry` callback (`loadTarget` ignores the callback's return, so
+  its materialize/flash/`keep` writes race Overview's exit animation, the
+  one scroll writer while it runs); returning after a consumed pick with no
+  entry navigation (the entry is never reached). Technical call by MAIN,
+  2026-11-15.
 - **Body-row fix.** The topic body row reads only the topic's own fold:
   the `.doc-body` inside the topic's `.tdoc`, never one inside
   `.topic-stream`. A topic without a body yields no body row.
@@ -202,6 +217,15 @@ Verification:
   panel version, and a log line on an older `template[data-history-page]`;
   no body row for a topic without a body, and no panel text in any topic's
   body row; indexing leaves the template count and the live DOM unchanged.
+- The Overview handoff (in the `search-palette.test.cjs` pick context with
+  a stub `WsOverview`): with Overview consuming, an entry pick calls
+  `WsOverview.pick` with the topic, defers `loadTarget` through
+  `WsOverview.after`, and calls neither `loadTarget` nor the fold owner
+  before the `after` callback runs; when the callback runs, it re-looks up
+  the topic and reaches the entry; with Overview declining, the pick goes
+  straight to `loadTarget`; with Overview still holding when the callback
+  runs (the entering-animation case), the callback repeats the handoff and
+  does not call `loadTarget` or the fold owner.
 - `scripts/palette-headless.mjs` (isolated daemon, a seeded board with
   enough entries to page): search a phrase that exists only on an older
   page and only inside a folded system run; opening the row (arrow keys
