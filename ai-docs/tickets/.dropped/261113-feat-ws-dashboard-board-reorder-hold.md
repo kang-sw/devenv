@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 705b92d96f93c00a
 sage-review-design-reviewed: 705b92d96f93c00a
+dropped: 2026-11-15
 ---
 
 # Dashboard board: hold a topic the user is reading in place when the server reorders it
@@ -664,3 +665,8 @@ Verification:
   hidden-column cases), the Decisions win.
 - `scripts/board-headless.mjs` screenshots at 1440 px and 700 px widths,
   light and dark, with one and two holds and with reduced motion emulated.
+
+
+## Resolution (2026-11-15)
+
+Superseded by 261115-feat-ws-dashboard-board-reorder-hold-rewrite. Only Phase 1 (0b58bed9a) landed on develop. Phases 2-4 on impl/develop/perm-unlit-icon stalled: Phase 4 did not converge and the (694) repair round failed. The owner chose to extract the spec and re-implement on current develop rather than merge the branch. The branch is kept as the reuse source; the successor ticket's Reuse map names the reusable and the non-reusable commits.
