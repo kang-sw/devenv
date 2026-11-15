@@ -7,12 +7,23 @@ const http = require('node:http');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
-const { _electron } = require(process.env.WS_PLAYWRIGHT);
 const root = path.resolve(__dirname, '..');
 const { builtPaths, processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
 const { executablePath, daemonPath } = builtPaths(root);
 const evidence = process.env.WS_ELECTRON_EVIDENCE || path.join(root, 'dist/evidence');
 fs.mkdirSync(evidence, { recursive: true });
+const electronAppLog = path.join(evidence, 'electron-app.log');
+const playwrightDebugLog = path.join(evidence, 'playwright-debug.log');
+fs.writeFileSync(electronAppLog, '');
+fs.writeFileSync(playwrightDebugLog, '');
+// Enable before loading Playwright: a rejected launch exposes no app streams.
+process.env.DEBUG = [process.env.DEBUG, 'pw:browser*'].filter(Boolean).join(',');
+const stderrWrite = process.stderr.write;
+process.stderr.write = function (chunk, ...args) {
+  fs.appendFileSync(playwrightDebugLog, chunk);
+  return stderrWrite.call(this, chunk, ...args);
+};
+const { _electron } = require(process.env.WS_PLAYWRIGHT);
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-smoke-'));
 const daemonRoot = path.join(temp, 'daemon'), shellRoot = path.join(temp, 'shell');
 fs.mkdirSync(path.join(shellRoot, 'dashboard'), { recursive: true });
@@ -61,9 +72,21 @@ async function titleIncludes(value) {
 async function main(fn, arg) { return application.evaluate(fn, arg); }
 async function launch() {
   const launchedAt = Date.now();
-  application = await _electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temp, 'profile')}`],
-    env: { ...process.env, WS_CACHE_HOME: shellRoot, WS_CONFIG_HOME: path.join(temp, 'config'), ELECTRON_RUN_AS_NODE: '' }, timeout: 8000 });
-  applicationIdentity = recordLaunch(application.process(), launchedAt);
+  fs.appendFileSync(electronAppLog, `\nLaunch at ${new Date(launchedAt).toISOString()}\n`);
+  try {
+    application = await _electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temp, 'profile')}`],
+      env: { ...process.env, WS_CACHE_HOME: shellRoot, WS_CONFIG_HOME: path.join(temp, 'config'), ELECTRON_RUN_AS_NODE: '',
+        ELECTRON_ENABLE_LOGGING: '1', ELECTRON_ENABLE_STACK_DUMPING: '1' }, timeout: 60000 });
+  } catch (error) {
+    fs.appendFileSync(electronAppLog, `Launch failed: ${error.message}\nPlaywright-captured app output (also in playwright-debug.log):\n`);
+    fs.appendFileSync(electronAppLog, fs.readFileSync(playwrightDebugLog));
+    throw error;
+  }
+  const child = application.process();
+  for (const [name, stream] of [['stdout', child.stdout], ['stderr', child.stderr]]) {
+    stream?.on('data', chunk => fs.appendFileSync(electronAppLog, `[${name}] ${chunk}`));
+  }
+  applicationIdentity = recordLaunch(child, launchedAt);
   const page = await application.firstWindow();
   // The main process owns Electron's beforeunload decision. With no listener,
   // Playwright auto-accepts it via CDP after the native handler has already
