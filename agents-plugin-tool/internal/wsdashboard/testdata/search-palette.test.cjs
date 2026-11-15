@@ -451,7 +451,7 @@ async function hostCases() {
   }
 
   // Entry extraction uses each article's own payload, not its nested versions.
-  // History-page contents are read without adopting nodes or opening disclosures.
+  // History pages and timeline gaps stay inert while their contents are indexed.
   const leaf = (text, owner) => ({ textContent: text, closest: () => owner,
     cloneNode() { return leaf(this.textContent, owner); }, querySelector: () => null });
   function article(id, fields) {
@@ -474,28 +474,32 @@ async function hostCases() {
     copy.times = [{ remove() { copy.textContent = '— Live log phrase'; } }];
     return copy;
   };
+  const gapEntry = article('e17', { '.entry-text': 'Unloaded-gap-only phrase', 'time.entry-at': '08:30' });
   const pageContent = { entries: [earlier] }, historyPage = { content: pageContent };
+  const gapContent = { entries: [gapEntry] }, historyGap = { content: gapContent };
   const stream = { entries: [log, system, panel, old] };
   let ownBody = null;
   const topicWithStream = { getAttribute: () => 'stream-topic', querySelector: selector => selector === '.tname' ? leaf('Stream topic') :
     selector === ':scope > .tdoc > .doc-body' ? ownBody : selector === '.rtext' ? leaf('Topic recap') : null };
   function query(selector, root) {
     if (selector === '.topic-stream' && root === topicWithStream) return [stream];
-    if (selector === 'template[data-history-page]' && root === stream) return [historyPage];
+    if (root === stream && selector.startsWith('template[')) {
+      return selector.split(',').flatMap(s => s.trim() === 'template[data-history-page]' ? [historyPage] : s.trim() === 'template[data-history-gap]' ? [historyGap] : []);
+    }
     if (selector === 'article.wb-entry') return root.entries || [];
     if (selector === 'time') return root.times || [];
     return root.fields && root.fields[selector] || [];
   }
   const entryCtx = vm.createContext({ framed: false, readItem: () => null, boardQ: () => [topicWithStream], q: query, doc: rowsCtx.doc });
   vm.runInContext(block(dashboard, '  function paletteText(', '  function paletteClosed('), entryCtx);
-  const beforeIndex = JSON.stringify([stream, pageContent, timedLine.textContent]);
+  const beforeIndex = JSON.stringify([stream, pageContent, gapContent, timedLine.textContent]);
   const indexed = plain(entryCtx.paletteRows());
   assert(!indexed.some(r => r.group === 2), 'a recap-only topic has no body row even when its stream has a body');
   assert.deepEqual(indexed.filter(r => r.group === 5).map(r => [r.entry, r.title]), [
     ['entry-log', 'Live log phrase'], ['entry-system', 'Folded system phrase'], ['entry-panel', 'Latest panel recap Latest body phrase'],
-    ['entry-version', 'Earlier version Historical payload'], ['entry-older', 'Older-page-only phrase']]);
+    ['entry-version', 'Earlier version Historical payload'], ['entry-older', 'Older-page-only phrase'], ['e17', 'Unloaded-gap-only phrase']]);
   assert.equal(indexed.find(r => r.entry === 'entry-log').hint, 'Stream topic · 10:01');
-  assert.equal(JSON.stringify([stream, pageContent, timedLine.textContent]), beforeIndex, 'indexing does not mutate live rows or history templates');
+  assert.equal(JSON.stringify([stream, pageContent, gapContent, timedLine.textContent]), beforeIndex, 'indexing does not mutate live rows or history templates');
   ownBody = leaf('Topic-owned body');
   assert.equal(entryCtx.paletteRows().find(r => r.group === 2).title, 'Topic recap Topic-owned body', 'topic body excludes panel text');
   // Nested versions cannot donate their recap/body to a payload-less current panel.
@@ -562,7 +566,7 @@ async function hostCases() {
     focus(opt) { assert.equal(folded, false); assert.deepEqual(plain(opt), { preventScroll: true }); active = 'entry'; events.push(['entry-focus']); },
     scrollIntoView() { assert.fail('entry picks must never scroll the history clip'); },
     get offsetWidth() { assert.fail('loadTarget alone owns entry flash geometry'); } };
-  const entryRow = { group: 5, kind: 'board-entry', topic: 'closed', entry: 'entry-older' };
+  const entryRow = { ...indexed.find(r => r.entry === gapEntry.id), topic: 'closed' };
   let loads = 0, paged = true;
   pickCtx.tkApi = { leavePage() { assert.equal(folded, false); events.push(['leave-page']); } };
   pickCtx.doc.body.classList.contains = () => paged;

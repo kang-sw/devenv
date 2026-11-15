@@ -103,7 +103,7 @@ func TestCheckRowsStageAnswersInTheReplyBar(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := "var BOARD = " + string(board) + ";\n" + formPrelude + "(function () {\n" + string(answers) + string(form) + "})();\n" + `
-var row = byId("item-3"), box = row.querySelector("label.ck > input"), x = row.querySelector("button.no-toggle"), note = row.querySelector("textarea.note");
+var row = byId("check-3"), box = row.querySelector("label.ck > input"), x = row.querySelector("button.no-toggle"), note = row.querySelector("textarea.note");
 check("nothing staged", reply(), "");
 tick(box, true);
 check("box stages ok", reply(), "03=ok");
@@ -124,11 +124,11 @@ check("the all-ok box ticks the ack alone", [reply(), box.checked], ["02=ok", fa
 tick(all, false);
 document.querySelectorAll("button[data-bulk]").forEach(click);
 check("the bulk buttons answer the policy pick and the ack, never the check", [reply(), box.checked], ["01=a\n02=ok", false]);
-var as = byId("item-6");
+var as = byId("check-6");
 check("the assumed check has a pen and no box", [!!as.querySelector("button.note-toggle"), as.querySelector("label.ck > input")], [true, null]);
 click(as.querySelector("button.note-toggle"));
 type(as.querySelector("textarea.note"), "wait, no");
-check("the assumed check sends a note alone in board order", reply(), "01=a\n02=ok\n06=^wait, no");
+check("the assumed check sends a note alone in board order", reply(), "01=a\n06=^wait, no\n02=ok");
 check("answered checks carry no answer control", [byId("item-4").getAttribute("data-id"), byId("item-5").getAttribute("data-id")], [null, null]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
@@ -185,10 +185,10 @@ check("before the script runs nothing is set", state(), null);
 run();
 check("on by default", [state(), pressed(), stored], ["1", ["true"], {}]);
 check("completed checks leave the live checklist", ids(".topic .checks .ckrow:not([data-id])"), []);
-check("the history filter targets the completed checks", ids(".topic .wb-hitem.check:not([data-id]):not(.void)"), ["item-4", "item-5"]);
-check("the open check stays in the live checklist", ids(".topic .checks .ckrow[data-id]"), ["item-3"]);
-check("the assumed history check keeps its correction control", ids(".topic .wb-hitem.check[data-id]"), ["item-6"]);
-check("the withdrawn history check stays outside the answered filter", ids(".topic .wb-hitem.check.void"), ["item-7"]);
+check("the history filter targets the completed checks", ids(".timeline-ask .wb-hitem.check:not([data-check-live]):not(.void)"), ["item-4", "item-5"]);
+check("the open check stays in the live checklist", ids(".topic .checks .ckrow[data-id]"), ["check-3", "check-6"]);
+check("the assumed history check keeps its correction control", ids(".topic .ckrow[data-assumed]"), ["check-6"]);
+check("the withdrawn history check stays outside the answered filter", ids(".timeline-ask .wb-hitem.check.void"), ["item-7"]);
 var first = document.querySelector("button.ckhide");
 click(first);
 check("a press turns it off and stores it", [state(), pressed(), stored["ws.wb.checks.hideAnswered"]], ["0", ["false"], "0"]);
@@ -253,7 +253,7 @@ func TestTypingBuildsTheReplyOnceAFrame(t *testing.T) {
 	script := "var BOARD = " + string(board) + ";\n" + formPrelude + "(function () {\n" + string(answers) + string(form) + "})();\n" + `
 var builds = 0, block = window.wbAnswers.block;
 window.wbAnswers.block = function (a, b) { builds++; return block(a, b); };
-var ra = byId("item-1"), rb = byId("item-2"), na = ra.querySelector("textarea.note"), boxA = ra.querySelector("label.ck > input");
+var ra = byId("check-1"), rb = byId("check-2"), na = ra.querySelector("textarea.note"), boxA = ra.querySelector("label.ck > input");
 var tb = document.querySelector('section.topic[data-topic="b"] textarea.tnote');
 key(na, "h"); key(na, "hi");
 check("a keystroke waits for its frame", [reply(), builds], ["", 0]);

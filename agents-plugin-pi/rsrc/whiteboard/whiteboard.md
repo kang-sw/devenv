@@ -435,7 +435,7 @@ Whiteboard: <full> - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
-**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block or `<wb:mention>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
+**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
 
 ## Host embed folder
 
@@ -506,9 +506,25 @@ Resolve a panel locator with `panel: "eN"` and a log locator with
 the latest panel version. Mentions supply context for the user's typed
 message, not answers or authored `{{12}}`/`{{p3}}` references.
 
+A topic card's x attaches the user's request to close that topic, after
+mentions inside its `<ws:user>` envelope:
+
+```text
+<wb:close-request topic="<topic>">optional reason</wb:close-request>
+```
+
+The body is that request's own reason, empty when none was given, escaped
+like a mention; the topic attribute escapes `&`, `<`, `>` and `"`.
+Close the named topic through the normal whiteboard update path unless it
+still has open work you must not abandon; in that case, reply in that topic
+with why you kept it open. Act without an extra confirmation. An already
+closed or unknown topic is a no-op you report briefly, since a request may
+outlive its card. The x itself only attaches the request; it never changes
+the topic's state.
+
 A web card on the dashboard shows a localhost dev server's page or a
 workspace HTML file; a localhost link you write opens one for the user.
-What the user takes from it follows the mentions, one element per line:
+What the user takes from it follows mentions and close requests, one element per line:
 `<wb:pick url="..." selector="...">text</wb:pick>` for a page element the
 user picked, and `<wb:console url="...">errors</wb:console>` for the
 page's console errors the user attached, one error per line. `url` is the

@@ -565,6 +565,9 @@
     if (old.classList.contains("closed") || n.classList.contains("closed")) return null;
     var of = q(".doc-frame:not(.doc-frame-next)", old)[0], nf = q(".doc-frame", n)[0];
     if (!of || !nf || of.getAttribute("data-doc") !== nf.getAttribute("data-doc")) return null;
+    // A panel-only topic's first frame is an entry, not a body to reload:
+    // leave it to frameKeep's key-and-document match like every other panel.
+    if (!/^topic:/.test(of.getAttribute("data-doc-key") || "")) return null;
     var oc = frameChain(of, old), nc = frameChain(nf, n);
     if (!oc || !nc || oc.length !== nc.length) return null;
     // The frames themselves may differ in kind (a mounted iframe, an

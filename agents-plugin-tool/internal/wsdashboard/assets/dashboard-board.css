@@ -75,8 +75,8 @@ details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) > .d-m
    content scrolling under its head. The maximize button (right of a topic's
    pin, at the end of a panel's head) gives way to the back button, and a
    large topic's pin hides as a maximized card's does. */
-.tbar :is(.d-max, .d-min, .t-fold, .t-raise) { color: inherit; opacity: .45; }
-.tbar:hover :is(.d-max, .d-min, .t-fold, .t-raise), .tbar :is(.d-max, .d-min, .t-fold, .t-raise):focus-visible { opacity: .9; }
+.tbar :is(.d-max, .d-min, .t-fold, .t-raise, .t-close-request) { color: inherit; opacity: .45; }
+.tbar:hover :is(.d-max, .d-min, .t-fold, .t-raise, .t-close-request), .tbar :is(.d-max, .d-min, .t-fold, .t-raise, .t-close-request):focus-visible { opacity: .9; }
 .tbar > .d-min, summary > .d-min { display: none; }
 section.topic[data-max], details.entry-panel[data-max] { position: fixed; z-index: var(--z-modal); top: 52px; left: 16px; right: 16px; bottom: 12px; margin: 0; overflow: auto; overscroll-behavior: contain; box-shadow: var(--wb-shadow-hi); }
 section.topic[data-max] { background: var(--wb-card); }
@@ -99,7 +99,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] .r-board > .reply { display: none !important; }
 :root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
 :root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-:root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close),
+:root[data-overview] .r-board :is(.t-close-request, .tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close),
 :root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
 :root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
 :root[data-overview] .r-board :is(.tpin, .bc-pin)[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); pointer-events: none; }
@@ -117,7 +117,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .overview-ghost { position: fixed; z-index: 46; pointer-events: none; box-sizing: border-box; overflow: hidden; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
 .overview-ghost > .tophead, .overview-ghost > .bc-hd { position: static !important; }
 .overview-ghost .rtext { overflow: hidden; }
-.overview-ghost :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close) { opacity: 0; }
+.overview-ghost :is(.t-close-request, .tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close) { opacity: 0; }
 .overview-ghost-body { height: 100%; background: var(--wb-card); }
 :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
 .overview-spacer { flex: none; pointer-events: none; }

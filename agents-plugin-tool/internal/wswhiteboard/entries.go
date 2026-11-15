@@ -42,7 +42,13 @@ type Entry struct {
 	BoardNotice      json.RawMessage `json:"board_notice,omitempty"`
 	WaitingOn        json.RawMessage `json:"waiting_on,omitempty"`
 	UnblockedReceipt json.RawMessage `json:"unblocked_receipt,omitempty"`
-	unknown          map[string]json.RawMessage
+	// Display-only batch provenance. Raw inputs distinguishes activation []
+	// from an unstamped batch; none of these fields is model authority.
+	Inputs       json.RawMessage `json:"inputs,omitempty"`
+	InputsFloor  string          `json:"inputs_floor,omitempty"`
+	Seq          int             `json:"seq,omitempty"`
+	AnswerSentAt int64           `json:"answer_sent_at,omitempty"`
+	unknown      map[string]json.RawMessage
 }
 
 // LatestAgent returns the last agent-authored log entry, never a panel or

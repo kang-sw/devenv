@@ -310,3 +310,122 @@ Verification:
   `W-step0-expanded-dark.png`, `W-step0-light.png`; header style
   `A-final-dark.png`). W is the reference for the look, not a pixel gate; no
   screenshot matrix or capture-comparison round is required of the worker.
+
+### Result (15e44e235) - 2026-11-15
+
+- VERIFIED: Phase 1 now renders a single event-ordered timeline with permanent
+  question/answer anchors, preceding reports, re-ask clocks, converted-item
+  controls, current state and latest-batch visibility. Other entries remain in
+  inert gaps; directional loading includes the item crossing 1000px and never
+  evicts admitted rows. Panel versions and the dependency clock remain intact.
+- VERIFIED: Commit-time attribution writes only optional Entry metadata (T0),
+  including activation/floor persistence, id-set exclusion, parser-cleaned
+  excerpts and newest matching answer-chip times. Existing folder schema and
+  MCP/HTTP surfaces are unchanged; archived schema-2 append and pending-recovery
+  regressions retain the added metadata.
+- Decisions: retain the existing complete EntryPage projection for panel/frame
+  preparation and derive the anchor/gap projection over all its chunks. A gap
+  target loads forward from itself, then backward from its nearest prefix if
+  needed to fill the window. Check-pill folding/lifting retains the real controls
+  at individual timeline positions with spacers. All insertion/navigation uses
+  the landed per-scroller owner; its implementation remains unchanged.
+- VERIFIED verification: full `go test ./internal/wswhiteboard -count=1` has
+  exactly the six pre-edit baseline failures and no additional failing tests.
+  Focused `TestTimeline.*` and `TestHistoryScript.*` pass. Full `wsinbox` and
+  `wsi18n` packages pass. Named MCP input/stream/publication/conversion tests and
+  dashboard board-frame/history/bridge/nudge-predicate tests pass. The named CSS
+  collision test retains its four existing collisions. JavaScript syntax checks
+  pass; the Node asset-split suite passes four tests and skips the opt-in pin.
+- VERIFIED: populated embed size is 256,914 bytes versus 255,787 before the
+  change (+1,127 bytes); its existing budget failure remains unresolved.
+- Unresolved: the baseline failures/collisions remain outside this feature;
+  independent lite review is lead-owned, and visual fit is INFERRED pending the
+  owner's post-merge W/A reference check. The informational lease acquisition was
+  refused because the existing develop track holds it; no override was used.
+- Omitted by owner override: child agents, worker independent review, browsers,
+  screenshots, daemon launches, full-dashboard testing, merge and push. Work
+  remains on `exec4/timeline-impl`; the ticket is deliberately left in `ready/`
+  without closure or movement.
+
+#### Edition (e875aa671) - 2026-11-15
+
+Owner amendment (owner-decided, relayed by the main lead; no open decision):
+CHECK items interleave in the timeline too, rendered the same way as
+questions. A check item sits at its own event position as a permanent anchor
+row in the question-row form (ID, title, status chip; for example the owner's
+"(964) held · ok" row), not only as a list lifted under the sticky check pill.
+The pill's fold/lift of the real controls stays. Scope and contracts are
+otherwise unchanged: no schema, MCP, or HTTP change.
+
+#### Edition (3f4844582) - 2026-11-15
+
+Result: check-interleave amendment implemented.
+
+- VERIFIED: the prior implementation already anchored check add events
+  (`timeline_view.go:80-81,141-179`) but rendered only check lists
+  (`assets/page.tmpl:65` in `15e44e235`). Checks now reuse the question
+  `srow`/`stext` summary and `pick` chip, with existing check verdict/reading
+  and status tokens; no new CSS or i18n keys. Embeds are unchanged.
+- VERIFIED: permanent `item-N` anchors stay at the add position while the pill
+  folds/lifts the real `check-N` controls. Assumed notes remain owned by those
+  controls; dashboard selection retains item identity even while lifted.
+- VERIFIED: offline full whiteboard tests retain exactly the same six baseline
+  failures, with no new failure. Focused timeline/check tests, full i18n, named
+  dashboard selection/check/bridge/history tests and JavaScript syntax pass.
+  Embed size remains 256,914 bytes (delta 0).
+- Unresolved: the six baseline failures, including the embed budget, remain;
+  visual acceptance is INFERRED pending the owner's post-merge check. No child
+  agent, browser, daemon, merge, push or ticket closure was performed.
+
+#### Edition (04cbdde8d) - 2026-11-15
+
+Lead amendment at the develop sync (technical; landed behavior wins): items
+without timeline events render at the head in the topic's existing stored
+item order, not item-number order. TASK3's unified whole-history panel
+(46af75a71) landed that order with a regression (`[9, 2]` stays `[9, 2]`).
+The timeline adopts it instead of reordering a landed, owner-checked view.
+The rest of the "Items without timeline events" decision is unchanged.
+Rejected: item-number order (would break the landed TASK3 regression and
+reorder what owners already see).
+
+#### Edition (e36b9f5b9) - 2026-11-15
+
+Develop sync: `63dd7e46a` integrates TASK3's whole-history frame; `e36b9f5b9`
+syncs the later develop tip `aa07206c0` (including its folder cache).
+
+- VERIFIED: permanent ask/check anchors and inert directional gaps now layer
+  over TASK3's complete transition projection, single-line answer chips,
+  complete disclosures, retirement evidence and unknown-time rows. Coalesced
+  creation events stay unchanged on disk; their members retain their ask
+  positions even after class patches. Eventless items keep stored order,
+  including the landed `[9, 2]` regression.
+- VERIFIED: open/assumed checks keep one real control/correction owner at their
+  permanent ask positions for pill folding/lifting; completed checks retain
+  the history visibility toggle. Ask and settlement disclosures have distinct
+  keys. Initial layout shares one capture per scroller, and all navigation
+  retains the landed keep/jump/place owner and pN panel-fold/update policy.
+  Owner headers survive panel republishing; answer-chip clocks and hover
+  metadata use owner send time. The T0 stamp contract is unchanged.
+- VERIFIED: refreshed develop baseline and merged full whiteboard runs fail
+  only `TestRenderPageEmbedSizeBudget`: 256,534 -> 257,941 bytes (+1,407).
+  No additional failure remains from the branch's six-failure baseline. Full
+  i18n, named board-frame/whiteboard-bridge/wbmention/timeline-bridge and MCP
+  input-attribution tests, four Node asset-split tests (one opt-in skip), and
+  assembled/standalone JavaScript syntax checks pass.
+- Unresolved: the existing embed-budget failure; visual fit remains INFERRED
+  pending the owner's check. No browser, daemon, child agent, push, merge into
+  develop, ticket-plan edit, or ticket closure was performed.
+
+#### Edition (1b8e95cae) - 2026-11-15
+
+- Restored board search over inert timeline gaps while retaining legacy
+  history-page indexing and the existing history-owner reveal/jump path.
+- Secondary coalesced and eventless question articles now have distinct,
+  stable, namespaced render keys, so Viewed deferral compares the exposed
+  question. The first question retains its event navigation anchor. T0:
+  display-only changes; stored data is unchanged.
+- VERIFIED: regression tests reproduce both issues and pass after the fixes.
+  Focused dashboard search, Viewed, frame, history and timeline tests and
+  whiteboard timeline/gap tests pass. Full whiteboard testing retains only
+  the known embed-budget failure; embed size is unchanged. No browser,
+  daemon, child agent, merge or push was used.

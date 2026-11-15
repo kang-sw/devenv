@@ -16,7 +16,7 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	for _, key := range []string{"id", "kind", "panel_id", "item_id", "recap", "text", "at", "imported", "topic_state", "board_notice", "waiting_on", "unblocked_receipt"} {
+	for _, key := range []string{"id", "kind", "panel_id", "item_id", "recap", "text", "at", "imported", "topic_state", "board_notice", "waiting_on", "unblocked_receipt", "inputs", "inputs_floor", "seq", "answer_sent_at"} {
 		delete(fields, key)
 	}
 	*e = Entry(known)
@@ -44,6 +44,7 @@ func (e Entry) MarshalJSON() ([]byte, error) {
 }
 
 func (e Entry) clone() Entry {
+	e.Inputs = append(json.RawMessage(nil), e.Inputs...)
 	e.TopicState = append(json.RawMessage(nil), e.TopicState...)
 	e.BoardNotice = append(json.RawMessage(nil), e.BoardNotice...)
 	e.WaitingOn = append(json.RawMessage(nil), e.WaitingOn...)
