@@ -266,8 +266,9 @@
       }
       return false;
     }
-    input.addEventListener("input", function (e) { if (!e.isComposing) sync(); });
-    input.addEventListener("compositionstart", close);
+    // An IME keeps its last syllable uncommitted until the next key, so the
+    // popup must follow composing text too; only picking waits (key above).
+    input.addEventListener("input", sync);
     input.addEventListener("compositionend", sync);
     input.addEventListener("blur", close);
     // A caret moved by a click or the arrow keys may leave the token.
