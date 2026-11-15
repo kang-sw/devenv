@@ -469,34 +469,8 @@
     "261115-bug-ws-dashboard-fixture-real-home-plan-usage-probe": {
       "registered_at": "2026-11-15T02:27:46Z"
     },
-    "261115-bug-ws-dashboard-model-history-stale-after-sse": {
-      "registered_at": "2026-11-15T09:52:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec5/model-history-sse",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:02:03Z",
-        "impl": {
-          "branch": "impl/exec5/model-history-sse/dusk-evoke-geek"
-        }
-      }
-    },
     "261115-bug-ws-dashboard-pinned-deeplink-under-topic-header": {
       "registered_at": "2026-11-15T03:57:52Z"
-    },
-    "261115-bug-ws-git-commit-cannot-conclude-merge": {
-      "registered_at": "2026-11-15T09:10:29Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T09:57:41Z",
-        "impl": {
-          "branch": "impl/develop/ajar-rants-ream"
-        }
-      }
     },
     "261115-bug-ws-git-commit-empty-ticket-updates": {
       "registered_at": "2026-11-15T08:45:02Z"
@@ -524,16 +498,6 @@
         "impl": {
           "branch": "impl/exec4/electron-phase1/cake-ember-ramp"
         }
-      }
-    },
-    "261115-feat-werkschaft-windows-custom-title-bar": {
-      "registered_at": "2026-11-15T02:24:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec4/titlebar-impl",
-        "phase": "closed",
-        "touched_at": "2026-11-15T05:23:26Z"
       }
     },
     "261115-feat-ws-claude-reasoning-summary-producer": {
@@ -573,42 +537,6 @@
     },
     "261115-feat-ws-dashboard-external-stt-voice-typing": {
       "registered_at": "2026-11-15T02:02:38Z"
-    },
-    "261115-feat-ws-dashboard-observed-session-model": {
-      "registered_at": "2026-11-14T23:03:59Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T05:15:57Z",
-        "impl": {
-          "branch": "impl/develop/shove-stem-disk"
-        }
-      }
-    },
-    "261115-feat-ws-dashboard-search-drawer-answer-agent": {
-      "registered_at": "2026-11-15T01:15:10Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T04:50:17Z",
-        "impl": {
-          "branch": "impl/develop/boil-rants-plant"
-        }
-      }
-    },
-    "261115-feat-ws-dashboard-user-message-envelope": {
-      "registered_at": "2026-11-15T02:43:38Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T07:22:43Z"
-      }
     },
     "261115-feat-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:46Z",
@@ -657,39 +585,6 @@
     },
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
-    },
-    "261115-feat-ws-whiteboard-topic-close-request": {
-      "registered_at": "2026-11-15T02:43:44Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:00:49Z"
-      }
-    },
-    "261115-feat-ws-whiteboard-topic-interleaved-timeline": {
-      "registered_at": "2026-11-15T03:11:31Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T06:18:28Z"
-      }
-    },
-    "261115-feat-ws-whiteboard-topic-waiting-on": {
-      "registered_at": "2026-11-15T03:33:00Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec4/waiting-on",
-        "phase": "closed",
-        "touched_at": "2026-11-15T03:55:35Z",
-        "impl": {
-          "branch": "impl/exec4/waiting-on/area-drift-dwarf"
-        }
-      }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
