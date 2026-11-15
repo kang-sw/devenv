@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5a87a5b89f65d3b3
 sage-review-completeness-reviewed: 5a87a5b89f65d3b3
+completed: 2026-11-15
 ---
 
 # Add researching as a whiteboard topic work state
@@ -353,3 +354,57 @@ changed post-split scripts. Verify the hammer references the existing
 mockup, screenshot or viewport/theme matrix. The existing browser filter test
 and `scripts/board-headless.mjs` may ground a later bounded check only if
 separately authorized; this invocation grants no browser, runtime or harness run.
+
+### Result (32dec7255) - 2026-11-15
+
+- Phase 2 landed in `94406db99` (badges/locales) and `32dec7255`
+  (dashboard filters). Researching is a localized peer badge with escaped,
+  independently optional owner and static estimate. The estimate uses
+  `js.wb.state.estimate`, never an elapsed/deadline clock or overdue style;
+  state transitions and close/reset remove stale metadata. Phase 1 plan and
+  Result bytes remain unchanged.
+- The shared filter row now orders All, Researching, Discussing, Waiting,
+  Implementing, Awaiting confirmation, Closed, Cards. Both radio groups and
+  the compact trigger use the existing `#i-hammer` for Cards. Registry-based
+  card counting preserves identity across normal/pinned regions and counts
+  equal-path cards separately; All retains its topic-only total and unloaded
+  closed remainder. State filters hide framework roots, Cards hides topics
+  and closed paging, and All restores view-only visibility without rebuilding
+  frames. Unpinned closes recount directly; pin/open/refresh retain existing
+  placement/lifecycle and Overview callback ownership.
+- All 11 locales include Cards and the static estimate. Removed exactly the
+  two Phase 1 research-key staging exceptions; full wsi18n passes with real
+  consumers and incoming user-role key removals preserved.
+- Lead-owned synchronization reached `dfa0fec19`, incorporating exact develop
+  `667f0f64a`, the final right-side single-line answer-chip/full substantive
+  disclosure refinement, and history-init batching. Interaction inspection
+  and the combined focused checks below passed. `stream.js`, `overview.js`
+  and `dashboard-board.js` are byte-identical to `667f0f64a`; P2 does not change
+  fit/init/keep, add per-row layout reads, or alter timeline markup.
+- Final verification at `dfa0fec19` used offline `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local` and isolated `WS_CACHE_HOME=/tmp/ws-research-p2/cache`,
+  `WS_CONFIG_HOME=/tmp/ws-research-p2/config`, from `agents-plugin-tool/`:
+  - `go test -p=1 ./internal/wswhiteboard -count=1 -timeout=240s -run
+    '^(TestTopicState|TestHistory|TestViewKit|TestCheckRowsStageAnswersInTheReplyBar|TestPageSourceAssembly|TestRenderPageDocumentShape|TestRenderPageTopicBodyPlacement|TestRenderPageContentOnlyTopic|TestRenderPageEmbedOmitsCurrentBody|TestRenderPageFollowsViewLanguage|TestDashboardTopicBodyUsesWholeCardFold|TestServedBoardFramesEveryBodySeparately)'`
+    passed (4.152s), including chip disclosures and batched history admission.
+  - `go test -p=1 ./internal/wsdashboard -count=1 -timeout=240s -run
+    '^(TestBoard(StateFilter|CardPlacement|Toolbar|Topic|PinnedClosedPagesCount|Sheet)|TestOverview(PureContracts|FilterContracts|StateFilterLifecycle)$|TestToolbar|TestPinnedColumnWidth|TestSharedCardActionSnapshots|TestFilesToolbarSheet|TestFullscreenPanelWidth|TestConversationPresentation)'`
+    passed (12.310s), including research/Cards filtering and retained roots.
+  - `go test -p=1 ./internal/wsi18n -count=1 -timeout=240s` passed (1.073s).
+    `node --check` passed for `cards.js`, `ago.js` and incoming `stream.js`;
+    `git diff --check` passed. Full command outputs were read.
+- Earlier post-e8 dashboard checking encountered the unchanged
+  `TestOverviewPageIntegration` source-string failure: it expects
+  `maximize(c)` while both captured `c70f7f550` and current `cards.js` defer
+  `maximize(c, floating)`. Exact baseline source/test inspection established
+  attribution; no test was changed to bless it and it was not rerun.
+  Full suites were not claimed green; other lead-reported baseline failures
+  were outside the selected scope and were not executed.
+- Independent one-pass lite review was clean over
+  `e8f5500c0..56ed15c91`; findings artifact:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@34840370/review-paths/55163db1-01-researching-phase2-lite.md`.
+  The lead accepted retaining this review after its serialized baseline merges;
+  no repeat review was run. Browser geometry remains unverified: UI-fast
+  authorizes focused tests, not browser/screenshots/matrix/runtime acceptance.
+  No provider/download/credential, daemon, install/reload, push or worker-owned
+  merge operation occurred; develop integration and activation remain lead-owned.
