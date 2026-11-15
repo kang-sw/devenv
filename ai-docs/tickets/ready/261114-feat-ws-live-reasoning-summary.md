@@ -62,6 +62,12 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
   The hello/protocol version, event kinds, tools and legacy terminal path stay
   unchanged. If this additive gating cannot carry the change, stop rather than
   introduce breaking semantics.
+- Build-tool provenance: the repair regenerated the bundle with an existing
+  read-only cached esbuild **0.28.1**, because the bounded cached lookup did not
+  locate pinned 0.28.2 under the no-install boundary. Runtime/SDK pins, lockfile,
+  target and bundling script are unchanged. Canonical input freshness, shipped
+  gate assertions and syntax checks passed; this is **not** a pinned-builder
+  pass or a claim of bit-identical output from esbuild 0.28.2.
 - The lead selected the minimal receiver-owned contract below to resolve the
   three fact-population technical gaps: exact eligible summary sources,
   identity/freshness ordering, and immutable natural-turn persistence. Source

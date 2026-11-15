@@ -31,7 +31,7 @@ func liveSummary(s *wslive.ReasoningSummary) *SummaryView {
 	}
 	streaming := false
 	for _, a := range s.Requests {
-		streaming = streaming || a.Status == wslive.SummaryStreaming
+		streaming = streaming || (s.ActiveRequest != nil && a.Request == s.ActiveRequest.Request && a.Attempt == s.ActiveRequest.Attempt && a.Status == wslive.SummaryStreaming)
 	}
 	return &SummaryView{Key: fmt.Sprintf("summary-live-%s-%d", s.Producer, s.Turn), Live: true, Streaming: streaming, Truncated: s.Truncated, Requests: s.Requests}
 }

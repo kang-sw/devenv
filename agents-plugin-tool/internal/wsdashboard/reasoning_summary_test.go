@@ -12,7 +12,7 @@ import (
 
 func rendererSummary() *wslive.ReasoningSummary {
 	text := "Existing conversation and activity stay separate.\n**plain text** <script>alert(1)</script>"
-	return &wslive.ReasoningSummary{V: 1, Producer: "12345678-1234-4234-8234-123456789abc", Turn: 1, Revision: 1,
+	return &wslive.ReasoningSummary{V: 1, Producer: "12345678-1234-4234-8234-123456789abc", Turn: 1, Revision: 1, ActiveRequest: &wslive.SummaryPair{Request: 1, Attempt: 1},
 		Requests: []wslive.SummaryAttempt{{Request: 1, Attempt: 1, Provider: "openai", API: "openai-responses", Model: "gpt-example", Status: wslive.SummaryStreaming,
 			Parts: []wslive.SummaryPart{{Text: text, ObservedBytes: int64(len(text)), RetainedBytes: int64(len(text)), Status: wslive.SummaryStreaming}}}}}
 }
@@ -41,6 +41,12 @@ func TestReasoningSummaryLivePlacementPlainTextAndStableKey(t *testing.T) {
 	if strings.Contains(live, "<script>") || strings.Contains(live, "<strong>plain text") || strings.Contains(string(a[regionEntries].HTML), "d-summary") {
 		t.Fatal("summary interpreted as markup or leaked into entries")
 	}
+	s.ActiveRequest = nil
+	paused := string(renderSummaryRegions(t, s, nil, nil)[regionConvLive].HTML)
+	if strings.Contains(paused, `class="d-updating"`) {
+		t.Fatal("a cleared active attempt still claimed to be updating")
+	}
+	s.ActiveRequest = &wslive.SummaryPair{Request: 1, Attempt: 1}
 	s.Revision++
 	s.Requests[0].Parts[0].Text += " more"
 	s.Requests[0].Parts[0].ObservedBytes += 5
