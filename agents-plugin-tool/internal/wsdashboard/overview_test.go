@@ -172,7 +172,7 @@ func TestOverviewPageIntegration(t *testing.T) {
 		}
 	}
 	cards := mustAsset(t, "cards.js")
-	for _, want := range []string{"if (overviewOn || dg", "window.WsOverview.after(function () { maximize(c); })", "if (opt.toolbar && opt.toolbar.filter) opt.toolbar.filter(run); else run();"} {
+	for _, want := range []string{"if (overviewOn || dg", "function maximize(c, floating)", "window.WsOverview.after(function () { maximize(c, floating); })", "if (opt.toolbar && opt.toolbar.filter) opt.toolbar.filter(run); else run();"} {
 		if !strings.Contains(cards, want) {
 			t.Errorf("missing card guard %q", want)
 		}

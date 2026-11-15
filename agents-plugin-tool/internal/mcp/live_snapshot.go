@@ -165,12 +165,19 @@ type liveSession struct {
 	// slot is the hosting daemon's in-memory hand-off of this session's
 	// snapshot; nil on the direct path, which writes the file and nudges at
 	// every fire. Set at creation, never changed.
-	slot wsdashboard.HostedSlot
+	slot    wsdashboard.HostedSlot
+	owner   func() (func(), error)
+	publish func(wslive.Snapshot)
 
 	mu    sync.Mutex
 	state *wslive.State
 	timer *time.Timer
 	due   time.Time
+	// A callback is registered when scheduled, and retires only when stopped
+	// before execution or after its actual write effects finish.
+	effects     map[uint64]chan struct{}
+	timerEffect uint64
+	quiescing   bool
 	// stopped is set once the session went inactive; its timer never arms
 	// again and the hub replaces it on the next intake.
 	stopped bool
@@ -269,8 +276,11 @@ func (ls *liveSession) halt() bool {
 	was := !ls.stopped
 	ls.stopped = true
 	ls.due = time.Time{}
-	if ls.timer != nil {
-		ls.timer.Stop()
+	if ls.timer != nil && ls.timer.Stop() {
+		if done, ok := ls.effects[ls.timerEffect]; ok {
+			close(done)
+			delete(ls.effects, ls.timerEffect)
+		}
 	}
 	return was
 }
@@ -311,9 +321,9 @@ func (ls *liveSession) finish() {
 	snap := ls.state.Snapshot(currentLiveSeams().now().UnixMilli())
 	ls.mu.Unlock()
 	snap.Repo = repo
-	data, err := json.Marshal(snap)
+	data, err := json.Marshal(snap.ForDisk())
 	if err == nil {
-		err = writeLiveSnapshot(ls.dir, data)
+		err = ls.withSlotOwner(func() error { return writeLiveSnapshot(ls.dir, data) })
 	}
 	ls.writeMu.Unlock()
 	if err != nil {
@@ -367,6 +377,9 @@ func (s *Server) liveSessionActive(sessionKey, dir string) bool {
 	current, err := s.dashboard.stateDir()
 	if err != nil {
 		return true
+	}
+	if s.live.host != nil && s.ownerPID > 0 && !s.terminalRowOwned(current, wsmailbox.ReplyID(sessionKey)) {
+		return false
 	}
 	return wsdashboard.SessionDir(current, wsmailbox.ReplyID(sessionKey)) == dir
 }
@@ -435,11 +448,75 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
 
+	var releaseRow func()
+	if s.live.host != nil && s.ownerPID > 0 {
+		stateDir := filepath.Dir(filepath.Dir(dir))
+		var err error
+		releaseRow, err = wsdashboard.LockRegistration(stateDir, wsmailbox.ReplyID(key))
+		if err != nil {
+			return toolTextResponse(id, "", err)
+		}
+		if !s.terminalRowOwned(stateDir, wsmailbox.ReplyID(key)) {
+			releaseRow()
+			if old := s.live.existing(key); old != nil {
+				old.stop()
+			}
+			return toolTextResponse(id, "dashboard off: terminal ownership changed\n", nil)
+		}
+	}
 	ls, created := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool { return s.liveSessionActive(key, dir) }, s.debugEvent)
+	if created {
+		if s.summaryCapable(ls) {
+			ls.owner = func() (func(), error) { return s.lockSummaryOwner(ls) }
+			ls.publish = func(snap wslive.Snapshot) { s.publishSummaryOwned(ls, snap) }
+			ls.summaryStore().SetWake(ls.slot.RingAppended)
+		}
+	}
+	if releaseRow != nil {
+		releaseRow()
+	}
 	if created {
 		// A new state (this server's first intake, or one after a
 		// reconnect): the session's Pi subagents' rows come from the runner.
 		s.piSeed(ls)
+	}
+	optional := false
+	for _, raw := range rawEvents {
+		if obj, ok := raw.(map[string]any); ok && obj["reasoningSummary"] != nil {
+			optional = true
+		}
+	}
+	capable := s.summaryCapable(ls)
+	if optional && len(rawEvents) != 1 {
+		return toolTextResponse(id, "", fmt.Errorf("reasoning summary requires one bounded event per intake record"))
+	}
+	ordered := s.intake != nil && s.intake.enabled()
+	var release func()
+	if optional && (!capable || adapter != "pi") {
+		return toolTextResponse(id, "", fmt.Errorf("reasoning summary not negotiated by this receiver"))
+	}
+	if optional || (ordered && capable) {
+		var err error
+		release, err = s.lockSummaryOwner(ls)
+		if err != nil {
+			return toolTextResponse(id, "", err)
+		}
+		// A previously admitted open turn has reserved the last pending slot:
+		// its real end still freezes in RAM while an older commit retries.
+		ls.mu.Lock()
+		finishing := false
+		if len(rawEvents) == 1 {
+			if obj, ok := rawEvents[0].(map[string]any); ok && obj["kind"] == wslive.KindTurnEnd {
+				finishing = ls.state.Snapshot(currentLiveSeams().now().UnixMilli()).Lead.ReasoningSummary != nil
+			}
+		}
+		ls.mu.Unlock()
+		if optional && !finishing {
+			if err = ls.summaryStore().Available(); err != nil {
+				release()
+				return toolTextResponse(id, "", err)
+			}
+		}
 	}
 	now := currentLiveSeams().now().UnixMilli()
 	var (
@@ -475,7 +552,23 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 				}
 				reset = reset || ev.Kind == wslive.KindReset
 				observed = append(observed, res.Observed...)
-				ring = append(ring, res.Ring...)
+				for _, entry := range res.Ring {
+					if entry.SummaryHistory != nil {
+						wslive.PrepareSummaryRing(res.Ring)
+						break
+					}
+				}
+				for _, entry := range res.Ring {
+					if entry.SummaryHistory != nil {
+						// Freeze the real turn before ordinary acceptance. No whole
+						// batch/tools/reply retry is attached to this candidate.
+						if err := ls.summaryStore().Register(entry); err != nil {
+							problems = append(problems, "summary storage failure: "+err.Error())
+						}
+					} else {
+						ring = append(ring, entry)
+					}
+				}
 				continue
 			}
 		}
@@ -495,6 +588,9 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	}
 	ls.ringMu.Lock()
 	ls.mu.Unlock()
+	if release != nil {
+		release()
+	}
 	if err := wslive.AppendObserved(ls.dir, observed); err != nil {
 		s.debugEvent("dashboard.model_evidence_write_error", map[string]any{"error": err.Error()})
 	}
@@ -502,6 +598,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		s.appendLiveRing(key, ls.dir, ls.slot, ring)
 	}
 	ls.ringMu.Unlock()
+	ls.retrySummaryCommits()
 	if reset {
 		// The adapter's reset cleared the tree; the runner still holds the
 		// Pi subagents it fed.
@@ -510,7 +607,11 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "ok: %d of %d events applied\n", applied, len(rawEvents))
-	b.WriteString("accepts: " + strings.Join(wslive.OptionalKinds, ", ") + ", " + wslive.TaskCountsCapability + "\n")
+	b.WriteString("accepts: " + strings.Join(wslive.OptionalKinds, ", ") + ", " + wslive.TaskCountsCapability)
+	if capable && ls.summaryStore().Available() == nil {
+		b.WriteString(", " + wslive.ReasoningSummaryCapability)
+	}
+	b.WriteByte('\n')
 	for _, p := range problems {
 		b.WriteString("skipped " + p + "\n")
 	}
@@ -544,19 +645,37 @@ func decodeLiveEvent(raw any) (wslive.Event, error) {
 // scheduleLocked arranges a snapshot write within delay, keeping an earlier
 // pending deadline. ls.mu is held.
 func (ls *liveSession) scheduleLocked(delay time.Duration) {
-	if ls.stopped {
+	if ls.stopped || ls.quiescing {
 		return
 	}
 	due := time.Now().Add(delay)
 	if !ls.due.IsZero() && !due.Before(ls.due) {
 		return
 	}
-	ls.due = due
-	if ls.timer == nil {
-		ls.timer = time.AfterFunc(delay, ls.fire)
-		return
+	if ls.timer != nil && ls.timer.Stop() {
+		if done, ok := ls.effects[ls.timerEffect]; ok {
+			close(done)
+			delete(ls.effects, ls.timerEffect)
+		}
 	}
-	ls.timer.Reset(delay)
+	ls.due = due
+	if ls.effects == nil {
+		ls.effects = map[uint64]chan struct{}{}
+	}
+	ls.timerEffect++
+	id := ls.timerEffect
+	ls.effects[id] = make(chan struct{})
+	ls.timer = time.AfterFunc(delay, func() {
+		defer func() {
+			ls.mu.Lock()
+			if done, ok := ls.effects[id]; ok {
+				close(done)
+				delete(ls.effects, id)
+			}
+			ls.mu.Unlock()
+		}()
+		ls.fire()
+	})
 }
 
 // fire hands the snapshot over, and arms the heartbeat unless a change is
@@ -573,6 +692,7 @@ func (ls *liveSession) fire() {
 		ls.onStop()
 		return
 	}
+	ls.retrySummaryCommits()
 	seams := currentLiveSeams()
 	now := seams.now()
 	ls.mu.Lock()
@@ -604,14 +724,18 @@ func (ls *liveSession) fire() {
 	ls.mu.Unlock()
 	snap.Repo = repo
 	if ls.slot != nil {
-		ls.slot.Publish(snap)
+		if ls.publish != nil {
+			ls.publish(snap)
+		} else {
+			ls.slot.Publish(snap)
+		}
 	}
 	var err error
 	if write {
 		var data []byte
-		data, err = json.Marshal(snap)
+		data, err = json.Marshal(snap.ForDisk())
 		if err == nil {
-			err = writeLiveSnapshot(ls.dir, data)
+			err = ls.withSlotOwner(func() error { return writeLiveSnapshot(ls.dir, data) })
 		}
 	}
 	ls.writeMu.Unlock()
@@ -698,7 +822,26 @@ func writeLiveSnapshot(dir string, data []byte) error {
 // surfaced. Its return value records projection success for callers that
 // report it separately from their authoritative mutation.
 func (s *Server) appendLiveRing(sessionKey, dir string, slot wsdashboard.HostedSlot, entries []wslive.RingEntry) bool {
-	if err := currentLiveSeams().appendRing(wslive.RingDir(dir), entries); err != nil {
+	write := func() error { return currentLiveSeams().appendRing(wslive.RingDir(dir), entries) }
+	var err error
+	if owner, ok := slot.(wsdashboard.LiveSlotOwner); ok {
+		if s.ownerPID > 0 && s.intake != nil {
+			release, ownedErr := s.lockSummaryOwner(&liveSession{dir: dir, replyID: wsmailbox.ReplyID(sessionKey), slot: slot})
+			if ownedErr != nil {
+				return false
+			}
+			err = write()
+			release()
+		} else if release, owned := owner.LockOwner(); owned {
+			err = write()
+			release()
+		} else {
+			return false
+		}
+	} else {
+		err = write()
+	}
+	if err != nil {
 		s.debugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
 		return false
 	}

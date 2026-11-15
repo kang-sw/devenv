@@ -21,6 +21,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { SUMMARY_FRAME_BYTES, type ReasoningSummary } from "../src/reasoning-summary.ts";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   JsonRpcLineBuffer,
@@ -217,6 +218,7 @@ describe("PendingRequestRegistry", () => {
  */
 function fakeChild() {
   const writes: Array<(err?: Error | null) => void> = [];
+  const lines: string[] = [];
   const proc = new EventEmitter() as EventEmitter & {
     stdin: EventEmitter & { write: (data: string, cb: (err?: Error | null) => void) => boolean; end: () => void };
     stdout: EventEmitter;
@@ -224,7 +226,8 @@ function fakeChild() {
     kill: () => boolean;
   };
   proc.stdin = Object.assign(new EventEmitter(), {
-    write: (_data: string, cb: (err?: Error | null) => void) => {
+    write: (data: string, cb: (err?: Error | null) => void) => {
+      lines.push(data);
       writes.push(cb);
       return true;
     },
@@ -238,7 +241,7 @@ function fakeChild() {
     onStderr: () => {},
     spawnProcess: () => proc as unknown as ChildProcessWithoutNullStreams,
   });
-  return { proc, writes, client };
+  return { proc, writes, lines, client };
 }
 
 function epipe(): Error {
@@ -256,6 +259,64 @@ function observe(promise: Promise<unknown>) {
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+describe("McpStdioClient reasoning-summary zero-write framing", () => {
+  const summary = (text: string): ReasoningSummary => ({ v: 1, producer: "dd2edb47-671e-4f22-a8dc-616321c24cb7", turn: 1, revision: 1, activeRequest: { request: 1, attempt: 1 }, truncated: false, requests: [{ request: 1, attempt: 1, provider: "openai", api: "openai-responses", model: "test", status: "streaming", truncated: false, parts: [{ output: 0, part: 0, text, observedBytes: Buffer.byteLength(text), retainedBytes: Buffer.byteLength(text), truncated: false, status: "streaming" }] }] });
+
+  test("oversized fixed overhead writes zero bytes, cancels unused allocated pending ID, next call still correlates", async () => {
+    const { client, proc, lines } = fakeChild();
+    const registry = (client as unknown as { registry: PendingRequestRegistry }).registry;
+    await assert.rejects(client.callTool("dashboard.intake", { session_key: "x".repeat(SUMMARY_FRAME_BYTES), adapter: "pi", events: [{ kind: "turn_end", at: 1, reasoningSummary: summary("prefix") }] }), /frame budget/);
+    assert.equal(lines.length, 0);
+    assert.equal(registry.size, 0, "rejected envelope does not leak its pending ID");
+    const next = client.callTool("normal", {});
+    const frame = JSON.parse(lines[0]);
+    assert.equal(frame.id, 2, "the failed frame allocated the real first ID, rather than guessing its length");
+    proc.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { content: [] } })}\n`));
+    await next; assert.equal(registry.size, 0); client.close();
+  });
+
+  test("actual allocated ID, full intake arguments and LF remain within 49152 UTF-8 bytes", async () => {
+    const { client, proc, lines } = fakeChild();
+    const registry = (client as unknown as { registry: PendingRequestRegistry }).registry;
+    (registry as unknown as { nextId: number }).nextId = Number.MAX_SAFE_INTEGER - 1;
+    const text = "\u0000\"\\한😀".repeat(600);
+    const call = client.callTool("dashboard.intake", { session_key: "long-key".repeat(5000), adapter: "pi", events: [{ kind: "turn_end", at: Number.MAX_SAFE_INTEGER, reason: "aborted", reasoningSummary: summary(text) }] });
+    assert.equal(lines.length, 1);
+    const line = lines[0], frame = JSON.parse(line);
+    assert.equal(frame.id, Number.MAX_SAFE_INTEGER - 1);
+    assert.ok(Buffer.byteLength(line) <= SUMMARY_FRAME_BYTES);
+    assert.ok(line.endsWith("\n"));
+    const projected = frame.params.arguments.events[0].reasoningSummary;
+    assert.ok(projected.truncated);
+    assert.equal(frame.params.arguments.events.length, 1);
+    if (projected.requests.length) {
+      const part = projected.requests[0].parts[0];
+      assert.ok(text.startsWith(part.text)); assert.equal(part.observedBytes, Buffer.byteLength(text));
+      assert.equal(part.retainedBytes, Buffer.byteLength(part.text));
+    }
+    proc.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { content: [] } })}\n`));
+    await call; client.close();
+  });
+
+  test("any observed launcher lost-call error revokes connection identity, not only intake failures", async () => {
+    const { client, proc } = fakeChild();
+    const first = client.connectionIdentity;
+    const call = client.callTool("other-tool", {});
+    proc.stdout.emit("data", Buffer.from('{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"dashboard daemon not reachable"}}\n'));
+    await assert.rejects(call, /not reachable/);
+    assert.notEqual(client.connectionIdentity, first);
+    client.close();
+  });
+
+  test("ordinary tool calls keep their existing unbounded legacy serialization", async () => {
+    const { client, proc, lines } = fakeChild();
+    const call = client.callTool("ordinary", { text: "x".repeat(SUMMARY_FRAME_BYTES + 1) });
+    assert.equal(lines.length, 1); assert.ok(Buffer.byteLength(lines[0]) > SUMMARY_FRAME_BYTES);
+    proc.stdout.emit("data", Buffer.from('{"jsonrpc":"2.0","id":1,"result":{"content":[]}}\n'));
+    await call; client.close();
+  });
+});
 
 test("McpStdioClient generic dispatch preserves appended whiteboard summaries and the result envelope", async () => {
   const { proc, writes, client } = fakeChild();
