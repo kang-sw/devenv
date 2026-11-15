@@ -141,13 +141,13 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
       report.omitted.push('Before-only capture is historical evidence, not a TASK3 acceptance verdict.');
     } else {
       const band = await page.evaluate(() => {
-        const h = document.querySelector('.wb-history[data-history="DENSITY"] .wb-history-head'), b = h.querySelector('.history-older'), l = h.querySelector('.mhead'), r = h.querySelector('.mmeta');
+        const h = document.querySelector('.wb-history[data-history="DENSITY"] > .mhead'), b = h.querySelector('.history-older'), l = h.querySelector('.wb-mtitle'), r = h.querySelector('.mmeta');
         const hb = h.getBoundingClientRect(), bb = b.getBoundingClientRect(), lb = l.getBoundingClientRect(), rb = r.getBoundingClientRect();
         return { height: hb.height, centered: Math.abs(bb.left + bb.width / 2 - hb.left - hb.width / 2), overlap: lb.right > bb.left || bb.right > rb.left, totals: r.textContent, visible: !b.hidden, overflow: h.scrollWidth > h.clientWidth + 1 };
       });
       measure('available-header', band);
       assert(band.visible && band.centered <= 1 && !band.overlap && !band.overflow, 'available history capsule is not centered or overlaps metadata');
-      await capture('available-header', density + ' .wb-history-head');
+      await capture('available-header', density + ' .wb-history > .mhead');
       await verifyData(fixture.stages[0]);
       const answered = page.locator('#item-' + fixture.itemIDs.answeredCheck + ' .wb-hitem, .wb-hitem#item-' + fixture.itemIDs.answeredCheck);
       const hide = page.locator(density + ' .ckhide');
@@ -160,7 +160,7 @@ export async function scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFo
       const unknownCheck = await page.locator('#item-' + fixture.legacyOrderedIDs[0] + ' .wb-hitem, .wb-hitem#item-' + fixture.legacyOrderedIDs[0]).isVisible();
       assert(unknownCheck, 'completed-check filter hid an explicitly undated legacy item');
       const exhausted = await page.evaluate(() => {
-        const h = document.querySelector('.wb-history[data-history="DENSITY"] .wb-history-head');
+        const h = document.querySelector('.wb-history[data-history="DENSITY"] > .mhead');
         return { height: h.getBoundingClientRect().height, hidden: h.querySelector('.history-older').hidden, totals: h.querySelector('.mmeta').textContent };
       });
       measure('exhausted-header', exhausted);

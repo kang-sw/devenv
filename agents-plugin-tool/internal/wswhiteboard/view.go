@@ -205,7 +205,10 @@ type TopicView struct {
 	// open or when its close gave none (a store written before results).
 	Result string
 	// UpdatedAt is the topic's latest change, the newest change time among
-	// its items, body, and recap (RFC 3339, UTC), empty when none has one. UpdatedMs
+	// its items, body, recap, and stream entries (logs, panels, and the
+	// system events of closes, reopens, item and content changes) (RFC 3339,
+	// UTC), empty when none has one. Label and tickets are metadata and do
+	// not count. UpdatedMs
 	// is the same instant in Unix milliseconds for the page script, and
 	// UpdatedClock its local HH:MM, which the embed shows.
 	UpdatedAt    string
@@ -216,9 +219,9 @@ type TopicView struct {
 	// Tickets are the topic's linked tickets, in the order the lead wrote
 	// them, each with the status ViewInput.Tickets resolved at render time.
 	Tickets []TicketBadge
-	// Live marks a topic with live work: at least one linked ticket still
-	// idea, todo, or ready whose category is actionable (liveCategories).
-	// The page gives it a glow.
+	// Live retains the legacy ticket-derived work marker: at least one linked
+	// actionable ticket still idea, todo, or ready. The board no longer renders
+	// linked-ticket badges or their glow; this is non-visible view metadata.
 	Live bool
 }
 
@@ -233,9 +236,9 @@ const (
 	TicketUnknown = "unknown"
 )
 
-// liveCategories are the ticket categories (a stem's second segment) whose
-// open tickets light a topic's glow: work to carry out. A linked research or
-// epic ticket still shows as a badge, but never makes a topic live.
+// liveCategories are the actionable ticket categories (a stem's second
+// segment) that set the legacy Live view metadata. Research and epic tickets
+// retain resolved metadata without setting Live.
 var liveCategories = []string{"feat", "bug", "refactor", "chore"}
 
 // TicketResolver resolves a linked ticket stem to its status: the status
@@ -797,7 +800,8 @@ func bumpRank(state *State, activity map[string]int) map[string]int {
 }
 
 // stampUpdated sets each block's latest change from the change times of its
-// items, body, and recap, and its recap's own update time; a time that does
+// items, body, recap, and stream entries, and its recap's own update time
+// (the latest agent log, else the legacy recap); a time that does
 // not parse (a store written before change times) counts as none.
 func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location) {
 	if loc == nil {

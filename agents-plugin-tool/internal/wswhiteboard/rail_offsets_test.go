@@ -64,7 +64,8 @@ var queue = [], ro = null;
 var document = { body: new E("body"), getElementById: function (id) { return id === "bcol" ? board : null; }, querySelector: function () { return null; }, createElement: function (t) { return new E(t); } };
 var window = { requestAnimationFrame: function (f) { queue.push(f); return queue.length; }, innerHeight: 800, addEventListener: function () {}, removeEventListener: function () {}, ResizeObserver: function (cb) { ro = cb; this.observe = function () {}; this.disconnect = function () {}; } };
 var requestAnimationFrame = window.requestAnimationFrame, cancelAnimationFrame = function () {}, ResizeObserver = window.ResizeObserver;
-function getComputedStyle(e) { return { overflowY: e === board ? "auto" : "visible", paddingTop: "0", getPropertyValue: function () { return ""; } }; }
+var railOverflow = "auto", railInset = "";
+function getComputedStyle(e) { return { overflowY: e === board ? railOverflow : "visible", paddingTop: "0", getPropertyValue: function (k) { return e === board && k === "--wb-rail-inset" ? railInset : ""; } }; }
 function frame() { var q = queue; queue = []; q.forEach(function (f) { f(); }); }
 function hostWrites() { return writes.filter(function (w) { return w[0] === "host"; }); }
 `
@@ -126,5 +127,43 @@ process.stdout.write(bad.join("\n"));`
 	}
 	if s := strings.TrimSpace(string(out)); s != "" {
 		t.Errorf("rail offset cases failed:\n%s", s)
+	}
+}
+
+// Both dashboard page kinds publish the same host inset. A document scroller
+// must not discard it just because the host itself no longer scrolls.
+func TestRailHostInsetAcrossScrollers(t *testing.T) {
+	data, err := assetFS.ReadFile("assets/rail.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	for _, overflow := range []string{"auto", "visible"} {
+		t.Run(overflow, func(t *testing.T) {
+			script := railPrelude + `
+railOverflow = "` + overflow + `"; railInset = "34px";
+document.scrollingElement = board;
+board.scrollTop = 1250;
+` + string(data) + `
+frame();
+check("head clears compact face and capsules",board.querySelector(".tophead").props["--wb-rail-top"],"78px");
+check("pill clears compact face, capsules and head",oqTop.props["--wb-rail-h"],"108px");
+railInset = "66px"; ro(); frame();
+check("late wrapped face height is read live",board.querySelector(".tophead").props["--wb-rail-top"],"110px");
+railInset = ""; ro(); frame();
+check("missing inset retains standalone geometry",board.querySelector(".tophead").props["--wb-rail-top"],"44px");
+check("host receives no inherited rail offsets",hostWrites(),[]);
+process.stdout.write(bad.join("\n"));`
+			out, err := nodeScript(node, script).CombinedOutput()
+			if err != nil {
+				t.Fatalf("node: %v\n%s", err, out)
+			}
+			if s := strings.TrimSpace(string(out)); s != "" {
+				t.Errorf("rail inset cases failed:\n%s", s)
+			}
+		})
 	}
 }

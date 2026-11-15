@@ -5,45 +5,46 @@
 //
 // The inbox is a directory of entry files, one per held message, named
 // <fixed-width UTC nanosecond stamp>-<random hex>.json. An entry file is
-// never rewritten: a merge replaces the entry with a new one. Every state
-// change of an entry starts with an atomic claim, a rename of its file away
-// from the inbox, so of a drain, a merge, and a cancel racing for one entry
-// exactly one wins:
+// never rewritten, and a send never joins an entry already held: every send
+// is its own new entry, so each message the user sends stays visible and
+// keeps its place. Every state change of an entry starts with an atomic
+// claim, a rename of its file away from the inbox, so of a drain, a steer,
+// and a cancel racing for one entry exactly one wins:
 //
 //   - Drain renames each entry into the drained/ subdirectory, where it stays
 //     as the record the page's sent marks read (the newest DrainedCap).
-//   - Merge renames the newest unsteered entry to a claim file, writes the
-//     merged entry under a new name, and removes the claim. When the claim
-//     fails because a drain took the entry, the send becomes a new entry
-//     instead, so a send is never lost and a drained entry never comes back.
 //   - Cancel renames the entry to a claim file, reads it, and removes it.
 //     When the claim fails, the entry was already drained.
 //   - Steer renames the entry to a claim file, writes the same entry marked
-//     for steering under a new name, and removes the claim. A steered entry
-//     is still held (cancel still takes it), but no later send merges into
-//     it, so a promoted message never absorbs text the user did not promote.
-//     The new name keeps the entry's stamp (only its random suffix changes),
-//     so a steered entry a full drain takes keeps its place in order: text
-//     sent before a held command still reaches the session before it.
+//     for steering under a new name with a fresh stamp, and removes the
+//     claim, so the promoted message joins the end of the steer queue (see
+//     below). A steered entry is still held (cancel still takes it).
 //   - Interrupt claims every held message entry, steered or not, removes
 //     them, and writes an interrupt entry, returning the claimed messages so
 //     the page can put them back in its composer.
 //
+// The held messages form two queues in the one directory: the steered
+// entries, then the rest (follow-ups and command entries), each in stamp
+// order. Queue order (queueRecords) is that order; Drain, Held, and Interrupt
+// return records in it, so the page shows, and the adapter receives, the
+// steer queue ahead of the follow-ups. A steered entry's stamp is the time
+// it joined the steer queue, not its first send's (SentAt keeps that).
+//
 // An interrupt entry asks the adapter to stop the session's running turn. It
-// carries only its creation time (SentAt) and is never a message: no send
-// merges into it, it counts toward no image cap, Held and MessageNames leave
-// it out, and Cancel and Steer refuse it.
+// carries only its creation time (SentAt) and is never a message: it counts
+// toward no image cap, Held and MessageNames leave it out, and Cancel and
+// Steer refuse it.
 //
 // A command entry holds one slash command the user picked in the composer
 // (Command): its name and arguments, never text the inbox parses. It carries
 // nothing else, so the adapter runs it natively instead of submitting it as
 // text. It is a held message (Held, MessageNames, Cancel, Interrupt, and
-// Drain treat it as one), but no send merges into it and a command send
-// never merges into another entry, and Steer refuses it: a command waits for
-// the turn end, as one typed in the terminal does. A drain returns it in
-// order among the messages; the adapter splits its batch there, so text
+// Drain treat it as one), and Steer refuses it: a command waits for the turn
+// end, as one typed in the terminal does. A drain returns it in its place in
+// the follow-up queue; the adapter splits its batch there, so follow-up text
 // before a command reaches the session before it runs and text after it,
-// after.
+// after. Steered entries are not held back by a command: they precede the
+// whole follow-up queue, as a steer-only drain mid-turn already takes them.
 //
 // Held means undrained: an entry in the inbox directory. A reader tells a
 // held entry from a drained one by the directory it sits in. A full drain
@@ -56,14 +57,12 @@
 //
 // An attached image carries a number, which the send's text names it by
 // with an "[Image #N]" marker and the delivered message lists it by with an
-// "Image #N: <path>" line. Numbers are unique within an entry; a merge
-// renumbers the later send's images and markers to continue the earlier
-// ones, since the merged entry reaches the session as one message.
+// "Image #N: <path>" line. Numbers are unique within an entry.
 //
 // Images a send attaches live in the attachments/ subdirectory as
 // <upload-id>-<n>.<ext> files the dashboard daemon writes; an entry records
 // their absolute paths. A file is never renamed and its name is never tied to
-// an entry name, since a merge gives the entry a new name. A file is deleted
+// an entry name, since a steer gives the entry a new name. A file is deleted
 // only once no held entry and no drained record lists it: when the drained
 // record listing it is trimmed (Drain), or by the daemon's sweep of old
 // unreferenced files (SweepAttachments).
@@ -120,8 +119,8 @@ const (
 	maxSelectorBytes    = 512
 	maxPickTextBytes    = 1024
 	maxWebURLBytes      = 2048
-	// maxImageNum bounds an image number a send names; a merge may number
-	// past it.
+	// maxImageNum bounds an image number a send names; an entry merged
+	// before sends stopped merging may number past it.
 	maxImageNum = 9999
 )
 
@@ -130,7 +129,7 @@ var (
 	// mentions, no picks, no console blocks, and no images.
 	ErrEmpty = errors.New("empty message: no text and no answers")
 	// ErrGone reports that an entry is no longer held: a drain delivered it,
-	// or a cancel or merge already took it.
+	// or a cancel or steer already took it.
 	ErrGone = errors.New("message is no longer held")
 	// ErrInvalid reports a send that breaks a limit or carries a malformed
 	// answer; its wrapped text says which.
@@ -163,31 +162,31 @@ type Chip struct {
 	Answer string `json:"answer,omitempty"`
 	Note   string `json:"note,omitempty"`
 	// SentAt is the time of the send that carried this chip, epoch
-	// milliseconds; Send sets it, and Merge keeps it per chip, since an
-	// entry's own SentAt is its first send's. Zero on a chip written before
-	// the field.
+	// milliseconds; Send sets it. An entry merged before sends stopped
+	// merging kept it per chip, since its own SentAt is its first send's.
+	// Zero on a chip written before the field.
 	SentAt int64 `json:"sentAt,omitempty"`
 }
 
 // Entry is one held message.
 type Entry struct {
 	SchemaVersion int `json:"schemaVersion"`
-	// Parts holds the typed text of each send merged into this entry, in
-	// order; the message keeps each as its own paragraph.
+	// Parts holds the send's text, including server-serialized selections
+	// (selections.go). An older combined entry may hold several parts,
+	// each kept as its own paragraph; no new stored field is needed.
 	Parts []string `json:"parts,omitempty"`
-	// Chips holds one answer per board item; a later send's chip for the
-	// same item replaced the earlier one in place.
+	// Chips holds one answer per board item.
 	Chips []Chip `json:"chips,omitempty"`
 	// Topics holds one note per board topic, kept as Chips are. An entry
 	// written before the field carries its topic notes as "[topic] text"
 	// lines in Parts, delivered as they are.
 	Topics []TopicNote `json:"topics,omitempty"`
 	// Mentions holds the text the user selected on the board and added to
-	// the message (mentions.go), in the order added across merged sends.
+	// the message (mentions.go), in the order added.
 	Mentions []Mention `json:"mentions,omitempty"`
 	// Picks and Consoles hold the page elements the user picked in a web
 	// card and the console errors it attached (webpicks.go), in the order
-	// added across merged sends.
+	// added.
 	Picks    []Pick    `json:"picks,omitempty"`
 	Consoles []Console `json:"consoles,omitempty"`
 	// Images holds the absolute paths of the attached image files, in send
@@ -202,7 +201,7 @@ type Entry struct {
 	SentAt int64 `json:"sentAt,omitempty"`
 	// Steer marks an entry the user promoted to steering: the adapter
 	// injects it at the session's next tool boundary instead of at the turn
-	// end. A steered entry is never a merge target.
+	// end. Steered entries queue ahead of the rest (queueRecords).
 	Steer bool `json:"steer,omitempty"`
 	// Interrupt marks an interrupt entry (Interrupt): a request to stop the
 	// session's running turn, never a message. It carries no other content.
@@ -380,16 +379,19 @@ func Normalize(e Entry) (Entry, error) {
 		return normalizeCommand(e)
 	}
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Steer: e.Steer}
-	size := 0
+	size, selectionMentions := 0, 0
 	for _, p := range e.Parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
+		var count int
+		p, count = normalizeSelectionText(p)
+		selectionMentions += count
 		size += len(p)
 		out.Parts = append(out.Parts, p)
 	}
-	if len(e.Mentions) > maxMentions {
+	if len(e.Mentions)+selectionMentions > maxMentions {
 		return Entry{}, fmt.Errorf("%w: more than %d mentions", ErrInvalid, maxMentions)
 	}
 	for _, m := range e.Mentions {
@@ -499,6 +501,18 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		out.ImageNums = nums
 	}
+	for _, p := range out.Parts {
+		for _, part := range ParseSelections(p) {
+			if part.Selection == nil {
+				continue
+			}
+			for _, n := range part.Selection.Images {
+				if !containsInt(out.ImageNums, n) {
+					return Entry{}, fmt.Errorf("%w: selection image %d is not attached", ErrInvalid, n)
+				}
+			}
+		}
+	}
 	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.Picks) == 0 && len(out.Consoles) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
 	}
@@ -578,90 +592,6 @@ func maxInt(list []int) int {
 	return m
 }
 
-// Merge appends add's parts, mentions, picks, console blocks, and images to base's and lays add's
-// chips and topic notes over base's: the later chip for an item, and the
-// later note for a topic, wins. base's first-send time is kept.
-// add's images are renumbered to continue base's, each number raised by
-// base's highest, and every marker in add's parts, chip notes, and topic
-// notes naming one of add's images is rewritten to its new number, so the
-// numbers stay unique across the merged message; an image base already lists
-// takes base's number. The image cap is the caller's to check before the
-// send.
-func Merge(base, add Entry) Entry {
-	out := Entry{SchemaVersion: SchemaVersion, SentAt: base.SentAt}
-	if out.SentAt == 0 {
-		out.SentAt = add.SentAt
-	}
-	out.Mentions = append(append([]Mention(nil), base.Mentions...), add.Mentions...)
-	out.Picks = append(append([]Pick(nil), base.Picks...), add.Picks...)
-	out.Consoles = append(append([]Console(nil), base.Consoles...), add.Consoles...)
-	baseNums := base.Nums()
-	for i, path := range base.Images {
-		if indexOf(out.Images, path) < 0 {
-			out.Images = append(out.Images, path)
-			out.ImageNums = append(out.ImageNums, baseNums[i])
-		}
-	}
-	offset := maxInt(out.ImageNums)
-	renum := map[int]int{}
-	addNums := add.Nums()
-	for i, path := range add.Images {
-		if j := indexOf(out.Images, path); j >= 0 {
-			renum[addNums[i]] = out.ImageNums[j]
-			continue
-		}
-		renum[addNums[i]] = addNums[i] + offset
-		out.Images = append(out.Images, path)
-		out.ImageNums = append(out.ImageNums, addNums[i]+offset)
-	}
-	out.Parts = append([]string{}, base.Parts...)
-	for _, p := range add.Parts {
-		out.Parts = append(out.Parts, renumberMarkers(p, renum))
-	}
-	out.Chips = append([]Chip{}, base.Chips...)
-	for _, c := range add.Chips {
-		if c.SentAt == 0 {
-			c.SentAt = add.SentAt
-		}
-		c.Note = renumberMarkers(c.Note, renum)
-		out.Chips = putChip(out.Chips, c)
-	}
-	out.Topics = append([]TopicNote{}, base.Topics...)
-	for _, t := range add.Topics {
-		t.Note = renumberMarkers(t.Note, renum)
-		out.Topics = putTopic(out.Topics, t)
-	}
-	if len(out.Topics) == 0 {
-		out.Topics = nil
-	}
-	return out
-}
-
-// renumberMarkers rewrites each ImageMarker in text whose number renum maps
-// to its new number, all at once, so a rewritten marker is never rewritten
-// again.
-func renumberMarkers(text string, renum map[int]int) string {
-	if len(renum) == 0 {
-		return text
-	}
-	var b strings.Builder
-	last := 0
-	ImageMarkers(text, func(start, end, n int) {
-		to, ok := renum[n]
-		if !ok || to == n {
-			return
-		}
-		b.WriteString(text[last:start])
-		b.WriteString(ImageMarker(to))
-		last = end
-	})
-	if last == 0 {
-		return text
-	}
-	b.WriteString(text[last:])
-	return b.String()
-}
-
 // stampNow is the entry name clock (a test seam).
 var stampNow = time.Now
 
@@ -670,8 +600,8 @@ var stampClock struct {
 	last time.Time
 }
 
-// nextStamp is strictly increasing within this process, so a merged entry
-// always sorts after the one it replaced.
+// nextStamp is strictly increasing within this process, so an entry written
+// later (a send, or a steer's rewrite) always sorts after those before it.
 func nextStamp() time.Time {
 	stampClock.Lock()
 	defer stampClock.Unlock()
@@ -694,12 +624,7 @@ func randomHex(n int) (string, error) {
 // writeEntry commits entry under a fresh name in dir through temp+rename, so
 // no reader sees a partial entry.
 func writeEntry(dir string, entry Entry) (string, error) {
-	return writeEntryAt(dir, entry, nextStamp().Format(stampLayout))
-}
-
-// writeEntryAt is writeEntry under the given stamp with a fresh random
-// suffix, so the entry sorts where an entry of that stamp does.
-func writeEntryAt(dir string, entry Entry, stamp string) (string, error) {
+	stamp := nextStamp().Format(stampLayout)
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return "", err
@@ -744,7 +669,7 @@ func readEntry(path string) (Entry, error) {
 
 // claim atomically takes the entry name in dir away from the inbox by
 // renaming it to a hidden claim file. It returns ErrGone when another claim
-// (a drain, a merge, a cancel) already took it.
+// (a drain, a steer, a cancel) already took it.
 func claim(dir, name, op string) (string, error) {
 	suffix, err := randomHex(4)
 	if err != nil {
@@ -760,11 +685,10 @@ func claim(dir, name, op string) (string, error) {
 	return claimed, nil
 }
 
-// Send holds add in the inbox at dir: merged into the newest held entry that
-// is not steered when there is one, or as a new entry. It returns the
-// resulting entry's name and whether it merged. add is normalized first
-// (Normalize); its SentAt is set from now when zero. A command or steered
-// send is always a new entry: it must not promote unrelated held text.
+// Send holds add in the inbox at dir as a new entry and returns its name;
+// merged is always false (a send never joins a held entry, so every message
+// keeps its own place in the queue). add is normalized first (Normalize);
+// its SentAt is set from now when zero.
 func Send(dir string, add Entry, now time.Time) (name string, merged bool, err error) {
 	if add.SentAt == 0 {
 		add.SentAt = now.UnixMilli()
@@ -780,77 +704,14 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, fmt.Errorf("create inbox dir: %w", err)
 	}
-	if add.Command != nil || add.Steer {
-		name, err = writeEntry(dir, add)
-		return name, false, err
-	}
-	rec, ok, err := MergeTarget(dir)
-	if err != nil {
-		return "", false, err
-	}
-	if !ok {
-		name, err = writeEntry(dir, add)
-		return name, false, err
-	}
-	target := rec.Name
-	claimed, err := claim(dir, target, "merge")
-	if errors.Is(err, ErrGone) {
-		// A drain took the held entry: this send starts the next message.
-		name, err = writeEntry(dir, add)
-		return name, false, err
-	}
-	if err != nil {
-		return "", false, err
-	}
-	base, err := readEntry(claimed)
-	if err != nil || base.Steer || base.Command != nil {
-		// Leave an unreadable entry where it was; this send stands alone. A
-		// steered one cannot be here unless it was steered after the target
-		// was chosen, and it accepts no merge either.
-		_ = rename(claimed, filepath.Join(dir, target))
-		name, err = writeEntry(dir, add)
-		return name, false, err
-	}
-	name, err = writeEntry(dir, Merge(base, add))
-	if err != nil {
-		// Put the claimed entry back so the earlier send is not lost.
-		_ = rename(claimed, filepath.Join(dir, target))
-		return "", false, err
-	}
-	_ = remove(claimed)
-	return name, true, nil
-}
-
-// MergeTarget is the held entry a send at dir would merge into: the newest
-// message that is not steered (never an interrupt entry) and that no held
-// command entry follows; false when there is none. A command entry is never
-// a target, and a send after one starts a new entry rather than joining an
-// older message, so text sent after a command still reaches the session
-// after it. An entry that cannot be read is skipped. A caller that caps what
-// one entry may carry counts the target's share through it.
-func MergeTarget(dir string) (Record, bool, error) {
-	names, err := Names(dir)
-	if err != nil {
-		return Record{}, false, err
-	}
-	for i := len(names) - 1; i >= 0; i-- {
-		e, err := readEntry(filepath.Join(dir, names[i]))
-		if err != nil {
-			continue
-		}
-		if e.Command != nil {
-			break
-		}
-		if !e.Steer && !e.Interrupt {
-			return Record{Name: names[i], Entry: e}, true, nil
-		}
-	}
-	return Record{}, false, nil
+	name, err = writeEntry(dir, add)
+	return name, false, err
 }
 
 // Steer marks the held entry name at dir for steering: it claims the entry
 // and writes the same entry with Steer set under a fresh name, so entry files
-// stay never rewritten. It returns the steered entry's name; an entry already
+// stay never rewritten. The fresh name's stamp is now, so the entry moves to
+// the end of the steer queue. It returns the steered entry's name; an entry already
 // steered is left as it is and its own name returned. It returns ErrGone
 // when the entry is no longer held, or is an interrupt entry, and
 // ErrCommand for a command entry; it leaves either in place.
@@ -880,8 +741,7 @@ func Steer(dir, name string) (string, error) {
 		return name, nil
 	}
 	entry.Steer = true
-	// The same stamp keeps the entry's place among the held entries.
-	steered, err := writeEntryAt(dir, entry, name[:strings.LastIndexByte(name, '-')])
+	steered, err := writeEntry(dir, entry)
 	if err != nil {
 		// Put the claimed entry back so the message is not lost.
 		_ = rename(claimed, filepath.Join(dir, name))
@@ -919,9 +779,10 @@ func Cancel(dir, name string) (Entry, error) {
 // writeInterruptEntry commits Interrupt's entry (a test seam).
 var writeInterruptEntry = writeEntry
 
-// Interrupt claims every held message entry at dir, steered or not, oldest
-// first, removes them, and writes an interrupt entry whose SentAt is now. It
-// returns the claimed records, oldest first, and the interrupt entry's name.
+// Interrupt claims every held message entry at dir, steered or not, removes
+// them, and writes an interrupt entry whose SentAt is now. It returns the
+// claimed records, in queue order (queueRecords), and the interrupt entry's
+// name.
 // A message another claim took first is skipped, and an unreadable one is
 // left held, as Cancel leaves it. When the interrupt entry cannot be written,
 // every claimed message is put back and the error returned.
@@ -967,11 +828,12 @@ func Interrupt(dir string, now time.Time) (held []Record, name string, err error
 	for _, c := range claims {
 		_ = remove(c)
 	}
-	return held, name, nil
+	return queueRecords(held), name, nil
 }
 
-// Drain claims every held message at dir, oldest first, moving each into the
-// drained directory, and returns those this call claimed. An entry another
+// Drain claims every held message at dir, moving each into the drained
+// directory, and returns those this call claimed, in queue order
+// (queueRecords): the steered ones first, then the rest. An entry another
 // claim took first is skipped. Every interrupt entry it meets is claimed and
 // deleted: never moved to the drained directory and never returned. The
 // drained directory is then trimmed to the newest DrainedCap records, and
@@ -1072,7 +934,26 @@ func drain(dir string, steerOnly bool) ([]Record, error) {
 		out = append(out, Record{Name: name, Entry: entry})
 	}
 	trimDrained(dir)
-	return out, firstErr
+	return queueRecords(out), firstErr
+}
+
+// queueRecords orders records, given in stamp order, as the inbox's two
+// queues: the steered entries first, then the rest (follow-ups and command
+// entries), each part keeping stamp order. A steer stamps the entry anew, so
+// a promoted message lands at the end of the steer queue.
+func queueRecords(records []Record) []Record {
+	out := make([]Record, 0, len(records))
+	for _, r := range records {
+		if r.Entry.Steer {
+			out = append(out, r)
+		}
+	}
+	for _, r := range records {
+		if !r.Entry.Steer {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // filterNames keeps the names whose entry reads and satisfies keep; an entry
@@ -1137,8 +1018,8 @@ func trimDrained(dir string) {
 // inbox at dir lists. It reads the held side, then the drained records, then
 // the held side again: a drain moves an entry from held to drained, so an
 // entry that moves between the reads is seen in one of them. The held side
-// is every file directly in dir that parses as an entry, so an entry a merge
-// or cancel has claimed, or a merge is writing, counts too.
+// is every file directly in dir that parses as an entry, so an entry a steer
+// or cancel has claimed, or a steer is writing, counts too.
 func referencedAttachments(dir string) map[string]bool {
 	attachDir := AttachmentsDir(dir)
 	out := map[string]bool{}
@@ -1271,9 +1152,9 @@ func InterruptNames(dir string) ([]string, error) {
 // first.
 func DrainedNames(dir string) ([]string, error) { return Names(DrainedDir(dir)) }
 
-// Held reads the held messages at dir, oldest first; interrupt entries are
-// left out. An entry that cannot be read (a claim took it meanwhile, or it
-// does not parse) is skipped.
+// Held reads the held messages at dir in queue order (queueRecords);
+// interrupt entries are left out. An entry that cannot be read (a claim took
+// it meanwhile, or it does not parse) is skipped.
 func Held(dir string) ([]Record, error) {
 	records, err := readAll(dir)
 	if err != nil {
@@ -1285,7 +1166,7 @@ func Held(dir string) ([]Record, error) {
 			out = append(out, r)
 		}
 	}
-	return out, nil
+	return queueRecords(out), nil
 }
 
 // Drained reads the drained records of the inbox at dir, oldest first.

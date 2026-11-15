@@ -21,16 +21,14 @@ func (d entryData) PayloadClass() string {
 	return "md"
 }
 
-// entryPageData is one history page to render; Tail marks the newest page,
-// whose last log run keeps its newest rows visible (EntryPage.Segments).
+// entryPageData is one history page to render.
 type entryPageData struct {
 	Entries EntryPage
-	Tail    bool
 	Page    *pageData
 }
 
-func (p *pageData) EntryPageOf(entries EntryPage, tail bool) entryPageData {
-	return entryPageData{Entries: entries, Tail: tail, Page: p}
+func (p *pageData) EntryPageOf(entries EntryPage) entryPageData {
+	return entryPageData{Entries: entries, Page: p}
 }
 
 // rowData pairs a log run's row with the rendering page.

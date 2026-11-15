@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -68,7 +69,10 @@ func TestCreateRefusesBadLaunch(t *testing.T) {
 	}
 }
 
-func TestSendRunsTurnAndHeldSendsMerge(t *testing.T) {
+// TestSendRunsTurnAndHeldSendsGoAsOneTurn: each send during a turn is its
+// own held message, and the turn end delivers them all as one next turn,
+// joined in queue order: the steered message first, then the follow-ups.
+func TestSendRunsTurnAndHeldSendsGoAsOneTurn(t *testing.T) {
 	h := newHarness(t, map[string]string{"chat": chatProfile})
 	id := h.create("chat").ID
 	if _, err := h.runner.Send(id, "first"); err != nil {
@@ -91,7 +95,7 @@ func TestSendRunsTurnAndHeldSendsMerge(t *testing.T) {
 		t.Fatalf("a sent turn runs: %+v", st)
 	}
 
-	for _, text := range []string{"second", "third"} {
+	for _, text := range []string{"second", "third", "fourth"} {
 		st, err := h.runner.Send(id, text)
 		if err != nil {
 			t.Fatal(err)
@@ -100,13 +104,23 @@ func TestSendRunsTurnAndHeldSendsMerge(t *testing.T) {
 			t.Fatalf("a send during a turn is held, the turn keeps running: %+v", st)
 		}
 	}
-	if st := h.state(id); st.Held != 1 {
-		t.Fatalf("two held sends should merge into one held message, held %d", st.Held)
+	if st := h.state(id); st.Held != 3 {
+		t.Fatalf("three held sends should be three held messages, held %d", st.Held)
+	}
+	// Promote "fourth": a profile conversation's turn takes no steered
+	// message, so it waits for the turn end, ahead of the follow-ups.
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(h.dir, id))
+	held, _ := wsinbox.Held(inbox)
+	if len(held) != 3 || held[2].Entry.Text() != "fourth" {
+		t.Fatalf("held = %+v", held)
+	}
+	if _, err := wsinbox.Steer(inbox, held[2].Name); err != nil {
+		t.Fatal(err)
 	}
 	p.events <- Event{SessionID: "backend-1"}
 	p.reply("answer one")
-	if got := p.nextSent(t); got != "second\n\nthird" {
-		t.Fatalf("the held sends should be the next turn as one message, got %q", got)
+	if got := p.nextSent(t); got != "fourth\n\nsecond\n\nthird" {
+		t.Fatalf("the held sends should be the next turn as one message, steered first, got %q", got)
 	}
 	p.reply("answer two")
 	eventually(t, "idle", func() bool { return h.state(id).Status == StatusIdle })
@@ -121,7 +135,7 @@ func TestSendRunsTurnAndHeldSendsMerge(t *testing.T) {
 			texts = append(texts, r.Kind+":"+r.Text)
 		}
 	}
-	want := "user:first reply:answer one user:second\n\nthird reply:answer two"
+	want := "user:first reply:answer one user:fourth\n\nsecond\n\nthird reply:answer two"
 	if strings.Join(texts, " ") != want {
 		t.Fatalf("ring = %q, want %q", strings.Join(texts, " "), want)
 	}
@@ -605,7 +619,7 @@ func TestRunnerSuiteOnPi(t *testing.T) {
 	for name, test := range map[string]func(*testing.T){
 		"CreateWritesRecordRegistrationAndSnapshot": TestCreateWritesRecordRegistrationAndSnapshot,
 		"CreateRefusesBadLaunch":                    TestCreateRefusesBadLaunch,
-		"SendRunsTurnAndHeldSendsMerge":             TestSendRunsTurnAndHeldSendsMerge,
+		"SendRunsTurnAndHeldSendsGoAsOneTurn":       TestSendRunsTurnAndHeldSendsGoAsOneTurn,
 		"IdleTimerEndsProcessAndNextSendResumes":    TestIdleTimerEndsProcessAndNextSendResumes,
 		"IdleTimeoutZeroNeverExits":                 TestIdleTimeoutZeroNeverExits,
 		"RecordSurvivesDaemonRestart":               TestRecordSurvivesDaemonRestart,

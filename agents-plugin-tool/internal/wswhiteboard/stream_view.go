@@ -59,10 +59,6 @@ type EntryPage struct {
 	Count int
 }
 
-// streamRunRows is how many rows a log run between panels shows before it
-// folds behind one "log n lines" row; the newest run keeps that many visible.
-const streamRunRows = 3
-
 // StreamRow is one row of a log run: an agent line (Entry), or adjacent
 // system events folded behind one chip (Systems).
 type StreamRow struct {
@@ -90,41 +86,15 @@ func (r StreamRow) Owner() bool {
 // Range is the row's first and last clock, or one clock when they match.
 func (r StreamRow) Range() string { return clockRange(r.entries()) }
 
-// StreamSegment is a latest panel card, or the log run between two panels:
-// Fold holds the rows behind its fold, Rows the rows shown below it.
+// StreamSegment is a latest panel card, or the log run between two panels,
+// every row of it shown.
 type StreamSegment struct {
 	Panel EntryView
-	Fold  []StreamRow
 	Rows  []StreamRow
 }
 
 // IsPanel reports a panel card segment.
 func (s StreamSegment) IsPanel() bool { return s.Panel.ID != "" }
-
-func (s StreamSegment) foldEntries() []EntryView {
-	var out []EntryView
-	for _, r := range s.Fold {
-		out = append(out, r.entries()...)
-	}
-	return out
-}
-
-// FoldKey is the fold's first entry ID, its disclosure key and anchor.
-func (s StreamSegment) FoldKey() string { return s.Fold[0].entries()[0].ID }
-
-// FoldCount and FoldRange label the fold: its entry count and clock range.
-func (s StreamSegment) FoldCount() int    { return len(s.foldEntries()) }
-func (s StreamSegment) FoldRange() string { return clockRange(s.foldEntries()) }
-
-// FoldOwner reports an owner answer behind the fold.
-func (s StreamSegment) FoldOwner() bool {
-	for _, r := range s.Fold {
-		if r.Owner() {
-			return true
-		}
-	}
-	return false
-}
 
 func clockRange(entries []EntryView) string {
 	if len(entries) == 0 {
@@ -138,29 +108,19 @@ func clockRange(entries []EntryView) string {
 }
 
 // Segments lays the page out as one chronological stream: each latest panel
-// a card, the log lines between two panels one run. A run longer than
-// streamRunRows folds whole; tail marks the newest page, whose last run keeps
-// its newest rows visible under the fold. An owner answer is the owner's own
-// line, so it stays a row of its own instead of folding into a system chip.
-// Earlier panel versions render inside their latest card
-// (EntryView.Versions), so their slots are skipped, and system events on
-// either side of such a slot join one chip.
-func (p EntryPage) Segments(tail bool) []StreamSegment {
+// a card, the log lines between two panels one run, every line shown. An
+// owner answer is the owner's own line, so it stays a row of its own instead
+// of folding into a system chip. Earlier panel versions render inside their
+// latest card (EntryView.Versions), so their slots are skipped, and system
+// events on either side of such a slot join one chip.
+func (p EntryPage) Segments() []StreamSegment {
 	var out []StreamSegment
 	var rows []StreamRow
-	flush := func(last bool) {
+	flush := func() {
 		if len(rows) == 0 {
 			return
 		}
-		seg := StreamSegment{Rows: rows}
-		if len(rows) > streamRunRows {
-			cut := len(rows)
-			if last {
-				cut -= streamRunRows
-			}
-			seg.Fold, seg.Rows = rows[:cut], rows[cut:]
-		}
-		out = append(out, seg)
+		out = append(out, StreamSegment{Rows: rows})
 		rows = nil
 	}
 	for _, run := range p.Runs {
@@ -178,19 +138,19 @@ func (p EntryPage) Segments(tail bool) []StreamSegment {
 				}
 			}
 		case run.Entry.Item != nil:
-			flush(false)
+			flush()
 			out = append(out, StreamSegment{Rows: []StreamRow{{Entry: run.Entry}}})
 		case run.Entry.Kind == EntryPanel:
 			if run.Entry.Historical {
 				continue
 			}
-			flush(false)
+			flush()
 			out = append(out, StreamSegment{Panel: run.Entry})
 		default:
 			rows = append(rows, StreamRow{Entry: run.Entry})
 		}
 	}
-	flush(tail)
+	flush()
 	return out
 }
 

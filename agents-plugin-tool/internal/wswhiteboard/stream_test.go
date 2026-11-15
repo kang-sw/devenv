@@ -124,12 +124,45 @@ func TestStreamHistoryWindowsAreFiftyChronologicalEntries(t *testing.T) {
 	if strings.Count(live, `class="wb-entry agent`) != 50 || !strings.Contains(live, `id="e74"`) || strings.Contains(live, `id="e73"`) {
 		t.Fatal("initial live DOM does not hold exactly the newest 50 entries")
 	}
-	// The newest run folds all but its last three lines; only e123 is current.
-	wantAll(t, live, `<details class="run-fold" data-key="run:e74" data-history-anchor="e74">`, `Log 47 · `, `class="wb-entry agent current" id="e123"`)
-	if strings.Count(live, ` current"`) != 1 || strings.Index(live, `id="e121"`) < strings.Index(live, `</details>`) || strings.Index(live, `id="e120"`) > strings.Index(live, `</details>`) {
-		t.Fatal("the newest three lines are not visible below the fold, or more than one line is current")
+	// All log entries are visible (no run-fold disclosure); only e123 is current.
+	wantAll(t, live, `class="wb-entry agent current" id="e123"`)
+	wantNone(t, live, `class="run-fold"`)
+	if strings.Count(live, ` current"`) != 1 {
+		t.Fatal("more than one line is current")
 	}
 	wantAll(t, out, `<template data-history-page data-count="50">`, `<template data-history-page data-count="23">`, ">Load older<")
+}
+
+// TestStreamHistoryHeaderIsOneRow pins the history header as one plain row,
+// never a disclosure: title and count, then the load-older capsule (hidden
+// when nothing older is held), then the counts meta, all inside the history
+// so its delegated click still owns the capsule. A closed topic's history is
+// shown like an open one's, and no fade covers the first visible entry.
+func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
+	st := &State{Topics: []TopicDoc{{Name: "long"}}}
+	for i := 1; i <= 60; i++ {
+		st.Topics[0].Entries = append(st.Topics[0].Entries, Entry{ID: fmt.Sprintf("e%d", i), Kind: EntryAgent, Text: fmt.Sprintf("line %d", i), At: testNow.Format(time.RFC3339)})
+	}
+	mustApply(t, st, `<wb:topic name="short"><wb:log>one</wb:log></wb:topic>`+
+		`<wb:topic name="done"><wb:log>final</wb:log><wb:close result="Shipped."/></wb:topic>`)
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	head := func(name string) string {
+		return `<div class="topic-stream"><div class="wb-history" data-history="` + name + `" aria-label="History"><div class="mhead"><span class="wb-mtitle">`
+	}
+	wantAll(t, out, head("long"), head("short"), head("done"),
+		`<span class="wb-mlabel">History</span><span class="n">60</span></span><button type="button" class="history-older">Load older</button><span class="mmeta">`,
+		`<span class="n">1</span></span><button type="button" class="history-older" hidden>Load older</button><span class="mmeta">`)
+	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:`, `<summary class="mhead">`)
+	css, err := embeddedAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(css), `.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }`,
+		`.wb-history > .mhead > .history-older { grid-column: 2; }`,
+		`min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
+		`.wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }`,
+		`.wb-mtitle > svg, .wb-mtitle > .n { flex: none; }`)
+	wantNone(t, string(css), `.history-clip::after`, `linear-gradient(var(--wb-bg), transparent)`, `.topic-stream > summary`)
 }
 
 func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
@@ -264,10 +297,10 @@ func TestPanelAuthoredReferencesAcrossAllSurfaces(t *testing.T) {
 	}
 }
 
-// Segments interleaves latest panel cards with log runs: a run over three
-// rows folds whole between panels, the newest run keeps three rows visible,
-// an owner answer is its own row, and other system events share one chip.
-func TestStreamSegmentsFoldRunsBetweenPanels(t *testing.T) {
+// Segments interleaves latest panel cards with log runs, every row of a run
+// shown. An owner answer is its own row, and other system events share one
+// chip.
+func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 	v := func(id, kind string) EntryView { return EntryView{Entry: Entry{ID: id, Kind: kind}} }
 	panel := v("p", EntryPanel)
 	panel.PanelID = "p1"
@@ -287,23 +320,17 @@ func TestStreamSegmentsFoldRunsBetweenPanels(t *testing.T) {
 				out = append(out, "panel:"+s.Panel.ID)
 				continue
 			}
-			out = append(out, fmt.Sprintf("fold:%d/rows:%d", len(s.Fold), len(s.Rows)))
+			out = append(out, fmt.Sprintf("rows:%d", len(s.Rows)))
 		}
 		return out
 	}
-	tail := page.Segments(true)
-	if got := fmt.Sprint(shape(tail)); got != "[fold:4/rows:0 panel:p fold:2/rows:3]" {
-		t.Fatalf("tail segments %s", got)
-	}
-	if got := fmt.Sprint(shape(page.Segments(false))); got != "[fold:4/rows:0 panel:p fold:5/rows:0]" {
-		t.Fatalf("older-page segments %s", got)
-	}
-	if tail[0].FoldKey() != "a1" || tail[0].FoldCount() != 5 || tail[0].FoldOwner() || !tail[2].FoldOwner() {
-		t.Fatal("fold key, count, or owner flag")
+	segs := page.Segments()
+	if got := fmt.Sprint(shape(segs)); got != "[rows:4 panel:p rows:5]" {
+		t.Fatalf("segments %s", got)
 	}
 	// s3 | owner | s4: the owner answer splits the chips around it.
-	last := tail[2]
-	if len(last.Fold[0].Systems) != 1 || last.Fold[1].Entry.ID != "o" || !last.Fold[1].Owner() || len(last.Rows[0].Systems) != 1 || last.Rows[0].Systems[0].ID != "s4" {
+	last := segs[2]
+	if len(last.Rows[0].Systems) != 1 || last.Rows[0].Systems[0].ID != "s3" || last.Rows[1].Entry.ID != "o" || !last.Rows[1].Owner() || len(last.Rows[2].Systems) != 1 || last.Rows[2].Systems[0].ID != "s4" {
 		t.Fatal("an owner answer is not its own row between system chips")
 	}
 }

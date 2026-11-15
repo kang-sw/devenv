@@ -65,6 +65,7 @@ type proxyHost struct {
 	// tools spawn its Pi subagents (mcp.ServerOptions.Agents); nil leaves
 	// them refusing.
 	agents mcp.PiAgents
+	nudges *mcp.WhiteboardNudges
 }
 
 // wait blocks until the replacement goroutine, if any, has ended.
@@ -94,6 +95,9 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 			OwnerPID:     hello.OwnerPID,
 			Harness:      hello.Harness,
 			Diag:         prefixedWriter{w: h.logw, prefix: fmt.Sprintf("dashboard: session pid %d: ", hello.OwnerPID)},
+		}
+		if h.nudges != nil {
+			opts.WhiteboardChanged = h.nudges.Poke
 		}
 		if d := h.live.Load(); d != nil {
 			opts.Live = d

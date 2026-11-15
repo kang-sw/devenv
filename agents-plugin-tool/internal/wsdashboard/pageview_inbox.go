@@ -1,8 +1,10 @@
 package wsdashboard
 
 import (
+	"cmp"
 	"html/template"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,9 +23,10 @@ type HeldView struct {
 	// Steer is set once the user promoted the message to steering; the
 	// bubble then shows a steer marker instead of the steer control.
 	Steer bool
-	// At is the first send's time (epoch ms).
+	// At is the send's time (epoch ms), kept by a steer.
 	At int64
-	// Parts are the merged sends' texts; the bubble divides them.
+	// Parts are the send's text; an entry merged before sends stopped
+	// merging holds one per send, and the bubble divides them.
 	Parts  []string
 	Chips  []wsinbox.Chip
 	Topics []wsinbox.TopicNote
@@ -151,8 +154,9 @@ type SentMark struct {
 	Held             bool
 }
 
-// heldViews lists the held entries, oldest first; attachDir and replyID
-// map their images as attachmentView does.
+// heldViews lists the held entries in the order given, the inbox's queue
+// order (wsinbox.Held: steered, then the rest); attachDir and replyID map
+// their images as attachmentView does.
 func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
@@ -240,21 +244,41 @@ func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64, settled in
 		return ok && c.SentAt < at
 	}
 	add := func(records []wsinbox.Record, isHeld bool) {
+		// The newest send's chip wins, so read the chips in send order: a
+		// steer moves an entry ahead of later sends in queue order (held)
+		// and gives it a newer name (drained). A chip's own send time
+		// counts (an entry merged before sends stopped merging holds chips
+		// of several sends), its entry's when it has none; the sort is
+		// stable, so a tie keeps the given order.
+		type timed struct {
+			c  wsinbox.Chip
+			at int64
+		}
+		var list []timed
 		for _, r := range records {
 			for _, c := range r.Entry.Chips {
-				if stale(c) {
-					continue
+				at := c.SentAt
+				if at == 0 {
+					at = r.Entry.SentAt
 				}
-				if !isHeld && c.Answer == "" && c.SentAt > 0 && c.SentAt < settled {
-					delete(marks, c.ID)
-					continue
-				}
-				if !seen[c.ID] {
-					seen[c.ID] = true
-					order = append(order, c.ID)
-				}
-				marks[c.ID] = SentMark{ID: c.ID, Answer: c.Answer, Note: c.Note, Held: isHeld}
+				list = append(list, timed{c, at})
 			}
+		}
+		slices.SortStableFunc(list, func(a, b timed) int { return cmp.Compare(a.at, b.at) })
+		for _, tc := range list {
+			c := tc.c
+			if stale(c) {
+				continue
+			}
+			if !isHeld && c.Answer == "" && c.SentAt > 0 && c.SentAt < settled {
+				delete(marks, c.ID)
+				continue
+			}
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				order = append(order, c.ID)
+			}
+			marks[c.ID] = SentMark{ID: c.ID, Answer: c.Answer, Note: c.Note, Held: isHeld}
 		}
 	}
 	add(drained, false)
