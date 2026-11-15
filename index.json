@@ -595,7 +595,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec5/worktree-view-prep",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T06:57:51Z",
         "impl": {
           "branch": "impl/exec5/worktree-view-prep/comic-kite-fruit"
