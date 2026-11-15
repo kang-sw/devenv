@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const assert = require('node:assert/strict');
+const { isDeepStrictEqual } = require('node:util');
 const { chromium } = require(process.env.WS_PLAYWRIGHT);
 const baseline = 'e86f22a82189ac6bb556e7cad84352b566a65b8b';
 const prefix = 'agents-plugin-tool/internal/wsdashboard/assets/';
@@ -29,13 +30,45 @@ function sprite(rev) {
     return `<symbol id="l-${n.slice(0, -4)}" viewBox="0 0 24 24">${body}</symbol>`;
   }).join('') + '</svg>';
 }
+// Capture the actual settled page, including every computed property. Keep raw
+// DOM/style differences as failures, not screenshot-normalization exceptions.
+async function snapshot(page, state) {
+  return page.evaluate(state => {
+    const rect = n => { const r = n.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
+    const name = n => n.tagName + (n.id ? '#' + n.id : '') + (n.getAttribute('class') ? '.' + n.getAttribute('class') : '');
+    const styles = n => { const css = getComputedStyle(n), out = {}; [...css].sort().forEach(k => { out[k] = css.getPropertyValue(k); }); return out; };
+    const pane = state.startsWith('toolbar') ? document.querySelector('.fpane[data-max]') : document.getElementById('files');
+    const label = pane.querySelector('.froot') || document.querySelector('#chead .froot');
+    const nodes = [document.documentElement, document.body, ...document.querySelectorAll('.dwrap,.dwrap *,#toolbar-files,#toolbar-files *')];
+    return {
+      dom: document.body.innerHTML, rootStyle: document.documentElement.getAttribute('style'),
+      pending: window.capturePending, requests: window.captureRequests,
+      animations: document.getAnimations().map(a => ({ playState: a.playState, currentTime: a.currentTime, target: name(a.effect.target) })),
+      nodes: nodes.map(n => ({ name: name(n), rect: rect(n), scroll: [n.scrollLeft, n.scrollTop, n.scrollWidth, n.scrollHeight], styles: styles(n) })),
+      // IDs/ancestry intentionally differ between owners; the visible inputs,
+      // logical state and layout below must not. Raw DOM/styles remain above.
+      contract: {
+        viewport: [innerWidth, innerHeight, devicePixelRatio], focus: name(document.activeElement), pageScroll: [scrollX, scrollY],
+        root: [label.textContent, label.title], mode: pane.getAttribute('data-fm'), query: pane.querySelector('.fq').value,
+        options: [...pane.querySelectorAll('.fopts button')].map(n => n.getAttribute('aria-pressed')),
+        view: [...pane.querySelectorAll('.fpop input[type="checkbox"]')].map(n => n.checked),
+        popover: !pane.querySelector('.fpop').hidden,
+        rows: [...pane.querySelectorAll('.ftree .fr')].map(n => [n.getAttribute('data-path'), n.getAttribute('aria-expanded'), n.getAttribute('aria-selected')]),
+        scroll: [...pane.querySelectorAll('.flist')].map(n => [n.scrollLeft, n.scrollTop]),
+        layout: [rect(pane), ...[...pane.querySelectorAll('.fhd,.fseg,.fsr,.flist,.fpop:not([hidden]),.fr')].map(rect)],
+        composer: [...document.querySelectorAll('#composer,#composer *')].map(n => ({ rect: rect(n), styles: styles(n) }))
+      }
+    };
+  }, state);
+}
 (async () => {
   const browser = await chromium.launch({ headless: true });
-  const errors = [], captures = [];
+  const errors = [], captures = [], checks = [], contracts = {};
   try {
     for (const rev of [baseline, 'result']) {
       const result = rev === 'result';
       const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'reduce' });
+      page.setDefaultTimeout(8000);
       page.on('pageerror', e => errors.push(rev + ': ' + e.stack));
       await page.route('**/*', route => { errors.push('unexpected network: ' + route.request().url()); return route.abort(); });
       const css = source(rev, 'agents-plugin-tool/internal/wswhiteboard/assets/page.css') + '\n' + source(rev, prefix + 'dashboard.css');
@@ -44,11 +77,20 @@ function sprite(rev) {
         const labels = { 'js.board.toolbar.files': 'Files', 'js.board.toolbar.search': 'Search', 'js.board.toolbar.overview': 'Overview', 'js.files.mode.name': 'Name', 'js.files.mode.content': 'Content', 'js.files.find.name': 'Find files', 'js.files.find.content': 'Search content', 'js.files.view': 'View', 'js.files.view.ign': 'Show ignored files', 'js.files.view.dot': 'Hide dot files' };
         window.wsT = (k, a, b) => k === 'js.board.toolbar.count' ? `open ${a} · closed ${b}` : labels[k] || k;
         window.wsTn = window.wsT;
+        window.capturePending = 0;
+        window.captureRequests = [];
         window.fetch = async input => {
           const u = new URL(input, 'http://fixture.invalid');
           if (u.pathname !== '/s/fixture/fs/list') throw new Error('unmocked fetch ' + input);
           const dir = u.searchParams.get('dir') || '';
-          return { ok: true, json: async () => ({ root: '/project', name: 'project', session: true, abs: '/project' + (dir ? '/' + dir : ''), sep: '/', entries: dir ? [{ name: 'main.go', st: 'M' }] : [{ name: 'src', dir: true, st: '*' }, { name: 'README.md' }, { name: '.gitignore' }, { name: 'go.mod' }] }) };
+          const request = { input, completed: false };
+          window.captureRequests.push(request);
+          window.capturePending++;
+          return { ok: true, json: async () => {
+            request.completed = true;
+            window.capturePending--;
+            return { root: '/project', name: 'project', session: true, abs: '/project' + (dir ? '/' + dir : ''), sep: '/', entries: dir ? [{ name: 'main.go', st: 'M' }] : [{ name: 'src', dir: true, st: '*' }, { name: 'README.md' }, { name: '.gitignore' }, { name: 'go.mod' }] };
+          } };
         };
       });
       await page.addScriptTag({ content: source(rev, prefix + 'cards.js') });
@@ -72,10 +114,26 @@ function sprite(rev) {
       async function capture(state) {
         await page.mouse.move(1439, 899);
         await page.evaluate(() => { window.captureFocus = document.activeElement; document.activeElement.blur(); });
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForFunction(() => window.capturePending === 0 && document.getAnimations().length === 0);
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        const filename = (result ? 'result' : 'baseline') + '-' + state + '.png';
-        await page.screenshot({ path: path.join(evidence, filename) });
+        const owner = result ? 'result' : 'baseline', tag = owner + '-' + state;
+        const before = await snapshot(page, state);
+        assert.equal(before.pending, 0, 'mock responses must be settled');
+        assert.deepEqual(before.animations, [], 'capture must not interrupt an animation');
+        const filename = tag + '.png';
+        // We already blurred: there is no caret to hide. Playwright's default
+        // rewrites every input/textarea's inline caret-color, including the
+        // unrelated composer. Capture without that observed style mutation.
+        await page.screenshot({ path: path.join(evidence, filename), caret: 'initial' });
         captures.push(filename);
+        const after = await snapshot(page, state);
+        fs.writeFileSync(path.join(evidence, tag + '-state.json'), JSON.stringify({ before, after }, null, 2));
+        checks.push({ state: tag, nonmutating: isDeepStrictEqual(after, before) });
+        fs.writeFileSync(path.join(evidence, 'state-checks.json'), JSON.stringify(checks, null, 2));
+        assert.deepEqual(after, before, 'screenshot must preserve exact DOM/styles/layout/requests/focus/scroll/animations');
+        contracts[tag] = before.contract;
+        if (state === 'tab-view') assert.deepEqual(before.contract.composer, contracts[owner + '-tab-tree'].composer, 'View must not change the composer');
         await page.evaluate(() => window.captureFocus.focus({ preventScroll: true }));
       }
       await page.locator('#files [data-path="src"]').click();
@@ -102,6 +160,10 @@ function sprite(rev) {
       await page.close();
     }
     assert.deepEqual(errors, []);
+    fs.writeFileSync(path.join(evidence, 'contracts.json'), JSON.stringify(contracts, null, 2));
+    for (const state of ['tab-tree', 'tab-view', 'toolbar-tree', 'toolbar-view']) {
+      assert.deepEqual(contracts['baseline-' + state], contracts['result-' + state], 'equivalent logical inputs and layout: ' + state);
+    }
     const comparison = await browser.newPage({ viewport: { width: 2880, height: 950 }, deviceScaleFactor: 1 });
     await comparison.route('**/*', r => r.abort());
     const summaries = [];
@@ -115,11 +177,11 @@ function sprite(rev) {
         return { differentPixels:count,totalPixels:images[0].naturalWidth*images[0].naturalHeight };
       });
       summaries.push({state,...diff});
-      await comparison.screenshot({path:path.join(evidence,'compare-'+state+'.png')});
+      await comparison.screenshot({path:path.join(evidence,'compare-'+state+'.png'),caret:'initial'});
     }
     fs.writeFileSync(path.join(evidence, 'comparison.html'), '<!doctype html><style>section{display:flex}img{width:49%}</style>' + summaries.map(s => `<h2>${s.state}: ${s.differentPixels}/${s.totalPixels} differing pixels</h2><section><img src="baseline-${s.state}.png"><img src="result-${s.state}.png"></section>`).join(''));
     fs.writeFileSync(path.join(evidence,'results.json'), JSON.stringify({baseline,result:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),summaries,captures},null,2));
-    console.log(JSON.stringify({ evidence, summaries },null,2));
+    console.log(JSON.stringify({ evidence, summaries, checks, equivalentContracts: true },null,2));
     assert(summaries.every(s => s.differentPixels === 0), 'appearance mismatch: inspect retained comparisons before product changes');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode=1; });
