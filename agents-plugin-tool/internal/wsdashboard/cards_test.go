@@ -876,7 +876,8 @@ function toggle(n) { widthBtn(n).fire("click", { preventDefault: function () {} 
 function closeCard(c) { c.minBtn.fire("click"); }
 function card(kind, semantic) { var c = page.W.open(kind, {}); if (semantic) c.el.setAttribute("data-preview-kind", semantic); return c; }
 resize(2400);
-[["text", 1280], ["markdown", 1280], ["code", 1440], ["diff", 1760], ["frame", 1600], ["image", 1600], ["video", 1600], ["unknown", 1920]].forEach(function (item) {
+// The preview renderer exposes text responses as code, and prose as markdown.
+[["markdown", 1280], ["code", 1440], ["diff", 1760], ["frame", 1600], ["image", 1600], ["video", 1600], ["unknown", 1920]].forEach(function (item) {
   var c = card("preview", item[0]); c.body.appendChild(mk("div", { "data-kind": "diff" })); c.maxBtn.fire("click");
   check(item[0] + " uses owning renderer, not nested content", inset(c.el), ((2400 - item[1]) / 2) + "px");
   check("effective extension is offered", widthBtn(c.el).hidden, false);

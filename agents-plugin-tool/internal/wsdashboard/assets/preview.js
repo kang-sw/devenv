@@ -138,8 +138,9 @@
   }
   function draw(card, v) {
     var d = card.data, box;
-    // Share the renderer's semantic category, not file extensions or MIME guesses.
-    card.el.setAttribute("data-preview-kind", v.kind === "text" && v.source ? "code" : v.kind);
+    // Monospace text views are code, regardless of the HTML/SVG source flag;
+    // rendered Markdown is prose. Use renderer kinds, not extensions or MIME.
+    card.el.setAttribute("data-preview-kind", v.kind === "text" ? "code" : v.kind);
     card.paint();
     head(card, ICON[v.kind] || "file", badge(v));
     if (v.kind === "image") {

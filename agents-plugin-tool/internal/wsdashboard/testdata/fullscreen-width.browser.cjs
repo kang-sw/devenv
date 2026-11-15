@@ -46,9 +46,14 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://fixture');
   if (u.pathname === '/') { res.setHeader('Content-Type', 'text/html'); res.end(html); return; }
   if (u.pathname === '/s/fixture/fs/preview') {
-    const kind = u.searchParams.get('path').split('.')[0];
+    const rel = u.searchParams.get('path'), kind = rel.split('.')[0];
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ kind: kind === 'code' ? 'text' : kind, source: kind === 'code', text: 'const width = "semantic category";\n'.repeat(12), html: '<h1>Markdown preview</h1><p>Prose keeps its category width.</p>', diff: [], frame: '/frame' })); return;
+    const answer = rel === 'main.go'
+      ? { kind: 'text', rel, abs: '/fixture/main.go', size: 13, text: 'package main\n' }
+      : rel === 'source.html'
+        ? { kind: 'text', rel, abs: '/fixture/source.html', size: 16, source: true, text: '<h1>Source</h1>\n' }
+        : { kind, rel, text: 'const width = "semantic category";\n'.repeat(12), html: '<h1>Markdown preview</h1><p>Prose keeps its category width.</p>', diff: [], frame: '/frame' };
+    res.end(JSON.stringify(answer)); return;
   }
   const assets = { '/cards.js': read('cards.js'), '/preview.js': read('preview.js'), '/dashboard.css': read('dashboard.css'), '/page.css': fs.readFileSync('agents-plugin-tool/internal/wswhiteboard/assets/page.css', 'utf8') };
   if (assets[u.pathname]) { res.setHeader('Content-Type', u.pathname.endsWith('.css') ? 'text/css' : 'text/javascript'); res.end(assets[u.pathname]); return; }
@@ -73,8 +78,8 @@ async function cardClick(page, variable, control) {
   const id = await page.evaluate(name => window[name].id, variable);
   await page.locator(`[data-card="${id}"] ${control}`).click();
 }
-async function preview(page, kind) {
-  await page.evaluate(kind => { window.activeCard = WsPreview.open(kind + '.fixture'); }, kind);
+async function preview(page, file) {
+  await page.evaluate(file => { window.activeCard = WsPreview.open(file); }, file);
   await page.waitForFunction(() => activeCard.el.hasAttribute('data-preview-kind'));
   await cardClick(page, 'activeCard', '.bc-max');
 }
@@ -91,10 +96,11 @@ async function shot(page, name) {
   const page = await context.newPage(); page.setDefaultTimeout(4000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin); await page.waitForFunction(() => window.fixtureReady);
-  // Actual preview renderer responses supply identity, including source-vs-prose.
-  for (const [kind, expected] of [['text',1280],['markdown',1280],['code',1440],['diff',1760],['frame',1600],['image',1600],['video',1600],['other',1920]]) {
-    await preview(page,kind); await geometry(page,'.bcard[data-max] .bc-in',2400,expected,'preview '+kind);
-    if (kind === 'markdown') {
+  // Monospace text responses are code, with or without the HTML/SVG source flag;
+  // rendered Markdown remains prose. main.go mirrors the production response.
+  for (const [file, expected] of [['main.go',1440],['text.fixture',1440],['markdown.fixture',1280],['source.html',1440],['diff.fixture',1760],['frame.fixture',1600],['image.fixture',1600],['video.fixture',1600],['other.fixture',1920]]) {
+    await preview(page,file); await geometry(page,'.bcard[data-max] .bc-in',2400,expected,'preview '+file);
+    if (file === 'markdown.fixture') {
       const toggle = page.locator('.bcard[data-max] .sheet-width');
       await toggle.focus();
       await page.keyboard.press('Enter');
@@ -203,7 +209,7 @@ async function shot(page, name) {
   near((await rect(page,'.bcard[data-max] .bc-in')).top,46,'mobile top');
   assert.equal(await page.locator('.bcard[data-max] .sheet-width').isVisible(),false);
   await shot(page,'640-dark-normal'); await page.keyboard.press('Escape');
-  await page.setViewportSize({width:1280,height:900}); await preview(page,'markdown');
+  await page.setViewportSize({width:1280,height:900}); await preview(page,'markdown.fixture');
   assert.equal(await page.locator('.bcard[data-max] .sheet-width').isVisible(),false,'ineffective extension absent at wide clamped width');
   await page.keyboard.press('Escape');
   // Reopen and reload never remember extension; content is not remounted by width.
