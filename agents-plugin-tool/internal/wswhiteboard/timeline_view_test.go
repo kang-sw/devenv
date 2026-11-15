@@ -3,6 +3,7 @@ package wswhiteboard
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -178,3 +179,56 @@ func TestTimelineInputHeaderClockIsRelativeTimeTarget(t *testing.T) {
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, Location: time.UTC})))
 	wantAll(t, out, fmt.Sprintf(`<span class="evi owner">O</span><time class="entry-at" title="2026-11-15 21:35" data-stamp="2026-11-15 21:35" data-at="%d">21:35</time>`, sent))
 }
+
+// Every history clock goes through the shared "clock" template, so no row kind
+// can drop the data-at/data-stamp that ago.js needs for its relative label.
+// The board holds every row kind: lead log, owner input, an ask of each class
+// (check included), an owner answer, a panel and topic-state/system rows.
+func TestEveryHistoryClockIsRelativeTimeTarget(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, logXML("a", "lead note"))
+	mustApply(t, st, addXML(ClassPolicy, "a", "pick", "x", "y"))
+	mustApply(t, st, addXML(ClassTechnical, "a", "tech"))
+	mustApply(t, st, addXML(ClassAnnounced, "a", "said"))
+	mustApply(t, st, addXML(ClassCheck, "a", "look"))
+	mustApply(t, st, panelXML("a", "panel recap", "<p>panel</p>"))
+	mustApply(t, st, `<wb:answer ids="1" value="a">yes, x</wb:answer>`)
+	mustApply(t, st, logXML("a", "after the answer"))
+	doc := &st.Topics[0]
+	var last *Entry
+	for i := range doc.Entries {
+		if doc.Entries[i].ItemID == 4 { // the check ask carries the owner message
+			last = &doc.Entries[i]
+		}
+	}
+	if last.Seq == 0 {
+		last.Seq = 99 // owner inputs attach to a recorded update batch
+	}
+	sent := time.Date(2026, 11, 15, 21, 35, 0, 0, time.UTC).UnixMilli()
+	last.Inputs = json.RawMessage(fmt.Sprintf(`[{"inbox_id":"x","sent_at":%d,"excerpt":"owner says","chip_ids":["4"]}]`, sent))
+
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, Location: time.UTC})))
+	clocks := historyClock.FindAllStringSubmatch(out, -1)
+	if len(clocks) == 0 {
+		t.Fatalf("no entry-at clocks rendered:\n%s", out)
+	}
+	var ask, owner bool
+	for _, m := range clocks {
+		if m[2] == "" {
+			continue
+		}
+		if !strings.Contains(m[1], ` data-at="`) || !strings.Contains(m[1], ` data-stamp="`) {
+			t.Errorf("history clock without relative-time data: %s", m[0])
+		}
+		ask = ask || strings.Contains(m[1], "wb-htime") && !strings.Contains(m[1], "datetime=\"\"")
+		owner = owner || !strings.Contains(m[1], "datetime=")
+	}
+	if !ask || !owner {
+		t.Fatalf("board did not render both ask-row and owner-input clocks (ask=%v owner=%v):\n%s", ask, owner, out)
+	}
+	if !strings.Contains(out, `data-kind`) {
+		t.Fatalf("history rows missing:\n%s", out)
+	}
+}
+
+var historyClock = regexp.MustCompile(`<time (class="entry-at[^"]*"[^>]*)>([^<]*)</time>`)
