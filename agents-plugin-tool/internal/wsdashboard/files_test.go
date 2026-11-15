@@ -73,6 +73,20 @@ func TestFilesExplorerInstances(t *testing.T) {
 	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+";\n"+cardsDOM+string(fixture))
 }
 
+func TestFilesExplorerColumnLayout(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		`.fworkspace[data-view="column"] { grid-template-columns: minmax(0, 1fr); }`,
+		`.fworkspace[data-view="column"] > .ftree { display: none; }`,
+		`.fdirectory[data-view="column"] { display: flex; padding: 0; overflow-x: auto; overflow-y: hidden; }`,
+		`.fcolumn { flex: 0 0 200px; min-width: 0; overflow-y: auto;`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("column view stylesheet lacks %q", want)
+		}
+	}
+}
+
 // TestFilesExplorerRows runs the explorer's pure parts (files.js) under
 // node, when it is installed: which entries the View toggles show, the
 // rows the tree draws and the keyboard walks (open folders flattened in

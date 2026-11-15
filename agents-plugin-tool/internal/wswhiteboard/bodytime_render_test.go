@@ -26,20 +26,22 @@ func TestBodyTimeRenderSharesTheValidatedViewValue(t *testing.T) {
 			board := string(regions.Board)
 			frame := frameDocs(t, board)["body"]
 			for _, out := range []string{markup(page), board} {
-				wantAll(t, out, `class="tago" datetime="`+activity+`"`, `class="body-age" data-body-age`, `>변경 시각 모름</span>`)
+				wantAll(t, out, `class="tago" datetime="`+activity+`"`)
 				if at != "" {
 					wantAll(t, out, `data-body-at="`+bodyAt+`"`)
+				} else {
+					wantAll(t, out, `data-body-at=""`)
 				}
-				wantNone(t, out, `data-body-at="`+activity+`"`, `class="body-age" datetime=`, "body_time_proof")
+				wantNone(t, out, `data-body-at="`+activity+`"`, `class="body-age"`, `>변경 시각 모름</span>`, "body_time_proof")
 			}
 			wantAll(t, frame, frameJSTag(t), `<!--wbchg:new-->`, `<!--wbchg:mod-->`, `<!--wbchg:del-->`, `<!--wbchg:delafter-->`)
 			if at == "" {
 				wantNone(t, frame, `name="wb-body-at"`, `data-body-at=`)
-				wantNone(t, markup(page), `data-body-at=`)
+				wantAll(t, markup(page), `data-body-at=""`)
 			} else {
 				wantAll(t, frame, `<meta name="wb-body-at" data-body-at="`+bodyAt+`">`)
 				if strings.Count(markup(page), `data-body-at=`) != 1 {
-					t.Fatal("unframed body time must come from its one header value")
+					t.Fatal("unframed body time must come from its one body metadata value")
 				}
 			}
 			if stale {
@@ -87,7 +89,8 @@ func TestBodyTimeDeferredAndClosedRenderKeepTheSameSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll(t, string(regions.Board), `data-history-topic="closed"`, `class="body-age" data-body-age data-body-at="`+at+`"`)
+	wantAll(t, string(regions.Board), `data-history-topic="closed"`, `class="tdoc" data-body-at="`+at+`"`)
+	wantNone(t, string(regions.Board), `class="body-age"`, `>변경 시각 모름</span>`)
 	view.Topics, view.DeferredTopics = view.DeferredTopics, nil
 	closed, err := RenderClosedTopics(view)
 	if err != nil {
