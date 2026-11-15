@@ -45,8 +45,8 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	// No label file: the head, title, and rail show the reply-id.
 	_, page := get(t, f.base+"/s/livesession")
 	for _, want := range []string{
-		`<title>livesession - ws dashboard</title>`,
-		`data-label="" data-max="64" data-title="livesession - ws dashboard"`,
+		`<title>livesession - Werkschaft (alpha)</title>`,
+		`data-label="" data-max="64" data-title="livesession - Werkschaft (alpha)"`,
 		`data-copy="` + html.EscapeString((SessionView{ReplyID: "livesession", Project: f.project, Harness: "claude"}).MailboxRef()) + `"`,
 		`class="sren" title="Rename (shown on this dashboard only)"`,
 		`<span class="rid">livesession</span>`,
@@ -72,8 +72,8 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 
 	_, page = get(t, f.base+"/s/livesession")
 	for _, want := range []string{
-		`<title>Build bot - ws dashboard</title>`,
-		`data-label="Build bot" data-max="64" data-title="Build bot - ws dashboard"`,
+		`<title>Build bot - Werkschaft (alpha)</title>`,
+		`data-label="Build bot" data-max="64" data-title="Build bot - Werkschaft (alpha)"`,
 		`data-copy="` + html.EscapeString((SessionView{ReplyID: "livesession", Project: f.project, Harness: "claude", Label: "Build bot"}).MailboxRef()) + `"`,
 		`<span class="rid lbl" title="livesession">Build bot</span>`,
 	} {
@@ -105,7 +105,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	}
 	f.waitLabel(t, "livesession", "")
 	_, page = get(t, f.base+"/s/livesession")
-	if !strings.Contains(page, `<title>livesession - ws dashboard</title>`) || !strings.Contains(page, `title="livesession&#10;click to copy">livesession</button>`) {
+	if !strings.Contains(page, `<title>livesession - Werkschaft (alpha)</title>`) || !strings.Contains(page, `title="livesession&#10;click to copy">livesession</button>`) {
 		t.Errorf("reset page does not show the reply-id")
 	}
 	// Resetting again is no error.
@@ -235,7 +235,7 @@ El.prototype.select = function () {};
 var doc = { createElement: function (t) { return new El(t); } };
 var root = new El("html", "", { "data-rid": "sess" });
 var H = new El("span", "r-head");
-var sn = H.appendChild(new El("span", "meta sname", { "data-label": "", "data-max": "64", "data-title": "sess - ws dashboard" }));
+var sn = H.appendChild(new El("span", "meta sname", { "data-label": "", "data-max": "64", "data-title": "sess - Werkschaft (alpha)" }));
 var nm = sn.appendChild(new El("button", "snm", { "data-copy": '<mailbox id="id:sess" dir="/p"/>', "data-mailbox-open": '<mailbox id="id:sess" dir="/p"' }));
 nm.textContent = "sess";
 var pen = sn.appendChild(new El("button", "sren", { "aria-label": "Rename" }));
@@ -343,7 +343,7 @@ check("a cut never leaves a trailing space", labelClean("ab cd", 3), "ab");
 
 // A head swap retitles the tab from the head's name.
 labelSwapped();
-check("the tab title follows the head", titles, ["sess - ws dashboard"]);
+check("the tab title follows the head", titles, ["sess - Werkschaft (alpha)"]);
 process.stdout.write(bad.join("\n"));
 `
 

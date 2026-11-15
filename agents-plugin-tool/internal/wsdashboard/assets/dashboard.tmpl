@@ -1,7 +1,7 @@
 {{define "session"}}<!DOCTYPE html>
 <html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}"{{with .Worktree}} data-worktree="{{.}}"{{end}} data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{if .Hosted}} data-hosted="1"{{end}}{{if .HandedOff}} data-handed="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
-<title>{{if .Worktree}}{{.Workspace}} · {{.WorktreeBranch}} - ws dashboard{{else}}{{template "stitle" .}}{{end}}</title>
+<title>{{if .Worktree}}{{.Workspace}} · {{.WorktreeBranch}} - Werkschaft (alpha){{else}}{{template "stitle" .}}{{end}}</title>
 <style>{{.Assets.WhiteboardCSS}}</style>{{if .Terminal}}
 <style>{{.Assets.XtermCSS}}</style>{{end}}
 <style>{{.Assets.CSS}}</style>
@@ -157,7 +157,7 @@ row, for a viewer the route lets stop one. */}}
 {{/* stitle is a session page's tab title: its display label, or its
 reply-id when it has none. The head's name carries it too (data-title), so
 the page script retitles the tab when a head swap brings a new label. */}}
-{{define "stitle"}}{{or .Label .ReplyID}} - ws dashboard{{end}}
+{{define "stitle"}}{{or .Label .ReplyID}} - Werkschaft (alpha){{end}}
 
 {{define "worktree-head"}}<span class="meta">{{.Workspace}}</span><b class="worktree-branch">{{icon "branch"}}{{.WorktreeBranch}}</b><span class="meta worktree-path" title="{{.Worktree}}">{{.Worktree}}</span><span class="chip">{{t "worktree.page"}}</span><span class="chip">{{t "worktree.local"}}</span>{{end}}
 
@@ -336,7 +336,7 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 {{define "index"}}<!DOCTYPE html>
 <html data-mode="index" data-rid="" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
-<title>ws dashboard</title>
+<title>Werkschaft (alpha)</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>

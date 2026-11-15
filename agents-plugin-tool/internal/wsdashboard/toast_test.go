@@ -160,7 +160,7 @@ N.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k]
 N.prototype.hasAttribute = function (k) { return k in this.attrs; };
 N.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 N.prototype.closest = function () { return this.up; };
-var title = "sess - ws dashboard";
+var title = "sess - Werkschaft (alpha)";
 var doc = { hidden: false };
 var shell = false, framed = false, shHidden = false;
 function shPost() {}
@@ -209,40 +209,40 @@ var bs = {}; bs[ASK] = [item("1", true), item("2"), item("9")];
 REG.board = new N({ sel: bs, attrs: { "data-h": "b1" } });
 `+block+`
 window.wbTitleCount(2);
-check("pill count alone", title, "(2) sess - ws dashboard");
+check("pill count alone", title, "(2) sess - Werkschaft (alpha)");
 tlCount();
-check("tree agents A, B and the lead's conversation wait", title, "(5) sess - ws dashboard");
+check("tree agents A, B and the lead's conversation wait", title, "(5) sess - Werkschaft (alpha)");
 var w = writes; window.wbTitleCount(2); tlCount();
 check("an unchanged count writes nothing", writes, w);
-check("the base is recorded once", root.getAttribute("data-wb-title"), "sess - ws dashboard");
+check("the base is recorded once", root.getAttribute("data-wb-title"), "sess - Werkschaft (alpha)");
 // the wait shown in the lead's tree row folds into the lead
 treeSel[PERM].push(new N({ up: R })); tlCount();
-check("a lead tree row and the conversation wait count once", title, "(5) sess - ws dashboard");
+check("a lead tree row and the conversation wait count once", title, "(5) sess - Werkschaft (alpha)");
 // hidden: a held board parsed detached, drafted and sent asks left out
 doc.hidden = true;
 var hb = {}; hb[ASK] = [item("1"), item("2"), item("3"), item("4")]; FR.B2 = new N({ sel: hb });
 tlHold("board", "b2", "B2");
-check("held board: 3, 4 open (1 drafted live, 2 sent)", title, "(5) sess - ws dashboard");
+check("held board: 3, 4 open (1 drafted live, 2 sent)", title, "(5) sess - Werkschaft (alpha)");
 var hb5 = {}; hb5[ASK] = hb[ASK].concat([item("5")]); FR.B2 = new N({ sel: hb5 }); tlHold("board", "b2", "B2");
-check("the same hash is not parsed again", [fragCalls, title], [1, "(5) sess - ws dashboard"]);
+check("the same hash is not parsed again", [fragCalls, title], [1, "(5) sess - Werkschaft (alpha)"]);
 tlHold("tree", "t1", "T1");
 check("a held update equal to the live region is not parsed", fragCalls, 1);
 var hc = {}; hc[SENT] = [sent("2"), sent("3")]; FR.C2 = new N({ sel: hc });
 tlHold("convlive", "c2", "C2");
-check("held conversation: 3 sent too; its wait gone, the lead's tree row still waits", title, "(4) sess - ws dashboard");
+check("held conversation: 3 sent too; its wait gone, the lead's tree row still waits", title, "(4) sess - Werkschaft (alpha)");
 var ht = {}; ht[PERM] = []; FR.T2 = new N({ sel: ht });
 tlHold("tree", "t2", "T2");
-check("held tree without prompts", title, "(1) sess - ws dashboard");
+check("held tree without prompts", title, "(1) sess - Werkschaft (alpha)");
 // showing the tab: the swaps land and the held parse is dropped
 doc.hidden = false; tlHeld = {};
 treeSel[PERM] = []; cl[".permwait"] = []; window.wbTitleCount(0); tlCount();
-check("nothing left: no prefix", title, "sess - ws dashboard");
+check("nothing left: no prefix", title, "sess - Werkschaft (alpha)");
 // tracker: baseline silently, toast new while shown, summarize hidden ones
 function U(keys, ready) { return { store: "s", ready: ready !== false, entries: keys.map(function (k) { return { store: "s", item: "i" + k, ev: null, key: k, kind: "mention", label: "Mention", title: "T" + k, author: k === "k3" ? "Ann" : "" }; }) }; }
 tlTracker(U([], false));
-check("an unloaded store counts 0", title, "sess - ws dashboard");
+check("an unloaded store counts 0", title, "sess - Werkschaft (alpha)");
 tlTracker(U(["k1", "k2"]));
-check("first loaded render: counted, no toast", [title, toasts.length], ["(2) sess - ws dashboard", 0]);
+check("first loaded render: counted, no toast", [title, toasts.length], ["(2) sess - Werkschaft (alpha)", 0]);
 tlTracker(U(["k1", "k2", "k3"]));
 check("a new key toasts once as a notice", toasts.map(function (t) { return [t.text, t.kind]; }), [["Mention · Tk3 · Ann", "notice"]]);
 toasts[0].click();
@@ -251,9 +251,9 @@ tlTracker(U(["k1", "k2", "k3"]));
 check("a known key does not toast again", toasts.length, 1);
 doc.hidden = true;
 tlTracker(U(["k1", "k2", "k3", "k4", "k5", "k6"]));
-check("hidden: counted, no toast", [title, toasts.length], ["(6) sess - ws dashboard", 1]);
+check("hidden: counted, no toast", [title, toasts.length], ["(6) sess - Werkschaft (alpha)", 1]);
 tlTracker(U(["k1", "k2", "k3", "k4", "k5"]));
-check("reading one drops the count", title, "(5) sess - ws dashboard");
+check("reading one drops the count", title, "(5) sess - Werkschaft (alpha)");
 tlShown();
 check("still hidden: no summary", toasts.length, 1);
 doc.hidden = false; tlShown();
@@ -270,11 +270,11 @@ var ss = {}; ss[".sess .chip.policy"] = [new N({ text: "3" }), new N({ text: "1"
 REG.sessions = new N({ sel: ss, attrs: { "data-h": "s1" } });
 `+block+`
 tlCount();
-check("index: policy chips plus approvals", title, "(5) sess - ws dashboard");
+check("index: policy chips plus approvals", title, "(5) sess - Werkschaft (alpha)");
 doc.hidden = true;
 var hs = {}; hs[".sess .chip.policy"] = [new N({ text: "1" })]; FR.S2 = new N({ sel: hs });
 tlHold("sessions", "s2", "S2");
-check("index: a held sessions region counts while hidden", title, "(1) sess - ws dashboard");
+check("index: a held sessions region counts while hidden", title, "(1) sess - Werkschaft (alpha)");
 tlHold("board", "b9", "B9");
 check("index: an uncounted region is not parsed", fragCalls, 1);
 process.stdout.write(bad.join("\n"));
