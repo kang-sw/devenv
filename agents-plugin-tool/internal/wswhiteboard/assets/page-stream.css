@@ -82,24 +82,14 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .wb-history { overflow-anchor: none; }
 .history-live { display: flow-root; width: 100%; }
 .timeline-row { display: flow-root; min-width: 0; }
-.history-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0; padding: 4px 8px; border-radius: 8px; border: 1px dashed color-mix(in srgb, var(--wb-fg) 20%, transparent); font-size: 12px; color: var(--wb-muted-fg); }
-.gap-label { font-weight: 700; }
+.history-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 2px 0; padding: 0 0 0 calc(var(--h-av) + var(--h-gap)); font-size: 11.5px; line-height: 20px; color: var(--wb-muted-fg); opacity: .8; }
+.gap-label { font-weight: 500; }
 .gap-range { font: 11px var(--wb-mono); }
 .gap-actions { display: inline-flex; gap: 4px; margin-left: auto; }
-.gap-actions button { border: 0; border-radius: 999px; padding: 2px 10px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 11.5px; cursor: pointer; }
-.gap-actions button:hover { color: var(--wb-fg); }
+.gap-actions button { border: 0; border-radius: 4px; padding: 0 6px; background: transparent; color: var(--wb-muted-fg); font-size: 11.5px; line-height: 20px; cursor: pointer; }
+.gap-actions button:hover { color: var(--wb-fg); background: var(--wb-wash); }
 .gap-actions button:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 .gap-actions button[hidden] { display: none; }
-.question-lead > .wb-entry > .entry-line { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
-.question-time { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
-.question-time:empty { display: none; }
-.timeline-answer { margin: 4px 0; border-radius: 8px; background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
-.timeline-answer > summary { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; cursor: pointer; font-size: 12.5px; color: var(--wb-accent-policy); }
-.timeline-answer > summary > span:last-child { min-width: 0; overflow-wrap: anywhere; }
-.timeline-answer .entry-at { font: 11px var(--wb-mono); }
-.owner-input { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 10px 0 5px; padding: 5px 8px; border-top: 1px solid var(--wb-line); background: var(--wb-wash); border-radius: 8px; font-size: 12px; }
-.owner-input .input-excerpt { min-width: 0; overflow-wrap: anywhere; }
-.owner-input .entry-at { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
 .wb-entry { min-width: 0; overflow-wrap: anywhere; }
 /* log rows: role badge, then body with its time inline on the first line */
 .entry-line { display: flex; align-items: baseline; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
@@ -107,9 +97,8 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .entry-line .entry-at { font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .8; cursor: default; }
 .entry-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .wb-entry.agent > .entry-line { color: var(--wb-fg); font-size: 12.5px; }
+
 .wb-entry.system .entry-text { overflow-wrap: anywhere; }
-.wb-entry.owner > .entry-line { background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
-.wb-entry.owner .entry-text { color: color-mix(in srgb, var(--wb-accent-policy) 70%, var(--wb-fg)); }
 .evi { flex: none; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
 /* The role badge stays beside the body's first line when the text wraps. */
 .entry-line > .evi { align-self: flex-start; margin-top: 2px; }
@@ -227,3 +216,41 @@ iframe.doc-frame { display: block; width: 100%; height: 0; border: 0; }
 .doc-body .edge.dash { stroke-dasharray: 4 3; }
 .doc-body .arrow { fill: var(--wb-muted-fg); }
 
+
+/* Calm history frame: every row kind shares one grid: avatar gutter (18px),
+   time (38px), then content. Time-less rows keep the empty cell so content
+   aligns. Secondary text is muted; only content that needs grouping (a
+   nested control card) keeps a surface. */
+.history-live { --h-av: 18px; --h-time: 38px; --h-gap: 8px; margin-left: 12px; width: auto; }
+.history-live .evi, .history-live .wb-hmark { width: var(--h-av); height: var(--h-av); font-size: 9px; }
+.history-live .evi.lead, .history-live .evi.owner, .history-live .wb-hmark { background: color-mix(in srgb, var(--wb-haccent, var(--wb-primary)) 12%, transparent); }
+.history-live .evi.owner { --wb-haccent: var(--wb-accent-policy); color: var(--wb-accent-policy); }
+.history-live .entry-line { gap: var(--h-gap); padding: 1px 0; font-size: 12.5px; line-height: 20px; border-radius: 4px; }
+.history-live .entry-line > .evi { margin-top: 1px; }
+.history-live .entry-text { padding-left: calc(var(--h-time) + var(--h-gap)); text-indent: calc(-1 * (var(--h-time) + var(--h-gap))); color: var(--wb-fg); }
+.history-live .entry-text > .entry-at, .history-live .wb-htime { display: inline-block; width: var(--h-time); margin-right: var(--h-gap); text-indent: 0; font: 10px/20px var(--wb-mono); color: var(--wb-muted-fg); opacity: .85; vertical-align: top; }
+.history-live .entry-text > .sep { display: none; }
+/* inline-block badges inherit the hanging indent and would draw outside their pill */
+.history-live .entry-text .ptag, .history-live .entry-text .entry-imported { text-indent: 0; }
+.history-live .wb-entry.system .entry-line, .history-live .wb-entry.system .entry-text { color: var(--wb-muted-fg); }
+.history-live .system-run > summary { padding: 0; font-size: 11.5px; line-height: 20px; }
+.history-live .system-run > summary > .rl { width: var(--h-av); }
+.history-live .srow { padding: 1px 0; }
+.owner-input { display: grid; grid-template-columns: var(--h-av) var(--h-time) minmax(0, 1fr); gap: 0 var(--h-gap); align-items: start; margin: 6px 0 1px; font-size: 12.5px; line-height: 20px; }
+.owner-input > .evi { margin-top: 1px; }
+.owner-input .entry-at { font: 10px/20px var(--wb-mono); color: var(--wb-muted-fg); opacity: .85; }
+.owner-input .input-body { min-width: 0; overflow-wrap: anywhere; color: var(--wb-fg); }
+.owner-input .in-ans { margin-left: 4px; color: var(--wb-muted-fg); }
+.owner-input .chip { height: auto; padding: 0; background: none; font-size: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); margin-right: 2px; color: var(--wb-muted-fg); }
+.timeline-answer > summary { display: grid; grid-template-columns: var(--h-av) var(--h-time) minmax(0, 1fr); gap: 0 var(--h-gap); align-items: start; cursor: pointer; font-size: 12.5px; line-height: 20px; list-style: none; }
+.timeline-answer > summary::-webkit-details-marker { display: none; }
+.timeline-answer .entry-at { font: 10px/20px var(--wb-mono); color: var(--wb-muted-fg); }
+.timeline-answer .sbody { margin-left: calc(var(--h-av) / 2); padding-left: calc(var(--h-av) / 2 + var(--h-gap)); }
+@media (max-width: 560px) {
+  .history-live { margin-left: 10px; }
+  .history-live .entry-text > .entry-at { display: block; text-indent: 0; margin: 0; width: auto; }
+  .history-live .entry-text { padding-left: 0; text-indent: 0; }
+  .owner-input, .timeline-answer > summary { grid-template-columns: var(--h-av) minmax(0, 1fr); }
+  .owner-input .entry-at, .timeline-answer .entry-at { grid-column: 2; }
+}
+.wb-askmeta { margin: 0 0 1px calc(var(--h-av, 18px) + var(--h-time, 38px) + 2 * var(--h-gap, 8px)); font-size: 10.5px; color: var(--wb-muted-fg); }

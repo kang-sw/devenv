@@ -823,6 +823,9 @@ type itemData struct {
 	Static bool
 	// History is set only for the unified full-page timeline row.
 	History *EntryView
+	// AskClock/AskAt/AskReasked put an anchored question's ask time and
+	// re-ask time in its own row instead of a caption line above it.
+	AskClock, AskAt, AskReasked string
 }
 
 // ItemOf pairs an item with the page for the item templates.

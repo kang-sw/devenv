@@ -153,7 +153,7 @@ func TestConversationPresentationInboxUserKeepsAnswersTextAndImage(t *testing.T)
 				html := string(set[regionEntries].HTML)
 				for _, want := range []string{
 					`class="msg user" data-entry="` + ring[0].Name,
-					`<span class="achip"><b>(781)</b> ok<span class="anote" title="keep visible">keep visible</span></span>`,
+					`<span class="achip" title="keep visible"><b>(781)</b> ok<span class="anote">keep visible</span></span>`,
 					`ordinary &lt;words&gt; <span class="imgtag"`,
 					`<img src="/s/self/attachment/0123456789abcdef-1.png"`,
 					`<span class="tnum">#1</span>`,
