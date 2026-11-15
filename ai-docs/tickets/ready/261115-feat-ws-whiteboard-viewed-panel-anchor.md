@@ -355,3 +355,62 @@ complete the matching baseline/result geometry and captures, and run the route's
 allocated one-pass lite review. No Phase 1 Result, closure, merge, push, shared
 endpoint/daemon action, provider/holder use, installation/download, or deployment
 is claimed. MAIN owns continuation and integration.
+
+## Authorized Continuation Checkpoint — 2026-11-15 (incomplete)
+
+MAIN 00:23:47 approved the shell-aware, fully pinned fixture proposal and
+exactly one fail-fast offline batch. The lead initiated integration of
+`5585844a794a031a770ce4171c5e05daf1bd3353`; this continuation completed that
+merge as `7589b5910fc50759fa8524f267b5e0209f491bad`, preserving every incoming
+path and both send receipt matching and incoming conversation follow. Static
+semantic reconciliation retains independent Files ownership, the one-row
+`.mhead > .history-older` header, always-shown history/system-chip folds,
+30-line/3-panel/1000px budgets, `positionHistory` geometry, and recap navigation
+through the explicit jump owner.
+
+Pre-freeze static inspection also corrected initial visible frame hydration
+being staged as though it were an external update (`2a2a6d73d`); swapped
+`wbKeep` frames still defer their first height. Its regression is authored but
+not executed in this continuation. The paired fixture uses normal shell entry
+and its active content iframe, separately compiled complete asset/template
+bundles, identical fixture code, exact fixture-origin permission, and request/
+response diagnostic retention. Frozen result:
+`b0af755624cc13929f4a384145d5787d76e3dbdb`; strict baseline remains the exact
+558 merge source. No preliminary executable test, build or probe was run.
+
+**VERIFIED failed authorized batch:**
+`browser-approved/freeze.json` records the pre-start pins/source/asset hashes
+and bounds. The one command was:
+
+```sh
+python3 ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/run.py --result b0af755624cc13929f4a384145d5787d76e3dbdb --batch approved-001
+```
+
+It stopped on the first baseline build, before any result build, binary,
+fixture server, browser or HTTP request. Complete compiler output:
+
+```text
+# github.com/kang-sw/devenv/internal/wsdashboard [github.com/kang-sw/devenv/internal/wsdashboard.test]
+internal/wsdashboard/gitbadge.go:410:6: signal already declared through import of package signal ("os/signal")
+	internal/wsdashboard/board_viewed_browser_test.go:9:2: other declaration of signal
+```
+
+This is a fixture import-name collision, not a product/browser verdict. The
+supervisor returned 1 after 1.87 seconds; no cap expired. Bounds were 180 seconds
+per build, 180 seconds browser, 8 seconds browser actions, and 600 seconds overall
+including a 30-second cleanup reserve. No fix, second batch, review or closure
+followed failure. `browser-approved/approved-001/` retains `RESULT.md`, full raw
+outputs, source/asset SHA-256 manifests and immutable local baseline build-input
+archives. No executable was produced to hash or retain. Its independent
+`cleanup.json` has `final_ps: []`, no cleanup signals and no errors. Existing
+failed `browser/` evidence remains unchanged.
+
+**Final integration advisory, not included in this batch:** MAIN's latest gate
+is develop `1612e099c`, superseding `088ecf679` and `6db68ec00`. Before final
+integration, the lead must reconcile transient board-read/gone handling and
+changed internal Go signatures, topic-state overdue nudges, wsinbox selections,
+and dashboard system-open menu/i18n changes plus Tauri zoom. MAIN explicitly
+kept this one batch on baseline 558; no silent repin, restart, extra execution,
+shared-runtime action or final integration is claimed. Further execution and
+any verification beyond the approved budget need MAIN disposition. Phase 1
+remains incomplete, with no Result or closure.
