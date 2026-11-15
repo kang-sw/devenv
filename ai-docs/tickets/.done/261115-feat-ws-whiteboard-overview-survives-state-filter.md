@@ -1,5 +1,6 @@
 ---
 title: "Whiteboard one-line view survives a toolbar state-filter switch"
+completed: 2026-11-15
 ---
 
 # Whiteboard one-line view survives a toolbar state-filter switch
@@ -102,3 +103,25 @@ Verification:
   re-filter, and arrow traversal covers only eligible topics.
 - `go test ./internal/wsdashboard -run 'TestOverview|TestBoardStateFilter|TestBoardToolbar|TestCards'`
   from `agents-plugin-tool/` with the offline env; never the full package.
+
+### Result (db35df60b) - 2026-11-15
+
+`WsOverview.filter(run)` (new, `overview.js`) replaces the page hook's
+`afterOverview(run)` (`dashboard.js` toolbar `filter`). While Overview is
+animating it queues itself on the finish callbacks without requesting an
+exit; when Overview is off it runs at once; while on and settled it records
+the topmost visible eligible row and the roved item, applies the filter,
+re-roves without moving keyboard focus (`rove(next, false)`; filtered rows
+lose `tabindex="0"`), and re-anchors through `keep` on that row, else the
+first eligible item, else the toolbar. `exit` and session-restore `enter`
+skip a filtered target or entry topic and fall back to the first eligible
+item. `cards.js` is unchanged.
+
+Verification (offline env, exit 0): `go test ./internal/wsdashboard -run
+'TestOverview|TestBoardStateFilter|TestBoardToolbar|TestCards|TestOutsidePreview'`
+including the isolated Chromium fixture (filter keeps `aria-pressed` and
+`data-overview`, control focus retained, one eligible roving target, arrow
+traversal skips hidden rows, Enter still exits and expands the selected
+row); `go test ./internal/wsi18n`; `go build ./cmd/ws-mcp`. Lead re-ran
+`-run TestOverview` (ok) and reviewed the diff: no findings. Owned process
+scan clean.
