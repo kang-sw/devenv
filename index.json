@@ -628,7 +628,14 @@
       "registered_at": "2026-11-14T14:32:38Z"
     },
     "261114-feat-ws-fullscreen-panel-width": {
-      "registered_at": "2026-11-14T12:36:52Z"
+      "registered_at": "2026-11-14T12:36:52Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec4/fullscreen-panel-width",
+        "phase": "active",
+        "touched_at": "2026-11-15T00:26:18Z"
+      }
     },
     "261114-feat-ws-hosted-antigravity-acp-adapter": {
       "registered_at": "2026-11-14T08:45:52Z"
