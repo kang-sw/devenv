@@ -30,11 +30,14 @@ authority only; its narrative and the permission brief supply supporting evidenc
 
 ## Execution Boundary (2026-11-15)
 
-MAIN authorizes Phase 1 documentation only in this invocation. Phase 2 and
-Decision 14's delivery boundary await the lead's check with EXEC4 against CSI
-(`261114-refactor-ws-common-session-interface`) Phase 1's merged admission
-sites. The contract below records intent and acceptance requirements; completing
-Phase 1 neither settles that coordination nor authorizes admission edits.
+Phase 1 documentation is recorded below. MAIN **2026-11-15 09:23:25 and
+09:23:59** withdrew its 09:22:10 go-now instruction: Decision 19, EXEC4 option
+(a), holds Decision 14 / Phase 2 admission work until CSI
+(`261114-refactor-ws-common-session-interface`) Phase 1 merges. Then refresh
+this lane onto its admission sites; do not create a parallel admission rewrite.
+The briefly dispatched Phase 2 worker stopped before any runtime/admission edit.
+Permission Phase 2 remains the prerequisite for worker-profile Phase 1 and
+agent-card dispatch. Phases 3–5 remain outside the current authorization.
 
 ## Decisions
 
@@ -154,7 +157,10 @@ Phase 1 neither settles that coordination nor authorizes admission edits.
     This is an explicit exception to the earlier authority-UI ordering, not a
     general foundation bypass. Forward: that interface's Phase 2 absorbs these
     controls. Historical foundation tickets are not rewritten here.
-14. **Technical delivery boundary.** Permission Phase 2 produces reusable
+14. **Technical delivery boundary.** Decision 19, confirmed by MAIN
+    09:23:25 / 09:23:59 and EXEC4 09:23:38, holds admission work until CSI
+    Phase 1 merges; use its merged admission sites without a parallel rewrite.
+    Permission Phase 2 produces reusable
     permission controls, backend admission for existing workers, and lead /
     settings selection routes. It does not produce new worker-posture routes
     or compose the worker dialog. Worker-profile Phase 1 follows permission
