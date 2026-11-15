@@ -164,6 +164,8 @@ click(h.querySelector('.history-older'));flush();check('last log chunk is remain
 h=start(logs(1,40));check('default log cut',first(h),'e11');
 keepVisible=true;var heldSnapshot=window.wbHistory.capture(document);h=board(logs(1,41));window.wbHistory.restore(document,heldSnapshot);flush();
 check('in-view append keeps the default cut',[h._wbHistoryChunks,h._wbHistoryPending],[['e11'],null]);
+visible(h,1);visible(h,0);flush();
+check('leaving the view returns a held cut to the tail',h._wbHistoryChunks,['e12']);
 keepVisible=false;var tailSnapshot=window.wbHistory.capture(document);h=board(logs(1,42));window.wbHistory.restore(document,tailSnapshot);flush();
 check('out-of-view append re-chooses the tail',h._wbHistoryChunks,['e13']);
 h=start(logs(51,100),[logs(1,50)]);

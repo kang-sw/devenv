@@ -1554,15 +1554,20 @@
   // The exposed units a staged release can depend on: top-level topics,
   // cards and groups, the pin list's topics and fetched closed-page topics.
   function boardExposureUnits() {
-    var pins = window.WsCards && window.WsCards.pinList && window.WsCards.pinList(), units = [];
+    var pins = window.WsCards && window.WsCards.pinList && window.WsCards.pinList(), units = [], panels = [];
     boardBoxes().concat(pins && boardBoxes().indexOf(pins) < 0 ? [pins] : []).forEach(function (box) {
       units = units.concat(Array.prototype.slice.call(box.children), q(".closed-page section.topic[data-topic]", box));
+      panels = panels.concat(boardLivePanels(box));
     });
-    return units.filter(boardExposed);
+    // Exposed panels set the frozen interval across topics (the leading and
+    // trailing span in boardRenderBlockers), so another topic's panel leaving
+    // can release a block whose own panels are all still in view.
+    return units.concat(panels).filter(boardExposed);
   }
   // A scroll or resize re-stages only when a release can follow: a pending
   // panel left the view (its topic's rendering may release), or the exposed
-  // unit set changed (a frozen interval or staged placement may release).
+  // unit or panel set changed (a frozen interval or staged placement may
+  // release).
   // Re-staging on every scroll frame repeated a whole board swap per frame
   // while anything was pending.
   function boardReleaseDue() {

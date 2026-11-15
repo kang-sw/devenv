@@ -169,6 +169,7 @@
     } finally { h._wbHistoryChoosing = false; }
   }
   function reset(h) {
+    h._wbHistoryHeld = false;
     h._wbHistoryChunks = [null];
     h._wbHistorySteps = 1;
     h._wbHistoryPending = { before: null };
@@ -216,7 +217,7 @@
     }).sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; })[0];
   }
   function collapse(h) {
-    if (!h._wbHistoryOut || (h._wbHistorySteps || 1) === 1) return;
+    if (!h._wbHistoryOut || ((h._wbHistorySteps || 1) === 1 && !h._wbHistoryHeld)) return;
     var topic = h.closest('.topic'), a = document.activeElement;
     if (!topic || !topic.isConnected || topic.hasAttribute('data-max')) return;
     if (a && (h.contains(a) || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.closest('.topic')))) return;
@@ -420,10 +421,13 @@
       // A settled default cut is the reader's window while its clip is in
       // view: re-choosing the tail would slide every visible row up inside
       // the flex-end clip, which no scroll write can repair. Keep the cut and
-      // let the clip grow below; leaving the view collapses it (arm).
+      // let the clip grow below; leaving the view collapses it (arm, collapse).
       var inView = saved.chunks && saved.chunks.length === 1 && saved.chunks[0] && !saved.pending && find(h, saved.chunks[0]) &&
         kit.keep(h, { capture: false }).visible(h.querySelector('.history-clip'));
       if (saved.chunks && (saved.chunks.length > 1 || inView)) {
+        // A held default cut is not an Older step, but leaving the view must
+        // still return it to the tail (collapse).
+        h._wbHistoryHeld = saved.chunks.length === 1;
         h._wbHistoryChunks = saved.chunks.slice();
         h._wbHistorySteps = saved.chunks.length;
         h._wbHistoryPending = saved.pending || null;

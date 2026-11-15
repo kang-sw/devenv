@@ -23,7 +23,7 @@ function q(sel,n) {
   if (sel === '.wb-entry.owner') return (n.panels || []).filter(function(p){return p.owner;});
   if (sel === '.wb-history') return n.history ? [n.history] : [];
   if (sel === '.closed-page section.topic[data-topic]') return n.pagedTopics || [];
-  if (sel === ".entry-panel, .wb-entry:not(.panel), .doc-frame") return n.panels || [];
+  if (sel === ".entry-panel, .wb-entry:not(.panel), .doc-frame") return n.panels || (n.children || []).reduce(function(all,c){return all.concat(c.panels || []);},[]);
   throw new Error("unmodeled selector: " + sel);
 }
 var main = {name:"main"}, pinScroller = {name:"pins"};

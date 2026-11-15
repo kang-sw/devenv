@@ -154,9 +154,15 @@ function gate(name, ok) {
       summary.late.newFrameHeights.every(h => parseFloat(h) >= 400));
 
     // D: keep the user's wheel stream authoritative while a revision is pending.
-    await frame.evaluate(() => { window.scroller().scrollTop = 0; });
+    // Put a panel the next revision changes in view, so the revision is
+    // actually staged and the wheel runs through the pending release path.
+    await frame.evaluate(() => {
+      const n = document.querySelector('#r-board section[data-topic="T001"] .entry-panel'), v = window.perfViewport();
+      window.scroller().scrollTop += n.getBoundingClientRect().top - (v.top + 120);
+    });
     await page.waitForTimeout(300);
     await emit('img', 'vis');
+    await settle();
     summary.scroll = await frame.evaluate(() => {
       const badge = document.querySelector('.board-viewed-pending');
       const visible = !!badge && !badge.hidden && badge.getBoundingClientRect().height > 0;
@@ -178,6 +184,7 @@ function gate(name, ok) {
     const scroll = summary.scroll, series = [scroll.initial, ...scroll.scrollTop];
     scroll.final = series[series.length - 1];
     scroll.requiredDelta = 0.8 * Math.min(25 * 80, Math.max(0, scroll.maxScroll - scroll.initial));
+    gate('vis revision is staged behind the pending badge', scroll.pendingBadgeVisible && scroll.changedPanelVisible.some(p => p.visible));
     gate('wheel no longtask > 50ms', scroll.longTasks.every(ms => ms <= 50));
     gate('wheel progress >= 80% clamped distance', scroll.final - scroll.initial >= scroll.requiredDelta);
     gate('wheel scrollTop non-decreasing', series.every((n, i) => !i || n >= series[i - 1]));

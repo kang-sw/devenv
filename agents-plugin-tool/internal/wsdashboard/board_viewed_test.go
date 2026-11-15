@@ -168,13 +168,18 @@ func TestBoardViewedScrollReleaseGate(t *testing.T) {
 var A=topic("A","a1",[panel("p1","one",true),panel("p2","two",true)]),B=topic("B","b1",[panel("p3","three")]);
 A.exposed=true;setLive([A,B]);
 boardPending={A:[A.panels[0]]};boardExposedUnits=boardExposureUnits();
-check("exposed units are the visible top-level topics",boardExposedUnits.length===1 && boardExposedUnits[0]===A);
+check("exposed units are the visible topics and panels",boardExposedUnits.length===3 && boardExposedUnits[0]===A && boardExposedUnits[1]===A.panels[0] && boardExposedUnits[2]===A.panels[1]);
 check("an unchanged view does not re-stage",!boardReleaseDue());
-A.panels[1].exposed=false;
-check("a non-blocking panel leaving does not re-stage",!boardReleaseDue());
 A.panels[0].exposed=false;
 check("a pending panel leaving re-stages",boardReleaseDue());
-A.panels[0].exposed=true;boardPending={A:true};B.exposed=true;
+// Another topic's panel bounds the frozen interval: it leaving while its
+// topic and the blocker stay exposed must still re-stage.
+A.panels[0].exposed=true;B.exposed=true;B.panels[0].exposed=true;boardExposedUnits=boardExposureUnits();
+check("an unchanged cross-topic view does not re-stage",!boardReleaseDue());
+B.panels[0].exposed=false;
+check("another topic's exposed panel leaving re-stages",boardReleaseDue());
+B.exposed=false;boardExposedUnits=boardExposureUnits();
+boardPending={A:true};B.exposed=true;
 check("a changed exposed unit set re-stages staged placement",boardReleaseDue());
 B.exposed=false;
 check("placement stays staged while the interval is unchanged",!boardReleaseDue());
