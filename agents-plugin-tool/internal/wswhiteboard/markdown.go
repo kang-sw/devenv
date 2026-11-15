@@ -120,7 +120,8 @@ func newMarkdown(p *pageData) *markdown {
 // which would also let a line starting with a tag swallow the markdown after
 // it up to the next blank line, and reads the allowlisted inline tags unless
 // the page sets noInlineTags. With rawHTML that parser, the raw HTML inline
-// parser, and html.WithUnsafe are on, so typed HTML is written as is.
+// parser, and html.WithUnsafe are on, so typed HTML is written as is (but for
+// a framed body's raw <img> paths, rawHTMLRenderer).
 func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldmark.Markdown {
 	blocks := []util.PrioritizedValue{
 		util.Prioritized(parser.NewSetextHeadingParser(), 100),
@@ -144,7 +145,7 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 	}
 	if rawHTML {
 		blocks = append(blocks, util.Prioritized(newRawTextHTMLBlockParser(), 900))
-		options = append(options, html.WithUnsafe())
+		options = append(options, html.WithUnsafe(), renderer.WithNodeRenderers(util.Prioritized(&rawHTMLRenderer{page: p}, 100)))
 	}
 	if inlineTags {
 		parserOptions = append(parserOptions, parser.WithASTTransformers(util.Prioritized(inlineTagTransformer{}, 100)))
