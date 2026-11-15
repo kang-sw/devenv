@@ -820,7 +820,17 @@
       "registered_at": "2026-11-15T02:12:43Z"
     },
     "261115-feat-ws-whiteboard-topic-state-badge": {
-      "registered_at": "2026-11-15T02:04:07Z"
+      "registered_at": "2026-11-15T02:04:07Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T02:20:36Z",
+        "impl": {
+          "branch": "impl/develop/fever-avid-stove"
+        }
+      }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
