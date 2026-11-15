@@ -63,6 +63,15 @@ Useful existing pieces:
   back to the OS scheme (`nativeTheme`) until the page reports one.
   Rejected: OS scheme only (mismatches the dashboard's own light/dark
   setting).
+- **(943)=a, owner (relayed by MAIN, 2026-11-15): start the bar now**,
+  queued after the whiteboard deps UI. A Windows build of the shell already
+  exists (the owner-check copy on the Windows host, built from develop), so
+  Phase 1 no longer waits on the Electron ticket's Phase 3 landing.
+  Rejected: holding until Phase 3 closes.
+- **macOS and Linux are verified by unit tests only** (announced: a direct
+  consequence of the owner directive that Electron never launches on the
+  owner's Mac). The platform-switch unit test proves those platforms keep
+  the native title bar. Rejected: a macOS GUI smoke run.
 
 ## Constraints
 
@@ -90,7 +99,6 @@ Useful existing pieces:
 
 ### Phase 1: Windows app-drawn title bar
 
-Blocked until the Electron shell ticket's Phase 3 lands a Windows build.
 Implement the settled decisions in `agents-plugin-tool/desktop-electron/`.
 
 Verification:
@@ -105,5 +113,4 @@ Verification:
   action is reachable from the bar and by keyboard; switching the
   dashboard theme recolors the bar and the overlay controls; the X-close
   confirmation from the Electron ticket still runs. Screenshots are kept as
-  evidence.
-- macOS smoke: the window still has the native title bar and its menus.
+  evidence outside the repository.
