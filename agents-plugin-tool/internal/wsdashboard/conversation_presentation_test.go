@@ -2,10 +2,13 @@ package wsdashboard
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -110,18 +113,67 @@ func TestConversationPresentationSourceLabelsRequireTypedCause(t *testing.T) {
 		ringRecord(4, wslive.RingEntry{Kind: "wake", Cause: "monitor", Text: "[child report] is not proof"}),
 	}
 	html := presentationHTML(t, ring, PageContent{}, nil)
-	for _, want := range []string{`class="msg user" data-entry="` + ring[0].Name, `class="input-record" data-entry="` + ring[1].Name, "Source unresolved", "owner text\n\n[child report]\nreport &lt;script&gt;not HTML&lt;/script&gt;", `class="wake-card child-report"`, "Child report", "known report &lt;b&gt;literal&lt;/b&gt;"} {
+	for _, want := range []string{`class="msg user" data-entry="` + ring[0].Name, `class="msg user" data-entry="` + ring[1].Name, "owner text\n\n[child report]\nreport &lt;script&gt;not HTML&lt;/script&gt;", `class="wake-card child-report"`, "Child report", "known report &lt;b&gt;literal&lt;/b&gt;"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q: %s", want, html)
 		}
 	}
-	if strings.Count(html, "Child report") != 1 || strings.Contains(html, "<script>") {
+	if strings.Count(html, "Child report") != 1 || strings.Contains(html, "<script>") || strings.Contains(html, "input-record") {
 		t.Fatal("prose classified or executed")
 	}
 	entries := []ConvEntry{{RingEntry: wslive.RingEntry{Kind: "user", Origin: "whiteboard", Text: mixed}}}
 	splitUserEntries(entries, t.TempDir(), "self")
 	if entries[0].Text != mixed {
-		t.Fatal("original unresolved input lost during display splitting")
+		t.Fatal("original mixed user input lost during display splitting")
+	}
+}
+
+func TestConversationPresentationInboxUserKeepsAnswersTextAndImage(t *testing.T) {
+	attachDir := t.TempDir()
+	image := filepath.Join(attachDir, "0123456789abcdef-1.png")
+	if err := os.WriteFile(image, []byte(pngBytes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := wsinbox.Entry{
+		Parts:     []string{"ordinary <words> [Image #1]"},
+		Chips:     []wsinbox.Chip{{ID: "781", Answer: "ok", Note: "keep visible"}},
+		Images:    []string{image},
+		ImageNums: []int{1},
+	}.Text()
+	for _, origin := range []string{wslive.OriginWhiteboard, wslive.OriginTerminal, ""} {
+		t.Run("origin="+origin, func(t *testing.T) {
+			ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingUser, Origin: origin, Text: input})}
+			original, _ := json.Marshal(ring)
+			cache := newEntryCache()
+			for i := 0; i < 2; i++ {
+				v := buildSessionView(pageInputs{Session: liveSession("self", "/proj", testNow), Snapshot: liveSnap(testNow, wslive.Lead{}), Ring: ring, Now: testNow, AttachDir: attachDir})
+				set, err := renderSessionRegions(v, cache)
+				if err != nil {
+					t.Fatal(err)
+				}
+				html := string(set[regionEntries].HTML)
+				for _, want := range []string{
+					`class="msg user" data-entry="` + ring[0].Name,
+					`<span class="achip"><b>(781)</b> ok<span class="anote" title="keep visible">keep visible</span></span>`,
+					`ordinary &lt;words&gt; <span class="imgtag"`,
+					`<img src="/s/self/attachment/0123456789abcdef-1.png"`,
+					`<span class="tnum">#1</span>`,
+				} {
+					if !strings.Contains(html, want) {
+						t.Errorf("missing %q: %s", want, html)
+					}
+				}
+				for _, bad := range []string{"input-record", "Source unresolved", "<details", "wb:answers", "Image #1: " + image, "<words>"} {
+					if strings.Contains(html, bad) {
+						t.Errorf("unexpected folded/raw input %q: %s", bad, html)
+					}
+				}
+			}
+			after, _ := json.Marshal(ring)
+			if string(original) != string(after) || cache.buildCount() != 1 {
+				t.Fatal("user rendering mutated records or missed the entry cache")
+			}
+		})
 	}
 }
 
