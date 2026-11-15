@@ -1,16 +1,17 @@
 /* The footer gutter and details are deliberately separate from rail styling. */
-.rail .usage-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-height: 25px; width: 100%; padding: 2px 0; border: 0; background: none; color: var(--wb-fg); cursor: pointer; font: inherit; text-align: left; }
+.rail .rfoot { flex-wrap: wrap; }
+.rail .usage-toggle { display: flex; flex: 1 1 180px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 10px; margin-left: auto; min-height: 20px; padding: 2px 0; border: 0; background: none; color: var(--wb-fg); cursor: pointer; font: inherit; text-align: left; }
 .rail .usage-toggle:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; border-radius: 3px; }
-.usage-harness { display: inline-flex; align-items: center; gap: 8px; }
+.usage-harness { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 6px; max-width: 100%; }
 .usage-mark { position: relative; display: inline-flex; width: 16px; height: 16px; flex: none; }
 .usage-clock { position: absolute; width: 9px; height: 9px; right: -4px; bottom: -3px; border-radius: 50%; background: var(--wb-card); color: var(--wb-warn-ink); box-shadow: 0 0 0 1px var(--wb-card); fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.usage-columns { display: flex; align-items: center; gap: 12px; }
-.usage-column { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; font-family: var(--wb-mono, monospace); font-variant-numeric: tabular-nums; }
+.usage-columns { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; }
+.usage-column { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; font-family: var(--wb-mono, monospace); font-variant-numeric: tabular-nums; }
 .usage-current { display: flex; align-items: baseline; gap: 3px; }
-.usage-number { font: 700 15px/1.2 var(--wb-mono, monospace); letter-spacing: -.035em; }
+.usage-number { font: 700 11px/1.2 var(--wb-mono, monospace); letter-spacing: -.035em; }
 .usage-key { color: var(--wb-muted-fg); font: 500 9px/1.2 var(--wb-sans, sans-serif); }
-.usage-percent { font-size: 10px; font-weight: 500; }
-.usage-pace { font: 600 10.5px/1.2 var(--wb-mono, monospace); letter-spacing: -.025em; }
+.usage-percent { font-size: 9px; font-weight: 500; }
+.usage-pace { font: 600 10px/1.2 var(--wb-mono, monospace); letter-spacing: -.025em; }
 .usage-pace.under { color: var(--wb-ok); }
 .usage-pace.over { color: var(--wb-fail); }
 .usage-stale, .usage-stale .usage-pace { color: var(--wb-muted-fg); }
