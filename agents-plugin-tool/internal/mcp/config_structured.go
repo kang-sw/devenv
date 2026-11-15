@@ -59,8 +59,6 @@ var worktreeProfileFamily = structuredFamily{
 	},
 }
 
-var agentProfileFamily = registeredAgentProfileFamily()
-
 func registeredAgentProfileFamily(registries ...map[string]wsagent.BackendRegistration) structuredFamily {
 	return structuredFamily{
 		prefix:       wsagent.ProfilePrefix,
@@ -89,17 +87,17 @@ func registeredAgentProfileFamily(registries ...map[string]wsagent.BackendRegist
 
 }
 
-var structuredFamilies = []structuredFamily{worktreeProfileFamily, agentProfileFamily}
-
 // structuredFamilyForKey picks the family a structured key belongs to by its
-// prefix.
-func structuredFamilyForKey(key string) (structuredFamily, bool) {
-	for _, family := range structuredFamilies {
-		if strings.HasPrefix(key, family.prefix) {
-			return family, true
-		}
+// prefix, binding agent profiles to this server's backend registry.
+func (s *Server) structuredFamilyForKey(key string) (structuredFamily, bool) {
+	switch {
+	case strings.HasPrefix(key, worktreeProfilePrefix):
+		return worktreeProfileFamily, true
+	case strings.HasPrefix(key, wsagent.ProfilePrefix):
+		return registeredAgentProfileFamily(s.agentBackends()...), true
+	default:
+		return structuredFamily{}, false
 	}
-	return structuredFamily{}, false
 }
 
 // tuneStructured is config.tune for a structured (JSON-object) key: the
@@ -107,12 +105,9 @@ func structuredFamilyForKey(key string) (structuredFamily, bool) {
 // validated before any write, session scope is refused, and a reset removes
 // the whole value from the selected scope.
 func (s *Server) tuneStructured(entry configKeyEntry, rawValue any, sessionKey string, explicitScope wsconfig.Scope, reset bool) (string, error) {
-	family, ok := structuredFamilyForKey(entry.Key)
+	family, ok := s.structuredFamilyForKey(entry.Key)
 	if !ok {
 		return "", fmt.Errorf("config.tune: %s is not a structured config key", entry.Key)
-	}
-	if family.prefix == wsagent.ProfilePrefix {
-		family = registeredAgentProfileFamily(s.agentBackends()...)
 	}
 	name := strings.TrimPrefix(entry.Key, family.prefix)
 	if err := family.validateName(name); err != nil {

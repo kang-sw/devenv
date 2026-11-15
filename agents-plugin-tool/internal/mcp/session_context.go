@@ -10,21 +10,31 @@ import (
 // Authority and lineage come only from the key store. Display nesting and a
 // conversation's ParentRef never participate in selection.
 type sessionContext struct {
-	key            string
-	scope          toolRole
-	parent         string
-	canonicalRoot  string
-	root           string
-	hosted         bool
-	harness        string
-	harnessSession string
-	harnessCwd     string
-	found          bool
-	transient      bool // cached activity inspection could not read the record
+	key       string
+	scope     toolRole
+	parent    string
+	root      string
+	hosted    bool
+	found     bool
+	transient bool // cached activity inspection could not read the record
 }
 
+type sessionAccessMode string
+
+const (
+	sessionAccessIdentity     sessionAccessMode = "identity"
+	sessionAccessIntake       sessionAccessMode = "intake"
+	sessionAccessActive       sessionAccessMode = "active"
+	sessionAccessMintIdentity sessionAccessMode = "mint-identity"
+	sessionAccessLookup       sessionAccessMode = "lookup"
+	sessionAccessBootstrap    sessionAccessMode = "bootstrap"
+	sessionAccessRelogin      sessionAccessMode = "relogin"
+	sessionAccessManual       sessionAccessMode = "manual"
+	sessionAccessMint         sessionAccessMode = "mint"
+)
+
 type sessionAccess struct {
-	mode   string // identity, intake, active, mint-identity, lookup, bootstrap, relogin, manual, or mint
+	mode   sessionAccessMode
 	key    string
 	root   string // already canonicalized by the caller, preserving its error order
 	scope  toolRole
@@ -40,7 +50,7 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 	// Unlike adoption, they neither normalize the key nor inspect hosted entry
 	// or harness metadata. In particular, a missing key never adopts the host.
 	switch in.mode {
-	case "mint-identity":
+	case sessionAccessMintIdentity:
 		// Existing identity-only mint consumers already supply the root and
 		// lineage. Preserve the store-only operation: no hosted probe, extra
 		// record read, or adoption normalization belongs to this path.
@@ -49,13 +59,13 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 			return sessionContext{}, err
 		}
 		return contextForEntry(key, sessionEntry{root: in.root, scope: in.scope, parent: in.parent}, true), nil
-	case "identity":
+	case sessionAccessIdentity:
 		entry, found := s.sessions.lookup(in.key)
 		return contextForEntry(in.key, entry, found), nil
-	case "intake":
+	case sessionAccessIntake:
 		entry, found := s.sessions.intakeLookup(in.key)
 		return contextForEntry(in.key, entry, found), nil
-	case "active":
+	case sessionAccessActive:
 		entry, found, transient := s.sessions.intakeInspect(in.key)
 		out := contextForEntry(in.key, entry, found)
 		out.transient = transient
@@ -64,14 +74,14 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 	// Preserve each adoption caller's normalization. Mint used the store
 	// directly, which keeps the caller-selected parent byte-for-byte.
 	switch in.mode {
-	case "bootstrap", "relogin":
+	case sessionAccessBootstrap, sessionAccessRelogin:
 		in.key, in.parent = strings.TrimSpace(in.key), strings.TrimSpace(in.parent)
-	case "manual", "lookup":
+	case sessionAccessManual, sessionAccessLookup:
 		in.key = strings.TrimSpace(in.key)
 	}
 	hosted := s.hostedSessionKey() // validates registration.host_pid once
 	switch in.mode {
-	case "bootstrap":
+	case sessionAccessBootstrap:
 		if hosted != "" && in.parent == "" && in.scope == roleLead {
 			if reason := s.leadKeyRefusal(hosted, in.root); reason != "" {
 				return sessionContext{}, fmt.Errorf("session bootstrap: this session is hosted and its session key is fixed, but %s %q %s", envHostedSessionKey, hosted, reason)
@@ -89,7 +99,7 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 			}
 			in.key = key
 		}
-	case "relogin":
+	case sessionAccessRelogin:
 		if hosted != "" && in.key != hosted {
 			return sessionContext{}, hostedKeyRefusal("session bootstrap", hosted, in.key)
 		}
@@ -105,13 +115,13 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 		if err := s.hostedLoginGuard(in.key, in.root); err != nil {
 			return sessionContext{}, err
 		}
-	case "manual":
+	case sessionAccessManual:
 		if hosted != "" && in.key != hosted {
 			if entry, ok := s.sessions.lookup(in.key); !ok || entry.parent == "" {
 				return sessionContext{}, hostedKeyRefusal("workflow_manual", hosted, in.key)
 			}
 		}
-	case "mint":
+	case sessionAccessMint:
 		key, err := s.sessions.mint(in.root, in.scope, in.parent)
 		if err != nil {
 			return sessionContext{}, err
@@ -121,22 +131,22 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 	out := sessionContext{key: in.key, hosted: hosted != "" && in.key == hosted}
 	if entry, ok := s.sessions.lookup(in.key); ok {
 		out.found = true
-		out.root, out.canonicalRoot, out.scope, out.parent = entry.root, entry.root, entry.scope, entry.parent
-		if rec, err := s.sessions.readStateWithError(in.key, partKey); err == nil {
-			out.harness, out.harnessSession, out.harnessCwd = rec.Harness, rec.HarnessSession, rec.HarnessCwd
-		}
+		out.root, out.scope, out.parent = entry.root, entry.scope, entry.parent
+		// Retain the adoption path's second, mutex-serialized read and activity
+		// touch even though no consumer needs its harness metadata.
+		_, _ = s.sessions.readStateWithError(in.key, partKey)
 	}
 	return out, nil
 }
 
 func contextForEntry(key string, entry sessionEntry, found bool) sessionContext {
-	return sessionContext{key: key, root: entry.root, canonicalRoot: entry.root, scope: entry.scope, parent: entry.parent, found: found}
+	return sessionContext{key: key, root: entry.root, scope: entry.scope, parent: entry.parent, found: found}
 }
 
 // lookupSession adapts existing identity-only consumers to the shared resolver
 // without widening their reads or changing their refusal and error ordering.
 func (s *Server) lookupSession(key string) (sessionEntry, bool) {
-	resolved, _ := s.resolveSession(sessionAccess{mode: "identity", key: key})
+	resolved, _ := s.resolveSession(sessionAccess{mode: sessionAccessIdentity, key: key})
 	return resolved.entry(), resolved.found
 }
 
@@ -146,13 +156,13 @@ func (c sessionContext) entry() sessionEntry {
 
 // intakeSession preserves the adapter-only cache and its bounded revocation.
 func (s *Server) intakeSession(key string) (sessionEntry, bool) {
-	resolved, _ := s.resolveSession(sessionAccess{mode: "intake", key: key})
+	resolved, _ := s.resolveSession(sessionAccess{mode: sessionAccessIntake, key: key})
 	return resolved.entry(), resolved.found
 }
 
 // activeSession is the timer's non-touching view of the same cache. A transient
 // read is distinct from revocation so it cannot discard an in-flight turn.
 func (s *Server) activeSession(key string) (sessionEntry, bool, bool) {
-	resolved, _ := s.resolveSession(sessionAccess{mode: "active", key: key})
+	resolved, _ := s.resolveSession(sessionAccess{mode: sessionAccessActive, key: key})
 	return resolved.entry(), resolved.found, resolved.transient
 }

@@ -346,3 +346,54 @@ func TestLockFileQueuedWaiterKeepsTheDeadline(t *testing.T) {
 		t.Fatalf("queued lockFile gave up after %v, want about %v", waited, lockTimeout)
 	}
 }
+
+func TestLockFileFlockFailureReleasesSlotForThirdWaiter(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "missing-parent", "notes.json.lock")
+	// Hold only the first writer's in-memory slot: the missing directory
+	// makes the next writer's flock fail after it acquires that slot.
+	v, _ := lockSlots.LoadOrStore(filepath.Clean(lockPath), make(chan struct{}, 1))
+	slot := v.(chan struct{})
+	slot <- struct{}{}
+	t.Cleanup(func() { lockSlots.Delete(filepath.Clean(lockPath)) })
+	type result struct {
+		locked bool
+		err    error
+	}
+	attempt := func(done chan<- result) {
+		unlock, locked, err := lockFile(lockPath)
+		if unlock != nil {
+			unlock()
+		}
+		done <- result{locked, err}
+	}
+	second := make(chan result, 1)
+	go attempt(second)
+	<-slot
+	select {
+	case got := <-second:
+		if got.locked || !os.IsNotExist(got.err) {
+			t.Fatalf("second lockFile = %v, %v; want flock open failure", got.locked, got.err)
+		}
+	case <-time.After(3 * lockTimeout):
+		t.Fatal("second writer did not finish after the first released its slot")
+	}
+	if len(slot) != 0 {
+		t.Fatal("flock failure leaked the in-memory slot")
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	third := make(chan result, 1)
+	go attempt(third)
+	select {
+	case got := <-third:
+		if !got.locked || got.err != nil {
+			t.Fatalf("third lockFile = %v, %v; want successful acquisition", got.locked, got.err)
+		}
+	case <-time.After(3 * lockTimeout):
+		t.Fatal("third writer did not proceed after the failed flock")
+	}
+	if len(slot) != 0 {
+		t.Fatal("third writer did not release the in-memory slot")
+	}
+}

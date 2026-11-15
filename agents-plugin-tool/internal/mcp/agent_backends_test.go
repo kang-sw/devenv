@@ -70,6 +70,22 @@ func TestConfigRegisteredAgentProfile(t *testing.T) {
 	t.Fatal("catalog has no profile family")
 }
 
+func TestConfigRegisteredAgentProfileRefusesAbsentBackend(t *testing.T) {
+	s, _, key := profileServer(t)
+	registerFixtureAgentBackends(s)
+	resp := keyedCall(t, s, 1, key, "config.tune", map[string]any{
+		"key": "agent.profile.fixture-lead", "scope": "project",
+		"value": map[string]any{"backend": "unregistered", "lead": true, "permission_mode": "review"},
+	})
+	want := `config.tune: agent.profile.fixture-lead backend must be "claude" or "fixture" or "pi"; got "unregistered"`
+	if !toolIsError(t, resp) || toolText(t, resp) != want {
+		t.Fatalf("unregistered profile write = %s, want refusal %q", resp, want)
+	}
+	if got := configGetJSON(t, s, 2, map[string]any{"key": "agent.profile.fixture-lead", "session_key": key}); got.Scope != configGetUnsetScope {
+		t.Fatalf("refused profile was stored: %+v", got)
+	}
+}
+
 func TestTrackerSupportRegisteredAgentBackend(t *testing.T) {
 	f := newTrackerSupportFixture(t)
 	registerFixtureAgentBackends(f.s)

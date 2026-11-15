@@ -28,8 +28,8 @@ func TestResolveSessionSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The requested root is not authority: lookup projects the key's root.
-	got, err := s.resolveSession(sessionAccess{mode: "lookup", key: " " + child + " ", root: t.TempDir(), parent: "display-parent"})
-	if err != nil || !got.found || got.key != child || got.scope != roleDelegate || got.parent != lead || got.root != canonical || got.canonicalRoot != canonical || got.hosted || got.harness != "pi" || got.harnessSession != "/historical/session.jsonl" || got.harnessCwd != root {
+	got, err := s.resolveSession(sessionAccess{mode: sessionAccessLookup, key: " " + child + " ", root: t.TempDir(), parent: "display-parent"})
+	if err != nil || !got.found || got.key != child || got.scope != roleDelegate || got.parent != lead || got.root != canonical || got.hosted {
 		t.Fatalf("CLI context = %+v, %v", got, err)
 	}
 
@@ -43,9 +43,9 @@ func TestResolveSessionSelection(t *testing.T) {
 		scope       toolRole
 		hosted      bool
 	}{
-		{"hosted bootstrap", sessionAccess{mode: "bootstrap", root: canonical, scope: roleLead}, lead, "", roleLead, true},
-		{"hosted relogin", sessionAccess{mode: "relogin", key: lead, root: canonical, scope: roleLead}, lead, "", roleLead, true},
-		{"explicit child", sessionAccess{mode: "manual", key: child}, child, lead, roleDelegate, false},
+		{"hosted bootstrap", sessionAccess{mode: sessionAccessBootstrap, root: canonical, scope: roleLead}, lead, "", roleLead, true},
+		{"hosted relogin", sessionAccess{mode: sessionAccessRelogin, key: lead, root: canonical, scope: roleLead}, lead, "", roleLead, true},
+		{"explicit child", sessionAccess{mode: sessionAccessManual, key: child}, child, lead, roleDelegate, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := s.resolveSession(tt.in)
@@ -59,8 +59,8 @@ func TestResolveSessionSelection(t *testing.T) {
 		in   sessionAccess
 		want string
 	}{
-		{"sentinel", sessionAccess{mode: "manual", key: freshBootstrapKey, root: canonical}, "workflow_manual:"},
-		{"relogin mismatch", sessionAccess{mode: "relogin", key: child, root: canonical, scope: roleLeaf, parent: lead}, "session bootstrap:"},
+		{"sentinel", sessionAccess{mode: sessionAccessManual, key: freshBootstrapKey, root: canonical}, "workflow_manual:"},
+		{"relogin mismatch", sessionAccess{mode: sessionAccessRelogin, key: child, root: canonical, scope: roleLeaf, parent: lead}, "session bootstrap:"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := s.resolveSession(tt.in)
@@ -72,7 +72,7 @@ func TestResolveSessionSelection(t *testing.T) {
 	if after := sessionKeyFileCount(t, s); after != before {
 		t.Fatalf("adoption/refusal minted keys: %d -> %d", before, after)
 	}
-	for _, mode := range []string{"bootstrap", "mint"} {
+	for _, mode := range []sessionAccessMode{sessionAccessBootstrap, sessionAccessMint} {
 		got, err := s.resolveSession(sessionAccess{mode: mode, root: canonical, scope: roleLead, parent: lead})
 		if err != nil || !got.found || got.key == lead || got.key == child || got.parent != lead || got.scope != roleLead || got.hosted {
 			t.Fatalf("%s child = %+v, %v", mode, got, err)
@@ -84,7 +84,7 @@ func TestResolveSessionMintPreservesParent(t *testing.T) {
 	root, s := hostedLoginEnv(t)
 	t.Setenv(envHostedSession, "")
 	parent := " padded-parent "
-	got, err := s.resolveSession(sessionAccess{mode: "mint", root: canonicalRootForTest(t, root), scope: roleDelegate, parent: parent})
+	got, err := s.resolveSession(sessionAccess{mode: sessionAccessMint, root: canonicalRootForTest(t, root), scope: roleDelegate, parent: parent})
 	if err != nil || !got.found || got.parent != parent {
 		t.Fatalf("mint context = %+v, %v; want exact parent %q", got, err, parent)
 	}
@@ -120,13 +120,17 @@ func TestResolveSessionHistoricalRecordsStayReadable(t *testing.T) {
 		if err := os.WriteFile(path, raw, 0600); err != nil {
 			t.Fatal(err)
 		}
-		got, err := s.resolveSession(sessionAccess{mode: "lookup", key: name})
-		if err != nil || !got.found || got.key != name || got.scope != roleLead || got.parent != "historical-parent" || got.root != canonical || got.harness != "claude" || got.harnessSession != "old-native-session" || got.harnessCwd != root {
+		got, err := s.resolveSession(sessionAccess{mode: sessionAccessLookup, key: name})
+		if err != nil || !got.found || got.key != name || got.scope != roleLead || got.parent != "historical-parent" || got.root != canonical {
 			t.Fatalf("%s = %+v, %v", name, got, err)
 		}
 		after, err := os.ReadFile(path)
 		if err != nil || !bytes.Equal(raw, after) {
 			t.Fatalf("lookup rewrote historical record: %s, %v", after, err)
+		}
+		rec, err := s.sessions.readStateWithError(name, partKey)
+		if err != nil || rec.Harness != "claude" || rec.HarnessSession != "old-native-session" || rec.HarnessCwd != root {
+			t.Fatalf("historical harness metadata = %+v, %v", rec, err)
 		}
 		if legacy {
 			if _, err := os.Stat(dirs.keyDir(name)); !os.IsNotExist(err) {

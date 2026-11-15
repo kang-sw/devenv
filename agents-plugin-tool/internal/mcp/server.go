@@ -1473,7 +1473,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
 		result, err := acquireWorktree(ctx, s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value, key, func(mintPath string) (string, error) {
-			resolved, err := s.resolveSession(sessionAccess{mode: "mint-identity", root: mintPath, scope: roleLead, parent: key})
+			resolved, err := s.resolveSession(sessionAccess{mode: sessionAccessMintIdentity, root: mintPath, scope: roleLead, parent: key})
 			return resolved.key, err
 		})
 		if err != nil {
@@ -2294,7 +2294,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		topLevelLead := false
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			capturedKey := strings.TrimSpace(keyStr)
-			entry, err := s.resolveSession(sessionAccess{mode: "lookup", key: capturedKey})
+			entry, err := s.resolveSession(sessionAccess{mode: sessionAccessLookup, key: capturedKey})
 			if err != nil {
 				return toolTextResponse(req.ID, "", err)
 			}
@@ -2304,7 +2304,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					mintRoot = rootOverride
 				}
 				parentKey = entry.key
-				topLevelLead = entry.parent == ""
+				topLevelLead = entry.entry().isTopLevelLead()
 			}
 		}
 		callerContext, planStem := renderPlanStem(name, callerContext, topLevelLead)
@@ -2397,7 +2397,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	if relogin, _ := arguments["relogin_session_key"].(string); strings.TrimSpace(relogin) != "" {
 		return s.handleLeadRelogin(id, arguments, strings.TrimSpace(relogin), canonical, scope, parentKey)
 	}
-	resolved, err := s.resolveSession(sessionAccess{mode: "bootstrap", root: canonical, scope: scope, parent: parentKey})
+	resolved, err := s.resolveSession(sessionAccess{mode: sessionAccessBootstrap, root: canonical, scope: scope, parent: parentKey})
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -2444,7 +2444,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 // a re-login that also carries a parent or a non-lead capability, since those
 // describe a key the re-login could never return.
 func (s *Server) handleLeadRelogin(id json.RawMessage, arguments map[string]any, key, canonical string, scope toolRole, parentKey string) response {
-	if _, err := s.resolveSession(sessionAccess{mode: "relogin", key: key, root: canonical, scope: scope, parent: parentKey}); err != nil {
+	if _, err := s.resolveSession(sessionAccess{mode: sessionAccessRelogin, key: key, root: canonical, scope: scope, parent: parentKey}); err != nil {
 		return toolTextResponse(id, "", err)
 	}
 	s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)

@@ -18,8 +18,8 @@ func TestSessionAccessIdentityMintKeepsStoreOnlyBehavior(t *testing.T) {
 		return readRecordFile(path, newValue)
 	}
 	childRoot := t.TempDir()
-	got, err := s.resolveSession(sessionAccess{mode: "mint-identity", root: childRoot, scope: roleLead, parent: lead})
-	if err != nil || !got.found || got.key == "" || got.key == lead || got.root != childRoot || got.canonicalRoot != childRoot || got.scope != roleLead || got.parent != lead || got.hosted {
+	got, err := s.resolveSession(sessionAccess{mode: sessionAccessMintIdentity, root: childRoot, scope: roleLead, parent: lead})
+	if err != nil || !got.found || got.key == "" || got.key == lead || got.root != childRoot || got.scope != roleLead || got.parent != lead || got.hosted {
 		t.Fatalf("identity mint = %+v, %v", got, err)
 	}
 	if reads != 0 || s.hostedKey != "" {

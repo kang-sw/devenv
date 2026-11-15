@@ -325,7 +325,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	//     refused before anything renders or mints. A key that carries a
 	//     parent passes: it is a child key a subagent on this connection
 	//     holds, and its worker playbooks read this manual.
-	if _, err := s.resolveSession(sessionAccess{mode: "manual", key: key}); err != nil {
+	if _, err := s.resolveSession(sessionAccess{mode: sessionAccessManual, key: key}); err != nil {
 		return toolTextResponse(id, "", err)
 	}
 
@@ -424,7 +424,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			if err != nil {
 				return toolTextResponse(id, "", err)
 			}
-			resolved, err := s.resolveSession(sessionAccess{mode: "mint", root: canonical, scope: roleLead})
+			resolved, err := s.resolveSession(sessionAccess{mode: sessionAccessMint, root: canonical, scope: roleLead})
 			if err != nil {
 				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: mint session: %w", err))
 			}

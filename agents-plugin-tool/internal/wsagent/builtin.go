@@ -65,9 +65,15 @@ func LeadProfileFor(backend string, registries ...map[string]BackendRegistration
 	if len(registries) > 0 {
 		return registries[0][backend].LeadProfile
 	}
-	for name, raw := range BuiltinProfiles() {
+	profiles := BuiltinProfiles()
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		var p Profile
-		if json.Unmarshal(raw, &p) == nil && p.Backend == backend && p.Lead {
+		if json.Unmarshal(profiles[name], &p) == nil && p.Backend == backend && p.Lead {
 			return strings.TrimPrefix(name, ProfilePrefix)
 		}
 	}
