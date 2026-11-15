@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "Den Pfad aus der Adressleiste des Dateiexplorers oder aus \"Als Pfad kopieren\" unverändert einfügen",
   "js.rail.ws.will": "Wird hinzugefügt",
   "js.rail.ws.add": "Hinzufügen",
+  "js.rail.ws.browse": "Durchsuchen",
+  "js.rail.ws.select": "Ordner auswählen",
   "js.rail.wt.title": "Worktree hinzufügen",
   "js.rail.wt.branch": "Branch",
   "js.rail.wt.new": "Neuer Branch",

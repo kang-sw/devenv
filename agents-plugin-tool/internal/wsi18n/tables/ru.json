@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "Вставьте путь из адресной строки проводника или из «Копировать как путь» как есть",
   "js.rail.ws.will": "Будет добавлено",
   "js.rail.ws.add": "Добавить",
+  "js.rail.ws.browse": "Обзор",
+  "js.rail.ws.select": "Выбрать папку",
   "js.rail.wt.title": "Добавить worktree",
   "js.rail.wt.branch": "Ветка",
   "js.rail.wt.new": "Новая ветка",

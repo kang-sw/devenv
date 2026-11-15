@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "Pega tal cual la ruta de la barra de direcciones del explorador de archivos o de \"Copiar como ruta\"",
   "js.rail.ws.will": "Se añadirá",
   "js.rail.ws.add": "Añadir",
+  "js.rail.ws.browse": "Examinar",
+  "js.rail.ws.select": "Seleccionar carpeta",
   "js.rail.wt.title": "Añadir worktree",
   "js.rail.wt.branch": "Rama",
   "js.rail.wt.new": "Rama nueva",

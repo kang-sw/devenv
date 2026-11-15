@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "エクスプローラーのアドレスバーや「パスのコピー」の値をそのまま貼り付けてください",
   "js.rail.ws.will": "追加先",
   "js.rail.ws.add": "追加",
+  "js.rail.ws.browse": "参照",
+  "js.rail.ws.select": "フォルダーを選択",
   "js.rail.wt.title": "Worktree を追加",
   "js.rail.wt.branch": "ブランチ",
   "js.rail.wt.new": "新しいブランチ",

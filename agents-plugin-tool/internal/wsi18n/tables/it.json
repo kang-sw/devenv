@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "Incolla così com'è il percorso dalla barra degli indirizzi di Esplora file o da \"Copia come percorso\"",
   "js.rail.ws.will": "Verrà aggiunto",
   "js.rail.ws.add": "Aggiungi",
+  "js.rail.ws.browse": "Sfoglia",
+  "js.rail.ws.select": "Seleziona cartella",
   "js.rail.wt.title": "Aggiungi worktree",
   "js.rail.wt.branch": "Branch",
   "js.rail.wt.new": "Nuovo branch",

@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "Cole como está o caminho da barra de endereço do explorador de arquivos ou de \"Copiar como caminho\"",
   "js.rail.ws.will": "Será adicionado",
   "js.rail.ws.add": "Adicionar",
+  "js.rail.ws.browse": "Procurar",
+  "js.rail.ws.select": "Selecionar pasta",
   "js.rail.wt.title": "Adicionar worktree",
   "js.rail.wt.branch": "Branch",
   "js.rail.wt.new": "Novo branch",

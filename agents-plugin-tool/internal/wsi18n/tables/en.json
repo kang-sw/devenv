@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "Paste the path from the file explorer's address bar or its \"Copy as path\" as is",
   "js.rail.ws.will": "Will add",
   "js.rail.ws.add": "Add",
+  "js.rail.ws.browse": "Browse",
+  "js.rail.ws.select": "Select folder",
   "js.rail.wt.title": "Add worktree",
   "js.rail.wt.branch": "Branch",
   "js.rail.wt.new": "New branch",

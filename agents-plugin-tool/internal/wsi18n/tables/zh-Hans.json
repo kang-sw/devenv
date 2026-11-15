@@ -1612,6 +1612,8 @@
   "js.rail.ws.hint": "请原样粘贴文件资源管理器地址栏或“复制为路径”得到的路径",
   "js.rail.ws.will": "将添加",
   "js.rail.ws.add": "添加",
+  "js.rail.ws.browse": "浏览",
+  "js.rail.ws.select": "选择文件夹",
   "js.rail.wt.title": "添加工作树",
   "js.rail.wt.branch": "分支",
   "js.rail.wt.new": "新分支",
