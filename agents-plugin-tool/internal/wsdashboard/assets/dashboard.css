@@ -1101,6 +1101,7 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 /* Explorer cards and both page-owned browsers share the same inner core. */
 .fpane { container-type: inline-size; --l2-side: color-mix(in srgb, var(--wb-bg) 62%, var(--wb-card)); --l2-band: color-mix(in srgb, var(--wb-fg) 4%, var(--wb-card)); --l2-zebra: color-mix(in srgb, var(--wb-fg) 2.2%, transparent); }
 :root[data-theme="light"] .fpane { --l2-side: color-mix(in srgb, var(--wb-bg) 75%, var(--wb-card)); --l2-band: color-mix(in srgb, var(--wb-fg) 3%, var(--wb-card)); --l2-zebra: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
+.fpane:focus-within { outline: 1px solid color-mix(in srgb, var(--wb-primary) 28%, var(--wb-line)); outline-offset: -1px; }
 .fcard { display: flex; height: 100%; border-radius: 0; box-shadow: none; }
 .ftabs { display: flex; align-self: stretch; align-items: flex-end; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 40%; overflow-x: auto; scrollbar-width: none; padding-top: 3px; }
 .ftabs::-webkit-scrollbar { display: none; }
@@ -1137,6 +1138,7 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .fworkspace > .ftree { min-width: 0; padding: 0 4px 8px; border-right: 1px solid var(--wb-line); font-size: 11.5px; background: var(--l2-side); }
 .ftree-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: 28px; box-sizing: border-box; margin: 0 -4px 2px; padding: 0 10px; font: 700 10.5px var(--wb-sans); color: var(--wb-muted-fg); border-bottom: 1px solid var(--wb-line); background: var(--l2-side); }
 .fdirectory { min-width: 0; overflow: auto; padding: 0 0 6px; background: repeating-linear-gradient(to bottom, transparent 0 22px, var(--l2-zebra) 22px 44px) 0 30px / 100% calc(100% - 30px) no-repeat local; }
+.fmarquee { position: fixed; pointer-events: none; z-index: calc(var(--z-modal) + 3); border: 1px solid color-mix(in srgb, var(--wb-primary) 50%, transparent); background: color-mix(in srgb, var(--wb-primary) 10%, transparent); }
 .fentry, .fdetail-head { display: grid; grid-template-columns: 16px minmax(0, 1fr) 80px; align-items: center; gap: 6px; height: 22px; box-sizing: border-box; padding: 0 6px; border-bottom: 1px solid transparent; font: 11px var(--wb-mono); }
 .fdetail-head { position: sticky; top: 0; z-index: 1; height: 28px; margin: 0 0 2px; padding: 0 12px; border-bottom-color: var(--wb-line); background: var(--l2-band); color: var(--wb-muted-fg); font: 700 10.5px var(--wb-sans); }
 .fentry .fi .li, .ftree .fi .li { width: 14px; height: 14px; }
@@ -1678,6 +1680,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .lmenu { position: fixed; z-index: 60; min-width: 190px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 5px; display: grid; gap: 2px; }
 .lmenu button { border: 0; background: transparent; border-radius: 7px; padding: 6px 9px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
 .lmenu button:hover, .lmenu button:focus-visible { background: var(--wb-muted); outline: none; }
+.fmenu button:disabled { opacity: .45; cursor: default; background: transparent; }
 /* the shared toast stack (toast.js): bottom-right, newest on top, inverted
    like the page's text; a tracker notification carries a policy bar on its
    left, the hidden-time summary a primary dot before its text */
