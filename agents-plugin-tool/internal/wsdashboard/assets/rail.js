@@ -191,7 +191,7 @@
   // generation min: its list's data-lgen is below it. A render without one
   // is never stale.
   function staleRail(html, min) {
-    var m = /\bdata-lgen="([0-9]+)"/.exec(String(html || ""));
+    var m = /\bdata-lgen="([0-9]+)"/.exec(typeof html === "string" ? html : html && html.shell ? html.shell.join("") : "");
     return !!m && +m[1] < min;
   }
 
@@ -710,6 +710,83 @@
     return text.length > APPROVAL_CAP ? text.slice(0, APPROVAL_CAP) + "\u2026" : text;
   }
 
+  // Canonical server inputs are independent of the live DOM (client marks,
+  // optimistic layout and time formatting never become the delta baseline).
+  // The server sends a full region whenever these inter-row slots change.
+  var ROW_SLOT = "<!--ws-rail-row-->";
+  function rowInputFull(html, doc) {
+    if (typeof html !== "string" || html.indexOf(ROW_SLOT) >= 0) return null;
+    var box = doc.createElement("div"), rows = Object.create(null), order = [];
+    box.innerHTML = html;
+    var nodes = Array.prototype.slice.call(box.querySelectorAll(".rs[data-rid]"));
+    if (nodes.some(function (n) {
+      var id = n.getAttribute("data-rid");
+      if (!id || rows[id] || n.parentElement.closest(".rs")) return true;
+      rows[id] = { html: n.outerHTML }; order.push(id);
+      return false;
+    })) return null;
+    nodes.forEach(function (n) { n.replaceWith(doc.createComment("ws-rail-row")); });
+    return { shell: box.innerHTML.split(ROW_SLOT), order: order, rows: rows };
+  }
+  function rowNode(html, id, doc) {
+    if (typeof html !== "string") return null;
+    var box = doc.createElement("div"); box.innerHTML = html;
+    var n = box.firstElementChild;
+    return box.childNodes.length === 1 && n && n.matches("div.rs[data-rid]") && n.getAttribute("data-rid") === id && !n.querySelector(".rs") ? n : null;
+  }
+  function rowInputPatch(base, ev, doc) {
+    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !Array.isArray(ev.rows) || ev.order.length + 1 !== base.shell.length) return null;
+    var rows = Object.create(null), changed = Object.create(null), seen = Object.create(null);
+    Object.keys(base.rows).forEach(function (id) { rows[id] = base.rows[id]; });
+    if (ev.rows.some(function (r) {
+      if (!r || typeof r.key !== "string" || !r.key || typeof r.hash !== "string" || changed[r.key]) return true;
+      var n = rowNode(r.html, r.key, doc);
+      if (!n) return true;
+      changed[r.key] = true; rows[r.key] = { html: n.outerHTML };
+      return false;
+    })) return null;
+    if (ev.order.some(function (id) {
+      if (typeof id !== "string" || !id || seen[id] || !rows[id]) return true;
+      seen[id] = true; return false;
+    }) || Object.keys(changed).some(function (id) { return !seen[id]; })) return null;
+    var kept = Object.create(null);
+    ev.order.forEach(function (id) { kept[id] = rows[id]; });
+    return { shell: base.shell, order: ev.order.slice(), rows: kept };
+  }
+  function rowInputHTML(input) {
+    if (typeof input === "string") return input;
+    return input.order.map(function (id, i) { return input.shell[i] + input.rows[id].html; }).join("") + input.shell[input.order.length];
+  }
+  // Validate everything before mutating. Only changed rows are parsed; an
+  // unchanged row and a hover-only row keep their nodes and running spinners.
+  // Return null for the existing full swap, false for hover-only/no-op, true
+  // when visible markup changed and client marks must run again.
+  function mergeRows(root, previous, next) {
+    if (!previous || !next || previous.shell.length !== next.shell.length || previous.shell.some(function (s, i) { return s !== next.shell[i]; })) return null;
+    var live = Object.create(null), updates = [], doc = root.ownerDocument;
+    Array.prototype.forEach.call(root.querySelectorAll(".rs[data-rid]"), function (n) { live[n.getAttribute("data-rid")] = n; });
+    if (Object.keys(live).length !== previous.order.length || previous.order.some(function (id) { return !live[id]; })) return null;
+    var reordered = previous.order.some(function (id, i) { return id !== next.order[i]; }), visible = reordered;
+    function withoutHover(n) { n = n.cloneNode(true); var src = n.querySelector(":scope > template.shp-source"); if (src) src.remove(); return n.outerHTML; }
+    if (next.order.some(function (id) {
+      var old = previous.rows[id], value = next.rows[id];
+      if (!old || !live[id]) return true;
+      if (old.html === value.html) return false;
+      var a = rowNode(old.html, id, doc), b = rowNode(value.html, id, doc);
+      if (!a || !b) return true;
+      var source = b.querySelector(":scope > template.shp-source"), oldSource = live[id].querySelector(":scope > template.shp-source");
+      if (source && oldSource && withoutHover(a) === withoutHover(b)) updates.push({ old: oldSource, node: source });
+      else { updates.push({ old: live[id], node: b, id: id }); visible = true; }
+      return false;
+    })) return null;
+    updates.forEach(function (u) { u.old.replaceWith(u.node); if (u.id) live[u.id] = u.node; });
+    if (reordered) {
+      var slots = previous.order.map(function (id) { var slot = doc.createComment("row"); live[id].replaceWith(slot); return slot; });
+      slots.forEach(function (slot, i) { slot.replaceWith(live[next.order[i]]); });
+    }
+    return visible;
+  }
+
   // Remember server markup before client marks/time formatting touch it.
   // A hover-only render replaces inert sources, not rows or their running
   // animations. Any other change uses the existing full rail swap.
@@ -824,6 +901,10 @@
   window.WsRail = {
     admissionDrafts: admissionDrafts,
     hoverUpdates: hoverUpdates,
+    rowInputFull: rowInputFull,
+    rowInputPatch: rowInputPatch,
+    rowInputHTML: rowInputHTML,
+    mergeRows: mergeRows,
     hover: hover,
     hoverPlace: hoverPlace,
     DRAFT_CAP: DRAFT_CAP,

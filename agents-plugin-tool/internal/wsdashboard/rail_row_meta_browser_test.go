@@ -33,6 +33,8 @@ func TestRailRowMetaBrowser(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	SetDevAssets(nil)
 	f := startPageFixture(t, func(o *DaemonOptions) {
 		o.Port = 0

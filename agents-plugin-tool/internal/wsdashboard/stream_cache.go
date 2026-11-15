@@ -66,6 +66,8 @@ type pageRender struct {
 	// board is the topic decomposition of regions[board], computed once in
 	// the shared session render, never per connection.
 	board *boardTopics
+	// rail is the row decomposition, shared across rail subscribers.
+	rail *railRows
 	// ok is false once the page is gone. err instead denotes a transient
 	// read failure: retain the last good render and retry on a refresh tick.
 	ok  bool

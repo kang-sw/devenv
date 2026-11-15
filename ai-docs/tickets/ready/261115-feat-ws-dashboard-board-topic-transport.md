@@ -290,6 +290,110 @@ a regression test that a clock-only liveness change ships that row, plus
 the existing rail tests and the
 `TestRailHoverUpdatesBrowser` regression.
 
+### Result (af2b5b889) - 2026-11-15
+
+Implemented Phase 2 only. Each shared rail render decomposes the unchanged
+full HTML into `data-rid` rows, complete rendered-HTML hashes and inter-row
+shell fragments. Rows still render on every rail wake, including wakes with
+unchanged session revisions. An opted-in connection (`railrows=1`) receives
+`rail-rows` with changed rows plus order. Exact shell equality proves the slot
+baseline; grouping, layout-generation, row-count or other shell changes use
+the full region. First sends remain full even with `h=current`, failed writes
+do not advance baselines, and uncertain decompositions reset by a full send.
+
+The client retains immutable canonical inputs separately from marked DOM,
+accumulates hidden/interaction-gated changes and parses only changed rows on
+ordinary deltas. Unchanged rows retain their nodes. Hover-only changes replace
+only inert sources, without remounting spinners, changing focus or reapplying
+marks. Existing drag/rename/layout gates, generation checks, rail metadata,
+folds and scroll/focus restoration remain in place.
+
+**Compatibility, directional T0.** New daemon -> old page: only the explicit
+query flag allocates row-event state (`wsdashboard/sse.go:455-462`); without
+it, full region delivery is unchanged (`wsdashboard/sse.go:627-655`). This also preserves
+old tabs that banner instead of reloading after the assets identity. New page
+-> old daemon: the additive query flag is ignored by the old stream, while the
+new page still consumes full rail regions
+(`wsdashboard/assets/dashboard-stream.js:182-211`). A missing or invalid client
+baseline closes the connection and reconnects for the guaranteed first full
+(`wsdashboard/assets/dashboard-stream.js:213-224`; `wsdashboard/sse.go:632-650`). No persisted data, MCP tool,
+hello, manifest or Pi harness surface changes, so reopening needs no migration
+or recovery. Paths in this paragraph are under
+`agents-plugin-tool/internal/`.
+
+**Measurements.** Baseline `59a283670`; candidate `af2b5b889`. Both used the
+saved disposable in-process daemon fixture: 112 rail rows, one rail SSE
+subscriber, separate cache/config/state directories and an ephemeral loopback
+port. Each window is 32 seconds; the change window makes 27 one-row
+snapshot/status changes at 1 Hz, with 27 rail renders and 27 events before and
+after. No shared daemon or board was contacted or modified.
+
+| Measure | Before -> after |
+|---|---:|
+| Initial stream event bytes | 409,126 -> 409,126 |
+| Change SSE bytes, total including framing | 11,044,503 -> 130,590 (**98.82% less**) |
+| SSE bytes per change, alternating status | 409,034 / 409,079 -> 4,815 / 4,860 |
+| Idle process CPU seconds / 32s | 0.048773 -> 0.076003 (0.152% -> 0.238% of one core) |
+| Change process CPU seconds / 32s | 1.138686 -> 1.062296 (3.558% -> 3.320% of one core) |
+| Sampled cumulative stream CPU | 0.41s -> 0.49s |
+| Sampled cumulative rail template CPU | 0.24s -> 0.27s |
+
+VERIFIED: the fixture saves wire bytes, while total CPU is roughly flat and
+the coarse stream/render CPU samples increase; row decomposition accounts for
+0.11s in the candidate profile. Process CPU includes the fixture driver,
+source/index processing, runtime/GC and profiling. These single samples do
+not establish a daemon CPU improvement. Render wall latency was not separately
+instrumented. INFERRED: this removes the same whole-rail wire waste as the
+live baseline, but the live 7.7MB/32s (27 pushes of about 287KB) and 70-106%
+daemon CPU are different workloads, not remeasured here. This rail-only
+fixture has about 409KB full events and runs no board/topic templates.
+
+Raw evidence: `/tmp/rail-phase2-evidence/summary.md`; baseline logs/profiles in
+`before/`, final candidate logs/profiles in `after/final/`, local profile top
+reports beside them, and the removed scratch harness retained as
+`measure-scratch.go`. The earlier candidate measurement is retained too.
+
+**Verification.** All Go tests used `GOPROXY=off GOSUMDB=off
+GOTOOLCHAIN=local`, `-count=1` and focused `-run` filters; no entire dashboard
+or MCP package, `./...`, network/provider, installation, shared-runtime
+operation, process signal, push or merge ran.
+
+- `TestRail*`, shared-rail and shell-stream tests passed, including exact
+  `TestRailHoverUpdatesBrowser` and `TestRailDragLiveBrowser` (20/20 drops
+  under churn). Cached Playwright/Chromium also passed rail metadata,
+  lifecycle, worktree-admission, child-busy and static-drag cases.
+- New regressions cover clock-only liveness shipping its row, rendering on an
+  unchanged-revision wake, complete HTML/hash parity, changed-row-only SSE and
+  WebSocket events, legacy full regions, side rails, first-full reconnect,
+  failed writes, uncertain baselines, hidden accumulation, keyed order and
+  invalid client input/recovery. Focused rail-row race tests passed.
+- Board-topic/unit, page stream/reload, region filter, shared-render and assets
+  identity regressions passed. Complete successful output is in
+  `after/focused-green.log` and `after/race.log`.
+- The first broader verification command exposed obsolete exact stream-URL
+  expectations in two existing Node tests. Both expected no new opt-in flag;
+  the production URL correctly added the D6-approved `railrows=1`. Updated
+  those contracts and added shell-opt-in/frame-exclusion and recovery cases.
+  Failed output and diagnosis remain in `after/focused-final.log` and
+  `failure-diagnosis.md`; the subsequent focused runs passed without skipped
+  or removed tests or raised timeouts.
+- Independent one-pass lite review was clean, with no findings. Report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@a93cfe66/review-paths/aa2d6db2-01-rail-phase2-lite.md`.
+
+Baseline screenshots were captured before source edits. Compared
+`/tmp/rail-phase2-evidence/after/real-expanded-dark-crop.png` vs
+`/tmp/rail-phase2-evidence/before/real-expanded-dark-crop.png`: match.
+Compared `/tmp/rail-phase2-evidence/after/real-expanded-light-crop.png` vs
+`/tmp/rail-phase2-evidence/before/real-expanded-light-crop.png`: match.
+Expanded and collapsed rail-row crops are byte-identical PNGs in both themes;
+checksums are in `visual-sha256.txt`. Full viewport captures are preserved as
+`{before,after}/real-{expanded,collapsed}-{dark,light}.png` for MAIN's premerge
+comparison; disposable workspace labels differ outside the row crops.
+
+Phase 1's Result and all phase plans are unchanged. Phases 3-5 remain
+unimplemented; the ticket stays in `ready/`, with branch and lease retained
+for MAIN. No unresolved implementation or review finding.
+
 ### Phase 3: Tree row deltas
 
 Apply the Phase 2 unit-and-delta pattern to `tree`. Verify bytes per tree

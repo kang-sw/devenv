@@ -175,11 +175,11 @@
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
   function connect(withoutBoard) {
     if (!window.WebSocket) return;
-    var boardInput = null;
+    var boardInput = null, railInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" || worktree ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : ""), {
+    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : "") + (shell || (!framed && mode !== "index") ? "&railrows=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -188,7 +188,7 @@
         trackerLost();
         setTimeout(connect, 3000);
       },
-      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, tracker: onTracker, gone: onGone }
+      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, tracker: onTracker, gone: onGone }
     });
     function onRegion(ev) {
       if (!ev) return;
@@ -204,7 +204,22 @@
         boardInput = boardInputFull(ev.html);
         if (boardInput) ev = { name: "board", hash: ev.hash, html: boardInput };
       }
+      if (ev.name === "rail" && WsRail) {
+        railInput = WsRail.rowInputFull(ev.html, doc);
+        if (railInput) ev = { name: "rail", hash: ev.hash, html: railInput };
+      }
       receiveRegion(ev);
+    }
+    function onRailRows(ev) {
+      var next = WsRail && WsRail.rowInputPatch(railInput, ev, doc);
+      if (!next) {
+        // Close before reopening: the new connection always sends a full rail.
+        st.close(); connected(false);
+        setTimeout(connect, 0);
+        return;
+      }
+      railInput = next;
+      receiveRegion({ name: "rail", hash: ev.hash, html: next });
     }
     function onBoardTopics(ev) {
       var next = boardInputPatch(boardInput, ev);
@@ -227,7 +242,7 @@
         delete hiddenRegions[ev.name];
         hiddenRegions[ev.name] = { hash: ev.hash, html: ev.html };
         tlHold(ev.name, ev.hash, ev.html);
-        if (ev.name === "rail" || ev.name === "sessions") apScan(frag(ev.html));
+        if (ev.name === "rail" || ev.name === "sessions") apScan(frag(ev.name === "rail" && WsRail ? WsRail.rowInputHTML(ev.html) : ev.html));
         return;
       }
       swap(ev.name, ev.hash, ev.html);
