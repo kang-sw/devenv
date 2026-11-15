@@ -812,8 +812,8 @@ historical, superseded by MAIN's later bounded implementation authority.
   independent reviewer read the actual allocated deltas and current merge seams;
   it did not rerun tests or claim runtime acceptance. Findings:
   `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@721a59b4/review-paths/9749f456-01-261114-live-summary-967-compat-lite.md`.
-  No broad re-sweep or additional review round was run. MAIN completed the one
-  final fresh develop sync at `9320cd230`; affected verification below completed
+  No broad re-sweep or additional review round was run. The EXEC2 lead completed
+  the one final fresh develop sync at `9320cd230`; affected verification below completed
   afterward. Implementation handoff is complete; acceptance, landing and ticket
   closure remain lead-owned.
 
@@ -823,8 +823,8 @@ or a parent-branch merge.
 
 ## Final pre-head verification - 2026-11-15
 
-MAIN merged exact `f4de6df7702e5ce1c626d2a0002bb750f443129e` into `e7a15cf056`
-at `9320cd2300afab9240e1d5051621911564cfcd30`, conflict-free. Inspecting only that
+The EXEC2 lead merged exact `f4de6df7702e5ce1c626d2a0002bb750f443129e` into
+`e7a15cf056` at `9320cd2300afab9240e1d5051621911564cfcd30`, conflict-free. Inspecting only that
 actual delta established the affected seams: shared session/wake templates,
 board-nudge presentation, composer/board assets, daemon wiring, locales and board
 badge markup. Search-answer code removal required native package recompilation;
