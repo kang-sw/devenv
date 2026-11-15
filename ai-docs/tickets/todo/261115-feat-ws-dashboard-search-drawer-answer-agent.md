@@ -131,6 +131,74 @@ Announced defaults relayed by MAIN (no owner objection):
 - The answer streams into the drawer through the existing SSE/WS region
   stream, with citation links to board items and file lines.
 
+Defaults and technical calls (posted by MAIN on the owner board as
+no-answer-needed, 2026-11-15; settled):
+
+- **Full history** means every retained board entry: open and closed
+  topics, the immutable `log.jsonl` entries and every retained panel
+  version. Settled items the store already evicted past its 500 cap are not
+  recoverable (`wswhiteboard/store.go:52-57`).
+- **Harness default.** The builtin default picks the first available
+  harness, Claude before Pi, following the tracker support precedent
+  (`wsagent/support.go:39-44,316-337`); a Pi-less downstream with the Claude
+  CLI gets Claude. With neither binary on PATH the answer request returns
+  503 and the drawer says no agent harness is available.
+- **Loopback enforced server-side.** Answer creation uses `TrustedWrite`
+  (404 for remote viewers, 403 for a bad Origin); answer reads and streams
+  are refused to non-local viewers; answers never enter a region shared with
+  remote viewers (`access.go:162-175`, `wsagent/http.go:45-59`,
+  `stream_cache.go:33-41`). Hiding the UI alone is not the gate.
+- **Two builtin profiles**, `search-answer-claude` (tools `Read`, `Grep`,
+  `Glob`) and `search-answer-pi` (tools `read`, `grep`, `find`, `ls`), each
+  with no `ws_tools`, MCP servers, plugins or skills, not lead, and empty
+  model/effort like the other builtins. Rejected: one profile with a
+  runtime-chosen backend, because a Profile names exactly one backend
+  (`profile.go:239-247`); the pair mirrors `tracker-support-*`.
+- **Board input is a per-question snapshot file.** The daemon renders the
+  session's board from the authoritative folder store under its lock into a
+  read-only file inside a per-question temp directory the agent may read,
+  and the prompt names it. Rejected: granting MCP `whiteboard.query` to the
+  agent key (changes an authorization contract, `server.go:731-758`, a
+  cross-version surface); letting the agent read the raw folder store
+  (bypasses the recovery boundary, `folders.go:99-126`).
+- **One-shot lifecycle.** The answer service spawns a conversation, waits
+  for its first turn to settle, then calls `CloseConversation` on success,
+  failure, timeout or cancel; hard timeout 5 minutes; at most one in-flight
+  answer per session page (a new Enter stops the running one) and at most 2
+  answer processes daemon-wide (further requests get 429 and a drawer
+  message). Rejected: the runner's sustained process with its 10-minute idle
+  timer (`runner.go:2732-2781`), which has no cap.
+- **Citations.** The answer prompt asks for `[[board:<item id>]]` and
+  `[[file:<root-relative path>:<line>]]` markers; the drawer validates each
+  against the session's board and the project root and renders valid ones as
+  links dispatched through `palettePick` and `WsPreview.open(path,{line})`
+  (`dashboard.js:5633-5663,5681`, `preview.js:237-249`); invalid ones stay
+  plain text. Rejected: free-form markdown links the page cannot validate.
+- **Answer history.** The drawer keeps the last 5 answers (question, final
+  rendered answer, time) per session in localStorage keyed by session
+  reply-id. Rejected: daemon-side retention (new server state for answers
+  only the local browser sees).
+- **Drawer mode.** Search is a third sheet mode of the existing drawer frame
+  (`drMode` `"search"` beside `"panels"`/`"git"`), sharing the one height
+  key `ws.dashboard.drawer.h`, with its own open-state key
+  `ws.dashboard.drawer.search` and keys for the last query and selected
+  slot; Ctrl+K opens the search sheet and focuses its input. Rejected: a
+  separate drawer frame, which would duplicate `drRoom` geometry and break
+  the one-height rule (`dashboard.js:3385-3394,3537-3557`).
+- **Keyboard details.** A query edit, slot switch or rerank clears the arrow
+  selection; hover styles a row but never selects it; a mouse click on a row
+  still opens it; Enter on an empty query does nothing. Rejected: keeping
+  hover-select, which would arm Enter-opens without an arrow key and
+  contradict (851).
+- **Compatibility: T0.** Two new builtin profiles in the existing Profile
+  shape, new loopback-only HTTP routes and new browser localStorage keys; no
+  MCP tool or argument, `/mcp` hello, store shape, tracker event or manifest
+  field changes (`agent.profile.<name>` is an existing dynamic family,
+  `mcp/agent_profile.go:8-60`).
+- **Drifted prose.** Update the stale "No profile is built in"
+  config-family prose in `mcp/agent_profile.go:8-12` on contact (AGENTS.md
+  "Update drifted docs on contact").
+
 ## Constraints
 
 - `tracker.js` stays host-agnostic: drawer hosting, filesystem, preview,
@@ -162,50 +230,26 @@ Announced defaults relayed by MAIN (no owner objection):
 
 ## Open Decision Queue
 
-Last ID used: pending MAIN board mapping (items below carry local labels S1-S15 until MAIN mints IDs)
+Last ID used: (866) (MAIN board IDs)
 
-(S1) [open] [announced] "Full history" means every retained board entry: open and closed topics, the immutable `log.jsonl` entries and every retained panel version; settled items the store already evicted (beyond its 500 cap) are not recoverable - `wswhiteboard/store.go:52-57`.
-
-(S2) [open] [announced] The builtin default picks the first available harness, Claude before Pi, and the answer request returns 503 with a "no agent harness available" drawer message when neither binary is on PATH - the tracker support precedent `wsagent/support.go:39-44,316-337`; a Pi-less downstream with the Claude CLI gets Claude.
-
-(S3) [open] [announced] Answer creation and the answer's stream/page are refused server-side to non-local viewers (`TrustedWrite` for creation: 404 remote, 403 bad Origin; local-viewer gate on reads/streams), not merely hidden in the UI, and answers never enter a region shared with remote viewers - consequence of the confirmed loopback-only default plus `access.go:162-175`, `wsagent/http.go:45-59`, `stream_cache.go:33-41`.
-
-(S4) [open] [technical] Two builtin profiles, `search-answer-claude` (tools `Read`, `Grep`, `Glob`; no ws_tools, MCP servers, plugins, skills; not lead) and `search-answer-pi` (tools `read`, `grep`, `find`, `ls`), with empty model/effort like the other builtins, over one profile with a runtime-chosen backend - a Profile names exactly one backend (`profile.go:239-247`), and two builtins mirror the `tracker-support-*` pair.
-
-(S5) [open] [technical] The daemon gives the agent the session's board as a read-only snapshot file it writes per question (rendered from the authoritative folder store under its lock) inside a per-question temp directory the agent may read, over granting MCP `whiteboard.query` to the agent key or letting it read the raw folder store - the first changes an authorization contract (`server.go:731-758`, a cross-version surface), the second bypasses the store's recovery boundary (`folders.go:99-126`).
-
-(S6) [open] [technical] One-shot lifecycle: the answer service spawns a conversation, waits for its first turn to settle, then calls `CloseConversation` on success, failure, timeout or cancel; a hard 5-minute timeout; at most one in-flight answer per session page (a new Enter stops the running one) and at most 2 answer processes daemon-wide (further requests get 429 and a drawer message), over the runner's sustained process with a 10-minute idle timer - the runner keeps processes alive by design (`runner.go:2732-2781`) and has no cap.
-
-(S7) [open] [technical] Citations: the answer prompt asks for `[[board:<item id>]]` and `[[file:<root-relative path>:<line>]]` markers; the drawer validates each against the session's board and the project root and renders valid ones as links dispatched through `palettePick` and `WsPreview.open(path,{line})` (`dashboard.js:5633-5663,5681`, `preview.js:237-249`), leaving invalid ones as plain text, over free-form markdown links the page cannot validate.
-
-(S8) [open] [technical] The drawer keeps the last 5 answers (question, final rendered answer, time) per session in localStorage keyed by session reply-id, over daemon-side retention - nothing new server-side, survives reload, and answers are only shown to the local browser anyway.
-
-(S9) [open] [technical] Search becomes a third sheet mode of the existing drawer frame (`drMode` "search" beside "panels"/"git"), sharing the one drawer height key `ws.dashboard.drawer.h`, with its own open-state key `ws.dashboard.drawer.search` plus keys for last query and selected slot; Ctrl+K opens the search sheet and focuses its input - over a separate drawer frame, which would duplicate `drRoom` geometry and break the one-height rule (`dashboard.js:3385-3394,3537-3557`).
-
-(S10) [open] [technical] Keyboard details: a query edit, slot switch or rerank clears the arrow selection; hover only styles a row and never selects it; a mouse click on a row still opens it; Enter on an empty query does nothing - over keeping hover-select, which would arm Enter-opens without an arrow key and contradict (851).
-
-(S11) [open] [policy] What an override of the answer profile may change.
+(864) [open] [policy] What an override of the answer profile may change.
 - Context: an `agent.profile.search-answer-*` override replaces the whole builtin value (`structured.go:22-58`), so as written it could add `Bash`, `Edit`, MCP servers, plugins or lead mode and silently break (849)'s "no shell, no network, no writes".
 - Alternative a: the answer service enforces a ceiling: an override may change `backend`, `model`, `effort`, `instructions` and may narrow `tools`; any tool outside the read set, any `ws_tools`, `mcp_servers`, `plugins`, `skills`, `lead` or a non-default `permission_mode` makes the request fail with a clear error naming the override.
 - Alternative b: overrides are trusted as written (the user configured them); document that broadening breaks the read-only guarantee.
 > Recommend a: (849) says the read-only scope is enforced by the allowlist, which only holds if an override cannot widen it.
 
-(S12) [open] [policy] How strictly "files under the project root" is enforced per backend.
+(865) [open] [policy] How strictly "files under the project root" is enforced per backend.
 - Context: the tool allowlist removes shell, write and network tools, but neither backend confines native read tools to a directory; `cwd` alone does not stop an absolute path (`claude.go:339-343`, `pi.go:427-429`). Claude permission rules can scope reads by path (for example `Read(//<root>/**)` under `dontAsk`, which also governs Grep/Glob - INFERRED, to be verified by the worker); Pi rejects permission-rule entries (`pi.go:381-390`).
 - Alternative a: Claude answers get path-scoped read rules for the project root and the snapshot directory (hard boundary); Pi answers run with `cwd` at the root and read-only tools, with the root documented as a soft boundary.
 - Alternative b: hard boundary or nothing: refuse Pi-backed answer profiles; only Claude answers.
 - Alternative c: soft boundary for both (tools only, `cwd` at root).
 > Recommend a: hard where the backend can enforce it, and Pi-only projects still work; the agent is local-only and read-only either way.
 
-(S13) [open] [policy] What plain Enter does where agent mode is absent (non-session pages, remote/LAN views).
+(866) [open] [policy] What plain Enter does where agent mode is absent (non-session pages, remote/LAN views).
 - Context: (851) makes plain Enter ask the agent; agent mode exists only on local session pages.
 - Alternative a: plain Enter with no arrow selection does nothing there (a hint says to use the arrows); the keyboard contract stays the same everywhere.
 - Alternative b: plain Enter opens the first result there (the old behavior).
 > Recommend a: one contract on every page; arrows plus Enter still open results.
-
-(S14) [open] [announced] Compatibility T0: two new builtin profiles in the existing Profile shape, new loopback-only HTTP routes, and new browser localStorage keys; no MCP tool or argument, `/mcp` hello, store shape, tracker event or manifest field changes (`agent.profile.<name>` is an existing dynamic family, `mcp/agent_profile.go:8-60`) - `ai-docs/manuals/release-compatibility.md` T0 definition.
-
-(S15) [open] [announced] Update the stale "No profile is built in" config-family prose in `mcp/agent_profile.go:8-12` on contact - AGENTS.md "Update drifted docs on contact".
 
 ## Phases
 
