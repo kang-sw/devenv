@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,6 +307,9 @@ func TestLeadHeldSendFlushesAtAnUnsolicitedTurnsEnd(t *testing.T) {
 	}
 	h.holders.out(holder, resultLine())
 	eventually(t, "the held message to be submitted", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
+	// Input is visible before its holder call returns and kick clears the
+	// queued message. Observe the completed loop step, not that early write.
+	h.quiesce(id)
 	if st := h.state(id); st.Status != StatusRunning || st.Held != 0 {
 		t.Fatalf("the submitted message's turn should run: %+v", st)
 	}
@@ -1571,6 +1575,22 @@ func TestLeadProcessThatExitedWhileNoDaemonRan(t *testing.T) {
 	}
 }
 
+// replayStatusGate keeps the rejoin's status answer pending until the test
+// has observed the loop drain the replay. No holder call timeout runs while
+// the gate is closed: draining a slow replay is not itself a deadlock.
+type replayStatusGate struct {
+	HolderHost
+	entered chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (g *replayStatusGate) Status(id string) (wsholder.AttachInfo, error) {
+	g.once.Do(func() { close(g.entered) })
+	<-g.release
+	return g.HolderHost.Status(id)
+}
+
 // TestLeadRejoinDoesNotStallBehindALongReplay: a holder answers a call on
 // the connection its records arrive on, in order. A rejoin that asked the
 // holder where its replay ends from the conversation's own loop would wait
@@ -1588,7 +1608,23 @@ func TestLeadRejoinDoesNotStallBehindALongReplay(t *testing.T) {
 		h.holders.out(holder, tasksLine(1+i%2))
 	}
 	h.holders.out(holder, tasksLine(0))
+	target := uint64(h.holders.records(holder))
+	entered, gate := make(chan struct{}), make(chan struct{})
+	var released sync.Once
+	release := func() { released.Do(func() { close(gate) }) }
+	defer release()
+	h.opts.Holders = &replayStatusGate{HolderHost: h.holders, entered: entered, release: gate}
 	h.start()
+	wait(t, "the rejoin's status call", entered)
+	// This bounded round trip fails if Status holds the conversation loop.
+	h.quiesce(id)
+	c := h.runner.conv(id)
+	eventually(t, "the loop to drain the replay while status waits", func() bool {
+		var seq uint64
+		c.do(func() { seq = c.seq })
+		return seq >= target
+	})
+	release()
 	h.send(id, "two")
 	eventually(t, "the rejoin to end and take the message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	if n := h.holders.timedOut(); n != 0 {
