@@ -85,6 +85,55 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
   remains available from its immutable ring record. The earlier permission/test
   for an old typed snapshot round-trip dropping the live field is superseded,
   not relabeled T2. Do not claim ring recovery restores that live field.
+- Directional grades below apply to the 675 additions, not every independently
+  integrated feature. The original `ef48c07ef` mapper exported new reasons and
+  cleared errors on native abort (`wsagent/pi.go:922,1089` at that revision);
+  those values reach persisted turn/diagnostic state, so that was not transparent
+  T0 or display-only T1. Likewise, persisting the live field and dropping it in an
+  old typed rewrite had no reconstruction trace and was not T2. Neither original
+  path is retained or excused by the new vocabulary.
+- **Old bundle -> new daemon: T0 for the legacy path.** The new mapper requires
+  explicit support for summary admission, exported reasons and native-abort
+  error clearing (`agents-plugin-tool/internal/wsagent/pi.go:934,951-955,1101-1106`).
+  Omitted/empty/unknown/malformed support leaves old counts, diagnostics, natural
+  turn reasons and answer-check writes unchanged; normal reopen sees those same
+  legacy records. The 30-case capability matrix, six old-bundle persisted cases
+  and `TestAnswerCheckHostedBundleReasonOptInPreservesLegacySuppression` exercise
+  the actual downstream effects, including error plus native abort.
+- **New bundle -> old daemon: T0 for the additive hosted fields.** The new writer
+  advertises only on exact host VERSION 1.5.2 (`agents-plugin-pi/src/index.ts:992`,
+  `src/hosted-dashboard-events.ts:44-47`). The actual `54b252036` reader decodes
+  known fields and handles only wake/status widget kinds (`internal/wsagent/wake.go:
+  147-176` at that revision), ignoring the capability and summary projection.
+  Its complete historical module runs six stop/native-abort combinations with
+  the actual additive widget shape and preserves legacy stored diagnostics and
+  reasonless turns. New reopen has no summary to reconstruct from those old
+  writes; legacy data remains ordinary data. Initial/observed terminal negotiation
+  also withholds fields from an old intake; the recorded invisible-reconnect
+  limitation is not an unconditional delivery guarantee.
+- **New/old mutable snapshot writers and new reopen: T0 for 675 disk data.**
+  `internal/wslive/snapshot_disk.go:6-8` removes only the live field from a copy.
+  Both MCP disk boundaries use it (`internal/mcp/live_snapshot.go:324,736`), as
+  does the native record writer (`internal/wsagent/record.go:485-489`); RAM still
+  receives the full snapshot (`live_snapshot.go:726-731`, `record.go:486,498-509`).
+  The old typed reader (`9854ff350:internal/wslive/snapshot.go:413-419`) never
+  encounters a new live member on disk, so an old rewrite cannot erase one.
+  New reopen deliberately starts blank, not recovered, until the next admissible
+  event. `TestSnapshotForDiskExcludesOnlyLiveReasoningSummary`, the two native
+  snapshot tests and three MCP snapshot tests exercise the production writers,
+  normal RAM JSON, finish/close/heartbeat, blank reopen and next-event admission.
+- **New immutable turn -> old reader/append -> new reader: T0 for retained data.**
+  The actual `9854ff350` reader tolerates extra fields (`internal/wslive/ring.go:333`);
+  its ordinary append creates new files by temp/rename (`ring.go:166-210`) rather
+  than rewriting existing records. `TestSummaryHistoricalReaderWriterPreservesOriginalBytes`
+  builds that entire historical module, compares the original summary-bearing
+  bytes after its append and reopens through the new reader with the same attempt
+  and prefix. New history authority is the actual immutable commit
+  (`internal/wslive/summary_commit.go:44-48`), subject to ordinary paging/pruning.
+  The superseded historical live-snapshot overwrite fixture is removed, not used
+  as recovery evidence. New readers/renderers also accept ordinary old records
+  with absent summary metadata through the unchanged fallback tests; no T4 path
+  or schema/protocol/version boundary is introduced.
 - Build-tool provenance: the repair regenerated the bundle with an existing
   read-only cached esbuild **0.28.1**, because the bounded cached lookup did not
   locate pinned 0.28.2 under the no-install boundary. Runtime/SDK pins, lockfile,
@@ -707,7 +756,66 @@ heavy implementation verification waits for MAIN's assigned slot, without
 waiving any verification above (current owner dispatch instruction supersedes
 the obsolete temporary 649-exclusive capture wording).
 
-## Blocked - 2026-11-15
+## Scoped 967 checkpoint - 2026-11-15
+
+Implementation is complete for the settled RAM/disk boundary. The source-backed
+T0 grades above are scoped compatibility evidence, not a live-host/provider or
+whole-feature visual certification. This ticket remains active; no closure or
+phase-completion claim is made by this checkpoint. The receiver block below is
+historical, superseded by MAIN's later bounded implementation authority.
+
+- Native RAM/disk implementation: `2e282425c`; MCP fire/finish filters and
+  production-path tests: `83ba68d5a`; historical fixture correction: `124697593`;
+  user-role/history regression and two authorized stale assertions: `33baca51c`.
+- Preserve every requested upstream integration through the lead-started exact
+  `667f0f64a` merge, concluded at `17ae65272`. Mail-wake association retains its
+  own hidden cursor markers and cache keys; natural summary history remains on
+  its real RingTurn. The only helper adaptation passes the existing self reply
+  ID to `conversation`. No wire/store interface was changed.
+- The composed user-role test covers whiteboard, terminal and absent origins,
+  answer chips, unchanged escaped user/reply markup during RAM updates, one
+  immutable summary key, paging and unchanged prior records. The mail-wake paging
+  fixture now carries actual retained summary metadata on the real intervening
+  turn, preserving all upstream marker/count/cursor assertions.
+- Latest post-merge affected checks passed with complete output read:
+  dashboard **58**, locales **15**, and the changed history initialization Node
+  test **1**. These cover mail-wake/cache projection, composer capsules, summary
+  insertion, native RAM binding, split assets, overview placement and history
+  swaps. Reuse unaffected completed checks: wslive **39** (including actual
+  historical children), MCP **30**, wsagent **40**, board **10**, Pi **116** with
+  no skips/cancellations, and bundle syntax/freshness. These are scoped runs,
+  not `go test ./...`, Windows, real Pi, provider or shared-daemon acceptance.
+- Go commands use exact offline 1.26.2 and
+  `-count=1 -vet=off -p=1 -parallel=1 -timeout=120s -v`.
+  The final affected dashboard selector extends the already completed selector
+  with `ConversationMailWake.*|InlineCapsules.*`; locale selector remains the
+  15 explicit key/table tests; changed board selector is exactly
+  `^TestHistoryScriptPanelChunksAndSwapUnderNode$`.
+  Pi command: `node --test test/dashboard-feed.test.ts test/hosted-dashboard-events.test.ts test/mcp-stdio-client.test.ts test/reasoning-summary.test.ts`.
+- Two first dashboard failures were diagnosed as stale assertions before repair.
+  `TestWhiteboardEffectsDoNotReplaceLegacyToolSummaries` now expects
+  `<article class="wbeffects wbupdate">` and `Saved panel summary`, not the old
+  `<details class="wbeffects">` plus raw `committed payload`; it additionally
+  forbids that payload and retains tools/command checks. Approved 781 markup is
+  recap-only. `TestOverviewPageIntegration` now asserts the existing
+  `maximize(c, floating)` signature/deferred call, not stale `maximize(c)`;
+  `assets/cards.js:916-917` already preserves floating mode through the overview
+  guard. No production implementation was changed to satisfy either assertion.
+- The prior actual-component captures remain the only visual evidence:
+  `/tmp/ws-live-summary-675-t0-render/renderer-03/comparison-{1280,360}.png`
+  compared with tracked `mockup-{1280,360}.png`. Placement/folding/plain-text
+  treatment matched at component level; extra truthful metadata height and
+  missing whole-page session/composer chrome prevent pixel-identical/full-host
+  acceptance. No new screenshot or runtime claim is made by backend checks.
+- The single newly authorized 967-delta compatibility Lite remains pending at
+  this checkpoint. No broad re-sweep, extra review round or later gate chase is
+  authorized. MAIN owns the one final fresh develop sync and landing.
+
+omitted: Full-suite/runtime/provider/Windows/whole-page visual acceptance; new
+procedures or raw evidence packets; ticket closure; self-initiated integration
+or a parent-branch merge.
+
+## Historical receiver checkpoint - 2026-11-15
 
 **VERIFIED:** MAIN's 23:10:43/23:12 authorization is consumed: one exact
 empty-derived key-only interpreter diagnostic and one once-only receiver-02
