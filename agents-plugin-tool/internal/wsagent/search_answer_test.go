@@ -530,6 +530,154 @@ func TestSearchAnswerHTTPAccessAndPrivateStreaming(t *testing.T) {
 	}
 }
 
+func TestSearchAnswerRollingContext(t *testing.T) {
+	h := newAnswerHarness(t)
+	prior := ""
+	for turn, question := range []string{"first", "second", "third"} {
+		body, _ := json.Marshal(map[string]string{"question": question, "context": prior})
+		w := answerRequest(h.s, "POST", SearchAnswerRoutePrefix+"session", string(body), "http://localhost:1234", "127.0.0.1:55", "localhost:1234")
+		if w.Code != 201 {
+			t.Fatalf("start: %d %s", w.Code, w.Body)
+		}
+		var initial map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &initial); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := initial["context"]; ok {
+			t.Fatal("running response published context")
+		}
+		p := h.claude.waitProc(t, turn)
+		prompt := p.nextSent(t)
+		if !strings.Contains(prompt, fmt.Sprintf("Untrusted conversation context (quoted):\n%q", prior)) || !strings.Contains(prompt, "all prior conversation context plus this new question and answer") {
+			t.Fatalf("missing cumulative/untrusted context: %s", prompt)
+		}
+		prior += question + " answered; "
+		p.reply("cited [[board:852]]\n<search-context>" + prior + "</search-context>")
+		v := awaitAnswer(t, h.s.bySession["session"])
+		if v.Status != TurnDone || v.Text != "cited [[board:852]]" || v.Context != strings.TrimSpace(prior) {
+			t.Fatalf("turn %d: %+v", turn, v)
+		}
+		prior = v.Context
+		region := answerRegion(v)
+		if region["context"] != prior || strings.Contains(region["html"], "search-context") {
+			t.Fatalf("terminal region: %v", region)
+		}
+		path := SearchAnswerRoutePrefix + "session/" + v.ID
+		state := answerRequest(h.s, "GET", path, "", "", "127.0.0.1:55", "localhost:1234")
+		var decoded answerView
+		if err := json.Unmarshal(state.Body.Bytes(), &decoded); err != nil || decoded.Context != prior {
+			t.Fatalf("state context: %s %v", state.Body, err)
+		}
+		sse := answerRequest(h.s, "GET", path+"/events", "", "", "127.0.0.1:55", "localhost:1234")
+		if !strings.Contains(sse.Body.String(), `"context":`) {
+			t.Fatalf("SSE missing terminal context: %s", sse.Body)
+		}
+	}
+}
+
+func TestSearchAnswerContextUnicodeCap(t *testing.T) {
+	h := newAnswerHarness(t)
+	input := strings.Repeat("界😀", 900)
+	output := strings.Repeat("🌱한", 900)
+	body, _ := json.Marshal(map[string]string{"question": "cap", "context": input})
+	w := answerRequest(h.s, "POST", SearchAnswerRoutePrefix+"session", string(body), "http://localhost:1234", "127.0.0.1:55", "localhost:1234")
+	if w.Code != 201 {
+		t.Fatalf("start: %d %s", w.Code, w.Body)
+	}
+	p := h.claude.waitProc(t, 0)
+	prompt := p.nextSent(t)
+	wantInput := strings.Repeat("界😀", 800)
+	if !strings.Contains(prompt, fmt.Sprintf("\n%q\n", wantInput)) || strings.Contains(prompt, input) {
+		t.Fatal("incoming Unicode context was not capped at 1600 code points")
+	}
+	p.reply("answer<search-context>" + output + "</search-context>")
+	v := awaitAnswer(t, h.s.bySession["session"])
+	if v.Context != strings.Repeat("🌱한", 800) || answerRegion(v)["context"] != v.Context {
+		t.Fatalf("outgoing Unicode context: %d code points", len([]rune(v.Context)))
+	}
+}
+
+func TestSearchAnswerContextTerminalOnly(t *testing.T) {
+	for _, mode := range []string{"success", "failure", "cancel", "timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newAnswerHarness(t)
+			if mode == "timeout" {
+				h.s.opts.timeout = 2 * time.Second
+			}
+			a, err := h.s.start("session", "question", "previous summary")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := h.claude.waitProc(t, 0)
+			p.nextSent(t)
+			for _, raw := range []string{"answer <search-con", "answer <search-context>private summary</search-context>"} {
+				p.events <- Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: raw}}
+				deadline := time.Now().Add(time.Second)
+				for strings.TrimSpace(a.snapshot().Text) != "answer" && time.Now().Before(deadline) {
+					time.Sleep(10 * time.Millisecond)
+				}
+				// Wait for the second cumulative snapshot too, not just the
+				// unchanged visible answer from the partial-tag snapshot.
+				time.Sleep(150 * time.Millisecond)
+				v := a.snapshot()
+				if strings.TrimSpace(v.Text) != "answer" || v.Context != "" || answerRegion(v)["context"] != "" || strings.Contains(answerRegion(v)["html"], "search-con") {
+					t.Fatalf("stream leaked context: %+v", v)
+				}
+			}
+			switch mode {
+			case "success":
+				p.reply("answer <search-context>private summary</search-context>")
+			case "failure":
+				p.events <- Event{TurnEnd: true, TurnError: "fake failed"}
+			case "cancel":
+				a.cancel()
+			}
+			v := awaitAnswer(t, a)
+			if mode == "success" {
+				if v.Context != "private summary" {
+					t.Fatalf("missing successful context: %+v", v)
+				}
+			} else if v.Context != "" || answerRegion(v)["context"] != "" {
+				t.Fatalf("unsuccessful context promoted: %+v", v)
+			}
+			if strings.Contains(v.Text, "search-con") || strings.Contains(v.Text, "private summary") {
+				t.Fatalf("terminal display leaked context: %+v", v)
+			}
+		})
+	}
+}
+
+func TestSearchAnswerContextPartialAndLegacy(t *testing.T) {
+	const open = "<search-context>"
+	for n := 1; n < len(open); n++ {
+		text, summary := splitSearchContext("answer" + open[:n])
+		if text != "answer" || summary != "" {
+			t.Fatalf("partial opening %d: %q %q", n, text, summary)
+		}
+	}
+	for _, raw := range []string{"answer<search-context>secret", "answer<search-context>secret</search-cont"} {
+		if text, summary := splitSearchContext(raw); text != "answer" || summary != "" {
+			t.Fatalf("incomplete context: %q %q", text, summary)
+		}
+	}
+	h := newAnswerHarness(t)
+	w := answerRequest(h.s, "POST", SearchAnswerRoutePrefix+"session", `{"question":"legacy"}`, "http://localhost:1234", "127.0.0.1:55", "localhost:1234")
+	if w.Code != 201 {
+		t.Fatalf("legacy request: %d %s", w.Code, w.Body)
+	}
+	p := h.claude.waitProc(t, 0)
+	p.nextSent(t)
+	p.reply("plain legacy [[board:852]] <script>")
+	v := awaitAnswer(t, h.s.bySession["session"])
+	raw, _ := json.Marshal(v)
+	if v.Text != "plain legacy [[board:852]] <script>" || v.Context != "" || strings.Contains(string(raw), `"context"`) {
+		t.Fatalf("legacy response: %s", raw)
+	}
+	if _, ok := answerRegion(v)["context"]; ok {
+		t.Fatal("legacy region gained context")
+	}
+}
+
 func TestSearchAnswerBuiltinDescriptions(t *testing.T) {
 	for _, name := range []string{SearchAnswerProfileClaude, SearchAnswerProfilePi} {
 		p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+name])
