@@ -2,6 +2,7 @@ package wsgit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -287,6 +288,84 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 	}
 	if !strings.Contains(message, "## Ticket Updates") || !strings.Contains(message, "260503-feat-demo: added ### Result") {
 		t.Fatalf("message missing auto ticket summary:\n%s", message)
+	}
+}
+
+func TestCommitTicketUpdateInferenceControl(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		updates  []string
+		suppress bool
+		want     string
+	}{
+		{name: "direct nil retains inference", want: "260503-feat-demo: added ### Result (abc123) - 2026-05-04"},
+		{name: "direct allocated empty retains inference", updates: []string{}, want: "260503-feat-demo: added ### Result (abc123) - 2026-05-04"},
+		{name: "suppression survives normalization", updates: []string{}, suppress: true},
+		{name: "explicit summaries remain authoritative", updates: []string{"  supplied summary  "}, suppress: true, want: "supplied summary"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &sequenceRunner{outs: [][]byte{
+				[]byte("main\n"), {}, {},
+				[]byte("1 M. N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n"),
+				[]byte("M\tai-docs/tickets/todo/260503-feat-demo.md\n"),
+				[]byte("diff --git a/ai-docs/tickets/todo/260503-feat-demo.md b/ai-docs/tickets/todo/260503-feat-demo.md\n+++ b/ai-docs/tickets/todo/260503-feat-demo.md\n+### Result (abc123) - 2026-05-04\n"),
+				{}, []byte("abc123\n"),
+			}}
+			verified := false
+			client := Client{Runner: runner, Verifier: func(root string, paths []string) ([]string, error) {
+				verified = true
+				if root != "/repo" || !reflect.DeepEqual(paths, []string{"ai-docs/tickets/todo/260503-feat-demo.md"}) {
+					t.Fatalf("verification root/paths = %q/%v", root, paths)
+				}
+				return []string{"retained advisory"}, nil
+			}}
+			result, err := client.Commit(context.Background(), "/repo", CommitOptions{
+				Paths: []string{"ai-docs/tickets/todo/260503-feat-demo.md"}, Title: "test: summaries",
+				AIContext: []string{"retained context"}, ExpectedBranch: "main",
+				UpdatedTickets: tc.updates, SuppressInferredTicketUpdates: tc.suppress,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !verified || !reflect.DeepEqual(result.Advisories, []string{"retained advisory"}) || len(result.TicketChanges) != 1 || !result.TicketChanges[0].ResultAdded {
+				t.Fatalf("verification or metadata lost: verified=%v result=%#v", verified, result)
+			}
+			message := runner.calls[6].args[2]
+			if !strings.Contains(message, "## AI Context\n- retained context") {
+				t.Fatalf("context lost: %s", message)
+			}
+			if tc.want == "" {
+				if strings.Contains(message, "## Ticket Updates") {
+					t.Fatalf("suppressed summaries present: %s", message)
+				}
+			} else if !strings.HasSuffix(message, "## Ticket Updates\n- "+tc.want) {
+				t.Fatalf("unexpected summaries: %s", message)
+			}
+		})
+	}
+}
+
+func TestNormalizeCommitOptionsTicketUpdateSuppressionIsInternal(t *testing.T) {
+	opts, err := normalizeCommitOptions(CommitOptions{
+		Paths: []string{"src"}, Title: "test: internal flag", AIContext: []string{"context"},
+		ExpectedBranch: "main", SuppressInferredTicketUpdates: true,
+	})
+	if err != nil || !opts.SuppressInferredTicketUpdates {
+		t.Fatalf("normalize = %#v, %v", opts, err)
+	}
+	data, err := json.Marshal(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "Suppress") || strings.Contains(string(data), "suppress") {
+		t.Fatalf("internal flag serialized: %s", data)
+	}
+	var decoded CommitOptions
+	if err := json.Unmarshal([]byte(`{"SuppressInferredTicketUpdates":true,"suppress_inferred_ticket_updates":true}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SuppressInferredTicketUpdates {
+		t.Fatal("JSON set internal suppression flag")
 	}
 }
 

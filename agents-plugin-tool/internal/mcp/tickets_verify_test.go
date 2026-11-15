@@ -27,7 +27,7 @@ func TestTicketsVerifyGitCommitCallSiteParityBlocksInvalidTicket(t *testing.T) {
 	server := NewServer(root, "test")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.verify","arguments":{"paths":["` + badPath + `"]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + badPath + `"],"title":"test: blocked commit","ai_context":["User intent: prove the commit gate matches tickets.verify."],"expected_branch":"` + branch + `"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + badPath + `"],"title":"test: blocked commit","updated_tickets":[],"ai_context":["User intent: prove the commit gate matches tickets.verify."],"expected_branch":"` + branch + `"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
