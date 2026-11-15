@@ -66,6 +66,36 @@ Source references below are relative to `agents-plugin-tool/internal/`.
 
 ## Decisions
 
+- **Phase 2 compatibility: T0, VERIFIED.** Only the pending intent's existing
+  optional topic-write list becomes sparse. At base `8145ec935`,
+  `wswhiteboard/folders.go:685,711-799` writes every topic and publishes the
+  session/receipt; its reader/replayer already iterates only supplied topic
+  writes (`:306-324,384-481,767-799`). The new planner omits identical bytes
+  (`folders.go:685-702`); serialization, schema and publication/recovery shapes
+  are unchanged (`:376-382,727-820`). Old readers consume new committed files
+  normally and old replay accepts sparse intents. Old writers may rewrite
+  unchanged files again but cannot lose new data because no new fields exist.
+  A new process reopens old/new stores through the unchanged load/readState
+  path; no migration or lost-field recovery is needed.
+- **Phase 2 comparison source: exact on-disk bytes, VERIFIED.** Read the current
+  topic's metadata with `wsstate.ReadFile` and compare it with `folderJSON(topic)`
+  while holding the existing writer flock (`folders.go:149-167,187-215,685-702`).
+  This costs one read per stable mapping but avoids assuming that a decoded
+  `before` State can reproduce the exact committed bytes. A new/changed
+  `(Key, Dir, HasDoc)` mapping always publishes, including an identical orphan
+  at a newly assigned path. Non-absence read errors abort planning before any
+  intent. Missing files still schedule a write rather than an omission.
+- **Phase 2 recovery invariant: VERIFIED.** `load` completes any earlier pending
+  decision before planning (`folders.go:306-324`); flock excludes cooperating
+  writers through comparison, intent installation and replay (`:149-167,187-215`).
+  Every omitted file already contains the exact target bytes at the durable
+  decision. The intent retains all session topic refs and changed metadata;
+  replay publishes included files before session metadata and receipt
+  (`:702,727-820`). An opener replays before `readState` checks mappings,
+  close state and log lengths (`:306-324,384-438`), and recovery never re-runs the
+  mutation or observer. External edits that bypass flock during a transaction
+  remain outside the writer contract. Log append selection is already
+  conditional (`:681-684`), including zero-length initialization; leave it intact.
 - **Compatibility: T0, VERIFIED.** In-process read caching only; no file shape,
   schema number, MCP tool, argument, protocol, or notification change. At base
   `b6ef094dd`, `wswhiteboard/folders.go:704-797` writes pending intent, topic/log
@@ -162,3 +192,24 @@ tests.
   assets. The shared runtime was not rebuilt/replaced, so a live after-deploy
   CPU reduction is **INFERRED**, not measured. The exact per-page live wake
   origin and the unrelated baseline MCP failure remain unresolved here.
+
+### Phase 2: Skip unchanged topic meta writes
+
+Owner/MAIN-approved follow-up to Phase 1. A live single-board update rewrote
+all 112 topic metadata files, amplifying atomic replacements and invalidating
+the read cache even for unchanged topics.
+
+Compare each planned topic's exact `folderJSON(topic)` bytes with its existing
+committed metadata under the folder lock. Omit byte-identical topic metadata
+from both publication and pending intent. New or remapped topics must still
+publish metadata; preserve changed documents, items, labels, and close/reopen
+state. Keep session metadata and receipt publication, log append conditions,
+and durable-decision/replay ordering unchanged. Stop if omission violates a
+recovery invariant rather than changing the recovery protocol.
+
+Compatibility target: T0, with no file shape, new file, schema, or MCP change.
+Verify a 112-topic single-topic update, recovery after pending/partial
+publication, adoption/rename/close/label paths, and scoped folder/race/MCP tests
+with offline Go flags. Capture before/after atomic replacement counts and raw
+evidence in `/tmp/exec5/perfD/`. Do not touch the shared daemon, run a daemon on
+real state, kill processes, push, or run the full dashboard package.
