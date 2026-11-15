@@ -422,8 +422,15 @@ func TestRootKeepsSessionsInTheRailOnly(t *testing.T) {
 			t.Errorf("empty root frame carries %q", absent)
 		}
 	}
-	if !strings.Contains(body, `<main id="grid" class="dgrid"></main>`) {
-		t.Error("root main panel is not empty")
+	// Landing content may live in main; session content may not.
+	main := mainPanel(body)
+	if main == "" {
+		t.Fatal("root frame has no main panel")
+	}
+	for _, absent := range []string{`href="/s/`, `data-region="sessions"`, `data-rid="`, `id="composer"`, `id="convo"`} {
+		if strings.Contains(main, absent) {
+			t.Errorf("root main panel carries session content %q", absent)
+		}
 	}
 	_, shell := get(t, f.base+"/")
 	for _, want := range []string{`data-rid=""`, `href="/s/livesession"`, `href="/s/boardsession"`, filepath.Base(f.project), `id="gear"`, `class="meta settings-version"`} {
@@ -955,4 +962,17 @@ func TestPageMarksASessionHandedToATerminal(t *testing.T) {
 	if !marked() {
 		t.Error("a handed-off lead session's page lacks the handed mark")
 	}
+}
+
+// mainPanel returns the <main id="grid"> element of a rendered page, or "".
+func mainPanel(body string) string {
+	i := strings.Index(body, `<main id="grid"`)
+	if i < 0 {
+		return ""
+	}
+	j := strings.Index(body[i:], `</main>`)
+	if j < 0 {
+		return ""
+	}
+	return body[i : i+j]
 }

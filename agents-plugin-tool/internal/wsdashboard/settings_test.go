@@ -21,8 +21,8 @@ func TestRootWithoutSessionsKeepsEmptySelectionAndSettings(t *testing.T) {
 		t.Error("Settings version is not at the right end of the saved notice row")
 	}
 	code, frame := get(t, base+"/?frame=1")
-	if code != http.StatusOK || !strings.Contains(frame, `<main id="grid" class="dgrid"></main>`) || strings.Contains(frame, `data-region="sessions"`) {
-		t.Fatalf("empty root frame = %d, main is not empty", code)
+	if code != http.StatusOK || mainPanel(frame) == "" || strings.Contains(mainPanel(frame), `data-region="sessions"`) || strings.Contains(mainPanel(frame), `href="/s/`) || strings.Contains(mainPanel(frame), `data-rid="`) || strings.Contains(frame, `data-region="sessions"`) {
+		t.Fatalf("empty root frame = %d, main carries session content or is missing", code)
 	}
 	for _, path := range []string{"/s/", "/s/INVALID", "/s/missing", "/s/missing?frame=1"} {
 		if code, _ := get(t, base+path); code != http.StatusNotFound {
