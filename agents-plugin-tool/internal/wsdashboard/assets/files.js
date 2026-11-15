@@ -179,6 +179,9 @@
     var plus = iconBtn("plus", wsT("js.files.tab.new")); plus.classList.add("ftab-new");
     plus.addEventListener("click", function () { newTab({ root: rootAbs, dir: dir, view: viewMode }); });
     ui.tabs.appendChild(plus);
+    // One tab: the stylesheet hides its chip and the bar is one row led by +.
+    // Two or more: the tabs take their own row above the address row.
+    ui.bar.classList.toggle("fbar-multi", tabs.length > 1);
   }
   function switchTab(index) {
     if (destroyed || !tabs[index] || index === active) return;
@@ -1230,7 +1233,7 @@
     el.textContent = "";
     el.setAttribute("data-fm", mode);
     el.classList.toggle("fpicker", directoriesOnly);
-    var bar = mk("div", "fbar");
+    var bar = ui.bar = mk("div", "fbar");
     ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
     ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
     var ctl = mk("div", "fbar-ctl"); bar.appendChild(ctl);
