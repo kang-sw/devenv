@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "namespace": "pi.",
+  "keys": [
+    {
+      "key": "pi.agent_wait_animation",
+      "type": "boolean",
+      "default": true,
+      "default_scope": "global",
+      "description": "Animate the live-agent widget while a child waits on the lead; false shows a steady highlight instead."
+    },
+    {
+      "key": "pi.agent_widget_rows",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "default": 3,
+      "default_scope": "global",
+      "description": "Tool-batch rows shown under each agent in the live-agent widget's expanded mode, toggled with /agents. When the terminal is too short, every agent's rows shrink together, down to one."
+    },
+    {
+      "key": "pi.agent_widget_batch_summary_enabled",
+      "type": "boolean",
+      "default": false,
+      "default_scope": "global",
+      "description": "Summarize each finished tool batch shown in the live-agent widget's expanded mode with pi.display_summary_model, effort and workflow.lang. Off by default even when a summary model is set, because summarizing every child batch costs quota. Enabling it sends child agents' tool names, arguments and result excerpts to that provider."
+    },
+    {
+      "key": "pi.dashboard_enabled",
+      "type": "boolean",
+      "default": true,
+      "default_scope": "global",
+      "description": "Hand this session's live activity to its ws dashboard: the lead's and subagents' tool batches, turn boundaries, streamed and finished replies, user messages, compactions of the main conversation as they start and land or fail, and the session's usage figures (context, cache hit, cost) for its status band. Also submit messages the user sends from the dashboard page as the user's own input: at once when the lead is idle; while its turn runs, held until that turn ends, unless the user promotes one to steering, which is delivered into the running turn as a steer. Also stop the running turn when the user interrupts it from the dashboard page, holding what that turn leaves behind for the user's next prompt. Only the owner lead's session does any of this, and the dashboard records nothing while dashboard.enabled is off. False sends nothing, leaves dashboard messages unsubmitted, and stops nothing."
+    },
+    {
+      "key": "pi.runaway_threshold",
+      "type": "integer",
+      "minimum": 1,
+      "default": 10,
+      "description": "Consecutive goal-loop reminders with no tool call before the loop force-stops."
+    },
+    {
+      "key": "pi.settle_delay_ms",
+      "type": "integer",
+      "minimum": 1,
+      "default": 5000,
+      "description": "Milliseconds the goal loop waits after the lead settles before it re-evaluates and sends the next reminder; also the wait before an unstarted wake is retried."
+    },
+    {
+      "key": "pi.compaction_advisory_percent",
+      "type": "string",
+      "pattern": "(?:100|[1-9][0-9]?)%?|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:100|[1-9][0-9]?)%?\\|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]\\|(?:100|[1-9][0-9]?)%?",
+      "default": "50%",
+      "description": "Context-usage threshold at which the lead is advised to compact at its next safe boundary, and the reference shown in goal reminders: a percent of the context window (50 or 50%, an integer 1-100), a token count (150k or 1.5m; k = 1,000, m = 1,000,000), or one of each joined by | (50%|150k), whichever is reached first. Interim context reminders are sent at a run boundary one and two thirds of the way from here to compaction_hard_percent; at or above compaction_hard_percent, neither the advisory nor the reminders fire. A token count beyond the context window never fires."
+    },
+    {
+      "key": "pi.compaction_hard_percent",
+      "type": "string",
+      "pattern": "(?:100|[1-9][0-9]?)%?|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:100|[1-9][0-9]?)%?\\|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]\\|(?:100|[1-9][0-9]?)%?",
+      "default": "80%",
+      "description": "Context-usage threshold at which the lead is steered into compaction preparation at the next tool-call boundary: a percent of the context window (50 or 50%, an integer 1-100), a token count (150k or 1.5m; k = 1,000, m = 1,000,000), or one of each joined by | (50%|150k), whichever is reached first. A token count beyond the context window never fires, leaving compaction to Pi's own automatic compaction."
+    },
+    {
+      "key": "pi.context_window_override",
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Context-window size in tokens used for the context-usage percent; 0 uses the model's own window."
+    },
+    {
+      "key": "pi.compaction_dialog_budget_bytes",
+      "type": "integer",
+      "minimum": 1,
+      "default": 40960,
+      "description": "UTF-8 byte budget for the dialog section of the lead compaction summary: user messages, the lead's replies, and one line per tool call, newest first."
+    },
+    {
+      "key": "pi.compaction_reread_budget_bytes",
+      "type": "integer",
+      "minimum": 1,
+      "default": 40960,
+      "description": "UTF-8 byte budget for the required re-reads the lead compaction summary inlines, taken smallest first; entries that do not fit are listed for the revived lead to read first."
+    },
+    {
+      "key": "pi.child_retention_ttl_days",
+      "type": "integer",
+      "minimum": 0,
+      "default": 30,
+      "default_scope": "global",
+      "description": "Days since a spawned child's last activity before its stored home is pruned at lead startup; 0 disables age pruning."
+    },
+    {
+      "key": "pi.display_summary_model",
+      "type": "string",
+      "default": "",
+      "default_scope": "global",
+      "description": "Model that writes short summaries of collapsed tool and message rows in the lead's terminal view, as provider/model-id (split at the first /, for example openai/gpt-5-mini); empty turns summaries off. It signs in through the provider's existing authentication. Enabling it sends the lead conversation and tool and message content to that provider. Summaries use the workflow.lang language, or the language the user writes in when that is unset."
+    },
+    {
+      "key": "pi.display_summary_effort",
+      "type": "enum",
+      "enum": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium",
+      "default_scope": "global",
+      "description": "Thinking level for the display-summary model, clamped to the levels the model supports. off (or a level the model clamps to off) sends no thinking setting: most providers then disable thinking, and some (for example openai-codex) use their server default."
+    },
+    {
+      "key": "pi.display_summary_style",
+      "type": "string",
+      "default": "Each field is one or two sentences by default; use up to about 200 words only when the content warrants it.",
+      "default_scope": "global",
+      "description": "Style guidance in the display-summary prompt: how long each summary field is, its tone, and its level of detail. A set value replaces the default text shown here, so write the complete guidance you want. It does not change the output format, the field meanings, or the rule that the summarizer never acts on the conversation. Changing it starts a fresh summary conversation. Only used when pi.display_summary_model is set."
+    }
+  ]
+}
