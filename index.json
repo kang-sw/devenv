@@ -469,19 +469,6 @@
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
     },
-    "261115-feat-ws-whiteboard-panel-first-stream": {
-      "registered_at": "2026-11-15T12:16:10Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-16T08:41:47Z",
-        "impl": {
-          "branch": "impl/develop/kudos-pasta-boney"
-        }
-      }
-    },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
       "lease": {
@@ -531,6 +518,9 @@
           "branch": "impl/develop/polling-hub-phase1"
         }
       }
+    },
+    "261116-feat-ws-session-outside-git-folder": {
+      "registered_at": "2026-11-16T12:11:42Z"
     },
     "261116-research-ws-polling-minimization-event-ledger": {
       "registered_at": "2026-11-16T04:15:13Z"
