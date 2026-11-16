@@ -132,6 +132,16 @@ kbd { font: 600 10.5px var(--wb-mono); border: 1px solid var(--wb-line); border-
 .lg-done span { font-size: 12.5px; color: var(--wb-muted-fg); }
 .lg-bar { width: 120px; height: 3px; border-radius: 3px; background: var(--wb-muted); overflow: hidden; margin-top: 4px; }
 .lg-bar::after { content: ""; display: block; width: 60%; height: 100%; background: var(--wb-ok); border-radius: 3px; }
+/* proposed: daemon clipboard copy (primary path on loopback), new CSS */
+.lg-copy { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 42px; padding: 0 16px; border: 0; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 700; background: var(--wb-now); color: var(--wb-on-now); cursor: pointer; }
+.lg-copy .i { width: 16px; height: 16px; }
+.lg-copy:disabled { opacity: .45; cursor: default; }
+.lg-sub { margin: -8px 0 0; font-size: 12px; color: var(--wb-muted-fg); text-align: center; }
+.lg-or { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--wb-muted-fg); white-space: nowrap; }
+.lg-or::before, .lg-or::after { content: ""; flex: 1; border-top: 1px solid var(--wb-muted); }
+.lg-hint.go { border-style: solid; border-color: color-mix(in srgb, var(--wb-primary) 55%, transparent); background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-card)); }
+.lg-hint .lg-copied { flex-basis: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--wb-ok); }
+.lg-msg.note { color: var(--wb-muted-fg); }
 
 /* proposed: the settings popover's login block (E), new CSS */
 .loginbox { display: grid; gap: 3px; padding-top: 8px; border-top: 1px solid var(--wb-muted); }
@@ -164,6 +174,8 @@ kbd { font: 600 10.5px var(--wb-mono); border: 1px solid var(--wb-line); border-
 .mk-lbl{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:11.5px;font-weight:800;color:var(--wb-muted-fg);margin:12px 0 5px}
 .mk-lbl .pill{padding:1px 8px;border-radius:999px;background:var(--wb-technical);color:var(--wb-on-technical)}
 .mk-lbl .hint{font-weight:500}
+.frags{display:grid;gap:6px}
+.frags .lg-card{max-width:none!important}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:18px;align-items:start}
 .vp{border-radius:10px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--wb-line);background:var(--wb-bg);position:relative}
 .vp-bar{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;background:color-mix(in srgb,var(--wb-muted) 70%,var(--wb-bg));font:11.5px var(--wb-mono);color:var(--wb-muted-fg);white-space:nowrap;overflow:hidden}
@@ -209,28 +221,48 @@ kbd { font: 600 10.5px var(--wb-mono); border: 1px solid var(--wb-line); border-
   <symbol id="i-paste" viewBox="0 0 24 24"><path d="M11 14h10"/><path d="M16 4h2a2 2 0 0 1 2 2v1.344"/><path d="m17 18 4-4-4-4"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 1.793-1.113"/><rect x="8" y="2" width="8" height="4" rx="1"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
-  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M16 4h2a2 2 0 0 1 2 2v4"/><path d="M21 14H11"/><path d="m15 10-4 4 4 4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-alert"viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
   <symbol id="lg-lockup" viewBox="40 56 1300 272"><g transform="translate(56 72) scale(0.46875)"><rect width="512" height="512" rx="96" fill="#1E2235"/><g transform="translate(8 0)" fill="none" stroke-width="46" stroke-linejoin="miter" stroke-miterlimit="2"><path d="M120 362 L176 200" stroke="#F2EBDD"/><path d="M232 362 L288 150" stroke="#F2EBDD"/><path d="M64 150 L112.3 333" stroke="#E4572E"/><path d="M185.1 226.5 L222.9 335.5" stroke="#E4572E"/><path d="M428.3 180 A50 50 0 1 0 339.7 226.1" stroke="#F2EBDD"/><path d="M360 238.9 L408 269.2" stroke="#E4572E"/><path d="M428.3 282 A50 50 0 1 1 339.7 328.1" stroke="#F2EBDD"/></g></g><g transform="translate(400 142)" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="square" stroke-linejoin="miter" stroke-miterlimit="2"><path d="M0 0 L22 100 L48 30 L74 100 L96 0"/><path transform="translate(126 0)" d="M56 0 H0 V100 H56 M0 50 H48"/><g transform="translate(212 0)"><path d="M0 100 V0 H22 A25 25 0 0 1 22 50 H0"/><path d="M27 64 L42 100" stroke="#E4572E" stroke-linecap="butt"/></g><g transform="translate(290 0)"><path d="M0 0 V100 M58 0 L4 54"/><path d="M32.7 44 L56 100" stroke="#E4572E" stroke-linecap="butt"/></g><path transform="translate(380 0)" d="M48.5 10.7 A25 25 0 1 0 28 50 A25 25 0 1 1 7.5 89.3" stroke-linecap="butt"/><path transform="translate(450 0)" d="M81 19 A44 44 0 1 0 81 81" stroke-linecap="butt"/><path transform="translate(570 0)" d="M0 0 V100 M60 0 V100 M0 50 H60"/><g transform="translate(660 0)"><path d="M0 100 L41 0 L63.1 54 M19.7 48 H60.7"/><path d="M67 64 L82 100" stroke="#E4572E" stroke-linecap="butt"/></g><path transform="translate(772 0)" d="M0 100 V0 H54 M0 48 H46"/><path transform="translate(856 0)" d="M0 0 H64 M32 0 V100"/></g></symbol>
 </svg>
 
 <div class="mk">
   <div class="mk-top"><h1>localhost 로그인 게이트 — 목업</h1><span class="sub">쿠키 없는 브라우저의 게이트 페이지 · 링크 복사 위치 · <span id="thm"></span></span><button type="button" onclick="flip()">테마 전환</button></div>
   <p class="lede">쿠키가 없는 localhost 브라우저는 어느 대시보드 주소로 가도 이 게이트 페이지를 받습니다. 게이트는 <b>세션, 워크스페이스, 버전, 사용량 등 아무것도 보여주지 않습니다</b>(브랜드 로고만). 로그인 링크·코드는 1회용, 10분 만료이고, 한 번 교환되면 400일 HttpOnly·SameSite=Strict 쿠키가 남습니다.</p>
+  <p class="lede">기본 경로는 게이트의 <b>「로그인 링크를 클립보드에 복사」</b> 버튼입니다. 누르면 페이지가 아니라 <b>이 컴퓨터의 대시보드 데몬</b>이 새 1회용 로그인 링크를 OS 클립보드에 넣고, 게이트는 "이제 <kbd>Ctrl</kbd>+<kbd>V</kbd>(macOS <kbd>⌘</kbd>+<kbd>V</kbd>)"로 안내합니다. 사용자가 페이지에 붙여넣으면 그대로 제출되어 로그인됩니다. 페이지는 열릴 때 클립보드를 읽지도 쓰지도 않고, 클립보드를 건드리는 동작은 누르기 전에 라벨에 그렇게 적혀 있습니다. 붙여넣기 칸과 「클립보드에서 붙여넣기」 버튼은 다른 곳(에이전트, 다른 브라우저, 데스크톱 앱)에서 받은 링크를 위한 보조 경로로 남습니다.</p>
 
   <h2>게이트 페이지</h2>
   <div class="grid2">
 
     <!-- A -->
     <div>
-      <div class="mk-lbl"><span class="pill">A</span>게이트 초기<span class="hint">입력칸 포커스 · 큰 붙여넣기 안내 · macOS는 <span class="mac-chip"><kbd>⌘</kbd>+<kbd>V</kbd></span></span></div>
+      <div class="mk-lbl"><span class="pill">A</span>게이트 초기<span class="hint">데몬 복사 버튼이 주 동작(포커스) · 붙여넣기는 보조 · 루프백 접속에서만</span></div>
       <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
         <div class="lg-page"><main class="lg-card">
           <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
-          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크나 코드를 붙여넣으세요.</p></div>
-          <div class="lg-hint" aria-hidden="true"><kbd>Ctrl</kbd><span class="lg-plus">+</span><kbd>V</kbd><span class="lg-do">로 붙여넣기</span></div>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
+          <button class="lg-copy" type="button"><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+          <p class="lg-sub">지금 클립보드 내용이 새 1회용 링크로 바뀝니다.</p>
+          <div class="lg-or">또는 다른 곳에서 받은 링크 붙여넣기</div>
+          <div class="lg-row"><input class="lg-in" placeholder="링크 또는 코드" aria-label="로그인 링크 또는 코드"><button class="lg-go" disabled>확인</button></div>
+          <button class="btn lg-clip" type="button"><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+        </main></div>
+      </div></div>
+    </div>
+
+    <!-- A2 -->
+    <div>
+      <div class="mk-lbl"><span class="pill">A2</span>클립보드에 복사됨<span class="hint">데몬이 OS 클립보드를 교체 · 버튼 자리가 붙여넣기 안내로 · macOS는 <span class="mac-chip"><kbd>⌘</kbd>+<kbd>V</kbd></span></span></div>
+      <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
+        <div class="lg-page"><main class="lg-card">
+          <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
+          <div class="lg-hint go" role="status"><span class="lg-copied"><svg class="i"><use href="#i-check"/></svg>복사했습니다</span><span class="lg-do">이제</span><kbd>Ctrl</kbd><span class="lg-plus">+</span><kbd>V</kbd></div>
           <div class="lg-row"><input class="lg-in focus" placeholder="링크 또는 코드" aria-label="로그인 링크 또는 코드"><button class="lg-go" disabled>확인</button></div>
           <button class="btn lg-clip" type="button"><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
-          <p class="lg-where">링크 받는 곳: 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
         </main></div>
       </div></div>
     </div>
@@ -241,27 +273,29 @@ kbd { font: 600 10.5px var(--wb-mono); border: 1px solid var(--wb-line); border-
       <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
         <div class="lg-page"><main class="lg-card">
           <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
-          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크나 코드를 붙여넣으세요.</p></div>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
           <div class="lg-hint busy" role="status"><span class="lg-spin"></span>확인 중…</div>
           <div class="lg-row"><input class="lg-in" disabled value="…/login?code=••••••••"><button class="lg-go" disabled>확인</button></div>
           <button class="btn lg-clip" type="button" disabled><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
-          <p class="lg-where">링크 받는 곳: 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
         </main></div>
       </div></div>
     </div>
 
     <!-- C -->
     <div>
-      <div class="mk-lbl"><span class="pill">C</span>코드가 틀렸거나 만료됨<span class="hint">페이지에 그대로 · 값은 선택된 채로 남아 다음 붙여넣기가 덮어씀</span></div>
+      <div class="mk-lbl"><span class="pill">C</span>코드가 틀렸거나 만료됨<span class="hint">페이지에 그대로 · 복사 버튼이 다시 주 동작 · 값은 선택된 채로 남아 다음 붙여넣기가 덮어씀</span></div>
       <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
         <div class="lg-page"><main class="lg-card">
           <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
-          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크나 코드를 붙여넣으세요.</p></div>
-          <div class="lg-hint" aria-hidden="true"><kbd>Ctrl</kbd><span class="lg-plus">+</span><kbd>V</kbd><span class="lg-do">로 다시 붙여넣기</span></div>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
+          <button class="lg-copy" type="button"><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+          <p class="lg-sub">지금 클립보드 내용이 새 1회용 링크로 바뀝니다.</p>
+          <div class="lg-or">또는 다른 곳에서 받은 링크 붙여넣기</div>
           <div class="lg-row"><input class="lg-in bad sel" value="…/login?code=••••••••" aria-invalid="true"><button class="lg-go">확인</button></div>
-          <p class="lg-msg bad" role="alert"><svg class="i"><use href="#i-alert"/></svg>맞지 않거나 만료된 코드입니다. 새 링크를 복사해 오세요.</p>
+          <p class="lg-msg bad" role="alert"><svg class="i"><use href="#i-alert"/></svg>맞지 않거나 만료된 코드입니다. 위 버튼으로 새 링크를 받으세요.</p>
           <button class="btn lg-clip" type="button"><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
-          <p class="lg-where">링크 받는 곳: 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
         </main></div>
       </div></div>
     </div>
@@ -276,12 +310,35 @@ kbd { font: 600 10.5px var(--wb-mono); border: 1px solid var(--wb-line); border-
         </main></div>
       </div></div>
     </div>
+
+    <div class="frags">
+    <!-- A3 -->
+    <div>
+      <div class="mk-lbl"><span class="pill">A3</span>데몬이 클립보드를 못 씀<span class="hint">헤드리스·SSH 세션 · 버튼 아래 한 줄, 버튼은 잠김 (빨강 아님)</span></div>
+      <div class="lg-card" style="max-width:400px;padding:12px 16px">
+        <button class="lg-copy" type="button" disabled><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+        <p class="lg-msg note"><svg class="i"><use href="#i-info"/></svg>이 세션에서는 클립보드를 쓸 수 없습니다. 아래 받는 곳에서 링크를 받아 붙여넣으세요.</p>
+      </div>
+    </div>
+    <!-- A4 -->
+    <div>
+      <div class="mk-lbl"><span class="pill">A4</span>너무 자주 누름<span class="hint">짧은 시간에 반복 · 클립보드는 그대로 · 버튼 아래 한 줄</span></div>
+      <div class="lg-card" style="max-width:400px;padding:12px 16px">
+        <button class="lg-copy" type="button"><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+        <p class="lg-msg warn"><svg class="i"><use href="#i-alert"/></svg>잠시 후 다시 시도하세요.</p>
+      </div>
+    </div>
+    <!-- C′ -->
+    <div>
+      <div class="mk-lbl"><span class="pill">C′</span>「클립보드에서 붙여넣기」가 거부됨<span class="hint">권한 거부·빈 클립보드일 때 C 자리의 한 줄만 바뀜 (빨강 아님)</span></div>
+      <div class="lg-card" style="max-width:400px;padding:12px 16px">
+        <p class="lg-msg warn" style="margin:0"><svg class="i"><use href="#i-alert"/></svg>클립보드를 읽지 못했습니다. Ctrl+V로 붙여넣으세요.</p>
+      </div>
+    </div>
+    </div>
   </div>
 
-  <div class="mk-lbl" style="margin-top:16px"><span class="pill">C′</span>클립보드 버튼이 거부됨<span class="hint">권한 거부·빈 클립보드일 때 C 자리의 한 줄만 바뀜 (빨강 아님)</span></div>
-  <div class="lg-card" style="max-width:400px;padding:12px 16px">
-    <p class="lg-msg warn" style="margin:0"><svg class="i"><use href="#i-alert"/></svg>클립보드를 읽지 못했습니다. Ctrl+V로 붙여넣으세요.</p>
-  </div>
+  <div class="callout"><b>루프백 전용.</b> 「로그인 링크를 클립보드에 복사」 버튼은 루프백(<code>127.0.0.1</code>, <code>::1</code>) 접속에서만 게이트에 나타나고, LAN 접속에는 절대 나타나지 않습니다. 데몬이 쓰는 클립보드는 데몬이 도는 컴퓨터의 것이라, 같은 컴퓨터의 브라우저일 때만 의미가 있습니다.</div>
 
   <h2>링크 받는 곳</h2>
   <div class="grid2">
@@ -338,8 +395,9 @@ kbd { font: 600 10.5px var(--wb-mono); border: 1px solid var(--wb-line); border-
   <div class="callout"><b>E 위치 근거.</b> LAN 공유는 설정 팝오버 안에서만 보입니다: <code>dashboard.tmpl:126</code>의 <code>{{define "settings"}}</code>가 <code>.gmenu.gcard</code> 뒤에 <code>{{with .LAN}}&lt;div class="lanbox"&gt;</code>를 그리고, 그 팝오버는 세션 레일 하단 톱니(<code>dashboard.tmpl:429</code>, <code>#gear</code>)가 엽니다. LAN 토큰 없는 요청이 받는 401 안내도 "Settings (the gear in the session rail footer)"를 가리킵니다(<code>access.go:126</code>). 새 블록은 같은 팝오버의 <code>.lanbox</code> 바로 앞에 두고, LAN 블록과 달리 LAN 모드와 무관하게 이 컴퓨터의 로그인된 브라우저에서 항상 보입니다.</div>
 
   <ul class="notes" style="margin-top:12px">
-    <li>A: 페이지 어디서든 <kbd>Ctrl</kbd>+<kbd>V</kbd>(macOS는 <kbd>⌘</kbd>+<kbd>V</kbd>)는 paste 이벤트로 즉시 제출합니다. 입력칸은 손으로 코드를 칠 때만 쓰고, 그때는 Enter나 확인으로 제출합니다.</li>
-    <li>클립보드 버튼은 <code>navigator.clipboard.readText()</code>: Chrome은 첫 번째에만 권한을 묻고, Safari·Firefox는 붙여넣기 말풍선을 띄웁니다.</li>
+    <li>A→A2: 「로그인 링크를 클립보드에 복사」는 페이지가 데몬에 요청만 보내고, 새 1회용 링크를 OS 클립보드에 넣는 것은 데몬 프로세스입니다. 페이지는 <code>navigator.clipboard.writeText()</code>를 쓰지 않습니다. 성공하면 A2, 데몬이 클립보드에 접근하지 못하면 A3, 짧은 시간에 반복하면 A4입니다.</li>
+    <li>A·A2: 페이지 어디서든 <kbd>Ctrl</kbd>+<kbd>V</kbd>(macOS는 <kbd>⌘</kbd>+<kbd>V</kbd>)는 paste 이벤트로 즉시 제출합니다. 입력칸은 손으로 코드를 칠 때만 쓰고, 그때는 Enter나 확인으로 제출합니다.</li>
+    <li>「클립보드에서 붙여넣기」 버튼(보조 경로)은 <code>navigator.clipboard.readText()</code>: Chrome은 첫 번째에만 권한을 묻고, Safari·Firefox는 붙여넣기 말풍선을 띄웁니다.</li>
     <li>링크 전체를 붙여넣어도, 코드만 붙여넣어도 받습니다. 받은 값은 B·C에서 코드 부분을 가려 보여줍니다.</li>
     <li>D의 이동 대상은 게이트가 처음 가로챈 주소입니다. 게이트 자체는 그 주소를 화면에 쓰지 않습니다.</li>
   </ul>
