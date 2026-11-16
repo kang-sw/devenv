@@ -116,6 +116,7 @@ func TestRailMetadataSelectiveSafetyAndVisibleResumption(t *testing.T) {
 	}
 	release()
 	waitFor(t, "rail hidden", func() bool { l.mu.Lock(); defer l.mu.Unlock(); return !l.running })
+	clock.Add(int64(gitRefreshGap))
 	release = l.watchFresh()
 	_ = nextWait(t, timers, 3*time.Minute)
 	if fake.count("/a") != 4 || fake.count("/b") != 4 {

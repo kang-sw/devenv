@@ -66,8 +66,9 @@ type railLister struct {
 	// read reads one repository; it runs on the lister's goroutine, never
 	// under mu. Nil lists nothing.
 	read func(repo string, regs []Registration) (RepoWorktrees, error)
-	// interval is the period between full reads.
-	interval time.Duration
+	// interval is the period between metadata checks; gap coalesces visible
+	// resumptions after a complete read.
+	interval, gap time.Duration
 	// after is time.After and now time.Now, injected so a test drives the
 	// clock.
 	after func(time.Duration) <-chan time.Time
@@ -90,7 +91,9 @@ type railLister struct {
 	// one).
 	full     bool
 	force    bool // explicit refresh/resumption; timer checks may use metadata
+	fresh    bool // visible resumption pending; coalesced through the minimum gap
 	lastFull time.Time
+	lastRead time.Time
 	gates    map[string]gitReadGate
 	// wanted holds the repositories the last rail render showed, with the
 	// registrations of their sessions; pending the wanted ones not read yet.
@@ -109,6 +112,7 @@ func newRailLister(read func(string, []Registration) (RepoWorktrees, error), cha
 	return &railLister{
 		read:     read,
 		interval: gitReadInterval,
+		gap:      gitRefreshGap,
 		after:    time.After,
 		now:      time.Now,
 		probe:    gitMetadataStamp,
@@ -129,8 +133,8 @@ func newRailLister(read func(string, []Registration) (RepoWorktrees, error), cha
 // the interval since it ends.
 func (l *railLister) watch() (release func()) { return l.watchWithRefresh(false) }
 
-// watchFresh is opt-in visible resumption; legacy stream lifetimes retain
-// their recent-list reuse across navigation.
+// watchFresh is opt-in visible resumption, coalesced through the minimum
+// read gap; legacy stream lifetimes retain recent-list reuse across navigation.
 func (l *railLister) watchFresh() (release func()) { return l.watchWithRefresh(true) }
 
 func (l *railLister) watchWithRefresh(fresh bool) (release func()) {
@@ -140,7 +144,7 @@ func (l *railLister) watchWithRefresh(fresh bool) (release func()) {
 	l.mu.Lock()
 	l.viewers++
 	if fresh {
-		l.full, l.force = true, true
+		l.full, l.force, l.fresh = true, true, true
 		signal(l.wake)
 	}
 	if l.viewers == 1 {
@@ -272,8 +276,31 @@ func (l *railLister) run() {
 			l.mu.Unlock()
 			return
 		}
+		if wait := l.gap - l.now().Sub(l.lastRead); l.fresh && !l.lastRead.IsZero() && wait > 0 {
+			l.mu.Unlock()
+			select {
+			case <-l.stop:
+				l.mu.Lock()
+				l.running = false
+				l.mu.Unlock()
+				return
+			case <-l.after(wait):
+			}
+			l.mu.Lock()
+			// Signals during the gap share this read. Flags and pending
+			// repositories remain intact until the snapshot below.
+			select {
+			case <-l.wake:
+			default:
+			}
+			if l.viewers == 0 {
+				l.running = false
+				l.mu.Unlock()
+				return
+			}
+		}
 		full, force := l.full, l.force
-		l.full, l.force = false, false
+		l.full, l.force, l.fresh = false, false, false
 		if full {
 			l.lastFull = l.now()
 		}
@@ -314,6 +341,7 @@ func (l *railLister) run() {
 			gate.complete(stamp, l.now(), r.Read)
 			l.mu.Lock()
 			l.reads++
+			l.lastRead = l.now()
 			delete(l.reading, repo)
 			if _, ok := l.wanted[repo]; ok {
 				if old, had := l.repos[repo]; !had || !reflect.DeepEqual(old, r) {
