@@ -310,6 +310,29 @@ Forward findings retained from R1 (not part of this fixes-only pass):
   prior click/key activation; Chromium may suppress the native prompt. Also
   assess Electron's existing whole-app leave-dialog copy on a session switch.
 
+#### Edition (190255257) - 2026-11-16
+
+Focused re-review confirmed I1–I3 and M3; lead requested two race hardenings
+before merge:
+
+- Treat `stay` as tentative, not proof that navigation was cancelled. Keep the
+  latest attempt on its frame: an accepted blank load still removes that frame
+  and starts its destination even after the same attempt's `stay`. If Back's
+  position was already restored, or restoration is still in flight, reconcile
+  history to the accepted destination without rewriting entries.
+- Bound history restoration to 1000ms. Missing shell popstate no longer queues
+  every later navigation forever: clear the restoring state and flush the
+  latest queued pick. Normal completion cancels the timeout.
+- RED: both new Node tests failed on `94a4aaaf6`: the destination frame was
+  missing after `stay` then blank load, and the queued pick never retried after
+  the timeout. GREEN: all six cases in
+  `node --test agents-plugin-tool/internal/wsdashboard/testdata/shell-lifecycle.test.cjs`
+  pass, covering rail/Back accepted-load races, synchronous/deferred history
+  restoration, fallback timing and queue release. `git diff --check` passes.
+- Node-only hardening; no local Go/ws/binary, browser run or daemon operation.
+  Native-dialog/live-browser acceptance remains with the lead. The previously
+  recorded Forward findings remain unchanged.
+
 ### Phase 2: Measure and improve fresh session-switch load performance
 
 Depends on Phase 1's landed Result. Measure cold/warm session switches, initial
