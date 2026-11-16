@@ -301,8 +301,8 @@ func imageAs(d *Daemon, peer, host, cookie, fetchSite, path string) *httptest.Re
 // same-site or cross-site), a non-image, a
 // directory, a missing file, a relative escape, a symlink to a non-image,
 // and a UNC or device path (refused on its spelling, even where it names a
-// real file) all get the uniform 404. An in-root image is unchanged: no
-// CORP header, and no Sec-Fetch-Site check.
+// real file) all get the uniform 404. In-root images share the fetch-site
+// check and CORP header.
 func TestImageRouteServesOutsideImagesToLoopbackViewersOnly(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	token := readLANToken(t, f.dir)
@@ -371,7 +371,7 @@ func TestImageRouteServesOutsideImagesToLoopbackViewersOnly(t *testing.T) {
 	}
 
 	in := imageAs(f.d, lanPeer, lanHost, token, "cross-site", "shot.png")
-	if in.Code != http.StatusOK || in.Body.String() != "PNG-INSIDE" || in.Header().Get("Cross-Origin-Resource-Policy") != "" {
+	if in.Code != http.StatusNotFound || strings.Contains(in.Body.String(), "PNG-INSIDE") {
 		t.Errorf("in-root image to a LAN viewer, cross-site = %d %q %v", in.Code, in.Body.String(), in.Header())
 	}
 }

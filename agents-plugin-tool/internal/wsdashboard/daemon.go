@@ -840,11 +840,16 @@ func (d *Daemon) handleShutdown(w http.ResponseWriter, r *http.Request) {
 
 // handleNudge schedules a re-read of the one session the body names
 // (Index.Nudge) and answers without waiting for it. It needs no credential:
-// all it can cause is a re-read of disk. A malformed body is 400, an unknown
+// non-browser callers omit Origin and fetch metadata. Browser requests must
+// be same-origin. A malformed body is 400, an unknown
 // session 404, and a scheduled re-read 204; the sender ignores the answer.
 func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if (len(r.Header.Values("Origin")) > 0 && !sameOrigin(r)) || crossSiteFetch(r) {
+		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return
 	}
 	d.stats.Nudges.Add(1)
@@ -867,6 +872,7 @@ func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }

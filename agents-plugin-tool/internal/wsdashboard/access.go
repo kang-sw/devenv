@@ -31,8 +31,8 @@ import (
 //   - GET and HEAD of the shared mermaid script and the shared frame
 //     stylesheet and script (publicAsset), which a topic body's sandboxed
 //     frame loads. That frame also inlines its images as
-//     data: URLs (ImageDataURL, up to 2 MiB); a larger image falls back to
-//     the image route, which a LAN viewer's frame cannot load.
+//     data: URLs (ImageDataURL, up to 2 MiB); a larger image is relayed by
+//     the same-origin host page through the protected image route.
 //   - GET and HEAD of the HTML preview's capability route
 //     (previewCapability, fs_capability.go), which a preview card's
 //     sandboxed frame loads with its relative assets, and of the file

@@ -705,9 +705,9 @@ func FrameAsset(name string) (data []byte, contentType string, ok bool) {
 // blocks. An image reaches the frame as whatever src ImageSrc (or
 // DocImageSrc) gave it: the frame's requests carry no cookie, so a served
 // page inlines body images rather than pointing at a route that needs one.
-// An image outside the session root is the one exception: inlining it would
-// hand its bytes to every viewer, so the body keeps its path text marked
-// data-relay (relayImage), and the frame lists those URLs as its own
+// An image too large to inline, or outside the session root (whose bytes
+// must not be handed to every viewer), keeps its path text marked
+// data-relay, and the frame lists those URLs as its own
 // data-relay, space-separated. The host fetches a URL its frame asks for only
 // when it is on that list, which the body's own markup cannot extend, and
 // hands the frame the image (doc-frame.js and the dashboard script).

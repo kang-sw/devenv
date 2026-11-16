@@ -415,8 +415,8 @@ func TestServedBoardFramesArePlaceholders(t *testing.T) {
 }
 
 // TestFramedBodyImagesTakeDocImageSrc pins where DocImageSrc applies: a file
-// image in a framed body takes it, an empty result falls back to ImageSrc,
-// and an item's image and the disk page's body keep ImageSrc.
+// image in a framed body takes it, an empty result relays ImageSrc through
+// the host, and an item's image and the disk page's body keep ImageSrc.
 func TestFramedBodyImagesTakeDocImageSrc(t *testing.T) {
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "![a](a.png) ![big](big.png)", Changed: 2}},
 		Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}, Rationale: "![item](a.png)"}}}
@@ -434,7 +434,9 @@ func TestFramedBodyImagesTakeDocImageSrc(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := frameDocs(t, string(regions.Board))["doc"]
-	wantAll(t, doc, `<img src="data:image/png;base64,QUJD" alt="a">`, `<img src="/route/big.png" alt="big">`)
+	wantAll(t, doc, `<img src="data:image/png;base64,QUJD" alt="a">`, `data-relay="/route/big.png"`)
+	wantNone(t, doc, `src="/route/big.png"`)
+	wantAll(t, string(regions.Board), `data-relay="/route/big.png" data-sandbox=`)
 	wantAll(t, string(regions.Board), `<img src="/route/a.png" alt="item"/>`)
 	wantNone(t, string(regions.Board), `src="data:image/png;base64,QUJD" alt="item"`)
 
