@@ -7,6 +7,50 @@ import (
 	"testing"
 )
 
+func TestQueryLatestSummary(t *testing.T) {
+	const later = "2026-11-13T13:00:00Z"
+	for _, tc := range []struct {
+		name, agentID, panelID, agentAt, panelAt, wantID, wantText string
+	}{
+		{"panel only", "", "e2", "", queryEntryTime, "e2", "panel recap"},
+		{"agent only", "e2", "", queryEntryTime, "", "e2", "agent body"},
+		{"newer panel", "e10", "e2", queryEntryTime, later, "e2", "panel recap"},
+		{"newer agent", "e2", "e10", later, queryEntryTime, "e2", "agent body"},
+		{"equal panel wins", "e9", "e10", queryEntryTime, queryEntryTime, "e10", "panel recap"},
+		{"equal agent wins", "e10", "e9", queryEntryTime, queryEntryTime, "e10", "agent body"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := TopicDoc{Name: "summary"}
+			if tc.agentID != "" {
+				doc.Entries = append(doc.Entries, Entry{ID: tc.agentID, Kind: EntryAgent, At: tc.agentAt, Text: "agent body"})
+			}
+			if tc.panelID != "" {
+				doc.Entries = append(doc.Entries, Entry{ID: tc.panelID, Kind: EntryPanel, PanelID: "p1", At: tc.panelAt, Recap: "panel recap", Text: "secret panel payload"})
+			}
+			doc.Entries = append(doc.Entries, Entry{ID: "e99", Kind: EntrySystem, At: later, Text: "system event"})
+			st := &State{Topics: []TopicDoc{doc}}
+			for _, raw := range []string{`{"topic":"summary"}`, `{"topic":"summary","depth":"topics"}`, `{"topic":"summary","body":true}`, `{"topic":"summary","entries":"log","kind":"system","last":1}`} {
+				r := queryResult(t, st, raw)
+				q := r.Topics[0]
+				if q.LatestSummary == nil || q.LatestSummary.ID != tc.wantID {
+					t.Fatalf("%s: summary = %+v", raw, q.LatestSummary)
+				}
+				if tc.agentID == "" && q.LatestAgent != nil || tc.agentID != "" && (q.LatestAgent == nil || q.LatestAgent.ID != tc.agentID) {
+					t.Fatalf("latest agent changed: %+v", q.LatestAgent)
+				}
+				text := FormatQuery(r)
+				if !strings.Contains(text, "current "+tc.wantID+" ") || !strings.Contains(text, ": "+tc.wantText+"\n") || strings.Contains(text, "secret panel payload") {
+					t.Fatalf("%s: wrong current summary or leaked payload:\n%s", raw, text)
+				}
+				encoded, err := json.Marshal(q)
+				if err != nil || strings.Contains(string(encoded), "secret panel payload") {
+					t.Fatalf("query metadata leaked payload: %s; %v", encoded, err)
+				}
+			}
+		})
+	}
+}
+
 func topicStateQueryBoard() *State {
 	st := queryEntryBoard()
 	st.Topics[0].Tickets = []string{"261101-feat-example"}

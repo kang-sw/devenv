@@ -893,8 +893,8 @@ func (p *pageData) renderTopicHTML(t TopicView) (template.HTML, error) {
 // RecapHTML renders the topic's recap through itemField, as an item's block
 // fields render, salted with the topic's key.
 func (p *pageData) RecapHTML(t TopicView) template.HTML {
-	if t.LatestAgent != nil {
-		return p.Inline(t.LatestAgent.Text)
+	if t.Head != nil {
+		return p.Inline(t.Head.Summary())
 	}
 	return p.itemField(t.Recap, "topic/"+t.Name+"/recap")
 }

@@ -258,10 +258,11 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic closed" id="`+topicAnchor("notes")+`" data-topic="notes" title="closed"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic closed has-doc" id="`+topicAnchor("notes")+`" data-topic="notes" title="closed"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+		`<details class="tdoc" data-key="doc:notes"><summary`, `class="trecap" data-entry="e1" data-kind="panel"`,
 		`<div class="topic-stream">`,
 		`<details class="entry-panel`, `data-key="entry:e1" id="p1"><summary`, "<h1>Plan</h1>")
-	wantNone(t, out, `class="tdoc"`, `data-key="entry:e1" id="p1" open>`)
+	wantNone(t, out, `data-key="doc:notes" open>`, `data-key="entry:e1" id="p1" open>`)
 }
 
 // TestRenderPageTopicKeyAttribute: every topic section carries its name as

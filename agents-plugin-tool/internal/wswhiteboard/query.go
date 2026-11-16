@@ -41,8 +41,10 @@ type QueryTopic struct {
 	// State and StateDiagnostic are derived from immutable system history.
 	State           *TopicState      `json:"state,omitempty"`
 	StateDiagnostic *StateDiagnostic `json:"state_diagnostic,omitempty"`
-	// LatestAgent is the current-state line, never a panel or system event.
+	// LatestAgent remains the latest agent log line, never a panel or system event.
 	LatestAgent *Entry
+	// LatestSummary is the latest agent line or panel recap. Panel Text is omitted.
+	LatestSummary *Entry
 	// Entries contain selected stream metadata/log text; panel Text is never
 	// populated here. Panels is discovery's latest matching version per pN.
 	Entries, Panels               []Entry
@@ -312,7 +314,7 @@ func FormatQuery(r QueryResult) string {
 	for _, t := range r.Topics {
 		sb.WriteString(topicLine(t) + "\n")
 		writeQueryState(&sb, t)
-		writeQueryCurrent(&sb, t.LatestAgent)
+		writeQueryCurrent(&sb, t.LatestSummary)
 		if t.Body != "" {
 			sb.WriteString("topic body:\n<<<\n" + t.Body + "\n>>>\n")
 		}
