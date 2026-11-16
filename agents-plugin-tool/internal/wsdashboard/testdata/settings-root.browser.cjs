@@ -84,19 +84,20 @@ const [base, emptyBase] = process.argv.slice(2);
     assert.equal(await page.locator('#gmenu [data-layout="tabs"]').getAttribute('aria-pressed'), 'true');
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
     await page.keyboard.press('Escape');
-    await current().locator(editor).fill('Preserve this cached draft');
+    await current().locator(editor).fill('Preserve this stored draft');
     await page.goBack();
     await page.waitForURL(base + '/');
     await rootIsEmpty();
     await openSettings();
     await page.locator('#glang').selectOption('ko');
     assert.equal((await context.cookies()).find(c => c.name === 'ws_dashboard_lang').value, 'ko');
-    // The hidden live frame's unsent text must hold the shell reload.
-    assert.equal(await page.locator('html').getAttribute('data-lang'), 'en');
-    await page.keyboard.press('Escape');
+    // No hidden live frame holds the reload: its draft was saved before
+    // teardown and returns in a fresh session document.
+    await page.locator('html[data-lang="ko"]').waitFor();
+    assert.equal(await page.locator('iframe.sframe').count(), 1);
     await page.locator('.rl[href="/s/livesession"]').click();
     await current().locator(editor).waitFor();
-    assert.equal(await current().locator('#ctext').inputValue(), 'Preserve this cached draft');
+    assert.equal(await current().locator('#ctext').inputValue(), 'Preserve this stored draft');
     await current().locator(editor).fill('');
     await page.reload();
     await current().locator('#grid[data-layout="tabs"]').waitFor();
@@ -134,11 +135,11 @@ const [base, emptyBase] = process.argv.slice(2);
     await page.keyboard.press('Escape');
     assert.deepEqual(context.serviceWorkers(), []);
     assert.deepEqual(errors, []);
-    console.log('Settings/root: keyboard, focus, dismissal, frame preferences, cookies/reload, cached draft, empty selection, narrow geometry, usage interaction and no-session reachability passed.');
+    console.log('Settings/root: keyboard, focus, dismissal, frame preferences, cookies/reload, stored draft, empty selection, narrow geometry, usage interaction and no-session reachability passed.');
     await context.close();
 
-    // Persistence is optional: the current choice must still reach visible,
-    // cached hidden and newly loaded frames when storage is denied or full.
+    // Persistence is optional: the shell's current choice must still reach
+    // visible and freshly loaded frames when storage is denied or full.
     for (const failure of ['denied', 'writes']) {
       const locked = await browser.newContext({ viewport: { width: 1700, height: 900 }, serviceWorkers: 'allow', reducedMotion: 'reduce' });
       locked.setDefaultTimeout(10000);
@@ -166,24 +167,27 @@ const [base, emptyBase] = process.argv.slice(2);
       await tab.goto(base + '/');
       await tab.locator('.rl[href="/s/livesession"]').click();
       await tab.frameLocator('.sframe.on').locator(editor).waitFor();
-      const cached = tab.frame({ url: base + '/s/livesession?frame=1' });
+      const previous = tab.frame({ url: base + '/s/livesession?frame=1' });
       await tab.goBack();
       await tab.frameLocator('.sframe.on').locator('#grid').waitFor();
       await tab.locator('#gear').click();
       await tab.locator('#gmenu [data-layout="tabs"]').click();
       await tab.locator('#gmenu [data-input="mod"]').click();
-      await cached.waitForFunction(() => document.getElementById('grid').getAttribute('data-layout') === 'tabs' && document.getElementById('ctext').placeholder === window.wsT('js.hint.mod'));
+      assert.equal(previous.isDetached(), true, 'session switch destroys the previous iframe');
+      assert.equal(await tab.locator('iframe.sframe').count(), 1);
       await tab.keyboard.press('Escape');
       await tab.locator('#gear').click();
       assert.equal(await tab.locator('#gmenu [data-layout="tabs"]').getAttribute('aria-pressed'), 'true');
       assert.equal(await tab.locator('#gmenu [data-input="mod"]').getAttribute('aria-pressed'), 'true');
       await tab.keyboard.press('Escape');
       await tab.goForward();
-      await cached.goto(base + '/s/livesession?frame=1');
-      await cached.locator('#grid[data-layout="tabs"]').waitFor();
+      await tab.frameLocator('.sframe.on').locator('#grid[data-layout="tabs"]').waitFor();
+      const fresh = tab.frame({ url: base + '/s/livesession?frame=1' });
+      assert.notEqual(fresh, previous);
+      await fresh.waitForFunction(() => document.getElementById('ctext').placeholder === window.wsT('js.hint.mod'));
       // Keys go to the visible rich editor; the hidden #ctext backing field
       // keeps the canonical value (44d01be77).
-      const textarea = cached.locator('#ctext'), box = cached.locator(editor);
+      const textarea = fresh.locator('#ctext'), box = fresh.locator(editor);
       await box.waitFor();
       await box.fill('Actual send-key mode');
       await box.press('Enter');
@@ -191,12 +195,12 @@ const [base, emptyBase] = process.argv.slice(2);
       assert.equal(sends.length, 0, failure + ': plain Enter must not send in modifier mode');
       const sent = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/livesession/message');
       await box.press('Control+Enter'); await sent;
-      await cached.waitForFunction(() => document.getElementById('ctext').value === '');
+      await fresh.waitForFunction(() => document.getElementById('ctext').value === '');
       assert.equal(sends.length, 1, failure + ': modifier Enter sends despite failed persistence');
       await tab.locator('#gear').click();
       await tab.locator('#gmenu [data-layout="split"]').click();
       await tab.locator('#gmenu [data-input="enter"]').click();
-      await cached.locator('#grid[data-layout="split"]').waitFor();
+      await fresh.locator('#grid[data-layout="split"]').waitFor();
       await tab.keyboard.press('Escape');
       await box.fill('Enter sends again');
       const sentAgain = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/livesession/message');
@@ -205,7 +209,7 @@ const [base, emptyBase] = process.argv.slice(2);
       assert.deepEqual(lockedErrors, []);
       assert.deepEqual(locked.serviceWorkers(), []);
       await locked.close();
-      console.log('Storage ' + failure + ': hidden/visible frame layout, retained in-memory choice and actual send keys passed.');
+      console.log('Storage ' + failure + ': fresh-frame layout, retained shell choice and actual send keys passed.');
     }
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,5 +1,5 @@
 ---
-title: "P3: Reduce hidden cached-page overhead and make relative clocks visibility-aware"
+title: "P3: Remove the hidden session-iframe cache"
 sage-review-design: skipped
 sage-review-completeness: skipped
 related:
@@ -8,7 +8,7 @@ related:
   261116-bug-werkschaft-electron-high-resolution-lag-diagnostics: "native presentation hypothesis remains separate"
 ---
 
-# P3: Reduce hidden cached-page overhead and make relative clocks visibility-aware
+# P3: Remove the hidden session-iframe cache
 
 ## Background
 
@@ -135,7 +135,8 @@ Compatibility tier: **n/a** for private client scheduling/cache refactors with
 unchanged daemon protocol, persisted drafts and tracker/store shapes. Reassess
 if implementation proposes a persisted visibility or protocol contract.
 
-Owner-required outcome (2026-11-16): **one shared scheduler per document;
+Historical clock requirement (superseded by the 10:25 trace decision below):
+**one shared scheduler per document;
 only on-screen labels update; zero clock ticks in hidden iframes and hidden
 topics; refresh once on reveal; cadence coarsens with age (for example,
 per-second only below one minute).** A hidden guard that leaves a one-second
@@ -148,18 +149,13 @@ unrelated network/authority timers without their own analysis.
 Assignment authorized promotion with a light design check, not full Sage
 ceremony. Sanity check: preserve same-path hash navigation; save serializable
 session drafts synchronously before detach; discard superseded loading frames;
-ignore late messages/load events from detached frames. Use the existing
-whiteboard age asset for one document clock, including dashboard time labels;
-observe visible labels instead of walking every label on a timer. Propagate
-clipped visibility to opaque body frames using parent/source and document-key
-checks, preserving existing tooltip holds. Keep this private client state,
-without configuration, shared-store or daemon protocol changes.
+ignore late messages/load events from detached frames. The initially considered
+shared clock and clipped-visibility work was dropped after the 10:25 trace
+instruction below; no scheduler code remains. Keep cache teardown private client
+state, without configuration, shared-store or daemon protocol changes.
 
-Cadence keeps current label formats: second-level freshness below one minute,
-minute-level thereafter (older minute/hour/day age labels use their next actual
-boundary). Reveal refreshes once at the current time rather than replaying ticks.
-Render-transaction work, input-box work and Electron diagnostics stay outside
-this Phase 1.
+Existing clock behavior stays unchanged. Exposure/render-transaction work,
+input-box work and Electron diagnostics stay outside this Phase 1.
 
 Owner answer (2026-11-16 10:18), verbatim:
 
@@ -173,6 +169,26 @@ calling iframe.remove() would bypass it. Save serializable drafts synchronously
 before starting navigation. No hidden-frame exception, IndexedDB or new custom
 confirmation mechanism is selected.
 
+### Trace-driven scope correction — 2026-11-16 10:25
+
+Read the complete lead-supplied analysis at
+`C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac/review-paths/f2812641-01-perf-trace-analysis-20261116.md`.
+Owner Chrome trace A covered 14.46 seconds: main thread busy 13.18 seconds,
+584 layouts / 6.69 seconds, of which 449 / 5.81 seconds were forced inside JS.
+Board exposure checks accounted for 44% of busy main-thread time; one scroll
+rAF forced 45–140 document layouts, up to 2.41 seconds. The scroll-path board
+re-swap was 3.1 seconds inclusive. Those costs belong to the separate exposure
+phase of `261113-feat-ws-dashboard-frontend-performance-profile-and-optimize`.
+
+**Drop the shared clock scheduler from this ticket.** `tickTimes` cost only
+32 ms over the approximately 14-second trace; ago clocks were refuted as a
+material cost. TimerFire total was 371 ms including debounces. Hidden frames
+were approximately 0.5 seconds / 4% of busy time (three iframes): the cache was
+not the major lag source in this trace. Nevertheless, the owner's explicit
+09:58 cache-removal decision stands. Finish that change independently, do not
+claim it fixes the measured exposure bottleneck, and do not touch composer grow
+or slash/# enumeration (the latter was refuted by the trace).
+
 ## Open questions
 
 - What fresh-switch latency bound should Phase 2 target?
@@ -185,8 +201,8 @@ confirmation mechanism is selected.
 - Do not rebuild/restart the shared daemon; live acceptance needs the lead's
   arranged swap. One R1 review, fixes-only R2; no co-author commit trailer.
 - Preserve source/origin/key checks, draft format, written attachment refs,
-  literal clock formats, history and same-session hash routes. Cancel timers
-  on hidden/pagehide; do not pause unrelated network/authority timers here.
+  literal clock formats, history and same-session hash routes. Leave both clock
+  implementations and unrelated network/authority timers unchanged.
 - Read before implementation: ai-docs/manuals/shipped-surface-boundary.md and
   ai-docs/manuals/release-compatibility.md. Both read in the assigned worktree.
 - The initially open unpersistable-content decision was answered before
@@ -194,23 +210,24 @@ confirmation mechanism is selected.
 
 ## Phases
 
-### Phase 1: Remove the session cache and make visible-document clocks efficient
+### Phase 1: Remove the hidden session-iframe cache
 
 Destroy the previous session iframe on each switch and load the target fresh;
-remove the five-page cache and draft-holding cache exceptions. Resolve unsent
-work handling explicitly without retaining hidden session documents. Implement
-the required clock outcome within the visible session and its body/topic
-frames, measuring visits/writes and callbacks before/after with identical
-content and traffic. Integrate DOM swaps, folds, filters, pinned/adopted topics,
-viewport and opaque body visibility; unregister on unmount. Keep reveal catch-up
-to one refresh and preserve body-age holds.
+remove the five-page cache and draft-holding cache exceptions. Save text and
+other serializable drafts synchronously before switch. Preserve the existing
+native beforeunload guard for pasted images: a cancelled leave retains the
+current session; accepted teardown removes the old frame before loading its
+replacement. Preserve same-session hash navigation and ignore removed frames'
+late load/messages. Repeated and superseded loading targets must not accumulate
+frames. No new custom confirmation or persistence mechanism.
 
-Future acceptance asserts no retained previous-session iframe after switches,
-no accumulation across repeated switches, one clock scheduler per document,
-zero hidden clock callbacks, no hidden/off-screen label writes, one reveal
-refresh, coarse old-label cadence, correct visible ages and the settled unsent
-work behavior. Compare historical 1-versus-5-page resource evidence with the
-new fresh-session lifecycle without claiming it proves the Electron root cause.
+Acceptance: offline Node VM tests exercise these branches against actual shell
+source, including save-before-leave, cancellation/acceptance, repeated switches,
+fresh return to a previous session, rapid target replacement, hashes, source/
+origin checks and stale events. Scoped Go page/shell tests run remotely on w5090.
+Real browser native-confirm and restored-draft acceptance remain separately
+arranged by the lead, not inferred from VM mocks. Leave clock, exposure and
+composer source unchanged; make no Electron-root-cause or measured-lag fix claim.
 
 ### Phase 2: Measure and improve fresh session-switch load performance
 
