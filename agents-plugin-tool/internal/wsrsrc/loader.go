@@ -69,10 +69,31 @@ func LoadSkillBody(root, name string) (string, error) {
 	return body, nil
 }
 
-// Load loads a playbook by name from root, optionally selecting a harness
-// variant. If harness is non-empty and the overlay file exists
-// (<root>/<name>/<name>.<harness>.md), it is loaded; otherwise the base file
-// (<root>/<name>/<name>.md) is loaded.
+// ProfileNames lists the lead playbook profiles a caller may select, in
+// config order. A playbook-local file <stem>.<profile>.md is a profile
+// variant; any other <stem>.<suffix>.md is a harness overlay. "direct" is the
+// default profile: no shipped file carries its suffix, so selecting it reads
+// the base files.
+var ProfileNames = []string{"direct", "orchestrate"}
+
+// IsProfileName reports whether name is one of ProfileNames.
+func IsProfileName(name string) bool {
+	for _, profile := range ProfileNames {
+		if name == profile {
+			return true
+		}
+	}
+	return false
+}
+
+// Load loads a playbook by name from root, optionally selecting a profile
+// variant and a harness overlay. The playbook file and each playbook-local
+// include resolve in the same order: <stem>.<profile>.md when profile is set
+// and the file exists, then <stem>.<harness>.md when harness is set and the
+// file exists, then <stem>.md. Validate refuses a stem carrying both a profile
+// variant and a harness overlay, so the order never has to break a tie. The
+// flat <root>/<name>.md fallback and root-level includes have no variants.
+// profile must be "" or one of ProfileNames.
 //
 // Manifest schema-version and per-file hash integrity are verified for every
 // file loaded (playbook + includes). Any mismatch returns a typed error with
@@ -87,9 +108,12 @@ func LoadSkillBody(root, name string) (string, error) {
 //     {{.Name}} appears in the body must be present in vars, otherwise an
 //     ErrUnprovidedVar is returned. Declared variables not appearing in the body
 //     are silently ignored when absent from vars.
-func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, error) {
+func Load(root, name, harness, profile string, vars map[string]string) (LoadedPlaybook, error) {
 	if !isBareStem(name) {
 		return LoadedPlaybook{}, fmt.Errorf("invalid playbook name %q: must be a bare stem", name)
+	}
+	if profile != "" && !IsProfileName(profile) {
+		return LoadedPlaybook{}, fmt.Errorf("invalid playbook profile %q: must be one of %s", profile, strings.Join(ProfileNames, ", "))
 	}
 
 	// Read and validate manifest (schema-version checked inside ReadManifest).
@@ -99,7 +123,7 @@ func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, e
 	}
 
 	// Resolve the file path.
-	filePath, isOverlay, err := resolvePlaybookPath(root, name, harness)
+	filePath, variant, err := resolvePlaybookPath(root, name, harness, profile)
 	if err != nil {
 		return LoadedPlaybook{}, err
 	}
@@ -118,7 +142,7 @@ func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, e
 	meta := metaFromFrontmatter(fm)
 
 	// Resolve includes.
-	includeText, err := resolveIncludes(root, name, harness, meta.Includes, manifest)
+	includeText, err := resolveIncludes(root, name, harness, profile, meta.Includes, manifest)
 	if err != nil {
 		return LoadedPlaybook{}, err
 	}
@@ -136,16 +160,14 @@ func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, e
 		}
 	}
 
-	loadedHarness := ""
-	if isOverlay {
-		loadedHarness = harness
+	loaded := LoadedPlaybook{Name: name, Meta: meta, Body: fullBody}
+	switch variant {
+	case variantProfile:
+		loaded.Profile = profile
+	case variantHarness:
+		loaded.Harness = harness
 	}
-	return LoadedPlaybook{
-		Name:    name,
-		Harness: loadedHarness,
-		Meta:    meta,
-		Body:    fullBody,
-	}, nil
+	return loaded, nil
 }
 
 // LoadPart reads a playbook-local part, <root>/<playbook>/<part>.md, that the
@@ -170,19 +192,25 @@ func LoadPart(root, playbook, part string) (string, error) {
 	return strings.TrimSpace(body), nil
 }
 
-// resolvePlaybookPath returns (absoluteFilePath, isOverlay, error).
-// If harness is set and the overlay file exists, returns the overlay path.
-// Otherwise returns the base file path.
-func resolvePlaybookPath(root, name, harness string) (string, bool, error) {
+// fileVariant names which file a lookup selected.
+type fileVariant int
+
+const (
+	variantBase fileVariant = iota
+	variantProfile
+	variantHarness
+)
+
+// resolvePlaybookPath returns the playbook file to load and which variant it
+// is: the profile variant, else the harness overlay, else the base file (see
+// Load).
+func resolvePlaybookPath(root, name, harness, profile string) (string, fileVariant, error) {
 	dir := filepath.Join(root, name)
-	if harness != "" {
-		if !isBareStem(harness) {
-			return "", false, fmt.Errorf("invalid harness %q: must be a bare stem", harness)
-		}
-		overlayPath := filepath.Join(dir, name+"."+harness+".md")
-		if _, err := os.Stat(overlayPath); err == nil {
-			return overlayPath, true, nil
-		}
+	if harness != "" && !isBareStem(harness) {
+		return "", variantBase, fmt.Errorf("invalid harness %q: must be a bare stem", harness)
+	}
+	if path, variant, ok := variantPath(dir, name, harness, profile); ok {
+		return path, variant, nil
 	}
 	basePath := filepath.Join(dir, name+".md")
 	// Flat-playbook fallback: when no subdir playbook exists at
@@ -196,10 +224,28 @@ func resolvePlaybookPath(root, name, harness string) (string, bool, error) {
 	if _, err := os.Stat(basePath); err != nil {
 		flatPath := filepath.Join(root, name+".md")
 		if _, flatErr := os.Stat(flatPath); flatErr == nil {
-			return flatPath, false, nil
+			return flatPath, variantBase, nil
 		}
 	}
-	return basePath, false, nil
+	return basePath, variantBase, nil
+}
+
+// variantPath returns dir/<stem>.<profile>.md, else dir/<stem>.<harness>.md,
+// whichever exists first; ok is false when neither is set or exists.
+func variantPath(dir, stem, harness, profile string) (string, fileVariant, bool) {
+	for _, candidate := range []struct {
+		suffix  string
+		variant fileVariant
+	}{{profile, variantProfile}, {harness, variantHarness}} {
+		if candidate.suffix == "" {
+			continue
+		}
+		path := filepath.Join(dir, stem+"."+candidate.suffix+".md")
+		if _, err := os.Stat(path); err == nil {
+			return path, candidate.variant, true
+		}
+	}
+	return "", variantBase, false
 }
 
 func checkPlaybookExists(root, name, filePath string, manifest Manifest) error {
@@ -291,12 +337,13 @@ func metaFromFrontmatter(fm map[string]any) PlaybookMeta {
 // its own frontmatter, and returns the bodies joined by a blank line.
 //
 // Include resolution is playbook-local first:
+//   - <root>/<playbook>/<include>.<profile>.md
 //   - <root>/<playbook>/<include>.<harness>.md
 //   - <root>/<playbook>/<include>.md
 //   - <root>/<include>.md
 //
 // Includes are NOT recursively resolved. This avoids include cycles by design.
-func resolveIncludes(root, playbookName, harness string, names []string, manifest Manifest) (string, error) {
+func resolveIncludes(root, playbookName, harness, profile string, names []string, manifest Manifest) (string, error) {
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -305,7 +352,7 @@ func resolveIncludes(root, playbookName, harness string, names []string, manifes
 		if !isBareStem(name) {
 			return "", fmt.Errorf("include name %q must be a bare stem", name)
 		}
-		includePath, relPath := resolveIncludePath(root, playbookName, name, harness)
+		includePath, relPath := resolveIncludePath(root, playbookName, name, harness, profile)
 
 		data, err := loadAndVerify(root, includePath, manifest)
 		if err != nil {
@@ -318,13 +365,9 @@ func resolveIncludes(root, playbookName, harness string, names []string, manifes
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func resolveIncludePath(root, playbookName, includeName, harness string) (string, string) {
-	if harness != "" {
-		localOverlayRel := filepath.ToSlash(filepath.Join(playbookName, includeName+"."+harness+".md"))
-		localOverlayPath := filepath.Join(root, filepath.FromSlash(localOverlayRel))
-		if _, err := os.Stat(localOverlayPath); err == nil {
-			return localOverlayPath, localOverlayRel
-		}
+func resolveIncludePath(root, playbookName, includeName, harness, profile string) (string, string) {
+	if path, _, ok := variantPath(filepath.Join(root, playbookName), includeName, harness, profile); ok {
+		return path, filepath.ToSlash(filepath.Join(playbookName, filepath.Base(path)))
 	}
 
 	localRel := filepath.ToSlash(filepath.Join(playbookName, includeName+".md"))

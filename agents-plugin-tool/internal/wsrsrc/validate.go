@@ -14,7 +14,9 @@ import (
 //  2. All manifest-listed files exist on disk with matching hashes.
 //  3. All files in the tree are listed in the manifest (no unlisted files).
 //  4. Each subdirectory is treated as a playbook: its required base file
-//     (<name>/<name>.md) must exist.
+//     (<name>/<name>.md) must exist, and no file stem in it carries both a
+//     profile variant (<stem>.<profile>.md, see ProfileNames) and a harness
+//     overlay (<stem>.<harness>.md).
 //  5. For each playbook file (base and overlays):
 //     a. All declared includes resolve to a playbook-local or root-level file
 //     that exists in both the manifest and on disk.
@@ -106,6 +108,9 @@ func validatePlaybookDir(root, name string, manifest Manifest) error {
 	if err != nil {
 		return fmt.Errorf("read playbook dir %s: %w", dir, err)
 	}
+	if err := checkVariantConflicts(name, subEntries); err != nil {
+		return err
+	}
 	for _, sub := range subEntries {
 		if sub.IsDir() || !strings.HasSuffix(sub.Name(), ".md") {
 			continue
@@ -132,12 +137,17 @@ func validatePlaybookFile(root, playbookName, filePath string, manifest Manifest
 	meta := metaFromFrontmatter(fm)
 
 	// 5a. All declared includes must resolve to a manifest-listed file on disk.
-	harness := harnessFromPlaybookFilename(playbookName, filepath.Base(filePath))
+	harness, profile := "", ""
+	if suffix := harnessFromPlaybookFilename(playbookName, filepath.Base(filePath)); IsProfileName(suffix) {
+		profile = suffix
+	} else {
+		harness = suffix
+	}
 	for _, inc := range meta.Includes {
 		if !isBareStem(inc) {
 			return fmt.Errorf("playbook %q: include name %q must be a bare stem", playbookName, inc)
 		}
-		incPath, incRelPath := resolveIncludePath(root, playbookName, inc, harness)
+		incPath, incRelPath := resolveIncludePath(root, playbookName, inc, harness, profile)
 		if _, ok := manifest.Files[incRelPath]; !ok {
 			return fmt.Errorf("playbook %q: include %q (%q) is not listed in manifest", playbookName, inc, incRelPath)
 		}
@@ -156,6 +166,36 @@ func validatePlaybookFile(root, playbookName, filePath string, manifest Manifest
 	}
 	if err := scanUndeclaredVars(playbookName, body, declaredSet); err != nil {
 		return err
+	}
+	return nil
+}
+
+// checkVariantConflicts refuses a playbook directory in which one file stem
+// (the playbook or a playbook-local include) has both a profile variant and
+// a harness overlay: the lookup order (profile, harness, base) would hide the
+// harness overlay from every profile-selected load. A combined
+// <stem>.<profile>.<harness>.md matrix is not supported.
+func checkVariantConflicts(playbookName string, entries []os.DirEntry) error {
+	profiles := map[string]string{}
+	harnesses := map[string]string{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		stem, suffix, ok := strings.Cut(strings.TrimSuffix(entry.Name(), ".md"), ".")
+		if !ok || !isBareStem(suffix) || strings.Contains(suffix, ".") {
+			continue
+		}
+		if IsProfileName(suffix) {
+			profiles[stem] = entry.Name()
+		} else {
+			harnesses[stem] = entry.Name()
+		}
+	}
+	for stem, profileFile := range profiles {
+		if harnessFile, ok := harnesses[stem]; ok {
+			return fmt.Errorf("playbook %q: %q has both a profile variant (%s) and a harness overlay (%s); a stem may carry one or the other", playbookName, stem, profileFile, harnessFile)
+		}
 	}
 	return nil
 }

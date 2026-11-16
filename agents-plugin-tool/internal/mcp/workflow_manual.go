@@ -378,16 +378,26 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		}
 	}
 
-	body, _, err := printPlaybookForCaller(s, key, rsrcRoot, "lead-workflow-manual", nil, s.configOptions(), workflowLang, overrideLookup)
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: render playbook: %w", err))
-	}
 	knobResolver := s.sessionResolver(key, builtinConfigDefaults())
 	if canonical != "" {
 		knobAdapter := sessionConfigAdapter{s: s.sessions}
 		knobOpts := s.configOptions()
 		knobOpts.RepoRoot = canonical
 		knobResolver = wsconfig.NewResolver(knobOpts, builtinConfigDefaults(), knobAdapter, knobAdapter)
+	}
+	// FRESH mints a parent-less lead, so it selects the profile through the
+	// same resolver as the knobs below; any other key selects one only as a
+	// top-level lead (callerPlaybookProfile).
+	topLevelLead := key == freshBootstrapKey || (sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead()
+	profile := ""
+	if topLevelLead {
+		if profile, err = s.resolvedPlaybookProfile(&knobResolver, key); err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
+		}
+	}
+	body, _, err := printPlaybookForCaller(s, key, profile, rsrcRoot, "lead-workflow-manual", nil, s.configOptions(), workflowLang, overrideLookup)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: render playbook: %w", err))
 	}
 	whiteboardOn, err := s.whiteboardEnabled(&knobResolver, key)
 	if err != nil {
@@ -401,7 +411,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	// refuses their tools for any other key, so a spawned key (lead scope
 	// with a parent, or a leaf) reads the knob-off manual. FRESH mints a
 	// parent-less lead.
-	if key != freshBootstrapKey && !(sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
+	if !topLevelLead {
 		whiteboardOn, trackerOn = false, false
 	}
 	body, err = applyKnobVariants(s, rsrcRoot, workflowManualPlaybookName, body, whiteboardOn, trackerOn)

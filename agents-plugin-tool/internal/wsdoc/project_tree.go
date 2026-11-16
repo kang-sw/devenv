@@ -54,7 +54,7 @@ func ReadInfra(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve rsrc root: %w", err)
 	}
-	pb, err := wsrsrc.Load(root, stem, "", nil)
+	pb, err := wsrsrc.Load(root, stem, "", "", nil)
 	if err != nil {
 		return "", err
 	}

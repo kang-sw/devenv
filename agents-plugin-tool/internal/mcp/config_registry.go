@@ -6,6 +6,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // Shared enum value slices used by both the config.* tools() schema literals
@@ -23,6 +24,11 @@ var (
 	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "default"}
 	agentsTierScopeEnum   = []string{"project", "global"}
 )
+
+// profileEnum lists the workflow.profile values: the profile file suffixes
+// the rsrc loader selects (<name>.<profile>.md). No shipped file carries the
+// direct suffix, so direct reads the base playbooks.
+var profileEnum = wsrsrc.ProfileNames
 
 // configKeyEntry is the per-key config registry row: the single source of
 // truth for a config.* knob's value schema, harness/no-agent applicability,
@@ -136,6 +142,54 @@ func (e configKeyEntry) HarnessBucketed() bool {
 // stores values under, in listing order. "all" is the stored spelling of the
 // caller-facing "*" and applies to every harness.
 var harnessBuckets = []string{"claude", "codex", "pi", "all"}
+
+// orchestrateHarnessWhitelist is the set of harness names verified to support
+// the nested spawn chain lead -> sub-lead -> worker -> delegate -> explore that
+// the orchestrate profile runs. config.tune warns when workflow.profile
+// orchestrate is written for a harness outside it (orchestrateWhitelistWarning).
+// Seeded empty; a harness joins only after a probe completes the whole chain
+// and the deepest result returns to the lead.
+//
+// Probe record:
+//   - Claude Code 2.1.325, probed 2026-11-16: a level-1 and a level-2 subagent
+//     below the lead have the Agent tool, a level-3 subagent has none, so a
+//     worker's delegate cannot spawn explore. Stays off.
+//   - Pi: off by ws's own cap, not a host limit. wsagent.MaxSpawnDepth = 2
+//     (internal/wsagent/children.go) allows at most two levels below the lead,
+//     and the pi.spawn description states it (internal/mcp/pi_forward.go).
+//   - Codex CLI 0.160.0, probed 2026-11-16: at its defaults the chain stops
+//     at the third level below the lead ("collab spawn failed: agent thread
+//     limit reached"); with -c agents.max_threads=16 -c agents.max_depth=8
+//     the full chain completes and the deepest result returns to the lead,
+//     and agents.max_depth=8 alone still stops at the third level. Stays off
+//     until the chain completes at the host's defaults.
+//   - No other host probed.
+var orchestrateHarnessWhitelist = map[string]bool{}
+
+// orchestrateWhitelistWarning returns the one-line warning for writing
+// workflow.profile orchestrate into harnessBucket ("*" or "all" means every
+// harness bucket, a single name means that harness), or "" when every harness
+// the write covers is in orchestrateHarnessWhitelist.
+func orchestrateWhitelistWarning(harnessBucket string) string {
+	var off []string
+	for _, h := range harnessBuckets {
+		if h == "all" {
+			continue
+		}
+		covered := harnessBucket == "*" || harnessBucket == "all" || harnessBucket == h
+		if covered && !orchestrateHarnessWhitelist[h] {
+			off = append(off, h)
+		}
+	}
+	if len(off) == 0 {
+		return ""
+	}
+	verb, pron := "is", "it"
+	if len(off) > 1 {
+		verb, pron = "are", "them"
+	}
+	return fmt.Sprintf("warning: workflow.profile orchestrate is set for %s, which %s not verified to support nested subagent spawn (lead -> sub-lead -> worker -> delegate -> explore); sessions on %s may fail to run orchestrated flows.\n", strings.Join(off, ", "), verb, pron)
+}
 
 // harnessBucketKey is the stored key of key's value for one harness bucket;
 // the caller-facing "*" is stored as "all".
@@ -251,6 +305,34 @@ var configRegistry = []configKeyEntry{
 		NoAgentVisible:    true,
 		// A lead-only knob at every scope: it shapes the lead's own
 		// recording habit, so a write needs a lead session_key.
+		RequiresLeadAuthority: true,
+		ResolverBacked:        true,
+	},
+	{
+		Key:        wsconfig.ItemWorkflowProfile,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{
+			{
+				Name:        "harness",
+				Description: "Harness bucket the value applies to. When omitted, defaults to the current session's detected harness. Use * explicitly for every harness (all).",
+				Enum:        promptHarnessEnum,
+			},
+			{
+				Name:        "scope",
+				Description: "Storage scope. When omitted the write lands in the item's declared default scope (global).",
+				Enum:        wsconfig.ScopeSchemaEnum(),
+			},
+		},
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Desired profile: direct or orchestrate. Omit when reset is true.",
+			Enum:        profileEnum,
+		}},
+		HarnessApplicable: true,
+		NoAgentVisible:    true,
+		// A lead-only knob at every scope: it shapes the lead's own
+		// playbooks, so a write needs a lead session_key.
 		RequiresLeadAuthority: true,
 		ResolverBacked:        true,
 	},
