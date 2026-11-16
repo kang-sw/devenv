@@ -158,6 +158,34 @@ func (s *hireRecoverySource) ReadSession(reg Registration) (SessionData, bool, e
 	return SessionData{}, true, nil
 }
 
+func TestHireStartupUnrelatedCorruptRegistrationDoesNotBlockReplay(t *testing.T) {
+	f := startPageFixture(t, hireRegistryFixture)
+	enableHiring(t, f.d, "livesession")
+	p := requestHiring(t, f.d, "livesession")
+	f.d.Close()
+	p.Launch = &HireLaunch{Harness: "claude"}
+	if err := f.d.saveHires([]HireProposal{p}); err != nil {
+		t.Fatal(err)
+	}
+	badDir := SessionDir(f.dir, "unrelated")
+	if err := os.MkdirAll(badDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, registrationFileName), []byte("{corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.d.index = NewIndex(IndexOptions{Dir: f.dir, Source: &hireRecoverySource{}})
+	// A safety sweep keeps encountering the corrupt unrelated registration.
+	for range 2 {
+		f.d.index.Refresh()
+	}
+	f.d.settleHires()
+	proposals, err := f.d.readHires()
+	if err != nil || len(proposals) != 1 || proposals[0].Status != "approved" || f.d.agents.(*hireFake).created != 1 {
+		t.Fatalf("unrelated registration blocked approval replay: %+v %v", proposals, err)
+	}
+}
+
 func TestHireStartupPartialIndexRetainsApprovalJournal(t *testing.T) {
 	for _, failure := range []string{"requester-source", "parent-source", "parent-registration"} {
 		t.Run(failure, func(t *testing.T) {
@@ -192,7 +220,7 @@ func TestHireStartupPartialIndexRetainsApprovalJournal(t *testing.T) {
 			}
 			f.d.index = NewIndex(IndexOptions{Dir: f.dir, Source: source})
 			f.d.index.Refresh()
-			if !f.d.index.Loaded() || f.d.index.hierarchyReady(p.Requester) {
+			if !f.d.index.Loaded() || f.d.hireHierarchyReady(p.Requester) {
 				t.Fatal("partial refresh supplied hierarchy authority")
 			}
 			f.d.settleHires()
@@ -205,7 +233,7 @@ func TestHireStartupPartialIndexRetainsApprovalJournal(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.d.index.Refresh()
-			if !f.d.index.hierarchyReady(p.Requester) {
+			if !f.d.hireHierarchyReady(p.Requester) {
 				t.Fatal("complete refresh did not recover authority")
 			}
 			f.d.settleHires()

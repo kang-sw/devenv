@@ -151,6 +151,30 @@ func (d *Daemon) hireParent(replyID string) string {
 	return scope.parent(replyID)
 }
 
+// Read the stored links before layout projection drops unreadable parents.
+// Readiness follows only this requester's chain, never the whole registry.
+func (d *Daemon) hireHierarchyReady(replyID string) bool {
+	if !d.index.hierarchyReady(replyID) {
+		return false
+	}
+	doc, _ := d.layout.current()
+	chain := []string{replyID}
+	seen := map[string]bool{replyID: true}
+	for i := 0; i < len(chain); i++ {
+		for _, ws := range doc.Workspaces {
+			for parent, children := range ws.Children {
+				for _, child := range children {
+					if child == chain[i] && !seen[parent] {
+						seen[parent] = true
+						chain = append(chain, parent)
+					}
+				}
+			}
+		}
+	}
+	return d.index.hierarchyReady(replyID, chain[1:]...)
+}
+
 // RequestHire is called only after the MCP server authenticates a top-level
 // lead key. There is no model-facing flag setter or approval operation.
 func (d *Daemon) RequestHire(replyID string, request HireRequest) (HireProposal, error) {
@@ -303,7 +327,7 @@ func (d *Daemon) settleHiresDeadlineLocked(proposals []HireProposal) (time.Time,
 			case p.Launch != nil:
 				// Startup recovery now runs immediately. Do not replay an
 				// approval before the index supplies the hierarchy authority.
-				if !d.index.hierarchyReady(p.Requester) {
+				if !d.hireHierarchyReady(p.Requester) {
 					arm(d.hireClock().Add(hireRetry))
 					break
 				}
