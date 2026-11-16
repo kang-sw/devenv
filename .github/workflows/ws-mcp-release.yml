@@ -20,6 +20,11 @@ on:
         description: "Version to embed in ws-mcp binaries, for example 0.50.1-dev"
         required: false
         default: "0.50.1-dev"
+      desktop_dry_run:
+        description: "Build both desktop zips as workflow artifacts only; never publish a release"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -134,7 +139,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -176,3 +181,156 @@ jobs:
           $exe = Resolve-Path ".\dist\ws-mcp-windows-amd64.exe"
           $root = Resolve-Path ".."
           & $exe smoke --root $root
+
+  desktop-build:
+    name: Desktop (${{ matrix.platform }}, ${{ matrix.arch }})
+    needs: build
+    # Keep ordinary PR/manual native-only builds unchanged. A tag ships desktop;
+    # an explicit dry run builds identical archives but cannot publish anything.
+    if: startsWith(github.ref, 'refs/tags/') || inputs.desktop_dry_run
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+            binary: ws-mcp-darwin-arm64
+            shell: bash
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            binary: ws-mcp-windows-amd64.exe
+            shell: pwsh
+    defaults:
+      run:
+        working-directory: agents-plugin-tool/desktop-electron
+        shell: ${{ matrix.shell }}
+    env:
+      # Explicit targets also work if GitHub changes the macOS runner CPU.
+      npm_config_platform: ${{ matrix.platform }}
+      npm_config_arch: ${{ matrix.arch }}
+      DESKTOP_PLATFORM: ${{ matrix.platform }}
+      DESKTOP_ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: agents-plugin-tool/desktop-electron/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download the release build's binaries and metadata
+        uses: actions/download-artifact@v5
+        with:
+          name: ws-mcp-assets
+          path: ${{ runner.temp }}/ws-mcp-assets
+
+      # Networked prerequisites are explicit and lockfile/version pinned. The
+      # subsequent package build only reads the cache; it never runs Electron.
+      - name: Install pinned desktop build dependencies and Electron zip
+        env:
+          # The installer's cacheRoot and build.cjs must agree.
+          electron_config_cache: ${{ runner.temp }}/electron-cache
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node node_modules/electron/install.js
+
+      - name: Assemble the wsflow daemon input without executing it
+        run: >-
+          node scripts/assemble-daemon-input.cjs
+          --binary "${{ runner.temp }}/ws-mcp-assets/${{ matrix.binary }}"
+          --out "${{ runner.temp }}/desktop-daemon-input"
+          --platform "${{ matrix.platform }}" --package wsflow
+
+      - name: Package unsigned desktop app and archive without launching it
+        env:
+          ELECTRON_CACHE: ${{ runner.temp }}/electron-cache
+          WERKSCHAFT_DAEMON_INPUT: ${{ runner.temp }}/desktop-daemon-input
+        run: >-
+          node -e "require('./scripts/build.cjs').build({ platform: process.env.DESKTOP_PLATFORM,
+          arch: process.env.DESKTOP_ARCH }).catch(error => { console.error(error); process.exitCode = 1; })"
+
+      - name: Upload platform desktop archive and checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            agents-plugin-tool/desktop-electron/dist/Werkschaft-${{ matrix.platform }}-${{ matrix.arch }}.zip
+            agents-plugin-tool/desktop-electron/dist/Werkschaft-desktop-SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+
+  desktop-release:
+    name: Verify and publish desktop assets
+    needs: desktop-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Download both desktop artifacts without overwriting their SUMS
+        uses: actions/download-artifact@v5
+        with:
+          pattern: desktop-*
+          path: ${{ runner.temp }}/desktop-platforms
+          merge-multiple: false
+
+      - name: Verify archives and write combined updater checksums
+        env:
+          INPUT: ${{ runner.temp }}/desktop-platforms
+          OUTPUT: ${{ runner.temp }}/desktop-release
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const { assetName, parseSums, SUMS } = require('./agents-plugin-tool/desktop-electron/update');
+          fs.mkdirSync(process.env.OUTPUT);
+          const lines = [];
+          for (const [platform, arch] of [['darwin', 'arm64'], ['win32', 'x64']]) {
+            const source = path.join(process.env.INPUT, `desktop-${platform}-${arch}`);
+            const name = assetName(platform, arch);
+            const bytes = fs.readFileSync(path.join(source, name));
+            const hash = crypto.createHash('sha256').update(bytes).digest('hex');
+            const sums = parseSums(fs.readFileSync(path.join(source, SUMS), 'utf8'));
+            if (sums.size !== 1 || sums.get(name) !== hash) throw new Error(`Invalid checksum for ${name}`);
+            fs.writeFileSync(path.join(process.env.OUTPUT, name), bytes);
+            lines.push(`${hash}  ${name}`);
+          }
+          fs.writeFileSync(path.join(process.env.OUTPUT, SUMS), lines.join('\n') + '\n');
+          NODE
+
+      # Retain the same combined payload on tags and dry runs. Only tags may
+      # reach the publishing step below, and the explicit dry-run veto wins.
+      - name: Upload combined desktop workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: werkschaft-desktop-assets
+          path: ${{ runner.temp }}/desktop-release/*
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Publish desktop assets to the native assets' tag release
+        if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/desktop-release/"* --repo "$GITHUB_REPOSITORY" --clobber
