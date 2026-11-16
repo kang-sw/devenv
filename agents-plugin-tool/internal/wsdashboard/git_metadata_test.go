@@ -119,25 +119,32 @@ func TestGitMetadataLinkedPointersRefsIndexAndWorktrees(t *testing.T) {
 
 type gitMetadataInfo struct {
 	fs.FileInfo
-	size int64
+	size    int64
+	modTime time.Time
 }
 
-func (i gitMetadataInfo) Size() int64 { return i.size }
+func (i gitMetadataInfo) Size() int64        { return i.size }
+func (i gitMetadataInfo) ModTime() time.Time { return i.modTime }
 
-func TestGitMetadataIgnoresUndefinedDirectorySize(t *testing.T) {
+func TestGitMetadataIgnoresDirectorySizeAndTime(t *testing.T) {
 	info, err := os.Stat(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	stamp := func(size int64) string {
+	stamp := func(size int64, at time.Time) string {
 		var b bytes.Buffer
-		writeGitMetadata(&b, "refs", gitMetadataInfo{FileInfo: info, size: size})
+		writeGitMetadata(&b, "refs", gitMetadataInfo{FileInfo: info, size: size, modTime: at})
 		return b.String()
 	}
-	// Windows directory enumeration exposes EndOfFile, which is undefined
-	// for directories. Inject differing values without changing the entry.
-	if stamp(0) != stamp(0x123456789) {
+	before := time.Unix(1700000000, 0)
+	after := before.Add(time.Second)
+	// Directory enumeration can expose irrelevant size/timestamp drift;
+	// neither changes the children that the probe fingerprints separately.
+	if stamp(0, before) != stamp(0x123456789, before) {
 		t.Fatal("undefined directory size changed the metadata hint")
+	}
+	if stamp(0, before) != stamp(0, after) {
+		t.Fatal("directory timestamp changed the metadata hint")
 	}
 	file := filepath.Join(t.TempDir(), "HEAD")
 	if err := os.WriteFile(file, []byte("ref: refs/heads/main"), 0o600); err != nil {
@@ -147,8 +154,55 @@ func TestGitMetadataIgnoresUndefinedDirectorySize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stamp(1) == stamp(2) {
+	if stamp(1, before) == stamp(2, before) {
 		t.Fatal("regular file size no longer changes the hint")
+	}
+	if stamp(1, before) == stamp(1, after) {
+		t.Fatal("regular file timestamp no longer changes the hint")
+	}
+}
+
+func TestGitMetadataDirectoryTimesAndEntries(t *testing.T) {
+	root := t.TempDir()
+	admin := filepath.Join(root, ".git")
+	refs := filepath.Join(admin, "refs")
+	heads := filepath.Join(refs, "heads")
+	if err := os.MkdirAll(heads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(admin, "HEAD"), []byte("ref: refs/heads/main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stamp := func() string {
+		t.Helper()
+		got, err := gitMetadataStamp(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	previous := stamp()
+	for _, dir := range []string{admin, refs, heads} {
+		at := time.Unix(1700000000, 0)
+		if err := os.Chtimes(dir, at, at); err != nil {
+			t.Fatal(err)
+		}
+		if stamp() != previous {
+			t.Fatalf("directory timestamp changed the hint: %s", filepath.Base(dir))
+		}
+	}
+	empty := filepath.Join(heads, "empty")
+	if err := os.Mkdir(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if stamp() == previous {
+		t.Fatal("directory creation missed")
+	}
+	if err := os.Remove(empty); err != nil {
+		t.Fatal(err)
+	}
+	if stamp() != previous {
+		t.Fatal("directory deletion did not restore the original hint")
 	}
 }
 
