@@ -1623,6 +1623,10 @@ func (c *conv) loop() {
 			c.spawnDirty = true
 			c.live.writeSnapshot()
 			c.changed(false)
+			if c.idleNow() {
+				c.armIdle()
+				c.restartIfDue()
+			}
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
@@ -1632,7 +1636,7 @@ func (c *conv) loop() {
 		case <-idleC:
 			c.idle = nil
 			if c.idleNow() {
-				c.stopProcess("")
+				c.stopProcess("idle_timeout")
 			}
 		case <-actionC:
 			c.actionTimer = nil
@@ -3296,7 +3300,7 @@ func (c *conv) releaseHolder(proc Process) {
 }
 
 // stopProcess ends the process, if any; a running turn ends with it.
-func (c *conv) stopProcess(string) {
+func (c *conv) stopProcess(reason string) {
 	c.stopIdle()
 	if c.proc == nil {
 		return
@@ -3306,6 +3310,25 @@ func (c *conv) stopProcess(string) {
 	_ = proc.Close()
 	c.setStatus(func() { c.proc = nil })
 	c.releaseHolder(proc)
+	// Close waits for the holder manager's exit write. Record the runner's
+	// intent afterwards: EOF may otherwise look like a plain child exit.
+	if reason != "" && c.rec.Lead && c.rec.HostPID == 0 {
+		if unlock, ok := c.lockRow(); ok {
+			reg, err := wsdashboard.ReadRegistration(c.r.opts.Dir, c.rec.ReplyID)
+			if err == nil {
+				reg.HostExitReason = reason
+				reg.HostStoppedAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+				err = wsdashboard.WriteRegistration(c.r.opts.Dir, reg)
+			}
+			unlock()
+			if err != nil {
+				fmt.Fprintf(c.r.opts.Log, "agent %s: record stop reason: %v\n", c.rec.ReplyID, err)
+			}
+		}
+	}
+	if reason != "" {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: process stopped: %s\n", c.rec.ReplyID, reason)
+	}
 	c.replaying, c.replayAsked = false, false
 	c.processEnded()
 }
@@ -3345,11 +3368,38 @@ func (c *conv) finishLine() {
 	}
 }
 
-// idleNow reports whether the idle timer may stop the process: no turn
-// runs and the harness reports no background task, whose work a stop would
-// end.
+// idleNow reports whether the idle timer may stop the process. Read child
+// state here too: a spawn notification may still be queued when the timer fires.
 func (c *conv) idleNow() bool {
-	return !c.turn && !c.replaying && c.bgTasks == 0
+	if c.turn || c.replaying || c.bgTasks != 0 {
+		return false
+	}
+	kind := ParentConversation
+	if c.rec.Lead {
+		kind = ParentLead
+	}
+	parent := ParentRef{Kind: kind, ReplyID: c.rec.ReplyID}
+	c.r.mu.Lock()
+	children := make([]*conv, 0, len(c.r.convs))
+	for _, child := range c.r.convs {
+		if child != c {
+			children = append(children, child)
+		}
+	}
+	c.r.mu.Unlock()
+	for _, child := range children {
+		child.mu.Lock()
+		// Send coverage protects initial queuing, but not input retained
+		// for retry after a settled launch failure. A held result still
+		// waits for the child's own descendants.
+		active := !child.closed && child.rec.Parent != nil && *child.rec.Parent == parent &&
+			(child.turn || child.holding || child.sends > max(child.settled.mark, child.voided))
+		child.mu.Unlock()
+		if active {
+			return false
+		}
+	}
+	return true
 }
 
 // checkInterrupt takes the inbox's interrupt requests and interrupts the

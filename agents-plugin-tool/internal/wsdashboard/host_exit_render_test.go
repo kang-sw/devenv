@@ -33,6 +33,7 @@ func TestHostedExitRows(t *testing.T) {
 		want, absent    []string
 	}{
 		{name: "zero", hosted: true, stopped: true, code: &zero, reason: "finished <ok>", stamp: "2026-01-02T03:04:05Z", want: []string{"Stopped", "exit code 0", "finished &lt;ok&gt;", "2026-01-02T03:04:05Z"}},
+		{name: "idle", hosted: true, stopped: true, code: &zero, reason: "idle_timeout", want: []string{"idle · Stopped", "idle_timeout"}, absent: []string{"child_exited"}},
 		{name: "failure", hosted: true, stopped: true, code: &failure, want: []string{"Stopped", "exit code 17"}},
 		{name: "signal", hosted: true, stopped: true, signal: &signal, want: []string{"Stopped", "signal 15"}, absent: []string{"exit code"}},
 		{name: "both", hosted: true, stopped: true, code: &zero, signal: &signal, want: []string{"exit code 0", "signal 15"}},
