@@ -1,0 +1,107 @@
+{
+  "shape": "8,6,4,2,60",
+  "measures": [
+    {
+      "bytes": 2944407,
+      "handlerMs": 217.88
+    },
+    {
+      "bytes": 2944407,
+      "handlerMs": 112.254
+    },
+    {
+      "bytes": 2944407,
+      "handlerMs": 22.082
+    },
+    {
+      "bytes": 2944407,
+      "handlerMs": 5.158
+    },
+    {
+      "bytes": 2944407,
+      "handlerMs": 16.278
+    }
+  ],
+  "htmlBytes": 2944449,
+  "assets": [
+    {
+      "url": "/s/dashboard-e030166ce244f3462e30b7f3.js",
+      "status": 200,
+      "bytes": 627928,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "url": "/s/wb-frame-f63565a143cc.css",
+      "status": 200,
+      "bytes": 91689,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/css; charset=utf-8"
+    },
+    {
+      "url": "/s/wb-frame-6feebc3f6d09.js",
+      "status": 200,
+      "bytes": 54018,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    }
+  ],
+  "initialWire": [
+    {
+      "event": "assets",
+      "bytes": 51
+    },
+    {
+      "event": "region",
+      "name": "rail",
+      "bytes": 8693
+    },
+    {
+      "event": "assets",
+      "bytes": 51
+    },
+    {
+      "event": "region",
+      "name": "mode",
+      "bytes": 81
+    },
+    {
+      "event": "region",
+      "name": "tree",
+      "bytes": 1653
+    },
+    {
+      "event": "region",
+      "name": "entries",
+      "bytes": 538
+    },
+    {
+      "event": "region",
+      "name": "board",
+      "bytes": 1736551
+    },
+    {
+      "event": "region",
+      "name": "panels",
+      "bytes": 79
+    },
+    {
+      "event": "region",
+      "name": "git",
+      "bytes": 458
+    }
+  ],
+  "updateWire": [
+    {
+      "event": "region",
+      "name": "head",
+      "bytes": 1594
+    },
+    {
+      "event": "board-topics",
+      "bytes": 146998
+    }
+  ],
+  "reconnects": 0,
+  "errors": []
+}

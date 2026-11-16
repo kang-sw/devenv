@@ -155,7 +155,7 @@ func TestTerminalsAreOfferedToALocalViewerOnly(t *testing.T) {
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	attr := ` data-term="` + name + `"`
 	const style = ".xterm .xterm-viewport"
-	if page := serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); !strings.Contains(page, attr) || !strings.Contains(page, style) {
+	if page := frameDependencies(t, serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String()); !strings.Contains(page, attr) || !strings.Contains(page, style) {
 		t.Errorf("a local viewer's page lacks the terminal offer (%s) or the emulator's stylesheet", attr)
 	}
 	if page := serve(f.d, lan, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, "data-term=") || strings.Contains(page, style) || !strings.Contains(page, `data-rid="livesession"`) {
@@ -200,7 +200,7 @@ func TestTerminalSymbolsFont(t *testing.T) {
 	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	face := `@font-face { font-family: "` + termSymbolsFamily + `"; src: url("/s/` + name + `") format("woff2"); font-display: swap; }`
-	if page := serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); !strings.Contains(page, face) {
+	if page := frameDependencies(t, serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String()); !strings.Contains(page, face) {
 		t.Errorf("a local viewer's page lacks the symbols font face %s", face)
 	}
 	if page := serve(f.d, lan, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, termSymbolsFamily) {

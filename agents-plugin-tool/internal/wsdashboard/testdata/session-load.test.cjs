@@ -193,8 +193,9 @@ test('framed main script uses one shared content-addressed static request', () =
   const pages = fs.readFileSync(path.join(root, 'pages.go'), 'utf8');
   const template = read('wsdashboard', 'dashboard.tmpl');
   assert.match(template, /\{\{if \.Frame\}\}<script src="\/s\/\{\{\.Assets.ScriptFile\}\}"><\/script>\{\{else\}\}<script>\{\{\.Assets.Script\}\}/);
-  assert.match(pages, /sha256.Sum256\(\[\]byte\(a.data.Script\)\)/);
-  assert(pages.includes('rest != a.data.ScriptFile'));
+  const assets = fs.readFileSync(path.join(root, 'frame_assets.go'), 'utf8');
+  assert(assets.includes('d.ScriptFile = add(string(d.Script), "js")'));
+  assert(pages.includes('file, ok := a.files[rest]'));
   new vm.Script(read('wsdashboard', 'dashboard.js'));
   const lifecycle = read('wsdashboard', 'dashboard-lifecycle.js');
   assert(lifecycle.indexOf('wsSaveSessionView();') < lifecycle.indexOf('location.replace("about:blank")'));

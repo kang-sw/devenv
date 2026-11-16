@@ -79,7 +79,7 @@ func TestWebCardScriptRidesOnlyALocalViewersPage(t *testing.T) {
 	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	const kind = "window.WsWeb = {"
-	page := serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String()
+	page := frameDependencies(t, serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String())
 	cardsAt, at := strings.Index(page, "window.WsCards = {"), strings.Index(page, kind)
 	scriptAt := strings.Index(page, `<script src="/s/dashboard-`)
 	script := mustAsset(t, "dashboard.js")
@@ -92,7 +92,7 @@ func TestWebCardScriptRidesOnlyALocalViewersPage(t *testing.T) {
 			t.Errorf("the session page lacks the web card's %s icon", icon)
 		}
 	}
-	if page := serve(f.d, lan, "GET", "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, kind) || !strings.Contains(page, "window.WsCards = {") {
+	if page := frameDependencies(t, serve(f.d, lan, "GET", "/s/livesession?frame=1", "").Body.String()); strings.Contains(page, kind) || !strings.Contains(page, "window.WsCards = {") {
 		t.Error("a LAN viewer's page carries the web card kind")
 	}
 }
