@@ -399,7 +399,18 @@ func TestPiProbeCacheConfigIdentityAndAbsences(t *testing.T) {
 			if change == "relative" {
 				// Temp and checkout can be on different Windows drives. Keep
 				// both spellings relative to a cwd on the fixture's own volume.
-				t.Chdir(f.root)
+				previous, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chdir(f.root); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := os.Chdir(previous); err != nil {
+						t.Error(err)
+					}
+				})
 			}
 			f.probe()
 			oldModels, oldVersion := f.cache("models").path, f.cache("version").path
