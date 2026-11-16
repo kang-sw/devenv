@@ -21,7 +21,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   delete require.cache[require.resolve('../main')];
   const { start } = require('../main');
   controller.connectDaemon = original;
-  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: false, getPath: () => roots.userData || userData, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: !!roots.packaged, getPath: () => roots.userData || userData, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
   let focusedContents = null;
   const renderers = [];
   class Base extends EventEmitter {
@@ -62,6 +62,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
         loadURL: async url => { this.loads.push(url); this.currentURL = url; loaded(url); },
         loadFile: async file => { this.loads.push(file); this.currentURL = file; loaded(pathToFileURL(file).href); },
         setZoomFactor: zoom => { this.zoom = zoom; },
+        toggleDevTools: () => { this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
         executeJavaScript: async script => { this.themeScript = script; return null; },
         focus: () => { focusedContents = this.webContents; },
         isFocused: () => focusedContents === this.webContents,
@@ -103,7 +104,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     focusedContents: () => focusedContents, clearFocus: () => { focusedContents = null; },
     dismissMenu: () => { const callback = menuCallback; menuCallback = null; callback(); },
     onDialog: fn => { onDialog = fn; },
-    menus, session: session.defaultSession, opened, choose: n => { response = n; } };
+    menus, template, session: session.defaultSession, opened, choose: n => { response = n; } };
 }
 test('native window, menus, authority, close veto and single-instance focus', async () => {
   const f = await fixture(), w = f.window;
@@ -515,6 +516,47 @@ test('platform switch keeps native construction on macOS/Linux and isolates Wind
     wc.emit('destroyed');
     assert(completed);
   }
+});
+test('Developer Tools menu targets dashboard contents in packaged and unpackaged layouts', async () => {
+  const update = require('../update'), original = update.createUpdater;
+  update.createUpdater = () => ({ applyOnLaunch: () => false, schedule() {} });
+  try {
+    for (const platform of ['darwin', 'linux', 'win32']) {
+      for (const packaged of [false, true]) {
+        const f = await fixture(undefined, platform, { packaged });
+        const dashboard = f.views[0] || f.window;
+        assert(f.template.find(item => item.label === 'View').submenu.includes(f.menus.devtools));
+        assert.equal(f.menus.devtools.label, 'Toggle Developer Tools');
+        assert.equal(f.menus.devtools.accelerator, platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I');
+        f.menus.devtools.click();
+        assert.equal(dashboard.devtoolsToggles, 1);
+        if (platform === 'win32') assert.equal(f.views[1].devtoolsToggles, undefined);
+      }
+    }
+  } finally { update.createUpdater = original; }
+});
+test('Windows F12 targets dashboard from either view without breaking bare Alt', async () => {
+  const f = await fixture(undefined, 'win32'), [dashboard, bar] = f.views;
+  for (const [index, view] of [dashboard, bar].entries()) {
+    const input = (key, type, modifiers = {}) => {
+      let prevented = false;
+      view.webContents.emit('before-input-event', { preventDefault() { prevented = true; } }, { key, type, ...modifiers });
+      return prevented;
+    };
+    assert.equal(input('F12', 'keyDown'), true);
+    assert.equal(input('F12', 'keyUp'), false);
+    assert.equal(input('F12', 'keyDown', { control: true }), false);
+    assert.equal(input('Alt', 'keyDown'), true);
+    assert.equal(input('F12', 'keyDown', { alt: true }), false);
+    assert.equal(input('Alt', 'keyUp'), false);
+    assert.equal(f.popups(), index);
+    assert.equal(input('Alt', 'keyDown'), true);
+    assert.equal(input('Alt', 'keyUp'), true);
+    f.dismissMenu();
+  }
+  assert.equal(dashboard.devtoolsToggles, 2);
+  assert.equal(bar.devtoolsToggles, undefined);
+  assert.equal(f.popups(), 2);
 });
 test('Windows startup focuses the dashboard and bare Alt routes through focused contents without a click', async () => {
   for (const unavailable of [false, true]) {
