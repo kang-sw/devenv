@@ -108,6 +108,57 @@ function forkValidationSchema(schema: unknown): unknown {
   return result;
 }
 
+function schemaRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function schemaPath(parent: string, key: string): string {
+  return `${parent}/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+}
+
+/**
+ * Directional call-shape check: runtime may add optional properties and drop
+ * requirements, recursively through existing properties. Other keywords stay
+ * exact after prose stripping. This cannot detect handler semantic changes.
+ */
+function forkSchemaMismatch(captured: unknown, runtime: unknown, path = "/parameters"): string | undefined {
+  if (isDeepStrictEqual(captured, runtime)) return undefined;
+  if (!schemaRecord(captured) || !schemaRecord(runtime)) return `${path}: changed`;
+
+  const oldRequired = captured.required === undefined ? [] : captured.required;
+  const newRequired = runtime.required === undefined ? [] : runtime.required;
+  if (!Array.isArray(oldRequired) || !Array.isArray(newRequired) ||
+      !oldRequired.every(name => typeof name === "string") || !newRequired.every(name => typeof name === "string")) {
+    return `${path}/required: invalid requirements`;
+  }
+  for (const name of newRequired) {
+    if (!oldRequired.includes(name)) return `${schemaPath(`${path}/required`, name)}: new required property`;
+  }
+
+  const oldProperties = captured.properties === undefined ? {} : captured.properties;
+  const newProperties = runtime.properties === undefined ? {} : runtime.properties;
+  if (!schemaRecord(oldProperties) || !schemaRecord(newProperties)) return `${path}/properties: changed`;
+  for (const [name, schema] of Object.entries(oldProperties)) {
+    const propertyPath = schemaPath(`${path}/properties`, name);
+    if (!Object.prototype.hasOwnProperty.call(newProperties, name)) return `${propertyPath}: missing runtime property`;
+    const mismatch = forkSchemaMismatch(schema, newProperties[name], propertyPath);
+    if (mismatch) return mismatch;
+  }
+  for (const name of Object.keys(newProperties)) {
+    if (!Object.prototype.hasOwnProperty.call(oldProperties, name) && newRequired.includes(name)) {
+      return `${schemaPath(`${path}/properties`, name)}: added required property`;
+    }
+  }
+  for (const key of new Set([...Object.keys(captured), ...Object.keys(runtime)])) {
+    if (key === "required" || key === "properties") continue;
+    if (!isDeepStrictEqual(captured[key], runtime[key]) ||
+        Object.prototype.hasOwnProperty.call(captured, key) !== Object.prototype.hasOwnProperty.call(runtime, key)) {
+      return `${schemaPath(path, key)}: changed`;
+    }
+  }
+  return undefined;
+}
+
 /** Compatibility comparison, retaining the parent-captured order in every result list. */
 export interface ForkRegistrationComparison {
   missing: ForkToolDefinition[];
@@ -121,14 +172,13 @@ export function classifyForkRegistrations(expected: readonly ForkToolDefinition[
   const actualByName = new Map(actual.map((tool) => [tool.name, tool]));
   const missing = expected.filter((tool) => !actualByName.has(tool.name));
   const extra = actual.filter((tool) => !expectedNames.has(tool.name));
-  const changed = expected
-    .filter((tool) => {
-      const registered = actualByName.get(tool.name);
-      // The runtime keeps its current metadata; wording drift is not a broken
-      // call contract. Schema/constraint changes remain fail-closed.
-      return registered !== undefined && !isDeepStrictEqual(forkValidationSchema(tool.parameters), forkValidationSchema(registered.parameters));
-    })
-    .map((tool) => tool.name);
+  const changed = expected.flatMap((tool) => {
+    const registered = actualByName.get(tool.name);
+    if (!registered) return [];
+    // Compare only; the child retains its actual runtime registration.
+    const mismatch = forkSchemaMismatch(forkValidationSchema(tool.parameters), forkValidationSchema(registered.parameters));
+    return mismatch ? [`${tool.name} (${mismatch})`] : [];
+  });
   const expectedCommonOrder = expected.filter((tool) => actualByName.has(tool.name)).map((tool) => tool.name);
   const actualCommonOrder = actual.filter((tool) => expectedNames.has(tool.name)).map((tool) => tool.name);
   const reordered = JSON.stringify(expectedCommonOrder) !== JSON.stringify(actualCommonOrder);
@@ -144,7 +194,7 @@ export function formatForkRegistrationMismatch(comparison: ForkRegistrationCompa
   return parts.length ? parts.join("; ") : undefined;
 }
 
-/** Exact callable order and validation schema, ignoring descriptions and object key order; no schema replay. */
+/** Preserve callable order; tolerate prose and compatible object-schema additions without replacing registrations. */
 export function compareForkRegistrations(expected: readonly ForkToolDefinition[], actual: readonly ForkToolDefinition[]): string | undefined {
   return formatForkRegistrationMismatch(classifyForkRegistrations(expected, actual));
 }
