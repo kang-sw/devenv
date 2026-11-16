@@ -246,6 +246,89 @@ since both touch how playbook text varies by knob.
   (68), Codex from this phase's probe, Pi by its cap), and the whitelist
   comment carries the same.
 
+### Result (2da06e481) - 2026-11-16
+
+Landed (1bf9eba09..2da06e481):
+- `wsrsrc.Load(root, name, harness, profile, vars)` changes:
+  - Lookup order is `<stem>.<profile>.md`, then `<stem>.<harness>.md`, then
+    `<stem>.md`, for playbooks and playbook-local includes alike.
+  - The flat `<root>/<name>.md` fallback has no variants.
+  - `wsrsrc.ProfileNames` (`direct`, `orchestrate`) is the shared list.
+  - `Validate` refuses a stem that carries both a profile variant and a
+    harness overlay.
+- `workflow.profile` knob:
+  - Harness-bucketed (claude, codex, pi, all), with builtin default `direct`,
+    global default scope, and lead authority.
+  - Registered in the scope registry, the config key registry, the tuning
+    catalog, and the `config.tune` description.
+  - Writing `orchestrate` for a harness outside
+    `orchestrateHarnessWhitelist`, or for `*` while any harness is outside
+    it, appends one `warning:` line. The whitelist ships empty (69).
+- Profile selection applies to top-level lead keys only, through
+  `playbook.read`, `playbook.render` (declared-variable collection included),
+  and `workflow_manual`.
+  - The FRESH sentinel resolves the profile through the canonical-root
+    resolver.
+  - Parented, unknown, and keyless keys load base files.
+- `role: sublead` maps to a lead-scoped child key. The render writes a
+  `sublead.json` marker `{"playbook": "<name>"}` in the key directory,
+  outside `recordParts`.
+- Sub-lead board path:
+  - At the whiteboard gate, a marked lead key walks `Parent` (at most 16
+    hops) to its top-level lead, and its call is rewritten onto that key. The
+    write, the board refresh, and the dashboard nudge all target the lead.
+  - `whiteboard.update` applies in status-only mode (`Env.StatusAuthor`):
+    `wb:log` and new `wb:panel` inside an existing open topic whose group
+    carries no `label` or `tickets`.
+  - A panel `id`, or a `name` that already exists, is refused. That includes
+    a name minted earlier in the same call.
+  - Success is one acknowledgement line. A sub-lead write never enables the
+    lead's knob and never returns `full:`, `embed:`, or `info:`.
+  - Refusals name the `whiteboard-status` playbook.
+  - `whiteboard.query` reads the lead's board.
+  - Unmarked parented keys keep today's denial verbatim.
+- Auto-ack (53): `ticketReviewAutoAckVariants` is keyed by playbook
+  (`lead-ticket`, `ticket-handler`) and carries the approved knob-off text.
+  `playbook.render` applies it as `playbook.read` does.
+- Two pre-existing track failures fixed: `spawnIdiomSites` gains
+  `ticket-handler`, and the knob-on `lead-ticket` queue step is re-anchored
+  on the rewritten queue `Section —` list. Both came from 6d1e7e8c6. No rsrc
+  prose changed.
+
+Decisions:
+- Attribution prefix is `[<playbook>] ` on log lines and panel recaps (64).
+- A sub-lead write renders no embed and stamps no user inputs. The lead's
+  own next entry answers the drained inbox.
+- An unrecognized stored `workflow.profile` value loads base files instead of
+  failing the call.
+- T1 confirmed (56): `writeParts` removes only part files. Only prune's and a
+  failed claim's whole-directory `RemoveAll` delete a key directory.
+
+Host probes (whitelist comment carries the same):
+- Claude Code 2.1.325, probed 2026-11-16 (68): a level-3 subagent has no
+  Agent tool. Off.
+- Codex CLI 0.160.0, probed 2026-11-16:
+  - At defaults, the third level below the lead fails with "collab spawn
+    failed: agent thread limit reached".
+  - With `-c agents.max_threads=16 -c agents.max_depth=8` the full chain
+    completes and the deepest result returns to the lead.
+  - `agents.max_depth=8` alone still fails.
+  - Off, until the chain completes at host defaults.
+- Pi: off by ws's own cap, not probed. `wsagent.MaxSpawnDepth = 2`
+  (`internal/wsagent/children.go`), which the `pi.spawn` description
+  restates (63).
+- No other host probed.
+
+Verification:
+- `go build ./...` and `go vet` are clean.
+- `go test` passes for `./internal/wsrsrc/...` (manifest, wsflow, pi, and
+  skills mirror tests included), `./internal/wswhiteboard/...`,
+  `./internal/wsconfig/...`, and `./internal/wsdoc/...`.
+- `go test ./internal/mcp/`: passes in full (610s, `-timeout 40m`).
+- One lite code review pass found no Critical or Important issues. It had one
+  minor: a failed marker write after the mint leaves an orphan key that is
+  never handed out and is pruned later.
+
 ### Phase 2: Sub-lead protocol and workflow manual split
 
 Written by the lead with the user in session (54).
