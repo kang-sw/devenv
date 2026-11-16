@@ -71,7 +71,7 @@ func (s *State) migrateLegacyContent() bool {
 				}
 			}
 			if !latest.LegacyContent && panelPos > bodyPos {
-				if bodyPos > markedPos {
+				if d.Body != d.Entries[markedPos].Text {
 					// The old writer retained a distinct body snapshot before
 					// its id repost. Keep those bytes too, then repeat the
 					// winning panel as latest; committed history cannot move.

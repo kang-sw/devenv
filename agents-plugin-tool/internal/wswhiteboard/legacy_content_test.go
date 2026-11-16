@@ -239,6 +239,42 @@ func TestLegacyContentClearAndEmptyEdit(t *testing.T) {
 	assertLegacyExact(t, st, versions)
 }
 
+// A new alias's own trailing Content event is not evidence of a distinct
+// old Body mutation. An old id-only repost needs no extra import in these cases.
+func TestLegacyContentOldIDAfterNewAlias(t *testing.T) {
+	binary := buildPanelV050Writer(t)
+	for _, tc := range []struct{ name, command string }{
+		{"edit", `<wb:edit><wb:old>new</wb:old><wb:new>edited</wb:new></wb:edit>`},
+		{"clear", `<wb:body/>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			f := FolderStore{Dir: dir}
+			if err := f.Update(nil, func(s *State) error {
+				mustApply(t, s, topicXML("t", "new payload")+`<wb:topic name="t">`+tc.command+`</wb:topic>`)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := legacyVersions(t, folderOpen(t, dir, nil), "t")
+			if len(before) != 2 {
+				t.Fatal("fixture must have two new alias versions")
+			}
+			historicalCall(t, binary, dir, "update", panelCommandXML("t", `id="p1" recap="Old id"`, "old id wins"), false)
+			st := folderOpen(t, dir, nil)
+			got := legacyVersions(t, st, "t")
+			if len(got) != 3 || !reflect.DeepEqual(got[:2], before) || got[2].LegacyContent || got[2].Text != "old id wins" || st.TopicBody("t") != "old id wins" {
+				t.Fatalf("old id repost fabricated migration versions: %+v", got)
+			}
+			assertLegacyExact(t, st, got)
+			tree := folderTree(t, dir)
+			if again := folderOpen(t, dir, nil); !reflect.DeepEqual(st, again) || !reflect.DeepEqual(tree, folderTree(t, dir)) {
+				t.Fatal("old id reconciliation did not stabilize")
+			}
+		})
+	}
+}
+
 func TestLegacyContentThroughV050Writer(t *testing.T) {
 	binary := buildPanelV050Writer(t)
 	t.Run("existing-schema2-migration-and-recovery", func(t *testing.T) {
