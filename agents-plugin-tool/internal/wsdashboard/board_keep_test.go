@@ -20,8 +20,9 @@ func TestBoardKeepWiring(t *testing.T) {
 		"var kept = board ? boardKeep() : null",
 		"ins = morphBoard(el, html, boardFrozen, boardPagedEdits);",
 		"boardPagedEdits = [];",
-		"window.wbHistory.sweep(); ins.forEach(watchBoard);",
+		"window.wbHistory.sweep();",
 		"window.wbHistory.restore(n, history);",
+		"watchBoard(n);",
 		"restoreScroll(scroll);",
 		"if (kept) kept.h.apply();",
 	}

@@ -105,12 +105,13 @@
     else if (board) {
       ins = morphBoard(el, html, boardFrozen, boardPagedEdits);
       boardPagedEdits = [];
-      if (window.wbHistory && window.wbHistory.sweep) { window.wbHistory.sweep(); ins.forEach(watchBoard); }
+      if (window.wbHistory && window.wbHistory.sweep) window.wbHistory.sweep();
       ins.forEach(bandBoard);
       ins.forEach(function (n) {
         // Materialize the reader's older pages before restoring disclosures
         // and frame heights, including immutable panel versions off the tail.
         if (window.wbHistory) { window.wbHistory.init(n); window.wbHistory.restore(n, history); }
+        watchBoard(n);
         restoreOpen(n);
         fmtTimes(n);
         sweepOutImgs(n);
@@ -194,7 +195,7 @@
   // bytes (TopicHTML, render.go), compared in place of the HTML (topicSeen).
   var boardSeen = {}, boardRendered = null, boardLatest = null, boardPending = Object.create(null), boardFrozen = [], boardRelease = false;
   var boardOwn = Object.create(null), boardImmediate = Object.create(null), boardSnap = null, boardExposedUnits = null;
-  var boardChanges = [], boardOffered = null, boardReleaseFrame = 0, boardHomeWrites = new WeakSet();
+  var boardChanges = [], boardOffered = null, boardReleaseFrame = 0, boardScrollTimer = 0, boardHomeWrites = new WeakSet();
   var boardPaged = Object.create(null), boardPagedEdits = [];
   var boardTopHeld = Object.create(null), boardTopOrder = null;
   function topicKey(n) {
@@ -966,11 +967,16 @@
   }
   function boardExposed(n) {
     if (!n || n.isConnected === false) return false;
-    if (boardSnap) return boardSnap.visible(n);
     var w = window.wbHistory;
+    if (w && w.rendered && !w.rendered(n)) return false;
+    if (boardSnap) return boardSnap.visible(n);
     return !!(w && w.keep && w.keep(n, { capture: false }).visible(n));
   }
-  function boardScroller(n) { return boardSnap ? boardSnap.scroller(n) : window.wbHistory.keep(n, { capture: false }).scroller; }
+  function boardScroller(n) {
+    var w = window.wbHistory;
+    if (!n || (w && w.rendered && !w.rendered(n))) return null;
+    return boardSnap ? boardSnap.scroller(n) : w && w.keep ? w.keep(n, { capture: false }).scroller : null;
+  }
   // Freeze the interval, not just the reading reference. A single scroll
   // delta cannot repair an insertion/reorder between two visible units.
   // Units outside the interval retain canonical order and render normally.
@@ -1331,9 +1337,22 @@
         return;
       }
     }
+    // IO uses the raw viewport, not the inset below sticky heads. One idle
+    // check per gesture restores that exact boundary without per-scroll scans.
+    if (Object.keys(boardPending).length && !("onscrollend" in doc)) {
+      clearTimeout(boardScrollTimer);
+      boardScrollTimer = setTimeout(function () { boardViewedTrailing(e); }, 120);
+    }
     // Modern hosts get exposure changes from IO, not from scanning the whole
     // board on every raw scroll. Old engines retain one coalesced fallback.
     if (!window.IntersectionObserver) boardViewedExposure();
+  }
+  function boardViewedTrailing(e) {
+    if (e && e.target && e.target !== doc && e.target !== doc.scrollingElement &&
+        e.target !== $('bcol') && e.target !== $('bpins') && !inBoard(e.target)) return;
+    clearTimeout(boardScrollTimer);
+    boardScrollTimer = 0;
+    boardViewedExposure();
   }
   function boardViewedExposure(report) {
     if (report && report.node) {
@@ -1346,18 +1365,19 @@
     });
   }
   doc.addEventListener("scroll", boardViewedScroll, { capture: true, passive: true });
+  doc.addEventListener("scrollend", boardViewedTrailing, { capture: true, passive: true });
   window.addEventListener("resize", function () { if (!window.IntersectionObserver) boardViewedExposure(); });
   doc.addEventListener("toggle", function (e) {
     var n = e.target;
-    if (!n || n.tagName !== "DETAILS") return;
+    if (!n || n.tagName !== "DETAILS" || !inBoard(n)) return;
     if (n.open) watchBoard(n);
     boardViewedExposure();
   }, true);
   // Watch topics, panels and placement groups through the shared IO source.
   // A swap sweeps removed subscriptions. Observing closed content is safe:
   // watch() skips its scroller inspection, and IO reports when it opens.
-  // Only exposure transitions, disclosures and the old-engine fallback gate
-  // a release check; ordinary scroll events do no per-unit geometry work.
+  // Exposure transitions, board disclosures and a trailing gesture check gate
+  // release; ordinary modern scroll events do no per-unit geometry work.
   function watchBoard(root) {
     if (!window.wbHistory || !window.wbHistory.watch || !root || root.nodeType !== 1) return;
     var w = window.wbHistory;

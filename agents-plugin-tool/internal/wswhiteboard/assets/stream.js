@@ -493,6 +493,10 @@
     function drop(sub) {
       if (sub.gone) return;
       sub.gone = true;
+      if (sub.node.wbWatch === sub.handle) {
+        delete sub.node.wbWatch;
+        delete sub.node.wbViewedExposure;
+      }
       var o = observers[sub.margin], list = o && o.subs.get(sub.node);
       if (!list) return;
       list.splice(list.indexOf(sub), 1);
@@ -502,6 +506,7 @@
       opt = opt || {};
       var sub = { node: node, margin: opt.margin || "0px", onChange: opt.onChange, onOut: opt.onOut, ratio: undefined, gone: false };
       var handle = { node: node, unwatch: function () { drop(sub); } };
+      sub.handle = handle;
       if (!node || !win.IntersectionObserver) { sub.gone = true; return handle; }
       if (rendered(node)) owner(scrollerOf(node));
       var o = observer(sub.margin), list = o.subs.get(node);

@@ -259,6 +259,7 @@
   doc.addEventListener("wbhistoryload", function (e) {
     var el = e.detail && e.detail.root;
     if (!el || !inBoard(el)) return;
+    watchBoard(el);
     restoreOpen(el);
     mountFrames(el);
     fmtTimes(el);

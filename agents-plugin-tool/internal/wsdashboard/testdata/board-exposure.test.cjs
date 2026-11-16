@@ -78,7 +78,7 @@ function scrollContract(boardSource = readAssetSource('wsdashboard', 'dashboard.
   vm.runInContext(`
     var reads=0, checks=0, flushes=0;
     var window={IntersectionObserver:IO,wbHistory:k};
-    var doc=document, boardPending={A:true}, boardReleaseFrame=0, boardHomeWrites=new WeakSet();
+    var doc=document, boardPending={A:true}, boardReleaseFrame=0, boardScrollTimer=0, boardHomeWrites=new WeakSet();
     function $(id){return id==='bcol'?bcol:null;}
     function boardPendingNames(){return [];}
     function boardPendingBadge(){}
@@ -91,8 +91,8 @@ function scrollContract(boardSource = readAssetSource('wsdashboard', 'dashboard.
     El.prototype.getBoundingClientRect=function(){reads++;return oldRect.call(this);};
     for(var i=0;i<1000;i++)topic(board,'unit'+i,bcol,40*i);
     bcol.scrollTop=50;
-  ` + funcs(boardSource, ['boardViewedScroll']) + `
-    // The modern raw-scroll branch must neither scan units nor schedule scans.
+  ` + funcs(boardSource, ['boardViewedScroll'].concat(boardSource.includes('function boardViewedTrailing') ? ['boardViewedTrailing'] : [])) + `
+    // Raw handlers do not scan; a trailing check after 120 ms is allowed.
     for(var i=0;i<100;i++)boardViewedScroll({type:'scroll',target:bcol});
     advance(16);
     assert.equal(reads,0,'1000-entry board: zero geometry reads from raw scroll ticks');
@@ -110,10 +110,91 @@ function scrollContract(boardSource = readAssetSource('wsdashboard', 'dashboard.
     report(1);report(1);report(0);
     assert.equal(checks,0,'observer reports coalesce before exact release checking');
     advance(16);assert.equal(checks,1);assert.equal(flushes,0);
+    var previousHandle=unit.wbWatch;
+    unit.connected=false;k.sweep();
+    assert.equal(unit.wbWatch,undefined,'sweep clears the dead board handle');
+    assert.equal(unit.wbViewedExposure,undefined,'fresh subscriptions replay their first exposure report');
+    unit.connected=true;watchBoard(board);
+    assert.ok(unit.wbWatch && unit.wbWatch!==previousHandle,'materialized rows can be re-watched');
+    assert.ok(observer.obs.includes(unit));
     // The old-engine fallback still coalesces scrolls and uses hidden-safe reads.
     window.IntersectionObserver=null;
     for(var i=0;i<100;i++)boardViewedScroll({type:'scroll',target:bcol});
     advance(16);assert.equal(checks,2);
+  `, c);
+}
+function trailingStickyContract() {
+  const source = readAssetSource('wsdashboard', 'dashboard.js');
+  for (const nativeScrollend of [true, false]) {
+    const c = fixture();
+    c.nativeScrollend = nativeScrollend;
+    vm.runInContext(`
+      var window={IntersectionObserver:IO,wbHistory:k};
+      var doc=document,boardPending={},boardReleaseFrame=0,boardScrollTimer=0,boardSnap=null;
+      var boardHomeWrites=new WeakSet(),checks=0,flushes=0;
+      if(nativeScrollend)doc.onscrollend=null;
+      function $(id){return id==='bcol'?bcol:id==='bpins'?bpins:null;}
+      function inBoard(n){return board.contains(n);}
+      function boardPendingNames(){return [];}
+      function boardPendingBadge(){}
+      function boardFlash(){}
+      function boardFlushViewed(){flushes++;boardPending={};}
+      function requestAnimationFrame(fn){return win.requestAnimationFrame(fn);}
+      function cancelAnimationFrame(id){win.cancelAnimationFrame(id);}
+      var head=topic(board,'stuck-head',bcol,0);head.sticky=true;head.candidate=false;
+      head.getBoundingClientRect=function(){return {top:50,bottom:130,height:80,left:0,right:500,width:500};};
+      var blocker=topic(board,'blocker',bcol,120);
+      k.watch(blocker);ios[0].report(blocker,1);
+      assert.equal(k.keep(blocker,{capture:false}).visible(blocker),true);
+      boardPending={A:[blocker]};
+    ` + funcs(source, ['boardExposed', 'boardWithSnap', 'boardReleaseDue', 'boardViewedScroll', 'boardViewedTrailing', 'boardViewedExposure']) + `
+      var exactReleaseDue=boardReleaseDue;
+      boardReleaseDue=function(){checks++;return exactReleaseDue();};
+      bcol.scrollTop=100;
+      assert.equal(k.seen(blocker).visible,true,'IO still intersects the raw viewport');
+      assert.equal(k.keep(blocker,{capture:false}).visible(blocker),false,'blocker is entirely under the sticky head');
+      // No further IO report: one trailing check must release this blocker.
+      for(var i=0;i<100;i++)boardViewedScroll({type:'scroll',target:bcol});
+      if(nativeScrollend) {
+        advance(200);assert.equal(checks,0,'native branch waits for scrollend');
+        boardViewedTrailing({type:'scrollend',target:bcol});
+      } else {
+        assert.equal(timers.length,1,'one debounced trailing check per gesture');
+        advance(119);assert.equal(checks,0,'no exposure scan during the gesture');
+        advance(1);
+      }
+      advance(16);
+      assert.equal(checks,1,'one exact sticky-boundary check at gesture end');
+      assert.equal(flushes,1,'a due release cannot stall awaiting another IO edge');
+      advance(200);assert.equal(checks,1);
+    `, c);
+  }
+}
+function reviewWiringContract() {
+  const source = readAssetSource('wsdashboard', 'dashboard.js');
+  const swap = funcs(source, ['swap']);
+  assert.ok(swap.indexOf('window.wbHistory.restore(n, history);') < swap.indexOf('watchBoard(n);'), 'watch rows admitted by init/restore');
+  const history = source.match(/doc\.addEventListener\("wbhistoryload", function \(e\) \{[\s\S]*?\n  \}\);/)[0];
+  assert.ok(history.includes('watchBoard(el);'), 'load-older/materialized rows are watched');
+  assert.ok(source.includes('doc.addEventListener("scrollend", boardViewedTrailing, { capture: true, passive: true });'));
+  const toggle = source.match(/doc\.addEventListener\("toggle", function \(e\) \{\n    var n = e.target;[\s\S]*?\n  \}, true\);/)[0];
+  const c = vm.createContext({ assert });
+  vm.runInContext(`
+    var toggleHandler,watched=0,releases=0;
+    var doc={addEventListener:function(kind,fn){toggleHandler=fn;}};
+    function inBoard(n){return !!n.board;}
+    function watchBoard(){watched++;}
+    function boardViewedExposure(){releases++;}
+  ` + toggle + `
+    toggleHandler({target:{tagName:'DETAILS',open:true,board:false}});
+    assert.equal(watched,0);assert.equal(releases,0,'unrelated tree/drawer disclosures do not release board updates');
+    toggleHandler({target:{tagName:'DETAILS',open:true,board:true}});
+    assert.equal(watched,1);assert.equal(releases,1);
+    var window={wbHistory:{rendered:function(){return false;},keep:function(){throw Error('hidden scroller inspected');}}};
+    var boardSnap=null;
+  ` + funcs(source, ['boardExposed', 'boardScroller']) + `
+    assert.equal(boardExposed({}),false);
+    assert.equal(boardScroller({}),null);
   `, c);
 }
 function readingCount() {
@@ -192,6 +273,8 @@ function run() {
   new vm.Script(readAssetSource('wswhiteboard', 'stream.js'));
   hiddenContract();
   scrollContract();
+  trailingStickyContract();
+  reviewWiringContract();
   candidatesContract();
   existingViewContracts();
   existingViewedContracts();
