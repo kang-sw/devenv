@@ -20,8 +20,9 @@ func TestBoardKeepWiring(t *testing.T) {
 		"var kept = board ? boardKeep() : null",
 		"ins = morphBoard(el, html, boardFrozen, boardPagedEdits);",
 		"boardPagedEdits = [];",
-		"window.wbHistory.sweep(); ins.forEach(watchBoard);",
+		"window.wbHistory.sweep();",
 		"window.wbHistory.restore(n, history);",
+		"watchBoard(n);",
 		"restoreScroll(scroll);",
 		"if (kept) kept.h.apply();",
 	}
@@ -59,7 +60,7 @@ func TestBoardKeepWiring(t *testing.T) {
 }
 
 func TestBoardKeepUnderNode(t *testing.T) {
-	src := dashboardFuncs(t, "boardKeep", "watchBoard", "restoreScroll")
+	src := dashboardFuncs(t, "boardKeep", "watchBoard", "boardViewedExposure", "restoreScroll")
 	runNode(t, "board owner captures", `
 var bad = [], log = [], owned = null;
 function check(what, ok) { if (!ok) bad.push(what); }
