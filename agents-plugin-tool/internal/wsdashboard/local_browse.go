@@ -24,9 +24,9 @@ type browseRoots struct {
 	Volumes []string `json:"volumes"`
 }
 
-// discoverBrowseRoots enumerates only conventional user mount locations, not
-// mount tables (which include pseudo filesystems). readDir is the OS seam:
-// both enumeration and readability checks can be exercised on any test host.
+// discoverBrowseRoots offers the filesystem root and conventional user mount
+// locations, not mount tables (which include pseudo filesystems). readDir is
+// the OS seam: enumeration and readability checks run on any test host.
 func discoverBrowseRoots(goos, host, home string, readDir func(string) ([]os.DirEntry, error)) browseRoots {
 	out := browseRoots{Host: host, Home: home, Volumes: []string{}}
 	seen := map[string]bool{}
@@ -46,6 +46,9 @@ func discoverBrowseRoots(goos, host, home string, readDir func(string) ([]os.Dir
 				visit(path.Join(dir, e.Name()))
 			}
 		}
+	}
+	if goos != "windows" {
+		add("/")
 	}
 	switch goos {
 	case "darwin":

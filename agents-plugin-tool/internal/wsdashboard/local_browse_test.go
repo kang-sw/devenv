@@ -205,7 +205,7 @@ func TestLocalBrowseRootsEveryOSAndUnreadableVolumes(t *testing.T) {
 	// Virtual OS paths map to real fixture directories. Permission errors
 	// are injected rather than depending on the test user's uid or chmod.
 	base := t.TempDir()
-	for _, dir := range []string{"Volumes/mac", "Volumes/locked", "mnt/c", "mnt/linux", "mnt/locked", "media/user/usb", "run/media/user/disk", "driveC", "driveZ"} {
+	for _, dir := range []string{"Volumes/mac", "Volumes/locked", "mnt/c", "mnt/linux", "mnt/locked", "media/user/usb", "run/media/user/disk", "driveC", "driveD", "driveZ"} {
 		if err := os.MkdirAll(filepath.Join(base, filepath.FromSlash(dir)), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -224,10 +224,10 @@ func TestLocalBrowseRootsEveryOSAndUnreadableVolumes(t *testing.T) {
 		goos string
 		want []string
 	}{
-		{"darwin", []string{"/Volumes/mac"}},
-		{"linux", []string{"/media/user/usb", "/mnt/c", "/mnt/linux", "/run/media/user/disk"}},
-		{"windows", []string{`C:\`}},
-		{"freebsd", []string{}},
+		{"darwin", []string{"/", "/Volumes/mac"}},
+		{"linux", []string{"/", "/media/user/usb", "/mnt/c", "/mnt/linux", "/run/media/user/disk"}},
+		{"windows", []string{`C:\`, `D:\`}},
+		{"freebsd", []string{"/"}},
 	} {
 		t.Run(c.goos, func(t *testing.T) {
 			got := discoverBrowseRoots(c.goos, "fixture-host", "/fixture-home", readDir)
@@ -236,4 +236,12 @@ func TestLocalBrowseRootsEveryOSAndUnreadableVolumes(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unreadable-root", func(t *testing.T) {
+		got := discoverBrowseRoots("freebsd", "fixture-host", "/fixture-home", func(string) ([]os.DirEntry, error) {
+			return nil, os.ErrPermission
+		})
+		if len(got.Volumes) != 0 {
+			t.Errorf("discovery offers an unreadable root: %v", got.Volumes)
+		}
+	})
 }

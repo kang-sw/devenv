@@ -41,6 +41,10 @@
     var i = p.lastIndexOf("/");
     return i < 0 ? "" : p.slice(0, i);
   }
+  // Listings use slash-canonicalized roots; discovery keeps native paths.
+  function browsePath(path) {
+    return (path || "").replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+  }
   // absPath is an entry's absolute path from its folder's listing: the
   // folder's absolute path (abs) in the host's spelling, the host's
   // separator (sep), and the entry's name. A root folder ("/", "C:\")
@@ -122,6 +126,22 @@
   }
   function shows(n) { return !!n && n.getClientRects().length > 0; }
   function local() { return typeof h.local === "function" ? !!h.local() : !!h.local; }
+  function localBrowse() { return directoriesOnly && rid === "host0" && local() && !!h.roots; }
+  function browseParent() {
+    if (!localBrowse() || !info) return "";
+    var path = browsePath(info.abs || info.root);
+    if (path === "/" || /^[a-z]:$/i.test(path)) return "";
+    var parent = path.slice(0, path.lastIndexOf("/"));
+    return /^[a-z]:$/i.test(parent) ? parent + "/" : parent || "/";
+  }
+  function up() {
+    if (dir) navigate(parentRel(dir));
+    else if (browseParent()) applyRoot(browseParent());
+  }
+  function home() {
+    if (localBrowse() && h.roots.home && browsePath(rootAbs) !== browsePath(h.roots.home)) applyRoot(h.roots.home);
+    else if (dir) navigate("");
+  }
   function load(k) { return h.load ? h.load(k) : null; }
   function save(k, v) { if (h.save) h.save(k, v); }
   function toast(s) { if (!destroyed && h.toast) h.toast(s); }
@@ -456,9 +476,25 @@
       paintRootChoices();
     }, function () { /* Older daemons or a failed read leave the free-text path usable. */ });
   }
+  function paintBrowseRoots() {
+    if (!ui.roots) return;
+    var choices = [h.roots.home].concat(h.roots.volumes || []), current = info ? browsePath(rootAbs) : null, seen = {};
+    // Up can land between home and a volume root; keep that location labeled.
+    if (info) choices.push(info.abs || info.root);
+    ui.roots.textContent = "";
+    choices.forEach(function (path) {
+      if (!path) return;
+      var key = browsePath(path);
+      if (seen[key]) return;
+      seen[key] = true;
+      var option = mk("option", "", h.roots.host + " · " + path);
+      option.value = path; ui.roots.appendChild(option);
+      if (key === current) ui.roots.value = path;
+    });
+  }
   function paintHead() {
     ui.rootBtn.disabled = directoriesOnly || !local();
-    if (ui.roots && info) ui.roots.value = rootAbs;
+    paintBrowseRoots();
     var name = info ? info.name || info.root : "";
     ui.root.textContent = name;
     ui.root.title = info ? info.root : "";
@@ -475,7 +511,8 @@
       b.addEventListener("click", function () { navigate(parts.slice(0, i + 1).join("/")); });
       ui.crumbs.appendChild(b);
     });
-    ui.up.disabled = ui.home.disabled = !dir;
+    ui.up.disabled = !dir && !browseParent();
+    ui.home.disabled = !dir && !(localBrowse() && h.roots.home && browsePath(rootAbs) !== browsePath(h.roots.home));
     var hist = history();
     ui.back.disabled = !hist || hist.index === 0;
     ui.forward.disabled = !hist || hist.index >= hist.paths.length - 1;
@@ -1243,10 +1280,10 @@
     ui.back.addEventListener("click", function () { traverseHistory(-1); });
     ui.forward.addEventListener("click", function () { traverseHistory(1); });
     ctl.appendChild(ui.back); ctl.appendChild(ui.forward);
-    ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
+    ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", up);
     ctl.appendChild(ui.up);
     ui.home = iconBtn("house", wsT("js.files.home")); ui.home.classList.add("fhome");
-    ui.home.addEventListener("click", function () { if (dir) navigate(""); });
+    ui.home.addEventListener("click", home);
     ctl.appendChild(ui.home);
     ui.location = mk("div", "flocation");
     ui.rootBtn = mk("button", "fcrumb fcrumb-root fchange-root"); ui.rootBtn.type = "button";
@@ -1287,9 +1324,6 @@
     if (directoriesOnly && h.roots) {
       ui.roots = mk("select", "froot-choices");
       ui.roots.setAttribute("aria-label", wsT("js.files.root.label"));
-      [h.roots.home].concat(h.roots.volumes || []).filter(function (p, i, all) { return p && all.indexOf(p) === i; }).forEach(function (path) {
-        var option = mk("option", "", h.roots.host + " · " + path); option.value = path; ui.roots.appendChild(option);
-      });
       ui.roots.addEventListener("change", function () { applyRoot(ui.roots.value); });
       ctl.appendChild(ui.roots);
     }
