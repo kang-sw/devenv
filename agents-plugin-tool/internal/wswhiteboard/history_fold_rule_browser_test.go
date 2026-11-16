@@ -14,19 +14,14 @@ import (
 // One history with closed questions, their answers, an older owner input and
 // one still-open question, each far above the bottom 1000px. In Chromium:
 // the initial view is the bottom-up cut (whole rows to >= 1000px, crossing
-// row included, no more); closed Q/A and the old input stay folded; only the
-// open question is lifted out between folds; every expand adds the same cut
-// while the row under the fold keeps its viewport position.
+// row included, no more); closed Q/A, the old input and the open question's
+// ask line all stay folded in one top fold (the open question's card stacks
+// after the history); every expand adds the same cut while the row under the
+// fold keeps its viewport position.
 // WS_FOLD_SHOTS=<dir> also saves dark/light screenshots of the initial and an
-// expanded view. Needs WS_PLAYWRIGHT_MODULE.
+// expanded view. Needs WS_PLAYWRIGHT_MODULE. WS_FOLD_PAGE=<dir> keeps the
+// rendered fold.html and labels.json there.
 func TestHistoryFoldRuleBrowser(t *testing.T) {
-	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
-		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
-	}
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node not installed")
-	}
 	st := &State{}
 	seq := 0
 	logs := func(n int) {
@@ -74,8 +69,6 @@ func TestHistoryFoldRuleBrowser(t *testing.T) {
 				label = "open-ask"
 			case r.Ask && r.Item != nil:
 				label = "closed-ask"
-			case r.Preceding:
-				label = "open-lead"
 			}
 			labels[r.Key] = label
 		}
@@ -93,7 +86,10 @@ func TestHistoryFoldRuleBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	dir := os.Getenv("WS_FOLD_PAGE")
+	if dir == "" {
+		dir = t.TempDir()
+	}
 	html, meta := filepath.Join(dir, "fold.html"), filepath.Join(dir, "labels.json")
 	if err := os.WriteFile(html, []byte(page), 0o600); err != nil {
 		t.Fatal(err)
@@ -101,6 +97,13 @@ func TestHistoryFoldRuleBrowser(t *testing.T) {
 	data, _ := json.Marshal(labels)
 	if err := os.WriteFile(meta, data, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

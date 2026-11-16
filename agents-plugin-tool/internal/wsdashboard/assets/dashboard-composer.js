@@ -967,7 +967,8 @@
   function selEl(n) { return n && (n.nodeType === 1 ? n : n.parentNode); }
   // itemIdAt is the ID of the item card n lies in, "" outside every card; the
   // card's element id carries it on every kind (a settled row has no data-id).
-  // Lifted check controls use check-<ID>; item-<ID> stays on their summary.
+  // An assumed check's history controls use check-<ID>; item-<ID> stays on
+  // their summary.
   function itemIdAt(n) {
     var el = selEl(n), entry = entryAt(n), provenance = entry && entry.getAttribute("data-entry-item");
     if (entry) return /^[0-9]{1,6}$/.test(provenance || "") ? provenance : "";

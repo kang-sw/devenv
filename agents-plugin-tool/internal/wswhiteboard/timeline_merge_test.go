@@ -28,9 +28,9 @@ func TestTimelineCoalescedCreationKeepsEveryQuestionAndProvenance(t *testing.T) 
 	}
 	before := string(mustMarshal(t, st))
 	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
-	live, held := timelineRows(view.Topics[0])
+	_, held := timelineRows(view.Topics[0])
 	var found bool
-	for _, row := range live {
+	for _, row := range held {
 		if row.Key != batch.ID {
 			continue
 		}
@@ -39,12 +39,27 @@ func TestTimelineCoalescedCreationKeepsEveryQuestionAndProvenance(t *testing.T) 
 			t.Fatalf("coalesced questions lost or reordered: %+v", row.Created)
 		}
 	}
-	if !found || len(held) < 50 {
-		t.Fatal("coalesced question batch must remain live outside paging")
+	if !found {
+		t.Fatal("open questions no longer anchor: their coalesced batch folds with the rest of the history")
+	}
+	var stacked []int
+	for _, g := range view.Topics[0].Asks {
+		for _, a := range g.Asks {
+			if a.Entry != batch.ID {
+				t.Fatalf("stacked ask %d jumps to %q, want the batch %q", a.Item.ID, a.Entry, batch.ID)
+			}
+			stacked = append(stacked, a.Item.ID)
+		}
+	}
+	if fmt.Sprint(stacked) != "[1 2 3]" {
+		t.Fatalf("open questions stack in creation order, got %v", stacked)
 	}
 	out := markup(render(t, view))
 	if strings.Count(out, `id="`+batch.ID+`"`) != 1 {
 		t.Fatal("a coalesced event still has exactly one navigation anchor")
+	}
+	if got := strings.Count(out, `class="wb-askjump" href="#`+batch.ID+`"`); got != 3 {
+		t.Fatalf("every stacked card jumps to the batch line, got %d jumps", got)
 	}
 	for _, id := range []int{1, 2, 3} {
 		if strings.Count(out, fmt.Sprintf(`id="item-%d"`, id)) != 1 {

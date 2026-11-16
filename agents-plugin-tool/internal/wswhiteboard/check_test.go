@@ -158,8 +158,10 @@ func TestCheckRowsRenderTheirStates(t *testing.T) {
 		row := func(id string) string {
 			return regexp.MustCompile(`<div class="ckrow[^"]*" id="` + prefix + id + `".*?</div>`).FindString(page)
 		}
-		open := row("3")
-		for _, want := range []string{`class="ckrow" id="` + prefix + `3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
+		// An open check row owns its item anchor on both layouts (on the full
+		// page it is the card stacked after the history).
+		open := regexp.MustCompile(`<div class="ckrow[^"]*" id="item-3".*?</div>`).FindString(page)
+		for _, want := range []string{`class="ckrow" id="item-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
 			if !strings.Contains(open, want) {
 				t.Fatalf("open check row missing %q:\n%s", want, open)
 			}
@@ -189,16 +191,23 @@ func TestCheckRowsRenderTheirStates(t *testing.T) {
 		if strings.Contains(page, `label class="ack"><input type="checkbox" data-id="03"`) {
 			t.Fatal("a check row reuses label.ack")
 		}
+		if layout == LayoutFull {
+			// No progress chip: open asks stack after the history, the
+			// policy first as it was asked first.
+			wantNone(t, page, `answered 3 / 4`)
+			recap, history, asks := strings.Index(page, `class="trecap"`), strings.Index(page, `class="wb-history"`), strings.Index(page, `class="tbody wb-asks"`)
+			policy, open := strings.Index(page, `class="card policy"`), strings.Index(page, `id="item-3"`)
+			if !(recap >= 0 && recap < history && history < asks && asks < policy && policy < open) {
+				t.Fatalf("placement recap %d, history %d, asks %d, policy %d, open check %d", recap, history, asks, policy, open)
+			}
+			continue
+		}
 		if !strings.Contains(page, `answered 3 / 4`) {
 			t.Fatal("the check list header carries its progress")
 		}
 		// Placement: recap, check list, then the policy and ack items.
 		recap, list, policy := strings.Index(page, `class="trecap"`), strings.Index(page, `class="checks"`), strings.Index(page, `class="card policy"`)
-		ordered := recap >= 0 && recap < list && list < policy
-		if layout == LayoutFull {
-			ordered = recap >= 0 && recap < policy && policy < list
-		}
-		if !ordered {
+		if !(recap >= 0 && recap < list && list < policy) {
 			t.Fatalf("placement recap %d, checks %d, policy %d", recap, list, policy)
 		}
 	}
@@ -255,15 +264,19 @@ func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
 }
 
 // TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide pins where the
-// check pill's hide toggle renders: in the head of an open topic holding an
-// answered check, pressed by default, and nowhere else: not on a list whose
-// checks are open or assumed only (an assumed check stays visible), and not
-// in a closed topic's settled fold. The stylesheet hides exactly the rows
-// without data-id, which the answered rows alone lack (form.js runs the
-// toggle; see TestCheckHideToggleKeepsItsStateOnTheRoot).
+// embed check pill's hide toggle renders: in the head of an open topic
+// holding an answered check, pressed by default, and nowhere else: not on a
+// list whose checks are open or assumed only (an assumed check stays
+// visible), not in a closed topic's settled fold, and never on the full
+// page, which has no check pill (its open checks stack after the history).
+// The stylesheet hides exactly the rows without data-id, which the answered
+// rows alone lack (form.js runs the toggle; see
+// TestCheckHideToggleKeepsItsStateOnTheRoot).
 func TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide(t *testing.T) {
 	const toggle = `<button type="button" class="btn mini ckhide" aria-pressed="true" title="hide answered requests">`
-	page := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	full := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantNone(t, full, `<div class="ckpill">`, `class="btn mini ckhide"`)
+	page := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
 	head := regexp.MustCompile(`<div class="ckpill">.*?</div>`).FindString(page)
 	if !strings.Contains(head, toggle) || strings.Count(page, `class="btn mini ckhide"`) != 1 {
 		t.Fatalf("open topic with answered checks: header\n%s", head)
@@ -274,7 +287,7 @@ func TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide(t *testing.T) {
 
 	st := &State{}
 	mustApply(t, st, addXML(ClassCheck, "t", "look")+addXML(ClassCheck, "t", "assume")+`<wb:answer id="2" value="ok" assumed="true">fine</wb:answer>`)
-	if page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Contains(page, `class="btn mini ckhide"`) {
+	if page := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"})); strings.Contains(page, `class="btn mini ckhide"`) {
 		t.Fatal("a list of open and assumed checks carries the hide toggle")
 	}
 

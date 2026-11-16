@@ -3,6 +3,7 @@ package wswhiteboard
 import (
 	"encoding/json"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -103,7 +104,7 @@ func TestCheckRowsStageAnswersInTheReplyBar(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := "var BOARD = " + string(board) + ";\n" + formPrelude + "(function () {\n" + string(answers) + string(form) + "})();\n" + `
-var row = byId("check-3"), box = row.querySelector("label.ck > input"), x = row.querySelector("button.no-toggle"), note = row.querySelector("textarea.note");
+var row = byId("item-3"), box = row.querySelector("label.ck > input"), x = row.querySelector("button.no-toggle"), note = row.querySelector("textarea.note");
 check("nothing staged", reply(), "");
 tick(box, true);
 check("box stages ok", reply(), "03=ok");
@@ -141,24 +142,29 @@ process.stdout.write(bad.join("\n"));`
 }
 
 // TestCheckHideToggleKeepsItsStateOnTheRoot runs answers.js and form.js over
-// the check board and pins the hide toggle: on by default (data-ck-hide="1"
-// on <html>, the button pressed), which the stylesheet turns into hiding the
-// completed HISTORY rows 04 and 05. Open 03 stays in the checklist and assumed
-// 06 keeps its correction control in HISTORY. A press stores "0"; a rerun of
-// the script (a dashboard board swap) keeps the stored state, syncs a freshly
-// rendered button, and leaves a button an earlier run wired toggling the
-// shared state; and the embed never touches storage. The cases execute under
-// node when it is installed.
+// the check board. The full page renders no hide toggle: completed 04 and 05
+// stay plain HISTORY rows, open 03 is the card stacked after the history, and
+// assumed 06 keeps its correction control in HISTORY. The embed keeps its
+// toggle, starts on the stored state, and toggles for the page alone without
+// touching storage. The cases execute under node when it is installed.
 func TestCheckHideToggleKeepsItsStateOnTheRoot(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed; check hide toggle cases not executed")
 	}
+	boards := map[Layout][]byte{}
 	regions, err := RenderRegions(BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	board, _ := json.Marshal(string(regions.Board))
+	boards[LayoutFull], _ = json.Marshal(string(regions.Board))
+	// Regions are the full board's; the embed's pill (and its toggle) comes
+	// from the embed page's topic section.
+	embedTopic := regexp.MustCompile(`(?s)<section class="topic[^>]*>.*?</section>`).FindString(render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutEmbed, ReplyID: "r"})))
+	if !strings.Contains(embedTopic, `class="btn mini ckhide"`) {
+		t.Fatalf("embed topic lacks its hide toggle:\n%s", embedTopic)
+	}
+	boards[LayoutEmbed], _ = json.Marshal(embedTopic)
 	answers, err := embeddedAsset("answers.js")
 	if err != nil {
 		t.Fatal(err)
@@ -167,8 +173,8 @@ func TestCheckHideToggleKeepsItsStateOnTheRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := func(bodyClass, body string) string {
-		return "var BOARD = " + string(board) + ";\nvar BODY_CLASS = " + bodyClass + ";\n" + formPrelude + `
+	cases := func(layout Layout, bodyClass, body string) string {
+		return "var BOARD = " + string(boards[layout]) + ";\nvar BODY_CLASS = " + bodyClass + ";\n" + formPrelude + `
 var stored = {}, touched = 0;
 window.localStorage = { getItem: function (k) { touched++; return k in stored ? stored[k] : null; }, setItem: function (k, v) { touched++; stored[k] = String(v); } };
 function run() {
@@ -180,31 +186,18 @@ function ids(sel) { return document.querySelectorAll(sel).map(function (e) { ret
 ` + body + `
 process.stdout.write(bad.join("\n"));`
 	}
-	full := cases(`"full"`, `
+	// The full page has no pill and no hide button: its open check is the
+	// card stacked after the history, its answered checks plain history rows.
+	full := cases(LayoutFull, `"full"`, `
 check("before the script runs nothing is set", state(), null);
 run();
-check("on by default", [state(), pressed(), stored], ["1", ["true"], {}]);
-check("completed checks leave the live checklist", ids(".topic .checks .ckrow:not([data-id])"), []);
-check("the history filter targets the completed checks", ids(".timeline-ask .wb-hitem.check:not([data-check-live]):not(.void)"), ["item-4", "item-5"]);
-check("the open check stays in the live checklist", ids(".topic .checks .ckrow[data-id]"), ["check-3", "check-6"]);
+check("no hide button on the full page", pressed(), []);
+check("completed checks render no live check rows", ids(".topic .checks .ckrow:not([data-id])"), []);
+check("completed checks are history rows", ids(".timeline-ask .wb-hitem.check:not(.void)").filter(function (id) { return id; }), ["item-4", "item-5", "item-6"]);
+check("the open check is the stacked card", ids(".wb-asks .checks .ckrow[data-id]"), ["item-3"]);
 check("the assumed history check keeps its correction control", ids(".topic .ckrow[data-assumed]"), ["check-6"]);
-check("the withdrawn history check stays outside the answered filter", ids(".timeline-ask .wb-hitem.check.void"), ["item-7"]);
-var first = document.querySelector("button.ckhide");
-click(first);
-check("a press turns it off and stores it", [state(), pressed(), stored["ws.wb.checks.hideAnswered"]], ["0", ["false"], "0"]);
-run();
-check("a rerun over the kept board keeps the stored state", [state(), pressed()], ["0", ["false"]]);
-click(first);
-check("the button an earlier run wired toggles the shared state once", [state(), pressed(), stored["ws.wb.checks.hideAnswered"]], ["1", ["true"], "1"]);
-click(first);
-root = parse(BOARD);
-check("a swapped-in button renders pressed", pressed(), ["true"]);
-run();
-check("a rerun syncs the swapped-in button to the stored state", [state(), pressed()], ["0", ["false"]]);
-document.documentElement.removeAttribute("data-ck-hide");
-run();
-check("a fresh page reads the stored state", state(), "0");`)
-	embed := cases(`"embed"`, `
+check("the withdrawn history check stays a void row", ids(".timeline-ask .wb-hitem.check.void"), ["item-7"]);`)
+	embed := cases(LayoutEmbed, `"embed"`, `
 stored["ws.wb.checks.hideAnswered"] = "0";
 run();
 check("the embed starts on whatever another page stored", [state(), pressed()], ["1", ["true"]]);
@@ -253,7 +246,7 @@ func TestTypingBuildsTheReplyOnceAFrame(t *testing.T) {
 	script := "var BOARD = " + string(board) + ";\n" + formPrelude + "(function () {\n" + string(answers) + string(form) + "})();\n" + `
 var builds = 0, block = window.wbAnswers.block;
 window.wbAnswers.block = function (a, b) { builds++; return block(a, b); };
-var ra = byId("check-1"), rb = byId("check-2"), na = ra.querySelector("textarea.note"), boxA = ra.querySelector("label.ck > input");
+var ra = byId("item-1"), rb = byId("item-2"), na = ra.querySelector("textarea.note"), boxA = ra.querySelector("label.ck > input");
 var tb = document.querySelector('section.topic[data-topic="b"] textarea.tnote');
 key(na, "h"); key(na, "hi");
 check("a keystroke waits for its frame", [reply(), builds], ["", 0]);

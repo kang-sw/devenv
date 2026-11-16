@@ -173,3 +173,43 @@ func TestHistoryScriptWiredOnlyIntoFullPagesAndSharedAssets(t *testing.T) {
 		t.Fatal("gaps replaced by clipped history")
 	}
 }
+
+// TestHistoryReadyHeightAcceptsZeroHeightRows pins readyHeight in stream.js:
+// a laid-out row whose content is all hidden (zero height, but a box) is
+// ready at 0 and never blocks the initial window or "load above"; a row with
+// no box yet (a host not laid out) still waits. The cases execute under node
+// when it is installed.
+func TestHistoryReadyHeightAcceptsZeroHeightRows(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; readyHeight cases not executed")
+	}
+	asset, err := embeddedAsset("stream.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(asset)
+	start := strings.Index(src, "  function readyHeight(row) {")
+	if start < 0 {
+		t.Fatal("readyHeight not found in stream.js")
+	}
+	end := strings.Index(src[start:], "\n  }\n")
+	if end < 0 {
+		t.Fatal("readyHeight has no end in stream.js")
+	}
+	script := src[start:start+end+4] + `
+var bad = [];
+function check(what, got, want) { if (got !== want) bad.push(what + ": got " + got + ", want " + want); }
+function row(height, boxes) { return { querySelectorAll: function () { return []; }, getBoundingClientRect: function () { return { height: height }; }, getClientRects: function () { return { length: boxes }; } }; }
+check("a visible row reads its height", readyHeight(row(24, 1)), 24);
+check("a laid-out row with hidden content is ready at zero", readyHeight(row(0, 1)), 0);
+check("a row with no box waits", readyHeight(row(0, 0)), null);
+process.stdout.write(bad.join("\n"));`
+	out, err := nodeScript(node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("readyHeight cases failed:\n%s", s)
+	}
+}

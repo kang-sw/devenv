@@ -4,6 +4,7 @@
   "wb.timeline.down": "▼ 加载下方",
   "wb.timeline.reasked": "再次提问",
   "wb.timeline.original": "原始问题",
+  "wb.timeline.askjump": "在记录中显示提问的位置",
   "js.capsule.topics": "主题",
   "worktree.page": "工作树",
   "worktree.local": "仅限本机",

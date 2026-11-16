@@ -247,6 +247,12 @@ func TestBoardViewedTimelineQuestionIdentity(t *testing.T) {
 				t.Fatal(problems)
 			}
 			if eventless {
+				// An open question without a creation event has no history
+				// line (its card stacks at the topic bottom); settled ones
+				// keep their eventless rows at the history head.
+				if _, problems = wswhiteboard.Apply(st, `<wb:answer id="1" value="ok">ok</wb:answer><wb:answer id="2" value="a">a</wb:answer>`, env); len(problems) > 0 {
+					t.Fatal(problems)
+				}
 				st.Topics[0].Entries = nil
 			} else if len(st.Topics[0].Entries) == 0 || !strings.HasPrefix(st.Topics[0].Entries[len(st.Topics[0].Entries)-1].Text, "Items added: ") {
 				t.Fatal("fixture must coalesce the two question creation events")

@@ -8,8 +8,12 @@ import (
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
+// HistoryAnchor reports whether a history row owns the item's item-N
+// anchor. An open item's anchor belongs to its bottom-stacked card, which
+// the answer scripts and item links target; its history row is only the
+// ask-time line.
 func (d itemData) HistoryAnchor() bool {
-	return d.History == nil || d.History.ID == ""
+	return (d.History == nil || d.History.ID == "") && d.Status != StatusOpen
 }
 
 func (d itemData) HistoryClassLabel() string {

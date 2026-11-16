@@ -15,9 +15,6 @@ const { chromium } = require(process.env.WS_VIEWED_PERF_PLAYWRIGHT);
     const page = await context.newPage();
     // The actual Go-rendered page, including production CSS and scripts.
     await page.setContent(fs.readFileSync(process.argv[2], 'utf8'));
-    // Exercise the owner's "show answered checks" state, not hidden geometry.
-    await page.locator('button.ckhide').click();
-    assert.equal(await page.locator('html').getAttribute('data-ck-hide'), '0');
     const reports = [], violations = [];
     for (const width of [1000, 480]) {
       await page.setViewportSize({width, height: 900});

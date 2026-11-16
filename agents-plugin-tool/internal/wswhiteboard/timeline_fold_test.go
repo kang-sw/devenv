@@ -50,22 +50,26 @@ func TestTimelineClosedQuestionsFoldLikeLogs(t *testing.T) {
 	}
 }
 
-func TestTimelineOpenQuestionIsExtractedWithGapsOnBothSides(t *testing.T) {
+// An open question no longer splits the history: it folds like any log and
+// its card stacks after the history, so the fold is the same single top gap
+// as without it.
+func TestTimelineOpenQuestionDoesNotSplitTheFold(t *testing.T) {
 	tv := foldHistory(t, true)
+	gaps := 0
 	for i, p := range tv.Timeline {
 		if p.Gap {
-			continue
-		}
-		for _, row := range p.Rows {
-			if row.Item != nil && row.Item.Status == StatusOpen && row.Ask {
-				if i == 0 || i == len(tv.Timeline)-1 || !tv.Timeline[i-1].Gap || !tv.Timeline[i+1].Gap {
-					t.Fatalf("open question lacks folded gaps on both sides: part %d of %d", i, len(tv.Timeline))
-				}
-				return
+			gaps++
+			if i != 0 {
+				t.Fatalf("fold at part %d, want only the top", i)
 			}
 		}
 	}
-	t.Fatal("open question not extracted into a live part")
+	if gaps != 1 || len(tv.Timeline) != 2 {
+		t.Fatalf("parts=%d gaps=%d, want one top fold plus the live tail", len(tv.Timeline), gaps)
+	}
+	if len(tv.Asks) != 1 || len(tv.Asks[0].Asks) != 1 || tv.Asks[0].Asks[0].Item.Title != "still open" || tv.Asks[0].Asks[0].Entry == "" {
+		t.Fatalf("open asks: %+v", tv.Asks)
+	}
 }
 
 func TestTimelineWithoutOpenQuestionHasOneTopFold(t *testing.T) {

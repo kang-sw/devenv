@@ -112,8 +112,8 @@ var checkControls = checkSummary.add(new El("div", "ckrow", { id: "check-7", "da
 var checkText = new Text(checkControls, "check title");
 sel = selection(checkText, checkText, "check title");
 check("within nested real check controls", hostMention().m, { topic: "ship-gate", text: "check title", id: "7" });
-checkControls.parentNode = t1; // the sticky pill lifts the real controls out of their summary
-check("lifted check controls retain item identity", hostMention().m, { topic: "ship-gate", text: "check title", id: "7" });
+checkControls.parentNode = t1; // controls outside their summary still name the item by check-<ID>
+check("detached check controls retain item identity", hostMention().m, { topic: "ship-gate", text: "check title", id: "7" });
 sel = selection(tOpt, tRow, "yes ... row");
 check("across two item cards", hostMention().m, { topic: "ship-gate", text: "yes ... row" });
 sel = selection(tRecap, tTitle, "recap Ship");
