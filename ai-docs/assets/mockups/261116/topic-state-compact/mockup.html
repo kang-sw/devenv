@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=1280">
+<title>topic state badge - compact mockup</title>
+<style>
+/* ===== verbatim: wswhiteboard/assets/page.css:5-36 (light :root) ===== */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-accent-assumed: #b0245a;
+  --wb-latest-log: rgb(110 200 130 / .08);
+  --wb-ck-ok: var(--wb-announced);
+  --wb-ck-no: #c0262d;
+  --wb-accent-policy: #b25000;
+  --wb-on-accent-policy: #ffffff;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 10%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* ===== verbatim: wswhiteboard/assets/page.css:77-103 (dark :root[data-theme=dark] + theme pins) ===== */
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-accent-assumed: #e48aae;
+  --wb-ck-ok: #6cc39a;
+  --wb-ck-no: #f0797e;
+  --wb-accent-policy: #e0a36c;
+  --wb-on-accent-policy: #1f150b;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+/* ===== verbatim: wswhiteboard/assets/page.css:104,117-118 (base) ===== */
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+/* ===== verbatim: wswhiteboard/assets/page-panels.css:78 (icon) ===== */
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* ===== verbatim: wswhiteboard/assets/page-items.css:1-24 (topic, tbar, CURRENT state badge) ===== */
+/* topic: one elevated surface with a filled title bar */
+.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.tbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.tbar .tlead { margin-right: auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.tbar .tname { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.tbar .tresult { font-size: 12.5px; opacity: .7; overflow-wrap: anywhere; }
+.topic-state,.stb,.eta,.state-estimate{display:inline-flex;align-items:center}
+.topic-state{flex-wrap:wrap;gap:4px 6px;min-width:0}
+.stb,.eta,.state-estimate{min-height:18px;border-radius:999px;font-size:11px}
+.stb{--c:#b9bdc6;gap:5px;padding:0 8px 0 6px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 20%,transparent)}
+.stb .wb-state-dot{width:7px;height:7px;flex:none;border-radius:50%;background:currentColor}
+.stb.confirm{--c:#7fd6a8}
+.stb.discuss{--c:#ffb36b}
+.stb.impl{--c:#8db8ff}
+.stb.research{--c:#c6a5f7}
+.stb.wb-state-wait .wb-state-dot{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+.state-label{white-space:nowrap}
+.stb .own{font:10.5px var(--wb-mono);min-width:0;overflow-wrap:anywhere}
+.eta,.state-estimate{padding:0 7px;font-weight:600;white-space:nowrap;color:#cfd3da;background:rgb(127 127 127 / .26)}
+.eta.wb-state-over{color:#ffd2cd;background:rgb(255 110 96 / .34);font-weight:800}
+.quiet .stb{color:color-mix(in srgb,var(--c) 40%,var(--wb-fg))}
+.quiet .eta,.quiet .state-estimate{color:var(--wb-fg)}
+.quiet .eta.wb-state-over{color:var(--wb-ck-no)}
+@media(max-width:600px){.topic-state{order:2;flex-basis:100%}}
+/* ===== verbatim: wswhiteboard/assets/page-items.css:26-29,32,35-36,49-50 (deps button, badge, bar) ===== */
+.dw { position: relative; display: inline-flex; align-self: center; }
+.dw .dbtn { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: .55; cursor: pointer; }
+.dw .dbtn.amber { color: #ffb36b; opacity: 1; }
+.dw .dbtn.green { color: #7fd6a8; opacity: 1; }
+.dw .dbtn.green:hover, .dw .dbtn.green[aria-expanded="true"] { background: rgb(127 214 168 / .2); }
+.dw .bd.r { background: rgb(127 127 127 / .55); color: #fff; }
+.dw .pop { position: fixed; inset: auto; margin: 0; z-index: 100; width: 318px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: visible; padding: 8px; border: 1px solid var(--wb-line); border-radius: 10px; background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); font: 12px/1.5 var(--wb-sans); }
+.dw .row.link:hover, .dw .row.link:focus-visible { background: var(--wb-muted); }
+.dw .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--wb-mono); color: inherit; }
+/* ===== verbatim: wswhiteboard/assets/page-stream.css:42,44 (ticket button) ===== */
+.dw.wbtk .dbtn { opacity: .72; }
+.dw.wbtk .bd { top: -2px; right: -5px; background: rgb(127 127 127 / .6); color: #fff; }
+/* ===== verbatim: wswhiteboard/assets/page-items.css:62-64,78 (clocks, tophead) ===== */
+time.tago, time.entry-at[data-at] { display: inline-block; contain: layout style; min-inline-size: 7ch; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.eta { contain: layout style; }
+.tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tophead { background: var(--wb-card); box-shadow: 0 -12px 0 var(--wb-bg); }
+/* ===== verbatim: wswhiteboard/assets/page-items.css:83,89-90 (quiet topic) ===== */
+.topic.quiet { box-shadow: none; background: transparent; }
+.topic.quiet .tbar { background: var(--wb-muted); color: var(--wb-muted-fg); border-radius: var(--wb-radius); flex-wrap: wrap; }
+.topic.quiet .tbar .tname { font-size: 13px; }
+/* ===================================================================
+   PROPOSED (new): compact state badge  -- class prefix .sb (state badge)
+   Replaces .stb + .eta + .state-estimate (page-items.css:7-23).
+   One pill per topic: state colour + state glyph + optional time.
+   No state word, no owner text: both live in the hover tip (.sb-tip).
+   =================================================================== */
+.sb{--c:#b9bdc6;position:relative;display:inline-flex;align-items:center;gap:4px;flex:none;height:20px;padding:0 7px 0 5px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 18%,transparent);font-size:12px;font-weight:700;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default}
+.sb:focus-visible{outline:2px solid var(--wb-primary);outline-offset:2px}
+.sb.solo{width:20px;padding:0;justify-content:center}           /* glyph only: no time */
+.sb > .i{width:13px;height:13px;stroke-width:1.9}
+/* time: big elapsed, small max at the lower right ("5" + "/60m") */
+.sb .t{display:inline-flex;align-items:baseline;contain:layout style}
+.sb .t b{font-size:12.5px;font-weight:800;letter-spacing:-.01em}
+.sb .t small{margin-left:1px;font-size:9.5px;font-weight:600;opacity:.72;position:relative;top:1.5px}
+.sb .t.est small{top:0;font-size:10.5px;opacity:.85;margin-left:0}  /* research estimate: no live clock, one quiet number */
+.sb.impl{--c:#8db8ff}
+.sb.research{--c:#c6a5f7}
+.sb.discuss{--c:#ffb36b}
+.sb.confirm{--c:#7fd6a8}
+.sb.wait{--c:#b9bdc6}
+.sb.over{--c:#ff8e80;background:color-mix(in srgb,var(--c) 28%,transparent)}  /* elapsed > ETA */
+.sb.over .t small{opacity:.85}
+.quiet .sb{color:color-mix(in srgb,var(--c) 40%,var(--wb-fg))}
+.quiet .sb.over{color:var(--wb-ck-no)}
+/* variant B: the existing dot is the only glyph; implementing grows it into a progress ring */
+.sb .wb-state-dot{width:7px;height:7px;flex:none;border-radius:50%;background:currentColor}
+.sb.wait .wb-state-dot{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+.sb .ring{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:2.4}
+.sb .ring .trk{opacity:.28}
+.sb .ring .arc{stroke-linecap:round}
+
+/* hover / focus tip. Real code: a fixed popover like .dw .pop (the topic clips overflow). */
+.sb-tip{position:absolute;top:calc(100% + 9px);right:-8px;z-index:20;min-width:212px;padding:8px 10px 9px;border:1px solid var(--wb-line);border-radius:10px;background:var(--wb-card);color:var(--wb-fg);box-shadow:var(--wb-shadow-hi);font:12px/1.45 var(--wb-sans);text-align:left;white-space:nowrap;cursor:auto}
+.sb-tip::before{content:"";position:absolute;right:16px;top:-5px;width:8px;height:8px;background:var(--wb-card);border-left:1px solid var(--wb-line);border-top:1px solid var(--wb-line);transform:rotate(45deg)}
+.sb-tip .h{display:flex;align-items:center;gap:6px;font-weight:800;font-size:12.5px;color:var(--tc)}
+.sb-tip .h .i{width:13px;height:13px;stroke-width:2}
+.sb-tip .who{margin-top:2px;font:11.5px var(--wb-mono);color:var(--wb-muted-fg)}
+.sb-tip .tl{margin-top:6px;font-weight:600;font-variant-numeric:tabular-nums}
+.sb-tip .tl .ov{color:var(--wb-ck-no);font-weight:800}
+.sb-tip .ext{color:var(--wb-muted-fg);font-size:11.5px}
+.sb-tip .bar{display:block;height:3px;margin-top:6px;overflow:hidden;border-radius:2px;background:var(--wb-muted)}
+.sb-tip .bar i{display:block;height:100%;background:var(--tc)}
+.sb-tip.impl{--tc:#4f86e8}.sb-tip.research{--tc:#9a6ee0}.sb-tip.discuss{--tc:#d17a1e}.sb-tip.confirm{--tc:#2f9a63}.sb-tip.wait{--tc:var(--wb-muted-fg)}
+:root[data-theme="dark"] .sb-tip.impl{--tc:#8db8ff}:root[data-theme="dark"] .sb-tip.research{--tc:#c6a5f7}:root[data-theme="dark"] .sb-tip.discuss{--tc:#ffb36b}:root[data-theme="dark"] .sb-tip.confirm{--tc:#7fd6a8}
+.sb-tip.sb-tip.over.over{--tc:var(--wb-ck-no)}
+
+/* PROPOSED: the head stays one row. The title shrinks first and ellipsizes;
+   icons, the badge and the age never wrap. (Before: .tlead wraps,
+   .tname overflow-wrap:anywhere, page-items.css:4-5.) */
+.v-new .tbar .tlead{flex:1 1 0;min-width:0;flex-wrap:nowrap;align-items:center}
+.v-new .tbar .tname{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+.v-new .tbar .tlead > .dw{flex:none}
+.v-new .tbar .tago{min-inline-size:0}
+
+/* ===================================================================
+   mockup chrome only (not product CSS)
+   =================================================================== */
+.mk{max-width:1248px;margin:0 auto;padding:20px 16px 40px}
+.mk-top{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.mk-top h1{font-size:19px;margin:0}
+.mk-top .sub{color:var(--wb-muted-fg);font-size:12.5px}
+.mk-top button{margin-left:auto;border:1px solid var(--wb-line);background:var(--wb-card);border-radius:8px;padding:4px 10px;cursor:pointer}
+.mk h2{font-size:15px;margin:26px 0 4px}
+.mk h2 .tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--wb-muted);color:var(--wb-muted-fg);margin-left:6px;vertical-align:2px}
+.mk .lede{color:var(--wb-muted-fg);font-size:12.5px;margin:0 0 10px}
+.mk-lbl{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:800;letter-spacing:.02em;color:var(--wb-muted-fg);margin:12px 0 5px}
+.mk-lbl .pill{padding:1px 8px;border-radius:999px;background:var(--wb-muted)}
+.mk-lbl .pill.rec{background:var(--wb-technical);color:var(--wb-on-technical)}
+.mk .topic{margin-bottom:8px}
+.mk .tbody-mk{padding:8px 14px 10px;font-size:13.5px;line-height:1.6}
+.mk .tbody-mk .ln{display:flex;gap:8px;align-items:center;color:var(--wb-muted-fg);font-size:12px}
+.mk .tbody-mk .ev{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--wb-technical);color:var(--wb-on-technical);font-size:9.5px;font-weight:800}
+/* state matrix */
+.mx{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:12.5px}
+.mx th{text-align:left;font-size:11px;color:var(--wb-muted-fg);font-weight:800;padding:0 10px}
+.mx td{padding:0 10px;vertical-align:middle}
+.mx td.nm{font-weight:700;white-space:nowrap}
+.mx td.nm small{display:block;font-weight:500;color:var(--wb-muted-fg);font-size:11px}
+.mx .strip{display:flex;align-items:center;gap:6px;min-height:30px;padding:4px 10px;border-radius:8px;background:var(--wb-topic);color:var(--wb-on-topic)}
+.mx .quiet .strip{background:var(--wb-muted);color:var(--wb-muted-fg)}
+.mx .strip.none{color:color-mix(in srgb,var(--wb-on-topic) 55%,transparent);font-size:11.5px}
+.mx td.tt{color:var(--wb-muted-fg);font-size:11.5px;line-height:1.45}
+.mx td.tt code{font-size:11px;color:var(--wb-fg)}
+/* narrow */
+.nar{display:grid;grid-template-columns:420px 420px 1fr;gap:20px;align-items:start}
+.nar .note{font-size:12.5px;color:var(--wb-muted-fg);line-height:1.55}
+.nar .note b{color:var(--wb-fg)}
+/* tips */
+.tips{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:start}
+.tips .topic{overflow:visible;margin-bottom:150px}
+.tips .topic .tbar{border-radius:var(--wb-radius)}
+.notes{font-size:12.5px;line-height:1.6;margin:4px 0 0;padding-left:18px}
+.notes li{margin-bottom:3px}
+.notes code{font-size:11.5px}
+.bug{border-left:3px solid var(--wb-ck-no);padding:6px 10px;background:color-mix(in srgb,var(--wb-ck-no) 8%,transparent);font-size:12.5px;border-radius:0 8px 8px 0;margin-top:10px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<!-- verbatim: wswhiteboard/assets/sprite.svg (i-clock, i-check, i-ticket) -->
+<symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></symbol><symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.1L13 4.6"/></symbol><symbol id="i-ticket" viewBox="0 0 16 16"><path d="M2.5 4.8a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1.7a1.5 1.5 0 0 0 0 3v1.7a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V9.5a1.5 1.5 0 0 0 0-3z"/><path d="M10.2 4.6v1.2M10.2 7.4v1.2M10.2 10.2v1.2"/></symbol>
+<!-- NEW state glyphs (proposed additions to sprite.svg, same 16px stroke grammar) -->
+<symbol id="i-st-impl" viewBox="0 0 16 16"><circle cx="8" cy="9.1" r="4.9"/><path d="M8 6.6v2.5l1.7 1.1M6.3 2.2h3.4M8 2.2v2"/></symbol>
+<symbol id="i-st-research" viewBox="0 0 16 16"><circle cx="7.1" cy="7.1" r="4.3"/><path d="M10.3 10.3l3.2 3.2"/></symbol>
+<symbol id="i-st-discuss" viewBox="0 0 16 16"><path d="M13.2 7.5c0 2.6-2.3 4.5-5.2 4.5-.7 0-1.4-.1-2-.3L3 12.9l.8-2.5c-.6-.8-1-1.8-1-2.9C2.8 4.9 5.1 3 8 3s5.2 1.9 5.2 4.5z"/></symbol>
+<symbol id="i-st-wait" viewBox="0 0 16 16"><path d="M4.6 2.5h6.8M4.6 13.5h6.8M5.5 2.5c0 2.7 2.5 3.4 2.5 5.5s-2.5 2.8-2.5 5.5M10.5 2.5c0 2.7-2.5 3.4-2.5 5.5s2.5 2.8 2.5 5.5"/></symbol>
+<symbol id="i-st-confirm" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.7" stroke-dasharray="2.6 1.9"/><path d="M5.6 8.2l1.7 1.6 3.1-3.3"/></symbol>
+</svg>
+
+<div class="mk">
+  <div class="mk-top"><h1>토픽 카드 상태 뱃지 — 컴팩트 목업</h1><span class="sub">wswhiteboard topic bar · 1280px · <span id="thm"></span></span><button type="button" onclick="flip()">테마 전환</button></div>
+  <p class="lede">상태 단어("구현 중")와 작업자 이름("pi 작업자 5")을 뱃지에서 빼고, 색 + 상태 아이콘 + 시간만 남깁니다. ETA는 같은 뱃지 안에서 <b>경과(큰 글씨) / 최대(우하단 작은 글씨)</b>로 붙습니다. 전체 문장은 호버 팁과 aria-label에 있습니다.</p>
+
+  <h2>1. 지금 vs 제안 <span class="tag">같은 헤더</span></h2>
+  <div class="mk-lbl"><span class="pill">지금</span> owner-before.png 재현 (현재 CSS 그대로)</div>
+  <div id="hero-before"></div>
+  <div class="mk-lbl"><span class="pill rec">제안 A · 권장</span> 상태 아이콘 + 시간</div>
+  <div id="hero-a" class="v-new"></div>
+  <div class="mk-lbl"><span class="pill">제안 B</span> 기존 점 유지 · 구현 중은 점이 진행 링으로</div>
+  <div id="hero-b" class="v-new"></div>
+
+  <h2>2. 상태별 뱃지 <span class="tag">코드의 상태 5종 + 시간 분기</span></h2>
+  <p class="lede">상태 집합: <code>discussing · waiting · researching · implementing · awaiting-confirmation</code> (topic_state.go:18-27). 시계는 implementing + run에만 있고(ago.js:71), researching의 ETA는 정보용 추정치(topic_state.go:45)라 흐르지 않습니다. 닫힌 토픽·진단 상태는 뱃지를 그리지 않습니다(ago.js:42).</p>
+  <table class="mx" id="matrix">
+    <thead><tr><th style="width:150px">상태</th><th>지금</th><th style="width:150px">A · 권장</th><th style="width:150px">B</th><th style="width:330px">팁 / aria-label</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>3. 좁은 카드 (420px) <span class="tag">긴 제목</span></h2>
+  <p class="lede">지금은 제목과 뱃지가 줄바꿈되어 헤더가 2~3행이 됩니다. 제안은 제목이 먼저 말줄임(…)되고, 아이콘·뱃지·시간은 한 행에 남습니다.</p>
+  <div class="nar">
+    <div><div class="mk-lbl"><span class="pill">지금</span></div><div id="nar-before"></div></div>
+    <div class="v-new"><div class="mk-lbl"><span class="pill rec">제안 A</span></div><div id="nar-a"></div></div>
+    <div class="note"><b>한 행 규칙</b><br>· <code>.tlead</code>가 <code>flex:1 1 0; min-width:0</code>로 남는 폭만 가짐<br>· <code>.tname</code>만 줄어들며 <code>text-overflow:ellipsis</code><br>· 의존/티켓 아이콘, 뱃지, “2분 전”은 <code>flex:none</code><br>· 잘린 제목은 <code>.tname</code>의 <code>title</code>로 전체 확인<br><br><b>뱃지 폭</b>: A 기준 최대 약 70px(“135/180m”), 시간 없는 상태는 20px 원형.</div>
+  </div>
+
+  <h2>4. 호버 팁 <span class="tag">마우스 오버 · 키보드 포커스</span></h2>
+  <p class="lede">작업자 이름, 상태 단어, ETA 전체 문장은 팁으로 옮깁니다. 진행 막대는 의존성 팝오버의 막대(<code>.dw .bar</code>)와 같은 모양입니다.</p>
+  <div class="tips v-new" id="tips"></div>
+
+  <h2>5. 구현 시 바뀌는 것 <span class="tag">CSS만으로는 안 됨</span></h2>
+  <ul class="notes">
+    <li><b>ago.js</b> <code>badge()</code>(ago.js:38-79): 라벨·owner span 대신 상태 아이콘 + <code>&lt;span class="t"&gt;&lt;b&gt;5&lt;/b&gt;&lt;small&gt;/60m&lt;/small&gt;&lt;/span&gt;</code>를 한 pill 안에 그림. 따로 있던 <code>.eta</code> / <code>.state-estimate</code> pill 삭제. 매 틱에 <code>b</code> 텍스트와 <code>over</code> 클래스, aria-label만 갱신.</li>
+    <li><b>page.tmpl</b> <code>topicstate</code>(page.tmpl:42): 서버 첫 렌더도 같은 마크업(아이콘 전용 pill)으로. <code>.tname</code>에 항상 <code>title="{{.Label}}"</code> (지금은 닫힌 토픽만).</li>
+    <li><b>sprite.svg</b>: 상태 아이콘 5개 추가(<code>i-st-impl/research/discuss/wait/confirm</code>). 구현 중은 스톱워치라서 제목 옆 의존성 시계(<code>i-clock</code>)와 헷갈리지 않음.</li>
+    <li><b>팁</b>: <code>.topic</code>이 overflow를 자르므로 <code>.dw .pop</code>처럼 fixed popover로 띄움(deps.js 위치 로직 재사용). 포커스 가능하게 <code>tabindex="0"</code>, <code>role="img"</code> + <code>aria-label</code>. 매분 바뀌는 숫자는 aria-label에만 반영(라이브 영역 아님).</li>
+    <li><b>i18n</b>(wsi18n/tables/*.json): 추가 <code>js.wb.state.eta.tip</code> = “ETA {0}분 중 {1}분 경과”, <code>js.wb.state.over</code> = “{0}분 초과”, <code>js.wb.state.extended</code> = “연장 {0}회 · 최초 {1}분”, <code>js.wb.state.eta.max</code> = “/{0}m”, <code>js.wb.state.estimate.short</code> = “~{0}m”. 기존 상태 이름 키(ko.json:433-437)와 <code>js.wb.state.estimate</code>는 팁에서 계속 사용. <code>js.wb.state.eta</code>(ko.json:439)는 더 이상 화면에 안 나옴.</li>
+    <li><b>연장 정보</b>: <code>InitialETAMinutes</code> / <code>ExtensionCount</code>(topic_state.go:35-37)는 지금 data 속성으로 안 내려옴 → 팁에 쓰려면 page.tmpl:57에 <code>data-state-initial-eta-minutes</code>, <code>data-state-extensions</code> 추가.</li>
+    <li><b>CSS</b>: page-items.css:7-23를 <code>.sb*</code> 규칙으로 교체, 4-5행을 한 행 규칙으로. page-items.css:24의 600px 미디어 규칙(뱃지를 다음 행으로)은 뱃지가 작아져서 삭제 가능.</li>
+  </ul>
+  <div class="bug"><b>발견한 기존 버그</b>: ago.js:33은 대기 상태를 <code>stb wait</code>로 그리는데 CSS는 <code>.stb.wb-state-wait</code>(page-items.css:16)만 속 빈 점으로 칠합니다. JS가 첫 틱에 템플릿 마크업(page.tmpl:42, <code>wb-state-wait</code>)을 갈아엎으므로 실제 화면의 “대기”는 꽉 찬 회색 점입니다(owner-before.png와 일치). 새 디자인에서는 클래스 이름을 하나로 통일하면 사라집니다.</div>
+</div>
+
+<script>
+var q = new URLSearchParams(location.search).get("theme");
+if (q) document.documentElement.setAttribute("data-theme", q);
+function themeLabel(){ document.getElementById("thm").textContent = (document.documentElement.getAttribute("data-theme") || "system") + " theme"; }
+function flip(){ var r=document.documentElement; r.setAttribute("data-theme", r.getAttribute("data-theme")==="dark"?"light":"dark"); themeLabel(); }
+themeLabel();
+
+var NAME = {impl:"구현 중", research:"연구 중", discuss:"논의 중", wait:"대기", confirm:"확인 대기"};
+var ICON = {impl:"i-st-impl", research:"i-st-research", discuss:"i-st-discuss", wait:"i-st-wait", confirm:"i-st-confirm"};
+function ic(id){ return '<svg class="i" aria-hidden="true"><use href="#'+id+'"/></svg>'; }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;"); }
+
+// s: {st, owner, eta, el, est, ext, init, quiet, norun}
+function full(s){
+  var parts=[NAME[s.st]];
+  if (s.owner) parts.push(s.owner);
+  if (s.eta) parts.push("ETA "+s.eta+"분 중 "+s.el+"분 경과" + (s.el>s.eta ? " · "+(s.el-s.eta)+"분 초과" : ""));
+  if (s.ext) parts.push("연장 "+s.ext+"회 · 최초 "+s.init+"분");
+  if (s.est) parts.push("예상 "+s.est+"분");
+  return parts.join(" · ");
+}
+// today's markup, as ago.js:57-78 builds it
+function before(s){
+  var h='<span class="topic-state"><span class="stb '+s.st+'"><span class="wb-state-dot" aria-hidden="true"></span><span class="state-label">'+NAME[s.st]+(s.owner?" · ":"")+'</span>'+(s.owner?'<span class="own">'+esc(s.owner)+'</span>':'')+'</span>';
+  if (s.est) h+='<span class="state-estimate">예상 '+s.est+'분</span>';
+  if (s.eta) { var over=s.el>s.eta; h+='<span class="eta'+(over?' wb-state-over':'')+'">ETA '+s.eta+'분 · '+s.el+'분 경과'+(over?' (+'+(s.el-s.eta)+')':'')+'</span>'; }
+  return h+'</span>';
+}
+function timeHTML(s){
+  if (s.eta) return '<span class="t"><b>'+s.el+'</b><small>/'+s.eta+'m</small></span>';
+  if (s.est) return '<span class="t est"><small>~'+s.est+'m</small></span>';
+  return "";
+}
+function cls(s){ return "sb "+s.st+(s.eta && s.el>s.eta?" over":"")+(timeHTML(s)?"":" solo"); }
+function attrs(s){ return ' tabindex="0" role="img" aria-label="'+esc(full(s))+'"'; }
+function badgeA(s, tip){ return '<span class="topic-state"><span class="'+cls(s)+'"'+attrs(s)+'>'+ic(ICON[s.st])+timeHTML(s)+(tip?tipHTML(s):"")+'</span></span>'; }
+function ring(s){
+  var p=Math.min(100, Math.round(s.el/s.eta*100));
+  return '<svg class="ring" viewBox="0 0 16 16" aria-hidden="true"><circle class="trk" cx="8" cy="8" r="5.6"/><circle class="arc" cx="8" cy="8" r="5.6" pathLength="100" stroke-dasharray="'+Math.max(p,3)+' 100" transform="rotate(-90 8 8)"/></svg>';
+}
+function badgeB(s){
+  var g = s.eta ? ring(s) : '<span class="wb-state-dot" aria-hidden="true"></span>';
+  return '<span class="topic-state"><span class="'+cls(s)+'"'+attrs(s)+'>'+g+timeHTML(s)+'</span></span>';
+}
+function tipHTML(s){
+  var over=s.eta && s.el>s.eta, h='<span class="sb-tip '+s.st+(over?' over':'')+'" role="tooltip"><div class="h">'+ic(ICON[s.st])+NAME[s.st]+'</div>';
+  if (s.owner) h+='<div class="who">'+esc(s.owner)+'</div>';
+  if (s.eta) h+='<div class="tl">ETA '+s.eta+'분 중 '+s.el+'분 경과'+(over?' · <span class="ov">'+(s.el-s.eta)+'분 초과</span>':'')+'</div>'+(s.ext?'<div class="ext">연장 '+s.ext+'회 · 최초 '+s.init+'분</div>':'')+'<span class="bar"><i style="width:'+Math.min(100,Math.round(s.el/s.eta*100))+'%"></i></span>';
+  if (s.est) h+='<div class="tl">예상 '+s.est+'분</div>';
+  return h+'</span>';
+}
+function deps(n){ return '<span class="dw"><button type="button" class="dbtn" aria-label="의존">'+'<svg class="i" aria-hidden="true"><use href="#i-clock"/></svg>'+(n?'<span class="bd r">'+n+'</span>':'')+'</button></span>'; }
+function tickets(n){ return '<span class="dw wbtk"><button type="button" class="dbtn" aria-label="티켓"><svg class="i" aria-hidden="true"><use href="#i-ticket"/></svg>'+(n>1?'<span class="bd">'+n+'</span>':'')+'</button></span>'; }
+// card: {title, s, ago, deps, tk, body, quiet}
+function card(c, which, tip){
+  var st = which==="before" ? before(c.s) : which==="b" ? badgeB(c.s) : badgeA(c.s, tip);
+  var lead='<span class="tlead"><span class="tname" title="'+esc(c.title)+'">'+esc(c.title)+'</span>'+(c.deps!==undefined?deps(c.deps):"")+(c.tk?tickets(c.tk):"")+'</span>';
+  var body = c.body ? '<div class="tbody-mk"><div class="ln"><span class="ev">L</span>21:37 · 2분 전 —</div>'+c.body+'</div>' : "";
+  return '<section class="topic'+(c.quiet?" quiet":"")+'" data-state="'+c.s.st+'"><div class="tophead"><div class="tbar">'+lead+st+'<time class="tago">'+c.ago+'</time></div></div>'+body+'</section>';
+}
+
+var hero = [
+  {title:"리뷰 스윕(develop 누적 커밋)", deps:1, ago:"2분 전", s:{st:"impl", owner:"pi 작업자 5", eta:60, el:5},
+   body:"수리 1/5 병합(bdc402c35): ubuntu CI에서 깨지던 노드 시험 스텁을 고쳤습니다(B1). 시험 코드만 바꿨고 제품 코드는 그대로입니다. 고친 시험 24건이 모두 통과했고, wswhiteboard 패키지 전체도 통과했습니다. 남은 4개 작업자는 계속 돌고 있습니다."},
+  {title:"좌하단 홈 버튼 + 세션 라벨 두 번 클릭 토글 제거", ago:"3분 전", quiet:true, s:{st:"wait"}}
+];
+["before","a","b"].forEach(function(w){ document.getElementById("hero-"+(w==="before"?"before":w)).innerHTML = hero.map(function(c){ return card(c,w); }).join(""); });
+
+var rows = [
+  ["구현 중","ETA 안쪽", {st:"impl", owner:"pi 작업자 5", eta:60, el:5}],
+  ["구현 중","ETA 거의 소진", {st:"impl", owner:"pi 작업자 5", eta:60, el:54}],
+  ["구현 중","ETA 초과 (경고색)", {st:"impl", owner:"pi 작업자 5", eta:60, el:72}],
+  ["구현 중","긴 시간 · 연장 2회", {st:"impl", owner:"codex 작업자 2", eta:180, el:135, ext:2, init:120}],
+  ["구현 중","run 없음 (ETA 없음)", {st:"impl"}],
+  ["연구 중","작업자 + 예상치", {st:"research", owner:"sonnet 조사자", est:30}],
+  ["연구 중","속성 없음", {st:"research"}],
+  ["논의 중","", {st:"discuss"}],
+  ["대기","", {st:"wait"}],
+  ["확인 대기","awaiting-confirmation", {st:"confirm"}],
+  ["구현 중 · 조용한 토픽","quiet 바 (열린 항목 없음)", {st:"impl", owner:"pi 작업자 5", eta:60, el:12}, true],
+  ["초과 · 조용한 토픽","quiet 바", {st:"impl", owner:"pi 작업자 5", eta:60, el:72}, true],
+  ["대기 · 조용한 토픽","quiet 바", {st:"wait"}, true],
+  ["닫힘 / 진단","closed · state diagnostic", null]
+];
+document.querySelector("#matrix tbody").innerHTML = rows.map(function(r){
+  var s=r[2], q=r[3]?' class="quiet"':'';
+  if (!s) return '<tr><td class="nm">'+r[0]+'<small>'+r[1]+'</small></td><td colspan="3"><div class="strip none">뱃지 없음 (지금과 동일, ago.js:42)</div></td><td class="tt">—</td></tr>';
+  return '<tr'+q+'><td class="nm">'+r[0]+'<small>'+r[1]+'</small></td><td><div class="strip">'+before(s)+'</div></td><td class="v-new"><div class="strip">'+badgeA(s)+'</div></td><td class="v-new"><div class="strip">'+badgeB(s)+'</div></td><td class="tt">'+esc(full(s))+'</td></tr>';
+}).join("");
+
+var narrow = [
+  {title:"리뷰 스윕(develop 누적 커밋) — 수리 5건 병렬 진행과 재검토 대기열 정리", deps:1, tk:2, ago:"2분 전", s:{st:"impl", owner:"pi 작업자 5", eta:60, el:5}},
+  {title:"대시보드 보드 카드 접기 상태가 새로고침 뒤 사라지는 문제", tk:1, ago:"1시간 전", s:{st:"impl", owner:"codex 작업자 2", eta:45, el:63}},
+  {title:"wsindex 부재 TTL 커버리지를 fetch 지연과 분리", ago:"8분 전", s:{st:"research", owner:"sonnet 조사자", est:30}},
+  {title:"좌하단 홈 버튼 + 세션 라벨 두 번 클릭 토글 제거", ago:"3분 전", quiet:true, s:{st:"wait"}}
+];
+document.getElementById("nar-before").innerHTML = narrow.map(function(c){ return card(c,"before"); }).join("");
+document.getElementById("nar-a").innerHTML = narrow.map(function(c){ return card(c,"a"); }).join("");
+
+document.getElementById("tips").innerHTML = [
+  {title:"리뷰 스윕(develop 누적 커밋)", deps:1, ago:"2분 전", s:{st:"impl", owner:"pi 작업자 5", eta:60, el:5}},
+  {title:"보드 카드 접기 상태 유지", tk:1, ago:"1시간 전", s:{st:"impl", owner:"codex 작업자 2", eta:60, el:72, ext:1, init:45}},
+  {title:"wsindex 부재 TTL 분리", ago:"8분 전", s:{st:"research", owner:"sonnet 조사자", est:30}}
+].map(function(c){ return card(c,"a",true); }).join("");
+</script>
+</body>
+</html>

@@ -49,7 +49,7 @@ func TestCloseResultRendersBesideTheName(t *testing.T) {
 	mustApply(t, st, addXML(ClassTechnical, "t", "x")+`<wb:answer id="1" value="ok">ok</wb:answer>`+`<wb:topic name="t"><wb:close result="Went with **plan b**."/></wb:topic>`)
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<span class="tname" title="closed">t</span>`+result+`Went with <strong>plan b</strong>.</span>`)
+		wantAll(t, out, `<span class="tname" title="t">t</span>`+result+`Went with <strong>plan b</strong>.</span>`)
 	}
 
 	mustApply(t, st, addXML(ClassTechnical, "t", "reopened"))
@@ -65,7 +65,7 @@ func TestCloseResultRendersBesideTheName(t *testing.T) {
 	// A store from before close results: closed, with no result to show.
 	old := &State{Seq: 2, Items: []Item{{ID: 1, Class: ClassTechnical, Topic: "legacy", Title: "x", Status: StatusAnswered, Answer: "ok", Settled: 1}}, ClosedTopics: []string{"legacy"}}
 	out = render(t, BuildView(old, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<span class="tlead"><span class="tname" title="closed">legacy</span></span>`)
+	wantAll(t, out, `<span class="tlead"><span class="tname" title="legacy">legacy</span></span>`)
 	wantNone(t, out, `class="tresult"`)
 }
 
@@ -90,7 +90,7 @@ func TestTopicBarShowsItsLatestChange(t *testing.T) {
 	wantNone(t, embed, "data-at=", "class=\"body-age\"", "data-body-at=")
 
 	for name, out := range map[string]string{"full": full, "embed": embed} {
-		start := strings.Index(out, `<span class="tname">old</span>`)
+		start := strings.Index(out, `<span class="tname" title="old">old</span>`)
 		if start < 0 {
 			t.Fatalf("%s: topic old missing", name)
 		}
@@ -218,9 +218,9 @@ func TestClosedTopicCapRenders(t *testing.T) {
 	st := closedBoard(t, 35)
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<div class="closed-more">5 more closed topics not shown</div>`, `<span class="tname" title="closed">c6</span>`)
+		wantAll(t, out, `<div class="closed-more">5 more closed topics not shown</div>`, `<span class="tname" title="c6">c6</span>`)
 		active := strings.SplitN(out, `<template data-history-topic`, 2)[0]
-		wantNone(t, active, `<span class="tname" title="closed">c5</span>`, `data-closed-next`)
+		wantNone(t, active, `<span class="tname" title="c5">c5</span>`, `data-closed-next`)
 		if layout == LayoutFull {
 			wantAll(t, out, `<template data-history-topic="c5">`)
 		}
@@ -246,7 +246,7 @@ func TestClosedTopicCapRenders(t *testing.T) {
 	if !strings.HasPrefix(rest, `<div class="closed-page"><section class="topic`) || strings.Count(rest, `<section class="topic`) != 5 {
 		t.Errorf("show-more answer:\n%.400s", rest)
 	}
-	wantAll(t, rest, `<span class="tname" title="closed">c5</span><span class="tresult" title="how the topic ended">Ending 5.</span>`, `class="btn mini tnote-toggle"`)
+	wantAll(t, rest, `<span class="tname" title="c5">c5</span><span class="tresult" title="how the topic ended">Ending 5.</span>`, `class="btn mini tnote-toggle"`)
 	wantNone(t, rest, `data-closed-next`, `id="reply-text"`)
 
 	html, err = RenderClosedTopics(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Closed: &ClosedWindow{From: 30, N: 2}}))
@@ -266,9 +266,9 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		wantAll(t, out,
-			`<section class="topic" id="`+topicAnchor("ship-gate")+`" data-topic="ship-gate" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">출시 게이트</span>`,
+			`<section class="topic" id="`+topicAnchor("ship-gate")+`" data-topic="ship-gate" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="출시 게이트">출시 게이트</span>`,
 			`<textarea class="note tnote" data-topic="ship-gate"`,
-			`<section class="topic" id="`+topicAnchor("Plain title")+`" data-topic="Plain title" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">Plain title</span>`)
+			`<section class="topic" id="`+topicAnchor("Plain title")+`" data-topic="Plain title" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="Plain title">Plain title</span>`)
 	}
 	// The note line takes the topic from data-topic, not the visible name.
 	formJS, err := embeddedAsset("form.js")

@@ -35,6 +35,22 @@
     researching: ["research", "js.wb.state.researching"],
     implementing: ["impl", "js.wb.state.implementing"]
   };
+  function glyph(name) {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "i");
+    svg.setAttribute("aria-hidden", "true");
+    var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#i-st-" + name);
+    svg.appendChild(use);
+    return svg;
+  }
+  function child(parent, tag, cls, value) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (value !== undefined) n.textContent = value;
+    parent.appendChild(n);
+    return n;
+  }
   function badge(topic, now) {
     var state = topic.getAttribute("data-state"), spec = Object.prototype.hasOwnProperty.call(states, state) && states[state];
     var bar = topic.querySelector(".tbar"), box = bar && bar.querySelector(".topic-state");
@@ -44,7 +60,7 @@
       return;
     }
     if (!box) {
-      box = span("topic-state");
+      box = span("topic-state dw");
       var lead = bar.querySelector(".tlead");
       bar.insertBefore(box, lead ? lead.nextSibling : bar.firstChild);
     }
@@ -52,30 +68,65 @@
     var own = owner.trim() && (state === "researching" || state === "implementing" && run.trim()) ? owner : "";
     var raw = topic.getAttribute("data-state-eta-minutes") || "", eta = Number(raw);
     var estimate = state === "researching" && /^\d+$/.test(raw) && Number.isSafeInteger(eta) && eta > 0 ? eta : 0;
-    // Only rebuild state text when authority changes, not on periodic ticks.
-    var key = JSON.stringify([state, own, estimate]);
-    if (box.wbStateKey !== key) {
-      box.textContent = "";
-      var pill = span("stb " + spec[0]);
-      var dot = span("wb-state-dot");
-      dot.setAttribute("aria-hidden", "true");
-      pill.appendChild(dot);
-      pill.appendChild(span("state-label", wsT(spec[1]) + (own ? " · " : "")));
-      if (own) pill.appendChild(span("own", own));
-      box.appendChild(pill);
-      if (estimate) box.appendChild(span("state-estimate", wsT("js.wb.state.estimate", estimate)));
-      box.wbStateKey = key;
-    }
     var start = instant(topic.getAttribute("data-state-started-at")), deadline = instant(topic.getAttribute("data-state-deadline-at"));
-    var timer = box.querySelector(".eta");
-    if (state !== "implementing" || !own || !/^\d+$/.test(raw) || !Number.isSafeInteger(eta) || eta <= 0 || !Number.isFinite(start) || !Number.isFinite(deadline) || deadline - start !== eta * 60000) {
-      if (timer) timer.parentNode.removeChild(timer);
-      return;
+    var clock = state === "implementing" && own && /^\d+$/.test(raw) && Number.isSafeInteger(eta) && eta > 0 && Number.isFinite(start) && Number.isFinite(deadline) && deadline - start === eta * 60000;
+    var elapsed = clock ? Math.max(0, Math.floor((now - start) / 60000)) : 0, over = clock && elapsed > eta;
+    var initial = Number(topic.getAttribute("data-state-initial-eta-minutes")), extensions = Number(topic.getAttribute("data-state-extensions"));
+    var extended = clock && Number.isSafeInteger(initial) && initial > 0 && initial < eta && Number.isSafeInteger(extensions) && extensions > 0;
+    // Authority changes rebuild the pill; ticks keep its focused node and SVG.
+    var key = JSON.stringify([state, own, estimate, !!clock, eta, initial, extensions, run, start, deadline]);
+    var pill = box.querySelector(".sb"), tip = box.querySelector(".sb-tip");
+    if (box.wbStateKey !== key && !(box.wbStateKey === undefined && pill && tip)) {
+      box.textContent = "";
+      pill = child(box, "span", "sb " + spec[0] + (!clock && !estimate ? " solo" : ""));
+      pill.setAttribute("tabindex", "0");
+      pill.setAttribute("role", "img");
+      pill.appendChild(glyph(spec[0]));
+      if (clock || estimate) {
+        var time = child(pill, "span", "t" + (estimate ? " est" : ""));
+        if (clock) child(time, "b", "", elapsed);
+        child(time, "small", "", wsT(clock ? "js.wb.state.eta.max" : "js.wb.state.estimate.short", eta));
+      }
+      tip = child(box, "span", "pop sb-tip " + spec[0]);
+      tip.setAttribute("role", "tooltip");
+      tip.setAttribute("popover", "manual");
+      tip.hidden = true;
+      var head = child(tip, "span", "h");
+      head.appendChild(glyph(spec[0]));
+      head.appendChild(document.createTextNode(wsT(spec[1])));
+      if (own) child(tip, "span", "who", own);
+      if (clock) {
+        child(tip, "span", "tl");
+        if (extended) child(tip, "span", "ext", wsT("js.wb.state.extended", extensions, initial));
+        child(child(tip, "span", "bar"), "i");
+      }
+      if (estimate) child(tip, "span", "tl", wsT("js.wb.state.estimate", estimate));
     }
-    if (!timer) { timer = span("eta"); box.appendChild(timer); }
-    var elapsed = Math.max(0, Math.floor((now - start) / 60000)), over = elapsed > eta;
-    put(timer, wsT("js.wb.state.eta", eta, elapsed) + (over ? " (+" + (elapsed - eta) + ")" : ""));
-    timer.classList.toggle("wb-state-over", over);
+    box.wbStateKey = key;
+    var parts = [wsT(spec[1])];
+    if (own) parts.push(own);
+    if (clock) {
+      parts.push(wsT("js.wb.state.eta.tip", eta, elapsed));
+      if (over) parts.push(wsT("js.wb.state.over", elapsed - eta));
+      if (extended) parts.push(wsT("js.wb.state.extended", extensions, initial));
+      put(pill.querySelector("b"), String(elapsed));
+      // The hidden tip is not a live region. Refresh its clock only per minute.
+      if (tip.wbMinute !== elapsed) {
+        var line = tip.querySelector(".tl");
+        line.textContent = wsT("js.wb.state.eta.tip", eta, elapsed);
+        if (over) {
+          line.appendChild(document.createTextNode(" · "));
+          child(line, "span", "ov", wsT("js.wb.state.over", elapsed - eta));
+        }
+        tip.querySelector("i").setAttribute("style", "width:" + Math.min(100, Math.floor(elapsed * 100 / eta)) + "%");
+        tip.wbMinute = elapsed;
+      }
+    }
+    if (estimate) parts.push(wsT("js.wb.state.estimate", estimate));
+    var label = parts.join(" · ");
+    if (pill.getAttribute("aria-label") !== label) pill.setAttribute("aria-label", label);
+    pill.classList.toggle("over", !!over);
+    tip.classList.toggle("over", !!over);
   }
   // BodyUpdatedAt is already validated by BuildView. No activity/clock
   // fallback: an absent body time stays unknown in the gutter.
