@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 76e3925e5b9cf75f
 sage-review-completeness-reviewed: 76e3925e5b9cf75f
+completed: 2026-11-16
 ---
 
 # worktree.acquire hides a stale reused branch; the route resolver blocks a new branch while a merged canonical ref remains
@@ -291,6 +292,57 @@ through the configured build lock):
 5. Independent R1 review of the implementation; fixes-only R2 only for
    substantive findings. Record minor/style findings as Forward. Append the
    Phase 2 Result without changing Phase 1 history.
+
+### Result (a576fda55) - 2026-11-16
+
+- A matching branch/ticket identity vouch now selects the existing `recreate`
+  action for a different, existing name-rooted canonical target with zero
+  measured commits ahead of its encoded merge root. The check precedes rename
+  permission/tracking refusals; canonical-current continuation, no-target vouch
+  handling, unvouched identity stops, unique-target collisions and legacy
+  rootless behavior remain intact. The existing create-path policy advisory is
+  restricted to a current branch that is itself the merge root, so this new
+  name-rooted case does not emit a contradictory warning.
+- Real-Git regressions cover develop and nested goal roots, unchanged refs and
+  checkout during routing, unique-target refusal, non-forced deletion refusal
+  while another worktree holds the target, recreation from the merge root, and
+  retained prior-current commits/tracking. Unit matrices cover exact/absent/
+  mismatched vouches, rename/tracking combinations and legacy boundaries;
+  injected count-read/parse failures still fail closed.
+- Independent R1 lite review (`74520463-01-stale-branch-phase2-r1.md`) found one
+  Critical: short revision operands could resolve a same-named tag instead of
+  the verified local branch. Fixed in `ce2b2391c` by qualifying both branch
+  operands as `refs/heads/` in the shared count helper
+  (`agents-plugin-tool/internal/mcp/implement_resolver.go:469-486`). Real-Git
+  regressions cover target, merge-root and current-branch shadowing tags with
+  ambiguity warnings disabled. No Important or Minor findings were raised.
+  The route allocated one-pass `lite`, so no R2 was dispatched under the worker
+  protocol; the fix was verified with the same scoped family.
+- Verification: from this pooled worktree, the exact remote command was
+  `bash D:/sys_lock.sh remote w5090 run exec1-phase2 15 --sync 'D:/Workspace/Repos/.ws-worktrees/devenv/groove-animosity-playroom' -- 'export PATH=$HOME/sdk/go/bin:$PATH; cd agents-plugin-tool && go test ./internal/mcp/ -run "ImplIdentity|ResolveImplement|ObserveImplementBranch" -count=1'`.
+  It passed before review (`0.866s`) and, after the substantive R1 fix changed
+  covered source inputs, passed again (`1.030s`, exit 0). `git diff --check`
+  passed. No full-package/build/vet sweep, local Go command, local Go/test
+  binary, local temporary artifact, daemon replacement, push or merge was
+  performed. D: free space remained above 150 GB.
+- **Compatibility: T0**, relative to `deb8289d2`. The old writer already emits
+  `recreate` (`deb8289d2:agents-plugin-tool/internal/mcp/implement_resolver.go:868-884`),
+  and the new writer reuses it at
+  `agents-plugin-tool/internal/mcp/implement_resolver.go:951-957`. The old
+  instruction reader (`deb8289d2:agents-plugin-tool/internal/mcp/implement_resolver.go:1004-1005`)
+  and new reader (`agents-plugin-tool/internal/mcp/implement_resolver.go:1018-1019`)
+  both understand the same non-forced delete/recreate action. Branch-plan and
+  agenda fields remain identical (`implement_resolver.go:103-128` in both
+  versions); no argument, response member, action enum or persistent schema is
+  added. The unchanged handler marshals/writes that same agenda through
+  `enterMode` (`agents-plugin-tool/internal/mcp/session_state.go:1138-1151`).
+  Old callers keep working, and old writers can still emit their previous
+  refusal without losing a new field. Reopening the new version reobserves Git
+  on the next invocation (`session_state.go:1123-1131`); there is no stored
+  addition to recover. This is the approved routing correction, not a new
+  protocol contract.
+- Phase 1 and its historical Result/Edition are unchanged. All phases are now
+  complete; the implementation branch is retained for lead-owned integration.
 
 ## Owner Decisions (2026-11-16)
 
