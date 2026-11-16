@@ -28,7 +28,7 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 			t.Errorf("the live session page lacks %q", want)
 		}
 	}
-	if i, j, k := strings.Index(live, "window.WsPreview = {"), strings.Index(live, "window.WsFiles = {"), strings.Index(live, "The dashboard page script"); i < 0 || j < i || k < j {
+	if i, j, k := strings.Index(live, "window.WsPreview = {"), strings.Index(live, "window.WsFiles = {"), strings.Index(live, `<script src="/s/dashboard-`); i < 0 || j < i || k < j {
 		t.Error("the explorer script is not between the preview kind and the page script")
 	}
 	if j, k := strings.Index(live, `id="ctabs"`), strings.Index(live, `<div id="convo" class="convo">`); j < 0 || k < j || strings.Contains(live, `id="splitter"`) {

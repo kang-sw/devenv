@@ -189,6 +189,30 @@ not the major lag source in this trace. Nevertheless, the owner's explicit
 claim it fixes the measured exposure bottleneck, and do not touch composer grow
 or slash/# enumeration (the latter was refuted by the trace).
 
+### Phase 2 implementation boundary — 2026-11-16 11:02
+
+Lead assigned a code-level fresh-load audit, contained caching/deduplication/
+visibility wins, and per-session scroll restoration. Baseline is develop
+`e6e0ebf44`; live Chrome/Electron trace and first-usable timing remain with the
+lead after its arranged swap. The tracked audit is
+`../assets/261116-bug-ws-dashboard-hidden-cached-page-cost/phase2-load-audit.md`.
+
+- Externalize only the framed session's shared main script at a content-hashed,
+  immutable URL; preserve prerequisite script order and fresh initialization.
+- Share only in-flight terminal-list requests. Defer off-screen terminal
+  emulator/socket/ring replay until near-view; retain near folded cards' existing
+  last-line preview. Do not cache output or resume a fresh empty emulator from
+  a stale sequence number.
+- Retain only bounded tab-local scroll metadata, separately from drafts. Board
+  scroll placement stays with the existing history owner. Do not change board
+  exposure functions, frame-height application, or composer implementation.
+- Compatibility: **T0** for the new `ws.dashboard.session-views` sessionStorage
+  key. The previous version has no reader/writer for it; `sessionViews` and
+  `saveSessionView` alone read/write it, so an intervening old client leaves its
+  records intact. Existing persisted drafts are unchanged. The content-hashed
+  script route and optional `wsSaveSessionView` callback are private page glue,
+  not a daemon tool/protocol/store schema change.
+
 ## Open questions
 
 - What fresh-switch latency bound should Phase 2 target?

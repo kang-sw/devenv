@@ -45,7 +45,7 @@
   // emulator measures its cells when it opens, so it opens once the font
   // is in or the wait is over.
   var SYMBOLS = "WsNerdSymbols", FONT_WAIT = 1500;
-  var hooks = {}, loading = null, cellH = 0, ui = {}, folders = null, listSeq = 0;
+  var hooks = {}, loading = null, cellH = 0, ui = {}, folders = null, listSeq = 0, listWait = null;
 
   function mk(tag, cls, text) {
     var e = doc.createElement(tag);
@@ -332,6 +332,23 @@
     c.body.appendChild(s.end);
     s.foldEl = mk("div", "tm-fold");
     status(c);
+    // A restored off-screen terminal needs neither an emulator nor a
+    // socket/backlog until the reader reaches it. Near folded cards still
+    // replay for their last-line preview. A fresh emulator always replays
+    // the full ring; no output cursor is cached.
+    if (window.IntersectionObserver) {
+      s.io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { s.near = e.isIntersecting; });
+        if (s.near) activate(c);
+      }, { rootMargin: "200px 0px" });
+      s.io.observe(c.el);
+    } else activate(c);
+  }
+  function activate(c) {
+    var s = c.t;
+    if (s.gone || s.term || s.starting) return;
+    s.starting = true;
+    if (s.io) { s.io.disconnect(); s.io = null; }
     emulator().then(function () {
       if (s.gone) return;
       start(c);
@@ -397,6 +414,7 @@
     clearTimeout(s.retryTimer);
     clearTimeout(s.fitTimer);
     if (s.ro) s.ro.disconnect();
+    if (s.io) s.io.disconnect();
     if (s.onWinFocus) window.removeEventListener("focus", s.onWinFocus);
     if (s.ws) { var ws = s.ws; s.ws = null; try { ws.close(); } catch (e) { /* closing */ } }
     if (s.term) { try { s.term.dispose(); } catch (e) { /* gone */ } }
@@ -428,7 +446,11 @@
       return c.t.foldEl;
     },
     sized: function (c) {
-      if (!c.t || !c.t.term) return;
+      if (!c.t) return;
+      if (!c.t.term) {
+        if (c.t.near || !c.t.io) activate(c);
+        return;
+      }
       later(c);
       // A card maximized to work in takes the keyboard.
       if (maximized(c)) setTimeout(function () { if (maximized(c) && c.t.term) c.t.term.focus(); }, 0);
@@ -438,13 +460,21 @@
   // --- the daemon's list -------------------------------------------------------
   function cardFor(tid) { return cards.list(KIND).filter(function (c) { return c.data.tid === tid; })[0] || null; }
   function list(done) {
+    // Mount, visibility and a drawer/popover can ask concurrently. Share
+    // only an in-flight read; a later explicit refresh still reaches the daemon.
+    if (listWait) { listWait.push(done); return; }
+    listWait = [done];
+    function finish(err, value) {
+      var wait = listWait; listWait = null;
+      wait.forEach(function (fn) { fn(err, value); });
+    }
     fetch(route(worktree ? "?folder=" + encodeURIComponent(worktree) : ""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw (t || "").trim() || "HTTP " + r.status; });
       return r.json();
     }).then(function (v) {
       folders = v.folders || null;
-      done(null, v);
-    }, function (e) { done(typeof e === "string" ? e : wsT("js.post.unreachable"), null); });
+      finish(null, v);
+    }, function (e) { finish(typeof e === "string" ? e : wsT("js.post.unreachable"), null); });
   }
   // reconcile opens a card for each of this session's terminals that has
   // none, at its start time, and drops the cards whose terminal the daemon

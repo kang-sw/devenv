@@ -162,7 +162,12 @@ func TestDevAssetsIDFollowsTheServedFiles(t *testing.T) {
 		t.Fatal("a script edit keeps the dev identity")
 	}
 	_, page = get(t, f.base+"/s/livesession?frame=1")
-	if !strings.Contains(page, "/*devid*/") || dataAssets(t, page) != stream {
+	a, err := loadDashboardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, script := get(t, f.base+"/s/"+a.data.ScriptFile)
+	if !strings.Contains(page, a.data.ScriptFile) || !strings.Contains(script, "/*devid*/") || dataAssets(t, page) != stream {
 		t.Errorf("the reloaded dev page carries %q, the stream %q", dataAssets(t, page), stream)
 	}
 }

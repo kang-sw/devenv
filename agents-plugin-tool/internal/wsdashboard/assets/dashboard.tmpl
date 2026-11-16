@@ -46,7 +46,7 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.FilesScript}}</script>{{if .Terminal}}
 <script>{{.Assets.TerminalScript}}</script>{{end}}{{if and .SysOpen (not .Worktree)}}
 <script>{{.Assets.WebScript}}</script>{{end}}
-<script>{{.Assets.Script}}</script>
+{{if .Frame}}<script src="/s/{{.Assets.ScriptFile}}"></script>{{else}}<script>{{.Assets.Script}}</script>{{end}}
 </body></html>
 {{end}}
 
