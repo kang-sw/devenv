@@ -167,6 +167,10 @@ func TestHostedPluginWarningPersistsAndSettingWaitsForProcessStart(t *testing.T)
 	if err := RegisterHostedPlugin(dir, filepath.Join(wsflow, "rsrc")); err != nil {
 		t.Fatal(err)
 	}
+	setHostedPackage(t, "ws")
+	if !h.state(id).Process || h.holder(id) != holder || h.record(id).PluginWarning != warning {
+		t.Fatal("changing the setting affected the running process")
+	}
 	setHostedPackage(t, "wsflow")
 	h.restart()
 	if got := h.holder(id); got != holder {
