@@ -1,5 +1,6 @@
 ---
 title: "dev.py rerun daemon reports unavailable after successful daemon replacement"
+completed: 2026-11-16
 ---
 
 # dev.py rerun daemon reports unavailable after successful daemon replacement
@@ -57,3 +58,12 @@ the false failure without masking real errors. Verify delayed readiness,
 successful replacement, true failure, concurrent replacement, and timeout in
 isolated fixtures with exact successor identity. No build, test, executable
 probe or daemon replacement is performed by this docs-only capture.
+
+
+## Resolution (2026-11-16)
+
+Absorbed by 261116-bug-ws-exe-launch-elimination under coordinator direction at 2026-11-16 03:22:51Z; this duplicate is closed to prevent a second assignment, not to claim live acceptance. Reviewed code HEAD d286b8eaf9fffc4dbfb2ae1ab86096de8e6d7a05 changes only scripts/dev.py and scripts/test_dev.py. The helper reuses LauncherStartLock through explicit handoff and bounded expected-content-hash REST confirmation; only parsed exit 1 / outcome unavailable permits nonzero reconciliation, with original diagnostics, one starter and one shared lifecycle deadline. Old/no/PID-only health, malformed or unrelated failures and expiry still fail. The daemon-start report/health contracts and package-root/env selection remain unchanged.
+
+Focused fully mocked Python verification: TMP=D:/Temp/exe-dev-repair TEMP=D:/Temp/exe-dev-repair DEV_TEST_TMP=D:/Temp/exe-dev-repair PYTHONDONTWRITEBYTECODE=1 python -B -m unittest scripts.test_dev.DevLifecycleTest -v; all 12 tests passed (0.593s), full output read at D:/Temp/exe-dev-repair/dev-lifecycle-1.txt. Independent focused R1 CLEAN for 04e06b7b5..d286b8eaf, no findings or fixes; conditional fixes-only R2 was not applicable. Full report: C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac@392ca909/review-paths/61cdf1a0-01-exe-dev-repair-r1.md.
+
+These source/test results settle this duplicate's reporting correction only. No live reproduction, executable fixture, Go/ws/test executable, native PID query, build, install, runtime probe, swap or sampling was performed. Actual live acceptance remains coordinator-owned and is not claimed. The primary ticket remains open without a phase Result pending that acceptance.

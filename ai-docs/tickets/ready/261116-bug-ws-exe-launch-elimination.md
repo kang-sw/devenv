@@ -145,6 +145,39 @@ startup can still reach a ws executable through `main`/`connect`,
 
 ## Decisions
 
+- Live-acceptance repair, coordinator assignment 2026-11-16 02:59:27Z:
+  fix the proven Python dev lifecycle gaps before the Codex REST follow-up.
+  `scripts/dev.py` must participate in the existing launcher starter gate
+  through bounded expected-build REST confirmation; builds stay outside it.
+  Reuse the imported `LauncherStartLock`, not Go's daemon singleton or a new
+  gate/interface. For the specific exit-1, parsed `outcome: unavailable`
+  response, use the remaining lifecycle deadline to confirm the expected
+  content hash over REST, without another executable invocation. Keep the
+  original diagnostic; reject malformed reports, unrelated failures, old
+  hashes and deadline expiry. Technical choices follow the two source-triage
+  findings; rejected: unconditional nonzero-exit success, a second starter,
+  a global wait increase or an unbounded/resetting deadline.
+- Acceptance evidence distinguishes process creation from readiness. The
+  sampled extra starter is real, but the supplied CSV does not establish
+  continuous health at its under-lock probe. Equal numeric cores already
+  ignore hash/build time; do not change that policy based on process age.
+  Coordinator-owned repeat sampling, not a worker runtime operation, must
+  determine any remaining anomaly after repairing the dev gate bypass.
+  Coordinator correction at 03:11:45Z: 02:54:29 was process creation plus
+  the /health `started` field time, not independently observed health. The
+  sampler first recorded healthy around 02:57:00; old retry waves stopped and
+  dashboard reconnect logging appeared around 02:55:08. Reachability may have begun
+  between 02:54:29 and 02:55:08, so an unpublished-endpoint window plausibly
+  explains PID 3452 at 02:54:52, but its exact admission cause remains unproven.
+  Do not pursue that historical anomaly or add diagnostics in this repair.
+- Repair compatibility tier: T0, internal Python caller coordination and
+  result handling only. Existing lock, endpoint and Go JSON outcome shapes
+  remain unchanged. Old launchers ignore the persistent gate; new launchers
+  reopen the same byte-zero lock. `scripts/dev.py` reads the existing outcome
+  and REST hash; it writes no shared data shape. Source evidence:
+  `scripts/dev.py:206-220,291-303`, launcher `:1079-1127,1540-1573`,
+  `cmd/ws-mcp/proxy.go:419-422`, `internal/wsdashboard/ensure.go:178-207`.
+
 - item 4 deferred to follow-up by owner direction 10:56
   The isolated Codex admission implementation is parked at local branch
   `parked/exe-phase1-item4-codex` and reverted from this ticket's retained
@@ -329,6 +362,29 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
    index, cached-value retention and unchanged credential fallback; Pi
    cache restart, wrapper/PATH/config invalidation, expiry, corrupt/newer
    schemas, failed writes and directional old-writer/new-reopen behavior.
+
+### Live-acceptance repair scope (coordinator assignment 2026-11-16 02:59:27Z)
+
+- Implement only the two dev lifecycle fixes in Decisions, in
+  `scripts/dev.py` and focused `scripts/test_dev.py` cases. If an existing
+  launcher test needs a deterministic assertion, limit it to this dev-gate
+  interaction; do not split or refactor the three launchers.
+- Mock all executable/PID APIs and control clocks. Prove a dev-held gate
+  prevents an updated MCP contender from starting beyond its 20-second
+  grace; successor publication yields zero extra starts. Cover bounded
+  contention, exception/failure release and unchanged explicit replacement.
+- Prove unavailable -> expected REST hash recovery invokes exactly one
+  starter; old hash, no health, malformed/non-unavailable failures and budget
+  expiry still fail with useful diagnostics. Never accept a PID alone or
+  shorten production grace. No local launcher runs, builds or live swap.
+- Run one independent R1, then fixes-only R2 for substantive fixes. Return
+  the reviewed code/head and evidence to the coordinator; leave this ticket
+  open. Codex REST is subsequent work, not part of this repair commit. The
+  parked Codex commit is CLI-admission work, not a REST implementation.
+- Source-only triage at `ae86b1408` is recorded in the machine-local report
+  `C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac/review-paths/462376e9-01-exe-live-triage.md`.
+  Swap evidence is under `D:/Temp/daemon-swap-1116/`; old in-memory launchers
+  are the previously accepted single-flight boundary, not a new defect.
 
 ## Constraints
 
@@ -679,6 +735,59 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
    can miss short-lived processes; report that measurement limit. Preserve
    only small acceptance evidence and remove owned temporary artifacts later.
 
+## Live-acceptance repair source checkpoint - 2026-11-16
+
+- Reviewed code HEAD: `d286b8eaf9fffc4dbfb2ae1ab86096de8e6d7a05`.
+  Only `scripts/dev.py` and `scripts/test_dev.py` changed from planning HEAD
+  `04e06b7b5fc080d824fb3b0d4a835bcf8e90f188`. The existing launcher gate is
+  reused without a cross-module interface change; builds, seeding and staging
+  finish outside it. One 60-second lifecycle deadline covers lock contention,
+  explicit `--replace`, and expected-content-hash REST confirmation. Only
+  parsed exit 1 / `outcome: unavailable` permits nonzero reconciliation;
+  diagnostics remain visible and no second starter is invoked.
+- Focused local command (all executable/PID/network boundaries mocked):
+  `TMP=D:/Temp/exe-dev-repair TEMP=D:/Temp/exe-dev-repair DEV_TEST_TMP=D:/Temp/exe-dev-repair PYTHONDONTWRITEBYTECODE=1 python -B -m unittest scripts.test_dev.DevLifecycleTest -v`
+  passed all 12 tests (0.593s); full output read at
+  `D:/Temp/exe-dev-repair/dev-lifecycle-1.txt`. Actual advisory-lock checks and
+  virtual clocks cover a dev-held gate through MCP contention beyond the
+  production 20-second grace and successor publication at t25 with zero extra
+  starters, shared-budget expiry, terminal release, explicit replacement,
+  unavailable recovery, malformed/unrelated failures, old/no/PID-only health,
+  late confirmation and hung responses. No executable fixture files were
+  created by this focused family. This is not a full-suite or live proof.
+- Independent focused R1 returned CLEAN for
+  `04e06b7b5..d286b8eaf`, with no Critical, Important or Minor findings.
+  Full report:
+  `C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac@392ca909/review-paths/61cdf1a0-01-exe-dev-repair-r1.md`.
+  No R1 fixes were required, so the conditional substantive-fix R2 does not
+  apply. The reviewer read source and the supplied full test log; it ran no
+  tests or live operations. This documentation checkpoint changes no reviewed
+  source inputs.
+- No Go/ws/test executable, launcher CLI, native PID query, build, install,
+  runtime probe, daemon swap, sampling, merge, push or release ran. Temporary
+  test directories were cleaned; only the small full-output record remains.
+  Original accepted Phase 1 source, retention policy and the old in-memory
+  launcher boundary are unchanged. PID 3452's historical cause is not proved.
+- Ticket remains open without a phase Result: the coordinator owns integration
+  and actual live acceptance. Stop before those live actions. Item 4 REST must
+  be planned afresh after this repair lands; the parked CLI-admission branch
+  is not a REST implementation and was not applied.
+- Coordinator direction at 03:22:51Z folds duplicate
+  `261116-bug-ws-dev-rerun-daemon-false-failure` into this repair. It is closed
+  as absorbed, with a Resolution naming the reviewed code, focused tests and
+  live-acceptance limit, so it cannot be assigned twice. Its unexecuted
+  standalone phase warning is explicitly accepted for duplicate absorption,
+  not treated as independent phase completion. No package-root/env-selection
+  interface changed; the existing dev package selection is retained.
+
 ## Forward
 
+- Live acceptance retained old executable/metadata pairs and pre-existing
+  orphan temp files intentionally: the approved baseline has no safe
+  process/accepted/rollback retention authority, so its pruning hook retains
+  settled artifacts. Failed-copy cleanup owns only that copy's new temp;
+  no historical sweep or new deletion policy is promised by this repair.
+- PID 3452's historical extra-start admission lacks a captured decision/health
+  trace. Repair the proven dev gate bypass without claiming that the CSV
+  proves its exact cause; repeat acceptance remains coordinator-owned.
 - Coordinator-approved boundary: old launchers and Electron do not share the new starter lock; a rare Electron race can execute one losing starter, with Go's singleton preventing a second daemon.

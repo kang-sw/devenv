@@ -6,9 +6,9 @@
 `rerun daemon` builds agents-plugin-tool/cmd/ws-mcp from the working tree
 (cross-built on the sys_lock remote w5090 by default, `go build` here with
 --local), stages it under the dashboard daemon's bin/ directory exactly as the launcher
-does, and runs `daemon-start --build-time <now>` so the daemon's own
-newer-build-wins rule drains and replaces the running daemon. Session
-launchers reconnect on their own.
+does, and runs `daemon-start --replace --build-time <now>` under the
+launcher's starter gate, holding it through bounded REST confirmation of the
+expected build. Session launchers reconnect on their own.
 
 It then seeds the same build into each local-devenv package dir of this checkout
 (a valid .local-devenv-runtime marker) with the launcher's own runtime name and
@@ -53,9 +53,8 @@ SEED_PACKAGES = ("agents-plugin", "agents-plugin-wsflow")
 # workers run.
 DAEMON_PACKAGE = REPO / "agents-plugin-wsflow"
 
-# How long to wait for daemon-start to finish. The
-# launcher gives a replacement DefaultStartWait plus a margin; a drain adds up
-# to its own 10s.
+# One lifecycle budget for starter-gate acquisition, daemon-start and REST
+# confirmation. Builds and seeding stay outside this deadline and the gate.
 START_TIMEOUT_SECONDS = 60.0
 
 
@@ -184,17 +183,18 @@ def describe(health: dict | None) -> str:
     )
 
 
-def current_health(launcher, daemon_dir: Path) -> tuple[dict | None, dict | None]:
+def current_health(launcher, daemon_dir: Path, timeout: float = 3.0) -> tuple[dict | None, dict | None]:
     endpoint = launcher.read_daemon_endpoint(daemon_dir)
     if endpoint is None:
         return None, None
     try:
-        return endpoint, launcher.daemon_health(int(endpoint["port"]), 3.0)
+        return endpoint, launcher.daemon_health(int(endpoint["port"]), timeout)
     except launcher.DaemonHung as exc:
         raise RuntimeError(f"the running daemon is wedged: {exc}") from exc
 
 
-def run_daemon_start(launcher, staged: Path, build_time: int, plugin_dir: Path = DAEMON_PACKAGE) -> dict:
+def run_daemon_start(launcher, staged: Path, build_time: int, plugin_dir: Path = DAEMON_PACKAGE,
+                     *, timeout: float = START_TIMEOUT_SECONDS) -> dict:
     env = dict(os.environ)
     # Set, not defaulted: a shell inside a harness session can inherit a
     # versioned plugin-cache path, and this command means this checkout.
@@ -211,18 +211,29 @@ def run_daemon_start(launcher, staged: Path, build_time: int, plugin_dir: Path =
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
-        timeout=START_TIMEOUT_SECONDS,
+        timeout=timeout,
         check=False,
     )
     for line in proc.stderr.splitlines():
         print(f"daemon-start: {line}")
-    if proc.returncode != 0:
-        raise RuntimeError(f"daemon-start exited {proc.returncode}: {proc.stdout.strip()}")
-    print(f"daemon-start: {proc.stdout.strip()}")
+    diagnostic = f"daemon-start exited {proc.returncode}: {proc.stdout.strip()}"
     try:
-        return json.loads(proc.stdout.strip().splitlines()[-1])
+        report = json.loads(proc.stdout.strip().splitlines()[-1])
+        if not isinstance(report, dict) or not isinstance(report.get("outcome"), str) or not report["outcome"]:
+            raise ValueError("missing outcome")
     except (ValueError, IndexError) as exc:
-        raise RuntimeError(f"daemon-start printed no report line: {proc.stdout!r}") from exc
+        if proc.returncode != 0:
+            raise RuntimeError(diagnostic) from exc
+        raise RuntimeError(f"daemon-start printed no valid report line: {proc.stdout!r}") from exc
+    if proc.returncode != 0:
+        if proc.returncode != 1 or report["outcome"] != "unavailable":
+            raise RuntimeError(diagnostic)
+        # Ensure can time out before its detached child publishes the endpoint.
+        # Only this result permits REST reconciliation, never another starter.
+        print(f"daemon-start: {diagnostic}")
+    else:
+        print(f"daemon-start: {proc.stdout.strip()}")
+    return report
 
 
 def seed_package(launcher, plugin_dir: Path, built: Path) -> str:
@@ -286,22 +297,52 @@ def rerun_daemon(local: bool, seed: bool = True) -> int:
         staged = launcher.stage_daemon_binary(built, bin_dir)
     print(f"staged: {staged}")
 
-    _, before = current_health(launcher, daemon_dir)
-    print(f"daemon before: {describe(before)}")
-    report = run_daemon_start(launcher, staged, int(time.time() * 1000))
-    _, after = current_health(launcher, daemon_dir)
-    print(f"daemon after:  {describe(after)}")
-    if after is None:
-        print("error: no daemon answers /health after daemon-start", file=sys.stderr)
+    deadline = time.monotonic() + START_TIMEOUT_SECONDS
+    starter = launcher.LauncherStartLock(daemon_dir)
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("lifecycle deadline expired waiting for the launcher starter lock")
+            if starter.acquire():
+                break
+            time.sleep(min(0.2, remaining))
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("lifecycle deadline expired before daemon-start")
+        _, before = current_health(launcher, daemon_dir, timeout=min(3.0, remaining))
+        print(f"daemon before: {describe(before)}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("lifecycle deadline expired before daemon-start")
+        report = run_daemon_start(launcher, staged, int(time.time() * 1000), timeout=remaining)
+        after = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            _, after = current_health(launcher, daemon_dir, timeout=min(3.0, remaining))
+            if time.monotonic() >= deadline:
+                break
+            if after is not None and after.get("content_hash") == digest:
+                print(f"daemon after:  {describe(after)}")
+                if report["outcome"] == "unavailable":
+                    print("daemon-start recovered: expected build confirmed over REST")
+                return 0
+            time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+        print(f"daemon after:  {describe(after)}")
+        if after is None:
+            print("error: no daemon answers /health within the lifecycle deadline after daemon-start", file=sys.stderr)
+        else:
+            print(
+                f"error: expected build was not confirmed over /health within the lifecycle deadline "
+                f"(outcome {report.get('outcome')}); the running daemon may be protected against downgrade",
+                file=sys.stderr,
+            )
         return 1
-    if after.get("content_hash") != digest:
-        print(
-            f"error: the running daemon is not the new build (outcome {report.get('outcome')}); "
-            "a newer-version daemon keeps running over an older source build",
-            file=sys.stderr,
-        )
-        return 1
-    return 0
+    finally:
+        starter.close()
 
 
 def main(argv: list[str]) -> int:
