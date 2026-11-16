@@ -52,12 +52,17 @@ test('numeric REST core precedence, explicit one-shot equal swap, and cross-boun
   assert.equal(launches.length, 0);
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.equal(drains, 1);
-  assert.deepEqual(launches, [['dashboard', '--port', '32000', '--lan']]);
+  assert.deepEqual(launches, [['dashboard', '--port', '32000', '--lock-wait', '8s', '--lan']]);
   assert.equal(await connectDaemon(config(f), deps), URL);
   assert.equal(launches.length, 1, 'explicit replacement is consumed once');
+  live = { ...live, pid: 122, started_at: 'plugin-winner', content_hash: 'different' };
+  deps.shutdown = async () => { drains++; live = { ...live, pid: 123, started_at: 'plugin-next' }; };
+  assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
+  assert.match(notices.at(-1), /different daemon won/);
+  assert.equal(drains, 2);
   live.version = '0.49.9';
   assert.equal(await connectDaemon(config(f), deps), URL);
-  assert.equal(launches.length, 1, 'unknown cross-minor clients keep incumbent');
+  assert.equal(launches.length, 2, 'unknown cross-minor clients keep incumbent');
   assert.match(notices.at(-1), /attached client versions are unknown.*update connected plugins/i);
 });
 test('failed preflight leaves incumbent serving, failed drain and late successor failure are distinct', async t => {

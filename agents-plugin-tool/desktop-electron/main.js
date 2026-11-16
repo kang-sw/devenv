@@ -226,9 +226,13 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       try {
         let url;
         try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace }, {
-          onNotice: message => { if (!window.isDestroyed()) dialog.showMessageBoxSync(window, {
-            type: 'warning', title: 'Daemon replacement unavailable', message, buttons: ['Keep connection'], noLink: true,
-          }); },
+          onNotice: message => {
+            if (window.isDestroyed()) return;
+            dialogOpen = true;
+            try { dialog.showMessageBoxSync(window, {
+              type: 'warning', title: 'Daemon replacement unavailable', message, buttons: ['Keep connection'], noLink: true,
+            }); } finally { dialogOpen = false; focusDashboard(true); }
+          },
         }); }
         catch (error) {
           if (!isCurrent(attempt)) return;

@@ -78,10 +78,12 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
     }
     if (refreshed < 0) return latest.url;
     try {
-      // A detached dashboard waits on the incumbent's existing lock (5s).
-      // Its spawn event is the preflight; no authenticated drain precedes it.
+      // Bound the successor's lock wait beyond the authenticated drain and
+      // final health round trip; it cannot serve until the old lock releases.
+      // A spawn event checks OS detach, not subsequent daemon startup success.
       await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root) },
-        ['dashboard', '--port', String(latest.endpoint.port), ...(latest.health.lan ? ['--lan'] : [])]);
+        ['dashboard', '--port', String(latest.endpoint.port), '--lock-wait', '8s',
+          ...(latest.health.lan ? ['--lan'] : [])]);
     } catch {
       notify('Replacement preflight failed; the incumbent was not drained. Retry later.');
       return running.url;
@@ -91,7 +93,8 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
       notify('Authenticated drain failed or the daemon changed; replacement outcome is uncertain. Check dashboard health before retrying.');
       return running.url;
     }
-    return await waitForDaemon(find, root, deps, latest, selected.metadata.version);
+    return await waitForDaemon(find, root, deps, latest, selected.metadata.version,
+      selected.metadata.binary_sha256, notify);
   }
   if (running) return running.url;
   if (platform !== 'darwin') {
@@ -107,27 +110,28 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
   catch (error) { throw new Error(`Cannot start dashboard daemon: ${error.message}`); }
   return waitForDaemon(find, root, deps);
 }
-async function waitForDaemon(find, root, deps, predecessor, candidateVersion) {
+async function waitForDaemon(find, root, deps, predecessor, candidateVersion, candidateHash, notify) {
   const sleep = deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
-  const deadline = Date.now() + 10000; // Includes drain and the Go lock wait.
-  for (let i = 0; i < (deps.maxPolls || 50); i++) {
-    try {
-      const answer = await find(root);
+  const deadline = Date.now() + (predecessor ? 13000 : 10000); // Drain + successor lock + startup.
+  for (let i = 0; i < (deps.maxPolls || (predecessor ? 65 : 50)); i++) {
+    let answer;
+    try { answer = await find(root); }
+    catch { /* The old endpoint can disappear during handoff. */ }
+    if (answer) {
       if (!predecessor) return answer.url;
       if (answer.endpoint?.pid !== predecessor.endpoint.pid ||
           answer.health?.started_at && answer.health.started_at !== predecessor.health.started_at) {
         // An unrelated plugin may win the lock. Attach only if its numeric
-        // core is at least our candidate's; never report an older winner as
-        // successful replacement or attribute its content to this package.
-        if (version(candidateVersion, answer.health?.version) > 0 ||
-            version(candidateVersion, answer.health?.version) === null) {
+        // core is at least our candidate's; never attribute its bytes to ours.
+        const relation = version(candidateVersion, answer.health?.version);
+        if (relation === null || relation > 0) {
           throw new Error('An older or unidentified daemon won the handoff; retry after inspecting the current connection');
+        }
+        if (answer.health?.content_hash && answer.health.content_hash !== candidateHash) {
+          notify?.('A different daemon won the handoff; attaching to its verified REST identity, not attributing it to the selected package.');
         }
         return answer.url;
       }
-    } catch (error) {
-      if (error.message.includes('won the handoff')) throw error;
-      // The old endpoint can disappear during handoff.
     }
     if (Date.now() >= deadline) break;
     await sleep(200);
