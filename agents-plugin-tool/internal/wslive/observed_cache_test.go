@@ -136,6 +136,16 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 	}
 	stats, opens := 0, 0
 	clock := time.Now()
+	// Keep directory writes on the injected clock's timeline. Otherwise a
+	// real Windows mtime tick can cover both append and removal while the
+	// advanced fake clock incorrectly makes that tick look safe to trust.
+	stamp := func(at time.Time) {
+		t.Helper()
+		if err := os.Chtimes(filepath.Join(dir, ObservedDirName), at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp(clock)
 	cache := ObservedCache{
 		open: func(path string) (*os.File, error) { opens++; return os.Open(path) },
 		stat: func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) },
@@ -162,6 +172,7 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock = clock.Add(time.Second)
+	stamp(clock)
 	got := cache.Load(dir)
 	if got == first || got.models[""].Current.Model != "second" {
 		t.Fatal("added record missed")
@@ -180,7 +191,9 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 	if !reflect.DeepEqual(snap, want) {
 		t.Fatalf("gated overlay differs: %+v vs %+v", snap, want)
 	}
-	// A vanished record drops on the next listing.
+	// A vanished record drops on the next listing, even when removal keeps
+	// the append's directory mtime tick. It was recent at that listing, so
+	// the racy window must prevent trusting it now.
 	files, _ := filepath.Glob(filepath.Join(dir, ObservedDirName, "*.json"))
 	for _, path := range files {
 		raw, _ := os.ReadFile(path)
@@ -192,6 +205,7 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 		}
 	}
 	clock = clock.Add(time.Second)
+	stamp(clock.Add(-time.Second))
 	dropped := cache.Load(dir)
 	if dropped.models[""].Current.Model != "first" || len(dropped.models[""].History) != 1 || stats != 2 {
 		t.Fatalf("vanished record kept: stats=%d", stats)

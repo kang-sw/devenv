@@ -1008,10 +1008,13 @@ func TestFolderPublishLockedAfterCommit(t *testing.T) {
 	go func() {
 		second <- f.UpdateAndPublish(nil, func(s *State) error { close(entered); s.Seq = 2; return nil }, func() error { return os.WriteFile(filepath.Join(dir, "index.html"), []byte("second"), 0o644) })
 	}()
+	// A legitimate publisher (or Windows file sharing retry) can hold the
+	// lock beyond the former two-second acquisition budget. The queued
+	// writer must still succeed after release, without entering early.
 	select {
 	case <-entered:
 		t.Error("another writer entered during publication")
-	case <-time.After(40 * time.Millisecond):
+	case <-time.After(2200 * time.Millisecond):
 	}
 	close(release)
 	if err := <-done; err != nil {
