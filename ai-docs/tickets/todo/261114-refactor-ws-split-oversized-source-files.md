@@ -361,6 +361,12 @@ Deferred scope: no splitting of the intact dispatch/schema functions, no
 changes to existing family implementations or tests, and no implementation
 plan for other oversized files in this phase (Phases 2-8 carry them).
 
+### Result (4faad059e) - 2026-11-17
+
+Merged to develop at 4faad059e (12 move-only commits, one per declaration family). `mcp/server.go` went from 6374 to 403 lines; declarations moved into `server_dispatch.go` (1664), `server_schemas.go` (1402), `server_config.go` (839), `server_tickets.go` (569), `server_sessions.go` (336), `server_util.go` (328), `server_git.go` (264), `server_inventory.go` (257), `server_diagnostics.go` (140), `server_harness.go` (132), `server_exec.go` (120), `server_playbook.go` (35).
+- Verification: 202 declarations proven byte-identical by AST comparison, gofmt clean, offline build and MCP vet passed.
+- The intact dispatch and schema functions were not split (deferred scope); `server_dispatch.go` and `server_schemas.go` are over 1000 lines but within the 2000-line goal.
+
 ### Phase 2: Split the oversized MCP test files
 
 Intended behavior: unchanged; same `package mcp` (internal tests only). Map:
@@ -404,6 +410,12 @@ sample from the map; `git show --stat HEAD` lists exactly two files and
 
 Deferred scope: no edits to non-test files or other test files.
 
+### Result (7f9403a06) - 2026-11-17
+
+Merged to develop at 7f9403a06 (9 move-only commits). New test files: `playbook_golden_test.go` (953), `server_stdio_git_test.go` (915), `todo_agenda_tools_test.go` (878), `server_stdio_config_test.go` (806), `route_resolve_implement_test.go` (749), `workflow_manual_state_test.go` (707), `tickets_mutate_stdio_test.go` (600), `server_stdio_exec_test.go` (493), `implement_todos_test.go` (440). Retained: `server_test.go` 1285, `playbook_tools_test.go` 1292, `session_state_test.go` 757 (from 3459, 2234, and 4084 lines respectively).
+- Verification: an AST source-slice proof preserved all 334 declaration and comment entries against the base; `TestMain` and shared helpers were kept in place, with only package and import scaffolding changed.
+- After merge the lead's narrow `mcp` tests passed. Retained files are over 1000 lines but within the 2000-line goal.
+
 ### Phase 3: Split wsagent runner and lead-runner tests
 
 Intended behavior: unchanged; same `package wsagent`. Map:
@@ -446,6 +458,12 @@ run: 1638 declarations identical).
 Deferred scope: optional fourth move (`Runner.Create` .. `Runner.act` plus
 request errors into `runner_requests.go`) only if the lead wants `runner.go`
 under ~1000 lines.
+
+### Result (21e4698a0) - 2026-11-17
+
+Merged to develop at 21e4698a0 (5 move-only commits). `wsagent/runner.go` went from 3555 to 1287 lines, with `runner_conv.go` (901), `runner_events.go` (770), and `runner_process.go` (636) split out; `lead_runner_test.go` went from 2206 to 778 lines, with `lead_rejoin_test.go` (731) and `lead_lifecycle_test.go` (722) split out.
+- Verification: all 1638 declaration hashes and the package-wide comment/body multisets are identical to the pre-series base.
+- The optional fourth move (`runner_requests.go`) was not taken; `runner.go` stays at 1287 lines, within the 2000-line goal.
 
 ### Phase 4: Split the dashboard tracker script into assembled fragments
 
@@ -509,6 +527,12 @@ testdata/search-palette.test.cjs` and `node --test tracker_draft.test.js`.
 Deferred scope: no asset-ID test coverage additions (`assets_id_test.go:65-67`
 does not list `tracker.js` today) and no mockup fix inside move commits.
 
+### Result (9b1466d3d) - 2026-11-17
+
+Merged to develop at 9b1466d3d (9 commits: one setup commit registering assembled tracker source readers, then 8 fragment moves). `assets/tracker.js` went from 7217 to 1150 lines, with fragments `tracker-render.js` (945), `tracker-menu.js` (900), `tracker-writes.js` (819), `tracker-window.js` (772), `tracker-forms.js` (736), `tracker-wiki.js` (667), `tracker-panel.js` (627), `tracker-mount.js` (601).
+- Embedded and development readers serve the assembled single-IIFE source, preserving the original bytes and asset identity; raw tracker test readers were switched to the assembled source before splitting so negative assertions inspect the complete source.
+- After merge the lead's narrow `wsdashboard` tests passed. Each fragment is under 1000 lines.
+
 ### Phase 5: Split Pi `ask.ts` and `spawner.ts`
 
 Intended behavior: unchanged; the bundle is rebuilt, so `dist/index.js` bytes
@@ -566,6 +590,13 @@ Parallelism: disjoint source files from Phase 6. Shares generated
 `native-pi/first-party-manifest.json` with Phase 7: whichever merges second
 regenerates instead of hand-merging.
 
+### Result (24bf3f3e6) - 2026-11-17
+
+Merged to develop at 24bf3f3e6 (8 move-only commits). `src/ask.ts` went from 2582 to 555 lines, with `ask-overlay.ts` (1169) and `ask-threads.ts` (849) split out; `src/spawner.ts` went from 4618 to 935 lines, with `spawner-push.ts` (1244), `spawner-launch.ts` (827), `spawner-record.ts` (580), `spawner-events.ts` (512), `spawner-admission.ts` (318), `spawner-tools.ts` (302) split out. The Pi bundle and both native first-party payloads were regenerated in the same change.
+- Verification: a compiler-API proof showed all 95 ask and 220 spawner declarations and attached comments byte-identical after ignoring `export` keywords; declaration multisets are unchanged.
+- The Pi suite's 17 failures and 58 tsc diagnostics are unchanged from the pre-split baseline (pre-existing; to be investigated separately).
+- `ask-overlay.ts` and `spawner-push.ts` are over 1000 lines but within the 2000-line goal.
+
 ### Phase 6: Split Pi test files
 
 Intended behavior: unchanged; test names stay identical. Map: the Tests section
@@ -598,6 +629,13 @@ identical set of full test names (`describe` path + title) before and after;
 declaration identity for top-level helpers.
 
 Parallelism: disjoint from Phase 5; may run in parallel.
+
+### Result (ea1998923) - 2026-11-17
+
+Merged to develop at ea1998923 (13 test-layout commits; no src or runtime changes). `test/ask.test.ts` went from 2847 to 834 lines (new `ask-overlay` 674, `ask-queue` 741, `ask-threads` 699), `spawner.test.ts` (3476) to 875 (new `spawner-registry` 814, `spawner-push` 730, `spawner-events` 621, `spawner-tools` 422), `goal-loop.test.ts` (3520) to 1187 (new `goal-loop-compaction` 1102, `goal-loop-resume` 1033, `goal-loop-pure` 559), plus fixtures `ask-threads.ts`, `goal-loop.ts`, `spawner-records.ts`.
+- Verification: gates compared the full named-test outcome multiset and the existing typecheck diagnostics against the execution baseline; the Pi suite's 17 failures and 58 tsc diagnostics are unchanged (pre-existing).
+- Caveats, accepted: `node --test` discovers `test/fixtures/*.ts` (existing precedent), adding 3 load passes; loading `fixtures/goal-loop.ts` standalone leaves one empty tmp dir (minor).
+- `goal-loop-compaction.test.ts` and `goal-loop-resume.test.ts` are over 1000 lines but within the 2000-line goal.
 
 ### Phase 7: Split the Claude mod watcher tests (ws and wsflow mirror)
 
@@ -635,6 +673,12 @@ TypeScript unresolved-import check and declaration identity proof from the map.
 Parallelism: disjoint source files from all other phases; shares generated Pi
 bundle/payload files with Phase 5 (regenerate on the second merge).
 
+### Result (be25443b0) - 2026-11-17
+
+Merged to develop at be25443b0 (3 commits). `hooks/claude-mod/watcher.test.ts` went from 2881 to 1326 lines in both `agents-plugin/` and the byte-identical `agents-plugin-wsflow/` mirror, with `watcher-board.test.ts` (857), `watcher-dashboard.test.ts` (451), and the shared `watcher-harness.ts` (258) added.
+- Verification: 46 board tests and 22 dashboard tests moved verbatim (72 tests remain in `watcher.test.ts`); names, helpers, comments, and bodies preserved with only import scaffolding changed.
+- Merge conflicts were confined to the generated Pi workflow bundles and the native first-party payload; resolved by rerunning `prepare-workflow-bundles.py` and `prepare-native-payload.py --first-party-only`. Payload staleness tests (`TestPiPrepared*`, `TestPiDaemonWorkflowOldReaderSeam`) passed afterwards.
+
 ### Phase 8: Split `scripts/board-headless.mjs`
 
 Intended behavior: unchanged. Map: section B of
@@ -663,3 +707,10 @@ output identical apart from stack line numbers (~2 s);
 `node --test scripts/board-headless/split.test.mjs`; declaration identity proof.
 
 Parallelism: disjoint from all other phases.
+
+### Result (3137b3d85) - 2026-11-17
+
+Merged to develop at 3137b3d85 (3 commits). `scripts/board-headless.mjs` went from 2475 to 1242 lines, with `board-headless/history.mjs` (514), `motion.mjs` (490), and `in-page.mjs` (245) split out; the entry path is unchanged.
+- Verification: only import/export scaffolding changed; declaration identity, no-argument usage output, all 21 stub scenarios, static names, syntax checks, and the split tests passed, and the split matches the map prototype exactly.
+- After all eight merges the lead ran `go build ./...` and `go vet ./...` (clean) and narrow tests for wswhiteboard, wsi18n, wsdashboard, mcp, wsagent payload, and wsrsrc mirror, all ok. Full CI run 43967536145 on 3137b3d85 is in progress (full CI pending).
+- The vendored `mermaid.min.js` was not split (owner decision recorded above).
