@@ -497,6 +497,9 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
+    "261116-bug-ws-native-pi-release-payload-staleness": {
+      "registered_at": "2026-11-16T00:52:49Z"
+    },
     "261116-bug-ws-shared-daemon-launcher-dependent-claude-plugin-root": {
       "registered_at": "2026-11-16T00:49:34Z"
     },
