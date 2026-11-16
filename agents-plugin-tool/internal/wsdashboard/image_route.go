@@ -35,7 +35,7 @@ import (
 // One widening, for a browser on this machine only (localViewer): an image
 // outside the root, which a served lead reply or board item names by an
 // absolute path (OutsideImage), is served too, under outsideImage's rules.
-// Such a response is refused, with the same 404, to a request whose
+// Every image response is refused, with the same 404, to a request whose
 // Sec-Fetch-Site is same-site or cross-site, and carries
 // Cross-Origin-Resource-Policy: same-origin, so another site open in the
 // same browser cannot probe the filesystem through an <img> load or error.
@@ -215,7 +215,8 @@ const imageDataMax = 2 << 20
 // (containedImage), for a topic body's sandboxed frame: the frame's opaque
 // origin sends no cookie, so in LAN mode the image route would refuse it. It
 // is empty when the route would refuse the path or the file is larger than
-// imageDataMax; the page then falls back to the route's URL (ImageSrc).
+// imageDataMax; the page then relays the route's URL (ImageSrc) through
+// the same-origin host so the opaque frame need not load it directly.
 // The containment checks run on every call; the encoded result is cached by
 // the resolved file's path, size, and modification time and the content
 // type (imageDataCache), so an unchanged image is read once while an edited
@@ -411,6 +412,10 @@ func containedImageInfo(root, path string) (file, ctype string, info os.FileInfo
 
 // handleImage serves the image route of one session.
 func (d *Daemon) handleImage(w http.ResponseWriter, r *http.Request, replyID string) {
+	if crossSiteFetch(r) {
+		http.Error(w, "image not found", http.StatusNotFound)
+		return
+	}
 	if d.index == nil || !ValidReplyID(replyID) {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
@@ -422,10 +427,8 @@ func (d *Daemon) handleImage(w http.ResponseWriter, r *http.Request, replyID str
 	}
 	path := r.URL.Query().Get("path")
 	file, ctype, ok := containedImage(s.Project, path)
-	outside := false
-	if !ok && localViewer(r) && !crossSiteFetch(r) {
+	if !ok && localViewer(r) {
 		file, ctype, ok = outsideImage(s.Project, path)
-		outside = ok
 	}
 	if !ok {
 		http.Error(w, "image not found", http.StatusNotFound)
@@ -448,8 +451,6 @@ func (d *Daemon) handleImage(w http.ResponseWriter, r *http.Request, replyID str
 	h.Set("Content-Security-Policy", imageContentSecurityPolicy)
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Referrer-Policy", "no-referrer")
-	if outside {
-		h.Set("Cross-Origin-Resource-Policy", "same-origin")
-	}
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	http.ServeContent(w, r, "", info.ModTime(), f)
 }
