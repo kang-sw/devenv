@@ -375,10 +375,11 @@ func TestDashboardTopicBodyUsesWholeCardFold(t *testing.T) {
 	board := string(regions.Board)
 	wantAll(t, board, `<div class="topic-stream"><div class="wb-history"`, `<details class="entry-panel`)
 	wantNone(t, board, `<details class="tdoc"`, `data-key="doc:shared"`, "has-doc")
-	// Standalone pages also retain only the panel folds after migration.
+	// Migrated sections have only panel folds. The page retains .has-doc
+	// CSS for unmigrated legacy views, so inspect the section's actual class.
 	page := render(t, view)
-	wantAll(t, page, `<details class="entry-panel`)
-	wantNone(t, markup(page), "has-doc", `class="tdoc"`)
+	wantAll(t, page, `<details class="entry-panel`, `<section class="topic" id="`+topicAnchor("shared")+`" data-topic="shared"`)
+	wantNone(t, markup(page), `class="tdoc"`)
 }
 
 // TestServedBoardFramesArePlaceholders pins the lazy mount's served form
