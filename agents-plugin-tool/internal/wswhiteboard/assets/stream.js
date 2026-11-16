@@ -1153,11 +1153,14 @@
   }
   function jump(recap) {
     cancel();
-    var topic = recap.closest('.topic'), history = window.wbHistory;
+    var topic = recap.closest('.topic'), entry = recap.getAttribute('data-entry'), history = window.wbHistory;
     if (!topic || !history || !history.loadTarget) return null;
+    if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(function () { jump(recap); })) return null;
+    if (topic.isConnected === false) topic = topic.id ? document.getElementById(topic.id) : null;
+    if (!topic) return null;
     // A dashboard card fold hides the whole topic; reveal it before geometry.
     var unfold = window.WsCards && window.WsCards.unfoldTopic;
-    var row = history.loadTarget(topic, recap.getAttribute('data-entry'), unfold);
+    var row = history.loadTarget(topic, entry, unfold);
     if (row) {
       // The arrival blink's more specific animation would mask the flash and
       // replay it when the blink ends, so neither may outlive this one.

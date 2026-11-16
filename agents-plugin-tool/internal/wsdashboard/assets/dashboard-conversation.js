@@ -148,6 +148,7 @@
     function result(topic, exact) { if (epoch === effectJumpEpoch && done) done(topic, exact); }
     function step() {
       if (epoch !== effectJumpEpoch) return;
+      if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(step)) return;
       var topic = effectTopic(topicID);
       if (!topic) {
         // Closed topics already have a paginated route. Do not invent a new
