@@ -145,6 +145,7 @@ function trailingStickyContract() {
       head.getBoundingClientRect=function(){return {top:50,bottom:130,height:80,left:0,right:500,width:500};};
       var blocker=topic(board,'blocker',bcol,120);
       k.watch(blocker);ios[0].report(blocker,1);
+      advance(16); // Finish watch()'s owner-install frame before timing the scroll gesture.
       assert.equal(k.keep(blocker,{capture:false}).visible(blocker),true);
       boardPending={A:[blocker]};
     ` + funcs(source, ['boardExposed', 'boardWithSnap', 'boardReleaseDue', 'boardViewedScroll', 'boardViewedTrailing', 'boardViewedExposure']) + `
@@ -215,7 +216,7 @@ function readingCount() {
     document.elementFromPoint=function(){return units[0];};
     var window={wbHistory:k};
     function boardBoxes(){return [board];}
-    var frameSizes=new Map(),frameSizeFrame=0,themes=0;
+    var frameSizes=new Map(),frameSizeFrame=0,themes=0,shHidden=false;
     function postTheme(){themes++;}
     units.forEach(function(n){n.style.height='40px';frameSizes.set(n,120);});
     units[0].wbGrow=true;
