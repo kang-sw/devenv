@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+
+	"github.com/gofrs/flock"
 	"strconv"
 	"time"
 )
@@ -23,8 +26,8 @@ const (
 	// OutcomeReplaced: an older daemon, an explicitly selected equal-core
 	// daemon, or one as new in the other LAN mode was replaced.
 	OutcomeReplaced Outcome = "replaced"
-	// OutcomeUnavailable: no healthy daemon came up in time, for example
-	// because a hung daemon still holds the lock. Nothing was terminated.
+	// OutcomeUnavailable: no healthy daemon came up in time. After an
+	// accepted replacement drain, the predecessor may already have stopped.
 	OutcomeUnavailable Outcome = "unavailable"
 )
 
@@ -51,6 +54,12 @@ type EnsureOptions struct {
 	// Replace requests one explicit equal-core replacement, even for the
 	// same content. It never permits downgrading a newer numeric core.
 	Replace bool
+	// Electron opts in to OS-accepted successor creation before drain.
+	SpawnBeforeShutdown bool
+	// PreserveRunningLAN uses each fresh healthy observation, not an earlier probe.
+	PreserveRunningLAN bool
+	// RefuseCrossMinor leaves a healthy incompatible incumbent untouched.
+	RefuseCrossMinor bool
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -117,12 +126,29 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 	if logw == nil {
 		logw = io.Discard
 	}
+	// Only strict Electron starters join the Python launcher's persistent
+	// launcher-start.lock; ordinary plugins already hold it before exec.
+	if opts.SpawnBeforeShutdown {
+		lock := flock.New(filepath.Join(opts.Dir, "launcher-start.lock"))
+		ok, err := lock.TryLockContext(ctx, 50*time.Millisecond)
+		if err != nil || !ok {
+			return OutcomeUnavailable, fmt.Errorf("dashboard: launcher start lock: %v", err)
+		}
+		defer lock.Unlock() // Never unlink: concurrent waiters may already hold the inode.
+	}
 	replaced := false
 	spawns := 0
 	for {
 		previous, readErr := ReadEndpoint(opts.Dir)
 		if readErr == nil {
 			info, err := Health(ctx, client, previous)
+			if err == nil && opts.PreserveRunningLAN {
+				opts.LAN = info.LAN
+			}
+			if err == nil && opts.RefuseCrossMinor && !SameMinor(info.Version, opts.Version) {
+				fmt.Fprintf(logw, "dashboard: refusing cross-minor replacement of %s by %s (attached versions unknown)\n", info.Version, opts.Version)
+				return OutcomeRunning, nil
+			}
 			switch {
 			case err == nil && (keepRunning(info, opts) || spawns >= maxSpawns):
 				switch {
@@ -133,9 +159,20 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 				}
 				return OutcomeStarted, nil
 			case err == nil:
+				if opts.SpawnBeforeShutdown {
+					// A successful Spawn means OS-accepted independent process creation,
+					// not health readiness; lock wait must cover the drain below.
+					if err := opts.Spawn(DaemonArgs(opts.Port, opts.LAN, opts.BuildTime)); err != nil {
+						return OutcomeUnavailable, fmt.Errorf("dashboard: successor preflight: %w", err)
+					}
+					spawns++
+				}
 				if err := RequestShutdown(ctx, client, previous); err != nil {
 					// The older daemon still serves; leave it rather than race it.
 					fmt.Fprintf(logw, "dashboard: older daemon %s refused shutdown: %v\n", info.Version, err)
+					if opts.SpawnBeforeShutdown {
+						return OutcomeUnavailable, fmt.Errorf("dashboard: authenticated drain uncertain: %w", err)
+					}
 					return OutcomeRunning, nil
 				}
 				fmt.Fprintf(logw, "dashboard: replacing daemon %s (lan %v, build %d) with %s (lan %v, build %d)\n", info.Version, info.LAN, info.BuildTime, opts.Version, opts.LAN, opts.BuildTime)
@@ -143,6 +180,15 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			default:
 				fmt.Fprintf(logw, "dashboard: recorded daemon unreachable (%v); starting one\n", err)
 			}
+		}
+		if opts.SpawnBeforeShutdown && spawns > 0 {
+			opts.Replace = false // Explicit request is consumed by the first spawn.
+			// The successor was already created. A late child/lock/health failure
+			// is unavailable, never evidence that the predecessor survived.
+			if !waitForSuccessor(ctx, client, opts, previous.Token) {
+				return OutcomeUnavailable, nil
+			}
+			continue
 		}
 		if spawns >= maxSpawns {
 			return OutcomeUnavailable, nil

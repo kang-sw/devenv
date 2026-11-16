@@ -290,6 +290,46 @@ func TestProxyHelloIsAnsweredThenTheStreamIsRaw(t *testing.T) {
 	}
 }
 
+// A compatible client reopens its transport after daemon drain, replays its
+// hello, then makes a new call. Sent requests are not replayed by this test.
+func TestProxyCompatibleClientReconnectsAfterDrain(t *testing.T) {
+	first := startProxyTestDaemon(t, &echoHandler{})
+	hello := testHello(map[string]string{"WS_RSRC_ROOT": "/plugin/rsrc"})
+	conn, reader, _ := proxyUpgrade(t, first, first.Endpoint().Token)
+	if accept := sendHello(t, conn, reader, hello); !accept.OK {
+		t.Fatal(accept.Reason)
+	}
+	if _, err := conn.Write([]byte("before\n")); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := reader.ReadString('\n'); err != nil || line != "before\n" {
+		t.Fatalf("before = %q, %v", line, err)
+	}
+	first.Close()
+	waitDone(t, first)
+	if _, err := reader.ReadByte(); err != io.EOF {
+		t.Fatalf("drained connection = %v, want EOF", err)
+	}
+	second, err := StartDaemon(DaemonOptions{Dir: first.dir, Port: 0, Version: "1.2.4", LockWait: time.Second, Proxy: &echoHandler{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(second.Close)
+	if second.Endpoint().Token == first.Endpoint().Token {
+		t.Fatal("successor reused shutdown credential")
+	}
+	conn, reader, _ = proxyUpgrade(t, second, second.Endpoint().Token)
+	if accept := sendHello(t, conn, reader, hello); !accept.OK || accept.Version != "1.2.4" {
+		t.Fatalf("reconnected hello = %+v", accept)
+	}
+	if _, err := conn.Write([]byte("after\n")); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := reader.ReadString('\n'); err != nil || line != "after\n" {
+		t.Fatalf("after = %q, %v", line, err)
+	}
+}
+
 func TestProxyRefusedHelloGetsAReasonLine(t *testing.T) {
 	d := startProxyTestDaemon(t, &echoHandler{})
 	for name, hello := range map[string]ProxyHello{

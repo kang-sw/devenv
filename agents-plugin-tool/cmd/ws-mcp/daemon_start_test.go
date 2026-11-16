@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -30,6 +31,21 @@ func TestDaemonStartReplaceFlagWiring(t *testing.T) {
 			t.Fatal("Ensure not called")
 		}
 	}
+}
+
+func TestDaemonStartStrictLifetimeFlagWiring(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only CLI opt-in; compile-only on remote Linux")
+	}
+	root := t.TempDir()
+	t.Setenv("WS_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(root, "config"))
+	daemonStartWithEnsure([]string{"--require-independent-lifetime", "--replace"}, func(_ context.Context, opts wsdashboard.EnsureOptions) (wsdashboard.Outcome, error) {
+		if !opts.SpawnBeforeShutdown || !opts.PreserveRunningLAN || !opts.RefuseCrossMinor || !opts.Replace {
+			t.Fatalf("strict options = %+v", opts)
+		}
+		return wsdashboard.OutcomeRunning, nil
+	})
 }
 
 // TestDaemonStartLANFollowsTheApplyRule pins daemonStartLAN: a starter the
