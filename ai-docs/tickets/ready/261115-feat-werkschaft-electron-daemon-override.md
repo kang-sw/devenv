@@ -96,16 +96,40 @@ failure it asks the user to start the dashboard normally
   Phase 3. Electron does not take or depend on the launcher's separate
   launcher-start.lock; a rare losing Electron-vs-launcher launch is accepted.
 
-## Blocked (2026-11-16)
+- **Windows strict lifetime, (1203)=a (owner 2026-11-16 11:14):** add the
+  Windows-only `daemon-start --require-independent-lifetime` flag. Only Electron
+  passes it. Breakaway failure fails explicitly with no in-job retry; ordinary
+  plugin callers retain today's retry. T0 additive: old callers are unchanged,
+  and an old selected binary rejects the unknown flag before running Ensure or
+  draining anything. Preserve the strict-preflight-before-drain constraint.
+- **Updater and cross-boundary reaffirmation, (1201)=ok and (1202)=ok
+  (owner 2026-11-16 11:14):** retain the separate downloader ticket without
+  implementing it here; show affected sessions and plugin-update guidance once
+  for a cross-minor/protocol swap, cancel attaches existing, and unknown session
+  versions prevent automatic replacement with an explicit reason.
+- **Current REST evidence (technical, source validated):** `/health` exposes
+  daemon identity only (`wsdashboard/daemon.go`, HealthInfo/handleHealth);
+  `/agents` lists runner conversations without attached launcher hello versions
+  (`wsagent/http.go`, Runner.List). ProxyHello has protocol/version fields but
+  the live proxy registry retains only connection/session handles and a count
+  (`wsdashboard/proxy.go`, serveProxyConn/ProxySessions). Therefore current
+  interfaces cannot enumerate affected client versions. Cross-boundary automatic
+  replacement must keep the existing connection and explain the unknown-version
+  reason plus plugin-update guidance, not invent a list or add an endpoint.
 
-Parked by the coordinating lead after Phase 2. Windows strict-lifetime mechanism
-(owner board (1203)) remains unanswered; Phase 3 replacement and Phase 4 packaged
-acceptance are not authorized to advance around it. Keep this ticket open and
-retain `impl/develop/cape-barn-hence` and its leased worktree without merging or
-releasing. The owner prioritizes exe-launch elimination and performance work;
-resume only on coordinating-lead direction. Current implementation includes the
-Phase 2 wsflow correction recorded below; no real Windows/macOS acceptance has
-been claimed.
+## Prior parking and current coordination (2026-11-16)
+
+The coordinating lead parked this ticket after Phase 2, then resumed Phase 3
+once the perf-daemon candidate reached its approved-swap/after-measurement gate.
+The owner has now confirmed the Windows interface above. Keep this ticket open
+and retain `impl/develop/cape-barn-hence` and its leased worktree without merging
+or releasing. Before touching cmd/ws-mcp daemon-start/staging or dashboard spawn
+files, coordinate exact paths with the lead because Exec1 is editing the startup
+path in parallel. Exact Go-path availability has been requested from the lead;
+no cmd/ws-mcp, Ensure or spawn source has been edited while that answer is
+pending. Source-only exploration recommends a strict pre-drain spawn ordering
+option rather than another executable probe or bootstrap starter. No real
+Windows/macOS acceptance has been claimed.
 
 ## Constraints
 
@@ -148,22 +172,18 @@ been claimed.
   test-built fake codex.exe. Node checks may run locally without spawning such
   executables. Before any local Windows binary acceptance, ask the coordinating
   lead with the exact command; cross-compile on w5090 and fetch only under
-  `D:/Temp/exec3-daemon/`, never the default Windows TEMP directory.
+  `D:/Temp/exec3-electron/`, never the default Windows TEMP directory.
   Use scoped checks only. Remove temporary artifacts after use; stop when D:
   has less than 20 GB free.
-- **Deferred owner confirmation:** additive Windows CLI opt-in
-  `daemon-start --require-independent-lifetime` is recommended but not yet
-  authorized (coordinating lead, 2026-11-16). Readiness and independent phases
-  may proceed. Isolate that implementation step; do not introduce the flag,
-  change plugin fallback, or claim verified Windows independent lifetime until
-  the owner confirms its interface. Alternatives on the owner board: environment
-  seam or no change. Strict-launch failure must be detected before draining a
-  healthy predecessor, not discovered only by Ensure's post-drain Spawn call.
-  Until that mechanism is authorized and implemented, Windows start/replacement
-  must fail closed with an actionable lifetime-unavailable reason; read-only
-  attach remains available. This is an explicit unimplemented acceptance gate,
-  not permission to use unsafe fallback or to close the ticket. Phase 1 and
-  portable independent work remain executable without resolving the gate.
+- **Approved Windows implementation gate:** owner (1203)=a authorizes the
+  additive strict-lifetime CLI interface, not an unsafe fallback or a claim that
+  Windows acceptance has already passed. Coordinate the shared Go-file edit
+  boundary with the lead first. Until the implementation lands, retain the
+  explicit Windows start/swap refusal; healthy read-only attach stays available.
+  Strict-launch failure must be detected before draining a healthy predecessor,
+  not discovered only by Ensure's post-drain Spawn call. Unsupported selected
+  binaries fail before drain. No real Windows executable acceptance is allowed
+  without the lead's prior approval of its exact command.
 - Lifecycle tests use an isolated absolute WS_CACHE_HOME and non-shared port;
   never start, replace, stop or shut down the shared daemon on port 29417.
 - No new release downloader, accepted-build registry, recovery promotion,
@@ -199,7 +219,7 @@ Go paths above are relative to `agents-plugin-tool/`.
 |---|---|---|
 | scope.span | multi-file | Electron shell, launcher, daemon and compatibility paths named in the phases: `agents-plugin-tool/desktop-electron/`, `agents-plugin/bin/ws-mcp-launcher.py`, `agents-plugin-tool/cmd/ws-mcp/proxy.go`, `agents-plugin-tool/internal/wsdashboard/` |
 | scope.surface | cross-module | Electron package, plugin launcher and Go daemon handoff are coordinated; no single-module change |
-| scope.new_public_symbol | yes | Proposed opt-in `daemon-start --require-independent-lifetime` is a separately gated step awaiting owner confirmation; existing callers retain their defaults. |
+| scope.new_public_symbol | yes | Owner (1203)=a approved Windows opt-in `daemon-start --require-independent-lifetime`; coordinate Go edit paths with the lead and preserve existing callers' defaults. |
 | scope.new_type_contract | yes | Shell-local development selection records an existing binary and matching resource/skills/contract root; no shared ws manifest or protocol field. |
 | scope.test_surface | existing | Existing Electron tests include `agents-plugin-tool/desktop-electron/test/endpoint.test.js` and `main.test.js`; daemon Ensure/daemon-start tests exist in their Go packages. |
 | complexity.reuse_points | confirmed | Existing `daemon-start`/`wsdashboard.Ensure` supports absent-daemon startup, authenticated drain, core precedence and bounded successor verification (`agents-plugin-tool/cmd/ws-mcp/proxy.go:354-420`, `agents-plugin-tool/internal/wsdashboard/ensure.go:89-160`). |
@@ -283,7 +303,21 @@ which daemon actually answers after handoff. Test older, equal and newer cores,
 concurrent plugin starts, failed drain and reconnect. Prove every holder retains
 its PID and each compatible session reconnects; audit that no shell path kills,
 signals or restarts holders. Surface incompatibility rather than claiming
-reconnect overrides the existing hello gate.
+reconnect overrides the existing hello gate. Unblock Windows via owner-approved
+(1203)=a only after coordinating the Go-file boundary. Add a strict detached
+preflight before authenticated drain; a preflight error must leave the current
+daemon healthy. A successfully detached successor may wait on the existing
+singleton lock before the old daemon is drained, with a wait budget that covers
+the drain. A later successor failure is reported as unavailable, not as a claim
+that the predecessor survived. Keep default plugin spawning unchanged.
+
+Use only REST for running-daemon version/core/LAN/health/compatibility checks;
+read candidate identity from metadata files and execute only to start a NEW
+daemon. Equal/newer ordinary attach must execute zero binaries; explicit
+same-core replacement is consumed once, and raced newer winners are retained.
+If current interfaces do not reveal affected session versions, refuse automatic
+cross-boundary replacement with an actionable reason and keep the old connection.
+Keep staging outside the replaceable app and do not take launcher-start.lock.
 
 ### Phase 4: Packaged acceptance
 
