@@ -1,6 +1,6 @@
 {
   "ws": {
-    "archive_sha256": "d0ed309f7ffed2816c2ed08a7aba73fdf51a517a44a14cc741845dc14fc2732f",
+    "archive_sha256": "ed75b68bbb452a3fccf3fec5fbd9c8630fb9d5cfecd82e80651301c0c0a439a6",
     "files": {
       ".claude-plugin/plugin.json": "dea3d8c48706251a60734e050e072bf8a4164ace42ed81bfc92acfe6214a2037",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
@@ -29,6 +29,7 @@
       "hooks/claude-mod/settings.ts": "5832173684c2b80ed44606566f4af7e8437f269f46eb38d0e2d3e87f6ba98a4b",
       "hooks/claude-mod/timing.ts": "aaa921d2164afb64508e758786d01b10c622c8554c1d655d216e81ccacde7ba6",
       "hooks/claude-mod/wake.ts": "78c00f1eea5468c6a9a82a45d97285a38fbba4a4d9a769838f5625d80cf0a402",
+      "hooks/claude-mod/watcher-harness.ts": "35784fcce70a951d1c24c46b2d238ba92e43ed5779b35f9827d950885e37ce34",
       "hooks/claude-mod/watcher.ts": "f787633e53b1faafa6bbb05f45b7b213488ac3eaf80db74aa8f4d06dd9f95076",
       "hooks/compact-revive-nudge.py": "ee8c1347c2fc6c972a7eb1a15d6f4ef0ae0b4dbb11ab7d157fb2f1b8c21bb095",
       "hooks/hooks.json": "57518c680167e15bda2cfa17316a18a1926772c49bd911a580138ffbc770857b",
@@ -103,7 +104,7 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "1e054f93b98640f6bcd50560fb871e9e450cd6dcb401cf662c956d74444af3c0",
+    "archive_sha256": "49a33ff9e6453ae27c3305b7cc639d9fb703adeb988adf2bb43f17af2d20e1a7",
     "files": {
       ".claude-plugin/plugin.json": "3810fa6da1583410918f71c0b919accf9d73e41f17366b4be63e64dc7b1b61b9",
       ".codex-plugin/plugin.json": "2eb747e70cf34f7fc17927d10f39962317a4c941503216262af8c37f7f96c8ce",
@@ -131,6 +132,7 @@
       "hooks/claude-mod/settings.ts": "5832173684c2b80ed44606566f4af7e8437f269f46eb38d0e2d3e87f6ba98a4b",
       "hooks/claude-mod/timing.ts": "aaa921d2164afb64508e758786d01b10c622c8554c1d655d216e81ccacde7ba6",
       "hooks/claude-mod/wake.ts": "78c00f1eea5468c6a9a82a45d97285a38fbba4a4d9a769838f5625d80cf0a402",
+      "hooks/claude-mod/watcher-harness.ts": "35784fcce70a951d1c24c46b2d238ba92e43ed5779b35f9827d950885e37ce34",
       "hooks/claude-mod/watcher.ts": "f787633e53b1faafa6bbb05f45b7b213488ac3eaf80db74aa8f4d06dd9f95076",
       "hooks/compact-revive-nudge.py": "ee8c1347c2fc6c972a7eb1a15d6f4ef0ae0b4dbb11ab7d157fb2f1b8c21bb095",
       "hooks/hooks.json": "97e592d9c208a161f6065693ed0a5de2f07887fa1153f0668e5cb858b6ff792f",
