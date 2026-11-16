@@ -727,20 +727,31 @@ func (s *Server) recordDashboardNudges(batch []wsdashboard.NudgeBody, port int) 
 
 // dashboardPageURL is the session's dashboard page URL when the daemon
 // serves it: the session is registered (its dashboard key is on, or the
-// daemon hosts it) and its most recent nudge round trip succeeded. It reads only recorded state, so
-// whiteboard.update never waits on, or fails through, the daemon. The
+// daemon hosts it) and its most recent nudge round trip succeeded. It reads
+// recorded state and optionally mints a login link in process, so
+// whiteboard.update never waits on HTTP or fails through the daemon. The
 // accepted lag: the answer reflects the previous nudge, so the first update
 // after the daemon dies may still name the URL once, and a session's first
 // update before any of its nudges returned names the file path.
 func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
 	d := &s.dashboard
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	sess, ok := d.sessions[strings.TrimSpace(sessionKey)]
 	if !ok || !sess.served() || sess.servedPort <= 0 {
+		d.mu.Unlock()
 		return "", false
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/s/%s", sess.servedPort, sess.replyID), true
+	path, port := "/s/"+sess.replyID, sess.servedPort
+	d.mu.Unlock()
+	if s.loginLink != nil {
+		link, err := s.loginLink(path)
+		if err != nil {
+			s.debugEvent("dashboard.login_link_failed", map[string]any{"error": err.Error()})
+			return "", false
+		}
+		return link, true
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d%s", port, path), true
 }
 
 // DashboardSessionSource reads registered sessions for the daemon's session

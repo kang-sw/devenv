@@ -38,7 +38,7 @@ func worktreePageFixture(t *testing.T, options ...func(*DaemonOptions)) (*pageFi
 func TestWorktreePageGuardsAndTemplate(t *testing.T) {
 	// This route reads Git and renders cold assets; the health client's
 	// 500 ms deadline is too short under the race detector.
-	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Timeout: 10 * time.Second, Transport: localhostTestHTTPTransport()}
 	get := func(t *testing.T, endpoint string) (int, string) {
 		t.Helper()
 		resp, err := client.Get(endpoint)

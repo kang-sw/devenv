@@ -31,6 +31,9 @@ func openWS(t *testing.T, base, path, origin string, answer bool) wsClient {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if d, ok := localhostTestDaemons.Load(base); ok {
+		cfg.Header.Set("Cookie", localhostTestCookie(t, d.(*Daemon)).String())
+	}
 	conn, err := websocket.DialConfig(cfg)
 	if err != nil {
 		t.Fatalf("websocket %s: %v", path, err)
@@ -67,7 +70,7 @@ func openWS(t *testing.T, base, path, origin string, answer bool) wsClient {
 // openSSE opens a plain stream request and checks that it is served SSE.
 func openSSE(t *testing.T, url string) <-chan sseEvent {
 	t.Helper()
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +113,9 @@ func handshake(t *testing.T, base, path, host string, headers map[string]string)
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	req := "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+	if d, ok := localhostTestDaemons.Load(base); ok {
+		req += "Cookie: " + localhostTestCookie(t, d.(*Daemon)).String() + "\r\n"
+	}
 	for k, v := range headers {
 		req += k + ": " + v + "\r\n"
 	}

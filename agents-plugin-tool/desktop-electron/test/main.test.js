@@ -20,10 +20,15 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   controller.connectDaemon = discover;
   const python = require('../python'), originalPython = python.pythonAvailable;
   python.pythonAvailable = roots.pythonAvailable || (async () => true);
+  const endpoint = require('../endpoint'), originalInspect = endpoint.inspect, originalRoot = endpoint.cacheRoot;
+  endpoint.inspect = roots.endpointRoot ? originalInspect : async () => { throw new Error('No test endpoint'); };
+  endpoint.cacheRoot = roots.endpointRoot ? () => roots.endpointRoot : originalRoot;
   delete require.cache[require.resolve('../main')];
   const { start } = require('../main');
   controller.connectDaemon = original;
   python.pythonAvailable = originalPython;
+  endpoint.inspect = originalInspect;
+  endpoint.cacheRoot = originalRoot;
   const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: !!roots.packaged, getPath: () => roots.userData || userData, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
   let focusedContents = null;
   const renderers = [];
@@ -62,7 +67,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
       this.webContents = Object.assign(new EventEmitter(), {
         setUserAgent: agent => { this.agent = agent; }, getUserAgent: () => 'Chromium',
         setWindowOpenHandler: handler => { this.popup = handler; },
-        loadURL: async url => { this.loads.push(url); this.currentURL = url; loaded(url); },
+        loadURL: async url => { roots.events?.push('navigate'); this.loads.push(url); this.currentURL = url; this.webContents.mainFrame.url = url; loaded(url); },
         loadFile: async file => { this.loads.push(file); this.currentURL = file; loaded(pathToFileURL(file).href); },
         setZoomFactor: zoom => { this.zoom = zoom; },
         toggleDevTools: () => { this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
@@ -80,6 +85,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     }
   }
   const session = { defaultSession: {
+    cookies: { set: async value => { roots.events?.push('cookie'); await roots.setCookie?.(value); } },
     setPermissionRequestHandler(handler) { this.request = handler; },
     setPermissionCheckHandler(handler) { this.check = handler; },
     webRequest: { onBeforeRequest(handler) { this.handler = handler; } },
@@ -91,8 +97,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   }
   const ipcMain = new EventEmitter(), nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: false });
   let template, response = 0, popups = 0, menuCallback, onDialog;
-  const opened = [];
-  start({ app, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
+  const opened = [], copied = [];
+  start({ clipboard: { writeText: value => copied.push(value) }, app, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
     Menu: { buildFromTemplate: t => Object.assign(t, { popup(options) {
       assert.equal(options.window, Base.current);
       popups++; menuCallback = options.callback; focusedContents = null;
@@ -107,7 +113,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     focusedContents: () => focusedContents, clearFocus: () => { focusedContents = null; },
     dismissMenu: () => { const callback = menuCallback; menuCallback = null; callback(); },
     onDialog: fn => { onDialog = fn; },
-    menus, template, session: session.defaultSession, opened, choose: n => { response = n; } };
+    menus, template, session: session.defaultSession, opened, copied, choose: n => { response = n; } };
 }
 test('startup readiness, updater and BaseWindow failures report stack and log, show an error box and exit', async t => {
   const update = require('../update'), original = update.createUpdater;
@@ -958,4 +964,115 @@ test('a stage applied at launch quits before any window and never registers the 
   assert.equal(app.quitCalled, true);
   assert.equal(windows, 0);
   assert.equal(quitApplied, false);
+});
+
+async function loginDaemon(t, handle) {
+  const http = require('node:http');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-native-login-'));
+  fs.mkdirSync(path.join(root, 'dashboard'));
+  const server = http.createServer((req, res) => {
+    if (req.url === '/health') return res.end(JSON.stringify({ service: 'ws-dashboard', pid: process.pid }));
+    handle(req, res);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}/`;
+  fs.writeFileSync(path.join(root, 'dashboard/endpoint.json'), JSON.stringify({
+    port: server.address().port, pid: process.pid, token: 'a'.repeat(64),
+  }));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  return { root, url };
+}
+async function until(predicate) {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() > deadline) assert.fail('Native login test timed out');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+test('native cookie precedes navigation on both layouts; Retry and Replace repeat it', async t => {
+  const events = [], cookies = [];
+  let requests = 0;
+  const daemon = await loginDaemon(t, (req, res) => {
+    assert.equal(req.url, '/auth/cookie');
+    assert.equal(req.headers.authorization, `Bearer ${'a'.repeat(64)}`);
+    requests++;
+    res.end(JSON.stringify({ name: 'ws_local', value: 'native-cookie', maxAge: 34560000 }));
+  });
+  for (const platform of ['darwin', 'win32']) {
+    events.length = 0;
+    const f = await fixture(async () => daemon.url, platform, { endpointRoot: daemon.root, events,
+      setCookie: async cookie => { cookies.push(cookie); await tick(); } });
+    const content = f.views[0] || f.window;
+    await until(() => content.loads.length === 1);
+    assert.deepEqual(events, ['cookie', 'navigate']);
+    const cookie = cookies.at(-1);
+    assert.deepEqual({ ...cookie, expirationDate: 0 }, { url: daemon.url, name: 'ws_local', value: 'native-cookie',
+      path: '/', httpOnly: true, sameSite: 'strict', expirationDate: 0 });
+    assert(Math.abs(cookie.expirationDate - Date.now() / 1000 - 34560000) < 5);
+    assert.deepEqual(f.copied, [], 'connecting never writes the clipboard');
+    await f.menus.retry.click();
+    await f.menus.replace_daemon.click();
+    assert.deepEqual(events, ['cookie', 'navigate', 'cookie', 'navigate', 'cookie', 'navigate']);
+  }
+  assert.equal(requests, 6);
+});
+test('old daemon, auth failures and cookie-set failures still navigate without a successful injection', async t => {
+  let status = 404;
+  const daemon = await loginDaemon(t, (_req, res) => {
+    res.writeHead(status);
+    res.end(JSON.stringify(status === 200 ? { name: 'ws_local', value: 'cookie', maxAge: 100 } : {}));
+  });
+  for (const code of [404, 401, 500, 200]) {
+    status = code;
+    let sets = 0;
+    const f = await fixture(async () => daemon.url, 'darwin', { endpointRoot: daemon.root,
+      setCookie: async () => { sets++; throw new Error('Cookie store unavailable'); } });
+    await until(() => f.window.loads.length === 1);
+    assert.deepEqual(f.window.loads, [daemon.url]);
+    assert.equal(sets, code === 200 ? 1 : 0);
+    assert.deepEqual(f.copied, []);
+  }
+  const other = await fixture(async () => 'http://127.0.0.1:1/', 'darwin', { endpointRoot: daemon.root,
+    setCookie: () => assert.fail('A mismatched connected origin must not receive a cookie') });
+  await until(() => other.window.loads.length === 1);
+  assert.deepEqual(other.window.loads, ['http://127.0.0.1:1/']);
+});
+test('explicit native menu click copies a login link and sends only success; failure preserves clipboard', async t => {
+  let fail = false, mints = 0, submitted;
+  const daemon = await loginDaemon(t, (req, res) => {
+    if (req.url === '/auth/cookie') { res.writeHead(404); res.end(); return; }
+    assert.equal(req.url, '/auth/link');
+    assert.equal(req.method, 'POST');
+    assert.equal(req.headers.authorization, `Bearer ${'a'.repeat(64)}`);
+    assert.equal(req.headers.origin, undefined);
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      submitted = JSON.parse(body); mints++;
+      res.writeHead(fail ? 500 : 200);
+      res.end(JSON.stringify({ url: daemon.url + 's/current?login=one-use#/board' }));
+    });
+  });
+  const f = await fixture(async () => daemon.url, 'win32', { endpointRoot: daemon.root });
+  const content = f.views[0], wc = content.webContents;
+  await until(() => content.loads.length === 1);
+  assert.deepEqual(f.copied, []);
+  assert.equal(mints, 0);
+  const sent = [];
+  wc.send = (...args) => sent.push(args);
+  wc.mainFrame.url = daemon.url + 's/current?view=board#/board';
+  assert.equal(f.menus.copy_browser_login.label, 'Copy Browser Login Link to Clipboard');
+  await f.menus.copy_browser_login.click();
+  assert.deepEqual(submitted, { path: '/s/current?view=board#/board' });
+  assert.deepEqual(f.copied, [daemon.url + 's/current?login=one-use#/board']);
+  assert.deepEqual(sent, [['werkschaft:login-copied']]);
+  fail = true;
+  await f.menus.copy_browser_login.click();
+  assert.equal(f.copied.length, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(f.ipcMain.listenerCount('werkschaft:login-copy'), 0, 'renderer cannot request a clipboard write');
 });

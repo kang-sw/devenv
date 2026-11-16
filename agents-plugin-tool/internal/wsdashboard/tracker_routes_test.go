@@ -397,7 +397,7 @@ func startTrackerDaemon(t *testing.T, tracker TrackerHost) *Daemon {
 // same-origin for a POST, and returns the status and body.
 func call(d *Daemon, method, path, body string) (int, string) {
 	host := "127.0.0.1:" + strconv.Itoa(d.Endpoint().Port)
-	rec := serve(d, viewer{peer: "127.0.0.1:50000", host: host}, method, path, body)
+	rec := serve(d, viewer{peer: "127.0.0.1:50000", host: host, localCookie: true}, method, path, body)
 	return rec.Code, rec.Body.String()
 }
 
@@ -416,7 +416,7 @@ func callRaw(d *Daemon, method, path string, body []byte, headers map[string]str
 		req.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()
-	d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(nil, d).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -454,7 +454,7 @@ func trackerEvents(events <-chan sseEvent, quiet time.Duration) []string {
 
 func openStream(t *testing.T, url string) <-chan sseEvent {
 	t.Helper()
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatal(err)

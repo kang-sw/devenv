@@ -249,6 +249,31 @@ Settled at drafting from the research (lead to confirm):
     T3 boundary with the owner's approval. Sending it only from new clients is
     not by itself a fix; enforcement is the fix.
 
+### Owner feedback during implementation (2026-11-17)
+
+- **(1239) Clipboard writes are explicit, click-only actions.** Settings keeps
+  “Copy browser login link” with subtext stating that it copies to the clipboard,
+  signs another browser in after pasting, and works once within ten minutes.
+  The Electron item is “Copy Browser Login Link to Clipboard”. No gate or
+  logged-in page reads or writes the clipboard on load or on login; browser
+  clipboard reads happen only on the paste button. Tests assert this and retain
+  the single-use exchange check.
+- **Owner clarification (00:04): add a native clipboard round trip from the
+  unauthenticated localhost gate.** An explicit button asks the daemon to mint
+  a ten-minute, single-use link and write it to this machine's OS clipboard;
+  the user pastes it back into the existing gate to prove access to that
+  clipboard. The route requires a loopback peer and Host, its own Origin, and
+  same-origin fetch metadata when present; it is rate-limited and never returns
+  the code or link. Native writers are injectable; unavailable writers disable
+  or hide the action. Existing agent links, Settings copy, Electron menu, and
+  paste exchange remain. The gate button's visual implementation waits for the
+  updated approved mockup (imported with its implementation branch cherry-pick).
+  Follow-up technical calls: A2 retains a small recopy text button; a runtime
+  clipboard failure (A3) leaves retry enabled, unlike the mockup's disabled
+  stand-in, and only a writer unavailable at render hides the action. All gate
+  states and Settings are captured in both themes in a temporary artifact folder,
+  not committed binary captures.
+
 ## Constraints
 
 - Read before editing, per AGENTS.md `### Implementation Conventions`:
@@ -418,6 +443,47 @@ Verification expectations (Go, `agents-plugin-tool`):
 - Regression: existing dashboard tests pass, moved onto the cookie helper
   where they hit gated routes. `go test ./...` passes.
 
+### Result (this-commit) - 2026-11-17
+
+Implemented the deny-by-default cookie guard, persisted owner-only HMAC secret,
+constant-time checks, bounded ten-minute single-use codes, exchange throttling,
+Strict re-entry probe, native cookie/link endpoints, hosted MCP login-link hook,
+and local-only Settings copy action. Machine, static-frame, PWA and capability
+exemptions retain their handler checks; the web-card proxy strips the new cookie.
+New nudge and roster clients send the endpoint bearer without requiring it.
+
+Owner feedback (1239) is applied: Settings explicitly names clipboard copying
+before the click, with the approved Korean explanatory subtext; clipboard access
+never runs on page load. The subsequent owner clarification adds `/auth/clipboard`:
+local peer plus Host, own Origin and fetch metadata, independent two-second and
+ten-per-minute throttles, no credential in its response, and an injectable native
+writer (pbcopy, Unicode-safe PowerShell stdin, Linux writer fallback). Failed writes
+revoke their unused code. The updated gate implements A/A2/A3/A4/B/C/C′/D, including
+the retry-enabled A3 and small A2 recopy technical calls. Chromium verification
+and visual comparison are retained for Phase 3.
+
+Verification: narrow `TestLocalhostAuth` tests pass, including `-race`; all i18n
+tests pass. MCP login-link, whiteboard pointer, machine-client, session lifecycle,
+stream, hiring and Pi forwarding batches pass (22 top-level tests plus ten
+subtests); existing proxy/ensure batch passes (23 plus 21); cmd hook/tracker tests
+pass (two). Adapted wsagent REST/support/Pi runner routes pass (21 plus 13).
+The full allowed wswhiteboard package passes. Existing dashboard callers now use
+real fixture cookies rather than a shipped bypass. All 595 inventoried affected
+existing tests ran in named batches (614 unique roots including adjacent prefix
+matches); the final command inventory is recorded with Phase 3 verification.
+
+Corrections against the drafted survey: the base already enforces an Origin and
+fetch-metadata check on `/nudge` and already relays large framed images through
+the host page; those protections remain unchanged. The temporary-capture and
+narrow-test instructions supersede the plan's tracked captures/full-suite command.
+The allowed full wsagent run found an unrelated lead-replay timeout, reproduced
+in isolation (two of three reruns pass); it is not changed here. Seven existing
+initial Chromium regression failures, and two additional browser failures plus
+one shell Node fixture failure, were reproduced against an untouched base archive,
+without weakening their assertions. Overall compatibility remains T1: old machine
+callers use the unchanged exemptions, old browser shells display the gate, and
+old daemons ignore the new cookie/bearers without any shared-store migration.
+
 ### Phase 2: Electron cookie injection and menu item
 
 Depends on Phase 1.
@@ -453,6 +519,27 @@ Verification expectations (`desktop-electron` node tests):
 - `discover`/`inspect` results still carry no token.
 - The existing `main.test.js`, `endpoint.test.js` and `daemon-controller`
   tests pass.
+
+### Result (this-commit) - 2026-11-17
+
+Implemented checked-identity Electron cookie injection before navigation on both
+window layouts, repeated on Retry and Replace. The bearer is re-read immediately
+before use and checked against the observed port, process identity and credential;
+neither discovery nor renderer IPC returns it. Native cookies are HttpOnly,
+SameSite Strict, root-scoped and expire with the daemon's Max-Age. A 404 from an
+older daemon, or any other authentication/injection failure, still navigates.
+
+The Connection menu now has a separator and the owner-approved (1239) label
+“Copy Browser Login Link to Clipboard”. Only an explicit menu click mints and
+copies a link, preserving the current path, query and fragment; failures leave
+the clipboard untouched. A payload-free preload event asks the dashboard to
+show the same localized success toast as Settings, without exposing the link.
+
+Verification: `cd agents-plugin-tool/desktop-electron && npm test` passes all
+123 Node tests, including cookie-before-load ordering, retry/replacement,
+old-daemon fallback, changed identity, click-only copying and bounded preload
+notifications. No Electron process was launched. The parent also reran the named
+Go page/stream/script/terminal/visibility regression batch successfully.
 
 ### Phase 3: Gate UI per mockup and Chromium acceptance
 
@@ -491,3 +578,87 @@ Verification expectations:
   state) against the mockup, with captures stored under the ticket's assets
   folder.
 - i18n table tests pass with the new keys in every table.
+
+### Result (this-commit) - 2026-11-17
+
+Completed headless Chromium acceptance against a disposable daemon and native
+clipboard fake. Both themes pass real paste-without-focus, clipboard-button login,
+native copy/paste, single-use reuse refusal, injected expiry, both throttles,
+checking-state paste suppression, Settings copying/toast, Strict cross-site
+re-entry, fragment retention, and secret-deletion recovery after both a POST and
+a real live WebSocket drop. Gate and authenticated-page loads perform zero browser
+clipboard reads/writes, and do not change the native clipboard fake. Theme-cookie
+selection and OS fallback/change are covered. Writer availability hides the button;
+runtime write failure leaves it retryable. Local peer/Host visibility also has
+explicit IPv4, localhost, IPv6, unavailable-writer and LAN unit coverage.
+
+Fixed findings from acceptance/review: replacing the already-current gate URL
+with its fragment can be a same-document navigation, so successful exchange and
+Strict re-entry now force a real reload for the same path/query; native copies
+preserve fragments; new actions clear stale error messages; Windows file paths
+in query values remain valid next destinations while authority/backslash URL
+paths are still rejected. Local fetch errors and stream/terminal reconnects now
+probe/reload the top window into the gate without treating a LAN credential as a
+localhost cookie. Updated the operational manual's access/state-file descriptions.
+
+Verification commands (all Go runs use `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`):
+
+- `go test -race ./internal/wsdashboard -run '^(TestLocalhostAuth|TestLocalhostCookieHelperBrowserModuleSeams|TestLoginGate(Next|Clipboard))' -count=1`: pass.
+- `go test ./internal/wsdashboard -run '^TestLoginGateBrowser$' -count=1`, with the cached Playwright module and browser-cache environment: pass, including the final fresh capture run (17.4 seconds).
+- `go test ./internal/wsi18n -count=1`: pass, all eleven language tables.
+- `go test ./internal/wsdashboard -run '^(TestPageStreamsRideWebSocket|TestSessionPagesCarryScriptHooks|TestTerminalCardScript.*|TestShellScript|TestWebSocket.*|TestVisibility.*|TestFreshSessionScriptAsset|TestPagesAndStreamsCarryTheAssetID)$' -count=1`: pass.
+- MCP login-link/machine-client/hiring/lifecycle/whiteboard-stream/Pi-forwarding and cmd proxy/tracker batches were rerun successfully; wsagent REST/support/Pi-runner batch passes. Electron's 123-test Node suite passes. Joined dashboard and gate scripts pass Node syntax checking.
+
+All requested A/A2/A3/A4/B/C/C′/D/E states were captured in light and dark in the
+run's temporary capture directory, together with unavailable-writer, exchange-rate
+and rotation recovery states. E contains the explicit (1239) label and subtext.
+There are eighteen side-by-side comparison images and two overview sheets. The
+implementer inspected those comparisons and both supplied mockup images. Remaining
+visual differences are deliberate or native: A2 adds the approved recopy text
+button and uses the platform shortcut; A3 remains enabled per the later technical
+call; A3/A4/C′ are full pages rather than the mockup's abbreviated fragments; the
+source hint additionally names the agent and actual English Connection action,
+adding a text line and omitting the mockup's selective bold emphasis; focus rings
+and real text selection differ from simulated styling; B/C mask the actual
+`login=` URL shape. E retains the existing layout/input/language/GitHub controls,
+uses a synthetic test version, has the longer owner-required subtext, and omits
+the LAN block because the fixture is loopback-only. Core palette, card geometry,
+logo viewport, controls and D wording/check styling match the mockup.
+
+Final regression qualification: 595 affected existing test names were inventoried
+and entered in seven narrow batches (614 roots including adjacent prefix matches),
+not a claim that every opt-in assertion passed. Authenticated HTTP/WS/Chromium
+fixtures use real cookies; alternate CJS/ESM/performance module seams also have
+race-tested coverage. Nine browser failures reproduce on the untouched base:
+`BoardHoldPillBrowser`, `BoardStateFilterBrowser`, `EntryRowsBrowser`, `FSPDFBrowser`,
+`PanelRowsBrowser`, `TreeRowsBrowser`, `WhiteboardEffectsBrowser`,
+`SettingsAndEmptyRootBrowser`, and `WorktreePageBrowser` (all `Test`-prefixed).
+The base also reproduces `TestShellSwitchesFramesThroughItsGlue`'s missing helper,
+optional viewed-update performance thresholds, landing-capture locator timeouts,
+and the unified-history fixture's pre-browser missing policy class. The optional
+send-latency fixture passes. Pure-renderer opt-ins requiring separate performance
+inputs remain explicitly skipped, not silently counted as passes. The unrelated
+wsagent lead-replay timeout remains intermittent as noted in Phase 1. No assertions
+were weakened, no Electron application or SSH was used, and no push occurred.
+
+#### Edition (this-commit) - 2026-11-17
+
+Applied the final independent-review requests after the security and visual LGTM
+(T1 overall, patch release permitted). Navigation failures spend the shared
+paste/exchange budget only with browser-proven same-origin fetch metadata and
+no mismatched Origin. Cross-site, same-site, none, missing metadata and mismatched
+Origin navigations cannot exhaust that budget; valid links still exchange and
+the same-origin failure limit remains enforced. HEAD previews never perform a
+login exchange/redirect, set a login cookie, consume a code or spend that budget.
+
+Restored the approved short source footer with three bold labels, localized in
+all eleven tables. This supersedes the longer agent/English-action footer noted
+in the preceding Result. Fresh light/dark A and A3 comparisons were inspected;
+the footer now fits two lines and matches the mockup's emphasis. The full gate
+Chromium acceptance run also passes and refreshes the remaining capture states.
+
+Verification: narrow auth/gate unit tests pass with `-race`, all i18n tests pass,
+and `TestLoginGateBrowser` passes (17.3 seconds). Added explicit foreign-navigation
+flood, retained same-origin limit, authenticated/cookieless HEAD preview, localized
+bold-label and two-line footer assertions. No machine route, shared store,
+protocol, Electron behavior or clipboard-action semantics changed.

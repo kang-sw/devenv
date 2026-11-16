@@ -318,7 +318,7 @@ func TestGitPushRoute(t *testing.T) {
 	if !strings.Contains(page, `data-git="push"`) {
 		t.Fatal("the session page lacks the git sheet's push button")
 	}
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +342,7 @@ func TestGitPushRoute(t *testing.T) {
 
 	// The push runs git in the handler, which outlasts testClient's 500 ms
 	// on a loaded Windows runner (seen on CI).
-	pushClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	pushClient := &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}
 	if code, _, raw := postJSONWith(t, pushClient, route, f.base, ""); code != http.StatusNoContent {
 		t.Fatalf("push = %d %s, want 204", code, raw)
 	}

@@ -594,7 +594,7 @@ func supportDaemon(t *testing.T) (*supportHarness, *daemonHarness) {
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
-	return sh, &daemonHarness{harness: sh.harness, base: fmt.Sprintf("http://127.0.0.1:%d", d.Endpoint().Port)}
+	return sh, &daemonHarness{harness: sh.harness, base: fmt.Sprintf("http://127.0.0.1:%d", d.Endpoint().Port), cookie: daemonCookieForTest(t, d)}
 }
 
 func TestSupportRoutesEndToEnd(t *testing.T) {

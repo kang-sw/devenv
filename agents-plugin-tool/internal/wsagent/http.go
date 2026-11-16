@@ -48,11 +48,12 @@ import (
 //	                              capability token (Authorization: Bearer),
 //	                              from this machine only
 //
-// The routes sit behind the daemon's access guard. A POST must carry a JSON
-// body (Content-Type application/json) and either no Origin (a non-browser
-// client) or the daemon's own origin, so no other web page can drive an
-// agent: a browser always sends Origin on a cross-origin POST, and the JSON
-// content type forces a CORS preflight the daemon never answers.
+// The routes sit behind the daemon's credential guard: non-token routes
+// require the localhost cookie (or the separate LAN credential for a remote
+// viewer). The by-token machine route keeps its capability check instead.
+// A POST must also carry a JSON body (Content-Type application/json) and
+// either no Origin or the daemon's own origin. A browser sends Origin on a
+// cross-origin POST, and JSON forces a CORS preflight the daemon never answers.
 //
 // A lead session runs with the user's own tools and permissions, so the
 // writes that decide what it may do take the stricter trusted gate

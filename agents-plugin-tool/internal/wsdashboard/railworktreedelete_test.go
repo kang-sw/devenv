@@ -61,7 +61,7 @@ func (f deleteFixture) post(t *testing.T, route string, req worktreeDeleteReques
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, _, out := postJSONWith(t, &http.Client{Timeout: 30 * time.Second}, f.base+route, f.base, string(raw))
+	code, _, out := postJSONWith(t, &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}, f.base+route, f.base, string(raw))
 	return code, out
 }
 

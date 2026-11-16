@@ -19,7 +19,7 @@ import (
 func fsViewers(t *testing.T, f *pageFixture) (local, lan viewer) {
 	t.Helper()
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	return viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + port},
+	return viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true},
 		viewer{name: "lan", peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 }
 
@@ -297,7 +297,7 @@ func TestFSRawStreamsVideoWithRange(t *testing.T) {
 		req.Host = "127.0.0.1"
 		req.RemoteAddr = "127.0.0.1:50000"
 		rec := httptest.NewRecorder()
-		f.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != ctype || rec.Header().Get("Accept-Ranges") != "bytes" ||
 			rec.Header().Get("X-Content-Type-Options") != "nosniff" || rec.Header().Get("Content-Security-Policy") != imageContentSecurityPolicy {
 			t.Errorf("raw %s = %d %v", name, rec.Code, rec.Header())
@@ -308,7 +308,7 @@ func TestFSRawStreamsVideoWithRange(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:50000"
 	req.Header.Set("Range", "bytes=1000-1999")
 	rec := httptest.NewRecorder()
-	f.d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 	if rec.Code != http.StatusPartialContent || rec.Header().Get("Content-Range") != "bytes 1000-1999/4096" || rec.Body.Len() != 1000 || string(rec.Body.Bytes()) != string(body[1000:2000]) {
 		t.Errorf("ranged video = %d Content-Range %q, %d bytes", rec.Code, rec.Header().Get("Content-Range"), rec.Body.Len())
 	}
@@ -432,7 +432,7 @@ func TestFSChangeRootIsLoopbackOnly(t *testing.T) {
 		req.RemoteAddr, req.Host = local.peer, local.host
 		req.Header.Set("Sec-Fetch-Site", "cross-site")
 		rec := httptest.NewRecorder()
-		f.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("cross-site %s = %d, want 404", target, rec.Code)
 		}

@@ -350,7 +350,7 @@ func TestGitDiffRoutes(t *testing.T) {
 	gitCommit(t, work, "b")
 	writeFile(t, filepath.Join(work, "w.txt"), "w\n")
 	head := revParse(t, work, "HEAD")
-	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}
 	read := func(path string) (int, string) {
 		t.Helper()
 		resp, err := client.Get(f.base + path)

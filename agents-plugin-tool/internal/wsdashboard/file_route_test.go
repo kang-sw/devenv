@@ -131,7 +131,7 @@ func TestFileViewKinds(t *testing.T) {
 	if code != http.StatusOK || h.Get("Content-Type") != "image/svg+xml" || h.Get("Content-Security-Policy") != imageContentSecurityPolicy || h.Get("X-Content-Type-Options") != "nosniff" {
 		t.Errorf("svg = %d %v", code, h)
 	}
-	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port), localCookie: true}
 	if rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path=page.html", ""); rec.Code != http.StatusFound ||
 		!strings.HasPrefix(rec.Header().Get("Location"), "/s/livesession/fs/view/") || strings.Contains(rec.Body.String(), "<script>") {
 		t.Errorf("html = %d %v %q", rec.Code, rec.Header(), rec.Body.String())
@@ -380,7 +380,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 			req.Header.Set("Sec-Fetch-Dest", dest)
 		}
 		rec := httptest.NewRecorder()
-		f.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 		return rec
 	}
 	if rec := nav(prefix+"docs/guide/style.css", "style"); rec.Code != http.StatusNotFound {
@@ -412,7 +412,7 @@ func TestFileViewPageServesAnIgnoredFolder(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	f := startPageFixture(t)
-	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port), localCookie: true}
 	gitRun(t, f.project, "init", "-q")
 	writeFile(t, filepath.Join(f.project, "paged", "doc", ".gitignore"), "*\n")
 	writeFile(t, filepath.Join(f.project, "paged", "doc", "document.html"), `<link rel="stylesheet" href="style.css">IGNORED-DOC`)

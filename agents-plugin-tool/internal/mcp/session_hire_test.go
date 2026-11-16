@@ -108,6 +108,7 @@ func TestHiringMCPRequestOpensReplyAndRosterProxy(t *testing.T) {
 	flag := httptest.NewRequest("POST", "http://127.0.0.1/s/"+f.replyA+"/hiring", strings.NewReader(`{"enabled":true}`))
 	flag.RemoteAddr = "127.0.0.1:1234"
 	flag.Header.Set("Origin", "http://127.0.0.1")
+	flag.AddCookie(dashboardCookieForTest(t, d))
 	res := httptest.NewRecorder()
 	d.Handler().ServeHTTP(res, flag)
 	if res.Code != 200 {
@@ -129,6 +130,7 @@ func TestHiringMCPRequestOpensReplyAndRosterProxy(t *testing.T) {
 	reject := httptest.NewRequest("POST", "http://127.0.0.1/session-hire/"+requestID+"/reject", strings.NewReader(`{"reason":"owner rejected"}`))
 	reject.RemoteAddr = "127.0.0.1:1234"
 	reject.Header.Set("Origin", "http://127.0.0.1")
+	reject.AddCookie(dashboardCookieForTest(t, d))
 	res = httptest.NewRecorder()
 	d.Handler().ServeHTTP(res, reject)
 	if res.Code != 200 {
@@ -162,7 +164,13 @@ func TestHiringMCPRequestOpensReplyAndRosterProxy(t *testing.T) {
 		t.Fatalf("roster proxy: %s", got)
 	}
 	// It is a read-only route: a POST cannot turn a roster read into control.
-	resp, err := http.Post("http://127.0.0.1:"+strconv.Itoa(d.Endpoint().Port)+"/session-hire/roster", "application/json", strings.NewReader(`{}`))
+	post, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+strconv.Itoa(d.Endpoint().Port)+"/session-hire/roster", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	post.Header.Set("Content-Type", "application/json")
+	post.AddCookie(dashboardCookieForTest(t, d))
+	resp, err := http.DefaultClient.Do(post)
 	if err != nil {
 		t.Fatal(err)
 	}

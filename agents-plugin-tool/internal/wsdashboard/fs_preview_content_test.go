@@ -118,7 +118,7 @@ func TestFSPDFPreviewRawAndGuards(t *testing.T) {
 		req.Host, req.RemoteAddr = local.host, local.peer
 		req.Header.Set("Sec-Fetch-Site", "cross-site")
 		rec := httptest.NewRecorder()
-		f.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("cross-site explicit root %s = %d", route, rec.Code)
 		}
@@ -128,7 +128,7 @@ func TestFSPDFPreviewRawAndGuards(t *testing.T) {
 	req.Host, req.RemoteAddr = local.host, local.peer
 	req.Header.Set("Range", "bytes=0-7")
 	rec := httptest.NewRecorder()
-	f.d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 	if rec.Code != http.StatusPartialContent || rec.Body.String() != pdf[:8] || rec.Header().Get("Content-Type") != "application/pdf" {
 		t.Errorf("PDF range = %d %q %v", rec.Code, rec.Body.String(), rec.Header())
 	}

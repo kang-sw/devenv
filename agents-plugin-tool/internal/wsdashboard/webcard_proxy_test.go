@@ -24,7 +24,7 @@ import (
 // Content-Encoding and Location the proxy sent.
 var webClient = &http.Client{
 	Timeout:       5 * time.Second,
-	Transport:     &http.Transport{Proxy: nil, DisableCompression: true},
+	Transport:     localhostTestTransport{base: &http.Transport{Proxy: nil, DisableCompression: true}},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 

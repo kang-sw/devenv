@@ -442,6 +442,7 @@ func startIndexedDaemon(t *testing.T, dir string, src SessionSource, poll time.D
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
+	registerLocalhostTestDaemon(t, d)
 	return d
 }
 
@@ -514,8 +515,8 @@ func TestNudgeRoute(t *testing.T) {
 	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 	d.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET /nudge = %d, want 405", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("cookieless GET /nudge = %d, want 401 (only POST is machine-exempt)", rec.Code)
 	}
 
 	// A daemon without a session source has no index: every nudge is 404.
