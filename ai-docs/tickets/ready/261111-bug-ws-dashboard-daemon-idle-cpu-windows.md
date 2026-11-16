@@ -230,6 +230,39 @@ identity writes, absent roots, legacy data, invalid identities, pending targets
 and invalidation races. Do not introduce a persisted index as an incidental
 optimization without settling its compatibility.
 
+#### Implementation candidate — pending after measurement (2026-11-16)
+
+Commits `c3715b0bd` and `692d07930` add an in-process identity-only
+metadata-gated discovery cache. Split files retain precedence over legacy;
+file identity, size, mtime, a two-second quiet interval and a post-read stat
+prevent stable stamps from surviving ordinary same-size writes, replacements
+and observed read races. Unreadable records and root-list failures fail closed;
+delivery still reads identity and registration fresh. The cache retains no
+legacy board snapshot or mutable session fields, writes no key, and introduces
+no new persisted or protocol surface (compatibility **n/a**).
+
+Remote w5090 focused `^TestWhiteboardNudge` scope passed after both commits.
+The 3,500-identity fixture has 2,644 legacy and 856 split records, with many
+nonlead/delegate entries. At five iterations per benchmark side, warm cached
+versus the mirrored prior full-discovery loop: **0 vs 3,500 successful record
+content reads per scan (100% fewer, above the 90% candidate threshold)**;
+**7,311 vs 1,167 metadata stats per scan** (identity and board existence),
+**22.1 vs 50.5 ms/op**, **5.66 vs 8.64 MB/op**, and **47,963 vs 93,050
+allocs/op**. The numbers are remote Linux source-level counters/benchmark
+results, not Windows physical-I/O, process CPU, nudge latency or matched live
+pprof evidence. Metadata stats are nonzero I/O; the old path also performs
+file-open work not counted as stats. Existing precise-timer and delivery tests
+passed; no deadline policy changed.
+
+Independent Lite R1 reported two Important test/benchmark integrity findings;
+`692d07930` fixes both (full-workload comparison and quiet same-size in-place
+mtime change) and scoped tests/benchmark passed after those fixes. The required
+fixes-only R2 CLI did not return a verdict in two bounded attempts; do not
+claim independent R2 clearance. The coordinating lead must approve any daemon
+rebuild/swap and alone capture a matched 125-second after pprof with identity
+counts, streams/nudges and activity context. Until that gate and review
+clearance, **Phase 1 has no Result and is not complete**; Phase 2 is blocked.
+
 ### Phase 2: Optimize the remaining candidates ranked by measurement
 
 Depends on Phase 1's landed Result and a fresh matched profile. Rank rail
