@@ -29,7 +29,7 @@ func TestEntryAndPanelStreamWaitsPastQuietWindow(t *testing.T) {
 	}
 }
 
-// Arrival is bounded by the test deadline, not the quiet window. Only after
+// Arrival is bounded by 30 seconds and the test deadline, not the quiet window. Only after
 // the first relevant event arrives do we use silence to check for duplicates.
 func keyedStreamEvent(t *testing.T, events <-chan sseEvent, region, delta string) sseEvent {
 	t.Helper()
@@ -46,9 +46,9 @@ func keyedStreamEvent(t *testing.T, events <-chan sseEvent, region, delta string
 		}
 		return false
 	}
-	deadline, ok := t.Deadline()
-	if !ok {
-		deadline = time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
+	if testDeadline, ok := t.Deadline(); ok && testDeadline.Before(deadline) {
+		deadline = testDeadline
 	}
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
