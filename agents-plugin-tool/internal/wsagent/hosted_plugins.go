@@ -110,7 +110,13 @@ func HostedPluginEnvironment(plugin string) (map[string]string, error) {
 		"WS_MCP_CLI_NAME": "", "WS_MCP_CONFIG_MANIFESTS": "",
 	}
 	for key, value := range manifest.Servers[manifest.Name].Env {
-		env[key] = strings.ReplaceAll(value, "${CLAUDE_PLUGIN_ROOT}", plugin)
+		if strings.Contains(value, "${CLAUDE_PLUGIN_ROOT}") {
+			// Plugin-root templates are filesystem paths (possibly a ';'
+			// list). Normalize their literal suffixes before substituting the
+			// native root; leave unrelated env strings such as URLs intact.
+			value = strings.ReplaceAll(filepath.FromSlash(value), "${CLAUDE_PLUGIN_ROOT}", plugin)
+		}
+		env[key] = value
 	}
 	return env, nil
 }

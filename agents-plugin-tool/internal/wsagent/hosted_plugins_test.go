@@ -163,6 +163,9 @@ func TestHostedPluginWarningPersistsAndSettingWaitsForProcessStart(t *testing.T)
 	if got, _ := flagValue(h.holders.spawned(holder).Argv, "--plugin-dir"); got != ws {
 		t.Fatalf("fallback plugin = %q", got)
 	}
+	if st := h.state(id); !st.Process || st.Error != "" {
+		t.Fatalf("usable fallback must warn without a launch error: %+v", st)
+	}
 	h.holders.out(holder, turnLines("session", "u1", "ok")...)
 	h.idle(id)
 	wsflow := leadBundledFixture(t, "wsflow")
@@ -183,6 +186,9 @@ func TestHostedPluginWarningPersistsAndSettingWaitsForProcessStart(t *testing.T)
 	}
 	if got := h.record(id).PluginWarning; got != warning {
 		t.Fatalf("reattach changed warning: %q", got)
+	}
+	if st := h.state(id); st.Error != "" {
+		t.Fatalf("reattached usable fallback must not be an error: %+v", st)
 	}
 	if _, err := h.runner.Stop(id); err != nil {
 		t.Fatal(err)
