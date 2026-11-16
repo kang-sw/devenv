@@ -2003,9 +2003,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		to, _ := params.Arguments["to"].(string)
 		entry, _ := s.lookupSession(strings.TrimSpace(sessionKey)) // resolveToolRoot verified the key.
 		checkRoot := func() error {
-			// Parenthood preserves the existing session-bound worker flow; it
-			// is not branch-ownership proof and does not require a lease.
-			if entry.parent != "" {
+			// Native workers are parented; daemon-spawned workers instead have
+			// parentless delegate keys. resolveToolRoot pins both to entry.root;
+			// neither exemption asserts branch ownership or requires a lease.
+			if entry.parent != "" || entry.scope == roleDelegate {
 				return nil
 			}
 			return guardOccupiedRoot(context.Background(), s.gitRunner(), root)
