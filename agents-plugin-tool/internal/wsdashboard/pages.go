@@ -70,6 +70,7 @@ var dashboardStyleFiles = []string{
 
 var trackerScriptFiles = []string{
 	"tracker.js",
+	"tracker-panel.js",
 	"tracker-wiki.js",
 	"tracker-window.js",
 	"tracker-forms.js",
