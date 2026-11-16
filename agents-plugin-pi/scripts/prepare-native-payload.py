@@ -200,7 +200,7 @@ def retain_committed_closure(repo, native, candidate):
 def write_first_party(repo, native, closure, input_hash, pkg):
     pi = repo / "agents-plugin-pi"
     first = native / "first-party"
-    for name in (*payload.FIRST_PARTY_FILES, *payload.WORKFLOW_BUNDLE_FILES):
+    for name in (*payload.FIRST_PARTY_FILES, "dist/THIRD_PARTY_NOTICES", "bin/ws-pi-forward.mjs", *payload.WORKFLOW_BUNDLE_FILES):
         target = first / name
         target.parent.mkdir(parents=True, exist_ok=True)
         if name == "package.json":
@@ -211,10 +211,10 @@ def write_first_party(repo, native, closure, input_hash, pkg):
         else:
             shutil.copyfile(pi / name, target)
     inputs = {}
-    for root in ("src", "scripts", "dist", "workflow-bundles"):
+    for root in ("src", "scripts", "dist", "workflow-bundles", "bundle-inputs"):
         for rel, sha in payload.tree(pi / root, ignore_junk=True).items():
             inputs[f"agents-plugin-pi/{root}/{rel}"] = sha
-    for name in ("package.json", "package-lock.json", "config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"):
+    for name in ("package.json", "package-lock.json", "config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md", "bin/ws-pi-forward.mjs"):
         inputs[f"agents-plugin-pi/{name}"] = payload.digest((pi / name).read_bytes())
     small = {"schema_version": 1, "closure_key": closure["key"], "bundle_input_hash": input_hash,
              "files": payload.tree(first), "inputs": dict(sorted(inputs.items()))}

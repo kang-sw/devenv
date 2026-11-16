@@ -51,8 +51,8 @@ func TestWakeStampAndSnapshotUnchangedFilesAreNotOpened(t *testing.T) {
 	if opens != len(ids) || cache.observed.Opens() != int64(len(ids)) {
 		t.Fatalf("unchanged wake reopened snapshot=%d observed=%d", opens-len(ids), cache.observed.Opens()-int64(len(ids)))
 	}
-	// A same-size/time atomic replacement changes adapter presence. Stamps
-	// re-read exactly once and do not load retained evidence just to ask expiry.
+	// A same-size/time atomic replacement changes adapter presence once the
+	// index/backstop refreshes its evidence. Stamps themselves never reopen it.
 	path := wslive.SnapshotPath(SessionDir(dir, ids[0]))
 	info, err := os.Stat(path)
 	if err != nil {
@@ -100,8 +100,12 @@ func TestWakeStampAndSnapshotUnchangedFilesAreNotOpened(t *testing.T) {
 	if err := os.Rename(tmp, path); err != nil {
 		t.Fatal(err)
 	}
+	if next, _ := reader.sessionStamp(ids[0], in); next != first || opens != len(ids) {
+		t.Fatal("stamp unexpectedly probed the replaced snapshot")
+	}
+	cache.snapshotWithoutObserved(dir, ids[0]) // the existing index/backstop read
 	if next, _ := reader.sessionStamp(ids[0], in); next == first {
-		t.Fatal("replaced snapshot did not move session stamp")
+		t.Fatal("refreshed evidence did not move session stamp")
 	}
 	if next, _ := reader.indexStamp(); next == firstIndex {
 		t.Fatal("replaced snapshot did not move index stamp")

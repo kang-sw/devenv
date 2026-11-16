@@ -82,7 +82,8 @@ before(() => {
   for (const name of ['TMP', 'TEMP', 'TMPDIR']) process.env[name] = tempRoot;
   freeSpace();
   root = mkdtempSync(join(tempRoot, 'workflow-consumer-'));
-  producer = git('rev-parse', 'HEAD').toString().trim();
+  // A staged merge candidate can be verified before its merge commit exists.
+  producer = git('rev-parse', process.env.WS_TEST_PRODUCER_TREE || 'HEAD').toString().trim();
   bundleManifest = JSON.parse(committed('agents-plugin-pi/workflow-bundles/manifest.json'));
   const consumer = join(root, 'exec3');
   mkdirSync(consumer);
@@ -115,7 +116,7 @@ before(() => {
       '    archive.extractall(sys.argv[2])',
     ].join('\n'), archive, destination], { cwd: root, env: process.env, stdio: 'pipe' });
     const inventory = Object.fromEntries(files(destination).map(name => [name, sha(readFileSync(join(destination, name)))]));
-    assert.deepEqual(inventory, bundleManifest[owner].files, 'actual committed ZIP inventory');
+    assert.deepEqual(inventory, bundleManifest[owner].files, 'actual selected snapshot ZIP inventory');
     const contract = json(join(destination, 'runtime.json'));
     const inert = Buffer.from('INERT consumer fixture, not an executable\n');
     writeFileSync(join(destination, 'ws-mcp.exe'), inert);
@@ -139,7 +140,7 @@ test('consumer provenance is pinned to immutable Exec3 sources', t => {
 });
 
 for (const owner of Object.keys(products)) {
-  test(`${owner}: committed producer ZIP validates and stages with the exact peer consumer`, t => {
+  test(`${owner}: selected producer snapshot ZIP validates and stages with the exact peer consumer`, t => {
     freeSpace();
     const source = packages.get(owner), destination = join(root, `${owner}-staged`);
     assertSelection(validateDaemonRoot(source, 'bundled', 'win32'), source, owner);
@@ -193,26 +194,60 @@ test('wsflow manifest is generated in the ZIP, not patched into canonical curate
   finally { writeFileSync(file, original); }
 });
 
-test('default-export forwarding keeps original ESM URL, owner marker and object identity', async () => {
+test('selected snapshot guarded factory keeps original ESM URL, owner marker and module/class identity', async () => {
   freeSpace();
-  const original = join(root, 'original owner # percent % ü space', 'dist', 'index.js');
-  mkdirSync(dirname(original), { recursive: true });
-  writeFileSync(join(dirname(dirname(original)), 'package.json'), '{"type":"module"}\n');
-  writeFileSync(original, 'export default { url: import.meta.url, owner: "wsflow-stub", token: {} };\n');
-  const uri = pathToFileURL(original).href;
+  const original = join(root, 'original owner # percent % ü space', 'native-pi', 'first-party');
+  mkdirSync(join(original, 'dist'), { recursive: true });
+  mkdirSync(join(original, 'bin'));
+  writeFileSync(join(original, 'package.json'), '{"type":"module"}\n');
+  // Prepared payload record, independently constructed from explicit raw rows.
+  // Source and lock are intentionally absent, as in native first-party payloads.
+  const inputs = {
+    'src/index.ts': Buffer.from('// inert source\r\n'),
+    'src/helper.mjs': Buffer.from('// inert helper\n'),
+    'src/eff_large_wordlist.txt': Buffer.from('11111\tabacus\n'),
+    'package-lock.json': Buffer.from('{"lockfileVersion":3}\n'),
+    'scripts/bundle.mjs': Buffer.from('// inert builder\n'),
+  };
+  const inputHash = sha(Object.keys(inputs).sort().map(name => `${name}\n${sha(inputs[name])}\n`).join(''));
+  writeFileSync(join(original, 'bundle-inputs.json'), JSON.stringify({ schema_version: 1, sha256: inputHash }));
+  assert.equal(existsSync(join(original, 'src')), false);
+  assert.equal(existsSync(join(original, 'package-lock.json')), false);
+  const bootstrap = join(original, 'bin', 'ws-pi-forward.mjs');
+  // Crucially use the selected producer tree, not today's worktree helper.
+  writeFileSync(bootstrap, committed('agents-plugin-pi/bin/ws-pi-forward.mjs'));
+  const dist = join(original, 'dist', 'index.js');
+  writeFileSync(dist, `// ws-pi-bundle-inputs: sha256-${inputHash}\n` + [
+    'export class HostToken {}',
+    'export const identity = { url: import.meta.url, owner: "wsflow-stub", token: new HostToken() };',
+    'export default async function (...args) { await Promise.resolve(); return { identity, HostToken, receiver: this, args }; }',
+    '',
+  ].join('\n'));
+  const uri = pathToFileURL(dist).href;
   assert.match(uri, /%20/);
   assert.match(uri, /%23/);
   assert.match(uri, /%25/);
   assert.match(uri, /%C3%BC/);
-  const shim = resolve(root, 'prepared cache with spaces', 'dist', 'index.js');
-  mkdirSync(dirname(shim), { recursive: true });
-  writeFileSync(join(dirname(dirname(shim)), 'package.json'), '{"type":"module"}\n');
-  // Same forwarding form as the materializer's original.as_uri() shim.
-  writeFileSync(shim, `export { default } from ${JSON.stringify(uri)};\n`);
-  const direct = await import(uri), forwarded = await import(pathToFileURL(shim).href);
-  assert.strictEqual(forwarded.default, direct.default);
-  assert.strictEqual(forwarded.default.token, direct.default.token);
-  assert.equal(forwarded.default.url, uri);
-  assert.equal(forwarded.default.owner, 'wsflow-stub');
-  assert.notEqual(forwarded.default.url, pathToFileURL(shim).href);
+  const selected = resolve(original, '.runtime', 'workflow', sha('consumer-forwarding'), 'wsflow');
+  mkdirSync(selected, { recursive: true });
+  const sibling = join(dirname(selected), 'agents-plugin-pi');
+  mkdirSync(sibling);
+  writeFileSync(join(sibling, 'package.json'), '{"type":"module","pi":{"extensions":["./index.mjs"]}}\n');
+  // Exact two-line materializer form; Python separately asserts actual emission.
+  writeFileSync(join(sibling, 'index.mjs'), `import { createPiForwarder } from ${JSON.stringify(pathToFileURL(bootstrap).href)};\nexport default createPiForwarder(${JSON.stringify(uri)});\n`);
+  const entry = json(join(sibling, 'package.json')).pi.extensions[0];
+  const forwarded = await import(pathToFileURL(join(sibling, entry)).href);
+  const receiver = {}, argument = {}, trailing = {};
+  const result = await Reflect.apply(forwarded.default, receiver, [argument, trailing]);
+  const direct = await import(uri);
+  assert.notStrictEqual(forwarded.default, direct.default, 'guard wrapper intentionally has its own identity');
+  assert.strictEqual(result.identity, direct.identity);
+  assert.strictEqual(result.identity.token, direct.identity.token);
+  assert.strictEqual(result.HostToken, direct.HostToken);
+  assert.ok(result.identity.token instanceof direct.HostToken);
+  assert.equal(result.identity.url, uri);
+  assert.equal(result.identity.owner, 'wsflow-stub');
+  assert.strictEqual(result.receiver, receiver);
+  assert.strictEqual(result.args[0], argument);
+  assert.strictEqual(result.args[1], trailing);
 });

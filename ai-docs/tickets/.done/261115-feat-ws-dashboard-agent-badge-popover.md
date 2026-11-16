@@ -112,3 +112,14 @@ board drawer wait work as before.
   reload, order, no row loss, expansion with full output, the narrow fit and
   the board tab. Existing session-page, files, worktree and explorer tests
   now reflect the tree living in the popover.
+
+#### Edition (hover preview) - 2026-11-16
+
+Owner (1306): the badge also opens the same `agpop` on hover. `dashboard-composer.js`
+adds pointerenter/pointerleave on badge and panel: 150 ms intent delay opens,
+200 ms grace after leaving both closes, only a hover-opened panel auto-closes;
+a click on a hover-opened panel makes it click-owned (stays open), otherwise
+click toggles as before; pin, Esc and outside press unchanged. Touch pointers
+and `(hover: hover)`-less devices never open it. No second popover. T0.
+Timing/flow checked with a node stub simulation; browser test not run.
+

@@ -1642,7 +1642,7 @@ func (c *conv) loop() {
 			c.leverC, c.leverStop = nil, nil
 			c.kick()
 		case <-beat.C:
-			c.live.writeSnapshot()
+			c.live.heartbeatSnapshot()
 			c.persistSeq()
 			if c.replaying {
 				// A holder that attached late (a rescan) is found here.
@@ -1780,6 +1780,9 @@ func (c *conv) writeRegistration() bool {
 	rec := c.record()
 	now := c.r.opts.Now()
 	reg := registration(rec, now)
+	// WriteRegistration normalizes this default before persisting it.
+	reg.SchemaVersion = 1
+	var previousRow *wsdashboard.Registration
 	if rec.Lead {
 		unlock, ok := c.lockRow()
 		if !ok {
@@ -1790,19 +1793,30 @@ func (c *conv) writeRegistration() bool {
 		// The holder manager writes the last exit independently of the
 		// runner's heartbeat; a regenerated row must not discard it.
 		if previous, err := wsdashboard.ReadRegistration(c.r.opts.Dir, rec.ReplyID); err == nil {
+			previousRow = &previous
 			reg.HostExitCode = previous.HostExitCode
 			reg.HostExitSignal = previous.HostExitSignal
 			reg.HostExitReason = previous.HostExitReason
 			reg.HostStoppedAt = previous.HostStoppedAt
 		}
 	}
+	// Reuse only the row already read under the lead's ownership lock, not
+	// process-local evidence: a spawn needs a real reservation on disk.
+	if previousRow != nil && now.Sub(c.lastReg) < wsdashboard.HeartbeatInterval {
+		previous := *previousRow
+		previous.HeartbeatAt = reg.HeartbeatAt
+		if previous == reg {
+			return true // no semantic change; leave the scheduled heartbeat due
+		}
+	}
 	err := wsdashboard.WriteRegistration(c.r.opts.Dir, reg)
 	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: registration write: %v\n", rec.ReplyID, err)
+		return false
 	}
 	c.lastReg = now
 	c.r.notify(rec.ReplyID, rec.Root)
-	return err == nil
+	return true
 }
 
 // rowForeign reports whether a session's row, as read, is no longer the
@@ -2390,6 +2404,8 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 				c.update(func(rec *Record) { rec.PluginWarning = warning })
 				if warning != "" {
 					fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, warning)
+					c.setStatus(func() { c.lastErr = warning })
+					c.changed(false)
 				}
 			},
 			WSMCP: func() (MCPCommand, error) {

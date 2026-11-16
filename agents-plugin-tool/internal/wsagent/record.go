@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -348,6 +349,8 @@ type liveWriter struct {
 	owner          func() (func(), bool)
 	wake           func()
 	slot           wsdashboard.HostedSlot
+	// The last successfully written disk projection, without its timestamp.
+	lastSnapshot []byte
 	// Only an observed holder agent_start supplies this real identity.
 	summarySource     string
 	summaryNaturalEnd bool
@@ -478,17 +481,40 @@ func (w *liveWriter) writeObserved(records []wslive.ObservedRecord) {
 	}
 }
 
-func (w *liveWriter) writeSnapshot() {
+func (w *liveWriter) writeSnapshot() { w.flushSnapshot(false) }
+
+// Heartbeats always reach disk: legacy readers do not have the hosted slot.
+func (w *liveWriter) heartbeatSnapshot() { w.flushSnapshot(true) }
+
+func (w *liveWriter) flushSnapshot(heartbeat bool) {
 	if w.beforeSnapshot != nil {
 		w.beforeSnapshot()
 	}
 	snap := w.st.Snapshot(w.now().UnixMilli())
 	w.publishSnapshot(snap)
-	raw, err := json.Marshal(snap.ForDisk())
+	disk := snap.ForDisk()
+	raw, err := json.Marshal(disk)
+	disk.UpdatedAt = 0
+	var content []byte
 	if err == nil {
-		err = w.withOwner(func() error { return writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644) })
+		content, err = json.Marshal(disk)
+	}
+	if err == nil {
+		err = w.withOwner(func() error {
+			// Only a hosted slot can serve the fresh timestamp in memory.
+			// Do not elide the periodic disk heartbeat or a failed write retry.
+			if !heartbeat && w.slot != nil && bytes.Equal(content, w.lastSnapshot) {
+				return nil
+			}
+			if err := writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644); err != nil {
+				return err
+			}
+			w.lastSnapshot = content
+			return nil
+		})
 	}
 	if err != nil {
+		w.lastSnapshot = nil
 		fmt.Fprintf(w.log, "agent %s: snapshot write: %v\n", w.st.ReplyID(), err)
 	}
 }

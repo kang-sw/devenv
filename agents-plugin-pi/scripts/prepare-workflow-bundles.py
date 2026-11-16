@@ -51,6 +51,18 @@ def archive(files):
 
 
 def prepare(pi, check=False):
+    # npm deliberately omits the root package-lock. Retain its raw bytes in a
+    # private shipped input path so the same bundle hash can be checked there.
+    source_lock, retained_lock = pi / "package-lock.json", pi / "bundle-inputs/lock.json"
+    if source_lock.is_file():
+        data = source_lock.read_bytes()
+        if not retained_lock.is_file() or retained_lock.read_bytes() != data:
+            if check:
+                raise ValueError("retained bundle lock input is stale or missing")
+            retained_lock.parent.mkdir(parents=True, exist_ok=True)
+            retained_lock.write_bytes(data)
+    elif not retained_lock.is_file():
+        raise ValueError("retained bundle lock input is missing")
     dest = pi / "workflow-bundles"
     manifest_path = dest / "manifest.json"
     prior = json.loads(manifest_path.read_bytes()) if manifest_path.exists() else {}

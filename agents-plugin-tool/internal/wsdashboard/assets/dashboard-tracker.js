@@ -385,6 +385,7 @@
   // the open palette, which keeps the focus.
   function palettePick(row, o) {
     if (row.kind === "session") { go(row.href); return; }
+    if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(function () { palettePick(row, o); })) return;
     // Look the target up again: an SSE board swap may have replaced its node
     // while the palette was open. Open every enclosing fold before scrolling.
     var topic = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
@@ -396,6 +397,7 @@
       if (live && !tabShown("board")) setTab("board");
     }
     function entryPick() {
+      if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(entryPick)) return;
       // Overview releases held board swaps before after callbacks; look up
       // the live topic again rather than navigating a detached history tree.
       var owner = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];

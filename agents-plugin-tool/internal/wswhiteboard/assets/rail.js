@@ -360,11 +360,10 @@
       ghosts[e] = null;
     });
   }
-  // morph stands a solid copy in edge's wrapper and changes it from g.r to
-  // into's box by height alone: it keeps into's left edge and width
-  // throughout, while its top, height, corners (between the bar's and the
-  // capsule's pill), and fill move. Inside it, g's content gives way to
-  // into's, both centred and clipped to its height. into hides
+  // morph lays out the copy at its destination once, then uses only a
+  // translate/scale transform and opacity while moving from g.r. No top,
+  // height, radius or background animation forces layout on every frame.
+  // Inside it, g's content gives way to into's. into hides
   // under it until it ends; nothing else fades. A stuck bar has its item's
   // body scrolling under it, so while it hides, a page-coloured plate takes
   // its box and the copy grows over that, not over the body.
@@ -383,6 +382,11 @@
     el.setAttribute("aria-hidden", "true");
     el.style.left = to.left - w.left + "px";
     el.style.width = to.width + "px";
+    el.style.top = to.top - w.top + "px";
+    el.style.height = to.height + "px";
+    el.style.borderRadius = b.radius;
+    el.style.backgroundColor = b.bg;
+    el.style.transformOrigin = "top center";
     [a, b].forEach(function (l) {
       var c = l.copy, nm = c.querySelector(TN);
       c.hidden = false;
@@ -402,8 +406,8 @@
     wrap.appendChild(el);
     var mine = ghosts[edge];
     el.animate([
-      { top: from.top - w.top + "px", height: from.height + "px", borderRadius: bar ? a.radius : from.height / 2 + "px", backgroundColor: a.bg },
-      { top: to.top - w.top + "px", height: to.height + "px", borderRadius: bar ? to.height / 2 + "px" : b.radius, backgroundColor: b.bg }
+      { transform: "translateY(" + (from.top - to.top) + "px) scaleY(" + (to.height > 0 ? from.height / to.height : 1) + ")" },
+      { transform: "none" }
     ], { duration: DUR, easing: EASE, fill: "forwards" }).onfinish = function () { if (ghosts[edge] === mine) dropGhost(edge); };
     // The two contents take turns, g's out over the first half and into's in
     // over the second, so their differently placed text never doubles up.
@@ -434,8 +438,13 @@
   // it will have once current.
   function jump(e) {
     var b = e.target.closest && e.target.closest(".wb-cap"), t = b && b.wbTopic;
-    if (!t || !t.isConnected) return;
-    var j = topics.indexOf(t);
+    if (!t) return;
+    if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(function () { jump(e); })) return;
+    if (!t.isConnected) t = t.id ? d.getElementById(t.id) : null;
+    if (!t) return;
+    var peers = Array.prototype.slice.call(box.querySelectorAll(ITEMS)).filter(function (n) { return n.getBoundingClientRect().height; });
+    var j = peers.indexOf(t);
+    readInset();
     var delta = t.getBoundingClientRect().top - (viewTop() + capH(Math.min(2, Math.max(0, j))));
     var smooth = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
     scroller.scrollBy({ top: delta, behavior: smooth ? "smooth" : "auto" });

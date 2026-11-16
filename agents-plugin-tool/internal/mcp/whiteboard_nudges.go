@@ -22,6 +22,10 @@ import (
 
 const whiteboardReconcileInterval = 30 * time.Second
 
+// Ticket status and external or interrupted writes are not fully represented by
+// the session metadata stamp. Periodically revisit even unchanged boards.
+const whiteboardNudgeRecoveryInterval = 5 * time.Minute
+
 type WhiteboardNudgeAgents interface {
 	Get(string) (wsagent.State, error)
 }
@@ -44,9 +48,10 @@ type WhiteboardNudges struct {
 	mu           sync.Mutex
 	pending      map[nudgeTarget]bool
 	// Discovery is serialized by run; deliveryGate deliberately never uses it.
-	identities map[string]nudgeIdentity
-	stat       func(string) (os.FileInfo, error)
-	read       recordFileReader
+	identities  map[string]nudgeIdentity
+	boardStamps map[nudgeTarget]os.FileInfo
+	stat        func(string) (os.FileInfo, error)
+	read        recordFileReader
 }
 
 type nudgeIdentity struct {
@@ -122,7 +127,7 @@ func (n *WhiteboardNudges) discoveryIdentity(d sessionDirs, key string) (string,
 }
 
 func nudgeSameIdentity(a, b os.FileInfo) bool {
-	return a.Mode().IsRegular() && b.Mode().IsRegular() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && os.SameFile(a, b)
+	return wsstate.SameFileMetadata(a, b)
 }
 
 func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudgeIdentity) (nudgeKeyIdentity, *nudgeIdentity, bool) {
@@ -164,6 +169,7 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 	if stat == nil {
 		stat = os.Stat
 	}
+	n.boardStamps = map[nudgeTarget]os.FileInfo{}
 	keys := map[string]bool{}
 	for i, dir := range []string{d.sessions, d.legacy} {
 		entries, err := os.ReadDir(dir)
@@ -217,8 +223,11 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 		t := nudgeTarget{key, r.Root}
 		dir := whiteboardFolder(t.root, t.key).Dir
 		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-			if _, err := stat(filepath.Join(dir, name)); err == nil {
+			if info, err := stat(filepath.Join(dir, name)); err == nil {
 				out[t] = time.Time{}
+				if name == "meta.json" && info.Mode().IsRegular() {
+					n.boardStamps[t] = info
+				}
 				break
 			}
 		}
@@ -305,10 +314,27 @@ func (n *WhiteboardNudges) process(t nudgeTarget, now time.Time) time.Time {
 	return next
 }
 
+// Reuse discovery's existing meta stat; never use it as delivery authority.
+// Transactions publish session meta last, but a crash with pending intent, a
+// topic-only external edit, or a ticket transition needs the recovery pass.
+func nudgeReconcile(boards map[nudgeTarget]time.Time, stamps map[nudgeTarget]os.FileInfo, found map[nudgeTarget]time.Time, current map[nudgeTarget]os.FileInfo, recovery bool) (map[nudgeTarget]time.Time, map[nudgeTarget]os.FileInfo) {
+	for t := range found {
+		old, known := boards[t]
+		a, b := stamps[t], current[t]
+		// SameFile can open both files on Windows. Size and mtime alone are
+		// only a hint; recovery covers equal-stamp replacements and races.
+		if known && !recovery && a != nil && b != nil && a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && time.Since(b.ModTime()) > nudgeIdentityQuietPeriod {
+			found[t] = old
+		}
+	}
+	return found, current
+}
+
 func (n *WhiteboardNudges) run() {
 	defer close(n.exited)
 	scan := n.now()
 	boards := map[nudgeTarget]time.Time{}
+	stamps := map[nudgeTarget]os.FileInfo{}
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -325,8 +351,12 @@ func (n *WhiteboardNudges) run() {
 		}
 		now := n.now()
 		if !now.Before(scan) {
-			boards = n.discover()
-			scan = now.Add(n.interval)
+			found := n.discover()
+			// The full safety scan recovers missed pokes, ticket-only changes
+			// and interrupted writes. Idle discovery itself is expensive, so
+			// do not rediscover every 30-second delivery retry interval.
+			boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, true)
+			scan = now.Add(whiteboardNudgeRecoveryInterval)
 		}
 		n.mu.Lock()
 		pending := n.pending
@@ -334,11 +364,7 @@ func (n *WhiteboardNudges) run() {
 		n.mu.Unlock()
 		if len(pending) > 0 {
 			valid := n.discover()
-			for t := range boards {
-				if _, ok := valid[t]; !ok {
-					delete(boards, t)
-				}
-			}
+			boards, stamps = nudgeReconcile(boards, stamps, valid, n.boardStamps, false)
 			for t := range pending {
 				if _, ok := valid[t]; ok {
 					boards[t] = time.Time{}
@@ -363,7 +389,12 @@ func (n *WhiteboardNudges) run() {
 				return
 			default:
 			}
-			boards[t] = n.process(t, now)
+			due := n.process(t, now)
+			if due.IsZero() {
+				// Zero means no deadline, not "process again on every wake".
+				due = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+			}
+			boards[t] = due
 		}
 		next := scan
 		for _, due := range boards {

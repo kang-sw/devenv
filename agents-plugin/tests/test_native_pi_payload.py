@@ -60,6 +60,11 @@ class NativePiPayloadTests(unittest.TestCase):
             with self.subTest(product=product):
                 manifests = PAYLOAD.check_source(REPO / product, REPO)
                 self.assertEqual(manifests["closure"]["dependencies"], json.loads((REPO / "agents-plugin-pi/package.json").read_text())["dependencies"])
+                first = REPO / product / "native-pi/first-party"
+                notices = (REPO / "agents-plugin-pi/dist/THIRD_PARTY_NOTICES").read_bytes()
+                self.assertEqual((first / "dist/THIRD_PARTY_NOTICES").read_bytes(), notices)
+                self.assertEqual(manifests["first"]["files"]["dist/THIRD_PARTY_NOTICES"], PAYLOAD.digest(notices))
+                self.assertEqual(json.loads((first / "package.json").read_bytes())["peerDependencies"]["@earendil-works/pi-coding-agent"], ">=0.84.4 <1.0.0")
                 self.assertTrue(all(PAYLOAD.drift_input(name) for name in manifests["first"]["inputs"]))
                 self.assertFalse(any(PAYLOAD.ignored_path(name) for name in manifests["closure"]["files"]))
                 self.assertTrue(all(name.startswith("node_modules/") for name in manifests["closure"]["files"]))
@@ -144,7 +149,7 @@ class NativePiPayloadTests(unittest.TestCase):
         for name in ("agents-plugin-pi/src/index.ts", "agents-plugin-pi/package.json",
                      "agents-plugin-pi/package-lock.json", "agents-plugin-pi/scripts/prepare-native-payload.py",
                      "agents-plugin-pi/scripts/bundle.mjs", "agents-plugin-pi/dist/index.js",
-                     "agents-plugin-pi/src/eff_large_wordlist.txt"):
+                     "agents-plugin-pi/src/eff_large_wordlist.txt", "agents-plugin-pi/bin/ws-pi-forward.mjs"):
             path = repo / name
             original = path.read_bytes()
             path.write_bytes(original + b"\n")
@@ -185,10 +190,10 @@ class NativePiPayloadTests(unittest.TestCase):
         repo = self.source_fixture()
         owner = repo / "agents-plugin"
         pi = repo / "agents-plugin-pi"
-        # bin really contains only the overlaid launcher; no native added-file
-        # scan is needed there. Populate the other owner overlays for copying.
+        # bin contains the owner-overlaid launcher and the inventoried stdlib
+        # forwarding bootstrap. Populate the other owner overlays for copying.
         self.assertEqual(PAYLOAD.tree(REPO / "agents-plugin-pi/bin", ignore_junk=True).keys(),
-                         {"ws-mcp-launcher.py"})
+                         {"ws-mcp-launcher.py", "ws-pi-forward.mjs"})
         shutil.copytree(REPO / "agents-plugin-pi/rsrc", pi / "rsrc", dirs_exist_ok=True)
         for name in PAYLOAD.OVERLAY_FILES:
             target = pi / name
@@ -353,15 +358,16 @@ class NativePiPayloadTests(unittest.TestCase):
         shutil.copytree(REPO / "agents-plugin-wsflow/native-pi", repo / "agents-plugin-wsflow/native-pi")
         products = ("agents-plugin", "agents-plugin-wsflow")
         before = {p: PAYLOAD.tree(repo / p / "native-pi") for p in products}
-        source = repo / "agents-plugin-pi/workflow-bundles/wsflow.zip"
-        original = source.read_bytes()
-        source.unlink()
-        with patch.object(PRODUCER.subprocess, "run", side_effect=AssertionError("first-party refresh must not run npm")):
-            with self.assertRaises(OSError):
-                PRODUCER.refresh_first_party(repo)
-        for product in products:
-            self.assertEqual(PAYLOAD.tree(repo / product / "native-pi"), before[product])
-        source.write_bytes(original)
+        for name in ("workflow-bundles/wsflow.zip", "dist/THIRD_PARTY_NOTICES"):
+            source = repo / "agents-plugin-pi" / name
+            original = source.read_bytes()
+            source.unlink()
+            with patch.object(PRODUCER.subprocess, "run", side_effect=AssertionError("first-party refresh must not run npm")):
+                with self.assertRaises(OSError):
+                    PRODUCER.refresh_first_party(repo)
+            for product in products:
+                self.assertEqual(PAYLOAD.tree(repo / product / "native-pi"), before[product])
+            source.write_bytes(original)
         with patch.object(PRODUCER.subprocess, "run", side_effect=AssertionError("first-party refresh must not run npm")):
             PRODUCER.refresh_first_party(repo)
         for product in products:

@@ -1,20 +1,22 @@
 package wsdashboard
 
 import (
-	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
-
-	"github.com/kang-sw/devenv/internal/execjob"
 )
 
 var errPlanUsage = errors.New("usage unavailable")
+
+// Legacy CLI-owned credential provenance, not transport: acquisition is REST
+// with no subprocess. Keep this wire/history identifier readable by old writers.
+const codexUsageSource = "via Codex CLI"
 
 func (s *planUsageStore) query(ctx context.Context, force bool) {
 	s.queryMu.Lock()
@@ -51,7 +53,7 @@ func (s *planUsageStore) query(ctx context.Context, force bool) {
 		// Keep the last value's source, not the failed attempt's source.
 		if s.gpt.Source == "" {
 			if codex {
-				s.gpt.Source = "via Codex CLI"
+				s.gpt.Source = codexUsageSource
 			} else {
 				s.gpt.Source = "via Pi"
 			}
@@ -92,85 +94,80 @@ func codexUsageEntry(limits codexUsageLimits, source string) (planUsageEntry, er
 }
 
 func (s *planUsageStore) queryCodex(ctx context.Context) (planUsageEntry, error) {
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	binary := s.codexBinary
-	if binary == "" {
-		var err error
-		binary, err = exec.LookPath("codex")
-		if err != nil {
-			return planUsageEntry{}, errPlanUsage
-		}
+	// File selection stays narrower than the CLI's full auth resolver. Never
+	// borrow an API key, refresh/login, or fall through to Pi after selection.
+	var auth struct {
+		Mode   string          `json:"auth_mode"`
+		APIKey json.RawMessage `json:"OPENAI_API_KEY"`
+		Tokens struct {
+			Access  string `json:"access_token"`
+			Account string `json:"account_id"`
+		} `json:"tokens"`
 	}
-	cmd := planUsageCommand(ctx, binary)
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
+	if !readUsageJSON(filepath.Join(s.configHome("CODEX_HOME", ".codex"), "auth.json"), &auth) ||
+		(auth.Mode != "chatgpt" && auth.Mode != "") ||
+		(auth.Mode == "" && len(auth.APIKey) > 0 && string(auth.APIKey) != "null") ||
+		strings.TrimSpace(auth.Tokens.Access) == "" ||
+		!validUsageHeaderValue("Bearer "+auth.Tokens.Access) ||
+		!validUsageHeaderValue(auth.Tokens.Account) || expiredUsageAccess(auth.Tokens.Access) {
+		return planUsageEntry{}, errPlanUsage
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.usageURL, nil)
+	if err != nil {
+		return planUsageEntry{}, errPlanUsage
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.Tokens.Access)
+	if auth.Tokens.Account != "" {
+		req.Header.Set("ChatGPT-Account-Id", auth.Tokens.Account)
+	}
+	req.Header.Set("User-Agent", "ws-dashboard")
+	req.Header.Set("originator", "codex_cli_rs")
+	body, err := s.readUsageResponse(req)
+	if err != nil {
+		return planUsageEntry{}, err
+	}
+	convert := func(w *usageHTTPWindow) *codexUsageWindow {
+		// Do not truncate near-weekly seconds into a weekly Codex quota.
+		if w == nil || w.Seconds != 604800 {
 			return nil
 		}
-		return execjob.KillTree(cmd.Process.Pid)
+		return &codexUsageWindow{Percent: w.Percent, Minutes: 10080, Reset: w.Reset}
 	}
-	cmd.WaitDelay = time.Second
-	stdin, err := cmd.StdinPipe()
+	return codexUsageEntry(codexUsageLimits{Plan: body.Plan, Primary: convert(body.Limits.Primary), Secondary: convert(body.Limits.Secondary)}, codexUsageSource)
+}
+
+// HTTP field values allow horizontal tabs and visible/obs-text bytes, but not
+// other controls or DEL. Validate before transport, including fake transports.
+func validUsageHeaderValue(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] == 127 || value[i] < 32 && value[i] != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+func expiredUsageAccess(access string) bool {
+	parts := strings.Split(access, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return planUsageEntry{}, errPlanUsage
+		return false
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return planUsageEntry{}, errPlanUsage
+	var claims struct {
+		Exp *float64 `json:"exp"`
 	}
-	cmd.Stderr = io.Discard
-	if err = cmd.Start(); err != nil {
-		return planUsageEntry{}, errPlanUsage
-	}
-	defer func() { _ = stdin.Close(); cancel(); _ = cmd.Wait() }()
-	enc := json.NewEncoder(stdin)
-	if enc.Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"clientInfo": map[string]string{"name": "ws-dashboard", "version": "1"}}}) != nil {
-		return planUsageEntry{}, errPlanUsage
-	}
-	scan := bufio.NewScanner(stdout)
-	scan.Buffer(make([]byte, 4096), 1<<20)
-	initialized := false
-	for scan.Scan() {
-		var reply struct {
-			ID     int             `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  json.RawMessage `json:"error"`
-		}
-		if json.Unmarshal(scan.Bytes(), &reply) != nil {
-			return planUsageEntry{}, errPlanUsage
-		}
-		if reply.ID == 1 && !initialized {
-			if len(reply.Error) > 0 && string(reply.Error) != "null" {
-				return planUsageEntry{}, errPlanUsage
-			}
-			if len(reply.Result) == 0 || string(reply.Result) == "null" {
-				return planUsageEntry{}, errPlanUsage
-			}
-			initialized = true
-			if enc.Encode(map[string]any{"jsonrpc": "2.0", "method": "initialized"}) != nil || enc.Encode(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read"}) != nil {
-				return planUsageEntry{}, errPlanUsage
-			}
-		} else if reply.ID == 2 && initialized {
-			if len(reply.Error) > 0 && string(reply.Error) != "null" {
-				return planUsageEntry{}, errPlanUsage
-			}
-			var result struct {
-				Limits codexUsageLimits `json:"rateLimits"`
-			}
-			if json.Unmarshal(reply.Result, &result) != nil {
-				return planUsageEntry{}, errPlanUsage
-			}
-			return codexUsageEntry(result.Limits, "via Codex CLI")
-		}
-	}
-	return planUsageEntry{}, errPlanUsage
+	// Decoding is only an early expiry refusal, never signature validation.
+	// Unknown/missing expiry remains server-authoritative for eligible tokens.
+	return json.Unmarshal(payload, &claims) == nil && claims.Exp != nil && *claims.Exp <= float64(time.Now().Unix())
 }
 
 var errPiExpired = errors.New("Pi token expired - open Pi to refresh")
 
 func (s *planUsageStore) queryPi(ctx context.Context) (planUsageEntry, error) {
-	// Only this fallback decodes credential values. They live for this request
-	// only; neither upstream error text nor response bodies ever leave it.
+	// Credential values stay request-local; no upstream diagnostics escape.
 	var auth struct {
 		Codex struct {
 			Type    string `json:"type"`
@@ -199,34 +196,49 @@ func (s *planUsageStore) queryPi(ctx context.Context) (planUsageEntry, error) {
 	req.Header.Set("User-Agent", "codex-cli")
 	req.Header.Set("OpenAI-Beta", "codex-1")
 	req.Header.Set("originator", "Codex Desktop")
-	response, err := s.client.Do(req)
+	body, err := s.readUsageResponse(req)
 	if err != nil {
-		return planUsageEntry{}, errPlanUsage
+		return planUsageEntry{}, err
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return planUsageEntry{}, errPlanUsage
-	}
-	type window struct {
-		Percent *float64        `json:"used_percent"`
-		Seconds int             `json:"limit_window_seconds"`
-		Reset   json.RawMessage `json:"reset_at"`
-	}
-	var body struct {
-		Plan   string `json:"plan_type"`
-		Limits struct {
-			Primary   *window `json:"primary_window"`
-			Secondary *window `json:"secondary_window"`
-		} `json:"rate_limit"`
-	}
-	if json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&body) != nil {
-		return planUsageEntry{}, errPlanUsage
-	}
-	convert := func(w *window) *codexUsageWindow {
+	convert := func(w *usageHTTPWindow) *codexUsageWindow {
 		if w == nil {
 			return nil
 		}
+		// Preserve Pi's existing seconds-to-minutes classification semantics.
 		return &codexUsageWindow{Percent: w.Percent, Minutes: w.Seconds / 60, Reset: w.Reset}
 	}
 	return codexUsageEntry(codexUsageLimits{Plan: body.Plan, Primary: convert(body.Limits.Primary), Secondary: convert(body.Limits.Secondary)}, "via Pi")
+}
+
+type usageHTTPWindow struct {
+	Percent *float64        `json:"used_percent"`
+	Seconds int             `json:"limit_window_seconds"`
+	Reset   json.RawMessage `json:"reset_at"`
+}
+type usageHTTPResponse struct {
+	Plan   string `json:"plan_type"`
+	Limits struct {
+		Primary   *usageHTTPWindow `json:"primary_window"`
+		Secondary *usageHTTPWindow `json:"secondary_window"`
+	} `json:"rate_limit"`
+}
+
+func (s *planUsageStore) readUsageResponse(req *http.Request) (usageHTTPResponse, error) {
+	var body usageHTTPResponse
+	response, err := s.client.Do(req)
+	if err != nil {
+		return body, errPlanUsage
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return body, errPlanUsage
+	}
+	// Read at most one byte beyond the cap, and reject trailing JSON as well
+	// as oversized bodies. Never return body bytes or URL-bearing HTTP errors.
+	const maxUsageResponse = 1 << 20
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxUsageResponse+1))
+	if err != nil || len(raw) > maxUsageResponse || json.Unmarshal(raw, &body) != nil {
+		return usageHTTPResponse{}, errPlanUsage
+	}
+	return body, nil
 }

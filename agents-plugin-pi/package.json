@@ -14,6 +14,7 @@
     "dist/",
     "scripts/",
     "bin/",
+    "bundle-inputs/",
     "workflow-bundles/",
     "rsrc/",
     "skills/",
@@ -37,7 +38,7 @@
   ],
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-coding-agent": ">=0.84.4 <1.0.0",
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {

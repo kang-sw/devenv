@@ -10,16 +10,18 @@ const tick = () => new Promise(setImmediate);
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-main-test-'));
 process.on('exit', () => fs.rmSync(userData, { recursive: true, force: true }));
 const preload = path.resolve(__dirname, '../dashboard-preload.js');
+const { fixture: daemonFixture } = require('./daemon-fixture.cjs');
+const { connectDaemon: realConnectDaemon } = require('../daemon-controller');
 
-async function fixture(discover = async () => 'http://127.0.0.1:39418/', platform = 'darwin') {
-  // Replace only the main-process discovery dependency; never a renderer bridge.
-  const endpoint = require('../endpoint');
-  const original = endpoint.discover;
-  endpoint.discover = discover;
+async function fixture(discover = async () => 'http://127.0.0.1:39418/', platform = 'darwin', roots = {}) {
+  // Replace only main-process lifecycle dependency; never a renderer bridge.
+  const controller = require('../daemon-controller');
+  const original = controller.connectDaemon;
+  controller.connectDaemon = discover;
   delete require.cache[require.resolve('../main')];
   const { start } = require('../main');
-  endpoint.discover = original;
-  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: false, getPath: () => userData });
+  controller.connectDaemon = original;
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: false, getPath: () => roots.userData || userData, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
   let focusedContents = null;
   const renderers = [];
   class Base extends EventEmitter {
@@ -112,6 +114,7 @@ test('native window, menus, authority, close veto and single-instance focus', as
   assert.equal(f.session.check(), false);
   f.session.request(null, 'clipboard-read', grant => assert.equal(grant, false));
   assert.equal(f.menus.retry.accelerator, 'CmdOrCtrl+R');
+  assert.equal(f.menus.replace_daemon.label, 'Replace daemon (same core)');
   f.menus.zoom_in.click(); assert.equal(w.zoom, 1.1);
   f.menus.zoom_in_shifted.click(); assert.equal(w.zoom, 1.25);
   f.menus.zoom_out.click(); assert.equal(w.zoom, 1.1);
@@ -155,6 +158,21 @@ test('native navigation, redirect, initial subframe requests and popup policies'
   assert.deepEqual(w.popup({ url: 'data:text/html,hi' }), { action: 'deny' });
   assert.deepEqual(w.popup({ url: 'https://example.com/popup' }), { action: 'deny' });
   assert.equal(f.opened.at(-1), 'https://example.com/popup');
+});
+test('native same-core action is one explicit attempt, never renderer IPC; refusal retains connection', async () => {
+  const requests = [];
+  const f = await fixture(async (options, deps) => {
+    requests.push(options.replace);
+    if (options.replace) deps.onNotice('Unknown client versions; update plugins.');
+    return 'http://127.0.0.1:39418/';
+  });
+  await f.menus.replace_daemon.click();
+  assert.deepEqual(requests, [false, true]);
+  assert.equal(f.window.currentURL, 'http://127.0.0.1:39418/');
+  assert.equal(f.window.title, 'Werkschaft');
+  await f.menus.retry.click();
+  assert.deepEqual(requests, [false, true, false]);
+  assert.equal(f.ipcMain.listenerCount('werkschaft:replace-daemon'), 0);
 });
 test('overlapping retries are ignored and rediscovery replaces the pin', async () => {
   let finish, calls = 0;
@@ -417,6 +435,22 @@ test('X-close Stay during a pending load is not that navigation choosing Stay', 
   reject(Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }));
   await retry;
   assert.equal(path.basename(w.currentURL), 'connection.html');
+});
+test('app quit after a new missing-only start does not stop the daemon', async t => {
+  const source = daemonFixture(t, 'darwin');
+  let running = false, launches = 0;
+  const deps = { env: { WS_CACHE_HOME: path.join(source.base, 'isolated-cache') },
+    discover: async () => { if (!running) throw Error('missing'); return 'http://127.0.0.1:39418/'; },
+    launch: async () => { launches++; running = true; } };
+  const f = await fixture(options => realConnectDaemon(options, deps), 'darwin', source);
+  await tick();
+  assert.equal(launches, 1);
+  assert.equal(f.window.currentURL, 'http://127.0.0.1:39418/');
+  f.app.emit('will-quit');
+  f.app.quit();
+  assert.equal(running, true, 'the simulated independent daemon still answers after app quit');
+  assert.equal(launches, 1);
+  assert.equal(f.app.quitCalled, true);
 });
 test('losing single-instance lock quits before creating a window', () => {
   const { start } = require('../main');

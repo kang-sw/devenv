@@ -702,9 +702,12 @@ type piMapper struct {
 	// A command answer seen before replay establishes native state is
 	// retained with its source sequence, not yet a lifecycle boundary.
 	pendingCommand *Event
-	messages       int
-	turnErr        string
-	turnReason     string
+	// A watchdog notify precedes Pi's public agent_start. Carry it across
+	// that one boundary, whose TurnStart clears transient session errors.
+	pendingLeadWarning string
+	messages           int
+	turnErr            string
+	turnReason         string
 	// Explicit opt-in from this process's native bundle. Legacy bundles keep
 	// their reasonless hosted ends and existing answer-check behavior.
 	summaryCapable bool
@@ -892,7 +895,12 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		m.nativeRun, m.nativeKnown = true, true
 		m.nativeGeneration++
 		m.pendingCommand = nil
-		return []Event{{TurnStart: true}}
+		out := []Event{{TurnStart: true}}
+		if warning := m.pendingLeadWarning; warning != "" {
+			out = append(out, Event{CommandError: warning})
+			m.pendingLeadWarning = ""
+		}
+		return out
 	case "message_start":
 		var msg piMessage
 		if json.Unmarshal(l.Message, &msg) == nil && msg.Role == "assistant" {
@@ -964,6 +972,14 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		switch l.Method {
 		case "select", "confirm", "input", "editor":
 			replies.send(map[string]any{"type": "extension_ui_response", "id": l.ID, "cancelled": true})
+		case "notify":
+			// The dependency-free launch watchdog must reach the dashboard,
+			// even when the bundled extension never initialized its own feed.
+			var text string
+			if m.spec.Lead != nil && json.Unmarshal(l.Message, &text) == nil && strings.HasPrefix(text, "[ws Pi] ") {
+				m.pendingLeadWarning = text
+				return []Event{{CommandError: text}}
+			}
 		case "setWidget":
 			if l.WidgetKey == piEventsWidgetKey && m.spec.Lead != nil {
 				out := piHostedEvents(l.WidgetLines)

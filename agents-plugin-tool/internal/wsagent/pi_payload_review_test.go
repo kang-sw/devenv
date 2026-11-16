@@ -12,7 +12,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
-func TestPiPreparedSourceDriftUsesSiblingWithoutBridge(t *testing.T) {
+func TestPiPreparedSourceDriftWithoutRebuiltBundleUsesBridge(t *testing.T) {
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -35,16 +35,16 @@ func TestPiPreparedSourceDriftUsesSiblingWithoutBridge(t *testing.T) {
 	}
 	piLeadFile(t, path, string(raw)+"\n// development edit\n")
 	entries, err = piBundledEntries()
-	if err != nil || !slices.Equal(entries, []string{path}) {
-		t.Fatalf("stale distribution must use sibling source: %v, %v", entries, err)
+	if err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale sibling bundle must not select unchecked source: %v, %v", entries, err)
 	}
 	warning := "previous warning"
-	spec := StartSpec{Root: base, Dir: filepath.Join(base, "session"), Lead: &LeadSpec{PluginIsolation: "isolated"}}
+	spec := StartSpec{Root: base, Dir: filepath.Join(base, "session"), Lead: &LeadSpec{PluginIsolation: "isolated", Env: map[string]string{EnvHostedSessionKey: "fixture-key"}}}
 	spec.Lead.PluginWarning = func(text string) { warning = text }
-	spec.Lead.WSMCP = func() (MCPCommand, error) { t.Fatal("source drift must not use bridge"); return MCPCommand{}, nil }
+	spec.Lead.WSMCP = func() (MCPCommand, error) { return MCPCommand{Command: "fixture-only"}, nil }
 	_, args, err := piLeadLaunch("pi", nil, spec)
-	if err != nil || warning != "" || !slices.Contains(args, path) {
-		t.Fatalf("source launch = %v, warning %q, error %v", args, warning, err)
+	if err != nil || !strings.Contains(warning, "EXTENSION NOT LOADED") || !strings.Contains(warning, "stale") || !slices.Contains(args, "builtin:mcp") || slices.Contains(args, path) {
+		t.Fatalf("stale source launch = %v, warning %q, error %v", args, warning, err)
 	}
 }
 

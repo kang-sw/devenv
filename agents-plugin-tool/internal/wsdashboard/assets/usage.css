@@ -6,7 +6,7 @@
 .usage-mark { position: relative; display: inline-flex; width: 16px; height: 16px; flex: none; }
 .usage-clock { position: absolute; width: 9px; height: 9px; right: -4px; bottom: -3px; border-radius: 50%; background: var(--wb-card); color: var(--wb-warn-ink); box-shadow: 0 0 0 1px var(--wb-card); fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .usage-columns { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; }
-.usage-column { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; font-family: var(--wb-mono, monospace); font-variant-numeric: tabular-nums; }
+.usage-column { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; font-family: var(--wb-mono, monospace); font-variant-numeric: tabular-nums; }
 .usage-current { display: flex; align-items: baseline; gap: 3px; }
 .usage-number { font: 700 11px/1.2 var(--wb-mono, monospace); letter-spacing: -.035em; }
 .usage-key { color: var(--wb-muted-fg); font: 500 9px/1.2 var(--wb-sans, sans-serif); }

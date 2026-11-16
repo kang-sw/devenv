@@ -4,6 +4,7 @@ import { createHostedDashboardEvents, HOSTED_EVENTS_WIDGET_KEY } from "../src/ho
 import { FLUSH_INTERVAL_MS } from "../src/dashboard-feed.ts";
 import { createReasoningSummaryObserver, SUMMARY_FRAME_BYTES } from "../src/reasoning-summary.ts";
 import { hostedSummaryFrame } from "../src/reasoning-summary-transport.ts";
+import { countBackgroundTasks, killAllBackgroundTasks, startBackgroundTask } from "../src/background-tasks.ts";
 
 function harness(reasoningSummary?: () => ReturnType<ReturnType<typeof createReasoningSummaryObserver>["projection"]>, reasoningSummaryCapable?: boolean) {
   let clock = 0;
@@ -49,6 +50,42 @@ test("hosted widget carries JSON wake/status event lines only, sampled at flush 
   h.flush();
   assert.equal(h.events().length, 3, "person input is not a wake; unchanged counts send nothing");
   h.channel.stop();
+});
+
+test("real background task membership immediately updates hosted counts", async () => {
+  const events: unknown[] = [];
+  const channel = createHostedDashboardEvents({
+    taskCounts: countBackgroundTasks,
+    setWidget: (_key, lines) => events.push(...lines.map((line) => JSON.parse(line))),
+    schedule: () => () => {},
+  });
+  channel.start();
+  try {
+    const done = new Promise<void>((resolve) => {
+      startBackgroundTask({
+        shell: process.execPath, args: ["-e", "setTimeout(() => {}, 100)"], cwd: process.cwd(),
+        command: "test", why: "test", timeoutS: 5, capBytes: 100, onComplete: () => resolve(),
+      });
+    });
+    assert.deepEqual(events, [{ kind: "status", background: 1, monitors: 0 }]);
+    await done;
+    assert.deepEqual(events, [
+      { kind: "status", background: 1, monitors: 0 },
+      { kind: "status", background: 0, monitors: 0 },
+    ]);
+    const monitorDone = new Promise<void>((resolve) => {
+      startBackgroundTask({
+        shell: process.execPath, args: ["-e", "setTimeout(() => {}, 100)"], cwd: process.cwd(),
+        command: "test", why: "test", capBytes: 100, onComplete: () => resolve(),
+      });
+    });
+    assert.deepEqual(events.at(-1), { kind: "status", background: 0, monitors: 1 });
+    await monitorDone;
+    assert.deepEqual(events.at(-1), { kind: "status", background: 0, monitors: 0 });
+  } finally {
+    channel.stop();
+    killAllBackgroundTasks();
+  }
 });
 
 test("hosted progress is coalesced and final is synchronous before native settlement, never an end command", () => {

@@ -1349,7 +1349,12 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);
     if (startEpoch !== sessionStartEpoch) await disposeStaleBootstrap();
     // The feed started before the footer mounted: its first figures may lack the footer's cost.
-    else dashboardFeed?.statusChanged();
+    else {
+      dashboardFeed?.statusChanged();
+      // Process-local completion for the independent hosted-launch watchdog.
+      // Early tool registration cannot prove that this awaited startup finished.
+      if (bootstrapRole === undefined) pi.events.emit("ws:lead-initialized", undefined);
+    }
   });
 
   pi.on("session_shutdown", async (event, _ctx) => {

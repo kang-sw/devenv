@@ -1226,12 +1226,14 @@ def pi_daemon_workflow_root(pi: Path) -> Path:
             any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in inventory.values())):
         raise ValueError("invalid workflow inventory")
     original = (pi / "dist/index.js").resolve(strict=True)
-    shim = ('export { default } from ' + json.dumps(original.as_uri()) + ';\n').encode()
+    bootstrap = (pi / "bin/ws-pi-forward.mjs").resolve(strict=True)
+    shim = ('import { createPiForwarder } from ' + json.dumps(bootstrap.as_uri()) + ';\n' +
+            'export default createPiForwarder(' + json.dumps(original.as_uri()) + ');\n').encode()
     entry = b'{"type":"module","pi":{"extensions":["./index.mjs"]}}\n'
     expected = {identity + "/" + name: value for name, value in inventory.items()}
     expected.update({"agents-plugin-pi/index.mjs": hashlib.sha256(shim).hexdigest(),
                      "agents-plugin-pi/package.json": hashlib.sha256(entry).hexdigest()})
-    key = hashlib.sha256(json.dumps([identity, record["archive_sha256"], original.as_uri(), sha256_file(original)], sort_keys=True).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([identity, record["archive_sha256"], original.as_uri(), sha256_file(original), sha256_file(bootstrap)], sort_keys=True).encode()).hexdigest()
     cache = pi / ".runtime/workflow"
     if (pi / ".runtime").is_symlink() or cache.is_symlink():
         raise ValueError("workflow cache contains a link")

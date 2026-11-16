@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // FolderCache keeps read-only opens in process. Each hit still acquires the
@@ -28,8 +30,8 @@ type folderCachedRead struct {
 	files map[string]os.FileInfo
 }
 
-// unchanged needs no topic opens. Atomic replacements are detected even on a
-// coarse timestamp filesystem by SameFile; in-place edits move size or mtime.
+// unchanged needs no topic opens. Identity metadata catches ordinary atomic
+// replacements; equal metadata cannot prove that content is unchanged.
 func (e folderCachedRead) unchanged(dir string) bool {
 	if e.state == nil {
 		return false
@@ -39,7 +41,7 @@ func (e folderCachedRead) unchanged(dir string) bool {
 	}
 	for path, before := range e.files {
 		after, err := os.Stat(path)
-		if err != nil || !os.SameFile(before, after) || before.Size() != after.Size() || before.Mode() != after.Mode() || !before.ModTime().Equal(after.ModTime()) {
+		if err != nil || !wsstate.SameFileMetadata(before, after) {
 			return false
 		}
 	}

@@ -40,9 +40,9 @@ type planUsageStore struct {
 	claude, gpt planUsageEntry
 	lastQuery   time.Time
 	// Request dependencies are private test seams, not configuration knobs.
-	codexBinary string
-	usageURL    string
-	client      *http.Client
+	// Production always uses the fixed HTTPS origin below for both readers.
+	usageURL string
+	client   *http.Client
 }
 
 func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageStore {

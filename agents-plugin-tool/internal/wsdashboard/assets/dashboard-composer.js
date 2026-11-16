@@ -342,6 +342,7 @@
   // focusTopicNote brings a topic's note into view on the board, opening it
   // through the topic's pen when it is closed.
   function focusTopicNote(name) {
+    if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(function () { focusTopicNote(name); })) return;
     var n = topicNote(name), topic = n && n.closest(".topic");
     if (!n) return;
     if (live && !tabShown("board")) setTab("board");
@@ -1540,7 +1541,29 @@
     q("details[data-key]", agpop).forEach(function (d) { d.classList.toggle("d-full", !!agFull[d.getAttribute("data-key")]); });
   }
   if (agpop && sbadge && agpin) {
-    sbadge.addEventListener("click", function () { agOpen(agpop.hidden); });
+    // Hover previews the same panel (mouse/pen only, never touch): a short
+    // intent delay opens it, a grace after leaving badge and panel closes it.
+    // Only a hover-opened panel auto-closes; a click makes it click-owned.
+    var hoverOpen = false, hoverTimer = 0, canHover = function (e) { return e.pointerType !== "touch" && (!window.matchMedia || matchMedia("(hover: hover)").matches); };
+    function hoverIn(e) {
+      if (!canHover(e)) return;
+      clearTimeout(hoverTimer);
+      if (!agpop.hidden) return;
+      hoverTimer = setTimeout(function () { if (agpop.hidden) { agOpen(true); hoverOpen = true; } }, 150);
+    }
+    function hoverOut(e) {
+      if (!canHover(e)) return;
+      clearTimeout(hoverTimer);
+      if (!hoverOpen) return;
+      hoverTimer = setTimeout(function () { if (hoverOpen && !agPinned()) { hoverOpen = false; agOpen(false); } }, 200);
+    }
+    [sbadge, agpop].forEach(function (n) { n.addEventListener("pointerenter", hoverIn); n.addEventListener("pointerleave", hoverOut); });
+    sbadge.addEventListener("click", function () {
+      clearTimeout(hoverTimer);
+      if (hoverOpen && !agpop.hidden) { hoverOpen = false; return; }
+      hoverOpen = false;
+      agOpen(agpop.hidden);
+    });
     agpin.addEventListener("click", function () { agPin(!agPinned()); });
     $("agclose").addEventListener("click", function () { agPin(false); agOpen(false); sbadge.focus(); });
     agpop.addEventListener("click", function (e) {

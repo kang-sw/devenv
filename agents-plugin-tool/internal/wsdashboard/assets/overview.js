@@ -270,6 +270,21 @@
   function exit(target, done, options) {
     if (!o || !on) { if (done) done(); return; }
     if (busy) { if (done) callbacks.push(done); return; }
+    if (target && window.wbPill && window.wbPill.apply) {
+      // Leave the holding view before explicit apply, then resolve the live
+      // target. Without pending updates the ordinary exit motion is unchanged.
+      var key = identity(target.closest(ITEM));
+      var land = function () {
+        if (!window.wbPill.apply(land)) return;
+        var live = find(key);
+        if (live) {
+          keep(live, clearance(live)); flash(live);
+          if (!(options && options.keep)) { live.setAttribute("tabindex", "-1"); live.focus({ preventScroll: true }); }
+        }
+        if (done) done();
+      };
+      if (!window.wbPill.apply(land)) return;
+    }
     var n = target && target.closest ? target.closest(ITEM) : null;
     if (n && n.hasAttribute("data-state-filtered")) n = null;
     var h = o.frames ? o.frames() : null, before = !calm() ? snapshot() : null;

@@ -130,7 +130,11 @@ print(json.dumps(module.reader_fixture(pathlib.Path(sys.argv[2]), sys.argv[3])))
 			if err != nil {
 				t.Fatal(err)
 			}
-			encodedURI := strings.TrimSuffix(strings.TrimPrefix(string(shim), "export { default } from "), ";\n")
+			lines := strings.Split(string(shim), "\n")
+			if len(lines) != 3 || !strings.HasPrefix(lines[0], "import { createPiForwarder } from ") {
+				t.Fatalf("missing guarded forwarding bootstrap: %q", shim)
+			}
+			encodedURI := strings.TrimSuffix(strings.TrimPrefix(lines[1], "export default createPiForwarder("), ");")
 			var uri string
 			if err := json.Unmarshal([]byte(encodedURI), &uri); err != nil {
 				t.Fatalf("not an ESM forwarding entry: %q: %v", shim, err)

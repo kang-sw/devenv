@@ -26,6 +26,14 @@
   // its region updates and skips the clock until it shows.
   var shell = root.hasAttribute("data-shell"), framed = root.hasAttribute("data-frame") && !!window.WsShell, shHidden = false;
   if (framed && window.parent === window) { location.replace(location.pathname + location.hash); return; }
+  function syncPageVisibility() {
+    var paused = doc.hidden || shHidden;
+    if (root.hasAttribute("data-animation-paused") === paused) return;
+    root.toggleAttribute("data-animation-paused", paused);
+    doc.dispatchEvent(new CustomEvent("ws-page-visibility"));
+  }
+  doc.addEventListener("visibilitychange", syncPageVisibility);
+  syncPageVisibility();
 
   // --- browser storage: guarded, since a locked-down browser throws on access
   var store = null;
@@ -252,37 +260,64 @@
   // keeps its offset whether the drawer is open or closed.
   var PANES = ["bcol", "bpins", "r-tree", "convo", "drbody"];
   // A scroll only marks its pane; the offset is read once per frame, in a
-  // frame callback beside the board rail's, so the visibility check and
-  // the scrollTop read share the frame's layout rather than force one of
-  // their own from inside every scroll event.
-  var paneScroll = {}, paneMoved = {}, paneFrame = 0;
+  // frame callback beside the board rail's. ResizeObserver caches whether
+  // each pane is laid out, so scroll callbacks never probe its geometry.
+  var paneScroll = {}, paneMoved = {}, paneVisible = {}, paneFrame = 0;
+  var paneObserver = window.ResizeObserver ? new ResizeObserver(function (entries) {
+    entries.forEach(function (entry) {
+      var el = entry.target, shown = entry.contentRect.width > 0 && entry.contentRect.height > 0;
+      paneVisible[el.id] = shown;
+      if (shown) paneScroll[el.id] = el.scrollTop;
+    });
+  }) : null;
   function notePanes() {
     paneFrame = 0;
     PANES.forEach(function (id) {
       if (!paneMoved[id]) return;
       paneMoved[id] = false;
       var el = $(id);
-      if (visible(el)) paneScroll[id] = el.scrollTop;
+      if (el && (paneObserver ? paneVisible[id] : visible(el))) paneScroll[id] = el.scrollTop;
     });
   }
   PANES.forEach(function (id) {
     var el = $(id);
-    if (el) el.addEventListener("scroll", function () {
+    if (!el) return;
+    if (paneObserver) paneObserver.observe(el);
+    el.addEventListener("scroll", function () {
       paneMoved[id] = true;
       if (!paneFrame) paneFrame = requestAnimationFrame(notePanes);
     }, { passive: true });
   });
   function scrollState() {
+    // The observer owns visibility. Snapshot offsets before swap writes,
+    // without getClientRects/style probes or any reads of owned scrollers.
     var s = [];
-    PANES.forEach(function (id) { var el = $(id); if (visible(el)) s.push([el, el.scrollTop]); });
-    if (doc.scrollingElement) s.push([doc.scrollingElement, doc.scrollingElement.scrollTop]);
+    PANES.forEach(function (id) {
+      var el = $(id);
+      if (el && !el.wbScrollOwner && (paneObserver ? paneVisible[id] : visible(el))) s.push([el, el.scrollTop]);
+    });
+    if (doc.scrollingElement && !doc.scrollingElement.wbScrollOwner) s.push([doc.scrollingElement, doc.scrollingElement.scrollTop]);
     return s;
   }
-  // Owned scrollers never take numeric restoration, even between transactions.
+  // Restore after the swap's writes; collect all current offsets before any
+  // scroll write. Multiple messages share one read phase. Owner input wins.
+  var scrollRestore = new Map(), scrollRestoreFrame = 0;
   function restoreScroll(s) {
-    var kept = window.wbHistory && window.wbHistory.keeping;
-    s.forEach(function (p) { if (!p[0].wbScrollOwner && !(kept && kept(p[0])) && p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; });
+    s.forEach(function (p) { if (!scrollRestore.has(p[0])) scrollRestore.set(p[0], p[1]); });
+    if (scrollRestoreFrame) return;
+    scrollRestoreFrame = requestAnimationFrame(function () {
+      scrollRestoreFrame = 0;
+      var kept = window.wbHistory && window.wbHistory.keeping, writes = [];
+      scrollRestore.forEach(function (top, el) {
+        if (el.isConnected !== false && !(el === convo && stick) && !el.wbScrollOwner && !(kept && kept(el)) && el.scrollTop !== top) writes.push([el, top]);
+      });
+      scrollRestore.clear();
+      writes.forEach(function (p) { p[0].scrollTop = p[1]; });
+    });
   }
+  ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (type) {
+    window.addEventListener(type, function () { scrollRestore.clear(); }, { capture: true, passive: true });
+  });
 
   // The conversation stays at the bottom while the user has it there. Its
   // two regions (entries, convlive) scroll together inside #convo, which
@@ -333,7 +368,9 @@
   function revealPanes() {
     PANES.forEach(function (id) {
       var el = $(id);
-      if (visible(el) && Object.prototype.hasOwnProperty.call(paneScroll, id)) el.scrollTop = paneScroll[id];
+      var shown = visible(el);
+      paneVisible[id] = shown;
+      if (shown && Object.prototype.hasOwnProperty.call(paneScroll, id)) el.scrollTop = paneScroll[id];
     });
     pinConvo();
     nearTop(); // a conversation shown too short to scroll still loads older entries

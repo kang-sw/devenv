@@ -190,12 +190,15 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
         sibling = root.parent / "agents-plugin-pi"
         self.assertEqual(json.loads((sibling / "package.json").read_bytes())["pi"]["extensions"], ["./index.mjs"])
         self.assertEqual((sibling / "index.mjs").read_text(),
-                         "export { default } from " + json.dumps((pi / "dist/index.js").as_uri()) + ";\n")
+                         "import { createPiForwarder } from " + json.dumps((pi / "bin/ws-pi-forward.mjs").as_uri()) + ";\n" +
+                         "export default createPiForwarder(" + json.dumps((pi / "dist/index.js").as_uri()) + ");\n")
         self.assert_package(root, identity)
         return root
 
     def test_producer_inventory_and_common_first_party_are_complete(self):
         records = PRODUCER.prepare(REPO / "agents-plugin-pi", check=True)
+        self.assertEqual((REPO / "agents-plugin-pi/bundle-inputs/lock.json").read_bytes(),
+                         (REPO / "agents-plugin-pi/package-lock.json").read_bytes())
         self.assertEqual(set(records), {"ws", "wsflow"})
         for identity, product in PRODUCTS.items():
             record = records[identity]
@@ -329,6 +332,9 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
             manifest["files"].pop(name)
             (first / name).unlink()
         (first / "workflow-bundles").rmdir()
+        # Notices, like workflow archives, are additive to this older format.
+        (first / "dist/THIRD_PARTY_NOTICES").unlink(missing_ok=True)
+        (first / "bin/ws-pi-forward.mjs").unlink(missing_ok=True)
         for relative, target, expected in (
                 ("agents-plugin/native-pi/first-party-manifest.json", manifest_path,
                  "9dda90585e6e312d1ab366510be2a7ef54fcd15968951394d1bbe6652456ac9a"),
@@ -386,6 +392,10 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
         self.assertNotEqual(updated, root)
         self.assertTrue(root.is_dir())
         self.assertIn(bundle.as_uri(), (updated.parent / "agents-plugin-pi/index.mjs").read_text())
+        bootstrap = pi / "bin/ws-pi-forward.mjs"
+        bootstrap.write_bytes(bootstrap.read_bytes() + b"\n// bootstrap drift\n")
+        self.assertNotEqual(launcher.pi_daemon_workflow_root(pi), updated,
+                            "forwarding bootstrap bytes participate in the private cache key")
 
     def write_archive(self, pi, files, modes=None):
         stream = io.BytesIO()

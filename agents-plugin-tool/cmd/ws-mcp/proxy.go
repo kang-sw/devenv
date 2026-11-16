@@ -367,7 +367,11 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 	buildTime := fs.Int64("build-time", 0, "the build time of the ws-mcp this daemon stands for, in Unix milliseconds; 0 reads this executable's modification time")
 	startWait := fs.Duration("start-wait", 0, "how long to wait for a started daemon; 0 means the default")
 	replace := fs.Bool("replace", false, "explicitly replace an equal-core daemon once, even with identical content; never downgrade a newer core")
+	independent := fs.Bool("require-independent-lifetime", false, "Windows Electron: refuse a daemon spawn that cannot break away from the caller's job")
 	_ = fs.Parse(args)
+	if *independent && runtime.GOOS != "windows" {
+		fatal("daemon-start", fmt.Errorf("--require-independent-lifetime is Windows-only"))
+	}
 
 	server := mcp.NewServer(defaultRoot("."), version, sourceCommit)
 	settings := server.DashboardSettings()
@@ -400,18 +404,27 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 	if *buildTime <= 0 {
 		*buildTime = wsdashboard.ExecutableBuildTime(exe)
 	}
-	spawn := func(args []string) error { return wsdashboard.SpawnDetached(exe, args, dir) }
+	spawn := func(args []string) error {
+		if *independent {
+			// The child may wait on dashboard.lock while the old daemon drains.
+			return wsdashboard.SpawnDetachedStrict(exe, append(args, "--lock-wait", "8s"), dir)
+		}
+		return wsdashboard.SpawnDetached(exe, args, dir)
+	}
 	outcome, err := ensure(ctx, wsdashboard.EnsureOptions{
-		Dir:         dir,
-		Version:     version,
-		BuildTime:   *buildTime,
-		ContentHash: wsdashboard.ExecutableContentHash(exe),
-		Replace:     *replace,
-		Port:        settings.Port,
-		LAN:         lan,
-		Spawn:       spawn,
-		StartWait:   *startWait,
-		Log:         os.Stderr,
+		Dir:                 dir,
+		Version:             version,
+		BuildTime:           *buildTime,
+		ContentHash:         wsdashboard.ExecutableContentHash(exe),
+		Replace:             *replace,
+		SpawnBeforeShutdown: *independent,
+		PreserveRunningLAN:  *independent,
+		RefuseCrossMinor:    *independent,
+		Port:                settings.Port,
+		LAN:                 lan,
+		Spawn:               spawn,
+		StartWait:           *startWait,
+		Log:                 os.Stderr,
 	})
 	if err != nil {
 		fatal("daemon-start", err)

@@ -249,7 +249,7 @@
 .rail .rs.kcol .kidtog .i:first-child { transform: rotate(-90deg); }
 /* after the toggle's count: the descendants at work, a small blue
    subscript pulsing like the subagent count; absent while none works */
-.rail .drkwork { flex: none; align-self: flex-end; margin: 0 0 3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s ease-in-out infinite; }
+.rail .drkwork { flex: none; align-self: flex-end; margin: 0 0 3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
 /* a parent's second line: the toggle and working count, then its message
    link filling the rest (empty when it has no message) */
 .rail .drmeta { display: flex; align-items: center; gap: 0; min-width: 0; margin-top: -4px; padding-bottom: 5px; }
@@ -335,11 +335,11 @@
 .rail .hi .orb { position: absolute; inset: -2px; padding: 1.5px; border-radius: 5px; overflow: hidden; pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }
-.rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s ease-in-out infinite; }
+.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s steps(12) infinite; }
+.rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s steps(4) infinite; }
 .rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }
 .rail .hiw { position: relative; flex: none; display: inline-flex; width: 28px; height: 16px; }
-.rail .sbn { position: absolute; left: 18.5px; bottom: -3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s ease-in-out infinite; }
+.rail .sbn { position: absolute; left: 18.5px; bottom: -3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
 .rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
 .rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }

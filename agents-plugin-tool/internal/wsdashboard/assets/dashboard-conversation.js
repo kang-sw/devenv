@@ -148,6 +148,7 @@
     function result(topic, exact) { if (epoch === effectJumpEpoch && done) done(topic, exact); }
     function step() {
       if (epoch !== effectJumpEpoch) return;
+      if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(step)) return;
       var topic = effectTopic(topicID);
       if (!topic) {
         // Closed topics already have a paginated route. Do not invent a new
@@ -253,6 +254,9 @@
       var h = convo.scrollHeight, top = convo.scrollTop;
       var added = mergeEntries(box, frag(res.html || ""));
       added.forEach(sweepOutImgs);
+      // Pagination supersedes any WS restoration queued before this fetch
+      // completed; its compensated reading position is now authoritative.
+      scrollRestore.delete(convo);
       // Keep what the user was reading in place: the prepended height goes
       // above the scroll offset.
       convo.scrollTop = top + (convo.scrollHeight - h);

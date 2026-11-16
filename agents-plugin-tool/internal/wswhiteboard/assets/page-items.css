@@ -58,6 +58,9 @@
 .dw .ar { margin-left: auto; opacity: .5; }
 .dw .sep { display: block; height: 1px; margin: 6px 4px; background: var(--wb-line); }
 .dw .lb { display: block; margin: 2px 4px; color: var(--wb-muted-fg); font-size: 11px; font-weight: 800; }
+/* Isolate clock updates without clipping their surroundings. */
+time.tago, time.entry-at[data-at] { display: inline-block; contain: layout style; min-inline-size: 7ch; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.eta { contain: layout style; }
 .tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
 .tbar .tnote-toggle:hover { opacity: 1; }
