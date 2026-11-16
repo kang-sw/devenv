@@ -980,6 +980,80 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
   not treated as independent phase completion. No package-root/env-selection
   interface changed; the existing dev package selection is retained.
 
+## Fresh item 4 REST reviewed source checkpoint - 2026-11-16
+
+- Reviewed code HEAD: `8f6a42a3d3d87be1e5e1926b19f2183503d94278`,
+  range `f3f8a4259076fddfb900127b52638507d758d40f..8f6a42a3d`.
+  Core acquisition/HTTP-only fixtures landed in `4c50ad056`; the independent
+  frozen-history fixture landed in `8f6a42a3d`. Only fresh Phase 1 item 4 is
+  delivered here; earlier lifecycle/profile/Pi-cache/dev-repair work is unchanged.
+- Codex acquisition now uses the fixed passive HTTPS wham GET on every OS,
+  with selected file-only ChatGPT OAuth access/account headers. Detection and
+  CODEX_HOME precedence are unchanged. Selected Codex failure never selects
+  Pi; explicit ChatGPT ignores API-key material, while legacy mixed documents,
+  malformed credentials, empty access, invalid headers and known expired exp
+  fail closed. Unknown expiry remains server-authoritative; JWT decoding is
+  not authenticity. No refresh/login/credential write, alternate resolver,
+  configurable origin, cookie or executable fallback was added. Caller-free
+  command helpers and copied-executable/protocol/batch fixtures were removed.
+- Shared HTTP parsing keeps raw seconds: Codex accepts exactly 604800, while
+  Pi retains seconds/60 classification. Both retain bounded HTTP/parse and
+  generic errors; redirects remain forbidden. Completion-based 5-minute /
+  forced 5-second cadence, detached 10-second budget, query coalescing,
+  measurements/source/asOf retention on failure and history-on-success remain.
+  `currentUsage`, `pushClaude`, Claude windows and UI/assets were not edited;
+  preserve develop's independently landed absent-kind fix during integration.
+- Directional T0 source proof: new `plan_usage_probe.go:17-19,96-136` writes
+  the same `via Codex CLI` identifier, explicitly documented as legacy
+  CLI-owned-credential provenance rather than subprocess transport. Latest
+  fields/read/write remain `plan_usage.go:18-67`; old and new write identical
+  shapes. Old history source validation/read and append preserve that literal
+  and supported extensions (`plan_usage_history.go:44-85,128-190`, unchanged
+  from planning HEAD). The independent frozen copy in
+  `plan_usage_compat_test.go:60-237` retains the old types, literal allowlist,
+  validation, pruning and append implementation. Its test at `:239-327`
+  stores an actual new REST sample, successfully reads/appends with the frozen
+  old writer, round-trips latest through the old writer, and reopens with new
+  code: prior/REST/old-appended samples, source, windows, asOf and extensions
+  survive. This proves old read/write usability and new reopen, not merely
+  recovery after an old-reader refusal or latest-only non-destruction.
+- Final focused gate, remote w5090 only:
+  `go test ./internal/wsdashboard/ -run "^Test(PlanUsage|DaemonExplicitHomeDoesNotQueryUsage)" -count=1 -v`
+  passed (0.290s) at reviewed code HEAD; full output read at
+  `D:/Temp/codex-rest-impl/final-focused.txt`. The isolated history pair also
+  passed (0.022s), full output at `history-compat-2.log` in that directory.
+  Remote HOME/CODEX_HOME/CLAUDE_CONFIG_DIR/WS_CACHE_HOME/WS_CONFIG_HOME/TMPDIR
+  were owned scratch paths, cleaned after use; only fake HTTP/test homes were
+  used. HTTP/auth-negative fixtures cover credential selection, optional exp,
+  all header byte boundaries plus valid opaque values, exact weekly windows,
+  status/timeout/redirect/size/parse failures, no-Pi-fallback, cache/history
+  retention, detached viewer completion and cadence/coalescing.
+- First core gate failed during dependency setup, before behavioral tests:
+  importing httpguts pulled unsummed x/text dependencies. Replaced that choice
+  with a private RFC field-value validator instead of expanding modules/sums;
+  coordinator accepted the correction. It permits HTAB and valid opaque bytes,
+  rejects CR/LF/NUL/DEL/other CTL, and returns only generic diagnostics. Later
+  focused gates passed. The fixture leaf's first attempt stopped at a gofmt
+  blank-line check, not a behavioral assertion; correction and focused rerun
+  passed. Small full failure logs remain `core-test-1.txt` and
+  `history-compat-1.log`; no repeated behavioral failure occurred.
+- Independent xlarge R1 Lite returned CLEAN for the exact range above: no
+  Critical, Important or Minor findings. Full source-only report:
+  `C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac@a80733aa/review-paths/e47ea0f6-01-codex-rest-r1.md`.
+  The reviewer independently compared the frozen old history implementation
+  and read the full focused logs; it ran no tests/live operations. No R1 fix
+  was needed, so substantive-fix-only R2 does not apply. The handoff commit
+  changes ticket documentation only; reviewed source stays at that code HEAD.
+  Ticket verification passes with the Sage freshness advisory explicitly
+  accepted: this checkpoint adds implementation/review evidence only and
+  changes none of the settled Decisions, route facts or phase plan.
+- No local Go/ws/launcher/test executable, executable fixture, authenticated
+  upstream call, credential inspection, build/install/runtime/PID query,
+  daemon swap, process sampling, merge, push or release ran. D: had 152 GB
+  available. Only small evidence logs remain in the owned temp directory.
+  Ticket stays in ready without a full Phase Result or closure: coordinator
+  integration and actual live acceptance remain pending; the lease is retained.
+
 ## Forward
 
 - Claude overlap rechecked against current develop, not assumed from this
