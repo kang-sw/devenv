@@ -370,8 +370,10 @@
       // from the height the frame stood at (board motion, slideBoard).
       if (f.wbGrow) {
         f.wbGrow = false;
-        var w = window.wbHistory, s = w && w.keep && w.keep(f, { capture: false }).scroller;
-        if (!(s && s.wbScrollOwner) && f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
+        // Resolve before the batch writes, through boardKeep's shared lookup.
+        // A capture:false keep here used to re-read layout after each height.
+        var s = kept && kept.scroller && kept.scroller(f);
+        if (s && !s.wbScrollOwner && f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
       }
       // A frame rendered before a theme switch (a board swap on a stream
       // opened earlier) takes the current theme when it first reports.

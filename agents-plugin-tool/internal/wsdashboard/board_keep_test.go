@@ -59,7 +59,7 @@ func TestBoardKeepWiring(t *testing.T) {
 }
 
 func TestBoardKeepUnderNode(t *testing.T) {
-	src := dashboardFuncs(t, "boardKeep", "watchBoard", "restoreScroll")
+	src := dashboardFuncs(t, "boardKeep", "watchBoard", "boardViewedExposure", "restoreScroll")
 	runNode(t, "board owner captures", `
 var bad = [], log = [], owned = null;
 function check(what, ok) { if (!ok) bad.push(what); }

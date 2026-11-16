@@ -503,7 +503,7 @@
       var sub = { node: node, margin: opt.margin || "0px", onChange: opt.onChange, onOut: opt.onOut, ratio: undefined, gone: false };
       var handle = { node: node, unwatch: function () { drop(sub); } };
       if (!node || !win.IntersectionObserver) { sub.gone = true; return handle; }
-      owner(scrollerOf(node));
+      if (rendered(node)) owner(scrollerOf(node));
       var o = observer(sub.margin), list = o.subs.get(node);
       // A node already observed reports only on a change: observing it
       // again gives the new subscription its first report.
@@ -548,29 +548,52 @@
       return y;
     }
     function scrollerTop(scroller) { return scroller === docScroller() ? 0 : scroller.getBoundingClientRect().top + (scroller.clientTop || 0); }
-    function viewport(scroller) {
-      var main = scroller === docScroller(), r = main ? { top: 0, bottom: win.innerHeight || scroller.clientHeight } : scroller.getBoundingClientRect();
+    function viewport(scroller, read) {
+      read = read || function (n) { return n.getBoundingClientRect(); };
+      var main = scroller === docScroller(), r = main ? { top: 0, bottom: win.innerHeight || scroller.clientHeight } : read(scroller);
       var top = Math.max(0, r.top + (main ? 0 : scroller.clientTop || 0));
       var bottom = Math.min(win.innerHeight || scroller.clientHeight, main ? r.bottom : r.top + (scroller.clientTop || 0) + scroller.clientHeight);
       var style = win.getComputedStyle(scroller);
       top += parseFloat(style.scrollPaddingTop) || 0;
       // The rail publishes its clearance on sticky heads, not on the host.
-      Array.from((main ? doc : scroller).querySelectorAll('.tophead, .bc-hd, .wb-rail-wrap.up .wb-rail-stack')).forEach(function (head) {
-        var hs = win.getComputedStyle(head), h = head.getBoundingClientRect();
+      Array.from((main ? doc : scroller).querySelectorAll('.tophead, .bc-hd, .wb-rail-wrap.up .wb-rail-stack')).filter(rendered).forEach(function (head) {
+        var hs = win.getComputedStyle(head), h = read(head);
         if ((hs.position === 'sticky' || head.matches('.wb-rail-stack')) && h.height && h.top <= top + (parseFloat(hs.top) || 0) + 1 && h.bottom > top)
           top = Math.max(top, h.bottom);
       });
       return { top: top, bottom: bottom, left: main ? 0 : Math.max(0, r.left + (scroller.clientLeft || 0)),
         right: Math.min(win.innerWidth || r.right || Infinity, main ? win.innerWidth || Infinity : r.left + (scroller.clientLeft || 0) + scroller.clientWidth) };
     }
-    function exposed(node, scroller, view) {
-      var v = view || viewport(scroller), r = node.getBoundingClientRect(), top = Math.max(v.top, r.top), bottom = Math.min(v.bottom, r.bottom);
+    // A geometry read inside closed details can itself force a display-lock
+    // update and full-document layout. Reject hidden ancestry BEFORE any rect,
+    // client box or scroller inspection; the details' own summary still shows.
+    function rendered(node) {
+      if (!node || node.isConnected === false) return false;
+      for (var p = node, branch = node; p; branch = p, p = p.parentElement) {
+        if (p.hidden) return false;
+        if (p !== node && p.tagName === 'DETAILS' && !p.open) {
+          var summary = Array.from(p.children || []).find(function (n) { return n.tagName === 'SUMMARY'; });
+          if (branch !== summary) return false;
+        }
+      }
+      if (node.checkVisibility) return node.checkVisibility({ visibilityProperty: true });
+      // Older engines lack checkVisibility. Style reads do not open a hidden
+      // details subtree's forced geometry scope (already rejected above).
+      for (var p = node; p; p = p.parentElement) {
+        var s = win.getComputedStyle(p);
+        if (s.display === 'none' || (p === node && (s.visibility === 'hidden' || s.visibility === 'collapse')) || s.contentVisibility === 'hidden') return false;
+      }
+      return true;
+    }
+    function exposed(node, scroller, view, read) {
+      if (!rendered(node)) return false;
+      read = read || function (n) { return n.getBoundingClientRect(); };
+      var v = view || viewport(scroller, read), r = read(node), top = Math.max(v.top, r.top), bottom = Math.min(v.bottom, r.bottom);
       var left = Math.max(v.left, r.left), right = Math.min(v.right, r.right);
       if (!(r.height > 0 && bottom - top >= 1 && right - left >= 1)) return false;
       for (var p = node.parentElement; p && p !== scroller && p !== doc.body; p = p.parentElement) {
-        if (p.tagName === 'DETAILS' && !p.open) return false;
         if (/hidden|clip|auto|scroll/.test(win.getComputedStyle(p).overflowY)) {
-          var box = p.getBoundingClientRect(); top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom);
+          var box = read(p); top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom);
           left = Math.max(left, box.left); right = Math.min(right, box.right);
         }
       }
@@ -581,14 +604,30 @@
       // head for every candidate makes history initialization/resize cubic
       // in board size; reject offscreen boxes before walking their ancestry.
       var root = scroller === docScroller() ? doc : scroller, view = viewport(scroller), line = view.top + 1;
-      var nodes = Array.from(root.querySelectorAll('.entry-panel, .wb-entry:not(.panel), .doc-frame, [data-card]')).filter(function (n) {
-        if (!exposed(n, scroller, view) || scrollerOf(n) !== scroller) return false;
-        // An opaque frame is represented by its host panel, never its DOM.
-        return !(n.matches('.doc-frame') && n.closest('.entry-panel'));
-      });
-      nodes.sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
-      return nodes.find(function (n) { var r = n.getBoundingClientRect(); return r.top <= line && r.bottom > line; }) ||
-        nodes.find(function (n) { return n.getBoundingClientRect().top > line; }) || null;
+      var selector = '.entry-panel, .wb-entry:not(.panel), .doc-frame, [data-card]', rects = new Map();
+      function read(n) { if (!rects.has(n)) rects.set(n, n.getBoundingClientRect()); return rects.get(n); }
+      function eligible(n) {
+        if (!rendered(n) || (n.matches('.doc-frame') && n.closest('.entry-panel'))) return false;
+        return exposed(n, scroller, view, read) && scrollerOf(n) === scroller;
+      }
+      // Frame-height batches normally capture the unit under the reading line
+      // in constant work, rather than enumerating the entire long board.
+      if (doc.elementFromPoint) {
+        var hit = doc.elementFromPoint((view.left + view.right) / 2, line), path = [];
+        for (var p = hit; p && p !== root; p = p.parentElement) {
+          if (p.matches && p.matches(selector) && eligible(p)) path.push(p);
+        }
+        path.sort(function (a, b) { return read(a).top - read(b).top; });
+        var atLine = path.find(function (n) { var r = read(n); return r.top <= line && r.bottom > line; });
+        if (atLine) return atLine;
+      }
+      // Gaps, overlays and old engines retain the exact previous selection
+      // rule, but hidden history/system runs are never measured and each
+      // candidate rect is read once, including sorting/line selection.
+      var nodes = Array.from(root.querySelectorAll(selector)).filter(rendered).filter(eligible);
+      nodes.sort(function (a, b) { return read(a).top - read(b).top; });
+      return nodes.find(function (n) { var r = read(n); return r.top <= line && r.bottom > line; }) ||
+        nodes.find(function (n) { return read(n).top > line; }) || null;
     }
     function owner(scroller) {
       var o = owners.get(scroller);
@@ -814,7 +853,8 @@
     // rescans every sticky head, which over a whole board's panels froze
     // every board update for ~1 s (100 topics).
     function snapshot() {
-      var views = new Map(), under = new Map();
+      var views = new Map(), under = new Map(), rects = new Map(), visibility = new Map();
+      function read(node) { if (!rects.has(node)) rects.set(node, node.getBoundingClientRect()); return rects.get(node); }
       function scroller(node) {
         var chain = [], found = null;
         for (var p = node && node.parentElement; p && p !== doc.body && p !== doc.documentElement; p = p.parentElement) {
@@ -828,14 +868,17 @@
         return found;
       }
       function visible(node) {
-        if (!node || node.isConnected === false) return false;
+        if (visibility.has(node)) return visibility.get(node);
+        if (!rendered(node)) { visibility.set(node, false); return false; }
         var s = scroller(node), v = views.get(s);
-        if (!v) { v = viewport(s); views.set(s, v); }
-        return exposed(node, s, v);
+        if (!v) { v = viewport(s, read); views.set(s, v); }
+        var result = exposed(node, s, v, read);
+        visibility.set(node, result);
+        return result;
       }
       return { scroller: scroller, visible: visible };
     }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, pin: pin, pinning: pinning, idle: idle, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, pin: pin, pinning: pinning, idle: idle, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot, rendered: rendered };
   }
   // Current panel folds follow pN; historical-version folds still use their
   // independent entry keys. The additive browser record is not board data.
@@ -973,7 +1016,7 @@
   window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, pinning: kit.pinning, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, pinning: kit.pinning, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot, rendered: kit.rendered };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {

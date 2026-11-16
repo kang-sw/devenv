@@ -839,15 +839,20 @@
   // Short owner captures, once per actual scroller, including independent
   // pins. No post-morph target selection or ordinary resize following.
   function boardKeep(nodes) {
-    var w = window.wbHistory, handles = [], scrollers = new Set();
+    var w = window.wbHistory, handles = [], scrollers = new Set(), resolved = new Map();
     if (!w || !w.keep) return null;
+    var lookup = w.snapshot && w.snapshot();
     (nodes || boardBoxes().map(function (b) { return b.firstElementChild || b; })).forEach(function (n) {
-      var inspect = w.keep(n, { capture: false });
-      if (scrollers.has(inspect.scroller)) return;
-      scrollers.add(inspect.scroller);
+      if (w.rendered && !w.rendered(n)) return;
+      // A height batch shares ancestor/scroller lookup; inspecting keep() for
+      // every frame repeated style/scrollHeight walks through the same topic.
+      var s = lookup ? lookup.scroller(n) : w.keep(n, { capture: false }).scroller;
+      resolved.set(n, s);
+      if (scrollers.has(s)) return;
+      scrollers.add(s);
       handles.push(w.keep(n));
     });
-    return { h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
+    return { scroller: function (n) { return resolved.get(n); }, h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
   }
   // Asset reloads cross a document boundary. Keep only tab-local, short-lived
   // identities; placement and late frame layout still belong to wbHistory.
@@ -1002,8 +1007,9 @@
   }
   // The mounted panels only: inert history pages are never exposed.
   function boardLivePanels(n) {
+    var w = window.wbHistory;
     return q(".entry-panel, .wb-entry:not(.panel), .doc-frame", n).filter(function (p) {
-      return !p.classList.contains("doc-frame") || !p.closest(".entry-panel");
+      return (!w || !w.rendered || w.rendered(p)) && (!p.classList.contains("doc-frame") || !p.closest(".entry-panel"));
     });
   }
   function boardPanelKey(n) { return n.id || n.getAttribute("data-key") || n.getAttribute("data-entry") || n.getAttribute("data-doc-key"); }
@@ -1289,7 +1295,8 @@
     // Exposed panels set the frozen interval across topics (the leading and
     // trailing span in boardRenderBlockers), so another topic's panel leaving
     // can release a block whose own panels are all still in view.
-    return units.concat(panels).filter(boardExposed);
+    var w = window.wbHistory;
+    return units.concat(panels).filter(function (n) { return !w || !w.rendered || w.rendered(n); }).filter(boardExposed);
   }
   // A scroll or resize re-stages only when a release can follow: a pending
   // panel left the view (its topic's rendering may release), or the exposed
@@ -1324,20 +1331,40 @@
         return;
       }
     }
+    // Modern hosts get exposure changes from IO, not from scanning the whole
+    // board on every raw scroll. Old engines retain one coalesced fallback.
+    if (!window.IntersectionObserver) boardViewedExposure();
+  }
+  function boardViewedExposure(report) {
+    if (report && report.node) {
+      if (report.node.wbViewedExposure === report.visible) return;
+      report.node.wbViewedExposure = report.visible;
+    }
     if (!boardReleaseFrame && Object.keys(boardPending).length) boardReleaseFrame = requestAnimationFrame(function () {
       boardReleaseFrame = 0;
       if (Object.keys(boardPending).length && boardReleaseDue()) boardFlushViewed(false);
     });
   }
   doc.addEventListener("scroll", boardViewedScroll, { capture: true, passive: true });
-  window.addEventListener("resize", boardViewedScroll);
-  // watchBoard puts the board's topic sections under root (root itself
-  // included) under the shared visibility source (wbHistory.watch), once
-  // each; a swap sweeps the ones it removed. wbHistory.seen reads their
-  // reports.
+  window.addEventListener("resize", function () { if (!window.IntersectionObserver) boardViewedExposure(); });
+  doc.addEventListener("toggle", function (e) {
+    var n = e.target;
+    if (!n || n.tagName !== "DETAILS") return;
+    if (n.open) watchBoard(n);
+    boardViewedExposure();
+  }, true);
+  // Watch topics, panels and placement groups through the shared IO source.
+  // A swap sweeps removed subscriptions. Observing closed content is safe:
+  // watch() skips its scroller inspection, and IO reports when it opens.
+  // Only exposure transitions, disclosures and the old-engine fallback gate
+  // a release check; ordinary scroll events do no per-unit geometry work.
   function watchBoard(root) {
     if (!window.wbHistory || !window.wbHistory.watch || !root || root.nodeType !== 1) return;
+    var w = window.wbHistory;
     var list = root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root);
-    list.forEach(function (n) { if (!n.wbWatch) n.wbWatch = window.wbHistory.watch(n); });
+    list = list.concat(q(".entry-panel, .wb-entry:not(.panel), .doc-frame, [data-card], .closed-page, .bpins", root));
+    list.forEach(function (n) {
+      if (!n.wbWatch) n.wbWatch = w.watch(n, { onChange: boardViewedExposure });
+    });
   }
 
