@@ -143,10 +143,13 @@ plan target. `dashboard.js` (536 lines) is no longer oversized.
     of raw `tracker.js` test readers to the assembled reader) that moves no code,
     following the earlier dashboard split. Rejected: forcing it into the first
     move commit, which mixes reader changes with a move.
-  - Phase 4 keeps `ai-docs/ref/tracker-mockup/index.html` working by loading the
-    fragments with one `<script src>` per fragment in assembly order. Rejected: a
-    generated assembled copy (new generated artifact and staleness test) and
-    retiring the mockup (deletion).
+  - Phase 4 keeps `ai-docs/ref/tracker-mockup/index.html` working with a small
+    inline loader that fetches the fragments in assembly order, joins them, and
+    executes the result as one script; the mockup notes that it must be served
+    over http. Rejected: one `<script src>` per fragment (the single IIFE spans
+    every fragment, so separate scripts fail to parse), a generated assembled
+    copy (new generated artifact and staleness test), and retiring the mockup
+    (deletion).
   - Phase 5 keeps re-exports in `ask.ts`/`spawner.ts`, adds `export` to moved
     private declarations, allows import-only edits to earlier new files, and
     commits the regenerated bundle and native payload in every src commit.
