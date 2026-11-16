@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><meta name="viewport" content="width=1280">
+<title>panel recap in the topic head - mockup</title>
+<style>
+/* ===== verbatim: wswhiteboard/assets/page.css (light :root) ===== */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-ck-no: #c0262d;
+  --wb-accent-policy: #b25000;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* ===== verbatim: wswhiteboard/assets/page.css (dark) ===== */
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-ck-no: #f0797e;
+  --wb-accent-policy: #e0a36c;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ===== verbatim: wswhiteboard/assets/page-items.css:2-8,75-78,90 (topic, tbar, clocks, head) ===== */
+.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.tbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.tbar .tlead { flex: 1 1 0; margin-right: auto; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px 8px; }
+.tbar .tname { min-width: 0; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topic-state { display: inline-flex; align-items: center; flex: none; }
+time.tago { display: inline-block; contain: layout style; min-inline-size: 7ch; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tbar .tago { flex: none; min-inline-size: 0; font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tophead { background: var(--wb-card); }
+/* the "● 대기" pill as the owner's screenshot shows it (running daemon) */
+.stb{--c:#b9bdc6;display:inline-flex;align-items:center;gap:5px;min-height:18px;padding:0 8px 0 6px;border-radius:999px;font-size:11px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 20%,transparent)}
+.stb .wb-state-dot{width:7px;height:7px;flex:none;border-radius:50%;background:currentColor}
+
+/* ===== verbatim: wsdashboard/assets/dashboard-board.css:28-32,103 (card head buttons) ===== */
+.li { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.ibtn { width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 6px; background: transparent; color: color-mix(in srgb, var(--wb-muted-fg) 82%, transparent); cursor: pointer; }
+.ibtn .li { width: 14px; height: 14px; }
+.tbar .ibtn { color: inherit; opacity: .45; }
+
+/* ===== verbatim: wswhiteboard/assets/page-stream.css:3-31 (head summary line) ===== */
+.trecap { margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+.trecap { contain: paint; }
+.trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.trecap .rtext { display: inline; min-width: 0; overflow-wrap: anywhere; }
+.trecap .rat { font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trecap .rat .evi { display: inline-flex; vertical-align: -3px; margin-right: 5px; }
+.tsub { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); overflow: hidden; }
+.tsub > .trecap { flex: 1 1 22em; min-width: 0; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+.tsub > .trecap .rat { font-size: 10.5px; }
+.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }
+.trecap:has(> .rat[role="button"]) { cursor: pointer; }
+
+/* ===== verbatim: wswhiteboard/assets/page-stream.css:60-160 (history, evi, panel rows) ===== */
+.topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
+.topic-stream .mhead { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }
+.wb-history > .mhead > .wb-mtitle { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.wb-history > .mhead > .mmeta { grid-column: 3; justify-self: end; white-space: nowrap; }
+.topic-stream .mhead .i { width: 12px; height: 12px; }
+.topic-stream .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream .mhead .mmeta { font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.history-live { --h-av: 18px; --h-time: 64px; --h-gap: 8px; margin-left: 12px; display: flow-root; }
+.evi { flex: none; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
+.evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0; border-radius: 6px; font-size: 11.5px; line-height: 20px; color: var(--wb-muted-fg); }
+.system-run > summary::-webkit-details-marker { display: none; }
+.system-run > summary > .rl { flex: none; width: var(--h-av); border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.wb-entry.panel { position: relative; margin: 6px 0; }
+.entry-panel { container-type: inline-size; min-width: 0; }
+.entry-panel > summary { list-style: none; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; column-gap: 8px; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
+.entry-panel > summary::-webkit-details-marker { display: none; }
+.entry-panel > summary::before { content: "\25B8"; grid-column: 1; grid-row: 1; width: 10px; font-size: 10px; line-height: 24px; color: var(--wb-muted-fg); }
+.entry-panel[open] > summary::before { content: "\25BE"; }
+.entry-panel > summary > button { grid-column: 4; grid-row: 1; }
+.entry-recap { min-width: 0; font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; }
+.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }
+.pmeta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 24px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; }
+.pmeta .entry-at { font: 11px var(--wb-mono); }
+.pmeta a.mref { font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.pmeta .pflink { width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--wb-muted-fg); }
+.pmeta .pflink .i { width: 13px; height: 13px; }
+.entry-panel > .entry-body { margin: 6px 0 0 18px; padding: 0 0 1px 12px; border-left: 1px solid var(--wb-line); font-size: 13px; }
+.entry-body p { margin: 0 0 6px; }
+.entry-body p:last-child { margin: 0; }
+
+/* ===== verbatim: wsdashboard/assets/dashboard-board.css:121-126 (Overview, Ctrl+Q) ===== */
+.ov section.topic > :not(.tophead) { display: none; }
+.ov .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ===================================================================
+   PROPOSED (new) - page-stream.css, next to .evi.lead / .evi.owner.
+   The head summary's panel marker. One new class, wb- prefix.
+   =================================================================== */
+.evi.wb-evi-panel { background: color-mix(in srgb, var(--wb-fg) 11%, transparent); color: var(--wb-muted-fg); }
+/* Alternative B only: a second summary line, one line, ellipsized. */
+.tsub > .trecap.wb-recap-more { flex-basis: 100%; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tsub > .trecap.wb-recap-more .rtext { display: inline; }
+
+/* ===================================================================
+   mockup chrome only (not product CSS)
+   =================================================================== */
+.mk{max-width:1180px;margin:0 auto;padding:20px 16px 36px}
+.mk-top{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.mk-top h1{font-size:19px;margin:0}
+.mk-top .sub{color:var(--wb-muted-fg);font-size:12.5px}
+.mk-top button{margin-left:auto;border:1px solid var(--wb-line);background:var(--wb-card);color:var(--wb-fg);border-radius:8px;padding:4px 10px;cursor:pointer}
+.mk h2{font-size:15px;margin:24px 0 4px}
+.mk h2 .tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--wb-muted);color:var(--wb-muted-fg);margin-left:6px;vertical-align:2px}
+.mk .lede{color:var(--wb-muted-fg);font-size:12.5px;margin:0 0 10px;line-height:1.6}
+.mk .lede b{color:var(--wb-fg)}
+.mk blockquote{margin:6px 0 10px;padding:6px 12px;border-left:3px solid var(--wb-accent-policy);background:var(--wb-wash);border-radius:0 8px 8px 0;font-size:13px}
+.mk-lbl{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:800;color:var(--wb-muted-fg);margin:12px 0 5px}
+.mk-lbl .pill{padding:1px 8px;border-radius:999px;background:var(--wb-muted)}
+.mk-lbl .pill.rec{background:var(--wb-technical);color:var(--wb-on-technical)}
+.mk-lbl .hint{font-weight:500}
+.mk .topic{margin-bottom:6px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start}
+.notes{font-size:12.5px;line-height:1.65;margin:4px 0 0;padding-left:18px}
+.notes li{margin-bottom:4px}
+.notes code{font-size:11.5px;background:var(--wb-wash);padding:0 4px;border-radius:4px}
+.callout{border-left:3px solid var(--wb-primary);padding:6px 10px;background:color-mix(in srgb,var(--wb-primary) 8%,transparent);font-size:12.5px;border-radius:0 8px 8px 0;margin-top:10px;line-height:1.6}
+.callout code{font-size:11.5px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<!-- wswhiteboard/assets/sprite.svg -->
+<symbol id="i-pen" viewBox="0 0 16 16"><path d="M10.4 2.8l2.8 2.8-7.6 7.6H2.8v-2.8z"/></symbol>
+<symbol id="i-list" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></symbol>
+<symbol id="i-link" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.3 9a2.6 2.6 0 0 0 3.7 3.7l.9-.9"/></symbol>
+<!-- wsdashboard/assets/lucide/icons (ISC) -->
+<symbol id="l-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+<symbol id="l-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="l-arrow-up-to-line" viewBox="0 0 24 24"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></symbol>
+<symbol id="l-maximize-2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/></symbol>
+<symbol id="l-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+</svg>
+
+<div class="mk">
+  <div class="mk-top"><h1>패널 recap을 토픽 머리 요약줄에 — 목업</h1><span class="sub">대시보드 보드 토픽 카드 · <span id="thm"></span></span><button type="button" onclick="flip()">테마 전환</button></div>
+  <blockquote>"엄청 자잘한 건데, 패널 제목도 recap으로 내보내고 있잖아요? 근데 이 패널 제목은 recap쪽에 안 뜨네요 ... 이것도 작은 텍스트로 표시되면 좋겠는데요." (2026-11-16 23:12)</blockquote>
+  <p class="lede"><b>해석</b>: "패널 제목" = <code>wb:panel recap="…"</code> (기록 줄의 굵은 글씨, 코드에서도 <code>.entry-recap</code>을 panel title이라 부름). "recap쪽" = 토픽 머리 바로 아래의 작은 요약줄(<code>.tsub &gt; .trecap</code>, 지금은 <b>에이전트 로그(L)만</b> 들어감). 이 토픽(<code>rail-home-button</code>)은 패널 2개 + 시스템 이벤트 2개뿐이고 <code>wb:log</code>가 하나도 없어서, 머리 요약줄 자체가 그려지지 않습니다. 같은 요청이 이미 todo 티켓 <code>261114-feat-ws-topic-latest-panel-recap-summary</code>로 잡혀 있고, 오너 확정 (692) "로그와 패널 recap 중 더 최근 것", (699) 같은 시각이면 큰 eN이 이김.</p>
+
+  <h2>1. 오너의 토픽 <span class="tag">패널만 있고 로그 없음</span></h2>
+  <div class="grid2">
+    <div><div class="mk-lbl"><span class="pill">지금</span><span class="hint">머리 아래 요약줄 없음</span></div><div id="s1-before"></div></div>
+    <div><div class="mk-lbl"><span class="pill rec">제안 A · 권장</span><span class="hint">최신 패널 recap이 작은 글씨로</span></div><div id="s1-after"></div></div>
+  </div>
+
+  <h2>2. 로그 뒤에 패널이 더 늦게 올라온 토픽 <span class="tag">로그 21:30 → 패널 21:42</span></h2>
+  <p class="lede">지금은 21:30의 L 줄이 계속 "현재 상태"로 남습니다. A는 더 최근인 패널 recap으로 바뀌고(이후 새 로그가 오면 다시 L), B는 L 줄을 두고 패널 recap을 한 줄 더 얹습니다.</p>
+  <div class="grid3">
+    <div><div class="mk-lbl"><span class="pill">지금</span></div><div id="s2-before"></div></div>
+    <div><div class="mk-lbl"><span class="pill rec">제안 A · 권장</span><span class="hint">더 최근 하나</span></div><div id="s2-a"></div></div>
+    <div><div class="mk-lbl"><span class="pill">대안 B</span><span class="hint">L 유지 + P 한 줄</span></div><div id="s2-b"></div></div>
+  </div>
+
+  <h2>3. 개요 모드 (Ctrl+Q) <span class="tag">머리만 보이는 화면</span></h2>
+  <p class="lede">개요는 <code>.tophead</code>만 남기고 요약줄을 4줄로 자릅니다(dashboard-board.css:121-126, overview.js:139). 지금은 이 토픽이 제목 한 줄뿐이고, A에서는 무엇이 끝났는지가 보입니다.</p>
+  <div class="grid2 ov">
+    <div><div class="mk-lbl"><span class="pill">지금</span></div><div id="s3-before"></div></div>
+    <div><div class="mk-lbl"><span class="pill rec">제안 A</span></div><div id="s3-after"></div></div>
+  </div>
+
+  <h2>4. 원인 / 변경</h2>
+  <ul class="notes">
+    <li><b>원인</b>: 머리 요약줄은 <code>TopicDoc.LatestAgent()</code>(entries.go:59-68, "never a panel or system event")만 씁니다. <code>HeadSummary()</code>(view.go:331)가 <code>LatestAgent == nil</code>이면 <code>.tsub</code>를 안 그리고, page.tmpl:57의 <code>{{with .LatestAgent}}{{template "recap" $}}{{end}}</code>, <code>RecapHTML</code>(render.go:895), 시각 스탬프(view.go:901-904)도 모두 로그 기준입니다. 패널 recap은 기록 줄(page.tmpl:96 <code>.entry-recap</code>)과 임베드의 <code>PanelRecaps</code>에만 나옵니다.</li>
+    <li><b>뷰</b>(view.go): <code>LatestAgent</code>는 그대로 두고(최신 로그 깜빡임 <code>.wb-entry.agent.current</code>, entries_test.go:277이 고정) 새 필드 예: <code>TopicView.Head *Entry</code> = 스트림에서 마지막 <code>agent</code> 또는 <code>panel</code> 항목(추가 순서 = eN 순서라 (699) 동률 규칙이 자동 충족). <code>HeadSummary</code>, <code>stampUpdated</code>의 RecapAt/Clock, <code>RecapHTML</code>이 Head를 봄. 패널이면 텍스트는 <code>Entry.Recap</code>.</li>
+    <li><b>템플릿</b>(page.tmpl:36 <code>recap</code>, :57 <code>topic</code>): <code>data-kind="panel"</code>, 표식 <code>&lt;span class="evi wb-evi-panel" title="{{t "wb.stream.panels"}}"&gt;P&lt;/span&gt;</code>(기존 키 "패널" 재사용). <code>data-entry</code>는 패널 버전의 eN → stream.js:1208 recap jump(<code>wbHistory.loadTarget</code>)가 그대로 그 패널 줄로 이동.</li>
+    <li><b>CSS</b>(page-stream.css, <code>.evi.owner</code> 옆): <code>.evi.wb-evi-panel</code> 한 줄. 글자 크기·색·4줄 제한은 기존 <code>.tsub &gt; .trecap</code> 그대로. 대시보드 CSS 변경 없음(개요 4줄 자르기·검색 팔레트가 이미 <code>.trecap .rtext</code>를 읽음).</li>
+    <li><b>같은 투영</b>(티켓 692): <code>whiteboard.query</code>의 <code>current</code> 줄(query_entries.go:393, 410, 440; query.go:315)과 세션 상태 토픽 목록(mcp/workflow_manual.go:158-176 <code>renderWhiteboardSummaries</code>). 호환 등급 T0(표시만, 저장 형식 불변).</li>
+    <li><b>대안 B</b>를 고르면 <code>.tsub</code>에 <code>.trecap.wb-recap-more</code> 한 줄 추가. 단 overview.js:139가 <code>.trecap .rtext</code>를 하나만 재므로 개요 애니메이션 수정이 따라옵니다 — A를 권장하는 이유.</li>
+    <li><b>곁가지 (기존 동작, 이번 변경 밖)</b>: 요약줄 시계의 상대 시간("1시간 전")이 위로 떠 보이는 것은 목업 오류가 아니라 실제 CSS 그대로입니다. page-items.css:75 <code>time.tago { display: inline-block; contain: layout style; min-inline-size: 7ch }</code>의 layout containment가 inline-block의 기준선을 아래 여백 가장자리로 바꿔서, 지금의 L 줄에서도 같은 모양입니다.</li>
+  </ul>
+  <div class="callout"><b>시험</b>: wswhiteboard <code>recap_jump_test.go</code>(data-kind/data-entry 마크업), <code>topic_tickets_test.go:311-332</code>(<code>.tsub</code> 유무), <code>recap_display_test.go</code>(클램프·title 속성), <code>stream_test.go:48</code>, <code>entries_test.go:277</code>(LatestAgent 불변 확인), <code>recap_test.go</code>, <code>query_entries_test.go</code> / <code>topic_state_query_test.go</code>(current 줄), <code>testdata/latest-log.browser.cjs</code>; mcp <code>workflow_manual_recaps_test.go</code>; 클래스 충돌은 wsdashboard <code>css_collision_test.go</code>.</div>
+</div>
+
+<script>
+var q = new URLSearchParams(location.search).get("theme");
+if (q) document.documentElement.setAttribute("data-theme", q);
+function themeLabel(){ document.getElementById("thm").textContent = document.documentElement.getAttribute("data-theme") + " theme"; }
+function flip(){ var r=document.documentElement; r.setAttribute("data-theme", r.getAttribute("data-theme")==="dark"?"light":"dark"); themeLabel(); }
+themeLabel();
+
+function li(id){ return '<svg class="li" aria-hidden="true"><use href="#l-'+id+'"/></svg>'; }
+function ic(id){ return '<svg class="i" aria-hidden="true"><use href="#i-'+id+'"/></svg>'; }
+function tbar(title, ago){
+  return '<div class="tbar"><span class="tlead"><span class="tname">'+title+'</span></span>'+
+    '<span class="topic-state"><span class="stb"><span class="wb-state-dot"></span>대기</span></span>'+
+    '<time class="tago">'+ago+'</time>'+
+    '<button class="ibtn">'+li("pin")+'</button><button class="ibtn">'+li("chevron-down")+'</button><button class="ibtn">'+li("arrow-up-to-line")+'</button><button class="ibtn">'+li("maximize-2")+'</button><button class="ibtn">'+ic("pen")+'</button><button class="ibtn">'+li("x")+'</button></div>';
+}
+// one head summary line; kind "agent" (L) or "panel" (P)
+function recap(kind, entry, clock, ago, text, more){
+  var mark = kind==="panel" ? '<span class="evi wb-evi-panel" title="패널">P</span>' : '<span class="evi lead" title="에이전트 로그">L</span>';
+  return '<div class="trecap'+(more?' wb-recap-more':'')+'" data-entry="'+entry+'" data-kind="'+kind+'"><span class="rat" role="button" tabindex="0">'+mark+clock+' · <time class="tago">'+ago+'</time></span> — <div class="rtext md" title="'+text+'">'+text+'</div></div>';
+}
+function panelRow(id, pid, clock, recapText, body){
+  return '<article class="wb-entry panel" data-entry="'+id+'" data-kind="panel" data-panel="'+pid+'"><details class="entry-panel" open><summary><span class="entry-recap">'+recapText+'</span><span class="pmeta"><time class="entry-at">'+clock+'</time><a class="mref" href="#'+pid+'">#'+pid+'</a><button type="button" class="pflink">'+ic("link")+'</button></span><button type="button" class="ibtn d-max">'+li("maximize-2")+'</button></summary><div class="entry-body md">'+body+'</div></details></article>';
+}
+function sys(n, clock){ return '<details class="system-run"><summary><span class="rl"></span><span class="lbl">시스템 이벤트 '+n+' · '+clock+'</span></summary></details>'; }
+function history(n, meta, rows){
+  return '<div class="topic-stream"><div class="wb-history"><div class="mhead"><span class="wb-mtitle">'+ic("list")+'<span class="wb-mlabel">기록</span><span class="n">'+n+'</span></span><span></span><span class="mmeta">'+meta+'</span></div><div class="history-live">'+rows+'</div></div></div>';
+}
+function topic(title, ago, sub, hist){
+  return '<section class="topic"><div class="tophead">'+tbar(title, ago)+(sub?'<div class="tsub">'+sub+'</div>':'')+'</div>'+(hist||'')+'</section>';
+}
+
+// --- 1. the owner's topic (data as on the board: 2 panels, 2 system events, no wb:log)
+var T1 = "좌하단 홈 버튼 + 세션 라벨 두 번 클릭 토글 제거";
+var P403 = "pi 작업자 하나가 고치고 있습니다. 병합 전에 화면 캡처를 제가 확인하고, 여기 올려 직접 보시게 하겠습니다.";
+var P407 = "develop에 병합했습니다(e39cf85b4). 공유 데몬을 다시 빌드해야 화면에 나타나는데, 다른 수리 작업이 끝날 때 한꺼번에 하겠습니다.";
+var h1 = history(4, "패널 2 · 로그 2줄",
+  panelRow("e5926","p403","21:25",P403,"<p><strong>요청하신 것</strong> (21:16): 좌하단 설정 버튼 오른쪽에 홈 버튼을 둡니다. 세션 목록의 라벨을 두 번 클릭하면 닫히는 동작은 없앱니다.</p>") +
+  sys(1,"21:25") +
+  panelRow("e5947","p407","21:36",P407,"<p><strong>한 것</strong> — 홈 버튼: 좌하단 설정 버튼 바로 오른쪽. 두 번 클릭 토글 제거: 열린 세션의 라벨을 다시 눌러도 아무 일도 하지 않습니다.</p>") +
+  sys(1,"21:36"));
+document.getElementById("s1-before").innerHTML = topic(T1, "1시간 전", "", h1);
+document.getElementById("s1-after").innerHTML = topic(T1, "1시간 전", recap("panel","e5947","21:36","1시간 전",P407), h1);
+
+// --- 2. mixed topic: agent log at 21:30, newer panel at 21:42
+var T2 = "리뷰 스윕(develop 누적 커밋)";
+var LOG = "수리 2/5 병합: CI에서 깨지던 노드 시험 스텁을 고쳤습니다. 남은 작업자 3개는 계속 돌고 있습니다.";
+var PAN = "수리 3/5 병합, 남은 2건은 재검토 대기입니다.";
+var h2 = history(9, "패널 3 · 로그 6줄", "");
+document.getElementById("s2-before").innerHTML = topic(T2, "3분 전", recap("agent","e812","21:30","15분 전",LOG), h2);
+document.getElementById("s2-a").innerHTML = topic(T2, "3분 전", recap("panel","e820","21:42","3분 전",PAN), h2);
+document.getElementById("s2-b").innerHTML = topic(T2, "3분 전", recap("agent","e812","21:30","15분 전",LOG) + recap("panel","e820","21:42","3분 전",PAN,true), h2);
+
+// --- 3. overview (Ctrl+Q): only the head survives
+document.getElementById("s3-before").innerHTML = topic(T1, "1시간 전", "", h1);
+document.getElementById("s3-after").innerHTML = topic(T1, "1시간 전", recap("panel","e5947","21:36","1시간 전",P407), h1);
+</script>
+</body>
+</html>
