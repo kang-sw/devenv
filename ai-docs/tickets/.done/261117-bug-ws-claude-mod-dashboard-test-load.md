@@ -1,5 +1,6 @@
 ---
 title: "claude-mod dashboard.test.ts fails to load under the mod test kit (node:fs import)"
+completed: 2026-11-17
 related:
   261115-feat-ws-dashboard-observed-session-model: "introduced the capture hook; its Result already notes dashboard.test.ts could not run merge-side"
   261115-feat-ws-claude-reasoning-summary-producer: "overlap: edits dashboard.ts and adds dashboard.test.ts tests; landing this ticket first gives them native coverage; expect a textual conflict in dashboard.test.ts"
@@ -161,3 +162,39 @@ Verification (read full output):
   `agents-plugin-tool`.
 - If any non-test claude-mod file changed, regenerate Pi workflow bundles and
   native payload and commit them with the change.
+
+### Result (66b2cf1f4) - 2026-11-17
+
+- Removed the forbidden filesystem import and capture branch in both mirrored
+  dashboard tests. The TS `observed(events)` assertion remains intact; the Go
+  reducer now uses only its embedded literal. Cross-reference comments name
+  the shared observation fields and turn ordering without claiming identical
+  event streams.
+- Verification (full native suite outputs read, including the dashboard sections):
+  - `claude plugin test agents-plugin`: 843 pass / 0 fail across 18 files
+    (143.13 s), including all 80 dashboard tests.
+  - `claude plugin test agents-plugin-wsflow`: 843 pass / 0 fail across 18 files
+    (143.32 s), including all 80 dashboard tests.
+  - Compared with the recorded baseline of 763 pass / 1 file-load failure
+    (764 reported tests), each suite now runs 80 additional passing assertions
+    and no longer reports a dashboard file-load failure. The baseline was not
+    rerun in this worker invocation.
+  - From `agents-plugin-tool`, with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+    `go test ./internal/mcp -count=1 -run '^TestObservedClaudeRetryAdapterToReducer$'`
+    and `go test ./internal/wsrsrc -count=1 -run '^TestWsflowHooksMirrorUpToDate$'`
+    both passed.
+  - Both `claude plugin validate` commands passed with warnings; `git diff
+    --check` and exact-byte mod directory comparison were clean.
+- No latent runtime test failures surfaced; no production file changed.
+  Compatibility tier remains n/a. Pi bundle/native payload regeneration was
+  omitted because only test files changed. No shared daemon rebuild/restart
+  or remote shell operation ran.
+- Dogfood observations: extra validation reports type warnings in unchanged
+  code (including dashboard test fixtures and dashboard.ts's inferred event
+  kind) plus missing package icons. These do not fail validation or the native
+  tests; broad warning cleanup was not included in this test-load fix.
+- Workflow limitation: this worker profile exposes no workflow manual, route,
+  acquire, render, or close tool. Bundled workflow/ticket conventions were
+  read instead; no route verdict or independent review allocation was
+  obtained, and no independent review ran. The finished ticket was moved
+  with native Git's documented unavailable-tool fallback.

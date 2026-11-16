@@ -11,17 +11,11 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// WS_CLAUDE_RETRY_CAPTURE is emitted by the adapter's rejected-call test.
-// The default fixture keeps this reducer contract runnable without Node.
+// The rejected-call test in dashboard.test.ts pins the same observed shape
+// (id, model, source, at, effort, effortSource, outputTps) and turn ordering.
+// This hand-reduced fixture is not the adapter's full recovered event stream.
 func TestObservedClaudeRetryAdapterToReducer(t *testing.T) {
 	raw := []byte(`[{"kind":"reset"},{"kind":"turn_start","at":1000},{"kind":"status","observed":{"id":"rate-response","model":"claude-opus-5-5","source":"claude.step","at":2000,"effort":"high","effortSource":"request","outputTps":100}},{"kind":"reply","text":"done","final":true},{"kind":"turn_end","at":2000}]`)
-	if path := os.Getenv("WS_CLAUDE_RETRY_CAPTURE"); path != "" {
-		var err error
-		raw, err = os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
 	var events []map[string]any
 	if err := json.Unmarshal(raw, &events); err != nil {
 		t.Fatal(err)
