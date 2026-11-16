@@ -345,25 +345,32 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	}
 }
 
-// framedDashboardScript checks the frame's single content-addressed script
-// reference and fetches the assembled source rather than expecting it inline.
-func framedDashboardScript(t *testing.T, base, page string) (int, string) {
+// dashboardPageScript pins the intended script mode: session frames load the
+// assembled script by URL, while the index frame embeds that script inline.
+func dashboardPageScript(t *testing.T, base, page string, external bool) (int, string) {
 	t.Helper()
+	want, err := dashboardTestAsset("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
 	matches := regexp.MustCompile(`<script src="(/s/dashboard-[0-9a-f]{24}\.js)"></script>`).FindAllStringSubmatchIndex(page, -1)
+	inline := "<script>" + string(want) + "</script>"
+	if !external {
+		if len(matches) != 0 || strings.Count(page, inline) != 1 {
+			t.Fatal("index must inline the assembled dashboard script exactly once, without an external reference")
+		}
+		return strings.Index(page, inline), string(want)
+	}
 	if len(matches) != 1 {
-		t.Fatalf("framed page has %d content-addressed dashboard scripts, want one", len(matches))
+		t.Fatalf("session frame has %d content-addressed dashboard scripts, want one", len(matches))
 	}
 	m := matches[0]
 	code, script := get(t, base+page[m[2]:m[3]])
 	if code != http.StatusOK {
 		t.Fatalf("dashboard script GET = %d", code)
 	}
-	want, err := dashboardTestAsset("assets/dashboard.js")
-	if err != nil {
-		t.Fatal(err)
-	}
 	if script != string(want) || strings.Contains(page, "The dashboard page script, shared") {
-		t.Error("frame must reference the assembled dashboard script, not inline it")
+		t.Error("session frame must reference the assembled dashboard script, not inline it")
 	}
 	return m[0], script
 }
@@ -385,7 +392,7 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if css < 0 || trackerCSS < css {
 			t.Errorf("%s page: the tracker stylesheet is missing or ahead of the dashboard's", name)
 		}
-		scriptAt, script := framedDashboardScript(t, f.base, page)
+		scriptAt, script := dashboardPageScript(t, f.base, page, name != "index")
 		i18n, tracker := strings.Index(page, "window.wsT = function"), strings.Index(page, "window.WsTracker = { mount: mount }")
 		if i18n < 0 || tracker < i18n || scriptAt < tracker {
 			t.Errorf("%s page: the tracker script is missing or not between the string table and the page script", name)

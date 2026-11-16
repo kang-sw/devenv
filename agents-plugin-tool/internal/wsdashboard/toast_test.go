@@ -304,7 +304,7 @@ func TestPagesCarryTheToastStackAndTitleHost(t *testing.T) {
 		if !regexp.MustCompile(`<html [^>]*data-wb-titlehost`).MatchString(page) {
 			t.Errorf("%s page lacks the data-wb-titlehost marker", name)
 		}
-		scriptAt, script := framedDashboardScript(t, f.base, page)
+		scriptAt, script := dashboardPageScript(t, f.base, page, name != "index")
 		if scriptAt < tracker {
 			t.Errorf("%s page: the page script precedes the tracker", name)
 		}
