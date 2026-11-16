@@ -206,6 +206,15 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
                 text = (REPO / path).read_text(encoding="utf-8")
                 self.assertRegex(text, r"prepare-workflow-bundles\.py[\"']? --check")
 
+    def test_version_bump_refreshes_workflows_before_native_first_party_offline(self):
+        script = (REPO / "agents-plugin-tool/scripts/bump-ws-version.sh").read_text(encoding="utf-8")
+        # The bump must produce (not just check) workflow archives before
+        # snapshotting them into native Pi, without reinstalling dependencies.
+        self.assertIn("set -eu\n", script)
+        self.assertRegex(script, r'PY\n\n(?:#[^\n]*\n)*'
+                         r'python3 "\$repo_root/agents-plugin-pi/scripts/prepare-workflow-bundles\.py"\n'
+                         r'python3 "\$repo_root/agents-plugin-pi/scripts/prepare-native-payload\.py" --first-party-only\n')
+
     def test_producer_inventory_and_common_first_party_are_complete(self):
         records = PRODUCER.prepare(REPO / "agents-plugin-pi", check=True)
         self.assertEqual((REPO / "agents-plugin-pi/bundle-inputs/lock.json").read_bytes(),
