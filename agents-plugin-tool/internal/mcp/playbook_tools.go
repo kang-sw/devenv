@@ -564,6 +564,9 @@ func formatEffortForText(effort string) string {
 //     note.mute, and note.unmute are denied to every key that is not a
 //     top-level lead (see isNoteMutationTool), so a worker hands a note to its
 //     lead through its report.
+//   - "sublead" → roleLead, like "worker", and the render also writes the
+//     sub-lead marker naming the playbook (writeSubleadMarker), which admits
+//     the key to a status-only path onto its top-level lead's whiteboard.
 //   - "lead", "", unknown → ("", false): lead playbooks never mint child keys.
 func childRoleForPlaybookRole(role string) (toolRole, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
@@ -571,7 +574,7 @@ func childRoleForPlaybookRole(role string) (toolRole, bool) {
 		return roleDelegate, true
 	case "leaf":
 		return roleLeaf, true
-	case "worker":
+	case "worker", subleadPlaybookRole:
 		return roleLead, true
 	default:
 		return "", false
@@ -1011,6 +1014,11 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, profile, rsrcRoot, name s
 				return "", "", fmt.Errorf("mint child session key: %w", err)
 			}
 			childKey := resolved.key
+			if strings.ToLower(strings.TrimSpace(pb.Meta.Role)) == subleadPlaybookRole {
+				if err := s.sessions.writeSubleadMarker(childKey, name); err != nil {
+					return "", "", fmt.Errorf("mark sub-lead session key: %w", err)
+				}
+			}
 			// Splice a clearly-delimited credential block into the body so the
 			// delegate's ws calls are pre-keyed. Prepended so the delegate sees
 			// the key before any procedure text.

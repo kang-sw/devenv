@@ -752,11 +752,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// read-only, and its denial names the report hand-off instead of the
 	// generic profile text. The whiteboard tools sit beside it for the same
 	// reason: the board is the top-level lead's channel to its user, so a
-	// spawned key can neither write nor read it.
+	// spawned key can neither write nor read it. A marked sub-lead key alone
+	// passes (subleadBoardFor): its call is rewritten onto its top-level
+	// lead's key, so the write, the board refresh, and the dashboard nudge
+	// all target that board, and handleWhiteboardUpdate admits status only.
 	//
 	// dashboard.intake alone resolves its key from the intake cache
 	// (intakeSession), so its call rate reads no key.json; a removed key
 	// still passes here for up to intakeRecheck, for that tool only.
+	var sublead *subleadBoard
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 		lookup := s.lookupSession
 		if params.Name == dashboardIntakeTool {
@@ -773,7 +777,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
 			}
 			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
-				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
+				board, marked := s.subleadBoardFor(keyStr, entry)
+				if !marked {
+					return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
+				}
+				sublead = &board
+				onBoard := make(map[string]any, len(params.Arguments))
+				for name, value := range params.Arguments {
+					onBoard[name] = value
+				}
+				onBoard["session_key"] = board.boardKey
+				params.Arguments = onBoard
 			}
 			// A store's support conversation passes like a top-level lead for
 			// the tracker and wiki tools its profile names (its writes are
@@ -1742,7 +1756,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	case "note.query":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
 	case "whiteboard.update":
-		return s.handleWhiteboardUpdate(req.ID, params.Arguments)
+		return s.handleWhiteboardUpdate(req.ID, params.Arguments, sublead)
 	case "whiteboard.query":
 		return s.handleWhiteboardQuery(req.ID, params.Arguments)
 	case "tracker.update":
