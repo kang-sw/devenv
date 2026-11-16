@@ -339,7 +339,10 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     connect();
   }).catch(error => failStartup({ app, dialog }, error));
 }
-if (require.main === module) {
+// An unpackaged dev run (`electron <dir>`) loads this file through Electron's
+// default app, so require.main is the loader, not this module: also start in
+// any Electron main process. Plain Node (unit tests) has no process.type.
+if (require.main === module || process.type === 'browser') {
   const electron = require('electron');
   const fail = error => failStartup(electron, error);
   process.on('uncaughtException', fail);

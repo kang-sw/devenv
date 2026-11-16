@@ -184,6 +184,27 @@ test('main entrypoint routes uncaught exceptions and unhandled rejections to the
   }
   assert.deepEqual(exits, [1, 1]);
 });
+test('main entrypoint starts in an unpackaged Electron dev run and stays inert when required from Node', () => {
+  const vm = require('node:vm'), root = path.resolve(__dirname, '..');
+  const run = ({ type, isMain }) => {
+    const names = [];
+    const app = Object.assign(new EventEmitter(), { setName: name => names.push(name), requestSingleInstanceLock: () => false,
+      quit() {}, whenReady: () => new Promise(() => {}), getPath: () => userData, exit() {} });
+    const electron = { app, dialog: { showErrorBox() {} } };
+    const entry = { exports: {} };
+    const load = n => n === 'electron' ? electron : require(n.startsWith('./') ? path.resolve(root, n) : n);
+    // `electron <dir>` makes Electron's default app the main module.
+    load.main = isMain ? entry : { exports: {} };
+    vm.runInNewContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), {
+      require: load, module: entry, __dirname: root,
+      process: Object.assign(new EventEmitter(), { platform: 'win32', ...(type ? { type } : {}) }), console,
+    });
+    return names;
+  };
+  assert.deepEqual(run({ type: 'browser', isMain: false }), ['Werkschaft']);
+  assert.deepEqual(run({ type: 'browser', isMain: true }), ['Werkschaft']);
+  assert.deepEqual(run({ isMain: false }), []);
+});
 test('native window, menus, authority, close veto and single-instance focus', async () => {
   const f = await fixture(), w = f.window;
   assert.equal(w.title, 'Werkschaft');
