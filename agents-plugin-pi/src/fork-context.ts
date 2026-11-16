@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 
 /** Durable, immutable snapshot transferred from a lead to one fork child. */
@@ -89,7 +90,76 @@ export function captureRegisteredTools(activeNames: readonly string[], allTools:
   });
 }
 
-/** Strict registration comparison, retaining the parent-captured order in every result list. */
+/** Strip prose only at schema nodes, never in property names or literal const/enum/default data. */
+function forkValidationSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(forkValidationSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const result = { ...schema } as Record<string, unknown>;
+  delete result.description;
+  for (const key of ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]) {
+    const map = result[key];
+    if (map && typeof map === "object" && !Array.isArray(map)) {
+      result[key] = Object.fromEntries(Object.entries(map).map(([name, child]) => [name, forkValidationSchema(child)]));
+    }
+  }
+  for (const key of ["items", "additionalItems", "additionalProperties", "contains", "not", "if", "then", "else", "propertyNames", "unevaluatedProperties", "unevaluatedItems", "contentSchema", "allOf", "anyOf", "oneOf", "prefixItems"]) {
+    if (Object.prototype.hasOwnProperty.call(result, key)) result[key] = forkValidationSchema(result[key]);
+  }
+  return result;
+}
+
+function schemaRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function schemaPath(parent: string, key: string): string {
+  return `${parent}/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+}
+
+/**
+ * Directional call-shape check: runtime may add optional properties and drop
+ * requirements, recursively through existing properties. Other keywords stay
+ * exact after prose stripping. This cannot detect handler semantic changes.
+ */
+function forkSchemaMismatch(captured: unknown, runtime: unknown, path = "/parameters"): string | undefined {
+  if (isDeepStrictEqual(captured, runtime)) return undefined;
+  if (!schemaRecord(captured) || !schemaRecord(runtime)) return `${path}: changed`;
+
+  const oldRequired = captured.required === undefined ? [] : captured.required;
+  const newRequired = runtime.required === undefined ? [] : runtime.required;
+  if (!Array.isArray(oldRequired) || !Array.isArray(newRequired) ||
+      !oldRequired.every(name => typeof name === "string") || !newRequired.every(name => typeof name === "string")) {
+    return `${path}/required: invalid requirements`;
+  }
+  for (const name of newRequired) {
+    if (!oldRequired.includes(name)) return `${schemaPath(`${path}/required`, name)}: new required property`;
+  }
+
+  const oldProperties = captured.properties === undefined ? {} : captured.properties;
+  const newProperties = runtime.properties === undefined ? {} : runtime.properties;
+  if (!schemaRecord(oldProperties) || !schemaRecord(newProperties)) return `${path}/properties: changed`;
+  for (const [name, schema] of Object.entries(oldProperties)) {
+    const propertyPath = schemaPath(`${path}/properties`, name);
+    if (!Object.prototype.hasOwnProperty.call(newProperties, name)) return `${propertyPath}: missing runtime property`;
+    const mismatch = forkSchemaMismatch(schema, newProperties[name], propertyPath);
+    if (mismatch) return mismatch;
+  }
+  for (const name of Object.keys(newProperties)) {
+    if (!Object.prototype.hasOwnProperty.call(oldProperties, name) && newRequired.includes(name)) {
+      return `${schemaPath(`${path}/properties`, name)}: added required property`;
+    }
+  }
+  for (const key of new Set([...Object.keys(captured), ...Object.keys(runtime)])) {
+    if (key === "required" || key === "properties") continue;
+    if (!isDeepStrictEqual(captured[key], runtime[key]) ||
+        Object.prototype.hasOwnProperty.call(captured, key) !== Object.prototype.hasOwnProperty.call(runtime, key)) {
+      return `${schemaPath(path, key)}: changed`;
+    }
+  }
+  return undefined;
+}
+
+/** Compatibility comparison, retaining the parent-captured order in every result list. */
 export interface ForkRegistrationComparison {
   missing: ForkToolDefinition[];
   extra: ForkToolDefinition[];
@@ -102,12 +172,13 @@ export function classifyForkRegistrations(expected: readonly ForkToolDefinition[
   const actualByName = new Map(actual.map((tool) => [tool.name, tool]));
   const missing = expected.filter((tool) => !actualByName.has(tool.name));
   const extra = actual.filter((tool) => !expectedNames.has(tool.name));
-  const changed = expected
-    .filter((tool) => {
-      const registered = actualByName.get(tool.name);
-      return registered !== undefined && JSON.stringify(tool) !== JSON.stringify(registered);
-    })
-    .map((tool) => tool.name);
+  const changed = expected.flatMap((tool) => {
+    const registered = actualByName.get(tool.name);
+    if (!registered) return [];
+    // Compare only; the child retains its actual runtime registration.
+    const mismatch = forkSchemaMismatch(forkValidationSchema(tool.parameters), forkValidationSchema(registered.parameters));
+    return mismatch ? [`${tool.name} (${mismatch})`] : [];
+  });
   const expectedCommonOrder = expected.filter((tool) => actualByName.has(tool.name)).map((tool) => tool.name);
   const actualCommonOrder = actual.filter((tool) => expectedNames.has(tool.name)).map((tool) => tool.name);
   const reordered = JSON.stringify(expectedCommonOrder) !== JSON.stringify(actualCommonOrder);
@@ -123,7 +194,7 @@ export function formatForkRegistrationMismatch(comparison: ForkRegistrationCompa
   return parts.length ? parts.join("; ") : undefined;
 }
 
-/** Exact order/schema comparison; no sorting, deduplication, or schema replay. */
+/** Preserve callable order; tolerate prose and compatible object-schema additions without replacing registrations. */
 export function compareForkRegistrations(expected: readonly ForkToolDefinition[], actual: readonly ForkToolDefinition[]): string | undefined {
   return formatForkRegistrationMismatch(classifyForkRegistrations(expected, actual));
 }

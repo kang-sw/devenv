@@ -33,7 +33,7 @@ describe("ForkContext", () => {
     assert.throws(() => parseForkContext(""), /malformed/);
   });
 
-  test("captures actual registrations in active order and classifies every strict mismatch", () => {
+  test("captures actual registrations in active order and classifies incompatible drift", () => {
     const actual = captureRegisteredTools(context.activeTools, context.registeredTools);
     assert.equal(compareForkRegistrations(context.registeredTools, actual), undefined);
     assert.deepEqual(classifyForkRegistrations(context.registeredTools, [actual[1]]), {
@@ -43,7 +43,71 @@ describe("ForkContext", () => {
       missing: [], extra: [{ name: "extra", description: "Extra", parameters: {} }], reordered: false, changed: [],
     });
     assert.match(compareForkRegistrations(context.registeredTools, [...actual].reverse()) ?? "", /reordered callable tools/);
-    assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], description: "changed" }, actual[1]]) ?? "", /changed callable tools: read/);
+    assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], parameters: { type: "string" } }, actual[1]]) ?? "", /changed callable tools: read/);
+  });
+
+  test("accepts worktree.release's optional force addition without modifying runtime metadata", () => {
+    const expected = [{
+      name: "ws__worktree_release",
+      description: "Release a pooled worktree.",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "Worktree path." },
+        key: { type: "string", description: "Worker session key." },
+        format: { type: "string", description: "Output format." },
+      } },
+    }];
+    const actual = [{
+      ...expected[0],
+      description: "Cleaning up a worktree whose owner is gone: pass force: true.",
+      parameters: { properties: { ...expected[0].parameters.properties, path: { type: "string", description: "Absolute worktree path." }, force: { description: "For whoever cleans up stale worktrees.", type: "boolean" } }, type: "object" },
+    }];
+    const snapshot = structuredClone(actual);
+    assert.equal(compareForkRegistrations(expected, actual), undefined);
+    assert.deepEqual(actual, snapshot, "runtime metadata remains authoritative and unmodified");
+    assert.match(compareForkRegistrations(expected, [{ ...actual[0], parameters: { ...actual[0].parameters, required: ["force"] } }]) ?? "", /ws__worktree_release.*\/parameters\/required\/force/);
+    assert.match(compareForkRegistrations(actual, expected) ?? "", /\/parameters\/properties\/force/);
+  });
+
+  test("accepts nested optional additions and required subsets, but refuses tightening with a schema path", () => {
+    const captured = { type: "object", properties: { options: { type: "object", properties: { key: { type: "string" } }, required: ["key"] } }, required: ["options"] };
+    const runtime = { ...captured, properties: { options: { ...captured.properties.options, properties: { ...captured.properties.options.properties, force: { type: "boolean" } }, required: [] } }, required: [] };
+    const compare = (before: unknown, after: unknown) => compareForkRegistrations(
+      [{ name: "probe", description: "", parameters: before }],
+      [{ name: "probe", description: "", parameters: after }],
+    );
+    assert.equal(compare(captured, runtime), undefined);
+    assert.equal(compare(captured, { ...runtime, required: undefined }), undefined);
+    assert.match(compare(runtime, captured) ?? "", /\/parameters\/required\/options/);
+    assert.match(compare(captured, { ...captured, additionalProperties: false }) ?? "", /\/parameters\/additionalProperties/);
+    assert.match(compare(captured, { ...captured, properties: { options: { ...captured.properties.options, additionalProperties: false } } }) ?? "", /\/parameters\/properties\/options\/additionalProperties/);
+    for (const [before, after, path] of [
+      [{ type: "string" }, { type: "number" }, "type"],
+      [{ enum: ["a"] }, { enum: ["a", "b"] }, "enum"],
+      [{ const: "a" }, { const: "b" }, "const"],
+      [{ minimum: 1 }, { minimum: 2 }, "minimum"],
+    ] as const) assert.match(compare(before, after) ?? "", new RegExp(`/parameters/${path}`));
+  });
+
+  test("ignores schema descriptions nested under items, anyOf and $defs", () => {
+    const parameters = { type: "array", items: { anyOf: [{ type: "string", description: "Old item." }, { $ref: "#/$defs/value" }] }, $defs: { value: { type: "number", description: "Old definition." } } };
+    const updated = { ...parameters, items: { anyOf: [{ type: "string", description: "New item." }, { $ref: "#/$defs/value" }] }, $defs: { value: { type: "number", description: "New definition." } } };
+    assert.equal(compareForkRegistrations(
+      [{ name: "probe", description: "Old tool.", parameters }],
+      [{ name: "probe", description: "New tool.", parameters: updated }],
+    ), undefined);
+  });
+
+  test("description-named arguments and literal schema data remain compatibility-relevant", () => {
+    for (const parameters of [
+      { type: "object", properties: { description: { type: "string" } } },
+      { const: { description: "original" } },
+      { enum: [{ description: "original" }] },
+      { default: { description: "original" } },
+    ]) {
+      const expected = [{ name: "probe", description: "Probe", parameters }];
+      const changed = JSON.parse(JSON.stringify(parameters).replace('"string"', '"number"').replace('"original"', '"changed"'));
+      assert.match(compareForkRegistrations(expected, [{ ...expected[0], parameters: changed }]) ?? "", /changed callable tools: probe/);
+    }
   });
 
   test("rejects an envelope that omits present context rather than taking the legacy path", () => {
