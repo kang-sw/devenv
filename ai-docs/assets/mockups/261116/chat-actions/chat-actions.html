@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>대화 블록 동작 거터 — 목업</title>
+<style>
+/* ---- real dashboard dark tokens (wswhiteboard/assets/page.css dark fallbacks) ---- */
+:root {
+  color-scheme: dark;
+  --wb-bg: #141518;
+  --wb-fg: #e7e7e4;
+  --wb-card: #1e2024;
+  --wb-muted: #2b2d32;
+  --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff;
+  --wb-ok: #6cc39a;
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", "Malgun Gothic", sans-serif;
+  /* mockup-only chrome */
+  --mk-border: #444;
+}
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+code { font-family: var(--wb-mono); font-size: 12.5px; background: var(--wb-muted); padding: 0 4px; border-radius: 4px; }
+a { color: var(--wb-primary); }
+
+/* ---- mockup chrome ---- */
+.mk-bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 10px 16px; background: #1b1c20; border-bottom: 1px solid var(--mk-border); }
+.mk-bar h1 { font-size: 14px; margin: 0; font-weight: 700; }
+.mk-seg { display: inline-flex; border: 1px solid var(--mk-border); border-radius: 8px; overflow: hidden; }
+.mk-seg button { font: inherit; font-size: 12.5px; color: var(--wb-muted-fg); background: transparent; border: 0; padding: 4px 10px; cursor: pointer; }
+.mk-seg button + button { border-left: 1px solid var(--mk-border); }
+.mk-seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 22%, transparent); color: var(--wb-fg); }
+.mk-lbl { font-size: 11.5px; color: var(--wb-muted-fg); margin-right: 6px; }
+.mk-cap { padding: 10px 16px 0; font-size: 12.5px; color: var(--wb-muted-fg); max-width: 980px; }
+.mk-cap b { color: var(--wb-fg); }
+.mk-stage { padding: 14px 16px 24px; display: flex; gap: 20px; align-items: flex-start; }
+.mk-pane { width: 760px; flex: none; border: 1px solid var(--mk-border); border-radius: 10px; background: var(--wb-bg); overflow: hidden; }
+body.narrow .mk-pane { width: 420px; }
+.mk-pane-head { font-size: 11.5px; color: var(--wb-muted-fg); padding: 6px 12px; border-bottom: 1px solid var(--wb-line); display: flex; justify-content: space-between; }
+.mk-notes { flex: 1; min-width: 260px; max-width: 420px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.mk-notes h2 { font-size: 13px; color: var(--wb-fg); margin: 0 0 6px; }
+.mk-notes ul { margin: 0 0 14px; padding-left: 18px; }
+.mk-notes li { margin: 3px 0; }
+.mk-tag { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); }
+
+/* ---- real conversation rules (wsdashboard/assets/dashboard-conversation.css, abridged) ---- */
+.conv { display: flex; flex-direction: column; gap: 0; padding: 10px 12px; }
+.conv > * { margin-block: .2em; }
+.msg { max-width: 100%; }
+.msg .mh { font-size: 11.5px; color: var(--wb-muted-fg); display: flex; gap: 6px; align-items: center; margin-bottom: 3px; }
+.msg .mh b { color: var(--wb-fg); }
+.msg .bub { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; max-width: 86%; }
+.msg.user .mh { justify-content: flex-end; }
+.msg.user .bub { background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); border-radius: 12px 12px 4px 12px; padding: 8px 11px; }
+.msg.fromlead { align-self: stretch; min-width: 0; }
+.msg.fromlead .mh.conv-row { margin-bottom: 0; }
+.msg.fromlead .bub { margin: 0 62px 0 36px; background: var(--wb-card); border-radius: 4px 12px 12px 12px; padding: 8px 12px; box-shadow: var(--wb-shadow); }
+.msg .bub.md { white-space: normal; min-width: 0; }
+.msg .bub.md p { margin: 0 0 8px; }
+.msg .bub.md p:last-child { margin-bottom: 0; }
+.msg.fromlead > .bub.md { contain: paint; } /* real rule: clips anything positioned inside the bubble */
+.msg.fromlead, .msg.user { margin-block: 8px; }
+.src { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.turnline { align-self: flex-start; display: inline-flex; gap: 6px; align-items: center; margin-left: 36px; font-size: 12px; color: var(--wb-muted-fg); }
+.conv-row, .msg .mh.conv-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 44px 18px; column-gap: 8px; align-items: baseline; padding: 5px 0; font: 13px/1.5 var(--wb-sans); color: var(--wb-muted-fg); }
+.conv-row > .row-icon { display: flex; justify-content: center; align-self: center; }
+.conv-row > .row-content { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.conv-row > .row-time { text-align: right; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
+.conv-row .row-avatar { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--wb-primary); color: var(--wb-bg); }
+.conv-row .row-avatar > .i { width: 13px; height: 13px; }
+.toolsline, .turnline { opacity: .68; }
+.toolsline .conv-row { padding-block: 1px; line-height: 1.4; }
+.toolsline .row-icon .i { width: 14px; height: 14px; }
+.tsum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* =====================================================================
+   PROPOSED: .mact — the per-block action gutter
+   ===================================================================== */
+.mact { display: flex; align-items: center; gap: 2px; }
+.mact-b { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 22px; min-width: 22px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font: 12px/1 var(--wb-sans); cursor: pointer; }
+.mact-b:hover { background: color-mix(in srgb, var(--wb-muted) 80%, transparent); color: var(--wb-fg); }
+.mact-b:focus-visible, .mact-b.fv { outline: 2px solid var(--wb-primary); outline-offset: 1px; color: var(--wb-fg); }
+.mact-b[aria-disabled="true"] { cursor: not-allowed; }
+.mact-b[aria-disabled="true"] > svg { opacity: .38; } /* dim the icon only: the tooltip must stay legible */
+.mact-b[aria-disabled="true"]:hover { background: transparent; color: var(--wb-muted-fg); }
+.mact-b .ok, .mact-b .done-l { display: none; }
+.mact-b.done { color: var(--wb-ok); }
+.mact-b.done .cp { display: none; }
+.mact-b.done .ok, .mact-b.done .done-l { display: inline; }
+.mact-b.done .ok { display: block; }
+/* tooltip: aria-disabled buttons stay focusable/hoverable, so the reason is reachable */
+.mact-b[data-tip]::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); right: 0; white-space: nowrap; font-size: 11.5px; line-height: 1.3; padding: 4px 8px; border-radius: 6px; background: #2b2d32; color: var(--wb-fg); border: 1px solid var(--mk-border); box-shadow: var(--wb-shadow); opacity: 0; pointer-events: none; transition: opacity .1s .35s; z-index: 5; }
+.mact-b[data-tip]:hover::after, .mact-b[data-tip]:focus-visible::after, .mact-b.fv::after, .mact-b.tip::after { opacity: 1; transition-delay: 0s; }
+.mact-b[aria-disabled="true"][data-tip]::after { color: var(--wb-muted-fg); }
+.mact-b.done[data-tip]::after { content: none; }
+/* hidden at rest by opacity (NOT visibility/display): stays in tab order, no reflow */
+.mact { opacity: 0; pointer-events: none; transition: opacity .12s; }
+.msg:hover > .mact, .msg:focus-within > .mact, .msg.sim-hover > .mact, .mact.pinned { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .mact { opacity: .7; pointer-events: auto; } }
+
+/* ---- Variant A: footer-row gutter, in flow, height reserved ---- */
+.v-a .msg > .mact { height: 22px; margin-top: 3px; justify-content: flex-end; }
+.v-a .msg.fromlead > .mact { margin-right: 62px; margin-left: 36px; }
+.v-a .msg.fromlead, .v-a .msg.user { margin-bottom: 3px; }
+/* a following turn footer shares the gutter row: pulled up onto it, left side */
+.v-a .msg.fromlead + .turnline { margin-top: -25px; height: 22px; }
+.v-a .msg.fromlead:has(+ .turnline) > .mact { margin-left: auto; } /* turnline sits left, gutter right */
+
+/* ---- Variant B: floating pill on the bubble's bottom-right edge, out of flow ---- */
+.v-b .msg { position: relative; }
+.v-b .msg > .mact { position: absolute; bottom: -13px; z-index: 3; padding: 2px; border-radius: 9px; background: #25272c; border: 1px solid var(--mk-border); box-shadow: 0 2px 8px rgb(0 0 0 / .45); }
+.v-b .msg.fromlead > .mact { right: 54px; }   /* bubble right edge (62px) minus 8px */
+.v-b .msg.user > .mact { right: -4px; }
+.v-b .msg:hover, .v-b .msg:focus-within, .v-b .msg.sim-hover { z-index: 2; }
+
+/* the bubble a gutter belongs to gets a faint ring while it is shown (helps pairing on dense pages) */
+.msg.sim-hover > .bub, .msg:hover > .bub, .msg:focus-within > .bub { box-shadow: var(--wb-shadow), 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); }
+.msg.user.sim-hover > .bub, .msg.user:hover > .bub, .msg.user:focus-within > .bub { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-primary) 28%, transparent); }
+
+/* mockup: a red marker outline on the screenshot's target position */
+.mk-pin { outline: 1.5px dashed #e5484d; outline-offset: 3px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-robot" viewBox="0 0 16 16"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.9 2.7a1.4 1.4 0 0 1 2 2L5.4 12.2l-2.9.8.8-2.9z"/><path d="M9.6 4l2 2"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 16 16"><path d="M5.5 3.5L2.8 6.2l2.7 2.7"/><path d="M2.8 6.2h6.7a3.6 3.6 0 0 1 0 7.2H6.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.4l3.2 3.1L13 4.6"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 16 16"><path d="M10.4 2.6a3.4 3.4 0 0 0-4.2 4.3L2.6 10.5a1.4 1.4 0 0 0 2 2l3.6-3.6a3.4 3.4 0 0 0 4.3-4.2l-2 2-1.9-.4-.4-1.9z"/></symbol>
+</svg>
+
+<div class="mk-bar">
+  <h1>대화 블록 동작 거터</h1>
+  <span><span class="mk-lbl">배치</span><span class="mk-seg" id="seg-v">
+    <button data-v="a">A · 꼬리줄 인라인</button><button data-v="b">B · 떠 있는 알약</button>
+  </span></span>
+  <span><span class="mk-lbl">상태</span><span class="mk-seg" id="seg-s">
+    <button data-s="rest">평소</button><button data-s="hover-agent">리드 hover</button><button data-s="hover-user">내 메시지 hover</button><button data-s="copied">복사됨</button><button data-s="focus">키보드 포커스</button><button data-s="narrow">좁은 폭 420px</button>
+  </span></span>
+</div>
+<div class="mk-cap" id="cap"></div>
+
+<div class="mk-stage">
+  <div class="mk-pane">
+    <div class="mk-pane-head"><span>대화</span><span id="wlabel"></span></div>
+    <div class="conv" id="conv">
+
+      <!-- 1. owner prompt (whiteboard origin) -->
+      <div class="msg user" id="u1" data-entry="u1">
+        <div class="mh"><span class="src">화이트보드</span><time>18:31</time></div>
+        <div class="bub">원격 테스트 돌려보고 통과하면 '열린 질문을 카드 아래로 옮기기' develop에 푸시해 줘.</div>
+        <div class="mact" role="toolbar" aria-label="메시지 동작">
+          <button class="mact-b" data-act="rewind" aria-disabled="true" aria-label="이 프롬프트 이전으로 되감기 (나중에 지원)" data-tip="이 프롬프트 이전으로 되감기 · 나중에 지원"><svg class="i"><use href="#i-undo"/></svg></button>
+          <button class="mact-b" data-act="edit" aria-disabled="true" aria-label="프롬프트 수정 (아직 지원하지 않음)" data-tip="프롬프트 수정 · 아직 지원하지 않음"><svg class="i"><use href="#i-pencil"/></svg></button>
+          <button class="mact-b" data-act="copy" aria-label="복사" data-tip="복사"><svg class="i cp"><use href="#i-copy"/></svg><svg class="i ok"><use href="#i-check"/></svg><span class="done-l">복사됨</span></button>
+        </div>
+        <template class="mraw">원격 테스트 돌려보고 통과하면 '열린 질문을 카드 아래로 옮기기' develop에 푸시해 줘.</template>
+      </div>
+
+      <!-- 2. intermediate lead reply, followed by a tools row (no turn footer) -->
+      <div class="msg fromlead" id="r1" data-entry="r1">
+        <div class="mh conv-row"><span class="row-icon"><span class="row-avatar"><svg class="i"><use href="#i-robot"/></svg></span></span><span class="row-content"><b>리드</b></span><span class="row-time">18:31</span><span></span></div>
+        <div class="bub md"><p>원격 테스트부터 돌리겠습니다.</p></div>
+        <div class="mact" role="toolbar" aria-label="메시지 동작">
+          <button class="mact-b" data-act="copy" aria-label="복사" data-tip="복사"><svg class="i cp"><use href="#i-copy"/></svg><svg class="i ok"><use href="#i-check"/></svg><span class="done-l">복사됨</span></button>
+        </div>
+        <template class="mraw">원격 테스트부터 돌리겠습니다.</template>
+      </div>
+      <div class="toolsline"><div class="conv-row"><span class="row-icon"><svg class="i"><use href="#i-wrench"/></svg></span><span class="row-content"><span class="tsum">도구 호출 2회 · Bash, git_commit</span></span><span class="row-time">14s</span><span></span></div></div>
+
+      <!-- 3. final lead reply (the screenshot block), followed by its turn footer -->
+      <div class="msg fromlead" id="r2" data-entry="r2">
+        <div class="mh conv-row"><span class="row-icon"><span class="row-avatar"><svg class="i"><use href="#i-robot"/></svg></span></span><span class="row-content"><b>리드</b></span><span class="row-time">18:44</span><span></span></div>
+        <div class="bub md"><p>원격 테스트를 통과해서(Node가 필요한 2건만 예외) '열린 질문을 카드 아래로 옮기기'를 develop에 푸시했습니다 (<code>d69105645</code>). 지금 데몬을 교체하고 있고, 끝나면 확인을 요청드리겠습니다.</p><p>Whiteboard: <a href="#">http://127.0.0.1:29417/s/example-session</a></p><p>Active ticket 261115-feat-ws-whiteboard-panel-first-stream has phases remaining on its retained impl branch — next cycle: wsflow:lead-run continues it.</p></div>
+        <div class="mact" role="toolbar" aria-label="메시지 동작">
+          <button class="mact-b" data-act="copy" aria-label="복사" data-tip="복사"><svg class="i cp"><use href="#i-copy"/></svg><svg class="i ok"><use href="#i-check"/></svg><span class="done-l">복사됨</span></button>
+        </div>
+        <template class="mraw">원격 테스트를 통과해서(Node가 필요한 2건만 예외) '열린 질문을 카드 아래로 옮기기'를 develop에 푸시했습니다 (`d69105645`). 지금 데몬을 교체하고 있고, 끝나면 확인을 요청드리겠습니다.
+
+Whiteboard: http://127.0.0.1:29417/s/example-session
+
+Active ticket 261115-feat-ws-whiteboard-panel-first-stream has phases remaining on its retained impl branch — next cycle: wsflow:lead-run continues it.</template>
+      </div>
+      <div class="turnline">턴 · 도구 호출 2회 · <span class="t">16s</span></div>
+
+      <!-- 4. owner prompt (terminal origin, multi-line) -->
+      <div class="msg user" id="u2" data-entry="u2">
+        <div class="mh"><time>18:46</time></div>
+        <div class="bub">확인했어. 이제 메모 패널 쪽 작업으로 넘어가자.
+목업부터 보여줘.</div>
+        <div class="mact" role="toolbar" aria-label="메시지 동작">
+          <button class="mact-b" data-act="rewind" aria-disabled="true" aria-label="이 프롬프트 이전으로 되감기 (나중에 지원)" data-tip="이 프롬프트 이전으로 되감기 · 나중에 지원"><svg class="i"><use href="#i-undo"/></svg></button>
+          <button class="mact-b" data-act="edit" aria-disabled="true" aria-label="프롬프트 수정 (아직 지원하지 않음)" data-tip="프롬프트 수정 · 아직 지원하지 않음"><svg class="i"><use href="#i-pencil"/></svg></button>
+          <button class="mact-b" data-act="copy" aria-label="복사" data-tip="복사"><svg class="i cp"><use href="#i-copy"/></svg><svg class="i ok"><use href="#i-check"/></svg><span class="done-l">복사됨</span></button>
+        </div>
+        <template class="mraw">확인했어. 이제 메모 패널 쪽 작업으로 넘어가자.
+목업부터 보여줘.</template>
+      </div>
+
+      <!-- 5. lead reply at rest, for comparison -->
+      <div class="msg fromlead" id="r3" data-entry="r3">
+        <div class="mh conv-row"><span class="row-icon"><span class="row-avatar"><svg class="i"><use href="#i-robot"/></svg></span></span><span class="row-content"><b>리드</b></span><span class="row-time">18:46</span><span></span></div>
+        <div class="bub md"><p>메모 패널 목업을 두 가지 배치로 만들겠습니다. 완료되면 경로와 스크린샷을 드리겠습니다.</p></div>
+        <div class="mact" role="toolbar" aria-label="메시지 동작">
+          <button class="mact-b" data-act="copy" aria-label="복사" data-tip="복사"><svg class="i cp"><use href="#i-copy"/></svg><svg class="i ok"><use href="#i-check"/></svg><span class="done-l">복사됨</span></button>
+        </div>
+        <template class="mraw">메모 패널 목업을 두 가지 배치로 만들겠습니다. 완료되면 경로와 스크린샷을 드리겠습니다.</template>
+      </div>
+      <div class="turnline">턴 · 도구 호출 0회 · <span class="t">4s</span></div>
+    </div>
+  </div>
+
+  <div class="mk-notes" id="notes">
+    <h2>블록별 동작</h2>
+    <ul>
+      <li><b>리드 응답</b>: 복사만. 원문 마크다운을 복사합니다.</li>
+      <li><b>내 메시지</b>: 되감기 · 수정 · 복사 (오른쪽 끝이 항상 복사).</li>
+      <li>되감기 = <b>이 프롬프트를 보내기 직전</b>으로. 하네스 체크포인트 단위가 사용자 프롬프트라서 리드 응답에는 두지 않습니다 (턴 중간 응답은 체크포인트가 아님).</li>
+      <li>수정 = 되감기 + 작성창에 이 프롬프트를 채워 넣기. 둘 다 하네스 지원 전까지 흐리게, <code>aria-disabled</code>라 포커스·툴팁은 동작.</li>
+    </ul>
+    <h2>레이아웃</h2>
+    <ul>
+      <li>평소엔 <code>opacity: 0</code>로 숨김 — 탭 순서에 남고 hover 때 리플로 없음.</li>
+      <li><span class="mk-tag">A</span> 거터 줄 22px을 항상 확보. 바로 뒤가 턴 꼬리줄이면 꼬리줄을 그 줄로 끌어올려 같은 줄 왼쪽/오른쪽에 함께 둡니다 (스크린샷의 빨간 표시 자리).</li>
+      <li><span class="mk-tag">B</span> 확보 공간 없음. 말풍선 오른쪽 아래 모서리에 겹쳐 뜹니다. 실제 말풍선은 <code>contain: paint</code>라 알약은 <code>.bub</code> 밖, <code>.msg</code> 기준으로 배치.</li>
+      <li>터치 기기(<code>hover: none</code>)는 항상 옅게 표시.</li>
+    </ul>
+    <h2>복사</h2>
+    <ul>
+      <li>복사 후 1.6초간 체크 + "복사됨", 그 동안 거터 고정 (마우스가 떠나도). 기존 <code>copyText(s, quiet)</code>로 토스트는 생략.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+(function () {
+  var CAPS = {
+    rest: "<b>평소</b> — 모든 거터가 숨어 있습니다. 실제 마우스를 블록 위에 올리면 이 상태에서도 동작합니다.",
+    "hover-agent": "<b>리드 hover</b> — 스크린샷의 리드 블록. 복사만 표시됩니다.",
+    "hover-user": "<b>내 메시지 hover</b> — 되감기·수정은 흐리게, 툴팁으로 이유를 알립니다 (되감기 툴팁 표시 중).",
+    copied: "<b>복사됨</b> — 복사 직후 1.6초: 체크 아이콘과 \"복사됨\", 거터가 고정됩니다.",
+    focus: "<b>키보드 포커스</b> — Tab으로 들어오면 :focus-within으로 거터가 보이고 버튼에 focus-visible 테두리.",
+    narrow: "<b>좁은 폭 420px</b> — 리드 블록과 내 메시지를 동시에 hover한 모습."
+  };
+  var conv = document.getElementById("conv");
+  function parse() {
+    var o = {}; location.hash.replace(/^#/, "").split("&").forEach(function (kv) { var p = kv.split("="); if (p[0]) o[p[0]] = decodeURIComponent(p[1] || ""); });
+    return { v: o.v === "b" ? "b" : "a", s: CAPS[o.s] ? o.s : "rest" };
+  }
+  function clear() {
+    document.querySelectorAll(".sim-hover").forEach(function (n) { n.classList.remove("sim-hover"); });
+    document.querySelectorAll(".mact-b.tip, .mact-b.done, .mact-b.fv").forEach(function (n) { n.classList.remove("tip", "done", "fv"); });
+    document.querySelectorAll(".mact.pinned").forEach(function (n) { n.classList.remove("pinned"); });
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+  function btn(id, act) { return document.querySelector("#" + id + " .mact-b[data-act=" + act + "]"); }
+  function apply() {
+    var st = parse();
+    conv.classList.remove("v-a", "v-b"); conv.classList.add("v-" + st.v);
+    document.body.classList.toggle("narrow", st.s === "narrow");
+    document.getElementById("wlabel").textContent = (st.s === "narrow" ? "420px" : "760px") + " · 배치 " + st.v.toUpperCase();
+    clear();
+    if (st.s === "hover-agent") document.getElementById("r2").classList.add("sim-hover");
+    if (st.s === "hover-user") { document.getElementById("u2").classList.add("sim-hover"); btn("u2", "rewind").classList.add("tip"); }
+    if (st.s === "copied") { document.getElementById("r2").classList.add("sim-hover"); btn("r2", "copy").classList.add("done"); }
+    if (st.s === "focus") { var b = btn("u2", "copy"); b.focus({ focusVisible: true }); b.classList.add("fv"); }
+    if (st.s === "narrow") { document.getElementById("r2").classList.add("sim-hover"); document.getElementById("u2").classList.add("sim-hover"); }
+    document.getElementById("cap").innerHTML = CAPS[st.s] + (st.v === "a" ? " &nbsp;<span class=\"mk-tag\">A</span> 꼬리줄 인라인" : " &nbsp;<span class=\"mk-tag\">B</span> 떠 있는 알약");
+    document.querySelectorAll("#seg-v button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === st.v)); });
+    document.querySelectorAll("#seg-s button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.s === st.s)); });
+  }
+  function go(v, s) { location.hash = "v=" + v + "&s=" + s; }
+  document.getElementById("seg-v").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) go(b.dataset.v, parse().s); });
+  document.getElementById("seg-s").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) go(parse().v, b.dataset.s); });
+  window.addEventListener("hashchange", apply);
+
+  // live copy: the raw text travels in a <template class="mraw"> beside the bubble (proposal);
+  // file:// may lack navigator.clipboard, so fall back to execCommand like copyText does.
+  function copyText(s) {
+    function fb() { var t = document.createElement("textarea"); t.value = s; t.style.cssText = "position:fixed;opacity:0"; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (e) {} t.remove(); }
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(s).catch(fb); else fb();
+  }
+  conv.addEventListener("click", function (e) {
+    var b = e.target.closest(".mact-b"); if (!b) return;
+    if (b.getAttribute("aria-disabled") === "true") { b.classList.add("tip"); setTimeout(function () { b.classList.remove("tip"); }, 1600); return; }
+    var msg = b.closest(".msg"), raw = msg.querySelector("template.mraw");
+    copyText(raw ? raw.content.textContent : msg.querySelector(".bub").innerText);
+    var bar = b.closest(".mact");
+    b.classList.add("done"); bar.classList.add("pinned");
+    clearTimeout(b._t); b._t = setTimeout(function () { b.classList.remove("done"); bar.classList.remove("pinned"); }, 1600);
+  });
+  apply();
+})();
+</script>
+</body>
+</html>
