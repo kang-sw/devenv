@@ -390,7 +390,7 @@ func TestCacheRootUsesExplicitOptionThenEnvThenHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CacheRoot default returned error: %v", err)
 	}
-	if got != filepath.Join(home, ".cache", defaultCacheDirName) {
+	if got != filepath.Join(home, ".cache", DefaultCacheDirName) {
 		t.Fatalf("CacheRoot default = %q", got)
 	}
 }

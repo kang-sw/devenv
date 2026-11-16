@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -108,7 +109,7 @@ var outsideDenied = []string{
 	".kube", ".git-credentials", ".codex/auth.json", ".claude/.credentials.json",
 	".config/gcloud", ".azure", ".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml",
 	".vault-token", ".password-store", "Library/Keychains",
-	".cache/ws@kang-sw-devenv/dashboard",
+	".cache/" + wsstate.DefaultCacheDirName + "/dashboard",
 }
 
 // OutsideLinkSource is a PageSource that also lists the files outside the

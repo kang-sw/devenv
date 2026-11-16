@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Keep the default locations protected even when a tool relocates its current
@@ -42,7 +44,7 @@ func deniedBasePaths(homes []string) []string {
 		for _, name := range outsideDenied {
 			add(filepath.Join(home, filepath.FromSlash(name)))
 		}
-		if dir, err := Dir(filepath.Join(home, ".cache", "ws@kang-sw-devenv")); err == nil {
+		if dir, err := Dir(filepath.Join(home, ".cache", wsstate.DefaultCacheDirName)); err == nil {
 			addDaemonDir(dir)
 		}
 	}
