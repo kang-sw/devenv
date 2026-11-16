@@ -8,10 +8,11 @@ The session whiteboard is a top-level lead's board for its user. Each topic
 holds current content, append-only panels, and a compact discussion log,
 beside the items you ask (IDs, statuses, verbatim answers). Use current
 content for the durable state of the work, panels for substantial discussion
-or visuals, and an agent log line for the current-state summary. The latest
-agent line supplies that summary; later server events do not replace it.
-Embeds keep the items but show panel recaps and the latest agent line instead
-of current content or accumulated payloads, with a link to the full board.
+or visuals, and an agent log line for a concise current-state update. The
+topic-head summary is the newest `wb:log` line or `wb:panel` recap.
+Timestamps decide; equal timestamps use the larger durable `eN` ID. Server
+events never replace it. Embeds keep the items, panel recaps, and that summary
+instead of current content or accumulated payloads, with a link to the full board.
 Workers and subagents do not use the board.
 
 ## Calls
@@ -89,7 +90,8 @@ batch may hold several `wb:topic` groups.
 | `wb:topic` | `name`, `label?`, `tickets?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:eta`, `wb:close`; none with `label` or `tickets` |
 | `wb:body` | none | current content, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
-| `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
+| `wb:panel` | `recap?`, `id?`, `name?` | optional full payload, or `wb:change` bundles; full posts require nonempty `recap` |
+| `wb:change` | none | one `wb:old` and one `wb:new`, inside a named `wb:panel` |
 | `wb:log` | none | one nonempty agent-authored line of inline Markdown |
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
 | `wb:state` | `value`, `owner?`, `eta_minutes?`, `on?` | none |
@@ -106,7 +108,10 @@ batch may hold several `wb:topic` groups.
 ## Context
 Markdown up to the closing tag.
 </wb:body>
-<wb:panel recap="Parser-first tradeoff">Keep the review slice small; see {{12}}.</wb:panel>
+<wb:panel name="tradeoff" recap="Parser-first tradeoff">Keep the review slice small; see {{12}}.</wb:panel>
+<wb:panel name="tradeoff">
+<wb:change><wb:old>small</wb:old><wb:new>focused</wb:new></wb:change>
+</wb:panel>
 <wb:log>In review: parser branch, waiting on CI</wb:log>
 <wb:add class="policy">
 <wb:title>Ship the <code>parser</code> before the renderer?</wb:title>
@@ -124,6 +129,12 @@ Markdown up to the closing tag.
 </wb:topic>
 ```
 
+- Literal bodies: ordinary `<`, `&`, and HTML need no escaping. Use
+  `<![CDATA[...]]>` around literal command markup that would be structural:
+  the body's own closing tag (even in backticks or a code fence), sibling
+  field openings, or `wb:change` examples in a panel. CDATA unwraps to literal
+  text; split any literal `]]>` across adjacent CDATA sections. This protects
+  command parsing, not Markdown/HTML rendering.
 - Topic stem: `<wb:topic name="ship-gate" label="Release gate">` keys the
   topic by the stem `ship-gate` (lowercase letters, digits, and hyphens, at
   most 40) and shows `label` as its name; later groups write
@@ -292,14 +303,25 @@ Markdown up to the closing tag.
   markdown after it, and keep blank lines out of HTML, since an indented
   line after one becomes a code block. A line that starts with an inline tag
   such as `<b>` is markdown text, whose line breaks render as `<br>`.
-- Panels: `recap` is required and nonempty; a recap-only panel is a message.
-  An optional payload carries a longer opinion, mockup, diagram, or image.
-  Omit `id` to mint a board-wide `pN`; use an existing `id="pN"` in the
-  same topic to append a complete new version, even when the text is the
-  same. Each immutable version has its own durable `eN` entry locator;
-  older versions remain in history while `pN` always targets the latest.
-  There is no `panel` attribute on `wb:edit`: re-post the whole panel,
-  including its recap and any payload, instead of editing it in place.
+- Panels: a full post requires nonempty `recap`; a recap-only panel is a
+  message. An optional payload carries a longer opinion, mockup, diagram, or
+  image. A new panel mints a board-wide `pN`. Optional nonblank `name` binds
+  it within its topic; later posts with the same name append a complete new
+  version of that panel, as does an existing `id="pN"` in the same topic,
+  even when the text is unchanged. If both selectors are given, they must
+  resolve to the same existing panel. Each immutable version has its own
+  durable `eN` locator; older versions remain in history while `pN` always
+  targets the latest. A full repost replaces the recap and entire payload;
+  omitting the payload clears it.
+  To patch an existing named panel, put one or more `wb:change` bundles
+  inside `wb:panel name="..."`, each holding `wb:old` and `wb:new` as in
+  the example. Changes apply in order to the latest payload, each against
+  the preceding result: nonempty `wb:old` must match exactly once; empty
+  `wb:new` deletes it. Send only bundles, with no full payload alongside
+  them. Omitted `recap` retains the latest recap; an explicit one must be
+  nonempty. The result appends one immutable version. Retrieve the latest
+  payload with `panel: "pN"` for exact anchors. `wb:edit` edits only current
+  content, not panels.
   Split content-heavy material into several (sub)panels rather than one
   huge panel; payloads are capped at 2 MiB of UTF-8 bytes, with an external
   file link as the alternative.
@@ -312,7 +334,7 @@ Markdown up to the closing tag.
   screenshots keep their existing location.
 - Agent log: `wb:log` appends one line of inline Markdown, without images,
   HTML, or block structures. Append a current-state line when the work's
-  state changes, so the latest agent line remains a useful summary; put
+  state changes, so it remains useful when it supplies the topic head; put
   substantial discussion in a panel instead of rewriting current content.
   The server records successful item/content/panel/close/reopen transitions
   as system events. Agent lines give a concise interpretation of current
@@ -347,16 +369,17 @@ omit it.
 Unknown state omits `state` and reports `state_diagnostic` with `entry` and
 code `malformed` or `unsupported`, rather than reusing an older deadline.
 These are metadata, not selectors; system state events do not replace the
-latest-agent summary.
+topic-head summary.
 
 ### Discovery and entry filters
 
 - Without explicit item/content selectors, default discovery is metadata:
-  each topic's latest agent line, its last ten log entries, and panel recaps.
+  each topic's current summary (newer agent line or panel recap), its last
+  ten log entries, and panel recaps.
   The recap list uses the newest matching version of each `pN`; a text
   match may therefore name a historical `eN`, not the current version.
   A `topic` or `text` filter still does not return current content or panel
-  payloads. System events cannot replace the latest-agent summary.
+  payloads. System events cannot replace the current summary.
 - `topic` takes a name or list, resolving stems and labels as `wb:topic`
   does. `closed: true` includes closed topics; topic/text-targeted discovery
   includes matching closed topics by default, while untargeted discovery
