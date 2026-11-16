@@ -275,8 +275,9 @@ not all by default:
 ### Phase 3: Remove board-exposure layout amplification from scrolling
 
 Implement the measured exposure phase above without pulling in composer or
-unmeasured generic render-transaction changes. First reject hidden/closed-details descendants before any geometry read in
-shared exposed/reading and dashboard candidate lists. Drive release checks
+unmeasured generic render-transaction changes. First reject hidden/closed-details
+descendants before any geometry read in shared exposed/reading and dashboard
+candidate lists. Drive release checks
 from observer exposure changes, not every scroll rAF; retain exact clipping at
 those change boundaries. Optimize the frame-height keep/reading path as well.
 A scroll must not measure all units or re-run a whole board swap when no held
@@ -290,8 +291,62 @@ closed details (including summary exceptions), non-rendered ancestors,
 unchanged exposure, partial/actual release, cross-topic spans, DOM replacement,
 independent scrollers, reading-line hit-test and the no-IntersectionObserver
 fallback. Include hidden historical versions/system runs in the 1,000-unit
-fixture. Record content-visibility:auto/virtualization only as a future phase. Run the scoped
-Go regressions on w5090; Node-dependent Go cases skip there, so execute the
+fixture. Record content-visibility:auto/virtualization only as a future phase.
+Run the scoped Go regressions on w5090; Node-dependent Go cases skip there, so execute the
 Node contracts locally without ws processes. Source-only checks must not claim
 native forced-layout timing or the owner's post-merge trace. One R1 review and
 fixes-only R2; report HEAD/range at this phase boundary.
+
+### Result (286495f00) - 2026-11-16
+
+Implemented the assigned exposure Phase 3 on `impl/develop/defy-afoot-dares`,
+base `1682b0c49`; other phases are not claimed complete.
+
+- Shared `rendered()` rejects closed-details descendants, hidden attributes,
+  display-none/display-locked states and detached nodes before geometry. A
+  closed details box and its own first summary remain eligible. Apply this
+  filter to exposed(), reading candidates, sticky headers, dashboard live
+  panels and exposure units. Observing a hidden node skips scroller inspection.
+- Modern raw scroll events no longer scan/re-stage the board. Topic/panel/card/
+  group observer exposure transitions queue one exact release check; repeated
+  identical reports do nothing. Disclosure toggles and the coalesced old-engine
+  fallback remain supported. Existing canonical/viewed/unread staging logic,
+  one-pixel/sticky/clip checks and top-origin click-only behavior are retained.
+- Shared reading capture first hit-tests the reading line and preserves the
+  original hidden-safe fallback for gaps/overlays/old engines. Rects and snapshot
+  visibility are memoized per read-only pass. Frame-height batches share cached
+  ancestor/scroller resolution, capture once per actual scroller, and reuse the
+  pre-write result rather than inspecting keep after each height write.
+- No dashboard.js, dashboard-composer.js, capsules.js, clock, hidden-cache,
+  style/virtualization or daemon lifecycle edits in this branch.
+
+Verification actually executed:
+
+- Local `node --test agents-plugin-tool/internal/wsdashboard/testdata/board-exposure.test.cjs`:
+  PASS. Parses full shipped dashboard/shared-history sources; runs hidden and
+  summary/fallback tests, actual observer subscription/coalescing, old-engine
+  fallback, existing shared viewKit contracts and static viewed-panel contracts.
+- Synthetic 1,000-unit board with 50 closed descendants: **0 getBoundingClientRect
+  calls and 0 release checks from 100 raw scroll events**; **4 rect calls** for
+  the actual `applyFrameHeights -> boardKeep -> keep -> reading` batch. No hidden
+  node rect was read. Counts are VM instrumentation of rect calls, not measured
+  native forced layouts, hit-test latency or the owner's browser frame rate.
+- Red controls run from `git show 1682b0c49:<source>` piped into the same offline
+  tests: shared-history base fails `hidden geometry was measured`; dashboard
+  base fails `raw scroll ticks must not recompute exposure`. No local Go/ws
+  executable or test-built fixture is involved.
+- Remote w5090 job `18241e3a64dd478b91324c730999fa28`:
+  `go test ./internal/wsdashboard/ ./internal/wswhiteboard/ -run "^Test(BoardViewed|BoardKeep|BoardFrame|BoardExposure|ViewKit|StreamScript)"`
+  PASS (0.196 s / 0.018 s). Node-only Go cases skip on the Node-less remote;
+  their direct offline Node runs above are separate evidence. Go-rendered
+  dynamic fixture cases were not independently run under local Node.
+- `git diff --check`: PASS. R1 and owner live re-trace remain pending. No daemon
+  swap/rebuild/restart, local Go/ws/launcher/test binary, browser/account action
+  or push performed.
+
+**Forward:** evaluate content-visibility:auto/contain-intrinsic-size or lazy
+DOM/virtualization only AFTER this hidden-measurement guard lands and the owner
+re-traces unavoidable long-document layout cost. Do not add them here or infer
+that batched reads alone make display-locked subtree measurements safe. Broader
+render transactions and per-layout DOM cost remain later measured work; composer
+implementation belongs to Exec 5's independent branch.
