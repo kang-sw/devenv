@@ -6,7 +6,7 @@ import (
 )
 
 func TestKeyedRowsClientHelpers(t *testing.T) {
-	src := dashboardFuncs(t, "keyedSame", "keyedInputPatch", "mergeEntriesRegion")
+	src := dashboardFuncs(t, "keyedSame", "keyedInputPatch", "keyedInputHTML", "mergeEntriesRegion")
 	runNode(t, "keyed row helpers", streamPageHarness+`
 var box = {rows:{a:"old A",b:"old B"}}, incoming = {rows:{a:"new A",b:"new B"}};
 function entriesBox() { return box; }
@@ -31,6 +31,11 @@ var entry = {shell:"entry",order:["a"],rows:{a:{html:"old a"}}};
 var entryNext = keyedInputPatch(entry,{hash:"h",order:["a"],rows:[{key:"a",hash:"a1",html:"new a"}]},rowNode);
 check("entry patch updates row without mutating baseline",[entryNext.shell,entryNext.rows.a.html,entry.rows.a.html],["entry","new a","old a"]);
 check("validator rejects row",keyedInputPatch(entry,{hash:"h",order:["a"],rows:[{key:"a",hash:"a1",html:"new a"}]},rowNode,function() { return false; }),null);
+var entryHTML = {shell:"<main><!--ws-entry-row-0--></main>",order:["a"],rows:{a:{html:"<p>entry</p>"}}};
+check("entry HTML fills slot",keyedInputHTML(entryHTML,/<!--ws-entry-row-(\d+)-->/g),"<main><p>entry</p></main>");
+var treeHTML = {shell:"<main><!--ws-tree-row-0--></main>",order:["parent","child"],parents:[-1,0],rows:{parent:{html:"<div>parent<!--ws-tree-row-1--></div>"},child:{html:"<div>child</div>"}}};
+check("tree HTML fills nested child slot",keyedInputHTML(treeHTML,/<!--ws-tree-row-(\d+)-->/g,true),"<main><div>parent<div>child</div></div></main>");
+check("HTML string passes through",keyedInputHTML("raw",/unused/g),"raw");
 process.stdout.write(bad.join("\n"));
 `)
 }
