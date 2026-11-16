@@ -326,7 +326,9 @@ func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
 
 	page := render(t, view)
 	wantAll(t, page, `<div class="doc-body md"><p><strong>plan</strong></p>`, "fetch('/s/r/message'")
-	wantNone(t, page, "<iframe", "srcdoc")
+	// The shared panel comparison script references srcdoc, but the disk
+	// page must render neither a frame nor a framed-document placeholder.
+	wantNone(t, markup(page), "<iframe", " srcdoc=", " data-srcdoc=")
 }
 
 // TestServedBoardFramesEveryBodySeparately: one frame per body, each carrying
