@@ -180,11 +180,12 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 }
 
 // A panel-level quote may contain whole wrapper examples or a quoted opener,
-// but it must not end halfway through a structural operand. Otherwise the raw
-// payload can silently replace a patch instead of leaving a visible refusal.
-// Walk only the candidate's bytes, skipping operand bodies by their own raw
-// close (and CDATA), just as structural reading does.
-func literalOperandCrossing(s string, at, end int, wrapper *bodyWrapper) string {
+// but it must not end halfway through a structural operand or wrapper. Otherwise
+// the raw payload can silently replace a patch instead of leaving a refusal.
+// Skip operand bodies by their own raw close (and CDATA), just as structural
+// reading does. A bare quoted opener stays legal without a structural tail.
+func (t *tokenizer) literalOperandCrossing(at, end, lineStart int, wrapper *bodyWrapper, closing string, tail *literalWrapperTail) string {
+	s, start, tailStart := t.s, at, end
 	inside := false
 	for at < end {
 		next := strings.IndexByte(s[at:end], '<')
@@ -196,6 +197,13 @@ func literalOperandCrossing(s string, at, end int, wrapper *bodyWrapper) string 
 		if strings.HasPrefix(rest, "<![CDATA[") {
 			close := strings.Index(rest[9:], "]]>")
 			if close < 0 {
+				// CDATA still owns the bytes after the literal ends. Only
+				// content after its real close can continue this wrapper.
+				close = strings.Index(s[at+9:], "]]>")
+				if close < 0 {
+					return ""
+				}
+				tailStart = at + 9 + close + 3
 				break
 			}
 			at += 9 + close + 3
@@ -236,7 +244,91 @@ func literalOperandCrossing(s string, at, end int, wrapper *bodyWrapper) string 
 			at = close + len(closing)
 		}
 	}
+	if inside {
+		if newline := strings.LastIndexByte(s[start:tailStart], '\n'); newline >= 0 {
+			lineStart = start + newline + 1
+		}
+		if tail.continues(t, tailStart, lineStart, wrapper, closing) {
+			return wrapper.tag
+		}
+	}
 	return ""
+}
+
+// Cache the next structural tail marker (or command close). Many bare quoted
+// openers must not each rescan the same remaining body, even when none has a
+// continuation. Candidates arrive in source order, so each suffix is walked once.
+type literalWrapperTail struct {
+	at         int
+	structural bool
+}
+
+func (tail *literalWrapperTail) continues(t *tokenizer, at, lineStart int, wrapper *bodyWrapper, closing string) bool {
+	if at <= tail.at {
+		return tail.structural
+	}
+	s, bodyStart, limit := t.s, at, len(t.s)
+	// Lookahead shares the delimiter index, but not diagnostic/crossing state.
+	probe := tokenizer{s: s, literals: t.literals}
+	defer func() { t.literals = probe.literals }()
+	advance := func(end int) {
+		if newline := strings.LastIndexByte(s[at:end], '\n'); newline >= 0 {
+			lineStart = at + newline + 1
+		}
+		at = end
+	}
+	for at < len(s) {
+		next := strings.IndexAny(s[at:], "<`~\n")
+		if next < 0 {
+			break
+		}
+		at += next
+		if s[at] != '<' {
+			end := probe.codeLiteralEnd(at, bodyStart, lineStart, closing, &limit)
+			// Body parsing unwraps CDATA even within a code literal. If
+			// that literal ends inside CDATA, resume after its real close.
+			for pos := at; pos < end; {
+				next := strings.Index(s[pos:end], "<![CDATA[")
+				if next < 0 {
+					break
+				}
+				pos += next + 9
+				close := strings.Index(s[pos:], "]]>")
+				if close < 0 {
+					end = len(s)
+					break
+				}
+				pos += close + 3
+				end = max(end, pos)
+			}
+			advance(max(at+1, end))
+			continue
+		}
+		rest := s[at:]
+		if strings.HasPrefix(rest, closing) {
+			tail.at, tail.structural = at, false
+			return false
+		}
+		if strings.HasPrefix(rest, "<![CDATA[") {
+			close := strings.Index(rest[9:], "]]>")
+			if close < 0 {
+				break
+			}
+			advance(at + 9 + close + 3)
+			continue
+		}
+		structural := strings.HasPrefix(rest, "</"+wrapper.tag+">")
+		for _, field := range wrapper.fields {
+			structural = structural || openingTagPrefix(rest, field)
+		}
+		if structural {
+			tail.at, tail.structural = at, true
+			return true
+		}
+		at++
+	}
+	tail.at, tail.structural = len(s), false
+	return false
 }
 
 // Matching indexes positions only; no fallback grammar walk licenses crossings.

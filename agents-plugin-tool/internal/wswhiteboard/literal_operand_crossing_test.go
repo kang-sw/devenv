@@ -9,7 +9,21 @@ import (
 )
 
 func TestNamedPanelPatchRefusesPanelToOperandCodeSpan(t *testing.T) {
-	const patch = "<wb:panel name=\"p\" recap=\"r2\">` <wb:change><wb:old>alpha ` x</wb:old><wb:new>z</wb:new></wb:change></wb:panel>"
+	testNamedPanelPatchRefusesCrossing(t, "<wb:panel name=\"p\" recap=\"r2\">` <wb:change><wb:old>alpha ` x</wb:old><wb:new>z</wb:new></wb:change></wb:panel>")
+}
+
+func TestNamedPanelPatchRefusesPanelToWrapperCodeSpan(t *testing.T) {
+	for _, body := range []string{
+		"` <wb:change><wb:old>alpha</wb:old> ` <wb:new>z</wb:new></wb:change>",
+		"` <wb:change> ` <wb:old>alpha</wb:old><wb:new>z</wb:new></wb:change>",
+		"` <wb:change><wb:old>alpha</wb:old><wb:new>z</wb:new> ` </wb:change>",
+	} {
+		testNamedPanelPatchRefusesCrossing(t, `<wb:panel name="p" recap="r2">`+body+`</wb:panel>`)
+	}
+}
+
+func testNamedPanelPatchRefusesCrossing(t *testing.T, patch string) {
+	t.Helper()
 	input := `<wb:topic name="t">` + patch + `</wb:topic>`
 	for _, ordered := range []bool{false, true} {
 		p := &problems{}
