@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: db8b9983ce535506
 sage-review-completeness-reviewed: db8b9983ce535506
+completed: 2026-11-16
 ---
 
 # Eliminate ws executable launches outside new-daemon start
@@ -627,6 +628,79 @@ The ticket remains open for the coordinator's final disposition.
   daemon, and no local Go/ws/launcher/test executable, build, PID query,
   sampling, daemon lifecycle action or shared-root write was performed.
 
+#### Edition (3345e3588) - 2026-11-16
+
+##### Overall final verdict
+
+**Accepted for closure within the approved scope and residual boundaries.**
+Coordinator 06:31:41Z authorized final evidence reconciliation and closure;
+06:32:27Z explicitly accepted evidence-limited reconnect/mailbox observations
+without a dedicated reconnect-window measurement. No new execution, sampling,
+test, implementation or residual-boundary work was performed for this edition.
+
+- Source/review foundation: original launcher/profile/Pi-cache implementation
+  merged in `74924b4c0`, bounded dev lifecycle repair in `4fdb920c0`, Codex
+  REST in `8072be902`, and item 4 live Result in `3345e3588`. Their scoped
+  mock/remote gates and independent reviews are recorded in the checkpoints
+  below; this edition does not turn them into live measurements or claim a
+  broad-suite run. Directional T0 remains the frozen old-history
+  read/append/new-reopen proof, not a conclusion from the live percentage.
+- Read-only artifact inspection:
+  `D:/Temp/daemon-swap-1116c/summary-final.txt` records the coordinator-owned
+  300-ms sampler, 06:16:16-06:21:11Z, with the selected swap-minus-30-seconds
+  through swap-plus-three-minutes window 06:16:51-06:20:21Z. It records two
+  starts of the selected `ws-mcp-dashboard-84a3ccf259151abf.exe`: explicit
+  `daemon-start --replace` PID 13204 at 06:17:20.442Z and necessary daemon
+  child PID 2404 at 06:17:21.481Z. There is no repeated ws starter storm in
+  that observed window, and `codex.exe` count is zero. Python/session and
+  unrelated executable starts are not conflated with forbidden ws starts.
+  Polling can miss short-lived processes; this is not a kernel event trace
+  or proof of zero executable activity outside the recorded window.
+- The same artifact records `dev.py rerun` exit 0 after the one-shot starter
+  returned `unavailable`, followed by expected-build REST confirmation and
+  the recovery diagnostic. This supplies live evidence for the bounded
+  dev-wrapper false-failure repair without changing its success criterion.
+- Reconnect/mailbox live evidence is deliberately **limited to continued
+  operation/delivery after swap**: coordinator reports lead MCP tools kept
+  working, and this session's 06:31Z/06:32Z mail exchange was delivered
+  through the swapped daemon. No dedicated reconnect-window, latency,
+  stream/one-shot matrix, cancellation or request-replay measurement exists;
+  none is claimed as a measured PASS. The coordinator explicitly states
+  this limitation does not block closure. Deterministic contract tests and
+  source review remain their separate evidence, not substituted live data.
+- Item 4 live PASS above supplies fresh real-credential dashboard acquisition
+  and matching history append with the stable legacy identifier. Earlier
+  `daemon-swap-1116` / `daemon-swap-1116b` observations remain historical:
+  old in-memory launchers were outside the accepted updated-gate guarantee.
+  They are not presented as a clean historical all-process measurement, and
+  PID 3452's exact historical admission cause remains unproven.
+
+##### Forwards - approved residual boundaries, no new assignment
+
+- **Item 3: retained old executable/metadata and orphan temp files.** Without
+  authoritative process-use/accepted/rollback retention evidence, settled
+  artifacts remain intentionally; each copy cleans only its own failed temp.
+  Retention itself starts no executable. A safe general sweep would require
+  separate retention/process-use design, not age-only deletion. Rough size:
+  **medium, 0.5-1 engineering day**; no new ticket or implementation authorized.
+- **Item 5: Pi probe on cache miss and five-minute model-cache expiry.** The
+  approved success cache reduces repeats but does not eliminate the existing
+  Pi/Node probe process on a miss or expiry. Recurrence on this PC was not
+  separately measured by this closing review. Eliminating those probes would
+  need a new non-process source/refresh design beyond the completed cache
+  contract. Rough size: **medium, 0.5-1 engineering day**, source-dependent;
+  no new ticket or implementation authorized.
+- **Item 1: Electron concurrent-start losing starter.** Updated Python
+  launchers share the starter gate; Electron does not. A rare simultaneous
+  new-daemon start can still execute one losing ws starter, with Go's
+  singleton preventing a second daemon. This is the explicitly accepted
+  new-start boundary, not a reproduced new defect. Eliminating it requires
+  separate cross-language gate coordination. Rough size: **medium,
+  0.5-1 engineering day**; no new ticket or implementation authorized.
+
+These are rough future-scope estimates, not scheduled work or expanded
+acceptance requirements. Closure preserves all three approved boundaries.
+
 ## Constraints
 
 - Python launcher, holder, and hosted harness process creation remain
@@ -1114,3 +1188,8 @@ The ticket remains open for the coordinator's final disposition.
   trace. Repair the proven dev gate bypass without claiming that the CSV
   proves its exact cause; repeat acceptance remains coordinator-owned.
 - Coordinator-approved boundary: old launchers and Electron do not share the new starter lock; a rare Electron race can execute one losing starter, with Go's singleton preventing a second daemon.
+
+
+## Resolution (2026-11-16)
+
+Closed under coordinator authorization at 2026-11-16 06:31:41Z, clarified 06:32:27Z. The closing Result Edition (3345e3588) combines item 4 real-credential REST/history PASS with the inspected 06:17Z swap artifact and explicitly evidence-limited continued MCP/mailbox operation. It preserves the three approved residual boundaries (retained staged artifacts, Pi cache-miss/TTL probes and Electron losing starter) with rough future-scope estimates; no new work or tickets are authorized. No dedicated reconnect-window measurement or blanket all-executable guarantee is claimed.
