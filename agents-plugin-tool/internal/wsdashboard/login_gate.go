@@ -47,7 +47,11 @@ func (d *Daemon) serveLoginGateState(w http.ResponseWriter, r *http.Request, inv
 		Clipboard: localViewer(r) && d.clipboardAvailable(), RateLimited: rateLimited,
 		CSS: template.CSS(get("css")), Script: template.JS(get("js"))}
 	logo, _ := dashboardFS.ReadFile("assets/brand/werkschaft-light.svg")
-	data.Logo = template.HTML(strings.Replace(string(logo), `stroke="#1E2235"`, `stroke="currentColor"`, 1))
+	_, logoBody, _ := strings.Cut(string(logo), ">")
+	logoBody = strings.TrimSuffix(strings.TrimSpace(logoBody), "</svg>")
+	logoBody = strings.Replace(logoBody, `stroke="#1E2235"`, `stroke="currentColor"`, 1)
+	// Match the approved lockup's symbol viewport while reusing the shipped art.
+	data.Logo = template.HTML(`<svg viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><symbol id="lg-lockup" viewBox="40 56 1300 272">` + logoBody + `</symbol><use href="#lg-lockup"/></svg>`)
 	var out bytes.Buffer
 	if err := t.Execute(&out, data); err != nil {
 		http.Error(w, "login page unavailable", http.StatusInternalServerError)

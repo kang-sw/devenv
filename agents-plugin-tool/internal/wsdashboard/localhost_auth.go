@@ -155,12 +155,12 @@ func (d *Daemon) refuseLogin(w http.ResponseWriter, r *http.Request, invalid boo
 func validLoginPath(path string) bool {
 	decoded, err := url.PathUnescape(path)
 	if err != nil || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") ||
-		strings.Contains(decoded, "\\") || strings.IndexFunc(decoded, unicode.IsControl) >= 0 {
+		strings.IndexFunc(decoded, unicode.IsControl) >= 0 {
 		return false
 	}
 	u, err := url.Parse(path)
 	return err == nil && !u.IsAbs() && u.Host == "" && u.Opaque == "" &&
-		strings.HasPrefix(u.Path, "/") && !strings.HasPrefix(u.Path, "//")
+		strings.HasPrefix(u.Path, "/") && !strings.HasPrefix(u.Path, "//") && !strings.Contains(u.Path, "\\")
 }
 
 // loginNext is shared with the self-contained gate. It retains path/query,

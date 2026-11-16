@@ -15,6 +15,15 @@
     if (typeof next !== "string" || next[0] !== "/" || next[1] === "/" || /[\\\r\n]/.test(next)) next = "/";
     return next + location.hash;
   }
+  function continueTo(next) {
+    var target = new URL(destination(next), location.origin);
+    // A gate occupies the requested URL already. Replacing that same URL with
+    // a fragment is a same-document navigation, so it would leave the gate up.
+    if (target.pathname === location.pathname && target.search === location.search) {
+      history.replaceState(null, "", target.href);
+      location.reload();
+    } else location.replace(target.href);
+  }
   function message(text, warning) {
     var msg = document.getElementById("lg-msg");
     msg.hidden = false;
@@ -24,7 +33,13 @@
     input.setAttribute("aria-invalid", warning ? "false" : "true");
   }
   function nativeVisible(on) {
-    if (native) native.hidden = !on;
+    if (native) {
+      native.hidden = !on;
+      if (on) {
+        document.getElementById("lg-sub").hidden = false;
+        document.getElementById("lg-native-msg").hidden = true;
+      }
+    }
     if (divider) divider.hidden = !on;
   }
   function checking(on) {
@@ -57,7 +72,7 @@
       }
       document.getElementById("lg-form").hidden = true;
       document.getElementById("lg-done").hidden = false;
-      setTimeout(function () { location.replace(destination(r.body.next)); }, 800);
+      setTimeout(function () { continueTo(r.body.next); }, 800);
     }).catch(function () { checking(false); message(cfg.invalidText, false); input.focus(); input.select(); });
   }
   function copyNative() {
@@ -65,7 +80,10 @@
     copyBusy = true; copy.disabled = true;
     if (again) again.disabled = true;
     document.getElementById("lg-native-msg").hidden = true;
-    fetch("/auth/clipboard", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({next:cfg.next})}).then(function (r) {
+    document.getElementById("lg-msg").hidden = true;
+    input.classList.remove("bad");
+    input.removeAttribute("aria-invalid");
+    fetch("/auth/clipboard", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({next:destination(cfg.next)})}).then(function (r) {
       if (!r.ok) throw {rate:r.status === 429};
       nativeVisible(false);
       hint.className = "lg-hint go";
@@ -78,6 +96,7 @@
       document.getElementById("lg-sub").hidden = true;
       var msg = document.getElementById("lg-native-msg");
       msg.hidden = false; msg.className = "lg-msg " + (err.rate ? "warn" : "note");
+      msg.querySelector("path").setAttribute("d", err.rate ? "M12 8v4M12 16h.01" : "M12 16v-4M12 8h.01");
       document.getElementById("lg-native-message").textContent = err.rate ? cfg.rate : cfg.unavailable;
     }).finally(function () {
       copyBusy = false; copy.disabled = false;
@@ -102,6 +121,6 @@
   // A cross-site navigation omits Strict cookies; this same-origin probe carries
   // them. No clipboard access occurs without an explicit button or paste gesture.
   fetch("/auth/status", {cache:"no-store"}).then(function (r) {
-    if (r.ok && !busy && !copyBusy) location.replace(destination(cfg.next));
+    if (r.ok && !busy && !copyBusy) continueTo(cfg.next);
   }).catch(function () {});
 })();

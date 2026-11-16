@@ -7,6 +7,39 @@
   // board answers, layout and tab), and formats times. It never builds
   // region HTML itself.
   var doc = document, root = doc.documentElement;
+  // HTTP and stream failures must bring a stale local tab back to the gate.
+  // Read only the auth error, on a clone: callers retain their response body.
+  var loginReloading = false, loginProbing = false;
+  var authFetch = window.fetch && window.fetch.bind(window);
+  function loginLost() {
+    if (loginReloading) return;
+    loginReloading = true;
+    try { window.top.location.reload(); } catch (e) { location.reload(); }
+  }
+  function loginResponse(response) {
+    if (!root.hasAttribute("data-sysopen") || response.status !== 401 || typeof response.clone !== "function") return;
+    response.clone().json().then(function (body) {
+      if (body && body.error === "login_required") loginLost();
+    }).catch(function () {});
+  }
+  if (authFetch) {
+    window.fetch = function (input, options) {
+      return authFetch(input, options).then(function (response) {
+        var target;
+        try { target = new URL(typeof input === "string" ? input : input.url || String(input), location.href); } catch (e) {}
+        if (target && target.origin === location.origin) loginResponse(response);
+        return response;
+      });
+    };
+  }
+  function probeLogin() {
+    // A LAN tab has a different credential; the localhost status probe cannot
+    // judge it. A failed network probe is not proof that a cookie was revoked.
+    if (!authFetch || !root.hasAttribute("data-sysopen") || loginProbing || loginReloading) return;
+    loginProbing = true;
+    authFetch("/auth/status", {cache: "no-store"}).then(loginResponse).catch(function () {}).finally(function () { loginProbing = false; });
+  }
+  window.wsDashboardLoginProbe = probeLogin;
   function q(sel, el) { return Array.prototype.slice.call((el || doc).querySelectorAll(sel)); }
   function $(id) { return doc.getElementById(id); }
   var mode = root.getAttribute("data-mode");

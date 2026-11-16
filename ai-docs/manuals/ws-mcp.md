@@ -109,7 +109,9 @@ under `<cache root>/dashboard/`:
   `dashboard.log` - the running daemon's
   log, including one line per session added to or removed from its index;
   `lan-token` - the LAN access token (LAN mode only), kept across daemon
-  restarts; deleting it issues a new one at once. `last-port` - the port the
+  restarts; deleting it issues a new one at once. `localhost-secret` - the
+  separate owner-only persisted key for the localhost browser cookie; deleting
+  it invalidates existing cookies without a restart. `last-port` - the port the
   last daemon bound: when `dashboard.port` is taken by another program, the
   daemon binds this port before an OS-assigned one, so a restart keeps its
   origin (page localStorage, LAN bookmark); a free `dashboard.port` always
@@ -562,9 +564,11 @@ of at the turn end. `POST /s/<reply-id>/interrupt` (body ignored) takes back
 every held message, steered or not, and writes an interrupt entry in one step
 under the inbox lock, answering `{held: [{id, text, chips, topics, images, nums}]}`
 in queue order (steered first, then the rest), each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
-and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `full:` line names
-`http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
-answered, and the page path otherwise.
+and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s
+`full:` line names the session's dashboard URL once its last nudge was answered,
+and the page path otherwise. A daemon-hosted server adds a single-use login code
+with a ten-minute expiry through an in-process hook; a server without that hook
+keeps the plain URL.
 
 The daemon creates one tracker host (`wstrackerhost.New`) before it starts
 serving, shared by the tracker's background poll and the tracker routes, and
@@ -1131,19 +1135,33 @@ its height, which covers a frame swapped in after the switch), and redraws
 drawn mermaid diagrams, in the page and in the frames, in the new palette.
 
 By default the daemon binds loopback and every route requires a loopback
-Host. LAN mode (`dashboard.lan_enabled`, read from the global config layer
-only and passed as `dashboard --lan`) binds every interface: a request whose
-peer address and Host are both loopback still passes with no token, and every
-other request, on every route, needs the LAN access token, which is separate
-from the endpoint file's shutdown token, with one exception: GET and HEAD of
-the shared mermaid script (`/s/<content-hash>.js`, the vendored library under
-a hash name, so it reveals nothing of any session) pass without it, because
-a topic body's sandboxed frame, an opaque origin, loads it with no cookie. The token arrives as `?token=` on the
-address the index page shows to a viewer on this machine only; that answer
-sets an HttpOnly cookie, which the page's links, SSE stream, images, and posts
-then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,
-and the daemon re-reads the global value when a session connects: a value
-that differs from its own mode replaces it through the drain path below.
+Host. Browser-facing routes additionally require the localhost HttpOnly,
+SameSite=Strict cookie, derived from `localhost-secret` and kept for up to 400
+days. Cookieless navigations show the self-contained login gate; fetches and
+WebSocket handshakes answer `401 {"error":"login_required"}`. Explicit gate
+copying asks the daemon to place a fresh single-use ten-minute link in the OS
+clipboard, then the user pastes it back. This route accepts only a loopback peer
+and Host with its own Origin and same-origin fetch metadata when present; it is
+rate-limited and returns no credential. Unavailable native writers hide the
+action, while runtime write failures allow retry. Nothing reads or writes the
+clipboard on page load. Agent links, Settings and the desktop Connection menu
+provide additional explicit login-link paths. Electron sets its native cookie
+before navigation. A same-origin status probe recovers a Strict-cookie browser
+that followed a cross-site link, retaining the requested fragment.
+
+LAN mode (`dashboard.lan_enabled`, global-only, passed as `dashboard --lan`)
+binds every interface. Local peer plus Host still requires the localhost cookie;
+a non-local browser needs the separate LAN token. Neither credential grants
+access through the other branch, and a LAN token never grants trusted writes.
+The LAN token arrives as `?token=` on the Settings addresses shown only to a
+local viewer and becomes its existing HttpOnly cookie. Machine routes retain
+their own checks without requiring the browser cookie: `/health`, `/mcp`,
+`/shutdown`, `/nudge`, `/session-hire/roster`, and `/agents/by-token/<op>`.
+Nudge and roster clients now send the endpoint bearer, but enforcement is deferred
+to preserve older clients. GET/HEAD public frame assets, path-capability routes
+and `/pwa/*` also remain cookieless. Every other route is gated by default.
+`/health` reports the mode as `lan`, and the daemon re-reads the global value
+when a session connects: a changed mode replaces it through the drain path below.
 
 At an equal numeric core, ordinary connection keeps the healthy daemon
 regardless of version suffix, build time or content hash. `/health` retains

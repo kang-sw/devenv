@@ -2110,7 +2110,7 @@
   "login.clipfail": "클립보드를 읽을 수 없습니다. Ctrl+V 또는 ⌘V로 붙여넣으세요.",
   "login.where": "위의 클립보드에 복사 버튼, 에이전트, 로그인된 대시보드의 설정 ⚙, 또는 데스크톱 앱의 Connection 메뉴 → Copy Browser Login Link to Clipboard에서 링크를 받으세요.",
   "login.connected": "연결됨",
-  "login.continuing": "요청한 페이지를 여는 중…",
+  "login.continuing": "요청한 페이지로 이동합니다…",
   "login.copy": "브라우저 로그인 링크 복사",
   "login.copy.sub": "클립보드에 복사됩니다 · 다른 브라우저에 붙여넣으면 로그인됩니다 · 10분 안에 한 번",
   "js.login.copied": "로그인 링크를 복사했습니다. 10분 이내에 한 번만 사용하세요.",

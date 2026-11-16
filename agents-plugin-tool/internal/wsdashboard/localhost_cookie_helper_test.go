@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -58,15 +60,82 @@ func registerLocalhostTestDaemon(t *testing.T, d *Daemon) {
 		t.Fatal(err)
 	}
 	t.Setenv("WS_DASHBOARD_TEST_COOKIES", string(raw))
-	// All existing Chromium fixtures import WS_PLAYWRIGHT_MODULE. Point that
-	// test-only seam at a wrapper that seeds each browser context's cookie jar.
-	if module := os.Getenv("WS_PLAYWRIGHT_MODULE"); module != "" && os.Getenv("WS_PLAYWRIGHT_REAL_MODULE") == "" {
-		helper, err := filepath.Abs("testdata/localhost-cookie.cjs")
-		if err != nil {
+	// Chromium fixtures use either the normal module seam or the opt-in
+	// performance seam. Both must seed real cookies before their navigation.
+	helper, err := filepath.Abs("testdata/localhost-cookie.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"WS_PLAYWRIGHT_MODULE", "WS_VIEWED_PERF_PLAYWRIGHT", "BOARD_HEADLESS_PLAYWRIGHT", "PLAYWRIGHT_MODULE"} {
+		module := os.Getenv(name)
+		if module == "" || module == helper {
+			continue
+		}
+		if os.Getenv("WS_PLAYWRIGHT_REAL_MODULE") == "" {
+			t.Setenv("WS_PLAYWRIGHT_REAL_MODULE", module)
+		}
+		if name == "WS_PLAYWRIGHT_MODULE" || name == "WS_VIEWED_PERF_PLAYWRIGHT" {
+			t.Setenv(name, helper)
+		}
+	}
+	if os.Getenv("WS_PLAYWRIGHT_REAL_MODULE") != "" {
+		// board-headless imports a directory-shaped ESM module, not the CJS
+		// filename used by the other fixtures. Both adapters share one cached
+		// wrapper object, including the acceptance safety preloader's hooks.
+		shim := t.TempDir()
+		source := "import { createRequire } from 'node:module';\nconst playwright = createRequire(import.meta.url)(" + strconv.Quote(helper) + ");\nexport const chromium = playwright.chromium;\nexport default playwright;\n"
+		if err := os.WriteFile(filepath.Join(shim, "index.mjs"), []byte(source), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("WS_PLAYWRIGHT_REAL_MODULE", module)
-		t.Setenv("WS_PLAYWRIGHT_MODULE", helper)
+		t.Setenv("BOARD_HEADLESS_PLAYWRIGHT", shim)
+		if os.Getenv("PLAYWRIGHT_MODULE") != "" {
+			t.Setenv("PLAYWRIGHT_MODULE", shim)
+		}
+	}
+}
+
+func TestLocalhostCookieHelperBrowserModuleSeams(t *testing.T) {
+	seams := []string{"WS_PLAYWRIGHT_MODULE", "WS_VIEWED_PERF_PLAYWRIGHT", "BOARD_HEADLESS_PLAYWRIGHT", "PLAYWRIGHT_MODULE"}
+	for _, seam := range seams {
+		t.Run(seam, func(t *testing.T) {
+			for _, name := range append([]string{"WS_PLAYWRIGHT_REAL_MODULE"}, seams...) {
+				t.Setenv(name, "")
+			}
+			rawModule := filepath.Join(t.TempDir(), "cached-playwright")
+			t.Setenv(seam, rawModule)
+			f := startPageFixture(t)
+			if os.Getenv("WS_PLAYWRIGHT_REAL_MODULE") != rawModule {
+				t.Fatal("wrapper lost the caller's selected cached module")
+			}
+			helper, err := filepath.Abs("testdata/localhost-cookie.cjs")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (seam == seams[0] || seam == seams[1]) && os.Getenv(seam) != helper {
+				t.Fatal("file-shaped module seam did not select the cookie wrapper")
+			}
+			shim := os.Getenv("BOARD_HEADLESS_PLAYWRIGHT")
+			source, err := os.ReadFile(filepath.Join(shim, "index.mjs"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(source), "createRequire(import.meta.url)("+strconv.Quote(helper)+")") || !strings.Contains(string(source), "export const chromium = playwright.chromium;") {
+				t.Fatal("ESM shim must reuse the same cookie wrapper and chromium object")
+			}
+			if seam == "PLAYWRIGHT_MODULE" && os.Getenv(seam) != shim {
+				t.Fatal("higher-priority board module seam bypassed the ESM shim")
+			}
+			var cookies []struct {
+				Name, Value, URL, SameSite string
+				HTTPOnly                   bool
+			}
+			if err := json.Unmarshal([]byte(os.Getenv("WS_DASHBOARD_TEST_COOKIES")), &cookies); err != nil {
+				t.Fatal(err)
+			}
+			if len(cookies) != 1 || cookies[0].Name != localhostCookieName || cookies[0].Value != localhostTestCookie(t, f.d).Value || cookies[0].URL != f.base || !cookies[0].HTTPOnly || cookies[0].SameSite != "Strict" {
+				t.Fatal("browser seam did not receive the fixture's real HttpOnly Strict cookie")
+			}
+		})
 	}
 }
 

@@ -578,3 +578,65 @@ Verification expectations:
   state) against the mockup, with captures stored under the ticket's assets
   folder.
 - i18n table tests pass with the new keys in every table.
+
+### Result (this-commit) - 2026-11-17
+
+Completed headless Chromium acceptance against a disposable daemon and native
+clipboard fake. Both themes pass real paste-without-focus, clipboard-button login,
+native copy/paste, single-use reuse refusal, injected expiry, both throttles,
+checking-state paste suppression, Settings copying/toast, Strict cross-site
+re-entry, fragment retention, and secret-deletion recovery after both a POST and
+a real live WebSocket drop. Gate and authenticated-page loads perform zero browser
+clipboard reads/writes, and do not change the native clipboard fake. Theme-cookie
+selection and OS fallback/change are covered. Writer availability hides the button;
+runtime write failure leaves it retryable. Local peer/Host visibility also has
+explicit IPv4, localhost, IPv6, unavailable-writer and LAN unit coverage.
+
+Fixed findings from acceptance/review: replacing the already-current gate URL
+with its fragment can be a same-document navigation, so successful exchange and
+Strict re-entry now force a real reload for the same path/query; native copies
+preserve fragments; new actions clear stale error messages; Windows file paths
+in query values remain valid next destinations while authority/backslash URL
+paths are still rejected. Local fetch errors and stream/terminal reconnects now
+probe/reload the top window into the gate without treating a LAN credential as a
+localhost cookie. Updated the operational manual's access/state-file descriptions.
+
+Verification commands (all Go runs use `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`):
+
+- `go test -race ./internal/wsdashboard -run '^(TestLocalhostAuth|TestLocalhostCookieHelperBrowserModuleSeams|TestLoginGate(Next|Clipboard))' -count=1`: pass.
+- `go test ./internal/wsdashboard -run '^TestLoginGateBrowser$' -count=1`, with the cached Playwright module and browser-cache environment: pass, including the final fresh capture run (17.4 seconds).
+- `go test ./internal/wsi18n -count=1`: pass, all eleven language tables.
+- `go test ./internal/wsdashboard -run '^(TestPageStreamsRideWebSocket|TestSessionPagesCarryScriptHooks|TestTerminalCardScript.*|TestShellScript|TestWebSocket.*|TestVisibility.*|TestFreshSessionScriptAsset|TestPagesAndStreamsCarryTheAssetID)$' -count=1`: pass.
+- MCP login-link/machine-client/hiring/lifecycle/whiteboard-stream/Pi-forwarding and cmd proxy/tracker batches were rerun successfully; wsagent REST/support/Pi-runner batch passes. Electron's 123-test Node suite passes. Joined dashboard and gate scripts pass Node syntax checking.
+
+All requested A/A2/A3/A4/B/C/C′/D/E states were captured in light and dark in the
+run's temporary capture directory, together with unavailable-writer, exchange-rate
+and rotation recovery states. E contains the explicit (1239) label and subtext.
+There are eighteen side-by-side comparison images and two overview sheets. The
+implementer inspected those comparisons and both supplied mockup images. Remaining
+visual differences are deliberate or native: A2 adds the approved recopy text
+button and uses the platform shortcut; A3 remains enabled per the later technical
+call; A3/A4/C′ are full pages rather than the mockup's abbreviated fragments; the
+source hint additionally names the agent and actual English Connection action,
+adding a text line and omitting the mockup's selective bold emphasis; focus rings
+and real text selection differ from simulated styling; B/C mask the actual
+`login=` URL shape. E retains the existing layout/input/language/GitHub controls,
+uses a synthetic test version, has the longer owner-required subtext, and omits
+the LAN block because the fixture is loopback-only. Core palette, card geometry,
+logo viewport, controls and D wording/check styling match the mockup.
+
+Final regression qualification: 595 affected existing test names were inventoried
+and entered in seven narrow batches (614 roots including adjacent prefix matches),
+not a claim that every opt-in assertion passed. Authenticated HTTP/WS/Chromium
+fixtures use real cookies; alternate CJS/ESM/performance module seams also have
+race-tested coverage. Nine browser failures reproduce on the untouched base:
+`BoardHoldPillBrowser`, `BoardStateFilterBrowser`, `EntryRowsBrowser`, `FSPDFBrowser`,
+`PanelRowsBrowser`, `TreeRowsBrowser`, `WhiteboardEffectsBrowser`,
+`SettingsAndEmptyRootBrowser`, and `WorktreePageBrowser` (all `Test`-prefixed).
+The base also reproduces `TestShellSwitchesFramesThroughItsGlue`'s missing helper,
+optional viewed-update performance thresholds, landing-capture locator timeouts,
+and the unified-history fixture's pre-browser missing policy class. The optional
+send-latency fixture passes. Pure-renderer opt-ins requiring separate performance
+inputs remain explicitly skipped, not silently counted as passes. The unrelated
+wsagent lead-replay timeout remains intermittent as noted in Phase 1. No assertions
+were weakened, no Electron application or SSH was used, and no push occurred.
