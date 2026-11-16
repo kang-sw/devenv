@@ -72,6 +72,12 @@ type ChoiceLister interface {
 	Choices(ctx context.Context) ([]ModelChoice, []string, error)
 }
 
+// observedChoiceLister preserves the original age of a persistent success.
+// Failure ages still begin when the listing ends, as for any ChoiceLister.
+type observedChoiceLister interface {
+	choicesObserved(context.Context, func() time.Time) ([]ModelChoice, []string, time.Time, error)
+}
+
 // Selection is a harness, model, and effort choice; an empty model or
 // effort is the profile's, else the harness's, default.
 type Selection struct {
@@ -297,7 +303,15 @@ func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 			continue
 		}
 		lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), choicesTimeout)
-		models, efforts, err := cl.Choices(lctx)
+		var models []ModelChoice
+		var efforts []string
+		var observed time.Time
+		var err error
+		if lister, ok := cl.(observedChoiceLister); ok {
+			models, efforts, observed, err = lister.choicesObserved(lctx, s.opts.Now)
+		} else {
+			models, efforts, err = cl.Choices(lctx)
+		}
 		cancel()
 		// Stamped when the listing ended, not when it began: a listing that
 		// hung until choicesTimeout would otherwise cache an entry already
@@ -313,6 +327,9 @@ func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 		}
 		if models != nil {
 			h.Models = models
+		}
+		if !observed.IsZero() {
+			now = observed
 		}
 		s.cache[h.Harness] = cachedChoices{at: now, models: h.Models, efforts: h.Efforts}
 	}
