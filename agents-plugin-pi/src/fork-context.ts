@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 
 /** Durable, immutable snapshot transferred from a lead to one fork child. */
@@ -89,7 +90,25 @@ export function captureRegisteredTools(activeNames: readonly string[], allTools:
   });
 }
 
-/** Strict registration comparison, retaining the parent-captured order in every result list. */
+/** Strip prose only at schema nodes, never in property names or literal const/enum/default data. */
+function forkValidationSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(forkValidationSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const result = { ...schema } as Record<string, unknown>;
+  delete result.description;
+  for (const key of ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]) {
+    const map = result[key];
+    if (map && typeof map === "object" && !Array.isArray(map)) {
+      result[key] = Object.fromEntries(Object.entries(map).map(([name, child]) => [name, forkValidationSchema(child)]));
+    }
+  }
+  for (const key of ["items", "additionalItems", "additionalProperties", "contains", "not", "if", "then", "else", "propertyNames", "unevaluatedProperties", "unevaluatedItems", "contentSchema", "allOf", "anyOf", "oneOf", "prefixItems"]) {
+    if (Object.prototype.hasOwnProperty.call(result, key)) result[key] = forkValidationSchema(result[key]);
+  }
+  return result;
+}
+
+/** Compatibility comparison, retaining the parent-captured order in every result list. */
 export interface ForkRegistrationComparison {
   missing: ForkToolDefinition[];
   extra: ForkToolDefinition[];
@@ -105,7 +124,9 @@ export function classifyForkRegistrations(expected: readonly ForkToolDefinition[
   const changed = expected
     .filter((tool) => {
       const registered = actualByName.get(tool.name);
-      return registered !== undefined && JSON.stringify(tool) !== JSON.stringify(registered);
+      // The runtime keeps its current metadata; wording drift is not a broken
+      // call contract. Schema/constraint changes remain fail-closed.
+      return registered !== undefined && !isDeepStrictEqual(forkValidationSchema(tool.parameters), forkValidationSchema(registered.parameters));
     })
     .map((tool) => tool.name);
   const expectedCommonOrder = expected.filter((tool) => actualByName.has(tool.name)).map((tool) => tool.name);
@@ -123,7 +144,7 @@ export function formatForkRegistrationMismatch(comparison: ForkRegistrationCompa
   return parts.length ? parts.join("; ") : undefined;
 }
 
-/** Exact order/schema comparison; no sorting, deduplication, or schema replay. */
+/** Exact callable order and validation schema, ignoring descriptions and object key order; no schema replay. */
 export function compareForkRegistrations(expected: readonly ForkToolDefinition[], actual: readonly ForkToolDefinition[]): string | undefined {
   return formatForkRegistrationMismatch(classifyForkRegistrations(expected, actual));
 }

@@ -33,7 +33,7 @@ describe("ForkContext", () => {
     assert.throws(() => parseForkContext(""), /malformed/);
   });
 
-  test("captures actual registrations in active order and classifies every strict mismatch", () => {
+  test("captures actual registrations in active order and classifies incompatible drift", () => {
     const actual = captureRegisteredTools(context.activeTools, context.registeredTools);
     assert.equal(compareForkRegistrations(context.registeredTools, actual), undefined);
     assert.deepEqual(classifyForkRegistrations(context.registeredTools, [actual[1]]), {
@@ -43,7 +43,38 @@ describe("ForkContext", () => {
       missing: [], extra: [{ name: "extra", description: "Extra", parameters: {} }], reordered: false, changed: [],
     });
     assert.match(compareForkRegistrations(context.registeredTools, [...actual].reverse()) ?? "", /reordered callable tools/);
-    assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], description: "changed" }, actual[1]]) ?? "", /changed callable tools: read/);
+    assert.match(compareForkRegistrations(context.registeredTools, [{ ...actual[0], parameters: { type: "string" } }, actual[1]]) ?? "", /changed callable tools: read/);
+  });
+
+  test("readiness accepts worktree.release description drift without replaying stale metadata", () => {
+    const expected = [{
+      name: "ws__worktree_release",
+      description: "Release a pooled worktree.",
+      parameters: { type: "object", properties: { force: { type: "boolean", description: "Override the lease guard." } } },
+    }];
+    const actual = [{
+      ...expected[0],
+      description: "Cleaning up a worktree whose owner is gone: pass force: true.",
+      parameters: { properties: { force: { description: "For whoever cleans up stale worktrees.", type: "boolean" } }, type: "object" },
+    }];
+    const snapshot = structuredClone(actual);
+    assert.equal(compareForkRegistrations(expected, actual), undefined);
+    assert.deepEqual(actual, snapshot, "runtime metadata remains authoritative and unmodified");
+    assert.match(compareForkRegistrations(expected, [{ ...actual[0], parameters: { ...actual[0].parameters, required: ["force"] } }]) ?? "", /changed callable tools/);
+    assert.match(compareForkRegistrations(expected, [{ ...actual[0], parameters: { type: "object", properties: { force: { type: "string" } } } }]) ?? "", /changed callable tools/);
+  });
+
+  test("description-named arguments and literal schema data remain compatibility-relevant", () => {
+    for (const parameters of [
+      { type: "object", properties: { description: { type: "string" } } },
+      { const: { description: "original" } },
+      { enum: [{ description: "original" }] },
+      { default: { description: "original" } },
+    ]) {
+      const expected = [{ name: "probe", description: "Probe", parameters }];
+      const changed = JSON.parse(JSON.stringify(parameters).replace('"string"', '"number"').replace('"original"', '"changed"'));
+      assert.match(compareForkRegistrations(expected, [{ ...expected[0], parameters: changed }]) ?? "", /changed callable tools: probe/);
+    }
   });
 
   test("rejects an envelope that omits present context rather than taking the legacy path", () => {
