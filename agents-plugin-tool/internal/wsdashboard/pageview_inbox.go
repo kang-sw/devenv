@@ -193,11 +193,7 @@ func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 		if !ok {
 			continue
 		}
-		hasEnvelope := false
-		for _, b := range blocks {
-			hasEnvelope = hasEnvelope || b.At != ""
-		}
-		if !hasEnvelope {
+		if !hasUserEnvelope(blocks) {
 			parseUserContent(&entries[i], attachDir, replyID)
 			continue
 		}
@@ -219,6 +215,31 @@ func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 			entries[i].UserBlocks = views
 		}
 	}
+}
+
+func hasUserEnvelope(blocks []wsinbox.UserMessage) bool {
+	for _, b := range blocks {
+		if b.At != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// userBlockTexts is the text of each bubble splitUserEntries draws of a user
+// entry's text, in order, as it stands before parseUserContent: each block of
+// an enveloped batch, else the whole text as its one bubble. The entry text
+// route answers it, so a bubble's index in its batch picks its text.
+func userBlockTexts(text string) []string {
+	blocks, ok := wsinbox.ParseUserMessages(text)
+	if !ok || !hasUserEnvelope(blocks) {
+		return []string{text}
+	}
+	out := make([]string, len(blocks))
+	for i, b := range blocks {
+		out[i] = b.Text
+	}
+	return out
 }
 
 func parseUserContent(e *ConvEntry, attachDir, replyID string) {

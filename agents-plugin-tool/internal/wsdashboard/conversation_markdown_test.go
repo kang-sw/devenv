@@ -86,7 +86,9 @@ func TestStreamingReplyShowsHTMLAsText(t *testing.T) {
 // reply's stray closing tags cannot close the bubble or the entry.
 func TestStrayClosingTagStaysInsideTheBubble(t *testing.T) {
 	html := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: "</div></div></div><b>x"}}, "")
-	if !strings.Contains(html, `<div class="bub md"><b>x</b></div></div>`) {
+	// The bubble closes where the template closes it; the action pill is
+	// its next sibling, and the entry closes after the pill.
+	if !strings.Contains(html, `<div class="bub md"><b>x</b></div><div class="d-acts"`) || !strings.Contains(html, `</button></div></div></div><div class="conv clive"`) {
 		t.Errorf("stray closing tags leaked out of the bubble:\n%s", html)
 	}
 }

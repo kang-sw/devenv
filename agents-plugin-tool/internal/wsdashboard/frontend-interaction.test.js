@@ -98,3 +98,88 @@ test('native and shell visibility keep pause state and notify each lifecycle tra
   context.doc.hidden = false; context.syncPageVisibility();
   assert.equal(attrs.has('data-animation-paused'), false); assert.equal(events.length, 5);
 });
+
+// A fake chat block for the msgacts handler: a batch entry holding two
+// owner bubbles, each with a pill (rewind disabled, copy).
+function chatBlocks() {
+  class El {
+    constructor(cls, attrs, parent) { this.cls = cls; this.attrs = Object.assign({}, attrs); this.parentNode = parent || null; this.kids = []; if (parent) parent.kids.push(this); }
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    removeAttribute(k) { delete this.attrs[k]; }
+    hasAttribute(k) { return k in this.attrs; }
+    matches(sel) { return sel === '[data-entry]' ? this.hasAttribute('data-entry') : sel.split('.').filter(Boolean).every(c => this.cls.includes(c)); }
+    closest(sel) { for (let n = this; n; n = n.parentNode) if (n.matches(sel)) return n; return null; }
+    all(sel) { const out = []; for (const k of this.kids) { if (k.matches(sel)) out.push(k); out.push(...k.all(sel)); } return out; }
+    querySelectorAll(sel) { return this.all(sel); }
+    contains(n) { for (; n; n = n.parentNode) if (n === this) return true; return false; }
+  }
+  const box = new El(['conv', 'centries'], {});
+  const batch = new El(['user-batch'], { 'data-entry': 'K1.json' }, box);
+  const bubble = () => {
+    const msg = new El(['msg', 'user'], {}, batch), bar = new El(['d-acts'], {}, msg);
+    return { msg, bar, rewind: new El(['d-act'], { 'data-act': 'rewind', 'aria-disabled': 'true' }, bar), copy: new El(['d-act'], { 'data-act': 'copy' }, bar) };
+  };
+  return { box, first: bubble(), second: bubble() };
+}
+
+function chatActions(answer, extra) {
+  const blocks = chatBlocks(), fetched = [], copied = [], toasts = [], timers = [];
+  let handler = null;
+  const context = Object.assign({
+    rid: 'sess', Promise, Array, Blob: class { constructor(parts) { this.text = parts.join(''); } },
+    window: { fetch: true }, navigator: {},
+    doc: { addEventListener(type, fn) { if (type === 'click') handler = fn; } },
+    entriesBox: () => blocks.box,
+    fetch(url) { fetched.push(url); return answer instanceof Error ? Promise.reject(answer) : Promise.resolve({ ok: true, json: () => Promise.resolve(answer) }); },
+    copyText(s, quiet) { copied.push([s, quiet]); return Promise.resolve(true); },
+    toast(s) { toasts.push(s); }, wsT: k => k,
+    setTimeout(fn) { timers.push(fn); return timers.length; }, clearTimeout() {}
+  }, extra);
+  vm.createContext(context);
+  vm.runInContext(section(read(__dirname + '/assets/dashboard-conversation.js'), '  var ACT_CONFIRM_MS', '  // --- older history:'), context);
+  const click = target => { const e = { target, prevented: false, preventDefault() { this.prevented = true; } }; handler(e); return e; };
+  const settle = () => new Promise(r => setImmediate(r));
+  return { blocks, fetched, copied, toasts, timers, click, settle };
+}
+
+test('chat block copy copies the fetched text of its own bubble, quietly, then confirms', async () => {
+  const t = chatActions({ blocks: ['first raw', 'second **raw**'], truncated: false });
+  assert.equal(t.click(t.blocks.second.copy).prevented, true);
+  await t.settle();
+  assert.deepEqual(t.fetched, ['/s/sess/entry?key=K1.json']);
+  assert.deepEqual(t.copied, [['second **raw**', true]]);
+  assert.equal(t.blocks.second.copy.hasAttribute('data-done'), true);
+  assert.equal(t.blocks.second.bar.hasAttribute('data-pinned'), true);
+  assert.equal(t.toasts.length, 0);
+  t.timers.pop()();
+  assert.equal(t.blocks.second.copy.hasAttribute('data-done'), false);
+  assert.equal(t.blocks.second.bar.hasAttribute('data-pinned'), false);
+});
+
+test('chat block copy writes a pending clipboard item inside the click when the browser takes one', async () => {
+  const written = [];
+  const t = chatActions({ blocks: ['only'], truncated: false }, {
+    window: { fetch: true, ClipboardItem: true, isSecureContext: true },
+    ClipboardItem: class { constructor(parts) { this.parts = parts; } },
+    navigator: { clipboard: { write(items) { written.push(items[0].parts['text/plain']); return Promise.resolve(); } } }
+  });
+  t.click(t.blocks.first.copy);
+  assert.equal(written.length, 1, 'the write must start inside the click');
+  assert.equal((await written[0]).text, 'only');
+  await t.settle();
+  assert.deepEqual(t.copied, []);
+  assert.equal(t.blocks.first.copy.hasAttribute('data-done'), true);
+});
+
+test('chat block disabled actions only show their tooltip, and a failed fetch toasts', async () => {
+  const t = chatActions(new Error('daemon gone'));
+  t.click(t.blocks.first.rewind);
+  assert.equal(t.blocks.first.rewind.hasAttribute('data-tipshow'), true);
+  assert.deepEqual(t.fetched, []);
+  t.click(t.blocks.first.copy);
+  await t.settle();
+  assert.deepEqual(t.copied, []);
+  assert.deepEqual(t.toasts, ['js.entry.copyfail']);
+  assert.equal(t.blocks.first.copy.hasAttribute('data-done'), false);
+});

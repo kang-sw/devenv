@@ -1229,7 +1229,7 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, its image, file view, files, history, closed-topic, worktree pool,
+// stream, its image, file view, files, history, entry text, closed-topic, worktree pool,
 // git status, log, and commit, attachment, and file browser routes, its
 // message, cancel, steer, interrupt, system-open, file browser host,
 // outside-link mint, git
@@ -1335,6 +1335,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleFiles(w, r, replyID)
 	case sub == "history":
 		d.handleHistory(w, r, replyID)
+	case sub == "entry":
+		d.handleEntryText(w, r, replyID)
 	case sub == "closed":
 		d.handleClosedTopics(w, r, replyID)
 	case sub == "worktrees":
