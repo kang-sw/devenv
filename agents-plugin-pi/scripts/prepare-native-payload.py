@@ -197,6 +197,49 @@ def retain_committed_closure(repo, native, candidate):
     return json.loads((native / "closure-manifest.json").read_text())
 
 
+def write_first_party(repo, native, closure, input_hash, pkg):
+    pi = repo / "agents-plugin-pi"
+    first = native / "first-party"
+    for name in (*payload.FIRST_PARTY_FILES, *payload.WORKFLOW_BUNDLE_FILES):
+        target = first / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if name == "package.json":
+            runtime_pkg = {**pkg, "pi": {**pkg["pi"], "extensions": ["./dist/index.js"]}}
+            target.write_bytes(payload.canonical(runtime_pkg) + b"\n")
+        elif name == "bundle-inputs.json":
+            target.write_bytes(payload.canonical({"schema_version": 1, "sha256": input_hash}) + b"\n")
+        else:
+            shutil.copyfile(pi / name, target)
+    inputs = {}
+    for root in ("src", "scripts", "dist", "workflow-bundles"):
+        for rel, sha in payload.tree(pi / root, ignore_junk=True).items():
+            inputs[f"agents-plugin-pi/{root}/{rel}"] = sha
+    for name in ("package.json", "package-lock.json", "config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"):
+        inputs[f"agents-plugin-pi/{name}"] = payload.digest((pi / name).read_bytes())
+    small = {"schema_version": 1, "closure_key": closure["key"], "bundle_input_hash": input_hash,
+             "files": payload.tree(first), "inputs": dict(sorted(inputs.items()))}
+    (native / "first-party-manifest.json").write_text(json.dumps(small, sort_keys=True, indent=2) + "\n")
+    return small
+
+
+def refresh_first_party(repo):
+    """No npm, dependency regeneration or closure re-encoding for text changes."""
+    pi = repo / "agents-plugin-pi"
+    check_bundle_paths(pi, repo)
+    input_hash = bundle_hash(pi)
+    pkg = json.loads((pi / "package.json").read_text())
+    _, lock = production_recipe(pkg, json.loads((pi / "package-lock.json").read_text()))
+    for product in ("agents-plugin", "agents-plugin-wsflow"):
+        owner = repo / product
+        manifests = payload.validate(owner)
+        closure = manifests["closure"]
+        if payload.normalized_lock(lock, pkg["dependencies"]) != closure["production_lock"]:
+            raise ValueError("CLOSURE inputs changed; full preparation required")
+        write_first_party(repo, owner / "native-pi", closure, input_hash, pkg)
+        payload.check_source(owner, repo)
+    print("native Pi first-party refreshed; dependency closure unchanged")
+
+
 def generate(repo, offline=False, npm_cache=None, report=None):
     npm = shutil.which("npm")
     if npm is None:
@@ -241,25 +284,7 @@ def generate(repo, offline=False, npm_cache=None, report=None):
             closure = {**candidate, "archive_sha256": payload.digest((native / "closure.zip").read_bytes())}
             (native / "closure-manifest.json").write_bytes(payload.canonical(closure) + b"\n")
         first = native / "first-party"
-        for name in payload.FIRST_PARTY_FILES:
-            target = first / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if name == "package.json":
-                runtime_pkg = {**pkg, "pi": {**pkg["pi"], "extensions": ["./dist/index.js"]}}
-                target.write_bytes(payload.canonical(runtime_pkg) + b"\n")
-            elif name == "bundle-inputs.json":
-                target.write_bytes(payload.canonical({"schema_version": 1, "sha256": input_hash}) + b"\n")
-            else:
-                shutil.copyfile(pi / name, target)
-        inputs = {}
-        for root in ("src", "scripts", "dist"):
-            for rel, sha in payload.tree(pi / root, ignore_junk=True).items():
-                inputs[f"agents-plugin-pi/{root}/{rel}"] = sha
-        for name in ("package.json", "package-lock.json", "config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"):
-            inputs[f"agents-plugin-pi/{name}"] = payload.digest((pi / name).read_bytes())
-        small = {"schema_version": 1, "closure_key": closure["key"], "bundle_input_hash": input_hash,
-                 "files": payload.tree(first), "inputs": dict(sorted(inputs.items()))}
-        (native / "first-party-manifest.json").write_text(json.dumps(small, sort_keys=True, indent=2) + "\n")
+        small = write_first_party(repo, native, closure, input_hash, pkg)
         fixture = temp / "fixture"
         fixture.mkdir()
         shutil.copytree(native, fixture / "native-pi")
@@ -298,5 +323,9 @@ if __name__ == "__main__":
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--npm-cache", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--first-party-only", action="store_true")
     args = parser.parse_args()
-    generate(args.repo, args.offline, args.npm_cache, args.report)
+    if args.first_party_only:
+        refresh_first_party(args.repo.resolve())
+    else:
+        generate(args.repo, args.offline, args.npm_cache, args.report)

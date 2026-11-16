@@ -225,7 +225,8 @@ class NativePiPayloadTests(unittest.TestCase):
             self.assertFalse(any(PAYLOAD.ignored_path(name) for name in names | set(small["inputs"])))
             raise RuntimeError("producer copy inspected")
 
-        with patch.object(PRODUCER.subprocess, "run", side_effect=fake_npm), \
+        with patch.object(PRODUCER.shutil, "which", return_value="fixture-npm"), \
+             patch.object(PRODUCER.subprocess, "run", side_effect=fake_npm), \
              patch.object(PRODUCER, "write_zip", side_effect=AssertionError("same-key generation must not recompress")), \
              patch.object(PRODUCER.payload, "validate", side_effect=inspect_archive):
             with self.assertRaisesRegex(RuntimeError, "producer copy inspected"):
@@ -328,7 +329,8 @@ class NativePiPayloadTests(unittest.TestCase):
         bundle = repo / "agents-plugin-pi/dist/index.js"
         bundle.write_bytes(bundle.read_bytes() + str(repo).encode())
         before = PAYLOAD.tree(repo / "agents-plugin/native-pi")
-        with patch.object(PRODUCER.subprocess, "run") as npm:
+        with patch.object(PRODUCER.shutil, "which", return_value="fixture-npm"), \
+             patch.object(PRODUCER.subprocess, "run") as npm:
             with self.assertRaisesRegex(ValueError, "producer path"):
                 PRODUCER.generate(repo)
             npm.assert_not_called()
@@ -339,7 +341,8 @@ class NativePiPayloadTests(unittest.TestCase):
         shutil.copytree(REPO / "agents-plugin-wsflow/native-pi", repo / "agents-plugin-wsflow/native-pi")
         before = {p: PAYLOAD.tree(repo / p / "native-pi") for p in ("agents-plugin", "agents-plugin-wsflow")}
         # No npm process is executed by this failure injection.
-        with patch.object(PRODUCER.subprocess, "run", side_effect=RuntimeError("preparation failed")):
+        with patch.object(PRODUCER.shutil, "which", return_value="fixture-npm"), \
+             patch.object(PRODUCER.subprocess, "run", side_effect=RuntimeError("preparation failed")):
             with self.assertRaisesRegex(RuntimeError, "preparation failed"):
                 PRODUCER.generate(repo)
         for product, inventory in before.items():
