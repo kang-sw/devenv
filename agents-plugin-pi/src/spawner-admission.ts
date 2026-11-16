@@ -6,7 +6,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, READ_TOOLS, NETWORK_TO
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { capacityEvictionCost, persistEvictedAgentCost } from "./agent-cost.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner-record.ts";
-import { isOwnerHeld, hasPendingTerminalDelivery } from "./spawner.ts";
+import { isOwnerHeld, hasPendingTerminalDelivery } from "./spawner-push.ts";
 import { resolveTools, resolveSpawnToolGroup, REPORT_TO_LEAD_TOOL_NAME, GATED_EXEC_TOOL_NAME } from "./spawner-tools.ts";
 import type { WriteScopeDiagnostic, RpcSpawnCtx } from "./spawner-launch.ts";
 

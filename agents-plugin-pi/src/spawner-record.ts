@@ -13,7 +13,7 @@ import type { ModelObservation } from "./model-observation.ts";
 import type { AgentBatchBuffer } from "./agent-batches.ts";
 import type { AgentViewModel } from "./agent-view.ts";
 import type { ToolGroup } from "./spawner-tools.ts";
-import type { ForkFinishOperation, TerminalDelivery } from "./spawner.ts";
+import type { ForkFinishOperation, TerminalDelivery } from "./spawner-push.ts";
 
 /**
  * One gated command awaiting the lead's decision (see

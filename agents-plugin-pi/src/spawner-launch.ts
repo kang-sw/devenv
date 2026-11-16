@@ -19,7 +19,7 @@ import { closeOpenBatch } from "./agent-batches.ts";
 import { scheduleAgentViewPublish } from "./agent-view.ts";
 import { REPORT_LOG_CAP } from "./spawner-record.ts";
 import type { RpcAgentRecord, RpcAgentRegistry, SpawnAgentRole } from "./spawner-record.ts";
-import { triggerAgentWidgetRefresh, createTerminalDelivery, hasPendingTerminalDelivery, pushToLead, isOwnerHeld } from "./spawner.ts";
+import { triggerAgentWidgetRefresh, createTerminalDelivery, hasPendingTerminalDelivery, pushToLead, isOwnerHeld } from "./spawner-push.ts";
 import { CHILD_BOOTSTRAP_OVERRIDE_ENVS, CHILD_MAILBOX_IDENTITY_ENVS } from "./spawner-tools.ts";
 import type { ToolGroup, ResolvedModelInfo } from "./spawner-tools.ts";
 
