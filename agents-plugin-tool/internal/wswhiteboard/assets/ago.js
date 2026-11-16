@@ -75,15 +75,15 @@
     var extended = clock && Number.isSafeInteger(initial) && initial > 0 && initial < eta && Number.isSafeInteger(extensions) && extensions > 0;
     // Authority changes rebuild the pill; ticks keep its focused node and SVG.
     var key = JSON.stringify([state, own, estimate, !!clock, eta, initial, extensions, run, start, deadline]);
-    var pill = box.querySelector(".sb"), tip = box.querySelector(".sb-tip");
+    var pill = box.querySelector(".wb-state-pill"), tip = box.querySelector(".sb-tip");
     if (box.wbStateKey !== key && !(box.wbStateKey === undefined && pill && tip)) {
       box.textContent = "";
-      pill = child(box, "span", "sb " + spec[0] + (!clock && !estimate ? " solo" : ""));
+      pill = child(box, "span", "wb-state-pill " + spec[0] + (!clock && !estimate ? " solo" : ""));
       pill.setAttribute("tabindex", "0");
       pill.setAttribute("role", "img");
       pill.appendChild(glyph(spec[0]));
       if (clock || estimate) {
-        var time = child(pill, "span", "t" + (estimate ? " est" : ""));
+        var time = child(pill, "span", "wb-state-time" + (estimate ? " est" : ""));
         if (clock) child(time, "b", "", elapsed);
         child(time, "small", "", wsT(clock ? "js.wb.state.eta.max" : "js.wb.state.estimate.short", eta));
       }
@@ -125,8 +125,8 @@
     if (estimate) parts.push(wsT("js.wb.state.estimate", estimate));
     var label = parts.join(" · ");
     if (pill.getAttribute("aria-label") !== label) pill.setAttribute("aria-label", label);
-    pill.classList.toggle("over", !!over);
-    tip.classList.toggle("over", !!over);
+    pill.classList.toggle("wb-state-over", !!over);
+    tip.classList.toggle("wb-state-over", !!over);
   }
   // BodyUpdatedAt is already validated by BuildView. No activity/clock
   // fallback: an absent body time stays unknown in the gutter.
