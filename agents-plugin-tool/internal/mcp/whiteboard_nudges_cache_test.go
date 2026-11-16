@@ -58,6 +58,10 @@ func TestWhiteboardNudgeCacheMetadataAndAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	oldInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	changed := []byte(strings.Replace(string(original), `"lead"`, `"xxxx"`, 1))
 	if len(changed) != len(original) {
 		t.Fatal("in-place fixture changed size")
@@ -65,13 +69,23 @@ func TestWhiteboardNudgeCacheMetadataAndAuthority(t *testing.T) {
 	if err := os.WriteFile(path, changed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	check("recent same-size in-place change", nilMap())
-	if len(n.identities) != 0 {
-		t.Fatal("recent in-place write was cached")
+	// Both stamps are quiet but distinct: the mtime check (not the recent
+	// metadata guard) must detect this same-inode, same-size edit.
+	if err := os.Chtimes(path, oldInfo.ModTime().Add(time.Second), oldInfo.ModTime().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	beforeReads := reads
+	check("stable same-size in-place change", nilMap())
+	if reads != beforeReads+1 || n.identities[target.key].key.Scope != "xxxx" {
+		t.Fatal("same-size write retained stale identity")
 	}
 	// Restore lead with an old timestamp, then replace by rename with the same size
 	// and mtime. File identity, not just size/mtime, must invalidate the hit.
 	nudgeWriteJSON(t, path, sessionKeyRecord{SchemaVersion: 2, Scope: string(roleLead), Root: target.root})
+	check("recent restoration", want)
+	if len(n.identities) != 0 {
+		t.Fatal("recent metadata cached")
+	}
 	old := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
@@ -92,7 +106,7 @@ func TestWhiteboardNudgeCacheMetadataAndAuthority(t *testing.T) {
 	if err := os.Rename(tmp, path); err != nil {
 		t.Fatal(err)
 	}
-	beforeReads := reads
+	beforeReads = reads
 	check("equal-size replacement", nilMap())
 	if reads != beforeReads+1 || n.identities[target.key].key.Scope != "xxxx" {
 		t.Fatal("replacement retained old authority or skipped content reread")
@@ -227,8 +241,56 @@ func TestWhiteboardNudgeCacheScopeRootAndParentChanges(t *testing.T) {
 	}
 }
 
-// The old reader is a full reread on every scan. These are source-level
-// content/stat counters, not physical disk-I/O or process CPU measurements.
+// Mirror the pre-cache discover loop in the benchmark, including listings,
+// board existence, and association suppression. Only the identity reads differ.
+func oldNudgeDiscoveryForBenchmark(b *testing.B, n *WhiteboardNudges) map[nudgeTarget]time.Time {
+	b.Helper()
+	d := n.dirs()
+	keys := map[string]bool{}
+	for i, dir := range []string{d.sessions, d.legacy} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, e := range entries {
+			key := e.Name()
+			if i == 0 && !e.IsDir() || i == 1 && e.IsDir() {
+				continue
+			}
+			if i == 1 {
+				var ok bool
+				key, ok = strings.CutSuffix(key, ".json")
+				if !ok {
+					continue
+				}
+			}
+			if sessionKeyFilenamePattern.MatchString(key) {
+				keys[key] = true
+			}
+		}
+	}
+	out := map[nudgeTarget]time.Time{}
+	associations := map[string]int{}
+	for key := range keys {
+		r, _, err := loadRecordWith(d, key, partKey, nil, n.read)
+		if err != nil || r.Scope != string(roleLead) || r.Parent != "" || !filepath.IsAbs(r.Root) {
+			continue
+		}
+		associations[wsmailbox.ReplyID(key)]++
+		target := nudgeTarget{key, r.Root}
+		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
+			if _, err := n.stat(filepath.Join(whiteboardFolder(target.root, target.key).Dir, name)); err == nil {
+				out[target] = time.Time{}
+				break
+			}
+		}
+	}
+	nudgeSuppressCollisions(out, associations)
+	return out
+}
+
+// These are source-level content/stat counters, not physical disk-I/O or
+// process CPU measurements. Stats include identity and board metadata.
 func BenchmarkWhiteboardNudgeDiscovery3500(b *testing.B) {
 	cache, root := b.TempDir(), b.TempDir()
 	n := NewWhiteboardNudges(filepath.Join(cache, "dashboard"), nil, io.Discard)
@@ -297,9 +359,7 @@ func BenchmarkWhiteboardNudgeDiscovery3500(b *testing.B) {
 		reads, stats = 0, 0
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			for _, key := range keys {
-				_, _, _ = loadRecordWith(d, key, partKey, nil, n.read)
-			}
+			oldNudgeDiscoveryForBenchmark(b, n)
 		}
 		b.StopTimer()
 		b.ReportMetric(float64(reads)/float64(b.N), "content-reads/op")

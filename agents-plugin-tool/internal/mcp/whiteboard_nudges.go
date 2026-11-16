@@ -160,6 +160,10 @@ func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudge
 // an authority to recover/mint a missing key.
 func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 	d := n.dirs()
+	stat := n.stat
+	if stat == nil {
+		stat = os.Stat
+	}
 	keys := map[string]bool{}
 	for i, dir := range []string{d.sessions, d.legacy} {
 		entries, err := os.ReadDir(dir)
@@ -213,7 +217,7 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 		t := nudgeTarget{key, r.Root}
 		dir := whiteboardFolder(t.root, t.key).Dir
 		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			if _, err := stat(filepath.Join(dir, name)); err == nil {
 				out[t] = time.Time{}
 				break
 			}
