@@ -350,3 +350,71 @@ re-traces unavoidable long-document layout cost. Do not add them here or infer
 that batched reads alone make display-locked subtree measurements safe. Broader
 render transactions and per-layout DOM cost remain later measured work; composer
 implementation belongs to Exec 5's independent branch.
+
+#### Edition (211817aab) - 2026-11-16
+
+R1 on `1682b0c49..c006d21bf` returned NEEDS FIX: 0 Critical, 1 Important,
+8 Minor. Full findings read from
+`C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac/review-paths/12a845e4-01-board-exposure-r1-findings.md`.
+The lead authorized I1 plus trivial M3/M5 only in this fixes-only pass.
+
+**Measurement clarification:** the earlier **0 rect reads / 0 release checks**
+counts the synchronous raw-scroll handlers only, not the whole gesture.
+**While an update is pending, each coalesced IntersectionObserver transition
+still runs an O(N) clean-layout exposure scan**, including rendered-state and
+ancestor checks. It may re-stage the board when the exposed set changes. The
+new trailing gesture check also performs that scan once. This phase removes
+hidden display-lock probes and per-raw-scroll polling; it does NOT eliminate
+all scroll-related scans or all clean-layout work. The four-rect height-batch
+receipt is the synthetic successful reading-line hit case, not a worst-case
+browser or fallback-scan bound.
+
+Fixed:
+
+- I1a: one trailing exact check after native `scrollend`, or a 120 ms debounce
+  on hosts without that event property. IO's raw viewport can miss a blocker
+  moving under a sticky tophead; the trailing check restores that boundary
+  without scanning every raw scroll event.
+- I1b: watch admitted history rows after `init`/`restore` in a swap and on
+  `wbhistoryload`, including load-older/deep-link materialization.
+- I1c: dropping a swept board subscription clears its `node.wbWatch` and cached
+  report flag, allowing a later re-materialization to subscribe and receive a
+  fresh first report.
+- M3: unrelated tree/drawer disclosures cannot trigger board release; the
+  document toggle listener now requires `inBoard`.
+- M5: the non-snapshot `boardExposed`/`boardScroller` paths reject hidden nodes
+  before capture:false keep/scroller inspection.
+
+Verification for this pass: ran
+`node --test agents-plugin-tool/internal/wsdashboard/testdata/board-exposure.test.cjs`
+**once: PASS**. Added the actual sticky-head/no-further-IO release contract for
+both native scrollend and debounce paths, plus swept/reinserted subscriptions,
+history watcher ordering, disclosure scope and pre-scroller hidden guards.
+The raw handler / best-case height-batch receipt remains 0 / 4 rect reads with
+1,000 units and 50 closed descendants, with the limitations stated above.
+`git diff --check` passed. No Go run (local or remote) in this pass; no ws
+executable, launcher, test-built binary, daemon operation, browser action or
+push. Fixes-only R2 and the owner live re-trace remain pending.
+
+**Forward from R1 (explicitly NOT implemented in this pass):**
+
+- M1: measure/narrow per-transition O(N × depth) scans, repeated rendered checks,
+  and no-op restaging; consider snapshot memoization and blocker/frozen-endpoint
+  predicates only after the owner re-trace.
+- M2: expand measurement coverage for scrollHeight/clientHeight, hit-testing and
+  native checkVisibility; count an IO-triggered 1,000-unit scan and hit-in-gap
+  fallback; add direct opened-details-content coverage (the old final caption
+  assertion did not cover that case). Current VM counts are not native layout
+  timings or full geometry-cost accounting.
+- M4: measure the larger observer target set (including hidden descendants),
+  native computeIntersections cost and display-lock behavior; do not claim its
+  scaling/native safety from the rect-throw proxy alone.
+- M6: address the `boardKeep(nodes == null)` first-child-hidden capture edge.
+- M7: clean up the effectively dead grow-animation/absent-history branch.
+- M8: evaluate multi-column hit-test versus whole-scroller anchor parity and
+  sticky-toolbar hit fallback cost.
+- Separate history-fill Forward: `progress()` interleaves `take()` DOM inserts
+  with `readyHeight()` rect reads; it was not hot in traces A/C and is unchanged.
+
+The earlier content-visibility:auto/virtualization Forward remains ordered
+AFTER hidden-measurement guard landing and owner re-tracing; neither is added.
