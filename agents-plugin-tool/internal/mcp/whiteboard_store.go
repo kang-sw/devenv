@@ -59,11 +59,12 @@ func openWhiteboardCached(record *sessionRecord, key string, raw io.Writer, cach
 			}
 		}
 	}
-	board, err := cache.Open(folder, record.Whiteboard)
+	board, revision, err := cache.OpenRevision(folder, record.Whiteboard)
 	if err != nil {
 		return fmt.Errorf("open whiteboard: %w", err)
 	}
 	record.Whiteboard = board
+	record.boardRevision = revision
 	if raw != nil {
 		data, err := json.Marshal(board)
 		if err != nil {

@@ -99,9 +99,9 @@ func voidBoardTag(tag string) bool {
 	return false
 }
 
-// boardTopicState is per connection, never shared with another stream. Even
-// when h names the current board, the first send is full: a reconnect has no
-// topic baseline. Failed writes never advance the connection's baseline.
+// boardTopicState is per connection, never shared with another stream. A held
+// current hash seeds the baseline without a write; clients retain the canonical
+// board they advertised. Otherwise only successful writes advance the baseline.
 type boardTopicState struct{ previous *boardTopics }
 
 func (s *boardTopicState) event(region renderedRegion, next *boardTopics) (string, any) {

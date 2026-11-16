@@ -87,15 +87,37 @@ func TestBoardTopicsStreams(t *testing.T) {
 	}
 	initial := full(parity("region"))
 	full(boardEvent(old))
-	// A new connection cannot rely on a board hash supplied by a previous one.
+	// A current held hash seeds the new connection without a duplicate send.
+	noBoard := func(events <-chan sseEvent) {
+		t.Helper()
+		all, closed := collect(events)
+		if closed {
+			t.Fatal("held-hash connection closed")
+		}
+		for _, e := range all {
+			if e.name == "board-topics" || e.name == "region" && strings.Contains(e.data, `"name":"board"`) {
+				t.Fatalf("held current hash resent the board: %+v", e)
+			}
+		}
+	}
 	reconnect := openSSE(t, f.base+path+"&h="+url.QueryEscape("board."+initial.Hash))
-	if r := full(boardEvent(reconnect)); r.Hash != initial.Hash {
-		t.Fatalf("first h=current send changed hash: %+v", r)
+	reconnectWS := openWS(t, f.base, path+"&h="+url.QueryEscape("board."+initial.Hash), f.base, true).events
+	noBoard(reconnect)
+	noBoard(reconnectWS)
+	stale := openSSE(t, f.base+path+"&h=board.stale")
+	if r := full(boardEvent(stale)); r.Hash != initial.Hash {
+		t.Fatal("stale reconnect did not get the current full board")
 	}
 	// Settle initial refresh bookkeeping before measuring the wake's render.
 	renders, reads := f.d.stats.SessionRenders.Load(), f.src.readCount("boardsession")
 	set("a2", shell, true, 3)
 	e := parity("board-topics")
+	if got := boardEvent(reconnect); got != e {
+		t.Fatalf("seeded SSE first delta = %+v, want %+v", got, e)
+	}
+	if got := boardEvent(reconnectWS); got != e {
+		t.Fatalf("seeded WS first delta = %+v, want %+v", got, e)
+	}
 	var patch boardTopicsEvent
 	if err := json.Unmarshal([]byte(e.data), &patch); err != nil {
 		t.Fatal(err)
@@ -129,5 +151,5 @@ func TestBoardTopicsStreams(t *testing.T) {
 	last := full(parity("region"))
 	full(boardEvent(old))
 	rews := openWS(t, f.base, path+"&h="+url.QueryEscape("board."+last.Hash), f.base, true)
-	full(boardEvent(rews.events))
+	noBoard(rews.events)
 }

@@ -208,6 +208,7 @@
     var b = region("board");
     if (b) {
       boardRendered = boardInputFull(b.innerHTML);
+      boardLatest = { hash: b.getAttribute("data-h"), html: boardRendered };
       Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = topicSeen(n); });
     }
   })();

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -26,8 +27,20 @@ type folderCacheSlot struct {
 }
 
 type folderCachedRead struct {
-	state *State
-	files map[string]os.FileInfo
+	state    *State
+	files    map[string]os.FileInfo
+	revision uint64
+}
+
+// Revisions identify immutable reads across all cache instances in this process.
+// They are not persisted and must not be carried by mutable State headers.
+var folderReadRevision atomic.Uint64
+
+func newFolderReadRevision(state *State) uint64 {
+	if state == nil {
+		return 0
+	}
+	return folderReadRevision.Add(1)
 }
 
 // unchanged needs no topic opens. Identity metadata catches ordinary atomic
@@ -74,8 +87,21 @@ func folderReadStamp(dir string) (map[string]os.FileInfo, error) {
 // Open is FolderStore.Open with an opt-in read cache, bounded to 64 boards.
 // Absent boards and legacy conversion use Open unchanged and are not cached.
 func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
+	state, _, err := c.OpenRevision(f, legacy)
+	return state, err
+}
+
+// OpenRevision returns Open's state and a process-local read identity. A cache
+// hit shares its immutable read's revision; every miss or uncached nonnil result
+// receives a fresh revision. The state header and revision are captured together
+// under the cache slot lock, without additional filesystem probes.
+func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64, error) {
+	uncached := func() (*State, uint64, error) {
+		state, err := f.Open(legacy)
+		return state, newFolderReadRevision(state), err
+	}
 	if c == nil {
-		return f.Open(legacy)
+		return uncached()
 	}
 	c.mu.Lock()
 	slot := c.entries[f.Dir]
@@ -92,7 +118,7 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 	defer slot.mu.Unlock()
 	if _, err := os.Stat(filepath.Join(f.Dir, "meta.json")); err != nil {
 		slot.read = folderCachedRead{}
-		return f.Open(legacy)
+		return uncached()
 	}
 	entry := slot.read
 	var hit bool
@@ -104,9 +130,11 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 		return f.guard()
 	}
 	var out *State
+	var revision uint64
 	err := f.withGuard(true, guard, func() error {
 		if hit {
 			out = entry.state.sharedRead()
+			revision = entry.revision
 			return nil
 		}
 		slot.read = folderCachedRead{}
@@ -116,8 +144,9 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 		files, stampErr := folderReadStamp(f.Dir)
 		var err error
 		out, _, err = f.load(legacy)
+		revision = newFolderReadRevision(out)
 		if err == nil && stampErr == nil && out != nil {
-			next := folderCachedRead{state: out, files: files}
+			next := folderCachedRead{state: out, files: files, revision: revision}
 			if next.unchanged(f.Dir) {
 				out.shared = true
 				slot.read = next
@@ -129,7 +158,7 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 	if err != nil {
 		slot.read = folderCachedRead{}
 	}
-	return out, err
+	return out, revision, err
 }
 
 // sharedRead copies only the header. Returning the cache's actual pointer

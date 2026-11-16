@@ -1,0 +1,151 @@
+{
+  "shape": "8,6,4,2,60",
+  "measures": [
+    {
+      "bytes": 985168,
+      "handlerMs": 159.659
+    },
+    {
+      "bytes": 985168,
+      "handlerMs": 70.911
+    },
+    {
+      "bytes": 985168,
+      "handlerMs": 5.064
+    },
+    {
+      "bytes": 985168,
+      "handlerMs": 2.809
+    },
+    {
+      "bytes": 985168,
+      "handlerMs": 2.605
+    }
+  ],
+  "htmlBytes": 985210,
+  "assets": [
+    {
+      "url": "/s/dashboard-8667636a42c33dcd37058c91.css",
+      "status": 200,
+      "bytes": 91631,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/css; charset=utf-8"
+    },
+    {
+      "url": "/s/dashboard-46aaf4341b91a67ca1d5c4b4.css",
+      "status": 200,
+      "bytes": 393708,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/css; charset=utf-8"
+    },
+    {
+      "url": "/s/dashboard-c3e321dc660717c3880e6f57.js",
+      "status": 200,
+      "bytes": 80660,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "url": "/s/dashboard-235ad5d24ea42454834621cd.js",
+      "status": 200,
+      "bytes": 1045730,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "url": "/s/dashboard-dc5ed5276e6faf3e6b1eaeb4.js",
+      "status": 200,
+      "bytes": 22921,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "url": "/s/dashboard-39b061a0a7d64cfa5eb04578.js",
+      "status": 200,
+      "bytes": 3843,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "url": "/s/dashboard-abd207ca035275cdb0b5474b.js",
+      "status": 200,
+      "bytes": 628344,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "url": "/s/wb-frame-f63565a143cc.css",
+      "status": 200,
+      "bytes": 91689,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/css; charset=utf-8"
+    },
+    {
+      "url": "/s/wb-frame-0d36a15b5c6b.js",
+      "status": 200,
+      "bytes": 2465,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "url": "/s/wb-frame-6feebc3f6d09.js",
+      "status": 200,
+      "bytes": 54018,
+      "cache": "public, max-age=31536000, immutable",
+      "type": "text/javascript; charset=utf-8"
+    }
+  ],
+  "initialWire": [
+    {
+      "event": "assets",
+      "bytes": 51
+    },
+    {
+      "event": "region",
+      "name": "rail",
+      "bytes": 8637
+    },
+    {
+      "event": "assets",
+      "bytes": 51
+    },
+    {
+      "event": "region",
+      "name": "mode",
+      "bytes": 81
+    },
+    {
+      "event": "region",
+      "name": "tree",
+      "bytes": 1653
+    },
+    {
+      "event": "region",
+      "name": "entries",
+      "bytes": 538
+    },
+    {
+      "event": "region",
+      "name": "panels",
+      "bytes": 79
+    },
+    {
+      "event": "region",
+      "name": "git",
+      "bytes": 458
+    }
+  ],
+  "updateWire": [
+    {
+      "event": "region",
+      "name": "head",
+      "bytes": 1559
+    },
+    {
+      "event": "board-topics",
+      "bytes": 110575
+    }
+  ],
+  "reconnects": 0,
+  "errors": []
+}

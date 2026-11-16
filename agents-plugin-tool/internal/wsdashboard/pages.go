@@ -148,6 +148,12 @@ type dashboardAssets struct {
 	tmpl  *template.Template
 	tmpls map[string]*template.Template
 	data  pageAssetsData
+	files map[string]dashboardFile
+}
+
+type dashboardFile struct {
+	body  string
+	ctype string
 }
 
 // templateFor is the template set that renders in lang; an unsupported or
@@ -161,17 +167,25 @@ func (a *dashboardAssets) templateFor(lang string) *template.Template {
 
 // pageAssetsData is what a page template inlines.
 type pageAssetsData struct {
-	CSS              template.CSS
-	Script           template.JS
-	ScriptFile       string // Content-addressed page script for fresh session frames.
-	Sprite           template.HTML
-	WhiteboardCSS    template.CSS
-	WhiteboardSprite template.HTML
-	FormScript       template.JS
-	AnswersScript    template.JS
-	MermaidInit      template.JS
-	MermaidFile      string
-	ViewerScript     template.JS
+	CSS                 template.CSS
+	Script              template.JS
+	ScriptFile          string // Content-addressed page script for fresh session frames.
+	FrameWhiteboardFile string
+	FrameCSSFile        string
+	FrameScriptFile     string
+	FrameXtermFile      string
+	FrameTermFile       string
+	FrameWebFile        string
+	FrameSelectFile     string
+	FrameI18nFiles      map[string]string
+	Sprite              template.HTML
+	WhiteboardCSS       template.CSS
+	WhiteboardSprite    template.HTML
+	FormScript          template.JS
+	AnswersScript       template.JS
+	MermaidInit         template.JS
+	MermaidFile         string
+	ViewerScript        template.JS
 	// SelectAllScript is shared with standalone whiteboards, separate from
 	// the assembled dashboard script and loaded once in every page kind.
 	SelectAllScript template.JS
@@ -327,8 +341,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 			icons[m[1]] = true
 		}
 	}
-	scriptHash := sha256.Sum256([]byte(a.data.Script))
-	a.data.ScriptFile = "dashboard-" + hex.EncodeToString(scriptHash[:12]) + ".js"
+	a.buildFrameFiles()
 	a.data.ID = assetID(a.data, source)
 	a.tmpls = map[string]*template.Template{}
 	for _, l := range wsi18n.Languages() {
@@ -1304,20 +1317,21 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	if !readMethod(w, r) {
 		return
 	}
-	if strings.HasPrefix(rest, "dashboard-") && strings.HasSuffix(rest, ".js") {
+	if strings.HasPrefix(rest, "dashboard-") && (strings.HasSuffix(rest, ".js") || strings.HasSuffix(rest, ".css")) {
 		a, err := loadDashboardAssets()
 		if err != nil {
 			http.Error(w, "assets unavailable", http.StatusInternalServerError)
 			return
 		}
-		if rest != a.data.ScriptFile {
+		file, ok := a.files[rest]
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Content-Type", file.ctype)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_, _ = w.Write([]byte(a.data.Script))
+		_, _ = w.Write([]byte(file.body))
 		return
 	}
 	if name, _ := wswhiteboard.MermaidAsset(); rest == name {

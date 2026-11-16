@@ -26,6 +26,7 @@ func TestPagesCarryScopedSelectAllScript(t *testing.T) {
 	script := "<script>" + string(wb.SelectAllScript) + "</script>"
 	for _, path := range []string{"/s/livesession", "/s/livesession?frame=1", "/s/boardsession?frame=1", "/", "/?frame=1"} {
 		code, page := get(t, f.base+path)
+		page = frameDependencies(t, page)
 		if code != http.StatusOK || strings.Count(page, script) != 1 {
 			t.Errorf("%s: status %d, scoped select-all script count %d, want 200 and one", path, code, strings.Count(page, script))
 		}

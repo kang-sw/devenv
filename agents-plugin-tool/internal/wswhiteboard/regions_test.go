@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // TestRenderRegionsMatchThePage pins the dashboard's reuse contract: the
@@ -605,9 +607,23 @@ func TestTopicFrameCarriesTheCopyStrings(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := frameDocs(t, string(regions.Board))["doc"]
-	wantAll(t, doc, `window.wsT = function`, `"js.wb.copy":"복사"`, `"js.wb.copy.done":"복사됨"`,
+	a, err := loadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := a.frameI18nFiles["ko"]
+	wantAll(t, doc, `<script src="`+file.name+`"></script>`+frameJSTag(t))
+	wantNone(t, doc, `window.wsT = function`)
+	data, ctype, ok := FrameAsset(file.name)
+	if !ok || ctype != "text/javascript; charset=utf-8" {
+		t.Fatal("frame subset asset not served")
+	}
+	if string(data) != string(wsi18n.SubsetScript("ko", frameKeyPrefix)) {
+		t.Fatal("frame subset bytes changed")
+	}
+	wantAll(t, string(data), `window.wsT = function`, `"js.wb.copy":"복사"`, `"js.wb.copy.done":"복사됨"`,
 		`"js.wb.ago.now":"방금"`, `"js.wb.body.unknown":"변경 시각 모름"`, `"js.wb.body.updated":"본문 {0} 갱신"`)
-	wantNone(t, doc, `"js.pill.open"`, `"js.tk.`)
+	wantNone(t, string(data), `"js.pill.open"`, `"js.tk.`)
 }
 
 // frameCSSLink and frameJSTag are how a topic-body frame's document loads

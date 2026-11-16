@@ -76,8 +76,12 @@ var applied=[],heldInputs=[];
 function swap(n,h,input) { applied.push({hash:h,input:input}); }
 function tlHold(n,h,input) { heldInputs.push(input); }
 `+src+`
+boardLatest={hash:"old-board",html:boardInputFull(section("A","a1","A1")+section("B","b1","B1"))};
 connect();
 var s=sockets[0];
+s.msg("board-topics",delta("A","a2","A2",["A","B"]));
+check("first delta patches page seed without reconnect",[sockets.length,texts(applied[0].input)],[1,["A2","B1"]]);
+applied=[];
 doc.hidden=true;
 s.msg("region",{name:"board",hash:"full",html:section("A","a1","A1")+section("B","b1","B1")});
 s.msg("board-topics",delta("A","a2","A2",["A","B"]));
@@ -85,12 +89,17 @@ s.msg("board-topics",delta("B","b2","B2",["B","A"]));
 check("hidden tab applies nothing",applied.length,0);
 check("hidden input accumulates every earlier patch",texts(hiddenRegions.board.html),["B2","A2"]);
 check("held earlier input remains canonical",texts(heldInputs[0]),["A1","B1"]);
+s.fail(); advance(3000);
+var resumed=sockets[sockets.length-1];
+resumed.msg("board-topics",delta("A","a3","A3",["B","A"]));
+check("hidden reconnect seeds advertised newest canonical input",texts(hiddenRegions.board.html),["B2","A3"]);
+s=resumed;
 doc.hidden=false; showRegions();
-check("show applies only the newest complete snapshot",[applied.length,texts(applied[0].input)],[1,["B2","A2"]]);
+check("show applies only the newest complete snapshot",[applied.length,texts(applied[0].input)],[1,["B2","A3"]]);
 s.msg("board-topics",{hash:"invalid",order:["unknown"],topics:[]});
 check("invalid patch closes old socket",s.closed,true);
 advance(0);
-check("recovery omits board hash but keeps head and mode and opt-in",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("head.head-hash,mode.m1")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1");
+check("recovery omits board hash but keeps head and mode and opt-in",sockets[sockets.length-1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("head.head-hash,mode.m1")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1");
 check("invalid patch did not reach swap",applied.length,1);
 process.stdout.write(bad.join("\n"));
 `)

@@ -2,10 +2,13 @@
 <html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}"{{with .Worktree}} data-worktree="{{.}}"{{end}} data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{if .Hosted}} data-hosted="1"{{end}}{{if .HandedOff}} data-handed="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>{{if .Worktree}}{{.Workspace}} · {{.WorktreeBranch}} - Werkschaft (alpha){{else}}{{template "stitle" .}}{{end}}</title>
+{{if .Frame}}<link rel="stylesheet" href="/s/{{.Assets.FrameWhiteboardFile}}">{{if .Terminal}}
+<link rel="stylesheet" href="/s/{{.Assets.FrameXtermFile}}">{{end}}
+<link rel="stylesheet" href="/s/{{.Assets.FrameCSSFile}}">{{else}}
 <style>{{.Assets.WhiteboardCSS}}</style>{{if .Terminal}}
 <style>{{.Assets.XtermCSS}}</style>{{end}}
 <style>{{.Assets.CSS}}</style>
-<style>{{.Assets.TrackerCSS}}</style></head>
+<style>{{.Assets.TrackerCSS}}</style>{{end}}</head>
 <body class="dash {{.Mode}}{{if .Worktree}} live{{end}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="dwrap">
 <div class="top">{{template "railbtn"}}{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
@@ -25,7 +28,12 @@
 {{end}}<div id="bcol" class="bcol">{{region . "board"}}</div>
 </main></div></div>
 {{if not .Frame}}{{template "settings" .}}{{end}}
-<script>{{i18n}}</script>
+{{if .Frame}}<script src="/s/{{index .Assets.FrameI18nFiles lang}}"></script>
+<script src="/s/{{.Assets.FrameScriptFile}}"></script>{{if .Terminal}}
+<script src="/s/{{.Assets.FrameTermFile}}"></script>{{end}}{{if and .SysOpen (not .Worktree)}}
+<script src="/s/{{.Assets.FrameWebFile}}"></script>{{end}}
+<script src="/s/{{.Assets.FrameSelectFile}}"></script>
+{{else}}<script>{{i18n}}</script>
 <script>{{.Assets.AnswersScript}}</script>
 <script>window.wbForm = function () {
 {{.Assets.FormScript}}};
@@ -46,7 +54,7 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.FilesScript}}</script>{{if .Terminal}}
 <script>{{.Assets.TerminalScript}}</script>{{end}}{{if and .SysOpen (not .Worktree)}}
 <script>{{.Assets.WebScript}}</script>{{end}}
-<script>{{.Assets.SelectAllScript}}</script>
+<script>{{.Assets.SelectAllScript}}</script>{{end}}
 {{if .Frame}}<script src="/s/{{.Assets.ScriptFile}}"></script>{{else}}<script>{{.Assets.Script}}</script>{{end}}
 </body></html>
 {{end}}

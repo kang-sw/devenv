@@ -220,9 +220,9 @@ func boardMemoBase(key string, record sessionRecord, lang string, reasked map[in
 	fmt.Fprint(h, boardMemoSharedBase(key, record, lang, reasked, replies))
 	fmt.Fprintf(h, "seq\x00%d\x00", record.Whiteboard.Seq)
 	// Folder metadata, logs, and panel versions are authoritative inputs too;
-	// equal render sequences must not hide changed on-disk content.
-	board, _ := json.Marshal(record.Whiteboard)
-	h.Write(board)
+	// equal render sequences must not hide changed on-disk content. The folder
+	// cache assigns a fresh identity whenever its authoritative read changes.
+	fmt.Fprintf(h, "folder\x00%d\x00", record.boardRevision)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

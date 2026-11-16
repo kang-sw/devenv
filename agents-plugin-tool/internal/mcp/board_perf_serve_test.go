@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // TestBoardPerfServe serves a synthetic long board from an in-process
@@ -54,6 +57,8 @@ func TestBoardPerfServe(t *testing.T) {
 	// Panel IDs are numbered across the board in creation order.
 	nextPanel := 0
 	topic := func(name string, panels int, closeIt bool) {
+		// Topic bodies also reserve a panel identity for version navigation.
+		nextPanel++
 		var b strings.Builder
 		fmt.Fprintf(&b, `<wb:topic name="%s"><wb:body>`, name)
 		fmt.Fprintf(&b, "## %s\n\nThe topic body: a decision summary with a list and a table.\n\n- first point about %s\n- second point\n- third point\n\n| key | value |\n|---|---|\n| a | 1 |\n| b | 2 |\n\n", name, name)
@@ -83,7 +88,19 @@ func TestBoardPerfServe(t *testing.T) {
 			b.WriteString(`<wb:close result="Closed for the harness"/>`)
 		}
 		b.WriteString(`</wb:topic>`)
-		f.update(t, b.String())
+		if os.Getenv("WS_BOARD_PERF_FRAMED") == "" {
+			f.update(t, b.String())
+		} else if err := whiteboardFolder(f.root, f.key).Update(nil, func(s *wswhiteboard.State) error {
+			// Match the normal synthetic shape with a fixed authoring clock;
+			// daemon liveness still uses real time. Never rewrite stored logs.
+			_, problems := wswhiteboard.Apply(s, b.String(), wswhiteboard.Env{Now: time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)})
+			if len(problems) != 0 {
+				return fmt.Errorf("fixture: %v", problems)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for i := closed - 1; i >= 0; i-- {
 		topic(fmt.Sprintf("C%02d", i), (panels+1)/2, true)
@@ -121,7 +138,15 @@ func TestBoardPerfServe(t *testing.T) {
 			}
 		}
 	}()
-	fmt.Printf("BOARD-PERF READY http://127.0.0.1:%d/s/%s\n", daemon.Endpoint().Port, f.replyID())
+	pagePath := "/s/" + f.replyID()
+	if os.Getenv("WS_BOARD_PERF_FRAMED") != "" {
+		pagePath += "?frame=1"
+	}
+	link, err := daemon.LoginLink(pagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("BOARD-PERF READY %s\n", link)
 	seq := 0
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
@@ -132,6 +157,24 @@ func TestBoardPerfServe(t *testing.T) {
 		switch cmd[0] {
 		case "quit":
 			return
+		case "measure":
+			// Measure the handler itself, excluding browser and socket work.
+			for i := 0; i < 5; i++ {
+				req := httptest.NewRequest("GET", pagePath, nil)
+				req.Host = fmt.Sprintf("127.0.0.1:%d", daemon.Endpoint().Port)
+				req.RemoteAddr = "127.0.0.1:12345"
+				req.AddCookie(dashboardCookieForTest(t, daemon))
+				w := httptest.NewRecorder()
+				start := time.Now()
+				daemon.Handler().ServeHTTP(w, req)
+				elapsed := time.Since(start)
+				if w.Code != 200 {
+					t.Fatalf("measure page: %d", w.Code)
+				}
+				raw, _ := json.Marshal(map[string]any{"bytes": w.Body.Len(), "handlerMs": float64(elapsed.Microseconds()) / 1000})
+				fmt.Printf("BOARD-PERF MEASURE %s\n", raw)
+			}
+			fmt.Println("BOARD-PERF OK")
 		case "log":
 			n := 1
 			if len(cmd) > 1 {

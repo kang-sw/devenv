@@ -682,7 +682,10 @@ func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string
 				break
 			}
 		}
-		if held[name] == region.Hash && !(isBoard && topics.previous == nil) && !(row.state != nil && !row.state.initialized) {
+		if held[name] == region.Hash && !(row.state != nil && !row.state.initialized) {
+			if isBoard {
+				topics.previous = board
+			}
 			continue
 		}
 		event, data := "region", any(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
