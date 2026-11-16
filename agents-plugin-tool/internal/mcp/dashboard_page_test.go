@@ -155,7 +155,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 }
 
 // TestDashboardServedPageRendersTopicBodyInAFrame pins the served board's
-// topic body: one sandboxed doc-frame iframe per body (opaque origin, no
+// migrated topic body: one sandboxed panel-frame placeholder per body (opaque origin, no
 // allow-same-origin, since the daemon's routes accept messages and steer
 // sessions), its text and inline HTML in the frame's document, a local image
 // inlined as a data: URL because the frame sends no cookie, an absolute image
@@ -179,19 +179,19 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(html, `id="wb-now"`) || strings.Contains(html, `class="now`) {
 		t.Errorf("the served board carries a Now slot:\n%.600s", html)
 	}
-	frames := regexp.MustCompile(`<div class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="([^"]*)" data-topic="([^"]*)"(?: data-relay="[^"]*")? data-sandbox="([^"]*)" data-srcdoc="([^"]*)"></div>`).FindAllStringSubmatch(html, -1)
-	if len(frames) != 2 {
-		t.Fatalf("doc-frame iframes = %d, want one per topic body:\n%.600s", len(frames), html)
+	frames := regexp.MustCompile(`<div class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="([^"]*)" data-topic="([^"]*)" data-entry="(e[1-9][0-9]*)"(?: data-relay="[^"]*")? data-sandbox="([^"]*)" data-srcdoc="([^"]*)"></div>`).FindAllStringSubmatch(html, -1)
+	if len(frames) != 2 || strings.Count(html, `<div class="doc-frame"`) != 2 {
+		t.Fatalf("panel-frame placeholders = %d, want one per migrated topic body:\n%.600s", len(frames), html)
 	}
-	docs := map[string]string{}
+	docs, entries := map[string]string{}, map[string]string{}
 	for _, m := range frames {
-		if m[2] != "topic:"+m[1] || m[3] != m[2] || m[4] != m[1] {
-			t.Errorf("body frame identity/provenance differs: %v", m[1:5])
+		if m[1] != m[4]+"/"+m[5] || m[2] != "entry:"+m[5] || m[3] != m[2] {
+			t.Errorf("panel frame identity/provenance differs: %v", m[1:6])
 		}
-		if m[5] != "allow-scripts allow-popups allow-popups-to-escape-sandbox" || strings.Contains(m[5], "allow-same-origin") {
-			t.Errorf("frame sandbox = %q", m[5])
+		if m[6] != "allow-scripts allow-popups allow-popups-to-escape-sandbox" || strings.Contains(m[6], "allow-same-origin") {
+			t.Errorf("frame sandbox = %q", m[6])
 		}
-		docs[m[4]] = stdhtml.UnescapeString(m[6])
+		docs[m[4]], entries[m[4]] = stdhtml.UnescapeString(m[7]), m[5]
 	}
 	rollout := docs["Rollout"]
 	for _, want := range []string{"본문 body-marker", "<details><summary>more</summary>raw</details>", `<img src="data:image/png;base64,`} {
@@ -209,10 +209,10 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(rollout, base64.StdEncoding.EncodeToString([]byte("outside-bytes"))) || strings.Count(rollout, "data:image/png") != 1 {
 		t.Errorf("an image outside the root must never be inlined into the frame")
 	}
-	if want := `data-topic="Rollout" data-relay="` + stdhtml.EscapeString(relay) + `" data-sandbox=`; !strings.Contains(html, want) {
+	if want := `data-topic="Rollout" data-entry="` + entries["Rollout"] + `" data-relay="` + stdhtml.EscapeString(relay) + `" data-sandbox=`; !strings.Contains(html, want) {
 		t.Errorf("the Rollout frame lacks its relay list %q", want)
 	}
-	if strings.Contains(html, `data-topic="Body only" data-relay`) {
+	if strings.Contains(html, `data-topic="Body only" data-entry="`+entries["Body only"]+`" data-relay`) {
 		t.Errorf("a body without an outside image must list no relay")
 	}
 	// The page written to disk and the embed take no relay.
@@ -794,7 +794,11 @@ func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 	if first, last := strings.Index(rest, `>c2</span>`), strings.Index(rest, `>c1</span>`); first < 0 || last < first || strings.Count(rest, `<section class="topic`) != 2 {
 		t.Errorf("the closed topics past the cap:\n%.800s", rest)
 	}
-	for _, want := range []string{`Ending 2.`, `<div class="doc-frame" title="c1"`, `/s/` + reg.ReplyID + `/file?path=ai-docs%2Fplan.md`} {
+	// Closed legacy bodies are now immutable panel payloads, still framed.
+	if strings.Count(rest, `<div class="doc-frame"`) != 2 {
+		t.Errorf("closed topic panels must keep one frame per body")
+	}
+	for _, want := range []string{`Ending 2.`, `<div class="doc-frame" title="c1/e`, `data-topic="c1" data-entry="e`, `/s/` + reg.ReplyID + `/file?path=ai-docs%2Fplan.md`} {
 		if !strings.Contains(rest, want) {
 			t.Errorf("the closed topics past the cap lack %q", want)
 		}

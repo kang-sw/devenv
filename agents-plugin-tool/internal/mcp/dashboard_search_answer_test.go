@@ -17,7 +17,7 @@ import (
 func TestDashboardSearchAnswerSnapshotRetainedHistory(t *testing.T) {
 	t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 	f := newWhiteboardFixture(t)
-	f.update(t, `<wb:topic name="open"><wb:body>current open topic</wb:body><wb:add class="technical"><wb:title>retained question</wb:title></wb:add><wb:log>immutable old log</wb:log><wb:panel recap="old panel">old panel payload</wb:panel><wb:panel id="p1" recap="new panel">new panel payload</wb:panel></wb:topic>`)
+	f.update(t, `<wb:topic name="open"><wb:body>current open topic</wb:body><wb:add class="technical"><wb:title>retained question</wb:title></wb:add><wb:log>immutable old log</wb:log><wb:panel recap="old panel">old panel payload</wb:panel><wb:panel id="p2" recap="new panel">new panel payload</wb:panel></wb:topic>`)
 	f.update(t, `<wb:topic name="closed"><wb:body>closed topic body</wb:body><wb:log>closed immutable log</wb:log><wb:panel recap="closed panel">closed panel payload</wb:panel><wb:close result="retained close result"/></wb:topic>`)
 	src := dashboardPageSource(t, nil)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
@@ -35,13 +35,24 @@ func TestDashboardSearchAnswerSnapshotRetainedHistory(t *testing.T) {
 		}
 	}
 	nonSystemEntries := 0
+	var panels []wswhiteboard.Entry
 	for _, entry := range board.Topics[0].Entries {
-		if entry.Kind != "system" {
+		if entry.Kind != wswhiteboard.EntrySystem {
 			nonSystemEntries++
 		}
+		if entry.Kind == wswhiteboard.EntryPanel {
+			panels = append(panels, entry)
+		}
 	}
-	if len(board.ClosedTopics) != 1 || board.ClosedTopics[0] != "closed" || nonSystemEntries != 3 {
+	// The body creates fixed p1; the two authored panel versions share p2.
+	// Keep all three payloads, without reposting over the body projection.
+	if len(board.ClosedTopics) != 1 || board.ClosedTopics[0] != "closed" || nonSystemEntries != 4 || len(panels) != 3 {
 		t.Fatalf("incomplete history: %+v", board)
+	}
+	if board.Topics[0].Body != "current open topic" || panels[0].PanelID != "p1" || !panels[0].LegacyContent || panels[0].Recap != "Current content" || panels[0].Text != "current open topic" ||
+		panels[1].PanelID != "p2" || panels[1].LegacyContent || panels[1].Text != "old panel payload" ||
+		panels[2].PanelID != "p2" || panels[2].LegacyContent || panels[2].Text != "new panel payload" {
+		t.Fatalf("body projection or immutable panel versions changed: %+v", board.Topics[0])
 	}
 	if strings.Contains(string(data), f.key) {
 		t.Fatal("session credential leaked into snapshot")

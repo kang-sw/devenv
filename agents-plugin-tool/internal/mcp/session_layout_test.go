@@ -82,6 +82,18 @@ func fullLegacyRecord(root, parent string) sessionRecord {
 	}
 }
 
+// Board opens migrate content independently of the session layout. Pin the
+// fixture's converted shape without using the production migration as oracle.
+func fullMigratedLegacyRecord(root, parent string) sessionRecord {
+	r := fullLegacyRecord(root, parent)
+	r.Whiteboard.EntrySeq, r.Whiteboard.PanelCounter = 1, 1
+	r.Whiteboard.Topics[0].Entries = []wswhiteboard.Entry{{
+		ID: "e1", Kind: wswhiteboard.EntryPanel, PanelID: "p1", LegacyContent: true,
+		Recap: "Current content", Text: "notes", At: "", Imported: true,
+	}}
+	return r
+}
+
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -169,6 +181,7 @@ func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 	writeSessionRecordForTest(t, s, "split-lead-00", root, roleLead, "")
 	want := fullLegacyRecord(root, "split-lead-00")
 	legacyPath := writeLegacyRecordForTest(t, s, "legacy-child-00", want)
+	inlineBefore := readFileForTest(t, legacyPath)
 	old := time.Now().Add(-2 * touchGuardWindow).Truncate(time.Second)
 	if err := os.Chtimes(legacyPath, old, old); err != nil {
 		t.Fatal(err)
@@ -189,7 +202,11 @@ func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 		if !ok {
 			t.Fatalf("readState(legacy, %d) failed", parts)
 		}
-		assertRecordContent(t, got, want)
+		expected := want
+		if parts&partWhiteboard != 0 {
+			expected = fullMigratedLegacyRecord(root, "split-lead-00")
+		}
+		assertRecordContent(t, got, expected)
 	}
 	if v, ok := s.getOverride("legacy-child-00", "review_phase"); !ok || v != "full" {
 		t.Fatalf("getOverride(legacy) = %q, %v", v, ok)
@@ -202,8 +219,8 @@ func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 	if exists(d.keyDir("legacy-child-00")) {
 		t.Fatal("a read created the legacy key's split directory")
 	}
-	if !exists(legacyPath) {
-		t.Fatal("a read removed the legacy record file")
+	if got := readFileForTest(t, legacyPath); !bytes.Equal(got, inlineBefore) {
+		t.Fatal("a board read changed the inline rollback snapshot")
 	}
 
 	// A no-op mutation writes nothing, so it does not migrate either. It
@@ -287,6 +304,12 @@ func TestLegacyRecordMigratesOnFirstWrite(t *testing.T) {
 			if !ok {
 				t.Fatal("readState after migration failed")
 			}
+			// The current board is converted; the byte-preservation assertions
+			// above still pin both original rollback representations.
+			want.Whiteboard = fullMigratedLegacyRecord(want.Root, want.Parent).Whiteboard
+			if tc.name == "whiteboard" {
+				want.Whiteboard.Seq++
+			}
 			assertRecordContent(t, got, want)
 		})
 	}
@@ -354,6 +377,7 @@ func TestCrashShapedLayouts(t *testing.T) {
 		if !ok {
 			t.Fatal("readState after migration failed")
 		}
+		want.Whiteboard = fullMigratedLegacyRecord(want.Root, want.Parent).Whiteboard
 		assertRecordContent(t, got, want)
 	})
 }
