@@ -48,6 +48,7 @@ func TestSessionURLServesTheShellAroundItsFramedPage(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession?frame=1 = %d", code)
 	}
+	page = frameDependencies(t, page)
 	for _, want := range []string{`data-frame="1"`, `class="rail rail-ph"`, `data-region="entries"`, `data-region="head"`, "window.WsShell"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the framed page lacks %q", want)
