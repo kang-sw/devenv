@@ -146,8 +146,23 @@ func diffBodies(oldBody, newBody string) (marks []BlockMark) {
 }
 
 // diffKeys matches the two block sequences by longest common subsequence,
-// then aligns each stretch between matches by similarity (alignGap).
+// then aligns each stretch between matches by similarity (pairGap).
 func diffKeys(old, cur []string) []BlockMark {
+	var marks []BlockMark
+	for _, edit := range pairBlocks(old, cur) {
+		marks = append(marks, edit.BlockMark)
+	}
+	return marks
+}
+
+// blockEdit retains the old block range behind a mark for panel comparisons.
+// Deletions at one point share a range; additions have an empty range.
+type blockEdit struct {
+	BlockMark
+	oldFrom, oldTo int
+}
+
+func pairBlocks(old, cur []string) []blockEdit {
 	n, m := len(old), len(cur)
 	if n*m > maxDiffCells {
 		return nil
@@ -166,12 +181,12 @@ func diffKeys(old, cur []string) []BlockMark {
 			}
 		}
 	}
-	var marks []BlockMark
+	var marks []blockEdit
 	i, j, oi, cj := 0, 0, 0, 0 // oi, cj: start of the current gap
 	for i < n && j < m {
 		switch {
 		case old[i] == cur[j]:
-			marks = append(marks, alignGap(old[oi:i], cur[cj:j], cj)...)
+			marks = append(marks, pairGap(old[oi:i], cur[cj:j], oi, cj)...)
 			i, j = i+1, j+1
 			oi, cj = i, j
 		case lcs[i+1][j] >= lcs[i][j+1]:
@@ -180,8 +195,14 @@ func diffKeys(old, cur []string) []BlockMark {
 			j++
 		}
 	}
-	marks = append(marks, alignGap(old[oi:], cur[cj:], cj)...)
-	sortMarks(marks)
+	marks = append(marks, pairGap(old[oi:], cur[cj:], oi, cj)...)
+	sort.SliceStable(marks, func(i, j int) bool {
+		a, b := marks[i], marks[j]
+		if a.Block != b.Block {
+			return a.Block < b.Block
+		}
+		return a.Kind == MarkDel && b.Kind != MarkDel
+	})
 	return marks
 }
 
@@ -227,11 +248,11 @@ func similarity(a, b string) float64 {
 	return max(float64(both)/float64(len(words)), float64(pre+suf)/float64(max(len(ta), len(tb))))
 }
 
-// alignGap marks one stretch between matched blocks: old blocks and new ones
-// (curFrom is the first new block's number) are paired in order, maximizing
-// total similarity; a pair is modified, an unpaired new block new, and old
-// blocks left unpaired leave one deletion point before the next new block.
-func alignGap(old, cur []string, curFrom int) []BlockMark {
+// pairGap aligns one stretch between matched blocks in order, maximizing
+// total similarity. A pair is modified, an unpaired new block is added, and
+// consecutive unpaired old blocks share a deletion point. Offsets retain
+// each block's identity in the complete old and current sequences.
+func pairGap(old, cur []string, oldFrom, curFrom int) []blockEdit {
 	n, m := len(old), len(cur)
 	if n == 0 && m == 0 {
 		return nil
@@ -246,9 +267,9 @@ func alignGap(old, cur []string, curFrom int) []BlockMark {
 			same = same && ki == kj
 		}
 		if same {
-			marks := make([]BlockMark, n)
+			marks := make([]blockEdit, n)
 			for i := range marks {
-				marks[i] = BlockMark{curFrom + i, MarkMod}
+				marks[i] = blockEdit{BlockMark{curFrom + i, MarkMod}, oldFrom + i, oldFrom + i + 1}
 			}
 			return marks
 		}
@@ -272,47 +293,38 @@ func alignGap(old, cur []string, curFrom int) []BlockMark {
 			}
 		}
 	}
-	var marks []BlockMark
+	var marks []blockEdit
 	deleted := -1 // the block number of the last deletion point written
 	i, j := 0, 0
 	for i < n || j < m {
 		switch {
 		case i < n && j < m && sim(i, j) > 0 && best[i][j] == best[i+1][j+1]+sim(i, j):
-			marks = append(marks, BlockMark{curFrom + j, MarkMod})
+			marks = append(marks, blockEdit{BlockMark{curFrom + j, MarkMod}, oldFrom + i, oldFrom + i + 1})
 			i, j = i+1, j+1
 		case i < n && (j == m || best[i][j] == best[i+1][j]):
 			if deleted != curFrom+j {
-				marks = append(marks, BlockMark{curFrom + j, MarkDel})
+				marks = append(marks, blockEdit{BlockMark{curFrom + j, MarkDel}, oldFrom + i, oldFrom + i + 1})
 				deleted = curFrom + j
+			} else {
+				marks[len(marks)-1].oldTo = oldFrom + i + 1
 			}
 			i++
 		default:
-			marks = append(marks, BlockMark{curFrom + j, MarkNew})
+			marks = append(marks, blockEdit{BlockMark{curFrom + j, MarkNew}, oldFrom + i, oldFrom + i})
 			j++
 		}
 	}
 	return marks
 }
 
-// sortMarks orders marks by block, a deletion point before the block's own
-// mark.
-func sortMarks(marks []BlockMark) {
-	sort.SliceStable(marks, func(i, j int) bool {
-		a, b := marks[i], marks[j]
-		if a.Block != b.Block {
-			return a.Block < b.Block
-		}
-		return a.Kind == MarkDel && b.Kind != MarkDel
-	})
-}
-
 var kindChange = ast.NewNodeKind("WhiteboardChange")
 
 // changeNode is a change mark in a parsed body; it renders as an HTML comment
-// the page script reads (assets/chg.js).
+// the topic or panel script reads (assets/chg.js and assets/panel-diff.js).
 type changeNode struct {
 	ast.BaseBlock
-	kind string
+	kind  string
+	panel bool
 }
 
 func (n *changeNode) Kind() ast.NodeKind { return kindChange }
@@ -348,7 +360,12 @@ func applyMarks(doc ast.Node, src []byte, marks []BlockMark) {
 // alone.
 func renderChange(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
-		_, _ = w.WriteString("<!--wbchg:" + n.(*changeNode).kind + "-->\n")
+		mark := n.(*changeNode)
+		prefix := "wbchg:"
+		if mark.panel {
+			prefix = "wbpdg:"
+		}
+		_, _ = w.WriteString("<!--" + prefix + mark.kind + "-->\n")
 	}
 	return ast.WalkSkipChildren, nil
 }

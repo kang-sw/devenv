@@ -31,7 +31,7 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/panel-diff.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
 
 // All consumers (standalone, dashboard and topic-body frames) use this same
@@ -40,6 +40,7 @@ var pageStyleFiles = []string{
 	"page.css",
 	"page-items.css",
 	"page-stream.css",
+	"page-panel-diff.css",
 	"page-panels.css",
 	"page-sticky.css",
 }
@@ -88,6 +89,8 @@ type pageAssets struct {
 	mermaidInit template.JS
 	// chg draws a topic body's change marks (wbChangeBars, wbWatchChanges).
 	chg string
+	// panelDiff binds the latest panel's comparison controls, in host or frame.
+	panelDiff string
 	// docFrame runs inside a served page's topic-body frame (framedDoc).
 	docFrame string
 	// frameCSSFile and frameJSFile are what every topic-body frame loads
@@ -183,6 +186,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 	}
 	svgView := get("svg-view.js")
 	chg := get("chg.js")
+	panelDiff := get("panel-diff.js")
 	code := get("code.js")
 	ago := get("ago.js")
 	a := &pageAssets{
@@ -197,8 +201,9 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		ago:         ago,
 		deps:        get("deps.js"),
 		mermaidInit: template.JS(get("mermaid-init.js")),
-		docFrame:    svgView + "\n" + ago + "\n" + chg + "\n" + code + "\n" + get("doc-frame.js"),
+		docFrame:    svgView + "\n" + ago + "\n" + chg + "\n" + code + "\n" + panelDiff + "\n" + get("doc-frame.js"),
 		chg:         chg,
+		panelDiff:   panelDiff,
 		viewer:      "(function () {\n" + svgView + "\n" + get("viewer.js") + "})();\n",
 		sprite:      template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		icons:       map[string]bool{},
@@ -436,7 +441,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream + "\n" + a.panelDiff), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -542,7 +547,7 @@ func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
 	if full {
 		// The viewer is for the standalone page; the embed is a chat
 		// snapshot with a size budget; it runs the form and dependency popovers.
-		script = a.viewer + script + a.pill + a.rail + a.ago + a.stream + a.live + a.chg + chgWire
+		script = a.viewer + script + a.pill + a.rail + a.ago + a.stream + a.live + a.chg + chgWire + a.panelDiff
 	}
 	p := &pageData{
 		View:        view,
@@ -594,8 +599,8 @@ func (p *pageData) prepareTopic(t TopicView, a *pageAssets) {
 		for _, page := range pages {
 			for _, run := range page.Runs {
 				e := run.Entry
-				if e.Kind == EntryPanel && e.Text != "" {
-					p.entries[e.ID] = p.panelHTML(t.Name, e.ID, e.Text, p.DocFramed, a)
+				if e.Kind == EntryPanel && e.HasBody() {
+					p.entries[e.ID] = p.panelHTML(t.Name, e, p.DocFramed, a)
 				}
 			}
 		}
@@ -623,14 +628,14 @@ func (p *pageData) DocHTML(topic string) template.HTML { return p.docs[topic] }
 // EntryHTML is a panel's content, isolated just like the topic body.
 func (p *pageData) EntryHTML(id string) template.HTML { return p.entries[id] }
 
-func (p *pageData) panelHTML(topic, entry, content string, framed bool, a *pageAssets) template.HTML {
+func (p *pageData) panelHTML(topic string, e EntryView, framed bool, a *pageAssets) template.HTML {
 	pageMermaid := p.Mermaid
 	p.Mermaid = false
 	p.framing, p.inDoc, p.relays = framed, true, nil
-	out := p.convertWith(p.rawMarkdown(), content, "entry/"+entry, nil)
+	out := p.renderPanel(e)
 	p.framing, p.inDoc = false, false
 	if framed {
-		out = p.framedDoc(topic, entry, out, false, p.Mermaid, p.relays, a, "")
+		out = p.framedDoc(topic, e.ID, out, false, p.Mermaid, p.relays, a, "")
 		p.Mermaid = false
 	}
 	p.Mermaid = p.Mermaid || pageMermaid
