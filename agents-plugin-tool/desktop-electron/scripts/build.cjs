@@ -47,7 +47,7 @@ async function build({ platform = process.platform, arch = process.arch, daemonI
   try {
     const source = path.join(stage, 'app');
     fs.mkdirSync(source);
-    for (const file of ['main.js', 'endpoint.js', 'daemon-selection.js', 'daemon-stage.js', 'daemon-controller.js',
+    for (const file of ['main.js', 'endpoint.js', 'daemon-selection.js', 'daemon-stage.js', 'daemon-controller.js', 'daemon-version.js',
       'policy.js', 'connection.html', 'update.js', 'dashboard-preload.js',
       'titlebar.js', 'titlebar.html', 'titlebar-preload.js', 'titlebar-renderer.js']) {
       fs.copyFileSync(path.join(root, file), path.join(source, file));

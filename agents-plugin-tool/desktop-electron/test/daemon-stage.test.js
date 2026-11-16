@@ -66,6 +66,22 @@ test('builder accepts only a supplied validated input and copies entire package 
     assert(fs.existsSync(path.join(daemon, '.claude-plugin/plugin.json')));
     assert(fs.existsSync(path.join(daemon, 'claude-agents/effort-low.md')));
     assert(fs.existsSync(path.join(daemon, 'rsrc/hello/hello.md')));
+    // Resolve every local JS helper from the packaged source, not the source tree.
+    const pending = ['main.js'], visited = new Set();
+    while (pending.length) {
+      const file = pending.pop();
+      if (visited.has(file)) continue;
+      visited.add(file);
+      const text = fs.readFileSync(path.join(dir, file), 'utf8');
+      for (const match of text.matchAll(/require\(['"](\.\/.+?)['"]\)/g)) {
+        const helper = path.normalize(path.join(path.dirname(file), match[1] + '.js'));
+        assert(fs.existsSync(path.join(dir, helper)), `Missing packaged helper: ${helper}`);
+        pending.push(helper);
+      }
+    }
+    assert(visited.has('daemon-controller.js'));
+    assert(visited.has('daemon-version.js'));
+    assert.equal(typeof require(path.join(dir, 'daemon-controller.js')).connectDaemon, 'function');
     return [dir];
   };
   const run = (_tar, args) => { archived++; fs.writeFileSync(args[args.indexOf('-f') + 1], 'archive fixture'); };
