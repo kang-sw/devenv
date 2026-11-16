@@ -70,19 +70,65 @@ class LauncherStartContractTest(unittest.TestCase):
         self.assertFalse((self.link.daemon_dir / "dashboard.lock").exists())
 
     def test_swap_silence_longer_than_old_grace_waits_for_successor(self):
+        for grace in (0, 20):  # initial connect and reconnect
+            now = [0.0]
+            def probe(timeout):
+                return (self.endpoint, self.health) if now[0] >= 4 else (None, None)
+            with self.subTest(grace=grace), \
+                 mock.patch.object(self.m.time, "monotonic", side_effect=lambda: now[0]), \
+                 mock.patch.object(self.m.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
+                 mock.patch.object(self.link, "probe", side_effect=probe), \
+                 mock.patch.object(self.link, "start_daemon") as start:
+                self.m.DAEMON_RETRY_SECONDS = 75
+                self.m.DAEMON_SWAP_GRACE_SECONDS = 20
+                self.assertEqual(self.link.ensure_healthy(grace=grace), (self.endpoint, self.health))
+                start.assert_not_called()
+            self.assertGreaterEqual(now[0], 4)
+        self.assertFalse((self.link.daemon_dir / "bin").exists())
+
+    def test_no_successor_starts_once_only_after_the_full_health_window(self):
         now = [0.0]
+        started_at = []
         def probe(timeout):
-            return (self.endpoint, self.health) if now[0] >= 4 else (None, None)
+            return (self.endpoint, self.health) if started_at else (None, None)
+        def start(*args, **kwargs):
+            started_at.append(now[0])
+            self.assertGreaterEqual(now[0], 20)
+            return True
         with mock.patch.object(self.m.time, "monotonic", side_effect=lambda: now[0]), \
              mock.patch.object(self.m.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
              mock.patch.object(self.link, "probe", side_effect=probe), \
-             mock.patch.object(self.link, "start_daemon") as start:
+             mock.patch.object(self.link, "start_daemon", side_effect=start) as starter:
             self.m.DAEMON_RETRY_SECONDS = 75
             self.m.DAEMON_SWAP_GRACE_SECONDS = 20
-            self.assertEqual(self.link.ensure_healthy(grace=20), (self.endpoint, self.health))
-            start.assert_not_called()
-        self.assertGreaterEqual(now[0], 4)
-        self.assertFalse((self.link.daemon_dir / "bin").exists())
+            self.link.ensure_healthy(grace=20)
+            starter.assert_called_once()
+        self.assertEqual(started_at, [20])
+
+    def test_connect_timeout_is_unreachable_but_established_timeout_is_hung(self):
+        import http.client
+        import socket
+        for connected in (False, True):
+            with self.subTest(connected=connected):
+                conn = mock.Mock()
+                if connected:
+                    conn.getresponse.side_effect = socket.timeout("accepted but unanswering")
+                else:
+                    conn.connect.side_effect = socket.timeout("handshake timed out")
+                with mock.patch.object(http.client, "HTTPConnection", return_value=conn):
+                    if connected:
+                        with self.assertRaises(self.m.DaemonHung):
+                            self.m.daemon_health(1, 0.02)
+                    else:
+                        self.assertIsNone(self.m.daemon_health(1, 0.02))
+                        conn.request.assert_not_called()
+                conn.close.assert_called_once()
+        # Other post-connect errors keep their old unreachable result; that
+        # result alone never bypasses the live/unqueryable recorded-PID veto.
+        conn = mock.Mock()
+        conn.getresponse.side_effect = ConnectionResetError("peer reset")
+        with mock.patch.object(http.client, "HTTPConnection", return_value=conn):
+            self.assertIsNone(self.m.daemon_health(1, 0.02))
 
     def test_live_unknown_or_malformed_endpoint_never_authorizes_start(self):
         self.link.daemon_dir.mkdir()

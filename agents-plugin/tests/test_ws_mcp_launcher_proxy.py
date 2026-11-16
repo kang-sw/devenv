@@ -610,7 +610,8 @@ class LauncherProxyTest(unittest.TestCase):
     def test_a_daemon_that_dies_with_no_successor_is_restarted(self):
         old = self.daemon(name="old")
         old.write_endpoint(self.daemon_dir)
-        client = ProxyClient(self.launcher, self.link())
+        client = ProxyClient(self.launcher, self.link(answer_budget=0.02))
+        self.addCleanup(client.close)
         client.send("initialize")
         client.recv()
         new = self.daemon(name="new", build_time=2_000_000_000_001)
@@ -828,6 +829,7 @@ class LauncherProxyTest(unittest.TestCase):
         client.thread.join(5.0)
         self.assertFalse(client.thread.is_alive())
         self.assertEqual(client.result.get("code"), 0)
+        self.assertEqual(client.close(), 0)
 
     # --- mailbox wait -------------------------------------------------------------
 
@@ -1217,7 +1219,8 @@ class LauncherProxyTest(unittest.TestCase):
                     old.write_endpoint(self.daemon_dir)
                 else:
                     (self.daemon_dir / "endpoint.json").unlink(missing_ok=True)
-                client = ProxyClient(self.launcher, self.link(repair_runtime=repair))
+                client = ProxyClient(self.launcher, self.link(answer_budget=0.02, repair_runtime=repair))
+                self.addCleanup(client.close)
                 client.send("initialize")
                 client.recv()
                 if not transient_initial_failure:

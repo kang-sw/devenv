@@ -553,6 +553,39 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
   short-lived processes and is not a kernel process-start trace. No such
   command, swap or install has been executed by this worker.
 
+### Bounded continuation evidence - 2026-11-16
+
+- Confirmed diagnosis: with fixture grace `0.02s` and retry budget `0.3s`, a
+  closed Windows localhost port raised `DaemonHung` after `0.0529s`, before
+  any starter ran. The 20-second production grace was already test-overridden;
+  the first PID-only fixture correction did not address this handshake/read
+  timeout conflation. Coordinator 02:17:32Z approved separating connect
+  failures/timeouts (unreachable) from established-connection timeouts (hung),
+  retaining recorded-PID vetoes. Reconnect fixtures now use a short socket
+  budget; production swap grace is unchanged.
+- Mocked local gates passed: starter family 12 tests (one remote-only process
+  fixture skipped), proxy family all 58 tests. A final pipe-fixture close
+  removed ResourceWarnings; its affected one-test gate passed without warnings.
+  Virtual-clock cases cover unreachable at t0, successor at t4 inside the
+  20-second grace with zero starts (initial/reconnect), and no successor with
+  exactly one start only after grace expiry.
+- Remote w5090 focused `^Test(LauncherStarterSingleFlight|StageExecutable|Ensure|KeepRunningCorePolicy)`
+  passed (1.226s), including six competing Python processes, crash lock release,
+  failed-copy cleanup, conservative retention, numeric-core and LAN cases.
+- Remote w5090 focused builtin/subset/saved-snapshot/old-writer family passed
+  (0.190s). Its first run correctly exposed a test-fixture mismatch: the
+  directional old-pruner fixture called today's now-conservative hook. Freeze
+  the pre-change prune policy inside that compatibility fixture so it still
+  proves actual old-write -> new-reopen; do not restore unsafe production
+  deletion to satisfy the old assertion.
+- Node-only injected-spawn Pi stream/fallback/EOF family passed (6 tests).
+  Outer Claude/Pi wait commands remain Python; the launcher cuts their hidden
+  start authority centrally. No executable integration fixtures ran locally.
+- All three launcher files are byte-identical. Item 4's five source/test files
+  remain byte-identical to the planning base after the explicit revert.
+- Independent R1 is next; this continuation still records no phase Result,
+  ticket closure, live swap, install, merge, push or acceptance success.
+
 ## Forward
 
 - Coordinator-approved boundary: old launchers and Electron do not share the new starter lock; a rare Electron race can execute one losing starter, with Go's singleton preventing a second daemon.

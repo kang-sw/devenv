@@ -1136,6 +1136,12 @@ def daemon_health(port: int, timeout: float) -> dict | None:
 
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
+        try:
+            conn.connect()
+        except OSError:
+            # A TCP handshake timeout is not an accepted, hung daemon.
+            # Absence admission still separately checks the recorded PID.
+            return None
         conn.request("GET", "/health")
         resp = conn.getresponse()
         body = resp.read(64 * 1024)

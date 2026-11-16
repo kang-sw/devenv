@@ -687,7 +687,30 @@ func TestPiProbeCacheOldWritersAndPrunersThenReopen(t *testing.T) {
 	if err := os.Chtimes(stale, old, old); err != nil {
 		t.Fatal(err)
 	}
-	wsdashboard.PruneStagedExecutables(dir, current)
+	// Exercise the pre-change writer, not today's conservative retention hook.
+	// Freeze its directory/age policy here so directional compatibility keeps
+	// proving old-write -> new-reopen after the production policy changes.
+	legacyPrune := func(dir, exe string) {
+		binDir := filepath.Join(dir, "bin")
+		if filepath.Dir(exe) != binDir {
+			return
+		}
+		entries, err := os.ReadDir(binDir)
+		if err != nil {
+			return
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if name == filepath.Base(exe) || strings.HasSuffix(name, ".tmp") {
+				continue
+			}
+			if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < 2*time.Minute {
+				continue
+			}
+			_ = os.RemoveAll(filepath.Join(binDir, name))
+		}
+	}
+	legacyPrune(dir, current)
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("old bin prune did not run: %v", err)
 	}
