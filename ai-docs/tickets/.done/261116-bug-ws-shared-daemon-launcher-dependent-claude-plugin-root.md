@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0cd526ff0670053b
 sage-review-completeness-reviewed: 0cd526ff0670053b
+completed: 2026-11-16
 ---
 
 # P0: Shared daemon Claude plugin root depends on the launcher that starts it
@@ -190,4 +191,127 @@ independent R1 after implementation; use fixes-only R2 only for substantive
 findings and retain minor findings as Forward. Record commands/results, per-lane
 T0 evidence, unresolved acceptance boundaries and coordination in the Result.
 Report the phase boundary to the coordinating lead; do not merge/push develop.
+
+### Result (91729cae0) - 2026-11-16
+
+Implemented and independently reviewed on `impl/develop/tidy-anvil-squad`:
+`91729cae0` (package/startup spine), `c42c538dd` and `a709fca6d`
+(consumer controls), `5fa5dba3f` (transactional first-party refresh).
+
+- Plain Pi ships intact ws and wsflow workflow archives: referenced Claude
+  agents, hook/import closure, canonical configuration, launchers and workflow
+  resources. Native first-party payloads carry both archives. Only the copied
+  daemon-start environment selects the actual owner; caller Pi roots, config
+  and hello remain unchanged. Relative paths normalize in the starter context;
+  alternate/invalid roots retain their meaning. Absent/invalid bundles retain
+  the existing backend error boundary, without a global startup/hello refusal.
+- Extraction verifies archive/member hashes, exact inventory, safe paths and
+  regular-file types, size limits, warm contents and staging. Private advisory
+  publication locking handles different daemon caches sharing one Pi package;
+  atomic replacement/rollback and concurrent cold/warm repair are covered.
+  This does not change the daemon starter/singleton lock or arbitration.
+- The finite extracted package has a supplied sibling Pi entry forwarding to
+  the original extension's dist file URI. Both unchanged old/new Go readers
+  return that real entry, not the MCP bridge. Original dependency ancestry,
+  module location, workflow owner and host-SDK selection paths remain intact.
+- Canonical wsflow has no `skills/manifest.json`; the producer synthesizes it
+  only in the prepared archive, with sorted slash-relative entries and UTF-8
+  CRLF-to-LF SHA-256 hashes. Exec3 confirmed its consumer requires a preassembled
+  input and validates before copying. Neither canonical skills nor the consumer
+  was weakened or edited. Exact-peer JS proof validates/stages both packages.
+- First-party-only refresh needs no npm or dependency closure regeneration and
+  validates a complete candidate before publication. `MATERIALIZER_SCHEMA`
+  remains 3 and native manifests remain schema 1. Both closure archives and
+  manifests are unchanged. Pi `src/` and source `dist/` are unchanged; native
+  prepared dist was stale against the already-current source bundle at the
+  readiness commit and was refreshed with its existing valid input header.
+
+#### Directional T0 evidence
+
+Old source is readiness revision `f3efb8510`. Frozen helper SHA-256:
+`11e81de2435faf81d2905e13dbdfabc213f12f0ead526b269a2e9246b2b72bce`, retained in
+`agents-plugin/tests/fixtures/native-pi-f3efb8510.json` and checked before use.
+This is source/fixture evidence, not historical released-binary acceptance.
+
+- **Old ws/wsflow starter -> new reader:** original resource/skills writers
+  (`agents-plugin/bin/ws-mcp-launcher.py` at old lines 840-863, 1489-1497)
+  still feed unchanged `wsrsrc/loader.go:30-38`,
+  `wsagent/lead_plugins.go:16-50` and `cmd/ws-mcp/agent_mcp.go:16-41`.
+  Existing complete package roots/native payloads retain their behavior;
+  explicit-invalid-root and both Claude isolation modes pass.
+- **New plain Pi -> old/new readers:** new writer is
+  `agents-plugin/bin/ws-mcp-launcher.py:1205-1350,1637`; the existing
+  `WS_RSRC_ROOT`/`WS_SKILLS_ROOT` values name the supplied complete ws package.
+  `hello_env`/`proxy_hello` still use caller roots. The Go reader implementations
+  above and `wsagent/pi_lead.go:121-174` are byte-unchanged from the old revision;
+  executable fixtures consume the real resulting package/forwarding entry.
+- **New prepared ws/wsflow -> old/new readers:** runtime-owner overlay selects
+  the respective archive, with actual owning Claude configuration bytes/defaults
+  checked, including wsflow's conservative values. Old native helper
+  `ws-pi-payload.py:288-337` copies every `first.files` member and hashes that
+  manifest plus identity/overlay. New writer
+  `prepare-native-payload.py:200-222` adds both archives through those same
+  fields; new helper `ws-pi-payload.py:291-340` retains the existing algorithm.
+  The frozen old helper materializes both owners, repairs corrupted new archive
+  bytes and retains the selected complete package after reopening with the new
+  helper. No old writer erases the retained producer archive representation.
+- **Old-format payload -> new helper:** the historical schema/package shape,
+  using current valid extension bytes, is first validated by the frozen old
+  helper, then consumed by the new helper. With no additive workflow archives,
+  existing legacy/backend behavior remains; no newly introduced refusal repairs
+  or blocks old packages. This fixture is not an old release load claim.
+- **Electron:** exact consumer sources from
+  `3d791f606a633141ef496cf09c821fbb3f7ae12f` accept and byte-copy both supplied
+  archives after inert binary/metadata assembly, returning the same existing
+  roots. Its lifecycle remains independently owned by Exec3. No new tool,
+  hello/config/rsrc field, store schema or version boundary was introduced.
+
+#### Verification
+
+- Coherent remote driver: `bash D:/Temp/exec2/run-gate.sh`, using
+  `bash D:/sys_lock.sh remote w5090 run exec2-claude-root 15 --sync
+  'D:/Workspace/Repos/.ws-worktrees/devenv/flyaway-fifteen-judgingly' -- ...`.
+  Final job `424fe3e5f5084b5a88447cfaa5b2d54b`, exit 0; complete output read at
+  `D:/Temp/exec2/remote-gate-7.log`. Isolated temporary HOME/config/cache/tmp
+  were removed on exit; shared Go caches stayed outside those fixtures.
+- Remote producer prepare/check and first-party freshness passed. Python:
+  `test_daemon_workflow_bundle.py` 9/9, `test_native_pi_payload.py` 15/15,
+  `test_ws_mcp_launcher_proxy.py` 58/58, wsflow runtime contract 3/3.
+- Remote focused `go test ./internal/wsagent -count=1 -timeout=240s -run ... -v`
+  passed owner/old-reader seam, native package-only layouts, bundle freshness,
+  actual-host SDK path selection, Claude isolation/relaunch and retained
+  dashboard/mail input on backend failure. Focused `internal/wsrsrc` passed
+  six Pi/wsflow mirror checks. No unscoped slow package was run.
+- Node v25.7.0:
+  `WS_TEST_TMP_ROOT=D:/Temp/exec2 WS_TEST_MIN_FREE_GIB=20
+  TMP=D:/Temp/exec2 TEMP=D:/Temp/exec2 TMPDIR=D:/Temp/exec2
+  node --test agents-plugin-pi/test/workflow-bundle-consumer.test.mjs`
+  passed 11/11. Full output read at `D:/Temp/exec2/node-consumer.log`.
+  This loads only exact peer JS and inert ESM stubs, not a local launcher or
+  actual Pi SDK. ZIP hashes: ws
+  `3a72edef1a53f9953ee0c14af5a46db427e5adcf069504153a6f6b4e0de270d9`,
+  wsflow `afd5118fa5835ac1570affad86ef5af548c480a09605012b4d5d0e9c8b2619b8`.
+- Launcher mirrors match SHA-256
+  `ff6d808e3ea92a337fdd102ff822012a129221a357643bfa7a2b8daec1a16171`.
+  `git diff --check` passed; D: free remained 152 GB. Peer-owned dev.py,
+  lifecycle/admission, and Electron production paths are untouched.
+- Independent R1 Lite: clean, no Critical/Important/Minor findings, range
+  `f3efb8510..5fa5dba3f`. Artifact:
+  `C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac@202653e7/review-paths/39209af8-01-claude-root-r1.md`.
+  No substantive findings required fixes-only R2; no Minor Forward remains.
+- Ticket verification passed with the generic sage-review freshness advisory.
+  Accepted after inspecting the ticket diff: only this completion Result was
+  appended; approved decisions, constraints and phase plan remain unchanged.
+
+Earlier failed gates are retained in `D:/Temp/exec2/remote-gate-{1..5}.log`:
+command-envelope transport length (before tests), missing wsflow input manifest,
+fixture TSX import resolution, real concurrent-publication race, old-format
+fixture inventory and the fixture's dashboard-plus-mail held count were diagnosed
+separately and resolved. The final coherent run above is the passing evidence.
+
+**Unresolved acceptance boundaries:** actual historical-release execution,
+actual-host Pi SDK loading, native Windows/macOS launcher execution and live
+cross-harness/account-backed acceptance were not performed. No installed plugin
+refresh, executable rebuild/install, daemon/account operation, merge, push or
+release was performed. Those operations remain with the coordinating lead.
 
