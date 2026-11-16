@@ -661,8 +661,8 @@ last reported turn is kept in the record (`last_turn`), so after a daemon
 restart a wait on a conversation that settled before it answers at once.
 `Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
-`git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
-six `pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
+`git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`,
+`tickets.create_empty`, and the six `pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
 adds `tickets.query/acquire/release/close/move/verify/checklist`, read-only
 `note.query`, `playbook.read`, `playbook.render`, `path.generate`, and
 `route.resolve_implement`. It keeps a delegate key, not lead authority, and
@@ -1505,7 +1505,7 @@ Current launcher inputs:
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which lists the `pi.*` tools, default on in ws and off in wsflow and Pi) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
-| `WS_MCP_CLI_NAME` | Command name that printed agent-runnable CLI commands (the rendered `mailbox wait` command and its re-arm line) start with; empty or unset uses the invoked binary path (`os.Args[0]`). Set by the `ws-cli`/`wsflow-cli` shims and by the Claude manifests' `mcpServers.<name>.env`, where plugin `bin/` is on the agent's Bash PATH; left unset for Codex, which does not put plugin `bin/` on PATH. |
+| `WS_MCP_CLI_NAME` | Python launcher command used in printed mailbox wait and re-arm guidance when it matches the supported safe form. The launcher sets it unless already set; an absent or unrecognized value uses an illustrative Python launcher path, never the runtime binary. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC
 stream from the moment the launcher connects to the daemon.

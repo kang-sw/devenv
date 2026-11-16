@@ -97,9 +97,9 @@ var PiWorkerTools = []string{"read", "bash", "edit", "write", "grep", "find", "l
 // an implementation prompt ends with, the git reads a commit and a diff
 // review need, and the pi.* tools a spawning playbook needs. A worker's
 // pi.* calls go to the daemon on its capability token (children.go), which
-// caps the spawn tree's depth and tier. Ticket workflow tools belong to
-// pi-mini-lead instead; pi-worker's tool set stays unchanged.
-var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}
+// caps the spawn tree's depth and tier. Ticket creation is available to the
+// worker; the remaining ticket workflow tools belong to pi-mini-lead.
+var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.create_empty", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}
 
 // PiMiniLeadWSTools adds ticket workflow reads and lifecycle operations, but
 // no lead-only tools or note, whiteboard, or tracker writes.

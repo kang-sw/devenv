@@ -388,17 +388,17 @@ func TestMailboxWaitRearmReminderOnTimeoutExit(t *testing.T) {
 	}
 }
 
-// TestMailboxWaitRearmCommandName asserts the re-arm command starts with
-// WS_MCP_CLI_NAME when the shim declares it, so a wait launched through the
-// shim re-arms through it, and with the invoked binary path otherwise.
+// TestMailboxWaitRearmCommandName checks that re-arm guidance uses a safe
+// Python launcher, never the runtime executable or an unsafe override.
 func TestMailboxWaitRearmCommandName(t *testing.T) {
 	bin := buildWsMCPMailboxTestBin(t)
 	for _, tc := range []struct {
 		cliName string
 		want    string
 	}{
-		{"ws-cli", "re-arm: ws-cli mailbox wait --session-key "},
-		{"", "re-arm: " + bin + " mailbox wait --session-key "},
+		{"python3 /plugin/bin/ws-mcp-launcher.py", "re-arm: python3 /plugin/bin/ws-mcp-launcher.py mailbox wait --session-key "},
+		{"ws-cli", "re-arm: python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key "},
+		{"", "re-arm: python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key "},
 	} {
 		env := append(mailboxTestEnv(t), "WS_MCP_CLI_NAME="+tc.cliName)
 		cmd := exec.Command(bin, "mailbox", "wait", "--session-key", "amber-tide-fox", "--timeout", "1s")
