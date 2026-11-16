@@ -385,6 +385,25 @@ func TestHostedMailboxWaitEndsWithItsConnection(t *testing.T) {
 
 func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 	h := startHostedDaemon(t)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		for _, path := range []string{
+			filepath.Join("/proc", strconv.Itoa(h.ep.PID), "status"),
+			filepath.Join(h.dir, "dashboard.log"),
+		} {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Logf("diagnostic %s: %v", path, err)
+			} else {
+				if len(data) > 16*1024 {
+					data = data[len(data)-16*1024:]
+				}
+				t.Logf("diagnostic %s (last 16 KiB):\n%s", path, strings.ReplaceAll(string(data), "\x00", ""))
+			}
+		}
+	})
 	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, h.ep); err != nil || info.LAN {
 		t.Fatalf("health before the change = %+v, %v", info, err)
 	}
@@ -504,7 +523,7 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 			t.Fatal("a line after the slow session's answer")
 		}
 	}
-	waitUntil(t, 10*time.Second, "the predecessor to exit", func() bool { return !wsstate.ProcessAlive(h.ep.PID) })
+	waitUntil(t, 10*time.Second, "the predecessor to exit", func() bool { return predecessorExited(h.ep.PID) })
 
 	// A hello whose session the dashboard does not apply to, or whose
 	// global config is another one, never triggers a replacement: it
@@ -535,6 +554,51 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 	}
 	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, successor); err != nil || !info.LAN {
 		t.Fatalf("health after the ignored hellos = %+v, %v", info, err)
+	}
+}
+
+// A Linux zombie has exited even if its supervisor has not reaped it yet.
+// Unknown or unreadable status falls back to the ordinary liveness check.
+func predecessorExited(pid int) bool {
+	if !wsstate.ProcessAlive(pid) {
+		return true
+	}
+	if goruntime.GOOS == "linux" {
+		status, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+		return err == nil && procStatusZombie(string(status))
+	}
+	return false
+}
+
+func procStatusZombie(status string) bool {
+	for _, line := range strings.Split(status, "\n") {
+		if key, value, ok := strings.Cut(line, ":"); ok && key == "State" {
+			fields := strings.Fields(value)
+			return len(fields) == 2 && fields[0] == "Z" && fields[1] == "(zombie)"
+		}
+	}
+	return false
+}
+
+func TestProcStatusZombie(t *testing.T) {
+	for _, tc := range []struct {
+		name, status string
+		want         bool
+	}{
+		{"zombie", "Name:\tws-mcp\nState:\tZ (zombie)\n", true},
+		{"running", "State:\tR (running)\n", false},
+		{"unknown", "State:\t? (unknown)\n", false},
+		{"missing", "Name:\tws-mcp\n", false},
+		{"empty state", "State:\t\n", false},
+		{"malformed", "State Z (zombie)\n", false},
+		{"incomplete zombie", "State:\tZ\n", false},
+		{"not a state code", "State:\tZombie\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := procStatusZombie(tc.status); got != tc.want {
+				t.Fatalf("procStatusZombie(%q) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
 	}
 }
 

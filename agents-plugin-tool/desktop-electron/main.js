@@ -2,6 +2,7 @@
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { connectDaemon } = require('./daemon-controller');
+const { pythonAvailable } = require('./python');
 const { nextZoom, destination } = require('./policy');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 const { createUpdater } = require('./update');
@@ -143,16 +144,16 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     };
     // Initial iframe src loads do not reliably emit will-frame-navigate.
     // Enforce the pin at the network boundary too, including redirect hops.
-    const connectionURL = pathToFileURL(path.join(__dirname, 'connection.html')).href;
+    const localPages = ['connection.html', 'python-missing.html'].map(file => pathToFileURL(path.join(__dirname, file)).href);
     wc.on('did-navigate', (_event, url) => {
       const target = navigation?.commitTarget;
       // Rollback belongs to the committed document, never another attempt's
       // provisional pin/title. A late promise settlement cannot advance it.
-      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : url === connectionURL)) retained = target;
+      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : localPages.includes(url))) retained = target;
     });
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
-      if (details.resourceType === 'mainFrame' && details.url === connectionURL) return callback({});
+      if (details.resourceType === 'mainFrame' && localPages.includes(details.url)) return callback({});
       const action = destination(details.url, pin, details.resourceType === 'mainFrame');
       if (action === 'dashboard' || action === 'frame') return callback({});
       callback({ cancel: true });
@@ -206,8 +207,11 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     async function navigate(url, attempt = beginNavigation()) {
       if (!isCurrent(attempt)) return;
       attempt.commitTarget = { pin: `${new URL(url).origin}/`, title: 'Werkschaft' };
+      await loadDocument(attempt, () => wc.loadURL(url));
+    }
+    async function loadDocument(attempt, load) {
       attempt.loading = true;
-      try { await wc.loadURL(url); }
+      try { await load(); }
       catch (error) {
         if (!isCurrent(attempt)) return;
         // ERR_ABORTED alone also means supersession or policy cancellation. Only
@@ -227,6 +231,16 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
+        const available = await pythonAvailable();
+        if (!isCurrent(attempt)) return;
+        if (!available) {
+          pin = null;
+          const missingTitle = 'Werkschaft — Python required — Connection → Retry';
+          setTitle(missingTitle);
+          attempt.commitTarget = { pin: null, title: missingTitle };
+          await loadDocument(attempt, () => wc.loadFile(path.join(__dirname, 'python-missing.html')));
+          return;
+        }
         let url;
         try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace }, {
           onNotice: message => {

@@ -124,6 +124,10 @@
    the pins), 320px at least and at most what leaves the board 360px: a
    width saved on a wider window is clamped to what this one leaves. */
 :root[data-convow] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--convow), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }
+/* Beside the pinned column with a board width set (dashboard-rail.css), the
+   cell is sized to the two, so the conversation takes its own (--cvw) and
+   the board the rest, which is the board's width. */
+:root[data-pincol][data-boardw] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--cvw), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }
 .dgrid.live > .dcv-edge { display: none; grid-area: board; justify-self: start; position: relative; z-index: 2; width: 9px; margin-left: -12px; cursor: col-resize; touch-action: none; }
 @media (min-width: 760px) {
   .dgrid.live[data-layout="split"] { grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(96px, 1fr) auto;

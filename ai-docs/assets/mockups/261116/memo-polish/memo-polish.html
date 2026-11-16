@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Memo pad polish - mockup (261116)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Self-contained mockup. Variants: cur (current memo.css, 320px), a (Quiet, 440px),
+  b (Paper, 440px), c (Board, 480px). Hash: #v=a&s=all|empty|list|edit|hover|undo|live
+  Tokens are the dashboard's dark-theme --wb-* values (wswhiteboard/assets/page.css).
+-->
+<style>
+:root {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32;
+  --wb-muted-fg: #a2a6ad; --wb-primary: #7aa2ff; --wb-fail: #f0797e;
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  --memo-hue: #f6da75; /* the existing memo.css accent */
+  color-scheme: dark;
+}
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+
+/* ---------- mockup chrome (not part of the proposal) ---------- */
+.mk-bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 18px; background: #0f1012; border-bottom: 1px solid var(--wb-line); }
+.mk-bar h1 { font-size: 14px; margin: 0 8px 0 0; }
+.mk-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--wb-muted); }
+.mk-seg button { font: inherit; font-size: 12.5px; color: var(--wb-muted-fg); background: transparent; border: 0; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.mk-seg button[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); font-weight: 600; }
+.mk-lbl { font-size: 11.5px; color: var(--wb-muted-fg); }
+.mk-stage { display: flex; flex-wrap: wrap; gap: 26px; padding: 22px 18px; align-items: flex-start; }
+.mk-frame { display: flex; flex-direction: column; gap: 8px; }
+.mk-cap { font-size: 12px; color: var(--wb-muted-fg); }
+.mk-cap b { color: var(--wb-fg); font-weight: 600; }
+.mk-screen { position: relative; height: 620px; display: flex; background: var(--wb-bg); border-radius: 6px; outline: 1px dashed rgb(255 255 255 / .08); outline-offset: 4px; }
+.mk-rail { width: 22px; flex: none; background: var(--wb-card); border-radius: 12px 0 0 12px; box-shadow: var(--wb-shadow-hi); position: relative; z-index: 2; }
+.mk-notes { padding: 0 18px 28px; max-width: 1100px; font-size: 13px; color: var(--wb-muted-fg); }
+.mk-notes h2 { font-size: 13.5px; color: var(--wb-fg); margin: 18px 0 4px; }
+.mk-notes ul { margin: 4px 0; padding-left: 18px; }
+body.mk-shot .mk-bar, body.mk-shot .mk-notes { display: none; }
+
+/* Shared: the pad sits flush against the rail, like position:fixed left:var(--memo-left) */
+.memo-pad { position: relative; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); }
+.memo-pad button { cursor: pointer; color: inherit; background: transparent; border: 0; font: inherit; }
+.memo-pad [hidden] { display: none !important; }
+
+/* ================= CURRENT (faithful copy of memo.css) ================= */
+.v-cur .memo-pad { width: 320px; gap: 10px; padding: 16px; border-radius: 0 12px 12px 0; background: color-mix(in srgb, var(--memo-hue) 24%, var(--wb-card)); }
+.v-cur header { display: flex; align-items: start; gap: 10px; }
+.v-cur header b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.v-cur .memo-pad button { border-radius: 4px; padding: 3px 6px; }
+.v-cur .memo-pad button:hover, .v-cur .memo-pad button.is-hover { background: rgb(127 127 127 / .2); }
+.v-cur textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 10px; resize: vertical; font: inherit; color: inherit; background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 6px; }
+.v-cur .memo-status { margin: 0; font-size: 12px; } .v-cur .memo-status:empty { display: none; }
+.v-cur .memo-list { flex: 1; min-height: 0; overflow: auto; }
+.v-cur .memo-note { position: relative; margin-bottom: 12px; padding: 14px 28px 14px 12px; background: color-mix(in srgb, var(--memo-hue) 40%, var(--wb-card)); border-radius: 3px 3px 12px 3px; box-shadow: 0 2px 4px rgb(0 0 0 / .12); }
+.v-cur .memo-text { white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.v-cur .memo-text a { color: var(--wb-primary); }
+.v-cur .memo-delete { position: absolute; right: 3px; top: 3px; opacity: 0; }
+.v-cur .memo-note:hover .memo-delete, .v-cur .memo-note.is-hover .memo-delete, .v-cur .memo-note:focus-within .memo-delete { opacity: 1; }
+.v-cur .memo-add-hint, .v-cur .memo-edit-hint, .v-cur .memo-n, .v-cur .memo-empty, .v-cur .memo-ic { display: none !important; }
+.v-cur .memo-add { display: contents; }
+.v-cur .memo-undo button { text-decoration: underline; }
+
+/* ================= Shared polish for A / B / C ================= */
+.v-a .memo-pad, .v-b .memo-pad, .v-c .memo-pad, .v-c2 .memo-pad { --pad-x: 18px; padding: 14px var(--pad-x) 0; gap: 12px; border-radius: 0 12px 12px 0; background: var(--wb-card); }
+:is(.v-a, .v-b, .v-c, .v-c2) header { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-ic { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #1e1b10; background: color-mix(in srgb, var(--memo-hue) 82%, var(--wb-card)); }
+:is(.v-a, .v-b, .v-c, .v-c2) header b { font-size: 14px; font-weight: 650; }
+:is(.v-a, .v-b, .v-c, .v-c2) header .ws { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--wb-muted-fg); padding: 1px 8px; border-radius: 999px; background: var(--wb-muted); font-family: var(--wb-mono); }
+:is(.v-a, .v-b, .v-c, .v-c2) header .memo-n { font-size: 11.5px; color: var(--wb-muted-fg); }
+:is(.v-a, .v-b, .v-c, .v-c2) header .sp { flex: 1; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-close { width: 28px; height: 28px; border-radius: 7px; color: var(--wb-muted-fg); }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-close:hover { background: var(--wb-muted); color: var(--wb-fg); }
+
+/* Add box: chrome lives on the wrapper, textarea is bare and auto-grows (no grip). */
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-add { border: 1px solid var(--wb-line); border-radius: 10px; background: color-mix(in srgb, var(--wb-bg) 55%, var(--wb-card)); transition: border-color .12s, box-shadow .12s; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-add:focus-within, :is(.v-a, .v-b, .v-c, .v-c2) .memo-add.is-focus { border-color: color-mix(in srgb, var(--memo-hue) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--memo-hue) 14%, transparent); }
+:is(.v-a, .v-b, .v-c, .v-c2) textarea { display: block; box-sizing: border-box; width: 100%; resize: none; overflow: hidden; border: 0; outline: none; background: transparent; color: inherit; font: inherit; font-size: 13.5px; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-add textarea { min-height: 42px; padding: 10px 12px; }
+:is(.v-a, .v-b, .v-c, .v-c2) textarea::placeholder { color: color-mix(in srgb, var(--wb-muted-fg) 80%, transparent); }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-add-hint, :is(.v-a, .v-b, .v-c, .v-c2) .memo-edit-hint { display: flex; gap: 10px; justify-content: flex-end; font-size: 11px; color: var(--wb-muted-fg); }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-add-hint { padding: 0 10px 7px; }
+/* Always laid out so focus/blur never shifts the list under the pointer; only dimmed when idle. */
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-add-hint { transition: opacity .12s; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-add:not(:focus-within):not(.is-focus) .memo-add-hint { opacity: .45; }
+:is(.v-a, .v-b, .v-c, .v-c2) kbd { font: 600 10.5px var(--wb-mono); color: var(--wb-muted-fg); border: 1px solid var(--wb-line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-status { margin: -4px 2px 0; font-size: 12px; color: var(--wb-muted-fg); } :is(.v-a, .v-b, .v-c, .v-c2) .memo-status:empty { display: none; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-list { flex: 1; min-height: 0; overflow: auto; margin: 0 calc(-1 * var(--pad-x)); padding: 2px var(--pad-x) 16px; display: flex; flex-direction: column; gap: 10px; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-note { position: relative; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-text { white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.6; cursor: text; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-text a { color: var(--wb-primary); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--wb-primary) 40%, transparent); }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-delete { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; font-size: 13px; color: var(--wb-muted-fg); opacity: 0; transition: opacity .12s, background .12s, color .12s; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-note:hover .memo-delete, :is(.v-a, .v-b, .v-c, .v-c2) .memo-note.is-hover .memo-delete, :is(.v-a, .v-b, .v-c, .v-c2) .memo-note:focus-within .memo-delete { opacity: 1; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-delete:hover, :is(.v-a, .v-b, .v-c, .v-c2) .memo-delete.is-hover { color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 16%, transparent); }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-edit-hint { margin-top: 6px; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-note textarea { padding: 0; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-empty { margin: auto 0; padding: 28px 12px 60px; text-align: center; color: var(--wb-muted-fg); font-size: 13px; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-empty .big { display: block; font-size: 26px; opacity: .5; margin-bottom: 6px; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-empty b { color: var(--wb-fg); font-weight: 600; }
+/* Undo becomes a snackbar pinned to the pad's bottom edge. */
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-undo { position: absolute; left: var(--pad-x); right: var(--pad-x); bottom: 14px; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: 9px; font-size: 13px; background: #2e3036; box-shadow: var(--wb-shadow-hi); }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-undo span { flex: 1; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-undo button { color: var(--wb-primary); font-weight: 600; padding: 3px 10px; border-radius: 6px; }
+:is(.v-a, .v-b, .v-c, .v-c2) .memo-undo button:hover { background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
+
+/* ================= A - Quiet (neutral pad, warm accent strip) ================= */
+.v-a .memo-pad { width: 440px; border-top: 3px solid color-mix(in srgb, var(--memo-hue) 70%, var(--wb-card)); }
+.v-a .memo-note { padding: 11px 38px 11px 14px; border-radius: 8px; background: color-mix(in srgb, var(--memo-hue) 7%, var(--wb-muted)); border-left: 3px solid color-mix(in srgb, var(--memo-hue) 62%, var(--wb-card)); transition: background .12s; }
+.v-a .memo-note:hover, .v-a .memo-note.is-hover { background: color-mix(in srgb, var(--memo-hue) 11%, var(--wb-muted)); }
+.v-a .memo-note.editing { background: color-mix(in srgb, var(--memo-hue) 9%, var(--wb-bg)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--memo-hue) 55%, transparent), 0 0 0 4px color-mix(in srgb, var(--memo-hue) 12%, transparent); }
+
+/* ================= B - Paper (muted amber sticky, folded corner) ================= */
+.v-b .memo-pad { width: 440px; }
+.v-b .memo-list { gap: 12px; }
+.v-b .memo-note { --paper: color-mix(in srgb, var(--memo-hue) 17%, #24231f); padding: 16px 38px 14px 16px; color: #efe6c8; border-radius: 2px 2px 2px 2px;
+  background: var(--paper); box-shadow: 0 1px 1px rgb(0 0 0 / .35), 0 6px 14px -6px rgb(0 0 0 / .6); }
+.v-b .memo-note::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 5px; background: color-mix(in srgb, var(--memo-hue) 30%, #24231f); } /* adhesive strip */
+.v-b .memo-note::after { content: ""; position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; background: linear-gradient(315deg, var(--wb-card) 50%, color-mix(in srgb, var(--memo-hue) 34%, #2a2822) 50%); box-shadow: -1px -1px 2px rgb(0 0 0 / .25); } /* folded corner */
+.v-b .memo-note:hover, .v-b .memo-note.is-hover { --paper: color-mix(in srgb, var(--memo-hue) 21%, #24231f); }
+.v-b .memo-note.editing { --paper: color-mix(in srgb, var(--memo-hue) 12%, #1d1c19); outline: 1px solid color-mix(in srgb, var(--memo-hue) 50%, transparent); outline-offset: -1px; }
+.v-b .memo-text a { color: #a9c1ff; }
+.v-b .memo-delete { color: #c9bf9e; }
+.v-b .memo-edit-hint { color: #b9b08f; }
+.v-b .memo-edit-hint kbd { color: #c9bf9e; border-color: rgb(239 230 200 / .22); }
+.v-b .memo-note textarea { color: #efe6c8; }
+
+/* ================= C - Board (2-column sticky grid) ================= */
+.v-c .memo-pad { width: 480px; }
+.v-c .memo-list { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: min-content; align-content: start; gap: 10px; }
+.v-c .memo-note { --paper: color-mix(in srgb, var(--memo-hue) 15%, #24231f); min-height: 92px; padding: 14px 32px 12px 13px; color: #efe6c8; border-radius: 3px 3px 14px 3px; background: var(--paper); box-shadow: 0 1px 1px rgb(0 0 0 / .35), 0 6px 14px -6px rgb(0 0 0 / .6); }
+.v-c .memo-note.wide, .v-c .memo-note.editing { grid-column: 1 / -1; min-height: 0; }
+.v-c .memo-note:hover, .v-c .memo-note.is-hover { --paper: color-mix(in srgb, var(--memo-hue) 20%, #24231f); }
+.v-c .memo-note.editing { --paper: color-mix(in srgb, var(--memo-hue) 10%, #1d1c19); outline: 1px solid color-mix(in srgb, var(--memo-hue) 50%, transparent); outline-offset: -1px; }
+.v-c .memo-text { font-size: 13px; }
+.v-c .memo-text a { color: #a9c1ff; }
+.v-c .memo-delete { color: #c9bf9e; top: 4px; right: 4px; }
+.v-c .memo-edit-hint { color: #b9b08f; }
+.v-c .memo-note textarea { color: #efe6c8; font-size: 13px; }
+.v-c .memo-empty { grid-column: 1 / -1; }
+
+/* ================= C2 - Masonry (B paper, shortest-column-first) ================= */
+/* memo-list holds two .memo-col stacks; placeMasonry() appends each note, in list
+   order, to the currently shorter column. No length rule, no min-height. */
+.v-c2 .memo-pad { width: 480px; }
+.v-c2 .memo-list { flex-direction: row; align-items: flex-start; }
+.v-c2 .memo-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.v-c2 .memo-note { --paper: color-mix(in srgb, var(--memo-hue) 15%, #24231f); padding: 14px 32px 12px 13px; color: #efe6c8; border-radius: 3px 3px 14px 3px; background: var(--paper); box-shadow: 0 1px 1px rgb(0 0 0 / .35), 0 6px 14px -6px rgb(0 0 0 / .6); }
+.v-c2 .memo-note:hover, .v-c2 .memo-note.is-hover { --paper: color-mix(in srgb, var(--memo-hue) 20%, #24231f); }
+.v-c2 .memo-note.editing { --paper: color-mix(in srgb, var(--memo-hue) 10%, #1d1c19); outline: 1px solid color-mix(in srgb, var(--memo-hue) 50%, transparent); outline-offset: -1px; }
+.v-c2 .memo-text { font-size: 13px; }
+.v-c2 .memo-text a { color: #a9c1ff; }
+.v-c2 .memo-delete { color: #c9bf9e; top: 4px; right: 4px; }
+.v-c2 .memo-edit-hint { color: #b9b08f; flex-wrap: wrap; gap: 2px 8px; }
+.v-c2 .memo-note textarea { color: #efe6c8; font-size: 13px; }
+.v-c2 .memo-empty { flex: 1; }
+</style>
+</head>
+<body>
+<div class="mk-bar">
+  <h1>Memo pad polish</h1>
+  <span class="mk-lbl">Variant</span>
+  <span class="mk-seg" id="mk-v"></span>
+  <span class="mk-lbl">State</span>
+  <span class="mk-seg" id="mk-s"></span>
+</div>
+<div class="mk-stage" id="stage"></div>
+<div class="mk-notes">
+  <h2>Variants</h2>
+  <ul>
+    <li><b>Current</b> - memo.css as shipped: 320px, olive pad (hue 24%) behind olive notes (hue 40%), dark textareas with resize grips, bare ✕ / Undo.</li>
+    <li><b>A Quiet</b> - 440px. Neutral pad (--wb-card) with a thin warm top edge; notes are dark muted cards with a 3px warm left strip. Lowest contrast against the rest of the dashboard; the post-it feel is a hint, not a surface.</li>
+    <li><b>B Paper</b> - 440px. Neutral pad; notes are muted amber paper with a darker adhesive strip and a folded bottom-right corner, warm ink. Clear post-it identity, still dark.</li>
+    <li><b>C Board</b> - 480px. Same paper as B laid out on a 2-column grid; memos longer than ~90 chars or 3 lines and the note being edited span both columns. Most "wall of stickies", weakest for long text and reading order.</li>
+    <li><b>C2 Masonry</b> - 480px. B paper in two column stacks; each memo, in list order, goes to the currently shorter column (ties left). No length rule, no min-height, no gaps; the note being edited grows in place in its column and other notes are re-placed only on the next render (save/cancel/add/delete).</li>
+  </ul>
+  <h2>Shared polish (A/B/C/C2)</h2>
+  <ul>
+    <li>Textareas are chrome-less and auto-grow (resize: none); the add box carries the border/focus ring, so there are no resize grips.</li>
+    <li>Header: memo icon, "Memos", workspace as a mono chip (ellipsized; full path stays in title), memo count, 28px close button.</li>
+    <li>Key hints (<kbd>Enter</kbd> save, <kbd>Shift</kbd>+<kbd>Enter</kbd> newline) move out of the placeholder into a kbd row inside the add box, dimmed when idle and full-strength on focus; the row is always laid out so focus/blur never shifts the list. A note being edited shows the same row plus <kbd>Esc</kbd> cancel. The placeholder shrinks to "Add a memo…".</li>
+    <li>Delete ✕ fades in on note hover/focus and turns danger-red on its own hover. Undo is a bottom snackbar instead of a trailing text line.</li>
+    <li>Korean: <code>word-break: keep-all</code> + <code>overflow-wrap: anywhere</code> (whole-word wrapping, long URLs still break), line-height 1.6, 13.5px.</li>
+    <li>No timestamps: the memo record is only {id, text} (wsdashboard/memos.go).</li>
+  </ul>
+</div>
+<script>
+(function () {
+  "use strict";
+  var VARIANTS = [
+    { id: "cur", name: "Current", w: 320 },
+    { id: "a", name: "A Quiet", w: 440 },
+    { id: "b", name: "B Paper", w: 440 },
+    { id: "c", name: "C Board", w: 480 },
+    { id: "c2", name: "C2 Masonry", w: 480 }
+  ];
+  var STATES = [
+    { id: "empty", name: "Empty" },
+    { id: "list", name: "Memos" },
+    { id: "edit", name: "Editing" },
+    { id: "hover", name: "Hover delete" },
+    { id: "undo", name: "Deleted / undo" },
+    { id: "mixed", name: "8 mixed" },
+    { id: "live", name: "Interactive" }
+  ];
+  var SEED = [
+    { id: "m1", text: "HW MGMT -> 서버실 작업\n- 서버실" },
+    { id: "m2", text: "릴리스 전에 develop → main 머지 확인" },
+    { id: "m3", text: "오늘 할 일\n- 대시보드 메모 UI 다듬기\n- 260909 리서치 티켓 정리\n- CI 캐시 만료 확인" },
+    { id: "m4", text: "배포 체크리스트: 데몬 재시작 후 /mcp hello 버전이 일치하는지 확인하고, 이전 마이너 세션이 잠기지 않는지 반드시 확인할 것. 참고 https://github.com/example/devenv/issues/1234 — 문제 생기면 바로 롤백." },
+    { id: "m5", text: "ping infra re: VPN cert renewal (expires Fri)" }
+  ];
+  // 8 memos of mixed length, ordered so C's full-row rule leaves half-row gaps.
+  var MIXED = [SEED[0], SEED[2], SEED[1], SEED[3], SEED[4],
+    { id: "m6", text: "점심 후 리뷰 2건" },
+    { id: "m7", text: "LAN 대시보드에서는 메모가 읽기 전용 — 편집은 로컬에서.\n포트 포워딩은 하지 말 것." },
+    { id: "m8", text: "TODO: wsflow 0.50.2 릴리스 노트 초안" }];
+  var live = SEED.map(function (m) { return { id: m.id, text: m.text }; });
+  var hash = parse();
+
+  function parse() {
+    var out = { v: "all", s: "list" };
+    location.hash.replace(/^#/, "").split("&").forEach(function (kv) { var p = kv.split("="); if (p[0]) out[p[0]] = decodeURIComponent(p[1] || ""); });
+    if (out.shot) document.body.classList.add("mk-shot");
+    return out;
+  }
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function linked(text) {
+    var out = "", re = /https?:\/\/[^\s<>]+/g, from = 0, m;
+    while ((m = re.exec(text))) { out += esc(text.slice(from, m.index)) + '<a href="' + esc(m[0]) + '" target="_blank" rel="noopener noreferrer">' + esc(m[0]) + "</a>"; from = re.lastIndex; }
+    return out + esc(text.slice(from));
+  }
+  function wide(text) { return text.length > 90 || text.split("\n").length > 3; }
+
+  function pad(v, state, items) {
+    var cur = v.id === "cur";
+    var editId = state === "edit" ? "m3" : null, hoverId = state === "hover" ? "m1" : null;
+    if (state === "empty") items = [];
+    if (state === "mixed") items = MIXED;
+    if (state === "undo") items = items.filter(function (m) { return m.id !== "m2"; });
+    var notes = items.map(function (m) {
+      var cls = "memo-note" + (m.id === editId ? " editing" : "") + (m.id === hoverId ? " is-hover" : "") + (wide(m.text) ? " wide" : "");
+      var body = m.id === editId
+        ? '<div class="memo-text" hidden></div><textarea aria-label="Edit memo">' + esc(m.text) + "</textarea>" +
+          '<div class="memo-edit-hint"><span><kbd>Enter</kbd> save</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span><span><kbd>Esc</kbd> cancel</span></div>'
+        : '<div class="memo-text" role="button" tabindex="0" aria-label="Edit memo">' + linked(m.text) + "</div>";
+      return '<article class="' + cls + '" data-id="' + m.id + '">' + body +
+        '<button type="button" class="memo-delete' + (m.id === hoverId ? " is-hover" : "") + '" aria-label="Delete memo">✕</button></article>';
+    }).join("");
+    if (!items.length && !cur) notes = '<div class="memo-empty"><span class="big">▤</span><b>No memos for devops yet.</b><br>Jot down anything you want to keep beside this workspace.</div>';
+    var placeholder = cur ? "Add a memo · Enter to save, Shift+Enter for a newline" : "Add a memo…";
+    var addFocus = !cur && (state === "empty" || state === "live") ? " is-focus" : "";
+    var undo = state === "undo"
+      ? (cur ? '<div class="memo-undo">Memo deleted. <button type="button">Undo</button></div>'
+             : '<div class="memo-undo"><span>Memo deleted.</span><button type="button">Undo</button></div>')
+      : '<div class="memo-undo" hidden></div>';
+    return '<aside class="memo-pad" aria-label="Workspace memos">' +
+      '<header><span class="memo-ic" aria-hidden="true">▤</span>' +
+      (cur ? '<b>Memos · <span>devops</span></b>' : '<b>Memos</b><span class="ws" title="D:\\Workspace\\Repos\\devops">devops</span><span class="memo-n">' + items.length + '</span><span class="sp"></span>') +
+      '<button type="button" class="memo-close" aria-label="Close memos">✕</button></header>' +
+      '<div class="memo-add' + addFocus + '"><textarea rows="' + (cur ? 2 : 1) + '" aria-label="New memo" placeholder="' + placeholder + '"></textarea>' +
+      '<div class="memo-add-hint"><span><kbd>Enter</kbd> save</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span></div></div>' +
+      '<p class="memo-status" role="status"></p>' +
+      '<div class="memo-list">' + notes + "</div>" + undo + "</aside>";
+  }
+
+  function grow(area) { if (area.closest(".v-cur")) return; area.style.height = "auto"; area.style.height = area.scrollHeight + "px"; }
+
+  // C2: shortest-column-first in list order. Each note is appended to the column
+  // whose current height is smaller (ties go left), measured after the previous
+  // append, so placement needs the list attached and laid out. Runs on every
+  // render (load/add/edit-save/delete/undo); an in-place edit only grows its note.
+  function placeMasonry(root) {
+    root.querySelectorAll(".v-c2 .memo-list").forEach(function (list) {
+      var notes = Array.prototype.slice.call(list.querySelectorAll(":scope > .memo-note"));
+      if (!notes.length) return;
+      // Mockup only: the static "Editing" state measures the edited note in view
+      // mode, as the real flow places first and the user clicks to edit later.
+      var editing = notes.filter(function (n) { return n.classList.contains("editing"); });
+      editing.forEach(function (n) { n.querySelector(".memo-text").hidden = false; n.querySelector(".memo-text").innerHTML = linked(n.querySelector("textarea").value); n.querySelectorAll("textarea, .memo-edit-hint").forEach(function (x) { x.style.display = "none"; }); });
+      var cols = [0, 1].map(function () { var c = document.createElement("div"); c.className = "memo-col"; list.appendChild(c); return c; });
+      notes.forEach(function (note) {
+        var target = cols[1].offsetHeight < cols[0].offsetHeight ? cols[1] : cols[0];
+        target.appendChild(note);
+      });
+      editing.forEach(function (n) { n.querySelector(".memo-text").hidden = true; n.querySelectorAll("textarea, .memo-edit-hint").forEach(function (x) { x.style.display = ""; }); });
+    });
+  }
+  function settle(root) { placeMasonry(root); root.querySelectorAll("textarea").forEach(grow); }
+
+  function frame(v, s) {
+    var el = document.createElement("div");
+    el.className = "mk-frame v-" + v.id;
+    el.innerHTML = '<div class="mk-cap"><b>' + v.name + "</b> · " + v.w + "px · " + STATES.filter(function (x) { return x.id === s; })[0].name + "</div>" +
+      '<div class="mk-screen"><div class="mk-rail"></div>' + pad(v, s, s === "live" ? live : SEED) + "</div>";
+    if (s === "live") { el.setAttribute("data-live", v.id); wire(el, v); }
+    return el;
+  }
+
+  function wire(el, v) {
+    var root = el.querySelector(".memo-pad"), input = root.querySelector(".memo-add textarea");
+    function rerender() { var n = frame(v, "live"), old = document.querySelector('.mk-frame[data-live="' + v.id + '"]') || el; old.replaceWith(n); settle(n); return n; }
+    root.querySelectorAll(".is-focus").forEach(function (x) { x.classList.remove("is-focus"); });
+    input.addEventListener("input", function () { grow(input); });
+    input.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (input.value.trim()) { live.unshift({ id: "n" + Date.now(), text: input.value }); rerender().querySelector(".memo-add textarea").focus(); } }
+    });
+    root.querySelectorAll(".memo-note").forEach(function (row) {
+      var id = row.getAttribute("data-id"), m = live.filter(function (x) { return x.id === id; })[0], text = row.querySelector(".memo-text");
+      text.addEventListener("click", function (e) {
+        if (e.target.closest("a") || row.querySelector("textarea")) return;
+        var area = document.createElement("textarea"); area.value = m.text; text.hidden = true;
+        var hint = document.createElement("div"); hint.className = "memo-edit-hint";
+        hint.innerHTML = "<span><kbd>Enter</kbd> save</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span><span><kbd>Esc</kbd> cancel</span>";
+        row.classList.add("editing"); row.insertBefore(area, text.nextSibling); if (!v.id.match(/cur/)) row.insertBefore(hint, area.nextSibling);
+        grow(area); area.focus();
+        area.addEventListener("input", function () { grow(area); });
+        area.addEventListener("keydown", function (e) {
+          if (e.isComposing || e.keyCode === 229) return;
+          if (e.key === "Escape") { e.preventDefault(); rerender(); }
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (area.value.trim()) { m.text = area.value; rerender(); } }
+        });
+      });
+      row.querySelector(".memo-delete").addEventListener("click", function () {
+        var idx = live.indexOf(m); live.splice(idx, 1);
+        var n = rerender(), u = n.querySelector(".memo-undo");
+        u.hidden = false; u.innerHTML = (v.id === "cur" ? "Memo deleted. " : "<span>Memo deleted.</span>") + '<button type="button">Undo</button>';
+        u.querySelector("button").addEventListener("click", function () { live.splice(idx, 0, m); rerender(); });
+      });
+    });
+  }
+
+  function seg(host, list, key) {
+    host.innerHTML = "";
+    list.forEach(function (x) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = x.name;
+      b.setAttribute("aria-pressed", String(hash[key] === x.id));
+      b.addEventListener("click", function () { hash[key] = x.id; location.hash = "v=" + hash.v + "&s=" + hash.s; });
+      host.appendChild(b);
+    });
+  }
+
+  function draw() {
+    hash = parse();
+    seg(document.getElementById("mk-v"), [{ id: "all", name: "All" }].concat(VARIANTS), "v");
+    seg(document.getElementById("mk-s"), [{ id: "all", name: "All" }].concat(STATES), "s");
+    var stage = document.getElementById("stage"); stage.innerHTML = "";
+    var vs = hash.v === "all" ? VARIANTS : VARIANTS.filter(function (x) { return hash.v.split(",").indexOf(x.id) >= 0; });
+    var ss = hash.s === "all" ? STATES.filter(function (x) { return x.id !== "live"; }) : STATES.filter(function (x) { return x.id === hash.s; });
+    vs.forEach(function (v) { ss.forEach(function (s) { stage.appendChild(frame(v, s.id)); }); });
+    settle(stage);
+    var ed = stage.querySelector(".memo-note.editing textarea");
+    if (ed && ss.length === 1 && vs.length === 1) { ed.focus(); ed.setSelectionRange(ed.value.length, ed.value.length); }
+  }
+  window.addEventListener("hashchange", draw);
+  draw();
+})();
+</script>
+</body>
+</html>

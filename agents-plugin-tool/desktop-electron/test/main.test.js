@@ -18,9 +18,12 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   const controller = require('../daemon-controller');
   const original = controller.connectDaemon;
   controller.connectDaemon = discover;
+  const python = require('../python'), originalPython = python.pythonAvailable;
+  python.pythonAvailable = roots.pythonAvailable || (async () => true);
   delete require.cache[require.resolve('../main')];
   const { start } = require('../main');
   controller.connectDaemon = original;
+  python.pythonAvailable = originalPython;
   const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: !!roots.packaged, getPath: () => roots.userData || userData, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
   let focusedContents = null;
   const renderers = [];
@@ -183,6 +186,7 @@ test('overlapping retries are ignored and rediscovery replaces the pin', async (
   finish('http://127.0.0.1:39418/');
   await tick();
   const retry = f.menus.retry.click();
+  await tick(); // Python's asynchronous preflight precedes rediscovery.
   assert.equal(calls, 2);
   finish('http://127.0.0.1:39419/');
   await retry;
@@ -190,6 +194,84 @@ test('overlapping retries are ignored and rediscovery replaces the pin', async (
   f.session.webRequest.handler({ url: 'http://127.0.0.1:39418/', resourceType: 'mainFrame' }, value => { canceled = value.cancel; });
   assert.equal(canceled, true);
   assert.equal(f.window.loads.at(-1), 'http://127.0.0.1:39419/');
+});
+test('missing Python shows the local guide first; Retry probes again and proceeds once present', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    let available = false, probes = 0, connections = 0;
+    const f = await fixture(async () => { connections++; return 'http://127.0.0.1:39418/'; }, platform, {
+      pythonAvailable: async () => { probes++; return available; },
+    });
+    const content = f.views[0] || f.window;
+    const guide = path.resolve(__dirname, '../python-missing.html'), guideURL = pathToFileURL(guide).href;
+    assert.deepEqual(content.loads, [guide]);
+    assert.match(f.window.title, /Python required/);
+    assert.equal(probes, 1);
+    assert.equal(connections, 0);
+    for (const [url, resourceType, expected] of [[guideURL, 'mainFrame', {}],
+      [guideURL, 'subFrame', { cancel: true }], [guideURL + '?x', 'mainFrame', { cancel: true }],
+      [pathToFileURL(path.resolve(__dirname, '../main.js')).href, 'mainFrame', { cancel: true }]]) {
+      f.session.webRequest.handler({ url, resourceType }, decision => assert.deepEqual(decision, expected));
+    }
+    await f.menus.retry.click();
+    assert.equal(probes, 2);
+    assert.equal(connections, 0);
+    assert.equal(content.loads.at(-1), guide);
+    available = true;
+    await f.menus.retry.click();
+    assert.equal(probes, 3);
+    assert.equal(connections, 1);
+    assert.equal(content.loads.at(-1), 'http://127.0.0.1:39418/');
+    assert.equal(f.window.title, 'Werkschaft');
+    await f.menus.retry.click();
+    assert.equal(probes, 4);
+    assert.equal(connections, 2);
+  }
+});
+test('Retry Stay after Python disappears retains the dashboard document, title and authority', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    let available = true;
+    const f = await fixture(undefined, platform, { pythonAvailable: async () => available });
+    const content = f.views[0] || f.window, wc = content.webContents, originalURL = content.currentURL;
+    wc.emit('page-title-updated', { preventDefault() {} }, 'Board — Unsaved');
+    available = false;
+    wc.loadFile = async file => {
+      content.loads.push(file);
+      wc.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must keep the unload veto'); } });
+      throw Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED', errno: -3 });
+    };
+    await f.menus.retry.click();
+    assert.equal(content.currentURL, originalURL);
+    assert.equal(f.window.title, 'Board — Unsaved');
+    wc.emit('page-title-updated', { preventDefault() {} });
+    assert.equal(f.window.title, 'Board — Unsaved');
+    assert.equal(path.basename(content.loads.at(-1)), 'python-missing.html');
+    assert(!content.loads.some(file => path.basename(file) === 'connection.html'));
+    f.session.webRequest.handler({ url: originalURL + 's/frame', resourceType: 'subFrame' }, decision => assert.deepEqual(decision, {}));
+    wc.emit('will-frame-navigate', { url: originalURL + 's/frame', isMainFrame: false,
+      preventDefault() { assert.fail('the retained dashboard origin must remain authorized'); } });
+    f.ipcMain.emit('werkschaft:update-subscribe', { sender: wc, senderFrame: Object.assign(wc.mainFrame, { url: originalURL }) });
+    assert.equal(content.state.channel, 'werkschaft:update-status');
+    assert.deepEqual(f.opened, []);
+  }
+});
+test('genuine Python guide load failures and aborts without Stay still show the connection fallback', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    for (const code of ['ERR_ABORTED', 'ERR_CONNECTION_REFUSED']) {
+      let available = true;
+      const f = await fixture(undefined, platform, { pythonAvailable: async () => available });
+      const content = f.views[0] || f.window, wc = content.webContents, originalURL = content.currentURL;
+      const loadFile = wc.loadFile;
+      available = false;
+      wc.loadFile = async file => {
+        if (path.basename(file) === 'python-missing.html') throw Object.assign(new Error(code), { code });
+        return loadFile(file);
+      };
+      await f.menus.retry.click();
+      assert.equal(path.basename(content.currentURL), 'connection.html');
+      assert.match(f.window.title, /Navigation failed/);
+      f.session.webRequest.handler({ url: originalURL + 's/frame', resourceType: 'subFrame' }, decision => assert.deepEqual(decision, { cancel: true }));
+    }
+  }
 });
 test('discovery and immediate navigation failure show the bundled connection page', async () => {
   const f = await fixture(async () => { throw new Error('No readable dashboard endpoint'); });

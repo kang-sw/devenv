@@ -74,6 +74,18 @@ func launcherTestPlugin(t *testing.T, bin string) (launcher string, env []string
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The launcher waits for the staged plugin's resource sentinel even when
+	// WS_RSRC_ROOT points at the real resource tree.
+	if err := os.MkdirAll(filepath.Join(plugin, "rsrc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(rsrc, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "rsrc", "manifest.json"), manifestBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	env, _ = dashboardTestEnv(t)
 	cache = cacheHomeFromEnv(t, env)
@@ -102,6 +114,22 @@ func launcherTestPlugin(t *testing.T, bin string) (launcher string, env []string
 	)
 	_ = python
 	return launcher, env, cache, cwd
+}
+
+// startLauncherTestDaemon prepares a live daemon for CLI-only tests: mailbox
+// commands connect to an existing daemon and do not bootstrap one themselves.
+func startLauncherTestDaemon(t *testing.T, bin string, env []string, cache, cwd string) {
+	t.Helper()
+	cmd := exec.Command(bin, "daemon-start")
+	cmd.Env, cmd.Dir = env, cwd
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("daemon-start: %v\n%s", err, out)
+	}
+	dir, err := wsdashboard.Dir(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEndpoint(t, dir, version, 10*time.Second)
 }
 
 type launcherClient struct {
@@ -329,7 +357,8 @@ func toolText(t *testing.T, resp map[string]any) string {
 
 func TestLauncherRunsMailboxWaitThroughTheDaemonLikeTheDirectCLI(t *testing.T) {
 	bin := buildDashboardTestBin(t, "")
-	launcher, env, _, cwd := launcherTestPlugin(t, bin)
+	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
+	startLauncherTestDaemon(t, bin, env, cache, cwd)
 
 	run := func(name string, argv ...string) (string, string, int) {
 		t.Helper()

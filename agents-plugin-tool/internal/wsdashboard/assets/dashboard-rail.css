@@ -45,10 +45,16 @@
    column), narrowed to leave the column 480px, and the column fills the
    window's remaining width to its right, so the page fills the window. The
    handle on the column's left edge, in the gap toward the board, drags the
-   board's width (--boardw, kept by cards.js; the column keeps 280px at
-   least: a width saved on a wider window is clamped to what this window
-   leaves, the column's 280px and the gaps). The column scrolls on its own. */
+   board's width (--boardw with data-boardw, kept by cards.js; the column
+   keeps 280px at least: a width saved on a wider window is clamped to what
+   this window leaves, the column's 280px and the gaps). On the live page
+   --boardw is the board's own column, not its cell: the cell is the
+   conversation's width (--cvw: --convow, else the stylesheet's 5:7 share
+   of the board), the grid's 16px gap and the board's, so each handle
+   moves only the panel on its left and the column takes the difference.
+   The column scrolls on its own. */
 :root { --pbw: calc(1680px - 32px - 356px); }
+.dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
 .dash.board { --pbw: 900px; }
 .bpcol { display: none; }
 /* An empty board (no topic or card in it; the placeholder may follow an empty #bpins or a future toolbar card) is a quiet dashed placeholder, as the idle pin zone (.bpzone) is. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
@@ -71,6 +77,7 @@
 @media (min-width: 1600px) {
   :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
   :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
+  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 296px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
   .dash:not(.live):not(.history) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
   :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
@@ -87,6 +94,7 @@
 @media (min-width: 2200px) {
   /* rail and column both show */
   :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
+  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
   :root[data-pincol] .bpcol { grid-column: 3; }

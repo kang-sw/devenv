@@ -143,6 +143,29 @@ func TestConversationSplitHandle(t *testing.T) {
 	}
 }
 
+// TestLiveCellIsTheConversationAndTheBoard pins the push layout beside the
+// pinned column on the live page: once a board width is set (data-boardw,
+// the board's own column there, cards.js TestColumnGrabsPush), the board's
+// cell is the conversation's width (--cvw: --convow, else the 5:7 share of
+// the board), the grid's 16px gap and the board's, clamped as the cell was,
+// so each handle moves only the panel on its left and the column takes the
+// difference; the grid gives the conversation its width and the board the
+// rest. Other pages keep --boardw as the whole cell.
+func TestLiveCellIsTheConversationAndTheBoard(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		".dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }",
+		`  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 296px)) minmax(280px, 1fr); }`,
+		`  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }`,
+		":root[data-pincol][data-boardw] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--cvw), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }",
+		".dgrid { --dgrid-cols: minmax(320px, 5fr) minmax(0, 7fr); --dgrid-gap: 16px; }",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("dashboard.css lacks %q", want)
+		}
+	}
+}
+
 // TestTrackerStopsAtItsWidestLayout pins the tracker's wide cap: from 1600px,
 // where it lays out layout D (Items at two shares, Notifications, the tab
 // pane: four panels' worth), its drawer sheet is 1600px at most, anchored
