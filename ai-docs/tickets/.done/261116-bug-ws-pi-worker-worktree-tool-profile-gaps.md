@@ -1,5 +1,6 @@
 ---
 title: "Pi worker profile omits tools needed beside worktree acquisition"
+completed: 2026-11-16
 related:
   261116-bug-ws-exe-launch-elimination: "Phase 1 item 2 owns tickets.create_empty exposure and executable-fallback elimination; do not duplicate that change"
   261116-feat-ws-subagent-worktree-lease: "owns scoped acquire/release permissions; this ticket covers adjacent worker primitives"
@@ -65,3 +66,30 @@ Verify an authorized worker can resolve an implementation branch and complete
 its assigned worktree/ticket flow through native tools, while unrelated lead
 operations and privilege escalation remain refused. No executable fallback,
 profile implementation or new permissions are introduced by this capture.
+
+### Result (a995e895f) - 2026-11-16
+
+Added the existing branch resolver and ticket preflight verifier to `pi-worker`;
+mini-lead inherits both, with one verifier entry. Updated the runbook inventory.
+No create-empty, resolver, routing, session schema, or authorization changes.
+
+Verification on remote w5090 through `D:/sys_lock.sh remote ... run --sync`:
+- Targeted profile/launch/snapshot/verification/session-binding tests passed.
+- Full `go test ./internal/wsagent ./internal/mcp ./internal/wsdoc -count=1`
+  passed (74.004s, 190.257s, 1.351s respectively); remote gofmt checks passed.
+- Cross-worktree dispatch checks cover worker and mini-lead allowlists with
+  child-lead and delegate keys: verify/create use the bound linked worktree;
+  mini-lead query does too. The original key checks the original checkout,
+  unknown keys cannot fall back, and explicit root overrides are rejected.
+- Launch-surface tests expose the additions to Pi and MCP. Existing launched
+  parent snapshots cannot gain new grants; unrelated lead operations and
+  delegate lease escalation remain refused. `git diff --check` passed.
+- Independent R1: no Critical/Important findings; one Minor for stale runbook
+  inventory. Fixed, and fixes-only R2 confirmed resolution. Review used the
+  read-only Pi profile because the running parent snapshot could not authorize
+  the newer ordinary worker's existing `tickets.create_empty` grant.
+
+No local Go, test/ws executable or launcher ran. No daemon rebuild/restart,
+profile override, or push. The observed wrong-root call was a caller-key mismatch,
+not a reproduced production dispatch defect. Separate worktree lease and
+occupied-index move policy remain with their related tickets.
