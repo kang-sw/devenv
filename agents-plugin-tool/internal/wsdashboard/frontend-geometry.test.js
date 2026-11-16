@@ -63,7 +63,7 @@ test('lifecycle post coalesces on rAF and reads layout before lifting the frame'
     removeAttribute() { events.push('write:lifted'); }
   };
   const context = {
-    queued: null, root,
+    queued: null, root, shHidden: false,
     doc: { querySelector() { return top; } },
     region() { return head; },
     $(id) { return id === 'qsslot' ? qs : null; },
@@ -91,4 +91,12 @@ test('lifecycle post coalesces on rAF and reads layout before lifting the frame'
   assert.equal(messages[1][1].popover, true);
   context.queue();
   assert.equal(frames.length, 1);
+  context.shHidden = true;
+  const sent = messages.length;
+  events.length = 0;
+  frames.shift()();
+  context.queue();
+  assert.equal(frames.length, 0, 'hidden cached frames do not schedule shell geometry posts');
+  assert.deepEqual(events, []);
+  assert.equal(messages.length, sent);
 });

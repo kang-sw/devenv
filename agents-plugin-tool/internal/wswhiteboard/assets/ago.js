@@ -176,9 +176,19 @@
   // One document-owned clock, shared with updated-ago. Query live nodes each
   // tick, including pinned/adopted topics; no captured list retains old boards.
   // A second-level tick handles run-relative minute boundaries, not wall minutes.
-  if (!window.wbAgoTimer) {
-    window.wbAgoTimer = setInterval(function () { window.wbAgo(document); }, 1000);
-    document.addEventListener("visibilitychange", function () { window.wbAgo(document); });
-    document.addEventListener("ws-page-visibility", function () { window.wbAgo(document); });
+  if (!window.wbAgoClockInit) {
+    window.wbAgoClockInit = true;
+    function syncAgoClock() {
+      var hidden = document.hidden || document.documentElement.hasAttribute("data-animation-paused");
+      if (hidden) {
+        if (window.wbAgoTimer != null) { clearInterval(window.wbAgoTimer); window.wbAgoTimer = null; }
+        return;
+      }
+      if (window.wbAgoTimer == null) window.wbAgoTimer = setInterval(function () { window.wbAgo(document); }, 1000);
+      window.wbAgo(document);
+    }
+    document.addEventListener("visibilitychange", syncAgoClock);
+    document.addEventListener("ws-page-visibility", syncAgoClock);
+    syncAgoClock();
   }
 })();

@@ -83,7 +83,7 @@ test('pane scroll bookkeeping uses observer visibility instead of geometry probe
   assert.equal(context.scrollState().length, 0);
 });
 
-test('native and shell visibility pause animations and notify clocks idempotently', () => {
+test('native and shell visibility keep pause state and notify each lifecycle transition', () => {
   const attrs = new Set(), events = [], context = {
     shHidden: false, doc: { hidden: false, addEventListener() {}, dispatchEvent(e) { events.push(e.type); } },
     root: { hasAttribute: key => attrs.has(key), toggleAttribute(key, value) { if (value) attrs.add(key); else attrs.delete(key); } },
@@ -92,10 +92,9 @@ test('native and shell visibility pause animations and notify clocks idempotentl
   vm.createContext(context);
   vm.runInContext(section(read(__dirname + '/assets/dashboard.js'), '  function syncPageVisibility()', '  // --- browser storage:'), context);
   context.shHidden = true; context.syncPageVisibility(); context.syncPageVisibility();
-  assert.equal(attrs.has('data-animation-paused'), true); assert.equal(events.length, 1);
+  assert.equal(attrs.has('data-animation-paused'), true); assert.equal(events.length, 3);
   context.shHidden = false; context.doc.hidden = true; context.syncPageVisibility();
-  assert.equal(events.length, 1);
+  assert.equal(events.length, 4, 'shell state changes must notify streams even while the native tab stays hidden');
   context.doc.hidden = false; context.syncPageVisibility();
-  assert.equal(attrs.has('data-animation-paused'), false); assert.equal(events.length, 2);
-  assert.match(read(__dirname + '/assets/dashboard-lifecycle.js'), /shHidden = !m\.shown;\s*syncPageVisibility\(\);/);
+  assert.equal(attrs.has('data-animation-paused'), false); assert.equal(events.length, 5);
 });
