@@ -7,7 +7,9 @@ class El {
   constructor(tag = 'div', cls = '') { this.tagName = tag; this.className = cls; this.children = []; this.attrs = {}; this.on = {}; this.hidden = false; this.value = ''; this.style = { setProperty() {} }; }
   set textContent(s) { this.children = []; this.text = s; }
   get textContent() { return (this.text || '') + this.children.map(c => c.textContent).join(''); }
-  appendChild(c) { this.children.push(c); c.parentNode = this; return c; }
+  appendChild(c) { if (c.parentNode) c.parentNode.children = c.parentNode.children.filter(x => x !== c); this.children.push(c); c.parentNode = this; return c; }
+  // Layout stand-ins: a note is as tall as its text is long; the list is two columns wide.
+  get offsetHeight() { return this.tagName === 'article' ? 20 + 10 * this.textContent.length : 0; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k]; }
   addEventListener(type, fn) { (this.on[type] ||= []).push(fn); }
@@ -25,8 +27,8 @@ class El {
 }
 let focused, timerID = 0, now = 0, timers = [];
 const ids = {};
-for (const id of ['memo-input', 'memo-list', 'memo-workspace', 'memo-status', 'memo-undo', 'memo-close']) ids[id] = new El(id === 'memo-input' ? 'textarea' : 'div');
-ids['memo-undo'].appendChild(new El('button'));
+for (const id of ['memo-input', 'memo-list', 'memo-workspace', 'memo-n', 'memo-status', 'memo-undo', 'memo-close']) ids[id] = new El(id === 'memo-input' ? 'textarea' : 'div');
+ids['memo-undo'].appendChild(new El('button')); ids['memo-list'].clientWidth = 444;
 const rail = new El(), ws = rail.appendChild(new El('section', 'rws'));
 ws.setAttribute('data-ws', '/repo'); ws.appendChild(new El('span', 'nm')).textContent = 'repo';
 const row = ws.appendChild(new El('div', 'rs')); row.setAttribute('data-rid', 'session');
@@ -46,7 +48,8 @@ const capsuleStub = {
     return picker;
   }
 };
-const window = { WsCapsules: capsuleStub, document: { documentElement: { getAttribute: () => 'standalone' } }, addEventListener() {}, sessionStorage: { setItem: (k,v) => storage.set(k,v), getItem: k => storage.get(k), removeItem: k => storage.delete(k) }, fetch: async (url, opts) => {
+const winOn = {};
+const window = { WsCapsules: capsuleStub, document: { documentElement: { getAttribute: () => 'standalone' } }, addEventListener(type, fn) { (winOn[type] ||= []).push(fn); }, sessionStorage: { setItem: (k,v) => storage.set(k,v), getItem: k => storage.get(k), removeItem: k => storage.delete(k) }, fetch: async (url, opts) => {
   calls.push([url, opts]);
   if (opts.method === 'POST') {
     if (failWrite) { failWrite = false; return { ok: false, text: async () => 'save failed' }; }
@@ -169,4 +172,46 @@ function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now
   memo.open(true, false); memo.open(false, false);
   release({ ok: true, json: async () => ({ memos: [], writable: true }) }); await flush();
   assert.notEqual(focused, ids['memo-input'], 'closed panel does not steal focus after delayed read');
+
+  // Masonry: shortest column first in list order, ties left; an edit save keeps
+  // every note's column, add and delete re-place.
+  const { layout } = window.WsMemo;
+  assert.deepEqual({ ...layout(['a', 'b', 'c', 'd'], [100, 50, 30, 30], 2, null) }, { a: 0, b: 1, c: 1, d: 1 });
+  assert.deepEqual({ ...layout(['a', 'b', 'c', 'd'], [100, 50, 60, 10], 2, null) }, { a: 0, b: 1, c: 1, d: 0 }, 'each note goes to the currently shorter column');
+  assert.deepEqual({ ...layout(['a', 'b'], [40, 40], 2, null) }, { a: 0, b: 1 }, 'ties go left');
+  assert.deepEqual({ ...layout(['a', 'b', 'c'], [10, 10, 10], 2, { a: 1, b: 1, c: 1 }) }, { a: 1, b: 1, c: 1 }, 'kept columns hold');
+  assert.deepEqual({ ...layout(['a', 'b'], [10, 10], 1, { a: 1, b: 0 }) }, { a: 0, b: 0 }, 'a column that no longer exists is re-placed');
+  const columns = () => ids['memo-list'].children.filter(c => c.className === 'memo-col').map(col => col.children.map(row => row.children[0].textContent));
+  local = true; remote = [{ id: 'a', text: 'x'.repeat(30) }, { id: 'b', text: 'short' }, { id: 'c', text: 'mid text' }, { id: 'd', text: 'tiny' }];
+  memo.open(true, false); await flush();
+  assert.deepEqual(columns(), [['x'.repeat(30)], ['short', 'mid text', 'tiny']], 'load places shortest-column-first');
+  assert.equal(ids['memo-n'].textContent, '4', 'header shows the memo count');
+  ids['memo-list'].querySelectorAll('.memo-text').find(t => t.textContent === 'short').fire('click');
+  area = ids['memo-list'].querySelector('textarea'); area.value = 'y'.repeat(60);
+  assert.equal(area.parentNode.className, 'memo-note memo-editing');
+  area.fire('keydown', { key: 'Enter' }); await flush();
+  assert.deepEqual(columns(), [['x'.repeat(30)], ['y'.repeat(60), 'mid text', 'tiny']], 'saving an edit keeps placement');
+  ids['memo-input'].value = 'n'; ids['memo-input'].fire('keydown', { key: 'Enter' }); await flush();
+  assert.deepEqual(columns(), [['n', 'y'.repeat(60)], ['x'.repeat(30), 'mid text', 'tiny']], 'add re-places');
+  ids['memo-list'].querySelector('.memo-delete').fire('click'); await flush();
+  assert.deepEqual(columns(), [['x'.repeat(30), 'mid text', 'tiny'], ['y'.repeat(60)]], 'delete re-places');
+  ids['memo-undo'].querySelector('button').fire('click'); await flush();
+  assert.deepEqual(columns(), [['n', 'y'.repeat(60)], ['x'.repeat(30), 'mid text', 'tiny']], 'undo re-places');
+  const editText = text => { ids['memo-list'].querySelectorAll('.memo-text').find(t => t.textContent === text).fire('click'); return ids['memo-list'].querySelector('textarea'); };
+  const resize = width => { ids['memo-list'].clientWidth = width; (winOn.resize || []).forEach(fn => fn()); };
+  area = editText('n'); area.value = 'z'.repeat(80); area.fire('keydown', { key: 'Enter' }); await flush();
+  const kept = [['z'.repeat(80), 'y'.repeat(60)], ['x'.repeat(30), 'mid text', 'tiny']];
+  assert.deepEqual(columns(), kept, 'a growing edit keeps its column');
+  editText('mid text').fire('keydown', { key: 'Escape' });
+  assert.deepEqual(columns(), kept, 'Esc keeps placement');
+  area = editText('tiny'); resize(400);
+  assert.equal(ids['memo-list'].querySelector('textarea'), area, 'a width change does not tear down an open edit');
+  assert.deepEqual(columns(), kept);
+  area.fire('keydown', { key: 'Escape' });
+  assert.deepEqual(columns(), [['z'.repeat(80), 'mid text', 'tiny'], ['x'.repeat(30), 'y'.repeat(60)]], 'the deferred width change re-places on the next render');
+  resize(300);
+  assert.deepEqual(columns(), [['z'.repeat(80), 'x'.repeat(30), 'y'.repeat(60), 'mid text', 'tiny']], 'a narrow pad has one column');
+  remote = []; memo.open(true, false); await flush();
+  assert.equal(ids['memo-list'].querySelector('.memo-empty').textContent, 'No memos yet.');
+  assert.equal(ids['memo-n'].textContent, '0');
 })().catch(e => { console.error(e); process.exitCode = 1; });
