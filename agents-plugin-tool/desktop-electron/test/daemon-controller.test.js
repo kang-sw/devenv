@@ -37,7 +37,7 @@ test('numeric REST core precedence, explicit one-shot equal swap, and cross-boun
   let launches = [], drains = 0, notices = [];
   const deps = { env: env(f), onNotice: s => notices.push(s),
     inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
-    launch: async (binary, opts, args) => {
+    preflight: async (binary, opts, args) => {
       assert.equal(fs.readFileSync(binary, 'utf8'), 'fixture bytes, not an executable');
       assert(opts.cwd.startsWith(path.join(f.userData, 'daemon-stages')));
       launches.push(args);
@@ -65,18 +65,29 @@ test('numeric REST core precedence, explicit one-shot equal swap, and cross-boun
   assert.equal(launches.length, 2, 'unknown cross-minor clients keep incumbent');
   assert.match(notices.at(-1), /attached client versions are unknown.*update connected plugins/i);
 });
+test('production macOS replacement refuses before spawn and drain without a verified successor signal', async t => {
+  const f = fixture(t, 'darwin');
+  let notices = [];
+  const deps = { env: env(f), onNotice: s => notices.push(s),
+    inspect: async () => ({ url: URL, endpoint: { pid: 120, port: 32000 },
+      health: { pid: 120, version: '0.50.1', started_at: 'old', lan: false } }),
+    launch: () => assert.fail('spawn event is not a preflight'),
+    shutdown: () => assert.fail('no authenticated drain without verified preflight') };
+  assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
+  assert.match(notices.at(-1), /verified detached successor preflight.*pending/);
+});
 test('failed preflight leaves incumbent serving, failed drain and late successor failure are distinct', async t => {
   const f = fixture(t, 'darwin');
   let live = { pid: 120, version: '0.50.1', lan: false, started_at: 'old' }, drains = 0, notice;
   const deps = { env: env(f), onNotice: value => { notice = value; },
     inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
-    launch: async () => { throw Error('spawn refused'); },
+    preflight: async () => { throw Error('preflight refused'); },
     shutdown: async () => { drains++; }, sleep: async () => {}, maxPolls: 2 };
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.match(notice, /preflight failed/);
   assert.equal(drains, 0);
   assert.equal(live.pid, 120);
-  deps.launch = async () => {};
+  deps.preflight = async () => {};
   deps.shutdown = async () => { drains++; throw Error('no drain'); };
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.match(notice, /outcome is uncertain/);

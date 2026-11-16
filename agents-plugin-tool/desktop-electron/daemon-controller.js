@@ -77,11 +77,18 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
       return latest.url;
     }
     if (refreshed < 0) return latest.url;
+    // The existing dashboard entry exposes no signal proving that its detached
+    // successor reached the lock wait. A spawn event alone cannot authorize
+    // draining a healthy daemon. Until the Go startup seam supplies a verified
+    // preflight, production replacement stays attached (no child, no drain).
+    if (!deps.preflight) {
+      notify('Replacement needs a verified detached successor preflight before drain; startup integration is pending. Keeping the current daemon.');
+      return latest.url;
+    }
     try {
-      // Bound the successor's lock wait beyond the authenticated drain and
-      // final health round trip; it cannot serve until the old lock releases.
-      // A spawn event checks OS detach, not subsequent daemon startup success.
-      await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root) },
+      // Injected preflight models a confirmed independent successor waiting
+      // on the lock; an injected spawn event alone is NOT that confirmation.
+      await deps.preflight(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root) },
         ['dashboard', '--port', String(latest.endpoint.port), '--lock-wait', '8s',
           ...(latest.health.lan ? ['--lan'] : [])]);
     } catch {
