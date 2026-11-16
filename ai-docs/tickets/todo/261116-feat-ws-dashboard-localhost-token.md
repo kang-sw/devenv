@@ -640,3 +640,25 @@ send-latency fixture passes. Pure-renderer opt-ins requiring separate performanc
 inputs remain explicitly skipped, not silently counted as passes. The unrelated
 wsagent lead-replay timeout remains intermittent as noted in Phase 1. No assertions
 were weakened, no Electron application or SSH was used, and no push occurred.
+
+#### Edition (this-commit) - 2026-11-17
+
+Applied the final independent-review requests after the security and visual LGTM
+(T1 overall, patch release permitted). Navigation failures spend the shared
+paste/exchange budget only with browser-proven same-origin fetch metadata and
+no mismatched Origin. Cross-site, same-site, none, missing metadata and mismatched
+Origin navigations cannot exhaust that budget; valid links still exchange and
+the same-origin failure limit remains enforced. HEAD previews never perform a
+login exchange/redirect, set a login cookie, consume a code or spend that budget.
+
+Restored the approved short source footer with three bold labels, localized in
+all eleven tables. This supersedes the longer agent/English-action footer noted
+in the preceding Result. Fresh light/dark A and A3 comparisons were inspected;
+the footer now fits two lines and matches the mockup's emphasis. The full gate
+Chromium acceptance run also passes and refreshes the remaining capture states.
+
+Verification: narrow auth/gate unit tests pass with `-race`, all i18n tests pass,
+and `TestLoginGateBrowser` passes (17.3 seconds). Added explicit foreign-navigation
+flood, retained same-origin limit, authenticated/cookieless HEAD preview, localized
+bold-label and two-line footer assertions. No machine route, shared store,
+protocol, Electron behavior or clipboard-action semantics changed.

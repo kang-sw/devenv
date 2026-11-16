@@ -4,7 +4,22 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
+
+func TestLoginGateSourcesUseShortBoldLabels(t *testing.T) {
+	for _, lang := range wsi18n.Languages() {
+		html := string(loginSources(lang.Code))
+		if strings.Count(html, "<b>") != 3 || strings.Count(html, "</b>") != 3 || strings.Contains(html, "{0}") || strings.Contains(html, "{1}") || strings.Contains(html, "{2}") {
+			t.Fatalf("%s: invalid source-label formatting: %s", lang.Code, html)
+		}
+	}
+	want := "링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정</b> ⚙, 또는 데스크톱 앱의 <b>연결</b> 메뉴"
+	if got := string(loginSources("ko")); got != want {
+		t.Fatalf("Korean footer = %s, want %s", got, want)
+	}
+}
 
 func TestLoginGateNextPreservesWindowsPathQuery(t *testing.T) {
 	d := authFixture(t)

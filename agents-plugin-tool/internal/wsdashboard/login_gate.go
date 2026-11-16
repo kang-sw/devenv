@@ -15,6 +15,16 @@ import (
 //go:embed assets/login-gate.tmpl assets/login-gate.css assets/login-gate.js
 var loginGateFS embed.FS
 
+// loginSources permits only fixed emphasis tags; translated text stays escaped.
+func loginSources(lang string) template.HTML {
+	bold := func(text string) string { return "<b>" + template.HTMLEscapeString(text) + "</b>" }
+	return template.HTML(strings.NewReplacer(
+		"{0}", bold(wsi18n.T(lang, "login.where.copy")),
+		"{1}", bold(wsi18n.T(lang, "drawer.settings")),
+		"{2}", bold(wsi18n.T(lang, "login.where.connection")),
+	).Replace(template.HTMLEscapeString(wsi18n.T(lang, "login.where"))))
+}
+
 func (d *Daemon) serveLoginGate(w http.ResponseWriter, r *http.Request, invalid bool) {
 	d.serveLoginGateState(w, r, invalid, false)
 }
@@ -31,7 +41,8 @@ func (d *Daemon) serveLoginGateState(w http.ResponseWriter, r *http.Request, inv
 		return string(raw)
 	}
 	t := template.Must(template.New("gate").Funcs(template.FuncMap{
-		"t": func(key string) string { return wsi18n.T(lang, key) },
+		"t":            func(key string) string { return wsi18n.T(lang, key) },
+		"loginSources": func() template.HTML { return loginSources(lang) },
 	}).Parse(get("tmpl")))
 	// Only a validated local path is serialized, never a credential or session data.
 	path := loginNext(r)

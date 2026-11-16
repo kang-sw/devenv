@@ -54,6 +54,7 @@ kbd { font:600 10.5px var(--wb-mono); border:1px solid var(--wb-line); border-bo
 .lg-msg.warn { color:var(--wb-warn-ink); }
 .lg-msg .i { margin-top:2px; }
 .lg-where { margin:0; padding-top:10px; border-top:1px solid var(--wb-muted); font-size:12px; color:var(--wb-muted-fg); line-height:1.55; }
+.lg-where b { color:var(--wb-fg); font-weight:600; }
 .lg-done { display:grid; justify-items:center; gap:6px; padding:18px 0 8px; text-align:center; }
 .lg-ok { width:44px; height:44px; border-radius:50%; display:grid; place-items:center; background:color-mix(in srgb,var(--wb-ok) 16%,transparent); color:var(--wb-ok); }
 .lg-ok .i { width:22px; height:22px; stroke-width:2.2; }

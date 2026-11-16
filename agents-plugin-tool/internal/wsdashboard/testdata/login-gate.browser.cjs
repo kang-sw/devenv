@@ -94,6 +94,15 @@ async function mint(next = '/s/livesession') {
     await page.keyboard.press(pasteShortcut);
   }
   async function capture(page, theme, state, selector = '.lg-card') {
+    if (state === 'A' || state === 'A3') {
+      const footer = page.locator('.lg-where');
+      assert.deepEqual(await footer.locator('b').allTextContents(), ['클립보드에 복사', '설정', '연결']);
+      const lines = await footer.evaluate(el => {
+        const css = getComputedStyle(el);
+        return (el.getBoundingClientRect().height - parseFloat(css.paddingTop) - parseFloat(css.borderTopWidth)) / parseFloat(css.lineHeight);
+      });
+      assert.ok(lines <= 2.1, `short source footer must fit two lines, got ${lines}`);
+    }
     await page.screenshot({ path: path.join(cfg.shots, `${theme}-${state}.png`) });
     const card = `${theme}-${state}-detail.png`;
     await page.locator(selector).screenshot({ path: path.join(cfg.shots, card) });

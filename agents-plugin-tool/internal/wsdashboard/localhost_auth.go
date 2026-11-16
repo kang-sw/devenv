@@ -215,9 +215,13 @@ func (a *localhostAuth) prune(now time.Time) {
 	a.codes = kept
 }
 
-// consume returns a retry interval when the daemon-wide failed-exchange
-// budget is exhausted. A blocked attempt cannot consume a valid code.
+// consumeLoginCode returns a retry interval when the failed-exchange budget
+// is exhausted. A blocked attempt cannot consume a valid code.
 func (d *Daemon) consumeLoginCode(code string) (bool, int) {
+	return d.consumeLoginCodeAttempt(code, true)
+}
+
+func (d *Daemon) consumeLoginCodeAttempt(code string, countFailure bool) (bool, int) {
 	a := &d.auth
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -235,7 +239,9 @@ func (d *Daemon) consumeLoginCode(code string) (bool, int) {
 			return true, 0
 		}
 	}
-	a.failures++
+	if countFailure {
+		a.failures++
+	}
 	return false, 0
 }
 
@@ -245,15 +251,21 @@ func authRateLimited(w http.ResponseWriter, retry int) {
 	writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limited"})
 }
 
-// loginNavigation handles only HTML navigation; fetches and WebSocket
-// handshakes never exchange credentials from a query parameter.
+// loginNavigation exchanges only GET navigations. HEAD previewers, fetches
+// and WebSocket handshakes must leave the one-time code untouched.
 func (d *Daemon) loginNavigation(w http.ResponseWriter, r *http.Request) bool {
-	if !loginNavigationRequest(r) || !r.URL.Query().Has("login") {
+	if r.Method != http.MethodGet || !loginNavigationRequest(r) || !r.URL.Query().Has("login") {
 		return false
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	ok, retry := d.consumeLoginCode(r.URL.Query().Get("login"))
+	// Foreign pages can navigate here without a preflight. Only browser-proven
+	// same-origin navigations may spend the paste/exchange failure budget;
+	// cross-site, none and missing metadata cannot establish that provenance.
+	sites, origins := r.Header.Values("Sec-Fetch-Site"), r.Header.Values("Origin")
+	countFailure := len(sites) == 1 && sites[0] == "same-origin" &&
+		(len(origins) == 0 || (len(origins) == 1 && sameOrigin(r)))
+	ok, retry := d.consumeLoginCodeAttempt(r.URL.Query().Get("login"), countFailure)
 	if !ok && d.localhostAuthenticated(r) {
 		http.Redirect(w, r, loginNext(r), http.StatusSeeOther)
 		return true
