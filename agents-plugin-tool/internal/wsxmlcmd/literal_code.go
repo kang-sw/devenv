@@ -154,35 +154,46 @@ func firstBodyClose(s string, at, end int, closing string) int {
 // matcher: if a frame's candidate crosses its own close, reject immediately
 // rather than assuming that close ends the frame, or recursively walking it.
 // Thus a long walk stops at the next body that could originate a long walk.
-func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields []string) bool {
-	var pending []literalFrame
-	for pos := first + len(closing); pos < end; {
+func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields bodyFieldRules) bool {
+	pending := slices.Clone(fields.enclosing)
+	pos := first + len(closing)
+	// A suspended raw parent can resume after several operand fields. Track
+	// source newlines across every frame, not only the currently raw frame.
+	// Index once instead of rescanning the parent's prefix for each operand.
+	if t.literals == nil {
+		t.literals = indexLiterals(t.s)
+	}
+	lineStart := 0
+	if i := sort.SearchInts(t.literals.newlines, pos); i > 0 {
+		lineStart = t.literals.newlines[i-1] + 1
+	}
+	advance := func(next int) {
+		if nl := strings.LastIndexByte(t.s[pos:next], '\n'); nl >= 0 {
+			lineStart = pos + nl + 1
+		}
+		pos = next
+	}
+	for pos < end {
 		rest := t.s[pos:]
 		if strings.HasPrefix(rest, "<![CDATA[") {
 			stop := strings.Index(rest[9:], "]]>")
 			if stop < 0 || pos+9+stop+3 > end {
 				return false
 			}
-			next := pos + 9 + stop + 3
-			if len(pending) > 0 && pending[len(pending)-1].raw {
-				if nl := strings.LastIndexByte(t.s[pos:next], '\n'); nl >= 0 {
-					pending[len(pending)-1].lineStart = pos + nl + 1
-				}
-			}
-			pos = next
+			advance(pos + 9 + stop + 3)
 			continue
 		}
 		if len(pending) > 0 {
 			top := &pending[len(pending)-1]
 			endTag := "</" + top.tag + ">"
 			if strings.HasPrefix(rest, endTag) {
-				pos += len(endTag)
+				advance(pos + len(endTag))
 				pending = pending[:len(pending)-1]
 				continue
 			}
 			if top.raw {
 				if rest[0] == '`' || rest[0] == '~' {
-					candidate := t.matchCodeLiteral(pos, top.bodyStart, top.lineStart, endTag, len(t.s))
+					candidate := t.matchCodeLiteral(pos, top.bodyStart, max(top.bodyStart, lineStart), endTag, len(t.s))
 					if candidate > pos {
 						if top.ownClose == 0 {
 							top.ownClose = firstBodyClose(t.s, pos, len(t.s), endTag)
@@ -196,24 +207,18 @@ func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields []st
 						if candidate > top.ownClose || candidate > end {
 							return false
 						}
-						if nl := strings.LastIndexByte(t.s[pos:candidate], '\n'); nl >= 0 {
-							top.lineStart = pos + nl + 1
-						}
-						pos = candidate
+						advance(candidate)
 						continue
 					}
 				}
-				if top.wrapper == "" || !openingTagPrefix(rest, top.wrapper) {
-					if rest[0] == '\n' {
-						top.lineStart = pos + 1
-					}
-					pos++
+				if !top.group && (top.wrapper == "" || !openingTagPrefix(rest, top.wrapper)) {
+					advance(pos + 1)
 					continue
 				}
 			}
 		}
 		if rest[0] != '<' {
-			pos++
+			advance(pos + 1)
 			continue
 		}
 		nameEnd := pos + 1
@@ -233,7 +238,7 @@ func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields []st
 			} else if !known {
 				frame, known = literalFrame{tag: name, raw: true}, true
 			}
-		} else if slices.Contains(fields, name) {
+		} else if slices.Contains(fields.tags, name) {
 			frame, known = literalFrame{tag: name, raw: true}, true
 		}
 		limit := end
@@ -249,12 +254,29 @@ func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields []st
 			continue
 		}
 		if !selfClosing {
-			frame.bodyStart, frame.lineStart = stop, stop
+			frame.bodyStart = stop
+			if frame.group {
+				// ParseOrdered reads text before a group's first command as
+				// a rejected raw body, with the same literal matcher. Such a
+				// body can originate a crossing walk just like a leaf/field.
+				next := stop
+				for next < len(t.s) && isSpace(t.s[next]) {
+					next++
+				}
+				if next < len(t.s) {
+					rest := t.s[next:]
+					frame.raw = rest[0] != '<' || !strings.HasPrefix(rest[1:], t.grammar.Prefix) && !strings.HasPrefix(rest, "</")
+					frame.bodyStart = next
+				}
+			}
 			pending = append(pending, frame)
 		}
-		pos = stop
+		advance(stop)
 	}
-	return len(pending) == 0
+	// Text between container fields is invalid in the fallback reading;
+	// text in a suspended raw panel body is not. Retain valid operand-local
+	// literals without mistaking mixed panel payloads for invalid syntax.
+	return len(pending) == 0 || !pending[len(pending)-1].raw && !pending[len(pending)-1].group
 }
 
 // Match the body reader's CDATA-before-literal dispatch, including a span
@@ -277,10 +299,10 @@ func literalConsumedEnd(s string, at, end int) int {
 }
 
 type literalFrame struct {
-	tag                            string
-	raw, group                     bool
-	wrapper                        string
-	bodyStart, lineStart, ownClose int
+	tag                 string
+	raw, group          bool
+	wrapper             string
+	bodyStart, ownClose int
 }
 
 func literalCommand(g *Grammar, name string) (literalFrame, bool) {
@@ -350,7 +372,7 @@ func literalTagEnd(s string, afterName, limit int) (end int, selfClosing, comple
 	return pos, false, false
 }
 
-func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, fields []string, limit *int) int {
+func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, fields bodyFieldRules, limit *int) int {
 	end := t.matchCodeLiteral(at, bodyStart, lineStart, closing, *limit)
 	if end <= at || end > *limit {
 		return at

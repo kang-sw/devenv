@@ -430,7 +430,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 				r.skipUnknown(tag)
 			}
 		case Container:
-			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings, cmd.Label()) {
+			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings, cmd.Label(), nil) {
 				return false
 			}
 		}
@@ -718,6 +718,7 @@ func (t *tokenizer) readBody(name string, from int, decode bool, fields []string
 type bodyFieldRules struct {
 	tags           []string
 	refuseOpenings bool
+	enclosing      []literalFrame
 }
 
 type bodyWrapper struct {
@@ -761,7 +762,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 			return "", false
 		}
 		if t.literalCode && t.i >= literalUntil {
-			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, fields.tags, &literalLimit)
+			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, fields, &literalLimit)
 			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
 				text.WriteString(t.s[t.i:literalUntil])
 				advance(literalUntil)
@@ -808,7 +809,14 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 				childLabel = wrapper.label + " <" + tag.name + ">"
 			}
 			checkAttrs(t.p, childLabel, tag.attrs, nil)
-			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, childLabel) {
+			// A wrapper operand returns through its container into this raw
+			// body. Fallback walks must retain both levels, including while
+			// skipping commands owned by a rejected group.
+			enclosing := []literalFrame{
+				{tag: name, raw: true, wrapper: wrapper.tag, bodyStart: bodyStart},
+				{tag: tag.name},
+			}
+			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, childLabel, enclosing) {
 				return "", false
 			}
 			*wrapper.children = append(*wrapper.children, child)
@@ -868,7 +876,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 					if known && spec.Kind == Container {
 						// Preserve raw field boundaries while attributing diagnostics
 						// to the rejected group, not a synthetic command position.
-						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, skippedLabel) {
+						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, skippedLabel, nil) {
 							return "", false
 						}
 					} else if known && spec.Wrapper != "" {
@@ -1102,7 +1110,7 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
 // readFields reads a container command's field tags (fields, full tags) up
 // to its closing tag, decoding the bodies of the tags in decode. label names
 // the command or the rejected group that owns skipped field diagnostics.
-func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool, label string) bool {
+func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool, label string, enclosing []literalFrame) bool {
 	closing := "</" + cmd.Tag + ">"
 	for {
 		t.skipSpace()
@@ -1147,7 +1155,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", label, tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			body, ok := t.readContent(tag.name, tag.at, decode[tag.name], bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, label, nil, nil)
+			body, ok := t.readContent(tag.name, tag.at, decode[tag.name], bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings, enclosing: enclosing}, label, nil, nil)
 			if !ok {
 				return false
 			}

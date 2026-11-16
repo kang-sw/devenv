@@ -179,6 +179,7 @@ func TestLiteralCodeNearLinearGrowth(t *testing.T) {
 }
 
 func BenchmarkLiteralCodeStructuralWalk(b *testing.B) {
+	benchmarkLiteralWrapperAndRejectedGroups(b)
 	g := literalPerformanceGrammar()
 	for _, kind := range literalPerformanceShapes {
 		for _, size := range []int{50000, 100000, 200000} {

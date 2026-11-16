@@ -175,6 +175,25 @@ func literalDifferentialCorpus() []string {
 		out = append(out, tc.input)
 	}
 	out = append(out, literalRawSpanOracleFixture)
+	out = append(out, literalWrapperContextInputs()...)
+	out = append(out, literalWrapperInlineCounterexample)
+	// New wrapper syntax is outside I1's release grammar, but belongs to I3.
+	// Raw operands may contain their parent wrapper's close as plain text.
+	for _, field := range []string{"old", "new"} {
+		for _, mark := range []string{"`", "``", "```", "~~~x\n"} {
+			for _, tail := range []string{" y ` z", " y `` z", "\n~~~\n", "<![CDATA[`</wb:change>]]>"} {
+				for _, text := range []string{"", " stray ` text "} {
+					change := func(body string) string {
+						if field == "old" {
+							return "<wb:change><wb:old>" + body + "</wb:old><wb:new>n</wb:new></wb:change>"
+						}
+						return "<wb:change><wb:old>o</wb:old><wb:new>" + body + "</wb:new></wb:change>"
+					}
+					out = append(out, `<wb:topic name="t"><wb:panel name="p">`+change("a "+mark)+text+change("x </wb:change>"+tail)+`</wb:panel></wb:topic>`)
+				}
+			}
+		}
+	}
 	out = append(out,
 		"<wb:topic name=\"ok\"><wb:log>keep</wb:log></wb:topic><wb:topic name=\"bad\">junk<wb:panel name=\"work\"><wb:change><wb:old>a `</wb:old><wb:new>b `</wb:new></wb:change></wb:panel></wb:topic>",
 		"<wb:topic name=\"t\"><wb:panel name=\"work\"><wb:change><wb:old>old</wb:old><wb:new>new</wb:new></wb:change></wb:panel><wb:log>later `</wb:log></wb:topic>",
@@ -525,15 +544,15 @@ func TestLiteralCodeDelimiterFreeInsertionMetamorphic(t *testing.T) {
 }
 
 func literalStructuralSplitFailure(input string) (bool, bool) {
-	if strings.Contains(input, "<wb:change") {
-		return false, false
-	}
 	g0 := grammar
 	g0.LiteralCode = false
 	p, q := &problems{}, &problems{}
 	baseline := wsxmlcmd.Parse(p, g0, input)
-	_, complete := wsxmlcmd.ParseOrdered(q, g0, input)
+	structural, complete := wsxmlcmd.ParseOrdered(q, g0, input)
 	if len(p.List) != 0 || len(q.List) != 0 || !complete {
+		return false, false
+	}
+	if literalInlineWrapperException(input, structural) {
 		return false, false
 	}
 	want := canonicalCommands(baseline)
@@ -544,20 +563,23 @@ func literalStructuralSplitFailure(input string) (bool, bool) {
 }
 
 func TestLiteralCodeCleanStructuralSplitWins(t *testing.T) {
-	checked := 0
+	checked, wrappers := 0, 0
 	corpus := literalDifferentialCorpus()
 	for i, input := range corpus {
 		bad, eligible := literalStructuralSplitFailure(input)
 		if eligible {
 			checked++
+			if strings.Contains(input, "<wb:change") {
+				wrappers++
+			}
 		}
 		if bad {
 			minimal := minimizeLiteralInput(input, func(s string) bool { bad, _ := literalStructuralSplitFailure(s); return bad })
 			t.Fatalf("I3 violation corpus[%d]; minimized input:\n%s", i, minimal)
 		}
 	}
-	if checked == 0 {
-		t.Fatal("no clean structural splits")
+	if checked == 0 || wrappers == 0 {
+		t.Fatal("no clean structural splits or wrapper inputs")
 	}
-	t.Logf("I3 corpus=%d clean-structural=%d violations=0", len(corpus), checked)
+	t.Logf("I3 corpus=%d clean-structural=%d wrappers=%d violations=0", len(corpus), checked, wrappers)
 }
