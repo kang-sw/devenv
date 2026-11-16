@@ -431,3 +431,52 @@ current-layout offsets; changed content can clamp them, and older conversation
 pages outside the fresh newest window are not proactively fetched to recreate
 an old history anchor. Exact long-history restoration and the numeric latency
 bound remain explicit follow-up/owner questions, not claimed measured wins.
+
+#### Edition (cad7b26e5) - 2026-11-16
+
+Phase 2 R1 fixes-only pass (I1, I2, M1, M4):
+
+- I1 supersedes the initial numeric board restoration: save scroller/topic/
+  panel identities and their reading offset; resolve the mounted panel through
+  existing board key/live-panel helpers and call `w.place(node, {readingOffset})`.
+  Missing identities alone use the explicitly approximate numeric fallback.
+  Snapshot a valid pending `BOARD_RELOAD` record before either rAF executes and
+  skip session-view board/document placement even if the earlier reload rAF
+  consumes that record. The old comment claiming numeric restoration follows
+  late frame heights was removed.
+- I2 supersedes numeric conversation restoration: save the top crossing entry's
+  `data-entry` identity and in-view offset. A shifted newest window resolves that
+  identity; a missing entry or an at-bottom leave restores bottom-follow instead
+  of a stale pixel offset. No older-history fetch or buffer cache is introduced.
+- M4: follow state and pane-offset seeding occur only in the final,
+  non-cancelled restore callback. Key/pointer input that cancels placement cannot
+  silently disable bottom-follow.
+- M1: coalesced terminal-list callbacks receive the shared request's actual
+  start time; reconcile no longer uses a later joining caller's timestamp to
+  delete a card born after the request.
+- Local `node --test` on `testdata/session-load.test.cjs` and
+  `testdata/shell-lifecycle.test.cjs`: **14/14 PASS** after correcting a missing
+  `KIND` constant in the new terminal test fixture. New cases model board growth
+  above the saved panel, earlier asset-reload placement/record consumption,
+  four new conversation entries while away, missing/at-bottom fallback,
+  input cancellation and a terminal created during a shared list request.
+  `git diff --check` passed. No Go, ws/launcher/test binary, browser run or
+  daemon operation in this pass. Board exposure/frame-height and composer source
+  remain untouched.
+
+Forward (R1; deliberately not implemented in this fixes-only pass):
+
+- M2: a main-script hash that disappears between HTML and its GET can leave an
+  inert frame until shell asset reload or another switch; consider bounded
+  one-shot failure recovery or a previous-build grace window separately.
+- M3: off-screen terminals' exit/closed status is delayed until near-view or a
+  later reconcile. Confirm the accepted tradeoff or seed status from the list.
+- M5: hidden board pane offsets still seed the existing `paneScroll` path;
+  `revealPanes` can apply those numerically on a later narrow-layout tab reveal.
+  Coordinate its owner-aware handling separately with the board executor.
+- M6: the static-asset client test remains source-regex-shaped and scroll tests
+  model the placement owner. Real integrated reload/late-frame/window-shift
+  acceptance remains with the lead; these VM cases are not a live trace.
+
+The prior byte table describes the initial Phase 2 snapshot, not this larger
+anchor-hardening script. No new measured latency/cache-hit claim is made.
