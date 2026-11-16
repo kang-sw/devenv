@@ -103,6 +103,20 @@ test('changed endpoint/identity prevents authenticated drain, no credentials in 
   await assert.rejects(shutdown(f.root, seen), error => !error.message.includes('b'.repeat(64)) && /changed/.test(error.message));
   assert.equal(drains, 0);
 });
+test('same PID and port token rotation during health cannot bind a stale observation to the new credential', async t => {
+  let drains = 0, rotate = 'b';
+  const f = await fixture(t, (req, res) => {
+    if (req.url === '/health' && rotate) f.write({ ...f.ep, token: rotate.repeat(64) });
+    if (req.url === '/shutdown') drains++;
+    res.end(JSON.stringify({ service: 'ws-dashboard', pid: process.pid, started_at: 'first' }));
+  });
+  await assert.rejects(inspect(f.root), /endpoint changed/);
+  rotate = false;
+  const seen = await inspect(f.root);
+  rotate = 'c';
+  await assert.rejects(shutdown(f.root, seen), /changed/);
+  assert.equal(drains, 0);
+});
 test('endpoint change during health is rejected, missing then retry succeeds', async t => {
   let change = true;
   const f = await fixture(t, (_req, res) => {

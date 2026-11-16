@@ -94,15 +94,22 @@ async function checkHealth(ep, timeout = 2000) {
   return `http://127.0.0.1:${ep.port}/`;
 }
 async function inspect(root = cacheRoot()) {
-  const ep = readEndpoint(root);
+  const initial = endpointFile(root);
+  const ep = { port: initial.port, pid: initial.pid }; // Never return a bearer credential.
   const health = await requestJSON(ep, 'GET', '/health', null, 2000);
-  const after = readEndpoint(root);
-  if (ep.port !== after.port || ep.pid !== after.pid) throw new Error('Dashboard endpoint changed; retry discovery');
-  const token = endpointFile(root).token;
-  if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) {
-    observedTokens.set(ep, crypto.createHash('sha256').update(token).digest('hex'));
+  const after = endpointFile(root);
+  if (ep.port !== after.port || ep.pid !== after.pid || initial.token !== after.token) {
+    throw new Error('Dashboard endpoint changed; retry discovery');
+  }
+  if (typeof initial.token === 'string' && /^[a-f0-9]{64}$/.test(initial.token)) {
+    observedTokens.set(ep, crypto.createHash('sha256').update(initial.token).digest('hex'));
   }
   return { url: `http://127.0.0.1:${ep.port}/`, endpoint: ep, health };
+}
+function sameDaemon(a, b) {
+  return a?.endpoint?.pid === b?.endpoint?.pid && a?.endpoint?.port === b?.endpoint?.port &&
+    a?.health?.started_at === b?.health?.started_at &&
+    observedTokens.get(a.endpoint) === observedTokens.get(b.endpoint);
 }
 async function shutdown(root, observed) {
   const ep = readShutdownEndpoint(root, observed.endpoint);
@@ -113,12 +120,11 @@ async function shutdown(root, observed) {
   // Reinspect immediately before draining: never send a stale token to a
   // different daemon. A concurrent winner after this check needs a Go guard.
   const current = await inspect(root);
-  if (current.endpoint.port !== ep.port || current.endpoint.pid !== ep.pid ||
-      (observed.health.started_at && current.health.started_at !== observed.health.started_at)) {
+  if (!sameDaemon(observed, current)) {
     throw new Error('Dashboard changed before shutdown; retry');
   }
   if (readShutdownEndpoint(root, ep).token !== ep.token) throw new Error('Dashboard shutdown credential changed; retry');
   await requestJSON(ep, 'POST', '/shutdown', ep.token, 3000);
 }
 async function discover(root = cacheRoot()) { return (await inspect(root)).url; }
-module.exports = { cacheRoot, readEndpoint, checkHealth, discover, inspect, shutdown, MAX_JSON };
+module.exports = { cacheRoot, readEndpoint, checkHealth, discover, inspect, shutdown, sameDaemon, MAX_JSON };
