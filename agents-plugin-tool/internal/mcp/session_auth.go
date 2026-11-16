@@ -112,6 +112,8 @@ type sessionRecord struct {
 	// in-memory value with the topic-folder authority. New writes never update
 	// the cache part. Nil means no board and gates implicit panel refresh.
 	Whiteboard *wswhiteboard.State `json:"whiteboard,omitempty"`
+	// Process-local identity of the immutable folder read, never persisted.
+	boardRevision uint64
 	// Prepared derived output, published under the folder lock after commit.
 	boardOutput *whiteboardRender
 }
