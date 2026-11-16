@@ -263,6 +263,14 @@ func TestMemoUsesSharedEditorStyles(t *testing.T) {
 }
 
 func TestCSSClassesDoNotCollideAcrossModules(t *testing.T) {
+	// The narrow exceptions below must not hide other selectors using the
+	// same names; those still participate in the collision scan.
+	probe := cssClasses(`.oq-pill { color: red } .board-updated { color: red } .dw .pop { color: red }`, "")
+	for _, class := range []string{"oq-pill", "board-updated", "dw", "pop"} {
+		if !probe[class] {
+			t.Errorf("collision scan misses unscoped .%s", class)
+		}
+	}
 	owners := map[string][]string{}
 	for _, m := range cssModules {
 		var b []byte
@@ -280,7 +288,23 @@ func TestCSSClassesDoNotCollideAcrossModules(t *testing.T) {
 		if !strings.Contains(string(b), "class prefix: "+m.prefix) {
 			t.Errorf("%s declares no %q header line; add a comment 'class prefix: %s' naming its new-class prefix", m.path, "class prefix: "+m.prefix, m.prefix)
 		}
-		for c := range cssClasses(string(b), m.root) {
+		css := string(b)
+		if m.name == "dashboard" {
+			// These exact cross-module rules are intentional: one pauses the
+			// whiteboard animation, the other tests a descendant to release
+			// board containment. Do not exempt other uses of these classes.
+			for _, exception := range []struct{ rule, fragment string }{
+				{`:root[data-animation-paused] :is(.spin, .pulse, .pibadge, .caret, .ibadge.busy .istop, .rail .drkwork, .rail .hi .rrun, .rail .hi.perm, .rail .sbn, .dskel i, .tk .tk-qspin, .oq-pill.board-updated) { animation-play-state: paused; }`, `.oq-pill.board-updated`},
+				{`#bcol:has([data-max], .board-toolbar[data-files], .board-state-pop:not([hidden]), .dw .pop:not([hidden])) { contain: style; }`, `.dw .pop:not([hidden])`},
+			} {
+				if strings.Count(css, exception.rule) != 1 {
+					t.Errorf("dashboard intentional cross-module rule missing or repeated: %s", exception.rule)
+				}
+				clean := strings.Replace(exception.rule, exception.fragment, "", 1)
+				css = strings.Replace(css, exception.rule, clean, 1)
+			}
+		}
+		for c := range cssClasses(css, m.root) {
 			owners[c] = append(owners[c], m.name)
 		}
 	}

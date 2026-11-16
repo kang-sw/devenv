@@ -21,6 +21,7 @@ func TestLauncherMailboxStreamEndsWhenPOSIXParentIsKilled(t *testing.T) {
 	}
 	bin := buildDashboardTestBin(t, "")
 	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
+	startLauncherTestDaemon(t, bin, env, cache, cwd)
 	const key = "amber-tide-fox"
 	seedReplyMail(t, env, key, "one")
 	// Like Node/Bun spawn: stdin is ignored, and killing the parent sends no
@@ -100,6 +101,7 @@ func TestLauncherMailboxStreamSurvivesArrivalsAndTimeoutThenSignal(t *testing.T)
 	}
 	bin := buildDashboardTestBin(t, "")
 	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
+	startLauncherTestDaemon(t, bin, env, cache, cwd)
 	const key = "amber-tide-fox"
 	seedReplyMail(t, env, key, "one")
 	client := startLauncher(t, launcher, cwd, env, "mailbox", "wait", "--session-key", key, "--stream", "--timeout", "50ms")

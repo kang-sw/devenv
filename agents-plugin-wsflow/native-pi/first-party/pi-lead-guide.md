@@ -80,5 +80,7 @@ adoption or live-process/history recovery is implied.
   or mutation. Its `ws-background-task` result arrives asynchronously;
   `ws-background-abort` lists or aborts these tasks. Session end, reload, or
   switching sessions kills background tasks; they are not durable children.
+  Use its `background:true` rather than shell `&` so hosted idle tracking sees
+  the task and does not stop the session while it runs.
 - Tune adapter settings through `ws/config.list` and `ws/config.tune`, or load
   `lead-tune` for broader configuration work.

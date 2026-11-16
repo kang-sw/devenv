@@ -15,7 +15,7 @@ func TestDependencyPopoverCSSScope(t *testing.T) {
 	if !ok {
 		t.Fatal("dependency styles missing")
 	}
-	rules, _, ok = strings.Cut(rules, ".tbar .tago")
+	rules, _, ok = strings.Cut(rules, "/* Isolate clock updates without clipping their surroundings. */")
 	if !ok {
 		t.Fatal("dependency style boundary missing")
 	}

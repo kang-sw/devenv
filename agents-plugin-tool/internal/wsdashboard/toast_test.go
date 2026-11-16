@@ -304,7 +304,14 @@ func TestPagesCarryTheToastStackAndTitleHost(t *testing.T) {
 		if !regexp.MustCompile(`<html [^>]*data-wb-titlehost`).MatchString(page) {
 			t.Errorf("%s page lacks the data-wb-titlehost marker", name)
 		}
-		for _, hook := range []string{".wstoasts {", ".wstoast.notice::before", "onRender: tlTracker", "if (O.onRender) O.onRender(UNREADS);", "openNotify: openNotify", `"js.toast.newnotes.other"`} {
+		scriptAt, script := dashboardPageScript(t, f.base, page, name != "index")
+		if scriptAt < tracker {
+			t.Errorf("%s page: the page script precedes the tracker", name)
+		}
+		if !strings.Contains(script, "onRender: tlTracker") {
+			t.Errorf("%s page script lacks the tracker title hook", name)
+		}
+		for _, hook := range []string{".wstoasts {", ".wstoast.notice::before", "if (O.onRender) O.onRender(UNREADS);", "openNotify: openNotify", `"js.toast.newnotes.other"`} {
 			if !strings.Contains(page, hook) {
 				t.Errorf("%s page lacks the toast/title hook %q", name, hook)
 			}

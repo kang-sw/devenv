@@ -158,10 +158,11 @@ func TestConfigListAgentProfileKnob(t *testing.T) {
 		byName[p.Name] = p
 	}
 	triage := byName["triage"]
-	if len(profiles) != 9 || triage.Scope != wsconfig.ScopeRepo || triage.Source != filepath.Join(root, ".ws-workflow", "config.json") {
-		t.Fatalf("current profiles = %+v, want triage from the repo file and the eight builtin support, worker, mini-lead, lead, and search-answer profiles", profiles)
+	builtins := []string{wsagent.SupportProfileClaude, wsagent.SupportProfilePi, wsagent.PiWorkerProfile, wsagent.PiMiniLeadProfile, wsagent.LeadProfileClaude, wsagent.LeadProfilePi, wsagent.SearchAnswerProfileClaude, wsagent.SearchAnswerProfilePi, wsagent.ExploreProfile}
+	if len(profiles) != len(builtins)+1 || triage.Scope != wsconfig.ScopeRepo || triage.Source != filepath.Join(root, ".ws-workflow", "config.json") {
+		t.Fatalf("current profiles = %+v, want triage from the repo file and builtin profiles %v", profiles, builtins)
 	}
-	for _, name := range []string{wsagent.SupportProfileClaude, wsagent.SupportProfilePi, wsagent.PiWorkerProfile, wsagent.PiMiniLeadProfile, wsagent.SearchAnswerProfileClaude, wsagent.SearchAnswerProfilePi} {
+	for _, name := range builtins {
 		if byName[name].Scope != wsconfig.ScopeBuiltin {
 			t.Fatalf("current profiles = %+v, want builtin %s", profiles, name)
 		}

@@ -1095,11 +1095,11 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 // capsule grows into a bar that leaves the stack, and a shown bar sinking
 // behind it shrinks into the capsule), the copy that morphs stands out of
 // flow in its edge's wrapper, and the rail's teardown drops both copies.
-// The morph changes a solid copy by height alone: a capsule is as wide as
-// its item's bar (no inset, the far one standing back by type and opacity
-// only), the copy keeps the target's left edge and width while its top,
-// height, corners, and fill move, the two contents take turns inside it
-// with no fade of the copy itself, a top-edge bar box is cut to the part
+// The morph lays out a solid copy at its destination and animates its
+// vertical translation and scale: a capsule is as wide as its item's bar
+// (no inset, the far one standing back by type and opacity only), the copy
+// uses the target's left edge, width, corners and fill; the two contents
+// take turns inside it with no fade of the copy itself. A top-edge bar box is cut to the part
 // showing under the stack so the copy never covers the capsules, and a
 // page-coloured plate stands in for a hidden stuck bar.
 func TestTopicRailBarCapsuleMotion(t *testing.T) {
@@ -1121,8 +1121,13 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 		"stuck = null;\n    dropGhost();\n  };",
 		`el.style.left = to.left - w.left + "px";`,
 		`el.style.width = to.width + "px";`,
-		`{ top: from.top - w.top + "px", height: from.height + "px", borderRadius: bar ? a.radius : from.height / 2 + "px", backgroundColor: a.bg },`,
-		`{ top: to.top - w.top + "px", height: to.height + "px", borderRadius: bar ? to.height / 2 + "px" : b.radius, backgroundColor: b.bg }`,
+		`el.style.top = to.top - w.top + "px";`,
+		`el.style.height = to.height + "px";`,
+		`el.style.borderRadius = b.radius;`,
+		`el.style.backgroundColor = b.bg;`,
+		`el.style.transformOrigin = "top center";`,
+		`{ transform: "translateY(" + (from.top - to.top) + "px) scaleY(" + (to.height > 0 ? from.height / to.height : 1) + ")" },`,
+		`{ transform: "none" }`,
 		`el.firstChild.animate([{ opacity: 1 }, { opacity: 0, offset: 0.5 }, { opacity: 0 }], { duration: DUR, fill: "forwards" });`,
 		`el.lastChild.animate([{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1 }], { duration: DUR, fill: "forwards" });`,
 		`into.animate([{ opacity: 0 }, { opacity: 0 }], { duration: DUR });`,
@@ -1133,6 +1138,19 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("the rail script lacks %q", want)
+		}
+	}
+	// The copy's geometry is set once, not animated through layout properties.
+	start := strings.Index(js, "    el.animate([")
+	if start < 0 {
+		t.Error("the rail has no ghost animation")
+	} else if end := strings.Index(js[start:], "], { duration: DUR"); end < 0 {
+		t.Error("the ghost animation has no keyframe boundary")
+	} else {
+		for _, property := range []string{"top:", "height:", "borderRadius:", "backgroundColor:"} {
+			if strings.Contains(js[start:start+end], property) {
+				t.Errorf("ghost keyframes animate layout property %s", property)
+			}
 		}
 	}
 	for _, want := range []string{

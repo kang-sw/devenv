@@ -200,9 +200,35 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	served := string(readPageOK(t, dashboardPageSource(t, nil), reg).Board.Board)
 	file := f.fullPage(t)
+	// Panel-post system events remain durable, but the panel versions now
+	// represent them in the rendered stream. Pin the fixture independently
+	// of the view's filtering predicate.
+	panelEvents := map[string]bool{
+		"Panel [p1](#p1) added: old-recap":        false,
+		"Panel [p1](#p1) re-posted: latest-recap": false,
+	}
+	omitted := map[string]bool{}
+	for _, entry := range rec.Whiteboard.Topics[0].Entries {
+		if _, ok := panelEvents[entry.Text]; ok {
+			if panelEvents[entry.Text] || entry.Kind != wswhiteboard.EntrySystem || entry.ItemID != 0 {
+				t.Fatalf("invalid or duplicate panel system event: %+v", entry)
+			}
+			panelEvents[entry.Text] = true
+			omitted[entry.ID] = true
+		}
+	}
+	if len(omitted) != 2 {
+		t.Fatalf("stored panel-post events = %v, want both fixture events", panelEvents)
+	}
 	entryTags := regexp.MustCompile(`<[^>]*\bdata-entry="e[0-9]+"[^>]*>`)
 	for name, html := range map[string]string{"file index": file, "dashboard": served} {
 		for _, entry := range rec.Whiteboard.Topics[0].Entries {
+			if omitted[entry.ID] {
+				if strings.Contains(html, `data-entry="`+entry.ID+`"`) {
+					t.Errorf("%s renders panel-post system event %s", name, entry.ID)
+				}
+				continue
+			}
 			found := false
 			for _, tag := range entryTags.FindAllString(html, -1) {
 				if strings.Contains(tag, `data-entry="`+entry.ID+`"`) && strings.Contains(tag, `data-kind="`+entry.Kind+`"`) {
