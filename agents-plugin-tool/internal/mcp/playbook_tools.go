@@ -1189,6 +1189,14 @@ func renderPlaybookWithPlan(s *Server, callerKey, profile, rsrcRoot, worktreeRoo
 	if err != nil {
 		return "", "", "", err
 	}
+	if _, shaped := ticketReviewAutoAckVariants[name]; shaped {
+		// playbook.read applies the same knob after its print (server.go).
+		autoAck, err := s.ticketReviewAutoAckEnabled(callerKey)
+		if err != nil {
+			return "", "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err)
+		}
+		body = applyTicketReviewAutoAckVariant(name, body, autoAck)
+	}
 	body = appendRenderContext(body, renderContext)
 	manager := wsstate.NewManager(s.stateOptions())
 	if planStem != "" {
