@@ -41,8 +41,10 @@ type PlaybookMeta struct {
 type LoadedPlaybook struct {
 	// Name is the playbook bare stem.
 	Name string
-	// Harness is the harness variant that was loaded ("" means base was loaded).
+	// Harness is the harness variant that was loaded ("" means none was).
 	Harness string
+	// Profile is the profile variant that was loaded ("" means none was).
+	Profile string
 	// Meta holds the parsed frontmatter.
 	Meta PlaybookMeta
 	// Body is the fully rendered content: post-substitution, with auto-includes appended.

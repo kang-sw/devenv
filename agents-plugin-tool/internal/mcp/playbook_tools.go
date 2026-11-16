@@ -977,7 +977,7 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, ca
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
 	// namespace variables without teaching product-mode semantics to wsrsrc.
-	pb, err := wsrsrc.Load(rsrcRoot, name, harness, nil)
+	pb, err := wsrsrc.Load(rsrcRoot, name, harness, "", nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -1236,7 +1236,7 @@ func renderPlanStem(name string, callerContext map[string]string, topLevelLead b
 }
 
 func declaredPlaybookVariables(s *Server, rsrcRoot, name string) (map[string]bool, error) {
-	pb, err := wsrsrc.Load(rsrcRoot, name, s.currentHarness(), nil)
+	pb, err := wsrsrc.Load(rsrcRoot, name, s.currentHarness(), "", nil)
 	if err != nil {
 		return nil, err
 	}

@@ -11,7 +11,7 @@ func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	for _, harness := range []string{"", "claude", "codex", "pi"} {
 		t.Run("harness="+harness, func(t *testing.T) {
-			pb, err := Load(root, "lead-use-mailbox", harness, nil)
+			pb, err := Load(root, "lead-use-mailbox", harness, "", nil)
 			if err != nil {
 				t.Fatalf("Load(harness=%q): %v", harness, err)
 			}
