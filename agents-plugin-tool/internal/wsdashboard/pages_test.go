@@ -385,9 +385,9 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if css < 0 || trackerCSS < css {
 			t.Errorf("%s page: the tracker stylesheet is missing or ahead of the dashboard's", name)
 		}
-		script, _ := framedDashboardScript(t, f.base, page)
+		scriptAt, script := framedDashboardScript(t, f.base, page)
 		i18n, tracker := strings.Index(page, "window.wsT = function"), strings.Index(page, "window.WsTracker = { mount: mount }")
-		if i18n < 0 || tracker < i18n || script < tracker {
+		if i18n < 0 || tracker < i18n || scriptAt < tracker {
 			t.Errorf("%s page: the tracker script is missing or not between the string table and the page script", name)
 		}
 		// The whiteboard's own pages leave the tracker strings out; the
@@ -406,10 +406,15 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		for _, hook := range []string{
 			".tk .wk-sw {", ".tk .card > .cbody.wk-body {", ".tk a.wlink {", ".tk .wk-vs {",
 			`attr('act', 'wk-mode')`, "function cardWiki(", "function wkRefused(", `'a[data-wiki][data-page]'`,
-			`tkUrl(id, "wiki")`, `"/save"), req,`, `"js.tk.wk.tab"`,
+			`"js.tk.wk.tab"`,
 		} {
 			if !strings.Contains(page, hook) {
 				t.Errorf("%s page lacks the wiki hook %q", name, hook)
+			}
+		}
+		for _, hook := range []string{`tkUrl(id, "wiki")`, `"/save"), req,`} {
+			if !strings.Contains(script, hook) {
+				t.Errorf("%s page script lacks the wiki adapter hook %q", name, hook)
 			}
 		}
 		// Settings is shell-owned; search is last in every framed header.
