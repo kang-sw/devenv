@@ -48,5 +48,5 @@ Behavior on that head:
   passed (mcp scoped run: ok, 30.5s). The full package was not run, per the
   phase plan.
 - Merged into develop as `9a3938498`.
-- Daemon swap (`python3 scripts/dev.py rerun daemon`): pending. The auto-mode
-  permission classifier denied the command for the worker; the lead runs it.
+- Daemon swap (`python3 scripts/dev.py rerun daemon`): done 2026-11-16. The shared
+  daemon now runs the develop `b4c59b001` build (content_hash `0bb3978c6622`).
