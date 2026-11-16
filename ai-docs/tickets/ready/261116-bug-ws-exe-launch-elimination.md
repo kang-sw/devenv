@@ -164,9 +164,9 @@ startup can still reach a ws executable through `main`/`connect`,
   Coordinator-owned repeat sampling, not a worker runtime operation, must
   determine any remaining anomaly after repairing the dev gate bypass.
   Coordinator correction at 03:11:45Z: 02:54:29 was process creation plus
-  health-request start, not independently observed health. The sampler first
-  recorded healthy around 02:57:00; old retry waves stopped and dashboard
-  reconnect logging appeared around 02:55:08. Reachability may have begun
+  the /health `started` field time, not independently observed health. The
+  sampler first recorded healthy around 02:57:00; old retry waves stopped and
+  dashboard reconnect logging appeared around 02:55:08. Reachability may have begun
   between 02:54:29 and 02:55:08, so an unpublished-endpoint window plausibly
   explains PID 3452 at 02:54:52, but its exact admission cause remains unproven.
   Do not pursue that historical anomaly or add diagnostics in this repair.
