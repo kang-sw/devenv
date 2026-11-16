@@ -610,6 +610,75 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
   reviewed-HEAD claim is made before that closure. Live acceptance remains
   separate, coordinator-owned, and unexecuted; ticket stays open without Result.
 
+### Reviewed source boundary and coordinator handoff - 2026-11-16
+
+- Reviewed code HEAD: `79841d02677a075cd3b55d31df8e1fe3af0f45fd`.
+  Independent lead-dispatched fixes-only R2 PASS closes R1-I1 and R1-I2;
+  no substantive fix-introduced issue or new Forward observation remained.
+  Full report:
+  `C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac@a80733aa/review-paths/6e57526d-01-exe-phase1-r2.md`.
+  R2 inspected the exact `236ca99dd..79841d026` fixes and full focused evidence;
+  it did not claim a fresh broad sweep or live acceptance. This handoff commit
+  changes documentation only; reviewed source remains exactly that code HEAD.
+- Source/verification boundary: original items 1/2/3/5 and 6-prep are implemented
+  and independently reviewed, with the focused evidence above. Full suite,
+  native Windows multiprocess sampling and coordinated swap acceptance remain
+  unperformed. Windows contention/PID overflow have deterministic mocked
+  coverage; the actual multi-process/crash-release gate ran only on w5090.
+- Preserve machine-local evidence in `D:/Temp/exe-phase1-launcher/`:
+  `proxy-failure-1.txt`, `proxy-failure-2.txt`, `continuation-evidence.txt`, and
+  `r1-fix-evidence.txt`. These are small full-output records, not build caches.
+- item 4 deferred to follow-up by owner direction 10:56
+  Its retained parked branch is `parked/exe-phase1-item4-codex` at `d9fd94543`;
+  final item-4 source/test diff against planning base is empty. Do not begin
+  that follow-up before coordinator live-acceptance results.
+- Coordinator owns release of this leased worktree, integration, remote build,
+  install and one shared-daemon swap. The worker performed none of them.
+  Keep this ticket in ready, without a phase Result or closure, until the
+  coordinator supplies actual live-acceptance evidence.
+
+#### Prepared acceptance procedure (coordinator only; not executed)
+
+1. Approve/select the integrated build and updated launcher copies, using the
+   coordinator's remote build/install procedure. Record pre-swap `/health`
+   identity and the endpoint PID; do not execute a binary to inspect identity.
+2. In a separate PowerShell console, capture a 90-second process sample:
+
+   ```powershell
+   $out = 'D:/Temp/exe-phase1-acceptance'
+   New-Item -ItemType Directory -Force $out | Out-Null
+   $until = (Get-Date).AddSeconds(90)
+   $rows = [System.Collections.Generic.List[object]]::new()
+   do {
+     $seen = (Get-Date).ToUniversalTime().ToString('o')
+     Get-CimInstance Win32_Process |
+       Where-Object { $_.Name -like 'ws-mcp*.exe' } |
+       ForEach-Object { $rows.Add([pscustomobject]@{
+         SeenAt=$seen; PID=$_.ProcessId; ParentPID=$_.ParentProcessId
+         Created=$_.CreationDate; Path=$_.ExecutablePath; Command=$_.CommandLine
+       }) }
+     Start-Sleep -Milliseconds 250
+   } while ((Get-Date) -lt $until)
+   $rows | Export-Csv "$out/processes.csv" -NoTypeInformation -Encoding utf8
+   ```
+
+3. Perform exactly one coordinator-approved swap while session MCP launchers
+   reconnect. If using REST shutdown, read the active endpoint privately and
+   send `POST http://127.0.0.1:<port>/shutdown` with its bearer token; allow the
+   selected session MCP launcher or explicit lifecycle action to start the
+   successor. Never log the token. Mailbox/ordinary CLI proxies are not starters.
+4. Exercise existing Claude/Pi mailbox streams, one-shot fallback/re-arm and
+   ordinary CLI proxies during the window. With approved plugin/key variables,
+   the safe CLI form is `python3 "$plugin/bin/ws-mcp-launcher.py" tools` and
+   `python3 "$plugin/bin/ws-mcp-launcher.py" mailbox wait --session-key "$key" --timeout 1s --format json`;
+   stream adds `--stream` and is cancelled after observation. Read successor
+   identity through `/health` and correlate distinct PID/creation-time rows.
+5. Expect one updated-launcher starter invocation and its necessary daemon
+   child, zero ws executions from mailbox/ordinary CLI/probe paths. Record the
+   approved rare Electron losing-starter exception separately. A 250-ms poll
+   can miss short-lived processes; report that measurement limit. Preserve
+   only small acceptance evidence and remove owned temporary artifacts later.
+
 ## Forward
 
 - Coordinator-approved boundary: old launchers and Electron do not share the new starter lock; a rare Electron race can execute one losing starter, with Go's singleton preventing a second daemon.
