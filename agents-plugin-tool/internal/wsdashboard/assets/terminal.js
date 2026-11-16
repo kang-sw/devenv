@@ -464,9 +464,10 @@
     // only an in-flight read; a later explicit refresh still reaches the daemon.
     if (listWait) { listWait.push(done); return; }
     listWait = [done];
+    listWait.asked = Date.now();
     function finish(err, value) {
       var wait = listWait; listWait = null;
-      wait.forEach(function (fn) { fn(err, value); });
+      wait.forEach(function (fn) { fn(err, value, wait.asked); });
     }
     fetch(route(worktree ? "?folder=" + encodeURIComponent(worktree) : ""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw (t || "").trim() || "HTTP " + r.status; });
@@ -480,8 +481,8 @@
   // none, at its start time, and drops the cards whose terminal the daemon
   // no longer lists. A card opened after the list was asked for stays.
   function reconcile() {
-    var seq = ++listSeq, asked = Date.now();
-    list(function (err, v) {
+    var seq = ++listSeq;
+    list(function (err, v, asked) {
       if (err || seq !== listSeq) return;
       var known = {};
       (v.terminals || []).concat(v.orphans || []).forEach(function (t) { known[t.id] = t; });
