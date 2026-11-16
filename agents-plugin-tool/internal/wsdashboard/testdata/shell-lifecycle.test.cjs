@@ -13,7 +13,7 @@ function fixture() {
   const glue = js.match(/\n  var shFrames = \[\][\s\S]*?\n  \/\/ shFrameInit wires/)[0];
   const init = js.match(/\n  function shShellInit\(\) \{[\s\S]*?\n  \}\n/)[0];
   const context = vm.createContext({ URL, console });
-  vm.runInContext(harness + readAssetSource('wsdashboard', 'shell.js') + '\n(function () {\n' + glue + init + `
+  vm.runInContext(harness + historyHarness + readAssetSource('wsdashboard', 'shell.js') + '\n(function () {\n' + glue + init + `
     first.contentDocument.readyState = 'complete';
     shShellInit();
     window.testShell = {
@@ -25,8 +25,33 @@ function fixture() {
   })();`, context);
   return context;
 }
+// Model actual history entries and traversal, not just the address bar.
+const historyHarness = `
+var entries = [{url: location.href, state: null}], position = 0;
+function address(url) { var u = new URL(url, ORIGIN); location.pathname = u.pathname; location.search = u.search; location.hash = u.hash; }
+history = {
+  get state() { return entries[position].state; },
+  pushState: function (state, title, url) {
+    pushed.push(url); entries.splice(position + 1); entries.push({url: new URL(url, ORIGIN).href, state: state}); position++; address(entries[position].url);
+  },
+  replaceState: function (state, title, url) { entries[position] = {url: new URL(url, ORIGIN).href, state: state}; address(entries[position].url); },
+  deferred: false, traversals: [],
+  go: function (delta) {
+    var next = position + delta;
+    if (next < 0 || next >= entries.length || next === position) return;
+    function traverse() {
+      position = next; address(entries[position].url);
+      listeners.popstate.forEach(function (fn) { fn({state: history.state}); });
+    }
+    if (this.deferred) this.traversals.push(traverse); else traverse();
+  },
+  flush: function () { while (this.traversals.length) this.traversals.shift()(); }
+};
+function historyPaths() { return entries.map(function (e) { var u = new URL(e.url); return u.pathname + u.hash; }); }
+function stay(frame) { from(frame.contentWindow, {wsShell: 'stay', attempt: frame.contentWindow.wsShellLeave}); }
+`;
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
-function run() {
+function runBase() {
   let c = fixture(), s = c.window.testShell, first = c.first;
   const pure = fs.readFileSync(path.join(__dirname, '../shell_test.go'), 'utf8').match(/const shellJSCases = `([\s\S]*?)\n`/)[1];
   vm.runInContext(pure, c);
@@ -56,6 +81,7 @@ function run() {
   assert.equal(c.location.pathname, '/s/a');
   assert.equal(s.count(), 1);
   assert.equal(c.frameOf('/s/b'), undefined);
+  c.stay(first);
   first.cancelLeave = false;
   c.click('/s/b');
   assert.equal(first.saved, 2);
@@ -100,9 +126,8 @@ function run() {
   assert.equal(d.saved, 0);
   assert.equal(d.contentWindow.location.hash, '#files');
   const pushes = c.pushed.length;
-  c.location.pathname = '/s/a'; c.location.hash = '';
-  c.listeners.popstate.forEach(fn => fn({}));
-  assert.equal(c.location.pathname, '/s/d', 'pending/cancelled leave keeps the current address');
+  c.history.go(-c.position);
+  assert.equal(c.location.pathname, '/s/a', 'pending Back leaves its destination entry untouched');
   d.load();
   const freshA = c.frameOf('/s/a');
   assert.ok(freshA);
@@ -142,11 +167,120 @@ function run() {
 
   const lifecycle = readAssetSource('wsdashboard', 'dashboard-lifecycle.js');
   assert.ok(lifecycle.includes('if (framed) window.wsSaveSessionDraft = saveDraft;'));
-  assert.ok(lifecycle.includes('window.addEventListener("beforeunload", WsRail.leaveGuard(function () { return imgs.some(function (p) { return !p.ref; }); }));'), 'existing native pasted-image guard stays unchanged');
+  assert.ok(lifecycle.includes('window.addEventListener("beforeunload", WsRail.leaveGuard('), 'existing native guard mechanism remains');
   assert.ok(!lifecycle.includes('WsShell.touch'));
   assert.ok(!lifecycle.includes('shOrder'));
   assert.equal(c.window.WsShell.touch, undefined);
   assert.equal(c.window.WsShell.LIMIT, undefined);
 }
+function testCancelledLeave() {
+  const c = fixture(), s = c.window.testShell, a = c.first;
+  a.cancelLeave = true;
+  c.click('/s/b');
+  assert.equal(a.saved, 1);
+  c.stay(a);
+  s.open('/s/a#files', true);
+  assert.equal(a.saved, 1, 'I1: same-session route after Stay must not prompt/reload');
+  assert.equal(a.contentWindow.location.hash, '#files');
+  c.click('/s/a#files');
+  assert.equal(a.saved, 1, 'I1: current rail row after Stay must not prompt/reload');
+  assert.equal(s.current(), a);
+  assert.equal(a.removed, false);
+  // A stale cancellation from the prior attempt cannot cancel a later leave.
+  const oldAttempt = a.contentWindow.wsShellLeave;
+  a.cancelLeave = false; c.click('/s/c');
+  c.from(a.contentWindow, { wsShell: 'stay', attempt: oldAttempt });
+  a.load();
+  assert.ok(c.frameOf('/s/c'));
+}
+function switchTo(c, path) {
+  const previous = c.window.testShell.current();
+  c.click(path); previous.load();
+  const next = c.frameOf(path); next.load(); return next;
+}
+function testHistoryCancellation() {
+  const c = fixture(), s = c.window.testShell;
+  const b = switchTo(c, '/s/b');
+  b.cancelLeave = true;
+  c.history.go(-1);
+  assert.deepEqual(plain(c.historyPaths()), ['/s/a', '/s/b'], 'I2: pending Back cannot overwrite its destination');
+  c.stay(b);
+  assert.equal(c.position, 1, 'I2: Stay restores the history position');
+  assert.deepEqual(plain(c.historyPaths()), ['/s/a', '/s/b']);
+  assert.equal(s.current(), b);
+  b.cancelLeave = false;
+  c.history.go(-1); b.load(); c.frameOf('/s/a').load();
+  c.history.go(1); c.frameOf('/s/a').load(); const freshB = c.frameOf('/s/b'); freshB.load();
+  assert.equal(s.current(), freshB, 'Back and Forward remain usable after cancellation');
+  const last = switchTo(c, '/s/c');
+  c.history.go(-1); c.history.go(-1);
+  assert.deepEqual(plain(c.historyPaths()), ['/s/a', '/s/b', '/s/c'], 'I2: double Back loses no entry');
+  last.load(); c.frameOf('/s/a').load();
+  assert.equal(c.location.pathname, '/s/a');
+  assert.equal(c.position, 0);
+  assert.deepEqual(plain(c.historyPaths()), ['/s/a', '/s/b', '/s/c']);
+
+  const cancelled = fixture();
+  switchTo(cancelled, '/s/b'); const kept = switchTo(cancelled, '/s/c');
+  kept.cancelLeave = true;
+  cancelled.history.go(-1); cancelled.history.go(-1);
+  cancelled.history.deferred = true; cancelled.stay(kept);
+  cancelled.from(kept.contentWindow, {wsShell: 'hash', hash: '#files'});
+  cancelled.window.testShell.open('/s/c', true);
+  assert.deepEqual(plain(cancelled.historyPaths()), ['/s/a', '/s/b', '/s/c'], 'hash/pick during async restoration cannot overwrite or truncate entries');
+  cancelled.history.flush();
+  assert.equal(cancelled.position, 2, 'cancelled double Back restores the original position');
+  assert.equal(kept.saved, 1, 'a current-row pick during restoration cannot reprompt');
+  assert.deepEqual(plain(cancelled.historyPaths()), ['/s/a', '/s/b', '/s/c']);
+}
+function draftFixture(failure) {
+  const lifecycle = readAssetSource('wsdashboard', 'dashboard-lifecycle.js');
+  const draftBlock = lifecycle.slice(lifecycle.indexOf('  var draftStore ='), lifecycle.indexOf('  // --- iframe shell'));
+  const dashboard = readAssetSource('wsdashboard', 'dashboard.js');
+  const loadSave = dashboard.match(/  function load\(k\)[\s\S]*?\n  function save\(k, v\) \{[\s\S]*?\n  \}/)[0];
+  const data = {}, handlers = {}, timers = [], posts = [];
+  let fail = failure;
+  const context = vm.createContext({ console, rid: 'a', shell: false, framed: true, mode: 'session', imgs: [],
+    doc: { addEventListener() {} }, clearTimeout() {}, setTimeout(fn) { timers.push(fn); },
+    shPost(kind, value) { posts.push({kind, ...value}); },
+    store: failure === 'denied' ? null : {
+      getItem(key) { return data[key] ?? null; }, removeItem(key) { delete data[key]; },
+      setItem(key, value) { if (fail) throw Error('quota'); data[key] = value; }
+    }
+  });
+  context.window = context; context.wsShellLeave = 7;
+  context.addEventListener = (type, fn) => { handlers[type] = fn; };
+  vm.runInContext(readAssetSource('wsdashboard', 'rail.js') + loadSave + '\nvar railStore = {load: load, save: save};\n' + draftBlock, context);
+  context.draft = {text: ''}; vm.runInContext('readDraft = function () { return draft; };', context);
+  return { context, timers, posts, recover() { fail = false; },
+    leave() { const event = { prompted: false, preventDefault() { this.prompted = true; } }; handlers.beforeunload(event); return event.prompted; }
+  };
+}
+function testStorageFailure() {
+  for (const mode of ['quota', 'denied']) {
+    const f = draftFixture(mode);
+    f.context.draft = {text: 'typed before debounce'};
+    f.context.wsSaveSessionDraft();
+    assert.equal(f.leave(), true, 'I3: failed ' + mode + ' save must invoke the native leave prompt');
+    assert.equal(f.timers.length > 0, true, 'surviving beforeunload schedules a cancellation signal');
+    f.timers.splice(0).forEach(fn => fn());
+    assert.deepEqual(f.posts, [{kind: 'stay', attempt: 7}]);
+    f.context.draft = {text: ''};
+    assert.equal(f.leave(), false, 'no prompt for an empty draft despite storage failure');
+    f.context.draft = {text: '', open: {topic: true}, tab: 'board'};
+    assert.equal(f.leave(), false, 'view state alone is not unsent content');
+  }
+  const f = draftFixture('quota'); f.context.draft = {text: 'retry'};
+  assert.equal(f.leave(), true, 'the guard synchronously saves even if no debounce fired');
+  f.recover(); assert.equal(f.leave(), false, 'a successful retry clears the failure');
+  f.context.imgs = [{n: 1}]; assert.equal(f.leave(), true, 'pasted images retain the existing guard');
+}
+function run() { runBase(); testCancelledLeave(); testHistoryCancellation(); testStorageFailure(); }
 module.exports = run;
-if (require.main === module) require('node:test')('fresh session frames, native-guard cancellation, drafts, races and history', run);
+if (require.main === module) {
+  const test = require('node:test');
+  test('fresh session frames, drafts, races and history', runBase);
+  test('I1: Stay clears leave intent before same-session routes and rail clicks', testCancelledLeave);
+  test('I2: cancelled Back restores position and double Back preserves entries', testHistoryCancellation);
+  test('I3: denied/full storage prompts before discarding a typed draft', testStorageFailure);
+}

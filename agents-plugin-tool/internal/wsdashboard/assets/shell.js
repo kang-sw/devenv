@@ -27,6 +27,7 @@
   //     nav     {href}                a page the shell frames was picked in
   //                                   the frame (a link, the palette, a
   //                                   spawn): the shell shows it
+  //     stay    {attempt}             the native leave guard kept this frame
   //     key     {key}                 a key the shell acts on, pressed in
   //                                   the frame: "rail" (Ctrl+`), "esc"
   //     layout  {pincol, dim, popover?} the frame shows the pinned column
@@ -56,6 +57,7 @@
     head: { html: "?string", qs: "string", pad: "number", top: "number" },
     title: { title: "string" },
     nav: { href: "string" },
+    stay: { attempt: "number" },
     key: { key: "string" },
     layout: { pincol: "boolean", dim: "number" },
     scroll: { y: "number" },

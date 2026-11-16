@@ -169,7 +169,7 @@ const [base, emptyBase] = process.argv.slice(2);
       await tab.frameLocator('.sframe.on').locator(editor).waitFor();
       const previous = tab.frame({ url: base + '/s/livesession?frame=1' });
       await tab.goBack();
-      await tab.frameLocator('.sframe.on').locator('#grid').waitFor();
+      await tab.frameLocator('.sframe.on[src="/?frame=1"]').locator('#grid').waitFor();
       await tab.locator('#gear').click();
       await tab.locator('#gmenu [data-layout="tabs"]').click();
       await tab.locator('#gmenu [data-input="mod"]').click();

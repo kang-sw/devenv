@@ -98,7 +98,7 @@
   // restored draft says so, and while the page holds one, leaving it asks
   // first (the browser's leave-page confirmation).
   // The shell holds no draft: its frames keep their own.
-  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false, draftUnsaved = false;
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
@@ -127,7 +127,10 @@
     if (!draftStore || restoring) return;
     clearTimeout(draftTimer);
     draftTimer = null;
-    draftStore.save(rid, readDraft());
+    var d = readDraft();
+    // View state alone is not unsent content requiring a native prompt.
+    var saved = draftStore.save(rid, d);
+    draftUnsaved = saved === false && !WsRail.emptyDraft(Object.assign({}, d, { open: {}, tab: "" }));
   }
   function queueDraft() {
     if (!draftStore || restoring) return;
@@ -232,7 +235,17 @@
     ["input", "change", "click", "toggle"].forEach(function (t) { doc.addEventListener(t, queueDraft, true); });
     window.addEventListener("pagehide", saveDraft);
     doc.addEventListener("visibilitychange", function () { if (doc.hidden) saveDraft(); });
-    window.addEventListener("beforeunload", WsRail.leaveGuard(function () { return imgs.some(function (p) { return !p.ref; }); }));
+    window.addEventListener("beforeunload", WsRail.leaveGuard(function () {
+      saveDraft();
+      var unsaved = imgs.some(function (p) { return !p.ref; }) || draftUnsaved;
+      if (unsaved && framed && typeof window.wsShellLeave === "number") {
+        var attempt = window.wsShellLeave;
+        // Accepted navigation destroys this document before the timer runs.
+        // A surviving document tells the shell that the native guard kept it.
+        setTimeout(function () { shPost("stay", { attempt: attempt }); }, 0);
+      }
+      return unsaved;
+    }));
   }
   if (framed) window.wsSaveSessionDraft = saveDraft;
 
@@ -250,7 +263,24 @@
   // and every link it would load as a page to the shell (go); shell.js
   // lists the messages.
   var shFrames = [], shOn = null, shWant = null, shLeaving = null, shHeadHtml = null, shSeq = 0, shTrackerRev = null;
+  var shIndex = 0, shRestoring = null, shRestoreNav = null, shLeaveSeq = 0;
   var shTop = doc.querySelector(".dwrap > .top"), shBody = doc.querySelector(".dwrap > .dbody");
+  function shHistoryIndex() { return history.state && Number.isSafeInteger(history.state.wsShellIndex) ? history.state.wsShellIndex : shIndex; }
+  function shPush(f) {
+    shIndex = shHistoryIndex() + 1;
+    history.pushState({ wsShellIndex: shIndex }, "", f.path + f.hash);
+  }
+  function shStay(ent, attempt) {
+    var leave = shLeaving;
+    if (!leave || leave.ent !== ent || leave.attempt !== attempt) return;
+    shLeaving = null;
+    // Back has already moved history. Restore the position, never its URL:
+    // replaceState here would erase the destination entry from Back/Forward.
+    if (shHistoryIndex() !== leave.from) {
+      shRestoring = leave.from;
+      history.go(leave.from - shHistoryIndex());
+    }
+  }
   // shPost sends a framed page's message of kind to its shell.
   function shPost(kind, m) {
     if (!framed) return;
@@ -317,6 +347,7 @@
           if (shOn === ent) shOn = null;
           if (shWant === ent) shWant = null;
           el.remove();
+          if (!next.push) shIndex = next.index;
           shStart(next.f, next.push);
           return;
         }
@@ -332,11 +363,15 @@
   // shOpen shows the page href names (a page the shell frames; any other
   // loads at the top level); push adds a history entry for it.
   function shOpen(href, push) {
+    // history.go is asynchronous; a pick after Stay must wait until Back's
+    // position is restored, rather than pushing from its destination entry.
+    if (shRestoring !== null) { shRestoreNav = { href: href, push: push }; return; }
     var u = new URL(href, location.href), f = window.WsShell.framed(u, location.origin);
     if (!f) { location.href = u.href; return; }
     var ent = shOn || shWant;
     if (ent && ent.f.path === f.path && !shLeaving) {
-      if (push && location.pathname + location.hash !== f.path + f.hash) history.pushState(null, "", f.path + f.hash);
+      if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
+      if (!push) shIndex = shHistoryIndex();
       if (f.hash !== ent.f.hash) {
         try { ent.el.contentWindow.location.hash = f.hash; } catch (x) { /* unloading */ }
       }
@@ -344,22 +379,23 @@
       return;
     }
     if (!ent) { shStart(f, push); return; }
-    // popstate already changed the outer URL. Keep it naming the current
-    // page while its native leave guard is pending (or cancelled).
-    if (!push && location.pathname + location.hash !== ent.f.path + ent.f.hash) history.replaceState(null, "", ent.f.path + ent.f.hash);
-    shLeaving = { ent: ent, f: f, push: push };
+    if (shLeaving && shLeaving.ent === ent) {
+      // A rapid second Back/rail pick replaces only the destination, not the
+      // history entries or the native navigation already awaiting acceptance.
+      shLeaving.f = f; shLeaving.push = push; shLeaving.index = shHistoryIndex();
+      return;
+    }
+    shLeaving = { ent: ent, f: f, push: push, from: shIndex, index: shHistoryIndex(), attempt: ++shLeaveSeq };
     // Save even a draft whose debounce has not fired. The native navigation,
     // not a custom confirm or a remove(), asks before losing pasted images.
     try {
       if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
+      ent.el.contentWindow.wsShellLeave = shLeaving.attempt;
       ent.el.contentWindow.location.replace("about:blank");
     } catch (x) { shLeaving = null; }
   }
   function shStart(f, push) {
-    if (location.pathname + location.hash !== f.path + f.hash) {
-      if (push) history.pushState(null, "", f.path + f.hash);
-      else history.replaceState(null, "", f.path + f.hash);
-    }
+    if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
     var el = doc.createElement("iframe");
     el.className = "sframe on";
     el.title = doc.title;
@@ -454,6 +490,7 @@
         case "head": ent.head = m; if (on) shHead(ent); break;
         case "title": ent.title = m.title; if (on) doc.title = m.title; break;
         case "nav": if (on) shOpen(m.href, true); break;
+        case "stay": shStay(ent, m.attempt); break;
         case "key":
           if (!on) break;
           if (m.key === "rail") railKey();
@@ -461,14 +498,26 @@
           break;
         case "layout": ent.pincol = m.pincol; ent.dim = m.dim; ent.popover = m.popover === true; if (on) shLayout(ent); break;
         case "scroll": ent.y = m.y; if (on) shScroll(ent); break;
-        case "hash": if (on && location.hash !== m.hash) history.replaceState(null, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
+        case "hash": if (on && !shLeaving && shRestoring === null && location.hash !== m.hash) history.replaceState(history.state, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
         case "theme":
           setTheme(m.theme, true);
           shFrames.forEach(function (x) { if (x !== ent) shSend(x, "theme", { theme: m.theme }); });
           break;
       }
     });
-    window.addEventListener("popstate", function () { shOpen(location.pathname + location.hash, false); });
+    window.addEventListener("popstate", function () {
+      if (shRestoring !== null) {
+        var delta = shRestoring - shHistoryIndex();
+        if (delta) history.go(delta);
+        else {
+          shRestoring = null;
+          var nav = shRestoreNav; shRestoreNav = null;
+          if (nav) shOpen(nav.href, nav.push);
+        }
+        return;
+      }
+      shOpen(location.pathname + location.hash, false);
+    });
     // The shell's hotkeys besides the rail's: the search palette's keys
     // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K,
     // Ctrl+Space and Cmd+K stay with a terminal by qShortcut's target rule.
@@ -620,6 +669,8 @@
   function shShellInit() {
     var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(location.pathname + location.hash, location.origin), location.origin);
     if (!el || !f) return;
+    shIndex = shHistoryIndex();
+    history.replaceState(Object.assign({}, history.state, { wsShellIndex: shIndex }), "", location.href);
     var ent = shAdd(el, f);
     shOn = ent;
     if (f.hash) { el.src = window.WsShell.src(f); return; }
