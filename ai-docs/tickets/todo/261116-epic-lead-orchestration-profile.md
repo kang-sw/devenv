@@ -8,13 +8,6 @@ related:
 
 # Lead orchestration profile: sub-lead building blocks behind a thin lead
 
-## Open Decision Queue
-
-Last ID: (70)
-
-(70) [open] [announced] The Dropped criterion no longer fires on today's hosts: it reads "nested spawn proves unusable on every supported host after the `ws/agent.spawn` work of `261116-research-ws-hosted-session-first-tier` lands, or the user abandons the profile split".
-- Citation: (68)=c with the owner's note (2026-11-16): implement as designed now; once the ws/agent work lands, effectively every harness can be supported - every host probed today already fails the chain, so the old wording would drop the epic the owner chose to continue.
-
 ## Scope
 
 - A `workflow.profile` knob that swaps lead-side playbooks wholesale between
@@ -142,8 +135,9 @@ Last ID: (70)
   `lead-run`, `lead-review`, and `lead-ship` entries are each at or under
   ~400 words and drive their flows end to end through sub-leads; with
   `direct`, the same flows behave as before apart from goal-run removal.
-- Dropped: nested spawn proves unusable on every supported host, or the
-  user abandons the profile split.
+- Dropped: nested spawn proves unusable on every supported host after the
+  `ws/agent.spawn` work of `261116-research-ws-hosted-session-first-tier`
+  lands, or the user abandons the profile split. (70)
 - Deferred: a `bootstrapper` block for `lead-bootstrap`; a build block for
   `lead-coauthor-paged-document`; compressing the lead-kept playbooks to the
   word budget.

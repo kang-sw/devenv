@@ -3,24 +3,13 @@ title: "Orchestration profile foundation: profile-aware playbooks, sub-lead prot
 parent: 261116-epic-lead-orchestration-profile
 related:
   261116-research-ws-hosted-session-first-tier: context - ws/agent.spawn direction for harness-neutral spawn depth (68)
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 539888080e1383b9
+sage-review-completeness-reviewed: 539888080e1383b9
 ---
 
 # Orchestration profile foundation: profile-aware playbooks, sub-lead protocol, sub-lead board status
-
-## Open Decision Queue
-
-Last ID: (72)
-
-(69) [open] [announced] Claude stays off the whitelist on the 2026-11-16 probe; the Phase 1 probe covers Codex only, and the whitelist may ship empty, so every `orchestrate` setting then warns.
-- Citation: (68)=c ("Claude is off the whitelist, with the warning"); the probe result recorded under **Claude result and timing**; Pi is capped by ws (63).
-
-(71) [open] [technical] Foundation adds the `role: sublead` mechanism with test fixtures only; no shipped playbook changes role here, and `ticket-handler` stays `role: worker`.
-- `role: sublead` set by the run, review, and ship children on their runners over switching `ticket-handler` now - no sub-lead playbook exists before those children, and the handler posts nothing to the board (its lead relays every ask).
-
-(72) [open] [announced] The `whiteboard-status` pointer appears only in refusals to a marked sub-lead key; an unmarked parented key (worker, card child) keeps today's denial verbatim.
-- Citation: (51)=a ("workers and card children keep the ordinary denial") and `261115-feat-ws-whiteboard-agent-card`'s verification of unchanged parented denial.
 
 ## Background
 
@@ -69,19 +58,26 @@ since both touch how playbook text varies by knob.
   the whitelist by ws's own cap, not a host limit: `pi.spawn` allows at most
   two levels below the lead (`pi_forward.go`); the whitelist comment cites
   that cap. (63) auto-confirmed (review)
-- **Claude result and timing.** Probed 2026-11-16 in Claude Code: a level-1
-  and a level-2 subagent below the lead have the Agent tool, a level-3
-  subagent has none (`general-purpose` and `wsflow:effort-low` alike), so the
-  chain stops at the worker and cannot reach delegate or explore. The chain
+- **Claude result and timing.** Probed 2026-11-16 in Claude Code 2.1.325: a
+  level-1 and a level-2 subagent below the lead have the Agent tool, a
+  level-3 subagent has none (`general-purpose` and `wsflow:effort-low`
+  alike), so a worker's delegate cannot spawn explore. The chain
   shape stays as the epic designs it and Phase 1 is implemented as written;
   harness-neutral depth control is expected from the `ws/agent.spawn`
   direction of `261116-research-ws-hosted-session-first-tier`, after which
   the whitelist grows. Rejected: a three-level run chain with
   `ticket-runner` absorbing the worker role; a worker whose children are
   leaves with no explore. (68)
+- **Whitelist at ship.** Claude stays off the whitelist on the 2026-11-16
+  probe; the Phase 1 probe covers Codex only. The whitelist may ship empty,
+  and then every `orchestrate` setting warns. (69)
 - **Attribution and panels.** The implementer picks the prefix form and a
-  test pins it; a sub-lead's `wb:panel` carries no `id`, so it always mints a
-  new panel and never rewrites one it did not author. (64) auto-confirmed
+  test pins it; the server refuses a sub-lead `wb:panel` that carries an
+  `id` or whose `name` resolves to an existing panel in the topic (`name`
+  alone selects a panel to replace or patch, `wswhiteboard/entries.go:122-161`),
+  checked against the topic as earlier commands in the same call leave it,
+  so a sub-lead always mints a new panel and never rewrites one it did not
+  author. (64) auto-confirmed
   (review)
 - **Keyless and FRESH loads.** A keyless `Load` (for example
   `wsdoc/project_tree.go`) uses base files; the `workflow_manual` FRESH
@@ -104,14 +100,30 @@ since both touch how playbook text varies by knob.
   is off; auto-enabling the board as a lead write does. (61)
 - **Board writers.** Only sub-lead keys write status. A new playbook role
   `role: sublead` mints a parented lead key (`childRoleForPlaybookRole`)
-  whose session record carries a sub-lead marker, the minting playbook name.
-  Only marked keys are admitted, resolving to the top-level lead's board by
-  walking `Parent`: `wb:log` and `wb:panel` inside an existing open
-  `wb:topic`, and `whiteboard.query` read-only. Workers and the agent-card
+  carrying a sub-lead marker, the minting playbook name, stored in its own
+  file in the key directory, outside `recordParts`
+  (`session_layout.go:78`): an old binary's `writeParts` rewrites only the
+  part files (`session_layout.go:312-331`), so a whole-file `key.json`
+  rewrite by an old daemon cannot drop the marker. Only marked keys are
+  admitted, resolving to the top-level lead's board by walking `Parent`:
+  `wb:log` and `wb:panel` inside an existing open `wb:topic` whose group
+  carries no `label` or `tickets` (those create or relabel a topic and
+  rewrite its ticket links), and `whiteboard.query` read-only. A write with no such open topic is refused
+  with the `whiteboard-status` pointer (72). The deferred board refresh and
+  the dashboard nudge after a sub-lead write target the top-level lead's key
+  the walk resolved, not the caller's (`server.go:813-827`). Workers and the agent-card
   children of `261115-feat-ws-whiteboard-agent-card` keep the ordinary
   denial. Rejected: admitting every parented lead key (it admits every
   `role: worker` render and breaks that ready ticket's unchanged-denial
   contract). (51)
+- **Role rollout.** This ticket adds the `role: sublead` mechanism with test
+  fixtures only; no shipped playbook changes role here. The run, review, and
+  ship children set it on their runners; `ticket-handler` stays
+  `role: worker`, since it posts nothing to the board. Rejected: switching
+  `ticket-handler` now. (71)
+- **Refusal pointer.** The `whiteboard-status` pointer appears only in
+  refusals to a marked sub-lead key; an unmarked parented key (worker, card
+  child) keeps today's denial verbatim. (72)
 - **Attribution.** A sub-lead's log line and panel recap carry a
   server-written attribution prefix in their text. Rejected: a new author
   field in the board store. (52)
@@ -129,9 +141,14 @@ since both touch how playbook text varies by knob.
   members verbatim); T0 for new rsrc files (an old binary opens only files it
   resolves, its overlay probe matches harness names only, manifest
   `schema_version` stays 1); T1 for whiteboard admission of sub-lead keys (an
-  old daemon ignores the unknown marker field, since session records are
-  read with `json.Unmarshal`, and refuses the key at the top-level-lead gate;
-  status lines are lost, no data changes). (56), (51)
+  old daemon never opens the marker file and refuses the key at the
+  top-level-lead gate; it never rewrites or deletes the file either, since
+  `writeParts` touches only `recordParts` files, so the new daemon still
+  admits the key afterwards; status lines are lost, no data changes). The
+  implementer confirms no old path deletes an unknown file in a key directory
+  short of removing the whole directory; if one does, the tier is no longer
+  T1 and the phase stops and reports, since T3 needs the owner's approval.
+  (56), (51)
 - **Placement.** `parent:` the epic, created in `todo/`. (57)
 
 ## Constraints
@@ -189,7 +206,8 @@ since both touch how playbook text varies by knob.
   description, and builtin defaults.
 - Profile-aware selection in `wsrsrc.Load` per (46)-(48); every `Load`
   caller, including declared-variable collection, receives the same profile.
-- Whitelist and `config.tune` warning per (49); nested-spawn probe per (50).
+- Whitelist and `config.tune` warning per (49); nested-spawn probe per (50),
+  (63), (69).
 - `role: sublead` and the session-record marker per (51); sub-lead board
   path per (51), (52), (61); a refused command's message for a sub-lead key
   names the `whiteboard-status` playbook (59), which Phase 2 writes.
@@ -212,12 +230,21 @@ since both touch how playbook text varies by knob.
     items" relay stay; with the knob off they are simply empty.
 - Verification: unit tests for lookup order, the top-level-only rule, the
   overlay-conflict validation, knob registration and the warning line, the
-  sub-lead board admission and every refused command, a `role: worker`
-  key still refused with today's message, a sub-lead write with the lead's
-  board knob off (accepted, knob unchanged, one acknowledgement line), the
-  attribution prefix, and the
+  sub-lead board admission and every refused command (including a write
+  with no open topic, a `wb:topic` group with `label` or `tickets`, and a
+  `wb:panel` carrying an `id` or a `name` that matches an existing panel,
+  including one minted earlier in the same call), a
+  `role: worker`
+  key still refused with today's message, the marker surviving a
+  `writeParts` rewrite of `key.json`, the board refresh and dashboard nudge
+  targeting the top-level lead's key, a sub-lead write with the lead's board
+  knob off on a seeded open topic (accepted, knob unchanged, one
+  acknowledgement line), the attribution prefix, and the
   auto-ack pin test; `go test ./internal/wsrsrc/... ./internal/mcp/...`; the
-  manifest and mirror regeneration tests.
+  manifest and mirror regeneration tests. At phase end the Result lists
+  every host probed and left unprobed with versions and dates (Claude from
+  (68), Codex from this phase's probe, Pi by its cap), and the whitelist
+  comment carries the same.
 
 ### Phase 2: Sub-lead protocol and workflow manual split
 
@@ -237,17 +264,21 @@ Written by the lead with the user in session (54).
 - `ticket-handler` report folded into the protocol (55); `lead-ticket`'s
   handler loop reads the folded report.
 - `whiteboard-status` playbook (59): the status-only subset for sub-leads;
-  `sublead-protocol` points a sub-lead that posts status at it. The
+  `sublead-protocol` points a sub-lead that posts status at it. It tells a
+  sub-lead that a "no open topic" refusal means keeping the status in its
+  report. The
   `whiteboard` playbook's "workers and subagents do not use the board" line
   is updated to point sub-leads there.
 - Verification: `playbook.read` of `lead-workflow-manual` for a top-level
   key under `direct` is byte-identical to the pre-split output (captured
   before the split); under `orchestrate` it holds the core and the generic
   loop and none of the sub-lead part; under `orchestrate` for a parented key
-  it is the base manual; manifest and mirror regeneration tests. (65)
+  it is the base manual; `playbook.read` resolves `whiteboard-status`, the
+  name the Phase 1 refusal text carries, and the `whiteboard` playbook's
+  sub-lead line names it; manifest and mirror regeneration tests. (65)
   auto-confirmed (review)
 
-## Blocked (2026-11-16)
+## Sage Review Round 1 (2026-11-16)
 
 ### Design Reviewer — block
 
