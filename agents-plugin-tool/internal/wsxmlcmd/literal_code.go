@@ -207,6 +207,12 @@ func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields body
 						if candidate > top.ownClose || candidate > end {
 							return false
 						}
+						// D-C: a following Decision-10 wrapper quote cannot
+						// license this enclosing cross-command candidate.
+						if top.wrapper != "" && literalHasWrapper(t.s, pos, candidate, top.wrapper) {
+							t.p.Add("literal code crosses a command boundary whose fallback depends on an inert wrapper example")
+							return false
+						}
 						advance(candidate)
 						continue
 					}
@@ -377,18 +383,51 @@ func literalTagEnd(s string, afterName, limit int) (end int, selfClosing, comple
 	return pos, false, false
 }
 
-// Locate the fallback context of a plain enclosing close in a wrapper body.
-// A panel close inside an operand does not end the panel in that reading.
-// Scan only the candidate prefix, never the panel's already-consumed prefix;
-// candidates are disjoint on acceptance and bounded by first on rejection.
-func (t *tokenizer) wrapperBoundaryFrames(at, first, bodyStart int, closing, wrapper string) ([]literalFrame, bool) {
+func literalHasWrapper(s string, at, end int, wrapper string) bool {
+	for at < end {
+		if strings.HasPrefix(s[at:], "<![CDATA[") {
+			stop := strings.Index(s[at+9:], "]]>")
+			if stop < 0 {
+				return false
+			}
+			at += 9 + stop + 3
+		} else if openingTagPrefix(s[at:], wrapper) {
+			return true
+		} else {
+			at++
+		}
+	}
+	return false
+}
+
+// Reconstruct the first plain close's fallback context and cache the actual
+// enclosing close. An operand-internal panel close cannot clamp later panel
+// quotes. Known tag attributes are lexed exactly as in the reader, so CDATA
+// text inside an attribute cannot empty the stack behind the raw scan's back.
+// A disagreement with the raw CDATA scan is rejected, never indexed through.
+func (t *tokenizer) wrapperBoundaryFrames(at, first, bodyStart int, closing, wrapper string, cachedClose *int) ([]literalFrame, bool) {
 	name := strings.TrimSuffix(strings.TrimPrefix(closing, "</"), ">")
 	pending := []literalFrame{{tag: name, raw: true, wrapper: wrapper, bodyStart: bodyStart}}
-	for pos := at; pos < first; {
+	var frames []literalFrame
+	captured, valid := false, true
+	for pos := at; pos < len(t.s); {
+		if len(pending) == 0 {
+			return nil, false
+		}
+		if !captured && pos >= first {
+			captured, valid = true, pos == first
+			frames = slices.Clone(pending)
+			if len(frames) == 1 {
+				frames = nil // this close really ends the enclosing panel
+			}
+		}
+		if captured && *cachedClose >= 0 {
+			return frames, valid
+		}
 		rest := t.s[pos:]
 		if strings.HasPrefix(rest, "<![CDATA[") {
 			stop := strings.Index(rest[9:], "]]>")
-			if stop < 0 || pos+9+stop+3 > first {
+			if stop < 0 {
 				return nil, false
 			}
 			pos += 9 + stop + 3
@@ -397,6 +436,10 @@ func (t *tokenizer) wrapperBoundaryFrames(at, first, bodyStart int, closing, wra
 		top := pending[len(pending)-1]
 		endTag := "</" + top.tag + ">"
 		if strings.HasPrefix(rest, endTag) {
+			if len(pending) == 1 {
+				*cachedClose = pos
+				return frames, captured && valid
+			}
 			pos += len(endTag)
 			pending = pending[:len(pending)-1]
 			continue
@@ -406,14 +449,14 @@ func (t *tokenizer) wrapperBoundaryFrames(at, first, bodyStart int, closing, wra
 			continue
 		}
 		nameEnd := pos + 1
-		for nameEnd < first && isNameByte(t.s[nameEnd]) {
+		for nameEnd < len(t.s) && isNameByte(t.s[nameEnd]) {
 			nameEnd++
 		}
 		if nameEnd == pos+1 {
 			pos++
 			continue
 		}
-		stop, selfClosing, complete := literalTagEnd(t.s, nameEnd, first)
+		stop, selfClosing, complete := literalTagEnd(t.s, nameEnd, len(t.s))
 		if !complete {
 			return nil, false
 		}
@@ -422,10 +465,7 @@ func (t *tokenizer) wrapperBoundaryFrames(at, first, bodyStart int, closing, wra
 		}
 		pos = stop
 	}
-	if pending[len(pending)-1].tag == name {
-		pending = pending[:len(pending)-1]
-	}
-	return pending, true
+	return nil, false
 }
 
 func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, fields bodyFieldRules, limit *int) int {
@@ -435,16 +475,23 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 	}
 	first := firstBodyClose(t.s, at, end, closing)
 	if first >= 0 {
+		fallbackLimit := first
 		if fields.wrapper != "" {
-			enclosing, ok := t.wrapperBoundaryFrames(at, first, bodyStart, closing, fields.wrapper)
+			enclosing, ok := t.wrapperBoundaryFrames(at, first, bodyStart, closing, fields.wrapper, fields.wrapperClose)
+			if *fields.wrapperClose >= 0 {
+				fallbackLimit = *fields.wrapperClose
+			} else {
+				fallbackLimit = *limit
+			}
 			if !ok {
-				*limit = min(*limit, first)
+				t.p.Add("literal code cannot resolve the enclosing wrapper boundary")
+				*limit = min(*limit, fallbackLimit)
 				return at
 			}
 			fields.enclosing = enclosing
 		}
 		if !t.codeBodyBoundary(first, end, closing, fields) {
-			*limit = min(*limit, first)
+			*limit = min(*limit, fallbackLimit)
 			return at
 		}
 	}

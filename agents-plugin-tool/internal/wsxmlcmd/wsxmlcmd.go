@@ -720,6 +720,7 @@ type bodyFieldRules struct {
 	refuseOpenings bool
 	enclosing      []literalFrame
 	wrapper        string
+	wrapperClose   *int
 }
 
 type bodyWrapper struct {
@@ -744,6 +745,8 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 	closing := "</" + name + ">"
 	if wrapper != nil {
 		fields.wrapper = wrapper.tag
+		fallbackClose := -1
+		fields.wrapperClose = &fallbackClose
 	}
 	// Only inspect newly consumed bytes, never the whole body prefix.
 	advance := func(end int) {

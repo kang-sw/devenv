@@ -177,6 +177,7 @@ func literalDifferentialCorpus() []string {
 	out = append(out, literalRawSpanOracleFixture)
 	out = append(out, literalWrapperContextInputs()...)
 	out = append(out, literalPanelOriginInputs()...)
+	out = append(out, literalR5Crossings()...)
 	out = append(out, literalWrapperInlineCounterexample)
 	for _, body := range literalWrapperPositiveBodies() {
 		out = append(out, "<wb:topic name=\"t\"><wb:panel name=\"p\" recap=\"r\">\n"+body+"\n</wb:panel></wb:topic>")
@@ -555,7 +556,11 @@ func literalStructuralSplitFailure(input string) (bool, bool) {
 	p, q := &problems{}, &problems{}
 	plain := wsxmlcmd.Parse(p, grammar, input)
 	ordered, complete := wsxmlcmd.ParseOrdered(q, grammar, input)
-	return !complete || len(p.List) != 0 || len(q.List) != 0 || !reflect.DeepEqual(want, canonicalCommands(plain)) || !reflect.DeepEqual(want, canonicalCommands(ordered)), true
+	// D-C/D-E permit loud refusal. Check each entry point independently:
+	// a refusal by one cannot hide a clean, structurally different sibling.
+	badPlain := len(p.List) == 0 && !reflect.DeepEqual(want, canonicalCommands(plain))
+	badOrdered := len(q.List) == 0 && (!complete || !reflect.DeepEqual(want, canonicalCommands(ordered)))
+	return badPlain || badOrdered, true
 }
 
 func TestLiteralCodeCleanStructuralSplitWins(t *testing.T) {

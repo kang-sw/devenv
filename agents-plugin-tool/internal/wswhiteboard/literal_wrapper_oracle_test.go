@@ -17,7 +17,7 @@ func literalStructuralExpected(input string) ([]map[string]any, bool) {
 	g0 := grammar
 	g0.LiteralCode = false
 	p, q := &problems{}, &problems{}
-	wsxmlcmd.Parse(p, g0, input)
+	baseline := wsxmlcmd.Parse(p, g0, input)
 	structural, complete := wsxmlcmd.ParseOrdered(q, g0, input)
 	if !complete || len(p.List) != 0 || len(q.List) != 0 {
 		return nil, false
@@ -39,8 +39,9 @@ func literalStructuralExpected(input string) ([]map[string]any, bool) {
 	p = &problems{}
 	expected := wsxmlcmd.Parse(p, g0, string(masked))
 	if len(p.List) != 0 {
-		// Do not filter failures of an eligible masked oracle out of the corpus.
-		return nil, true
+		// D-E: an invalid masked reading permits refusal or the original
+		// structural result, not an automatically failing nil comparator.
+		return canonicalCommands(baseline), true
 	}
 	var restore func([]command)
 	restore = func(cmds []command) {
@@ -62,55 +63,46 @@ func literalSourceOpening(s string, at int, name string) bool {
 	return after < len(s) && strings.HasPrefix(s[at:], prefix) && strings.ContainsRune(" />\t\r\n", rune(s[after]))
 }
 
-// Read only the clean structural panel source. Its actual close is discovered
-// forward while skipping operand bodies, not guessed from LastIndex.
-func literalPanelRegions(input string, start int, tag, wrapper string) ([]literalRawSpan, []int, int) {
-	bodyStart := literalOpeningEnd(input, start)
-	var raw []literalRawSpan
-	var openings []int
-	from := bodyStart
-	for at := bodyStart; ; {
-		if strings.HasPrefix(input[at:], "<![CDATA[") {
-			at += 9 + strings.Index(input[at+9:], "]]>") + 3
-			continue
-		}
-		if strings.HasPrefix(input[at:], "</"+tag+">") {
-			return append(raw, literalRawSpan{from, at}), openings, bodyStart
-		}
-		if !literalSourceOpening(input, at, wrapper) {
+// Skip only a wrapper not already consumed by an accepted panel-level quote.
+// Thus a quoted opener's remaining text stays panel raw text, not a stale
+// structural operand region. Clean structural input supplies complete tags.
+func literalSkipWrapper(input string, at int, wrapper string) int {
+	at = literalOpeningEnd(input, at)
+	if input[at-2] == '/' {
+		return at
+	}
+	for {
+		for at < len(input) && strings.ContainsRune(" \t\r\n", rune(input[at])) {
 			at++
-			continue
 		}
-		raw = append(raw, literalRawSpan{from, at})
-		openings = append(openings, at)
-		at = literalOpeningEnd(input, at)
-		if input[at-2] != '/' {
-			for {
-				for strings.ContainsRune(" \t\r\n", rune(input[at])) {
-					at++
-				}
-				close := "</" + wrapper + ">"
-				if strings.HasPrefix(input[at:], close) {
-					at += len(close)
-					break
-				}
-				end := literalOpeningEnd(input, at)
-				nameEnd := strings.IndexAny(input[at+1:end], " />\t\r\n") + at + 1
-				if input[end-2] != '/' {
-					close = "</" + input[at+1:nameEnd] + ">"
-					for !strings.HasPrefix(input[end:], close) {
-						if strings.HasPrefix(input[end:], "<![CDATA[") {
-							end += 9 + strings.Index(input[end+9:], "]]>") + 3
-						} else {
-							end++
-						}
+		close := "</" + wrapper + ">"
+		if strings.HasPrefix(input[at:], close) {
+			return at + len(close)
+		}
+		if !literalSourceOpening(input, at, "wb:old") && !literalSourceOpening(input, at, "wb:new") {
+			return -1 // a quoted earlier opener exposed invalid container text
+		}
+		end := literalOpeningEnd(input, at)
+		nameEnd := strings.IndexAny(input[at+1:end], " />\t\r\n") + at + 1
+		if input[end-2] != '/' {
+			close = "</" + input[at+1:nameEnd] + ">"
+			for end < len(input) && !strings.HasPrefix(input[end:], close) {
+				if strings.HasPrefix(input[end:], "<![CDATA[") {
+					stop := strings.Index(input[end+9:], "]]>")
+					if stop < 0 {
+						return -1
 					}
-					end += len(close)
+					end += 9 + stop + 3
+				} else {
+					end++
 				}
-				at = end
 			}
+			if end == len(input) {
+				return -1
+			}
+			end += len(close)
 		}
-		from = at
+		at = end
 	}
 }
 
@@ -139,61 +131,67 @@ func literalWrapperMasks(input string, structural []command) map[int]bool {
 			continue
 		}
 		wrapper, closing := grammar.Prefix+spec.Wrapper, "</"+c.Tag+">"
-		raw, openings, bodyStart := literalPanelRegions(input, start, c.Tag, wrapper)
-		for _, region := range raw {
-			for at := region.start; at < region.end; {
-				if strings.HasPrefix(input[at:], "<![CDATA[") {
-					at += 9 + strings.Index(input[at+9:], "]]>") + 3
-					continue
+		bodyStart := literalOpeningEnd(input, start)
+		for at := bodyStart; at < sourceAt && !strings.HasPrefix(input[at:], closing); {
+			if strings.HasPrefix(input[at:], "<![CDATA[") {
+				at += 9 + strings.Index(input[at+9:], "]]>") + 3
+				continue
+			}
+			if literalSourceOpening(input, at, wrapper) {
+				next := literalSkipWrapper(input, at, wrapper)
+				if next < 0 {
+					break // masked structural parse handles this via D-E
 				}
-				if input[at] != '`' && input[at] != '~' {
-					at++
-					continue
+				at = next
+				continue
+			}
+			if input[at] != '`' && input[at] != '~' {
+				at++
+				continue
+			}
+			mark, runEnd := input[at], at+1
+			for runEnd < len(input) && input[runEnd] == mark {
+				runEnd++
+			}
+			end := literalOracleFenceEnd(input, at, bodyStart, closing)
+			if end <= at && mark == '`' {
+				slashes := 0
+				for i := at - 1; i >= bodyStart && input[i] == '\\'; i-- {
+					slashes++
 				}
-				mark, runEnd := input[at], at+1
-				for runEnd < len(input) && input[runEnd] == mark {
-					runEnd++
-				}
-				end := literalOracleFenceEnd(input, at, bodyStart, closing)
-				if end <= at && mark == '`' {
-					slashes := 0
-					for i := at - 1; i >= bodyStart && input[i] == '\\'; i-- {
-						slashes++
-					}
-					if slashes%2 == 0 {
-						for next := runEnd; next < len(input); {
-							index := strings.IndexByte(input[next:], '`')
-							if index < 0 {
-								break
-							}
-							next += index
-							stop := next + 1
-							for stop < len(input) && input[stop] == '`' {
-								stop++
-							}
-							if stop-next == runEnd-at {
-								end = stop
-								break
-							}
-							next = stop
+				if slashes%2 == 0 {
+					for next := runEnd; next < len(input); {
+						index := strings.IndexByte(input[next:], '`')
+						if index < 0 {
+							break
 						}
-					}
-				}
-				quotesOpening := false
-				for _, opening := range openings {
-					quotesOpening = quotesOpening || opening >= runEnd && opening < end
-				}
-				if end > at && quotesOpening && !literalOracleRawClose(input, at, end, closing) {
-					for pos := at; pos < end; pos++ {
-						if strings.HasPrefix(input[pos:], "<![CDATA[") {
-							pos += 9 + strings.Index(input[pos+9:], "]]>") + 2
-						} else if literalSourceOpening(input, pos, wrapper) {
-							masks[pos] = true
+						next += index
+						stop := next + 1
+						for stop < len(input) && input[stop] == '`' {
+							stop++
 						}
+						if stop-next == runEnd-at {
+							end = stop
+							break
+						}
+						next = stop
 					}
 				}
-				// Examine every raw origin independently. A rejected/unmatched
-				// inline run's distant closer must not hide a later valid fence.
+			}
+			if end > at && !literalOracleRawClose(input, at, end, closing) {
+				// CDATA is consumed atomically even when a span ends in it.
+				for pos := at; pos < end; pos++ {
+					if strings.HasPrefix(input[pos:], "<![CDATA[") {
+						pos += 9 + strings.Index(input[pos+9:], "]]>") + 2
+						end = max(end, pos+1)
+					} else if literalSourceOpening(input, pos, wrapper) {
+						masks[pos] = true
+					}
+				}
+				at = end // accepted closer/inner runs are not new origins (m1)
+			} else {
+				// Rejected crossing/unmatched candidates cannot hide a later
+				// valid local quote (M-7). Resume at the next source run.
 				at = runEnd
 			}
 		}
