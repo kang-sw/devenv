@@ -16,7 +16,7 @@ import (
 // its own manifest and lists both in WS_MCP_CONFIG_MANIFESTS. The three
 // declare the same keys and may differ only in dashboard.enabled's and
 // dashboard.pi_spawn_enabled's defaults (today all three default the first
-// on; only ws defaults the second on).
+// on; ws and Pi default the second on).
 
 var dashboardPackages = []struct {
 	name      string
@@ -27,7 +27,7 @@ var dashboardPackages = []struct {
 }{
 	{"ws", claudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"), true, true},
 	{"wsflow", wsflowClaudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin-wsflow", "dashboard-config-manifest.json"), true, false},
-	{"pi", filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json"), filepath.Join("..", "..", "..", "agents-plugin-pi", "dashboard-config-manifest.json"), true, false},
+	{"pi", filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json"), filepath.Join("..", "..", "..", "agents-plugin-pi", "dashboard-config-manifest.json"), true, true},
 }
 
 // perPackageDefault is a dashboard key whose default differs by package.

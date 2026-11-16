@@ -21,7 +21,7 @@ import (
 
 const (
 	piMCPOnlySpawn    = "`ws/pi.spawn` (tier: the resolved capability tier, not a model name)"
-	piMCPOnlyExplore  = "a `ws/pi.spawn` subagent at tier small, briefed for read-only work"
+	piMCPOnlyExplore  = "a `ws/pi.spawn` subagent with profile explore and tier small"
 	piMCPOnlyContinue = "ws/pi.send to the same subagent id"
 )
 
@@ -67,6 +67,8 @@ type piRecordFixture struct {
 
 func newPiRecordFixture(t *testing.T) *piRecordFixture {
 	t.Helper()
+	t.Setenv(wsagent.EnvPiToken, "test-token")
+	t.Setenv(wsagent.EnvPiEndpoint, "http://127.0.0.1:1")
 	s, root, key := setupPlanRenderServer(t, "ws")
 	dir, err := s.dashboard.stateDir()
 	if err != nil {
@@ -148,7 +150,7 @@ func assertPiMCPOnlyBody(t *testing.T, body string) {
 // worker playbook is told pi.spawn with the resolved tier.
 func TestPlaybookRenderPiSpawnedCallerUsesMCPOnlyIdioms(t *testing.T) {
 	f := newPiRecordFixture(t)
-	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi})
+	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi, WSTools: []string{"pi.spawn", "pi.send"}})
 	assertPiMCPOnlyBody(t, renderedBody(t, f.s, key, "ticket-worker-elevated"))
 }
 
@@ -180,7 +182,7 @@ func TestPlaybookRenderHostedPiLeadSwitchesOnBridgeFallback(t *testing.T) {
 		}
 	}
 	if strings.Contains(body, "pi.spawn") {
-		t.Errorf("native Pi lead body names pi.spawn:\n%s", body)
+		t.Errorf("unmarked Pi lead body names pi.spawn:\n%s", body)
 	}
 }
 
@@ -201,7 +203,7 @@ func TestPlaybookRenderUnrecordedCallerKeepsHarnessRow(t *testing.T) {
 // caller key to the terminology switch as playbook.render does.
 func TestPlaybookReadPiSpawnedCallerUsesMCPOnlyIdioms(t *testing.T) {
 	f := newPiRecordFixture(t)
-	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi})
+	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi, WSTools: []string{"pi.spawn", "pi.send"}})
 	resp := callToolOnce(t, f.s, 2, "playbook.read", map[string]any{"name": "ticket-worker-elevated", "session_key": key})
 	if toolIsError(t, resp) {
 		t.Fatalf("playbook.read returned error: %s", resp)

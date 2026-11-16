@@ -37,15 +37,17 @@
  * best-effort by design (see `readAndClearSidecar`).
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { isExecutionAgent, withoutRetiredNativeTools } from "./native-agent-policy.ts";
 import { labelAdapterText } from "./adapter-label.ts";
 import { withSummaryId } from "./summary-id.ts";
 import { TOOL_GROUPS, isOwnerHeld, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
 import { restoreDescendantUsage } from "./agent-usage-rollup.ts";
-import { ownedHomeRemovalState, readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
+import { holdRetiredOwnedHistory, ownedHomeRemovalState, readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
 
@@ -488,14 +490,15 @@ export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
       `${orphanDisplayId(orphan)} · ${orphan.spawnRole ?? "worker"}`,
       ...(orphan.title ? [orphan.title] : []),
       `State at shutdown: running, ${reportSummary(orphan)}`,
-      `Resume: ws-agent-send ${target} "<repeat the interrupted instruction>"`,
-      `Inspect first: ws-agent-transcript ${target}`,
+      `Inspect/resume execution worker: /audit ${target} (interactive owner TUI only).`,
+      `Session history: ${orphan.sessionPath}`,
+      "No process, in-flight command approval, or report history was recovered. Re-issue interrupted work only after inspection; shell commands require fresh correlated approval.",
     );
   }
   if (idle.length > 0) {
     lines.push(
       `${idle.length} previously idle agent${idle.length === 1 ? " was" : "s were"} also restored.`,
-      `Use ws-agent-list to inspect ${idle.length === 1 ? "it" : "them"}.`,
+      "Use /audit in the owner TUI to inspect retained execution history; daemon pi.* does not own these workers.",
     );
   }
   return lines.join("\n");
@@ -540,13 +543,18 @@ export function writeSidecar(leadSessionFile: string, orphans: PersistedOrphan[]
   writeSidecarAt(sidecarPath(leadSessionFile), orphans);
 }
 
-export function writeSidecarAt(path: string, orphans: PersistedOrphan[]): void {
+const preservationBlockedPaths = new Set<string>();
+
+/** A failed recovery remains write-blocked for every later persistence caller. */
+export function writeSidecarAt(path: string, orphans: PersistedOrphan[]): boolean {
+  if (preservationBlockedPaths.has(resolve(path))) return false;
   try {
-    if (orphans.length === 0) return;
+    if (orphans.length === 0) return true;
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeFileSync(path, serializeOrphans(orphans), { mode: 0o600 });
+    return true;
   } catch {
-    // Nothing to fall back to — the orphans are simply not announced next run.
+    return false;
   }
 }
 
@@ -560,6 +568,71 @@ export function readAndClearSidecar(leadSessionFile: string): PersistedOrphan[] 
   return readAndClearSidecarAt(sidecarPath(leadSessionFile));
 }
 
+/**
+ * Production recovery boundary. Legacy general/fork/research and unrecognized
+ * entries are never revived. Quarantine the entire original file, byte-for-byte
+ * (including unknown fields), before returning any recognized execution workers.
+ * A failed quarantine preserves the source and refuses recovery, rather than
+ * silently consuming history or claiming a daemon adopted it.
+ */
+export interface ExecutionSidecarRecovery {
+  orphans: PersistedOrphan[];
+  writable: boolean;
+  retentionSafe: boolean;
+}
+
+export function readExecutionSidecarAt(path: string, notice: (message: string) => void): ExecutionSidecarRecovery {
+  const key = resolve(path);
+  // Refuse every later write until this read/protection/quarantine completes.
+  preservationBlockedPaths.add(key);
+  const blocked = (reason: string): ExecutionSidecarRecovery => {
+    notice(`ws-pi-agent: ${reason} Native sidecar preserved at ${path}; NOT resumed or adopted. Sidecar writes, new persistent execution and automatic retention are blocked until preservation can be established.`);
+    return { orphans: [], writable: false, retentionSafe: false };
+  };
+  let raw: string;
+  try { raw = readFileSync(path, "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return blocked("Could not read the existing sidecar.");
+    preservationBlockedPaths.delete(key);
+    return { orphans: [], writable: true, retentionSafe: true };
+  }
+  let entries: unknown[];
+  try {
+    const file = JSON.parse(raw);
+    if (file?.version !== SIDECAR_VERSION || !Array.isArray(file.orphans)) return blocked("Unrecognized sidecar metadata cannot establish history protection.");
+    entries = file.orphans;
+  } catch { return blocked("Unreadable sidecar metadata cannot establish history protection."); }
+  const parsed = parseOrphans(raw);
+  const execution = parsed.filter(isExecutionAgent);
+  const retired = entries.filter(entry => !execution.some(orphan => entry && typeof entry === "object"
+    && isExecutionAgent(entry as PersistedOrphan) && (entry as PersistedOrphan).agentId === orphan.agentId && (entry as PersistedOrphan).sessionPath === orphan.sessionPath
+    && ((entry as PersistedOrphan).ownership === undefined || orphan.ownership !== undefined)));
+  const heldHomes: string[] = [];
+  for (const entry of retired) {
+    const ownership = (entry as Partial<PersistedOrphan> | null)?.ownership;
+    // Unknown/missing identity cannot prove which TTL-scanned history is at risk.
+    // Keep the source in place so every subsequent startup also fails closed.
+    if (!validDescriptor(ownership) || ownership.agentId !== (entry as PersistedOrphan).agentId || ownership.sessionPath !== (entry as PersistedOrphan).sessionPath
+      || !holdRetiredOwnedHistory(ownership)) return blocked("Could not durably protect every retired/unrecognized owned history.");
+    heldHomes.push(ownership.home);
+  }
+  if (retired.length > 0) {
+    const quarantine = `${path}.retired-${randomUUID()}`;
+    try { renameSync(path, quarantine); }
+    catch { return blocked("Could not quarantine the existing sidecar."); }
+    notice(`ws-pi-agent: retired general/fork/explore native entries were NOT resumed or adopted by daemon pi.*. Original sidecar preserved at ${quarantine}; transcript/prompt bytes were not changed. Permanent owner-held history protection (ownerHeld:true; no live-process claim) excludes these homes from automatic retention until explicitly released: ${heldHomes.join(", ")}. Only ${execution.length} recognized execution-worker record(s) may be restored as dormant.`);
+  } else {
+    try { rmSync(path); }
+    catch { return blocked("Could not consume the existing execution sidecar."); }
+  }
+  preservationBlockedPaths.delete(key);
+  return { writable: true, retentionSafe: true, orphans: execution.map(orphan => ({
+    ...orphan,
+    ...(orphan.delegation ? { delegation: { ...orphan.delegation, tools: withoutRetiredNativeTools(orphan.delegation.tools) } } : {}),
+  })) };
+}
+
+/** Legacy parser/filesystem seam for historical-format tests, not startup recovery. */
 export function readAndClearSidecarAt(path: string): PersistedOrphan[] {
   let raw: string | undefined;
   try {

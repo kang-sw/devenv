@@ -1,4 +1,9 @@
 /**
+ * Live execution-only engine for ws-execute/ws-approve. Public native agent,
+ * explore and fork registrations are retired. The low-level lifecycle helpers
+ * below remain shared/testable; runtime registries admit execution workers only.
+ *
+ * Historical lifecycle notes (not the current public tool surface):
  * Self-built delegation spawner: `ws-agent-spawn` / `ws-agent-send` /
  * `ws-agent-list` / `ws-agent-stop` / `ws-agent-transcript` /
  * `ws-report-to-lead` / `explore`.
@@ -96,13 +101,10 @@ import { attachFirstTaskForkCacheNotice, type ForkCacheNoticeOwner } from "./for
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { buildAgentSendSummary, buildAgentSpawnSummary, buildExploreSummary, createDispatchToolPreview } from "./tool-row-render.ts";
 import {
   formatConcreteModelWarning,
   formatExploreTierRefusal,
   formatTierWarning,
-  modelCatalogFromToolCtx,
-  tierWarningNotifierFromToolCtx,
   validateCatalogModel,
   validateConcreteModel,
   type ConcreteModelRejection,
@@ -111,7 +113,7 @@ import {
   type TierRejection,
 } from "./model-catalog.ts";
 import { countBackgroundTasks } from "./background-tasks.ts";
-import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type PublicExploreMode, type SpawnRole } from "./process-role.ts";
+import { WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type SpawnRole } from "./process-role.ts";
 import { FORK_READINESS_KIND, captureForkContext, compareForkRegistrations, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions, type ChannelConnection, type ChannelHello } from "./agent-channel.ts";
 import { consumedApprovalsFromResume, parseApprovalConsumedMessage, pendingApprovalFromResume } from "./approval-protocol.ts";
@@ -133,6 +135,21 @@ import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.t
 import { modelObservation, retainModelObservation, type ModelObservation } from "./model-observation.ts";
 import { closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "./agent-batches.ts";
 import { observeAgentView, scheduleAgentViewPublish, type AgentViewModel } from "./agent-view.ts";
+import { isExecutionAgent, withoutRetiredNativeTools } from "./native-agent-policy.ts";
+
+// Only the retained execution gateway owns a native runtime registry. Keep
+// lower-level lifecycle helpers testable without reviving public delegation.
+const executionRegistries = new WeakSet<RpcAgentRegistry>();
+const persistenceBlockedRegistries = new WeakSet<RpcAgentRegistry>();
+
+/** A retained, unreadable/unquarantined sidecar must not be replaced by new execution history. */
+export function blockExecutionPersistence(registry: RpcAgentRegistry): void {
+  persistenceBlockedRegistries.add(registry);
+}
+
+export function assertExecutionPersistenceAvailable(registry: RpcAgentRegistry): void {
+  if (persistenceBlockedRegistries.has(registry)) throw new Error("ws-pi-agent: persistent execution is blocked while the existing native sidecar/history cannot be safely preserved; resolve the reported preservation failure first");
+}
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -203,10 +220,11 @@ export function captureChildBootstrapFailure(client: Pick<RpcClient, "onEvent">)
 }
 
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
-  "read-only": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME],
-  "read-only-explore": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS],
-  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS],
-  "execute-worker": [...READ_ONLY_BUILTINS, GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME, "explore"],
+  // Legacy names remain readable in persisted metadata, not as delegation permissions.
+  "read-only": [...READ_ONLY_BUILTINS],
+  "read-only-explore": [...READ_ONLY_BUILTINS],
+  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls"],
+  "execute-worker": [...READ_ONLY_BUILTINS, GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME],
 };
 
 /**
@@ -221,7 +239,7 @@ export function resolveTools(group: ToolGroup, wsToolNames: readonly string[] = 
   const extra = group === "full-worker" ? inheritableTools(wsToolNames)
     : group === "execute-worker" ? readOnlyWsTools(wsToolNames).filter(name => EXECUTE_WORKER_WS_TOOLS.has(name))
     : [];
-  return [...builtins, ...extra].join(",");
+  return withoutRetiredNativeTools([...builtins, ...extra]).join(",");
 }
 
 /** Shared tier resolution for persistent spawn and the manual advisory.
@@ -3750,13 +3768,17 @@ export function spawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteSco
   return resolveSpawnAdmission(ctx, writeScopes).policy;
 }
 
-export const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress before settlement. Do not stop mid-run to ask a question: decide, proceed, and record the assumption among your decisions, or, when you genuinely cannot proceed, settle with the blocker stated so your caller can resume you.\n\n## Code-review artifacts\nWhen your playbook tells you to spawn a code reviewer with a generated findings path, pass that exact absolute path as the sole \`write_scopes\` file grant. Reviewer admission rejects omission, trees, globs, and multiple paths so the required report cannot silently disappear.\n`;
+export const WORKER_LIFECYCLE_GUIDE = `\n\n## Execution worker lifecycle\nCarry out the assigned execution task yourself. Every shell command uses ws-worker-exec and waits for a correlated lead decision; never bypass that gate. Use ws-report-to-lead only for intermediate progress, not completion. Your ordinary assistant answer is delivered when the worker settles. Do not spawn native children or stop mid-run to ask a question: decide and record assumptions, or settle with a blocker.\n`;
 
 export async function spawnAgent(
   registry: RpcAgentRegistry,
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
 ): Promise<{ agent_id: string; alias?: string; evicted?: string; write_scopes?: WriteScopeDiagnostic }> {
+  assertExecutionPersistenceAvailable(registry);
+  if (executionRegistries.has(registry) && (!isExecutionAgent(ctx) || ctx.forkFrom || ctx.explicitTools || params.writeScopes)) {
+    throw new Error("ws-pi-agent: native delegation is retired; this registry accepts execution workers only");
+  }
   const dispatchAdmission = beginSubtreeDispatch(registry);
   const finishDispatch = typeof dispatchAdmission === "function" ? dispatchAdmission : await dispatchAdmission;
   try {
@@ -3852,6 +3874,9 @@ export async function spawnAgent(
       sessionPath,
       ownership,
       systemPromptPath: promptPath,
+      // Pin the relay beyond this launch's listener so /audit dormant resume
+      // cannot strand a new gated command after process loss.
+      ...(toolGroup === "execute-worker" ? { onApprovalPending: ctx.onApprovalPending } : {}),
       delegation,
       modelBase,
       // Explicit effort wins; "default" retains the selected source's policy.
@@ -4048,6 +4073,9 @@ export async function sendToAgent(
     // A live owner drops a removed child from its registry; name the removal rather than an unknown id.
     if (isRemovedAgent(registry, resolvedId)) throw new Error(removedAgentMessage(resolvedId));
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
+  }
+  if (executionRegistries.has(registry) && !isExecutionAgent(record)) {
+    throw new Error("ws-pi-agent: retired native agent cannot be resumed; its session history is not a daemon agent");
   }
   // A launch in flight has claimed `record.client` but may not have started
   // its process yet; a prompt there would throw and read as an exit. Wait for
@@ -4518,50 +4546,19 @@ export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: stri
 // Pi tool registration.
 // ---------------------------------------------------------------------------
 
-export interface ExploreParams {
-  query: string;
-  mode?: PublicExploreMode;
-}
-
 export interface AgentToolsHandle {
   /** Graceful teardown for `session_shutdown`: awaits a best-effort
    * `client.stop()` over every live RPC-backed child. */
   stopAll(): Promise<void>;
-  /**
-   * 260904 Phase 1: the same RPC-backed registry `ws-agent-*` already reads
-   * and writes, exposed so `execute-gateway.ts`'s `ws-execute`/`ws-approve`
-   * tools can spawn/inspect agents on ONE shared map — §4's "agent_id
-   * disambiguates among all live and dormant/retained agents" requires this,
-   * not a second parallel registry.
-   */
+  /** Live execution workers, including dormant recovery and approval correlation. */
   rpcRegistry: RpcAgentRegistry;
 }
 
 /**
- * Registers the six RPC-backed delegation tools (`ws-agent-spawn`,
- * `ws-agent-send`, `ws-agent-list`, `ws-agent-stop`, `ws-agent-transcript`,
- * `ws-report-to-lead`) plus the persistent `explore` preset. Every dispatcher
- * registers the same tool; the persisted delegation allowlist removes child
- * management, including Explore, at terminal depth.
- *
- * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
- * child-side tool this ticket adds (registered here but reachable only from
- * a worker's `full-worker` `--tools` allowlist, per `TOOL_GROUPS`); its
- * `execute()` is a no-op ack — the relay to the lead rides the existing
- * `RpcClient.onEvent()` wire via `applyRpcEvent`'s `tool_execution_start`
- * branch, not the tool's return value (see that function's doc comment).
- * `ws-agent-transcript` is a lead-side introspection tool (same family as
- * `ws-agent-list`/`ws-agent-stop`), never added to any `TOOL_GROUPS` entry, so
- * it is not reachable from a worker's own `--tools`.
- *
- * 260905: there is no seventh, harvesting tool — `ws-agent-wait` is deleted.
- * Everything a lead used to block for now arrives as a pushed custom message
- * (see this module's header and `pushToLead`), and the background liveness
- * probe started here is what turns a child that dies without settling into an
- * `exited` push instead of silence.
- *
- * Child management is available only within the persisted depth/capability
- * envelope. The tool-call gate enforces the same ceiling after lazy activation.
+ * Initializes the live execution-only engine used by ws-execute/ws-approve.
+ * No public child-management tools are registered. Only an internal execution
+ * worker registers ws-report-to-lead; its no-op ack is observed by the parent
+ * RPC event stream, preserving intermediate progress separately from settlement.
  */
 export function registerAgentTools(
   pi: ExtensionAPI,
@@ -4573,332 +4570,36 @@ export function registerAgentTools(
     /** This process's channel to its own parent, when it was launched by the adapter; absent for a root lead. */
     subtreeUpstream?: SubtreeUpstream;
   },
-  /**
-   * 260904 Phase 1: see `RpcSpawnCtx.onApprovalPending`'s doc comment.
-   * Threaded into both `ws-agent-spawn`'s `spawnAgent` call and
-   * `ws-agent-send`'s `sendToAgent` call (dormant-resume branch) so a
-   * `ws-execute`-spawned `execute-worker` keeps its approval relay wired even
-   * if it is later driven through the generic `ws-agent-*` tools (shared
-   * registry, §4). A no-op for every other `toolGroup` — `GATED_EXEC_TOOL_NAME`
-   * is unreachable from their `--tools` lists, so this callback never fires.
-   */
-  onApprovalPending?: (record: RpcAgentRecord) => void,
-  /** Adapter-owned persistent-research guide, wired by index.ts. */
-  exploreGuidePath = "explore-guide.md",
   /** Shared ws-owned native/MCP presentation seam. */
   toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
+  executionRegistries.add(rpcRegistry);
   registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
   registerChildLaunchPreflight(rpcRegistry, bridge.ensureChildRuntime);
   installSubtreePublisher(rpcRegistry, sessionCtx.subtreeUpstream, () => heldPushQueue.length, () => ({ ...ownTurnRef }));
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
-  /** Cap on the head-truncated query used as a spawned explore's display title. */
-  const EXPLORE_TITLE_CAP = 60;
-  const EXPLORE_TITLE_TRUNCATION_MARKER = "…";
-
-  /** Head-truncates `query` to `EXPLORE_TITLE_CAP` characters for use as the spawned record's `title`. */
-  function deriveExploreTitle(query: string): string {
-    return query.length > EXPLORE_TITLE_CAP ? `${query.slice(0, EXPLORE_TITLE_CAP)}${EXPLORE_TITLE_TRUNCATION_MARKER}` : query;
+  // Progress is an internal execution-worker facility, not a lead tool that
+  // a helper (tool_search/codemode) could reactivate.
+  if (readSpawnRole(process.env) === "worker" && readDelegationPolicy()?.tools.includes(GATED_EXEC_TOOL_NAME)) {
+    registerWsTool(pi, {
+      name: REPORT_TO_LEAD_TOOL_NAME,
+      label: REPORT_TO_LEAD_TOOL_NAME,
+      description:
+        "Surface an async status update or intermediate finding to the lead immediately, distinct from your final answer. It is delivered to the lead the moment you call this — there is nothing to wait for on either side.",
+      parameters: {
+        type: "object",
+        properties: {
+          message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately. Final output is the ordinary assistant answer delivered when the agent settles." },
+        },
+        required: ["message"],
+      } as never,
+      async execute() {
+        return { content: [{ type: "text", text: "reported" }] };
+      },
+    }, toolPreviewTuiRef);
   }
-
-  function composeExploreTask(query: string, mode: ExploreMode): string {
-    return `Intent mode: ${mode}\n\nQuestion:\n${query}`;
-  }
-
-  registerWsTool(pi, {
-    name: "ws-agent-spawn",
-    label: "ws-agent-spawn",
-    description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, write_scopes?} immediately after the initial prompt is sent. model_name accepts a configured tier alias or concrete Pi model ID; either is catalog/auth validated before allocation, while omission inherits the parent model. write_scopes grants bounded native edit/write authority to an otherwise restricted child; it never confines a child that already has unrestricted native edit/write. Do not wait for it: end your turn, and its reports and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
-    parameters: {
-      type: "object",
-      properties: {
-        system_prompt_path: {
-          type: "string",
-          description: "Path to the lead-rendered playbook prompt file, appended as the child's system prompt via --append-system-prompt.",
-        },
-        prompt: { type: "string", description: "Initial task prompt sent to the spawned agent." },
-        model_name: {
-          type: "string",
-          description:
-            "Optional tier alias (small|medium|large|xlarge) resolved against harness pi agents.tier config, or a concrete Pi model ID (provider/id) validated with configured auth. Invalid named selections fail; omit to inherit the parent model.",
-        },
-        model_effort: {
-          type: "string",
-          description:
-            "Optional Pi thinking level (off|minimal|low|medium|high|xhigh|max) or default. default applies no caller override: inherit keeps parent effort, tiers keep configured effort, and concrete models use their own default. Unsupported explicit values degrade to a no-op.",
-        },
-        alias: {
-          type: "string",
-          description:
-            "Optional short name for this agent, usable in place of agent_id on ws-agent-send/stop/transcript/ws-approve. Reusing an alias held by a running, thread-bound, or owner-held agent rejects this spawn; a dormant/idle holder's alias is overwritten (its title is kept). Never derived automatically — omit to address this agent by uuid only.",
-        },
-        title: {
-          type: "string",
-          description: "Optional free-text label for this agent, independent of alias (display only, never used for resolution).",
-        },
-        cwd_override: {
-          type: "string",
-          description: "Optional absolute existing directory used as the spawned child's working directory. Reused when a stopped child is resumed.",
-        },
-        write_scopes: {
-          type: "array",
-          minItems: 1,
-          description: "Optional exact-file or directory-tree grants, each rooted at an absolute path. Tree include entries are positive root-relative path.posix.matchesGlob patterns. Authorized restricted children receive Pi's native edit/write tools only within these scopes.",
-          items: {
-            type: "object",
-            properties: {
-              path: { type: "string", description: "Absolute file path or tree root." },
-              kind: { type: "string", enum: ["file", "tree"] },
-              include: { type: "array", minItems: 1, items: { type: "string" }, description: "Optional positive root-relative glob union for a tree grant." },
-            },
-            required: ["path", "kind"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["system_prompt_path", "prompt"],
-    } as never,
-    async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
-      const p = params as {
-        system_prompt_path: string;
-        prompt: string;
-        model_name?: string;
-        model_effort?: string;
-        alias?: string;
-        title?: string;
-        cwd_override?: string;
-        write_scopes?: WriteScope[];
-      };
-      let resolvedInfo: ResolvedModelInfo | undefined;
-      const result = await spawnAgent(
-        rpcRegistry,
-        {
-          pi,
-          cwd: sessionCtx.cwd,
-          storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
-          inheritModel: inheritModelFromToolCtx(toolCtx),
-          inheritEffort: typeof (toolCtx as { thinkingLevel?: unknown }).thinkingLevel === "string"
-            ? (toolCtx as { thinkingLevel: string }).thinkingLevel
-            : undefined,
-          catalog: modelCatalogFromToolCtx(toolCtx),
-          allowConcreteModel: true,
-          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
-          wsToolNames: bridge.wsToolNames,
-          extensionPath: sessionCtx.extensionPath,
-          client: bridge.client,
-          provenance: bridge.renderRegistry?.get(p.system_prompt_path),
-          parentPolicy: leadParentPolicy(bridge),
-          onApprovalPending,
-          onModelResolved: (resolved) => {
-            resolvedInfo = resolved;
-            onUpdate?.({ content: [], details: { resolved } });
-          },
-        },
-        {
-          systemPromptPath: p.system_prompt_path,
-          prompt: p.prompt,
-          modelName: p.model_name,
-          modelEffort: p.model_effort,
-          alias: p.alias,
-          title: p.title,
-          cwdOverride: p.cwd_override,
-          writeScopes: p.write_scopes,
-        },
-      );
-      return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved: resolvedInfo } };
-    },
-    ...createDispatchToolPreview(toolPreviewTuiRef, "ws-agent-spawn", buildAgentSpawnSummary),
-  }, toolPreviewTuiRef);
-
-  registerWsTool(pi, {
-    name: "ws-agent-send",
-    label: "ws-agent-send",
-    description:
-      "Send a message to a spawned agent. A running agent is steered after its current tool-call batch finishes and before its next model call; this does not cancel in-flight tool calls. An idle agent receives a new prompt. A dormant (ws-agent-stop'd) agent_id — including one revived from a ws-agent-orphaned message after a session restart — is auto-resumed from its cached session file first, then receives a new prompt. Returns as soon as the message is delivered; the agent's answer arrives later as a pushed ws-agent-* message.",
-    parameters: {
-      type: "object",
-      properties: {
-        agent_id: { type: "string", description: "agentId returned by ws-agent-spawn." },
-        message: { type: "string", description: "Message text to deliver." },
-      },
-      required: ["agent_id", "message"],
-    } as never,
-    async execute(_toolCallId, params) {
-      const p = params as { agent_id: string; message: string };
-      // `leadSend: true`: this tool is the lead's own channel to a child (see
-      // `RpcResumeCtx.leadSend`), unlike ask.ts's overlay channel.
-      const result = await sendToAgent(
-        rpcRegistry,
-        { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, onApprovalPending, leadSend: true, leadSessionKey: bridge.defaultSessionKeyRef.current },
-        p.agent_id,
-        p.message,
-        true,
-      );
-      // 260906 Phase 2: ws-agent-send never resolves a model itself — the
-      // line reconstructs the TARGET agent's recorded model/effort instead.
-      // A record revived from a sidecar snapshot (restart survivor) carries
-      // no `modelSource`; that degrades to `inherited: true`/`tier:
-      // "inherit"` rather than throwing or guessing a tier name.
-      const record = rpcRegistry.get(result.agent_id);
-      const inherited = record?.modelSource === undefined ? true : record.modelSource === "inherit";
-      const resolved: ResolvedModelInfo = {
-        tier: inherited ? "inherit" : record?.modelSource === "concrete" ? "concrete" : record?.modelTier ?? "?",
-        model: record?.modelBase,
-        effort: record?.modelEffort,
-        inherited,
-      };
-      return { content: [{ type: "text", text: JSON.stringify(result) }], details: { resolved } };
-    },
-    ...createDispatchToolPreview(toolPreviewTuiRef, "ws-agent-send", buildAgentSendSummary),
-  }, toolPreviewTuiRef);
-
-  registerWsTool(pi, {
-    name: "ws-agent-list",
-    label: "ws-agent-list",
-    description:
-      "List every tracked agent_id, its alias/title (when set), status (running, idle, dormant, waiting-on-children, or pending-delivery), model, last_report_at, and owner_held:true while the owner's last send retains settle ownership. Only running means autonomous execution; settled output is pushed without a wait tool.",
-    parameters: {
-      type: "object",
-      properties: {
-        include_prompt: {
-          type: "boolean",
-          description: "When true, also include each agent's stored (head-truncated) initial prompt. Off by default.",
-        },
-      },
-    } as never,
-    async execute(_toolCallId, params) {
-      const p = params as { include_prompt?: boolean };
-      const result = listAgents(rpcRegistry, { includePrompt: p.include_prompt });
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
-    },
-  }, toolPreviewTuiRef);
-
-  registerWsTool(pi, {
-    name: "ws-agent-stop",
-    label: "ws-agent-stop",
-    description:
-      "Gracefully stop a spawned agent's live RPC process. It stays registered as dormant/resumable — ws-agent-send auto-resumes it later via its cached session file.",
-    parameters: {
-      type: "object",
-      properties: { agent_id: { type: "string", description: "agentId returned by ws-agent-spawn." } },
-      required: ["agent_id"],
-    } as never,
-    async execute(_toolCallId, params) {
-      const p = params as { agent_id: string };
-      // Non-silent: an explicit stop is a delegation outcome the lead should
-      // see land in its transcript like every other settle reason.
-      const result = await stopAgent(rpcRegistry, p.agent_id, pi);
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
-    },
-  }, toolPreviewTuiRef);
-
-  registerWsTool(pi, {
-    name: "ws-agent-transcript",
-    label: "ws-agent-transcript",
-    description:
-      "Lead-side introspection: returns {transcript_path}, the absolute path to a spawned agent's Pi session JSONL. No content marshalling — grep/read the file directly.",
-    parameters: {
-      type: "object",
-      properties: { agent_id: { type: "string", description: "agentId returned by ws-agent-spawn." } },
-      required: ["agent_id"],
-    } as never,
-    async execute(_toolCallId, params) {
-      const p = params as { agent_id: string };
-      const result = getAgentTranscriptPath(rpcRegistry, p.agent_id);
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
-    },
-  }, toolPreviewTuiRef);
-
-  registerWsTool(pi, {
-    name: REPORT_TO_LEAD_TOOL_NAME,
-    label: REPORT_TO_LEAD_TOOL_NAME,
-    description:
-      "Surface an async status update or intermediate finding to the lead immediately, distinct from your final answer. It is delivered to the lead the moment you call this — there is nothing to wait for on either side.",
-    parameters: {
-      type: "object",
-      properties: {
-        message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately. Final output is the ordinary assistant answer delivered when the agent settles." },
-      },
-      required: ["message"],
-    } as never,
-    async execute() {
-      return { content: [{ type: "text", text: "reported" }] };
-    },
-  }, toolPreviewTuiRef);
-
-  registerWsTool(pi, {
-    name: "explore",
-    label: "explore",
-    description:
-      "Spawn a persistent exploration researcher. It returns exactly {agent_id, alias}; use ws-agent-send to continue the same child. Select mode by intended investigation burden: lookup and search are small, investigation is medium, deep-research is large, and high-assurance-research is xlarge.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Exploration question." },
-        mode: {
-          type: "string",
-          enum: Object.keys(PUBLIC_EXPLORE_MODE_TIERS),
-          description:
-            "Investigation burden; defaults to search. lookup retrieves one fact whose likely location or identity is known. search performs bounded evidence discovery or tracing without cross-source judgment. investigation gathers and connects bounded evidence. deep-research pursues an ambiguous, difficult question through multiple sources and iterative hypothesis testing. high-assurance-research applies raised evidentiary standards through cross-source corroboration, adversarial challenge, repeated hypothesis testing, and explicit coverage and gap accounting; it does not promise completeness, conformance to a formal assurance or certification standard, or freedom from unresolved gaps.",
-        },
-      },
-      required: ["query"],
-      additionalProperties: false,
-    } as never,
-    async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
-      const raw = params as Record<string, unknown>;
-      if (Object.keys(raw).some((key) => key !== "query" && key !== "mode")) {
-        throw new Error("ws-pi-agent: invalid explore arguments");
-      }
-      const p = params as ExploreParams;
-      const requestedMode = p.mode ?? "search";
-      if (!Object.prototype.hasOwnProperty.call(PUBLIC_EXPLORE_MODE_TIERS, requestedMode)) {
-        throw new Error(`ws-pi-agent: unknown explore mode: ${String(p.mode)}`);
-      }
-      const mode = requestedMode as PublicExploreMode;
-      const tier = PUBLIC_EXPLORE_MODE_TIERS[mode];
-      let resolvedInfo: ResolvedModelInfo | undefined;
-      const result = await spawnAgent(
-        rpcRegistry,
-        {
-          pi,
-          cwd: sessionCtx.cwd,
-          storage: sessionCtx.storage ?? storageContextFromToolCtx(toolCtx),
-          inheritModel: inheritModelFromToolCtx(toolCtx),
-          catalog: modelCatalogFromToolCtx(toolCtx),
-          notifyTierWarning: tierWarningNotifierFromToolCtx(toolCtx),
-          wsToolNames: bridge.wsToolNames,
-          extensionPath: sessionCtx.extensionPath,
-          client: bridge.client,
-          toolGroup: "read-only-explore",
-          spawnRole: "explore",
-          exploreMode: mode,
-          parentPolicy: leadParentPolicy(bridge),
-          requireTier: true,
-          aliasPrefix: "explore",
-          onApprovalPending,
-          onModelResolved: (resolved) => {
-            resolvedInfo = resolved;
-            onUpdate?.({ content: [], details: { resolved } });
-          },
-        },
-        {
-          systemPromptPath: exploreGuidePath,
-          prompt: composeExploreTask(p.query, mode),
-          modelName: tier,
-          title: deriveExploreTitle(p.query),
-        },
-      );
-      return {
-        content: [{ type: "text", text: JSON.stringify({ agent_id: result.agent_id, alias: result.alias }) }],
-        details: { resolved: resolvedInfo },
-      };
-    },
-    ...createDispatchToolPreview(toolPreviewTuiRef, "explore", buildExploreSummary),
-  }, toolPreviewTuiRef);
 
   return {
     rpcRegistry,

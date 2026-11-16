@@ -19,8 +19,8 @@
  * matching the shape the reference harnesses already use for these same
  * tools (Claude Code registers them as `mcp__plugin_ws_ws__playbook_read`).
  * The model maps the unmodified `ws/playbook.read(...)` SKILL.md prose to
- * the sanitized registered name itself (prose is not rewritten here — it is
- * not this bridge's to rewrite). Dispatch to ws-mcp always uses the RAW
+ * the sanitized registered name itself. A compatibility appendix supersedes
+ * stale native-agent guidance, without renaming wire APIs. Dispatch uses the RAW
  * dotted `rawName` (`client.callTool(rawName, ...)`) — sanitization is
  * registration-only and never touches the wire call to ws-mcp.
  */
@@ -43,6 +43,7 @@ import { labelAdapterText } from "./adapter-label.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { dedupePlaybook, dedupeRead, workflowManualKey, workflowManualResultText } from "./playbook-read-dedupe.ts";
+import { daemonAgentInitializeCapabilities, adaptPiGuidanceContent, adaptPiPromptArtifact, callPiWithExploreFallback } from "./daemon-agent-compat.ts";
 
 import type { ForkContext } from "./fork-context.ts";
 import { RenderRegistry, assertPolicyTool, assertSessionAuthority, childPolicy, playbookProfile, readDelegationPolicy, readOnlyWsTools, READ_TOOLS, CHILD_MANAGEMENT_TOOLS, type PlaybookProfile } from "./delegation-policy.ts";
@@ -165,14 +166,11 @@ function firstText(result: McpToolCallResult): string | undefined {
  */
 export const MODEL_CATALOG_ADVISORY =
   "> [!note]\n" +
-  "> **Pi's model tier table has no entries.** ws-agent-spawn (and ws-fork/" +
-  "ws-execute) now refuse a named tier that has no genuine pi entry instead " +
-  "of silently inheriting the parent session's model; Explore intent modes " +
-  "refuse the same way. Configure the `small`, `medium`, `large`, and `xlarge` tiers " +
-  "for harness `pi` via `config.tune agents.tier harness:pi` (see lead-tune): " +
-  "lookup/search use `small`; investigation uses `medium`; deep-research uses " +
-  "`large`; high-assurance-research uses `xlarge`. Changes apply " +
-  "immediately — no restart needed.";
+  "> **Pi's model tier table has no entries.** pi.spawn requires a configured " +
+  "Pi capability tier. Configure `small`, `medium`, `large`, and `xlarge` " +
+  "for harness `pi` via `config.tune agents.tier harness:pi` (see lead-tune). " +
+  "Local exploration normally uses `small`. Tier changes apply immediately; " +
+  "tool availability changes may require reconnecting.";
 
 /**
  * The four fixed tiers `config.resolve_agent` understands — used by
@@ -1075,7 +1073,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     const initResult = await client.initialize({
       name: "ws-pi-bridge",
       version: "0.1.0",
-    });
+    }, daemonAgentInitializeCapabilities(readSpawnRole(process.env), Boolean(policy)));
     assertVersionPin(runtime, initResult.serverInfo.version);
 
     tools = filterOutAdapterOnlyTools(filterOutMercenaryTools(await client.listTools()));
@@ -1182,21 +1180,24 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
                 }
               },
             });
-            return { ...mapped, content: await adoptRevivedKey(rawParams?.session_key, dedupeManual(mapped.content)) };
+            return { ...mapped, content: adaptPiGuidanceContent(await adoptRevivedKey(rawParams?.session_key, dedupeManual(mapped.content))) };
           }
 
-          const result = await client.callTool(rawName, args);
+          const result = await callPiWithExploreFallback((name, callArgs) => client.callTool(name, callArgs), rawName, args);
           if (result.isError) {
             // Throwing is how Pi's tool contract signals isError: true —
             // returning a value never sets it (docs/extensions.md#L1953-2011).
             throw new Error(firstText(result) ?? `${registeredName} failed with no error text`);
           }
-          if (rawName === "playbook.render" && renderProfile) {
+          if (rawName === "playbook.render") {
             const path = firstText(result)?.split("\n")[0]?.trim();
-            if (!path) throw new Error("ws-pi-agent: render returned no provenance path");
-            const entry = renderRegistry.record(path, renderProfile);
-            if (entry.sessionKey) knownKeys.add(entry.sessionKey);
-            pi.appendEntry("ws-pi-render-provenance", entry);
+            if (!path) throw new Error("ws-pi-agent: render returned no prompt path");
+            adaptPiPromptArtifact(path);
+            if (renderProfile) {
+              const entry = renderRegistry.record(path, renderProfile);
+              if (entry.sessionKey) knownKeys.add(entry.sessionKey);
+              pi.appendEntry("ws-pi-render-provenance", entry);
+            }
           }
           if (rawName === "ferrule") {
             try { const key = JSON.parse(firstText(result) ?? "{}").session_key; if (typeof key === "string") knownKeys.add(key); } catch { /* text ferrule response is not authorized as a new key */ }
@@ -1208,6 +1209,8 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           const piAliasTableReport = await computeRawDispatchPiAliasTableReport(rawName, (name, callArgs) => client.callTool(name, callArgs), catalog);
           let content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0, advisoryKeyHolder);
           if (rawName === "workflow_manual") content = await adoptRevivedKey(rawParams?.session_key, dedupeManual(content));
+          // Normalize before deduplication so the compared body matches what the model saw.
+          if (rawName === "playbook.read") content = adaptPiGuidanceContent(content);
           // One playbook unit with the ws-skill and typed /skill: copies its
           // preload inlined: a visible identical body of the same name, from
           // either path, collapses this read whatever its context.
@@ -1222,6 +1225,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
               }
             }
           }
+          if (rawName === "playbook.render" || rawName === "workflow_manual") content = adaptPiGuidanceContent(content);
           return { content, details: result };
         },
       }, opts.toolPreviewTuiRef);

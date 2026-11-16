@@ -52,7 +52,7 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 			return "", nil, err
 		}
 		entries = []string{"builtin:mcp"}
-		warnings = append(warnings, fmt.Sprintf("[ws Pi] EXTENSION NOT LOADED: Bundled Pi extension unavailable (%v); using the ws MCP bridge instead. Native lead tools (ws-execute, explore, ws__*) are unavailable. Mail remains reachable through MCP. Repair/reinstall the extension and restart this session.", bundleErr))
+		warnings = append(warnings, fmt.Sprintf("[ws Pi] EXTENSION NOT LOADED: Bundled Pi extension unavailable (%v); using the ws MCP bridge instead. Native lead tools (ws-execute, ws__*) are unavailable. Mail remains reachable through MCP. Repair/reinstall the extension and restart this session.", bundleErr))
 	}
 	// This tiny dependency-free extension also watches a nominally healthy
 	// load: Pi catches extension factory/session_start errors and continues.

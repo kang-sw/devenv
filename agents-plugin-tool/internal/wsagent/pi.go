@@ -308,8 +308,7 @@ func piArgs(spec StartSpec, bridge string) []string {
 }
 
 // piExtensionPackage is the package.json name of the native ws Pi extension,
-// the extension that registers the explore, ws-agent-spawn, and
-// ws-agent-send tools.
+// the extension that registers the execution gateway and bridges daemon tools.
 const piExtensionPackage = "ws-pi-bridge"
 
 // PiMCPOnly reports whether rec is a Pi conversation that reaches ws only

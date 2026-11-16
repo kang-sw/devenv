@@ -42,9 +42,9 @@ var playbookTerminologyTable = map[string]map[string]string{
 		"ContinueIdiom": "resuming the agent using its task id",
 	},
 	"pi": {
-		"ExploreAgent":  "the `explore` researcher",
-		"SpawnIdiom":    "ws-agent-spawn",
-		"ContinueIdiom": "ws-agent-send to the same alias or agent id",
+		"ExploreAgent":  "an exploration agent",
+		"SpawnIdiom":    "spawning a subagent",
+		"ContinueIdiom": "resuming the agent using its returned id",
 	},
 	// "" = host-neutral fallback for unknown/undetected harness.
 	"": {
@@ -109,12 +109,10 @@ func terminologyForHarness(harness, namespace string) map[string]string {
 	return table
 }
 
-// playbookTerminology is the terminology a render substitutes for its caller:
-// terminologyForHarness, except that a caller running Pi without the native
-// ws Pi extension (piMCPOnly, see Server.callerPiMCPOnly) gets
-// piMCPOnlyTerminology whatever harness its connection was detected as.
-func playbookTerminology(harness string, piMCPOnly bool, namespace string) map[string]string {
-	if piMCPOnly {
+// playbookTerminology selects daemon Pi idioms only for a caller whose
+// client and effective tool surface permit them.
+func playbookTerminology(harness string, piAvailable bool, namespace string) map[string]string {
+	if piAvailable {
 		return piMCPOnlyTerminology(namespace)
 	}
 	return terminologyForHarness(harness, namespace)
@@ -152,21 +150,28 @@ func (s *Server) callerPiMCPOnly(key string) bool {
 			def = &rp.Definition
 		}
 	}
-	return wsagent.PiMCPOnly(rec, def)
+	if !wsagent.PiMCPOnly(rec, def) {
+		return false
+	}
+	if rec.Lead {
+		return true
+	}
+	if def == nil {
+		return false
+	}
+	hasSpawn, hasSend := false, false
+	for _, tool := range def.WSTools {
+		hasSpawn = hasSpawn || tool == "pi.spawn"
+		hasSend = hasSend || tool == "pi.send"
+	}
+	return hasSpawn && hasSend
 }
 
-// piMCPOnlyTerminology is the terminology row of a Pi session that reaches ws
-// only through Pi's builtin MCP client: the native extension's explore,
-// ws-agent-spawn, and ws-agent-send tools (the "pi" row) are absent there, so
-// every idiom names the ws MCP Pi tools instead. pi.spawn takes a capability
-// tier, not a model, and has no read-only profile, so the explorer is a
-// small-tier spawn whose brief asks for read-only work without promising
-// enforcement. The namespace is assembled here for the same reason as in
-// claudeSpawnIdiom. ContinueIdiom carries no backticks because delegationTip
-// wraps it in a code span.
+// piMCPOnlyTerminology names daemon Pi tools using the runtime namespace.
+// ContinueIdiom has no backticks because delegationTip wraps it in a code span.
 func piMCPOnlyTerminology(namespace string) map[string]string {
 	return map[string]string{
-		"ExploreAgent":  "a `" + namespace + "/pi.spawn` subagent at tier small, briefed for read-only work",
+		"ExploreAgent":  "a `" + namespace + "/pi.spawn` subagent with profile explore and tier small",
 		"SpawnIdiom":    "`" + namespace + "/pi.spawn` (tier: the resolved capability tier, not a model name)",
 		"ContinueIdiom": namespace + "/pi.send to the same subagent id",
 	}
@@ -965,7 +970,9 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 // playbookTerminology).
 func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.currentHarness()
-	terminology := playbookTerminology(harness, s.callerPiMCPOnly(callerKey), s.runtimeNamespace())
+	piClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerPiMCPOnly(callerKey)
+	piAvailable := piClient && s.piListed() && s.toolAllowed("pi.spawn") && s.toolAllowed("pi.send")
+	terminology := playbookTerminology(harness, piAvailable, s.runtimeNamespace())
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
 	// namespace variables without teaching product-mode semantics to wsrsrc.

@@ -89,6 +89,9 @@ const PiWorkerProfile = "pi-worker"
 // PiMiniLeadProfile adds bounded ticket workflow tools to the coding worker.
 const PiMiniLeadProfile = "pi-mini-lead"
 
+// ExploreProfile is a local, read-only Pi researcher; the caller selects its tier.
+const ExploreProfile = "explore"
+
 // PiWorkerTools are Pi's built-in coding tools the pi-worker profile
 // allows.
 var PiWorkerTools = []string{"read", "bash", "edit", "write", "grep", "find", "ls"}
@@ -113,9 +116,13 @@ var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
 
+//go:embed instructions/explore.md
+var exploreText string
+
 // builtinInstructionTexts are the embedded instruction texts by name.
 var builtinInstructionTexts = map[string]string{
 	supportInstructions: trackerSupportText,
+	ExploreProfile:      exploreText,
 }
 
 // BuiltinInstructionNames are the names a builtin: instructions value may
@@ -178,6 +185,16 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		panic(err)
 	}
 	out[ProfilePrefix+PiMiniLeadProfile] = raw
+	raw, err = json.Marshal(Profile{
+		Description:  "Local read-only Pi researcher reporting evidence from project files.",
+		Backend:      BackendPi,
+		Tools:        searchAnswerTools(BackendPi),
+		Instructions: BuiltinInstructionsPrefix + ExploreProfile,
+	})
+	if err != nil {
+		panic(err)
+	}
+	out[ProfilePrefix+ExploreProfile] = raw
 	for name, backend := range map[string]string{SearchAnswerProfileClaude: BackendClaude, SearchAnswerProfilePi: BackendPi} {
 		raw, err := json.Marshal(Profile{
 			Description: fmt.Sprintf("Search answer agent (%s): reads the session board snapshot and project files; no shell, write, or network tools. Project-root confinement is best effort, not a sandbox.", backend),

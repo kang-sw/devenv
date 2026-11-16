@@ -4,6 +4,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { canDelegateWriteCapability, parseEffectiveWriteCapability, type EffectiveWriteCapability } from "./write-scopes.ts";
+import { RETIRED_NATIVE_AGENT_TOOLS, withoutRetiredNativeTools } from "./native-agent-policy.ts";
 
 export const DEFAULT_MAX_AGENT_DEPTH = 2;
 export const DELEGATION_ENV = "WS_PI_DELEGATION_POLICY";
@@ -56,7 +57,7 @@ export function readOnlyWsTools(tools: readonly string[]): string[] {
 // Owner-lead coordination is not inherited, even by workers with lead-scoped MCP keys.
 const OWNER_LEAD_WS_TOOLS: ReadonlySet<string> = new Set(["ws__session_request_hire", "ws__session_roster"]);
 export function inheritableTools(tools: readonly string[]): string[] {
-  return tools.filter(tool => !OWNER_LEAD_WS_TOOLS.has(tool));
+  return withoutRetiredNativeTools(tools).filter(tool => !OWNER_LEAD_WS_TOOLS.has(tool));
 }
 function legacyWriteCapability(policy: Pick<DelegationPolicy, "depth" | "tools">): EffectiveWriteCapability {
   if (policy.depth === 0 || (policy.tools.includes("edit") && policy.tools.includes("write"))) return { mode: "unrestricted" };
@@ -84,7 +85,7 @@ export function readDelegationPolicy(env: NodeJS.ProcessEnv = process.env): Dele
   return raw ? parseDelegationPolicy(JSON.parse(raw)) : undefined;
 }
 export function terminalTools(tools: readonly string[], depth: number, maxDepth: number): string[] {
-  return [...new Set(tools)].filter(tool => depth < maxDepth || !CHILD_MANAGEMENT_TOOLS.includes(tool as never));
+  return withoutRetiredNativeTools([...new Set(tools)]).filter(tool => depth < maxDepth || !CHILD_MANAGEMENT_TOOLS.includes(tool as never));
 }
 export function childPolicy(parent: DelegationPolicy, tools: readonly string[], authority: SessionAuthority, requiresChildren = false, sessionKey?: string, network?: NetworkAuthority, write?: EffectiveWriteCapability): DelegationPolicy {
   const depth = parent.depth + 1;
@@ -113,6 +114,7 @@ export function childPolicy(parent: DelegationPolicy, tools: readonly string[], 
   return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, write: requestedWrite, ...(network || requested.search || requested.fetch ? { network: requested } : {}), ...(sessionKey ? { sessionKey } : {}), ...(!sessionKey && parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
 }
 export function assertPolicyTool(policy: DelegationPolicy | undefined, name: string): void {
+  if (RETIRED_NATIVE_AGENT_TOOLS.has(name)) throw new Error(`ws-pi-agent: ${name} is retired; use daemon pi.* agents`);
   if (policy && (!policy.tools.includes(name) || (name === "web_search" && !policy.network?.search) || (name === "ws_web_fetch" && !policy.network?.fetch))) throw new Error(`ws-pi-agent: ${name} exceeds this agent's capability ceiling`);
 }
 export function assertSessionAuthority(policy: DelegationPolicy | undefined, args: Record<string, unknown>, knownKeys: ReadonlySet<string>): void {

@@ -81,6 +81,10 @@ def copy_plain_pi(base):
     package = json.loads((source / "package.json").read_bytes())
     for name in ("package.json", *package["files"]):
         src, dest = source / name, pi / name
+        # Source-only Go syncs omit the gitignored pack-time skills copy.
+        # Assemble those same bytes from its canonical input without Node/npm.
+        if name.rstrip("/") == "skills" and not src.exists():
+            src = REPO / "agents-plugin/skills"
         dest.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
             shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "node_modules", ".runtime"))

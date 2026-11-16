@@ -6,7 +6,7 @@
  * decideOnSettle's pure-reducer precedent in goal-loop.ts — no fake
  * ExtensionAPI/pi.on capture needed), computeSessionBootstrap (260906 Phase
  * 1's testability extraction — the one function that drives index.ts's
- * actual role-gate -> computeLeadActiveTools -> addForkToolIfLead ->
+ * actual role-gate -> computeLeadActiveTools ->
  * withoutOwnerQuestionTools -> addSkillToolIfLeadOrFork sequencing, so this file can
  * assert the post-reshape tool surface directly rather than only the pure
  * helpers in isolation), computeSkillsBlockCached (the dogfood fix's
@@ -43,7 +43,7 @@ import {
   type WsBlockBase,
 } from "../src/lead-bootstrap.ts";
 import { WS_SKILL_TOOL_NAME, type LoadedSkill } from "../src/lead-skills.ts";
-import { FORK_TOOL_NAME } from "../src/fork.ts";
+import { PI_AGENT_COMPAT_GUIDE } from "../src/daemon-agent-compat.ts";
 import { ASK_TOOL_NAME, RESOLVE_TOOL_NAME } from "../src/ask.ts";
 import { APPROVE_TOOL_NAME, BACKGROUND_ABORT_TOOL_NAME, EXECUTE_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, UGLY_READ_TOOL_NAME } from "../src/execute-gateway.ts";
 import { GATED_EXEC_TOOL_NAME } from "../src/spawner.ts";
@@ -96,6 +96,7 @@ describe("buildWsBlock", () => {
     const skillsIndex = result.indexOf("SKILLS-BLOCK-MARKER");
     assert.ok(manualIndex >= 0 && guideIndex >= 0 && skillsIndex >= 0, "all three inputs must appear in the output");
     assert.ok(manualIndex < guideIndex && guideIndex < skillsIndex, "order must be manual snapshot, then guide text, then skills block");
+    assert.ok(result.endsWith(PI_AGENT_COMPAT_GUIDE), "compatibility overrides also cover older loaded skills and manual snapshots");
   });
 
   test("tolerates an empty skills block", () => {
@@ -139,7 +140,7 @@ describe("computeBeforeAgentStartResult", () => {
 
 /**
  * computeSessionBootstrap drives the SAME sequencing index.ts's session_start
- * actually calls (role gate -> computeLeadActiveTools -> addForkToolIfLead ->
+ * actually calls (role gate -> computeLeadActiveTools ->
  * withoutOwnerQuestionTools -> addSkillToolIfLeadOrFork), so asserting against ITS
  * output — rather than a test-local re-implementation of that order — is
  * what satisfies the ticket's "drives before_agent_start through the real
@@ -167,10 +168,10 @@ describe("computeSessionBootstrap", () => {
     assert.ok(!result.activeTools.includes("bash"), "native bash must be removed");
     assert.ok(!result.activeTools.includes("read"), "native read must be removed");
     assert.ok(!result.activeTools.includes(GATED_EXEC_TOOL_NAME), "the gated-exec tool must stay excluded from the lead");
-    for (const name of [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, BACKGROUND_ABORT_TOOL_NAME, FORK_TOOL_NAME, WS_SKILL_TOOL_NAME]) {
+    for (const name of [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, BACKGROUND_ABORT_TOOL_NAME, WS_SKILL_TOOL_NAME]) {
       assert.ok(result.activeTools.includes(name), `expected ${name} on the host lead's reshaped surface`);
     }
-    for (const name of [ASK_TOOL_NAME, RESOLVE_TOOL_NAME]) {
+    for (const name of [ASK_TOOL_NAME, RESOLVE_TOOL_NAME, "ws-fork"]) {
       assert.ok(!result.activeTools.includes(name), `${name} must not be on the host lead's surface`);
     }
   });

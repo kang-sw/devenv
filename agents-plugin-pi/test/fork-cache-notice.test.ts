@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { attachFirstTaskForkCacheNotice, formatFirstForkCacheNotice } from "../src/fork-cache-notice.ts";
 import { spawnAgent, sendToAgent } from "../src/spawner.ts";
-import { buildForkSpawnCtx } from "../src/fork.ts";
 import { readForkLaunchContext } from "../src/fork-context.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 
@@ -89,12 +88,6 @@ test("label uses title/id fallback and remains one line", () => {
   assert.match(h.notices[0], /^fork tiny task ·/);
   const fallback = harness({ alias: undefined }); fallback.emit(event());
   assert.match(fallback.notices[0], /^fork abcdefgh ·/);
-});
-
-test("task spawn context carries only an ephemeral parent UI reference", () => {
-  const owner = { mode: "tui", hasUI: true, ui: { notify() {} } } as any;
-  const built = buildForkSpawnCtx({} as any, { client: {}, wsToolNames: [], defaultSessionKeyRef: {} } as any, { cwd: "/tmp" }, { forkFrom: "/tmp/source", explicitTools: "", catalog: [], forkCacheNoticeOwner: owner });
-  assert.equal(built.forkCacheNoticeOwner, owner);
 });
 
 test("production initial spawn attaches before prompt; live/dormant sends never re-arm or wake lead", async (t) => {

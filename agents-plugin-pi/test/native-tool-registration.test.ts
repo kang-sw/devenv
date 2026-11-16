@@ -7,7 +7,6 @@ import { test } from "node:test";
 import { createEventBus, discoverAndLoadExtensions, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAgentTools } from "../src/spawner.ts";
 import { registerExecuteGateway } from "../src/execute-gateway.ts";
-import { registerFork } from "../src/fork.ts";
 import { startBridge } from "../src/bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolResultTuiModules } from "../src/tool-result-render.ts";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
@@ -46,20 +45,15 @@ function harness() {
 }
 
 /** These invoke production registration factories; the compact helper test alone cannot catch missing shared refs. */
-test("actual native registrations retain schemas/executors while sharing cold and late-filled preview refs", () => {
+test("retained native execution registrations share cold and late-filled preview refs", async () => {
   const { tools, pi, bridge } = harness();
   const ref = createToolPreviewTuiRef();
-  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, "/tmp/explore.md", ref);
-  registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
-  registerFork(pi, bridge, agents.rpcRegistry, { cwd: "/tmp" }, undefined, ref);
+  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp", extensionPath: "/unused/index.ts" }, ref);
+  registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", extensionPath: "/unused/index.ts", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
 
   for (const name of [
-    "ws-agent-send",
-    "ws-agent-spawn",
-    "explore",
     "ws-approve",
     "ws-execute",
-    "ws-fork",
     "do-i-really-have-to-read-this-myself",
     "do-i-really-have-to-run-this-myself",
     "ws-background-abort",
@@ -70,27 +64,21 @@ test("actual native registrations retain schemas/executors while sharing cold an
     assert.ok(tool?.renderCall && tool?.renderResult, `${name} receives shared presentation hooks`);
     assert.throws(() => tool!.renderCall!({ model: "caller-only", effort: "high" }, {}, { state: {}, argsComplete: true, isPartial: false }), "factory-time cold ref preserves Pi fallback");
   }
-  const send = tools.get("ws-agent-send")!;
-  assert.ok("agent_id" in (send.parameters!.properties ?? {}), "ws-agent-send schema is preserved");
-  const report = tools.get("ws-report-to-lead")!;
-  assert.deepEqual(Object.keys(report.parameters!.properties ?? {}), ["message"], "ws-report-to-lead is a progress/finding report with no kind parameter");
-
+  for (const name of ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript", "explore", "ws-fork", "ws-report-to-lead"]) {
+    assert.equal(tools.has(name), false, `${name} is not registered for a lead or helper to activate`);
+  }
   ref.current = tui;
-  // 260906 Phase 2: ws-agent-send now owns its own custom renderCall (target
-  // agent + message head), not the generic raw-arg YAML dump — this proves
-  // the SAME captured closure sees the late-filled ref for its own summary.
-  const rendered = send.renderCall!({ agent_id: "agent-1", message: "hello there" }, { bold: (x: string) => x, fg: (_: string, x: string) => x }, { state: {}, argsComplete: true, isPartial: false }) as { render(width: number): string[] };
-  const renderedText = rendered.render(120).join("\n");
-  assert.match(renderedText, /target: agent-1/, "ws-agent-send's own custom summary renders the target agent");
-  assert.match(renderedText, /message: hello there/);
-  agents.stopAll();
+  const execute = tools.get("ws-execute")!;
+  const rendered = execute.renderCall!({ prompt: "inspect status" }, { bold: (x: string) => x, fg: (_: string, x: string) => x }, { state: {}, argsComplete: true, isPartial: false }) as { render(width: number): string[] };
+  assert.match(rendered.render(120).join("\n"), /inspect status/);
+  await agents.stopAll();
 });
 
 test("260906 Phase 1: the two direct tools cap their real registered OUTPUT preview at ten logical lines, not ten physical rows", () => {
   const { tools, pi, bridge } = harness();
   const ref = createToolPreviewTuiRef();
-  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp" }, undefined, "/tmp/explore.md", ref);
-  registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
+  const agents = registerAgentTools(pi, bridge, { cwd: "/tmp", extensionPath: "/unused/index.ts" }, ref);
+  registerExecuteGateway(pi, bridge, agents.rpcRegistry, { cwd: "/tmp", extensionPath: "/unused/index.ts", executeWorkerPromptPath: "/tmp/execute.md" }, ref);
   ref.current = tui;
 
   const theme = { bold: (x: string) => x, fg: (_: string, x: string) => x };

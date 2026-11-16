@@ -123,6 +123,7 @@ import { buildExecuteSummary, createDispatchToolPreview } from "./tool-row-rende
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
   GATED_EXEC_TOOL_NAME,
+  assertExecutionPersistenceAvailable,
   inheritModelFromToolCtx,
   leadParentPolicy,
   pushToLead,
@@ -725,6 +726,7 @@ export function registerExecuteGateway(
       required: ["prompt"],
     } as never,
     async execute(_toolCallId, params, _signal, onUpdate, toolCtx) {
+      assertExecutionPersistenceAvailable(rpcRegistry);
       const p = params as { command?: string; prompt: string; complex?: boolean };
       let output: string | undefined;
       if (p.command !== undefined) {

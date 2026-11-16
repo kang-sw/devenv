@@ -1,6 +1,11 @@
 /**
  * ws-pi-bridge: Pi extension entry point.
  *
+ * Native child management, explore, fork and question-thread entry points are
+ * retired. Only ws-execute/ws-approve uses the live local engine, dashboard
+ * projection and recovery; general delegation is daemon pi.*. The ticketed
+ * architecture notes below describe history, not the current public surface.
+ *
  * Bridges ws-mcp (the harness-neutral MCP server backing the ws workflow —
  * Go source untouched, see AGENTS.md's golden rule) onto Pi:
  *   - Spawns the ws-mcp launcher as a subprocess on session_start, closes it
@@ -189,6 +194,7 @@ import {
   agentCostRefreshRef,
   agentDashboardRefreshRef,
   agentWidgetRefreshRef,
+  blockExecutionPersistence,
   heldPushQueue,
   isLeadInterrupted,
   isOwningAgentIdle,
@@ -199,6 +205,7 @@ import {
   pushToLead,
   registerAgentTools,
   registerPushFlush,
+  resolveTools,
   sendBatchToLead,
   type AgentToolsHandle,
   type RpcAgentRecord,
@@ -206,7 +213,7 @@ import {
 } from "./spawner.ts";
 import { createAgentWidgetController, registerAgentWidgetCommand, resolveAgentWidgetRows, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
-import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
+import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readExecutionSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type ExecutionSidecarRecovery, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
 import { registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
@@ -217,22 +224,16 @@ import { confirmSummarizedBuiltinTools, registerAdapterMessageRenderers, registe
 import { registerSkillResources, resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { registerModelPrompts } from "./model-prompts.ts";
-import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, FORK_READINESS_KIND, type ForkContext } from "./fork-context.ts";
 import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts";
 import { ChildApprovalGate } from "./approval-protocol.ts";
-import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
+import { isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { registerBackgroundTaskShutdown } from "./background-tasks.ts";
 import { afterCompactionHold, boardSteerDeps, buildMailboxPushMessage, buildWhiteboardHeldMessage, createBridgeDrain, createBridgeInboxDrain, createBridgeInterruptDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
-import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   createThreadRegistryHandle,
   type ThreadRegistryHandle,
   captureForkResume,
-  hydrateThreadRegistry,
-  registerAsk,
-  registerThreadCommands,
-  threadRegistryPath,
   saveThreadRegistryFile,
 } from "./ask.ts";
 import { registerAuditCommands } from "./audit.ts";
@@ -245,7 +246,7 @@ import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDesc
 import { AgentViewUpstream, agentViewUpstreamRef, buildAgentViewModel, scheduleAgentViewPublish } from "./agent-view.ts";
 import { BATCH_SUMMARY_CONFIG_KEYS, batchSummaryConfigFrom, createBatchSummarizer, type BatchSummarizer } from "./batch-summary.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
-import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
+import { assertPolicyTool, DEFAULT_MAX_AGENT_DEPTH, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
@@ -258,6 +259,7 @@ import { createReasoningSummaryObserver } from "./reasoning-summary.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 import { applyWorkflowOwner } from "./workflow-owner.ts";
+import { isExecutionAgent, withoutRetiredNativeTools } from "./native-agent-policy.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
 // installed package, or a cache). Every RPC child receives this path verbatim
@@ -272,7 +274,6 @@ const runtimeJsonPath = join(pluginDir, "runtime.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const leadCompactGuidePath = join(pluginDir, "lead-compact-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
-const exploreGuidePath = join(pluginDir, "explore-guide.md");
 
 /** Installs one bounded reporter for the active adapter session. Only a TUI owner lead has a notification surface. */
 export function applySessionStartOwnershipDiagnostics(
@@ -286,6 +287,12 @@ export function applySessionStartOwnershipDiagnostics(
 
 export function applySessionShutdownOwnershipDiagnostics(): void {
   ownerNotifyRef.current = undefined;
+}
+
+/** Hosted/RPC diagnostic plus durable model-visible evidence, without a startup wake. */
+export function notifyNativeSidecarRetirement(pi: Pick<ExtensionAPI, "sendMessage">, ui: Pick<ExtensionUIContext, "notify">, message: string): void {
+  ui.notify(`[ws Pi] ${message}`, "warning");
+  pi.sendMessage({ customType: "ws-native-retirement", content: message, display: true }, { deliverAs: "nextTurn" });
 }
 
 /**
@@ -326,24 +333,34 @@ export function registerAgentFooterOutputEvents(pi: Pick<ExtensionAPI, "on">, li
   pi.on("message_end", (event) => { lifecycle.observeOutput(event); lifecycle.acceptUsage(event.message); });
 }
 
-/**
- * The one session-start orphan revival wiring, shared by both `session_start`
- * revival sites so they cannot drift. A revived fork gets `armForkRoleWiring`
- * with no owner-question callback (owner-question wiring is disconnected, so
- * no `onQuestionReport` is armed); a revived execute-worker gets the approval
- * relay pinned to the record itself, so it no longer depends on which call
- * site happens to resume it.
- */
+/** Restore only execution workers, pinning the approval relay to each record
+ * so internal /audit resumption retains the same correlation protocol. */
 export function reviveSessionOrphans(
-  pi: ExtensionAPI,
+  _pi: ExtensionAPI,
   registry: RpcAgentRegistry,
   orphans: PersistedOrphan[],
   onApprovalPending: ((record: RpcAgentRecord) => void) | undefined,
 ): RpcAgentRecord[] {
-  return reviveOrphans(registry, orphans, {
-    fork: (record) => armForkRoleWiring(pi, registry, record),
-    executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
+  return reviveOrphans(registry, orphans.filter(isExecutionAgent).map(orphan => ({ ...orphan, spawnRole: "execute-worker" })), {
+    executeWorker: (record) => {
+      record.onApprovalPending = onApprovalPending;
+      // Pre-envelope execution sidecars still get the narrow execution policy,
+      // never an unbounded generic worker fallback on internal /audit resume.
+      record.delegation ??= {
+        version: 1, depth: 1, maxDepth: DEFAULT_MAX_AGENT_DEPTH, authority: "leaf",
+        tools: resolveTools("execute-worker", record.wsToolNames).split(","),
+        write: { mode: "none" },
+      };
+      record.delegation = { ...record.delegation, tools: withoutRetiredNativeTools(record.delegation.tools) };
+    },
   });
+}
+
+/** Publish preservation failure to the production registry before it can spawn. */
+export function prepareExecutionSidecar(registry: RpcAgentRegistry, path: string, notice: (message: string) => void): ExecutionSidecarRecovery {
+  const recovery = readExecutionSidecarAt(path, notice);
+  if (!recovery.writable) blockExecutionPersistence(registry);
+  return recovery;
 }
 
 export function applySessionStartAgentRetention(
@@ -352,12 +369,17 @@ export function applySessionStartAgentRetention(
   config: GoalLoopConfig,
   recovered: PersistedOrphan[],
   prune: typeof pruneStaleAgentHomes = pruneStaleAgentHomes,
+  recovery?: ExecutionSidecarRecovery,
+  notice?: (message: string) => void,
 ): PersistedOrphan[] {
   // Tree-root lead only (no spawn role): the prune scans every owner namespace
   // on the machine, so a fork child must not repeat it from inside a tree.
-  if (role !== undefined) return recovered;
+  if (role !== undefined || recovery?.retentionSafe === false) return recovered;
   try {
-    const retention = prune(root, resolveChildRetentionTtlDays(config), { evictionCost: retentionEvictionCost });
+    const retention = prune(root, resolveChildRetentionTtlDays(config), {
+      evictionCost: retentionEvictionCost, preserveRetiredHistory: recovery !== undefined,
+      onRetiredHistoryHeld: home => notice?.(`ws-pi-agent: permanent owner-held history protection (ownerHeld:true; no live-process claim) now preserves retired native history at ${home} from automatic retention until explicitly released.`),
+    });
     if (retention.deletedHomes.length === 0) return recovered;
     const deletedHomes = new Set(retention.deletedHomes);
     return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
@@ -373,10 +395,11 @@ export async function persistShutdownAgentSnapshots(
   agentTools: AgentToolsHandle | undefined,
   sidecar: string | undefined,
   threads: ThreadRegistryHandle,
-): Promise<void> {
+): Promise<boolean> {
   const orphans = agentTools ? captureOrphans(agentTools.rpcRegistry) : undefined;
   await agentTools?.stopAll();
-  if (!sidecar || !agentTools || !orphans) return;
+  if (!agentTools || !orphans) return true;
+  if (!sidecar) return orphans.length === 0;
   for (const orphan of orphans) {
     const record = agentTools.rpcRegistry.get(orphan.agentId);
     if (!record) continue;
@@ -386,13 +409,14 @@ export async function persistShutdownAgentSnapshots(
     orphan.observedEffort = record.observedEffort;
     orphan.observedContextTokens = record.observedContextTokens;
   }
-  writeSidecarAt(sidecar, orphans);
+  if (!writeSidecarAt(sidecar, orphans)) return false;
   for (const thread of threads.threads.values()) {
     if (!thread.respondentAgentId) continue;
     const record = agentTools.rpcRegistry.get(thread.respondentAgentId);
     if (record) thread.forkResume = captureForkResume(record);
   }
   if (threads.pathRef.current) saveThreadRegistryFile(threads.pathRef.current, [...threads.threads.values()]);
+  return true;
 }
 
 /**
@@ -478,34 +502,6 @@ export async function drainStdoutBeforeExit(stream: DrainableStream, timeoutMs =
   }
 }
 
-/**
- * Replays only a missing task-fork tool's captured provider metadata. The
- * handler remains local and truthful: the parent extension is absent, so no
- * dispatch route exists in this child process.
- */
-function installMissingTaskForkTools(
-  pi: ExtensionAPI,
-  context: ForkContext | undefined,
-): { unavailableTools: string[]; error?: string } {
-  if (context?.kind !== "task") return { unavailableTools: [] };
-  const comparison = classifyForkRegistrations(context.registeredTools, captureRegisteredTools(pi.getActiveTools(), pi.getAllTools()));
-  const structuralError = formatForkRegistrationMismatch({ ...comparison, missing: [] });
-  if (structuralError) return { unavailableTools: [], error: structuralError };
-  for (const tool of comparison.missing) {
-    pi.registerTool({
-      name: tool.name,
-      label: tool.name,
-      description: tool.description,
-      parameters: tool.parameters as never,
-      async execute() {
-        throw new Error(`ws-pi-agent: unavailable fork tool "${tool.name}": its parent extension was not loaded`);
-      },
-    });
-  }
-  if (comparison.missing.length) pi.setActiveTools([...context.activeTools]);
-  return { unavailableTools: comparison.missing.map((tool) => tool.name) };
-}
-
 export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // First action of the factory, before anything this process could spawn
   // (the ws-mcp stdio client in `startBridge`, bash tools): the channel
@@ -552,7 +548,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     catch (error) { return { block: true, reason: String(error) }; }
   });
   pi.on("before_agent_start", () => {
-    if (delegation && readSpawnRole(process.env) !== "fork") pi.setActiveTools(pi.getActiveTools().filter(name => delegation.tools.includes(name)));
+    const active = withoutRetiredNativeTools(pi.getActiveTools());
+    pi.setActiveTools(delegation ? active.filter(name => delegation.tools.includes(name)) : active);
   });
   // Filled before the bridge starts so native tool renderers are available
   // independently of async MCP startup; absent helpers retain Pi fallback.
@@ -600,19 +597,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   const skillsBlockCacheRef: { current: SkillsBlockCache | undefined } = { current: undefined };
   const effectivePromptRef: LeadPromptRef = { current: undefined };
   const sessionKeyRef: { current: string | undefined } = { current: undefined };
-  // Present malformed metadata is a launch error, while no metadata remains the legacy fallback.
-  let forkContextError: string | undefined;
-  let deliveredFork: ReturnType<typeof readForkLaunchContext>;
-  try { deliveredFork = readSpawnRole(process.env) === "fork" ? readForkLaunchContext(process.env) : undefined; }
-  catch (error) { forkContextError = String(error); }
-  const durableForkContextRef: { current: ForkContext | undefined } = { current: deliveredFork?.context };
-  const inheritedForkPromptRef: { current: string | undefined } = { current: deliveredFork?.context?.effectiveSystemPrompt };
-  // Absence keeps local prompt fallback, never a missing own-key bypass.
-  let forkReady = readSpawnRole(process.env) !== "fork";
-  let firstForkInput = true;
-  let unavailableForkTools: string[] = [];
-  let forkRegistrationError: string | undefined;
-  let previousOwnKeys: string[] = [];
+  // Retired native fork prompts are never reconstructed or re-registered.
+  const inheritedForkPromptRef: { current: string | undefined } = { current: undefined };
   // 260905 (push model): the shared RPC registry, published as a mutable ref
   // so `createApprovalRelay` — which must be constructed BEFORE
   // `registerAgentTools` creates that registry — can still read it at push
@@ -772,26 +758,6 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   }, toolPreviewTuiRef);
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef, effectivePromptRef, inheritedForkPromptRef, sessionKeyRef);
   registerModelPrompts(pi, inheritedForkPromptRef);
-  pi.on("input", (event, ctx) => {
-    if (readSpawnRole(process.env) !== "fork") return undefined;
-    let error = forkContextError ?? forkRegistrationError ?? (!forkReady || !handle?.defaultSessionKeyRef.current?.trim() ? "fork bootstrap is not ready: no valid own key" : undefined);
-    try {
-      if (!error && durableForkContextRef.current) error = compareForkRegistrations(durableForkContextRef.current.registeredTools, captureRegisteredTools(pi.getActiveTools(), pi.getAllTools()));
-    } catch (cause) { error = String(cause); }
-    if (error) {
-      ctx.ui.notify(`ws-pi-agent: ${error}`, "error");
-      return { action: "handled" };
-    }
-    if (firstForkInput) {
-      firstForkInput = false;
-      return { action: "transform", text: frameForkInput(event.text, handle!.defaultSessionKeyRef.current!, unavailableForkTools), images: event.images };
-    }
-    return undefined;
-  });
-  pi.on("before_provider_request", async (event, ctx) => {
-    if (readSpawnRole(process.env) !== "fork") return undefined;
-    return applyForkAffinity(event.payload, durableForkContextRef.current, await effectiveForkDescriptor(ctx, pi.getThinkingLevel()), ctx.sessionManager.getSessionId());
-  });
   // 260906 Phase 1: declarative/global, same placement as registerFork/
   // registerAsk above it — a fork child re-runs session_start too and needs
   // ws-skill registered so addSkillToolIfLeadOrFork has something to
@@ -815,10 +781,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     };
   };
   registerWsSkillTool(pi, toolPreviewTuiRef, wsSkillPreload);
-  // Order is load-bearing: registered after the fork `input` handler above, so
-  // a fork's first input arrives here already framed (no leading `/skill:`)
-  // and keeps its framing; a typed `/skill:` of an own skill is expanded with
-  // the same preload as `ws-skill`.
+  // Typed /skill: uses the same own-key preload as ws-skill.
   registerTypedSkillExpansion(pi, wsSkillPreload);
   // 260905 Edition: releases the child pushes that arrived while this session
   // was mid-turn, each with a status line computed at release time. Factory
@@ -847,17 +810,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const sessionSummary = sessionRole === undefined ? createReasoningSummaryObserver(VERSION) : undefined;
     reasoningSummaryObserver = sessionSummary;
     applySessionStartOwnershipDiagnostics(sessionRole, ctx);
-    if (forkContextError) { ctx.ui.notify(forkContextError, "error"); return; }
-    if (readSpawnRole(process.env) === "fork" && !durableForkContextRef.current) {
-      durableForkContextRef.current = restoreForkContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
-      inheritedForkPromptRef.current = durableForkContextRef.current?.effectiveSystemPrompt;
-    }
-    if (readSpawnRole(process.env) === "fork") {
-      forkReady = false;
-      firstForkInput = true;
-      unavailableForkTools = [];
-      forkRegistrationError = undefined;
-      previousOwnKeys = restoreForkKeys(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
+    if (sessionRole === "fork" || sessionRole === "explore") {
+      throw new Error("[ws Pi] native fork/explore execution is retired; session history is retained, not resumed or adopted by daemon pi.*");
     }
     // 260905 Edition: hand the spawner this session's idleness accessor (the
     // same captured-ctx-per-session_start seam wsBlockBaseRef uses), so a
@@ -874,14 +828,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // the bridge reads it for the lead key. Only the owner lead can be one.
     const hosted: HostedMode = sessionRole === undefined ? await hostedMode() : { mode: "off" };
 
-    // 260907 Phase 1: guard the seam so a `startBridge`/`registerAgentTools`
-    // failure never falls through into a partial/toolless registration — see
-    // `bootstrapOrFailLoud`'s doc comment above. `createApprovalRelay` stays
-    // built BEFORE `registerAgentTools` inside the guarded closure (not
-    // after, unlike registerExecuteGateway below) so it can be threaded into
-    // that call too — see spawner.ts's registerAgentTools doc comment for why
-    // a dormant-resumed execute-worker needs the SAME callback wired through
-    // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
+    // Bootstrap failures stay loud. One approval relay is shared by fresh
+    // execution workers and dormant records restored later in this startup.
     const sessionBootstrap = await bootstrapOrFailLoud(ctx.ui, readSpawnRole(process.env), async () => {
       const h = await startBridge(pi, {
         launcherPath,
@@ -890,15 +838,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         cwd: ctx.cwd,
         toolPreviewTuiRef,
         ui: ctx.ui,
-        forkContext: durableForkContextRef.current,
-        previousOwnKeys,
         sessionEntries: ctx.sessionManager.getEntries(),
         sessionId: ctx.sessionManager.getSessionId(),
         sessionFile: ctx.sessionManager.getSessionFile(),
       });
       try {
         const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-        const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath, subtreeUpstream }, approval, exploreGuidePath, toolPreviewTuiRef);
+        const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath, subtreeUpstream }, toolPreviewTuiRef);
         return { handle: h, agentTools: tools, onApprovalPending: approval };
       } catch (error) {
         h.shutdown();
@@ -1136,36 +1082,19 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       handle.releaseLocalBootstrap();
     }
 
-    // 260904 Phase 1 (side-thread fork): registered declaratively/globally,
-    // same pattern as registerExecuteGateway above — a fork child re-runs
-    // session_start too and needs ws-fork registered so computeForkToolSurface's
-    // own exclusion of it has something to exclude. Whether it is ever ACTIVE
-    // is addForkToolIfLead's job, applied below via computeSessionBootstrap,
-    // not this registration.
-    // Owner-question wiring is disconnected: no onQuestion callback is passed,
-    // here or on orphan revival below, so no fork-raised owner thread is ever
-    // created. The dormant hook (`armForkRoleWiring`'s `onQuestion`,
-    // `handleForkRaisedQuestion`) stays in the tree unarmed.
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, effectivePromptRef, extensionPath: extensionEntryPath }, undefined, toolPreviewTuiRef);
-
-    // 260904 Phase 2 (owner question surface), same declarative/global
-    // registration placement as registerFork above: ws-queue-question/
-    // ws-withdraw-question stay registered, but no role activates them:
-    // computeSessionBootstrap filters them out of the top lead's active tools.
-    //
-    // §5's captured-ctx staleness rule: re-capture ctx on EVERY session_start
-    // (never a factory-scope ctx), and hydrate the persisted registry so
-    // pending questions and dormant threads survive a lead restart. Only a
-    // lead/fork session owns a thread registry — a worker/explore child has
-    // none.
+    // Native fork/question entry points are retired, including /answer's lazy
+    // discussion-fork spawn. Existing thread files are left untouched.
     threadHandle.ctxRef.current = ctx;
     const dispatchSessionFile = ctx.sessionManager.getSessionFile();
     leadSessionFile = dispatchSessionFile ?? undefined;
     const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
     leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
+    const recovery = prepareExecutionSidecar(agentTools.rpcRegistry, leadSidecarPath, message => notifyNativeSidecarRetirement(pi, ctx.ui, message));
+    // Neither shutdown nor a superseded bootstrap may overwrite retained raw
+    // bytes. writeSidecarAt also enforces the blocked path for every caller.
+    if (!recovery.writable) leadSidecarPath = undefined;
     generation.sidecar = leadSidecarPath;
-    let recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
-    recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recoveredRegistry);
+    let recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recovery.orphans, undefined, recovery, message => notifyNativeSidecarRetirement(pi, ctx.ui, message));
     if (recoveredRegistry.length > 0) reviveSessionOrphans(pi, agentTools.rpcRegistry, recoveredRegistry, onApprovalPending);
     publishSubtree(agentTools.rpcRegistry);
     // Revival marks nothing dirty, and the rows' first sample ran before it.
@@ -1182,36 +1111,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       if (orphanPush) pi.sendMessage(buildOrphanNoticeMessage(orphanPush), { deliverAs: "nextTurn" });
     }
     if (isLeadOrFork(readSpawnRole(process.env))) {
-      const sessionFile = dispatchSessionFile;
-      if (sessionFile) {
-        hydrateThreadRegistry(threadHandle, threadRegistryPath(sessionFile));
-        // 260905 orphan revival: a previous run of THIS lead session died (or
-        // was shut down) with children still live. Read-and-delete the
-        // sidecar, put each orphan back on the registry as a dormant record
-        // (ws-agent-send relaunches it from the same --session file), and —
-        // when any of them was cut off mid-turn — tell the lead once. Runs
-        // before `registerAsk`/`registerThreadCommands` only incidentally —
-        // nothing below depends on it.
-        const orphans = recoveredRegistry;
-        if (orphans.length > 0) {
-          // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
-          // persisted precisely so a revived FORK comes back with its fork-role
-          // wiring rather than silently degrading to plain-worker behavior on
-          // the next ws-agent-send (see reviveSessionOrphans).
-          reviveSessionOrphans(pi, agentTools.rpcRegistry, orphans, onApprovalPending);
-          // Edition: EVERY entry is re-registered above (an idle reviewer
-          // must stay reachable through ws-agent-send), but only a set
-          // containing cut-off work is announced — see buildOrphanPush.
-          const orphanPush = buildOrphanPush(orphans);
-          if (orphanPush) {
-            if (readSpawnRole(process.env) === "fork") {
-              // Startup custom messages bypass input; queue without triggering a
-              // model turn so restored work first passes the own-key guard.
-              pi.sendMessage(buildOrphanNoticeMessage(orphanPush), { deliverAs: "nextTurn" });
-            } else pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
-          }
-        }
-      }
+      // Execution records were revived once above; this is only a notice,
+      // not a second revival or an assertion that a process survived.
+      const orphanPush = buildOrphanPush(recoveredRegistry);
+      if (orphanPush) pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
       // 260905 (live-agent widget ticket): TUI-lead-only, via
       // `shouldArmAgentWidget` (review relay #1 Important #5: extracted into
       // agent-widget.ts's own pure predicate, directly unit tested, so this
@@ -1243,27 +1146,12 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         agentWidgetHandle.refresh();
       }
     }
-    registerAsk(pi, threadHandle, agentTools.rpcRegistry, toolPreviewTuiRef);
-    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, extensionPath: extensionEntryPath, effectivePromptRef });
     // 260908 (subagent audit window ticket): stricter than `isLeadOrFork`
     // above — `shouldRegisterAudit` requires a true lead (no spawn-role
     // marker at all), so a fork child never registers `/audit`. Neither
     // `pi.registerCommand` nor `pi.registerShortcut` is called when the gate
     // is false (see `audit.ts`'s own doc comment).
     registerAuditCommands(pi, agentTools.rpcRegistry, readSpawnRole(process.env), ctx.mode, { cwd: ctx.cwd, extensionPath: extensionEntryPath, sessionKeyRef: handle.defaultSessionKeyRef });
-
-    // A task fork inherits the parent's ordered callable surface. A missing
-    // parent-only extension may be represented only by a metadata-identical
-    // local stub; all other drift remains a pre-prompt readiness failure.
-    if (readSpawnRole(process.env) === "fork") {
-      try {
-        const unavailable = installMissingTaskForkTools(pi, durableForkContextRef.current);
-        unavailableForkTools = unavailable.unavailableTools;
-        forkRegistrationError = unavailable.error;
-      } catch (error) {
-        forkRegistrationError = String(error);
-      }
-    }
 
     // §1/§4/260906: one pure call produces BOTH the ws block's static base
     // (manual snapshot + Pi lead guide) AND the fully reshaped lead/fork
@@ -1314,35 +1202,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // `_rebuildSystemPrompt` for a role that previously never took that
     // path at all.
     if (isLeadOrFork(bootstrapRole)) {
-      pi.setActiveTools(bootstrap.activeTools);
+      pi.setActiveTools(withoutRetiredNativeTools(bootstrap.activeTools));
     } else if (delegation) {
-      pi.setActiveTools(delegation.tools.filter(name => pi.getAllTools().some(tool => tool.name === name)));
+      pi.setActiveTools(withoutRetiredNativeTools(delegation.tools).filter(name => pi.getAllTools().some(tool => tool.name === name)));
     }
 
-    if (bootstrapRole === "fork") {
-      const actual = captureRegisteredTools(pi.getActiveTools(), pi.getAllTools());
-      const registrationError = durableForkContextRef.current ? compareForkRegistrations(durableForkContextRef.current.registeredTools, actual) : undefined;
-      const ownKey = handle.defaultSessionKeyRef.current;
-      const keyError = !ownKey?.trim() || ownKey === (durableForkContextRef.current?.parentSessionKey ?? process.env[WS_PI_PARENT_SESSION_KEY_ENV]) || previousOwnKeys.includes(ownKey) || durableForkContextRef.current?.parentSessionKeys?.includes(ownKey)
-        ? "fork bootstrap did not issue a distinct current own key" : undefined;
-      const readinessError = forkRegistrationError ?? registrationError ?? keyError;
-      const readiness = {
-        sessionId: ctx.sessionManager.getSessionId(),
-        sessionPath: ctx.sessionManager.getSessionFile(),
-        ownSessionKey: handle.defaultSessionKeyRef.current,
-        activeTools: [...pi.getActiveTools()],
-        registeredTools: actual,
-        ...(readinessError ? { error: readinessError } : {}),
-      };
-      // Child entries, rather than parent transcript copies or launch files, own restart lifetime.
-      if (durableForkContextRef.current) pi.appendEntry("ws-pi-fork-context", { sessionId: ctx.sessionManager.getSessionId(), context: durableForkContextRef.current });
-      pi.appendEntry("ws-pi-fork-keys", { sessionId: ctx.sessionManager.getSessionId(), current: handle.defaultSessionKeyRef.current, previous: previousOwnKeys });
-      // Stage-2 readiness: the parent validates this payload over the
-      // authenticated channel (`validateForkReadiness`) before its first prompt.
-      channel?.publishReadiness(FORK_READINESS_KIND, readiness);
-      removeForkTransport(process.env[WS_PI_FORK_CONTEXT_ENV]);
-      forkReady = !readinessError;
-    }
     // Mount only after this session's tools and fork readiness are complete:
     // the host TUI import is asynchronous, and yielding earlier would let Pi
     // snapshot the active tool set before later question tools were registered.
@@ -1393,7 +1257,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // captureOrphans snapshots pre-stop child state, including dormant
     // records read-and-cleared from the sidecar. Persist using the claimed
     // registry/path before stopAll can mutate it, never newer globals.
-    await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);
+    const saved = await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);
+    if (!saved) _ctx.ui.notify("[ws Pi] execution shutdown snapshot was not saved; the existing native sidecar remains preserved/write-blocked or its write failed. No recovery is claimed.", "warning");
     if (shutdownEpoch === sessionStartEpoch) {
       descendantUsageReporterRef.current?.setSource(undefined);
       agentViewUpstreamRef.current?.setSource(undefined);

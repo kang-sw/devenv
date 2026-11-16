@@ -36,8 +36,8 @@
  * `computeSessionBootstrap` is now the single pure function `index.ts` calls
  * once per `session_start` to produce BOTH the ws block's static base above
  * AND the reshaped lead/fork active-tools surface, threading
- * `computeLeadActiveTools` (execute-gateway.ts), `addForkToolIfLead`
- * (fork.ts), `withoutOwnerQuestionTools`, and `addSkillToolIfLeadOrFork`
+ * `computeLeadActiveTools` (execute-gateway.ts),
+ * `withoutOwnerQuestionTools`, and `addSkillToolIfLeadOrFork`
  * (lead-skills.ts) in sequence — replacing what used to be three separate
  * `pi.setActiveTools()`/`pi.getActiveTools()` round-trips in `index.ts`
  * itself. This module's actual responsibility is therefore "the whole
@@ -52,7 +52,7 @@ import type { BeforeAgentStartEventResult, ExtensionAPI, SlashCommandInfo } from
 import { isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 import { SESSION_KEY_END_ANCHOR } from "./bridge.ts";
 import { computeLeadActiveTools } from "./execute-gateway.ts";
-import { addForkToolIfLead } from "./fork.ts";
+import { PI_AGENT_COMPAT_GUIDE } from "./daemon-agent-compat.ts";
 import { ASK_TOOL_NAME, RESOLVE_TOOL_NAME } from "./ask.ts";
 import { addSkillToolIfLeadOrFork, buildSkillsBlock, loadSkillFile, resolveSkillEntries, type LoadedSkill } from "./lead-skills.ts";
 
@@ -91,7 +91,7 @@ export function staticManualPart(manualSnapshot: string): string {
  * for an empty skills set.
  */
 export function buildWsBlock(manualSnapshot: string, guideText: string, skillsBlock: string): string {
-  return `${SESSION_STATE_POINTER_LINE}\n\n${staticManualPart(manualSnapshot)}\n\n${guideText}\n\n${skillsBlock}`;
+  return `${SESSION_STATE_POINTER_LINE}\n\n${staticManualPart(manualSnapshot)}\n\n${guideText}\n\n${skillsBlock}\n\n${PI_AGENT_COMPAT_GUIDE}`;
 }
 
 /** The once-per-`session_start` portion of the ws block (manual snapshot + guide text) — everything EXCEPT the live `<available_skills>` piece. See `computeSkillsBlockCached` for why skills are excluded from this static base. */
@@ -233,7 +233,7 @@ function withoutOwnerQuestionTools(activeTools: readonly string[]): string[] {
  * produces the WHOLE lead/fork session-start outcome — the ws block's static
  * base AND the reshaped tool surface — for a given role, so a test can drive
  * `index.ts`'s actual sequencing (role gate -> `computeLeadActiveTools` ->
- * `addForkToolIfLead` -> `withoutOwnerQuestionTools` -> `addSkillToolIfLeadOrFork`)
+ * `withoutOwnerQuestionTools` -> `addSkillToolIfLeadOrFork`)
  * without re-implementing a second copy of that order inside the test
  * itself. `index.ts` calls this once per `session_start` and applies the
  * result (`wsBlockBaseRef.current = result.wsBlockBase` only when it is not
@@ -244,7 +244,7 @@ function withoutOwnerQuestionTools(activeTools: readonly string[]): string[] {
  * `worker`/`explore` short-circuit to `{ wsBlockBase: undefined, activeTools:
  * [...currentActiveTools] }` — no block, no reshape, tool surface passed
  * through unchanged (matches the pre-260906 behavior: those roles were never
- * touched by any of the four reshape steps).
+ * touched by any of the reshape steps).
  *
  * A later dogfood fix removed the `<available_skills>` piece from this
  * function entirely: `computeSessionBootstrap` no longer takes
@@ -268,7 +268,6 @@ export function computeSessionBootstrap(inputs: SessionBootstrapInputs): Session
   if (role === "fork") return { wsBlockBase, activeTools: [...currentActiveTools] };
 
   let activeTools = computeLeadActiveTools(currentActiveTools);
-  activeTools = addForkToolIfLead(activeTools, role);
   activeTools = withoutOwnerQuestionTools(activeTools);
   activeTools = addSkillToolIfLeadOrFork(activeTools, role);
 
