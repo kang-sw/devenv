@@ -791,13 +791,15 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 		if t.literalCode && t.i >= literalUntil {
 			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, &literalLimit)
 			if wrapper != nil && literalUntil > t.i {
-				if field := t.literalOperandCrossing(t.i, literalUntil, lineStart, wrapper, closing, &wrapperTail); field != "" {
+				if field, structural := t.literalOperandCrossing(t.i, literalUntil, lineStart, wrapper, closing, &wrapperTail); field != "" {
 					owner := wrapper.parent.Label()
 					if wrapper.label != "" {
 						owner = wrapper.label
 					}
 					t.problem(t.i, "%s: code span/fence starting at line %d ends inside <%s> of <%s>; use <![CDATA[...]]> for a literal wrapper example", owner, t.lineAt(t.i), field, wrapper.tag)
-					literalUntil = t.i // keep the wrapper and its operands structural
+					if structural {
+						literalUntil = t.i // keep a readable wrapper and its operands structural
+					}
 				}
 			}
 			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
