@@ -2,7 +2,10 @@
 title: ws dashboard frontend performance - profile and optimize
 related:
   261113-feat-ws-whiteboard-board-frontend-performance: "absorbs this ticket's board scope ((417) board-note typing, long whiteboard, the board candidate techniques) and the (473) measurement; this ticket keeps the non-board surfaces"
-  261113-feat-ws-dashboard-iframe-shell: session-switch cost is structural (full document reload per navigation) and is addressed there; this ticket measures (d) but does not restructure navigation
+  261113-feat-ws-dashboard-iframe-shell: historical shell prerequisite; new cache removal is owned by the hidden-cached-page ticket
+  261116-bug-ws-dashboard-hidden-cached-page-cost: "P3: remove hidden session cache; visible-only shared clocks; fresh-switch load follow-up"
+  261116-bug-werkschaft-electron-high-resolution-lag-diagnostics: "P2: isolate native high-resolution presentation from shared renderer costs"
+  261111-bug-ws-dashboard-daemon-idle-cpu-windows: "backend profile/discovery costs, measured separately"
 ---
 
 # ws dashboard frontend performance - profile and optimize
@@ -75,6 +78,93 @@ established causes.
   `### Implementation Conventions` (paths under `agents-plugin-tool/internal/`
   and `agents-plugin*/`).
 - No intended visual change.
+
+## Additional measured evidence — 2026-11-16 (P1/P4)
+
+Duplicate capture: retain P1 shared render-transaction and P4 main-composer
+work in this existing non-board frontend backlog rather than create overlapping
+tickets. Board-local frame/history/note work remains with its existing owner;
+coordinate the changed-topic postprocessing boundary rather than duplicate it.
+All paths below are under `agents-plugin-tool/`.
+
+Evidence source read: `D:/Temp/dash-scroll-perf/SUMMARY.md`. The summary's
+Windows isolated browser probes are not a reproduction of the owner's aged,
+exposed Electron lag. The initial unmeasured observations above are historical;
+these are fresh measurements, not an assertion that one root cause is proven.
+No visual change is intended for either performance-only refactor.
+
+### P1: Shared render transaction (priority P1, size M)
+
+- `internal/wsdashboard/assets/dashboard-stream.js:449-461` buffers latest
+  canonical input per region while hidden, but visible events call `swap`
+  immediately. There is no shared rAF render transaction (`:153-175`). The
+  transport is WebSocket despite SSE naming in source/task descriptions.
+- A single-topic patch triggers board-wide postprocessing at
+  `internal/wsdashboard/assets/dashboard-board.js:137-150`: frame indexing,
+  forms, capsule notes, chips and sent markers. Existing morph paths reuse
+  unchanged nodes; full DOM replacement is not the claim.
+- Initial board data measured 383,900 B wire (~384 KB), 291,852 B HTML.
+  `internal/wsdashboard/board_topics.go:20-30,104-119` emits the initial full
+  board and complete changed-topic HTML/order, not append-only log fragments.
+  No steady board event was captured in the 47.851-second fresh-session sample;
+  earlier whiteboard burst cost remains unmeasured.
+
+Reproduction: in an isolated profile, replay identical ordered region/topic
+bursts and a large topic update; count parses, swaps, postprocessing visits,
+geometry/scroll work and frame/long-task timings. Retain the current hidden
+latest-per-region behavior as a control; do not posit an unbounded FIFO.
+
+Candidate direction: parse ordered patches into canonical state in order,
+coalesce only render commits to the latest canonical region per rAF, batch
+geometry reads/scroll capture/writes, and postprocess only changed units.
+Coalescing must not discard ordered deltas before they have been applied.
+Preserve drafts, history, selection, focus, scroll anchoring and hash ordering.
+Budgeted/unit rendering is a later option only if one large transaction remains
+measurably expensive.
+
+Open questions: which regions can share one transaction without breaking
+ordering/scroll contracts; how are canonical dependencies and removal/full-board
+fallbacks represented; and what measured transaction budget is appropriate?
+These mechanism/acceptance choices are not settled by the performance report.
+
+### P4: Composer layout thrash and slash guard (priority P4, size M; guard S)
+
+- `internal/wsdashboard/assets/dashboard-composer.js:386-396` writes height
+  auto, reads scrollHeight, then writes height on each input (`:1651`).
+- In an isolated headless long-prefix case (5,500 characters plus 104 typed),
+  bypassing real scrollHeight/autosizing reduced outer handler mean from
+  0.919 to 0.272 ms/key (~70%), grow-group 0.677 to 0.029 ms and total layout
+  200.40 to 99.91 ms. This diagnostic bypass is not a shippable fixed-height fix.
+  The original mean was below 1 ms: severe typing freeze was not reproduced.
+- Slash autocomplete enumerates commands before checking the trigger at
+  `dashboard-composer.js:820-845`. Removing popup sync saved only ~11% of the
+  outer handler and did not reduce layout in the measured case. Topic lookup
+  is cached; ordinary typing is not proven to perform network ticket lookups.
+
+Reproduction: compare short and long drafts using real input without sending;
+measure handler/layout and visible latency separately. Include slash/non-slash,
+IME, selection/caret, pasted/fragmented long drafts, dense results and live
+updates. CDP dispatch latency is not key-to-photon latency.
+
+Candidate direction: batch autosize and popup placement to avoid synchronous
+write/read/write thrash; check the slash trigger before enumeration; consider
+cached command metadata/unchanged-popup skips only when measured. Preserve
+actual autosizing, IME/caret, keyboard selection, slash results and send behavior.
+Open questions: what scheduling boundary preserves immediate caret/popup
+correctness, and which dense/fragmented inputs warrant further work? No fixed
+height, virtualization or editor rewrite is preselected.
+
+### Compatibility and phase integration
+
+Compatibility tier: **n/a** for client-only scheduling/input refactors with
+unchanged wire payloads, stores, manifest fields and draft format. Existing
+T0-only constraint still governs any proposed server-surface extension; no such
+extension is chosen here. Use the existing Phase 1 to establish matched replay
+and typing baselines, then Phase 2 for the measured P1/P4 corrections. Assert
+ordered final DOM and preserved drafts/history/selection/hash/scroll plus
+unchanged visual output, and report before/after counts rather than only a
+subjective speed claim. No builds, tests or browser/daemon actions occur in
+this docs capture.
 
 ## Phases
 
