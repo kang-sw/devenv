@@ -751,7 +751,7 @@ func TestRailLayoutRoute(t *testing.T) {
 	if stamp() == before {
 		t.Error("a layout write left the rail's stamp as it was")
 	}
-	ev := waitRegionHolding(t, stream, regionRail, `aria-pressed="true"`)
+	ev := waitRegionHolding(t, stream, regionRail, `data-star="1"`)
 	board, live := strings.Index(ev.HTML, `data-rid="boardsession"`), strings.Index(ev.HTML, `data-rid="livesession"`)
 	if board < 0 || live < 0 || board > live || strings.Contains(ev.HTML, "data-layout-empty") {
 		t.Errorf("the rail after the import does not lead with the starred boardsession:\n%s", ev.HTML)
@@ -782,7 +782,7 @@ func TestRailLayoutRoute(t *testing.T) {
 		t.Fatalf("unstar = %d %+v", code, reply)
 	}
 	ev = waitRegionHolding(t, stream, regionRail, `data-rid="livesession"`)
-	if strings.Contains(ev.HTML, `aria-pressed="true"`) {
+	if strings.Contains(ev.HTML, `data-star="1"`) {
 		t.Error("the rail still shows a star after the unstar")
 	}
 	if !strings.Contains(string(readLayoutFile(t, f.dir)), `"boardsession"`) {

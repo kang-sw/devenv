@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="ko" data-sysopen>
+<head>
+<meta charset="utf-8">
+<title>ws dashboard - session row tweaks mockup (261116)</title>
+<script>
+  // ?theme=dark|light pins the theme the same way the dashboard does (root data-theme).
+  (function () { var m = /[?&]theme=(dark|light)/.exec(location.search); document.documentElement.setAttribute("data-theme", m ? m[1] : "light"); })();
+</script>
+<style>
+/* ---- copied verbatim: wswhiteboard/assets/page.css:5-103,117-118,133 ---- */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-accent-assumed: #b0245a;
+  --wb-latest-log: rgb(110 200 130 / .08);
+  --wb-ck-ok: var(--wb-announced);
+  --wb-ck-no: #c0262d;
+  --wb-accent-policy: #b25000;
+  --wb-on-accent-policy: #ffffff;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 10%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* Only the lower log history is highlighted, never the topic's recap. */
+.wb-entry.agent.current { background: var(--wb-latest-log); }
+.wb-entry.agent.current.wb-log-blink { animation: wb-log-arrival 1s ease-in-out 3; }
+@keyframes wb-log-arrival {
+  0%, 100% { background: var(--wb-latest-log); }
+  50% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-entry.agent.current.wb-log-blink { animation: none; }
+}
+/* Dark palette. The OS preference applies it unless the page pins light
+   (data-theme="light"); data-theme="dark" applies it whatever the OS says.
+   The two blocks hold the same variables: change them together. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-bg: var(--background, #141518);
+    --wb-fg: var(--foreground, #e7e7e4);
+    --wb-card: var(--card, #1e2024);
+    --wb-muted: var(--muted, #2b2d32);
+    --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+    --wb-primary: var(--primary, #7aa2ff);
+    --wb-primary-fg: var(--primary-foreground, #0c1424);
+    --wb-topic: #2a2d33;
+    --wb-on-topic: #e4e5e8;
+    --wb-now: #243457;
+    --wb-on-now: #d3defb;
+    --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+    --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+    --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+    --wb-accent-assumed: #e48aae;
+    --wb-ck-ok: #6cc39a;
+    --wb-ck-no: #f0797e;
+    --wb-accent-policy: #e0a36c;
+    --wb-on-accent-policy: #1f150b;
+    --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+    --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+    --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  }
+}
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-accent-assumed: #e48aae;
+  --wb-ck-ok: #6cc39a;
+  --wb-ck-no: #f0797e;
+  --wb-accent-policy: #e0a36c;
+  --wb-on-accent-policy: #1f150b;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+/* ---- copied verbatim: wswhiteboard/assets/page-panels.css:78 ---- */
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard.css:6-48 ---- */
+:root {
+  --wb-ph-think: #6a4fc4;  --wb-on-ph-think: #ffffff;
+  --wb-ph-reply: #0e7a83;  --wb-on-ph-reply: #ffffff;
+  --wb-ph-tool: #2457c5;   --wb-on-ph-tool: #ffffff;
+  --wb-ph-perm: #a35f00;   --wb-on-ph-perm: #ffffff;
+  --wb-ph-compact: #9a3a73; --wb-on-ph-compact: #ffffff;
+  --wb-perm-ink: var(--wb-ph-perm);
+  --wb-compact-ink: var(--wb-ph-compact);
+  --pv-bg: #e4dcf7; --pv-fg: #3a2c6b; --pv-line: #b9a9e8;
+  --wb-ok: #1d7348; --wb-fail: #c0262d;
+  --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  /* the warning tone on a toast, whose surface is the inverted text colour */
+  --wb-toast-warn: #f2c06b;
+}
+/* Dark variants: the same OS-or-pinned rule as the whiteboard sheet. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
+    --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
+    --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
+    --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+    --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
+    --wb-perm-ink: var(--wb-on-ph-perm);
+    --wb-compact-ink: var(--wb-on-ph-compact);
+    --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
+    --wb-ok: #6cc39a; --wb-fail: #f0797e;
+    --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+    --wb-toast-warn: #9a5a00;
+  }
+}
+:root[data-theme="dark"] {
+  --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
+  --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
+  --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
+  --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+  --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
+  --wb-perm-ink: var(--wb-on-ph-perm);
+  --wb-compact-ink: var(--wb-on-ph-compact);
+  --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
+  --wb-ok: #6cc39a; --wb-fail: #f0797e;
+  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-toast-warn: #9a5a00;
+}
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:9-12,136-153,158-163,171-183,188,206-208,220-221,229-233 ---- */
+:root { --scrim: rgb(0 0 0 / .28); --star: #c98a00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --scrim: rgb(0 0 0 / .5); --star: #f2b632; } }
+:root[data-theme="dark"] { --scrim: rgb(0 0 0 / .5); --star: #f2b632; }
+.dbody { display: contents; }
+.rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
+.rail .rsp { flex: 1; }
+.rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
+.rail .chip .i { width: 11px; height: 11px; }
+.rail .rref { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rref:hover, .rail .rref:focus-visible { color: var(--wb-primary); background: var(--wb-muted); }
+.rail .rref.busy { opacity: .5; cursor: progress; }
+.rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; }
+.rail .rlist > .empty { padding: 10px 12px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.rail .rws + .rws { margin-top: 8px; }
+.rail .wsbar { display: flex; align-items: center; gap: 8px; padding: 3px 12px; min-height: 28px; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
+.rail .wstog { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; border-radius: 4px; font: inherit; text-align: left; background: transparent; color: inherit; cursor: pointer; }
+.rail .wstog:focus-visible { outline: 1.5px solid currentColor; outline-offset: 2px; }
+.rail .wsbar .wsi { display: inline-flex; flex: none; opacity: .8; margin-right: -2px; }
+.rail .wsbar .nm { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
+.rail .rws.col .wsbody { display: none; }
+.rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.rail .radd .i, .rail .rforget .i, .rail .rnew .i, .rail .rdel .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .wthd:hover .rdel, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { opacity: .7; }
+@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { opacity: .5; } }
+.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"], .rail .rdel:hover { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+.rail .wsbody { padding-top: 2px; }
+.rail .rwt { padding: 4px 0 2px; }
+.rail .rwt.empty { border-color: transparent; }
+.rail .rwt.empty .wthd { opacity: .6; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }
+.rail .wthd .i { width: 12px; height: 12px; }
+.rail .wthd .wtroot { display: inline-flex; flex: 0 0 auto; }
+.rail .wthd .wtroot .i { width: 10px; height: 10px; }
+.rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail .wsbody > .rsessions { margin-top: 4px; }
+.rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
+.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
+.rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .rs { -webkit-user-select: none; user-select: none; }
+.rail .rs, .rail .wsbar, .rail .wthd { -webkit-touch-callout: none; }
+.rail .drgrip { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; display: flex; justify-content: center; padding-top: 6px; box-sizing: border-box; color: var(--wb-muted-fg); cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; opacity: 0; transition: opacity .12s; }
+.rail .drgrip .i { width: 10px; height: 14px; stroke-width: 2.4; }
+.rail .rs:hover .drgrip, .rail .rs:focus-within .drgrip { opacity: .7; }
+.rail .drgrip:hover { opacity: 1; color: var(--wb-fg); }
+@media (pointer: coarse) { .rail .drgrip { opacity: .55; } }
+/* (shipped star button; only the 'before' frames render it) */
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:239-247 ---- */
+.rail .star { width: 16px; height: 16px; margin: 0; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
+.rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
+.rail .star:hover { background: var(--wb-muted); }
+.rail .star[aria-pressed="true"] { opacity: 1; color: var(--star); }
+.rail .star[aria-pressed="true"] .i { fill: currentColor; }
+.rail .star[aria-pressed="false"] { opacity: 0; }
+.rail .rs:hover .star[aria-pressed="false"], .rail .rs:focus-within .star[aria-pressed="false"] { opacity: .6; }
+.rail .rs .star[aria-pressed="false"]:hover, .rail .star[aria-pressed="false"]:focus-visible { opacity: 1; }
+@media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:259,262-270,273,276-281,298-304,308-333 ---- */
+.rail .rkids { margin-left: 14px; border-left: 2px solid var(--wb-muted); }
+@media (max-width: 1599.98px) { .rail .rkids { margin-left: 10px; } }
+.rail .rs.kcol + .rkids { display: none; }
+.rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }
+.rail .rkids .star, .rail .rkids .drmsg { display: none; }
+.rail .kidtog { flex: none; display: inline-flex; align-items: center; gap: 0; height: 16px; margin-left: -3px; padding: 0 3px 0 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.rail .kidtog .i { width: 12px; height: 12px; stroke-width: 1.8; transition: transform .15s; }
+.rail .kidtog:hover, .rail .kidtog:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+.rail .kidtog .i + .i { width: 11px; height: 11px; stroke-width: 1.7; margin: 0 1px; transition: none; }
+.rail .rs.kcol .kidtog .i:first-child { transform: rotate(-90deg); }
+.rail .drkwork { flex: none; align-self: flex-end; margin: 0 0 3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
+.rail .drmeta { display: flex; align-items: center; gap: 0; min-width: 0; margin-top: -4px; padding-bottom: 5px; }
+.rail .drmeta > .drmsg { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; align-items: center; margin: 0 0 0 8px; padding: 0 8px 0 0; }
+.rail .drmeta > .drmsg .s2 { margin-top: 0; }
+.rail .rbt { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 45%; font-family: var(--wb-mono); font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
+.rail .rbt .i { width: 10px; height: 10px; flex: none; }
+.rail .rbt span { overflow: hidden; text-overflow: ellipsis; }
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
+.rail .rl:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .s1 [hidden] { display: none; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .dracts { position: absolute; top: 0; bottom: 0; right: 8px; display: none; align-items: center; gap: 2px; }
+.rail .dracts button { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .dracts .i { width: 13px; height: 13px; stroke-width: 1.6; }
+.rail .dracts button:hover, .rail .dracts button:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+/* a hosted lead's third hover button (archive, or unarchive in the archived
+   fold): the time slot widens so nothing moves when the three show */
+.rail .rs.hosted-row .drslot { min-width: 66px; }
+.rail .drarch.busy { opacity: .55; cursor: progress; }
+@media (hover: hover) {
+  .rail .rs:hover .dracts { display: flex; }
+  .rail .rs:hover .drslot { visibility: hidden; }
+}
+.rail .rs:focus-within .dracts { display: flex; }
+.rail .rs:focus-within .drslot { visibility: hidden; }
+/* a row's rename: the input stands where the name was */
+.rail .drinp { flex: 1 1 0; min-width: 60px; margin: 3px 0; padding: 1px 4px; font: inherit; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); border: 1px solid var(--wb-primary); border-radius: 4px; outline: none; -webkit-user-select: text; user-select: text; }
+.rail .rs .s1:has(.drinp) .drtail { flex: none; }
+.rail .rs .s1:has(.drinp) .dracts { display: none; }
+.rail .rs .s1:has(.drinp) .drslot { visibility: visible; }
+.rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
+.rail .rs.cur .rid { color: var(--wb-fg); }
+.rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .s2 .who { font-weight: 700; margin-right: 4px; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:344-347,356-369 (harness icon, .hiw/.sbn/.qdot) ---- */
+.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
+.rail .hi.claude { background: #D97757; }
+.rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rail .hi.codex { background: #10A37F; }
+.rail .hi .orb { position: absolute; inset: -2px; padding: 1.5px; border-radius: 5px; overflow: hidden; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s steps(12) infinite; }
+.rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s steps(4) infinite; }
+.rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }
+.rail .hiw { position: relative; flex: none; display: inline-flex; width: 28px; height: 16px; }
+.rail .sbn { position: absolute; left: 18.5px; bottom: -3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
+.rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+@keyframes rail-orbit { to { transform: rotate(360deg); } }
+@keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
+@keyframes rail-blink { 50% { opacity: .25; } }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:377-380 (.rpop) ---- */
+.rpop { position: fixed; z-index: var(--z-popovers); width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
+  background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
+.rpop[hidden] { display: none; }
+.rpop [hidden] { display: none !important; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:523-524 (.hosted) ---- */
+.hosted { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.hosted .i { width: 12px; height: 12px; stroke-width: 1.5; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:563-573 (row menu) ---- */
+.rpop.rmenu { width: auto; min-width: 220px; max-width: min(330px, calc(100vw - 16px)); gap: 4px; padding: 5px; }
+.rpop .rmlist, .rpop .rmsub { display: grid; gap: 2px; min-width: 0; }
+.rpop .rmsub { max-height: 184px; overflow-y: auto; overscroll-behavior: contain; margin: 0 0 2px 20px; padding-left: 4px; border-left: 1px solid var(--wb-muted); }
+.rpop .rmi { display: flex; align-items: center; gap: 8px; min-width: 0; border: 0; background: transparent; border-radius: 7px; padding: 6px 9px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.rpop .rmi:hover, .rpop .rmi:focus-visible { background: var(--wb-muted); outline: none; }
+.rpop .rmi[aria-disabled="true"] { opacity: .45; cursor: default; }
+.rpop .rmi .i { width: 14px; height: 14px; flex: none; }
+.rpop .rmi .rmt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpop .rmi .rmgo { transform: rotate(-90deg); transition: transform .12s; }
+.rpop .rmi[aria-expanded="true"] .rmgo { transform: none; }
+.rpop .rmsess { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 8px 7px 4px; border-top: 1px solid var(--wb-muted); }
+/* ==== PROPOSED (not in source yet) - scoped to .v-after frames so the
+   "before" frames above keep rendering the shipped rules unchanged ==== */
+
+/* (1) favorite badge: a 10px filled star on the harness icon's bottom-left
+   corner, mirroring the policy dot (.qdot, top-left, dashboard-rail.css:364-366):
+   absolute inside .hiw so the icon keeps its x, ringed in the row's ground
+   (--rs-ground) so it parts from the icon and the working ring. */
+.v-after .rail .rs { --rs-ground: var(--wb-card); }
+.v-after .rail .rs:hover, .v-after .rail .rs.hov { --rs-ground: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.v-after .rail .rs.cur { --rs-ground: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .hstar { position: absolute; z-index: 2; left: -4px; bottom: -4px; width: 10px; height: 10px; color: var(--star); cursor: default; }
+.rail .hstar .i { width: 10px; height: 10px; fill: currentColor; stroke: var(--rs-ground, var(--wb-card)); stroke-width: 4.5; stroke-linejoin: round; paint-order: stroke; }
+/* the row menu's favorite item: the outline star to add, the filled star in
+   the star ink to remove (the label says which) */
+.rpop .rmi .i.rmstar { stroke-width: 1.5; }
+.rpop .rmi[data-on="true"] .i.rmstar { color: var(--star); fill: currentColor; }
+
+/* (3) spacing: the wrap is as wide as what it holds. With no subagents it
+   is the 16px icon and the name follows at the link's 6px gap; a count
+   sits in the flow 2.5px after the icon (its old x, 18.5px) at the same
+   subscript height, and pushes the name right by its own width. */
+.v-after .rail .hiw { width: auto; }
+.v-after .rail .sbn { position: relative; left: auto; bottom: -3px; align-self: flex-end; margin-left: 2.5px; }
+/* ==== mockup scaffolding (not product) ==== */
+:root { --z-popovers: 60; } /* dashboard-shell.css:24 */
+/* forced hover (.hov) so a still screenshot shows the hover state; mirrors
+   dashboard-rail.css:207, 231, 245, 317-320, 365 */
+.rail .rs.hov { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur.hov { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .rs.hov .drgrip { opacity: .7; }
+.rail .rs.hov .star[aria-pressed="false"] { opacity: .6; }
+.rail .rs.hov .dracts { display: flex; }
+.rail .rs.hov .drslot { visibility: hidden; }
+.rail .rs.hov .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs .s1:has(.drinp) .dracts { display: none !important; }
+.rail .rs .s1:has(.drinp) .drslot { visibility: visible !important; }
+
+body { padding: 26px 40px 40px; }
+.mk-h { display: flex; align-items: baseline; gap: 12px; margin: 0 0 4px; }
+.mk-h h1 { margin: 0; font-size: 18px; font-weight: 800; }
+.mk-h .sub { font-size: 12px; color: var(--wb-muted-fg); }
+.mk-h .sp { flex: 1; }
+.mk-theme { font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 3px 12px; background: var(--wb-muted); color: var(--wb-fg); cursor: pointer; }
+.mk-theme:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.mk-req { margin: 0 0 18px; font-size: 12.5px; color: var(--wb-muted-fg); max-width: 1120px; }
+.mk-req q { color: var(--wb-fg); }
+.mk-sec { margin: 26px 0 0; padding-top: 18px; border-top: 1px solid var(--wb-line); }
+.mk-sec > h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; font-size: 15px; font-weight: 800; }
+.mk-sec > h2 .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 12px; }
+.mk-sec > h2 .d { font-size: 12px; font-weight: 500; color: var(--wb-muted-fg); }
+.mk-grid { display: grid; gap: 16px 20px; align-items: start; }
+.mk-g3 { grid-template-columns: 364px 364px minmax(0, 1fr); }
+.mk-g2w { grid-template-columns: 560px 560px; }
+.mk-cap { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 12.5px; font-weight: 800; }
+.mk-cap .tag { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; border-radius: 6px; background: var(--wb-muted); color: var(--wb-fg); font-size: 11px; }
+.mk-cap .tag.new { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.mk-cap .d { font-weight: 500; font-size: 11.5px; color: var(--wb-muted-fg); }
+.mk-frame { position: relative; padding: 12px; border-radius: 14px; background: var(--wb-bg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.mk-frame .rail { width: 340px; }
+.mk-frame .rpop { position: absolute; }
+.mk-tall { min-height: 450px; box-sizing: border-box; }
+.mk-notes { font-size: 12.5px; color: var(--wb-muted-fg); }
+.mk-notes h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 800; color: var(--wb-fg); }
+.mk-notes ul { margin: 0 0 12px; padding-left: 18px; }
+.mk-notes li { margin: 0 0 4px; }
+.mk-notes b { color: var(--wb-fg); }
+.mk-notes code, .mk-list code, .mk-req code { font-family: var(--wb-mono); font-size: 11.5px; background: var(--wb-wash); padding: 0 3px; border-radius: 3px; }
+.mk-owner { display: block; width: 371px; height: auto; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); margin: 4px 0 10px; }
+.mk-cursor { position: absolute; z-index: 70; width: 14px; height: 20px; pointer-events: none; }
+.mk-ring { position: absolute; z-index: 3; border: 1.5px dashed var(--wb-fail); border-radius: 6px; pointer-events: none; }
+.mk-ring.ok { border-color: var(--wb-primary); }
+.mk-callout { position: absolute; z-index: 4; font-size: 11px; font-weight: 700; white-space: nowrap; color: var(--wb-fail); pointer-events: none; }
+.mk-callout.ok { color: var(--wb-primary); }
+.mk-sessph { font-size: 11.5px; color: var(--wb-muted-fg); }
+.mk-sessph b { color: var(--wb-fg); font-weight: 700; }
+.mk-hint { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 8px 2px 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.mk-hint kbd { font: 700 10.5px var(--wb-mono); padding: 0 4px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-fg); }
+.mk-btn { font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 3px 12px; background: var(--wb-primary); color: var(--wb-primary-fg); cursor: pointer; margin-top: 8px; }
+.mk-btn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 2px; }
+/* the measured gap between the harness icon and the name (section 4) */
+.mk-gap { position: absolute; z-index: 5; height: 3px; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--wb-fail) 38%, transparent) 0 2px, transparent 2px 4px); outline: 1px solid color-mix(in srgb, var(--wb-fail) 70%, transparent); pointer-events: none; }
+.mk-gap.ok { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--wb-ok) 38%, transparent) 0 2px, transparent 2px 4px); outline-color: color-mix(in srgb, var(--wb-ok) 75%, transparent); }
+.mk-gapl { position: absolute; z-index: 5; padding: 2px 5px; border-radius: 999px; background: var(--wb-card); box-shadow: inset 0 0 0 1px currentColor; font: 800 10px/1 var(--wb-mono); color: var(--wb-fail); pointer-events: none; white-space: nowrap; }
+.mk-gapl.ok { color: var(--wb-ok); }
+.mk-list { margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.6; max-width: 1180px; }
+.mk-list > li { margin: 0 0 8px; }
+.mk-list ul { margin: 2px 0 0; padding-left: 18px; }
+.mk-list b { font-weight: 800; }
+.mk-list .q { color: var(--wb-warn-ink); font-weight: 700; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<!-- symbols copied verbatim: wsdashboard/assets/sprite.svg -->
+<symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+<symbol id="i-repo" viewBox="0 0 16 16"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></symbol>
+<symbol id="i-person" viewBox="0 0 16 16"><circle cx="8" cy="5.3" r="2.6"/><path d="M3.2 13.6c.5-2.6 2.4-4.1 4.8-4.1s4.3 1.5 4.8 4.1"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+<symbol id="i-pin" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></symbol>
+<symbol id="i-hosted" viewBox="0 0 16 16"><rect x="2.5" y="2.8" width="11" height="4.4" rx="1.2"/><rect x="2.5" y="8.8" width="11" height="4.4" rx="1.2"/><path d="M5 5h.01M5 11h.01"/></symbol>
+<symbol id="i-grip" viewBox="0 0 16 16"><circle cx="5.8" cy="3.6" r=".5"/><circle cx="10.2" cy="3.6" r=".5"/><circle cx="5.8" cy="8" r=".5"/><circle cx="10.2" cy="8" r=".5"/><circle cx="5.8" cy="12.4" r=".5"/><circle cx="10.2" cy="12.4" r=".5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.9 2.7a1.4 1.4 0 0 1 2 2L5.4 12.2l-2.9.8.8-2.9z"/><path d="M9.6 4l2 2"/></symbol>
+<symbol id="i-archive" viewBox="0 0 16 16"><rect x="1.9" y="2.6" width="12.2" height="3.4" rx="1"/><path d="M3.1 6v6.2a1.3 1.3 0 0 0 1.3 1.3h7.2a1.3 1.3 0 0 0 1.3-1.3V6"/><path d="M6.4 8.9h3.2"/></symbol>
+<!-- copied verbatim: wswhiteboard/assets/sprite.svg (i-reload) -->
+<symbol id="i-reload" viewBox="0 0 16 16"><path d="M14.3 2.8v3.9h-3.9"/><path d="M13 10.2a5.4 5.4 0 1 1-1.3-5.6l2.6 2.1"/></symbol>
+</svg>
+
+
+<div class="mk-h"><h1>레일 세션 행: 즐겨찾기 · 새 세션 이름 · 아이콘 간격</h1><span class="sub">ws dashboard rail mockup, 2026-11-16</span><span class="sp"></span><button type="button" class="mk-theme" id="mk-theme">다크 / 라이트</button></div>
+<p class="mk-req">요청: <q>별모양을 우클릭 했을 때 별도의 즐겨찾기 토글 행으로 두고, 아이콘도 하네스 아이콘 좌하단에 작은 별로</q> · <q>세션 추가 직후에 rename 버튼 누른 상태로</q> · <q>서브에이전트 숫자 없을 땐 붙어있는 게 낫겠습니다</q>. 프레임 안의 레일은 실제 CSS(<code>dashboard-rail.css</code>)를 그대로 쓰고, 바뀌는 규칙만 <code>.v-after</code> 아래 PROPOSED 블록에 있습니다.</p>
+
+<section class="mk-sec">
+  <h2><span class="n">1</span>행에서 별 버튼을 없애고, 즐겨찾기는 아이콘 좌하단 배지로<span class="d">현재 / 변경 후 · 평소 / 마우스를 올렸을 때</span></h2>
+  <div class="mk-grid mk-g3">
+    <div>
+      <div class="mk-cap"><span class="tag">현재</span>평소<span class="d">즐겨찾기 행만 노란 별이 이름 뒤에</span></div>
+      <div class="mk-frame v-before" id="f1a"></div>
+      <div class="mk-cap" style="margin-top:14px"><span class="tag">현재</span>마우스를 올렸을 때<span class="d">이름 바로 뒤에 흐린 별이 나타남</span></div>
+      <div class="mk-frame v-before" id="f1b"></div>
+    </div>
+    <div>
+      <div class="mk-cap"><span class="tag new">변경 후</span>평소<span class="d">별 버튼 없음 · 즐겨찾기는 아이콘 배지</span></div>
+      <div class="mk-frame v-after" id="f1c"></div>
+      <div class="mk-cap" style="margin-top:14px"><span class="tag new">변경 후</span>마우스를 올렸을 때<span class="d">이름 뒤가 비어 있어 잘못 누를 곳이 없음</span></div>
+      <div class="mk-frame v-after" id="f1d"></div>
+    </div>
+    <div class="mk-notes">
+      <h3>보내주신 화면 (현재)</h3>
+      <img class="mk-owner" src="owner-before.png" alt="현재 세션 행: 이름 뒤 노란 별, 오른쪽에 연필·복사·보관 버튼">
+      <h3>배지</h3>
+      <ul>
+        <li>10px 채운 별, 별 색은 기존 <code>--star</code> (라이트 #c98a00 / 다크 #f2b632).</li>
+        <li>위치는 아이콘 <b>좌하단</b>. 좌상단은 이미 답할 항목 점(<code>.qdot</code>), 우하단 바깥은 서브에이전트 숫자(<code>.sbn</code>) 자리라 겹치지 않습니다.</li>
+        <li><code>.qdot</code>처럼 행 바탕색 테두리를 둘러 아이콘·작업 중 링과 분리. 행이 호버·선택(<code>.cur</code>)되면 테두리 색도 따라감.</li>
+        <li>배지는 표시만 합니다 (클릭 대상 아님, 링크 안이라 누르면 세션이 열림). 툴팁/스크린리더: “즐겨찾기”.</li>
+        <li>하위 세션 행과 보관된 행은 지금처럼 즐겨찾기가 없습니다 (<code>StarHidden</code> / <code>Archived</code>).</li>
+      </ul>
+      <h3>호버</h3>
+      <ul>
+        <li>현재: 즐겨찾기가 아닌 행도 호버하면 이름 바로 뒤 16px에 흐린 별(<code>opacity .6</code>)이 생겨, 이름을 누르려다 별이 눌림 (빨간 점선).</li>
+        <li>변경 후: 그 자리가 없어지고, 연필·복사·보관 버튼은 그대로.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="mk-sec">
+  <h2><span class="n">2</span>우클릭 메뉴의 즐겨찾기 항목<span class="d">이미 있는 행 메뉴(<code>.rpop.rmenu</code>)에 한 줄 추가 · 프레임은 실제로 동작합니다</span></h2>
+  <div class="mk-grid mk-g2w">
+    <div>
+      <div class="mk-cap"><span class="tag new">변경 후</span>즐겨찾기 행을 우클릭<span class="d">“즐겨찾기 해제” · 채운 별</span></div>
+      <div class="mk-frame v-after mk-tall" id="f2a" data-live="1"></div>
+    </div>
+    <div>
+      <div class="mk-cap"><span class="tag new">변경 후</span>일반 행을 우클릭<span class="d">“즐겨찾기에 추가” · 빈 별</span></div>
+      <div class="mk-frame v-after mk-tall" id="f2b" data-live="1"></div>
+    </div>
+  </div>
+  <div class="mk-notes" style="margin-top:12px;max-width:1140px">
+    <ul>
+      <li><b>메뉴는 이미 있습니다</b>: 행 우클릭, 터치 길게 누르기(500ms), 행에 포커스가 있을 때 <kbd>Shift+F10</kbd> / 메뉴 키로 열림 (<code>dashboard-rail-popovers.js</code> rpRowMake / railRowMenu). 이름 바꾸기 · 주소 복사 · 다른 세션 아래로 이동 · 상위 세션에서 분리 · (호스트 세션이면) 세션 메뉴. 새 항목은 <b>복사 바로 다음</b>, 같은 <code>.rmi</code> 모양.</li>
+      <li><b>키보드</b>: 별 버튼이 빠져도 같은 메뉴 키(<kbd>Shift+F10</kbd>/메뉴 키) → <kbd>↑</kbd><kbd>↓</kbd> → <kbd>Enter</kbd>로 토글됩니다. 레일의 탭 순서(<code>RAIL_FOCUS</code>)에서는 <code>.star</code>가 빠져 오히려 짧아집니다.</li>
+      <li><b>라벨 방식</b>: 체크 표시 대신 <b>동사 라벨을 바꾸는 방식</b>(“즐겨찾기에 추가” ↔ “즐겨찾기 해제”). 이 메뉴의 항목은 전부 동작(이름 바꾸기, 복사, 이동, 분리)이고 체크형 항목이 아직 없어서, 같은 문법을 유지하고 스크린리더에서도 누르면 무엇이 되는지가 그대로 읽힙니다. 아이콘은 빈 별 / <code>--star</code>로 채운 별.</li>
+      <li>고르면 메뉴가 닫히고 배지가 바로 바뀐 뒤(낙관적), 기존과 같은 레이아웃 op(<code>star</code>/<code>unstar</code>)를 보내 레일 스왑이 행을 즐겨찾기 묶음 위/아래로 옮깁니다. 실패하면 배지를 되돌리고 토스트.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="mk-sec">
+  <h2><span class="n">3</span>새 세션을 만든 직후 바로 이름 바꾸기 상태<span class="d">“새 세션 → 시작” 후 열린 새 세션 페이지의 레일</span></h2>
+  <div class="mk-grid mk-g3">
+    <div>
+      <div class="mk-cap"><span class="tag new">변경 후</span>새 세션 페이지가 열린 순간<span class="d">연필을 누른 상태와 같음</span></div>
+      <div class="mk-frame v-after" id="f3a"></div>
+      <div class="mk-hint"><span><kbd>Enter</kbd> 저장</span><span><kbd>Esc</kbd> · 바깥 클릭: 자동 이름 유지</span></div>
+      <button type="button" class="mk-btn" id="mk-replay">새 세션 다시 추가해 보기</button>
+    </div>
+    <div>
+      <div class="mk-cap"><span class="tag new">변경 후</span>이름을 입력하고 Enter<span class="d">라벨로 저장, 행은 평소 모양</span></div>
+      <div class="mk-frame v-after" id="f3b"></div>
+    </div>
+    <div class="mk-notes">
+      <h3>동작</h3>
+      <ul>
+        <li>레일의 연필 버튼과 <b>똑같은 편집</b>(railRename → labelStart): 이름 자리에 입력란, 포커스 + 전체 선택, 호버 버튼은 숨고 시간 칸은 남음, 편집 중엔 레일 스왑을 보류.</li>
+        <li>새 세션은 아직 라벨이 없어서 입력란은 <b>비어 있고</b>, 자리표시자로 자동 이름(reply-id)이 보입니다. 비운 채 <kbd>Enter</kbd>/<kbd>Esc</kbd>/바깥 클릭이면 그대로 자동 이름. reply-id를 값으로 채워 선택해 두면 <kbd>Enter</kbd> 한 번에 reply-id가 라벨로 저장돼 버려서 채우지 않습니다.</li>
+        <li>계기: 스폰 팝오버의 <code>POST /agents/leads</code>가 201 <code>{id}</code>로 답하면 지금도 <code>go("/s/&lt;id&gt;")</code>로 새 세션 페이지를 엽니다. 이동 직전에 일회용 표시(sessionStorage)를 남기고, 새 페이지의 레일이 그 행을 처음 그릴 때(로드 또는 다음 레일 스왑의 <code>railMarks</code>) 한 번 연필을 누릅니다. 라우트·데이터 변경 없음.</li>
+        <li>왼쪽 프레임의 입력란은 실제로 입력됩니다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="mk-sec">
+  <h2><span class="n">4</span>아이콘과 이름 사이 간격<span class="d">아이콘 위의 막대·숫자 = 하네스 아이콘 오른쪽 끝부터 이름 왼쪽 끝까지 (실측)</span></h2>
+  <div class="mk-grid mk-g3">
+    <div>
+      <div class="mk-cap"><span class="tag">현재</span>숫자가 없어도 12px 자리를 비워 둠</div>
+      <div class="mk-frame v-before mk-measure" id="f4a"></div>
+    </div>
+    <div>
+      <div class="mk-cap"><span class="tag new">변경 후</span>숫자가 없으면 붙고, 있으면 그만큼 밀림</div>
+      <div class="mk-frame v-after mk-measure" id="f4b"></div>
+    </div>
+    <div class="mk-notes">
+      <h3>원인</h3>
+      <ul>
+        <li><code>dashboard-rail.css:362</code> <code>.rail .hiw { … width: 28px; … }</code>: 16px 아이콘 + 서브에이전트 숫자용 12px 칸을 <b>항상</b> 확보. 여기에 링크의 <code>gap: 6px</code>(<code>:299</code>)가 더해져 아이콘~이름이 늘 18px.</li>
+        <li><code>:363</code> <code>.rail .sbn { position: absolute; left: 18.5px; bottom: -3px; … }</code>: 숫자는 그 빈 칸에 절대 위치로 놓임. 의도는 주석 <code>:334-343</code> “kept whether or not subagents run, so the name never moves”.</li>
+      </ul>
+      <h3>변경</h3>
+      <ul>
+        <li><code>.hiw</code>의 고정 폭 제거, <code>.sbn</code>은 흐름 안으로 (아이콘 뒤 2.5px, 같은 아래첨자 높이). 숫자 없음 6px(현재 18px), 한 자리 15px, 두 자리 21px (실측).</li>
+        <li>숫자가 생기고 사라질 때 이름이 몇 px 움직이는 것은 요청대로 받아들임.</li>
+        <li>하위 세션 행(<code>.rkids</code>)도 같은 <code>.hiw</code>라 함께 붙습니다.</li>
+        <li>둘째 줄의 “› 👤5”는 서브에이전트가 아니라 <b>하위 세션 수</b> 토글(<code>.kidtog</code>)이고 이번 변경과 무관합니다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="mk-sec">
+  <h2><span class="n">5</span>구현 시 바뀌는 것</h2>
+  <ol class="mk-list">
+    <li><b>즐겨찾기: 별 버튼 → 배지 + 행 메뉴</b>
+      <ul>
+        <li><code>dashboard.tmpl:447</code> (rrow): <code>&lt;button class="star"&gt;</code> 삭제. <code>.hiw</code> 안에 <code>.hstar</code> 배지(<code>{{icon "pin"}}</code>, role=img, “즐겨찾기”)를 <code>.Starred</code>일 때 추가. 즐겨찾기를 걸 수 있는 행(<code>not (or .StarHidden .Archived)</code>)의 <code>.rs</code>에 <code>data-star="0|1"</code>: 메뉴가 항목을 보일지와 현재 상태를 여기서 읽음.</li>
+        <li><code>rail.js:201-205</code> starred(): <code>.star[aria-pressed]</code> 대신 행의 <code>data-star="1"</code>을 읽음. 이것을 쓰는 드롭 규칙(<code>:215, :242, :312, :439</code>)은 그대로.</li>
+        <li><code>dashboard-rail.js:79</code> RAIL_FOCUS에서 <code>".star"</code> 제거 · <code>:374-394</code> railRename에서 <code>star</code>(입력 위치 <code>at</code>와 hide 목록) 제거 → 입력은 항상 <code>.drtail</code> 앞 · <code>:455-467</code> 클릭의 별 분기를 <code>railStar(row, on)</code>으로 옮김 (배지·<code>data-star</code> 즉시 반영, <code>layoutSave({op: "star"|"unstar"})</code>, 실패 시 되돌림).</li>
+        <li><code>dashboard-rail-popovers.js:598-613</code> rpRowMake <code>P.open</code>: 복사 항목 다음에 즐겨찾기 항목 (<code>data-star</code>가 있는 행만, 아이콘 <code>pin</code>, 해제일 때 채운 별). 맨 위 주석(<code>:519-535</code>)의 항목 목록도 갱신.</li>
+        <li><code>dashboard-rail.css:236-247</code>(<code>.star</code>)와 <code>:265</code>의 <code>.rkids .star</code> 삭제, PROPOSED 블록의 <code>.hstar</code> · <code>--rs-ground</code> · <code>.rmstar</code> 추가.</li>
+        <li>i18n 11개 테이블(<code>internal/wsi18n/tables/*.json</code>): <code>js.rail.menu.star</code> “즐겨찾기에 추가”, <code>js.rail.menu.unstar</code> “즐겨찾기 해제”, 배지 라벨(예: <code>rail.starred</code> “즐겨찾기”). 기존 <code>rail.star</code>(“별표: 이 세션을 워크트리 맨 위에 고정”)는 쓰이지 않게 되므로 메뉴 항목 title로 옮기거나 삭제.</li>
+        <li>테스트: <code>rail_test.go:1175-1200</code>(<code>class="star"</code> 단언), <code>railscript_test.go:53, :101</code>(<code>.star</code> 스텁), <code>rail_layout_test.go:754, :785</code>(<code>aria-pressed="true"</code> 대기)를 새 마크업 기준으로.</li>
+        <li>라우트/데이터: <b>없음</b>. <code>/rail/layout</code>의 <code>star</code>/<code>unstar</code> op, <code>RailRow.Starred</code>/<code>StarHidden</code> 그대로.</li>
+      </ul>
+    </li>
+    <li><b>새 세션 직후 이름 바꾸기</b>
+      <ul>
+        <li><code>dashboard-leads.js:224-232</code> submit(): 201 <code>{id}</code>를 받은 뒤 <code>go()</code> 직전에 sessionStorage 일회용 키(예: <code>ws.dashboard.renameNew</code> = id)를 씀. 별도 SSE 이벤트는 없고, 새 행은 새 페이지의 서버 렌더 레일(또는 다음 레일 스왑)에 들어 있음.</li>
+        <li><code>dashboard-rail.js:55</code> railMarks()(로드 <code>:619</code> + 모든 레일 스왑 뒤 실행) 끝에서: 키가 있고 그 id의 행이 레일에 있으면 키를 지우고 <code>railRename(row)</code> 한 번. 짧은 기한(예: 10초)이 지나면 키만 지움.</li>
+        <li><code>railRename</code>(<code>dashboard-rail.js:374</code>) / <code>labelStart</code>(<code>dashboard-actions.js:176</code>)는 변경 없음.</li>
+        <li>라우트/데이터: <b>없음</b>.</li>
+      </ul>
+    </li>
+    <li><b>간격</b>
+      <ul>
+        <li><code>dashboard-rail.css:362</code> <code>width: 28px</code> 삭제 · <code>:363</code> <code>.sbn</code>을 <code>position: relative; bottom: -3px; align-self: flex-end; margin-left: 2.5px</code>로 · 주석 <code>:334-343</code>의 “kept whether or not subagents run, so the name never moves” 수정.</li>
+        <li>마크업·라우트·데이터 변경 없음 (<code>rail_kid_busy_test.go:111-125</code>는 마크업만 확인하므로 그대로 통과할 것으로 예상).</li>
+      </ul>
+    </li>
+    <li><b>확인하지 못한 것 / 정할 것</b>
+      <ul>
+        <li class="q">1600px 미만에서는 레일이 닫힌 오버레이라, 새 세션 페이지에서 레일 행 편집이 보이지 않습니다. 이때 헤드의 이름 바꾸기(같은 labelStart)를 열지, 레일을 열고 행을 편집할지 정해야 합니다. 목업은 레일이 보이는 경우입니다.</li>
+        <li>새 행이 워크트리 목록의 어디에 들어가는지(레이아웃 순서)는 확인하지 않았습니다. 목업은 마지막에 둡니다. 이번 변경으로 순서는 바뀌지 않습니다.</li>
+        <li>용어: 코드·문구는 “별표(star)”, 요청은 “즐겨찾기”. 목업은 화면 문구만 “즐겨찾기”로 통일했습니다.</li>
+      </ul>
+    </li>
+  </ol>
+</section>
+<script>
+(function () {
+  var doc = document;
+  function ic(n, cls) { return '<svg class="i' + (cls ? " " + cls : "") + '" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  var LET = { claude: "C", codex: "X", pi: "P" };
+
+  // row renders one rail session row as the rrow template (dashboard.tmpl:447)
+  // does; v is "before" (shipped markup, the star button) or "after" (no
+  // star button; the .hstar badge and data-star on the row).
+  function row(o, v) {
+    var h = o.h || "claude", canStar = !o.child;
+    var cls = "rs" + (o.cur ? " cur" : "") + (o.hov ? " hov" : "") + (o.hosted ? " hosted-row" : "") + (o.kcol ? " kcol" : "");
+    var attrs = ' data-rid="' + esc(o.rid) + '"' + (v === "after" && canStar ? ' data-star="' + (o.fav ? 1 : 0) + '"' : "");
+    var tip = h + " · " + (o.run ? "작업 중" : "리드 대기");
+    var hi = '<span class="hi ' + h + (o.run ? " run" : "") + '" role="img" aria-label="' + tip + '" title="' + tip + '">' + LET[h] +
+      (o.run ? '<span class="orb"><span class="rrun"></span></span>' : "") + "</span>";
+    var hiw = '<span class="hiw">' + hi +
+      (o.q ? '<span class="qdot" role="img" aria-label="답할 항목 ' + o.q + '개" title="답할 항목 ' + o.q + '개"></span>' : "") +
+      (v === "after" && o.fav ? '<span class="hstar" role="img" aria-label="즐겨찾기" title="즐겨찾기">' + ic("pin") + "</span>" : "") +
+      (o.sub ? '<span class="sbn" title="서브에이전트 ' + o.sub + '개 실행 중">' + o.sub + "</span>" : "") + "</span>";
+    var name = o.label ? '<span class="rid lbl" title="' + esc(o.rid) + '">' + esc(o.label) + "</span>" : '<span class="rid">' + esc(o.rid) + "</span>";
+    var s1 = '<div class="s1"><a class="rl" href="#' + esc(o.rid) + '">' + hiw + name +
+      (o.hosted ? '<span class="hosted" title="대시보드가 실행하는 세션">' + ic("hosted") + "</span>" : "") + "</a>" +
+      (v === "before" && canStar ? '<button type="button" class="star" aria-pressed="' + !!o.fav + '" title="별표: 이 세션을 워크트리 맨 위에 고정" aria-label="별표: 이 세션을 워크트리 맨 위에 고정">' + ic("pin") + "</button>" : "") +
+      '<a class="drtail" href="#' + esc(o.rid) + '" tabindex="-1"><span class="drslot">' + (o.when ? '<time class="when t">' + o.when + "</time>" : "") + "</span></a>" +
+      '<span class="dracts"><button type="button" class="drren" data-label="' + esc(o.label || "") + '" title="이름 바꾸기 (대시보드 표시용)" aria-label="이름 바꾸기 (대시보드 표시용)">' + ic("pencil") + "</button>" +
+      '<button type="button" class="drcopy" title="메일함 주소 복사" aria-label="메일함 주소 복사">' + ic("copy") + "</button>" +
+      (o.hosted ? '<button type="button" class="drarch" title="보관 · 프로세스를 끝내고 레일에서 숨김" aria-label="보관 · 프로세스를 끝내고 레일에서 숨김">' + ic("archive") + "</button>" : "") + "</span></div>";
+    var msg = o.msg ? '<a class="drmsg" href="#' + esc(o.rid) + '" tabindex="-1"><span class="s2">' + (o.you ? '<b class="who">나</b>' : "") + esc(o.msg) + "</span></a>" : "";
+    var s2 = "";
+    if (o.kids) s2 = '<div class="drmeta"><button type="button" class="kidtog" aria-expanded="' + !o.kcol + '" title="하위 세션 ' + o.kids + '개">' + ic("chev") + ic("person") + '<span class="kn">' + o.kids + "</span></button>" + (msg || '<a class="drmsg" tabindex="-1"></a>') + "</div>";
+    else if (!o.child) s2 = msg;
+    return '<div class="' + cls + '"' + attrs + '><span class="drgrip" aria-hidden="true">' + ic("grip") + '</span><div class="drbody">' + s1 + s2 + "</div></div>";
+  }
+  function rows(list, v) {
+    // starred rows first, as the daemon's layout pins them (rail.js stars)
+    var top = list.filter(function (o) { return o.fav; }), rest = list.filter(function (o) { return !o.fav; });
+    return top.concat(rest).map(function (o) {
+      return row(o, v) + (o.childRows ? '<div class="rkids" data-parent="' + esc(o.rid) + '">' + o.childRows.map(function (k) { return row(k, v); }).join("") + "</div>" : "");
+    }).join("");
+  }
+  function rail(list, v, live) {
+    return '<aside class="rail"><div class="r-rail"><div class="rhd"><b class="rtitle">세션</b><button type="button" class="radd" title="워크스페이스 추가">' + ic("plus") + '</button><span class="rsp"></span><span class="chip" title="실시간 세션">실시간 ' + live + '</span><button type="button" class="rref" title="새로 고침">' + ic("reload") + "</button></div>" +
+      '<div class="rlist"><section class="rws"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true"><span class="wsi">' + ic("repo") + '</span><span class="nm">devenv</span><span class="pp">~/devenv</span></button><span class="ct">' + live + "</span></div>" +
+      '<div class="wsbody"><div class="rwt"><div class="wthd">' + ic("branch") + '<span class="br">develop</span><span class="wf">· 루트</span><button type="button" class="rnew" title="develop에서 세션 시작">' + ic("plus") + '</button><span class="gs">±10</span></div>' +
+      '<div class="rsessions">' + rows(list, v) + "</div></div></div></section></div></div></aside>";
+  }
+
+  // the rows the frames show (fictional names, labels in Korean)
+  function base() {
+    return [
+      { rid: "amberquietharbor", label: "메인", h: "claude", hosted: true, fav: true, kids: 5, kcol: true, you: true, msg: "/compact", when: "3분" },
+      { rid: "cobaltwindyfield", label: "리뷰", h: "codex", hosted: true, run: true, sub: 3, msg: "리뷰 결과를 정리했습니다", when: "12분" },
+      { rid: "mossytallbridge", label: "문서 정리", h: "claude", q: 2, msg: "manual 초안을 확인해 주세요", when: "1시간" }
+    ];
+  }
+  function put(id, html) { doc.getElementById(id).innerHTML = html; }
+  function cursorAt(frame, x, y) {
+    var c = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+    c.setAttribute("class", "mk-cursor"); c.setAttribute("viewBox", "0 0 14 20");
+    c.innerHTML = '<path d="M1 1v15l4-3.6 2.6 6 2.4-1-2.6-5.8H13z" fill="#fff" stroke="#000" stroke-width="1.1" stroke-linejoin="round"/>';
+    c.style.left = x + "px"; c.style.top = y + "px"; frame.appendChild(c); return c;
+  }
+  function rel(frame, el) {
+    var f = frame.getBoundingClientRect(), r = el.getBoundingClientRect();
+    return { left: r.left - f.left, top: r.top - f.top, right: r.right - f.left, bottom: r.bottom - f.top, width: r.width, height: r.height };
+  }
+  function ring(frame, el, ok, text, below) {
+    var r = rel(frame, el), d = doc.createElement("div");
+    d.className = "mk-ring" + (ok ? " ok" : "");
+    d.style.left = (r.left - 3) + "px"; d.style.top = (r.top - 3) + "px"; d.style.width = (r.width + 6) + "px"; d.style.height = (r.height + 6) + "px";
+    frame.appendChild(d);
+    if (text) {
+      var t = doc.createElement("div"); t.className = "mk-callout" + (ok ? " ok" : ""); t.textContent = text;
+      t.style.left = (r.left - 3) + "px"; t.style.top = (below ? r.bottom + 6 : r.top - 18) + "px"; frame.appendChild(t);
+    }
+  }
+
+  // ---- section 1 ----
+  put("f1a", rail(base(), "before", 3));
+  var b1 = base(); b1[1].hov = true;
+  put("f1b", rail(b1, "before", 3));
+  put("f1c", rail(base(), "after", 3));
+  var a1 = base(); a1[1].hov = true;
+  put("f1d", rail(a1, "after", 3));
+
+  // ---- section 2: the row menu (rpRowMake's items, in its order) ----
+  var menuState = null;
+  function menuClose() { doc.querySelectorAll(".mk-frame .rpop.rmenu").forEach(function (m) { m.remove(); }); menuState = null; }
+  function menuOpen(frame, rowEl, x, y, keep) {
+    if (!keep) menuClose();
+    var on = rowEl.getAttribute("data-star") === "1", canStar = rowEl.hasAttribute("data-star");
+    var name = rowEl.querySelector(".rid").textContent, hosted = !!rowEl.querySelector(".hosted");
+    var el = doc.createElement("div");
+    el.className = "rpop rmenu";
+    var h = '<div class="rmlist" role="menu" aria-label="' + esc(name) + '">' +
+      '<button type="button" class="rmi" role="menuitem">' + ic("pencil") + '<span class="rmt">이름 바꾸기 (대시보드 표시용)</span></button>' +
+      '<button type="button" class="rmi" role="menuitem">' + ic("copy") + '<span class="rmt">메일함 주소 복사</span></button>' +
+      (canStar ? '<button type="button" class="rmi mk-fav" role="menuitem" data-on="' + on + '" title="이 세션을 워크트리 맨 위에 고정">' + ic("pin", "rmstar") + '<span class="rmt">' + (on ? "즐겨찾기 해제" : "즐겨찾기에 추가") + "</span></button>" : "") +
+      '<button type="button" class="rmi" role="menuitem" aria-haspopup="menu" aria-expanded="false"><span class="i"></span><span class="rmt">다른 세션 아래로 이동</span>' + ic("chev", "rmgo") + "</button></div>" +
+      (hosted ? '<div class="rmsess mk-sessph"><b>세션 메뉴</b> (모델 · 권한 모드 · 노력 · 중지 · 터미널로 넘기기 · 닫기): 호스트 세션에서만, 변경 없음</div>' : "");
+    el.innerHTML = h;
+    frame.appendChild(el);
+    var fw = frame.clientWidth, mw = el.offsetWidth;
+    el.style.left = Math.min(x, fw - mw - 8) + "px"; el.style.top = y + "px";
+    menuState = { el: el, frame: frame, row: rowEl };
+    var fav = el.querySelector(".mk-fav");
+    if (fav) fav.addEventListener("click", function () {
+      var rid = rowEl.getAttribute("data-rid"), st = frames2[frame.id];
+      st.forEach(function (o) { if (o.rid === rid) o.fav = !on; });
+      menuClose();
+      draw2(frame.id);
+      var again = frame.querySelector('.rs[data-rid="' + rid + '"] .rl');
+      if (again) again.focus();
+    });
+    el.addEventListener("keydown", function (e) {
+      var items = Array.prototype.slice.call(el.querySelectorAll(".rmi")), i = items.indexOf(doc.activeElement);
+      if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); items[(i + items.length - 1) % items.length].focus(); }
+      else if (e.key === "Escape") { e.preventDefault(); var l = rowEl.querySelector(".rl"); menuClose(); if (l) l.focus(); }
+    });
+    return el;
+  }
+  var frames2 = { f2a: base(), f2b: base() };
+  function draw2(id) { put(id, rail(frames2[id], "after", 3)); }
+  draw2("f2a"); draw2("f2b");
+  ["f2a", "f2b"].forEach(function (id) {
+    var fr = doc.getElementById(id);
+    fr.addEventListener("contextmenu", function (e) {
+      var r = e.target.closest(".rs");
+      if (!r) return;
+      e.preventDefault();
+      var b = fr.getBoundingClientRect();
+      menuOpen(fr, r, e.clientX - b.left, e.clientY - b.top);
+    });
+    fr.addEventListener("keydown", function (e) {
+      var r = e.target.closest && e.target.closest(".rs");
+      if (!r || !((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu")) return;
+      e.preventDefault();
+      var rr = rel(fr, r), m = menuOpen(fr, r, rr.left + 8, rr.bottom + 2);
+      m.querySelector(".rmi").focus();
+    });
+  });
+  doc.addEventListener("click", function (e) { if (!(e.target.closest && e.target.closest(".rpop.rmenu"))) menuClose(); });
+
+  // ---- section 3: the new session in the rename state ----
+  function newRows(label) {
+    var l = base();
+    l.push({ rid: "velvetnorthlantern", label: label, h: "claude", hosted: true, cur: true, when: label ? "방금" : "" });
+    return l;
+  }
+  function renameStart(frame, onSave) {
+    var r = frame.querySelector(".rs.cur"), s1 = r.querySelector(".s1"), nm = r.querySelector(".rid"), hosted = r.querySelector(".hosted");
+    var inp = doc.createElement("input");
+    inp.type = "text"; inp.className = "drinp"; inp.value = ""; inp.placeholder = r.getAttribute("data-rid"); inp.maxLength = 64;
+    inp.spellcheck = false; inp.setAttribute("autocomplete", "off"); inp.setAttribute("aria-label", "이름 바꾸기 (대시보드 표시용)");
+    nm.hidden = true; if (hosted) hosted.hidden = true;
+    s1.insertBefore(inp, r.querySelector(".drtail"));
+    function end(v) { if (inp.ending) return; inp.ending = true; onSave(v); }
+    inp.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter") { e.preventDefault(); end(inp.value.trim()); }
+      else if (e.key === "Escape") { e.preventDefault(); end(""); }
+    });
+    inp.addEventListener("blur", function () { if (!inp.ending) end(""); });
+    return inp;
+  }
+  function draw3(focus) {
+    put("f3a", rail(newRows(""), "after", 4));
+    var fr = doc.getElementById("f3a"), inp = renameStart(fr, function (v) {
+      put("f3a", rail(newRows(v), "after", 4));
+    });
+    if (focus) { inp.focus(); inp.select(); }
+    return inp;
+  }
+  draw3(false);
+  put("f3b", rail(newRows("레일 정리"), "after", 4));
+  doc.getElementById("mk-replay").addEventListener("click", function () { draw3(true); });
+
+  // ---- section 4: spacing, measured ----
+  function spacingRows() {
+    return [
+      { rid: "amberquietharbor", label: "메인", h: "claude", hosted: true, kids: 1, msg: "숫자 없음", when: "3분",
+        childRows: [{ rid: "pinebrightcove", label: "하위 세션", h: "claude", child: true, when: "5분" }] },
+      { rid: "cobaltwindyfield", label: "리뷰", h: "codex", hosted: true, run: true, sub: 3, msg: "서브에이전트 3", when: "12분" },
+      { rid: "mossytallbridge", label: "문서 정리", h: "claude", run: true, sub: 12, msg: "서브에이전트 12", when: "1시간" }
+    ];
+  }
+  put("f4a", rail(spacingRows(), "before", 4));
+  put("f4b", rail(spacingRows(), "after", 4));
+  function measure(fid, ok) {
+    var fr = doc.getElementById(fid);
+    fr.querySelectorAll(".rs").forEach(function (r) {
+      var hi = rel(fr, r.querySelector(".hi")), nm = rel(fr, r.querySelector(".rid")), w = nm.left - hi.right;
+      var g = doc.createElement("div"); g.className = "mk-gap" + (ok ? " ok" : "");
+      g.style.left = hi.right + "px"; g.style.top = (hi.top - 5) + "px"; g.style.width = w + "px"; fr.appendChild(g);
+      var l = doc.createElement("div"); l.className = "mk-gapl" + (ok ? " ok" : "");
+      l.textContent = "↔ " + (Math.round(w * 2) / 2) + "px"; l.style.left = "200px"; l.style.top = (hi.top + 1) + "px";
+      fr.appendChild(l);
+    });
+  }
+
+  function overlays() {
+    // section 1: the pointer over the hovered row's name end; the star there (before)
+    var fb = doc.getElementById("f1b"), st = fb.querySelector(".rs.hov .star");
+    var sr = rel(fb, st);
+    ring(fb, st, false);
+    cursorAt(fb, sr.left + 5, sr.top + 6);
+    var fd = doc.getElementById("f1d"), nm = fd.querySelector(".rs.hov .rid"), nr = rel(fd, nm);
+    cursorAt(fd, nr.right + 5, nr.top + 6);
+    var fc = doc.getElementById("f1c"), badge = fc.querySelector(".hstar");
+    ring(fc, badge, true);
+    // section 2: menus open on the first (favorite) and second (plain) rows
+    [["f2a", 0], ["f2b", 1]].forEach(function (p) {
+      var fr = doc.getElementById(p[0]), r = fr.querySelectorAll(".rsessions > .rs")[p[1]], rr = rel(fr, r);
+      var x = rr.left + 128, y = rr.top + 14;
+      menuOpen(fr, r, x, y, true);
+      menuState.el.querySelector(".mk-fav").style.background = "var(--wb-muted)";
+      menuState = null; // keep both open for the still
+      cursorAt(fr, x - 2, y - 4);
+      if (p[1] === 1) r.classList.add("hov");
+    });
+    measure("f4a", false);
+    measure("f4b", true);
+    // section 3: the input as it is right after the page opened
+    // (not focused on load, so the page does not jump to section 3)
+  }
+  (doc.fonts && doc.fonts.ready ? doc.fonts.ready : Promise.resolve()).then(function () { requestAnimationFrame(overlays); });
+
+  doc.getElementById("mk-theme").addEventListener("click", function () {
+    var t = doc.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    var u = new URL(location.href); u.searchParams.set("theme", t); location.replace(u.href);
+  });
+})();
+</script>
+</body>
+</html>

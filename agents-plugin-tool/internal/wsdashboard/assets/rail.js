@@ -198,10 +198,9 @@
   }
 
   function hasClass(el, c) { return (" " + (el.className || "") + " ").indexOf(" " + c + " ") >= 0; }
-  // starred reports a session row whose star the daemon rendered pressed.
+  // starred reads the favorite state rendered on the session row.
   function starred(el) {
-    var b = el && el.querySelector ? el.querySelector(".star") : null;
-    return !!b && b.getAttribute("aria-pressed") === "true";
+    return !!el && el.getAttribute("data-star") === "1";
   }
 
   // drop moves item (a live session row, worktree group or workspace section) next to

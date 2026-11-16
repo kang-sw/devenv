@@ -233,18 +233,6 @@
 @media (pointer: coarse) { .rail .drgrip { opacity: .55; } }
 .rdragging.drno, .rdragging.drno * { cursor: not-allowed !important; }
 .drhint { position: fixed; z-index: 47; padding: 4px 8px; border-radius: 6px; background: var(--wb-fg); color: var(--wb-bg); font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: var(--wb-shadow-hi); pointer-events: none; }
-/* the star follows the name: hidden until the row is hovered or focused
-   (a starred row always shows it), keeping its width meanwhile so the name
-   never moves, and the name ellipsizes before it */
-.rail .star { width: 16px; height: 16px; margin: 0; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
-.rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
-.rail .star:hover { background: var(--wb-muted); }
-.rail .star[aria-pressed="true"] { opacity: 1; color: var(--star); }
-.rail .star[aria-pressed="true"] .i { fill: currentColor; }
-.rail .star[aria-pressed="false"] { opacity: 0; }
-.rail .rs:hover .star[aria-pressed="false"], .rail .rs:focus-within .star[aria-pressed="false"] { opacity: .6; }
-.rail .rs .star[aria-pressed="false"]:hover, .rail .star[aria-pressed="false"]:focus-visible { opacity: 1; }
-@media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
 /* the tree: a parent's children box (.rkids) indents its rows one step
    from the harness column (16px; 12px in the overlay rail) under a guide
    line. The parent's toggle (chevron, person, child count) opens its
@@ -262,7 +250,7 @@
 @media (max-width: 1599.98px) { .rail .rkids { margin-left: 10px; } }
 .rail .rs.kcol + .rkids { display: none; }
 .rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }
-.rail .rkids .star, .rail .rkids .drmsg { display: none; }
+.rail .rkids .drmsg { display: none; }
 .rail .kidtog { flex: none; display: inline-flex; align-items: center; gap: 0; height: 16px; margin-left: -3px; padding: 0 3px 0 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
 .rail .kidtog .i { width: 12px; height: 12px; stroke-width: 1.8; transition: transform .15s; }
 .rail .kidtog:hover, .rail .kidtog:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
@@ -292,9 +280,8 @@
 .rail .rrev[aria-disabled="true"] { color: var(--wb-muted-fg); border-style: dashed; cursor: not-allowed; }
 .rail .rrev[aria-disabled="true"]:hover { background: var(--wb-card); }
 .rail .rrev.busy { opacity: .55; cursor: progress; }
-/* a row's link is split around the star (no button inside a link): the
-   name part (.rl, the one tab stop), the rest of the first line (.drtail),
-   and the message line (.drmsg) all open the session */
+/* the name (.rl, the one tab stop), first-line tail (.drtail), and message
+   (.drmsg) all open the session; a rename input goes before the tail */
 .rail .drbody { flex: 1 1 auto; min-width: 0; }
 .rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
 .rail .rl:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
@@ -334,13 +321,11 @@
 /* status: the harness icon (a 16px letter square) stays still while the lead
    works and a blue line travels around its border; it wobbles and hops while
    it waits on an approval (a static ring stays) and wears a static ring when
-   it has failed. The icon sits in a fixed-width wrap (.hiw): the 16px icon
-   and a 12px slot on its right, kept whether or not subagents run, so the
-   name never moves. The level-1 subagents running are a small blue count
-   blinking in that slot, at the icon's bottom-right just past the working
-   ring (the icon's box grown 2px); open policy items are a 7px dot in the
-   policy accent on the icon's top-left corner, ringed in the row's ground
-   so it parts from icon and ring. Both are absolute: the icon keeps its x. */
+   it has failed. The wrap (.hiw) fits the icon and any running-subagent
+   count: the count flows just past the working ring at bottom-right and
+   pushes the name right only while present. Open policy items are a 7px
+   dot at top-left; favorites are a 10px star at bottom-left, ringed in the
+   row's ground so the badge parts from icon and ring. */
 .rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
 .rail .hi.claude { background: #D97757; }
 .rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
@@ -359,8 +344,13 @@
 .rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s steps(12) infinite; }
 .rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s steps(4) infinite; }
 .rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }
-.rail .hiw { position: relative; flex: none; display: inline-flex; width: 28px; height: 16px; }
-.rail .sbn { position: absolute; left: 18.5px; bottom: -3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
+.rail .hiw { position: relative; flex: none; display: inline-flex; height: 16px; }
+.rail .sbn { position: relative; bottom: -3px; align-self: flex-end; margin-left: 2.5px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
+.rail .rs { --rs-ground: var(--wb-card); }
+.rail .rs:hover { --rs-ground: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { --rs-ground: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .hstar { position: absolute; z-index: 2; left: -4px; bottom: -4px; width: 10px; height: 10px; color: var(--star); cursor: default; }
+.rail .hstar .i { width: 10px; height: 10px; fill: currentColor; stroke: var(--rs-ground); stroke-width: 4.5; stroke-linejoin: round; paint-order: stroke; }
 .rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
 .rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
@@ -567,6 +557,8 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
 .rpop .rmi:hover, .rpop .rmi:focus-visible { background: var(--wb-muted); outline: none; }
 .rpop .rmi[aria-disabled="true"] { opacity: .45; cursor: default; }
 .rpop .rmi .i { width: 14px; height: 14px; flex: none; }
+.rpop .rmi .i.rmstar { stroke-width: 1.5; }
+.rpop .rmi[data-on="true"] .i.rmstar { color: var(--star); fill: currentColor; }
 .rpop .rmi .rmt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rpop .rmi .rmgo { transform: rotate(-90deg); transition: transform .12s; }
 .rpop .rmi[aria-expanded="true"] .rmgo { transform: none; }

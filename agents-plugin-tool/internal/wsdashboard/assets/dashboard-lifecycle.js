@@ -557,6 +557,7 @@
     if (qs && qs.innerHTML !== (m ? m.qs : "")) qs.innerHTML = m ? m.qs : "";
     shTop.style.paddingRight = m ? m.pad + "px" : "";
     shTop.style.minHeight = m ? m.top + "px" : "";
+    railRenameNew();
   }
   // shLayout takes the shown frame's pinned column (the rail overlays
   // beside it below 2200px) and its backdrop's dim.
