@@ -88,6 +88,25 @@ failure it asks the user to start the dashboard normally
   If satisfying it needs another cross-module interface, obtain approval first.
   Rejected: claiming an early health probe alone guarantees mode preservation.
 
+- **Missing-only start (technical decision approved by coordinating lead,
+  2026-11-16):** after REST discovery finds no live daemon, use the existing
+  detached `dashboard --port ...` equivalent NEW-daemon entry. StartDaemon's
+  lock arbitrates concurrent starts without a drain, unlike daemon-start's
+  possible LAN-probe race. Controlled REST-authenticated replacement remains
+  Phase 3. Electron does not take or depend on the launcher's separate
+  launcher-start.lock; a rare losing Electron-vs-launcher launch is accepted.
+
+## Blocked (2026-11-16)
+
+Parked by the coordinating lead after Phase 2. Windows strict-lifetime mechanism
+(owner board (1203)) remains unanswered; Phase 3 replacement and Phase 4 packaged
+acceptance are not authorized to advance around it. Keep this ticket open and
+retain `impl/develop/cape-barn-hence` and its leased worktree without merging or
+releasing. The owner prioritizes exe-launch elimination and performance work;
+resume only on coordinating-lead direction. Current implementation includes the
+Phase 2 wsflow correction recorded below; no real Windows/macOS acceptance has
+been claimed.
+
 ## Constraints
 
 - **REST-only inspection (owner 2026-11-16 09:48, relayed by coordinating lead):**
