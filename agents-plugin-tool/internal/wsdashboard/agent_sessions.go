@@ -79,8 +79,8 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 		return SessionData{}, false, err
 	}
 	h := sha256.New()
-	updatedAt := s.snaps.HashLiveStores(h, s.dir, reg.ReplyID, s.now())
-	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), SnapshotUpdatedAt: updatedAt}, true, nil
+	updatedAt, staleAt := s.snaps.HashLiveStoresClock(h, s.dir, reg.ReplyID, s.now())
+	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), SnapshotUpdatedAt: updatedAt, SnapshotStaleAt: staleAt}, true, nil
 }
 
 func (s agentSessions) ReadPage(reg Registration) (PageContent, bool, error) {
@@ -209,9 +209,16 @@ func HashLiveStores(h io.Writer, stateDir, replyID string, now time.Time) time.T
 // names tell a send (a new held name), a steer (a name replaced), and a
 // drain apart.
 func (c *SnapshotCache) HashLiveStores(h io.Writer, stateDir, replyID string, now time.Time) time.Time {
+	updatedAt, _ := c.HashLiveStoresClock(h, stateDir, replyID, now)
+	return updatedAt
+}
+
+// HashLiveStoresClock returns clock evidence from the same immutable snapshot
+// used by the fingerprint, so a concurrent publish cannot mix generations.
+func (c *SnapshotCache) HashLiveStoresClock(h io.Writer, stateDir, replyID string, now time.Time) (updatedAt, staleAt time.Time) {
 	sessionDir := SessionDir(stateDir, replyID)
-	var updatedAt time.Time
 	if p, err := c.read(wslive.SnapshotPath(sessionDir)); err == nil && p.docOK {
+		staleAt = snapshotStaleAt(&p.snap)
 		fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", p.snap.Stale(now), p.canonical)
 		if p.snap.UpdatedAt > 0 {
 			updatedAt = time.UnixMilli(p.snap.UpdatedAt)
@@ -242,5 +249,5 @@ func (c *SnapshotCache) HashLiveStores(h io.Writer, stateDir, replyID string, no
 			}
 		}
 	}
-	return updatedAt
+	return updatedAt, staleAt
 }
