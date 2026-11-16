@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -88,6 +89,9 @@ func TestRailSessionRowBrowser(t *testing.T) {
 		if err := os.WriteFile(wslive.SnapshotPath(SessionDir(dir, id)), raw, 0o600); err != nil {
 			return err
 		}
+		// Registration alone is enough for the rail index, but /s/<id>
+		// also needs a page from pageFake.ReadPage to serve the shell.
+		src.putPage(id, PageContent{})
 		src.set(id, SessionData{Fingerprint: at.String(), SnapshotUpdatedAt: at})
 		return nil
 	}
@@ -133,6 +137,9 @@ func TestRailSessionRowBrowser(t *testing.T) {
 	waitFor(t, "session row fixture indexed", func() bool { _, ok := d.Index().Session("plainrow"); return ok && d.Index().Loaded() })
 	if status, _, body := postJSON(t, base+railLayoutRoute, base, `{"op":"attach","rid":"kidrow","parent":"plainrow"}`); status != http.StatusOK {
 		t.Fatalf("attach fixture child: %d %s", status, body)
+	}
+	if status, html := get(t, base+"/s/plainrow"); status != http.StatusOK || !strings.Contains(html, `data-shell="1"`) {
+		t.Fatalf("fixture session must serve the rail shell: status %d", status)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

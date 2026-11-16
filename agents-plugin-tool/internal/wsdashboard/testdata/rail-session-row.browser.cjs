@@ -28,6 +28,11 @@ async function showRail(page) {
 }
 async function shot(page, name) {
   if (!shots) return;
+  // Keep the rename focused, but clear incidental hover cards and the
+  // deliberately triggered failure toast before capturing owner evidence.
+  const { width, height } = page.viewportSize();
+  await page.mouse.move(width - 5, height - 5);
+  await page.waitForFunction(() => !document.querySelector('.rpop.shp:not([hidden]), .wstoast'));
   await page.screenshot({ path: path.join(shots, name + '.png'), scale: 'css' });
 }
 async function openMenu(page, id, keyboard = false) {
@@ -113,7 +118,10 @@ async function editing(page, id, wide) {
       await showRail(page);
       await badge.waitFor();
       assert.equal(await page.locator('.drinp, #r-head .sinp').count(), 0);
-      // Overlay widths: rows with/without favorites/counts and the open menu.
+      // Overlay widths: all four favorite/count combinations (including
+      // the child with neither), and the open context menu.
+      await toggle(page, 'plainrow', true);
+      await until(async () => (await order(page))[0] === 'plainrow', 'favorite without count leads the screenshot rows');
       for (const width of [1280, 760]) {
         await page.setViewportSize({ width, height: 900 });
         await showRail(page);
@@ -123,6 +131,8 @@ async function editing(page, id, wide) {
         await shot(page, `menu-${theme}-${width}`);
         await page.keyboard.press('Escape');
       }
+      await toggle(page, 'plainrow', false);
+      await until(async () => (await order(page))[0] === 'agentsrow', 'snapshot favorite cleared');
       // Child and archived rows retain their original favorite restrictions.
       await openMenu(page, 'kidrow');
       assert.equal(await page.locator(menu + ' .rmstar').count(), 0, 'no child favorite item');
@@ -164,15 +174,14 @@ async function editing(page, id, wide) {
       await input.press('Enter');
       await until(async () => await page.locator('.drinp').count() === 0, 'empty Enter closes rename');
       assert.equal(await page.locator(row(id) + ' .drren').getAttribute('data-label'), '', 'empty Enter stores no default label');
-      // Give an existing label a creation intent to check full selection.
+      // The shared rename editor also selects the whole existing label.
       await page.locator(row(id) + ' .rid').hover();
       await page.locator(row(id) + ' .drren').click();
       await page.locator(row(id) + ' .drinp').fill('selected name');
       await page.locator(row(id) + ' .drinp').press('Enter');
       await until(async () => await page.locator(row(id) + ' .rid').textContent() === 'selected name', 'rename saved');
-      await page.evaluate(({ key, id }) => sessionStorage.setItem(key, JSON.stringify({ id, at: Date.now() })), { key: marker, id });
-      // A new rail render triggers railMarks without a new navigation.
-      await page.locator(row('plainrow') + ' .kidtog').click();
+      await page.locator(row(id) + ' .rid').hover();
+      await page.locator(row(id) + ' .drren').click();
       input = page.locator(row(id) + ' .drinp');
       await input.waitFor();
       assert.deepEqual(await input.evaluate(e => [e.selectionStart, e.selectionEnd]), [0, 'selected name'.length], 'existing label fully selected');
