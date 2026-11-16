@@ -984,8 +984,8 @@ conversation:
   is in the state and `host.backgroundTasks`; a subagent the lead's Agent
   call started takes its effort from an `effort-<level>` subagent type and
   its model and context size from its own assistant lines. Idle stop is
-  the profile's `idle_timeout_seconds` (a Claude lead 600, a Pi lead off)
-  and waits for the background task count to be zero.
+  the profile's `idle_timeout_seconds` (600 by default for both lead backends;
+  0 disables it) and waits for the reported background task count to be zero.
 - **Streaming.** A hosted Claude lead starts with
   `--include-partial-messages`. The `stream_event` mapper accumulates text
   deltas into the reply so far, emitting at most once per 100 ms within a

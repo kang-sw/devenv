@@ -1816,10 +1816,32 @@ func TestLeadIdleStopWaitsForBackgroundTasks(t *testing.T) {
 	}
 }
 
+// TestPiLeadIdleStopAndMailWake verifies a stopped Pi lead wakes for mail.
+func TestPiLeadIdleStopAndMailWake(t *testing.T) {
+	h := newLeadHarness(t)
+	h.globalProfile(LeadProfilePi, `{"backend":"pi","lead":true,"idle_timeout_seconds":1}`)
+	h.start()
+	id := h.lead(BackendPi, LeadOptions{}).ID
+	h.send(id, "one")
+	holder := h.holder(id)
+	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
+	h.idle(id)
+	eventually(t, "the idle stop", func() bool { return !h.state(id).Process && h.holders.opCount("stop "+holder) == 1 })
+	h.mail.deliver(h.record(id).WSKey, "From a@x: ping")
+	eventually(t, "mail to restart the lead", func() bool {
+		newHolder := h.record(id).HolderID
+		if newHolder == "" || newHolder == holder {
+			return false
+		}
+		prompts := h.holders.inputs(newHolder, "prompt")
+		return len(prompts) == 1 && sameJSON(t, json.RawMessage(prompts[0]), []byte(`{"type":"prompt","message":"From a@x: ping"}`))
+	})
+}
+
 // TestPiLeadTurnsAndCompact: a pi lead runs the user's own loadout (no
 // off switches on its command line, no tool-loadout check), a run that
-// starts with no send opens a turn, a typed /compact is the RPC compact
-// command whose answer ends the turn, and idle stop is off by default.
+// starts with no send opens a turn, and a typed /compact is the RPC compact
+// command whose answer ends the turn.
 func TestPiLeadTurnsAndCompact(t *testing.T) {
 	h := newLeadHarness(t).start()
 	st := h.lead(BackendPi, LeadOptions{})
@@ -1891,12 +1913,12 @@ func TestPiLeadTurnsAndCompact(t *testing.T) {
 		return st.Status == StatusIdle && strings.Contains(st.Error, "nothing to compact")
 	})
 
-	// Idle stop is off for a pi lead unless its profile sets one.
+	// Pi leads use the default idle stop.
 	var idleAfter time.Duration
 	c := h.runner.conv(id)
 	c.do(func() { idleAfter = c.idleAfter })
-	if idleAfter != 0 || h.holders.opCount("stop") != 0 {
-		t.Fatalf("a pi lead has no idle stop by default: %v, holder calls %v", idleAfter, h.holders.opList())
+	if idleAfter != DefaultIdleTimeout || h.holders.opCount("stop") != 0 {
+		t.Fatalf("a pi lead's idle stop = %v, want %v; holder calls %v", idleAfter, DefaultIdleTimeout, h.holders.opList())
 	}
 }
 
@@ -1983,13 +2005,12 @@ func TestPiLeadMapper(t *testing.T) {
 		t.Fatalf("a profile conversation's loadout is checked: %+v", evs)
 	}
 
-	// Idle stop is off for a pi lead unless its profile sets a timeout: pi
-	// reports no background tasks to wait for.
-	seconds := 90
+	// Explicit timeouts, including zero, override the lead default.
+	seconds, zero := 90, 0
 	for want, p := range map[time.Duration]Profile{
-		0:                  {Backend: BackendPi, Lead: true},
+		0:                  {Backend: BackendPi, Lead: true, IdleTimeoutSeconds: &zero},
 		90 * time.Second:   {Backend: BackendPi, Lead: true, IdleTimeoutSeconds: &seconds},
-		DefaultIdleTimeout: {Backend: BackendClaude, Lead: true},
+		DefaultIdleTimeout: {Backend: BackendPi, Lead: true},
 	} {
 		if got := p.IdleTimeout(); got != want {
 			t.Errorf("%+v idle timeout = %v, want %v", p, got, want)

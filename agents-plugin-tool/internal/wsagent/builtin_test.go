@@ -144,10 +144,9 @@ func TestBuiltinLeadProfilesResolve(t *testing.T) {
 	if claude.PermissionMode != DefaultLeadPermissionMode || pi.PermissionMode != "" {
 		t.Fatalf("permission modes = %q, %q; want the default for claude and none for pi", claude.PermissionMode, pi.PermissionMode)
 	}
-	// Idle stop: on for claude, whose stream reports background tasks; off
-	// for pi, where an idle process cannot be told from a waiting one.
-	if claude.IdleTimeout() != DefaultIdleTimeout || pi.IdleTimeout() != 0 {
-		t.Fatalf("idle timeouts = %s, %s; want %s and off", claude.IdleTimeout(), pi.IdleTimeout(), DefaultIdleTimeout)
+	// Both lead backends use the default idle stop.
+	if claude.IdleTimeout() != DefaultIdleTimeout || pi.IdleTimeout() != DefaultIdleTimeout {
+		t.Fatalf("idle timeouts = %s, %s; want %s for both", claude.IdleTimeout(), pi.IdleTimeout(), DefaultIdleTimeout)
 	}
 	for _, bad := range []string{
 		`{"backend":"claude","permission_mode":"auto"}`,
