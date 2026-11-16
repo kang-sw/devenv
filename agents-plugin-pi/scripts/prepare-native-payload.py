@@ -198,6 +198,9 @@ def retain_committed_closure(repo, native, candidate):
 
 
 def generate(repo, offline=False, npm_cache=None, report=None):
+    npm = shutil.which("npm")
+    if npm is None:
+        raise SystemExit("npm not found on PATH; install Node.js and npm to prepare the native payload")
     repo = repo.resolve()
     pi = repo / "agents-plugin-pi"
     check_bundle_paths(pi, repo)
@@ -219,11 +222,11 @@ def generate(repo, offline=False, npm_cache=None, report=None):
             env["npm_config_cache"] = str(npm_cache.resolve())
         env["npm_config_userconfig"] = os.devnull
         flags = ["--ignore-scripts", "--legacy-peer-deps", "--bin-links=false", "--no-audit", "--no-fund"] + (["--offline"] if offline else [])
-        subprocess.run(["npm", "install", "--package-lock-only", *flags], cwd=deps, env=env, check=True)
+        subprocess.run([npm, "install", "--package-lock-only", *flags], cwd=deps, env=env, check=True)
         normalized = json.loads((deps / "package-lock.json").read_text())
         if payload.normalized_lock(normalized, pkg["dependencies"]) != payload.normalized_lock(lock, pkg["dependencies"]):
             raise ValueError("npm changed the canonical production dependency graph")
-        subprocess.run(["npm", "ci", "--omit=dev", *flags], cwd=deps, env=env, check=True)
+        subprocess.run([npm, "ci", "--omit=dev", *flags], cwd=deps, env=env, check=True)
         (deps / "node_modules/.package-lock.json").unlink(missing_ok=True)
         removed, narrowed = prune_dependencies(deps, normalized)
         native = temp / "native-pi"
