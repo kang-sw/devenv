@@ -510,6 +510,9 @@
     "261116-bug-ws-dashboard-daemon-idle-file-touches": {
       "registered_at": "2026-11-16T04:15:13Z"
     },
+    "261116-bug-ws-dashboard-frontend-idle-and-switch-cost": {
+      "registered_at": "2026-11-16T04:15:13Z"
+    },
     "261116-bug-ws-exe-launch-elimination": {
       "registered_at": "2026-11-16T00:55:02Z",
       "lease": {
@@ -544,6 +547,12 @@
     },
     "261116-feat-ws-dashboard-restore-session-iframe-cache": {
       "registered_at": "2026-11-16T03:49:02Z"
+    },
+    "261116-refactor-ws-pi-retire-native-agent-tools": {
+      "registered_at": "2026-11-16T04:16:49Z"
+    },
+    "261116-research-ws-polling-minimization-event-ledger": {
+      "registered_at": "2026-11-16T04:15:13Z"
     }
   }
 }
