@@ -462,6 +462,35 @@ idle and pending at-top states (1440: y=52; 700: y=96); the capsule lies inside 
 the top pill wrapper stays zero-height (the capsule is centred in it, e.g. 1440 at top: wrapper
 x=614 y=114 w=806 h=0, capsule x=958.7 y=114 w=116.6 h=28).
 
+#### Edition (1ce2bf78c) - 2026-11-16
+
+Owner (1216)=a reverses the earlier hand-home acknowledgement decision for click-only
+(top-origin) latches: returning to the top by hand keeps their update badge/count;
+only an explicit pill/home click releases them. Ordinary scroll-releasable changes
+are still acknowledged on hand-home and only those names flash. This supersedes
+the blanket hand-home clearing clauses in Decisions 6/11 and the Phase 1 Result's
+retention of those semantics; phase plans and previous results are unchanged.
+
+`dashboard-board.js` now filters the change ledger to latched names instead of
+emptying it. The browser T01 nudge-to-home expectations retain count 1, the badge
+and hold marker, with no applied flash. New offline contract
+`testdata/board-home-ack.test.cjs` covers no latches, one latch, and two latches
+(including an unmounted new topic), distinct counting across repeated revisions,
+and unchanged staged-data ledgers. Optional scroll-root/correction hardening was
+not included; both board and document scrollers retain support. T0: frontend-only
+ephemeral state, no protocol, shared-store or persistence change.
+
+Verification from the repository root:
+
+- `node --test agents-plugin-tool/internal/wsdashboard/testdata/board-home-ack.test.cjs agents-plugin-tool/internal/wsdashboard/testdata/board-exposure.test.cjs`
+  — PASS, all four tests. Before the fix the new latched cases failed with badge
+  count 0 instead of 1/2; the unlatched case already passed.
+- `node --check agents-plugin-tool/internal/wsdashboard/testdata/board-hold-pill.browser.cjs`
+  and `git diff --check` — PASS.
+- Full browser acceptance not run: Playwright configuration is absent and its
+  fixture server requires a Go-built test. Owner prohibits Go, test binaries and
+  launcher execution on this PC. No daemon, merge or push; no dogfood surprise.
+
 ### Phase 2: rise hold gaps
 Only what Phase 0 shows missing: visible topic rising holds in place, releases when all involved
 cards are off-screen, batched, deferrals (selection, focus, hover, hidden, overview, maximize).
