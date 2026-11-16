@@ -5,11 +5,10 @@ import "testing"
 // Real dispatch/reconnect/hidden-region code, with a small typed input stub.
 // Chromium exercises the real input parser and keyed DOM merger separately.
 func TestRailRowsClientRecovery(t *testing.T) {
-	src := dashboardFuncs(t, "openStream", "connected", "connect", "showRegions")
-	runNode(t, "rail delta dispatch and recovery", streamPageHarness+`
+	src := streamClientFuncs(t, "openStream", "connected", "connect", "showRegions")
+	runNode(t, "rail delta dispatch and recovery", streamPageHarness(t)+`
 var mode="session",rid="rid1",worktree="",hiddenRegions={},modeHash="m1",liveMode=false,sseOn=true;
 function held() { return "rail.old,head.kept"; }
-function pageHidden() { return doc.hidden; }
 function trackerLost() {} function trackerNudge() {} function syncBadge() {} function modeChanged() {} function banner() {}
 function tlHold() {} function tlCount() {} function tlShown() {} var tlHeld={};
 function frag(html) { return html; } function apScan() {}
@@ -33,7 +32,7 @@ check("only newest complete input applies",applied[1],["rail","two",{value:"ABC"
 s.msg("rail-rows",{hash:"invalid",valid:false});
 check("untrusted delta closes stream without applying",[s.closed,applied.length],[true,2]);
 advance(0);
-check("reconnect retains other hashes and opts in",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("rail.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1");
+check("reconnect retains other hashes and opts in",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("rail.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1");
 // The new connection cannot use the previous one's canonical row baseline.
 sockets[1].msg("rail-rows",{hash:"premature",valid:true,add:"bad"});
 check("delta before first full is rejected",[sockets[1].closed,applied.length],[true,2]);

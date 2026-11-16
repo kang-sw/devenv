@@ -8,7 +8,9 @@ import (
 
 // streamPageHarness is a fake WebSocket, a fake connection indicator, and a
 // virtual clock for running dashboard.js's stream code under node.
-const streamPageHarness = `
+func streamPageHarness(t *testing.T) string {
+	t.Helper()
+	return `
 var now = 0, timers = [], tid = 0;
 function setTimeout(fn, ms) { var id = ++tid; timers.push({ id: id, at: now + (ms || 0), fn: fn }); return id; }
 function clearTimeout(id) { timers = timers.filter(function (t) { return t.id !== id; }); }
@@ -23,9 +25,10 @@ function advance(ms) {
   now = end;
 }
 var sockets = [];
-function WebSocket(url) { this.url = url; this.sent = []; this.closed = false; sockets.push(this); }
+function WebSocket(url) { this.url = url; this.sent = []; this.closed = false; this.readyState = WebSocket.OPEN; sockets.push(this); }
+WebSocket.OPEN = 1;
 WebSocket.prototype.send = function (d) { this.sent.push(d); };
-WebSocket.prototype.close = function () { this.closed = true; };
+WebSocket.prototype.close = function () { this.closed = true; this.readyState = 3; };
 WebSocket.prototype.msg = function (event, data) { this.onmessage({ data: JSON.stringify(data === undefined ? { event: event } : { event: event, data: data }) }); };
 WebSocket.prototype.fail = function () { this.onerror({}); this.onclose({}); };
 var window = { WebSocket: WebSocket };
@@ -35,11 +38,22 @@ function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(wan
 function wsT(k) { return k; }
 var indicator = { title: "", off: false, classList: { toggle: function (c, on) { indicator.off = on; } } };
 function q() { return [indicator]; }
-var doc = { hidden: false };
+var doc = { hidden: false, listeners: {} };
+doc.addEventListener = function (type, fn) { (doc.listeners[type] = doc.listeners[type] || []).push(fn); };
+doc.removeEventListener = function (type, fn) { doc.listeners[type] = (doc.listeners[type] || []).filter(function (f) { return f !== fn; }); };
+doc.dispatchEvent = function (e) { (doc.listeners[e.type] || []).slice().forEach(function (fn) { fn(e); }); };
 // The page stands alone: no shell around it, no shell above it.
 var shell = false, framed = false, shHidden = false, shTrackerRev = null;
 function shDrafts() { return false; }
-`
+` + dashboardFuncs(t, "pageHidden")
+}
+
+// Include the real stream lifecycle state as well as the requested functions.
+// A bare connect slice misses the epoch, cancellation and cached-frame owner.
+func streamClientFuncs(t *testing.T, names ...string) string {
+	t.Helper()
+	return dashboardJSBlock(t, "\n  var mainStream =", "\n  function connect(") + dashboardFuncs(t, names...)
+}
 
 // TestPageStreamsRideWebSocket pins the page side of the stream transport
 // (dashboard.js openStream, connect, supOpen): the page opens no
@@ -73,12 +87,11 @@ func TestPageStreamsRideWebSocket(t *testing.T) {
 	sup := block("supOpen ... supClose", `(?s)\n  function supOpen\(c\) \{.*?\n  function supClose\(c\) \{.*?\n  \}\n`)
 	act := block("supActUI", `(?s)\n  function supActUI\(c, added, st\) \{.*?\n  \}\n`)
 
-	runNode(t, "page stream", "(async function () {\n"+streamPageHarness+`
+	runNode(t, "page stream", "(async function () {\n"+streamPageHarness(t)+`
 function fetch() { return Promise.resolve({ status: 404 }); }
 var mode = "session", rid = "rid1", worktree = "", heldNow = "board.1,head.2", hiddenRegions = {}, modeHash = "", liveMode = false;
 function held() { return heldNow; }
 function boardInputFull() { return null; }
-function pageHidden() { return doc.hidden; }
 function trackerLost() { log.push("lost"); }
 function trackerNudge(rev) { log.push("nudge:" + rev); }
 function swap(name, hash, html) { log.push("swap:" + name + "." + hash); }
@@ -88,7 +101,7 @@ function syncBadge() {}
 function banner(text) { log.push("banner:" + text); }
 `+open+connect+`
 connect();
-check("one socket with the held hashes", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.1,head.2") + "&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1"]);
+check("one socket with the held hashes", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.1,head.2") + "&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1"]);
 var s = sockets[0];
 s.onopen({});
 check("open lights the indicator", indicator.off, false);
@@ -96,7 +109,7 @@ s.msg("region", { name: "board", hash: "3", html: "<p>b</p>" });
 s.msg("tracker", { rev: 0 });
 check("region and tracker act", log, ["swap:board.3", "nudge:0"]);
 s.msg("ping");
-check("ping answered", s.sent, ['{"event":"pong"}']);
+check("open reports visibility and ping is answered", s.sent, ['{"event":"visibility","visible":true}', '{"event":"pong"}']);
 log = [];
 doc.hidden = true;
 s.msg("region", { name: "head", hash: "4", html: "<p>h</p>" });
@@ -110,7 +123,7 @@ check("a drop shows on the indicator and forgets the revision", [indicator.off, 
 advance(2999);
 check("no reconnect before 3 s", sockets.length, 1);
 advance(1);
-check("one reconnect per drop, with the hashes held now", sockets.map(function (x) { return x.url; }).slice(1), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1"]);
+check("one reconnect per drop, with the hashes held now", sockets.map(function (x) { return x.url; }).slice(1), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1"]);
 var r = sockets[1];
 r.onopen({});
 check("recovery shows on the indicator", indicator.off, false);
@@ -126,21 +139,21 @@ advance(10000);
 check("confirmed gone is final", [log, indicator.off, r.closed, sockets.length], [["lost", "banner:js.banner.gone"], true, true, 2]);
 mode = "index";
 connect();
-check("the index stream", sockets[2].url, "ws://localhost:1234/events?h=" + encodeURIComponent("board.3,head.4"));
+check("the index stream", sockets[2].url, "ws://localhost:1234/events?h=" + encodeURIComponent("board.3,head.4") + "&display=1");
 shell = true;
 connect();
-check("the shell opts into rail rows", sockets[3].url, "ws://localhost:1234/rail/events?h=" + encodeURIComponent("board.3,head.4") + "&railrows=1");
+check("the shell opts into rail rows", sockets[3].url, "ws://localhost:1234/rail/events?h=" + encodeURIComponent("board.3,head.4") + "&railrows=1&display=1");
 shell = false; framed = true; mode = "session";
 connect();
-check("the frame requests tree but not absent rail rows", sockets[4].url, "ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1");
+check("the frame requests tree but not absent rail rows", sockets[4].url, "ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1&display=1");
 worktree = "/fixture";
 connect();
-check("worktree excludes tree rows", sockets[5].url, "ws://localhost:1234/events?h=" + encodeURIComponent("board.3,head.4") + "&frame=1&topics=1");
+check("worktree excludes tree rows", sockets[5].url, "ws://localhost:1234/events?h=" + encodeURIComponent("board.3,head.4") + "&frame=1&topics=1&display=1");
 process.stdout.write(bad.join("\n"));
 })();
 `)
 
-	runNode(t, "support chat stream", "(function () {\n"+streamPageHarness+`
+	runNode(t, "support chat stream", "(function () {\n"+streamPageHarness(t)+`
 var regions = [], acted = [];
 function supShown() { return true; }
 var supH = { uiCommand: function (id, cmd) { acted.push(id + ":" + cmd.op + ":" + cmd.arg); } };
@@ -154,7 +167,7 @@ function supRegion(c, name, html, st) {
 var c = { id: "store1", conv: { id: "conv1", page: "/s/conv1" }, root: { parentNode: {} }, st: null, stFor: null, retry: null };
 supOpen(c);
 supOpen(c);
-check("one socket for the conversation", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/conv1/events?regions=entries,convlive"]);
+check("one socket for the conversation", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/conv1/events?regions=entries,convlive&display=1"]);
 var s = sockets[0];
 s.onopen({});
 s.msg("region", { name: "convlive", html: "" });
@@ -162,7 +175,7 @@ s.msg("region", { name: "entries", html: "kanban" });
 doc.hidden = true;
 s.msg("region", { name: "entries", html: "list" });
 s.msg("ping");
-check("the first entries region is history, later ones act, hidden or not", [regions, acted, s.sent], [["convlive:history", "entries:history", "entries:live"], ["store1:view:list"], ['{"event":"pong"}']]);
+check("the first entries region is history, later ones act, hidden or not", [regions, acted, s.sent], [["convlive:history", "entries:history", "entries:live"], ["store1:view:list"], ['{"event":"visibility","visible":true}', '{"event":"pong"}']]);
 regions = []; acted = [];
 s.fail();
 check("a drop closes the stream", [c.st, s.closed], [null, true]);
@@ -207,7 +220,7 @@ func TestPageReloadsOnOtherAssets(t *testing.T) {
 	draft := block("holdsDraft", `\n  function holdsDraft\(\) \{[^\n]+\n`)
 	modeChanged := block("modeChanged", `(?s)\n  function modeChanged\(next\) \{.*?\n  \}\n`)
 
-	runNode(t, "assets identity", "(function () {\n"+streamPageHarness+`
+	runNode(t, "assets identity", "(function () {\n"+streamPageHarness(t)+`
 var mode = "session", rid = "rid1", worktree = "", hiddenRegions = {}, modeHash = "", liveMode = false;
 function held() { return ""; }
 function trackerLost() {}

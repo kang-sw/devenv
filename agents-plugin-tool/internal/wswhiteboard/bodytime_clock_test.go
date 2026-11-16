@@ -49,6 +49,7 @@ function make(framed) {
     get textContent() { return this._text; }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] ?? null; }
+    hasAttribute(k) { return k in this.attrs; }
     appendChild(e) { this.children.push(e); e.parentNode = this; return e; }
     insertBefore(e) { this.appendChild(e); body.nextElementSibling = e; }
     addEventListener(k, f) { this.events[k] = f; }
@@ -65,7 +66,7 @@ function make(framed) {
   const body = new E('doc-body'), parent = new E(), block = new E();
   body.parentNode = parent; body.topic = framed ? null : topic;
   const doc = {
-    body: new E(),
+    body: new E(), documentElement: new E(), addEventListener() {},
     querySelector: sel => sel === 'meta[name="wb-doc-key"]' ? (framed ? key : null) : meta,
     querySelectorAll: sel => sel === '.tdoc iframe.doc-frame' ? env.frames : sel === '[data-body-age]' ?
       doc.body.children.filter(e => e.attrs['data-body-age'] !== undefined) : [],

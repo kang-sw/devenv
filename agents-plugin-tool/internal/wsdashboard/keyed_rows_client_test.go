@@ -7,7 +7,7 @@ import (
 
 func TestKeyedRowsClientHelpers(t *testing.T) {
 	src := dashboardFuncs(t, "keyedSame", "keyedInputPatch", "keyedInputHTML", "mergeEntriesRegion")
-	runNode(t, "keyed row helpers", streamPageHarness+`
+	runNode(t, "keyed row helpers", streamPageHarness(t)+`
 var box = {rows:{a:"old A",b:"old B"}}, incoming = {rows:{a:"new A",b:"new B"}};
 function entriesBox() { return box; }
 function entryInputHTML(input) { return "full"; }

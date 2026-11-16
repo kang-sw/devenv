@@ -40,11 +40,10 @@ process.stdout.write(bad.join("\\n"));
 // Chromium exercises real validation and DOM merging; this probe isolates the
 // production stream owner's mandatory full recovery and hidden accumulation.
 func TestPanelRowsClientRecovery(t *testing.T) {
-	src := dashboardFuncs(t, "openStream", "connected", "connect", "showRegions")
-	runNode(t, "panel delta dispatch and recovery", streamPageHarness+`
+	src := streamClientFuncs(t, "openStream", "connected", "connect", "showRegions")
+	runNode(t, "panel delta dispatch and recovery", streamPageHarness(t)+`
 var mode="session",rid="rid1",worktree="",hiddenRegions={},modeHash="m1",liveMode=false,sseOn=true;
 function held(){return "panels.old,head.kept";}
-function pageHidden(){return doc.hidden||shHidden;}
 function trackerLost(){} function trackerNudge(){} function syncBadge(){} function modeChanged(){} function banner(){}
 function tlHold(){} function tlCount(){} function tlShown(){} var tlHeld={};
 var applied=[],bases=[];
@@ -53,7 +52,7 @@ function panelInputFull(html){return html==="invalid-full"?null:{value:html};}
 function panelInputPatch(base,ev){bases.push(base&&base.value);return base&&ev&&ev.valid?{value:base.value+ev.add}:null;}
 `+src+`
 connect();var s=sockets[0];
-check("session opts in",s.url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("panels.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1");
+check("session opts in",s.url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("panels.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1");
 s.msg("region",{name:"panels",hash:"old",html:"A"});
 check("first full reaches same-hash owner",applied,[["panels","old","A"]]);
 doc.hidden=true;
@@ -72,24 +71,25 @@ advance(0);
 sockets[2].msg("region",{name:"panels",hash:"fresh",html:"D"});
 sockets[2].msg("panel-rows",{hash:"next",valid:true,add:"E"});
 check("old daemon full repairs baseline",applied[3],["panels","next","DE"]);
-shHidden=true;
+doc.hidden=true;
 sockets[2].msg("panel-rows",{hash:"held",valid:true,add:"F"});
 sockets[2].fail();advance(3000);
+check("browser-hidden reconnect requests no display work",sockets[3].url,s.url.replace("display=1","display=0"));
 sockets[3].msg("region",{name:"panels",hash:"reconnected-full",html:"G"});
 sockets[3].msg("panel-rows",{hash:"reconnected-delta",valid:true,add:"H"});
 check("hidden reconnect replaces stale input",[applied.length,hiddenRegions.panels.html.value],[4,"GH"]);
 sockets[2].msg("panel-rows",{hash:"stale",valid:true,add:"bad"});
 check("closed socket cannot contaminate hidden input",hiddenRegions.panels.html.value,"GH");
-shHidden=false;showRegions();
+doc.hidden=false;showRegions();
 check("show applies recovered latest",applied[4],["panels","reconnected-delta","GH"]);
 framed=true;connect();
-check("frame opts in without rail",sockets[4].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("panels.old,head.kept")+"&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1");
+check("frame opts in without rail",sockets[4].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("panels.old,head.kept")+"&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1&display=1");
 shell=true;connect();
-check("shell excludes panels",sockets[5].url,"ws://localhost:1234/rail/events?h="+encodeURIComponent("panels.old,head.kept")+"&frame=1&railrows=1");
+check("shell excludes panels",sockets[5].url,"ws://localhost:1234/rail/events?h="+encodeURIComponent("panels.old,head.kept")+"&frame=1&railrows=1&display=1");
 shell=false;framed=false;mode="index";connect();
-check("index excludes panels",sockets[6].url,"ws://localhost:1234/events?h="+encodeURIComponent("panels.old,head.kept"));
+check("index excludes panels",sockets[6].url,"ws://localhost:1234/events?h="+encodeURIComponent("panels.old,head.kept")+"&display=1");
 mode="session";worktree="/fixture";connect();
-check("worktree excludes panels",sockets[7].url,"ws://localhost:1234/events?h="+encodeURIComponent("panels.old,head.kept")+"&topics=1&railrows=1");
+check("worktree excludes panels",sockets[7].url,"ws://localhost:1234/events?h="+encodeURIComponent("panels.old,head.kept")+"&topics=1&railrows=1&display=1");
 process.stdout.write(bad.join("\n"));
 `)
 }

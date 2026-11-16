@@ -241,7 +241,7 @@ func TestBoardHistoryHooksSurroundSSESwap(t *testing.T) {
 	// Execute the actual dispatcher too: each inserted board root must receive
 	// its captured pages before disclosures/frames and the final owner apply.
 	// Tree deltas and full fallbacks must use their own lifecycle, never history.
-	runNode(t, "board and tree swap ordering", `
+	runNode(t, "board and tree swap ordering", animationFrameHarness+`
 var bad = [], log = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var main = {scrollTop:400, wbScrollOwner:true}, pins = {scrollTop:500, wbScrollOwner:true}, outer = {scrollTop:40}, treePane = {scrollTop:80};
@@ -260,7 +260,7 @@ var window = {wbHistory:{
     var top=n.scroller.scrollTop;log.push("keep:"+n.name);
     return {apply:function(){
       check("numeric restoration leaves the owner alone "+n.name,n.scroller.scrollTop,0);
-      check("outer scroll is restored before owner apply",outer.scrollTop,40);
+      check("outer scroll restoration remains deferred during owner apply",outer.scrollTop,0);
       n.scroller.scrollTop=top;log.push("apply:"+n.name);
     }};
   },
@@ -273,7 +273,7 @@ function region(name){return name==="board"?boardEl:treeEl;}
 function $(){return main;}
 function q(){return [];}
 var boardPending={}, boardFrozen=[], boardPagedEdits=["paged"], boardLatest=null, boardRendered=null, boardOffered=null;
-var boardHomeWrites=new WeakSet(), ctext=null, mpend=null, live=false, TL_REGIONS={};
+var boardHomeWrites=new WeakSet(), ctext=null, mpend=null, live=false, TL_REGIONS={}, convo=null, stick=false;
 var treeRendered={html:"previous"}, mergeRows=true;
 function editing(){return false;}
 function reducedMotion(){return true;}
@@ -305,21 +305,25 @@ function mergeTreeRows(el,previous,next){
   doc.activeElement=null;treePane.scrollTop=0;log.push("tree-merge");return mergeRows?[row]:null;
 }
 function drawerWait(){log.push("wait");} function agSwapped(){log.push("agents");}
-`+whiteboardBridgeFunctions(t, string(data), "swap", "captureBoardHistory", "boardKeep", "restoreScroll")+`
+`+whiteboardBridgeFunctions(t, string(data), "swap", "captureBoardHistory", "boardKeep")+dashboardJSBlock(t, "\n  var scrollRestore =", "\n  [\"wheel\"")+`
 var numericRestore=restoreScroll;
 restoreScroll=function(s){log.push("scroll");numericRestore(s);};
 swap("board","new-board","board-html",true);
-var prepared=function(name){return ["init:","history:","open:","times:","images:","heights:","frames:","answers:"].map(function(s){return s+name;});};
+var prepared=function(name){return ["init:","history:","watch:","open:","times:","images:","heights:","frames:","answers:"].map(function(s){return s+name;});};
 check("board lifecycle ordering and exactly-once owner corrections",log,
-  ["capture:board","capture:pins","keep:old-main","keep:old-pin","morph","sweep","watch:topic","watch:pin-topic","band:topic","band:pin-topic"]
+  ["capture:board","capture:pins","keep:old-main","keep:old-pin","morph","sweep","band:topic","band:pin-topic"]
   .concat(prepared("topic"),prepared("pin-topic"),["hash:board","scroll","apply:old-main","apply:old-pin","pending"]));
-check("both reader owners are restored",[main.scrollTop,pins.scrollTop,outer.scrollTop],[400,500,40]);
+check("owner captures apply before the batched numeric restore",[main.scrollTop,pins.scrollTop,outer.scrollTop],[400,500,0]);
+flushAnimationFrames();
+check("both reader owners survive numeric restoration",[main.scrollTop,pins.scrollTop,outer.scrollTop],[400,500,40]);
 check("paged edits are consumed once",boardPagedEdits,[]);
 log=[];swap("tree","row-delta",{html:"delta"});
 check("tree row lifecycle never captures board history",log,["tree-merge","open:row","times:row","images:row","hash:tree","focus","scroll","wait","agents"]);
+flushAnimationFrames();
 check("tree pane and retained focus survive the row swap",[treePane.scrollTop,doc.activeElement===focus],[80,true]);
 log=[];mergeRows=false;swap("tree","full-fallback","full-html");
 check("full tree fallback restores disclosures before scrolling without board history",log,["tree-full","tree-merge","tree-replace","open:tree","times:tree","images:tree","hash:tree","focus","scroll","wait","agents"]);
+flushAnimationFrames();
 check("full fallback keeps canonical input, pane and focus",[treeRendered.html,treePane.scrollTop,doc.activeElement===focus],["full-html",80,true]);
 process.stdout.write(bad.join("\n"));`)
 }

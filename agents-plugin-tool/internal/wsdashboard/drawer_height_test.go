@@ -222,6 +222,7 @@ function press(target, y) { return { target: { closest: function () { return tar
 var doc = { activeElement: null, addEventListener: function () {} };
 var drawer = el('drawer'), drbody = el('drbody'), gbody = el('gbody'), sbody = el('sbody'), shandle = el('shandle'), drsheet = el('drsheet'), drclip = el('drclip');
 var drhandle = el('drhandle'), gitRegion = el('r-git'), ghandleEl = el('ghandle'), drfold = el('drfold');
+var drheader = {getBoundingClientRect:function(){return {bottom:40};}};
 var drOpen = false, drMode = 'panels', drWant = false, drH = 320, drTop = 40, drShown = '', drHas = true, drSwap = false, DR_MIN = 160, DR_SHUT = 80, DR_OPEN = 'k', DR_SEARCH = 'search', tkApi = null;
 function ghandle() { return ghandleEl; }
 function drMeasure() {}
@@ -232,13 +233,14 @@ function ghSync() {} function drTitle() {} function drFill() {} function wtLoad(
 var stored = {};
 function save(k, v) { stored[k] = v; }
 function wsT(k) { return k; }
-`+fold+apply+setOpen+drag+`
+`+dashboardFuncs(t, "drHeaderBottom")+fold+apply+setOpen+drag+`
 function shown() { return drfold.hidden ? '' : drfold.classList.contains('git') ? 'git' : drfold.classList.contains('search') ? 'search' : 'panels'; }
 
 drApply(false);
 check('a closed drawer has no fold button', shown(), '');
 drSetOpen(true, 'panels');
 check('the panels sheet: the fold button in the panels slot', shown(), 'panels');
+check('the handle clears the measured header', drhandle.style.top, '360px');
 drSetOpen(true, 'git');
 check('the git sheet: the fold button in the git slot', shown(), 'git');
 

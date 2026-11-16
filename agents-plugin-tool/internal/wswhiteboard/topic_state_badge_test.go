@@ -27,6 +27,8 @@ class E {
 }
 var document=new E(),window={wsT:true,addEventListener:()=>{}},now=Date.parse('2026-11-15T00:00:00Z'),timers=[];
 document.createElement=()=>new E();
+document.documentElement=new E();
+document.addEventListener=()=>{};
 Date.now=()=>now;
 function setInterval(fn,ms){timers.push({fn,ms});return timers.length;}
 function wsT(k,...a){return ({'js.wb.state.awaiting-confirmation':'확인 대기','js.wb.state.waiting':'대기','js.wb.state.discussing':'논의 중','js.wb.state.implementing':'구현 중','js.wb.state.researching':'연구 중','js.wb.state.estimate':'예상 {0}분','js.wb.state.eta':'ETA {0}분 · {1}분 경과'}[k]||k).replace(/\{(\d+)\}/g,(_,i)=>a[i]);}

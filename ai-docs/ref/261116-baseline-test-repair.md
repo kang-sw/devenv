@@ -6,7 +6,7 @@ Owner-authorized ad-hoc repair on `impl/develop/baseline-test-repair`, initially
 
 All ten originally reported baseline failures and the requested topic-rail motion failure are repaired. Own changes are tests/fixtures and source-faithful generated Pi guidance, not dashboard CSS, JS, templates or runtime Go behavior. Incoming develop visual changes were integrated as requested, not modified by the repair.
 
-The **unfiltered full Go suite is not green**: precisely two unchanged tests still require Node, which is not installed on w5090. Their guards were not weakened or skipped. The owner accepted these two environment-only reds on 2026-11-16 at 17:58.
+The original unfiltered full Go run was not green: two badge tests stopped at their Node prerequisite guards. The owner accepted those observed reds on 2026-11-16 at 17:58. The environment-only diagnosis was incomplete: a later Node-enabled run exposed missing browser primitives in their DOM harness. Those harnesses are now fixed; see the correction below.
 
 ## Diagnosis by failure
 
@@ -45,7 +45,7 @@ The command used no filters or exclusions. `cmd/ws-mcp` passed (134.042 s), `int
 1. `TestTopicStateBadgeResearchingMetadata` - `node required for research badge contract`, `topic_state_badge_test.go:52`.
 2. `TestTopicStateBadgeClockAndReconciliation` - `node required for badge clock contract`, `topic_state_badge_test.go:112`.
 
-These tests were introduced by `94406db99`; their source is untouched. The final remote prerequisite check explicitly confirmed that `node` is not installed. No installation was attempted. The full command therefore exited 1; no all-green claim is made.
+These tests were introduced by `94406db99` and were untouched by the original repair. That run confirmed a missing Node prerequisite and exited 1, but could not exercise the JavaScript or establish that installing Node would make it pass.
 
 ## Late child-report settlement - 2026-11-16 17:58
 
@@ -58,5 +58,15 @@ Re-ran its entire package once on w5090 as requested: `go test ./cmd/ws-mcp/... 
 Independent R1 and a supplemental R1 limited to the newly discovered full-suite repairs were clear on static review. No substantive finding required a fixes-only R2.
 
 - Forward (minor R1): the memo fixture still uses the production two-second real-clock window and could flake if its goroutine is descheduled for longer than that window. No new clock abstraction was added in this bounded repair.
-- Forward (owner accepted 2026-11-16 17:58): `TestTopicStateBadgeResearchingMetadata` and `TestTopicStateBadgeClockAndReconciliation` remain red solely because w5090 lacks Node; provide that verifier prerequisite before rerunning them, without weakening their guards.
+- Resolved by the Node-harness correction below: both `TestTopicStateBadge*` failures were DOM-fixture drift, masked by the original verifier's missing Node prerequisite.
 - Worker-created temporary scripts, messages and review reports under `D:/Temp/baseline-test-repair/` are removed at handoff after preserving conclusions here.
+
+## Node-enabled correction - 2026-11-16
+
+Both badge tests reproduced with Node installed: `ago.js` reads `document.documentElement.hasAttribute("data-animation-paused")` and registers document visibility listeners, which their small DOM lacked. Supplying the document root and listener primitive fixes both tests without changing `ago.js`, the badge assertions, or the Node prerequisite guards. The two body-time Node harnesses needed the same primitives.
+
+Verification used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` from `agents-plugin-tool/`:
+
+- All four badge/body-time tests passed in a targeted `-run` (0.823 s).
+- `go test ./internal/wswhiteboard -count=1 -v` passed (123.107 s); existing opt-in browser, fixture-generation and external compatibility tests retained their prerequisite skips.
+- The companion dashboard harness repair passed its 20 targeted tests (2.244 s) and `go test ./internal/wsdashboard -count=1 -v -run 'Board|Rows|Drawer|Toolbar|Page|Tab|Search|Hidden'` (113.598 s), with existing opt-in browser skips. This is a filtered dashboard result, not a new full-suite verdict.

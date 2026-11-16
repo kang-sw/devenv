@@ -178,8 +178,12 @@ func TestSearchPaletteRenderedEntries(t *testing.T) {
 		apply(`<wb:topic name="stream"><wb:log>Padding log line</wb:log></wb:topic>`)
 	}
 	apply(`<wb:topic name="stream"><wb:panel recap="Earlier panel recap"><p>Historical payload needle</p></wb:panel><wb:panel id="p1" recap="Latest panel recap"><p>Latest payload needle</p><script>forbiddenScriptNeedle()</script></wb:panel><wb:log>Live log needle</wb:log></wb:topic>`)
-	apply(`<wb:topic name="body"><wb:body><p>Topic-owned body needle</p></wb:body></wb:topic>`)
-	regions, err := wswhiteboard.RenderRegions(wswhiteboard.BuildView(state, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, Location: time.UTC}))
+	apply(`<wb:topic name="body"><wb:body><p>Migrated body needle</p></wb:body></wb:topic>`)
+	view := wswhiteboard.BuildView(state, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, Location: time.UTC})
+	// The legacy alias now produces an imported panel. Keep an unconverted
+	// view too, so search still exercises the topic-owned body fallback.
+	view.Topics = append(view.Topics, wswhiteboard.TopicView{Name: "legacy", Label: "Legacy", Doc: "<p>Topic-owned body needle</p>"})
+	regions, err := wswhiteboard.RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}

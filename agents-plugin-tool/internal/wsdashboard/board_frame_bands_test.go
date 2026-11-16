@@ -143,7 +143,7 @@ func TestBoardTopicResizeKeepsTheView(t *testing.T) {
 	runNode(t, "topic resize", `
 var bad = [];
 function check(what, ok) { if (!ok) bad.push(what); }
-var unobserved = [], keeping = null;
+var unobserved = [], keeping = null, shHidden = false;
 var topicRO = { unobserve: function (t) { unobserved.push(t.name); } };
 var window = { wbHistory: { keeping: function (s) { return s === keeping ? {} : null; } } };
 function Scroller(name, top) { this.name = name; this.top = top; this.clientTop = 0; this.scrollTop = 1000; this.scrollHeight = 5000; this.clientHeight = 800; this.kids = []; }
