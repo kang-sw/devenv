@@ -497,6 +497,9 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
+    "261116-bug-ws-dashboard-composer-autosize-forced-layout": {
+      "registered_at": "2026-11-16T01:25:12Z"
+    },
     "261116-bug-ws-dev-rerun-daemon-false-failure": {
       "registered_at": "2026-11-16T00:53:09Z"
     },
