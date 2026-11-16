@@ -662,6 +662,7 @@
       if (!m) return;
       if (m.wsShell === "shown") {
         shHidden = !m.shown;
+        syncPageVisibility();
         if (shHidden) return;
         showRegions();
         tickTimes();

@@ -31,9 +31,11 @@ E.prototype.removeEventListener = function () {};
 E.prototype.getBoundingClientRect = function () { return { top: this.top, bottom: this.top + 40, width: 100, height: 40 }; };
 E.prototype.scrollIntoView = function () { jumped.push(this.attrs.id); };
 var fire = null, jumped = [], observed = [];
-function requestAnimationFrame() { return 1; }
+var frames = [];
+function requestAnimationFrame(fn) { frames.push(fn); return frames.length; }
 function cancelAnimationFrame() {}
-function IntersectionObserver(cb) { fire = cb; this.observe = function (el) { observed.push(el); }; this.disconnect = function () {}; }
+function frame() { var batch = frames.splice(0); batch.forEach(function (fn) { fn(); }); }
+function IntersectionObserver(cb) { fire = function (entries) { cb(entries); frame(); }; this.observe = function (el) { observed.push(el); }; this.disconnect = function () {}; }
 function getComputedStyle() { return { overflowY: "visible" }; }
 function wsT(k) { return k; }
 function item(id, top, state) { var e = new E("div"); e.attrs.id = id; e.top = top;
