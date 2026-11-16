@@ -9,8 +9,8 @@ const root = path.join(__dirname, '../assets');
 class Evt {
   constructor(type, opts = {}) { Object.assign(this, opts); this.type = type; this.defaultPrevented = !!opts.defaultPrevented; }
   preventDefault() { this.defaultPrevented = true; }
-  stopPropagation() {}
-  stopImmediatePropagation() { this.stopped = true; }
+  stopPropagation() { this.propagationStopped = true; }
+  stopImmediatePropagation() { this.stopped = true; this.propagationStopped = true; }
 }
 class El {
   constructor(name = 'div', type = 1) { this.nodeName = name.toUpperCase(); this.tagName = this.nodeName; this.nodeType = type; this.childNodes = []; this.attrs = {}; this.listeners = {}; this.style = {}; this.className = ''; this.scrollHeight = 38; this.offsetWidth = 100; this.offsetHeight = 20; }
@@ -122,6 +122,15 @@ f.wsc.editor.dispatchEvent(new Evt('compositionstart'));
 f.wsc.editor.dispatchEvent(new Evt('input'));
 f.wsc.editor.dispatchEvent(new Evt('compositionend'));
 assert.equal(composition.at(-1), true, 'IME input reaches owners without opening pickers');
+// notify is the backing field's only input, not a duplicate: the native
+// contenteditable event must stop before reaching ancestor input owners.
+const inputsBefore = composition.length;
+for (let i = 0; i < 30; i++) {
+  const native = new Evt('input', { bubbles: true });
+  f.wsc.editor.dispatchEvent(native);
+  assert.equal(native.propagationStopped, true, 'native editor input cannot bubble alongside the forwarded input');
+}
+assert.equal(composition.length - inputsBefore, 30, 'one backing-field input per native edit');
 
 // Browser-produced line blocks and filler breaks are text, not phantom lines.
 f.wsc.editor.textContent = '';

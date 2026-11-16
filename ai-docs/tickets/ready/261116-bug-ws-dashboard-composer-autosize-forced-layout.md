@@ -43,6 +43,26 @@ machine-local):
 - Remove the duplicate work from the nested synthetic `input` (capsules.js
   notify) if it re-runs `grow()` for the same change.
 
+- Design sanity pass: the live capsule editor is a contenteditable `div`,
+  not a textarea. Its existing block layout already grows/shrinks naturally
+  within the CSS 38–160px bounds with internal overflow; no JS measurement
+  or `field-sizing` is needed for it. Use native `field-sizing: content`
+  for the plain textarea, with a frame-coalesced measuring-layer fallback
+  only on browsers without support.
+- `capsules.js` is now under `wsdashboard/assets/`. Its native editor input
+  stops propagation and forwards once to the backing field; retain that
+  notification contract rather than removing the composer's only input.
+- No cross-version tool, protocol, config, or stored-data surface changes.
+
+## Constraints
+
+- Read and follow `ai-docs/manuals/shipped-surface-boundary.md` and
+  `ai-docs/manuals/release-compatibility.md` for internal dashboard edits.
+- Do not edit dashboard board/stream exposure code (a parallel executor owns it).
+- Local verification is Node-only without ws executable spawning; Go tests
+  run only remotely on w5090. No local ws binary, launcher, daemon restart,
+  Go command, or test binary. Live performance verification belongs to the lead.
+
 ## Phases
 
 ### Phase 1: Keystroke path without forced layout
