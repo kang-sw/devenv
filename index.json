@@ -536,7 +536,14 @@
       "registered_at": "2026-11-16T13:07:35Z"
     },
     "261116-feat-ws-dashboard-session-page-payload-and-render-cost": {
-      "registered_at": "2026-11-16T20:29:44Z"
+      "registered_at": "2026-11-16T20:29:44Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-16T20:31:53Z"
+      }
     },
     "261116-feat-ws-session-outside-git-folder": {
       "registered_at": "2026-11-16T12:11:42Z"
