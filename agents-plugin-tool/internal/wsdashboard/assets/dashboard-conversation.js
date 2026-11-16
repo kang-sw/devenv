@@ -223,6 +223,72 @@
   }
   doc.addEventListener("click", effectJumpClick);
 
+  // --- chat block actions (msgacts, dashboard.tmpl) ---------------------------
+  // Copy fetches the block's stored text from the entry text route
+  // (entry_text_route.go) and copies it quietly: the button confirms
+  // (data-done, with its pill pinned) for 1.6 s, so no toast doubles it. A
+  // batch's bubbles share one entry key; the route answers one text per
+  // bubble, in order, and the bubble's index picks its own. Where the async
+  // Clipboard API takes a pending item, the write starts inside the click,
+  // so a browser that ties clipboard writes to the gesture still allows it
+  // after the fetch; elsewhere the fetched text goes through copyText. A
+  // disabled action (rewind, edit) only shows its tooltip.
+  var ACT_CONFIRM_MS = 1600;
+  function entryText(msg) {
+    var holder = msg.closest("[data-entry]"), key = holder && holder.getAttribute("data-entry");
+    if (!key || !window.fetch) return Promise.reject(new Error("no entry"));
+    var index = holder === msg ? 0 : Array.prototype.indexOf.call(holder.querySelectorAll(".msg.user"), msg);
+    return fetch("/s/" + rid + "/entry?key=" + encodeURIComponent(key), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (ans) {
+      var text = ans && ans.blocks && ans.blocks[index];
+      if (typeof text !== "string") throw new Error("no text");
+      return text;
+    });
+  }
+  function copyEntry(msg) {
+    var text = entryText(msg);
+    function viaCopyText() { return text.then(function (s) { return copyText(s, true); }); }
+    if (window.ClipboardItem && window.isSecureContext && navigator.clipboard && navigator.clipboard.write) {
+      var item = null;
+      try { item = new ClipboardItem({ "text/plain": text.then(function (s) { return new Blob([s], { type: "text/plain" }); }) }); } catch (e) { item = null; }
+      if (item) return navigator.clipboard.write([item]).then(function () { return true; }, viaCopyText);
+    }
+    return viaCopyText();
+  }
+  // actConfirm shows b's tooltip (a disabled action), or its done state with
+  // its pill pinned (a copy), for ACT_CONFIRM_MS.
+  function actConfirm(b, done) {
+    var bar = b.parentNode;
+    clearTimeout(b.wsActTimer);
+    b.setAttribute(done ? "data-done" : "data-tipshow", "");
+    if (done) bar.setAttribute("data-pinned", "");
+    b.wsActTimer = setTimeout(function () {
+      b.removeAttribute("data-done");
+      b.removeAttribute("data-tipshow");
+      bar.removeAttribute("data-pinned");
+    }, ACT_CONFIRM_MS);
+  }
+  function msgActClick(e) {
+    var t = e.target, box = entriesBox();
+    var b = t && t.closest ? t.closest(".d-act") : null;
+    if (!b || !box || !box.contains(b)) return;
+    e.preventDefault();
+    if (b.getAttribute("aria-disabled") === "true") { actConfirm(b, false); return; }
+    if (b.getAttribute("data-act") !== "copy" || b.wsActBusy) return;
+    b.wsActBusy = true;
+    copyEntry(b.closest(".msg")).then(function (ok) {
+      b.wsActBusy = false;
+      if (!ok) throw new Error("copy refused");
+      actConfirm(b, true);
+    }).catch(function () {
+      b.wsActBusy = false;
+      toast(wsT("js.entry.copyfail"));
+    });
+  }
+  doc.addEventListener("click", msgActClick);
+
   // --- older history: loaded a page at a time when scrolled to the top -------
   // The region draws the newest entries; older ones come from the history
   // route and are prepended with the scroll position kept. histBefore is the
