@@ -23,7 +23,8 @@
 //     (`</wb:why>`), so `<`, `&`, inline HTML, and mermaid are written as is.
 //     A CDATA section (`<![CDATA[...]]>`) passes its content through
 //     literally, for a body that must contain its own closing tag. A grammar
-//     may also opt into inert Markdown code spans/fences (Grammar.LiteralCode).
+//     may also opt into inert Markdown code spans/fences (Grammar.LiteralCode),
+//     provided a candidate contains no raw close of its own body outside CDATA.
 //   - A body loses one newline right after its opening tag and one right
 //     before its closing tag, so a body written on its own lines keeps its
 //     text exactly; nothing else is trimmed.
@@ -117,7 +118,7 @@ type Grammar struct {
 	Group    *Group
 	// RefuseFieldOpenings rejects literal sibling field openings in field bodies.
 	RefuseFieldOpenings bool
-	// LiteralCode makes Markdown code spans and fenced blocks inert in bodies.
+	// LiteralCode makes non-crossing Markdown code spans and fences inert in bodies.
 	// Other grammars retain their original delimiter behavior.
 	LiteralCode bool
 }
@@ -328,7 +329,6 @@ func ParseOrdered(p *Problems, g Grammar, s string) (commands []Command, complet
 func (r *parser) read() {
 	g := r.g
 	r.literalCode = g.LiteralCode
-	r.grammar = &r.g
 	for !r.fatal {
 		r.skipSpace()
 		if r.i >= len(r.s) {
@@ -430,7 +430,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 				r.skipUnknown(tag)
 			}
 		case Container:
-			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings, cmd.Label(), nil) {
+			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings, cmd.Label()) {
 				return false
 			}
 		}
@@ -514,7 +514,7 @@ func (r *parser) group(tag openTag) {
 			if r.ordered {
 				body, ok := r.readBodyContent(tag.name, tag.at, false, nil, scope.Label(), &r.g)
 				if ok {
-					p.Add("%s: text before its first command: %q%s", scope.Label(), excerpt(body), hint)
+					r.problem(r.i, "%s: text before its first command: %q%s", scope.Label(), excerpt(body), hint)
 				}
 				return
 			}
@@ -523,7 +523,7 @@ func (r *parser) group(tag openTag) {
 				r.fail(tag.at, "<%s> has no closing %s", tag.name, closing)
 				return
 			}
-			p.Add("%s: text before its first command: %q%s", scope.Label(), excerpt(rest[:end]), hint)
+			r.problem(r.i+end, "%s: text before its first command: %q%s", scope.Label(), excerpt(rest[:end]), hint)
 			r.i += end + len(closing)
 			return
 		}
@@ -587,16 +587,17 @@ func excerpt(s string) string {
 
 // tokenizer reads a command string; fatal is set once reading cannot go on.
 type tokenizer struct {
-	s           string
-	i           int
-	p           *Problems
-	fatal       bool
-	ordered     bool
-	literalCode bool
-	grammar     *Grammar
-	literals    *literalIndex
-	linePos     int
-	lineCount   int
+	s                           string
+	i                           int
+	p                           *Problems
+	fatal                       bool
+	ordered                     bool
+	literalCode                 bool
+	literals                    *literalIndex
+	linePos                     int
+	lineCount                   int
+	crossings                   int
+	crossingFrom, crossingUntil int
 }
 
 func (t *tokenizer) lineAt(i int) int {
@@ -610,8 +611,28 @@ func (t *tokenizer) lineAt(i int) int {
 	return strings.Count(t.s[:i], "\n") + 1
 }
 
+const crossingGuidance = "; code containing its own closing tag is structural text: use <![CDATA[...]]> for the literal example; split any ]]> across adjacent CDATA sections"
+
+func (t *tokenizer) guideProblems(from int) {
+	for i := from; i < len(t.p.List); i++ {
+		if !strings.Contains(t.p.List[i], crossingGuidance) {
+			t.p.List[i] += crossingGuidance
+		}
+	}
+}
+
+// Decorate an existing structural problem only within a rejected candidate.
+// This never creates a diagnostic or changes fatal/command-local handling.
+func (t *tokenizer) problem(at int, format string, args ...any) {
+	before := len(t.p.List)
+	t.p.Add(format, args...)
+	if t.crossingUntil > 0 && at >= t.crossingFrom && at < t.crossingUntil {
+		t.guideProblems(before)
+	}
+}
+
 func (t *tokenizer) fail(i int, format string, args ...any) {
-	t.p.Add("line %d: %s", t.lineAt(i), fmt.Sprintf(format, args...))
+	t.problem(t.i, "line %d: %s", t.lineAt(i), fmt.Sprintf(format, args...))
 	t.fatal = true
 }
 
@@ -718,9 +739,6 @@ func (t *tokenizer) readBody(name string, from int, decode bool, fields []string
 type bodyFieldRules struct {
 	tags           []string
 	refuseOpenings bool
-	enclosing      []literalFrame
-	wrapper        string
-	wrapperClose   *int
 }
 
 type bodyWrapper struct {
@@ -743,11 +761,12 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 	bodyStart, lineStart := t.i, t.i
 	literalUntil, literalLimit := t.i, len(t.s)
 	closing := "</" + name + ">"
-	if wrapper != nil {
-		fields.wrapper = wrapper.tag
-		fallbackClose := -1
-		fields.wrapperClose = &fallbackClose
-	}
+	before, crossings := len(t.p.List), t.crossings
+	defer func() {
+		if t.crossings > crossings {
+			t.guideProblems(before)
+		}
+	}()
 	// Only inspect newly consumed bytes, never the whole body prefix.
 	advance := func(end int) {
 		if newline := strings.LastIndexByte(t.s[t.i:end], '\n'); newline >= 0 {
@@ -769,7 +788,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 			return "", false
 		}
 		if t.literalCode && t.i >= literalUntil {
-			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, fields, &literalLimit)
+			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, &literalLimit)
 			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
 				text.WriteString(t.s[t.i:literalUntil])
 				advance(literalUntil)
@@ -816,14 +835,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 				childLabel = wrapper.label + " <" + tag.name + ">"
 			}
 			checkAttrs(t.p, childLabel, tag.attrs, nil)
-			// A wrapper operand returns through its container into this raw
-			// body. Fallback walks must retain both levels, including while
-			// skipping commands owned by a rejected group.
-			enclosing := []literalFrame{
-				{tag: name, raw: true, wrapper: wrapper.tag, bodyStart: bodyStart},
-				{tag: tag.name},
-			}
-			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, childLabel, enclosing) {
+			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, childLabel) {
 				return "", false
 			}
 			*wrapper.children = append(*wrapper.children, child)
@@ -883,7 +895,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 					if known && spec.Kind == Container {
 						// Preserve raw field boundaries while attributing diagnostics
 						// to the rejected group, not a synthetic command position.
-						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, skippedLabel, nil) {
+						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, skippedLabel) {
 							return "", false
 						}
 					} else if known && spec.Wrapper != "" {
@@ -1072,7 +1084,7 @@ func (t *tokenizer) strayClosing() bool {
 		t.i = len(t.s)
 		return true
 	}
-	t.p.Add("line %d: %s closes nothing open", t.lineAt(t.i), t.s[t.i:t.i+end+1])
+	t.problem(t.i, "line %d: %s closes nothing open", t.lineAt(t.i), t.s[t.i:t.i+end+1])
 	t.i += end + 1
 	return true
 }
@@ -1086,7 +1098,7 @@ func (t *tokenizer) skipText(where string) {
 	} else {
 		t.i += next
 	}
-	t.p.Add("line %d: text %s: %q", t.lineAt(start), where, excerpt(t.s[start:t.i]))
+	t.problem(start, "line %d: text %s: %q", t.lineAt(start), where, excerpt(t.s[start:t.i]))
 }
 
 func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
@@ -1117,7 +1129,7 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
 // readFields reads a container command's field tags (fields, full tags) up
 // to its closing tag, decoding the bodies of the tags in decode. label names
 // the command or the rejected group that owns skipped field diagnostics.
-func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool, label string, enclosing []literalFrame) bool {
+func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool, label string) bool {
 	closing := "</" + cmd.Tag + ">"
 	for {
 		t.skipSpace()
@@ -1152,7 +1164,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		}
 		line := t.lineAt(tag.at)
 		if !known {
-			t.p.Add("%s: unknown field <%s> (fields: %s)", label, tag.name, strings.Join(fields, ", "))
+			t.problem(tag.at, "%s: unknown field <%s> (fields: %s)", label, tag.name, strings.Join(fields, ", "))
 			t.skipUnknown(tag)
 			if t.fatal {
 				return false
@@ -1162,7 +1174,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", label, tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			body, ok := t.readContent(tag.name, tag.at, decode[tag.name], bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings, enclosing: enclosing}, label, nil, nil)
+			body, ok := t.readContent(tag.name, tag.at, decode[tag.name], bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, label, nil, nil)
 			if !ok {
 				return false
 			}

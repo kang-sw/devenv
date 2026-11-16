@@ -46,7 +46,7 @@ func literalPerformanceInput(kind string, size int) (string, int) {
 	case "single-unmatched-fences":
 		add(panel, "```\n"+strings.Repeat("```x\n", size/5), closePanel)
 	case "single-malformed-markup":
-		add(panel, "`</wb:panel>"+strings.Repeat("<a?", size/3)+"`", closePanel)
+		add(panel, "`<![CDATA[</wb:panel>]]>"+strings.Repeat("<a?", size/3)+"`", closePanel)
 	case "fence-per-log", "tilde-per-log", "fence-per-panel", "fence-per-field":
 		open, close, mark := "<wb:log>", "</wb:log>", "```"
 		if kind == "tilde-per-log" {

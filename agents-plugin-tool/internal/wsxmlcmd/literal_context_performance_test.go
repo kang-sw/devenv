@@ -138,10 +138,13 @@ func checkLiteralContext(t *testing.T, kind, input string, count int, ordered bo
 func TestLiteralGroupEndpointIsNotContainerText(t *testing.T) {
 	g := literalContextGrammar()
 	input := "<wb:log>`</wb:log><wb:topic name=\"t\">text `"
-	first := strings.Index(input, "</wb:log>")
-	tok := tokenizer{s: input, grammar: &g}
-	if tok.codeBodyBoundary(first, len(input), "</wb:log>", bodyFieldRules{}) {
-		t.Fatal("a group endpoint is not invalid inter-field container text")
+	g0 := g
+	g0.LiteralCode = false
+	p, q := &Problems{}, &Problems{}
+	got, complete := ParseOrdered(p, g, input)
+	baseline, expectedComplete := ParseOrdered(q, g0, input)
+	if complete != expectedComplete || len(p.List) != len(q.List) || len(got) != len(baseline) || got[0].Body != baseline[0].Body {
+		t.Fatalf("group must retain structural reading: complete=%v/%v problems=%v/%v", complete, expectedComplete, p.List, q.List)
 	}
 }
 

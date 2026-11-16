@@ -126,20 +126,33 @@ func TestPanelAndLogCodeLiteralsAreInert(t *testing.T) {
 		"  ~~~~xml\n</wb:panel> and <wb:change/>\n~~~\n  ~~~~~\nAfter tilde fence.",
 		"<![CDATA[<wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>]]>",
 	} {
-		cmds := mustParse(t, panelXML("t", "sample", payload)+logXML("t", "after sample"))
+		input := panelXML("t", "sample", payload) + logXML("t", "after sample")
+		if !strings.HasPrefix(payload, "<![CDATA[") {
+			// Owner (1208)=b: keep the original raw-close inputs, but
+			// structural parsing/refusal wins. CDATA is the safe spelling.
+			assertLiteralOwnerBReading(t, input)
+			assertLiteralOwnerBApply(t, input)
+		}
+		protected := payload
+		if !strings.HasPrefix(payload, "<![CDATA[") {
+			protected = "<![CDATA[" + payload + "]]>"
+		}
+		cmds := mustParse(t, panelXML("t", "sample", protected)+logXML("t", "after sample"))
 		want := strings.TrimSuffix(strings.TrimPrefix(payload, "<![CDATA["), "]]>")
 		if len(cmds) != 2 || cmds[0].Body != want || len(cmds[0].Children) != 0 || cmds[1].Body != "after sample" {
 			t.Fatalf("literal payload changed structure or bytes: %+v", cmds)
 		}
 		st := &State{}
-		mustApply(t, st, panelXML("t", "sample", payload))
+		mustApply(t, st, panelXML("t", "sample", protected))
 		if entries(t, st, "t")[0].Text != want {
 			t.Fatal("literal panel was not stored verbatim")
 		}
 	}
 	line := "Literal `</wb:log></wb:topic><wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>` is inert."
+	assertLiteralOwnerBReading(t, logXML("t", line))
+	assertLiteralOwnerBApply(t, logXML("t", line))
 	st := &State{}
-	mustApply(t, st, logXML("t", line))
+	mustApply(t, st, logXML("t", "<![CDATA["+line+"]]>"))
 	if got, _ := st.LatestAgent("t"); got.Text != line {
 		t.Fatalf("literal log = %+v", got)
 	}
@@ -149,7 +162,9 @@ func TestPanelAndLogCodeLiteralsAreInert(t *testing.T) {
 		"`<wb:new></wb:old><wb:change/>`",
 		"```xml\n<wb:new></wb:old><wb:change/>\n```",
 	} {
-		cmds := mustParse(t, `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>`+operand+`</wb:old><wb:new/></wb:change></wb:panel></wb:topic>`)
+		input := `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>` + operand + `</wb:old><wb:new/></wb:change></wb:panel></wb:topic>`
+		assertLiteralOwnerBReading(t, input)
+		cmds := mustParse(t, `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old><![CDATA[`+operand+`]]></wb:old><wb:new/></wb:change></wb:panel></wb:topic>`)
 		if len(cmds[0].Children) != 1 || cmds[0].Children[0].FieldsOf("wb:old")[0] != operand {
 			t.Fatalf("literal patch operand changed: %+v", cmds)
 		}
@@ -160,7 +175,7 @@ func TestPanelAndLogCodeLiteralsAreInert(t *testing.T) {
 	old := "`<wb:old></wb:panel><wb:change/>`"
 	newText := "~~~xml\n<wb:new></wb:panel><wb:change/>\n~~~"
 	st = &State{}
-	mustApply(t, st, `<wb:topic name="t"><wb:panel name="sample" recap="Literal">`+old+`</wb:panel></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="sample" recap="Literal"><![CDATA[`+old+`]]></wb:panel></wb:topic>`)
 	mustApply(t, st, `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>`+old+`</wb:old><wb:new>`+newText+`</wb:new></wb:change></wb:panel></wb:topic>`)
 	if latest := queryResult(t, st, `{"panel":"p1"}`).Direct.Entry; latest.Text != newText {
 		t.Fatal("literal operands did not patch stored payload verbatim")

@@ -8,11 +8,10 @@ import (
 	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 )
 
-// Decision 10 makes inline AND fenced wrapper-opening examples inert (D-A).
-// D-B exempts only individual spans, never an input: mask the wrapper openers
-// quoted by each qualifying span in the structural oracle. All other commands,
-// operands and bytes are still compared. Any raw panel close outside CDATA in
-// [start,end) disqualifies a span, even if it lies inside a wrapper operand.
+// Owner (1208)=b: crossing candidates are structural, without exceptions.
+// Normalize only local D-A wrapper-opening quotes in the reference reading;
+// inline/fenced spans must contain no own raw close outside CDATA. All other
+// commands, operands and bytes remain structural comparisons, never skipped.
 func literalStructuralExpected(input string) ([]map[string]any, bool) {
 	g0 := grammar
 	g0.LiteralCode = false

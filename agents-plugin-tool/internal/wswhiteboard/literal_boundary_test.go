@@ -2,21 +2,20 @@ package wswhiteboard
 
 import (
 	"encoding/json"
-	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 )
 
-// Every round-3 variant, including cross-group/root and rejected-group skips.
+// Every prior variant remains a regression; owner (1208)=b now requires the
+// structural interpretation rather than licensing any raw-close crossing.
 func literalBoundaryRepros() map[string]string {
 	topic := func(s string) string { return `<wb:topic name="t">` + s + `</wb:topic>` }
 	panel := func(s string) string { return `<wb:panel recap="r">` + s + `</wb:panel>` }
 	first := panel("see `<b title='")
 	second := `<wb:panel recap="s">it's > two ` + "`" + ` end</wb:panel>`
-	out := map[string]string{
+	return map[string]string{
 		"CA-cdata-end":      topic(panel("``") + panel("`<![CDATA[`</wb:panel>]]>``")),
 		"CA-cdata-baseline": topic(panel("``") + panel("`<![CDATA[`</wb:panel>]]>")),
 		"CA-panel":          topic(first + second),
@@ -36,69 +35,29 @@ func literalBoundaryRepros() map[string]string {
 		"CB-panel":          topic(panel("a `") + panel("``</wb:panel>`` y ` z")),
 		"CB-field":          topic("<wb:add class=\"technical\"><wb:title>a `b</wb:title><wb:why>see ``</wb:why>`` y ` z</wb:why></wb:add>"),
 	}
-	return out
 }
 
-type literalAmbiguityCase struct {
-	name, input string
-	bodies      []string
-}
+type literalAmbiguityCase struct{ name, input string }
 
 func literalAmbiguityTransitions() []literalAmbiguityCase {
 	prefix := `<wb:topic name="t"><wb:panel recap="r">`
 	next := `</wb:panel><wb:panel recap="s">`
 	suffix := `</wb:panel></wb:topic>`
 	return []literalAmbiguityCase{
-		{"two-to-one-before", prefix + "``" + next + "`</wb:panel>`" + suffix, []string{"``", "`</wb:panel>`"}},
-		{"two-to-one-after", prefix + "``" + next + "`</wb:panel>``" + suffix, []string{"``" + next + "`</wb:panel>``"}},
-		{"one-to-two-before", prefix + "```a" + next + "``b</wb:panel>```c" + suffix, []string{"```a" + next + "``b</wb:panel>```c"}},
-		{"one-to-two-after", prefix + "```a" + next + "``b</wb:panel>```c``" + suffix, []string{"```a", "``b</wb:panel>```c``"}},
+		{"two-to-one-before", prefix + "``" + next + "`</wb:panel>`" + suffix},
+		{"two-to-one-after", prefix + "``" + next + "`</wb:panel>``" + suffix},
+		{"one-to-two-before", prefix + "```a" + next + "``b</wb:panel>```c" + suffix},
+		{"one-to-two-after", prefix + "```a" + next + "``b</wb:panel>```c``" + suffix},
 	}
 }
 
 func TestLiteralCodeActiveSpanMutationChangesCleanReading(t *testing.T) {
-	// These bodies already contain active delimiters, so I2r does not apply.
-	// Appending a tick destroys the second body's single-run span in the
-	// two-to-one case; only the enclosing literal reading remains clean.
-	// A non-adjacent double run instead creates ambiguity and forces a split.
+	// Retain all four historical inputs, but none can license a raw-close
+	// crossing under owner-b. Existing structural problems and Apply policy win.
 	for _, tc := range literalAmbiguityTransitions() {
 		t.Run(tc.name, func(t *testing.T) {
-			g0 := grammar
-			g0.LiteralCode = false
-			p0 := &problems{}
-			wsxmlcmd.Parse(p0, g0, tc.input)
-			if len(p0.List) == 0 {
-				t.Fatal("fixture unexpectedly has a clean structural split")
-			}
-			for _, ordered := range []bool{false, true} {
-				p := &problems{}
-				var cmds []command
-				complete := true
-				if ordered {
-					cmds, complete = wsxmlcmd.ParseOrdered(p, grammar, tc.input)
-					cmds = cmds[1:]
-				} else {
-					cmds = wsxmlcmd.Parse(p, grammar, tc.input)
-				}
-				if len(p.List) != 0 || !complete || len(cmds) != len(tc.bodies) {
-					t.Fatalf("commands=%+v problems=%v complete=%v", cmds, p.List, complete)
-				}
-				for i, want := range tc.bodies {
-					if cmds[i].Body != want {
-						t.Fatalf("body %d=%q want %q", i, cmds[i].Body, want)
-					}
-				}
-			}
-			st := &State{}
-			out, p := Apply(st, tc.input, testEnv())
-			if out.Accepted != len(tc.bodies) || st.PanelCounter != len(tc.bodies) || len(p) != 0 || out.Failed != "" || out.Unpartitioned {
-				t.Fatalf("Apply=%+v panels=%d problems=%v", out, st.PanelCounter, p)
-			}
-			for i, want := range tc.bodies {
-				if got := queryResult(t, st, fmt.Sprintf(`{"panel":"p%d"}`, i+1)).Direct.Entry.Text; got != want {
-					t.Fatalf("stored body %d=%q want %q", i, got, want)
-				}
-			}
+			assertLiteralOwnerBReading(t, tc.input)
+			assertLiteralOwnerBApply(t, tc.input)
 		})
 	}
 }
@@ -132,134 +91,44 @@ func canonicalCommands(cmds []command) []map[string]any {
 func TestLiteralBoundaryRound4Repros(t *testing.T) {
 	for name, input := range literalBoundaryRepros() {
 		t.Run(name, func(t *testing.T) {
-			p := &problems{}
-			got := wsxmlcmd.Parse(p, grammar, input)
-			q := &problems{}
-			ordered, complete := wsxmlcmd.ParseOrdered(q, grammar, input)
-			if !complete {
-				t.Fatalf("incomplete: %v", q.List)
-			}
-			if strings.HasPrefix(name, "CB-") {
-				if len(p.List) != 0 || len(q.List) != 0 {
-					t.Fatalf("problems: %v / %v", p.List, q.List)
-				}
-				count := 2
-				if strings.HasPrefix(name, "CB-log") {
-					count = 3
-				}
-				if name == "CB-field" {
-					count = 1
-				}
-				if len(got) != count {
-					t.Fatalf("commands=%d want %d: %+v", len(got), count, got)
-				}
-				if name == "CB-field" {
-					if got[0].FieldsOf("wb:title")[0] != "a `b" || got[0].FieldsOf("wb:why")[0] != "see ``</wb:why>`` y ` z" {
-						t.Fatalf("fields: %+v", got)
-					}
-				} else {
-					first := "a `"
-					if name == "CB-log-baseline" {
-						first = "a"
-					}
-					if got[0].Body != first {
-						t.Fatalf("first body=%q want=%q", got[0].Body, first)
-					}
-				}
-			} else {
-				oldGrammar := grammar
-				oldGrammar.LiteralCode = false
-				baselineProblems := &problems{}
-				baseline := wsxmlcmd.Parse(baselineProblems, oldGrammar, input)
-				if !reflect.DeepEqual(canonicalCommands(got), canonicalCommands(baseline)) {
-					t.Fatalf("baseline=%+v got=%+v", baseline, got)
-				}
-				if name != "CA-rejected-group" && (len(p.List) != 0 || len(q.List) != 0) {
-					t.Fatalf("problems: %v / %v", p.List, q.List)
-				}
-			}
 			if name == "CA-rejected-group" {
-				if len(ordered) != 3 || ordered[2].Body != "it's > keep ` it" {
-					t.Fatalf("lost valid group: %+v", ordered)
+				// Preserve the original regression, not a code-disabled
+				// ordered reference that lacks the required probe limit.
+				p := &problems{}
+				got, complete := wsxmlcmd.ParseOrdered(p, grammar, input)
+				if !complete || len(p.List) != 1 || len(got) != 3 || got[2].Body != "it's > keep ` it" {
+					t.Fatalf("lost following valid group: %+v %v complete=%v", got, p.List, complete)
 				}
-			} else if !reflect.DeepEqual(canonicalCommands(got), canonicalCommands(ordered)) {
-				t.Fatalf("ParseOrdered differs: %+v", ordered)
+				return
 			}
+			assertLiteralOwnerBReading(t, input)
 		})
 	}
 }
 
 func TestLiteralWalkResumesDelimitersAfterCDATA(t *testing.T) {
-	// The first following-body span ends inside CDATA. After consuming the
-	// section atomically, its immediately following span quotes its own close.
+	// CDATA remains atomic; the later quote of a raw panel close is now
+	// structural, so compare the complete result and Apply outcome to fallback.
 	body := "`<![CDATA[`]]>``</wb:panel>`` y ``` z"
 	input := "<wb:topic name=\"t\"><wb:panel recap=\"r\">```a</wb:panel><wb:panel recap=\"s\">" + body + "</wb:panel></wb:topic>"
-	want := "````</wb:panel>`` y ``` z"
-	for _, ordered := range []bool{false, true} {
-		p := &problems{}
-		var cmds []command
-		complete := true
-		if ordered {
-			cmds, complete = wsxmlcmd.ParseOrdered(p, grammar, input)
-			cmds = cmds[1:]
-		} else {
-			cmds = wsxmlcmd.Parse(p, grammar, input)
-		}
-		if len(p.List) != 0 || !complete || len(cmds) != 2 || cmds[0].Body != "```a" || cmds[1].Body != want {
-			t.Fatalf("ordered=%v commands=%+v complete=%v problems=%v", ordered, cmds, complete, p.List)
-		}
-	}
-	st := &State{}
-	out, p := Apply(st, input, testEnv())
-	if out.Accepted != 2 || st.PanelCounter != 2 || len(p) != 0 || out.Failed != "" || out.Unpartitioned || queryResult(t, st, `{"panel":"p2"}`).Direct.Entry.Text != want {
-		t.Fatalf("Apply=%+v panels=%d problems=%v", out, st.PanelCounter, p)
-	}
+	assertLiteralOwnerBReading(t, input)
+	assertLiteralOwnerBApply(t, input)
 }
 
 func TestLiteralBoundaryRound4ApplyNoSilentMerge(t *testing.T) {
-	for _, name := range []string{"CA-panel", "CA-third-panel", "CA-double-quote", "CA-known-name", "CA-fence", "CA-cdata-end", "CA-cdata-baseline", "CB-log", "CB-log-baseline", "CB-panel"} {
+	for name, input := range literalBoundaryRepros() {
 		t.Run(name, func(t *testing.T) {
-			input := literalBoundaryRepros()[name]
-			cmds, parseProblems := parse(input)
-			st := &State{}
-			result, p := Apply(st, input, testEnv())
-			count := 2
-			if name == "CA-third-panel" || strings.HasPrefix(name, "CB-log") {
-				count = 3
-			}
-			panels := count
-			if strings.HasPrefix(name, "CB-log") {
-				panels = 2
-			}
-			if len(parseProblems) != 0 || len(cmds) != count || result.Accepted != count || st.PanelCounter != panels || len(p) != 0 || result.Failed != "" || result.Unpartitioned {
-				t.Fatalf("commands=%d result=%+v panels=%d problems=%v / %v", len(cmds), result, st.PanelCounter, parseProblems, p)
-			}
-			for i, c := range cmds {
-				if c.Tag == "wb:panel" {
-					id := fmt.Sprintf("p%d", i+1)
-					if strings.HasPrefix(name, "CB-log") && i == 2 {
-						id = "p2"
-					}
-					if body := queryResult(t, st, fmt.Sprintf(`{"panel":%q}`, id)).Direct.Entry.Text; body != c.Body {
-						t.Fatalf("%s body=%q want %q", id, body, c.Body)
-					}
-				} else if log, _ := st.LatestAgent("t"); log.Text != c.Body {
-					t.Fatalf("log=%q want %q", log.Text, c.Body)
+			if name == "CA-rejected-group" {
+				st := &State{}
+				out, p := Apply(st, input, testEnv())
+				failed := strings.Split(input, `<wb:topic name="ok">`)[0]
+				log, ok := st.LatestAgent("ok")
+				if out.Accepted != 1 || out.Unpartitioned || len(p) != 1 || out.Failed != "<wb:failed>\n"+failed+"\n</wb:failed>" || !ok || log.Text != "it's > keep ` it" {
+					t.Fatalf("lost accepted log or changed retry group: %+v %v", out, p)
 				}
+				return
 			}
-			if name == "CB-log" && cmds[0].Body != "a `" {
-				t.Fatal("changed first body")
-			}
+			assertLiteralOwnerBApply(t, input)
 		})
-	}
-	input := literalBoundaryRepros()["CA-rejected-group"]
-	st := &State{}
-	result, p := Apply(st, input, testEnv())
-	failed := strings.Split(input, `<wb:topic name="ok">`)[0]
-	if result.Accepted != 1 || st.PanelCounter != 0 || result.Unpartitioned || len(p) != 1 || result.Failed != "<wb:failed>\n"+failed+"\n</wb:failed>" {
-		t.Fatalf("rejected group: %+v %v", result, p)
-	}
-	if log, _ := st.LatestAgent("ok"); log.Text != "it's > keep ` it" {
-		t.Fatalf("lost log: %+v", log)
 	}
 }

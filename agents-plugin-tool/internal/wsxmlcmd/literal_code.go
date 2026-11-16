@@ -1,7 +1,6 @@
 package wsxmlcmd
 
 import (
-	"slices"
 	"sort"
 	"strings"
 )
@@ -149,357 +148,38 @@ func firstBodyClose(s string, at, end int, closing string) int {
 	return -1
 }
 
-// Walk the fallback interpretation (the enclosing body ended at first).
-// Accept only an end in enclosing-level text. Raw frames share readContent's
-// matcher: if a frame's candidate crosses its own close, reject immediately
-// rather than assuming that close ends the frame, or recursively walking it.
-// Thus a long walk stops at the next body that could originate a long walk.
-func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields bodyFieldRules) bool {
-	pending := slices.Clone(fields.enclosing)
-	pos := first + len(closing)
-	// A suspended raw parent can resume after several operand fields. Track
-	// source newlines across every frame, not only the currently raw frame.
-	// Index once instead of rescanning the parent's prefix for each operand.
-	if t.literals == nil {
-		t.literals = indexLiterals(t.s)
+// A matched candidate crossing its own raw close is not a literal. Structural
+// reading wins without adding a refusal; only existing problems gain guidance.
+// Cache that raw close to bound repeated probes. Once reading has passed it
+// (for example by consuming a wrapper operand), later local quotes start fresh.
+// limit also bounds rejected-group lexical probes in readContent.
+func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, limit *int) int {
+	if *limit < at {
+		*limit = len(t.s)
 	}
-	lineStart := 0
-	if i := sort.SearchInts(t.literals.newlines, pos); i > 0 {
-		lineStart = t.literals.newlines[i-1] + 1
-	}
-	advance := func(next int) {
-		if nl := strings.LastIndexByte(t.s[pos:next], '\n'); nl >= 0 {
-			lineStart = pos + nl + 1
-		}
-		pos = next
-	}
-	for pos < end {
-		rest := t.s[pos:]
-		if strings.HasPrefix(rest, "<![CDATA[") {
-			stop := strings.Index(rest[9:], "]]>")
-			if stop < 0 || pos+9+stop+3 > end {
-				return false
-			}
-			advance(pos + 9 + stop + 3)
-			continue
-		}
-		if len(pending) > 0 {
-			top := &pending[len(pending)-1]
-			endTag := "</" + top.tag + ">"
-			if strings.HasPrefix(rest, endTag) {
-				advance(pos + len(endTag))
-				pending = pending[:len(pending)-1]
-				continue
-			}
-			if top.raw {
-				if rest[0] == '`' || rest[0] == '~' {
-					candidate := t.matchCodeLiteral(pos, top.bodyStart, max(top.bodyStart, lineStart), endTag, len(t.s))
-					if candidate > pos {
-						if top.ownClose == 0 {
-							top.ownClose = firstBodyClose(t.s, pos, len(t.s), endTag)
-						}
-						if top.ownClose < 0 || candidate > top.ownClose {
-							return false
-						}
-						// Only scan non-crossing candidates. Expanding CDATA
-						// before this check would rescan entire later-body chains.
-						candidate = literalConsumedEnd(t.s, pos, candidate)
-						if candidate > top.ownClose || candidate > end {
-							return false
-						}
-						// D-C: a following Decision-10 wrapper quote cannot
-						// license this enclosing cross-command candidate.
-						if top.wrapper != "" && literalHasWrapper(t.s, pos, candidate, top.wrapper) {
-							t.p.Add("literal code crosses a command boundary whose fallback depends on an inert wrapper example")
-							return false
-						}
-						advance(candidate)
-						continue
-					}
-				}
-				if !top.group && (top.wrapper == "" || !openingTagPrefix(rest, top.wrapper)) {
-					advance(pos + 1)
-					continue
-				}
-			}
-		}
-		if rest[0] != '<' {
-			advance(pos + 1)
-			continue
-		}
-		nameEnd := pos + 1
-		for nameEnd < len(t.s) && isNameByte(t.s[nameEnd]) {
-			nameEnd++
-		}
-		if nameEnd == pos+1 {
-			pos++
-			continue
-		}
-		name := t.s[pos+1 : nameEnd]
-		frame, known := literalCommand(t.grammar, name)
-		textTag := false
-		if len(pending) > 0 {
-			top := pending[len(pending)-1]
-			if !top.group {
-				frame, known = literalFrame{tag: name, raw: !top.raw}, true
-			} else if top.raw && !strings.HasPrefix(name, t.grammar.Prefix) {
-				// The rejected-group reader treats non-command tags as text,
-				// not raw elements whose distant close could rescan a suffix.
-				textTag, known = true, false
-			} else if !known {
-				frame, known = literalFrame{tag: name, raw: true}, true
-			}
-		} else if slices.Contains(fields.tags, name) {
-			frame, known = literalFrame{tag: name, raw: true}, true
-		}
-		limit := end
-		if !known {
-			limit = min(limit, pos+256)
-		}
-		stop, selfClosing, complete := literalTagEnd(t.s, nameEnd, limit)
-		if !complete {
-			if known {
-				return false
-			}
-			pos = nameEnd
-			continue
-		}
-		if !selfClosing && !textTag {
-			frame.bodyStart = stop
-			if frame.group {
-				// ParseOrdered reads text before a group's first command as
-				// a rejected raw body, with the same literal matcher. Such a
-				// body can originate a crossing walk just like a leaf/field.
-				next := stop
-				for next < len(t.s) && isSpace(t.s[next]) {
-					next++
-				}
-				if next < len(t.s) {
-					rest := t.s[next:]
-					frame.raw = t.ordered && (rest[0] != '<' || !strings.HasPrefix(rest[1:], t.grammar.Prefix) && !strings.HasPrefix(rest, "</"))
-					frame.bodyStart = next
-				}
-			}
-			pending = append(pending, frame)
-		}
-		advance(stop)
-	}
-	// Text between container fields is invalid in the fallback reading;
-	// text in a suspended raw panel body is not. Retain valid operand-local
-	// literals without mistaking mixed panel payloads for invalid syntax.
-	return len(pending) == 0 || !pending[len(pending)-1].raw && !pending[len(pending)-1].group
-}
-
-// Match the body reader's CDATA-before-literal dispatch, including a span
-// whose closing delimiter is inside a CDATA section. Never resume inside it.
-func literalConsumedEnd(s string, at, end int) int {
-	for at < end {
-		next := strings.Index(s[at:end], "<![CDATA[")
-		if next < 0 {
-			break
-		}
-		at += next + 9
-		stop := strings.Index(s[at:], "]]>")
-		if stop < 0 {
-			return len(s)
-		}
-		at += stop + 3
-		end = max(end, at)
-	}
-	return end
-}
-
-type literalFrame struct {
-	tag                 string
-	raw, group          bool
-	wrapper             string
-	bodyStart, ownClose int
-}
-
-func literalCommand(g *Grammar, name string) (literalFrame, bool) {
-	if g.isGroup(name) {
-		return literalFrame{tag: name, group: true}, true
-	}
-	spec, known := g.lookup(name)
-	frame := literalFrame{tag: name, raw: spec.Kind != Container}
-	if spec.Wrapper != "" {
-		frame.wrapper = g.Prefix + spec.Wrapper
-	}
-	return frame, known
-}
-
-// Boundary recognition does not validate attributes or emit diagnostics.
-// Unknown literal names get only a bounded lexical probe, so malformed markup
-// cannot trigger diagnostic lineAt prefix scans or unbounded repeated scans.
-func literalTagEnd(s string, afterName, limit int) (end int, selfClosing, complete bool) {
-	if afterName >= limit || !isSpace(s[afterName]) && s[afterName] != '>' && s[afterName] != '/' {
-		return afterName, false, false
-	}
-	// readOpen's syntax without attribute allocation or diagnostic line scans.
-	pos := afterName
-	for pos < limit {
-		for pos < limit && isSpace(s[pos]) {
-			pos++
-		}
-		if pos == limit {
-			break
-		}
-		if s[pos] == '>' {
-			return pos + 1, false, true
-		}
-		if s[pos] == '/' {
-			if pos+1 < limit && s[pos+1] == '>' {
-				return pos + 2, true, true
-			}
-			break
-		}
-		start := pos
-		for pos < limit && isNameByte(s[pos]) {
-			pos++
-		}
-		if pos == start {
-			break
-		}
-		for pos < limit && isSpace(s[pos]) {
-			pos++
-		}
-		if pos == limit || s[pos] != '=' {
-			break
-		}
-		pos++
-		for pos < limit && isSpace(s[pos]) {
-			pos++
-		}
-		if pos == limit || s[pos] != '\'' && s[pos] != '"' {
-			break
-		}
-		quote := s[pos]
-		stop := strings.IndexByte(s[pos+1:limit], quote)
-		if stop < 0 {
-			break
-		}
-		pos += stop + 2
-	}
-	return pos, false, false
-}
-
-func literalHasWrapper(s string, at, end int, wrapper string) bool {
-	for at < end {
-		if strings.HasPrefix(s[at:], "<![CDATA[") {
-			stop := strings.Index(s[at+9:], "]]>")
-			if stop < 0 {
-				return false
-			}
-			at += 9 + stop + 3
-		} else if openingTagPrefix(s[at:], wrapper) {
-			return true
-		} else {
-			at++
-		}
-	}
-	return false
-}
-
-// Reconstruct the first plain close's fallback context and cache the actual
-// enclosing close. An operand-internal panel close cannot clamp later panel
-// quotes. Known tag attributes are lexed exactly as in the reader, so CDATA
-// text inside an attribute cannot empty the stack behind the raw scan's back.
-// A disagreement with the raw CDATA scan is rejected, never indexed through.
-func (t *tokenizer) wrapperBoundaryFrames(at, first, bodyStart int, closing, wrapper string, cachedClose *int) ([]literalFrame, bool) {
-	name := strings.TrimSuffix(strings.TrimPrefix(closing, "</"), ">")
-	pending := []literalFrame{{tag: name, raw: true, wrapper: wrapper, bodyStart: bodyStart}}
-	var frames []literalFrame
-	captured, valid := false, true
-	for pos := at; pos < len(t.s); {
-		if len(pending) == 0 {
-			return nil, false
-		}
-		if !captured && pos >= first {
-			captured, valid = true, pos == first
-			frames = slices.Clone(pending)
-			if len(frames) == 1 {
-				frames = nil // this close really ends the enclosing panel
-			}
-		}
-		if captured && *cachedClose >= 0 {
-			return frames, valid
-		}
-		rest := t.s[pos:]
-		if strings.HasPrefix(rest, "<![CDATA[") {
-			stop := strings.Index(rest[9:], "]]>")
-			if stop < 0 {
-				return nil, false
-			}
-			pos += 9 + stop + 3
-			continue
-		}
-		top := pending[len(pending)-1]
-		endTag := "</" + top.tag + ">"
-		if strings.HasPrefix(rest, endTag) {
-			if len(pending) == 1 {
-				*cachedClose = pos
-				return frames, captured && valid
-			}
-			pos += len(endTag)
-			pending = pending[:len(pending)-1]
-			continue
-		}
-		if rest[0] != '<' || top.raw && (top.wrapper == "" || !openingTagPrefix(rest, top.wrapper)) {
-			pos++
-			continue
-		}
-		nameEnd := pos + 1
-		for nameEnd < len(t.s) && isNameByte(t.s[nameEnd]) {
-			nameEnd++
-		}
-		if nameEnd == pos+1 {
-			pos++
-			continue
-		}
-		stop, selfClosing, complete := literalTagEnd(t.s, nameEnd, len(t.s))
-		if !complete {
-			return nil, false
-		}
-		if !selfClosing {
-			pending = append(pending, literalFrame{tag: t.s[pos+1 : nameEnd], raw: !top.raw, bodyStart: stop})
-		}
-		pos = stop
-	}
-	return nil, false
-}
-
-func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, fields bodyFieldRules, limit *int) int {
-	end := t.matchCodeLiteral(at, bodyStart, lineStart, closing, *limit)
-	if end <= at || end > *limit {
+	end := t.matchCodeLiteral(at, bodyStart, lineStart, closing, len(t.s))
+	if end <= at {
 		return at
 	}
-	first := firstBodyClose(t.s, at, end, closing)
+	first := -1
+	if *limit < end {
+		first = *limit
+	} else {
+		first = firstBodyClose(t.s, at, end, closing)
+	}
 	if first >= 0 {
-		fallbackLimit := first
-		if fields.wrapper != "" {
-			enclosing, ok := t.wrapperBoundaryFrames(at, first, bodyStart, closing, fields.wrapper, fields.wrapperClose)
-			if *fields.wrapperClose >= 0 {
-				fallbackLimit = *fields.wrapperClose
-			} else {
-				fallbackLimit = *limit
-			}
-			if !ok {
-				t.p.Add("literal code cannot resolve the enclosing wrapper boundary")
-				*limit = min(*limit, fallbackLimit)
-				return at
-			}
-			fields.enclosing = enclosing
+		*limit = first
+		if at >= t.crossingUntil {
+			t.crossingFrom = at
 		}
-		if !t.codeBodyBoundary(first, end, closing, fields) {
-			*limit = min(*limit, fallbackLimit)
-			return at
-		}
+		t.crossingUntil = max(t.crossingUntil, end)
+		t.crossings++
+		return at
 	}
 	return end
 }
 
-// Candidate matching is shared by the body reader and fallback walk. The
-// lazily built index contains positions only, never boundary-policy decisions.
+// Matching indexes positions only; no fallback grammar walk licenses crossings.
 func (t *tokenizer) matchCodeLiteral(at, bodyStart, lineStart int, closing string, limit int) int {
 	mark := t.s[at]
 	if mark != '`' && mark != '~' || at > bodyStart && t.s[at-1] == mark {

@@ -2,6 +2,7 @@ package wsxmlcmd
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -75,12 +76,21 @@ func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
 		"```xml\ninterior ``` </x:text> is still code\n```",
 		"~~~xml\n</x:text> `\n~~~",
 	} {
-		cmds, problems := parse(g, "<x:text>"+body+"</x:text>")
-		if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != stripTrailingNewline(body) {
+		input := "<x:text>" + body + "</x:text>"
+		cmds, problems := parse(g, input)
+		if strings.Contains(body, "</x:text>") {
+			// Owner-b: a raw own-close candidate is not a literal.
+			g0 := g
+			g0.LiteralCode = false
+			baseline, structuralProblems := parse(g0, input)
+			if len(problems) == 0 || len(problems) != len(structuralProblems) || !reflect.DeepEqual(cmds, baseline) {
+				t.Fatalf("structural %q: %+v / %+v, %q / %q", body, cmds, baseline, problems, structuralProblems)
+			}
+		} else if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != stripTrailingNewline(body) {
 			t.Fatalf("literal %q: %+v, %q", body, cmds, problems)
 		}
 	}
-	cmds, problems = parse(g, "<x:payload>\n<x:change><x:old>`<x:new></x:old>`</x:old><x:new/></x:change>\n<x:change><x:old><![CDATA[<x:new></x:old>]]></x:old><x:new> &amp; </x:new></x:change>\n</x:payload>")
+	cmds, problems = parse(g, "<x:payload>\n<x:change><x:old>`<![CDATA[<x:new></x:old>]]>`</x:old><x:new/></x:change>\n<x:change><x:old><![CDATA[<x:new></x:old>]]></x:old><x:new> &amp; </x:new></x:change>\n</x:payload>")
 	if len(problems) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 2 || strings.TrimSpace(cmds[0].Body) != "" {
 		t.Fatalf("wrapped fields: %+v, %q", cmds, problems)
 	}
@@ -130,11 +140,15 @@ func TestLiteralCodeDoesNotPairAcrossStructuralBodies(t *testing.T) {
 	if len(problems) != 0 || len(cmds) != 1 || len(cmds[0].Fields) != 2 || cmds[0].FieldsOf("x:old")[0] != "a `" || cmds[0].FieldsOf("x:new")[0] != "b `" {
 		t.Fatalf("cross-operand code pairing: %+v, %q", cmds, problems)
 	}
-	// Complete examples can contain repeated enclosing elements in one span.
+	// Owner-b requires CDATA for examples containing their own raw close.
 	body := "`<x:text>one</x:text><x:text>two</x:text>`"
 	cmds, problems = parse(g, "<x:text>"+body+"</x:text>")
+	if len(problems) == 0 || !strings.Contains(strings.Join(problems, " "), "CDATA") {
+		t.Fatalf("raw own-close example was not structural: %+v, %q", cmds, problems)
+	}
+	cmds, problems = parse(g, "<x:text><![CDATA["+body+"]]></x:text>")
 	if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
-		t.Fatalf("balanced literal example: %+v, %q", cmds, problems)
+		t.Fatalf("CDATA example: %+v, %q", cmds, problems)
 	}
 }
 
@@ -189,7 +203,7 @@ func BenchmarkLiteralCodeLookahead(b *testing.B) {
 func literalMalformedMarkupFixture(n int) (Grammar, string, string) {
 	g := Grammar{Prefix: "wb:", LiteralCode: true, Group: &Group{Name: "topic", Attr: "name"}, Commands: map[string]Spec{"panel": {Kind: Leaf, Attrs: []string{"recap"}, Scoped: true}}}
 	body := "`</wb:panel>" + strings.Repeat("<a?", n) + "`"
-	input := `<wb:topic name="t"><wb:panel recap="r">` + body + `</wb:panel></wb:topic>`
+	input := `<wb:topic name="t"><wb:panel recap="r">` + "`<![CDATA[</wb:panel>]]>" + strings.Repeat("<a?", n) + "`" + `</wb:panel></wb:topic>`
 	return g, input, body
 }
 
