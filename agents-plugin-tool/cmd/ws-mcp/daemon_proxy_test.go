@@ -385,6 +385,22 @@ func TestHostedMailboxWaitEndsWithItsConnection(t *testing.T) {
 
 func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 	h := startHostedDaemon(t)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		for _, path := range []string{
+			filepath.Join("/proc", strconv.Itoa(h.ep.PID), "status"),
+			filepath.Join(h.dir, "dashboard.log"),
+		} {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Logf("diagnostic %s: %v", path, err)
+			} else {
+				t.Logf("diagnostic %s:\n%s", path, data)
+			}
+		}
+	})
 	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, h.ep); err != nil || info.LAN {
 		t.Fatalf("health before the change = %+v, %v", info, err)
 	}

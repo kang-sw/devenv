@@ -345,6 +345,29 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	}
 }
 
+// framedDashboardScript checks the frame's single content-addressed script
+// reference and fetches the assembled source rather than expecting it inline.
+func framedDashboardScript(t *testing.T, base, page string) (int, string) {
+	t.Helper()
+	matches := regexp.MustCompile(`<script src="(/s/dashboard-[0-9a-f]{24}\.js)"></script>`).FindAllStringSubmatchIndex(page, -1)
+	if len(matches) != 1 {
+		t.Fatalf("framed page has %d content-addressed dashboard scripts, want one", len(matches))
+	}
+	m := matches[0]
+	code, script := get(t, base+page[m[2]:m[3]])
+	if code != http.StatusOK {
+		t.Fatalf("dashboard script GET = %d", code)
+	}
+	want, err := dashboardTestAsset("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if script != string(want) || strings.Contains(page, "The dashboard page script, shared") {
+		t.Error("frame must reference the assembled dashboard script, not inline it")
+	}
+	return m[0], script
+}
+
 // TestPagesCarryTheTracker pins the tracker renderer on the pages that mount
 // it, the framed session pages and the index (the shell around a session page
 // leaves it to its frame): its stylesheet after the dashboard's, its script
@@ -362,7 +385,8 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if css < 0 || trackerCSS < css {
 			t.Errorf("%s page: the tracker stylesheet is missing or ahead of the dashboard's", name)
 		}
-		i18n, tracker, script := strings.Index(page, "window.wsT = function"), strings.Index(page, "window.WsTracker = { mount: mount }"), strings.Index(page, "The dashboard page script, shared")
+		script, _ := framedDashboardScript(t, f.base, page)
+		i18n, tracker := strings.Index(page, "window.wsT = function"), strings.Index(page, "window.WsTracker = { mount: mount }")
 		if i18n < 0 || tracker < i18n || script < tracker {
 			t.Errorf("%s page: the tracker script is missing or not between the string table and the page script", name)
 		}
