@@ -1,0 +1,312 @@
+{
+  "commit": "4be663726eb2cc6fa9779b8f55b152f76c3a2c00",
+  "tag": "v0.50.0",
+  "archive_sha256": "68a6bac619ae28fd68130a33c55e655540695770324ea6a25b5088ee8d573d7a",
+  "files": [
+    {
+      "path": "wswhiteboard/assets/ago.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/ago.js",
+      "sha256": "7015f1cfaf3ad89c12a7157bbe42e6e6fddbd98cc4fdafde1166741835d23d45"
+    },
+    {
+      "path": "wswhiteboard/assets/answers.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/answers.js",
+      "sha256": "be634fac6cb113902fee970547033f4167e5a071afd2e1aa5c457f3cf776ace3"
+    },
+    {
+      "path": "wswhiteboard/assets/chg.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/chg.js",
+      "sha256": "f8d65b38fc16f39e8b045e6b511de48060634c3df402c70cbd9b7a840b845e52"
+    },
+    {
+      "path": "wswhiteboard/assets/code.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/code.js",
+      "sha256": "dc966da0f0a8c6811ece9c38304ede0b7c09e9768230e130962aa05ade87b02c"
+    },
+    {
+      "path": "wswhiteboard/assets/deps.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/deps.js",
+      "sha256": "1a330782160c69068b7e4d474daaf0d80aa3fd71c1eafac6a8f6ffa3816910ee"
+    },
+    {
+      "path": "wswhiteboard/assets/doc-frame.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/doc-frame.js",
+      "sha256": "ff222fb4c0474a57c88070befffa3c951cf22c408e5998170fb2e17b8f91aea2"
+    },
+    {
+      "path": "wswhiteboard/assets/form.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/form.js",
+      "sha256": "a22af3f40d8c180c0af4717b85182378facad122164a778c436dd219c7e1cb68"
+    },
+    {
+      "path": "wswhiteboard/assets/live.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/live.js",
+      "sha256": "0e30dcc41c03ad4035c7bdf8ac64c2fb58752afe21b87c3d6e560c0c118ada9d"
+    },
+    {
+      "path": "wswhiteboard/assets/mermaid-init.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/mermaid-init.js",
+      "sha256": "e0f7f8bb291984337af36997e3a89c408408395612e3d329fe881fba4b0c89d8"
+    },
+    {
+      "path": "wswhiteboard/assets/mermaid/LICENSE",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/mermaid/LICENSE",
+      "sha256": "ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80"
+    },
+    {
+      "path": "wswhiteboard/assets/mermaid/README.md",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/mermaid/README.md",
+      "sha256": "b63e03cfe1d1c796c62e9c90a730f93978ddd21014505627f467da927c68668e"
+    },
+    {
+      "path": "wswhiteboard/assets/mermaid/mermaid.min.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/mermaid/mermaid.min.js",
+      "sha256": "581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8"
+    },
+    {
+      "path": "wswhiteboard/assets/page-items.css",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/page-items.css",
+      "sha256": "065e4b85f0ca787937ae2b286c93cead51a9c850088a0e405e2b2b74c6aad167"
+    },
+    {
+      "path": "wswhiteboard/assets/page-panels.css",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/page-panels.css",
+      "sha256": "858fee280d77ca8fa6005be8cf31635a2ee04c5a0777933c9cd7d78324314403"
+    },
+    {
+      "path": "wswhiteboard/assets/page-sticky.css",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/page-sticky.css",
+      "sha256": "4aae2c19bb6ace065864f11f419b52d3f2fe96fcb6f8a8cd833b309514b7dee3"
+    },
+    {
+      "path": "wswhiteboard/assets/page-stream.css",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css",
+      "sha256": "fbb60d0c8706ed86f2810edd5a703794f0a66da35609b550840fb0763d9803af"
+    },
+    {
+      "path": "wswhiteboard/assets/page.css",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/page.css",
+      "sha256": "7428b6c286ed13d60ed55d80a802171b71a94cb56bc3ec45e13f321636948a6f"
+    },
+    {
+      "path": "wswhiteboard/assets/page.tmpl",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl",
+      "sha256": "920ce08bf6f778db16b274c31b52765cdc0e78a534ffe10fce873b2a294f69bd"
+    },
+    {
+      "path": "wswhiteboard/assets/pill.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/pill.js",
+      "sha256": "ea050d2338a7ec75e569fee3e783d29a9df6df9e33c53196bb8ced20ec36020a"
+    },
+    {
+      "path": "wswhiteboard/assets/rail.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/rail.js",
+      "sha256": "42ab6c8a5bda48bc6b2da4d531e5f52b763c105af0481f56adbcc62e5d462bd3"
+    },
+    {
+      "path": "wswhiteboard/assets/sprite.svg",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/sprite.svg",
+      "sha256": "61dbf37a68ca119dd9c2a920812926e0015b6762c4d86e15b91e30a0fafb5a0f"
+    },
+    {
+      "path": "wswhiteboard/assets/stream.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/stream.js",
+      "sha256": "2be50f38ca471b4f4a9250397178dc4ac24d8b73b55331183b03644408f41559"
+    },
+    {
+      "path": "wswhiteboard/assets/svg-view.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/svg-view.js",
+      "sha256": "03f524990cd59b668e921cd0243564358556002d536f54f9a2b6c72a9034a30d"
+    },
+    {
+      "path": "wswhiteboard/assets/viewer.js",
+      "source": "agents-plugin-tool/internal/wswhiteboard/assets/viewer.js",
+      "sha256": "717e91d4a92c96ceb90c3042bfad2c48c7687862447694baf06dc0f4a6c884a5"
+    },
+    {
+      "path": "wswhiteboard/bare_links.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/bare_links.go",
+      "sha256": "2c7761d52db6fb2a090b34b1320451e70f681ef4294fdf0d72ec251bc5d017cd"
+    },
+    {
+      "path": "wswhiteboard/board_notice.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/board_notice.go",
+      "sha256": "b5dc7e8c782b16b80604f6cf9b9453d870d46a66a8e0d188d46abc2e08b31aa3"
+    },
+    {
+      "path": "wswhiteboard/bodytime.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/bodytime.go",
+      "sha256": "39ebcf38a971ff502a443a457da8f25bd56f50c0fdff9dd57eaa258536b96107"
+    },
+    {
+      "path": "wswhiteboard/changes.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/changes.go",
+      "sha256": "6ef465549e96628983b8589411fe217b152d715876ac174626f18c2816ef6fc9"
+    },
+    {
+      "path": "wswhiteboard/commands.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/commands.go",
+      "sha256": "ea41ed38234392f93bf85093bc7beaf109c78f2007b7c1e3e5ca64b1269a9e4d"
+    },
+    {
+      "path": "wswhiteboard/count_chips.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/count_chips.go",
+      "sha256": "002aea2deb992feaec1e0f0ed0614e5fb11bb24ef87d3ca1b6de6fec9cec2ec7"
+    },
+    {
+      "path": "wswhiteboard/effects.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/effects.go",
+      "sha256": "b677305811e2ce8437a67f52aeaf1f99765efffb15549ed47138aea7d135321d"
+    },
+    {
+      "path": "wswhiteboard/entries.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/entries.go",
+      "sha256": "3def5e7b65de3b6ce2db3c6f769fa674f856682ed04f9e3f2eebf6d465c9a359"
+    },
+    {
+      "path": "wswhiteboard/entry_json.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/entry_json.go",
+      "sha256": "c9729f4c519c4291b83eaac483c86d83b07666ad054c2c95ad2e932fd10d60cd"
+    },
+    {
+      "path": "wswhiteboard/folders.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/folders.go",
+      "sha256": "bcd8977ed69dae1fea17715b952347c3def9767c5a356d84dd933ab04e44c568"
+    },
+    {
+      "path": "wswhiteboard/folders_cache.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/folders_cache.go",
+      "sha256": "5ce7b8eab2f384ae53f00aee10a1b59bb53a8e6c9052648ed25914d88b7e602b"
+    },
+    {
+      "path": "wswhiteboard/history_items.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/history_items.go",
+      "sha256": "9bbe6d89a1b26834f17503251cd9e0ce73c98962a77eccda3a6a16c98061d472"
+    },
+    {
+      "path": "wswhiteboard/history_render.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/history_render.go",
+      "sha256": "8bd171eb15f5cfe412572bbfd2182f9f29a62c4feee3061c33d859ace6fe0ba8"
+    },
+    {
+      "path": "wswhiteboard/htmlblock.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/htmlblock.go",
+      "sha256": "c8d532507d234afef7df209a3053a1a5d52b3a72a1f52d5d6a02fabd614e706f"
+    },
+    {
+      "path": "wswhiteboard/inline_tags.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/inline_tags.go",
+      "sha256": "4a98d213d00d9e26b9663870e168b8c954b6436c93a6820ed8e84d44455f47fd"
+    },
+    {
+      "path": "wswhiteboard/markdown.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/markdown.go",
+      "sha256": "2a6cdfc031e8233e39165a3b0c56439f6d9d87bc525eafa31b942109a90f75a3"
+    },
+    {
+      "path": "wswhiteboard/markdown_text.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/markdown_text.go",
+      "sha256": "e568644e8a395716e2ae574c7136627e59c34a74d7ce78adfce21f56a77b6266"
+    },
+    {
+      "path": "wswhiteboard/nudge.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/nudge.go",
+      "sha256": "4c29f6c709ed8f882dfb75092a2f603a35c07fa2e9ea3da2d3c0e702fe3da3a5"
+    },
+    {
+      "path": "wswhiteboard/query.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/query.go",
+      "sha256": "7603664ae48c31e17fd50a59ca9002e83252385e2b7fedccdb3e94dc5433b112"
+    },
+    {
+      "path": "wswhiteboard/query_entries.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/query_entries.go",
+      "sha256": "901159cc2290038dd8442c667e066d9a15507174649e8ecfcf4485a514833368"
+    },
+    {
+      "path": "wswhiteboard/raw_img.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/raw_img.go",
+      "sha256": "71219a8e4c12b0f5fc6fe5f43e0f05ca4f6f3a4dc738fdbee3f974772beb29c6"
+    },
+    {
+      "path": "wswhiteboard/render.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/render.go",
+      "sha256": "d939ac950cc56ae60766fafd5bf9228657447c0e6ecb70eb029222e3f34e4b4b"
+    },
+    {
+      "path": "wswhiteboard/render_topics.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/render_topics.go",
+      "sha256": "f960a869709cea83a23d173c1399f011b294e1e3f8f505326103e1d354b61d3b"
+    },
+    {
+      "path": "wswhiteboard/sanitize.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/sanitize.go",
+      "sha256": "327cc97f9eb741b7050bd06484ce6850cd789c49f7e4bef265e989c201d0a73a"
+    },
+    {
+      "path": "wswhiteboard/store.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/store.go",
+      "sha256": "a87a649cf89cf09722dfc8a62551745d8407776727d23f649e3f33d1806649d5"
+    },
+    {
+      "path": "wswhiteboard/stream_render.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/stream_render.go",
+      "sha256": "a69883ca7113fd15e616e59ff21f157f53596abc4b640237315525d3a1bc7912"
+    },
+    {
+      "path": "wswhiteboard/stream_view.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/stream_view.go",
+      "sha256": "d86d39e48bd470ad225e202509a82456e6ae9721e74b8b24bb8ac11fd2d52bcd"
+    },
+    {
+      "path": "wswhiteboard/timeline_view.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/timeline_view.go",
+      "sha256": "dd2d418263bcb5c37356480b301dcb42ef33c48c7f93322bb8feab75d5aa9dbf"
+    },
+    {
+      "path": "wswhiteboard/topic_eta.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/topic_eta.go",
+      "sha256": "e3d5bb014d9a44531373390be6413ec0dc6bbe0a9ab05f928e17522850d1072e"
+    },
+    {
+      "path": "wswhiteboard/topic_state.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/topic_state.go",
+      "sha256": "83ec1566625907cf1a79dba8d5e8247ef5e39cac0f34b077a5343c1e8753660f"
+    },
+    {
+      "path": "wswhiteboard/topics.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/topics.go",
+      "sha256": "066f0c467293e744bc7daad919e10d803f2a49de53043bdcd9125ce75bd49765"
+    },
+    {
+      "path": "wswhiteboard/tree.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/tree.go",
+      "sha256": "1cb3cca682e3c174b9542edf0b23253b40628b63fefe0dcea8d354efe093a856"
+    },
+    {
+      "path": "wswhiteboard/update_summaries.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/update_summaries.go",
+      "sha256": "1bb0f723a960a19543f88e49042c0b451000f606948f49cd3fb0cab2acda29fc"
+    },
+    {
+      "path": "wswhiteboard/view.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/view.go",
+      "sha256": "9f47966289e0d071e6b29a25295d9118afe6ae1f97d73ca99580fcee5e50b60d"
+    },
+    {
+      "path": "wswhiteboard/waiting_on.go",
+      "source": "agents-plugin-tool/internal/wswhiteboard/waiting_on.go",
+      "sha256": "1ecd2baad4a0f68048cad615490b3849b9a66c8def08d89835458e9b444e5431"
+    },
+    {
+      "path": "wsxmlcmd/check.go",
+      "source": "agents-plugin-tool/internal/wsxmlcmd/check.go",
+      "sha256": "c8d1e2410de53915a67052c0c48ad49a01e8c7aee61731701d029daa13219635"
+    },
+    {
+      "path": "wsxmlcmd/wsxmlcmd.go",
+      "source": "agents-plugin-tool/internal/wsxmlcmd/wsxmlcmd.go",
+      "sha256": "f6d236e5160a0f03084350efae2da1e7e01e7e179486e91e02bb13c24647e5f1"
+    }
+  ]
+}

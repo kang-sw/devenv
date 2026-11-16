@@ -1,14 +1,21 @@
 package wswhiteboard
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -90,6 +97,214 @@ func folderAdd(s *State) error {
 	}
 	s.Topics[0].Body = "new current content"
 	return nil
+}
+
+// Freeze both the real v0.50.0 writer and its shared parser. Only the import
+// relocation is rewritten after hash verification; remaining dependencies are
+// resolved from this module, offline, with the caller's isolated environment.
+func buildPanelV050Writer(t *testing.T) string {
+	t.Helper()
+	fixture := filepath.Join("testdata", "panel-v050")
+	var manifest struct {
+		Commit     string
+		ArchiveSHA string `json:"archive_sha256"`
+		Files      []struct{ Path, SHA256 string }
+	}
+	if err := json.Unmarshal(folderRead(t, filepath.Join(fixture, "manifest.json")), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Commit != "4be663726eb2cc6fa9779b8f55b152f76c3a2c00" {
+		t.Fatal("wrong historical release")
+	}
+	archive := folderRead(t, filepath.Join(fixture, "source.tar.gz"))
+	sum := sha256.Sum256(archive)
+	if hex.EncodeToString(sum[:]) != manifest.ArchiveSHA {
+		t.Fatal("historical archive hash changed")
+	}
+	want := map[string]string{}
+	for _, file := range manifest.Files {
+		want[file.Path] = file.SHA256
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	dir := t.TempDir()
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Typeflag != tar.TypeReg || !filepath.IsLocal(filepath.FromSlash(header.Name)) {
+			t.Fatal("invalid fixture path")
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(data)
+		if want[header.Name] != hex.EncodeToString(sum[:]) {
+			t.Fatalf("historical source changed: %s", header.Name)
+		}
+		delete(want, header.Name)
+		if strings.HasSuffix(header.Name, ".go") {
+			data = bytes.ReplaceAll(data, []byte(`"github.com/kang-sw/devenv/internal/wsxmlcmd"`), []byte(`"github.com/kang-sw/devenv/historyfixture/wsxmlcmd"`))
+		}
+		path := filepath.Join(dir, filepath.FromSlash(header.Name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatal("missing historical source")
+	}
+	module, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod := fmt.Sprintf("module github.com/kang-sw/devenv/historyfixture\n\ngo 1.23\n\nrequire github.com/kang-sw/devenv v0.0.0\nreplace github.com/kang-sw/devenv => %s\n", strconvQuote(module))
+	driver := strings.ReplaceAll(historicalDriver, "/historyfixture/historical", "/historyfixture/wswhiteboard")
+	for path, data := range map[string][]byte{"go.mod": []byte(mod), "go.sum": folderRead(t, filepath.Join(module, "go.sum")), "main.go": []byte(driver)} {
+		if err := os.WriteFile(filepath.Join(dir, path), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	binary := filepath.Join(dir, "v050-writer")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	// Start at the explicit absolute module root, including nested Go calls.
+	cmd := exec.CommandContext(ctx, "go", "-C", dir, "build", "-p=1", "-mod=mod", "-o", binary, ".")
+	cmd.Dir = module
+	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
+	output, err := cmd.CombinedOutput()
+	t.Logf("v0.50.0 %s build from %s: %v\n%s", manifest.Commit, module, cmd.Args, output)
+	if err != nil {
+		t.Fatalf("historical writer build: %v", err)
+	}
+	return binary
+}
+
+func TestFolderPanelNamesThroughV050Writer(t *testing.T) {
+	binary := buildPanelV050Writer(t)
+	patch := `<wb:topic name="Work"><wb:panel name="implementation"><wb:change><wb:old>Pending</wb:old><wb:new>Complete</wb:new></wb:change></wb:panel></wb:topic>`
+	// Recap and a valid id would allow a dangerous literal replacement if a
+	// caller stripped name. Exercise the discriminator without other errors.
+	oldPatch := strings.Replace(patch, `name="implementation"`, `name="implementation" id="p1" recap="Status"`, 1)
+	for _, stage := range []string{"committed", "intent", "log-partial"} {
+		t.Run(stage, func(t *testing.T) {
+			dir := t.TempDir()
+			apply := func(xml string) func(*State) error { return func(s *State) error { mustApply(t, s, xml); return nil } }
+			f := FolderStore{Dir: dir}
+			if err := f.Update(nil, apply(`<wb:topic name="Work"><wb:panel name="implementation" recap="Status">Pending anchor</wb:panel></wb:topic>`)); err != nil {
+				t.Fatal(err)
+			}
+			initial := folderOpen(t, dir, nil)
+			original := entries(t, initial, "Work")[0]
+			expected := initial.clone()
+			mustApply(t, expected, patch)
+			if stage != "committed" {
+				f.Fault = func(hit string) error {
+					if hit == stage {
+						return folderCrash
+					}
+					return nil
+				}
+			}
+			err := f.Update(nil, apply(patch))
+			if stage == "committed" && err != nil || stage != "committed" && !errors.Is(err, folderCrash) {
+				t.Fatalf("crash stage %s: %v", stage, err)
+			}
+			// A refused old call may recover an already-durable intent, but must
+			// publish no command-generated version, line or counter advancement.
+			historicalCall(t, binary, dir, "update", logXML("Work", "must not commit")+oldPatch, true)
+			got := folderOpen(t, dir, nil)
+			if !reflect.DeepEqual(expected, got) {
+				t.Fatalf("old recovery/refusal changed state\nwant %s\ngot %s", folderJSON(expected), folderJSON(got))
+			}
+			prefix := folderTree(t, dir)
+			historicalCall(t, binary, dir, "open", "", false)
+			if !reflect.DeepEqual(prefix, folderTree(t, dir)) {
+				t.Fatal("old committed read changed bytes")
+			}
+			historicalCall(t, binary, dir, "update", logXML("Other", "unrelated old write")+`<wb:topic name="Work"><wb:panel id="p1" recap="Old writer">Legacy id payload</wb:panel></wb:topic>`, false)
+			afterOldWrite := folderTree(t, dir)
+			for path, data := range prefix {
+				current := afterOldWrite[path]
+				if strings.Contains(path, "/panels/") && current != data || strings.HasSuffix(path, "log.jsonl") && !strings.HasPrefix(current, data) {
+					t.Fatalf("old writer rewrote %s", path)
+				}
+			}
+			got = folderOpen(t, dir, nil)
+			latest := queryResult(t, got, `{"panel":"p1"}`).Direct.Entry
+			if latest.Text != "Legacy id payload" || latest.PanelName != "" {
+				t.Fatalf("wrong legacy version: %+v", latest)
+			}
+			before := got.clone()
+			// A later named patch must find the historical binding but patch
+			// the intervening unnamed legacy version, not the last named text.
+			update := `<wb:topic name="Work"><wb:panel name="implementation"><wb:change><wb:old>Legacy id</wb:old><wb:new>New named</wb:new></wb:change></wb:panel></wb:topic>`
+			f.Fault = nil
+			if err := f.Update(nil, apply(update)); err != nil {
+				t.Fatal(err)
+			}
+			got = folderOpen(t, dir, nil)
+			latest = queryResult(t, got, `{"panel":"p1"}`).Direct.Entry
+			if latest.Text != "New named payload" || latest.Recap != "Old writer" || latest.PanelName != "implementation" || got.PanelCounter != 1 {
+				t.Fatalf("lost reconstructed name/latest version: %+v", latest)
+			}
+			if exact := queryResult(t, got, fmt.Sprintf(`{"panel":%q}`, original.ID)).Direct.Entry; !reflect.DeepEqual(exact, original) {
+				t.Fatal("exact original eN link changed")
+			}
+			if exact := queryResult(t, got, fmt.Sprintf(`{"panel":%q}`, expected.Topics[0].Entries[len(initial.Topics[0].Entries)].ID)).Direct.Entry; exact.Text != "Complete anchor" {
+				t.Fatal("exact patched eN payload changed")
+			}
+			if !reflect.DeepEqual(entries(t, got, "Work")[:len(entries(t, before, "Work"))], entries(t, before, "Work")) {
+				t.Fatal("named update mutated historical entries")
+			}
+			// All refusal cases run against an already-open store as well.
+			tree := folderTree(t, dir)
+			historicalCall(t, binary, dir, "update", oldPatch, true)
+			if !reflect.DeepEqual(tree, folderTree(t, dir)) {
+				t.Fatal("old parser refusal wrote committed store")
+			}
+		})
+	}
+	t.Run("old-data-and-first-open", func(t *testing.T) {
+		dir := t.TempDir()
+		legacy := filepath.Join(t.TempDir(), "legacy.json")
+		legacyState := folderFixture()
+		legacyState.EmbedDir = "" // this fixture tests content, not a stale host path
+		if err := os.WriteFile(legacy, folderJSON(legacyState), 0644); err != nil {
+			t.Fatal(err)
+		}
+		historicalCall(t, binary, dir, "legacy", legacy, false)
+		converted := folderTree(t, dir)
+		historicalCall(t, binary, dir, "update", strings.Replace(patch, `name="implementation"`, `name="implementation" recap="Status"`, 1), true)
+		if !reflect.DeepEqual(converted, folderTree(t, dir)) {
+			t.Fatal("refusal changed separately converted legacy content")
+		}
+		got := folderOpen(t, dir, nil)
+		if got.Topics[0].Body != folderFixture().Topics[0].Body || got.Topics[0].Entries[0].Text != folderFixture().Topics[0].Recap {
+			t.Fatal("new reader lost old data")
+		}
+		historicalCall(t, binary, dir, "update", panelXML("Old", "old recap", "old panel"), false)
+		got = folderOpen(t, dir, nil)
+		mustApply(t, got, `<wb:topic name="Old"><wb:panel id="p1" recap="new recap">new full panel</wb:panel><wb:body>alpha</wb:body><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit></wb:topic>`)
+		if got.TopicBody("Old") != "beta" || queryResult(t, got, `{"panel":"p1"}`).Direct.Entry.Text != "new full panel" {
+			t.Fatal("old full/id/body/edit calls broke on new parser")
+		}
+	})
 }
 
 func TestFolderAbsentAndEmpty(t *testing.T) {

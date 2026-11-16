@@ -189,7 +189,7 @@ not the major lag source in this trace. Nevertheless, the owner's explicit
 claim it fixes the measured exposure bottleneck, and do not touch composer grow
 or slash/# enumeration (the latter was refuted by the trace).
 
-### Phase 2 implementation boundary — 2026-11-16 11:02
+### Implementation boundary for Phase 2 — 2026-11-16 11:02
 
 Lead assigned a code-level fresh-load audit, contained caching/deduplication/
 visibility wins, and per-session scroll restoration. Baseline is develop

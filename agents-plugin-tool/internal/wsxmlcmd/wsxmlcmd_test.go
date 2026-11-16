@@ -1,6 +1,8 @@
 package wsxmlcmd
 
 import (
+	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -54,6 +56,180 @@ func TestCallerPrefixAndTableDecideTheTags(t *testing.T) {
 	}
 	if !slices.Equal(problems, want) {
 		t.Fatalf("problems = %q, want %q", problems, want)
+	}
+}
+
+func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
+	input := "<tr:note>`</tr:note>` tail</tr:note>"
+	cmds, problems := parse(testGrammar, input)
+	if len(problems) == 0 || len(cmds) != 1 || cmds[0].Body != "`" {
+		t.Fatalf("default grammar changed delimiter behavior: %+v, %q", cmds, problems)
+	}
+	g := Grammar{Prefix: "x:", LiteralCode: true, RefuseFieldOpenings: true, Commands: map[string]Spec{
+		"payload": {Kind: Leaf, Wrapper: "change", Fields: []string{"old", "new"}},
+		"text":    {Kind: Leaf},
+	}}
+	for _, body := range []string{
+		"`</x:text>`", "``a ` </x:text>``", "unmatched ` text",
+		"```xml\n</x:text> `\n```\n", "~~~xml\n</x:text> `\n~~~\n",
+		"   ````xml\n</x:text>\n```\n   `````\n",
+		"```xml\ninterior ``` </x:text> is still code\n```",
+		"~~~xml\n</x:text> `\n~~~",
+	} {
+		input := "<x:text>" + body + "</x:text>"
+		cmds, problems := parse(g, input)
+		if strings.Contains(body, "</x:text>") {
+			// Owner-b: a raw own-close candidate is not a literal.
+			g0 := g
+			g0.LiteralCode = false
+			baseline, structuralProblems := parse(g0, input)
+			if len(problems) == 0 || len(problems) != len(structuralProblems) || !reflect.DeepEqual(cmds, baseline) {
+				t.Fatalf("structural %q: %+v / %+v, %q / %q", body, cmds, baseline, problems, structuralProblems)
+			}
+		} else if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != stripTrailingNewline(body) {
+			t.Fatalf("literal %q: %+v, %q", body, cmds, problems)
+		}
+	}
+	cmds, problems = parse(g, "<x:payload>\n<x:change><x:old>`<![CDATA[<x:new></x:old>]]>`</x:old><x:new/></x:change>\n<x:change><x:old><![CDATA[<x:new></x:old>]]></x:old><x:new> &amp; </x:new></x:change>\n</x:payload>")
+	if len(problems) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 2 || strings.TrimSpace(cmds[0].Body) != "" {
+		t.Fatalf("wrapped fields: %+v, %q", cmds, problems)
+	}
+	children := cmds[0].Children
+	if children[0].FieldsOf("x:old")[0] != "`<x:new></x:old>`" || children[1].FieldsOf("x:old")[0] != "<x:new></x:old>" || children[1].FieldsOf("x:new")[0] != " &amp; " {
+		t.Fatalf("operand bytes changed: %+v", children)
+	}
+	// Undeclared wrapper spellings and code/CDATA examples remain raw payload.
+	body := "`<x:change/>` <![CDATA[<x:change/>]]> <x:changex/>"
+	cmds, problems = parse(g, "<x:payload>"+body+"</x:payload>")
+	if len(problems) != 0 || len(cmds[0].Children) != 0 || cmds[0].Body != "`<x:change/>` <x:change/> <x:changex/>" {
+		t.Fatalf("literal wrapper: %+v, %q", cmds, problems)
+	}
+	cmds, problems = parse(g, "<x:payload>stray<x:change/></x:payload>")
+	if len(problems) != 0 || cmds[0].Body != "stray" || len(cmds[0].Children) != 1 {
+		t.Fatalf("mixed content must remain visible to validation: %+v, %q", cmds, problems)
+	}
+	// Long unmatched runs must remain linear rather than rescanning every
+	// suffix of the same delimiter run.
+	long := strings.Repeat("`", 128*1024)
+	cmds, problems = parse(g, "<x:text>"+long+"</x:text>")
+	if len(problems) != 0 || cmds[0].Body != long {
+		t.Fatal("unmatched run changed payload")
+	}
+	_, problems = parse(g, "<x:payload><x:change><x:old>missed<x:new>closing</x:old></x:change></x:payload>")
+	if len(problems) == 0 || !strings.Contains(problems[0], "body holds an opening <x:new>") {
+		t.Fatalf("literal opt-in relaxed real sibling validation: %q", problems)
+	}
+}
+
+func TestLiteralCodeDoesNotPairAcrossStructuralBodies(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, RefuseFieldOpenings: true, Commands: map[string]Spec{
+		"text": {Kind: Leaf}, "other": {Kind: Leaf},
+		"set": {Kind: Container, Fields: []string{"old", "new"}},
+	}}
+	for _, tc := range []struct{ input, first, second string }{
+		{"<x:text>a `</x:text><x:text>b `</x:text>", "a `", "b `"},
+		{"<x:text>a ``</x:text><x:other>b ``</x:other>", "a ``", "b ``"},
+		{"<x:text>~~~\na</x:text><x:other>\n~~~\nb</x:other>", "~~~\na", "~~~\nb"},
+	} {
+		cmds, problems := parse(g, tc.input)
+		if len(problems) != 0 || len(cmds) != 2 || cmds[0].Body != tc.first || cmds[1].Body != tc.second {
+			t.Fatalf("cross-command code pairing: %+v, %q", cmds, problems)
+		}
+	}
+	cmds, problems := parse(g, "<x:set><x:old>a `</x:old><x:new>b `</x:new></x:set>")
+	if len(problems) != 0 || len(cmds) != 1 || len(cmds[0].Fields) != 2 || cmds[0].FieldsOf("x:old")[0] != "a `" || cmds[0].FieldsOf("x:new")[0] != "b `" {
+		t.Fatalf("cross-operand code pairing: %+v, %q", cmds, problems)
+	}
+	// Owner-b requires CDATA for examples containing their own raw close.
+	body := "`<x:text>one</x:text><x:text>two</x:text>`"
+	cmds, problems = parse(g, "<x:text>"+body+"</x:text>")
+	if len(problems) == 0 || !strings.Contains(strings.Join(problems, " "), "CDATA") {
+		t.Fatalf("raw own-close example was not structural: %+v, %q", cmds, problems)
+	}
+	cmds, problems = parse(g, "<x:text><![CDATA["+body+"]]></x:text>")
+	if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
+		t.Fatalf("CDATA example: %+v, %q", cmds, problems)
+	}
+}
+
+func literalLookaheadFixture(kind string, size int) string {
+	switch kind {
+	case "tildes":
+		return strings.Repeat("~a", size/2)
+	case "unmatched-fences":
+		return "```\n" + strings.Repeat("```x\n", (size-4)/5)
+	default:
+		return "Status `ready` with **next** action."
+	}
+}
+
+func TestLiteralCodeLookaheadLargeLegalInputs(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{"text": {Kind: Leaf}}}
+	for _, kind := range []string{"tildes", "unmatched-fences"} {
+		body := literalLookaheadFixture(kind, 200000)
+		start := time.Now()
+		cmds, problems := parse(g, "<x:text>"+body+"</x:text>")
+		elapsed := time.Since(start)
+		if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != stripTrailingNewline(body) {
+			t.Fatalf("large legal %s changed bytes: %q", kind, problems)
+		}
+		t.Logf("%s: %d bytes in %s", kind, len(body), elapsed)
+	}
+}
+
+func BenchmarkLiteralCodeLookahead(b *testing.B) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{"text": {Kind: Leaf}}}
+	for _, kind := range []string{"typical", "tildes", "unmatched-fences"} {
+		for _, size := range []int{100000, 200000} {
+			if kind == "typical" && size != 100000 {
+				continue
+			}
+			body := literalLookaheadFixture(kind, size)
+			input := "<x:text>" + body + "</x:text>"
+			b.Run(fmt.Sprintf("%s/%d", kind, len(body)), func(b *testing.B) {
+				b.SetBytes(int64(len(body)))
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					cmds, problems := parse(g, input)
+					if len(problems) != 0 || len(cmds) != 1 {
+						b.Fatal(problems)
+					}
+				}
+			})
+		}
+	}
+}
+
+func literalMalformedMarkupFixture(n int) (Grammar, string, string) {
+	g := Grammar{Prefix: "wb:", LiteralCode: true, Group: &Group{Name: "topic", Attr: "name"}, Commands: map[string]Spec{"panel": {Kind: Leaf, Attrs: []string{"recap"}, Scoped: true}}}
+	body := "`</wb:panel>" + strings.Repeat("<a?", n) + "`"
+	input := `<wb:topic name="t"><wb:panel recap="r">` + "`<![CDATA[</wb:panel>]]>" + strings.Repeat("<a?", n) + "`" + `</wb:panel></wb:topic>`
+	return g, input, body
+}
+
+func BenchmarkLiteralCodeMalformedMarkup(b *testing.B) {
+	for _, n := range []int{33300, 66600} {
+		g, input, body := literalMalformedMarkupFixture(n)
+		b.Run(fmt.Sprint(len(body)), func(b *testing.B) {
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				cmds, problems := parse(g, input)
+				if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
+					b.Fatalf("legal literal changed: commands=%d problems=%v", len(cmds), problems)
+				}
+			}
+		})
+	}
+}
+
+func TestLiteralCodeMalformedMarkupIsVerbatim(t *testing.T) {
+	g, input, body := literalMalformedMarkupFixture(66600)
+	start := time.Now()
+	cmds, problems := parse(g, input)
+	t.Logf("%d-byte malformed-name literal parsed in %s", len(body), time.Since(start))
+	if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
+		t.Fatalf("legal literal changed: commands=%d problems=%v", len(cmds), problems)
 	}
 }
 
