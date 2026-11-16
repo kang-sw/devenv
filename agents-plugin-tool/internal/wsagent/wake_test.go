@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -158,8 +159,8 @@ func TestPiHostedEventWidget(t *testing.T) {
 		t.Fatalf("counts = %+v", counts)
 	}
 	worker := newPiMapper(StartSpec{})
-	if got := worker.mapLine(piWidgetLine(piEventsWidgetKey, lines...), nopReplies{}); len(got) != 0 {
-		t.Fatalf("a non-lead must not import hosted wake/count events: %+v", got)
+	if got := worker.mapLine(piWidgetLine(piEventsWidgetKey, lines...), nopReplies{}); !reflect.DeepEqual(got, []Event{counts}) {
+		t.Fatalf("a non-lead must import only hosted task counts: %+v", got)
 	}
 }
 
