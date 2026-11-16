@@ -1053,8 +1053,8 @@ def endpoint_process_alive(endpoint: dict) -> bool | None:
 
         try:
             handle = _winapi.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
-        except OSError as exc:
-            return False if exc.winerror == 87 else None
+        except (OSError, OverflowError) as exc:
+            return False if getattr(exc, "winerror", None) == 87 else None
         try:
             result = _winapi.WaitForSingleObject(handle, 0)
             if result == _winapi.WAIT_OBJECT_0:
@@ -1068,7 +1068,7 @@ def endpoint_process_alive(endpoint: dict) -> bool | None:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    except OSError:
+    except (OSError, OverflowError):
         return None
     return True
 
@@ -1082,8 +1082,6 @@ class LauncherStartLock:
         self.locked = False
         try:
             os.set_inheritable(self.fd, False)
-            if os.fstat(self.fd).st_size == 0:
-                os.write(self.fd, b"\0")
         except BaseException:
             os.close(self.fd)
             raise
@@ -1106,6 +1104,11 @@ class LauncherStartLock:
                 return False
             raise
         self.locked = True
+        # Windows permits locking beyond EOF. Initialize only while owning
+        # byte zero: a contender must never write into the winner's lock.
+        if os.fstat(self.fd).st_size == 0:
+            os.lseek(self.fd, 0, os.SEEK_SET)
+            os.write(self.fd, b"\0")
         return True
 
     def close(self) -> None:

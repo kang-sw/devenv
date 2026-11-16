@@ -586,6 +586,30 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
 - Independent R1 is next; this continuation still records no phase Result,
   ticket closure, live swap, install, merge, push or acceptance success.
 
+### Independent R1 and remediation - 2026-11-16
+
+- R1 reviewed `8a8e52498..236ca99dd`, reporting no Critical and two Important:
+  R1-I1 (Windows fresh-file initialization before byte-lock ownership) and
+  R1-I2 (native PID overflow escaping the conservative unknown-PID guard).
+  Full report: machine-local
+  `C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac@a80733aa/review-paths/0d710944-01-exe-phase1-r1.md`.
+- R1-I1 fix: initialize byte zero only after successfully taking its advisory
+  lock. A deterministic mocked Windows contender regression forbids any
+  initialization write without lock ownership; the native Windows unit case
+  also exercises acquisition beyond EOF. The persistent file is neither
+  truncated nor unlinked and its descriptor remains non-inheritable.
+- R1-I2 fix: native PID-conversion overflow means unknown, never dead. Both
+  platform helper paths and the controlled MCP-unavailable/zero-start path
+  have explicit overflow regression cases, with native PID APIs mocked.
+- Focused fix gates passed: local mocked starter family 15 tests (one
+  remote-process fixture skipped), remote w5090 `^TestLauncherStarterSingleFlight$`
+  passed (0.909s). The three launcher copies remain byte-identical, SHA256
+  `0e137b1d0989d3ffab6f95295957d342474e48ac42efdbf8cc94ee48205f9ddd`.
+- The routed lite allocation permits no worker-owned re-review. The lead
+  dispatches independent fixes-only R2 for these substantive fixes; no
+  reviewed-HEAD claim is made before that closure. Live acceptance remains
+  separate, coordinator-owned, and unexecuted; ticket stays open without Result.
+
 ## Forward
 
 - Coordinator-approved boundary: old launchers and Electron do not share the new starter lock; a rare Electron race can execute one losing starter, with Go's singleton preventing a second daemon.

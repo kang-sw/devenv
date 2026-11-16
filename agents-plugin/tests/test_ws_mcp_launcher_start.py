@@ -69,6 +69,78 @@ class LauncherStartContractTest(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertFalse((self.link.daemon_dir / "dashboard.lock").exists())
 
+    def test_windows_first_use_initialization_is_inside_lock_ownership(self):
+        import errno
+        from types import SimpleNamespace
+        owner = [None]
+        writes = []
+        def locking(fd, mode, length):
+            self.assertEqual(length, 1)
+            if mode == 1:
+                if owner[0] is not None:
+                    raise OSError(errno.EACCES, "winner owns byte zero")
+                owner[0] = fd
+            else:
+                self.assertEqual(owner[0], fd)
+                owner[0] = None
+        def write(fd, data):
+            if owner[0] != fd:
+                raise PermissionError("contender wrote before owning the Windows byte lock")
+            writes.append(fd)
+            return len(data)
+        windows = SimpleNamespace(LK_NBLCK=1, LK_UNLCK=2, locking=locking)
+        # Both descriptors see a fresh empty file. An old constructor write
+        # before acquire fails deterministically; no native process is spawned.
+        with mock.patch.object(self.m.os, "name", "nt"), \
+             mock.patch.dict(sys.modules, {"msvcrt": windows}), \
+             mock.patch.object(self.m.os, "fstat", return_value=SimpleNamespace(st_size=0)) as stat, \
+             mock.patch.object(self.m.os, "write", side_effect=write):
+            a = self.m.LauncherStartLock(self.link.daemon_dir)
+            b = self.m.LauncherStartLock(self.link.daemon_dir)
+            try:
+                stat.assert_not_called()
+                self.assertEqual(writes, [])
+                self.assertTrue(a.acquire())
+                self.assertFalse(b.acquire())
+                self.assertEqual(writes, [a.fd])
+                a.close()
+                a = None
+                self.assertTrue(b.acquire())
+                self.assertEqual(writes[-1], b.fd)
+            finally:
+                if a is not None:
+                    a.close()
+                b.close()
+
+    def test_pid_native_conversion_overflow_is_unknown_on_both_platforms(self):
+        from types import SimpleNamespace
+        for pid in (None, 0, -1, True, "123"):
+            self.assertIsNone(self.m.endpoint_process_alive({"pid": pid}))
+        for platform_name in ("posix", "nt"):
+            with self.subTest(platform=platform_name), \
+                 mock.patch.object(self.m.os, "name", platform_name), \
+                 mock.patch.object(self.m.os, "kill", side_effect=OverflowError("native PID conversion")) as kill, \
+                 mock.patch.dict(sys.modules, {"_winapi": SimpleNamespace(OpenProcess=mock.Mock(side_effect=OverflowError("native PID conversion")))}):
+                self.assertIsNone(self.m.endpoint_process_alive({"pid": 10**100}))
+                if platform_name == "posix":
+                    kill.assert_called_once_with(10**100, 0)
+                else:
+                    kill.assert_not_called()
+
+    def test_huge_pid_mcp_path_refuses_start_with_controlled_unavailable(self):
+        from types import SimpleNamespace
+        endpoint = dict(self.endpoint, pid=10**100)
+        with mock.patch.object(self.link, "probe", return_value=(endpoint, None)), \
+             mock.patch.object(self.link, "wait_healthy", return_value=(endpoint, None)), \
+             mock.patch.object(self.m.os, "kill", side_effect=OverflowError("native PID conversion")), \
+             mock.patch.dict(sys.modules, {"_winapi": SimpleNamespace(OpenProcess=mock.Mock(side_effect=OverflowError("native PID conversion")))}), \
+             mock.patch.object(self.link, "start_daemon") as starter:
+            err = io.StringIO()
+            self.assertEqual(self.m.proxy_serve(self.link, ["serve", "--stdio"], io.BytesIO(), io.BytesIO(), err), 1)
+            self.assertIn("live or unqueryable", err.getvalue())
+            starter.assert_not_called()
+        self.assertFalse((self.link.daemon_dir / "bin").exists())
+
     def test_swap_silence_longer_than_old_grace_waits_for_successor(self):
         for grace in (0, 20):  # initial connect and reconnect
             now = [0.0]
