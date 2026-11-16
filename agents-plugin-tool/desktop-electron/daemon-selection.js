@@ -62,7 +62,18 @@ function validateTree(root, label) {
     if (!fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep)) throw new Error(`${label} path escapes its root: ${name}`);
     if (!fs.statSync(file).isFile() || digest(file, true) !== expected) throw new Error(`${label} hash mismatch: ${name}`);
   }
-  const entries = Object.keys(manifest.files);
+  const listed = new Set(Object.keys(manifest.files));
+  function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(file); continue; }
+      const name = path.relative(root, file).split(path.sep).join('/');
+      if (name === 'manifest.json') continue;
+      if (!listed.has(name)) throw new Error(`Unlisted ${label} file: ${name}`);
+    }
+  }
+  walk(root);
+  const entries = [...listed];
   if (label === 'skills' && !entries.some(name => name.endsWith('/SKILL.md')) ||
       label === 'rsrc' && !entries.some(name => name.endsWith('.md'))) throw new Error(`Empty ${label} content`);
 }

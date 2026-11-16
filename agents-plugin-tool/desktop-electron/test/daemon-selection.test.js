@@ -88,6 +88,10 @@ test('binary hash, version, optional protocol and inventory gates match the laun
 test('resource/skills paths and manifest bytes must belong to the selected root', t => {
   const f = fixture(t);
   for (const tree of ['rsrc', 'skills']) {
+    const extra = path.join(f.bundled.root, tree, 'unexpected', tree === 'rsrc' ? 'extra.md' : 'SKILL.md');
+    fs.mkdirSync(path.dirname(extra)); fs.writeFileSync(extra, 'unlisted skill or resource');
+    assert.throws(f.select, /Unlisted .* file/, 'unlisted skills are readable by Go without manifest checks');
+    fs.rmSync(path.dirname(extra), { recursive: true });
     const file = path.join(f.bundled.root, tree, 'hello', tree === 'rsrc' ? 'hello.md' : 'SKILL.md');
     fs.appendFileSync(file, 'tampered');
     assert.throws(f.select, /hash mismatch/);
