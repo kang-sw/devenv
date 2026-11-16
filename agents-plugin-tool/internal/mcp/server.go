@@ -589,6 +589,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferSubagent:    "off",
 		wsconfig.ItemWorkflowWhiteboardEnabled: "off",
 		wsconfig.ItemWorkflowTrackerEnabled:    "off",
+		wsconfig.ItemWorkflowProfile:           "direct",
 		wsconfig.ItemSageReview:                "auto",
 		wsconfig.ItemSageReviewDesign:          "off",
 		wsconfig.ItemTicketReviewAutoAck:       "on",
@@ -1055,7 +1056,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 		}
 		// Harness: load-bearing for harness-applicable keys (the harness-bucketed
-		// prompt.*, workflow.whiteboard_enabled and workflow.tracker_enabled, and agents.tier); accepted
+		// prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled and workflow.profile, and agents.tier); accepted
 		// but ignored (warning-only, Decision 5) for keys that do not vary by
 		// harness.
 		harness, _ := params.Arguments["harness"].(string)
@@ -1242,6 +1243,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				text += fmt.Sprintf("warning: effective value unreadable: %v\n", err)
 			} else if effective.Scope != resolvedScope || answeredKey != storeKey {
 				text += fmt.Sprintf("shadowed: effective %s: %s [scope:%s]\n", answeredKey, effective.Value, effective.Scope)
+			}
+			if entry.Key == wsconfig.ItemWorkflowProfile && value == "orchestrate" {
+				text += orchestrateWhitelistWarning(harness)
 			}
 			return toolTextResponse(req.ID, text, nil)
 		}
@@ -2209,7 +2213,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
+		printProfile, err := s.callerPlaybookProfile(keyStr)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), printProfile, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2320,7 +2328,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, strings.TrimSpace(renderSessionKey), rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
+		renderProfile, err := s.callerPlaybookProfile(renderSessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, strings.TrimSpace(renderSessionKey), renderProfile, rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
 		text := withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, s.configOptions())
 		if planPath != "" {
 			text += "\n" + planPathLinePrefix + planPath
@@ -2945,6 +2957,21 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: trackerEntry.SelectorFields,
 		ValueFields:    trackerEntry.ValueFields,
 		Current:        currentHarnessBucketedValue(resolver, sessionKey, trackerEntry.Key, harness),
+	})
+
+	workflowProfileEntry := registryEntryByKey(wsconfig.ItemWorkflowProfile)
+	appendKnob(workflowProfileEntry, tuningKnob{
+		ID:          workflowProfileEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Lead playbook profile (builtin direct), per harness. direct reads the base lead playbooks; orchestrate selects the orchestrate variant of each lead playbook that has one, from the next workflow-manual or playbook load, and the lead then works through sub-leads, which run tickets through workers that delegate and explore. It applies to top-level lead sessions only; a sub-lead or worker always reads the base playbooks. orchestrate needs a host that supports nested subagent spawn (lead -> sub-lead -> worker -> delegate -> explore); config.tune warns when a harness it is set for is not verified to. A write lands in the session's harness bucket unless harness names another (* for every harness), and in global scope (all of the user's projects) unless scope names another. A read takes the session's harness bucket from any scope first, then the * bucket from any scope. Cost: orchestrate spends more agents per ticket and keeps the lead's own context lean; direct spawns fewer agents and keeps more work in the lead's context.",
+		Writer:      tuningWriter{Tool: workflowProfileEntry.WriterTool, FixedArguments: map[string]string{"key": workflowProfileEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           workflowProfileEntry.ResetTool,
+			FixedArguments: map[string]string{"key": workflowProfileEntry.Key, "reset": "true"},
+		},
+		SelectorFields: workflowProfileEntry.SelectorFields,
+		ValueFields:    workflowProfileEntry.ValueFields,
+		Current:        currentHarnessBucketedValue(resolver, sessionKey, workflowProfileEntry.Key, harness),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
@@ -4739,16 +4766,16 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for harness-applicable keys (config.list lists a harness selector for them: prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled, agents.tier) and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for harness-applicable keys (config.list lists a harness selector for them: prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled, workflow.profile, agents.tier) and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>, or an adapter-declared key. See config.list for the supported set."),
 					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), an object {tier, backend, model, effort} for agents.tier, or a profile object for worktree.profile.<name>. For agents.tier reset pass only {tier}; omit for other resets."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. repo writes the committed .ws-workflow/config.json in the session's worktree (session_key required) and leaves staging to your next git.commit. Global-only keys reject non-global scopes; agents.tier supports project and global scopes; worktree.profile.<name> supports project, repo, and global.", wsconfig.ScopeSchemaEnum()),
-					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.*, workflow.whiteboard_enabled and workflow.tracker_enabled (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
+					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled and workflow.profile (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
-					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms, workflow.whiteboard_enabled and workflow.tracker_enabled) and for prompt.* keys; also the target session for a session-scope write."),
+					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms, workflow.whiteboard_enabled, workflow.tracker_enabled and workflow.profile) and for prompt.* keys; also the target session for a session-scope write."),
 				},
 				"required": []string{"key"},
 			},

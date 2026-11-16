@@ -6,6 +6,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // Shared enum value slices used by both the config.* tools() schema literals
@@ -24,10 +25,10 @@ var (
 	agentsTierScopeEnum   = []string{"project", "global"}
 )
 
-// profileEnum lists the workflow.profile values. It must match the profile
-// file suffixes the rsrc loader selects (<name>.<profile>.md); the base
-// playbooks are the direct profile and have no suffix.
-var profileEnum = []string{"direct", "orchestrate"}
+// profileEnum lists the workflow.profile values: the profile file suffixes
+// the rsrc loader selects (<name>.<profile>.md). No shipped file carries the
+// direct suffix, so direct reads the base playbooks.
+var profileEnum = wsrsrc.ProfileNames
 
 // configKeyEntry is the per-key config registry row: the single source of
 // truth for a config.* knob's value schema, harness/no-agent applicability,
@@ -156,7 +157,13 @@ var harnessBuckets = []string{"claude", "codex", "pi", "all"}
 //   - Pi: off by ws's own cap, not a host limit. wsagent.MaxSpawnDepth = 2
 //     (internal/wsagent/children.go) allows at most two levels below the lead,
 //     and the pi.spawn description states it (internal/mcp/pi_forward.go).
-//   - Codex: probe pending
+//   - Codex CLI 0.160.0, probed 2026-11-16: at its defaults the chain stops
+//     at the third level below the lead ("collab spawn failed: agent thread
+//     limit reached"); with -c agents.max_threads=16 -c agents.max_depth=8
+//     the full chain completes and the deepest result returns to the lead,
+//     and agents.max_depth=8 alone still stops at the third level. Stays off
+//     until the chain completes at the host's defaults.
+//   - No other host probed.
 var orchestrateHarnessWhitelist = map[string]bool{}
 
 // orchestrateWhitelistWarning returns the one-line warning for writing

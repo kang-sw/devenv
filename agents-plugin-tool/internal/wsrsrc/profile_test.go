@@ -11,16 +11,16 @@ func profileTree(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"pb/pb.md":                 "---\nkind: print\nincludes:\n  - core\n  - spawn\n---\nBase body.\n",
-		"pb/pb.orchestrate.md":     "---\nkind: print\nincludes:\n  - core\n  - spawn\n---\nOrchestrate body.\n",
-		"pb/core.md":               "Base core.\n",
-		"pb/core.orchestrate.md":   "Orchestrate core.\n",
-		"pb/spawn.md":              "Base spawn.\n",
-		"pb/spawn.codex.md":        "Codex spawn.\n",
-		"other/other.md":           "---\nkind: print\n---\nOther base.\n",
-		"other/other.codex.md":     "---\nkind: print\n---\nOther codex.\n",
-		"flat.md":                  "---\nkind: print\n---\nFlat base.\n",
-		"flat.orchestrate.md":      "Flat orchestrate.\n",
+		"pb/pb.md":               "---\nkind: print\nincludes:\n  - core\n  - spawn\n---\nBase body.\n",
+		"pb/pb.orchestrate.md":   "---\nkind: print\nincludes:\n  - core\n  - spawn\n---\nOrchestrate body.\n",
+		"pb/core.md":             "Base core.\n",
+		"pb/core.orchestrate.md": "Orchestrate core.\n",
+		"pb/spawn.md":            "Base spawn.\n",
+		"pb/spawn.codex.md":      "Codex spawn.\n",
+		"other/other.md":         "---\nkind: print\n---\nOther base.\n",
+		"other/other.codex.md":   "---\nkind: print\n---\nOther codex.\n",
+		"flat.md":                "---\nkind: print\n---\nFlat base.\n",
+		"flat.orchestrate.md":    "Flat orchestrate.\n",
 	}
 	for rel, body := range extra {
 		files[rel] = body
