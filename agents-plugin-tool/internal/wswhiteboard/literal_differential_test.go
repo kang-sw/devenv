@@ -176,7 +176,11 @@ func literalDifferentialCorpus() []string {
 	}
 	out = append(out, literalRawSpanOracleFixture)
 	out = append(out, literalWrapperContextInputs()...)
+	out = append(out, literalPanelOriginInputs()...)
 	out = append(out, literalWrapperInlineCounterexample)
+	for _, body := range literalWrapperPositiveBodies() {
+		out = append(out, "<wb:topic name=\"t\"><wb:panel name=\"p\" recap=\"r\">\n"+body+"\n</wb:panel></wb:topic>")
+	}
 	// New wrapper syntax is outside I1's release grammar, but belongs to I3.
 	// Raw operands may contain their parent wrapper's close as plain text.
 	for _, field := range []string{"old", "new"} {
@@ -544,19 +548,11 @@ func TestLiteralCodeDelimiterFreeInsertionMetamorphic(t *testing.T) {
 }
 
 func literalStructuralSplitFailure(input string) (bool, bool) {
-	g0 := grammar
-	g0.LiteralCode = false
+	want, eligible := literalStructuralExpected(input)
+	if !eligible {
+		return false, false
+	}
 	p, q := &problems{}, &problems{}
-	baseline := wsxmlcmd.Parse(p, g0, input)
-	structural, complete := wsxmlcmd.ParseOrdered(q, g0, input)
-	if len(p.List) != 0 || len(q.List) != 0 || !complete {
-		return false, false
-	}
-	if literalInlineWrapperException(input, structural) {
-		return false, false
-	}
-	want := canonicalCommands(baseline)
-	p, q = &problems{}, &problems{}
 	plain := wsxmlcmd.Parse(p, grammar, input)
 	ordered, complete := wsxmlcmd.ParseOrdered(q, grammar, input)
 	return !complete || len(p.List) != 0 || len(q.List) != 0 || !reflect.DeepEqual(want, canonicalCommands(plain)) || !reflect.DeepEqual(want, canonicalCommands(ordered)), true

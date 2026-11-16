@@ -231,10 +231,15 @@ func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields body
 		}
 		name := t.s[pos+1 : nameEnd]
 		frame, known := literalCommand(t.grammar, name)
+		textTag := false
 		if len(pending) > 0 {
 			top := pending[len(pending)-1]
 			if !top.group {
 				frame, known = literalFrame{tag: name, raw: !top.raw}, true
+			} else if top.raw && !strings.HasPrefix(name, t.grammar.Prefix) {
+				// The rejected-group reader treats non-command tags as text,
+				// not raw elements whose distant close could rescan a suffix.
+				textTag, known = true, false
 			} else if !known {
 				frame, known = literalFrame{tag: name, raw: true}, true
 			}
@@ -253,7 +258,7 @@ func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields body
 			pos = nameEnd
 			continue
 		}
-		if !selfClosing {
+		if !selfClosing && !textTag {
 			frame.bodyStart = stop
 			if frame.group {
 				// ParseOrdered reads text before a group's first command as
@@ -265,7 +270,7 @@ func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields body
 				}
 				if next < len(t.s) {
 					rest := t.s[next:]
-					frame.raw = rest[0] != '<' || !strings.HasPrefix(rest[1:], t.grammar.Prefix) && !strings.HasPrefix(rest, "</")
+					frame.raw = t.ordered && (rest[0] != '<' || !strings.HasPrefix(rest[1:], t.grammar.Prefix) && !strings.HasPrefix(rest, "</"))
 					frame.bodyStart = next
 				}
 			}
@@ -372,15 +377,76 @@ func literalTagEnd(s string, afterName, limit int) (end int, selfClosing, comple
 	return pos, false, false
 }
 
+// Locate the fallback context of a plain enclosing close in a wrapper body.
+// A panel close inside an operand does not end the panel in that reading.
+// Scan only the candidate prefix, never the panel's already-consumed prefix;
+// candidates are disjoint on acceptance and bounded by first on rejection.
+func (t *tokenizer) wrapperBoundaryFrames(at, first, bodyStart int, closing, wrapper string) ([]literalFrame, bool) {
+	name := strings.TrimSuffix(strings.TrimPrefix(closing, "</"), ">")
+	pending := []literalFrame{{tag: name, raw: true, wrapper: wrapper, bodyStart: bodyStart}}
+	for pos := at; pos < first; {
+		rest := t.s[pos:]
+		if strings.HasPrefix(rest, "<![CDATA[") {
+			stop := strings.Index(rest[9:], "]]>")
+			if stop < 0 || pos+9+stop+3 > first {
+				return nil, false
+			}
+			pos += 9 + stop + 3
+			continue
+		}
+		top := pending[len(pending)-1]
+		endTag := "</" + top.tag + ">"
+		if strings.HasPrefix(rest, endTag) {
+			pos += len(endTag)
+			pending = pending[:len(pending)-1]
+			continue
+		}
+		if rest[0] != '<' || top.raw && (top.wrapper == "" || !openingTagPrefix(rest, top.wrapper)) {
+			pos++
+			continue
+		}
+		nameEnd := pos + 1
+		for nameEnd < first && isNameByte(t.s[nameEnd]) {
+			nameEnd++
+		}
+		if nameEnd == pos+1 {
+			pos++
+			continue
+		}
+		stop, selfClosing, complete := literalTagEnd(t.s, nameEnd, first)
+		if !complete {
+			return nil, false
+		}
+		if !selfClosing {
+			pending = append(pending, literalFrame{tag: t.s[pos+1 : nameEnd], raw: !top.raw, bodyStart: stop})
+		}
+		pos = stop
+	}
+	if pending[len(pending)-1].tag == name {
+		pending = pending[:len(pending)-1]
+	}
+	return pending, true
+}
+
 func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, fields bodyFieldRules, limit *int) int {
 	end := t.matchCodeLiteral(at, bodyStart, lineStart, closing, *limit)
 	if end <= at || end > *limit {
 		return at
 	}
 	first := firstBodyClose(t.s, at, end, closing)
-	if first >= 0 && !t.codeBodyBoundary(first, end, closing, fields) {
-		*limit = min(*limit, first)
-		return at
+	if first >= 0 {
+		if fields.wrapper != "" {
+			enclosing, ok := t.wrapperBoundaryFrames(at, first, bodyStart, closing, fields.wrapper)
+			if !ok {
+				*limit = min(*limit, first)
+				return at
+			}
+			fields.enclosing = enclosing
+		}
+		if !t.codeBodyBoundary(first, end, closing, fields) {
+			*limit = min(*limit, first)
+			return at
+		}
 	}
 	return end
 }

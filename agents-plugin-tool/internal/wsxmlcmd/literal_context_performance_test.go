@@ -7,15 +7,30 @@ import (
 	"time"
 )
 
-var literalContextShapes = []string{"wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog"}
+var literalContextShapes = []string{"wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog", "panel-foo-desync", "rejected-group-html-fence", "rejected-group-html-inline"}
 
 func literalContextGrammar() Grammar {
 	g := literalPerformanceGrammar()
-	g.Commands["panel"] = Spec{Kind: Leaf, Attrs: []string{"name"}, Wrapper: "change", Fields: []string{"old", "new"}, Scoped: true}
+	g.Commands["panel"] = Spec{Kind: Leaf, Attrs: []string{"name", "recap"}, Wrapper: "change", Fields: []string{"old", "new"}, Scoped: true}
 	return g
 }
 
 func literalContextInput(kind string, size int) (string, int) {
+	if kind == "panel-foo-desync" {
+		unit := "<wb:panel name=\"p\" recap=\"r\">`<wb:change><wb:old>x</wb:panel><wb:foo>y</wb:old><wb:new>z</wb:new></wb:change></wb:panel>"
+		n := max(1, size/len(unit))
+		return "<wb:topic name=\"t\">" + strings.Repeat(unit, n) + "<wb:log>q </wb:foo>` </wb:panel><wb:log>r</wb:log></wb:topic>", n + 1
+	}
+	if strings.HasPrefix(kind, "rejected-group-html-") {
+		mark := "```x\n"
+		last := "\n```\n</b>"
+		if kind == "rejected-group-html-inline" {
+			mark, last = "`x", "`</b>"
+		}
+		unit := "<wb:topic name=\"a\"><b>\n" + mark + "</wb:topic>"
+		n := max(1, size/len(unit))
+		return strings.Repeat(unit, n) + "<wb:topic name=\"z\"><wb:log>" + last + "</wb:log></wb:topic>", n
+	}
 	if strings.HasPrefix(kind, "wrapper-") {
 		field := strings.TrimSuffix(strings.TrimPrefix(kind, "wrapper-"), "-tilde")
 		change := func(body string) string {
@@ -54,6 +69,23 @@ func checkLiteralContext(t *testing.T, kind, input string, count int, ordered bo
 	if !complete {
 		t.Fatalf("incomplete: %v", p.List)
 	}
+	if kind == "panel-foo-desync" {
+		if ordered {
+			cmds = cmds[1:]
+		}
+		if len(p.List) != 0 || len(cmds) != count {
+			t.Fatalf("desync count=%d want=%d problems=%v", len(cmds), count, p.List)
+		}
+		for _, c := range cmds[:count-1] {
+			if c.Body != "`" || len(c.Children) != 1 || c.Children[0].FieldsOf("wb:old")[0] != "x</wb:panel><wb:foo>y" {
+				t.Fatalf("desynchronized panel: %+v", c)
+			}
+		}
+		if cmds[count-1].Body != "q </wb:foo>` </wb:panel><wb:log>r" {
+			t.Fatalf("desynchronized log: %+v", cmds[count-1])
+		}
+		return
+	}
 	if strings.HasPrefix(kind, "wrapper-") {
 		if ordered {
 			cmds = cmds[1:]
@@ -91,9 +123,25 @@ func checkLiteralContext(t *testing.T, kind, input string, count int, ordered bo
 		if kind == "rejected-group-tilde" {
 			want = "~~~"
 		}
+		if kind == "rejected-group-html-fence" {
+			want = "```\n</b>"
+		}
+		if kind == "rejected-group-html-inline" {
+			want = "`</b>"
+		}
 		if cmds[len(cmds)-1].Body != want {
 			t.Fatalf("following log=%q want=%q", cmds[len(cmds)-1].Body, want)
 		}
+	}
+}
+
+func TestLiteralGroupEndpointIsNotContainerText(t *testing.T) {
+	g := literalContextGrammar()
+	input := "<wb:log>`</wb:log><wb:topic name=\"t\">text `"
+	first := strings.Index(input, "</wb:log>")
+	tok := tokenizer{s: input, grammar: &g}
+	if tok.codeBodyBoundary(first, len(input), "</wb:log>", bodyFieldRules{}) {
+		t.Fatal("a group endpoint is not invalid inter-field container text")
 	}
 }
 

@@ -15,6 +15,43 @@ func literalWrapperContextInputs() []string {
 	}
 }
 
+func literalPanelOriginInputs() []string {
+	return []string{
+		"<wb:topic name=\"t\"><wb:panel name=\"p\" recap=\"r\">`<wb:change><wb:old>x</wb:panel><wb:foo>y</wb:old><wb:new>z</wb:new></wb:change></wb:panel><wb:log>q </wb:foo>` </wb:panel><wb:log>r</wb:log></wb:topic>",
+		"<wb:topic name=\"t\"><wb:panel name=\"p\">`<wb:change><wb:old>x</wb:panel>y`</wb:old><wb:new>z</wb:new></wb:change></wb:panel></wb:topic>",
+	}
+}
+
+func TestLiteralPanelOriginCloseInsideOperand(t *testing.T) {
+	g0 := grammar
+	g0.LiteralCode = false
+	for _, input := range literalPanelOriginInputs() {
+		p := &problems{}
+		baseline := wsxmlcmd.Parse(p, g0, input)
+		if len(p.List) != 0 {
+			t.Fatal(p.List)
+		}
+		for _, ordered := range []bool{false, true} {
+			p := &problems{}
+			var got []command
+			complete := true
+			if ordered {
+				got, complete = wsxmlcmd.ParseOrdered(p, grammar, input)
+			} else {
+				got = wsxmlcmd.Parse(p, grammar, input)
+			}
+			if !complete || len(p.List) != 0 || !reflect.DeepEqual(canonicalCommands(got), canonicalCommands(baseline)) {
+				t.Fatalf("ordered=%v commands=%+v problems=%v", ordered, canonicalCommands(got), p.List)
+			}
+		}
+		st := &State{}
+		out, pApply := Apply(st, input, testEnv())
+		if len(pApply) == 0 || out.Failed == "" || out.Unpartitioned || st.PanelCounter != 0 {
+			t.Fatalf("mixed panel silently accepted: %+v panels=%d problems=%v", out, st.PanelCounter, pApply)
+		}
+	}
+}
+
 func TestLiteralWrapperContextPreservesStructuralReading(t *testing.T) {
 	g0 := grammar
 	g0.LiteralCode = false
