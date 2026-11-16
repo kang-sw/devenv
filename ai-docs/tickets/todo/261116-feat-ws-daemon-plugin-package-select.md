@@ -437,3 +437,55 @@ npm test -- --test-name-pattern='production bridge launches ws-mcp with the adap
 Pi checks: PASS, 4 owner/skills tests and 1 bridge test. No unresolved findings.
 The shared daemon was not touched; no merge, push, SSH or Electron operation was
 performed. Ticket status remains `todo`.
+
+#### Edition (145beedef) - 2026-11-17
+
+CI repair on `impl/develop/package-select-ci`, based on develop `cb512bed6`,
+for run `43899877983` after the package-selection merge `41c9ab027`.
+
+Root causes and repairs:
+
+- **MCP recovery:** recovery itself succeeded, but every restarted ws-only lead
+  under the fixed wsflow default called the launch warning callback, which copied
+  the fallback warning into `lastErr`/`State.Error`. The original recovery test
+  remains unchanged. Nonfatal launch warnings now stay in persisted
+  `PluginWarning` and the log without overwriting process/recovery errors.
+  Fallback tests additionally require an empty Error on a live/reattached
+  usable process. Actual Pi extension health failures still reach Error through
+  their existing `CommandError` path, verified by its unchanged regression test.
+  The original two failures were reproduced on macOS by explicitly selecting
+  the ws starter; the inherited local wsflow root otherwise masked them.
+- **Windows paths:** substituting a native root into a slash-separated manifest
+  template yielded mixed separators, including manifest lists and nested custom
+  paths. Template values now pass through `filepath.FromSlash` before root
+  substitution; unrelated values such as literal URLs stay unchanged. A new
+  portable test pins native nested paths, multi-manifest lists and unchanged
+  URL/namespace values. Before this feature, the attached Go MCP command used
+  `filepath.Abs`/`filepath.Join`, and Pi's bridge built manifest paths with Node's
+  `path.join`; the native-path expectations were therefore retained, not loosened.
+- **Windows parent-watch fixture:** related to this merge, not an unrelated
+  parent-watch race. Its helper re-executes the test binary, whose TestMain now
+  replaces WS_CACHE_HOME. The helper's wait child consequently wrote its marker
+  into a different cache from the one the outer test polled. The fixture now
+  passes the original marker cache through an explicit helper variable and sets
+  it on the wait child's env. Production process-watching logic, the 10-second
+  deadline and lifecycle assertions are unchanged.
+
+Verification from `agents-plugin-tool/`: all commands below PASS.
+
+```bash
+WS_RSRC_ROOT="$PWD/../agents-plugin/rsrc" GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^(TestLeadMCP.*|TestHostedPlugin.*|TestHostedWorkerMCPWarningPersists|TestPiHostedPackageRegistrySettingMatrix|TestPiLeadSourceSiblingUsesSelectedPackage|TestPiLeadManifestEnvironmentBoundary|TestPiLeadFallbackWarningClassifiesMCPOnly|TestPiLeadHealthNotificationReachesDashboardError|TestLeadIsolation.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./cmd/ws-mcp -run '^(TestHostedPackage.*|TestAgentMCP.*|TestMailboxWaitRequiresSessionKey)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./internal/wsagent ./cmd/ws-mcp
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOOS=windows go vet ./internal/wsagent ./cmd/ws-mcp
+scratch=$(mktemp -d /tmp/package-select-ci-compile.XXXXXX)
+trap 'rm -rf "$scratch"' EXIT
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOOS=windows go test -c -o "$scratch/wsagent.test.exe" ./internal/wsagent
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOOS=windows go test -c -o "$scratch/ws-mcp.test.exe" ./cmd/ws-mcp
+```
+
+The macOS groups passed in 1.6 s and 3.1 s. Both Windows test binaries compiled;
+Windows runtime execution, including the parent-death fixture, requires the next
+Windows CI run and was not claimed on macOS. Diff whitespace verification passed.
+No shared daemon, Electron, merge, push or SSH operation was performed. No package
+artifacts or protocol/Record shape changed (T0 unchanged). Ticket remains `todo`.
