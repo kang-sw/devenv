@@ -4,6 +4,7 @@ related:
   261116-bug-ws-exe-launch-elimination: "Item 4 Codex REST usage work in flight with Exec1 may overlap the usage data path"
   261114-feat-ws-dashboard-usage-footer-meter: "Original approved usage indicator design and reference"
   261113-feat-ws-dashboard-rail-usage-gutter: "Usage cache and acquisition contract"
+completed: 2026-11-16
 ---
 
 # Fix stale dashboard usage windows and restore stacked indicator layout
@@ -73,3 +74,17 @@ Restore current percentage above its red/green offset in each window column;
 retain weekly-only and stale styling. Verify with a side-by-side LOOK capture
 against the approved mockup A at matching dimensions, including narrow layout.
 This UI phase may be assigned to a Claude worker.
+
+### Result - 2026-11-16 (Phase 2)
+
+Cause: commit 090ec68f3 ("compact usage strip") deliberately dropped
+`flex-direction: column; align-items: flex-end; gap: 1px` from `.usage-column`
+(and a test asserted its absence), so the percent and the red/green pace delta
+flowed inline. Restored those three declarations in `usage.css`; the compact
+sizes, wrapping, weekly-only and stale treatments are unchanged. The
+`usage.test.js` rule check now asserts `flex-direction: column`. T0, CSS only.
+
+LOOK: static harness with the real `usage.css`, before/after at 3x
+(`D:/Temp/ui-worker-1116/before.png`, `after.png`; not copied into the repo).
+Narrow wrap not separately captured. `node --test usage.test.js`: 12 pass, the
+same 6 chart tests fail with and without this change (pre-existing).
