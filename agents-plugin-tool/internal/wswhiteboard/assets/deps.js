@@ -8,6 +8,11 @@
     if (active && !active.isConnected) close(false);
     return node && node.closest ? node.closest('.dw') : null;
   }
+  function trigger(w) { return w.querySelector('.dbtn') || w.querySelector('.sb'); }
+  function expanded(w, value) {
+    var b = w.querySelector('.dbtn');
+    if (b) b.setAttribute('aria-expanded', value);
+  }
   function cancel() { clearTimeout(opening); clearTimeout(leaving); }
   function isOpen(p) {
     if (p.showPopover) {
@@ -18,11 +23,11 @@
   function close(focus) {
     cancel();
     if (!active) return;
-    var b = active.querySelector('.dbtn');
+    var b = trigger(active);
     var p = active.querySelector('.pop');
     if (p.hidePopover && p.isConnected) p.hidePopover();
     p.hidden = true;
-    b.setAttribute('aria-expanded', 'false');
+    expanded(active, 'false');
     active = null;
     pinned = false;
     if (focus && b.isConnected) {
@@ -35,13 +40,13 @@
     cancel();
     if (!w || !w.isConnected) return;
     if (active !== w) { close(false); active = w; }
-    var b = w.querySelector('.dbtn'), p = w.querySelector('.pop');
+    var b = trigger(w), p = w.querySelector('.pop');
     var wasOpen = isOpen(p);
     p.hidden = false;
     // The top layer also escapes sticky-head stacking contexts and transient
     // rail reorder transforms. Older engines retain the fixed fallback.
     if (!wasOpen && p.showPopover) p.showPopover();
-    b.setAttribute('aria-expanded', 'true');
+    expanded(w, 'true');
     // Fixed descendants bypass overflow:hidden on .topic. Measure each open,
     // including after swaps; clamp horizontally and flip above when needed.
     var r = b.getBoundingClientRect(), box = p.getBoundingClientRect();
@@ -101,7 +106,7 @@
     try { if (p.matches(':popover-open')) return; } catch (err) { /* older engine */ }
     cancel();
     p.hidden = true;
-    active.querySelector('.dbtn').setAttribute('aria-expanded', 'false');
+    expanded(active, 'false');
     active = null;
     pinned = false;
   }, true);

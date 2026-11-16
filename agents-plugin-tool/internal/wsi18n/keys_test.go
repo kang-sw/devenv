@@ -104,7 +104,8 @@ func TestEveryEnglishKeyIsUsed(t *testing.T) {
 	keys, _ := usedKeys(t)
 	var unused []string
 	for k := range Table(Default) {
-		if k == nameKey {
+		// Retain the former long ETA label for older rendered pages.
+		if k == nameKey || k == "js.wb.state.eta" {
 			continue
 		}
 		if _, ok := keys[k]; !ok {

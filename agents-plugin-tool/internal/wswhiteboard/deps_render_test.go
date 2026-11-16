@@ -56,7 +56,7 @@ func TestDependencyPopoverRenderStates(t *testing.T) {
 						`class="row link" href="#topic-waiter"><span>Waiting &lt;&amp;&gt;</span><span class="ar">`,
 						`class="row link" href="#topic-another"`)
 					if !topic.Closed {
-						wantAll(t, out, `class="tname">Work</span><span class="dw">`)
+						wantAll(t, out, `class="tname" title="Work">Work</span><span class="dw">`)
 					}
 				}
 				out := render(t, view)

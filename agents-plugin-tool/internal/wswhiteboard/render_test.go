@@ -200,7 +200,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout **notes**", Changed: 12}, {Name: "초기 범위", Body: "closed notes", Changed: 3}, {Name: "tool surface", Body: "old notes", Changed: 4}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		start := strings.Index(out, `<span class="tname">embed layout</span>`)
+		start := strings.Index(out, `<span class="tname" title="embed layout">embed layout</span>`)
 		block := out[start:]
 		block = block[:strings.Index(block, "</section>")]
 		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="topic-stream"`)
@@ -212,7 +212,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 			t.Errorf("%s: body tag = %q, want it open (changed at seq 12, after the embed at 10)", name, tag)
 		}
 		// A body that did not change since the previous embed is open only on the full page.
-		start = strings.Index(out, `<span class="tname">tool surface</span>`)
+		start = strings.Index(out, `<span class="tname" title="tool surface">tool surface</span>`)
 		block = out[start:]
 		block = block[:strings.Index(block, "</section>")]
 		tag := docTag.FindString(block)
@@ -221,7 +221,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 			t.Errorf("%s: unchanged body tag %q, open = %v, want %v", name, tag, open, wantOpen)
 		}
 		// A closed topic folds its body on both pages.
-		start = strings.Index(out, `<span class="tname" title="closed">초기 범위</span>`)
+		start = strings.Index(out, `<span class="tname" title="초기 범위">초기 범위</span>`)
 		if start < 0 {
 			t.Fatalf("%s: closed topic missing", name)
 		}
@@ -234,7 +234,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 			t.Errorf("%s: a closed topic still carries its body", name)
 		}
 		// A topic with no body has no body block.
-		start = strings.Index(out, `<span class="tname">embed retention</span>`)
+		start = strings.Index(out, `<span class="tname" title="embed retention">embed retention</span>`)
 		block = out[start:]
 		block = block[:strings.Index(block, "</section>")]
 		if strings.Contains(block, "tdoc") {
@@ -249,7 +249,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
+	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
 		`<details class="entry-panel`, `data-key="entry:e1" id="p1" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tdoc"`)
 	wantNone(t, out, `class="tbody"`)
@@ -258,7 +258,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic closed" id="`+topicAnchor("notes")+`" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic closed" id="`+topicAnchor("notes")+`" data-topic="notes" title="closed"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<div class="topic-stream">`,
 		`<details class="entry-panel`, `data-key="entry:e1" id="p1"><summary`, "<h1>Plan</h1>")
 	wantNone(t, out, `class="tdoc"`, `data-key="entry:e1" id="p1" open>`)
@@ -290,9 +290,9 @@ func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("embed layout")+`" data-topic="embed layout"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">embed layout</span></span>`,
+		wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("embed layout")+`" data-topic="embed layout"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="embed layout">embed layout</span></span>`,
 			`.topic.has-doc > .tophead > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
-		start := strings.Index(out, `<span class="tname">embed retention</span>`)
+		start := strings.Index(out, `<span class="tname" title="embed retention">embed retention</span>`)
 		if start < 0 {
 			t.Fatalf("%s: topic missing", name)
 		}
@@ -451,7 +451,7 @@ func TestTopicBodyHTMLCaveats(t *testing.T) {
 
 func TestRenderPageTopicBlockOrder(t *testing.T) {
 	out := render(t, sampleView(LayoutFull))
-	start := strings.Index(out, `<span class="tname">embed layout</span>`)
+	start := strings.Index(out, `<span class="tname" title="embed layout">embed layout</span>`)
 	if start < 0 {
 		t.Fatal("embed layout topic missing")
 	}
@@ -470,7 +470,7 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 		t.Errorf("title bar chips: want the policy count and no assumed count")
 	}
 
-	start = strings.Index(out, `<span class="tname">embed retention</span>`)
+	start = strings.Index(out, `<span class="tname" title="embed retention">embed retention</span>`)
 	block = out[start:]
 	block = block[:strings.Index(block, "</section>")]
 	policy, ack, settled := strings.Index(block, `id="item-77"`), strings.Index(block, `id="item-78"`), strings.Index(block, `id="item-69"`)
@@ -546,10 +546,10 @@ func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 	wantNone(t, regexpHistoryArticle(full, "item-72"), "note-toggle", "wb-hassumed")
 
 	closedFull := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, closedFull, `<section class="topic closed" id="`+topicAnchor("t")+`" data-topic="t">`, `<div class="topic-stream">`, `data-history-item="1"`, `data-id="01"`, `title="correction"`)
+	wantAll(t, closedFull, `<section class="topic closed" id="`+topicAnchor("t")+`" data-topic="t" title="closed">`, `<div class="topic-stream">`, `data-history-item="1"`, `data-id="01"`, `title="correction"`)
 	wantNone(t, closedFull, `<details class="settled"`, `<details class="topic-stream"`)
 	closed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, closed, `<section class="topic quiet closed" id="`+topicAnchor("t")+`" data-topic="t">`,
+	wantAll(t, closed, `<section class="topic quiet closed" id="`+topicAnchor("t")+`" data-topic="t" title="closed">`,
 		`<div class="srow" id="item-1" data-id="01">`,
 		`<button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`,
 		`<div class="reply solo" data-idle hidden>`)
@@ -678,7 +678,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	full := render(t, BuildView(embedState, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
 	// The embed's closed topic's settled items sit behind a collapsed chip in its one
 	// title line.
-	start := strings.Index(full, `<section class="topic quiet closed" id="`+topicAnchor("초기 범위")+`" data-topic="초기 범위">`)
+	start := strings.Index(full, `<section class="topic quiet closed" id="`+topicAnchor("초기 범위")+`" data-topic="초기 범위" title="closed">`)
 	if start < 0 {
 		t.Fatal("closed settled-only topic is not quiet")
 	}
@@ -698,7 +698,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 
 	// Two fresh embed decisions stay expanded, while the older six retain
 	// their independent nested disclosure. Full pages use HISTORY instead.
-	start = strings.Index(full, `<span class="tname">tool surface</span>`)
+	start = strings.Index(full, `<span class="tname" title="tool surface">tool surface</span>`)
 	block = full[start:]
 	block = block[:strings.Index(block, "</section>")]
 	if !strings.Contains(block, `<details class="settled" open><summary title="settled">`) {
@@ -718,7 +718,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	}
 
 	embed := render(t, sampleView(LayoutEmbed))
-	if !strings.Contains(embed, `<section class="topic quiet" id="`+topicAnchor("tool surface")+`" data-topic="tool surface"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">tool surface</span></span>`) {
+	if !strings.Contains(embed, `<section class="topic quiet" id="`+topicAnchor("tool surface")+`" data-topic="tool surface"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="tool surface">tool surface</span></span>`) {
 		t.Errorf("embed: settled-only topic with nothing new is not quiet")
 	}
 }

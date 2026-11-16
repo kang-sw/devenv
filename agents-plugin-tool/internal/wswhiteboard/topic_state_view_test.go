@@ -99,13 +99,14 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 								StateResearching:          "연구 중",
 							}
 						}
-						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wb-state-wait", StateDiscussing: "discuss", StateImplementing: "impl", StateResearching: "research"}
-						badge := `<span class="topic-state"><span class="stb ` + classes[value] + `"><span class="wb-state-dot" aria-hidden="true"></span>` + labels[value]
+						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wait", StateDiscussing: "discuss", StateImplementing: "impl", StateResearching: "research"}
+						wantAll(t, out, `<span class="topic-state dw"><span class="sb `+classes[value], `tabindex="0" role="img" aria-label="`+labels[value], `<use href="#i-st-`+classes[value]+`"/>`, `<span class="tname" title="Work">Work</span>`)
+						wantNone(t, out, `<span class="stb `, `<span class="eta`, `<span class="state-estimate">`, `aria-live=`)
 						if value == StateImplementing {
-							badge += ` · <span class="own">executor &#34;&lt;&amp;&gt;&#39;</span>`
+							wantAll(t, out, `<small>/10m</small>`, `<span class="who">executor &#34;&lt;&amp;&gt;&#39;</span>`)
+						} else {
+							wantAll(t, out, `class="sb `+classes[value]+` solo"`)
 						}
-						wantAll(t, out, badge+`</span></span>`)
-						wantNone(t, out, `<span class="own">executor "`)
 						tag := stateTopicTag(t, out, "Work")
 						wantAll(t, tag, `data-state="`+value+`"`)
 						wantNone(t, tag, "data-state-diagnostic")
@@ -115,7 +116,7 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 						}
 						run := current.State.Run
 						wantAll(t, tag, `data-state-owner="executor &#34;&lt;&amp;&gt;&#39;"`, `data-state-eta-minutes="10"`,
-							`data-state-started-at="`+run.StartedAt+`"`, `data-state-deadline-at="`+run.DeadlineAt+`"`, `data-state-run="`+run.ID+`"`)
+							`data-state-started-at="`+run.StartedAt+`"`, `data-state-deadline-at="`+run.DeadlineAt+`"`, `data-state-run="`+run.ID+`"`, `data-state-initial-eta-minutes="7"`, `data-state-extensions="1"`)
 					}
 				}
 			}
@@ -146,24 +147,24 @@ func TestTopicStateViewResearchingBadgeMetadata(t *testing.T) {
 					if lang == "ko" {
 						label, estimate = "연구 중", fmt.Sprintf("예상 %d분", current.ETAMinutes)
 					}
-					wantAll(t, out, `<span class="stb research"><span class="wb-state-dot" aria-hidden="true"></span>`+label)
+					wantAll(t, out, `<span class="topic-state dw"><span class="sb research`, `aria-label="`+label, `<use href="#i-st-research"/>`)
 					if current.Owner == "" {
 						wantNone(t, tag, "data-state-owner")
-						wantNone(t, out, `<span class="own">`)
+						wantNone(t, out, `<span class="who">`)
 					} else {
 						owner := current.Owner
 						if strings.HasPrefix(owner, "<img") {
 							owner = "&lt;img src=x onerror=attack()&gt;"
 						}
 						wantAll(t, tag, `data-state-owner="`+owner+`"`)
-						wantAll(t, out, ` · <span class="own">`+owner+`</span>`)
+						wantAll(t, out, `<span class="who">`+owner+`</span>`)
 					}
 					if current.ETAMinutes == 0 {
 						wantNone(t, tag, "data-state-eta-minutes")
 						wantNone(t, out, `<span class="state-estimate">`)
 					} else {
 						wantAll(t, tag, fmt.Sprintf(`data-state-eta-minutes="%d"`, current.ETAMinutes))
-						wantAll(t, out, `<span class="state-estimate">`+estimate+`</span>`)
+						wantAll(t, out, `<span class="tl">`+estimate+`</span>`, fmt.Sprintf(`<span class="t est"><small>~%dm</small></span>`, current.ETAMinutes))
 					}
 					if current.Run != nil {
 						t.Fatalf("%s: research acquired a run", name)
