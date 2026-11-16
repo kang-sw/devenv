@@ -272,7 +272,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 	}
 	a := &dashboardAssets{data: pageAssetsData{
 		CSS:              template.CSS(get("dashboard.css") + "\n" + get("memo.css") + "\n" + get("usage.css")),
-		Script:           template.JS(get("dashboard.js")),
+		Script:           template.JS(string(wb.SelectAllScript) + "\n" + get("dashboard.js")),
 		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		TrackerCSS:       template.CSS(get("tracker.css")),
 		TrackerScript:    template.JS(get("tracker.js")),

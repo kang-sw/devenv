@@ -31,7 +31,7 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/select-all.js assets/sprite.svg
 var assetFS embed.FS
 
 // All consumers (standalone, dashboard and topic-body frames) use this same
@@ -69,6 +69,8 @@ type pageAssets struct {
 	// and the dashboard composer read.
 	answers string
 	form    string
+	// selectAll scopes page selections; sandboxed body frames never load it.
+	selectAll string
 	// code adds line numbers and a copy button to code blocks, on every
 	// page that runs form (it follows form, which defines wbBindBoard) and
 	// inside a topic-body frame.
@@ -189,6 +191,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		css:         template.CSS(get("page.css")),
 		answers:     get("answers.js"),
 		form:        get("form.js"),
+		selectAll:   get("select-all.js"),
 		code:        code,
 		live:        get("live.js"),
 		stream:      get("stream.js"),
@@ -417,9 +420,10 @@ func RenderClosedTopics(view View) (template.HTML, error) {
 // reply bar (a function body: run it inside a function scope, as RenderPage
 // does), and the mermaid theme script that runs after MermaidAsset.
 type SharedAssets struct {
-	CSS        template.CSS
-	Sprite     template.HTML
-	FormScript template.JS
+	CSS             template.CSS
+	Sprite          template.HTML
+	FormScript      template.JS
+	SelectAllScript template.JS
 	// AnswersScript defines window.wbAnswers, the answer-block builder
 	// FormScript calls; a self-contained script for the page to inline once,
 	// ahead of the first FormScript run.
@@ -436,7 +440,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream), AnswersScript: template.JS(a.answers), SelectAllScript: template.JS(a.selectAll), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -538,7 +542,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 
 func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
 	full := view.Layout != LayoutEmbed
-	script := a.answers + a.form + a.code + a.deps
+	script := a.selectAll + a.answers + a.form + a.code + a.deps
 	if full {
 		// The viewer is for the standalone page; the embed is a chat
 		// snapshot with a size budget; it runs the form and dependency popovers.

@@ -118,6 +118,8 @@ html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
 body { font: 14px/1.5 var(--wb-sans); }
 .id, code { font-family: var(--wb-mono); }
 button { font: inherit; color: inherit; }
+/* Only chrome: topic labels, item IDs, paths and readable bodies stay copyable. */
+.top h1, .mhead, .btn { -webkit-user-select: none; user-select: none; }
 a { color: var(--wb-primary); }
 .wrap { margin: 0 auto; padding: 16px; }
 .full .wrap { max-width: 1200px; }
