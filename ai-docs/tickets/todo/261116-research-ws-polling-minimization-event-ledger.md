@@ -1,6 +1,7 @@
 ---
 title: "Research polling minimization and a change ledger"
 related:
+  261116-feat-ws-daemon-hub-first-polling: "Actionable phased implementation of board 1242=a and 1243=a"
   261116-bug-ws-dashboard-frontend-idle-and-switch-cost: "Frontend idle and switch costs"
   261116-bug-ws-dashboard-daemon-idle-file-touches: "Low-risk daemon idle touch reductions"
   261111-bug-ws-dashboard-daemon-idle-cpu-windows: "Earlier daemon idle CPU and discovery work"
@@ -38,7 +39,11 @@ Research only; do not prescribe implementation before compatibility and recovery
 
 ## Decisions
 
-The owner's direction is polling minimization toward an event-driven design. The ledger, IPC hub and OS notifications remain alternatives to evaluate, not an implementation decision.
+- Owner decision (board 1242=a, confirmed 2026-11-16 16:14): **hub first**. In-daemon writers notify the daemon's in-memory change hub directly and readers subscribe. Do not create a shared change-ledger file. Reuse the existing broker, targeted index lanes and mailbox wake hub rather than adding a parallel event framework.
+- Owner decision (board 1243=a, confirmed 2026-11-16 16:14): external changes (git, hand edits, older/non-notifying binaries) must be recovered within **five minutes**, using a code constant and a slow safety scan. No new config-manifest key; unknown keys are a T3 compatibility hazard.
+- The earlier ledger proposal in Context is historical, superseded by 1242=a. The study remains evidence/proposals except where the owner has explicitly decided above.
+- Remaining implementation is collected in `261116-feat-ws-daemon-hub-first-polling`, including P4 mailbox timers/hireLoop and P5 git stat gating plus the observed daemon-startup git burst. Already landed Windows metadata identity, changed-only board reconciliation and memory-only adapter stamps are not reimplemented.
+- Out of scope: P3 heartbeat cadence/flush changes await a separate owner crash-detection-latency decision; P7 OS notifications await the owner's DLP experiment. Existing disk heartbeats and liveness behavior remain intact.
 
 ## Outcome Ledger
 
@@ -46,6 +51,10 @@ The owner's direction is polling minimization toward an event-driven design. The
 
 The cited audit and Exec3 measurements above are workload-specific; the audit did not deeply examine every poller.
 
+### Confirmed Decisions
+
+Board 1242=a selects the in-memory hub, not a shared ledger. Board 1243=a fixes the external safety bound at five minutes in code, not configuration. See Decisions above.
+
 ### Open Questions
 
-Which option and compatibility tier can safely reduce touches across old and new binaries, and how will missed changes be recovered without restoring the original polling cost?
+Heartbeat/crash-detection latency (P3) and OS-notification DLP behavior (P7) remain owner decisions; neither blocks the hub-first ticket. Per-surface compatibility and recovery are recorded in that actionable ticket before each phase lands.
