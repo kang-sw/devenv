@@ -1,6 +1,8 @@
 ---
 title: "Orchestration profile foundation: profile-aware playbooks, sub-lead protocol, sub-lead board status"
 parent: 261116-epic-lead-orchestration-profile
+related:
+  261116-research-ws-hosted-session-first-tier: context - ws/agent.spawn direction for harness-neutral spawn depth (68)
 sage-review-design: blocked
 sage-review-completeness: blocked
 ---
@@ -9,7 +11,7 @@ sage-review-completeness: blocked
 
 ## Open Decision Queue
 
-Last ID: (67)
+Last ID: (69)
 
 (51) [open] [policy] Which keys may write status to the top-level lead's board (reopened by design review: as confirmed, it admits every parented lead key).
 - Context: `role: worker` renders mint parented lead keys (`childRoleForPlaybookRole`), so "any parented lead key" admits every `lead-run` worker and `ticket-handler`, not only sub-leads; and ready ticket `261115-feat-ws-whiteboard-agent-card` pins "every unrelated parented caller's existing denial. No global child permission" with a verification for unchanged parented denial. No key-level marker separates a sub-lead from a worker today.
@@ -17,12 +19,8 @@ Last ID: (67)
 - Alternative b: any parented lead key, as confirmed; supersede the card ticket's ordinary-denial constraint by name and coordinate its tests.
 > a: matches the epic's "sub-lead key" framing (03), (15) and keeps the ready card ticket's contract intact.
 
-(61) [open] [policy] A sub-lead status write when the top-level lead's whiteboard knob resolves off (builtin default off).
-- Context: a successful `whiteboard.update` today calls `enableWhiteboardKnobForSession` and returns lead-only directives (the `full:` URL, the applied-info line); reusing it for a sub-lead write would switch the user's board on as a side effect.
-- Alternative a: accept the write into the board store without touching any knob; the sub-lead's success output is a single acknowledgement line with no lead directives; the status shows whenever the user opens the board.
-- Alternative b: refuse the write with a short message; the sub-lead keeps status in its report only.
-- Alternative c: auto-enable the board, as the handler does for a lead.
-> a: a sub-lead never branches on the lead's knob, and the knob stays the user's switch.
+(69) [open] [announced] Claude stays off the whitelist on the 2026-11-16 probe; the Phase 1 probe covers Codex only, and the whitelist may ship empty, so every `orchestrate` setting then warns.
+- Citation: (68)=c ("Claude is off the whitelist, with the warning"); the probe result recorded under **Claude result and timing**; Pi is capped by ws (63).
 
 ## Background
 
@@ -61,7 +59,7 @@ since both touch how playbook text varies by knob.
   the `shadowed:` line. Rejected: a structured `warnings` field; a
   `runtime.json` capability. (49)
 - **Probe.** Phase 1 probes nested spawn (lead -> sub-lead -> worker ->
-  delegate -> explore) on Claude, Codex, and Pi; only verified harnesses seed
+  delegate -> explore) on the hosts not yet probed; only verified harnesses seed
   the whitelist; host versions and probe date are a comment at the
   whitelist. Rejected: a new manual. (50)
 - **Probe criterion.** A harness is verified when the full lead -> sub-lead
@@ -71,6 +69,16 @@ since both touch how playbook text varies by knob.
   the whitelist by ws's own cap, not a host limit: `pi.spawn` allows at most
   two levels below the lead (`pi_forward.go`); the whitelist comment cites
   that cap. (63) auto-confirmed (review)
+- **Claude result and timing.** Probed 2026-11-16 in Claude Code: a level-1
+  and a level-2 subagent below the lead have the Agent tool, a level-3
+  subagent has none (`general-purpose` and `wsflow:effort-low` alike), so the
+  chain stops at the worker and cannot reach delegate or explore. The chain
+  shape stays as the epic designs it and Phase 1 is implemented as written;
+  harness-neutral depth control is expected from the `ws/agent.spawn`
+  direction of `261116-research-ws-hosted-session-first-tier`, after which
+  the whitelist grows. Rejected: a three-level run chain with
+  `ticket-runner` absorbing the worker role; a worker whose children are
+  leaves with no explore. (68)
 - **Attribution and panels.** The implementer picks the prefix form and a
   test pins it; a sub-lead's `wb:panel` carries no `id`, so it always mints a
   new panel and never rewrites one it did not author. (64) auto-confirmed
@@ -88,6 +96,13 @@ since both touch how playbook text varies by knob.
   it. Rejected: a section inside `sublead-protocol` (every sub-lead would
   carry it); the full `whiteboard` playbook (its lead-only rules would reach
   sub-leads). (59)
+- **Board knob off.** A sub-lead write never calls
+  `enableWhiteboardKnobForSession` and never returns the lead directives (the
+  `full:` URL, the applied-info line); its success output is one
+  acknowledgement line. With the top-level lead's whiteboard knob resolving
+  off, the write is still accepted into the board store, and the status shows
+  when the user opens the board. Rejected: refusing the write while the knob
+  is off; auto-enabling the board as a lead write does. (61)
 - **Attribution.** A sub-lead's log line and panel recap carry a
   server-written attribution prefix in their text. Rejected: a new author
   field in the board store. (52)
@@ -165,7 +180,7 @@ since both touch how playbook text varies by knob.
 - Profile-aware selection in `wsrsrc.Load` per (46)-(48); every `Load`
   caller, including declared-variable collection, receives the same profile.
 - Whitelist and `config.tune` warning per (49); nested-spawn probe per (50).
-- Sub-lead board path per (51), (52); a refused command's message for a
+- Sub-lead board path per (51), (52), (61); a refused command's message for a
   parented key names the `whiteboard-status` playbook (59), which Phase 2
   writes.
 - Auto-ack per (53). Approved knob-off text (match each on-text exactly
@@ -187,7 +202,9 @@ since both touch how playbook text varies by knob.
     items" relay stay; with the knob off they are simply empty.
 - Verification: unit tests for lookup order, the top-level-only rule, the
   overlay-conflict validation, knob registration and the warning line, the
-  board admission and every refused command, the attribution prefix, and the
+  board admission and every refused command, a sub-lead write with the lead's
+  board knob off (accepted, knob unchanged, one acknowledgement line), the
+  attribution prefix, and the
   auto-ack pin test; `go test ./internal/wsrsrc/... ./internal/mcp/...`; the
   manifest and mirror regeneration tests.
 

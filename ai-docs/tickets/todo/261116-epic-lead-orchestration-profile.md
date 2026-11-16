@@ -3,9 +3,17 @@ title: "Lead orchestration profile: sub-lead building blocks behind a thin lead"
 sage-review-design: required
 related:
   261115-feat-ws-worker-profile-session-spawn: context - role/scope gates a sub-lead key must fit
+  261116-research-ws-hosted-session-first-tier: context - its ws/agent.spawn direction is the expected path to harness-neutral spawn depth
 ---
 
 # Lead orchestration profile: sub-lead building blocks behind a thin lead
+
+## Open Decision Queue
+
+Last ID: (70)
+
+(70) [open] [announced] The Dropped criterion no longer fires on today's hosts: it reads "nested spawn proves unusable on every supported host after the `ws/agent.spawn` work of `261116-research-ws-hosted-session-first-tier` lands, or the user abandons the profile split".
+- Citation: (68)=c with the owner's note (2026-11-16): implement as designed now; once the ws/agent work lands, effectively every harness can be supported - every host probed today already fails the chain, so the old wording would drop the epic the owner chose to continue.
 
 ## Scope
 
@@ -101,6 +109,15 @@ related:
   may not support nested spawn. The whitelist grows as harnesses are added.
   Rejected: refusing the setting; a separate research ticket before the epic.
   (16)
+- **Depth today.** Claude Code gives a level-3 subagent no spawn tool
+  (probed 2026-11-16) and ws caps `pi.spawn` at two levels, so no
+  host probed so far completes the chain (Codex is probed in the foundation
+  child).
+  The chain shape and the children's names stay; harness-neutral depth
+  control is expected from the `ws/agent.spawn` direction of
+  `261116-research-ws-hosted-session-first-tier`. Rejected: `ticket-runner`
+  absorbing the worker role to keep a three-level chain; leaf-only worker
+  children. (68)
 - **Sub-lead whiteboard path.** The foundation child gives a sub-lead key a
   write path for status log lines and panels on its top-level lead's board,
   and none for asks; the board and its nudges are keyed to a top-level lead
