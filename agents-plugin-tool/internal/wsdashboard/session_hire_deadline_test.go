@@ -186,6 +186,28 @@ func TestHireStartupUnrelatedCorruptRegistrationDoesNotBlockReplay(t *testing.T)
 	}
 }
 
+func TestHireReadinessIgnoresForeignWorkspaceLinks(t *testing.T) {
+	f := startPageFixture(t, hireRegistryFixture)
+	f.d.Close()
+	f.d.index.Refresh()
+	f.d.index.retry("unrelated")
+	doc, _ := f.d.layout.current()
+	doc = doc.clone()
+	// A stale link in another workspace is not part of the requester's
+	// displayed hierarchy, even when its old parent cannot be read.
+	doc.Workspaces[filepath.Join(f.project, "other-workspace")] = &railLayoutWS{Children: map[string][]string{"unrelated": {"livesession"}}}
+	raw, err := doc.encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFile(f.dir, railLayoutFileName, raw); err != nil {
+		t.Fatal(err)
+	}
+	if !f.d.hireHierarchyReady("livesession") || f.d.hireParent("livesession") != "" {
+		t.Fatal("foreign workspace link blocked a top-level requester")
+	}
+}
+
 func TestHireStartupPartialIndexRetainsApprovalJournal(t *testing.T) {
 	for _, failure := range []string{"requester-source", "parent-source", "parent-registration"} {
 		t.Run(failure, func(t *testing.T) {

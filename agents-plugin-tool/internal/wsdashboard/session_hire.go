@@ -158,16 +158,23 @@ func (d *Daemon) hireHierarchyReady(replyID string) bool {
 		return false
 	}
 	doc, _ := d.layout.current()
+	facts := railFactsOf(d.railBaseView(d.pages()))
+	row, ok := facts.rows[replyID]
+	if !ok {
+		return false
+	}
+	ws := doc.Workspaces[row.WS]
+	if ws == nil {
+		return true
+	}
 	chain := []string{replyID}
 	seen := map[string]bool{replyID: true}
 	for i := 0; i < len(chain); i++ {
-		for _, ws := range doc.Workspaces {
-			for parent, children := range ws.Children {
-				for _, child := range children {
-					if child == chain[i] && !seen[parent] {
-						seen[parent] = true
-						chain = append(chain, parent)
-					}
+		for parent, children := range ws.Children {
+			for _, child := range children {
+				if child == chain[i] && !seen[parent] {
+					seen[parent] = true
+					chain = append(chain, parent)
 				}
 			}
 		}
