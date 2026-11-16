@@ -1,5 +1,6 @@
 'use strict';
 const path = require('node:path');
+const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { connectDaemon } = require('./daemon-controller');
 const { pythonAvailable } = require('./python');
@@ -8,6 +9,24 @@ const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar')
 const { createUpdater } = require('./update');
 const UPDATE = Object.freeze({ check: 'werkschaft:update-check', download: 'werkschaft:update-download',
   skip: 'werkschaft:update-skip', restart: 'werkschaft:update-restart', subscribe: 'werkschaft:update-subscribe', status: 'werkschaft:update-status' });
+
+function failStartup({ app, dialog }, error) {
+  let logPath, logStatus;
+  try {
+    const detail = error?.stack || String(error);
+    console.error(detail);
+    try {
+      logPath = path.join(app.getPath('userData'), 'startup-error.log');
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.writeFileSync(logPath, `${detail}\n`, { encoding: 'utf8', mode: 0o600 });
+      logStatus = `Error log: ${logPath}`;
+    } catch (logError) {
+      console.error('Could not write startup error log:', logError);
+      logStatus = `Could not write startup-error.log${logPath ? ` at ${logPath}` : ''}.`;
+    }
+    dialog.showErrorBox('Werkschaft startup failed', `${error?.message || String(error)}\n\n${logStatus}`);
+  } finally { app.exit(1); }
+}
 
 function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
   app.setName('Werkschaft');
@@ -318,7 +337,13 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     applicationMenu = Menu.buildFromTemplate(menu);
     Menu.setApplicationMenu(applicationMenu);
     connect();
-  });
+  }).catch(error => failStartup({ app, dialog }, error));
 }
-if (require.main === module) start(require('electron'));
+if (require.main === module) {
+  const electron = require('electron');
+  const fail = error => failStartup(electron, error);
+  process.on('uncaughtException', fail);
+  process.on('unhandledRejection', fail);
+  start(electron);
+}
 module.exports = { start };

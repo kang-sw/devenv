@@ -109,6 +109,81 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     onDialog: fn => { onDialog = fn; },
     menus, template, session: session.defaultSession, opened, choose: n => { response = n; } };
 }
+test('startup readiness, updater and BaseWindow failures report stack and log, show an error box and exit', async t => {
+  const update = require('../update'), original = update.createUpdater;
+  const stderr = [];
+  t.mock.method(console, 'error', (...args) => stderr.push(args));
+  for (const stage of ['readiness', 'updater', 'BaseWindow']) {
+    const failure = new Error(`injected ${stage} failure`), exits = [], boxes = [];
+    const directory = path.join(userData, stage), log = path.join(directory, 'startup-error.log');
+    fs.mkdirSync(directory);
+    fs.writeFileSync(log, 'previous failure');
+    update.createUpdater = () => {
+      if (stage === 'updater') throw failure;
+      return { applyOnLaunch: () => false };
+    };
+    delete require.cache[require.resolve('../main')];
+    const { start } = require('../main');
+    update.createUpdater = original;
+    const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true,
+      whenReady: () => stage === 'readiness' ? Promise.reject(failure) : Promise.resolve(),
+      getVersion: () => '0.1.0', getPath: () => directory, exit: code => exits.push(code) });
+    start({ app, BaseWindow: class { constructor() { throw failure; } },
+      nativeTheme: { shouldUseDarkColors: false },
+      session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+      dialog: { showErrorBox: (title, message) => boxes.push({ title, message }) } }, 'win32');
+    await tick();
+    assert.deepEqual(exits, [1]);
+    assert.equal(stderr.at(-1)[0], failure.stack);
+    assert.equal(fs.readFileSync(log, 'utf8'), `${failure.stack}\n`);
+    assert.equal(boxes.length, 1);
+    assert.equal(boxes[0].title, 'Werkschaft startup failed');
+    assert(boxes[0].message.includes(failure.message));
+    assert(boxes[0].message.includes(log));
+  }
+});
+test('startup still shows an error box and exits when the error log cannot be written', async t => {
+  const failure = new Error('startup failure with unwritable log'), exits = [], boxes = [], stderr = [];
+  t.mock.method(console, 'error', (...args) => stderr.push(args));
+  const directory = path.join(userData, 'blocked-user-data');
+  fs.writeFileSync(directory, 'not a directory');
+  const { start } = require('../main');
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true,
+    whenReady: () => Promise.reject(failure), getPath: () => directory, exit: code => exits.push(code) });
+  start({ app, dialog: { showErrorBox: (_title, message) => boxes.push(message) } }, 'win32');
+  await tick();
+  assert.deepEqual(exits, [1]);
+  assert.equal(stderr[0][0], failure.stack);
+  assert.match(stderr[1][0], /Could not write startup error log/);
+  assert.equal(boxes.length, 1);
+  assert(boxes[0].includes(failure.message));
+  assert(boxes[0].includes(path.join(directory, 'startup-error.log')));
+  assert.match(boxes[0], /Could not write/);
+});
+test('main entrypoint routes uncaught exceptions and unhandled rejections to the same fatal handler', () => {
+  const vm = require('node:vm'), events = new EventEmitter(), exits = [], boxes = [], stderr = [];
+  const directory = path.join(userData, 'process-errors'), log = path.join(directory, 'startup-error.log');
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true,
+    whenReady: () => new Promise(() => {}), getPath: () => directory, exit: code => exits.push(code) });
+  const electron = { app, dialog: { showErrorBox: (_title, message) => boxes.push(message) } };
+  const root = path.resolve(__dirname, '..'), entry = { exports: {} };
+  const load = name => name === 'electron' ? electron : require(name.startsWith('./') ? path.resolve(root, name) : name);
+  load.main = entry;
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), {
+    require: load, module: entry, __dirname: root, process: Object.assign(events, { platform: 'win32' }),
+    console: { error: (...args) => stderr.push(args) },
+  });
+  for (const [event, failure] of [['uncaughtException', new Error('uncaught startup exception')],
+    ['unhandledRejection', 'unhandled startup rejection']]) {
+    assert.equal(events.listenerCount(event), 1);
+    events.emit(event, failure);
+    assert.equal(stderr.at(-1)[0], failure.stack || failure);
+    assert.equal(fs.readFileSync(log, 'utf8'), `${failure.stack || failure}\n`);
+    assert(boxes.at(-1).includes(failure.message || failure));
+    assert(boxes.at(-1).includes(log));
+  }
+  assert.deepEqual(exits, [1, 1]);
+});
 test('native window, menus, authority, close veto and single-instance focus', async () => {
   const f = await fixture(), w = f.window;
   assert.equal(w.title, 'Werkschaft');
