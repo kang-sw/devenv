@@ -41,6 +41,13 @@ established causes.
 
 ## Decisions
 
+Owner priority update (2026-11-16 10:05): performance is top priority in
+parallel with `261116-bug-ws-exe-launch-elimination`. The P1 render transaction
+and P4 input work below belong to that priority set; P1/P4 retain the original
+finding labels, not lower scheduling authority. Input scope includes composer
+autosize and both slash/`#` trigger guards. This is backlog authority only;
+implementation awaits the owner's explicit assignment.
+
 - Measure first, fix only measured hotspots. Rejected: speculative rewrite or
   framework migration.
 - Implementer is a Claude (Opus) worker: the owner directed that frontend
@@ -127,7 +134,7 @@ ordering/scroll contracts; how are canonical dependencies and removal/full-board
 fallbacks represented; and what measured transaction budget is appropriate?
 These mechanism/acceptance choices are not settled by the performance report.
 
-### P4: Composer layout thrash and slash guard (priority P4, size M; guard S)
+### P4: Composer layout thrash and slash/# guards (finding P4, size M; guards S)
 
 - `internal/wsdashboard/assets/dashboard-composer.js:386-396` writes height
   auto, reads scrollHeight, then writes height on each input (`:1651`).
@@ -142,14 +149,16 @@ These mechanism/acceptance choices are not settled by the performance report.
   is cached; ordinary typing is not proven to perform network ticket lookups.
 
 Reproduction: compare short and long drafts using real input without sending;
-measure handler/layout and visible latency separately. Include slash/non-slash,
-IME, selection/caret, pasted/fragmented long drafts, dense results and live
+measure handler/layout and visible latency separately. Include slash, `#` and
+non-trigger typing, IME, selection/caret, pasted/fragmented long drafts, dense results and live
 updates. CDP dispatch latency is not key-to-photon latency.
 
 Candidate direction: batch autosize and popup placement to avoid synchronous
-write/read/write thrash; check the slash trigger before enumeration; consider
+write/read/write thrash; guard slash and `#` paths before unnecessary source
+lookup/enumeration or popup work. The measured pre-trigger enumeration defect
+is slash-specific; audit `#` before claiming the same defect there. Consider
 cached command metadata/unchanged-popup skips only when measured. Preserve
-actual autosizing, IME/caret, keyboard selection, slash results and send behavior.
+actual autosizing, IME/caret, keyboard selection, slash/topic results and send behavior.
 Open questions: what scheduling boundary preserves immediate caret/popup
 correctness, and which dense/fragmented inputs warrant further work? No fixed
 height, virtualization or editor rewrite is preselected.

@@ -75,6 +75,11 @@ invalidation policy is selected here.
 
 ## Decisions
 
+Owner priority update (2026-11-16 10:05): perf-daemon discovery indexing and
+before/after pprof measurement are top priority alongside perf-render,
+perf-input and the separate exe-launch elimination effort. Implementation
+still awaits the owner's explicit assignment.
+
 Compatibility tier: **n/a** for in-process indexing/caching and private
 performance instrumentation with unchanged identity files, MCP/hello, stores
 and tracker/config fields. If a persistent index or protocol/config extension

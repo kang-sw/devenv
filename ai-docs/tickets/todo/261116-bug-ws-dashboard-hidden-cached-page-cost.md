@@ -110,6 +110,12 @@ from document.hidden or remove the owner's cached frames.
 
 ## Decisions
 
+Owner priority update (2026-11-16 10:05): performance is top priority in
+parallel with exe-launch elimination. Within perf-render, session-iframe cache
+removal and the shared visible-only clock scheduler come first. Render
+transaction work and Electron diagnostics remain in the same priority set.
+Implementation still requires the owner's explicit assignment.
+
 Owner decision (2026-11-16 09:58, binding), verbatim:
 
 > 그리고 숨은 세션 iframe은 그냥 매번 지우는 게 낫겠습니다. 새로고침하면 잠깐은 괜찮아지는 거보니까 도저히 백그라운드에 누적할만한 건 아닌 거 같아요. 차라리 세션 변경마다 새로고침되게 하고, 사용감이 떨어지면 새로고침 퍼포먼스 자체를 개선하는 방향으로 가죠.

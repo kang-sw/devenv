@@ -51,6 +51,12 @@ choose a correction. Do not blindly disable the GPU, force
 
 ## Decisions
 
+Owner priority update (2026-11-16 10:05): performance, including this
+perf-render diagnostic track, is top priority in parallel with exe-launch
+elimination. The P2 label preserves the original finding identity; it does not
+override this scheduling directive. No implementation starts without the
+owner's explicit assignment.
+
 Compatibility tier: **n/a** for local diagnostic and embedding/runtime
 investigation with unchanged daemon protocol, stores and configuration manifests.
 No rendering policy or runtime pin is selected. This is a performance-only
