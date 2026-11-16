@@ -14,6 +14,8 @@
     "dist/",
     "scripts/",
     "bin/",
+    "bundle-inputs/",
+    "workflow-bundles/",
     "rsrc/",
     "skills/",
     "runtime.json",
@@ -50,7 +52,8 @@
     "copy-skills": "node scripts/copy-skills.mjs",
     "bundle": "node scripts/bundle.mjs",
     "native-payload": "python3 scripts/prepare-native-payload.py",
-    "prepack": "npm run copy-skills",
-    "prepare": "npm run copy-skills"
+    "workflow-bundles": "python3 scripts/prepare-workflow-bundles.py",
+    "prepack": "npm run copy-skills && npm run workflow-bundles",
+    "prepare": "npm run copy-skills && npm run workflow-bundles"
   }
 }

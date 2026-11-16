@@ -12,7 +12,9 @@ import sys
 import threading
 import time
 import uuid
-from pathlib import Path
+import zipfile
+import zlib
+from pathlib import Path, PurePosixPath
 
 
 _BREADCRUMB_DIR: Path | None = None
@@ -1200,6 +1202,154 @@ def hello_env(env: dict, cwd: str) -> dict:
     return out
 
 
+def pi_daemon_workflow_root(pi: Path) -> Path:
+    """Expand only the producer-supplied owning package, never installed plugins.
+
+    Both products travel in first-party files so even an older native Pi
+    materializer's runtime.json overlay selects the actual owner. The sibling
+    entry uses the old Go reader's existing Pi discovery seam without recursively
+    embedding native-pi or relocating the extension's module/host SDK identity.
+    """
+    identity = json.loads((pi / "runtime.json").read_bytes())["plugin"]
+    if identity not in ("ws", "wsflow"):
+        raise ValueError("invalid Pi workflow owner")
+    bundles = pi / "workflow-bundles"
+    manifest = bundles / "manifest.json"
+    if manifest.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError("workflow manifest too large")
+    record = json.loads(manifest.read_bytes())[identity]
+    archive = bundles / (identity + ".zip")
+    if archive.stat().st_size > 16 * 1024 * 1024 or sha256_file(archive) != record["archive_sha256"]:
+        raise ValueError("workflow archive checksum/size mismatch")
+    inventory = record["files"]
+    if (not isinstance(inventory, dict) or not 1 <= len(inventory) <= 4096 or
+            any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in inventory.values())):
+        raise ValueError("invalid workflow inventory")
+    original = (pi / "dist/index.js").resolve(strict=True)
+    bootstrap = (pi / "bin/ws-pi-forward.mjs").resolve(strict=True)
+    shim = ('import { createPiForwarder } from ' + json.dumps(bootstrap.as_uri()) + ';\n' +
+            'export default createPiForwarder(' + json.dumps(original.as_uri()) + ');\n').encode()
+    entry = b'{"type":"module","pi":{"extensions":["./index.mjs"]}}\n'
+    expected = {identity + "/" + name: value for name, value in inventory.items()}
+    expected.update({"agents-plugin-pi/index.mjs": hashlib.sha256(shim).hexdigest(),
+                     "agents-plugin-pi/package.json": hashlib.sha256(entry).hexdigest()})
+    key = hashlib.sha256(json.dumps([identity, record["archive_sha256"], original.as_uri(), sha256_file(original), sha256_file(bootstrap)], sort_keys=True).encode()).hexdigest()
+    cache = pi / ".runtime/workflow"
+    if (pi / ".runtime").is_symlink() or cache.is_symlink():
+        raise ValueError("workflow cache contains a link")
+    dest = cache / key
+
+    def matches(root):
+        try:
+            if root.is_symlink():
+                return False
+            actual = {}
+            for path in root.rglob("*"):
+                if path.is_symlink():
+                    return False
+                if path.is_file():
+                    actual[path.relative_to(root).as_posix()] = sha256_file(path)
+            return root.is_dir() and actual == expected
+        except OSError:
+            return False
+
+    if matches(dest):
+        return dest / identity
+    cache.mkdir(parents=True, exist_ok=True)
+    stage = cache / (".stage-" + uuid.uuid4().hex)
+    ready, previous = stage / "ready", stage / "previous"
+    ready.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(archive) as z:
+            infos = z.infolist()
+            if len(infos) != len(inventory) or {i.filename for i in infos} != set(inventory):
+                raise ValueError("workflow archive inventory mismatch")
+            if sum(i.file_size for i in infos) > 64 * 1024 * 1024:
+                raise ValueError("workflow archive too large")
+            for info in infos:
+                name = info.filename
+                path = PurePosixPath(name)
+                mode = info.external_attr >> 16
+                if (not name or path.is_absolute() or path.as_posix() != name or
+                        ".." in path.parts or "\\" in name or ":" in name or
+                        info.is_dir() or stat_module.S_IFMT(mode) not in (0, stat_module.S_IFREG) or
+                        info.file_size > 8 * 1024 * 1024):
+                    raise ValueError("unsafe workflow archive member")
+                data = z.read(info)
+                if hashlib.sha256(data).hexdigest() != inventory[name]:
+                    raise ValueError("workflow file checksum mismatch")
+                target = ready / identity / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+        plugin = json.loads((ready / identity / ".claude-plugin/plugin.json").read_bytes())
+        runtime = json.loads((ready / identity / "runtime.json").read_bytes())
+        if plugin["name"] != identity or runtime["plugin"] != identity:
+            raise ValueError("workflow owner mismatch")
+        sibling = ready / "agents-plugin-pi"
+        sibling.mkdir()
+        (sibling / "index.mjs").write_bytes(shim)
+        (sibling / "package.json").write_bytes(entry)
+        if not matches(ready):
+            raise ValueError("workflow staging verification failed")
+        # Different daemon cache roots can share this Pi installation. Keep
+        # publication/repair serialized independently of their starter locks;
+        # immutable warm reads need no lock, and process death releases it.
+        if (cache / "launcher-start.lock").is_symlink():
+            raise ValueError("workflow publication lock contains a link")
+        publisher = LauncherStartLock(cache)
+        try:
+            deadline = time.monotonic() + 10
+            while not publisher.acquire():
+                if time.monotonic() >= deadline:
+                    raise OSError("workflow publication lock timed out")
+                time.sleep(0.01)
+            if not matches(dest):
+                if dest.exists():
+                    dest.rename(previous)
+                try:
+                    ready.rename(dest)
+                except OSError:
+                    if previous.exists() and not dest.exists():
+                        previous.rename(dest)
+                    raise
+            return dest / identity
+        finally:
+            publisher.close()
+    finally:
+        # A failed rollback is retained for diagnosis, never deleted as staging.
+        if not previous.exists() or dest.exists():
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def daemon_start_env(env: dict, cwd: str) -> dict:
+    """Keep hello/caller resources intact; select workflow bytes only for start."""
+    out = hello_env(env, cwd)
+    rsrc = Path(out.get("WS_RSRC_ROOT", ""))
+    pi = rsrc.parent
+    # Explicit alternate/invalid roots keep their original meaning. Old Pi
+    # packages with no supplied bundles retain backend-time failure semantics.
+    if rsrc.name != "rsrc" or not rsrc.is_dir() or not (pi / "workflow-bundles").is_dir():
+        return out
+    try:
+        if json.loads((pi / "package.json").read_bytes()).get("name") != "ws-pi-bridge":
+            return out
+        root = pi_daemon_workflow_root(pi)
+        plugin = json.loads((root / ".claude-plugin/plugin.json").read_bytes())
+        server_env = plugin["mcpServers"][plugin["name"]]["env"]
+        if not isinstance(server_env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in server_env.items()):
+            raise ValueError("invalid workflow server environment")
+        selected = {name: value.replace("${CLAUDE_PLUGIN_ROOT}", str(root)) for name, value in server_env.items()}
+        selected.update({"WS_RSRC_ROOT": str(root / "rsrc"), "WS_SKILLS_ROOT": str(root / "skills")})
+        for name in ("WS_MCP_NAMESPACE", "WS_MCP_SETUP_TOOL", "WS_MCP_NO_AGENT", "WS_MCP_CLI_NAME", "WS_MCP_CONFIG_MANIFESTS"):
+            out.pop(name, None)
+        out.update(selected)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError, EOFError, zipfile.BadZipFile, zlib.error) as exc:
+        # This is not global package admission: Pi/Codex remain available, and
+        # Claude uses its existing backend error/pending-input path.
+        note(f"bundled daemon workflow unavailable; retaining caller roots: {exc}")
+    return out
+
+
 def proxy_hello(mode: str, argv: list[str], env: dict, runtime_version: str) -> dict:
     """The first line on the stream: this connection's process context."""
     cwd = os.getcwd()
@@ -1486,7 +1636,7 @@ class DaemonLink:
         note(f"starting the daemon: {' '.join(argv)}")
         # The daemon starts session holders with the interpreter this launcher
         # runs under; PATH python3 may be missing or, on Windows, a Store alias.
-        env = dict(self.env)
+        env = daemon_start_env(self.env, os.getcwd())
         if not env.get("WS_MCP_HOLDER_PYTHON") and sys.executable:
             env["WS_MCP_HOLDER_PYTHON"] = sys.executable
         try:

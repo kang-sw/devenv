@@ -23,6 +23,9 @@ FIRST_PARTY_FILES = ("dist/index.js", "dist/eff_large_wordlist.txt", "src/web-se
                      "src/helper-host.mjs", "package.json", "config-manifest.json",
                      "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md",
                      "bundle-inputs.json")
+# Additive first-party files: older payloads remain valid, and older helpers
+# already copy every file listed in first.files (not just FIRST_PARTY_FILES).
+WORKFLOW_BUNDLE_FILES = ("workflow-bundles/manifest.json", "workflow-bundles/ws.zip", "workflow-bundles/wsflow.zip")
 REFERENCE_FIELDS = ("main", "module", "exports", "bin", "browser", "imports")
 
 
