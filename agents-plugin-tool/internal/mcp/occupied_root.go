@@ -53,8 +53,9 @@ func (e *occupiedRootError) Error() string {
 // guardOccupiedRoot refuses an impl checkout unless the operation explicitly
 // permits that exact branch. Merge permits its resolved source and target,
 // regardless of caller parenthood. A ticket-write caller skips this guard only
-// for a parented session in its session-bound checkout; parent-less callers pass
-// no allowed branches. Neither exemption asserts ownership or needs a lease.
+// for a parented or delegate session in its session-bound checkout; parentless
+// leads pass no allowed branches. Neither exemption asserts ownership or needs
+// a lease.
 // Call before status/staging/checkout, and recheck at the mutation boundary;
 // these observations do not serialize arbitrary external Git processes.
 func guardOccupiedRoot(ctx context.Context, runner wsgit.Runner, root string, allowedBranches ...string) error {

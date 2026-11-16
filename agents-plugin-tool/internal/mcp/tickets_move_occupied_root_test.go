@@ -115,13 +115,15 @@ func TestTicketsMoveOccupiedRootAllowedSessions(t *testing.T) {
 		{"detached", "", "", roleLead},
 		{"parented-lead", "impl/develop/worker", "live", roleLead},
 		{"parented-delegate", "impl/worker", "live", roleDelegate},
+		{"agent-delegate", "impl/develop/worker", "", roleDelegate},
+		{"rootless-agent-delegate", "impl/worker", "", roleDelegate},
 		{"missing-parent-lead", "impl/worker", "missing-parent-record", roleLead},
 		{"missing-parent-delegate", "impl/develop/worker", "missing-parent-record", roleDelegate},
 	} {
 		for _, from := range []string{"todo", "ready"} {
 			t.Run(tc.name+"/"+from, func(t *testing.T) {
 				root, s, key := occupiedMoveFixture(t, from, true)
-				if tc.parent != "" {
+				if tc.parent != "" || tc.role == roleDelegate {
 					parent := tc.parent
 					if parent == "live" {
 						parent = key
@@ -178,6 +180,53 @@ func TestTicketsMoveOccupiedRootAllowedSessions(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Agent workers carry parentless delegate keys. Even a server rooted elsewhere
+// must move/close only in the key's checkout, never the other worker's index.
+func TestTicketMutationsAgentWorkerBoundRoot(t *testing.T) {
+	for _, tool := range []string{"tickets.move", "tickets.close"} {
+		t.Run(tool, func(t *testing.T) {
+			root, _, _ := occupiedMoveFixture(t, "todo", true)
+			runGit(t, root, "switch", "-c", "impl/develop/worker")
+			key, err := NewAgentKeyStore().Mint(canonicalRootForTest(t, root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign := implRootRepo(t, "impl/develop/other")
+			oldPath := "ai-docs/tickets/todo/" + occupiedMoveStem + ".md"
+			mustWrite(t, foreign, oldPath, ixTicket("Foreign"))
+			runGit(t, foreign, "add", oldPath)
+			s := NewServer(foreign, "test")
+			defer s.Close()
+			before := occupiedMergeSnapshot(t, foreign)
+			args := map[string]any{"session_key": key, "stem": occupiedMoveStem}
+			to := "ready"
+			if tool == "tickets.move" {
+				args["to"] = to
+			} else {
+				to = ".done"
+				args["status"] = "done"
+			}
+			resp := callToolOnce(t, s, 1, tool, args)
+			requireOccupiedMergeUnchanged(t, foreign, before)
+			if isToolError(resp) {
+				t.Fatalf("agent worker refused: %s", resp)
+			}
+			newPath := "ai-docs/tickets/" + to + "/" + occupiedMoveStem + ".md"
+			body, err := os.ReadFile(filepath.Join(root, newPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if staged := runGitOutput(t, root, "show", ":"+newPath); !bytes.Equal(staged, body) {
+				t.Fatalf("destination not staged byte-for-byte: %s", staged)
+			}
+			changes := string(runGitOutput(t, root, "diff", "--cached", "--name-only", "--no-renames"))
+			if changes != oldPath+"\n"+newPath+"\n" && changes != newPath+"\n"+oldPath+"\n" {
+				t.Fatalf("staged paths outside the ticket move: %s", changes)
+			}
+		})
 	}
 }
 
