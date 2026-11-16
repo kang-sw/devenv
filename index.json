@@ -512,6 +512,16 @@
           "branch": "impl/develop/theft-civil-cushy"
         }
       }
+    },
+    "261116-feat-ws-worktree-release-guard": {
+      "registered_at": "2026-11-16T00:07:45Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-16T00:07:45Z"
+      }
     }
   }
 }
