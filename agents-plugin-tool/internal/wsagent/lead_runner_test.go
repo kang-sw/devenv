@@ -1816,6 +1816,25 @@ func TestLeadIdleStopWaitsForBackgroundTasks(t *testing.T) {
 	}
 }
 
+// TestPiLeadIdleStopWaitsForBackgroundShell verifies the hosted count gates idle stop.
+func TestPiLeadIdleStopWaitsForBackgroundShell(t *testing.T) {
+	h := newLeadHarness(t)
+	h.globalProfile(LeadProfilePi, `{"backend":"pi","lead":true,"idle_timeout_seconds":1}`)
+	h.start()
+	id := h.lead(BackendPi, LeadOptions{}).ID
+	h.send(id, "one")
+	holder := h.holder(id)
+	h.holders.out(holder, `{"type":"agent_start"}`, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":1,"monitors":0}`)), `{"type":"agent_settled"}`)
+	h.idle(id)
+	eventually(t, "background shell count", func() bool { return h.state(id).BackgroundTasks == 1 })
+	time.Sleep(1600 * time.Millisecond)
+	if st := h.state(id); !st.Process || st.BackgroundTasks != 1 || h.holders.opCount("stop") != 0 {
+		t.Fatalf("a background shell keeps the process alive: %+v, holder calls %v", st, h.holders.opList())
+	}
+	h.holders.out(holder, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":0,"monitors":0}`)))
+	eventually(t, "the idle stop", func() bool { return !h.state(id).Process && h.holders.opCount("stop "+holder) == 1 })
+}
+
 // TestPiLeadIdleStopAndMailWake verifies a stopped Pi lead wakes for mail.
 func TestPiLeadIdleStopAndMailWake(t *testing.T) {
 	h := newLeadHarness(t)

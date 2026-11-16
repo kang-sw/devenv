@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,17 @@ func piSpec(t *testing.T, raw string) StartSpec {
 	spec := claudeSpec(t, raw)
 	spec.Dir = "/sess"
 	return spec
+}
+
+func TestPiMapperBackgroundShellCount(t *testing.T) {
+	m := newPiMapper(StartSpec{Profile: Profile{Backend: BackendPi, Lead: true}, Lead: &LeadSpec{}})
+	for _, n := range []int{1, 0} {
+		line := piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":`+strconv.Itoa(n)+`,"monitors":0}`)
+		evs := m.mapLine(line, nopReplies{})
+		if len(evs) != 1 || evs[0].BackgroundTasks == nil || *evs[0].BackgroundTasks != n {
+			t.Fatalf("background count %d mapped to %+v", n, evs)
+		}
+	}
 }
 
 func TestPiCompactCommand(t *testing.T) {
