@@ -172,6 +172,7 @@ class E {
   get textContent() { return this._text; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k] ?? null; }
+  hasAttribute(k) { return k in this.attrs; }
   appendChild(e) { this.children.push(e); e.parentNode = this; return e; }
   insertBefore(e) { this.appendChild(e); body.nextElementSibling = e; }
   remove() { this.removed = true; }
@@ -186,7 +187,7 @@ body.rect = { left: 10, top: 10, right: 310, bottom: 210, width: 300, height: 20
 body.topic = { querySelector: () => header };
 let comments = [], timers = [], observed = 0, loads = [];
 const doc = {
-  body: new E(), activeElement: { id: 'keep-focus' },
+  body: new E(), documentElement: new E(), addEventListener() {}, activeElement: { id: 'keep-focus' },
   querySelector: () => header,
   querySelectorAll: sel => sel === 'time.tago[data-at]' ? [activity] : doc.body.children.filter(e => e.attrs['data-body-age'] !== undefined),
   createElement: () => new E(),

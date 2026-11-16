@@ -10,11 +10,11 @@ import (
 
 // TestHiddenFrameHoldsItsUpdatesUntilShown pins a framed page's side of the
 // shell's visibility message (dashboard.js shFrameInit, connect,
-// pageHidden, showRegions, tickTimes): a frame the shell hides gets no visibilitychange,
-// so the shell tells it (shown); hidden, it keeps only each region's newest
-// update and applies none, skips the clock, and defers the tracker reload,
-// as a hidden tab does; shown, it applies the held updates once each, reads
-// the tracker once, and catches the clock up. A message from any window but
+// pageHidden, showRegions, tickTimes): browser-hidden tabs hold the newest
+// regions while retaining light tracker events; a cached frame stops its
+// stream and clock, suspends author frames, and ignores late socket events.
+// Showing it drains held regions, reconnects once and catches the clock up.
+// A message from any window but
 // its parent is ignored. The cases execute under node when it is installed.
 func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
@@ -29,13 +29,12 @@ func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 	open := block("openStream", `(?s)\n  function openStream\(path, on\) \{.*?\n  \}\n`)
 	connect := block("connected ... connect", `(?s)\n  var sseOn = true;\n.*?\n  // showRegions applies`)
 	show := block("showRegions", `(?s)\n  function showRegions\(\) \{.*?\n  \}\n`)
-	hidden := block("pageHidden", `\n  function pageHidden\(\) \{[^\n]*\}\n`)
 	tick := block("tickTimes", `(?s)\n  function tickTimes\(\) \{.*?\n  \}\n`)
 	frame := block("shFrameInit", `(?s)\n  function shFrameInit\(\) \{.*?\n  \}\n  // shShellInit`)
 	post := block("shPost", `(?s)\n  function shPost\(kind, m\) \{.*?\n  \}\n`)
 	search := block("tkSearch", `(?s)\n  var tkWantSearch = false;\n  function tkSearch\(\) \{.*?\n  \}\n`)
 
-	runNode(t, "hidden frame", "(function () {\n"+streamPageHarness+`
+	runNode(t, "hidden frame", "(function () {\n"+animationFrameHarness+streamPageHarness(t)+`
 framed = true;
 var parentWin = { got: [], hashes: [], layouts: [], postMessage: function (m, o) { parentWin.got.push([m.wsShell, o]); if (m.wsShell === "hash") parentWin.hashes.push(m.hash); if (m.wsShell === "layout") parentWin.layouts.push(m); } }, otherWin = {};
 var listeners = {};
@@ -47,12 +46,15 @@ location.origin = "http://localhost:1234";
 location.hash = "";
 var history = { pushState: function (s, t, u) { location.hash = u; }, replaceState: function (s, t, u) { location.hash = u; } };
 doc.querySelector = function () { return null; };
-doc.addEventListener = function () {};
 doc.title = "sess - Werkschaft (alpha)";
 var rootAttrs = {}, bodyWatch = [];
 doc.body = {};
 var MutationObserver = window.MutationObserver = function () { var seen = new Map(); this.observe = function (node, opts) { if (node === doc.body) { if (seen.has(node)) bodyWatch[seen.get(node)] = opts; else { seen.set(node, bodyWatch.length); bodyWatch.push(opts); } } }; };
-var root = { setAttribute: function (k) { rootAttrs[k] = true; }, removeAttribute: function (k) { delete rootAttrs[k]; }, hasAttribute: function (k) { return k === "data-lifted" && !!rootAttrs[k]; }, clientWidth: 1200 };
+var root = { toggleAttribute: function (k, on) { if (on) rootAttrs[k] = true; else delete rootAttrs[k]; }, setAttribute: function (k) { rootAttrs[k] = true; }, removeAttribute: function (k) { delete rootAttrs[k]; }, hasAttribute: function (k) { return !!rootAttrs[k]; }, clientWidth: 1200 };
+function CustomEvent(type) { this.type = type; }
+var suspended = 0, mounted = 0;
+function suspendDocFrames() { suspended++; }
+function mountFramesPaced() { mounted++; }
 function region() { return null; }
 function $() { return null; }
 var searchOpens = 0, tkApi = { openSearch: function () { searchOpens++; } };
@@ -88,15 +90,16 @@ q = function (sel) {
   if (sel === ".rpop:not([hidden]), .lmenu") return railPops.concat(linkMenus);
   return [];
 };
-`+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+search+frame+`
+`+mustAsset(t, "shell.js")+dashboardFuncs(t, "syncPageVisibility")+open+connect+show+tick+post+search+frame+`
 connect();
 shFrameInit();
+flushAnimationFrames();
 var s = sockets[0];
 check("the body is watched for appended popovers and for hidden/open toggles, neither observe() overwriting the other",
   [bodyWatch.some(function (o) { return o.childList && !o.subtree; }), bodyWatch.some(function (o) { return o.subtree && o.attributes && o.attributeFilter.indexOf("hidden") >= 0; })], [true, true]);
-check("a framed session page opts into topic and tree rows without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1");
+check("a framed session page opts into topic and tree rows without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1&display=1");
 s.onopen({});
-function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }
+function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); flushAnimationFrames(); }
 fromShell({ wsShell: "settings", layout: "tabs", input: "mod" }, otherWin);
 check("another window cannot change settings", settings, []);
 fromShell({ wsShell: "settings", layout: "tabs", input: "mod" });
@@ -113,26 +116,36 @@ fromShell({ shown: false }, otherWin);
 s.msg("region", { name: "board", hash: "2", html: "" });
 check("a message from another window is ignored", log, ["swap:board.2"]);
 log = [];
-fromShell({ shown: false });
+doc.hidden = true; syncPageVisibility();
 s.msg("region", { name: "board", hash: "3", html: "" });
 s.msg("region", { name: "convlive", hash: "4", html: "" });
 s.msg("region", { name: "board", hash: "5", html: "" });
 s.msg("tracker", { rev: 7 });
 s.msg("tracker", { rev: 8 });
 tickTimes();
-check("a hidden frame holds its regions, defers the tracker, and skips the clock",
-  [log, Object.keys(hiddenRegions), hiddenRegions.board.hash, shTrackerRev, times],
-  [["hold:board", "hold:convlive", "hold:board"], ["convlive", "board"], "5", 8, 1]);
+check("a browser-hidden frame holds regions and skips the clock while light tracker events act",
+  [log, Object.keys(hiddenRegions), hiddenRegions.board.hash, times],
+  [["hold:board", "hold:convlive", "hold:board", "nudge:7", "nudge:8"], ["convlive", "board"], "5", 1]);
+doc.hidden = false;
 log = [];
+fromShell({ shown: false });
+check("caching closes the stream and suspends author documents", [s.closed, suspended, root.hasAttribute("data-animation-paused")], [true, 1, true]);
+s.msg("region", { name: "board", hash: "late", html: "" });
+s.msg("tracker", { rev: 99 });
+s.fail(); advance(10000); tickTimes();
+check("cached frames ignore late events and never retry or tick", [log, sockets.length, times, hiddenRegions.board.hash], [[], 1, 1, "5"]);
 fromShell({ shown: true });
-check("shown, it applies each held region once, in arrival order, and reads the tracker once",
-  [log, Object.keys(hiddenRegions), shTrackerRev, times], [["swap:convlive.4", "swap:board.5", "nudge:8"], [], null, 2]);
+check("shown, it applies each held region once in arrival order and resumes rendering",
+  [log, Object.keys(hiddenRegions), shTrackerRev, times, mounted, sockets.length, root.hasAttribute("data-animation-paused")],
+  [["swap:convlive.4", "swap:board.5"], [], null, 2, 1, 2, false]);
+check("resumed stream requests display work", sockets[1].url, s.url);
 log = [];
+s = sockets[1]; s.onopen({});
 s.msg("region", { name: "board", hash: "6", html: "" });
 s.msg("tracker", { rev: 9 });
 check("and then acts on updates as they come", log, ["swap:board.6", "nudge:9"]);
 history.pushState(null, "", "#/store");
-check("the frame posted its layout, title, and a hash route its own history call moved to its parent only", parentWin.got.map(function (x) { return x.join(" "); }), ["layout http://localhost:1234", "title http://localhost:1234", "hash http://localhost:1234"]);
+check("the frame posted its title, deferred layout, and hash route to its parent only", parentWin.got.map(function (x) { return x.join(" "); }), ["title http://localhost:1234", "layout http://localhost:1234", "hash http://localhost:1234"]);
 history.replaceState(null, "", "#/store/item");
 location.hash = "#/back";
 listeners.popstate.forEach(function (fn) { fn({}); });

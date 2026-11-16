@@ -34,6 +34,15 @@ func runNode(t *testing.T, what, script string) {
 	}
 }
 
+// animationFrameHarness keeps writes deferred until the test advances a frame.
+// Callbacks scheduled during that frame wait for the next one, as in a browser.
+const animationFrameHarness = `
+var animationFrames = new Map(), animationFrameID = 0;
+function requestAnimationFrame(fn) { var id = ++animationFrameID; animationFrames.set(id, fn); return id; }
+function cancelAnimationFrame(id) { animationFrames.delete(id); }
+function flushAnimationFrames() { var batch = Array.from(animationFrames.values()); animationFrames.clear(); batch.forEach(function (fn) { fn(); }); }
+`
+
 // toastDOM is a minimal DOM and a virtual clock (setTimeout, clearTimeout,
 // Date.now, advance) for running toast.js under node.
 const toastDOM = `
@@ -198,7 +207,7 @@ func TestTabLabelCount(t *testing.T) {
 		t.Fatal("dashboard.js holds no tab label ... sseOn block")
 	}
 	block = strings.TrimSuffix(block, "var sseOn = true;")
-	runNode(t, "session tab label", tlAskSrc(t, string(data))+tabLabelPrelude+boardBoxSrc(t, string(data))+dashboardFuncs(t, "treeInputHTML")+`
+	runNode(t, "session tab label", tlAskSrc(t, string(data))+tabLabelPrelude+boardBoxSrc(t, string(data))+dashboardJSBlock(t, "\n  var TREE_SLOT =", "\n  function treeRowKey(")+dashboardFuncs(t, "keyedInputHTML", "treeInputHTML")+`
 var mode = "session";
 var R = new N(), A = new N(), B = new N();
 var treeSel = {}; treeSel[PERM] = [new N({ up: A }), new N({ up: A }), new N({ up: B })]; treeSel[".agent.root"] = [R];

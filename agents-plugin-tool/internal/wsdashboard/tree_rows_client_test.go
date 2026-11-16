@@ -5,11 +5,10 @@ import "testing"
 // Dispatch uses the real WebSocket and hidden-region code. The real DOM input
 // validator and merger run in TestTreeRowsBrowser, including malformed events.
 func TestTreeRowsClientRecovery(t *testing.T) {
-	src := dashboardFuncs(t, "openStream", "connected", "connect", "showRegions")
-	runNode(t, "tree delta dispatch and hidden recovery", streamPageHarness+`
+	src := streamClientFuncs(t, "openStream", "connected", "connect", "showRegions")
+	runNode(t, "tree delta dispatch and hidden recovery", streamPageHarness(t)+`
 var mode="session",rid="rid1",worktree="",hiddenRegions={},modeHash="m1",liveMode=false,sseOn=true;
 function held() { return "tree.old,head.kept"; }
-function pageHidden() { return doc.hidden; }
 function trackerLost() {} function trackerNudge() {} function syncBadge() {} function modeChanged() {} function banner() {}
 function tlHold() {} function tlCount() {} function tlShown() {} var tlHeld={};
 var applied=[], bases=[];
@@ -29,7 +28,7 @@ check("only newest hidden input applies",applied[1],["tree","two","ABC"]);
 s.msg("tree-rows",{hash:"bad",valid:false});
 check("invalid event closes without applying",[s.closed,applied.length],[true,2]);
 advance(0);
-check("reconnect opts in and preserves held hashes",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("tree.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1");
+check("reconnect opts in and preserves held hashes",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("tree.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1");
 sockets[1].msg("tree-rows",{hash:"premature",valid:true,add:"bad"});
 check("connection cannot inherit another baseline",[sockets[1].closed,applied.length],[true,2]);
 advance(0);
@@ -39,6 +38,7 @@ check("full repairs baseline",applied[3],["tree","next","DE"]);
 doc.hidden=true;
 sockets[2].msg("tree-rows",{hash:"held",valid:true,add:"F"});
 sockets[2].fail(); advance(3000);
+check("browser-hidden reconnect requests no display work",sockets[3].url,s.url.replace("display=1","display=0"));
 sockets[3].msg("region",{name:"tree",hash:"reconnected-full",html:"G"});
 sockets[3].msg("tree-rows",{hash:"reconnected-delta",valid:true,add:"H"});
 check("hidden reconnect replaces old connection inputs",[applied.length,hiddenRegions.tree.html.value],[4,"GH"]);

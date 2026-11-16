@@ -60,9 +60,9 @@ func TestBoardKeepWiring(t *testing.T) {
 }
 
 func TestBoardKeepUnderNode(t *testing.T) {
-	src := dashboardFuncs(t, "boardKeep", "watchBoard", "boardViewedExposure", "restoreScroll")
-	runNode(t, "board owner captures", `
-var bad = [], log = [], owned = null;
+	src := dashboardFuncs(t, "boardKeep", "watchBoard", "boardViewedExposure") + dashboardJSBlock(t, "\n  var scrollRestore =", "\n  [\"wheel\"")
+	runNode(t, "board owner captures", animationFrameHarness+`
+var bad = [], log = [], owned = null, convo = null, stick = false;
 function check(what, ok) { if (!ok) bad.push(what); }
 var main = {scrollTop:400, wbScrollOwner:true}, pins = {scrollTop:500, wbScrollOwner:true};
 var a = {name:"a", scroller:main}, b = {name:"b", scroller:pins}, c = {name:"c", scroller:main};
@@ -89,8 +89,13 @@ log=[];watchBoard(section);watchBoard(section);
 check("watch once",log.join() === "watch:topic");
 var other={scrollTop:5}, transient={scrollTop:60}; owned=transient;
 restoreScroll([[main,100],[pins,100],[other,50],[transient,0]]);
+check("scroll restoration waits for the frame", other.scrollTop===5 && transient.scrollTop===60);
+restoreScroll([[other,99]]);
+check("multiple restores share one callback", animationFrames.size===1);
+flushAnimationFrames();
 check("permanent owner and active jump are not numerically restored",main.scrollTop===400 && pins.scrollTop===500 && other.scrollTop===50 && transient.scrollTop===60);
 owned=null;restoreScroll([[main,0],[transient,0]]);
+flushAnimationFrames();
 check("ownership persists between transactions",main.scrollTop===400 && transient.scrollTop===0);
 process.stdout.write(bad.join("\n"));`)
 }

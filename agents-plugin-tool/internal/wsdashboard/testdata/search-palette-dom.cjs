@@ -79,7 +79,7 @@ module.exports = function renderedEntries(source, fixture) {
   assert.equal(JSON.stringify(root.snapshot()), before, 'indexing does not mutate the rendered DOM or templates');
   const entries = rows.filter(r => r.group === 5);
   const find = text => entries.filter(r => r.title.includes(text));
-  for (const text of ['Older-page needle', 'Live log needle', 'Historical payload needle', 'Latest payload needle']) {
+  for (const text of ['Older-page needle', 'Live log needle', 'Historical payload needle', 'Latest payload needle', 'Migrated body needle']) {
     assert.equal(find(text).length, 1, `one entry for ${text}`);
   }
   assert(!find('Historical payload needle')[0].title.includes('Latest payload needle'), 'version text is owned by its version');
@@ -87,7 +87,9 @@ module.exports = function renderedEntries(source, fixture) {
   assert(find('Latest payload needle')[0].title.includes('Latest panel recap'), 'panel recap and body share one row');
   assert(!entries.some(r => r.title.includes('forbiddenScriptNeedle')), 'frame scripts are not indexed');
   assert(!rows.some(r => r.group === 2 && r.topic === 'stream'), 'bodyless topic cannot inherit panel text or recap');
-  assert(rows.some(r => r.group === 2 && r.topic === 'body' && r.title === 'Topic-owned body needle'));
+  assert(rows.some(r => r.group === 5 && r.topic === 'body' && r.title.includes('Migrated body needle')), 'legacy body writes are searchable as imported panels');
+  assert(!rows.some(r => r.group === 2 && r.topic === 'body'), 'migrated content is not duplicated as a topic body');
+  assert(rows.some(r => r.group === 2 && r.topic === 'legacy' && r.title === 'Topic-owned body needle'), 'unconverted topic-owned bodies remain searchable');
   assert.equal(new Set(entries.map(r => r.entry)).size, entries.length, 'every entry/version has its own row');
   const allArticles = q('article.wb-entry').concat(pages.flatMap(p => q('article.wb-entry', p.content)));
   assert.equal(entries.length, allArticles.length, 'live and inert entries are all indexed');

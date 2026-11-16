@@ -131,7 +131,7 @@ function mounted(p) {
     f.getAttribute("sandbox") === SANDBOX && !f.hasAttribute("data-sandbox") && f.setLive.sandbox === false && f.setLive.srcdoc === false && !f.blank;
 }
 function placeholder(p) { return el(p) === p && p.tagName === "DIV" && !p.hasAttribute("srcdoc"); }
-var window = {};
+var window = {}, shHidden = false;
 function setTimeout() {}
 function requestAnimationFrame() {}
 `
@@ -308,7 +308,7 @@ func TestBoardFrameHeightsBatch(t *testing.T) {
 	runNode(t, "frame height batch", `
 var bad = [];
 function check(what, ok) { if (!ok) bad.push(what); }
-var raf = [], queries = 0, themes = 0;
+var raf = [], queries = 0, themes = 0, shHidden = false;
 var main = {wbScrollOwner:true}, pins = {wbScrollOwner:true};
 function requestAnimationFrame(fn) { raf.push(fn); return raf.length; }
 function num(v) { return typeof v === "number" && isFinite(v) ? v : 0; }

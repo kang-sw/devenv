@@ -37,7 +37,7 @@ window.WsCards = {
 
 func TestBoardTopicsClientSnapshots(t *testing.T) {
 	src := dashboardFuncs(t, "topicKey", "topicSeen", "boardInputFull", "boardInputPatch", "boardNodes", "morphBoard", "forgetOpen", "openKey", "frameKeep", "frameKept", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft")
-	runNode(t, "board incremental snapshots", streamPageHarness+boardTopicsClientDOM+src+`
+	runNode(t, "board incremental snapshots", streamPageHarness(t)+boardTopicsClientDOM+src+`
 var base = boardInputFull(section("A","a1","A1")+section("B","b1","B1")+"<div>reply</div>");
 var one = boardInputPatch(base,delta("A","a2","A2",["A","B"]));
 var two = boardInputPatch(one,delta("B","b2","B2",["A","B"]));
@@ -64,12 +64,11 @@ process.stdout.write(bad.join("\n"));
 }
 
 func TestBoardTopicsClientHiddenAndRecovery(t *testing.T) {
-	src := dashboardFuncs(t, "topicKey", "topicSeen", "boardInputFull", "boardInputPatch", "boardNodes", "openStream", "connected", "connect", "showRegions", "held")
-	runNode(t, "board hidden patches and recovery", streamPageHarness+boardTopicsClientDOM+`
+	src := streamClientFuncs(t, "topicKey", "topicSeen", "boardInputFull", "boardInputPatch", "boardNodes", "openStream", "connected", "connect", "showRegions", "held")
+	runNode(t, "board hidden patches and recovery", streamPageHarness(t)+boardTopicsClientDOM+`
 var mode="session",rid="rid1",worktree="",hiddenRegions={},modeHash="m1",liveMode=false,sseOn=true;
 var regions=[{getAttribute:function(k) { return k==="data-region"?"board":"old-board"; }},{getAttribute:function(k) { return k==="data-region"?"head":"head-hash"; }}];
 function q(sel) { return sel==="[data-region]"?regions:[indicator]; }
-function pageHidden() { return doc.hidden; }
 function trackerLost() {} function trackerNudge() {} function syncBadge() {} function modeChanged() {} function banner() {}
 var tlHeld = {};
 function tlCount() {} function tlShown() {}
@@ -91,7 +90,7 @@ check("show applies only the newest complete snapshot",[applied.length,texts(app
 s.msg("board-topics",{hash:"invalid",order:["unknown"],topics:[]});
 check("invalid patch closes old socket",s.closed,true);
 advance(0);
-check("recovery omits board hash but keeps head and mode and opt-in",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("head.head-hash,mode.m1")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1");
+check("recovery omits board hash but keeps head and mode and opt-in",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("head.head-hash,mode.m1")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1&display=1");
 check("invalid patch did not reach swap",applied.length,1);
 process.stdout.write(bad.join("\n"));
 `)
