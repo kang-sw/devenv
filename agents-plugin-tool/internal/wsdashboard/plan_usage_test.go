@@ -50,6 +50,27 @@ func TestPlanUsageClaudeStaleGuardAndPersistence(t *testing.T) {
 	}
 }
 
+func TestPlanUsageClaudeDropsAbsentWindow(t *testing.T) {
+	s := usageTestStore(t)
+	now := time.Now().UnixMilli()
+	five := wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: 40, ResetsAt: now + 100000}
+	week := wslive.UsageLimit{Kind: wslive.LimitSevenDay, Percent: 20, ResetsAt: now + 200000}
+	push := func(at int64, limits ...wslive.UsageLimit) {
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: at, Usage: &wslive.Usage{Limits: limits}})
+	}
+	push(now, five, week)
+	push(now+1, week) // unchanged weekly value, but the set changed
+	push(now, five, week) // an older session cannot resurrect the removed window
+	push(now+2)           // no limits is not a complete report
+	push(now+2, wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: -1})
+	for _, store := range []*planUsageStore{s, newPlanUsageStore(s.dir, s.home, s.getenv)} {
+		entries := store.entries()
+		if len(entries) != 1 || len(entries[0].Windows) != 1 || entries[0].Windows[0].Kind != wslive.LimitSevenDay || entries[0].AsOf != now+1 {
+			t.Fatalf("expected only persisted weekly window: %+v", entries)
+		}
+	}
+}
+
 func TestPlanUsageResetNormalization(t *testing.T) {
 	want := int64(1800000000000)
 	for _, raw := range []string{`1800000000`, `1800000000000`, `"1800000000"`, `"2027-01-15T08:00:00Z"`} {

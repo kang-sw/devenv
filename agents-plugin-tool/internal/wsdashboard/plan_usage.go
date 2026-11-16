@@ -73,9 +73,35 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	if s == nil || snap == nil || snap.Adapter != "claude" || snap.Usage == nil {
 		return
 	}
+	// A status without limits is not a complete usage response. Invalid
+	// figures likewise cannot safely establish which windows are absent.
+	if snap.UpdatedAt <= 0 || len(snap.Usage.Limits) == 0 {
+		return
+	}
+	for _, v := range snap.Usage.Limits {
+		if (v.Kind != wslive.LimitFiveHour && v.Kind != wslive.LimitSevenDay) || !validUsage(v.Percent) {
+			return
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if snap.UpdatedAt < s.claude.AsOf {
+		return
+	}
 	changed := false
+	present := make(map[string]bool, len(snap.Usage.Limits))
+	for _, v := range snap.Usage.Limits {
+		present[v.Kind] = true
+	}
+	kept := s.claude.Windows[:0]
+	for _, old := range s.claude.Windows {
+		if present[old.Kind] {
+			kept = append(kept, old)
+		} else {
+			changed = true
+		}
+	}
+	s.claude.Windows = kept
 	var samples []planUsageSample
 	for _, v := range snap.Usage.Limits {
 		if (v.Kind != wslive.LimitFiveHour && v.Kind != wslive.LimitSevenDay) || !validUsage(v.Percent) {
@@ -110,6 +136,9 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		}
 	}
 	if changed {
+		if snap.UpdatedAt > s.claude.AsOf {
+			s.claude.AsOf = snap.UpdatedAt
+		}
 		s.claude.Harness = "claude"
 		s.claude.Source = "Claude push"
 		s.saveLocked()
