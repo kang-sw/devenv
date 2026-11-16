@@ -689,8 +689,8 @@ func TestFSOutsideCapabilityVerifiesOnItsOwnRouteOnly(t *testing.T) {
 }
 
 // TestFSOutsideExpiredPageRemintsByPostOnly pins what a tab on an outside
-// HTML file gets once its capability expired: its navigation is answered
-// with the re-mint page, which carries the linked path and the mint route
+// HTML file gets once its capability expired: after localhost login its
+// navigation gets the re-mint page, which carries the linked path and mint route
 // for its script to post and no file content, and neither that GET nor any
 // other mints a capability or redirects; the page's post then yields a
 // fresh URL that serves the file. A request that is no document navigation
@@ -704,11 +704,32 @@ func TestFSOutsideExpiredPageRemintsByPostOnly(t *testing.T) {
 	a := o.linked(t, page)
 	clock.advance(fsCapabilityTTL + time.Second)
 
-	navigate := func(target string) *httptest.ResponseRecorder {
-		return capFetch(o.pageFixture, o.local, target, capShape{"", "none", "navigate", "document"})
+	navigateWithCookie := func(target string, cookie bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.RemoteAddr, r.Host = o.local.peer, o.local.host
+		r.Header.Set("Sec-Fetch-Site", "none")
+		r.Header.Set("Sec-Fetch-Mode", "navigate")
+		r.Header.Set("Sec-Fetch-Dest", "document")
+		if cookie {
+			r.AddCookie(authCookie(t, o.d))
+		}
+		return authServe(o.d, r)
 	}
+	navigate := func(target string) *httptest.ResponseRecorder { return navigateWithCookie(target, true) }
 	next := under(a.View, "sub/next%20page.html")
 	for _, target := range []string{a.View, next} {
+		// Expired capabilities no longer authorize a page that auto-posts
+		// the absolute path from their unverified payload.
+		gate := navigateWithCookie(target, false)
+		if gate.Code != http.StatusUnauthorized || !strings.Contains(gate.Body.String(), "data-login-gate") ||
+			strings.Contains(gate.Body.String(), "data-mint=") || strings.Contains(gate.Body.String(), page) {
+			t.Fatalf("cookieless expired navigation = %d %s, want login gate", gate.Code, gate.Body.String())
+		}
+		link, _ := authLink(t, o.d, target)
+		loggedIn := navigateWithCookie(link, false)
+		if loggedIn.Code != http.StatusSeeOther || loggedIn.Header().Get("Location") != target || len(loggedIn.Result().Cookies()) != 1 {
+			t.Fatalf("login did not continue to expired URL: %d %v", loggedIn.Code, loggedIn.Header())
+		}
 		rec := navigate(target)
 		body := rec.Body.String()
 		if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" || strings.Contains(body, "AWAY") {
@@ -756,7 +777,7 @@ func TestFSOutsideExpiredPageRemintsByPostOnly(t *testing.T) {
 	if code != http.StatusOK || fresh.View == a.View {
 		t.Fatalf("the re-mint = %d %+v, want a fresh URL", code, fresh)
 	}
-	if rec := navigate(under(fresh.View, "sub/next%20page.html")); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "NEXT-AWAY") {
+	if rec := navigateWithCookie(under(fresh.View, "sub/next%20page.html"), false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "NEXT-AWAY") {
 		t.Errorf("the fresh URL = %d, want the file", rec.Code)
 	}
 	// Re-mint remains available after a link leaves the board/live history.
