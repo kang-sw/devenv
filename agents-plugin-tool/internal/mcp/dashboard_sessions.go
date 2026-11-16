@@ -65,9 +65,11 @@ type dashboardLink struct {
 	// empty means this process's, read live.
 	cacheHome string
 
-	// commonDirs memoizes dashboardCommonDir per session root, read before
-	// mu is taken so the registration's git call never holds it.
-	commonDirs sync.Map // root -> string
+	// Common-directory discovery is shared only within this link. Its lock is
+	// separate from mu: neither git nor waiting for another read holds mu.
+	commonMu     sync.Mutex
+	commonDirs   map[string]*dashboardCommonRead
+	commonRunner wsgit.Runner // test seam; nil uses the server's runner
 
 	nudgeOnce sync.Once
 	nudges    chan wsdashboard.NudgeBody
@@ -127,13 +129,73 @@ func dashboardStamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 // dashboardCommonDirTimeout bounds the registration's one git read.
 const dashboardCommonDirTimeout = 2 * time.Second
+const dashboardCommonDirReuse = 5 * time.Minute
+const dashboardCommonDirLimit = 128
+
+type dashboardCommonRead struct {
+	done chan struct{}
+	dir  string
+	at   time.Time
+}
+
+// commonDir coalesces in-flight reads and bounds both successful and failed
+// reuse. Expired entries are discarded without probing the filesystem.
+func (d *dashboardLink) commonDir(runner wsgit.Runner, root string) string {
+	if root == "" {
+		return ""
+	}
+	d.commonMu.Lock()
+	if d.commonDirs == nil {
+		d.commonDirs = make(map[string]*dashboardCommonRead)
+	}
+	now := d.clock()
+	for key, entry := range d.commonDirs {
+		if entry.done == nil && (now.Sub(entry.at) >= dashboardCommonDirReuse || now.Before(entry.at)) {
+			delete(d.commonDirs, key)
+		}
+	}
+	if entry := d.commonDirs[root]; entry != nil {
+		if entry.done != nil {
+			done := entry.done
+			d.commonMu.Unlock()
+			<-done
+			return entry.dir
+		}
+		dir := entry.dir
+		d.commonMu.Unlock()
+		return dir
+	}
+	entry := &dashboardCommonRead{done: make(chan struct{})}
+	// In-flight roots are always shared. Completed entries are evicted when
+	// the bounded cache is full; temporary in-flight excess is not retained.
+	for key, old := range d.commonDirs {
+		if len(d.commonDirs) < dashboardCommonDirLimit {
+			break
+		}
+		if old.done == nil {
+			delete(d.commonDirs, key)
+		}
+	}
+	d.commonDirs[root] = entry
+	d.commonMu.Unlock()
+	dir := dashboardCommonDir(runner, root)
+	d.commonMu.Lock()
+	entry.dir, entry.at = dir, d.clock()
+	done := entry.done
+	entry.done = nil
+	if len(d.commonDirs) > dashboardCommonDirLimit {
+		delete(d.commonDirs, root)
+	}
+	close(done)
+	d.commonMu.Unlock()
+	return dir
+}
 
 // dashboardCommonDir is root's git common directory, absolute, which a
 // registration carries so the dashboard's session rail groups a linked
 // worktree under its repository without running git per session; empty
-// when root is not in a repository or git fails. It runs once per
-// session root per process (dashboardLink.commonDirs), never under the
-// dashboard lock.
+// when root is not in a repository or git fails. Callers share bounded
+// per-link results without holding the dashboard lock.
 func dashboardCommonDir(runner wsgit.Runner, root string) string {
 	if root == "" {
 		return ""
@@ -276,14 +338,11 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 		return
 	}
 	d := &s.dashboard
-	commonDir, cached := d.commonDirs.Load(root)
-	if !cached {
-		commonDir = dashboardCommonDir(s.gitRunner(), root)
-		d.commonDirs.Store(root, commonDir)
-	}
+	commonDir := ""
+	discovered := false
+retry:
 	now := d.clock()
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.sessions == nil {
 		d.sessions = map[string]*dashboardSession{}
 	}
@@ -299,6 +358,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	}
 	dir, err := d.stateDir()
 	if err != nil {
+		d.mu.Unlock()
 		return
 	}
 	if sess.reg.ReplyID == "" && !sess.daemonRow {
@@ -308,6 +368,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 		}
 	}
 	if sess.daemonRow {
+		d.mu.Unlock()
 		return
 	}
 	if !sess.enabled {
@@ -316,11 +377,26 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 			// this session left behind must not keep it listed.
 			s.dashboardUnregister(dir, sess)
 		}
+		d.mu.Unlock()
 		return
 	}
 	if sess.reg.ReplyID != "" && !sess.idle {
+		d.mu.Unlock()
 		return
 	}
+	if sess.reg.ReplyID == "" && !discovered {
+		runner := d.commonRunner
+		if runner == nil {
+			runner = s.gitRunner()
+		}
+		d.mu.Unlock()
+		commonDir = d.commonDir(runner, root)
+		discovered = true
+		// Resolve eligibility and check daemon ownership again after the read.
+		force = true
+		goto retry
+	}
+	defer d.mu.Unlock()
 	if !d.pruned {
 		d.pruned = true
 		wsdashboard.PruneRegistrations(dir, now, wsdashboard.RegistryRetention)
@@ -328,7 +404,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	reg := sess.reg
 	if reg.ReplyID == "" {
 		reg = wsdashboard.Registration{ReplyID: sess.replyID, Project: sess.project, RegisteredAt: dashboardStamp(now)}
-		reg.GitCommonDir = commonDir.(string)
+		reg.GitCommonDir = commonDir
 	}
 	reg.Harness = s.currentHarness()
 	// Recorded so the daemon refuses to take the session over while its

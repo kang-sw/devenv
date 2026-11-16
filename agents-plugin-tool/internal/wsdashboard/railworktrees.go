@@ -15,7 +15,10 @@ import (
 // holds its stream open: when the first such stream opens (unless the last
 // full read is under gitReadInterval old, as it is when a page moves to
 // another session through the rail: its stream closes, the next one opens),
-// then every gitReadInterval until the last one closes, and at once when a page asks
+// then checks Git metadata each gitReadInterval until the last one closes,
+// forcing complete reads within five minutes even when metadata stays unchanged.
+// Explicit refresh, mutation rereads and opt-in visible resumption bypass the
+// hint. It also reads at once when a page asks
 // (POST /rail/refresh, the rail header's refresh button). A repository the
 // rail starts to show between those reads (a session registered in it) is
 // read on its own at once; the others keep their lists. One goroutine runs
@@ -69,6 +72,7 @@ type railLister struct {
 	// clock.
 	after func(time.Duration) <-chan time.Time
 	now   func() time.Time
+	probe func(string) (string, error)
 	// changed is called after a read that changed a list.
 	changed func()
 	// sweep runs before each full read, on the lister's goroutine and never
@@ -85,7 +89,9 @@ type railLister struct {
 	// pending ones; lastFull is when the last full read began (zero before
 	// one).
 	full     bool
+	force    bool // explicit refresh/resumption; timer checks may use metadata
 	lastFull time.Time
+	gates    map[string]gitReadGate
 	// wanted holds the repositories the last rail render showed, with the
 	// registrations of their sessions; pending the wanted ones not read yet.
 	wanted  map[string][]Registration
@@ -105,6 +111,8 @@ func newRailLister(read func(string, []Registration) (RepoWorktrees, error), cha
 		interval: gitReadInterval,
 		after:    time.After,
 		now:      time.Now,
+		probe:    gitMetadataStamp,
+		gates:    map[string]gitReadGate{},
 		changed:  changed,
 		stop:     stop,
 		wake:     make(chan struct{}, 1),
@@ -119,15 +127,25 @@ func newRailLister(read func(string, []Registration) (RepoWorktrees, error), cha
 // lister's goroutine, which reads every wanted repository at once unless
 // the last full read is under the interval old; the next then comes when
 // the interval since it ends.
-func (l *railLister) watch() (release func()) {
+func (l *railLister) watch() (release func()) { return l.watchWithRefresh(false) }
+
+// watchFresh is opt-in visible resumption; legacy stream lifetimes retain
+// their recent-list reuse across navigation.
+func (l *railLister) watchFresh() (release func()) { return l.watchWithRefresh(true) }
+
+func (l *railLister) watchWithRefresh(fresh bool) (release func()) {
 	if l == nil {
 		return func() {}
 	}
 	l.mu.Lock()
 	l.viewers++
+	if fresh {
+		l.full, l.force = true, true
+		signal(l.wake)
+	}
 	if l.viewers == 1 {
 		if l.lastFull.IsZero() || l.now().Sub(l.lastFull) >= l.interval {
-			l.full = true
+			l.full, l.force = true, true
 		}
 		signal(l.wake)
 		if !l.running {
@@ -160,7 +178,7 @@ func (l *railLister) refresh() bool {
 	if l.viewers == 0 {
 		return false
 	}
-	l.full = true
+	l.full, l.force = true, true
 	signal(l.wake)
 	return true
 }
@@ -178,6 +196,7 @@ func (l *railLister) reread(repo string) {
 	defer l.mu.Unlock()
 	if l.viewers == 0 {
 		delete(l.repos, key)
+		delete(l.gates, key)
 		return
 	}
 	if _, ok := l.wanted[key]; ok {
@@ -212,6 +231,7 @@ func (l *railLister) lists(wanted map[string][]Registration) map[string]railRepo
 	for key := range l.repos {
 		if _, ok := next[key]; !ok {
 			delete(l.repos, key)
+			delete(l.gates, key)
 		}
 	}
 	for key := range l.pending {
@@ -252,8 +272,8 @@ func (l *railLister) run() {
 			l.mu.Unlock()
 			return
 		}
-		full := l.full
-		l.full = false
+		full, force := l.full, l.force
+		l.full, l.force = false, false
 		if full {
 			l.lastFull = l.now()
 		}
@@ -262,9 +282,11 @@ func (l *railLister) run() {
 			rearm = max(0, l.interval-l.now().Sub(l.lastFull))
 		}
 		todo := map[string][]Registration{}
+		forced := map[string]bool{}
 		for repo, regs := range l.wanted {
 			if full || l.pending[repo] {
 				todo[repo] = regs
+				forced[repo] = force || l.pending[repo]
 				l.reading[repo] = true
 			}
 		}
@@ -275,7 +297,21 @@ func (l *railLister) run() {
 			changed = true
 		}
 		for repo, regs := range todo {
+			l.mu.Lock()
+			gate := l.gates[repo]
+			l.mu.Unlock()
+			stamp, probeErr := l.probe(repo)
+			if probeErr != nil {
+				stamp = ""
+			}
+			if !gate.needed(stamp, l.now(), forced[repo]) {
+				l.mu.Lock()
+				delete(l.reading, repo)
+				l.mu.Unlock()
+				continue
+			}
 			r := l.readRepo(repo, regs)
+			gate.complete(stamp, l.now(), r.Read)
 			l.mu.Lock()
 			l.reads++
 			delete(l.reading, repo)
@@ -284,13 +320,21 @@ func (l *railLister) run() {
 					changed = true
 				}
 				l.repos[repo] = r
+				l.gates[repo] = gate
 			}
 			l.mu.Unlock()
 		}
-		if full {
-			tick, armed = l.after(l.interval), true
-		} else if rearm >= 0 {
-			tick, armed = l.after(rearm), true
+		if full || rearm >= 0 {
+			delay := l.interval
+			if !full {
+				delay = rearm
+			}
+			l.mu.Lock()
+			for repo := range l.wanted {
+				delay = min(delay, l.gates[repo].delay(l.now(), l.interval))
+			}
+			l.mu.Unlock()
+			tick, armed = l.after(delay), true
 		}
 		if changed && l.changed != nil {
 			l.changed()

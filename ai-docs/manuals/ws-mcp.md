@@ -155,15 +155,17 @@ under `<cache root>/dashboard/`:
   never came. The snapshot's `repo` fields (the
   root's folder, branch, upstream, ahead and behind, and the counts of
   modified, staged, and untracked working-tree entries) come from ws-mcp's own
-  `rev-parse`, `symbolic-ref`, `rev-list --left-right --count`, and
-  `status --porcelain` reads, cached per session and refreshed at most once
+  `status --porcelain=v2 --branch --ahead-behind` read (plus short HEAD
+  discovery when detached), cached per session and refreshed at most once
   per heartbeat interval from the writer's timer, never on an intake call, and
   only when a tool batch ended since the last read (an idle session runs no
   git); the snapshot write that finds the cache missing or stale (a session's
   first, then at most one per heartbeat interval, change or heartbeat alike)
   waits for the refresh, up to its 5 s timeout. There is no automatic fetch, so
   behind reflects the last one. The status read takes no optional
-  lock and shares the 5 s timeout; when it fails the counts stay zero. The
+  lock and gets a 3 s sub-deadline within the 5 s overall timeout; when it
+  fails, the reserved remainder lets cheap branch/ref reads preserve the
+  available standing while counts stay zero. The
   page's status band shows only the folder; the git handle reads the rest
   itself (below).
 - `sessions/<reply-id>/inbox/` - the board-answer inbox (`internal/wsinbox`):
@@ -325,17 +327,22 @@ first `# ` heading; 16 KB read, cached a minute). The daemon reads it itself
 follows it: when a session's live snapshot brings repo figures that differ
 from the ones it brought before and from the handle's last read, the stream
 asks for a read as a refresh would, so the two agree once it lands. It reads
-a root only while at least one session page under it holds its SSE stream
-open: once when the first stream opens, every 3 minutes while one stays, and
-at once on `POST /s/<reply-id>/git` (sent when the git drawer opens; it needs
+a root only while a page watches its git display: once on first use,
+then checks Git administration metadata at the prior 3-minute cadence.
+Unchanged metadata suppresses commands, but a complete read is forced within
+five minutes for in-place edits/untracked contents. Explicit refresh bypasses
+the hint, including `POST /s/<reply-id>/git` (sent when the git drawer opens; it needs
 an `Origin` equal to the daemon's own, answers 204, and 409 when no open page
 watches the root). One goroutine per watched root runs every read, so pages
 sharing a root share one read and no two reads of a root overlap; a refresh
 inside 2 seconds of the last read waits for that gap's end, and requests
 arriving meanwhile fold into that one read. The last stream's close ends the
-root's reads and drops its value. A read is `rev-parse`, `symbolic-ref`,
-`rev-list --left-right --count`, and `status --porcelain` with no optional
-lock (`wsgit.BranchSync`, `wsgit.WorkingTreeCounts`), in the C locale,
+root's reads and drops its value. New WebSocket pages opt into `display=0|1`
+and optional client visibility frames: hiding releases only git/rail watches,
+not functional region/tracker streams; showing refreshes the display. Older
+WebSocket clients and SSE retain stream-lifetime watches. A complete badge
+read is porcelain-v2 status plus top-level discovery (and short HEAD when
+detached), with no optional lock, in the C locale,
 bounded by 10 s together, with no daemon-wide lock held; it never fetches. A
 non-repository root shows no handle; a failed read shows it dimmed, with the
 reason (git's message) in its title.
@@ -406,8 +413,11 @@ repository comes from the registration's `git_common_dir` (ws-mcp's one
 `.git` on disk. The worktree rows come from `git worktree list --porcelain`
 through the source's optional `RepoWorktreeSource` (pooled worktrees under
 the `worktree_pool` roots show only while they hold a session), read only
-while a page streams the rail: on the first such stream, every 3 minutes,
-for a newly shown repository alone, and on `POST /rail/refresh` (own Origin;
+while a page watches the rail display: on first use, for a newly shown
+repository alone, and after changed Git metadata or the five-minute safety
+deadline. The prior 3-minute checks remain; metadata never replaces mutation
+admission, and pool configuration is re-resolved on complete reads. Explicit
+refresh and opt-in visible resumption bypass the hint, including `POST /rail/refresh` (own Origin;
 409 with no streaming page). Change counts come from the newest session
 snapshot in the worktree; the rail never reads a working tree. Drafts,
 stars, and collapsed workspaces are browser-local (`assets/rail.js`).
