@@ -40,6 +40,33 @@ clear old-account windows when identity changes. Preserve valid current windows
 and error handling. Add unit coverage for Pro-to-Max, absent windows, identity
 change and failed refresh, including a subsequent refresh of the new account.
 
+### Result - 2026-11-16
+
+`pushClaude` now removes cached kinds absent from a newer nonempty, valid
+Claude limits snapshot, including when the retained window's value is unchanged;
+the removal is persisted and advances the entry timestamp so an older snapshot
+cannot immediately restore it. Per-window stale/monotonic guards still apply.
+Missing/empty or invalid limits are not treated as a successful empty refresh.
+No account identity is tracked in this account-blind store; no credential or
+identity tracking was added. Snapshots carry only their general `UpdatedAt`,
+not an authoritative usage-response timestamp or completeness marker: later
+session activity can refresh that timestamp, and independently stale sessions
+may still repopulate old windows. Empty authoritative responses cannot be
+identified separately from absent status data. These remain limitations, not
+claims of full identity-change or empty-response handling.
+
+Compatibility: **T0**, no stored shape change; existing `planUsageEntry` and
+`planUsageWindow` JSON and `saveLocked`/`newPlanUsageStore` reader/writer are
+unchanged (`agents-plugin-tool/internal/wsdashboard/plan_usage.go:21-65`).
+The regression covers {5h, 7d} -> {7d}, persistence, older snapshot replay,
+and empty/invalid status. Phase 2 UI is untouched.
+
+Remote w5090 `go test ./internal/wsdashboard/... -run "TestPlanUsage"` passed
+(job `6621982d7b5540bc849681d14f9abcd1`). The initial full-package run (job
+`0f0d194b9e3d461f84ea2b944d88bf8e`) failed unrelated tracker/toast page asset
+assertions in `TestPagesCarryTheTracker` and
+`TestPagesCarryTheToastStackAndTitleHost`; no UI files were changed.
+
 ### Phase 2: Restore vertical indicator layout
 
 Restore current percentage above its red/green offset in each window column;
