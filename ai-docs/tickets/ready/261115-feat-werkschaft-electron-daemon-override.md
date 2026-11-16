@@ -7,7 +7,7 @@ related:
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4bf35c6c91796d9c
-sage-review-design-reviewed: 8393f7f6d33d780e
+sage-review-design-reviewed: dbccf1873e641d01
 ---
 
 # Electron standalone daemon start and replacement
@@ -317,6 +317,10 @@ daemon. Equal/newer ordinary attach must execute zero binaries; explicit
 same-core replacement is consumed once, and raced newer winners are retained.
 If current interfaces do not reveal affected session versions, refuse automatic
 cross-boundary replacement with an actionable reason and keep the old connection.
+Repeat this guard at Ensure's actual healthy-daemon replacement decision, not
+only the shell's earlier REST check: a compatible initial daemon can race with
+a different cross-minor winner before the starter runs. Test that raced winner
+is not drained. Apply LAN preservation at the same fresh observation point.
 Keep staging outside the replaceable app and do not take launcher-start.lock.
 
 ### Phase 4: Packaged acceptance
