@@ -168,19 +168,15 @@ func TestLiteralContextNearLinearGrowth(t *testing.T) {
 				for _, size := range []int{50000, 100000, 200000} {
 					input, count := literalContextInput(kind, size)
 					checkLiteralContext(t, kind, input, count, ordered)
-					best := time.Hour
-					for trial := 0; trial < 3; trial++ {
+					best := bestLiteralParseTime(t, len(input), func() {
 						p := &Problems{}
-						start := time.Now()
 						if ordered {
 							ParseOrdered(p, g, input)
 						} else {
 							Parse(p, g, input)
 						}
-						best = min(best, time.Since(start))
-					}
+					})
 					bests = append(bests, best)
-					t.Logf("%d bytes best-of-3=%s", len(input), best)
 				}
 				if bests[2] >= 100*time.Millisecond || bests[2] > 6*bests[0]+5*time.Millisecond || bests[1] > 3*bests[0]+5*time.Millisecond || bests[2] > 3*bests[1]+5*time.Millisecond {
 					t.Fatalf("superlinear or over 100ms at 200KB: %v", bests)
