@@ -216,6 +216,16 @@ This is backend performance-only work with no intended visual/behavior change.
 | risk.test | high | Insert/update/delete, in-place writes, legacy roots, invalid identities, pending targets, and invalidation races require coverage |
 | risk.security_or_contract | high | Identity discovery gates lead authority; persistent indexes would alter compatibility assumptions |
 
+## Blocked (2026-11-16)
+
+The Phase 1 code candidate has passed remote scoped tests/benchmark and the
+independent fixes-only R2. The remaining gate is coordinating-lead approval
+and sequencing of a daemon rebuild/swap, followed by the profiling lead's
+REST-only after capture against the retained contextual baseline. No worker is
+authorized to rebuild, swap or claim live Windows performance acceptance around
+that gate. Phase 1 remains without a Result; Phase 2 has not started. Resume
+with the approved measurement step, not an unneeded new implementation sweep.
+
 ## Phases
 
 ### Phase 1: Index or cache whiteboard nudge discovery with before/after pprof
