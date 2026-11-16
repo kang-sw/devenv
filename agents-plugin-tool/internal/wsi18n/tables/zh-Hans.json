@@ -1606,6 +1606,7 @@
   "rail.unarchive": "取消归档 · 回到休眠，投递排队的邮件",
   "rail.deleteat": "此已结束会话被清理删除的时间",
   "rail.folder": "文件夹（不是 git 仓库）",
+  "rail.home": "首页",
   "rail.lasttool": "最后一次工具调用",
   "rail.live.title": "实时会话",
   "rail.refresh": "重新读取工作树列表",

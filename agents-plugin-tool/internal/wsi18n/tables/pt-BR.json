@@ -1606,6 +1606,7 @@
   "rail.unarchive": "Desarquivar · volta a dormir; o e-mail na fila é entregue",
   "rail.deleteat": "Quando o registro exclui esta sessão encerrada",
   "rail.folder": "pasta (não é um repositório git)",
+  "rail.home": "Início",
   "rail.lasttool": "última chamada de ferramenta",
   "rail.live.title": "sessões ao vivo",
   "rail.refresh": "Reler as listas de worktrees",

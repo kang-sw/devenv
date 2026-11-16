@@ -203,8 +203,8 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     spans(s, 'root dark 1440');
     assert.ok(await wheel(page, 1420), 'root dark 1440: the wheel at the right edge does not scroll the landing');
 
-    // Picking a session opens it; picking it again closes its view and
-    // shows the landing at /, and the row is no longer marked.
+    // Picking a session opens it; picking it again keeps its view open.
+    // The explicit Home button shows the landing and clears the row mark.
     await openRail(page);
     await page.locator('#rail .rs[data-rid="livesession"] .rl').click();
     await shows(page, '/s/livesession');
@@ -213,20 +213,26 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     assert.equal(await cur(page, 'livesession'), true, 'the open session is marked');
     await shot(page, 'selected-row.png');
     await page.locator('#rail .rs[data-rid="livesession"] .rl').click();
+    await shows(page, '/s/livesession');
+    assert.equal(await cur(page, 'livesession'), true, 'reselect keeps the session marked');
+    await page.locator('.rail-home').click();
     await shows(page, '/');
     r = await landing(page);
-    root(r, 'after reselect', 'dark');
-    assert.equal(await cur(page, 'livesession'), false, 'no row marked after reselect');
+    root(r, 'after Home', 'dark');
+    assert.equal(await cur(page, 'livesession'), false, 'no row marked after Home');
     await page.waitForTimeout(300);
-    await shot(page, 'after-reselect.png');
+    await shot(page, 'after-home.png');
 
-    // Another row still opens as before; Enter on the open row closes it
-    // like a click; Back returns to the session, and Back again to /.
+    // Another row still opens as before; Enter on the open row keeps it
+    // open. Home returns to /; Back returns to the session, then to /.
     await openRail(page);
     await page.locator('#rail .rs[data-rid="boardsession"] .rl').click();
     await shows(page, '/s/boardsession');
     await openRail(page);
     await page.locator('#rail .rs[data-rid="boardsession"] .rl').focus();
+    await page.keyboard.press('Enter');
+    await shows(page, '/s/boardsession');
+    await page.locator('.rail-home').focus();
     await page.keyboard.press('Enter');
     await shows(page, '/');
     await page.goBack();
@@ -236,7 +242,7 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     root(await landing(page), 'back to the landing', 'dark');
     await c.close();
 
-    // Light: the dark-ink lockup, at the root and after a reselect.
+    // Light: the dark-ink lockup, at the root and after Home.
     ({ c, page } = await ctx('light', 1440));
     await page.goto(base + '/');
     r = await landing(page);
@@ -249,8 +255,10 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     await shows(page, '/s/livesession');
     await openRail(page);
     await page.locator('#rail .rs[data-rid="livesession"] .rl').click();
+    await shows(page, '/s/livesession');
+    await page.locator('.rail-home').click();
     await shows(page, '/');
-    root(await landing(page), 'landing light after reselect', 'light');
+    root(await landing(page), 'landing light after Home', 'light');
     await c.close();
 
     // A picked theme wins over the OS: light picked on a dark OS, and dark
@@ -300,7 +308,7 @@ const cur = (page, id) => page.locator('#rail .rs[data-rid="' + id + '"]').evalu
     }
 
     assert.deepEqual(errors, []);
-    console.log('PASS: illustrated landing per theme at / and 700px, its scroll box spanning the main area to the window edge at 700, 1440 and 2560, only the shown theme fetched; reselect closes the view to /; other rows open as before');
+    console.log('PASS: illustrated landing per theme at / and 700px, its scroll box spanning the main area to the window edge at 700, 1440 and 2560, only the shown theme fetched; reselect keeps the view open; Home returns to /; other rows open as before');
   } finally {
     await browser.close();
   }

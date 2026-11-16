@@ -1606,6 +1606,7 @@
   "rail.unarchive": "Desarchivar · vuelve a dormida; se entrega el correo en cola",
   "rail.deleteat": "Cuándo el registro elimina esta sesión finalizada",
   "rail.folder": "carpeta (no es un repositorio git)",
+  "rail.home": "Inicio",
   "rail.lasttool": "última llamada a herramienta",
   "rail.live.title": "sesiones en vivo",
   "rail.refresh": "Volver a leer las listas de worktrees",

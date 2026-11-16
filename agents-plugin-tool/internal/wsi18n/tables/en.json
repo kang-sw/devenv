@@ -1606,6 +1606,7 @@
   "rail.unarchive": "Unarchive · back to asleep; queued mail is delivered",
   "rail.deleteat": "When the registry prunes this ended session",
   "rail.folder": "folder (not a git repository)",
+  "rail.home": "Home",
   "rail.lasttool": "last tool call",
   "rail.live.title": "live sessions",
   "rail.refresh": "Re-read the worktree lists",

@@ -1606,6 +1606,7 @@
   "rail.unarchive": "Ripristina · torna in sospensione; la posta in coda viene consegnata",
   "rail.deleteat": "Quando il registro elimina questa sessione terminata",
   "rail.folder": "cartella (non è un repository git)",
+  "rail.home": "Home",
   "rail.lasttool": "ultima chiamata a strumento",
   "rail.live.title": "sessioni attive",
   "rail.refresh": "Rileggi gli elenchi dei worktree",

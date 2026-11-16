@@ -1606,6 +1606,7 @@
   "rail.unarchive": "Aus dem Archiv holen · zurück in den Ruhezustand; wartende Mails werden zugestellt",
   "rail.deleteat": "Wann die Registry diese beendete Sitzung löscht",
   "rail.folder": "Ordner (kein Git-Repository)",
+  "rail.home": "Startseite",
   "rail.lasttool": "letzter Tool-Aufruf",
   "rail.live.title": "Live-Sitzungen",
   "rail.refresh": "Worktree-Listen neu lesen",

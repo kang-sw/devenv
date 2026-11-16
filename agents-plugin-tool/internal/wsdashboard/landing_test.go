@@ -166,8 +166,8 @@ func TestLandingGuideAssetsAreComplete(t *testing.T) {
 // lockup over the illustrated how-to is one page that scrolls in the main
 // panel and fits at 1440 and 700px, showing the lockup and screenshots for
 // each theme (and fetching only those), and a second click (or Enter) on
-// the open session's rail row closes its view, back to / and the landing,
-// while a click on another row opens it as before. With WS_LANDING_SHOTS
+// the open session's rail row keeps it open. Home returns to / and the
+// landing, while another row opens as before. With WS_LANDING_SHOTS
 // set (an absolute directory) it also saves full-page screenshots and the
 // add-workspace step close up.
 func TestLandingGuideBrowser(t *testing.T) {

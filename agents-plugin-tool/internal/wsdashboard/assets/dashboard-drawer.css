@@ -48,7 +48,7 @@
 /* Settings uses the rail's fixed, viewport-bounded popover. */
 .settings-pop { width: 300px; }
 .settings-pop:focus { outline: none; }
-.settings-toggle { flex: none; }
+.settings-toggle, .rail-home { flex: none; }
 /* A click on the framed main panel dismisses Settings in its owning shell. */
 :root[data-shell]:has(.settings-pop:not([hidden])) .frames { pointer-events: none; }
 .gmenu.gcard { position: static; width: auto; box-shadow: none; padding: 0; background: transparent; }
