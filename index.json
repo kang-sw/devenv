@@ -511,7 +511,14 @@
       "registered_at": "2026-11-16T01:25:12Z"
     },
     "261116-bug-ws-dev-rerun-daemon-false-failure": {
-      "registered_at": "2026-11-16T00:53:09Z"
+      "registered_at": "2026-11-16T00:53:09Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-16T03:24:25Z"
+      }
     },
     "261116-bug-ws-exe-launch-elimination": {
       "registered_at": "2026-11-16T00:55:02Z",
