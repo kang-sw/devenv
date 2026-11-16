@@ -43,13 +43,16 @@ function copyPackage(root, destination, source, platform) {
 function stageDaemon(selected, userData, platform = process.platform, appRoot) {
   if (!path.isAbsolute(userData)) throw new Error('Daemon user data path must be absolute');
   const container = path.join(userData, 'daemon-stages');
-  // A replaced app bundle may disappear while its daemon is still running.
+  fs.mkdirSync(container, { recursive: true, mode: 0o700 });
+  // A junction/symlinked userData must not point back into a replaceable app.
+  // Resolve both sides after creating the container, before allocating a stage.
+  const actualContainer = fs.realpathSync(container);
   for (const origin of [selected.root, appRoot].filter(Boolean)) {
-    const rel = path.relative(origin, container);
+    const rel = path.relative(fs.realpathSync(origin), actualContainer);
     if (!rel.startsWith('..' + path.sep) && rel !== '..') throw new Error('Daemon stage must be outside the app and its source');
   }
-  fs.mkdirSync(container, { recursive: true, mode: 0o700 });
-  const name = `${selected.contract.plugin}-${selected.metadata.version}-${selected.metadata.binary_sha256.slice(0, 16)}`;
+  const safeVersion = selected.metadata.version.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.{2,}/g, '_').slice(0, 80);
+  const name = `${selected.contract.plugin}-${safeVersion}-${selected.metadata.binary_sha256.slice(0, 16)}`;
   const stage = fs.mkdtempSync(path.join(container, `${name}-`));
   try {
     // mkdtemp owns only this partial directory; never remove a complete or

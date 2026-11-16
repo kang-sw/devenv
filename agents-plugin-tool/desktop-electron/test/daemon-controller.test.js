@@ -80,15 +80,33 @@ test('development source stages its own package, invalid explicit selection neve
 });
 test('raced lock winner is attached without LAN reconfiguration, even if first probes fail', async t => {
   const f = fixture(t, 'darwin');
-  let probes = 0, launches = 0, locked = false, lan = true;
+  let probes = 0, entrants = 0, losers = 0, winner = null;
   const deps = { env: env(f), discover: async () => {
     probes++;
-    if (probes <= 4 || !locked) throw Error('transient health failure');
-    return URL;
-  }, launch: async () => { launches++; locked = true; }, sleep: async () => {}, maxPolls: 5 };
+    if (probes <= 4 || !winner) throw Error('transient health failure');
+    assert.equal(winner.lan, true, 'attached daemon retains its LAN mode');
+    return winner.url;
+  }, launch: async (_binary, opts) => {
+    entrants++;
+    assert.deepEqual(opts.env.WS_MCP_CONFIG_MANIFESTS.split(';').map(file => path.basename(file)),
+      ['config-manifest.json', 'dashboard-config-manifest.json']);
+    // Model the Go dashboard entry: both child processes start, only one
+    // StartDaemon takes the lock; the loser exits without changing the winner.
+    if (winner) losers++;
+    else winner = { url: URL, lan: true };
+  }, sleep: async () => {}, maxPolls: 5 };
   assert.deepEqual(await Promise.all([connectDaemon(config(f), deps), connectDaemon(config(f), deps)]), [URL, URL]);
-  assert.equal(launches, 2, 'two direct dashboard entrants are safe: StartDaemon lock selects one');
-  assert.equal(lan, true, 'no LAN setting is passed and no Ensure/drain is called');
+  assert.equal(entrants, 2);
+  assert.equal(losers, 1);
+  assert.deepEqual(winner, { url: URL, lan: true });
+});
+test('plugin winner discovered while staging attaches with zero executable launches', async t => {
+  const f = fixture(t, 'darwin');
+  let probes = 0;
+  assert.equal(await connectDaemon(config(f), { env: env(f),
+    discover: async () => { if (++probes === 1) throw Error('transient health failure'); return URL; },
+    launch: () => assert.fail('concurrent healthy winner must not be started over') }), URL);
+  assert.equal(probes, 2);
 });
 test('hung/uncertain endpoint, failed spawn and retry do not stop any process or prune complete stages', async t => {
   const f = fixture(t, 'darwin');

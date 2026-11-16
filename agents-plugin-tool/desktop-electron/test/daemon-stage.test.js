@@ -31,6 +31,25 @@ test('staging retains complete versions outside the app; cleans only its own fai
     assert.equal(validateDaemonRoot(staged.root, 'bundled', 'darwin').binary, staged.binary);
   }
 });
+test('untrusted version suffix cannot escape or name a path outside the staging container', t => {
+  const f = fixture(t, 'darwin');
+  f.bundled.save(f.bundled.binary + '.metadata.json', { ...f.bundled.metadata, version: '0.50.1-../../outside' });
+  const staged = stageDaemon(f.select(), f.userData, 'darwin', f.appRoot);
+  assert.equal(path.dirname(staged.root), path.join(f.userData, 'daemon-stages'));
+  assert(!path.basename(staged.root).includes('..'));
+});
+test('a symlinked userData inside the app cannot masquerade as out-of-bundle stage', t => {
+  const f = fixture(t, 'darwin'), selected = f.select();
+  assert.throws(() => stageDaemon(selected, f.appRoot, 'darwin', f.appRoot), /outside the app/);
+  const linked = path.join(f.base, 'linked-userdata');
+  try { fs.symlinkSync(f.appRoot, linked, 'junction'); }
+  catch (error) {
+    if (error.code !== 'EPERM') throw error;
+    t.diagnostic('Windows symlink creation unavailable; direct in-bundle refusal covered');
+    return;
+  }
+  assert.throws(() => stageDaemon(selected, linked, 'darwin', f.appRoot), /outside the app/);
+});
 test('builder accepts only a supplied validated input and copies entire package without running it', async t => {
   const f = fixture(t);
   const out = path.join(f.base, 'out'), cache = path.join(f.base, 'cache');
