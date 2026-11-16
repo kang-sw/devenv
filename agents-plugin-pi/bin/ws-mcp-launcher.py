@@ -884,6 +884,7 @@ DAEMON_DEFAULT_START_WAIT = 10.0  # wsdashboard.DefaultStartWait, seconds
 PROXY_LOST_REQUEST_CODE = -32000
 # One bounded wait for requests not yet sent, shared by MCP and CLI forwarding.
 DAEMON_RETRY_SECONDS = 75.0
+DAEMON_SWAP_GRACE_SECONDS = 20.0
 DAEMON_RETRY_POLL_SECONDS = 3.0
 # Repeated quick closes back off rather than starting a second MCP server.
 PROXY_QUICK_CLOSE_SECONDS = 2.0
@@ -958,9 +959,13 @@ def stage_daemon_binary(binary: Path, bin_dir: Path) -> Path:
         current = False
     if not current:
         tmp = bin_dir / f".{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-        shutil.copyfile(binary, tmp)
-        os.chmod(tmp, 0o755)
-        os.replace(tmp, target)
+        try:
+            shutil.copyfile(binary, tmp)
+            os.chmod(tmp, 0o755)
+            os.replace(tmp, target)
+        finally:
+            # Only this copy attempt owns this unpredictable temporary path.
+            tmp.unlink(missing_ok=True)
     metadata = read_runtime_metadata(binary)
     if metadata is not None:
         write_runtime_metadata(target, metadata)
@@ -1036,6 +1041,87 @@ def read_daemon_endpoint(daemon_dir: Path) -> dict | None:
 
 class DaemonHung(Exception):
     """The daemon's port accepted but nothing answered within the timeout."""
+
+
+def endpoint_process_alive(endpoint: dict) -> bool | None:
+    """False proves the recorded PID exited; unknown is not absence."""
+    pid = endpoint.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    if os.name == "nt":
+        import _winapi
+
+        try:
+            handle = _winapi.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        except OSError as exc:
+            return False if exc.winerror == 87 else None
+        try:
+            result = _winapi.WaitForSingleObject(handle, 0)
+            if result == _winapi.WAIT_OBJECT_0:
+                return False
+            return True if result == _winapi.WAIT_TIMEOUT else None
+        except OSError:
+            return None
+        finally:
+            _winapi.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return None
+    return True
+
+
+class LauncherStartLock:
+    """Persistent advisory starter lock, never the daemon-held singleton lock."""
+
+    def __init__(self, daemon_dir: Path) -> None:
+        daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(daemon_dir / "launcher-start.lock", os.O_CREAT | os.O_RDWR, 0o600)
+        self.locked = False
+        try:
+            os.set_inheritable(self.fd, False)
+            if os.fstat(self.fd).st_size == 0:
+                os.write(self.fd, b"\0")
+        except BaseException:
+            os.close(self.fd)
+            raise
+
+    def acquire(self) -> bool:
+        import errno
+
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                os.lseek(self.fd, 0, os.SEEK_SET)
+                msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                return False
+            raise
+        self.locked = True
+        return True
+
+    def close(self) -> None:
+        try:
+            if self.locked:
+                if os.name == "nt":
+                    import msvcrt
+
+                    os.lseek(self.fd, 0, os.SEEK_SET)
+                    msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
+        finally:
+            os.close(self.fd)
 
 
 def daemon_health(port: int, timeout: float) -> dict | None:
@@ -1231,12 +1317,12 @@ def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
 def wait_daemon_connection(link, hello: dict):
     """Retry only before a command was sent; rediscover the endpoint each time.
 
-    Keep the existing first connection's start/replacement behavior. Subsequent
-    attempts only connect to the successor, never repeatedly start a daemon.
+    CLI authority is network-only on the first attempt as well as retries.
+    A command-carrying hello is never replayed.
     """
     deadline = time.monotonic() + DAEMON_RETRY_SECONDS
     try:
-        return link.connect(hello)
+        return link.connect(hello, allow_start=False)
     except DaemonRequestSent:
         raise
     except (DaemonUnavailable, DaemonHung) as exc:
@@ -1294,6 +1380,7 @@ class DaemonLink:
         self._content_hash: str | None = None
         self.started = False
         self.start_error = ""
+        self.start_output = ""
         metadata = read_runtime_metadata(binary)
         self.binary_version = metadata["version"] if metadata is not None else runtime_version
         if metadata is None:
@@ -1334,16 +1421,21 @@ class DaemonLink:
 
     def wait_healthy(self, budget: float) -> tuple[dict | None, dict | None]:
         deadline = time.monotonic() + budget
+        hung = None
         while True:
             try:
-                endpoint, health = self.probe(min(1.0, max(0.1, deadline - time.monotonic())))
-            except DaemonHung:
+                endpoint, health = self.probe(min(1.0, max(0.01, deadline - time.monotonic())))
+                hung = None
+            except DaemonHung as exc:
+                hung = exc
                 endpoint, health = None, None
             if health is not None:
                 return endpoint, health
             if time.monotonic() >= deadline:
+                if hung is not None:
+                    raise hung
                 return endpoint, None
-            time.sleep(0.2)
+            time.sleep(min(0.2, max(0, deadline - time.monotonic())))
 
     def needs_start(self, health: dict) -> bool:
         """Only an older numeric core authorizes ordinary replacement.
@@ -1354,9 +1446,8 @@ class DaemonLink:
         version = str(health.get("version", ""))
         return not same_core(version, self.binary_version) and compare_daemon_versions(version, self.binary_version) < 0
 
-    def start_daemon(self) -> bool:
-        """Run the staged binary's daemon-start entry; True when it reports a daemon."""
-        self.started = True
+    def start_daemon(self, lifecycle_argv: list[str] | None = None, *, deadline: float | None = None) -> bool:
+        """Run daemon-start while the caller holds the launcher starter lock."""
         # Healthy peers do not need a local candidate. Repair only when a
         # start/replacement is actually required, including after reconnect.
         if self.repair_runtime is not None and not self.repair_runtime():
@@ -1375,7 +1466,14 @@ class DaemonLink:
             self.start_error = f"staging the daemon binary failed: {exc}"
             note(self.start_error)
             return False
-        argv = [str(staged), "daemon-start", "--build-time", str(self.build_time)]
+        argv = [str(staged), *(lifecycle_argv if lifecycle_argv is not None else ["daemon-start", "--build-time", str(self.build_time)])]
+        budget = 2 * DAEMON_DEFAULT_START_WAIT + self.start_budget
+        if deadline is not None:
+            budget = min(budget, deadline - time.monotonic())
+        if budget <= 0:
+            self.start_error = "starter coordination exhausted the 75s daemon budget"
+            return False
+        self.started = True
         note(f"starting the daemon: {' '.join(argv)}")
         # The daemon starts session holders with the interpreter this launcher
         # runs under; PATH python3 may be missing or, on Windows, a Store alias.
@@ -1389,13 +1487,14 @@ class DaemonLink:
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
-                timeout=2 * DAEMON_DEFAULT_START_WAIT + self.start_budget,
+                timeout=budget,
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             self.start_error = f"daemon-start failed: {exc}"
             note(self.start_error)
             return False
+        self.start_output = proc.stdout
         for line in proc.stderr.splitlines():
             note(f"daemon-start: {line}")
         if proc.returncode != 0:
@@ -1404,34 +1503,68 @@ class DaemonLink:
             return False
         return True
 
-    def connect(self, hello: dict, *, grace: float = 0.0) -> SocketStream:
-        """Connect to a compatible daemon, starting or replacing one when needed.
+    def ensure_healthy(self, *, grace: float = 0.0, allow_start: bool = True,
+                       lifecycle_argv: list[str] | None = None) -> tuple[dict, dict]:
+        """Recheck under single-flight before any repair, staging or starter exec."""
+        deadline = time.monotonic() + DAEMON_RETRY_SECONDS
+        may_start = self.allow_start and allow_start
+        explicit_replace = lifecycle_argv is not None and any(
+            arg in {"--replace", "-replace", "--replace=true", "-replace=true"} for arg in lifecycle_argv[1:])
 
-        grace is how long a daemon that answers nothing is given before one is
-        started: a reconnect under a replacement gives the successor a moment.
-        A wedged daemon is diagnosed without trying to start a second one.
-        """
-        if grace > 0:
-            endpoint, health = self.wait_healthy(grace)
+        def needs_start(health):
+            return health is None or self.needs_start(health) or (
+                explicit_replace and same_core(str(health.get("version", "")), self.binary_version))
+
+        if grace > 0 and may_start:
+            endpoint, health = self.wait_healthy(min(grace, max(0, deadline - time.monotonic())))
         else:
-            try:
-                endpoint, health = self.probe(self.answer_budget)
-            except DaemonHung as exc:
-                raise DaemonUnavailable(str(exc)) from exc
-        if health is None and not self.allow_start:
-            raise DaemonUnavailable("no running daemon answered; inspection never starts one")
-        if self.allow_start and (health is None or self.needs_start(health)):
-            if not self.start_daemon():
-                raise DaemonUnavailable(self.start_error or "no daemon could be started")
-            endpoint, health = self.wait_healthy(self.start_budget)
-            if health is None or endpoint is None:
-                raise DaemonUnavailable(f"no daemon answered within {self.start_budget:.0f}s of starting one")
-            if self.needs_start(health) and compare_daemon_versions(str(health.get("version", "")), self.binary_version) <= 0:
-                # daemon-start reported a daemon, but the one answering is
-                # still the older one (it refused to stop, or won the lock
-                # race): never settle on an older numeric core. Equal-core
-                # successors are deliberately retained regardless of build.
-                raise DaemonUnavailable(f"daemon {health.get('version', '')} (build {health.get('build_time', 0)}) is older than this plugin's runtime and was not replaced")
+            endpoint, health = self.probe(self.answer_budget)
+        if not may_start:
+            if endpoint is None or health is None:
+                raise DaemonUnavailable("daemon not running; CLI and inspection never start one")
+            return endpoint, health
+        if health is None and grace <= 0:
+            endpoint, health = self.wait_healthy(min(DAEMON_SWAP_GRACE_SECONDS, max(0, deadline - time.monotonic())))
+        if not needs_start(health):
+            return endpoint, health
+        try:
+            starter = LauncherStartLock(self.daemon_dir)
+        except OSError as exc:
+            raise DaemonUnavailable(f"cannot open launcher starter lock: {exc}") from exc
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DaemonUnavailable("starter coordination exhausted the 75s daemon budget")
+                if starter.acquire():
+                    # The winner may have published a successor while we waited.
+                    endpoint, health = self.probe(min(self.answer_budget, remaining))
+                    if not needs_start(health):
+                        return endpoint, health
+                    if health is None:
+                        if endpoint is not None:
+                            if endpoint_process_alive(endpoint) is not False:
+                                raise DaemonUnavailable("daemon not answering; recorded PID is live or unqueryable; refusing absence startup")
+                        elif (self.daemon_dir / DAEMON_ENDPOINT_FILE).exists():
+                            raise DaemonUnavailable("daemon endpoint is unreadable or invalid; refusing absence startup")
+                    if not self.start_daemon(lifecycle_argv, deadline=deadline):
+                        raise DaemonUnavailable(self.start_error or "no daemon could be started")
+                    endpoint, health = self.wait_healthy(min(self.start_budget, max(0, deadline - time.monotonic())))
+                    if health is None or endpoint is None:
+                        raise DaemonUnavailable(f"no daemon answered within {self.start_budget:.0f}s of starting one")
+                    if self.needs_start(health):
+                        raise DaemonUnavailable(f"daemon {health.get('version', '')} is older than this plugin's runtime and was not replaced")
+                    return endpoint, health
+                # Losers only poll the network; they never stage or execute.
+                time.sleep(min(0.2, remaining))
+                endpoint, health = self.probe(min(1.0, max(0.01, deadline - time.monotonic())))
+                if not needs_start(health):
+                    return endpoint, health
+        finally:
+            starter.close()
+
+    def connect(self, hello: dict, *, grace: float = 0.0, allow_start: bool = True) -> SocketStream:
+        endpoint, health = self.ensure_healthy(grace=grace, allow_start=allow_start)
         version = str(health.get("version", ""))
         if not same_minor(version, self.runtime_version):
             raise DaemonUnavailable(f"daemon {version} is outside this plugin's minor ({self.runtime_version})")
@@ -1625,7 +1758,7 @@ class McpProxy:
         if self.stdin_done.wait(max(DAEMON_RETRY_POLL_SECONDS, min(5.0, 0.5 * self.quick_closes))):
             return None
         try:
-            stream = self.link.connect(self.hello, grace=1.5)
+            stream = self.link.connect(self.hello, grace=DAEMON_SWAP_GRACE_SECONDS)
         except (DaemonUnavailable, DaemonHung) as exc:
             print(f"ws-mcp-launcher: dashboard daemon not reachable: {exc}", file=self.stderr, flush=True)
             return None
@@ -1857,15 +1990,14 @@ def main() -> int:
         note(str(exc))
         health = None
 
-    if inspection and not bootstrap_forced:
+    if inspection:
         return inspect_runtime(link, argv, health)
     usable_daemon = health is not None and same_minor(str(health.get("version", "")), link.runtime_version) and (
         compare_daemon_versions(str(health["version"]), link.runtime_version) >= 0 or same_core(str(health["version"]), link.runtime_version))
-    cli_uses_daemon = mode == "cli" and not inspection and usable_daemon
+    cli_uses_daemon = mode == "cli"
     need_install = False
     if cli_uses_daemon:
-        # Every CLI-mode non-inspection command reuses a usable daemon,
-        # taking priority over bootstrap_forced and forced local installs.
+        # CLI proxies have no repair/start authority even on a cold cache.
         pass
     elif bootstrap_forced:
         note("forcing runtime install from bootstrap binary or url")
@@ -1903,23 +2035,23 @@ def main() -> int:
                 fail(f"dashboard daemon not reachable: runtime repair failed: {exc}")
             return False
 
-    if need_install:
-        repair_runtime(force=True)
-    # A CLI consumer must not replace a usable daemon just because its local binary is newer.
+    # Repair is deferred until startup is authorized under the starter lock.
     link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ,
-                      allow_start=not inspection and not cli_uses_daemon, repair_runtime=repair_runtime)
+                      allow_start=mode in {"mcp", "lifecycle"},
+                      repair_runtime=lambda: repair_runtime(force=need_install))
     if inspection:
         # An explicit bootstrap+version repairs a child runtime but never starts it.
         return inspect_runtime(link, argv, None)
     if mode == "lifecycle":
-        explicit_replace = any(arg in {"--replace", "-replace", "--replace=true", "-replace=true"} for arg in argv[1:])
-        if health is not None and not explicit_replace and not link.needs_start(health):
+        try:
+            _, health = link.ensure_healthy(lifecycle_argv=argv)
+        except (DaemonUnavailable, DaemonHung) as exc:
+            fail(f"dashboard daemon not reachable: {exc}")
+        if link.started:
+            print(link.start_output, end="")
+        else:
             print(json.dumps(dict(health, outcome="kept")))
-            return 0
-        if read_runtime_metadata(binary) is None:
-            fail("dashboard daemon not reachable: no verified runtime to start")
-        staged = stage_daemon_binary(binary, link.daemon_dir / DAEMON_BIN_DIR_NAME)
-        return subprocess.call([str(staged), *argv], env=os.environ)
+        return 0
     wait_for_rsrc_tree(plugin_dir)
     apply_rsrc_root_env(plugin_dir, os.environ)
     apply_skills_root_env(plugin_dir, os.environ)

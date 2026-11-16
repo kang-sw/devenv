@@ -39,10 +39,8 @@ func TestCompareVersions(t *testing.T) {
 
 // TestStageExecutableCopiesAndPrunes: the daemon's binary copy is
 // content-addressed and reused for the same content; staging leaves the
-// other copies alone (the running daemon's among them), and the daemon
-// prunes the settled ones once it holds the lock, keeping its own and
-// whatever another launcher may still be staging (a temp file, a copy
-// younger than the grace period).
+// other copies alone. Singleton ownership and age do not establish process
+// exit or accepted/rollback retention, so even old artifacts stay.
 func TestStageExecutableCopiesAndPrunes(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "ws-mcp.exe")
 	if err := os.WriteFile(src, []byte("binary-v1"), 0o755); err != nil {
@@ -82,18 +80,33 @@ func TestStageExecutableCopiesAndPrunes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The v1 copy is settled: a daemon that ran from it is long gone.
-	old := time.Now().Add(-2 * stagedPruneGrace)
+	// Age alone proves neither process-use nor rollback safety.
+	old := time.Now().Add(-24 * time.Hour)
 	if err := os.Chtimes(first, old, old); err != nil {
 		t.Fatal(err)
 	}
 	PruneStagedExecutables(filepath.Dir(binDir), second)
-	if _, err := os.Stat(first); !os.IsNotExist(err) {
-		t.Fatalf("the settled v1 copy survived the prune: %v", err)
+	// Include an unknown metadata file, a directory and a symlink: none is
+	// disposable just because it lives beside a launcher-owned executable.
+	metadata := first + ".metadata.json"
+	foreign := filepath.Join(binDir, "electron-package")
+	if err := os.WriteFile(metadata, []byte(`{"accepted":true}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, path := range []string{second, tmp, young} {
+	if err := os.Mkdir(foreign, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(binDir, "ws-mcp-dashboard-link.exe")
+	linked := os.Symlink(first, link) == nil
+	PruneStagedExecutables(filepath.Dir(binDir), second)
+	for _, path := range []string{first, second, tmp, young, metadata, foreign} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("the prune removed %s: %v", path, err)
+		}
+	}
+	if linked {
+		if _, err := os.Lstat(link); err != nil {
+			t.Fatalf("prune removed symlink: %v", err)
 		}
 	}
 	// A daemon that runs from outside the staged directory (POSIX, where
@@ -101,8 +114,9 @@ func TestStageExecutableCopiesAndPrunes(t *testing.T) {
 	if err := os.Chtimes(young, old, old); err != nil {
 		t.Fatal(err)
 	}
+	before, _ := os.ReadDir(binDir)
 	PruneStagedExecutables(filepath.Dir(binDir), src)
-	if entries, _ = os.ReadDir(binDir); len(entries) != 3 {
+	if entries, _ = os.ReadDir(binDir); len(entries) != len(before) {
 		t.Fatalf("a prune from outside the bin dir changed it: %v", entries)
 	}
 }

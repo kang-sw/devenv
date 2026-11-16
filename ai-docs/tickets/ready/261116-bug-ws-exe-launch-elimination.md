@@ -500,6 +500,59 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
   locally and clean them. Item 7 process sampling and any shared swap remain
   coordinator-owned acceptance, not a fact-population command.
 
+## Implementation checkpoint (not phase acceptance) - 2026-11-16
+
+- Item 2 landed in `b5b73efb5`; item 5 in `4cc15f9ab`. Item 4 is parked
+  at `parked/exe-phase1-item4-codex` (`d9fd94543`) and fully reverted by
+  `36ecc6e43`; neither the Pi cache nor launcher changes depend on it.
+- Pending launcher work adds a persistent OS starter lock, a 20-second
+  swap grace, conservative recorded-PID absence admission and network-only
+  CLI entry/retry paths. All subprocess APIs in the local proxy family are
+  mocked, including permitted starters. No local ws/Go/test executable ran.
+- Coordinator-approved conservative cleanup: each failed Python copy removes
+  only its own random temp path. Go's existing pruning hook now retains all
+  settled artifacts: this baseline has no authoritative accepted/rollback
+  retention source and singleton ownership does not prove that the previous
+  draining process has exited. Old executables, metadata, orphan temps,
+  directories and symlinks deliberately remain; no retention index/API or
+  Electron package pruning is invented.
+- Verification: new mocked starter contract family passed (10 tests, one
+  remote-process fixture skipped). Existing mocked proxy family: 56 of 58
+  tests pass; `test_a_daemon_that_dies_with_no_successor_is_restarted` and
+  `test_recovery_repairs_missing_runtime_only_when_start_becomes_needed`
+  still fail waiting for the successor hello (5/8 seconds). A first correction
+  isolated fake PID admission, removed obsolete CLI-start expectations and
+  made timeout/symlink fixtures independent of Windows environment. The two
+  reconnect failures repeated afterward: worker stop (f), no further fix
+  attempt before checkpoint. Full commands/output are retained in machine-local
+  `D:/Temp/exe-phase1-launcher/proxy-failure-{1,2}.txt`. Their
+  implementation-versus-fixture blame remains unresolved at this checkpoint.
+- The first new-family failure was a fixture reading a Windows-locked byte;
+  reading after unlock fixed it. The proxy family's first run also exposed
+  restricted Windows symlinks and an environment-dependent HTTP timeout;
+  those fixture issues were corrected. No passing full-proxy claim is made.
+- Item 5 focused remote wsagent family passed (0.158s, full output read by
+  its implementer). Item 2 focused MCP render family passed (0.195s); its
+  original wsagent output was truncated and deleted before full review, so
+  that older run is not verified-pass evidence. The cmd re-arm fixture is
+  updated but unrun under the internal-package-only command authorization.
+- Coordinator 02:14:46Z authorized bounded same-branch continuation after this
+  checkpoint: first diagnose whether the changed health grace exhausts the
+  fixture deadline; production health grace must not be shortened to fit tests.
+  Larger changes require a new report. Remaining: diagnose the repeated
+  reconnect failure, focused remote starter/staging/profile gates, independent R1 and
+  substantive fixes-only R2 if needed. No reviewed HEAD or phase Result yet.
+- Coordinator alone owns subsequent merge/build/install/swap and live process
+  sampling. Acceptance preparation after reviewed code: sample
+  `Get-CimInstance Win32_Process` at 250-ms intervals into an owned
+  `D:/Temp/exe-phase1-acceptance/` CSV before/during/after one coordinated swap;
+  exercise session MCP reconnect plus mailbox stream/one-shot and ordinary
+  CLI proxies, and inspect startup count and command lines. Expect one
+  updated-launcher starter plus necessary daemon child; record the accepted
+  rare Electron losing-starter boundary separately. Polling can miss very
+  short-lived processes and is not a kernel process-start trace. No such
+  command, swap or install has been executed by this worker.
+
 ## Forward
 
 - Coordinator-approved boundary: old launchers and Electron do not share the new starter lock; a rare Electron race can execute one losing starter, with Go's singleton preventing a second daemon.
