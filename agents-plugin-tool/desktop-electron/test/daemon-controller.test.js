@@ -31,6 +31,74 @@ test('REST-only attach to a healthy daemon does not select, stage or launch; no 
       launch() { assert.fail('healthy attach must not execute anything'); } }), `http://127.0.0.1:${server.address().port}/`);
   }
 });
+test('numeric REST core precedence, explicit one-shot equal swap, and cross-boundary refusal', async t => {
+  const f = fixture(t, 'darwin');
+  let live = { pid: 120, version: '0.50.1', lan: true, started_at: 'old', content_hash: 'old' };
+  let launches = [], drains = 0, notices = [];
+  const deps = { env: env(f), onNotice: s => notices.push(s),
+    inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
+    launch: async (binary, opts, args) => {
+      assert.equal(fs.readFileSync(binary, 'utf8'), 'fixture bytes, not an executable');
+      assert(opts.cwd.startsWith(path.join(f.userData, 'daemon-stages')));
+      launches.push(args);
+    },
+    shutdown: async () => { drains++; live = { ...live, pid: 121, started_at: 'new', content_hash: f.bundled.metadata.binary_sha256 }; },
+    sleep: async () => {} };
+  live.version = '0.50.4';
+  assert.equal(await connectDaemon(config(f), deps), URL);
+  assert.equal(launches.length, 0);
+  live.version = '0.50.1-dev';
+  assert.equal(await connectDaemon(config(f), deps), URL);
+  assert.equal(launches.length, 0);
+  assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
+  assert.equal(drains, 1);
+  assert.deepEqual(launches, [['dashboard', '--port', '32000', '--lan']]);
+  assert.equal(await connectDaemon(config(f), deps), URL);
+  assert.equal(launches.length, 1, 'explicit replacement is consumed once');
+  live.version = '0.49.9';
+  assert.equal(await connectDaemon(config(f), deps), URL);
+  assert.equal(launches.length, 1, 'unknown cross-minor clients keep incumbent');
+  assert.match(notices.at(-1), /attached client versions are unknown.*update connected plugins/i);
+});
+test('failed preflight leaves incumbent serving, failed drain and late successor failure are distinct', async t => {
+  const f = fixture(t, 'darwin');
+  let live = { pid: 120, version: '0.50.1', lan: false, started_at: 'old' }, drains = 0, notice;
+  const deps = { env: env(f), onNotice: value => { notice = value; },
+    inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
+    launch: async () => { throw Error('spawn refused'); },
+    shutdown: async () => { drains++; }, sleep: async () => {}, maxPolls: 2 };
+  assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
+  assert.match(notice, /preflight failed/);
+  assert.equal(drains, 0);
+  assert.equal(live.pid, 120);
+  deps.launch = async () => {};
+  deps.shutdown = async () => { drains++; throw Error('no drain'); };
+  assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
+  assert.match(notice, /outcome is uncertain/);
+  deps.shutdown = async () => { drains++; live = { ...live, pid: 121, started_at: 'successor pending', version: '0.49.8' }; };
+  await assert.rejects(connectDaemon({ ...config(f), replace: true }, deps), /older or unidentified daemon won/);
+  assert.equal(drains, 2);
+  live = { pid: 120, version: '0.50.1', lan: false, started_at: 'old' };
+  deps.shutdown = async () => { drains++; live = { ...live, pid: 120 }; };
+  await assert.rejects(connectDaemon({ ...config(f), replace: true }, deps), /predecessor survival is not guaranteed/);
+});
+test('raced newer or incompatible winner after staging is never drained; Windows remains fail-closed', async t => {
+  const f = fixture(t, 'darwin');
+  let checks = 0, notices = [], live = { pid: 120, version: '0.50.0', lan: true, started_at: 'one' };
+  const deps = { env: env(f), onNotice: s => notices.push(s),
+    inspect: async () => { if (++checks === 2) live = { pid: 123, version: '0.51.0', lan: false, started_at: 'two' };
+      return { url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }; },
+    launch: () => assert.fail('no executable for raced winner'), shutdown: () => assert.fail('no drain for raced winner') };
+  assert.equal(await connectDaemon(config(f), deps), URL);
+  assert.equal(checks, 2);
+  const windows = fixture(t, 'win32');
+  live = { pid: 120, version: '0.50.1', lan: true, started_at: 'one' };
+  checks = 0;
+  assert.equal(await connectDaemon({ ...config(windows), platform: 'win32', replace: true },
+    { ...deps, select: () => windows.select(), inspect: async () => ({ url: URL,
+      endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }) }), URL);
+  assert.match(notices.at(-1), /integration is pending/);
+});
 test('missing macOS daemon starts only staged dashboard, preserves config/cache, strips hosted identity', async t => {
   const f = fixture(t, 'darwin');
   let running = false, calls = 0, launches = 0, stagedRoot;

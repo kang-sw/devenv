@@ -218,14 +218,18 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (navigation === attempt) navigation = null;
       }
     }
-    async function connect() {
+    async function connect(replace = false) {
       if (connecting || window.isDestroyed()) return;
       const attempt = beginNavigation();
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
         let url;
-        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform }); }
+        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace }, {
+          onNotice: message => { if (!window.isDestroyed()) dialog.showMessageBoxSync(window, {
+            type: 'warning', title: 'Daemon replacement unavailable', message, buttons: ['Keep connection'], noLink: true,
+          }); },
+        }); }
         catch (error) {
           if (!isCurrent(attempt)) return;
           pin = null;
@@ -283,7 +287,10 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         { id: 'zoom_out', label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => zoomBy('out') },
       ] },
       { role: 'windowMenu' }, { role: 'help', submenu: [] },
-      { label: 'Connection', submenu: [{ id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: connect }] },
+      { label: 'Connection', submenu: [
+        { id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: () => connect() },
+        { id: 'replace_daemon', label: 'Replace daemon (same core)', click: () => connect(true) },
+      ] },
     ];
     applicationMenu = Menu.buildFromTemplate(menu);
     Menu.setApplicationMenu(applicationMenu);

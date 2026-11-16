@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
-const { cacheRoot, readEndpoint, checkHealth, discover, MAX_JSON } = require('../endpoint');
+const { cacheRoot, readEndpoint, checkHealth, discover, inspect, shutdown, MAX_JSON } = require('../endpoint');
 
 async function fixture(t, handle) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-endpoint-'));
@@ -15,7 +15,7 @@ async function fixture(t, handle) {
   const ep = { port: server.address().port, pid: process.pid };
   const file = path.join(root, 'dashboard/endpoint.json');
   const write = value => fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
-  write({ ...ep, token: 'NEVER-EXPOSE-THIS' });
+  write({ ...ep, token: 'a'.repeat(64) });
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
   return { root, ep, file, write };
 }
@@ -28,7 +28,8 @@ test('cache override, relative root, symlink, default and missing home', t => {
   assert.equal(cacheRoot({ HOME: '/home/user' }, '/', () => '/users/ki'), path.resolve('/home/user', '.cache', 'ws@kang-sw-devenv'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.symlinkSync(root, root + '/link');
+  try { fs.symlinkSync(root, root + '/link', 'junction'); }
+  catch (error) { if (error.code !== 'EPERM') throw error; return; }
   assert.equal(cacheRoot({ WS_CACHE_HOME: root + '/link' }), fs.realpathSync(root));
 });
 test('identity-only discovery, no credentials, proxy, redirects or writes', async t => {
@@ -68,6 +69,39 @@ test('health deadline is total, including a slow streaming body', async t => {
   const before = Date.now();
   await assert.rejects(checkHealth(f.ep, 40), /health check failed/);
   assert(Date.now() - before < 1000);
+});
+test('REST inspection returns validated health without bearer; shutdown alone uses endpoint credential', async t => {
+  let requests = [], accepted = false;
+  const f = await fixture(t, (req, res) => {
+    requests.push({ method: req.method, path: req.url, auth: req.headers.authorization });
+    if (req.url === '/health') return res.end(JSON.stringify({ service: 'ws-dashboard', pid: process.pid,
+      port: f.ep.port, version: '0.50.1', lan: true, started_at: 'start-a', content_hash: 'hash-a' }));
+    if (req.url === '/shutdown' && req.method === 'POST' && req.headers.authorization === `Bearer ${'a'.repeat(64)}`) {
+      accepted = true;
+      res.writeHead(202); return res.end(JSON.stringify({ shutting_down: true }));
+    }
+    res.writeHead(401); res.end('{}');
+  });
+  const observed = await inspect(f.root);
+  assert.equal(observed.health.version, '0.50.1');
+  assert.equal(observed.health.lan, true);
+  assert(!JSON.stringify(observed).includes('a'.repeat(64)));
+  assert.deepEqual(requests.map(r => r.auth), [undefined]);
+  await shutdown(f.root, observed);
+  assert(accepted);
+  assert.deepEqual(requests.map(r => r.path), ['/health', '/health', '/shutdown']);
+  assert.deepEqual(requests.map(r => r.auth), [undefined, undefined, `Bearer ${'a'.repeat(64)}`]);
+});
+test('changed endpoint/identity prevents authenticated drain, no credentials in errors', async t => {
+  let drains = 0;
+  const f = await fixture(t, (req, res) => {
+    if (req.url === '/shutdown') drains++;
+    res.end(JSON.stringify({ service: 'ws-dashboard', pid: process.pid, started_at: 'first' }));
+  });
+  const seen = await inspect(f.root);
+  f.write({ ...f.ep, token: 'b'.repeat(64) });
+  await assert.rejects(shutdown(f.root, seen), error => !error.message.includes('b'.repeat(64)) && /changed/.test(error.message));
+  assert.equal(drains, 0);
 });
 test('endpoint change during health is rejected, missing then retry succeeds', async t => {
   let change = true;

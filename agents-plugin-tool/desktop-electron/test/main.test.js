@@ -114,6 +114,7 @@ test('native window, menus, authority, close veto and single-instance focus', as
   assert.equal(f.session.check(), false);
   f.session.request(null, 'clipboard-read', grant => assert.equal(grant, false));
   assert.equal(f.menus.retry.accelerator, 'CmdOrCtrl+R');
+  assert.equal(f.menus.replace_daemon.label, 'Replace daemon (same core)');
   f.menus.zoom_in.click(); assert.equal(w.zoom, 1.1);
   f.menus.zoom_in_shifted.click(); assert.equal(w.zoom, 1.25);
   f.menus.zoom_out.click(); assert.equal(w.zoom, 1.1);
@@ -157,6 +158,21 @@ test('native navigation, redirect, initial subframe requests and popup policies'
   assert.deepEqual(w.popup({ url: 'data:text/html,hi' }), { action: 'deny' });
   assert.deepEqual(w.popup({ url: 'https://example.com/popup' }), { action: 'deny' });
   assert.equal(f.opened.at(-1), 'https://example.com/popup');
+});
+test('native same-core action is one explicit attempt, never renderer IPC; refusal retains connection', async () => {
+  const requests = [];
+  const f = await fixture(async (options, deps) => {
+    requests.push(options.replace);
+    if (options.replace) deps.onNotice('Unknown client versions; update plugins.');
+    return 'http://127.0.0.1:39418/';
+  });
+  await f.menus.replace_daemon.click();
+  assert.deepEqual(requests, [false, true]);
+  assert.equal(f.window.currentURL, 'http://127.0.0.1:39418/');
+  assert.equal(f.window.title, 'Werkschaft');
+  await f.menus.retry.click();
+  assert.deepEqual(requests, [false, true, false]);
+  assert.equal(f.ipcMain.listenerCount('werkschaft:replace-daemon'), 0);
 });
 test('overlapping retries are ignored and rediscovery replaces the pin', async () => {
   let finish, calls = 0;
