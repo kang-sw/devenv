@@ -371,7 +371,17 @@
       "registered_at": "2026-11-15T04:00:54Z"
     },
     "261115-feat-werkschaft-electron-daemon-override": {
-      "registered_at": "2026-11-16T00:36:48Z"
+      "registered_at": "2026-11-16T00:36:48Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-16T00:37:29Z",
+        "impl": {
+          "branch": "impl/develop/cape-barn-hence"
+        }
+      }
     },
     "261115-feat-werkschaft-electron-shell": {
       "registered_at": "2026-11-15T01:09:25Z",
