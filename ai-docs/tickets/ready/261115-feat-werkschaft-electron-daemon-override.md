@@ -90,6 +90,31 @@ failure it asks the user to start the dashboard normally
 
 ## Constraints
 
+- **REST-only inspection (owner 2026-11-16 09:48, relayed by coordinating lead):**
+  every check of an already-running daemon (health, version, core, compatibility,
+  LAN mode) uses its REST API. Read candidate metadata and runtime.json as files.
+  Never execute ws-mcp for --version, hello, probes or compatibility inspection.
+  Electron executes a daemon entry only after deciding a NEW daemon must start;
+  assert zero executable launches on healthy attach/inspection paths in tests.
+- **Hostable selected package (dogfood #12, coordinating lead 2026-11-16):**
+  validate the parent package of selected WS_RSRC_ROOT contains a readable
+  `.claude-plugin/plugin.json` with supported name ws or wsflow, matching
+  `internal/wsagent/lead_plugins.go:16-53`. Apply to both bundled and selected
+  dev input, and fail closed for missing/invalid/Pi-only package metadata.
+- **Independent replacement ordering (coordinating lead 2026-11-16):** prove
+  strict detachment before draining a healthy predecessor, through preflight or
+  an already-independent starter. Test failed strict preflight leaves the old
+  daemon serving. A spawn failure after drain is a separate tested failure
+  mode, never described as preserving the predecessor.
+- **Out-of-bundle staging (coordinating lead 2026-11-16):** packaged
+  app.getAppPath()/daemon is a source, not the running location. Before launch,
+  snapshot binary, metadata, runtime contract, plugin metadata, resources and
+  skills together to a versioned per-user directory outside the replaceable
+  Electron bundle. Retain old staged versions without automatic pruning;
+  explicit manual cleanup is allowed only after explicit daemon shutdown and
+  when no process uses that version. Clean only a failed/incomplete staging
+  attempt owned by this operation. This avoids removing a running daemon's
+  resources or locking a shell self-update.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin-tool/)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
 - All work, ticket promotion included, stays in the leased full worktree on
@@ -202,7 +227,11 @@ fallback. Test first start, retry and app exit in isolation. The Windows
 strict-lifetime step is separately gated by owner confirmation above; before
 it lands, verify the Windows refusal path without spawning any executable,
 and report Windows start/survival acceptance as pending. Do not claim the
-Windows slice or this ticket complete on portable/mock evidence.
+Windows slice or this ticket complete on portable/mock evidence. Include the
+new REST-only, hostable-package validation and out-of-bundle staging constraints
+above. Package only a supplied, file-validated daemon input; never run a binary
+to produce metadata or build/download it on first launch. Verify with scoped
+Node fixtures and injected spawns only until platform acceptance is authorized.
 
 ### Phase 3: Controlled replacement and reconnect
 
