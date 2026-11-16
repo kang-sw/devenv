@@ -1,11 +1,30 @@
 /* Daemon-local workspace memos. No markdown, HTML, or cross-tab live sync. */
 (function (window) {
   "use strict";
-  window.WsMemo = { mount: function (doc, rail, panel, close) {
+  // Shortest column first, in list order; ties go left. keep maps a memo id to
+  // the column it already holds, so saving an edit never moves other notes.
+  function layout(ids, heights, count, keep) {
+    var sums = [], out = {};
+    for (var c = 0; c < count; c++) sums.push(0);
+    ids.forEach(function (id, i) {
+      var col = keep && keep[id] < count ? keep[id] : sums.indexOf(Math.min.apply(null, sums));
+      out[id] = col; sums[col] += heights[i] || 0;
+    });
+    return out;
+  }
+  var KEYS_FULL = "<span><kbd>Enter</kbd> save</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span><span><kbd>Esc</kbd> cancel</span>";
+  var KEYS_SHORT = "<span><kbd>↵</kbd> save</span><span><kbd>⇧↵</kbd> newline</span><span><kbd>Esc</kbd> cancel</span>";
+  window.WsMemo = { layout: layout, mount: function (doc, rail, panel, close) {
     var input = doc.getElementById("memo-input"), list = doc.getElementById("memo-list");
     var title = doc.getElementById("memo-workspace"), status = doc.getElementById("memo-status");
+    var counter = doc.getElementById("memo-n");
     var undo = doc.getElementById("memo-undo"), workspace = "", session = "", items = [];
     var shown = false, writable = false, busy = false, loaded = false, generation = 0, deleted = null, timer = 0, wide = false;
+    // slots: memo id -> column from the last placement; placed: the list width
+    // it was made for; stale: the width changed while an edit was open.
+    var slots = {}, placed = -1, stale = false;
+    var narrow = window.matchMedia ? window.matchMedia("(max-width: 699.98px)") : null;
+    function columns() { return (narrow && narrow.matches) || list.clientWidth < 390 ? 1 : 2; }
     var pickers = [], topicGeneration = 0;
     function closePickers() {
       ++topicGeneration;
@@ -70,11 +89,22 @@
       }
       box.appendChild(doc.createTextNode(text.slice(from)));
     }
-    function render() {
+    // keep: hold each memo in its previous column (edit save, edit cancel).
+    // Everything else re-places, as does a keep render after a width change.
+    function render(keep) {
       closePickers(); pickers = pickers.slice(0, 1);
       list.textContent = "";
       if (window.WsCapsules && window.WsCapsules.sweep) window.WsCapsules.sweep();
       input.hidden = !writable; input.disabled = busy;
+      if (counter) counter.textContent = loaded ? String(items.length) : "";
+      if (loaded && !items.length) {
+        var empty = doc.createElement("p"); empty.className = "memo-empty"; empty.textContent = "No memos yet.";
+        list.appendChild(empty);
+      }
+      var count = items.length ? columns() : 1, cols = [], rows = [];
+      for (var c = 0; items.length && c < count; c++) {
+        cols.push(list.appendChild(doc.createElement("div"))); cols[c].className = "memo-col";
+      }
       items.forEach(function (m) {
         var row = doc.createElement("article"), text = doc.createElement("div");
         row.className = "memo-note"; text.className = "memo-text";
@@ -85,12 +115,15 @@
             if (busy || row.querySelector("textarea")) return;
             var area = doc.createElement("textarea"); area.value = m.text; area.maxLength = 8000;
             area.addEventListener("input", function () { fits(area.value); });
-            area.setAttribute("aria-label", "Edit memo"); text.hidden = true; row.appendChild(area); attach(area); area.focus();
+            area.setAttribute("aria-label", "Edit memo"); text.hidden = true; row.appendChild(area); attach(area);
+            var keys = doc.createElement("div"); keys.className = "memo-hint"; keys.setAttribute("aria-hidden", "true");
+            keys.innerHTML = count > 1 ? KEYS_SHORT : KEYS_FULL;
+            row.appendChild(keys); row.className = "memo-note memo-editing"; area.focus();
             area.addEventListener("keydown", function (e) {
               if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
               if (e.key === "Escape") {
                 // The cancelled edit's over-limit refusal no longer applies; recheck the add draft instead.
-                e.preventDefault(); e.stopPropagation(); fits(input.value); render();
+                e.preventDefault(); e.stopPropagation(); fits(input.value); render(true);
               }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -111,9 +144,22 @@
           });
           row.appendChild(del);
         }
-        list.appendChild(row);
+        cols[0].appendChild(row); rows.push(row);
       });
+      // Every column has the same width, so heights measured in the first one
+      // hold in any; one layout read, then the notes move to their columns.
+      // Each note also costs the column's row gap, so a column of many short
+      // notes is not mistaken for the shorter one.
+      var gap = count > 1 && window.getComputedStyle ? parseFloat(window.getComputedStyle(cols[0]).rowGap) || 0 : 0;
+      var heights = count > 1 ? rows.map(function (row) { return row.offsetHeight + gap; }) : [];
+      slots = layout(items.map(function (m) { return m.id; }), heights, count, keep && !stale ? slots : null);
+      rows.forEach(function (row, i) { cols[slots[items[i].id]].appendChild(row); });
+      placed = list.clientWidth; stale = false;
       badge();
+    }
+    function refit() {
+      if (!shown || !loaded || list.clientWidth === placed) return;
+      if (list.querySelector("textarea")) stale = true; else render();
     }
     function request(url, options) {
       return window.fetch(url, options).then(function (r) {
@@ -145,7 +191,7 @@
         return true;
       }).catch(function (e) { if (gen === generation) say(e.message); return false; }).then(function (ok) {
         busy = false; input.disabled = false;
-        if (ok) render();
+        if (ok) render(action === "edit");
         return ok;
       });
     }
@@ -196,7 +242,7 @@
       var button = e.target.closest(".memo-count");
       if (button) { e.preventDefault(); e.stopPropagation(); select(button.closest(".rws")); close(true); }
     }, true);
-    window.addEventListener("resize", position);
+    window.addEventListener("resize", function () { position(); refit(); });
     return { open: open, sync: sync, remember: function () {
       try { window.sessionStorage.setItem("ws.memo.resume", shown ? "1" : ""); } catch (_) {}
     }, resume: function () {
