@@ -151,9 +151,16 @@
       // Each note also costs the column's row gap, so a column of many short
       // notes is not mistaken for the shorter one.
       var gap = count > 1 && window.getComputedStyle ? parseFloat(window.getComputedStyle(cols[0]).rowGap) || 0 : 0;
-      var heights = count > 1 ? rows.map(function (row) { return row.offsetHeight + gap; }) : [];
-      slots = layout(items.map(function (m) { return m.id; }), heights, count, keep && !stale ? slots : null);
-      rows.forEach(function (row, i) { cols[slots[items[i].id]].appendChild(row); });
+      var ids = items.map(function (m) { return m.id; }), prior = keep && !stale ? slots : null, width = list.clientWidth;
+      function place() {
+        slots = layout(ids, count > 1 ? rows.map(function (row) { return row.offsetHeight + gap; }) : [], count, prior);
+        rows.forEach(function (row, i) { cols[slots[items[i].id]].appendChild(row); });
+      }
+      place();
+      // The one-column measuring stack can show a layout scrollbar the split
+      // columns do not (or the reverse), so its heights were read at another
+      // width; measure once more in place at the final width.
+      if (count > 1 && list.clientWidth !== width) place();
       placed = list.clientWidth; stale = false;
       badge();
     }

@@ -48,7 +48,8 @@ const capsuleStub = {
     return picker;
   }
 };
-const window = { WsCapsules: capsuleStub, document: { documentElement: { getAttribute: () => 'standalone' } }, addEventListener() {}, sessionStorage: { setItem: (k,v) => storage.set(k,v), getItem: k => storage.get(k), removeItem: k => storage.delete(k) }, fetch: async (url, opts) => {
+const winOn = {};
+const window = { WsCapsules: capsuleStub, document: { documentElement: { getAttribute: () => 'standalone' } }, addEventListener(type, fn) { (winOn[type] ||= []).push(fn); }, sessionStorage: { setItem: (k,v) => storage.set(k,v), getItem: k => storage.get(k), removeItem: k => storage.delete(k) }, fetch: async (url, opts) => {
   calls.push([url, opts]);
   if (opts.method === 'POST') {
     if (failWrite) { failWrite = false; return { ok: false, text: async () => 'save failed' }; }
@@ -196,8 +197,20 @@ function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now
   assert.deepEqual(columns(), [['x'.repeat(30), 'mid text', 'tiny'], ['y'.repeat(60)]], 'delete re-places');
   ids['memo-undo'].querySelector('button').fire('click'); await flush();
   assert.deepEqual(columns(), [['n', 'y'.repeat(60)], ['x'.repeat(30), 'mid text', 'tiny']], 'undo re-places');
-  ids['memo-list'].clientWidth = 300; memo.open(true, false); await flush();
-  assert.deepEqual(columns(), [['n', 'x'.repeat(30), 'y'.repeat(60), 'mid text', 'tiny']], 'a narrow pad has one column');
+  const editText = text => { ids['memo-list'].querySelectorAll('.memo-text').find(t => t.textContent === text).fire('click'); return ids['memo-list'].querySelector('textarea'); };
+  const resize = width => { ids['memo-list'].clientWidth = width; (winOn.resize || []).forEach(fn => fn()); };
+  area = editText('n'); area.value = 'z'.repeat(80); area.fire('keydown', { key: 'Enter' }); await flush();
+  const kept = [['z'.repeat(80), 'y'.repeat(60)], ['x'.repeat(30), 'mid text', 'tiny']];
+  assert.deepEqual(columns(), kept, 'a growing edit keeps its column');
+  editText('mid text').fire('keydown', { key: 'Escape' });
+  assert.deepEqual(columns(), kept, 'Esc keeps placement');
+  area = editText('tiny'); resize(400);
+  assert.equal(ids['memo-list'].querySelector('textarea'), area, 'a width change does not tear down an open edit');
+  assert.deepEqual(columns(), kept);
+  area.fire('keydown', { key: 'Escape' });
+  assert.deepEqual(columns(), [['z'.repeat(80), 'mid text', 'tiny'], ['x'.repeat(30), 'y'.repeat(60)]], 'the deferred width change re-places on the next render');
+  resize(300);
+  assert.deepEqual(columns(), [['z'.repeat(80), 'x'.repeat(30), 'y'.repeat(60), 'mid text', 'tiny']], 'a narrow pad has one column');
   remote = []; memo.open(true, false); await flush();
   assert.equal(ids['memo-list'].querySelector('.memo-empty').textContent, 'No memos yet.');
   assert.equal(ids['memo-n'].textContent, '0');
