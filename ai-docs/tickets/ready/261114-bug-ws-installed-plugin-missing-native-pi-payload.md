@@ -930,6 +930,12 @@ edit, live install or daemon operation occurred. Native Windows/zlib-ng,
 PowerShell, the opt-in network-install lane and live rollout remain unrun.
 The ticket remains ready for EXEC5 review and owner-gated rollout.
 
+#### Edition (d81b2eae4) - 2026-11-16
+
+**Forward:** Every release bump of `agents-plugin-pi/package.json` stales the
+first-party fingerprint. Follow up by regenerating the native payload in the
+release flow, or by excluding the version from the fingerprint.
+
 ## Owner Decisions (2026-11-16)
 
 - (1183)=a: commit the trimmed native Pi payload into the public repo.
