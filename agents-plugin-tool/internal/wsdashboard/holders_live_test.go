@@ -98,9 +98,9 @@ func TestDaemonRestartReattachesToARunningHolder(t *testing.T) {
 		t.Fatalf("first daemon's holders = %+v, want %s", started, id)
 	}
 	f1.d.Close()
-	if first.Client(id) != nil {
-		t.Fatal("the closed daemon still holds the holder's attach")
-	}
+	// Close drops the socket; the manager's Done watcher clears its client
+	// entry asynchronously after the reader observes that disconnect.
+	waitFor(t, "the closed daemon to clear the holder's attach", func() bool { return first.Client(id) == nil })
 
 	sink := &holderOutput{}
 	second := wsholder.New(wsholder.Options{Dir: holdersDir, Python: python, Sink: sink})
