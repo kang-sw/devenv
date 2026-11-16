@@ -211,19 +211,6 @@
     "261114-bug-ws-dashboard-search-palette-minors": {
       "registered_at": "2026-11-13T16:54:43Z"
     },
-    "261114-bug-ws-installed-plugin-missing-native-pi-payload": {
-      "registered_at": "2026-11-14T04:54:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T17:56:43Z",
-        "impl": {
-          "branch": "impl/develop/chain-jelly-henna"
-        }
-      }
-    },
     "261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract": {
       "registered_at": "2026-11-14T14:28:20Z",
       "lease": {
@@ -382,6 +369,9 @@
     },
     "261115-chore-settings-hidden-theme-and-rail-swap-tests": {
       "registered_at": "2026-11-15T04:00:54Z"
+    },
+    "261115-feat-werkschaft-electron-daemon-override": {
+      "registered_at": "2026-11-16T00:36:48Z"
     },
     "261115-feat-werkschaft-electron-shell": {
       "registered_at": "2026-11-15T01:09:25Z",
