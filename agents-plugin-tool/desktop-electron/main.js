@@ -1,7 +1,7 @@
 'use strict';
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { discover } = require('./endpoint');
+const { connectDaemon } = require('./daemon-controller');
 const { nextZoom, destination } = require('./policy');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 const { createUpdater } = require('./update');
@@ -36,8 +36,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     try { if (updater.applyOnLaunch()) { app.quit(); return; } }
     catch (error) { console.error(`Update apply at launch failed: ${error.message}`); }
     // "Restart now" quits through the normal path (the page may still veto)
-    // and relaunches; a plain full quit applies without relaunching. Either
-    // way only the shell exits: it is attach-only and never stops the daemon.
+    // and relaunches; a plain full quit applies without relaunching. Neither
+    // path shuts down the independently started or attached daemon.
     let relaunch = false;
     app.on('will-quit', () => {
       try { updater.applyOnQuit(relaunch); } catch (error) { console.error(`Update apply at quit failed: ${error.message}`); }
@@ -218,14 +218,22 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (navigation === attempt) navigation = null;
       }
     }
-    async function connect() {
+    async function connect(replace = false) {
       if (connecting || window.isDestroyed()) return;
       const attempt = beginNavigation();
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
         let url;
-        try { url = await discover(); }
+        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace }, {
+          onNotice: message => {
+            if (window.isDestroyed()) return;
+            dialogOpen = true;
+            try { dialog.showMessageBoxSync(window, {
+              type: 'warning', title: 'Daemon replacement unavailable', message, buttons: ['Keep connection'], noLink: true,
+            }); } finally { dialogOpen = false; focusDashboard(true); }
+          },
+        }); }
         catch (error) {
           if (!isCurrent(attempt)) return;
           pin = null;
@@ -283,7 +291,10 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         { id: 'zoom_out', label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => zoomBy('out') },
       ] },
       { role: 'windowMenu' }, { role: 'help', submenu: [] },
-      { label: 'Connection', submenu: [{ id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: connect }] },
+      { label: 'Connection', submenu: [
+        { id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: () => connect() },
+        { id: 'replace_daemon', label: 'Replace daemon (same core)', click: () => connect(true) },
+      ] },
     ];
     applicationMenu = Menu.buildFromTemplate(menu);
     Menu.setApplicationMenu(applicationMenu);

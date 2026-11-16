@@ -36,6 +36,17 @@ func SpawnDetached(exe string, args []string, dir string) error {
 	return nil
 }
 
+// SpawnDetachedStrict reports OS breakaway refusal rather than retrying inside
+// the caller's job. Used only by the Windows Electron daemon-start opt-in.
+func SpawnDetachedStrict(exe string, args []string, dir string) error {
+	cmd, err := startDetachedStrict(exe, args, dir)
+	if err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
 // DaemonExecutable returns the binary a daemon should run from. On Windows a
 // running executable locks its file and directory, which would block removal
 // of a versioned plugin cache that holds ws-mcp, so the binary is copied into
