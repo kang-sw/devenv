@@ -78,8 +78,8 @@ func TestBuiltinPiWorkerProfileResolves(t *testing.T) {
 	if want := []string{"read", "bash", "edit", "write", "grep", "find", "ls"}; !slices.Equal(p.Tools, want) {
 		t.Errorf("pi-worker tools = %v, want %v", p.Tools, want)
 	}
-	if want := []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}; !slices.Equal(p.WSTools, want) {
-		t.Errorf("pi-worker ws_tools = %v, want unchanged set %v", p.WSTools, want)
+	if want := []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.create_empty", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}; !slices.Equal(p.WSTools, want) {
+		t.Errorf("pi-worker ws_tools = %v, want %v", p.WSTools, want)
 	}
 	var pi []string
 	for _, tool := range p.WSTools {

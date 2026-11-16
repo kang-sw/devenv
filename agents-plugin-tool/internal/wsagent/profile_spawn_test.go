@@ -126,6 +126,22 @@ func TestPiParentSnapshotDoesNotWidenWithConfigOrDaemonRestart(t *testing.T) {
 	spawn()
 }
 
+func TestPiParentSnapshotExcludesNewWorkerGrant(t *testing.T) {
+	h, _ := childHarness(t)
+	setSpawnProfiles(t, h, map[string]string{
+		ProfilePrefix + PiWorkerProfile: `{"backend":"pi","tools":["read"],"ws_tools":["pi.spawn"]}`,
+	})
+	w := h.spawnWorker("medium")
+	h.backend.waitProcStart(t, 0)
+	setSpawnProfiles(t, h, map[string]string{
+		ProfilePrefix + PiWorkerProfile: `{"backend":"pi","tools":["read"],"ws_tools":["pi.spawn","tickets.create_empty"]}`,
+	})
+	_, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "x", Tier: "small", Parent: &ParentRef{Kind: ParentConversation, ReplyID: w.ID}})
+	if err == nil || !strings.Contains(err.Error(), "ws_tools.tickets.create_empty") {
+		t.Fatalf("new grant must not widen the launched parent: %v", err)
+	}
+}
+
 func TestPiChildWidenedProfileRefusedOnRestart(t *testing.T) {
 	h, _ := childHarness(t)
 	w := h.spawnWorker("medium")

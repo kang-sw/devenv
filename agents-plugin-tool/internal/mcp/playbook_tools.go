@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -317,39 +318,26 @@ func resolveNamespaceVars(namespace string) map[string]string {
 // live record. It reproduces the abstract command form the playbook body
 // shipped before render-time injection, so a session with no key still learns
 // the shape rather than being handed a broken command.
-const mailboxWaitCommandGeneric = "ws-mcp mailbox wait --session-key <your key> [--slug <your address>] [--timeout <duration>]"
+const mailboxWaitCommandGeneric = "python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key <your key> [--slug <your address>] [--timeout <duration>]"
 
-// envCLIName names the command a printed CLI invocation should start with.
-// The package declares it where its CLI shim is on the agent's shell PATH (the
-// Claude manifests, and the shims themselves); elsewhere — Codex puts no plugin
-// bin/ on PATH — it stays unset and the resolved binary path is used.
+// envCLIName is the launcher's shell-quoted Python command, when available.
 const envCLIName = "WS_MCP_CLI_NAME"
 
-// envRuntimeBinary is the launcher's record of the runtime binary it runs
-// or proxies for.
-const envRuntimeBinary = "WS_MCP_RUNTIME_BINARY"
+// Accept only simple shell words or single-quoted paths. In particular, never
+// echo an untrusted executable override or shell metacharacters into guidance.
+var launcherCommandPattern = regexp.MustCompile(`^(?:'(?:[A-Za-z0-9_./:\\ -]*[/\\])?python(?:3(?:\.[0-9]+)?)?(?:\.exe)?'|(?:[A-Za-z0-9_./:\\-]*[/\\])?python(?:3(?:\.[0-9]+)?)?(?:\.exe)?)[ ]+(?:'[A-Za-z0-9_./:\\ -]*ws-mcp-launcher\.py'|[A-Za-z0-9_./:\\-]*ws-mcp-launcher\.py)$`)
 
-// CLICommandName returns the command name that printed, agent-runnable CLI
-// invocations start with: WS_MCP_CLI_NAME when declared, else os.Args[0]. The
-// declared shim name is short, version-stable, and allowlistable; os.Args[0]
-// is the versioned runtime binary path. Neither writes a package-internal
-// launcher path into shipped text (shipped-surface-boundary.md). The server
-// cannot discover the shim itself: its own PATH does not carry plugin bin/.
+// CLICommandName returns a Python launcher prefix for printed CLI guidance.
 func CLICommandName() string { return CLICommandNameFrom(os.Getenv) }
 
-// CLICommandNameFrom is CLICommandName under the environment getenv reads:
-// the declared shim name, else the runtime binary the launcher recorded in
-// WS_MCP_RUNTIME_BINARY, else this process's own argv[0]. A server hosted
-// by the dashboard daemon must not print the daemon's staged copy as the
-// command, so the launcher's record comes before argv[0].
+// CLICommandNameFrom falls back to an illustrative launcher path, never the
+// runtime executable, when the caller's launcher command is not recognizable.
 func CLICommandNameFrom(getenv func(string) string) string {
-	if name := strings.TrimSpace(getenv(envCLIName)); name != "" {
+	name := strings.TrimSpace(getenv(envCLIName))
+	if launcherCommandPattern.MatchString(name) {
 		return name
 	}
-	if bin := strings.TrimSpace(getenv(envRuntimeBinary)); bin != "" {
-		return bin
-	}
-	return strings.TrimSpace(os.Args[0])
+	return "python3 <plugin>/bin/ws-mcp-launcher.py"
 }
 
 // mailboxWaitCommandVar resolves {{.MailboxWaitCommand}} to a concrete,

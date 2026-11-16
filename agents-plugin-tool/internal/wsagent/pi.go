@@ -55,17 +55,35 @@ func (b PiBackend) Executable() string {
 // project-local files ignored, and pi's thinking levels. The levels come
 // back even when the listing fails.
 func (b PiBackend) Choices(ctx context.Context) ([]ModelChoice, []string, error) {
+	models, efforts, _, err := b.choicesObserved(ctx, piProbeNow)
+	return models, efforts, err
+}
+
+// choicesObserved carries a disk hit's original observation into Support's
+// memory cache, so a restart cannot renew a nearly expired listing.
+func (b PiBackend) choicesObserved(ctx context.Context, now func() time.Time) ([]ModelChoice, []string, time.Time, error) {
 	efforts := append([]string(nil), piEfforts...)
 	command, err := lookPath(b.Executable())
 	if err != nil {
-		return nil, efforts, fmt.Errorf("pi backend: %w", err)
+		return nil, efforts, time.Time{}, fmt.Errorf("pi backend: %w", err)
 	}
-	out, err := runListing(ctx, command, []string{"--offline", "--no-approve", "--list-models"}, piEnv(environ()))
+	env := piEnv(environ())
+	cache := newPiProbeCache("models", command, nil, env)
+	if record, ok := cache.load(now()); ok {
+		if models, ok := record.models(); ok {
+			return models, efforts, record.ObservedAt, nil
+		}
+	}
+	out, err := runListing(ctx, command, []string{"--offline", "--no-approve", "--list-models"}, env)
 	if err != nil {
-		return nil, efforts, fmt.Errorf("pi --list-models: %w", err)
+		return nil, efforts, time.Time{}, fmt.Errorf("pi --list-models: %w", err)
 	}
 	models, err := parsePiModels(out)
-	return models, efforts, err
+	at := now()
+	if err == nil {
+		cache.save(at, models)
+	}
+	return models, efforts, at, err
 }
 
 // parsePiModels reads pi --list-models' table: a header naming the
@@ -1244,6 +1262,14 @@ func (m *piMapper) stats(raw json.RawMessage) []Event {
 // piVersionPattern finds a dotted version in `pi --version` output.
 var piVersionPattern = regexp.MustCompile(`(\d+)\.(\d+)(?:\.\d+)?`)
 
+// runPiVersion is separate from the model-listing seam so fixtures can
+// forbid either subprocess independently without changing its argv.
+var runPiVersion = func(ctx context.Context, command string, args, env []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = env
+	return cmd.Output()
+}
+
 // PiVersion runs `pi --version` (pi looked up on PATH, as PiBackend does
 // with no Command) and returns its first dotted version, such as "1.0.4".
 // It fails when pi is missing, does not exit within the context, or prints
@@ -1253,12 +1279,25 @@ func PiVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, command, append(pre, "--version")...)
-	cmd.Env = piEnv(environ())
-	out, err := cmd.Output()
+	env := piEnv(environ())
+	cache := newPiProbeCache("version", command, pre, env)
+	if record, ok := cache.load(piProbeNow()); ok {
+		if version, ok := record.version(); ok {
+			return version, nil
+		}
+	}
+	out, err := runPiVersion(ctx, command, append(pre, "--version"), env)
 	if err != nil {
 		return "", fmt.Errorf("pi --version: %w", err)
 	}
+	version, err := parsePiVersion(out)
+	if err == nil {
+		cache.save(piProbeNow(), version)
+	}
+	return version, err
+}
+
+func parsePiVersion(out []byte) (string, error) {
 	version := piVersionPattern.FindString(string(out))
 	if version == "" {
 		return "", fmt.Errorf("pi --version printed no version: %q", strings.TrimSpace(string(out)))
