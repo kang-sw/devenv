@@ -95,7 +95,13 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
       stop();
       stopped = false;
       capabilityDirty = options.reasoningSummaryCapable !== undefined;
-      unsubscribe = onBackgroundTasksChanged(dirty);
+      // A running task must reach the host before its idle timer can stop the
+      // lead. Do not coalesce membership changes behind the dashboard timer.
+      unsubscribe = onBackgroundTasksChanged(() => {
+        cancel?.();
+        cancel = undefined;
+        flush();
+      });
       dirty();
     },
     stop,
