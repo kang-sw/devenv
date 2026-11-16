@@ -81,7 +81,7 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		all = append(all, timelineEntries(t.Older[i])...)
 	}
 	all = append(all, timelineEntries(t.Stream)...)
-	firstAsk, lastAnswer, panel := map[int]string{}, map[int]string{}, map[string]string{}
+	firstAsk, lastAnswer := map[int]string{}, map[int]string{}
 	changed := map[int]bool{}
 	createdAt := map[string][]int{}
 	for _, e := range all {
@@ -93,9 +93,6 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		}
 		if e.OwnerAnswer() {
 			lastAnswer[e.ItemID] = e.ID
-		}
-		if e.Kind == EntryPanel && !e.Historical {
-			panel[e.PanelID] = e.ID
 		}
 		if e.Kind == EntryAgent || e.Kind == EntryPanel || e.ItemID > 0 || len(createdAt[e.ID]) > 0 {
 			changed[e.Seq] = true
@@ -155,16 +152,6 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 					r.Inputs = append(r.Inputs, h)
 				}
 			}
-		}
-		if e.Historical {
-			// Versions stay nested at the latest panel, but their owner-input
-			// headers still start the original iteration at its append position.
-			preceding, cluster = panel[e.PanelID], false
-			if len(r.Inputs) > 0 {
-				r.Key, r.Page = "input-"+e.ID, EntryPage{}
-				rows = append(rows, r)
-			}
-			continue
 		}
 		for _, id := range createdAt[e.ID] {
 			if firstAsk[id] == e.ID {
@@ -257,7 +244,8 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 	var out []timelinePart
 	for _, r := range rows {
 		r.Preceding = leads[r.Key]
-		if openPanels[r.Key] && len(r.Page.Runs) > 0 {
+		// An earlier panel version stays folded even when it leads a question.
+		if openPanels[r.Key] && len(r.Page.Runs) > 0 && !r.Page.Runs[0].Entry.Historical {
 			r.Page.Runs[0].Entry.Open = true
 		}
 		gap := !anchors[r.Key]

@@ -29,8 +29,9 @@ window.localStorage={getItem:function(k){return storage[k]||null;},setItem:funct
 document.documentElement.setAttribute('data-wb-reply','session-a');
 document.on={};document.addEventListener=function(k,fn){(document.on[k]||(document.on[k]=[])).push(fn);};
 function fixture(panel,entry,older){
-  root=parse('<div class="wb-history"><article class="wb-entry panel" data-panel="'+panel+'" data-entry="'+entry+'"><details class="entry-panel" id="'+panel+'" data-key="entry:'+entry+'" open><summary>recap<span class="wb-panel-updated" hidden>UPDATED</span></summary>'+(older?'<details class="panel-versions"><summary>versions</summary><article class="wb-entry panel historical" data-panel="'+panel+'" data-entry="'+older+'"><details class="entry-panel" data-key="entry:'+older+':history"><summary>old recap</summary></details></article></details>':'')+'</details></article></div>');
-  return root.querySelector('.entry-panel');
+  // An earlier version is a sibling row written before the latest one.
+  root=parse('<div class="wb-history">'+(older?'<article class="wb-entry panel historical" data-panel="'+panel+'" data-entry="'+older+'"><details class="entry-panel" data-key="entry:'+older+':history"><summary>old recap</summary></details></article><div class="wb-entry system" data-entry="e99"></div>':'')+'<article class="wb-entry panel" data-panel="'+panel+'" data-entry="'+entry+'"><details class="entry-panel" id="'+panel+'" data-key="entry:'+entry+'" open><summary>recap<span class="wb-panel-updated" hidden>UPDATED</span></summary></details></article></div>');
+  return root.querySelector('.entry-panel[id]');
 }
 function pending(p){return !p.querySelector('.wb-panel-updated').hidden;}
 function userOpen(kit,p){document.on.click.at(-1)({target:p.querySelector('summary')});p.open=true;return kit.toggle(p);}
@@ -62,7 +63,7 @@ check('unrelated new pN keeps default, not another panel fold',[fresh.open,pendi
 storage['ws.dashboard.panelshut']=JSON.stringify(['session-a/entry:e5']);
 var legacy=fixture('p3','e6','e5');kit.restore(legacy);
 check('legacy latest-entry fold migrates through known historical metadata',[legacy.open,pending(legacy)],[false,true]);
-var historical=legacy.querySelector('.historical .entry-panel');historical.open=true;
+var historical=root.querySelector('.historical .entry-panel');historical.open=true;
 check('historical-version fold is not the current identity record',kit.restore(historical),false);
 check('historical manual choice remains independent',historical.open,true);
 kit.opened(legacy);

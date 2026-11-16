@@ -126,5 +126,5 @@ func TestTimelineRepublishedPanelRetainsOriginalInputIteration(t *testing.T) {
 	if strings.Index(out, "Original owner request") > strings.Index(out, `id="e2"`) {
 		t.Fatal("owner iteration moved to the republished panel")
 	}
-	wantAll(t, out, `class="panel-versions"`, "original body", "latest body")
+	wantAll(t, out, `class="wb-entry panel historical" id="e1"`, "original body", "latest body")
 }

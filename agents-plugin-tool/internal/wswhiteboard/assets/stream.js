@@ -982,7 +982,11 @@
       var shut;
       try { shut = JSON.parse(storage && storage.getItem('ws.dashboard.panelshut') || '[]'); } catch (_) { return null; }
       if (!Array.isArray(shut)) return null;
-      var versions = [i.article].concat(Array.from(i.article.querySelectorAll('.wb-entry[data-entry]')));
+      // Earlier versions are sibling rows of the history, live or inert in a gap.
+      var history = i.article.closest('.wb-history') || i.article, versions = [i.article];
+      [history].concat(Array.from(history.querySelectorAll('template')).map(function (t) { return t.content; })).forEach(function (r) {
+        if (r) versions = versions.concat(Array.from(r.querySelectorAll('.wb-entry[data-entry]')));
+      });
       var old = versions.find(function (a) {
         return a.getAttribute('data-panel') === i.id && shut.indexOf(scope + '/entry:' + a.getAttribute('data-entry')) >= 0;
       });
@@ -1089,6 +1093,75 @@
   document.addEventListener('mouseover', function (e) {
     var t = e.target && e.target.closest && e.target.closest('time.entry-at[data-at]');
     if (t && window.wbAgoText) t.title = window.wbAgoText(+t.getAttribute('data-at')) + ' · ' + (t.getAttribute('data-stamp') || '');
+  });
+  // A panel's link menu copies two links: pN always opens the newest
+  // version, eN this exact one. The page URL is kept, since both the file
+  // page and the dashboard jump to a fragment on load.
+  function linkMenuClose() {
+    Array.from(document.querySelectorAll('.pfmenu')).forEach(function (m) {
+      var b = m.parentElement && m.parentElement.querySelector('button.pflink');
+      if (b) { b.classList.remove('on'); b.setAttribute('aria-expanded', 'false'); }
+      m.remove();
+    });
+  }
+  function linkCopy(text) {
+    // Through a scratch textarea: the async clipboard API is denied in
+    // sandboxed hosts and absent over plain http (code.js does the same).
+    var ta = document.createElement('textarea'), ok = false;
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  function linkMenu(btn) {
+    var article = btn.closest('.wb-entry.panel'), T = window.wsT || function (k) { return k; };
+    var panel = article.getAttribute('data-panel'), entry = article.getAttribute('data-entry');
+    var newest = btn.getAttribute('data-newest') || '', ver = btn.getAttribute('data-ver') || '';
+    var menu = document.createElement('div'), head = document.createElement('div');
+    menu.className = 'pfmenu'; menu.setAttribute('role', 'menu');
+    head.className = 'pfmh'; head.textContent = T("js.wb.link.copy");
+    menu.appendChild(head);
+    [[panel, 'link', T("js.wb.link.latest"), article.classList.contains('historical') ? T("js.wb.link.latest.old", newest) : T("js.wb.link.latest.now", newest)],
+      [entry, 'history', T("js.wb.link.this"), T("js.wb.link.this.desc", ver)]].forEach(function (it) {
+      var b = document.createElement('button'), text = document.createElement('span'), k = document.createElement('span'), code = document.createElement('code'), d = document.createElement('span');
+      b.type = 'button'; b.className = 'pfmi'; b.setAttribute('role', 'menuitem'); b.setAttribute('data-copy', it[0]);
+      text.className = 'pfmt'; k.className = 'pfk'; d.className = 'pfd';
+      code.textContent = '#' + it[0]; d.textContent = it[3];
+      k.append(it[2] + ' ', code); text.append(k, d);
+      b.innerHTML = '<svg class="i" aria-hidden="true"><use href="#i-' + it[1] + '"/></svg>';
+      b.appendChild(text);
+      b.insertAdjacentHTML('beforeend', '<svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>');
+      b.addEventListener('mouseenter', function () { b.focus(); });
+      menu.appendChild(b);
+    });
+    article.appendChild(menu);
+    btn.classList.add('on'); btn.setAttribute('aria-expanded', 'true');
+    menu.querySelector('.pfmi').focus();
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target, btn = t.closest && t.closest('button.pflink'), item = t.closest && t.closest('.pfmenu .pfmi');
+    if (item) {
+      e.preventDefault(); e.stopPropagation();
+      if (linkCopy(location.href.split('#')[0] + '#' + item.getAttribute('data-copy'))) {
+        item.querySelector('.pfd').textContent = window.wsT ? window.wsT("js.wb.copy.done") : 'Copied';
+        window.setTimeout(linkMenuClose, 700);
+      }
+      return;
+    }
+    if (t.closest && t.closest('.pfmenu')) return;
+    var open = btn && btn.getAttribute('aria-expanded') === 'true';
+    linkMenuClose();
+    if (!btn) return;
+    // The button sits in a panel summary: never toggle the panel.
+    e.preventDefault(); e.stopPropagation();
+    if (!open) linkMenu(btn);
+  }, true);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.querySelector('.pfmenu')) linkMenuClose();
   });
   var bind = window.wbBindBoard;
   if (bind) {
