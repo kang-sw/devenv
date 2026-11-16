@@ -75,7 +75,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
     let latest;
     try { latest = await find(root); }
     catch { notify('Dashboard health became uncertain during staging; keeping the current connection. Retry later.'); return running.url; }
-    if (!sameDaemon(latest, running)) return latest.url;
+    if (!sameDaemon(latest, running)) return attachWinner(selected.metadata.version, latest, notify);
     const refreshed = version(selected.metadata.version, latest.health.version);
     if (refreshed === null || core(selected.metadata.version).slice(0, 2).some((n, i) => n !== core(latest.health.version)[i])) {
       notify('Daemon compatibility changed during staging; keeping the current connection. Update connected plugins before retrying.');
@@ -96,6 +96,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
           notify(`Replacement did not drain the incumbent: ${error.message}. Retry after checking daemon health.`);
           return still.url;
         }
+        if (still) return attachWinner(selected.metadata.version, still, notify);
         throw new Error(`Replacement starter failed after the incumbent changed; availability is uncertain: ${error.message}`);
       }
       const still = await find(root).catch(() => null);
@@ -119,9 +120,8 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
         notify('Authenticated drain failed or the daemon changed; outcome is uncertain. Check dashboard health before retrying.');
         const still = await find(root).catch(() => null);
         if (still && sameDaemon(still, latest)) return still.url;
-        if (still && sameMinorCandidate(selected.metadata.version, still.health?.version) &&
-            version(selected.metadata.version, still.health.version) <= 0) return still.url;
-        throw new Error('Authenticated drain outcome uncertain; no compatible daemon can be attached — retry after inspecting health');
+        if (still) return attachWinner(selected.metadata.version, still, notify);
+        throw new Error('Authenticated drain outcome uncertain; no daemon can be attached — retry after inspecting health');
       }
     }
     return await waitForDaemon(find, root, deps, latest, selected.metadata.version,
@@ -145,6 +145,18 @@ function sameMinorCandidate(candidate, running) {
   const a = core(candidate), b = core(running);
   return a && b && a[0] === b[0] && a[1] === b[1];
 }
+function attachWinner(candidate, answer, notify) {
+  const relation = version(candidate, answer.health?.version);
+  if (relation === null || relation > 0) {
+    throw new Error('An older or unidentified daemon won the handoff; retry after inspecting the current connection');
+  }
+  // Unknown client versions prohibit initiating a cross-boundary drain, not
+  // observing a numerically newer daemon that already won the singleton.
+  if (relation < 0 && !sameMinorCandidate(candidate, answer.health.version)) {
+    notify?.('A newer daemon won the handoff across a minor/protocol boundary. Update connected plugins if their hello is refused; no further replacement was attempted.');
+  }
+  return answer.url;
+}
 async function waitForDaemon(find, root, deps, predecessor, candidateVersion, candidateHash, notify) {
   const sleep = deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const deadline = Date.now() + (predecessor ? 13000 : 10000); // Drain + successor lock + startup.
@@ -154,21 +166,14 @@ async function waitForDaemon(find, root, deps, predecessor, candidateVersion, ca
     catch { /* The old endpoint can disappear during handoff. */ }
     if (answer) {
       if (!predecessor) return answer.url;
-      if (answer.endpoint?.pid !== predecessor.endpoint.pid ||
-          answer.health?.started_at && answer.health.started_at !== predecessor.health.started_at) {
+      if (!sameDaemon(answer, predecessor)) {
         // An unrelated plugin may win the lock. Attach only if its numeric
         // core is at least our candidate's; never attribute its bytes to ours.
-        const relation = version(candidateVersion, answer.health?.version);
-        if (relation === null || relation > 0) {
-          throw new Error('An older or unidentified daemon won the handoff; retry after inspecting the current connection');
-        }
-        if (!sameMinorCandidate(candidateVersion, answer.health?.version)) {
-          throw new Error('A cross-minor daemon won the handoff; attached client versions are unknown. Update connected plugins before retrying');
-        }
+        const url = attachWinner(candidateVersion, answer, notify);
         if (answer.health?.content_hash && answer.health.content_hash !== candidateHash) {
           notify?.('A different daemon won the handoff; attaching to its verified REST identity, not attributing it to the selected package.');
         }
-        return answer.url;
+        return url;
       }
     }
     if (Date.now() >= deadline) break;
