@@ -1242,8 +1242,8 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	ticketOn := read("lead-ticket")
 	bullet := withNamespace(lineTicketQueueBoard, RuntimeNamespace())
 	idx := strings.Index(ticketOn, bullet)
-	if idx < 0 || idx > strings.Index(ticketOn, "### Trace a change before writing it") || idx < strings.Index(ticketOn, "### Queue state") {
-		t.Fatalf("knob on: lead-ticket must carry the queue step inside Queue state:\n%s", ticketOn)
+	if idx < 0 || idx > strings.Index(ticketOn, "Trace before writing — any change") || idx < strings.Index(ticketOn, "Section — `## Open Decision Queue`") {
+		t.Fatalf("knob on: lead-ticket must carry the queue step inside the queue Section list:\n%s", ticketOn)
 	}
 	for _, want := range []string{"a `wb:floor` at the queue's last-ID line", "the query does not return", "with `ids` set to the queue's item IDs"} {
 		if !strings.Contains(bullet, want) {

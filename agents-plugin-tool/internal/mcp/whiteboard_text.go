@@ -28,7 +28,9 @@ const (
 	// lead-discuss variant; a test pins the two together.
 	whiteboardCaptureLine = "Confirmed decisions reach a ticket only through `{{ns}}:lead-ticket`, once the user moves to capture. Authoritative topic folders remain after the session key expires; do not treat key expiry as board deletion."
 
-	lineTicketQueueStateEnd = "\n\n### Trace a change before writing it"
+	// lineTicketQueueStateEnd ends lead-ticket's queue `Section —` list; the
+	// knob-on queue step joins that list as its last item.
+	lineTicketQueueStateEnd = "\n\nTrace before writing — any change"
 	lineTicketQueueBoard    = "- When you open or resume a queue, put its open items on the whiteboard:\n" +
 		"  `{{ns}}/whiteboard.query` with `ids` set to the queue's item IDs, then in one\n" +
 		"  `{{ns}}/whiteboard.update` `wb:add` each open queue item\n" +
