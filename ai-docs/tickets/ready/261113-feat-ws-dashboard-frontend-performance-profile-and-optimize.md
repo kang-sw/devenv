@@ -1,9 +1,11 @@
 ---
 title: ws dashboard frontend performance - profile and optimize
+sage-review-design: skipped
+sage-review-completeness: skipped
 related:
   261113-feat-ws-whiteboard-board-frontend-performance: "absorbs this ticket's board scope ((417) board-note typing, long whiteboard, the board candidate techniques) and the (473) measurement; this ticket keeps the non-board surfaces"
   261113-feat-ws-dashboard-iframe-shell: historical shell prerequisite; new cache removal is owned by the hidden-cached-page ticket
-  261116-bug-ws-dashboard-hidden-cached-page-cost: "P3: remove hidden session cache; visible-only shared clocks; fresh-switch load follow-up"
+  261116-bug-ws-dashboard-hidden-cached-page-cost: "P3: cache removal and fresh-switch load follow-up; clocks dropped after measured trace"
   261116-bug-werkschaft-electron-high-resolution-lag-diagnostics: "P2: isolate native high-resolution presentation from shared renderer costs"
   261111-bug-ws-dashboard-daemon-idle-cpu-windows: "backend profile/discovery costs, measured separately"
 ---
@@ -50,9 +52,10 @@ implementation awaits the owner's explicit assignment.
 
 - Measure first, fix only measured hotspots. Rejected: speculative rewrite or
   framework migration.
-- Implementer is a Claude (Opus) worker: the owner directed that frontend
-  adjustments go to Opus agents, and the change needs visual-regression
-  judgment. Rejected: Pi worker.
+- Historical frontend/visual implementer preference: Claude (Opus). The direct
+  2026-11-16 exposure assignment below authorizes this worker's bounded
+  behavior-preserving performance implementation; it does not transfer the
+  independent composer work or authorize a visual redesign.
 - Builds and tests run on the sys_lock remote w5090; live measurement runs on
   the owner's Windows machine dashboard.
 - (417) Measure all four scenarios (a-d), with priority on (b) idle CPU and
@@ -85,6 +88,12 @@ implementation awaits the owner's explicit assignment.
   `### Implementation Conventions` (paths under `agents-plugin-tool/internal/`
   and `agents-plugin*/`).
 - No intended visual change.
+- 2026-11-16 exposure assignment: only Phase 3 is promoted for implementation
+  in the assigned isolated worktree. Do not edit dashboard-composer.js or
+  capsules.js (Exec 5 owns typing), hidden-cache source, daemon lifecycle or
+  unrelated phases. No local Go/test binary/ws executable/launcher runs;
+  scoped Go checks on w5090 only. Local offline Node contracts spawn no ws
+  executable. Live traces and daemon swaps are lead/owner-arranged.
 
 ## Additional measured evidence — 2026-11-16 (P1/P4)
 
@@ -175,6 +184,50 @@ unchanged visual output, and report before/after counts rather than only a
 subjective speed claim. No builds, tests or browser/daemon actions occur in
 this docs capture.
 
+## Exposure assignment and trace decision — 2026-11-16
+
+Read the complete supplied analysis
+`C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac/review-paths/f2812641-01-perf-trace-analysis-20261116.md`.
+Trace A: 13.18/14.46 seconds main-thread busy, 584 layouts / 6.69 seconds,
+449 forced layouts / 5.81 seconds; board exposure accounts for **44% of busy
+main-thread time**, up to **140 full-document layouts in one rAF** (2.41 seconds).
+The scroll-path `swap("board", ..., still=true)` re-run costs 3.1 seconds
+inclusive. The chain is whiteboard `stream.js:566` exposed, dashboard `visible`,
+`boardExposureUnits`, `boardReleaseDue`, `boardFlushViewed`, `boardKeep` and
+history reading capture. These are measured priorities, superseding the broad
+candidate ranking above. Postprocessing is not hot (<0.3% self); clocks cost
+32 ms over this trace; slash/# enumeration is refuted. Composer grow is a
+separate directly assigned branch and must not be touched here.
+
+Promote **Phase 3 only**. Compatibility: **n/a**, private client exposure/read
+batching and release gating; no protocol/store/draft/event/config shape changes.
+Preserve exact one-pixel, clipped/sticky reading-boundary and per-scroller
+viewed/unread semantics, top-origin click-only holds, immutable canonical input,
+owner receipt admission and explicit release. No framework/config change.
+
+Trace C read before implementation (2026-11-16 10:47):
+`C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac/review-paths/cc07bc5e-01-perf-trace-c-board-scroll.md`.
+Layout is 84.1% of 11.98 seconds busy time: 661 layouts / 10.085 seconds at
+exposed's getBoundingClientRect, including 548 / 8.275 seconds from the scroll
+gate and 113 / 1.810 seconds from frame-height keep/reading capture. Each read
+re-dirties full-document layout (~9,250 objects, ~15 ms), without JS writes
+between reads. Closed-details display-lock forcing is the likely mechanism;
+closed-details filtering after the read is too late. **Batching reads alone is
+not a fix.** The scroll re-swap did not occur in C; the gate itself is the cost.
+
+Updated light design sanity pass: reject closed-details/non-rendered nodes
+before geometry and candidate enumeration, preserving the details' own visible
+summary and collapsed panel box. Move scroll release checks to existing
+IntersectionObserver change reports, not a raw scroll rAF. The exact existing
+one-pixel/sticky clipping check still decides release on those changes. Use a
+reading-line hit-test (or observed candidates) before any fallback scan in
+shared keep/reading; never measure hidden fallback candidates. Resolve the
+frame-height batch's scrollers before writing heights and capture once per
+scroller. Do not add content-visibility:auto or virtualization: Forward only,
+after hidden-read elimination. Offline Node contracts must demonstrate hidden
+geometry is never read and a 1,000-unit scroll does not scan every unit. The
+owner performs live re-tracing after merge.
+
 ## Phases
 
 ### Phase 1: Measure
@@ -218,3 +271,27 @@ not all by default:
 3. Keyed incremental updates instead of whole-region `innerHTML` replacement
    for the board.
 4. A per-topic rendered-HTML cache keyed by content hash.
+
+### Phase 3: Remove board-exposure layout amplification from scrolling
+
+Implement the measured exposure phase above without pulling in composer or
+unmeasured generic render-transaction changes. First reject hidden/closed-details descendants before any geometry read in
+shared exposed/reading and dashboard candidate lists. Drive release checks
+from observer exposure changes, not every scroll rAF; retain exact clipping at
+those change boundaries. Optimize the frame-height keep/reading path as well.
+A scroll must not measure all units or re-run a whole board swap when no held
+content/placement can release. Preserve
+per-panel holds, cross-topic frozen intervals, pins/closed-page transfers,
+user-scroll ownership, top-origin click-only pending counts and explicit release.
+
+Verification: an offline Node contract must reject the old per-unit synchronous
+scroll path and count layout reads for a synthetic 1,000-entry board. Cover
+closed details (including summary exceptions), non-rendered ancestors,
+unchanged exposure, partial/actual release, cross-topic spans, DOM replacement,
+independent scrollers, reading-line hit-test and the no-IntersectionObserver
+fallback. Include hidden historical versions/system runs in the 1,000-unit
+fixture. Record content-visibility:auto/virtualization only as a future phase. Run the scoped
+Go regressions on w5090; Node-dependent Go cases skip there, so execute the
+Node contracts locally without ws processes. Source-only checks must not claim
+native forced-layout timing or the owner's post-merge trace. One R1 review and
+fixes-only R2; report HEAD/range at this phase boundary.
