@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ko" data-sysopen>
+<head>
+<meta charset="utf-8">
+<title>ws dashboard - git init badge mockup (261116)</title>
+<script>
+  // ?theme=dark|light pins the theme the same way the dashboard does (root data-theme).
+  (function () { var m = /[?&]theme=(dark|light)/.exec(location.search); document.documentElement.setAttribute("data-theme", m ? m[1] : "light"); })();
+</script>
+<style>
+/* ---- copied verbatim: wswhiteboard/assets/page.css:5-102,117-118,133 ---- */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-accent-assumed: #b0245a;
+  --wb-latest-log: rgb(110 200 130 / .08);
+  --wb-ck-ok: var(--wb-announced);
+  --wb-ck-no: #c0262d;
+  --wb-accent-policy: #b25000;
+  --wb-on-accent-policy: #ffffff;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 10%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* Only the lower log history is highlighted, never the topic's recap. */
+.wb-entry.agent.current { background: var(--wb-latest-log); }
+.wb-entry.agent.current.wb-log-blink { animation: wb-log-arrival 1s ease-in-out 3; }
+@keyframes wb-log-arrival {
+  0%, 100% { background: var(--wb-latest-log); }
+  50% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-entry.agent.current.wb-log-blink { animation: none; }
+}
+/* Dark palette. The OS preference applies it unless the page pins light
+   (data-theme="light"); data-theme="dark" applies it whatever the OS says.
+   The two blocks hold the same variables: change them together. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-bg: var(--background, #141518);
+    --wb-fg: var(--foreground, #e7e7e4);
+    --wb-card: var(--card, #1e2024);
+    --wb-muted: var(--muted, #2b2d32);
+    --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+    --wb-primary: var(--primary, #7aa2ff);
+    --wb-primary-fg: var(--primary-foreground, #0c1424);
+    --wb-topic: #2a2d33;
+    --wb-on-topic: #e4e5e8;
+    --wb-now: #243457;
+    --wb-on-now: #d3defb;
+    --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+    --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+    --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+    --wb-accent-assumed: #e48aae;
+    --wb-ck-ok: #6cc39a;
+    --wb-ck-no: #f0797e;
+    --wb-accent-policy: #e0a36c;
+    --wb-on-accent-policy: #1f150b;
+    --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+    --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+    --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  }
+}
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-accent-assumed: #e48aae;
+  --wb-ck-ok: #6cc39a;
+  --wb-ck-no: #f0797e;
+  --wb-accent-policy: #e0a36c;
+  --wb-on-accent-policy: #1f150b;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+/* ---- wswhiteboard/assets/page-panels.css:78-79 ---- */
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip .i, details.settled .i { width: 12px; height: 12px; stroke-width: 2; }
+/* ---- wsdashboard/assets/dashboard.css:6-48 ---- */
+:root {
+  --wb-ph-think: #6a4fc4;  --wb-on-ph-think: #ffffff;
+  --wb-ph-reply: #0e7a83;  --wb-on-ph-reply: #ffffff;
+  --wb-ph-tool: #2457c5;   --wb-on-ph-tool: #ffffff;
+  --wb-ph-perm: #a35f00;   --wb-on-ph-perm: #ffffff;
+  --wb-ph-compact: #9a3a73; --wb-on-ph-compact: #ffffff;
+  --wb-perm-ink: var(--wb-ph-perm);
+  --wb-compact-ink: var(--wb-ph-compact);
+  --pv-bg: #e4dcf7; --pv-fg: #3a2c6b; --pv-line: #b9a9e8;
+  --wb-ok: #1d7348; --wb-fail: #c0262d;
+  --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  /* the warning tone on a toast, whose surface is the inverted text colour */
+  --wb-toast-warn: #f2c06b;
+}
+/* Dark variants: the same OS-or-pinned rule as the whiteboard sheet. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
+    --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
+    --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
+    --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+    --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
+    --wb-perm-ink: var(--wb-on-ph-perm);
+    --wb-compact-ink: var(--wb-on-ph-compact);
+    --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
+    --wb-ok: #6cc39a; --wb-fail: #f0797e;
+    --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+    --wb-toast-warn: #9a5a00;
+  }
+}
+:root[data-theme="dark"] {
+  --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
+  --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
+  --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
+  --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+  --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
+  --wb-perm-ink: var(--wb-on-ph-perm);
+  --wb-compact-ink: var(--wb-on-ph-compact);
+  --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
+  --wb-ok: #6cc39a; --wb-fail: #f0797e;
+  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-toast-warn: #9a5a00;
+}
+/* ---- wsdashboard/assets/dashboard-rail.css:9-13,136-217,234-242,271-276,293-328,339-342,357-359,457-460,467-506,512-516 ---- */
+:root { --scrim: rgb(0 0 0 / .28); --star: #c98a00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --scrim: rgb(0 0 0 / .5); --star: #f2b632; } }
+:root[data-theme="dark"] { --scrim: rgb(0 0 0 / .5); --star: #f2b632; }
+.dbody { display: contents; }
+.rail { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
+.rail .rsp { flex: 1; }
+.rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
+.rail .chip .i { width: 11px; height: 11px; }
+.rail .rref { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rref:hover, .rail .rref:focus-visible { color: var(--wb-primary); background: var(--wb-muted); }
+.rail .rref.busy { opacity: .5; cursor: progress; }
+.rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; }
+.rail .rlist > .empty { padding: 10px 12px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.rail .rws + .rws { margin-top: 8px; }
+.rail .wsbar { display: flex; align-items: center; gap: 8px; padding: 3px 12px; min-height: 28px; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
+.rail .wstog { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; border-radius: 4px; font: inherit; text-align: left; background: transparent; color: inherit; cursor: pointer; }
+.rail .wstog:focus-visible { outline: 1.5px solid currentColor; outline-offset: 2px; }
+.rail .wsbar .wsi { display: inline-flex; flex: none; opacity: .8; margin-right: -2px; }
+.rail .wsbar .nm { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
+.rail .rws.col .wsbody { display: none; }
+/* the + buttons (a worktree row's new session among them), forget, and a
+   worktree row's delete: quiet until their line is hovered or they are
+   focused (faint always on touch screens), full on hover and while their
+   popover is open */
+.rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.rail .radd .i, .rail .rforget .i, .rail .rnew .i, .rail .rdel .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .wthd:hover .rdel, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { opacity: .7; }
+@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { opacity: .5; } }
+.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"], .rail .rdel:hover { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+.rail .rdel:hover { color: var(--wb-fail); }
+.rail .rforget:disabled { cursor: progress; }
+.rail .wsbody { padding-top: 2px; }
+.rail .rwt { padding: 4px 0 2px; }
+.rail .rwt.empty { border-color: transparent; }
+.rail .rwt.empty .wthd { opacity: .6; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }
+.rail .wthd .i { width: 12px; height: 12px; }
+.rail .wthd .wtroot { display: inline-flex; flex: 0 0 auto; }
+.rail .wthd .wtroot .i { width: 10px; height: 10px; }
+.rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail .wsbody > .rsessions { margin-top: 4px; }
+/* the hierarchy reads in three columns: the workspace icon at 12px, the
+   branch icon at 28px with the worktree's guide line under it, and the
+   harness icon at 49px; a row's grip takes the 14px between the guide line
+   and its harness icon */
+.rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
+.rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
+/* the fold row under a group's live rows: two halves, archived and ended,
+   one tri-state radio (none, archived, or ended open; rail.js marks) */
+.rail .rfold { display: flex; align-items: stretch; padding: 4px 8px 2px 14px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rail .rfh { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.rail .rfh + .rfh { padding-left: 10px; border-left: 1px solid var(--wb-muted); }
+.rail .rfh .i { width: 12px; height: 12px; stroke-width: 1.7; }
+.rail .rfh .d-n { font-variant-numeric: tabular-nums; }
+.rail .rfh::after { content: "\25b8"; margin-left: 1px; }
+.rail .rfh[aria-expanded="true"]::after { content: "\25be"; }
+.rail .rfh:hover:not(:disabled) { color: var(--wb-primary); }
+.rail .rfh:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.rail .rfh[aria-expanded="true"] { color: var(--wb-fg); font-weight: 700; }
+.rail .rfh:disabled { opacity: .5; cursor: default; }
+.rail .rfh:disabled::after { content: none; }
+.rail .rfold + .rended { margin-top: 2px; }
+.rail .rended:not(.on) { display: none; }
+.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
+.rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .rs.ended { opacity: .75; }
+/* an archived row is ended to the layout (no drag, no parent) but drawn
+   asleep (.stopped), at full strength */
+.rail .rs.ended.archived { opacity: 1; }
+/* a pending-deletion row's time slot: when the registry prune deletes it,
+   in the warning ink under a day */
+.rail .when.del.soon { color: var(--wb-warn-ink); font-weight: 600; }
+/* drag to reorder (dashboard.js, rail drag): a row or a workspace bar
+   selects no text and opens no browser long-press menu, so a held press
+   drags a bar and opens a row's own menu (the rail row menu); the dragged
+   one dims and a line shows where it lands */
+.rail .rs { -webkit-user-select: none; user-select: none; }
+.rail .rs, .rail .wsbar, .rail .wthd { -webkit-touch-callout: none; }
+.rail .rs.rdrag, .rail .rwt.rdrag, .rail .rws.rdrag { opacity: .45; }
+.rail .star { width: 16px; height: 16px; margin: 0; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
+.rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
+.rail .star:hover { background: var(--wb-muted); }
+.rail .star[aria-pressed="true"] { opacity: 1; color: var(--star); }
+.rail .star[aria-pressed="true"] .i { fill: currentColor; }
+.rail .star[aria-pressed="false"] { opacity: 0; }
+.rail .rs:hover .star[aria-pressed="false"], .rail .rs:focus-within .star[aria-pressed="false"] { opacity: .6; }
+.rail .rs .star[aria-pressed="false"]:hover, .rail .star[aria-pressed="false"]:focus-visible { opacity: 1; }
+@media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
+.rail .drmeta { display: flex; align-items: center; gap: 0; min-width: 0; margin-top: -4px; padding-bottom: 5px; }
+.rail .drmeta > .drmsg { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; align-items: center; margin: 0 0 0 8px; padding: 0 8px 0 0; }
+.rail .drmeta > .drmsg .s2 { margin-top: 0; }
+.rail .rbt { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 45%; font-family: var(--wb-mono); font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
+.rail .rbt .i { width: 10px; height: 10px; flex: none; }
+.rail .rbt span { overflow: hidden; text-overflow: ellipsis; }
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
+.rail .rl:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .s1 [hidden] { display: none; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; color: inherit; text-decoration: none; }
+/* the time slot on the first line's right edge, wide enough for the hover
+   pencil and clipboard that take it (the time hides), so neither the name
+   nor the badges move */
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .dracts { position: absolute; top: 0; bottom: 0; right: 8px; display: none; align-items: center; gap: 2px; }
+.rail .dracts button { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .dracts .i { width: 13px; height: 13px; stroke-width: 1.6; }
+.rail .dracts button:hover, .rail .dracts button:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+/* a hosted lead's third hover button (archive, or unarchive in the archived
+   fold): the time slot widens so nothing moves when the three show */
+.rail .rs.hosted-row .drslot { min-width: 66px; }
+.rail .drarch.busy { opacity: .55; cursor: progress; }
+@media (hover: hover) {
+  .rail .rs:hover .dracts { display: flex; }
+  .rail .rs:hover .drslot { visibility: hidden; }
+}
+.rail .rs:focus-within .dracts { display: flex; }
+.rail .rs:focus-within .drslot { visibility: hidden; }
+/* a row's rename: the input stands where the name was */
+.rail .drinp { flex: 1 1 0; min-width: 60px; margin: 3px 0; padding: 1px 4px; font: inherit; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); border: 1px solid var(--wb-primary); border-radius: 4px; outline: none; -webkit-user-select: text; user-select: text; }
+.rail .rs .s1:has(.drinp) .drtail { flex: none; }
+.rail .rs .s1:has(.drinp) .dracts { display: none; }
+.rail .rs .s1:has(.drinp) .drslot { visibility: visible; }
+.rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
+.rail .rs.cur .rid { color: var(--wb-fg); }
+.rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .s2 .who { font-weight: 700; margin-right: 4px; }
+.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
+.rail .hi.claude { background: #D97757; }
+.rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rail .hi.codex { background: #10A37F; }
+.rail .hiw { position: relative; flex: none; display: inline-flex; width: 28px; height: 16px; }
+.rail .sbn { position: absolute; left: 18.5px; bottom: -3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
+.rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.rpop .pbtn { white-space: nowrap; flex: none; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rpop .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.rpop .pbtn:disabled { opacity: .45; cursor: default; }
+.rpop .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+dialog.rdeldlg { width: min(460px, calc(100vw - 24px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border: 0; border-radius: 12px;
+  background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 12.5px; }
+dialog.rdeldlg[open] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+dialog.rdeldlg::backdrop { background: var(--scrim, rgb(0 0 0 / .35)); }
+dialog.rdeldlg [hidden] { display: none !important; }
+.rdeldlg .rdhd { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 800; }
+.rdeldlg .rdhd .i { width: 15px; height: 15px; flex: none; color: var(--wb-fail); }
+.rdeldlg .rdpath { margin-top: -6px; padding: 0; background: none; font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdfacts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rdeldlg .rdfacts:empty { display: none; }
+.rdeldlg .rdfact { display: flex; align-items: flex-start; gap: 7px; min-width: 0; overflow-wrap: anywhere; }
+.rdeldlg .rdfact .i { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--wb-muted-fg); }
+.rdeldlg .rdfact.warn, .rdeldlg .rdfact.warn .i { color: var(--wb-warn-ink); }
+.rdeldlg .rdfact.bad, .rdeldlg .rdfact.bad .i { color: var(--wb-fail); }
+.rdeldlg .rdpaths { list-style: none; margin: 0 0 0 20px; padding: 4px 8px; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; border-radius: 6px; background: var(--wb-muted); font: 11.5px/1.5 var(--wb-mono); }
+.rdeldlg .rdpaths li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rdeldlg .rdpaths li.more { font-family: var(--wb-sans); color: var(--wb-muted-fg); }
+.rdeldlg .rdsub { margin-top: 3px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rdeldlg .rdholders { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.rdeldlg .rdholders li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rdeldlg .rdholders .nm { font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rdeldlg .rdholders .rdst { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .rdholders li.live .rdst { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote, .rdeldlg .rdforce { margin: 0; padding: 7px 10px; border-radius: 8px; overflow-wrap: anywhere; }
+.rdeldlg .rdnote.bad { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); /* the shared ink alone is 4.29:1 on this tint in the light theme; the text colour deepens it there and lifts it in the dark theme */ }
+.rdeldlg .rdforcehd { font-weight: 800; }
+.rdeldlg .rdforce ul { margin: 3px 0 0; padding-left: 18px; }
+.rdeldlg .rdconf { display: grid; gap: 5px; }
+.rdeldlg .rdconft { font-size: 12px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdconft code { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); background: var(--wb-muted); padding: 0 4px; border-radius: 4px; }
+.rdeldlg .rdq { width: 100%; box-sizing: border-box; font: 12.5px var(--wb-mono); border: 0; border-radius: 8px; padding: 5px 8px; background: var(--wb-muted); color: inherit; }
+.rdeldlg .rdq:focus-visible { outline: 1.5px solid var(--wb-fail); }
+.rdeldlg .rdmsg { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdmsg.err { color: var(--wb-fail); }
+.rdeldlg .rdrow { display: flex; justify-content: flex-end; gap: 6px; }
+.rdeldlg .pbtn { white-space: nowrap; flex: none; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 4px 14px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .pbtn.danger { background: var(--wb-fail); color: var(--wb-card); }
+.rdeldlg .pbtn:disabled { opacity: .45; cursor: default; }
+.rdeldlg .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+   menu shares; and the approval cards under the conversation */
+.hosted { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.hosted .i { width: 12px; height: 12px; stroke-width: 1.5; }
+.sess .hostc { display: inline-flex; align-items: center; gap: 4px; justify-self: start; min-width: 0; }
+.chip.perm { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+/* ---- wsdashboard/assets/memo.css:63, dashboard-menus.css:53 (toast, appended last) ---- */
+.rail .memo-count { flex: none; white-space: nowrap; border: 0; border-radius: 999px; background: rgb(127 127 127 / .18); color: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer; }
+.wstoast { pointer-events: auto; position: relative; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow-wrap: anywhere; }
+
+
+/* =====================================================================
+   NEW (proposed) - the git-init button on a plain folder's bar and its
+   modal. Everything below this line is mockup-only.
+   ===================================================================== */
+/* .rgit: same 18px slot and 13px glyph as .radd/.rforget/.rnew/.rdel
+   (dashboard-rail.css:158-163), but shown at rest: it is the folder's only
+   way forward, so it does not hide until hover. Daemon-machine only, like
+   .rnew/.rdel (dashboard-rail.css:520-521). */
+.rail .rgit { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: .6; cursor: pointer; transition: opacity .12s; }
+.rail .rgit .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .wsbar:hover .rgit, .rail .rgit:focus-visible { opacity: .85; }
+.rail .rgit:hover, .rail .rgit[aria-expanded="true"], .rail .rgit.hov { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .rgit:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+html:not([data-sysopen]) .rail .rgit { display: none; }
+/* the modal reuses dialog.rdeldlg wholesale; only the header icon tone and
+   a primary submit differ (non-destructive) */
+.rdeldlg.rgitdlg .rdhd .i { color: var(--wb-primary); }
+.rdeldlg .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); } /* = .rpop .pbtn.go, dashboard-rail.css:458 */
+.rdeldlg .rdlead { margin: 0; word-break: keep-all; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdlead code { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); background: var(--wb-muted); padding: 0 4px; border-radius: 4px; }
+.rdeldlg .rdnote.bad { word-break: keep-all; }
+.rdeldlg .rdnote.bad code { font-family: var(--wb-mono); font-weight: 700; }
+
+/* ---- mockup scaffolding (not product) ---- */
+body { width: 1280px; margin: 0; padding: 20px 24px 28px; box-sizing: border-box; }
+.mk-h { display: flex; align-items: baseline; gap: 12px; margin: 0 0 4px; }
+.mk-h h1 { margin: 0; font-size: 17px; font-weight: 800; }
+.mk-h .sub { font-size: 12px; color: var(--wb-muted-fg); }
+.mk-req { margin: 0 0 14px; font-size: 12px; color: var(--wb-muted-fg); }
+.mk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 20px; }
+.mk-cap { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 13px; font-weight: 800; }
+.mk-cap .tag { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 11px; }
+.mk-cap .d { font-weight: 500; font-size: 12px; color: var(--wb-muted-fg); }
+.mk-frame { position: relative; height: 330px; border-radius: 14px; overflow: hidden; background: var(--wb-bg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.mk-frame .rail { position: absolute; top: 12px; left: 12px; bottom: 12px; width: 340px; }
+.mk-stub { position: absolute; top: 12px; left: 364px; right: 12px; bottom: 12px; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); padding: 14px; display: grid; align-content: start; gap: 9px; }
+.mk-stub i { display: block; height: 9px; border-radius: 5px; background: var(--wb-muted); }
+.mk-stub i.t { height: 14px; width: 60%; background: color-mix(in srgb, var(--wb-muted-fg) 30%, var(--wb-muted)); }
+.mk-scrim { position: absolute; inset: 0; background: var(--scrim, rgb(0 0 0 / .35)); }
+/* a shown-modal <dialog> sits in the top layer; here it is an open dialog
+   centred in its frame instead */
+.mk-frame dialog.rdeldlg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; width: 420px; }
+/* the native title tooltip, drawn (a screenshot cannot show the real one) */
+.mk-tip { position: absolute; z-index: 5; padding: 2px 7px; font: 12px/1.45 var(--wb-sans); color: #1b1d21; background: #f6f6f4; border: 1px solid #b9b9b6; border-radius: 4px; box-shadow: 0 2px 6px rgb(0 0 0 / .18); white-space: nowrap; pointer-events: none; }
+:root[data-theme="dark"] .mk-tip { color: #e7e7e4; background: #2b2d32; border-color: #4a4d54; }
+.mk-cursor { position: absolute; z-index: 6; width: 14px; height: 20px; pointer-events: none; }
+.mk-note { position: absolute; z-index: 4; display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: var(--wb-primary); white-space: nowrap; }
+.mk-note::before { content: "\2191"; font-size: 13px; }
+.mk-ring { position: absolute; z-index: 3; border: 1.5px dashed var(--wb-primary); border-radius: 7px; pointer-events: none; }
+.mk-frame .wstoast { position: absolute; right: 18px; bottom: 18px; }
+.mk-foot { margin: 16px 0 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.mk-foot code { font-family: var(--wb-mono); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<!-- copied from wsdashboard/assets/sprite.svg -->
+<symbol id="i-repo" viewBox="0 0 16 16"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></symbol>
+<symbol id="i-wsfolder" viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.4 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+<symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+<symbol id="i-trash" viewBox="0 0 16 16"><path d="M2.8 4.3h10.4M6.3 4.3V2.8h3.4v1.5"/><path d="M4.2 4.3l.6 8.4a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.4"/><path d="M6.7 7v4M9.3 7v4"/></symbol>
+<symbol id="i-pin" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></symbol>
+<symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.9 2.7a1.4 1.4 0 0 1 2 2L5.4 12.2l-2.9.8.8-2.9z"/><path d="M9.6 4l2 2"/></symbol>
+<symbol id="i-grip" viewBox="0 0 16 16"><circle cx="5.8" cy="3.6" r=".5"/><circle cx="10.2" cy="3.6" r=".5"/><circle cx="5.8" cy="8" r=".5"/><circle cx="10.2" cy="8" r=".5"/><circle cx="5.8" cy="12.4" r=".5"/><circle cx="10.2" cy="12.4" r=".5"/></symbol>
+<symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></symbol>
+<symbol id="i-archive" viewBox="0 0 16 16"><rect x="1.9" y="2.6" width="12.2" height="3.4" rx="1"/><path d="M3.1 6v6.2a1.3 1.3 0 0 0 1.3 1.3h7.2a1.3 1.3 0 0 0 1.3-1.3V6"/><path d="M6.4 8.9h3.2"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></symbol>
+<symbol id="i-reload" viewBox="0 0 16 16"><path d="M14.3 2.8v3.9h-3.9"/><path d="M13 10.2a5.4 5.4 0 1 1-1.3-5.6l2.6 2.1"/></symbol>
+<symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.1L13 4.6"/></symbol>
+<!-- NEW (proposed) i-gitinit: the rail's branch glyph (i-branch, whose worktree rows already mean "git") with the rail's "+" (radd/rnew) at its foot -->
+<symbol id="i-gitinit" viewBox="0 0 16 16"><circle cx="4.2" cy="3.4" r="1.5"/><circle cx="4.2" cy="12.4" r="1.5"/><circle cx="10.4" cy="4.6" r="1.5"/><path d="M4.2 4.9v6M10.4 6.1c0 2.3-2.6 2.4-6.2 3.7"/><path d="M12.3 9.3v5M9.8 11.8h5"/></symbol>
+</svg>
+
+<div class="mk-h"><h1>git 폴더가 아닌 워크스페이스에 "git init하기" 버튼</h1><span class="sub">ws dashboard rail mockup, 2026-11-16</span></div>
+<p class="mk-req">일반 폴더 바에는 새 세션 버튼이 없습니다 (lead 세션은 Git 워크트리 루트에서만 시작). 바에 git init 아이콘을 추가하고, 누르면 확인 모달을 띄웁니다.</p>
+
+<div class="mk-grid">
+  <div>
+    <div class="mk-cap"><span class="tag">a</span>일반 폴더 바에 git init 버튼<span class="d">평소 / 마우스를 올렸을 때 (툴팁)</span></div>
+    <div class="mk-frame" id="fa"></div>
+  </div>
+  <div>
+    <div class="mk-cap"><span class="tag">b</span>확인 모달<span class="d">dialog.rdeldlg를 그대로 씀</span></div>
+    <div class="mk-frame" id="fb"></div>
+  </div>
+  <div>
+    <div class="mk-cap"><span class="tag">c</span>완료 후<span class="d">git 폴더가 되어 루트 워크트리 행과 새 세션 버튼이 생김</span></div>
+    <div class="mk-frame" id="fc"></div>
+  </div>
+  <div>
+    <div class="mk-cap"><span class="tag">d</span>모달 오류 상태<span class="d">git을 찾을 수 없음</span></div>
+    <div class="mk-frame" id="fd"></div>
+  </div>
+</div>
+<p class="mk-foot">새 아이콘 <code>i-gitinit</code> = 레일의 브랜치 글리프 + 레일의 “+”. 버튼은 다른 + 버튼처럼 18px 칸, 13px 글리프. 이 폴더의 유일한 다음 단계라서 평소에도 흐리게 보이고 (opacity .6), 마우스를 올리면 진해집니다. <code>.rnew</code>·<code>.rdel</code>처럼 데몬이 도는 컴퓨터의 브라우저에서만 보입니다 (<code>html[data-sysopen]</code>).</p>
+
+<script>
+(function () {
+  function ic(n) { return '<svg class="i" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
+  function stub() { return '<div class="mk-stub"><i class="t"></i><i></i><i style="width:85%"></i><i style="width:70%"></i><i></i><i style="width:55%"></i></div>'; }
+  var gitWs =
+    '<section class="rws" data-ws="/Users/me/devenv"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true"><span class="wsi">' + ic("repo") + '</span><span class="nm">devenv</span><span class="pp">~/devenv</span></button>' +
+    '<button type="button" class="radd">' + ic("plus") + '</button><button type="button" class="memo-count">▤ <span>2</span></button><span class="ct">1</span></div>' +
+    '<div class="wsbody"><div class="rwt"><div class="wthd">' + ic("branch") + '<span class="br">develop</span><span class="wtroot">' + ic("repo") + '</span><span class="wf">· 루트</span><button type="button" class="rnew">' + ic("plus") + '</button><span class="gs">±3</span></div>' +
+    '<div class="rsessions"><div class="rs"><span class="drgrip">' + ic("grip") + '</span><div class="drbody"><div class="s1"><a class="rl"><span class="hiw"><span class="hi claude">C</span></span><span class="rid lbl">dashboard polish</span></a><button type="button" class="star" aria-pressed="false">' + ic("pin") + '</button><a class="drtail"><span class="drslot"><time class="when">3분</time></span></a></div>' +
+    '<div class="drmeta"><a class="drmsg"><span class="s2"><span class="who">lead</span>레일 목업을 확인하고 있습니다</span></a></div></div></div></div></div></div></section>';
+  // the plain folder before git init
+  function plainWs(hov) {
+    return '<section class="rws" data-ws="/Users/me/Documents/notes"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true"><span class="wsi" title="폴더 (git 저장소 아님)">' + ic("wsfolder") + '</span><span class="nm">notes</span><span class="pp">~/Documents/notes</span></button>' +
+      '<button type="button" class="rgit' + (hov ? ' hov' : '') + '" title="git init하기" aria-label="git init하기" aria-haspopup="dialog" aria-expanded="false">' + ic("gitinit") + '</button>' +
+      '<button type="button" class="rforget"' + (hov ? ' style="opacity:.7"' : '') + '>' + ic("x") + '</button><button type="button" class="memo-count">▤ <span>0</span></button><span class="ct">0</span></div><div class="wsbody"></div></section>';
+  }
+  // the same folder after git init: a repository with its root worktree (unborn main)
+  var repoWs =
+    '<section class="rws" data-ws="/Users/me/Documents/notes"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true"><span class="wsi" title="저장소">' + ic("repo") + '</span><span class="nm">notes</span><span class="pp">~/Documents/notes</span></button>' +
+    '<button type="button" class="radd">' + ic("plus") + '</button><button type="button" class="rforget">' + ic("x") + '</button><button type="button" class="memo-count">▤ <span>0</span></button><span class="ct">0</span></div>' +
+    '<div class="wsbody"><div class="rwt empty"><div class="wthd">' + ic("branch") + '<span class="br">main</span><span class="wtroot">' + ic("repo") + '</span><span class="wf">· 루트</span><button type="button" class="rnew" style="opacity:1;background:rgb(127 127 127 / .22)" title="main에서 세션 시작">' + ic("plus") + '</button></div></div></div></section>';
+  function rail(ws) {
+    return '<aside class="rail"><div class="r-rail"><div class="rhd"><b class="rtitle">세션</b><button type="button" class="radd">' + ic("plus") + '</button><span class="rsp"></span><span class="chip">실시간 1</span><button type="button" class="rref">' + ic("reload") + '</button></div>' +
+      '<div class="rlist">' + gitWs + ws + '</div></div></aside>';
+  }
+  function dlg(err) {
+    return '<dialog class="rdeldlg rgitdlg" open aria-labelledby="h' + (err ? 'e' : 'o') + '"><h2 class="rdhd" id="h' + (err ? 'e' : 'o') + '">' + ic("gitinit") + '<span>이 폴더를 git 폴더로 만들까요?</span></h2>' +
+      '<code class="rdpath">/Users/me/Documents/notes</code>' +
+      '<p class="rdlead">이 폴더에서 <code>git init</code>을 실행합니다. 파일은 커밋하지 않으며, 끝나면 새 세션 버튼이 생깁니다.</p>' +
+      (err ? '<p class="rdnote bad">git을 찾을 수 없습니다. git을 설치한 뒤 다시 시도하세요.</p>' : '') +
+      '<div class="rdrow"><button type="button" class="pbtn">취소</button><button type="button" class="pbtn go">git init</button></div></dialog>';
+  }
+  function put(id, html) { document.getElementById(id).innerHTML = html; }
+  // (a) two rails side by side would not fit; one rail shows the hover copy,
+  //     the resting copy is pinned top-right as an inset
+  // (a) one rail: "notes" at rest, "scratch" under the pointer with its tooltip
+  put("fa", rail(plainWs(false) + plainWs(true).replace(/notes/g, "scratch").replace("~/Documents/scratch", "~/tmp/scratch")) + stub());
+  put("fb", rail(plainWs(false)) + stub() + '<div class="mk-scrim"></div>' + dlg(false));
+  put("fc", rail(repoWs) + stub() + '<div class="wstoast">notes을(를) git 폴더로 만들었습니다</div>');
+  put("fd", rail(plainWs(false)) + stub() + '<div class="mk-scrim"></div>' + dlg(true));
+
+  // place the drawn tooltip under the hovered button in (a), and the
+  // callout on the new-session button in (c)
+  function place() {
+    var fa = document.getElementById("fa"), b = fa.querySelector(".rail .rgit.hov"), fr = fa.getBoundingClientRect(), r = b.getBoundingClientRect();
+    var tip = document.createElement("div"); tip.className = "mk-tip"; tip.textContent = "git init하기";
+    tip.style.left = (r.left - fr.left + 6) + "px"; tip.style.top = (r.bottom - fr.top + 14) + "px"; fa.appendChild(tip);
+    var cur = document.createElementNS("http://www.w3.org/2000/svg", "svg"); cur.setAttribute("class", "mk-cursor"); cur.setAttribute("viewBox", "0 0 14 20");
+    cur.innerHTML = '<path d="M1 1v15l4-3.6 2.6 6 2.4-1-2.6-5.8H13z" fill="#fff" stroke="#000" stroke-width="1.1" stroke-linejoin="round"/>';
+    cur.style.left = (r.left - fr.left + 8) + "px"; cur.style.top = (r.top - fr.top + 8) + "px"; fa.appendChild(cur);
+    var fc = document.getElementById("fc"), n = fc.querySelectorAll(".rail .rnew")[1], cr = fc.getBoundingClientRect(), nr = n.getBoundingClientRect();
+    var ring = document.createElement("div"); ring.className = "mk-ring";
+    ring.style.left = (nr.left - cr.left - 4) + "px"; ring.style.top = (nr.top - cr.top - 4) + "px"; ring.style.width = (nr.width + 8) + "px"; ring.style.height = (nr.height + 8) + "px"; fc.appendChild(ring);
+    var note = document.createElement("div"); note.className = "mk-note"; note.textContent = "새 세션 버튼 (main에서 세션 시작)";
+    note.style.left = (nr.left - cr.left - 4) + "px"; note.style.top = (nr.bottom - cr.top + 10) + "px"; fc.appendChild(note);
+  }
+  if (document.readyState === "complete") place(); else window.addEventListener("load", place);
+})();
+</script>
+</body>
+</html>

@@ -500,6 +500,12 @@
         railPopOpen("lead", fresh);
         return;
       }
+      var init = t.closest && t.closest(".rgit");
+      if (init) {
+        e.preventDefault();
+        railGitInit(init);
+        return;
+      }
       var del = t.closest && t.closest(".rdel");
       if (del) {
         e.preventDefault();
