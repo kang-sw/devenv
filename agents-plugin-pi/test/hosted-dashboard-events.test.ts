@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHostedDashboardEvents, HOSTED_EVENTS_WIDGET_KEY } from "../src/hosted-dashboard-events.ts";
+import { createHostedDashboardEvents, startRpcDashboardEvents, HOSTED_EVENTS_WIDGET_KEY } from "../src/hosted-dashboard-events.ts";
 import { FLUSH_INTERVAL_MS } from "../src/dashboard-feed.ts";
 import { createReasoningSummaryObserver, SUMMARY_FRAME_BYTES } from "../src/reasoning-summary.ts";
 import { hostedSummaryFrame } from "../src/reasoning-summary-transport.ts";
+import { dashboardTaskCounts } from "../src/dashboard-feed.ts";
+import { agentDashboardRefreshRef, markAgentExited, type RpcAgentRegistry } from "../src/spawner.ts";
 import { countBackgroundTasks, killAllBackgroundTasks, startBackgroundTask } from "../src/background-tasks.ts";
 
 function harness(reasoningSummary?: () => ReturnType<ReturnType<typeof createReasoningSummaryObserver>["projection"]>, reasoningSummaryCapable?: boolean) {
@@ -50,6 +52,56 @@ test("hosted widget carries JSON wake/status event lines only, sampled at flush 
   h.flush();
   assert.equal(h.events().length, 3, "person input is not a wake; unchanged counts send nothing");
   h.channel.stop();
+});
+
+test("spawned workers report timed shells and monitors through their RPC widget", async () => {
+  assert.equal(startRpcDashboardEvents(undefined, false, { taskCounts: countBackgroundTasks, setWidget: () => assert.fail("owner uses intake") }), undefined);
+  const events: any[] = [];
+  const channel = startRpcDashboardEvents("worker", false, {
+    taskCounts: countBackgroundTasks,
+    setWidget: (_key, lines) => events.push(...lines.map(line => JSON.parse(line))),
+    schedule: () => () => {},
+  })!;
+  try {
+    for (const timeoutS of [5, undefined]) {
+      const done = new Promise<void>(resolve => startBackgroundTask({
+        shell: process.execPath, args: ["-e", "setTimeout(() => {}, 100)"], cwd: process.cwd(),
+        command: "test", why: "test", timeoutS, capBytes: 100, onComplete: () => resolve(),
+      }));
+      assert.deepEqual(events.at(-1), { kind: "status", background: timeoutS ? 1 : 0, monitors: timeoutS ? 0 : 1 });
+      await done;
+      assert.deepEqual(events.at(-1), { kind: "status", background: 0, monitors: 0 });
+    }
+  } finally { channel.stop(); killAllBackgroundTasks(); }
+});
+
+test("execute jobs stay counted from dispatch through approval waits until settlement/exit", () => {
+  const registry = new Map([
+    ["launching", { agentId: "launching", toolGroup: "execute-worker", launching: {}, reportLog: [] }],
+    ["active", { agentId: "active", toolGroup: "execute-worker", running: true, reportLog: [] }],
+    ["streaming", { agentId: "streaming", toolGroup: "execute-worker", streaming: true, reportLog: [] }],
+    ["approval", { agentId: "approval", toolGroup: "execute-worker", pendingApproval: { decision: "sent" }, reportLog: [] }],
+    ["done", { agentId: "done", toolGroup: "execute-worker", running: false, streaming: false, reportLog: [] }],
+    ["other", { agentId: "other", toolGroup: "full-worker", running: true, reportLog: [] }],
+  ]) as unknown as RpcAgentRegistry;
+  const events: any[] = [];
+  const channel = startRpcDashboardEvents(undefined, true, {
+    taskCounts: () => dashboardTaskCounts(registry),
+    setWidget: (_key, lines) => events.push(...lines.map(line => JSON.parse(line))),
+    schedule: () => () => {},
+  })!;
+  agentDashboardRefreshRef.current = () => channel.tasksChanged();
+  try {
+    channel.leadEvent({ type: "agent_settled" });
+    assert.deepEqual(events.at(-1), { kind: "status", background: 4, monitors: 0 });
+    for (const id of ["launching", "active", "streaming", "approval"]) {
+      const record = registry.get(id)!;
+      record.launching = undefined;
+      record.client = {} as never;
+      markAgentExited(undefined, registry, record, { suppressTerminal: true });
+    }
+    assert.deepEqual(events.at(-1), { kind: "status", background: 0, monitors: 0 });
+  } finally { agentDashboardRefreshRef.current = undefined; channel.stop(); }
 });
 
 test("real background task membership immediately updates hosted counts", async () => {

@@ -37,6 +37,45 @@ func TestPiMapperBackgroundShellCount(t *testing.T) {
 	}
 }
 
+func TestPiWorkerIdleTaskCounts(t *testing.T) {
+	for _, work := range []struct {
+		name, status string
+	}{
+		{"background shell", `{"kind":"status","background":1,"monitors":0}`},
+		{"monitor", `{"kind":"status","background":0,"monitors":1}`},
+		// Native execute jobs use the existing background count, not a new wire field.
+		{"execute job", `{"kind":"status","background":1,"monitors":0}`},
+	} {
+		t.Run(work.name, func(t *testing.T) {
+			m := newPiMapper(StartSpec{Profile: Profile{Backend: BackendPi}})
+			c := &conv{r: &Runner{convs: map[string]*conv{}}}
+			for _, status := range []string{work.status, `{"kind":"status","background":0,"monitors":0}`} {
+				evs := m.mapLine(piWidgetLine(piEventsWidgetKey, status), nopReplies{})
+				if len(evs) != 1 || evs[0].BackgroundTasks == nil {
+					t.Fatalf("worker task status lost: %+v", evs)
+				}
+				c.bgTasks = *evs[0].BackgroundTasks
+				if c.idleNow() != (c.bgTasks == 0) {
+					t.Fatalf("idleNow with %d tasks = %v", c.bgTasks, c.idleNow())
+				}
+			}
+		})
+	}
+}
+
+func TestPiWorkerTaskWidgetKeepsLeadAuthoritySeparate(t *testing.T) {
+	m := newPiMapper(StartSpec{Profile: Profile{Backend: BackendPi}})
+	wake := piWidgetLine(piEventsWidgetKey, `{"kind":"wake","cause":"background_exit","text":"done"}`)
+	if evs := m.mapLine(wake, nopReplies{}); len(evs) != 0 {
+		t.Fatalf("worker widget gained lead wake authority: %+v", evs)
+	}
+	hello := piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":1,"monitors":0,"capabilities":["reasoning_summary_v1"]}`)
+	evs := m.mapLine(hello, nopReplies{})
+	if len(evs) != 1 || evs[0].summaryCapability != nil || m.summaryCapable {
+		t.Fatalf("worker counts gained lead summary authority: %+v", evs)
+	}
+}
+
 func TestPiCompactCommand(t *testing.T) {
 	envelope := func(body string) string {
 		return "<ws:user at=\"2026-11-15T12:34+00:00\">\n" + body + "\n</ws:user>"
@@ -225,6 +264,15 @@ func TestPiEnv(t *testing.T) {
 	want := []string{"HOME=/h", "PATH=/bin", "PI_SKIP_VERSION_CHECK=1"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("piEnv = %v, want %v", got, want)
+	}
+}
+
+func TestPiWorkerEnv(t *testing.T) {
+	got := piWorkerEnv([]string{"PATH=/bin", "WS_PI_SPAWN_ROLE=fork", "WS_PI_DELEGATION_POLICY=parent", "WS_MAILBOX=parent"})
+	slices.Sort(got)
+	want := []string{"PATH=/bin", "PI_SKIP_VERSION_CHECK=1", "WS_PI_SPAWN_ROLE=worker"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("worker must carry its own role without inherited native policy: %v", got)
 	}
 }
 

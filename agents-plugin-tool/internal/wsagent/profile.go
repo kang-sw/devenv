@@ -41,9 +41,9 @@ const (
 	BackendPi     = "pi"
 )
 
-// DefaultIdleTimeout disables idle stop when a profile has no
-// idle_timeout_seconds; the sustained process never ends due to idleness.
-const DefaultIdleTimeout = 0
+// DefaultIdleTimeout stops an idle worker after ten minutes when its profile
+// omits idle_timeout_seconds. Lead profiles default to no idle stop.
+const DefaultIdleTimeout = 600 * time.Second
 
 // ReservedMCPServer is the MCP server name the runner gives the attached
 // ws-mcp; a profile's own mcp_servers may not use it.
@@ -104,8 +104,8 @@ type Profile struct {
 	// persona.
 	Instructions string `json:"instructions,omitempty"`
 	// IdleTimeoutSeconds ends the sustained process after that long with no
-	// running turn and no input; 0 never ends it, and absent is
-	// DefaultIdleTimeout.
+	// running turn, input, background work or active child; 0 never ends it.
+	// Absent is DefaultIdleTimeout for workers and 0 for leads.
 	IdleTimeoutSeconds *int `json:"idle_timeout_seconds,omitempty"`
 	// ListInIndex lists the profile's conversations in the dashboard
 	// session index; they are hidden from it by default.
@@ -143,9 +143,12 @@ func ValidLeadPermissionMode(mode string) bool {
 }
 
 // IdleTimeout is the profile's idle timeout; zero means never. An absent
-// value means never (DefaultIdleTimeout) for every backend.
+// value means never for leads and DefaultIdleTimeout for workers.
 func (p Profile) IdleTimeout() time.Duration {
 	if p.IdleTimeoutSeconds == nil {
+		if p.Lead {
+			return 0
+		}
 		return DefaultIdleTimeout
 	}
 	return time.Duration(*p.IdleTimeoutSeconds) * time.Second
@@ -482,7 +485,7 @@ func ProfileValueSchema(registries ...map[string]BackendRegistration) map[string
 			"plugins":              stringList("Plugin directories (claude) or extension paths (pi) to load; relative paths resolve against the working root. Absent loads none. Not allowed in a repo-scope profile."),
 			"skills":               map[string]any{"type": "boolean", "description": "Keep the harness's skills and slash commands on; off by default."},
 			"instructions":         map[string]any{"type": "string", "minLength": 1, "description": "Task instruction file appended to the harness's own system prompt; a relative path resolves against the working root, and builtin:<name> names an instruction text embedded in ws-mcp (" + strings.Join(BuiltinInstructionNames(), ", ") + ")."},
-			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn and no input (for a lead, also no background task); 0 or absent never ends it."},
+			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn, input, background work or active child; 0 never ends it. Absent defaults to 0 for leads and 600 for workers."},
 			"list_in_index":        map[string]any{"type": "boolean", "description": "List this profile's conversations in the dashboard session index; hidden by default."},
 			"lead":                 map[string]any{"type": "boolean", "description": "Host the profile's conversations as lead sessions: the harness loads the user's own settings, plugins, hooks, memory, and MCP servers, runs under a session holder with a lead ws session key, and asks the dashboard for tool permission. The capability fields (tools, ws_tools, mcp_servers, plugins, skills, instructions, list_in_index) must be absent. Not allowed in a repo-scope profile."},
 			"permission_mode":      map[string]any{"enum": profilePermissionModes(registries), "description": "A lead conversation's starting permission mode (claude only); absent is auto."},

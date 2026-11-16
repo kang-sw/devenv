@@ -251,10 +251,9 @@ import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { MISSING_HOSTED_KEY_WARNING, hostedMode, unconfirmedHostedWarning, type HostedMode } from "./hosted-session.ts";
-import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
+import { createDashboardFeed, dashboardAgentEntries, dashboardTaskCounts, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
 import { ownModelObservations } from "./model-observation.ts";
-import { countBackgroundTasks } from "./background-tasks.ts";
-import { createHostedDashboardEvents } from "./hosted-dashboard-events.ts";
+import { createHostedDashboardEvents, startRpcDashboardEvents } from "./hosted-dashboard-events.ts";
 import { createReasoningSummaryObserver } from "./reasoning-summary.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
@@ -376,10 +375,12 @@ export function applySessionStartAgentRetention(
   // on the machine, so a fork child must not repeat it from inside a tree.
   if (role !== undefined || recovery?.retentionSafe === false) return recovered;
   try {
+    let heldHomes = 0;
     const retention = prune(root, resolveChildRetentionTtlDays(config), {
       evictionCost: retentionEvictionCost, preserveRetiredHistory: recovery !== undefined,
-      onRetiredHistoryHeld: home => notice?.(`ws-pi-agent: permanent owner-held history protection (ownerHeld:true; no live-process claim) now preserves retired native history at ${home} from automatic retention until explicitly released.`),
+      onRetiredHistoryHeld: () => { heldHomes++; },
     });
+    if (heldHomes > 0) notice?.(`ws-pi-agent: permanent owner-held history protection (ownerHeld:true; no live-process claim) now excludes ${heldHomes} retired native history homes under ${join(root, "ws-agents")} from automatic retention. There is no release command; after all affected sessions have stopped, back up any history you need and manually remove unwanted homes.`);
     if (retention.deletedHomes.length === 0) return recovered;
     const deletedHomes = new Set(retention.deletedHomes);
     return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
@@ -915,11 +916,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         // Cost and cache rate come from the TUI footer's estimate; without a footer only context is sent.
         status: () => dashboardStatus(ctx.getContextUsage(), ctx.model?.contextWindow, agentFooterLifecycle.usage()),
         observations: () => ownModelObservations(ctx.sessionManager.getBranch(), ctx.sessionManager.getHeader()),
-        taskCounts: countBackgroundTasks,
+        taskCounts: () => dashboardTaskCounts(feedRegistry),
         reasoningSummary: () => sessionSummary?.projection(),
       });
       dashboardFeed = feed;
-      agentDashboardRefreshRef.current = () => { feed.agentsChanged(); };
       feed.start();
     }
     if (readSpawnRole(process.env) === undefined && hosted.mode === "hosted") {
@@ -931,16 +931,25 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         agents: () => dashboardAgentEntries(rowsRegistry),
       });
       hostedAgentRows = rows;
-      agentDashboardRefreshRef.current = () => { rows.agentsChanged(); };
       rows.start();
-      hostedDashboardEvents = createHostedDashboardEvents({
-        setWidget: (key, lines) => { ctx.ui.setWidget(key, lines); },
-        taskCounts: countBackgroundTasks,
+    }
+    // Workers need their own counts on RPC stdout, not an owner-only intake
+    // feed. The daemon reads this widget for both leads and workers.
+    const taskRegistry = agentTools.rpcRegistry;
+    hostedDashboardEvents = startRpcDashboardEvents(sessionRole, hosted.mode === "hosted", {
+      setWidget: (key, lines) => { ctx.ui.setWidget(key, lines); },
+      taskCounts: () => dashboardTaskCounts(taskRegistry),
+      ...(sessionRole === undefined ? {
         reasoningSummary: () => sessionSummary?.projection(),
         reasoningSummaryCapable: VERSION === "1.5.2",
-      });
-      hostedDashboardEvents.start();
-    }
+      } : {}),
+    });
+    agentDashboardRefreshRef.current = () => {
+      dashboardFeed?.agentsChanged();
+      dashboardFeed?.statusChanged();
+      hostedAgentRows?.agentsChanged();
+      hostedDashboardEvents?.tasksChanged();
+    };
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
       executeWorkerPromptPath: executeWorkerGuidePath,
@@ -1089,12 +1098,15 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadSessionFile = dispatchSessionFile ?? undefined;
     const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
     leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
-    const recovery = prepareExecutionSidecar(agentTools.rpcRegistry, leadSidecarPath, message => notifyNativeSidecarRetirement(pi, ctx.ui, message));
+    const retirementNotices: string[] = [];
+    const retirementNotice = (message: string) => { retirementNotices.push(message); };
+    const recovery = prepareExecutionSidecar(agentTools.rpcRegistry, leadSidecarPath, retirementNotice);
     // Neither shutdown nor a superseded bootstrap may overwrite retained raw
     // bytes. writeSidecarAt also enforces the blocked path for every caller.
     if (!recovery.writable) leadSidecarPath = undefined;
     generation.sidecar = leadSidecarPath;
-    let recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recovery.orphans, undefined, recovery, message => notifyNativeSidecarRetirement(pi, ctx.ui, message));
+    let recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recovery.orphans, undefined, recovery, retirementNotice);
+    if (retirementNotices.length) notifyNativeSidecarRetirement(pi, ctx.ui, retirementNotices.join("\n"));
     if (recoveredRegistry.length > 0) reviveSessionOrphans(pi, agentTools.rpcRegistry, recoveredRegistry, onApprovalPending);
     publishSubtree(agentTools.rpcRegistry);
     // Revival marks nothing dirty, and the rows' first sample ran before it.

@@ -1932,12 +1932,12 @@ func TestPiLeadTurnsAndCompact(t *testing.T) {
 		return st.Status == StatusIdle && strings.Contains(st.Error, "nothing to compact")
 	})
 
-	// Pi leads use the default idle stop.
+	// Pi leads do not idle stop unless their profile explicitly opts in.
 	var idleAfter time.Duration
 	c := h.runner.conv(id)
 	c.do(func() { idleAfter = c.idleAfter })
-	if idleAfter != DefaultIdleTimeout || h.holders.opCount("stop") != 0 {
-		t.Fatalf("a pi lead's idle stop = %v, want %v; holder calls %v", idleAfter, DefaultIdleTimeout, h.holders.opList())
+	if idleAfter != 0 || h.holders.opCount("stop") != 0 {
+		t.Fatalf("a pi lead's idle stop = %v, want 0; holder calls %v", idleAfter, h.holders.opList())
 	}
 }
 

@@ -152,7 +152,7 @@ test("unchanged materialized native payload uses the actual Pi host graph", {
       assert.deepEqual(Object.keys(frame).sort(), ["id", "jsonrpc", "method", "params"]);
       if (protocol.length === 1) {
         assert.equal(frame.method, "initialize");
-        assert.deepEqual(frame.params, { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "ws-pi-bridge", version: "0.1.0" } });
+        assert.deepEqual(frame.params, { protocolVersion: "2025-03-26", capabilities: { experimental: { wsPiDaemonAgents: true } }, clientInfo: { name: "ws-pi-bridge", version: "0.1.0" } });
         return { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: "identity-fixture", version: runtime.plugin_version } };
       }
       if (protocol.length === 2) { assert.equal(frame.method, "tools/list"); assert.deepEqual(frame.params, {}); return { tools: [] }; }
@@ -366,10 +366,11 @@ test("unchanged materialized native payload uses the actual Pi host graph", {
     assert.ok(component.children.some(child => Object.getPrototypeOf(child) === witness.Text.prototype));
     assert.ok(component.render(80).some(line => line.includes("identity-fixture")));
 
-    const prompt = join(root, "prompt.md");
-    fs.writeFileSync(prompt, "Identity observation only; no child or model may run.\n", { flag: "wx" });
-    const spawn = native.tools.get("ws-agent-spawn").definition;
-    await assert.rejects(step("one loaded spawn", () => spawn.execute("identity-spawn", { system_prompt_path: prompt, prompt: "not delivered", alias: "identity-fixture" }, undefined, undefined, runner.createToolContext("identity-spawn", undefined))), error => error === sentinel);
+    for (const retired of ["ws-agent-spawn", "ws-agent-stop", "ws-agent-list", "ws-agent-transcript"]) assert.equal(native.tools.has(retired), false, `${retired} stays retired`);
+    // ws-execute is the remaining native SDK child path; daemon pi.spawn does
+    // not instantiate an in-process RpcClient and cannot witness host identity.
+    const spawn = native.tools.get("ws-execute").definition;
+    await assert.rejects(step("one loaded execute spawn", () => spawn.execute("identity-spawn", { prompt: "Identity observation only; no child or model may run.", complex: true }, undefined, undefined, runner.createToolContext("identity-spawn", undefined))), error => error === sentinel);
     assert.equal(counts.start, 1);
     assert.equal(Object.getPrototypeOf(observedReceiver), sdk.RpcClient.prototype);
     assert.equal(observedReceiver.constructor, witness.RpcClient);
@@ -382,7 +383,8 @@ test("unchanged materialized native payload uses the actual Pi host graph", {
     assert.deepEqual(args.slice(2, 7), ["--session-dir", dirname(args[1]), "--append-system-prompt", join(dirname(args[1]), "prompt.md"), "--no-extensions"]);
     assert.deepEqual(args.slice(7, 10), ["--extension", entry, "--tools"]);
     assert.equal(args.length, 11); assert.ok(args[10].split(",").includes("ws-report-to-lead"));
-    assert.ok(fs.readFileSync(args[5], "utf8").startsWith(fs.readFileSync(prompt, "utf8")));
+    assert.ok(args[10].split(",").includes("ws-worker-exec"));
+    assert.ok(fs.readFileSync(args[5], "utf8").startsWith(fs.readFileSync(join(nativeRoot, "execute-worker-guide.md"), "utf8")));
     const childEnv = observedOptions.env;
     const endpoint = JSON.parse(childEnv.WS_PI_CHANNEL_ENDPOINT);
     assert.deepEqual(endpoint, { kind: "pipe", path: operations.find(operation => operation.fake === "channel listen").target.path });
@@ -391,11 +393,6 @@ test("unchanged materialized native payload uses the actual Pi host graph", {
     assert.equal(childEnv.WS_PI_SPAWN_ROLE, "worker"); assert.equal(childEnv.WS_PI_CHANNEL_GENERATION, "1");
     for (const key of ["WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", "WS_PI_PARENT_SESSION_KEY", "WS_PI_WEB_HOME", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL", "WS_MAILBOX", "WS_MAILBOX_AUTO"]) assert.equal(childEnv[key], "");
     assert.equal(JSON.parse(childEnv.WS_PI_DELEGATION_POLICY).depth, 1);
-    const listed = await step("loaded list", () => native.tools.get("ws-agent-list").definition.execute("identity-list", { include_prompt: true }));
-    const rows = JSON.parse(listed.content[0].text);
-    assert.equal(rows.length, 1); assert.equal(rows[0].alias, "identity-fixture"); assert.equal(rows[0].status, "dormant");
-    const transcript = await step("loaded transcript", () => native.tools.get("ws-agent-transcript").definition.execute("identity-transcript", { agent_id: rows[0].agent_id }));
-    assert.deepEqual(JSON.parse(transcript.content[0].text), { transcript_path: args[1] });
     assert.equal(Object.getPrototypeOf(registry), witness.ModelRegistry.prototype);
     assert.deepEqual(registryReads.map(read => read.name), ["getAvailable", "getAll", "hasConfiguredAuth"]);
     assert.ok(registryReads.every(read => read.receiver === registry));

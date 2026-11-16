@@ -2922,6 +2922,9 @@ func (c *conv) handle(ev Event) {
 			})
 			c.syncHost(quiet)
 			c.changed(quiet)
+			if !quiet {
+				c.watched()
+			}
 			if n == 0 && !c.turn && !quiet {
 				c.armIdle()
 				c.restartIfDue()
@@ -3393,7 +3396,7 @@ func (c *conv) idleNow() bool {
 		// for retry after a settled launch failure. A held result still
 		// waits for the child's own descendants.
 		active := !child.closed && child.rec.Parent != nil && *child.rec.Parent == parent &&
-			(child.turn || child.holding || child.sends > max(child.settled.mark, child.voided))
+			(child.turn || child.bgTasks != 0 || child.holding || child.sends > max(child.settled.mark, child.voided))
 		child.mu.Unlock()
 		if active {
 			return false

@@ -40,10 +40,31 @@ func TestParseProfileDefaults(t *testing.T) {
 		t.Fatalf("ParseProfile: %v", err)
 	}
 	if p.IdleTimeout() != DefaultIdleTimeout || p.ListInIndex || p.Skills || len(p.Tools) != 0 || len(p.WSTools) != 0 || len(p.MCPServers) != 0 {
-		t.Fatalf("an absent knob should default off: %+v", p)
+		t.Fatalf("unexpected profile defaults: %+v", p)
 	}
 	if p.InstructionsPath("/root") != "" {
 		t.Fatalf("no instructions should give no path")
+	}
+}
+
+func TestProfileDefaultIdleTimeoutScope(t *testing.T) {
+	for _, backend := range []string{BackendPi, BackendClaude} {
+		for _, lead := range []bool{false, true} {
+			p := Profile{Backend: backend, Lead: lead}
+			want := 600 * time.Second
+			if lead {
+				want = 0
+			}
+			if got := p.IdleTimeout(); got != want {
+				t.Errorf("%s lead=%v default = %v, want %v", backend, lead, got, want)
+			}
+			for _, seconds := range []int{0, 90} {
+				p.IdleTimeoutSeconds = &seconds
+				if got := p.IdleTimeout(); got != time.Duration(seconds)*time.Second {
+					t.Errorf("%s lead=%v explicit %d = %v", backend, lead, seconds, got)
+				}
+			}
+		}
 	}
 }
 
