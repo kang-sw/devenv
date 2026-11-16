@@ -7,8 +7,8 @@ import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } 
 import { capacityEvictionCost, persistEvictedAgentCost } from "./agent-cost.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner-record.ts";
 import { isOwnerHeld, hasPendingTerminalDelivery } from "./spawner.ts";
-import type { WriteScopeDiagnostic, RpcSpawnCtx } from "./spawner.ts";
 import { resolveTools, resolveSpawnToolGroup, REPORT_TO_LEAD_TOOL_NAME, GATED_EXEC_TOOL_NAME } from "./spawner-tools.ts";
+import type { WriteScopeDiagnostic, RpcSpawnCtx } from "./spawner-launch.ts";
 
 /**
  * Best-effort `setThinkingLevel()` after `start()` for persistent children.

@@ -7,10 +7,11 @@ import { createOutputRateTracker } from "./output-rate.ts";
 import { modelObservation, retainModelObservation } from "./model-observation.ts";
 import { closeOpenBatch, createBatchBuffer, observeBatchEvent } from "./agent-batches.ts";
 import { scheduleAgentViewPublish } from "./agent-view.ts";
-import { observeForkFinishEvent, advanceWorkGeneration, syncOwnershipProtection, recordReport, triggerAgentWidgetRefresh, triggerAgentCostRefresh, advanceForkFinish, finishResumeCtx, createTerminalDelivery, pushToLead, probeAgentLiveness, triggerAgentDashboardRefresh, clearTerminalFacts } from "./spawner.ts";
+import { observeForkFinishEvent, triggerAgentWidgetRefresh, triggerAgentCostRefresh, advanceForkFinish, finishResumeCtx, createTerminalDelivery, pushToLead, triggerAgentDashboardRefresh } from "./spawner.ts";
 import type { PushFamily, PushDeliverAs } from "./spawner.ts";
 import { getAgentRpcSnapshot, refreshAgentTelemetry } from "./spawner-record.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner-record.ts";
+import { advanceWorkGeneration, syncOwnershipProtection, recordReport, probeAgentLiveness, clearTerminalFacts } from "./spawner-launch.ts";
 import { REPORT_TO_LEAD_TOOL_NAME, GATED_EXEC_TOOL_NAME } from "./spawner-tools.ts";
 
 /**
