@@ -2,6 +2,7 @@
 title: Harden Pi bundle failure reporting, supported host range, and notices
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-11-16
 ---
 
 ## Intent
@@ -40,3 +41,14 @@ Prevent invisible Pi lead tool loss and ship deterministic, licensed extension a
 ### Phase 1: Harden launch and package artifacts
 
 Implement the five decisions above. Add focused tests for loud fallback, host version decisions, notices and both native hashes. Rebuild deterministically and regenerate mirrors via the existing producer. Verify using pure node checks locally and focused Go tests remotely. Run R1 and substantive-fixes-only R2, record evidence, then close. Deferred: tool retirement, payload architecture redesign, generic launch resolution refactors, live daemon/installed-session rollout.
+
+### Result (51c75ee61) - 2026-11-16
+
+- Implemented all five items. Preflight failures retain the mail-capable MCP bridge with a session error and first-turn system banner; a dependency-free launch watchdog separately detects incomplete native startup. Unsupported/unknown host versions warn but do not block. Existing session/store/manifest shapes remain unchanged (all items T0).
+- Added deterministic `dist/THIRD_PARTY_NOTICES` for 16 inlined package roots (including both entities versions), mirrored through generic native file inventories. htmlparser2 10.1.0 is MIT; domelementtype 2.3.0 is BSD-2-Clause. Root Apache appendix now carries the owner-provided identity and first-commit year. No first-party package LICENSE copies exist; third-party dashboard licenses were preserved.
+- Both native mirrors were already fresh before this change (`20b0affd...`); regenerated only for changed inputs. Final source header, native headers, native manifest hashes and bundle-input records all equal `1626cb0351970086b8f9a7ed4dee82076d54a7dc0e8633119a4d6698ddb4c29b`. Both closure ZIPs/manifests remained byte-identical. Notices match across all three distributions, SHA-256 `efcf20f46412a1c4f28bb0a7889783e3f179fdbf8483cd9850a2008478538884`.
+- Independent R1 found two Important issues: tool presence could mask a late startup failure, and extension notification order preceded the runner's clearing turn-start boundary. Fixed with a final-awaited-startup process-local signal plus ordered mapper carry. Regressions cover both tools present without completion, readiness reset, and an already-idle autonomous notify -> agent_start run. Fixes-only R2 is clean; Forward: none. Review reports were read and removed from the approved temp directory after recording these results.
+- Final verification: approved `bash D:/sys_lock.sh remote w5090 run exec11 25 --sync <worktree> -- 'export PATH=$HOME/sdk/go/bin:$PATH; cd agents-plugin-tool && go test ./internal/wsagent/... -count=1 -run "TestPiLead|TestPiBundle|TestPiPrepared|TestLegacyPiLead|TestLeadIsolation|TestLegacyLeadIsolation|TestIsolationBackend"'` passed, 43.275s (job `6a48ad8e813841f69098457e92c8e522`).
+- Final local check with TMP/TEMP/TMPDIR under `D:/Temp/exec11`: `node --test agents-plugin-tool/internal/wsagent/testdata/pi-lead-health.test.mjs agents-plugin-pi/test/bundle-freshness.test.mjs` passed 9, failed 0, skipped 1 (Windows symlink permission EPERM). `git diff --check` and ticket verification passed. No prohibited local executable/build/launcher, merge or push was run.
+- Surprises: boolbase's npm tarball omits LICENSE, handled with the explicit upstream ISC notice; initial producer validation hit Windows CP949 decoding, resolved for the run with `PYTHONUTF8=1`. Producer temp paths were confined through TMP/TEMP/TMPDIR; owned caches/node_modules were removed. Generated native manifest newlines were normalized to LF before commit.
+- Omitted intentionally: real Pi/launcher execution, full npm suite and live installed-session/daemon rollout under the owner's safety restrictions; Node-dependent remote adapter tests cannot run on w5090. These do not block the focused passing verification boundary.
