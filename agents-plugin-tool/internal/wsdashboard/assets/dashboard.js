@@ -278,11 +278,25 @@
     if (doc.scrollingElement) s.push([doc.scrollingElement, doc.scrollingElement.scrollTop]);
     return s;
   }
-  // Owned scrollers never take numeric restoration, even between transactions.
+  // Restore after the swap's writes; collect all current offsets before any
+  // scroll write. Multiple messages share one read phase. Owner input wins.
+  var scrollRestore = new Map(), scrollRestoreFrame = 0;
   function restoreScroll(s) {
-    var kept = window.wbHistory && window.wbHistory.keeping;
-    s.forEach(function (p) { if (!p[0].wbScrollOwner && !(kept && kept(p[0])) && p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; });
+    s.forEach(function (p) { if (!scrollRestore.has(p[0])) scrollRestore.set(p[0], p[1]); });
+    if (scrollRestoreFrame) return;
+    scrollRestoreFrame = requestAnimationFrame(function () {
+      scrollRestoreFrame = 0;
+      var kept = window.wbHistory && window.wbHistory.keeping, writes = [];
+      scrollRestore.forEach(function (top, el) {
+        if (el.isConnected !== false && !(el === convo && stick) && !el.wbScrollOwner && !(kept && kept(el)) && el.scrollTop !== top) writes.push([el, top]);
+      });
+      scrollRestore.clear();
+      writes.forEach(function (p) { p[0].scrollTop = p[1]; });
+    });
   }
+  ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (type) {
+    window.addEventListener(type, function () { scrollRestore.clear(); }, { capture: true, passive: true });
+  });
 
   // The conversation stays at the bottom while the user has it there. Its
   // two regions (entries, convlive) scroll together inside #convo, which

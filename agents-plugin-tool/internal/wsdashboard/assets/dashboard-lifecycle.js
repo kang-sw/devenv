@@ -603,11 +603,11 @@
     function post() {
       queued = null;
       var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
-      if (top) send("head", {
+      var head = top ? {
         html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
         pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
         top: top.offsetHeight
-      });
+      } : null;
       // A link menu's local z-index cannot outrank the shell header either;
       // lift its frame through the same layer as the other popovers. The
       // read-only hover card (rail.js, .shp) is a tooltip and never lifts.
@@ -615,10 +615,12 @@
       // (data-lifted, dashboard-shell.css), so the shell's header and rail
       // stay visible under the raised frame instead of going blank.
       var popover = q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; });
+      var layout = { pincol: root.hasAttribute("data-pincol"), dim: dim(), popover: popover };
       if (popover) root.setAttribute("data-lifted", ""); else root.removeAttribute("data-lifted");
-      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(), popover: popover });
+      if (head) send("head", head);
+      send("layout", layout);
     }
-    function queue() { if (!queued) queued = setTimeout(post, 16); }
+    function queue() { if (!queued) queued = requestAnimationFrame(post); }
     doc.addEventListener("ws-overview", queue);
     var top = doc.querySelector(".dwrap > .top");
     if (window.MutationObserver) {
@@ -673,9 +675,9 @@
         if (chip && WsRail) railPopOpen("sess", chip);
       } else if (m.wsShell === "settings") { setLayout(m.layout); setInput(m.input); }
       else if (m.wsShell === "theme") setTheme(m.theme, true);
-      else if (m.wsShell === "sync") { sent = {}; post(); shPost("title", { title: doc.title }); }
+      else if (m.wsShell === "sync") { sent = {}; queue(); shPost("title", { title: doc.title }); }
     });
-    post();
+    queue();
     shPost("title", { title: doc.title });
     if (window.scrollY) send("scroll", { y: Math.round(window.scrollY) });
   }

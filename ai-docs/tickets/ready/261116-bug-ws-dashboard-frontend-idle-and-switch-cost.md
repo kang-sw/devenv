@@ -2,6 +2,8 @@
 title: "Reduce dashboard frontend idle and session-switch cost"
 related:
   261116-feat-ws-dashboard-restore-session-iframe-cache: "Restore the session iframe cache later, separately"
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Reduce dashboard frontend idle and session-switch cost
@@ -37,3 +39,7 @@ Trace E (`1e5c5357-01-perf-trace-e-idle-and-switch.md`, 2026-11-16) measured a s
 ## Decisions
 
 - Optimize fresh loads first; iframe caching is a separate, later owner-gated effort.
+- Light design/completeness check completed by implementing worker per explicit owner instruction (2026-11-16): scope, invariants, two phases and verification boundary are executable; no unresolved design decisions. Implementation details: use bounded speculative history batches with a write-free height read pass, returning surplus rows to the inert gap before binding; preserve exact whole-row 1000px windows, unknown-frame waits, and pending snapshots. Coalesce follow-up observers/events with rAF, not a new scheduler or configuration.
+- Collect drawer and lifecycle geometry before writes; defer watch-owner geometry until after history writes. Phase 2 depends on Phase 1 and uses cached pane visibility, idempotent pill writes, event-driven rAF work, stepped running animations and hidden-page gates. Prefer layout/style containment without paint clipping of composer popovers.
+- Scope is frontend JS/CSS and focused pure Node tests only; no iframe-cache restore or daemon Go edits. No protocol/store change. Per owner: one passing focused check closes each phase; R1 independent review and fixes-only R2 for substantive findings; minor findings go to Forward.
+- Local Go/build/ws/test executables, launchers and dev.py are forbidden (AhnLab V3). Remote Go only via the owner's w5090 command if needed; local tests must be pure Node without ws spawning. Timing savings are trace-derived estimates pending owner switch/idle/scroll captures, not measured acceptance claims.
