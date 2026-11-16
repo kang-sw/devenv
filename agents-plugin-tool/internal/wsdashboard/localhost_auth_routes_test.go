@@ -102,11 +102,11 @@ func TestLocalhostAuthMachineExemptionsStayLocal(t *testing.T) {
 			{"LAN machine", "192.168.7.30:50000", "192.168.7.20:43210", "", "", "", false},
 			{"LAN browser", "192.168.7.30:50000", "192.168.7.20:43210", "http://192.168.7.20:43210", "same-origin", "", false},
 			{"rebound Origin", "127.0.0.1:50000", "evil.example:43210", "http://evil.example:43210", "same-origin", "", false},
-			{"rebound fetch without Origin", "127.0.0.1:50000", "evil.example:43210", "", "same-origin", "", false},
+			{"rebound fetch without Origin", "127.0.0.1:50000", "evil.example:43210", "", "", "*/*", false},
 			{"rebound legacy navigation", "127.0.0.1:50000", "evil.example:43210", "", "", "text/html", false},
 			{"loopback machine", "127.0.0.1:50000", "127.0.0.1:43210", "", "", "", true},
 			{"IPv6 machine", "[::1]:50000", "localhost:43210", "", "", "", true},
-			{"legacy machine Host", "127.0.0.1:50000", "machine.example:43210", "", "", "", true},
+			{"legacy machine Host", "127.0.0.1:50000", "machine.example:43210", "", "", "", false},
 			{"local browser", "127.0.0.1:50000", "127.0.0.1:43210", "http://127.0.0.1:43210", "same-origin", "", true},
 		} {
 			for _, withToken := range []bool{false, true} {
