@@ -3,41 +3,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
-const crypto = require('node:crypto');
-const { selectDaemon, SETTING } = require('../daemon-selection');
-
-const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-function fixture(t, platform = 'win32') {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-daemon-input-'));
-  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
-  const appRoot = path.join(base, 'app'), userData = path.join(base, 'userData');
-  fs.mkdirSync(appRoot); fs.mkdirSync(userData);
-  const binaryName = platform === 'win32' ? 'ws-mcp.exe' : 'ws-mcp';
-  function make(root, version = '0.50.1-dev') {
-    fs.mkdirSync(root, { recursive: true });
-    const binary = path.join(root, binaryName), contractFile = path.join(root, 'runtime.json');
-    // These bytes cannot execute. Tests never invoke a binary or child process.
-    fs.writeFileSync(binary, 'fixture bytes, not an executable');
-    const contract = { plugin_version: '0.50.1', mcp_protocol: '2025-03-26',
-      tools: { 'runtime.read': '>=0.50.1' }, commands: { 'runtime.info': '>=0.50.1' } };
-    const metadata = { schema_version: 1, version, binary_sha256: sha(fs.readFileSync(binary)),
-      mcp_protocol: '2025-03-26', tools: ['runtime.read'], commands: ['runtime.info'] };
-    const save = (file, value) => fs.writeFileSync(file, JSON.stringify(value));
-    save(contractFile, contract); save(binary + '.metadata.json', metadata);
-    for (const [tree, rel] of [['rsrc', 'hello/hello.md'], ['skills', 'hello/SKILL.md']]) {
-      const dir = path.join(root, tree); fs.mkdirSync(path.join(dir, 'hello'), { recursive: true });
-      fs.writeFileSync(path.join(dir, rel), 'hello\r\nworld\r\n');
-      save(path.join(dir, 'manifest.json'), { schema_version: 1, files: { [rel]: sha('hello\nworld\n') } });
-    }
-    return { root, binary, contract, metadata, contractFile, save };
-  }
-  const bundled = make(path.join(appRoot, 'daemon'));
-  const dev = make(path.join(base, 'selected'), '0.50.3-dev');
-  const choose = value => fs.writeFileSync(path.join(userData, SETTING), JSON.stringify(value));
-  const select = () => selectDaemon({ appRoot, userData, platform });
-  return { base, appRoot, userData, bundled, dev, choose, select };
-}
+const { fixture, sha } = require('./daemon-fixture.cjs');
+const { SETTING } = require('../daemon-selection');
 test('bundled and explicit dev roots bind matching binary, contract, resources and skills without executing bytes', t => {
   const f = fixture(t);
   const bundled = f.select();
@@ -84,6 +51,35 @@ test('binary hash, version, optional protocol and inventory gates match the laun
   assert.throws(f.select, /unexpected tools/);
   save(b.binary + '.metadata.json', { schema_version: 1, version: '0.50.1', binary_sha256: b.metadata.binary_sha256 });
   assert.equal(f.select().metadata.tools, undefined, 'legacy producer inventories/protocol are unknown, not empty');
+});
+test('bundled and dev must be complete hostable Claude packages (Pi-only is not enough)', t => {
+  for (const platform of ['win32', 'darwin']) {
+    const f = fixture(t, platform);
+    for (const selected of [f.bundled, f.dev]) {
+      if (selected === f.dev) f.choose({ schema_version: 1, root: selected.root });
+      const reject = /Cannot use (bundled|development) daemon/;
+      fs.rmSync(selected.pluginFile);
+      assert.throws(f.select, reject);
+      selected.save(selected.pluginFile, { name: 'pi' });
+      assert.throws(f.select, reject);
+      selected.save(selected.pluginFile, selected.plugin);
+      for (const file of ['bin/ws-mcp-launcher.py', 'config-manifest.json', 'dashboard-config-manifest.json', 'claude-agents/effort-low.md']) {
+        const target = path.join(selected.root, file), bytes = fs.readFileSync(target);
+        fs.rmSync(target); assert.throws(f.select, reject, file);
+        fs.writeFileSync(target, bytes);
+      }
+      selected.save(selected.pluginFile, { ...selected.plugin, agents: ['./claude-agents/../bad.md'] });
+      assert.throws(f.select, /Invalid Claude plugin reference/);
+      selected.save(selected.pluginFile, selected.plugin);
+    }
+  }
+});
+test('wsflow package name must agree with its runtime contract', t => {
+  const f = fixture(t);
+  f.bundled.save(f.bundled.pluginFile, { ...f.bundled.plugin, name: 'wsflow' });
+  assert.throws(f.select, /plugin\/runtime mismatch/);
+  f.bundled.save(f.bundled.contractFile, { ...f.bundled.contract, plugin: 'wsflow' });
+  assert.equal(f.select().contract.plugin, 'wsflow');
 });
 test('resource/skills paths and manifest bytes must belong to the selected root', t => {
   const f = fixture(t);

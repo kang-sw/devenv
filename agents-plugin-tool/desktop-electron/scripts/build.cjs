@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const pkg = require('../package.json');
+const { copyPackage } = require('../daemon-stage');
 const SUMS = 'Werkschaft-desktop-SHA256SUMS';
 
 // The release assets the updater reads: Werkschaft-<platform>-<arch>.zip and
@@ -29,8 +30,9 @@ function archive({ out, platform, arch, host = process.platform, run = execFileS
   return { zip, sums, hash };
 }
 
-async function build({ platform = process.platform, arch = process.arch, cache, packageApp, out = path.join(root, 'dist'), run } = {}) {
+async function build({ platform = process.platform, arch = process.arch, daemonInput = process.env.WERKSCHAFT_DAEMON_INPUT, cache, packageApp, out = path.join(root, 'dist'), run } = {}) {
   if (!['darwin', 'win32'].includes(platform)) throw new Error('This slice packages darwin and win32 only');
+  if (!daemonInput || !path.isAbsolute(daemonInput)) throw new Error('A supplied absolute preassembled daemonInput is required');
   if (platform === 'win32') arch = 'x64';
   const version = pkg.devDependencies.electron;
   const zipName = `electron-v${version}-${platform}-${arch}.zip`;
@@ -45,7 +47,8 @@ async function build({ platform = process.platform, arch = process.arch, cache, 
   try {
     const source = path.join(stage, 'app');
     fs.mkdirSync(source);
-    for (const file of ['main.js', 'endpoint.js', 'policy.js', 'connection.html', 'update.js', 'dashboard-preload.js',
+    for (const file of ['main.js', 'endpoint.js', 'daemon-selection.js', 'daemon-stage.js', 'daemon-controller.js',
+      'policy.js', 'connection.html', 'update.js', 'dashboard-preload.js',
       'titlebar.js', 'titlebar.html', 'titlebar-preload.js', 'titlebar-renderer.js']) {
       fs.copyFileSync(path.join(root, file), path.join(source, file));
     }
@@ -53,6 +56,7 @@ async function build({ platform = process.platform, arch = process.arch, cache, 
     for (const file of ['icon.png', 'icon.ico']) {
       fs.copyFileSync(path.join(root, 'icons', file), path.join(source, 'icons', file));
     }
+    copyPackage(daemonInput, path.join(source, 'daemon'), 'bundled', platform);
     fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({
       name: pkg.name, productName: 'Werkschaft', version: pkg.version, main: pkg.main, author: pkg.author,
     }));

@@ -77,23 +77,43 @@ function validateTree(root, label) {
   if (label === 'skills' && !entries.some(name => name.endsWith('/SKILL.md')) ||
       label === 'rsrc' && !entries.some(name => name.endsWith('.md'))) throw new Error(`Empty ${label} content`);
 }
-function selectDaemon({ appRoot, userData, platform = process.platform }) {
-  if (!path.isAbsolute(appRoot) || !path.isAbsolute(userData)) throw new Error('Daemon app and user data paths must be absolute');
-  const setting = path.join(userData, SETTING);
-  let root = path.join(appRoot, 'daemon'), source = 'bundled';
-  if (fs.existsSync(setting)) {
-    let selection;
-    try { selection = readJSON(setting); }
-    catch (error) { throw new Error(`Invalid daemon selection at ${setting}: ${error.message}`); }
-    if (selection?.schema_version !== 1 || typeof selection.root !== 'string' ||
-        !path.isAbsolute(selection.root) || Object.keys(selection).sort().join(',') !== 'root,schema_version') {
-      throw new Error(`Invalid daemon selection at ${setting}: expected absolute development root`);
-    }
-    root = selection.root; source = 'development';
+function packageFiles(root) {
+  const plugin = readJSON(path.join(root, '.claude-plugin', 'plugin.json'));
+  if (!['ws', 'wsflow'].includes(plugin?.name)) throw new Error('Invalid Claude plugin manifest (expected ws or wsflow)');
+  if (!Array.isArray(plugin.agents) || !plugin.agents.length || !plugin.mcpServers?.ws ||
+      !Array.isArray(plugin.mcpServers.ws.args)) throw new Error('Incomplete Claude plugin references');
+  const prefix = '${CLAUDE_PLUGIN_ROOT}/';
+  const args = plugin.mcpServers.ws.args;
+  const manifests = plugin.mcpServers.ws.env?.WS_MCP_CONFIG_MANIFESTS?.split(';');
+  if (!args.includes(prefix + 'bin/ws-mcp-launcher.py') ||
+      !Array.isArray(manifests) || manifests.length !== 2 ||
+      !manifests.includes(prefix + 'config-manifest.json') ||
+      !manifests.includes(prefix + 'dashboard-config-manifest.json')) {
+    throw new Error('Incomplete Claude launcher or config references');
   }
+  const references = [...plugin.agents, ...args.filter(arg => arg.startsWith(prefix)), ...manifests];
+  for (const ref of references) {
+    if (typeof ref !== 'string') throw new Error('Invalid Claude plugin reference');
+    const relative = ref.startsWith(prefix) ? ref.slice(prefix.length) : ref.startsWith('./') ? ref.slice(2) : '';
+    if (!relative || relative.includes('\\') || relative.split('/').some(part => !part || part === '.' || part === '..')) {
+      throw new Error(`Invalid Claude plugin reference: ${ref}`);
+    }
+    const file = path.join(root, ...relative.split('/'));
+    if (!fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep) || !fs.statSync(file).isFile()) {
+      throw new Error(`Invalid Claude plugin file: ${relative}`);
+    }
+    if (relative.endsWith('.json')) readJSON(file);
+    else fs.readFileSync(file); // A referenced text file must be readable, not merely present.
+  }
+  return plugin;
+}
+function validateDaemonRoot(root, source, platform) {
+  if (!path.isAbsolute(root)) throw new Error('Daemon root must be absolute');
   const binary = path.join(root, platform === 'win32' ? 'ws-mcp.exe' : 'ws-mcp');
   try {
+    const plugin = packageFiles(root);
     const contract = readJSON(path.join(root, 'runtime.json'));
+    if (contract.plugin !== plugin.name) throw new Error('Claude plugin/runtime mismatch');
     const metadata = readJSON(binary + '.metadata.json');
     if (!fs.statSync(binary).isFile() || metadata?.schema_version !== 1 || !version(metadata.version) ||
         !/^[a-f0-9]{64}$/.test(metadata.binary_sha256) || digest(binary) !== metadata.binary_sha256) {
@@ -111,7 +131,23 @@ function selectDaemon({ appRoot, userData, platform = process.platform }) {
     const rsrc = path.join(root, 'rsrc'), skills = path.join(root, 'skills');
     validateTree(rsrc, 'rsrc');
     validateTree(skills, 'skills');
-    return { source, binary, contract, metadata, env: { WS_RSRC_ROOT: rsrc, WS_SKILLS_ROOT: skills } };
+    return { source, root, binary, contract, metadata, env: { WS_RSRC_ROOT: rsrc, WS_SKILLS_ROOT: skills } };
   } catch (error) { throw new Error(`Cannot use ${source} daemon at ${root}: ${error.message}`); }
 }
-module.exports = { selectDaemon, SETTING };
+function selectDaemon({ appRoot, userData, platform = process.platform }) {
+  if (!path.isAbsolute(appRoot) || !path.isAbsolute(userData)) throw new Error('Daemon app and user data paths must be absolute');
+  const setting = path.join(userData, SETTING);
+  let root = path.join(appRoot, 'daemon'), source = 'bundled';
+  if (fs.existsSync(setting)) {
+    let selection;
+    try { selection = readJSON(setting); }
+    catch (error) { throw new Error(`Invalid daemon selection at ${setting}: ${error.message}`); }
+    if (selection?.schema_version !== 1 || typeof selection.root !== 'string' ||
+        !path.isAbsolute(selection.root) || Object.keys(selection).sort().join(',') !== 'root,schema_version') {
+      throw new Error(`Invalid daemon selection at ${setting}: expected absolute development root`);
+    }
+    root = selection.root; source = 'development';
+  }
+  return validateDaemonRoot(root, source, platform);
+}
+module.exports = { selectDaemon, validateDaemonRoot, SETTING };

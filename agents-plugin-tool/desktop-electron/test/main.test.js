@@ -12,14 +12,14 @@ process.on('exit', () => fs.rmSync(userData, { recursive: true, force: true }));
 const preload = path.resolve(__dirname, '../dashboard-preload.js');
 
 async function fixture(discover = async () => 'http://127.0.0.1:39418/', platform = 'darwin') {
-  // Replace only the main-process discovery dependency; never a renderer bridge.
-  const endpoint = require('../endpoint');
-  const original = endpoint.discover;
-  endpoint.discover = discover;
+  // Replace only main-process lifecycle dependency; never a renderer bridge.
+  const controller = require('../daemon-controller');
+  const original = controller.connectDaemon;
+  controller.connectDaemon = discover;
   delete require.cache[require.resolve('../main')];
   const { start } = require('../main');
-  endpoint.discover = original;
-  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: false, getPath: () => userData });
+  controller.connectDaemon = original;
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: false, getPath: () => userData, getAppPath: () => path.resolve(__dirname, '..') });
   let focusedContents = null;
   const renderers = [];
   class Base extends EventEmitter {
@@ -417,6 +417,15 @@ test('X-close Stay during a pending load is not that navigation choosing Stay', 
   reject(Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }));
   await retry;
   assert.equal(path.basename(w.currentURL), 'connection.html');
+});
+test('app quit leaves an attached or independently started daemon untouched', async () => {
+  let connects = 0;
+  const f = await fixture(async () => { connects++; return 'http://127.0.0.1:39418/'; });
+  f.app.emit('will-quit');
+  f.app.quit();
+  assert.equal(connects, 1);
+  assert.equal(f.app.quitCalled, true);
+  assert.equal(f.window.currentURL, 'http://127.0.0.1:39418/');
 });
 test('losing single-instance lock quits before creating a window', () => {
   const { start } = require('../main');
