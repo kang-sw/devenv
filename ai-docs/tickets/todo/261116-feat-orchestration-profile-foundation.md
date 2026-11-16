@@ -11,16 +11,16 @@ sage-review-completeness: blocked
 
 ## Open Decision Queue
 
-Last ID: (69)
-
-(51) [open] [policy] Which keys may write status to the top-level lead's board (reopened by design review: as confirmed, it admits every parented lead key).
-- Context: `role: worker` renders mint parented lead keys (`childRoleForPlaybookRole`), so "any parented lead key" admits every `lead-run` worker and `ticket-handler`, not only sub-leads; and ready ticket `261115-feat-ws-whiteboard-agent-card` pins "every unrelated parented caller's existing denial. No global child permission" with a verification for unchanged parented denial. No key-level marker separates a sub-lead from a worker today.
-- Alternative a: only sub-lead keys. A new playbook role `role: sublead` mints a parented lead key whose session record carries a sub-lead marker (the minting playbook name); only marked keys are admitted, resolving to the top-level lead's board by walking `Parent`, `wb:log` and `wb:panel` inside an existing open `wb:topic` only, `whiteboard.query` read-only. Workers and card children keep the ordinary denial. Compatibility: an old daemon ignores the marker field (session records are read with `json.Unmarshal`), so it denies the key as today - status lines lost, no data change (T1).
-- Alternative b: any parented lead key, as confirmed; supersede the card ticket's ordinary-denial constraint by name and coordinate its tests.
-> a: matches the epic's "sub-lead key" framing (03), (15) and keeps the ready card ticket's contract intact.
+Last ID: (72)
 
 (69) [open] [announced] Claude stays off the whitelist on the 2026-11-16 probe; the Phase 1 probe covers Codex only, and the whitelist may ship empty, so every `orchestrate` setting then warns.
 - Citation: (68)=c ("Claude is off the whitelist, with the warning"); the probe result recorded under **Claude result and timing**; Pi is capped by ws (63).
+
+(71) [open] [technical] Foundation adds the `role: sublead` mechanism with test fixtures only; no shipped playbook changes role here, and `ticket-handler` stays `role: worker`.
+- `role: sublead` set by the run, review, and ship children on their runners over switching `ticket-handler` now - no sub-lead playbook exists before those children, and the handler posts nothing to the board (its lead relays every ask).
+
+(72) [open] [announced] The `whiteboard-status` pointer appears only in refusals to a marked sub-lead key; an unmarked parented key (worker, card child) keeps today's denial verbatim.
+- Citation: (51)=a ("workers and card children keep the ordinary denial") and `261115-feat-ws-whiteboard-agent-card`'s verification of unchanged parented denial.
 
 ## Background
 
@@ -92,8 +92,7 @@ since both touch how playbook text varies by knob.
 - **Sub-lead board syntax.** A separate short `whiteboard-status` print
   playbook teaches the status-only subset (`wb:log`, `wb:panel` inside an
   existing `wb:topic`), read on demand by a sub-lead that posts status;
-  `sublead-protocol` names it, and the refusal a parented key receives names
-  it. Rejected: a section inside `sublead-protocol` (every sub-lead would
+  `sublead-protocol` names it, and a refusal to a sub-lead key names it. Rejected: a section inside `sublead-protocol` (every sub-lead would
   carry it); the full `whiteboard` playbook (its lead-only rules would reach
   sub-leads). (59)
 - **Board knob off.** A sub-lead write never calls
@@ -103,6 +102,16 @@ since both touch how playbook text varies by knob.
   off, the write is still accepted into the board store, and the status shows
   when the user opens the board. Rejected: refusing the write while the knob
   is off; auto-enabling the board as a lead write does. (61)
+- **Board writers.** Only sub-lead keys write status. A new playbook role
+  `role: sublead` mints a parented lead key (`childRoleForPlaybookRole`)
+  whose session record carries a sub-lead marker, the minting playbook name.
+  Only marked keys are admitted, resolving to the top-level lead's board by
+  walking `Parent`: `wb:log` and `wb:panel` inside an existing open
+  `wb:topic`, and `whiteboard.query` read-only. Workers and the agent-card
+  children of `261115-feat-ws-whiteboard-agent-card` keep the ordinary
+  denial. Rejected: admitting every parented lead key (it admits every
+  `role: worker` render and breaks that ready ticket's unchanged-denial
+  contract). (51)
 - **Attribution.** A sub-lead's log line and panel recap carry a
   server-written attribution prefix in their text. Rejected: a new author
   field in the board store. (52)
@@ -119,9 +128,10 @@ since both touch how playbook text varies by knob.
   a string map round-tripped by `updateConfigFile`; the repo file keeps
   members verbatim); T0 for new rsrc files (an old binary opens only files it
   resolves, its overlay probe matches harness names only, manifest
-  `schema_version` stays 1); T1 for whiteboard admission of parented keys (an
-  old daemon refuses them at the top-level-lead gate; status lines are lost,
-  no data changes). (56)
+  `schema_version` stays 1); T1 for whiteboard admission of sub-lead keys (an
+  old daemon ignores the unknown marker field, since session records are
+  read with `json.Unmarshal`, and refuses the key at the top-level-lead gate;
+  status lines are lost, no data changes). (56), (51)
 - **Placement.** `parent:` the epic, created in `todo/`. (57)
 
 ## Constraints
@@ -163,11 +173,11 @@ since both touch how playbook text varies by knob.
 | scope.new_type_contract | yes | wsrsrc.Load gains a profile selection input; the sublead-protocol report block is a new cross-skill contract |
 | scope.test_surface | existing | agents-plugin-tool/internal/wsrsrc/whiteboard_selection_test.go, internal/mcp/ticket_review_text_test.go, whiteboard_tools_test.go; the auto-ack pin test named in the ticket is absent (search for "exactly once" in ticket_review*_test.go returned nothing) |
 | complexity.reuse_points | confirmed | harnessBuckets, harnessBucketKey, resolveIncludePath overlay probe, replaceOrAppend, the shadowed: line shape in config_structured.go and server.go |
-| complexity.side_effect_risk | high | wsrsrc.Load feeds playbook.read, playbook.render, workflow_manual and project_tree, and the whiteboard gate relaxes for parented lead keys |
+| complexity.side_effect_risk | high | wsrsrc.Load feeds playbook.read, playbook.render, workflow_manual and project_tree, and the whiteboard gate admits marked sub-lead keys |
 | risk.correctness | moderate | lookup order, top-level-only selection and the Parent walk are new logic on shared load paths |
 | risk.fit | moderate | selection site in wsrsrc.Load departs from the applyKnobVariants precedent, by recorded decision (46) |
 | risk.test | moderate | many new unit cases across wsrsrc and mcp; nested-spawn probe is manual per host |
-| risk.security_or_contract | high | session gate admits parented lead keys on the top-level lead's board (T1 declared in (56)); config key and rsrc file additions are cross-version surfaces |
+| risk.security_or_contract | high | session gate admits marked sub-lead keys on the top-level lead's board (T1 declared in (56)); config key and rsrc file additions are cross-version surfaces |
 
 ## Phases
 
@@ -180,9 +190,9 @@ since both touch how playbook text varies by knob.
 - Profile-aware selection in `wsrsrc.Load` per (46)-(48); every `Load`
   caller, including declared-variable collection, receives the same profile.
 - Whitelist and `config.tune` warning per (49); nested-spawn probe per (50).
-- Sub-lead board path per (51), (52), (61); a refused command's message for a
-  parented key names the `whiteboard-status` playbook (59), which Phase 2
-  writes.
+- `role: sublead` and the session-record marker per (51); sub-lead board
+  path per (51), (52), (61); a refused command's message for a sub-lead key
+  names the `whiteboard-status` playbook (59), which Phase 2 writes.
 - Auto-ack per (53). Approved knob-off text (match each on-text exactly
   against the text present when the phase runs):
   - `lead-ticket`: `- Only user-confirmed decisions, plus items the handler
@@ -202,7 +212,8 @@ since both touch how playbook text varies by knob.
     items" relay stay; with the knob off they are simply empty.
 - Verification: unit tests for lookup order, the top-level-only rule, the
   overlay-conflict validation, knob registration and the warning line, the
-  board admission and every refused command, a sub-lead write with the lead's
+  sub-lead board admission and every refused command, a `role: worker`
+  key still refused with today's message, a sub-lead write with the lead's
   board knob off (accepted, knob unchanged, one acknowledgement line), the
   attribution prefix, and the
   auto-ack pin test; `go test ./internal/wsrsrc/... ./internal/mcp/...`; the
