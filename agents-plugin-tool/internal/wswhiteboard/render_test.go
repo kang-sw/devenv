@@ -546,10 +546,10 @@ func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 	wantNone(t, regexpHistoryArticle(full, "item-72"), "note-toggle", "wb-hassumed")
 
 	closedFull := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, closedFull, `<section class="topic closed" id="`+topicAnchor("t")+`" data-topic="t">`, `<div class="topic-stream">`, `data-history-item="1"`, `data-id="01"`, `title="correction"`)
+	wantAll(t, closedFull, `<section class="topic closed" id="`+topicAnchor("t")+`" data-topic="t" title="closed">`, `<div class="topic-stream">`, `data-history-item="1"`, `data-id="01"`, `title="correction"`)
 	wantNone(t, closedFull, `<details class="settled"`, `<details class="topic-stream"`)
 	closed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, closed, `<section class="topic quiet closed" id="`+topicAnchor("t")+`" data-topic="t">`,
+	wantAll(t, closed, `<section class="topic quiet closed" id="`+topicAnchor("t")+`" data-topic="t" title="closed">`,
 		`<div class="srow" id="item-1" data-id="01">`,
 		`<button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`,
 		`<div class="reply solo" data-idle hidden>`)
