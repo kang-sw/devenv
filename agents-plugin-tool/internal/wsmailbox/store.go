@@ -250,6 +250,7 @@ func WithLock(path string, fn func(*StoreFile) error) error {
 	if err != nil {
 		return err
 	}
+	before := copyQueues(current.Queues)
 	if err := fn(&current); err != nil {
 		return err
 	}
@@ -283,6 +284,7 @@ func WithLock(path string, fn func(*StoreFile) error) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename mailbox store: %w", rerr)
 	}
+	publishQueueChange(path, before, current.Queues)
 	return nil
 }
 

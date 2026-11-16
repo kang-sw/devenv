@@ -180,12 +180,18 @@ func NewIndex(opts IndexOptions) *Index {
 // nothing serves it, so only a nudge or a resume changes it, and a resume
 // rewrites its registration.
 func (x *Index) Refresh() {
-	regs, err := ReadRegistrations(x.opts.Dir)
+	seen := map[string]bool{}
+	regs, err := readRegistrations(x.opts.Dir, func(id string, err error) {
+		// Remember unreadable startup rows too. This uses the listing's
+		// existing read, not a second probe of an already failed file.
+		seen[id] = true
+		x.retry(id)
+		fmt.Fprintf(x.opts.Log, "dashboard: read registration %s: %v\n", id, err)
+	})
 	if err != nil {
 		fmt.Fprintf(x.opts.Log, "dashboard: read session registry: %v\n", err)
 		return
 	}
-	seen := map[string]bool{}
 	for _, reg := range regs {
 		seen[reg.ReplyID] = true
 		if x.endedApplied(reg) {
@@ -218,6 +224,18 @@ func (x *Index) Refresh() {
 // once: until then a session the index lacks may only be unread yet, so a
 // store keyed by reply-id (the rail layout) must not drop it as forgotten.
 func (x *Index) Loaded() bool { return x.loaded.Load() }
+
+// hierarchyReady is stronger than Loaded: an incomplete startup listing or
+// source read must not turn a stored parent into false top-level authority.
+// Retain approval intent until recovery; this checks only existing memory.
+func (x *Index) hierarchyReady(replyID string) bool {
+	if x == nil || !x.Loaded() {
+		return false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.sessions[replyID] != nil && len(x.readErrors) == 0
+}
 
 // endedApplied reports whether reg is an ended registration the index
 // already applied unchanged and whose project root still exists, so a

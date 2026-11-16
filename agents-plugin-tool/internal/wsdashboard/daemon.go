@@ -257,10 +257,13 @@ type Daemon struct {
 	// (rail_layout.go).
 	layout *railLayoutStore
 	// hireMu serializes proposal decisions, flag changes, and rail nesting.
-	hireMu   sync.Mutex
-	hireNow  func() time.Time
-	hireWake chan struct{}
-	hireDone chan struct{}
+	hireMu     sync.Mutex
+	hireNow    func() time.Time
+	hireAfter  func(time.Duration) (<-chan time.Time, func())
+	hireRead   func() ([]HireProposal, error)
+	hireInLoop bool // guarded by hireMu
+	hireWake   chan struct{}
+	hireDone   chan struct{}
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache

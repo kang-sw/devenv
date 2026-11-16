@@ -268,10 +268,11 @@ which the slot signals in place of a nudge). The hosted writer still writes
 changed, at each turn end, and when its server closes (which also drops the
 copy, so the file renders again); an idle heartbeat writes nothing and only
 moves the copy's `updatedAt`. A session whose directory the daemon does not
-serve stays on the file-and-nudge path. The daemon also re-reads every
-session every 30 seconds, except
-an ended one it already read since it ended (a nudge or a resume still
-re-reads it). A re-read compares a fingerprint taken from metadata (the
+serve stays on the file-and-nudge path. The daemon runs full registry
+safety discovery every five minutes, with targeted 30-second legacy
+liveness/recovery checks between scans. An ended session already applied
+is not re-read unless a nudge, resume, or retry requires it. A re-read
+compares a fingerprint taken from metadata (the
 session record, live-store and mailbox-history entry names, the ticket
 directories' file names, sizes, and modification times, the unread count,
 the contacts, the listening marker) and builds no panel; the board renders
@@ -1473,7 +1474,11 @@ as before; closing the connection (the launcher exits, or the
 daemon drains) cancels the wait at once and clears its listening marker
 (`exit_code` 130, "interrupted"). A hosted wait rechecks on an in-process
 signal (a mailbox send by a server the daemon hosts, a board-answer inbox
-write, or a nudge) with a 10 s backstop poll.
+write, or a nudge) with a five-minute lost-notification backstop poll.
+The daemon's undelivered-mail maintenance likewise discovers queue stores
+at startup and every five minutes, visiting changed stores and pending
+notice deadlines between scans; presence-only heartbeats do not schedule
+maintenance. Failed notice delivery retains its 30-second retry cadence.
 
 `mailbox wait --stream` emits one JSON line per arrival without draining and
 keeps its listening marker until interruption, client disconnect, or parent

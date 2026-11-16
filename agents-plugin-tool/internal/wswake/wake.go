@@ -9,7 +9,10 @@
 // nudge's coalescing, for one) is the subscriber's.
 package wswake
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 // Hub delivers wake signals to its current subscribers. The zero value is
 // ready to use. Signalling a hub with no subscriber costs one lock.
@@ -27,14 +30,25 @@ var Mailbox = &Hub{}
 // pending signal: signals sent while one is pending fold into it, which a
 // level-triggered recheck covers.
 type Sub struct {
-	hub   *Hub
-	hard  chan struct{}
-	nudge chan struct{}
+	hub    *Hub
+	hard   chan struct{}
+	nudge  chan struct{}
+	stores chan struct{}
+	paths  map[string]struct{}
 }
 
 // Subscribe adds a subscriber; Close removes it.
-func (h *Hub) Subscribe() *Sub {
+func (h *Hub) Subscribe() *Sub { return h.subscribe(false) }
+
+// SubscribeStores also collects changed store paths. Ordinary wait subscribers
+// retain no path history, even when they remain armed indefinitely.
+func (h *Hub) SubscribeStores() *Sub { return h.subscribe(true) }
+
+func (h *Hub) subscribe(stores bool) *Sub {
 	s := &Sub{hub: h, hard: make(chan struct{}, 1), nudge: make(chan struct{}, 1)}
+	if stores {
+		s.stores, s.paths = make(chan struct{}, 1), map[string]struct{}{}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.subs == nil {
@@ -49,6 +63,43 @@ func (s *Sub) Hard() <-chan struct{} { return s.hard }
 
 // Nudge receives the nudges.
 func (s *Sub) Nudge() <-chan struct{} { return s.nudge }
+
+// Stores signals changed mailbox queue files, independently of broad hard
+// wakes/nudges. TakeStores drains the level-triggered set after a signal.
+func (s *Sub) Stores() <-chan struct{} { return s.stores }
+
+func (s *Sub) TakeStores() []string {
+	s.hub.mu.Lock()
+	defer s.hub.mu.Unlock()
+	paths := make([]string, 0, len(s.paths))
+	for path := range s.paths {
+		paths = append(paths, path)
+		delete(s.paths, path)
+	}
+	select {
+	case <-s.stores:
+	default:
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// StoreChanged publishes a successful queue change without waking ordinary
+// waiters for presence-only writes. The caller still owns its hard-wake policy.
+func (h *Hub) StoreChanged(path string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for s := range h.subs {
+		if s.stores == nil {
+			continue
+		}
+		s.paths[path] = struct{}{}
+		select {
+		case s.stores <- struct{}{}:
+		default:
+		}
+	}
+}
 
 // Close unsubscribes; it is safe to call more than once.
 func (s *Sub) Close() {
