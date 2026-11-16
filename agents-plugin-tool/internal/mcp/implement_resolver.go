@@ -470,11 +470,15 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 // error: treating an unverifiable branch as clean would let unrelated ticket
 // work be mixed precisely when the safety check cannot run.
 func aheadOfMergeRootCount(client wsgit.Client, root, mergeRoot, currentBranch string) (int, error) {
-	result, err := client.MergeBase(context.Background(), root, mergeRoot, currentBranch)
+	// These are local branch identities, not arbitrary revisions. A same-named
+	// tag must not shadow either branch and make unique work look fully landed.
+	mergeRootRef := "refs/heads/" + mergeRoot
+	currentBranchRef := "refs/heads/" + currentBranch
+	result, err := client.MergeBase(context.Background(), root, mergeRootRef, currentBranchRef)
 	if err != nil {
 		return 0, err
 	}
-	out, err := client.Runner.RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranch)
+	out, err := client.Runner.RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranchRef)
 	if err != nil {
 		return 0, err
 	}

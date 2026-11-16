@@ -327,7 +327,7 @@ func TestObserveImplementBranchVouchedTargetAheadFailsClosed(t *testing.T) {
 			runGit(t, root, "commit", "--allow-empty", "-m", "current work")
 			intercepted := false
 			client := wsgit.Client{Runner: mergeInterceptRunner{intercept: func(_ context.Context, _ string, args []string) ([]byte, error, bool) {
-				if len(args) == 3 && args[0] == "rev-list" && args[1] == "--count" && strings.HasSuffix(args[2], ".."+target) {
+				if len(args) == 3 && args[0] == "rev-list" && args[1] == "--count" && strings.HasSuffix(args[2], "..refs/heads/"+target) {
 					intercepted = true
 					return []byte(tc.output), tc.err, true
 				}
@@ -338,6 +338,49 @@ func TestObserveImplementBranchVouchedTargetAheadFailsClosed(t *testing.T) {
 			}
 			if !intercepted {
 				t.Fatal("target count fault was not exercised")
+			}
+		})
+	}
+}
+
+func TestObserveImplementBranchIgnoresShadowingTags(t *testing.T) {
+	for _, shadow := range []string{"target", "merge root", "current"} {
+		t.Run(shadow, func(t *testing.T) {
+			root := t.TempDir()
+			initGit(t, root)
+			runGit(t, root, "config", "core.warnAmbiguousRefs", "false")
+			runGit(t, root, "switch", "-c", "develop")
+			runGit(t, root, "commit", "--allow-empty", "-m", "base")
+			stem := "260921-feat-vouched-reentry"
+			target := implTicketBranch("develop", stem)
+			runGit(t, root, "switch", "-c", target)
+			runGit(t, root, "commit", "--allow-empty", "-m", "unique target work")
+			runGit(t, root, "switch", "develop")
+			branch := "impl/develop/manual"
+			runGit(t, root, "switch", "-c", branch)
+			runGit(t, root, "commit", "--allow-empty", "-m", "unique current work")
+			switch shadow {
+			case "target":
+				runGit(t, root, "tag", target, "refs/heads/develop")
+			case "merge root":
+				runGit(t, root, "tag", "develop", "refs/heads/"+target)
+			case "current":
+				runGit(t, root, "tag", branch, "refs/heads/develop")
+			}
+			obs, err := observeImplementBranch(wsgit.NewClient(), root, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !obs.TargetExists || obs.TargetAheadOfMergeRoot != 1 || obs.AheadOfMergeRoot != 1 {
+				t.Fatalf("shadowing tag corrupted local branch counts: %+v", obs)
+			}
+			n := normalizedImplementFacts{
+				TicketStem: stem, ScopeSlug: implTicketSuffix(stem), AllowRename: "yes",
+				IdentityVouch: &implementIdentityVouch{Branch: branch, TicketStem: stem},
+			}
+			plan := deriveImplementBranchPlan(n, obs)
+			if plan.Action != "stop" || strings.Contains(implementBranchNextInstruction(implementVerdict{BranchPlan: plan}), "git branch -d") {
+				t.Fatalf("shadowing tag authorized cleanup of unique branch work: %+v", plan)
 			}
 		})
 	}
