@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -302,6 +304,42 @@ func TestObserveImplementBranchFailsClosedWhenAheadStateCannotBeVerified(t *test
 	runGit(t, root, "checkout", "-b", "impl/missing-root/owner")
 	if _, err := observeImplementBranch(wsgit.NewClient(), root, ""); err == nil {
 		t.Fatal("observeImplementBranch unexpectedly treated an unresolvable merge root as zero commits ahead")
+	}
+}
+
+func TestObserveImplementBranchVouchedTargetAheadFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		err          error
+	}{
+		{name: "read failure", err: errors.New("injected target count failure")},
+		{name: "invalid count", output: "not-a-count\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			initGit(t, root)
+			runGit(t, root, "switch", "-c", "develop")
+			runGit(t, root, "commit", "--allow-empty", "-m", "base")
+			stem := "260921-feat-vouched-reentry"
+			target := implTicketBranch("develop", stem)
+			runGit(t, root, "branch", target)
+			runGit(t, root, "switch", "-c", "impl/develop/manual")
+			runGit(t, root, "commit", "--allow-empty", "-m", "current work")
+			intercepted := false
+			client := wsgit.Client{Runner: mergeInterceptRunner{intercept: func(_ context.Context, _ string, args []string) ([]byte, error, bool) {
+				if len(args) == 3 && args[0] == "rev-list" && args[1] == "--count" && strings.HasSuffix(args[2], ".."+target) {
+					intercepted = true
+					return []byte(tc.output), tc.err, true
+				}
+				return nil, nil, false
+			}}}
+			if _, err := observeImplementBranch(client, root, target); err == nil || !strings.Contains(err.Error(), "verify leftover target branch ahead state") {
+				t.Fatalf("unverified target must fail before a vouch can authorize recreation: %v", err)
+			}
+			if !intercepted {
+				t.Fatal("target count fault was not exercised")
+			}
+		})
 	}
 }
 

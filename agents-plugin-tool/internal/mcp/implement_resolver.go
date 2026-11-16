@@ -579,7 +579,7 @@ func resolveImplement(input implementInput, source implementRouteFactsSource, ob
 	docMode := deriveImplementDocMode(n)
 	branchPlan := deriveImplementBranchPlan(n, obs)
 	warnings = append(warnings, branchPlan.Warnings...)
-	if (branchPlan.Action == "create" || branchPlan.Action == "recreate") && n.MergeTargetPolicy != "" {
+	if (branchPlan.Action == "create" || branchPlan.Action == "recreate") && n.MergeTargetPolicy != "" && branchPlan.CurrentBranch == branchPlan.MergeTarget {
 		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
 	}
 	if routeFactsMissing(source.Status) {
@@ -941,8 +941,18 @@ func finishImplementBranchPlanTail(plan implementBranchPlan, n normalizedImpleme
 			obs.AheadOfMergeRoot, plan.MergeTarget, firstNonEmpty(n.TicketStem, "unspecified"), plan.SuspectedOwnerStem)
 		return plan
 	}
-	// A vouch lifts only the identity stop. A canonical-name collision remains
-	// blocking; sharing/tracking state keeps the vouched branch in place.
+	// Only name-rooted targets have a measured ahead count; a legacy target's
+	// default zero is not landing evidence. Recreation leaves the vouched
+	// current branch and its tracking untouched, so rename policy is irrelevant.
+	if _, _, nameRooted := parseImplBranchRoot(targetBranch); vouched && nameRooted && obs.TargetExists && obs.TargetAheadOfMergeRoot == 0 {
+		plan.Action = "recreate"
+		plan.Reason = fmt.Sprintf(
+			"leftover fully-landed implementation branch %q has no commits ahead of merge root %q; delete and recreate for a clean re-entry",
+			targetBranch, plan.MergeTarget)
+		return plan
+	}
+	// Other canonical-name collisions remain blocking; sharing/tracking state
+	// keeps a vouched branch in place only when the target does not exist.
 	if vouched && !obs.TargetExists && (obs.Upstream != "" || obs.Ahead != 0 || obs.Behind != 0 || n.AllowRename != "yes") {
 		plan.Action = "continue"
 		plan.TargetBranch = obs.CurrentBranch
