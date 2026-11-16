@@ -37,8 +37,10 @@
  * best-effort by design (see `readAndClearSidecar`).
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { isExecutionAgent, withoutRetiredNativeTools } from "./native-agent-policy.ts";
 import { labelAdapterText } from "./adapter-label.ts";
 import { withSummaryId } from "./summary-id.ts";
 import { TOOL_GROUPS, isOwnerHeld, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
@@ -488,14 +490,15 @@ export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
       `${orphanDisplayId(orphan)} · ${orphan.spawnRole ?? "worker"}`,
       ...(orphan.title ? [orphan.title] : []),
       `State at shutdown: running, ${reportSummary(orphan)}`,
-      `Resume: ws-agent-send ${target} "<repeat the interrupted instruction>"`,
-      `Inspect first: ws-agent-transcript ${target}`,
+      `Inspect/resume execution worker: /audit ${target} (interactive owner TUI only).`,
+      `Session history: ${orphan.sessionPath}`,
+      "No process, in-flight command approval, or report history was recovered. Re-issue interrupted work only after inspection; shell commands require fresh correlated approval.",
     );
   }
   if (idle.length > 0) {
     lines.push(
       `${idle.length} previously idle agent${idle.length === 1 ? " was" : "s were"} also restored.`,
-      `Use ws-agent-list to inspect ${idle.length === 1 ? "it" : "them"}.`,
+      "Use /audit in the owner TUI to inspect retained execution history; daemon pi.* does not own these workers.",
     );
   }
   return lines.join("\n");
@@ -560,6 +563,49 @@ export function readAndClearSidecar(leadSessionFile: string): PersistedOrphan[] 
   return readAndClearSidecarAt(sidecarPath(leadSessionFile));
 }
 
+/**
+ * Production recovery boundary. Legacy general/fork/research and unrecognized
+ * entries are never revived. Quarantine the entire original file, byte-for-byte
+ * (including unknown fields), before returning any recognized execution workers.
+ * A failed quarantine preserves the source and refuses recovery, rather than
+ * silently consuming history or claiming a daemon adopted it.
+ */
+export function readExecutionSidecarAt(path: string, notice: (message: string) => void): PersistedOrphan[] {
+  let raw: string;
+  try { raw = readFileSync(path, "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") notice(`ws-pi-agent: could not read native sidecar ${path}; retained in place, no workers recovered.`);
+    return [];
+  }
+  const parsed = parseOrphans(raw);
+  const execution = parsed.filter(isExecutionAgent);
+  let rawCount = -1;
+  try {
+    const file = JSON.parse(raw);
+    if (file?.version === SIDECAR_VERSION && Array.isArray(file.orphans)) rawCount = file.orphans.length;
+  } catch { /* Unrecognized history is preserved too. */ }
+  if (rawCount !== execution.length) {
+    const quarantine = `${path}.retired-${randomUUID()}`;
+    try { renameSync(path, quarantine); }
+    catch {
+      notice(`ws-pi-agent: native sidecar ${path} contains retired or unrecognized agents; could not quarantine it. File retained in place, no workers recovered.`);
+      return [];
+    }
+    notice(`ws-pi-agent: retired general/fork/explore native entries were NOT resumed or adopted by daemon pi.*. Original sidecar preserved at ${quarantine}; session history files were not changed. Only ${execution.length} recognized execution-worker record(s) may be restored as dormant.`);
+  } else {
+    try { rmSync(path); }
+    catch {
+      notice(`ws-pi-agent: could not consume native sidecar ${path}; file retained, no workers recovered.`);
+      return [];
+    }
+  }
+  return execution.map(orphan => ({
+    ...orphan,
+    ...(orphan.delegation ? { delegation: { ...orphan.delegation, tools: withoutRetiredNativeTools(orphan.delegation.tools) } } : {}),
+  }));
+}
+
+/** Legacy parser/filesystem seam for historical-format tests, not startup recovery. */
 export function readAndClearSidecarAt(path: string): PersistedOrphan[] {
   let raw: string | undefined;
   try {

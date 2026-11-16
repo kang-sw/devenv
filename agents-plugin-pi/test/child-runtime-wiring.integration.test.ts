@@ -33,7 +33,6 @@ import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const EXTENSION_ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
 const BUNDLED_RUNTIME = readFileSync(join(PACKAGE_ROOT, "runtime.json"), "utf8");
-const FORK_CONTEXT = { version: 1, kind: "task", effectiveSystemPrompt: "captured", activeTools: [], registeredTools: [] };
 
 interface InstallRun { argv: string[]; cwd: string; binary: string; binaryExisted: boolean }
 
@@ -143,16 +142,18 @@ async function session(opts: { marker: boolean }) {
   }
   const storage = createAgentStorageContext("wiring-lead", root);
   const tools = registerAgentTools(pi, bridge, { cwd: root, storage, extensionPath: EXTENSION_ENTRY });
+  const promptPath = join(root, "execution-prompt.md");
+  writeFileSync(promptPath, "Offline execution task");
   const spawnCtx = {
     storage, pi, cwd: root, inheritModel: "pi/small", catalog: [], wsToolNames: [], extensionPath: EXTENSION_ENTRY,
-    client: bridge.client, forkFrom: "/tmp/wiring-parent.jsonl", spawnRole: "fork", forkContext: FORK_CONTEXT,
+    client: bridge.client, toolGroup: "execute-worker", spawnRole: "execute-worker",
   };
   return {
     pluginDir,
     launcher,
     builds,
     installs,
-    spawn: () => spawnAgent(tools.rpcRegistry as Map<string, RpcAgentRecord>, spawnCtx as never, { prompt: "task" }),
+    spawn: () => spawnAgent(tools.rpcRegistry as Map<string, RpcAgentRecord>, spawnCtx as never, { systemPromptPath: promptPath, prompt: "task" }),
     bump: () => {
       const contract = JSON.parse(BUNDLED_RUNTIME) as { plugin_version: string };
       writeFileSync(runtimeJsonPath, JSON.stringify({ ...contract, plugin_version: `${contract.plugin_version}-bumped` }));

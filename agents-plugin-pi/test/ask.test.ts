@@ -104,7 +104,6 @@ import {
   type PersistedForkResume,
 } from "../src/ask.ts";
 import { ConversationViewComponent, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
-import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import {
   agentWidgetRefreshRef,
   applyRpcEvent,
@@ -170,7 +169,6 @@ describe("tool names", () => {
   test("260911: renamed from ws-ask/ws-resolve; fork role handlers refuse execution instead of hiding schemas", () => {
     assert.equal(ASK_TOOL_NAME, "ws-queue-question");
     assert.equal(RESOLVE_TOOL_NAME, "ws-withdraw-question");
-    assert.equal(FORK_EXCLUDED_TOOL_NAMES.size, 0);
   });
 });
 

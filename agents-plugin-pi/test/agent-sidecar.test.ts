@@ -532,12 +532,14 @@ describe("buildOrphanSummary", () => {
         "scout · fork",
         "Inspect recovery copy",
         "State at shutdown: running, last report 2026-09-05T10:00:00.000Z",
-        "Resume: ws-agent-send scout \"<repeat the interrupted instruction>\"",
-        "Inspect first: ws-agent-transcript scout",
+        "Inspect/resume execution worker: /audit scout (interactive owner TUI only).",
+        "Session history: s",
+        "No process, in-flight command approval, or report history was recovered. Re-issue interrupted work only after inspection; shell commands require fresh correlated approval.",
         "fedcba98 · worker",
         "State at shutdown: running, no reports",
-        "Resume: ws-agent-send fedcba98-7654-3210-fedc-ba9876543210 \"<repeat the interrupted instruction>\"",
-        "Inspect first: ws-agent-transcript fedcba98-7654-3210-fedc-ba9876543210",
+        "Inspect/resume execution worker: /audit fedcba98-7654-3210-fedc-ba9876543210 (interactive owner TUI only).",
+        "Session history: s",
+        "No process, in-flight command approval, or report history was recovered. Re-issue interrupted work only after inspection; shell commands require fresh correlated approval.",
       ].join("\n"),
     );
   });
@@ -548,18 +550,18 @@ describe("buildOrphanSummary", () => {
       orphan({ agentId: "a2", state: "idle" }),
       orphan({ agentId: "a3" }),
     ]);
-    assert.equal(summary.split("\n").slice(-2).join("\n"), "2 previously idle agents were also restored.\nUse ws-agent-list to inspect them.", "an orphan with no state field reads as idle");
+    assert.equal(summary.split("\n").slice(-2).join("\n"), "2 previously idle agents were also restored.\nUse /audit in the owner TUI to inspect retained execution history; daemon pi.* does not own these workers.", "an orphan with no state field reads as idle");
     assert.ok(!summary.includes("a2") && !summary.includes("a3"));
   });
 
   test("uses singular grammar for one previously idle agent", () => {
     const summary = buildOrphanSummary([orphan({ agentId: "a1", state: "running" }), orphan({ agentId: "a2", state: "idle" })]);
-    assert.match(summary, /1 previously idle agent was also restored\.\nUse ws-agent-list to inspect it\.$/);
+    assert.match(summary, /1 previously idle agent was also restored\.\nUse \/audit in the owner TUI/);
   });
 
   test("an all-running set has no idle-restoration note", () => {
     const summary = buildOrphanSummary([orphan({ agentId: "a1", state: "running" })]);
-    assert.equal(summary.split("\n").length, 5);
+    assert.equal(summary.split("\n").length, 6);
     assert.ok(!summary.includes("previously idle"));
   });
 });
@@ -575,7 +577,7 @@ describe("buildOrphanPush (announce only what was cut off)", () => {
     return { agentId: "a1", sessionPath: "s", systemPromptPath: "p", wsToolNames: [], toolGroup: "full-worker", ...overrides };
   }
 
-  test("an all-idle set is worth NO message — every entry is still re-registered, and ws-agent-list is the trace", () => {
+  test("an all-idle set is worth NO message — retained execution history is available through /audit", () => {
     assert.equal(buildOrphanPush([orphan({ agentId: "a1", state: "idle" }), orphan({ agentId: "a2" })]), undefined);
   });
 
@@ -595,7 +597,7 @@ describe("buildOrphanPush (announce only what was cut off)", () => {
     assert.equal(agents[0], "1 mid-turn agent recovered as dormant");
     assert.ok(agents.includes("a1 · worker"));
     assert.ok(agents.includes("State at shutdown: running, no reports"));
-    assert.ok(agents.includes("Resume: ws-agent-send a1 \"<repeat the interrupted instruction>\""));
+    assert.ok(agents.includes("Inspect/resume execution worker: /audit a1 (interactive owner TUI only)."));
     assert.ok(agents.includes("2 previously idle agents were also restored."));
     assert.ok(!String(push.agents).includes("a2") && !String(push.agents).includes("a3"));
   });
@@ -604,7 +606,7 @@ describe("buildOrphanPush (announce only what was cut off)", () => {
     const push = buildOrphanPush([orphan({ agentId: "a1", state: "running" }), orphan({ agentId: "a2", state: "running" })])!;
     assert.equal(push.count, 2);
     assert.equal("idle_agent_ids" in push, false);
-    assert.equal(String(push.agents).split("\n").length, 9, "one header plus four concise recovery lines per interrupted agent");
+    assert.equal(String(push.agents).split("\n").length, 11, "one header plus five truthful recovery lines per interrupted execution worker");
   });
 
   test("261007: the directly sent orphan notice carries the payload as JSON under the adapter label", () => {
@@ -696,44 +698,27 @@ describe("writeSidecar / readAndClearSidecar (filesystem)", () => {
 describe("reviveOrphans (role wiring re-armed on revival)", () => {
   const pi = { sendMessage() {} } as unknown as ExtensionAPI;
 
-  test("a full sidecar round trip revives a fork with no owner-question hook, so a stale kind:question is a plain report", () => {
+  test("runtime revival restores only execution workers and never re-arms retired general/fork records", () => {
     const source: RpcAgentRegistry = new Map([
       ["fork-1", record({ agentId: "fork-1", spawnRole: "fork", client: {} as RpcClient })],
       ["worker-1", record({ agentId: "worker-1", spawnRole: "worker", client: {} as RpcClient })],
-      ["ex-1", record({ agentId: "ex-1", spawnRole: "execute-worker", client: {} as RpcClient })],
+      ["ex-1", record({ agentId: "ex-1", toolGroup: "execute-worker", spawnRole: "execute-worker", client: {} as RpcClient })],
     ]);
     const parsed = parseOrphans(serializeOrphans(captureOrphans(source)));
 
     const revivedRegistry: RpcAgentRegistry = new Map();
-    // index.ts's own revival wiring, the one function both session_start
-    // revival sites call: no owner-question callback is passed, so the revived
-    // fork arms no onQuestionReport.
+    // The runtime restoration boundary admits execution workers only.
     const relayed: string[] = [];
     reviveSessionOrphans(pi, revivedRegistry, parsed, (rec) => relayed.push(rec.agentId));
 
-    assert.deepEqual([...revivedRegistry.keys()].sort(), ["ex-1", "fork-1", "worker-1"]);
+    assert.deepEqual([...revivedRegistry.keys()], ["ex-1"]);
     const ex = revivedRegistry.get("ex-1")!;
     ex.onApprovalPending?.(ex);
     assert.deepEqual(relayed, ["ex-1"], "a revived execute-worker carries the approval relay on its record");
     assert.equal(ex.onQuestionReport, undefined);
-    const fork = revivedRegistry.get("fork-1")!;
-    assert.equal(fork.client, undefined, "revived dormant — ws-agent-send relaunches it from its own session file");
-    assert.equal(fork.onQuestionReport, undefined, "a revived fork is not armed with the owner-question hook");
-
-    // A fork revived from a pre-change session file may still send kind:"question".
-    const outcome = applyRpcEvent(fork, {
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "question", message: "which anchor?" },
-    });
-    assert.deepEqual(
-      outcome,
-      { push: { family: "ws-agent-report", payload: { report: "which anchor?" }, deliverAs: "followUp" } },
-      "a residual kind is ignored: the lead gets a plain report, never ws-agent-question",
-    );
-
-    const worker = revivedRegistry.get("worker-1")!;
-    assert.equal(worker.onQuestionReport, undefined, "a plain worker has no role wiring to re-arm");
+    assert.equal(ex.client, undefined, "only a dormant execution record is restored, not a live process");
+    assert.equal(revivedRegistry.has("fork-1"), false);
+    assert.equal(revivedRegistry.has("worker-1"), false);
   });
 
   test("an execute-worker's approval relay is re-armed on the record itself, not left to the resume call site", () => {

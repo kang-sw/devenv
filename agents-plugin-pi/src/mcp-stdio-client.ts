@@ -325,10 +325,10 @@ export class McpStdioClient {
     });
   }
 
-  async initialize(clientInfo: { name: string; version: string }): Promise<McpInitializeResult> {
+  async initialize(clientInfo: { name: string; version: string }, capabilities: Record<string, unknown> = {}): Promise<McpInitializeResult> {
     return this.request<McpInitializeResult>("initialize", {
       protocolVersion: "2025-03-26",
-      capabilities: {},
+      capabilities,
       clientInfo,
     });
   }

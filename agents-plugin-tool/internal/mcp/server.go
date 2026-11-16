@@ -36,6 +36,7 @@ type Server struct {
 	whiteboardChanged func(cacheHome, root, key string)
 	rootMu            sync.RWMutex
 	sessionHarness    string
+	piDaemonAgents    bool // initialize experimental capability, protected by rootMu
 	sessions          *sessionStore
 	mailbox           mailboxRuntimeState
 	// indexOpts configures the ticket ownership index client; zero values
@@ -386,6 +387,7 @@ func (s *Server) handleNotification(req request, requests *sync.Map) {
 func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
+		s.observePiDaemonAgents(req.Params)
 		s.observeHarness("initialize", detectHarnessFromInitializeParams(req.Params))
 		// No session/root exists yet at this call: a machine-scope identity
 		// registers immediately (needs no root); a worktree/clone identity
@@ -4208,6 +4210,30 @@ func (s *Server) observeHarness(source, harness string) {
 			"observed": harness,
 		})
 	}
+}
+
+// observePiDaemonAgents records the client's explicit model-facing opt-in.
+// Missing or malformed metadata never implies support.
+func (s *Server) observePiDaemonAgents(raw json.RawMessage) {
+	var params struct {
+		Capabilities struct {
+			Experimental struct {
+				PiDaemonAgents bool `json:"wsPiDaemonAgents"`
+			} `json:"experimental"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil {
+		params.Capabilities.Experimental.PiDaemonAgents = false
+	}
+	s.rootMu.Lock()
+	s.piDaemonAgents = params.Capabilities.Experimental.PiDaemonAgents
+	s.rootMu.Unlock()
+}
+
+func (s *Server) clientPiDaemonAgents() bool {
+	s.rootMu.RLock()
+	defer s.rootMu.RUnlock()
+	return s.piDaemonAgents
 }
 
 func (s *Server) currentHarness() string {

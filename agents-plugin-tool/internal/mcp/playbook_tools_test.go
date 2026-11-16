@@ -282,11 +282,7 @@ func TestPlaybookPrintPiHarnessSelectsOverlay(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintPiHarnessUsesPiTerminology pins the exact native Pi idioms
-// (the ws Pi extension's tools) that delegate playbooks receive; a Pi session
-// without that extension gets the MCP-only row instead
-// (playbook_pi_mcp_only_test.go). Structural overlays remain independently
-// tested; terminology substitution must not rely on one.
+// An unmarked Pi client receives neutral idioms rather than unavailable tools.
 func TestPlaybookPrintPiHarnessUsesPiTerminology(t *testing.T) {
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
 		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
@@ -299,9 +295,9 @@ func TestPlaybookPrintPiHarnessUsesPiTerminology(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"ExploreAgent":  "the `explore` researcher",
-		"SpawnIdiom":    "ws-agent-spawn",
-		"ContinueIdiom": "ws-agent-send to the same alias or agent id",
+		"ExploreAgent":  "an exploration agent",
+		"SpawnIdiom":    "spawning a subagent",
+		"ContinueIdiom": "resuming the agent using its returned id",
 	}
 	piTerm := terminologyForHarness("pi", RuntimeNamespace())
 	for varName, term := range want {

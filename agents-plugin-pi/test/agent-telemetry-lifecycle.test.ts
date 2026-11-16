@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { agentWidgetRefreshRef, attachEventListener, refreshAgentTelemetry, registerAgentTools as registerAgentToolsBase, sendToAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { agentWidgetRefreshRef, attachEventListener, refreshAgentTelemetry, registerAgentTools as registerAgentToolsBase, sendToAgent, spawnAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
 
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
@@ -251,8 +251,8 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       const tools = new Map<string, any>();
       const pi = { registerTool: (tool: any) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
       const handle = registerAgentTools(pi, { client: { callTool: async () => { throw new Error("no tier lookup"); } }, wsToolNames: [], defaultSessionKeyRef: { current: "lead" } } as never, { cwd: dir });
-      const result = await tools.get("ws-agent-spawn").execute("call", { system_prompt_path: join(dir, "p.md"), prompt: "still dispatch" }, undefined, undefined, { sessionManager: { getSessionId: () => "lead" }, agentStorageRoot: dir, modelRegistry: { getAll: () => [], hasConfiguredAuth: () => true } });
-      const record = handle.rpcRegistry.get(JSON.parse(result.content[0].text).agent_id)!;
+      const result = await spawnAgent(handle.rpcRegistry, { pi, cwd: dir, extensionPath: TEST_EXTENSION_ENTRY, storage: createAgentStorageContext("lead", dir), catalog: [], wsToolNames: [], client: {} as never, toolGroup: "execute-worker" }, { systemPromptPath: join(dir, "p.md"), prompt: "still dispatch" });
+      const record = handle.rpcRegistry.get(result.agent_id)!;
       assert.deepEqual(prompts, ["still dispatch"]); assert.equal(record.telemetry, undefined);
       await handle.stopAll();
     } finally { closeFakeChildren(); Object.assign(RpcClient.prototype, original); }
@@ -281,8 +281,8 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       const tools = new Map<string, any>();
       const pi = { registerTool: (tool: any) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
       const handle = registerAgentTools(pi, { client: { callTool: async () => { throw new Error("no tier lookup"); } }, wsToolNames: [], defaultSessionKeyRef: { current: "lead" } } as never, { cwd: dir });
-      const result = await tools.get("ws-agent-spawn").execute("call", { system_prompt_path: join(dir, "p.md"), prompt: "first" }, undefined, undefined, { sessionManager: { getSessionId: () => "lead" }, agentStorageRoot: dir, model: { provider: "requested", id: "large" }, thinkingLevel: "high", modelRegistry: { getAll: () => [], hasConfiguredAuth: () => true } });
-      const record = handle.rpcRegistry.get(JSON.parse(result.content[0].text).agent_id)!;
+      const result = await spawnAgent(handle.rpcRegistry, { pi, cwd: dir, extensionPath: TEST_EXTENSION_ENTRY, storage: createAgentStorageContext("lead", dir), inheritModel: "requested/large", inheritEffort: "high", catalog: [], wsToolNames: [], client: {} as never, toolGroup: "execute-worker" }, { systemPromptPath: join(dir, "p.md"), prompt: "first" });
+      const record = handle.rpcRegistry.get(result.agent_id)!;
       assert.deepEqual(record.telemetry?.origin, { sessionId: "child", sessionPath: session, emptyPrefix: true });
       assert.equal(record.telemetry?.contextTokens, 61_782);
       assert.equal(record.observedModel, "actual/clamped"); assert.equal(record.observedEffort, "low"); assert.deepEqual(prompts, ["first"]);

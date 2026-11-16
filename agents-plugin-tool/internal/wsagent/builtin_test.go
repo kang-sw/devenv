@@ -55,8 +55,23 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != 8 {
-		t.Fatalf("ResolveProfiles with no config should list the builtin support, lead, pi-worker, pi-mini-lead, and search-answer profiles: %+v, %v", all, err)
+	if err != nil || len(all) != 9 {
+		t.Fatalf("ResolveProfiles with no config should list all nine builtin profiles: %+v, %v", all, err)
+	}
+}
+
+func TestBuiltinExploreProfile(t *testing.T) {
+	rp, err := ResolveProfile(testConfig(t), t.TempDir(), ExploreProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := rp.Definition
+	if rp.Scope != wsconfig.ScopeBuiltin || p.Backend != BackendPi || p.Lead || !slices.Equal(p.Tools, []string{"read", "grep", "find", "ls"}) || len(p.WSTools)+len(p.MCPServers)+len(p.Plugins) != 0 || p.Skills || p.Model != "" || p.Effort != "" {
+		t.Fatalf("explore profile is not local read-only and tier-selected: %+v", p)
+	}
+	text, ok := p.BuiltinInstructions()
+	if !ok || !strings.Contains(text, "file paths and line numbers") || !strings.Contains(text, "uncertainty") {
+		t.Fatalf("explore evidence instructions missing: %q", text)
 	}
 }
 

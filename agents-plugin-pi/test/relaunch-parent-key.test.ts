@@ -16,7 +16,6 @@ import { DELEGATION_ENV, type DelegationPolicy } from "../src/delegation-policy.
 import { registerAgentTools, relaunchDelegation, sendToAgent, spawnAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import { closeThreadOnDone, createForkChannel, createThreadRegistryHandle, ensureRespondent, type ThreadRecord } from "../src/ask.ts";
-import { buildForkSpawnCtx } from "../src/fork.ts";
 import { until } from "./fixtures/subtree-channels.ts";
 
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
@@ -57,7 +56,7 @@ function installRpcHarness(start: (this: any) => Promise<void>, extra: Proto = {
   return () => { closeFakeChildren(); Object.assign(proto, saved); };
 }
 
-test("ws-agent-send relaunches a dormant worker with the lead's key read at send time", async () => {
+test("internal execution-worker resume uses the lead's key read at send time", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-relaunch-parent-")));
   const launched: DelegationPolicy[] = [];
   const restore = installRpcHarness(async function (this: { options: { env: Record<string, string>; args: string[] } }) {
@@ -69,7 +68,7 @@ test("ws-agent-send relaunches a dormant worker with the lead's key read at send
   const bridge = { wsToolNames: [], defaultSessionKeyRef: { current: "lead-at-spawn" }, client: {} };
   const handle = registerAgentTools(pi, bridge as never, { cwd: root, extensionPath: TEST_EXTENSION_ENTRY, storage: createAgentStorageContext("relaunch-owner", root) });
   try {
-    for (const [agentId, spawnRole] of [["pre-fix-execute", "execute-worker"], ["pre-fix-worker", "worker"]] as const) {
+    for (const [agentId, spawnRole] of [["pre-fix-execute", "execute-worker"]] as const) {
       const dormant: RpcAgentRecord = {
         agentId, spawnRole, sessionPath: join(root, `${agentId}.jsonl`), systemPromptPath: join(root, "prompt.md"),
         wsToolNames: [], toolGroup: spawnRole === "execute-worker" ? "execute-worker" : "full-worker",
@@ -78,16 +77,16 @@ test("ws-agent-send relaunches a dormant worker with the lead's key read at send
       handle.rpcRegistry.set(agentId, dormant);
     }
     bridge.defaultSessionKeyRef.current = "lead-after-relogin";
-    for (const agentId of ["pre-fix-execute", "pre-fix-worker"]) {
-      await tools.get("ws-agent-send").execute("send", { agent_id: agentId, message: "resume" });
+    for (const agentId of ["pre-fix-execute"]) {
+      await sendToAgent(handle.rpcRegistry, { pi, cwd: root, extensionPath: TEST_EXTENSION_ENTRY, leadSessionKey: bridge.defaultSessionKeyRef.current }, agentId, "resume");
     }
-    assert.equal(launched.length, 2);
+    assert.equal(launched.length, 1);
     for (const policy of launched) {
       assert.equal(policy.parentSessionKey, "lead-after-relogin");
       assert.equal(policy.sessionKey, undefined);
       assert.equal(policy.authority, "leaf", "only the parent key is re-stamped");
     }
-    assert.equal(handle.rpcRegistry.get("pre-fix-worker")!.delegation?.parentSessionKey, undefined, "the stored record policy is left as spawned");
+    assert.equal(handle.rpcRegistry.get("pre-fix-execute")!.delegation?.parentSessionKey, undefined, "the stored record policy is left as spawned");
   } finally {
     await handle.stopAll();
     restore();
@@ -118,9 +117,11 @@ test(`a dormant fork re-stamps ${storedParent ?? "missing"} parent through ${rou
   try {
     const bridge = { wsToolNames: [], defaultSessionKeyRef: { current: "lead-at-spawn" }, client: {} };
     const result = await spawnAgent(registry, {
-      ...buildForkSpawnCtx(pi, bridge as never, { cwd: root, extensionPath: TEST_EXTENSION_ENTRY }, {
-        inheritModel: "offline/test", catalog: [], explicitTools: "read", forkFrom: "/tmp/relaunch-parent.jsonl", forkContext: context as never,
-      }), storage,
+      pi, cwd: root, extensionPath: TEST_EXTENSION_ENTRY, storage,
+      wsToolNames: [], client: bridge.client as never,
+      parentSessionKey: bridge.defaultSessionKeyRef.current,
+      parentPolicy: { version: 1, depth: 0, maxDepth: 2, authority: "lead", tools: ["read"], sessionKey: bridge.defaultSessionKeyRef.current },
+      inheritModel: "offline/test", catalog: [], explicitTools: "read", forkFrom: "/tmp/relaunch-parent.jsonl", spawnRole: "fork", forkContext: context as never,
     }, { prompt: "task" });
     const record = registry.get(result.agent_id)!;
     await record.client?.stop();

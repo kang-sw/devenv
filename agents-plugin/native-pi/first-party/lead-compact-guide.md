@@ -11,8 +11,8 @@ take the boundary when it does.
 Compaction replaces this conversation with a summary. Durable state belongs in
 ws tooling, where it survives every compaction; the summary carries pointers to
 it plus what only this conversation holds. The adapter writes the summary's
-fixed parts itself: the session key, the active ticket and playbook, child
-agents in flight and finished, and the recent dialog (user messages, your
+fixed parts itself: the session key, the active ticket and playbook, internal
+execution workers in flight and finished, and the recent dialog (user messages, your
 replies, branch summaries, and one line per tool call; tool output is left in
 the session file). You write the rest as prose under fixed headings.
 
@@ -38,7 +38,10 @@ Do these in order, without starting new work in between:
    keep file names out of the prose; the lever's file lists below are where
    files go. Aim for about 2-4k tokens in total.
    - **Current work** names the active playbook's current step, if one is
-     running.
+     running. Include daemon Pi child ids, their outstanding assignments and
+     results still needed: the adapter's internal execution-worker snapshot
+     does not inventory `pi.*` children. Use what is already in context; do
+     not poll or load transcripts just for compaction.
    - **Immediate next step** quotes the user's latest request verbatim.
    - **File lists.** `required_rereads` holds only the files the immediate
      next step needs, each with `lines` when only part is needed, and why.
