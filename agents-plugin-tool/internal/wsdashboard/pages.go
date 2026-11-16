@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/tracker-*.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
 var dashboardFS embed.FS
 
 // These are ordered source fragments, not independently loaded scripts or
@@ -68,6 +68,18 @@ var dashboardStyleFiles = []string{
 	"dashboard-shell.css",
 }
 
+var trackerScriptFiles = []string{
+	"tracker.js",
+	"tracker-panel.js",
+	"tracker-wiki.js",
+	"tracker-window.js",
+	"tracker-forms.js",
+	"tracker-menu.js",
+	"tracker-writes.js",
+	"tracker-render.js",
+	"tracker-mount.js",
+}
+
 func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte, error) {
 	var files []string
 	switch name {
@@ -75,6 +87,8 @@ func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte
 		files = dashboardScriptFiles
 	case "dashboard.css":
 		files = dashboardStyleFiles
+	case "tracker.js":
+		files = trackerScriptFiles
 	default:
 		return read(name)
 	}

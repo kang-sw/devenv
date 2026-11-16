@@ -13,7 +13,7 @@ import (
 // equal to the name draws the id alone, as before labels existed. The
 // title helpers execute under node when it is installed.
 func TestTrackerStoreLabelTitles(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

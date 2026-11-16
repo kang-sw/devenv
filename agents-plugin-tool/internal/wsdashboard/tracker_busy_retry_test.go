@@ -28,7 +28,7 @@ func runTrackerNode(t *testing.T, what, script string) {
 // including) end, both regexp-quoted literals.
 func trackerJSBlock(t *testing.T, start, end string) string {
 	t.Helper()
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
