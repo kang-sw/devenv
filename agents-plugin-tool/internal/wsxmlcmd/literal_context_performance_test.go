@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var literalContextShapes = []string{"quoted-wrapper-openers", "wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog", "panel-foo-desync", "rejected-group-html-fence", "rejected-group-html-inline"}
+var literalContextShapes = []string{"quoted-wrapper-openers", "quoted-wrapper-prose-fields", "wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog", "panel-foo-desync", "rejected-group-html-fence", "rejected-group-html-inline"}
 
 func literalContextGrammar() Grammar {
 	g := literalPerformanceGrammar()
@@ -17,6 +17,11 @@ func literalContextGrammar() Grammar {
 }
 
 func literalContextInput(kind string, size int) (string, int) {
+	if kind == "quoted-wrapper-prose-fields" {
+		unit := "Use `<wb:change>` with <wb:old> and <wb:new> fields. "
+		n := max(1, size/len(unit))
+		return `<wb:topic name="t"><wb:panel name="p" recap="r">` + strings.Repeat(unit, n) + `End in </wb:change>.</wb:panel></wb:topic>`, n
+	}
 	if kind == "quoted-wrapper-openers" {
 		body := strings.Repeat("`<wb:change>` ", max(1, size/13))
 		return `<wb:topic name="t"><wb:panel name="p" recap="r">` + body + `</wb:panel></wb:topic>`, 1
@@ -73,6 +78,15 @@ func checkLiteralContext(t *testing.T, kind, input string, count int, ordered bo
 	}
 	if !complete {
 		t.Fatalf("incomplete: %v", p.List)
+	}
+	if kind == "quoted-wrapper-prose-fields" {
+		if ordered {
+			cmds = cmds[1:]
+		}
+		if len(p.List) != count || len(cmds) != 1 || len(cmds[0].Children) != 0 || !strings.HasSuffix(cmds[0].Body, "End in </wb:change>.") {
+			t.Fatalf("prose fields: commands=%d problems=%d want=%d", len(cmds), len(p.List), count)
+		}
+		return
 	}
 	if kind == "quoted-wrapper-openers" {
 		if ordered {
