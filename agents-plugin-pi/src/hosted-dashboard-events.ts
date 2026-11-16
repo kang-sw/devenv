@@ -1,5 +1,5 @@
-/** Hosted leads cannot use intake: the runner owns their snapshot. Send only
- * extension-observed wakes, task counts and eligible lead summaries on its reserved RPC widget instead.
+/** Daemon conversations cannot use intake: the runner owns their snapshot.
+ * Send task counts for workers too; wakes and eligible summaries remain lead-only.
  * Older runners ignore the additive summary/capability fields and keep their
  * existing wake/count handling; no new intake kind is introduced.
  */
@@ -8,6 +8,7 @@ import { defaultSchedule, FLUSH_INTERVAL_MS, PENDING_EVENT_CAP } from "./dashboa
 import { dashboardWakeMessages, type DashboardWake } from "./dashboard-wake.ts";
 import { REASONING_SUMMARY_CAPABILITY, type ReasoningSummary } from "./reasoning-summary.ts";
 import { hostedSummaryLine } from "./reasoning-summary-transport.ts";
+import type { SpawnRole } from "./process-role.ts";
 
 export const HOSTED_EVENTS_WIDGET_KEY = "ws-dashboard-events";
 
@@ -19,6 +20,14 @@ export interface HostedDashboardEventsOptions {
   reasoningSummaryCapable?: boolean;
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => () => void;
+}
+
+/** A spawned worker uses RPC widgets, never the owner lead's intake feed. */
+export function startRpcDashboardEvents(role: SpawnRole | undefined, hosted: boolean, options: HostedDashboardEventsOptions) {
+  if (role === undefined && !hosted) return undefined;
+  const channel = createHostedDashboardEvents(options);
+  channel.start();
+  return channel;
 }
 
 export function createHostedDashboardEvents(options: HostedDashboardEventsOptions) {
@@ -75,6 +84,13 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
     }, lastFlush === undefined ? 0 : Math.max(0, lastFlush + FLUSH_INTERVAL_MS - now()));
   }
 
+  function tasksChanged(): void {
+    if (stopped) return;
+    cancel?.();
+    cancel = undefined;
+    flush();
+  }
+
   function stop(): void {
     stopped = true;
     cancel?.();
@@ -96,15 +112,12 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
       stopped = false;
       capabilityDirty = options.reasoningSummaryCapable !== undefined;
       // A running task must reach the host before its idle timer can stop the
-      // lead. Do not coalesce membership changes behind the dashboard timer.
-      unsubscribe = onBackgroundTasksChanged(() => {
-        cancel?.();
-        cancel = undefined;
-        flush();
-      });
+      // conversation. Do not coalesce membership changes behind the dashboard timer.
+      unsubscribe = onBackgroundTasksChanged(tasksChanged);
       dirty();
     },
     stop,
+    tasksChanged,
     leadEvent(event: unknown) {
       if (stopped) return;
       const e = event as { type?: unknown; message?: unknown } | undefined;

@@ -74,7 +74,7 @@ import type { LeadUsageSummary } from "./agent-cost.ts";
 import type { CumulativeCost } from "./agent-telemetry.ts";
 import { buildAgentViewModel } from "./agent-view.ts";
 import type { GoalLoopConfig } from "./goal-loop.ts";
-import { onBackgroundTasksChanged } from "./background-tasks.ts";
+import { countBackgroundTasks, onBackgroundTasksChanged } from "./background-tasks.ts";
 import { createOutputRateTracker } from "./output-rate.ts";
 import { modelObservation, type ModelObservation } from "./model-observation.ts";
 import { dashboardWakeMessages } from "./dashboard-wake.ts";
@@ -153,6 +153,17 @@ export interface DashboardTarget {
   sessionKey: string | undefined;
   /** Stable bridge identity, not the freshly constructed target wrapper. */
   connection?: object;
+}
+
+/** Local work that must outlive a settled turn: shells, monitors and native
+ * execute jobs (including launch and approval waits). Execute jobs share the
+ * existing background field so older daemons protect them too. */
+export function dashboardTaskCounts(registry: RpcAgentRegistry): { timed: number; monitors: number } {
+  const counts = countBackgroundTasks();
+  for (const record of registry.values()) {
+    if (record.toolGroup === "execute-worker" && (record.launching !== undefined || record.running || record.streaming || record.pendingApproval !== undefined)) counts.timed++;
+  }
+  return counts;
 }
 
 export interface DashboardFeedOptions {

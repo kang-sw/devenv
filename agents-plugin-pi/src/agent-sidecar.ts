@@ -620,7 +620,7 @@ export function readExecutionSidecarAt(path: string, notice: (message: string) =
     const quarantine = `${path}.retired-${randomUUID()}`;
     try { renameSync(path, quarantine); }
     catch { return blocked("Could not quarantine the existing sidecar."); }
-    notice(`ws-pi-agent: retired general/fork/explore native entries were NOT resumed or adopted by daemon pi.*. Original sidecar preserved at ${quarantine}; transcript/prompt bytes were not changed. Permanent owner-held history protection (ownerHeld:true; no live-process claim) excludes these homes from automatic retention until explicitly released: ${heldHomes.join(", ")}. Only ${execution.length} recognized execution-worker record(s) may be restored as dormant.`);
+    notice(`ws-pi-agent: retired general/fork/explore native entries were NOT resumed or adopted by daemon pi.*. Original sidecar preserved at ${quarantine}; transcript/prompt bytes were not changed. Permanent owner-held history protection (ownerHeld:true; no live-process claim) excludes these homes from automatic retention: ${heldHomes.join(", ")}. There is no release command; after all affected sessions have stopped, back up any history you need and manually remove unwanted homes. Only ${execution.length} recognized execution-worker record(s) may be restored as dormant.`);
   } else {
     try { rmSync(path); }
     catch { return blocked("Could not consume the existing execution sidecar."); }

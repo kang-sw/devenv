@@ -90,6 +90,17 @@ function registerExecuteGateway(pi: any, bridge: any, registry: any, sessionCtx:
   return registerExecuteGatewayBase(pi, bridge, registry, { ...sessionCtx, executeWorkerPromptPath: join(process.cwd(), "execute-worker-guide.md"), extensionPath: sessionCtx.extensionPath ?? TEST_EXTENSION_ENTRY }, ...rest);
 }
 
+test("gateway descriptions and aborted approvals never recommend retired native tools", async () => {
+  const tools = new Map<string, any>();
+  registerExecuteGateway({ registerTool: (tool: any) => tools.set(tool.name, tool) }, {}, new Map(), {
+    cwd: process.cwd(), channel: {}, approvalGate: { waitForDecision: async () => "aborted" },
+  });
+  for (const tool of tools.values()) assert.doesNotMatch(tool.description, /ws-agent-(?:spawn|stop|list|transcript)/);
+  assert.match(tools.get(UGLY_READ_TOOL_NAME).description, /pi\.spawn/);
+  const result = await tools.get(GATED_EXEC_TOOL_NAME).execute("aborted", { command: "never run", rationale: "test" });
+  assert.equal(result.content[0].text, "Aborted before the lead responded.");
+});
+
 describe("buildExecuteWorkerPrompt", () => {
   test("no command: returns the lead's prompt unchanged", () => {
     assert.equal(buildExecuteWorkerPrompt({ prompt: "investigate the failing test" }), "investigate the failing test");

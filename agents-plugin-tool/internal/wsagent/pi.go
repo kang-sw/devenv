@@ -386,6 +386,12 @@ func piEnv(env []string) []string {
 	return harnessEnv(env, []string{"WS_PI_", "WS_MAILBOX"}, nil, map[string]string{"PI_SKIP_VERSION_CHECK": "1"})
 }
 
+// piWorkerEnv marks a daemon worker for an explicitly loaded native extension:
+// it must report its own RPC task counts, not start the owner's intake feed.
+func piWorkerEnv(env []string) []string {
+	return append(piEnv(env), "WS_PI_SPAWN_ROLE=worker")
+}
+
 // piLeadEnv is a lead conversation's environment: piEnv without the ws
 // variables of the session that started the daemon (leadDropEnv), plus the
 // hosted-session variables.
@@ -445,7 +451,7 @@ func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 	}
 	cmd := exec.Command(command, append(pre, piArgs(spec, bridge)...)...)
 	cmd.Dir = spec.workDir()
-	cmd.Env = piEnv(spec.Env)
+	cmd.Env = piWorkerEnv(spec.Env)
 	m := newPiMapper(spec)
 	p, err := startChild(spec, cmd, m, piProtocol{})
 	if err != nil {
@@ -980,10 +986,18 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 				return []Event{{CommandError: text}}
 			}
 		case "setWidget":
-			if l.WidgetKey == piEventsWidgetKey && m.spec.Lead != nil {
+			if l.WidgetKey == piEventsWidgetKey {
 				out := piHostedEvents(l.WidgetLines)
 				kept := out[:0]
 				for _, ev := range out {
+					if m.spec.Lead == nil {
+						// Workers report activity on the same RPC channel, but do
+						// not gain the hosted lead's wake or summary authority.
+						if ev.BackgroundTasks != nil {
+							kept = append(kept, Event{BackgroundTasks: ev.BackgroundTasks, Background: ev.Background, Monitors: ev.Monitors})
+						}
+						continue
+					}
 					if ev.summaryCapability != nil {
 						m.summaryCapable = *ev.summaryCapability && len(line)+1 <= wslive.SummaryFrameBytes
 						ev.summaryCapability = nil

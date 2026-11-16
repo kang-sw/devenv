@@ -105,6 +105,73 @@ func TestPiIdleStopWaitsForChildren(t *testing.T) {
 	}
 }
 
+func TestPiIdleStopWaitsForChildBackgroundWork(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	h.globalProfile(PiWorkerProfile, `{"backend":"pi","idle_timeout_seconds":1}`)
+	parent, holder := spawnRecoveryWorker(t, h)
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "child", Tier: "small", Parent: &ParentRef{Kind: ParentConversation, ReplyID: parent.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childHolder := h.holder(child.ID)
+	waited := make(chan TurnResult, 1)
+	go func() {
+		res, _ := h.runner.wait(context.Background(), child.ID, 5*time.Second, true)
+		waited <- res
+	}()
+	eventually(t, "child wait", func() bool {
+		c := h.runner.conv(child.ID)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.parentWaits) > 0
+	})
+	h.holders.out(childHolder, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":1,"monitors":0}`)))
+	h.holders.out(childHolder, recoveryPiReply("waiting for background work")...)
+	if res := <-waited; res.Status != TurnDone {
+		t.Fatalf("child result: %+v", res)
+	}
+	h.holders.out(holder, `{"type":"agent_settled"}`)
+	h.idle(parent.ID)
+	time.Sleep(1200 * time.Millisecond)
+	if !h.state(parent.ID).Process || !h.state(child.ID).Process {
+		t.Fatal("background work must protect the settled worker and its parent")
+	}
+	h.holders.out(childHolder, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":0,"monitors":0}`)))
+	eventually(t, "task completion", func() bool {
+		c := h.runner.conv(child.ID)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.bgTasks == 0
+	})
+	time.Sleep(200 * time.Millisecond)
+	if !h.state(parent.ID).Process {
+		t.Fatal("background completion must rearm a full parent idle interval")
+	}
+	eventually(t, "worker and parent idle stop after background completion", func() bool {
+		return !h.state(child.ID).Process && !h.state(parent.ID).Process
+	})
+}
+
+func TestPiIdleNowWaitsForChildBackgroundWork(t *testing.T) {
+	for _, lead := range []bool{false, true} {
+		kind := ParentConversation
+		if lead {
+			kind = ParentLead
+		}
+		r := &Runner{convs: map[string]*conv{}}
+		parent := &conv{r: r, rec: Record{ReplyID: "parent", Lead: lead}}
+		child := &conv{rec: Record{Parent: &ParentRef{Kind: kind, ReplyID: "parent"}}, bgTasks: 1}
+		r.convs["child"] = child
+		if parent.idleNow() {
+			t.Errorf("lead=%v: child background work must keep the parent alive", lead)
+		}
+		child.bgTasks = 0
+		if !parent.idleNow() {
+			t.Errorf("lead=%v: settled child must release the idle gate", lead)
+		}
+	}
+}
+
 // Failed startup retains the child's prompt for retry, but its failed send
 // has settled and must not count as running work in the parent's idle gate.
 func TestPiIdleStopAfterChildStartFailure(t *testing.T) {

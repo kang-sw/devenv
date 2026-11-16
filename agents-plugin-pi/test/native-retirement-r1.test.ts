@@ -128,6 +128,8 @@ test("I2 real expired owned transcript, prompt and raw sidecar survive quarantin
   assert.deepEqual(recovery.orphans, []);
   assert.equal(readOwnership(legacy.ownership.home)?.liveness.ownerHeld, true);
   assert.match(notices.join("\n"), /Permanent owner-held history protection/);
+  assert.doesNotMatch(notices.join("\n"), /until explicitly released/);
+  assert.match(notices.join("\n"), /manually/);
   assert.match(notices.join("\n"), /no live-process claim/);
   assert.match(notices.join("\n"), new RegExp(legacy.ownership.agentId));
   applySessionStartAgentRetention(undefined, root, { child_retention_ttl_days: 1 }, recovery.orphans, undefined, recovery);
@@ -208,8 +210,11 @@ test("I2/I3 unrecognized metadata keeps the source and fails retention closed on
   const unrelatedStartup = readExecutionSidecarAt(join(root, "another-lead.json"), () => {});
   const globalNotices: string[] = [];
   applySessionStartAgentRetention(undefined, root, { child_retention_ttl_days: 1 }, [], undefined, unrelatedStartup, message => globalNotices.push(message));
-  assert.equal(globalNotices.length, 2);
+  assert.equal(globalNotices.length, 1, "one aggregate notice per startup, not one per home");
   assert.ok(globalNotices.every(message => message.includes("ownerHeld:true") && message.includes("no live-process claim")));
+  assert.doesNotMatch(globalNotices[0], /until explicitly released/);
+  assert.match(globalNotices[0], /manually/);
+  assert.match(globalNotices[0], /2.*homes/);
   assert.equal(readOwnership(legacy.ownership.home)?.liveness.ownerHeld, true);
   assert.equal(readOwnership(otherNamespace.ownership.home)?.liveness.ownerHeld, true);
   assert.equal(readFileSync(sidecar, "utf8"), raw);

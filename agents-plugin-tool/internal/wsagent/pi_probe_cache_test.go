@@ -238,7 +238,7 @@ func TestPiProbeCacheModelExpiryUsesObservation(t *testing.T) {
 }
 
 func TestPiProbeCacheCommandInvalidation(t *testing.T) {
-	for _, change := range []string{"size", "nanosecond mtime", "command", "PATH", "symlink target", "node PATH"} {
+	for _, change := range []string{"size", "subsecond mtime", "command", "PATH", "symlink target", "node PATH"} {
 		t.Run(change, func(t *testing.T) {
 			f := newPiProbeFixture(t)
 			if change == "node PATH" {
@@ -254,7 +254,16 @@ func TestPiProbeCacheCommandInvalidation(t *testing.T) {
 					t.Skipf("symlink unavailable: %v", err)
 				}
 			}
+			if change == "subsecond mtime" {
+				setPiProbeMtime(t, f.command, time.Unix(1_700_000_000, 123_000_000))
+			}
 			if change == "PATH" {
+				if runtime.GOOS == "windows" {
+					// Real LookPath uses PATHEXT, unlike the other mocked cases.
+					f.command += ".exe"
+					f.write(f.command, "mock command")
+					t.Setenv("PATHEXT", ".EXE")
+				}
 				if err := os.Chmod(f.command, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -270,14 +279,10 @@ func TestPiProbeCacheCommandInvalidation(t *testing.T) {
 				if err := os.Chtimes(f.command, info.ModTime(), info.ModTime()); err != nil {
 					t.Fatal(err)
 				}
-			case "nanosecond mtime":
-				info, _ := os.Stat(f.command)
-				at := info.ModTime().Add(time.Nanosecond)
-				if err := os.Chtimes(f.command, at, at); err != nil {
-					t.Fatal(err)
-				}
+			case "subsecond mtime":
+				advancePiProbeMtime(t, f.command)
 			case "command", "PATH":
-				f.command = filepath.Join(f.root, "other", "pi")
+				f.command = filepath.Join(f.root, "other", filepath.Base(f.command))
 				f.write(f.command, "mock command")
 				if change == "PATH" {
 					if err := os.Chmod(f.command, 0o700); err != nil {
@@ -303,6 +308,28 @@ func TestPiProbeCacheCommandInvalidation(t *testing.T) {
 				t.Fatalf("identity reused after %s: models %d, version %d", change, f.modelCalls, f.versionCalls)
 			}
 		})
+	}
+}
+
+func setPiProbeMtime(t *testing.T, path string, at time.Time) {
+	t.Helper()
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func advancePiProbeMtime(t *testing.T, path string) {
+	t.Helper()
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NTFS stores 100 ns ticks, so adding 1 ns can be a no-op. A millisecond
+	// still proves subsecond identity without asking for unrepresentable time.
+	setPiProbeMtime(t, path, before.ModTime().Add(time.Millisecond))
+	after, err := os.Stat(path)
+	if err != nil || after.ModTime().UnixNano() == before.ModTime().UnixNano() || after.ModTime().Unix() != before.ModTime().Unix() {
+		t.Fatalf("subsecond fixture mtime did not change within its second: %v, %v", after, err)
 	}
 }
 
@@ -359,12 +386,20 @@ func TestPiProbeCacheConfigIdentityAndAbsences(t *testing.T) {
 				t.Setenv("PI_CODING_AGENT_DIR", "")
 			case "auth disappears", "auth mtime":
 				f.write(auth, "secret-a")
+				if change == "auth mtime" {
+					setPiProbeMtime(t, auth, time.Unix(1_700_000_000, 123_000_000))
+				}
 			case "models disappears", "models size":
 				f.write(models, "secret-m")
 			case "package appears":
 				if err := os.Remove(pkg); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if change == "relative" {
+				// Temp and checkout can be on different Windows drives. Keep
+				// both spellings relative to a cwd on the fixture's own volume.
+				t.Chdir(f.root)
 			}
 			f.probe()
 			oldModels, oldVersion := f.cache("models").path, f.cache("version").path
@@ -399,11 +434,7 @@ func TestPiProbeCacheConfigIdentityAndAbsences(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "auth mtime":
-				info, _ := os.Stat(auth)
-				at := info.ModTime().Add(time.Nanosecond)
-				if err := os.Chtimes(auth, at, at); err != nil {
-					t.Fatal(err)
-				}
+				advancePiProbeMtime(t, auth)
 			case "models size":
 				f.write(models, "changed credential-m")
 			case "package appears":
