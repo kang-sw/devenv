@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 140ae330ba5cb3e9
 sage-review-completeness-reviewed: 140ae330ba5cb3e9
+completed: 2026-11-16
 ---
 
 # Installed ws and wsflow packages omit the native Pi payload
@@ -943,3 +944,8 @@ release flow, or by excluding the version from the fingerprint.
   7.3 MB shared by ws and wsflow, a 0.7 MB manifest, and 1.7 MB of first-party
   files. It keeps (647)=a: marketplace installs work offline. To land it,
   rebase onto develop and run it through the merge flow.
+
+
+## Resolution (2026-11-16)
+
+Merged into develop at 6b6f7fc96 after rebasing onto v0.50.1. The producer now resolves npm portably (585d91ad3), and the first-party fingerprints were refreshed for 0.50.1 (d81b2eae4). TestPiPrepared passes on w5090. Follow-up: the fingerprint includes the package version, so the payload goes stale on every release bump. The fix belongs in the release flow (see Forward in 44a8688cd).
