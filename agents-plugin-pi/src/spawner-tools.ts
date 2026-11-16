@@ -4,7 +4,7 @@ import { validateCatalogModel, validateConcreteModel, type ConcreteModelRejectio
 import { createAgentStorageContext, type AgentStorageContext } from "./agent-storage.ts";
 import { READ_TOOLS, inheritableTools, readOnlyWsTools } from "./delegation-policy.ts";
 import { withoutRetiredNativeTools } from "./native-agent-policy.ts";
-import type { RpcAgentRegistry } from "./spawner.ts";
+import type { RpcAgentRegistry } from "./spawner-record.ts";
 
 // Only the retained execution gateway owns a native runtime registry. Keep
 // lower-level lifecycle helpers testable without reviving public delegation.
