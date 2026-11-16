@@ -58,6 +58,7 @@ func (d *Daemon) workspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(workspacePreviewRoute, d.handleWorkspacePreview)
 	mux.HandleFunc(workspaceAddRoute, d.handleWorkspaceAdd)
 	mux.HandleFunc(workspaceForgetRoute, d.handleWorkspaceForget)
+	mux.HandleFunc(workspaceGitInitRoute, d.handleWorkspaceGitInit)
 	mux.HandleFunc(worktreeOptionsRoute, d.handleWorktreeOptions)
 	mux.HandleFunc(worktreeAddRoute, d.handleWorktreeAdd)
 	mux.HandleFunc(worktreeDeletePreviewRoute, d.handleWorktreeDeletePreview)

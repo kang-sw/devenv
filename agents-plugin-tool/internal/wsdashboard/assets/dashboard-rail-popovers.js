@@ -757,6 +757,88 @@
     }, true);
   }
 
+  // --- plain-folder git init --------------------------------------------------
+  // The modal lives outside the streamed rail, like the delete modal. Replies
+  // to a closed/reopened instance must not close or overwrite the newer one.
+  var rgit = null;
+  function rgitMake() {
+    var D = { seq: 0, path: "", busy: false, btn: null };
+    var dl = D.el = mk("dialog", "rdeldlg rgitdlg");
+    var hd = dl.appendChild(mk("h2", "rdhd"));
+    hd.id = rpId();
+    dl.setAttribute("aria-labelledby", hd.id);
+    hd.appendChild(gIcon("gitinit"));
+    hd.appendChild(mk("span", null, wsT("js.rail.gitinit.title")));
+    var where = dl.appendChild(mk("code", "rdpath"));
+    var lead = dl.appendChild(mk("p", "rdlead"));
+    wsT("js.rail.gitinit.body", "\u0001").split("\u0001").forEach(function (part, i) {
+      if (i) lead.appendChild(mk("code", null, wsT("js.rail.gitinit.submit")));
+      if (part) lead.appendChild(doc.createTextNode(part));
+    });
+    var note = dl.appendChild(mk("p", "rdnote bad"));
+    note.setAttribute("role", "alert");
+    var row = dl.appendChild(mk("div", "rdrow"));
+    var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var go = row.appendChild(rpBtn("pbtn go", wsT("js.rail.gitinit.submit")));
+    function button() {
+      if (D.btn && D.btn.isConnected) return D.btn;
+      var found = null;
+      q(".rgit", region("rail") || railEl).forEach(function (b) {
+        var ws = b.closest(".rws");
+        if (ws && ws.getAttribute("data-ws") === D.path) found = b;
+      });
+      return found;
+    }
+    go.addEventListener("click", function () {
+      if (D.busy) return;
+      var n = D.seq;
+      D.busy = go.disabled = true;
+      note.textContent = "";
+      note.hidden = true;
+      railPost("/rail/workspaces/git-init", { path: D.path }, function (st, v, s) {
+        if (st === 200) {
+          if (n === D.seq) D.close();
+          toast(String(v.message || ""));
+          return;
+        }
+        if (n !== D.seq) { toast(railErr(st, s)); return; }
+        D.busy = go.disabled = false;
+        note.textContent = railErr(st, s);
+        note.hidden = false;
+      });
+    });
+    cancel.addEventListener("click", function () { D.close(); });
+    dl.addEventListener("cancel", function (e) { e.preventDefault(); D.close(); });
+    dl.addEventListener("close", function () {
+      D.seq++;
+      var b = button();
+      if (b) { b.setAttribute("aria-expanded", "false"); b.focus(); }
+    });
+    D.open = function (btn, path) {
+      D.seq++;
+      D.path = path;
+      D.btn = btn;
+      D.busy = go.disabled = false;
+      where.textContent = where.title = path;
+      note.textContent = "";
+      note.hidden = true;
+      btn.setAttribute("aria-expanded", "true");
+      if (!dl.parentNode) doc.body.appendChild(dl);
+      if (!dl.open) dl.showModal();
+      cancel.focus();
+    };
+    D.close = function () { if (dl.open) dl.close(); };
+    return D;
+  }
+  function railGitInit(btn) {
+    if (!root.hasAttribute("data-sysopen")) return;
+    var ws = btn.closest(".rws"), path = ws && ws.getAttribute("data-ws");
+    if (!path) return;
+    railPopClose(false);
+    rgit = rgit || rgitMake();
+    rgit.open(btn, path);
+  }
+
   // --- rail worktree delete ----------------------------------------------------
   // A linked worktree row's trash button (.rdel) opens the delete modal: a
   // <dialog> shown modal, made once outside the rail region (which every
@@ -958,7 +1040,8 @@
     // Escape closes the delete modal before anything else hears it (the
     // rail overlay would close on it too).
     window.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && rdel && rdel.el.open) { e.preventDefault(); e.stopPropagation(); rdel.close(); }
+      var modal = rgit && rgit.el.open ? rgit : rdel && rdel.el.open ? rdel : null;
+      if (e.key === "Escape" && modal) { e.preventDefault(); e.stopPropagation(); modal.close(); }
     }, true);
   }
   // A framed page opens the session menu (the shell's menu message) against
