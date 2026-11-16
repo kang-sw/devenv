@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>목업 · 패널 변경 거터 (panel diff gutter) · 261116</title>
+<!--
+  Mockup only. Self-contained: no external references.
+  "copied verbatim" blocks are the whiteboard page's real CSS, labelled with source file:line.
+  Everything after "NEW (mockup only)" is the proposal.
+  Theme: :root[data-theme="light"|"dark"] (page.css:50-104); open with #dark for the dark palette.
+-->
+<style>
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page.css:5-36 ---- */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-accent-assumed: #b0245a;
+  --wb-latest-log: rgb(110 200 130 / .08);
+  --wb-ck-ok: var(--wb-announced);
+  --wb-ck-no: #c0262d;
+  --wb-accent-policy: #b25000;
+  --wb-on-accent-policy: #ffffff;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 10%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page.css:37-38 ---- */
+/* Only the lower log history is highlighted, never the topic's recap. */
+.wb-entry.agent.current { background: var(--wb-latest-log); }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page.css:50-104 ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-bg: var(--background, #141518);
+    --wb-fg: var(--foreground, #e7e7e4);
+    --wb-card: var(--card, #1e2024);
+    --wb-muted: var(--muted, #2b2d32);
+    --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+    --wb-primary: var(--primary, #7aa2ff);
+    --wb-primary-fg: var(--primary-foreground, #0c1424);
+    --wb-topic: #2a2d33;
+    --wb-on-topic: #e4e5e8;
+    --wb-now: #243457;
+    --wb-on-now: #d3defb;
+    --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+    --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+    --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+    --wb-accent-assumed: #e48aae;
+    --wb-ck-ok: #6cc39a;
+    --wb-ck-no: #f0797e;
+    --wb-accent-policy: #e0a36c;
+    --wb-on-accent-policy: #1f150b;
+    --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+    --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+    --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  }
+}
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-accent-assumed: #e48aae;
+  --wb-ck-ok: #6cc39a;
+  --wb-ck-no: #f0797e;
+  --wb-accent-policy: #e0a36c;
+  --wb-on-accent-policy: #1f150b;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page.css:115-123 ---- */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
+*:hover { scrollbar-color: color-mix(in srgb, var(--wb-fg) 42%, transparent) transparent; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.id, code { font-family: var(--wb-mono); }
+button { font: inherit; color: inherit; }
+a { color: var(--wb-primary); }
+.wrap { margin: 0 auto; padding: 16px; }
+.full .wrap { max-width: 1200px; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page.css:126-133 ---- */
+/* page header */
+.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.top h1 { font-size: 18px; margin: 0; font-weight: 700; }
+.top .meta { color: var(--wb-muted-fg); font-size: 12px; font-family: var(--wb-mono); }
+.top .counts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+/* chips: filled, role-coloured */
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-panels.css:77-78 ---- */
+/* icons: inline SVG, so alignment does not depend on which font has the glyph */
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-items.css:1-16 ---- */
+/* topic: one elevated surface with a filled title bar */
+.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.tbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.tbar .tlead { margin-right: auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.tbar .tname { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.tbar .tresult { font-size: 12.5px; opacity: .7; overflow-wrap: anywhere; }
+.topic-state,.stb,.eta,.state-estimate{display:inline-flex;align-items:center}
+.topic-state{flex-wrap:wrap;gap:4px 6px;min-width:0}
+.stb,.eta,.state-estimate{min-height:18px;border-radius:999px;font-size:11px}
+.stb{--c:#b9bdc6;gap:5px;padding:0 8px 0 6px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 20%,transparent)}
+.stb .wb-state-dot{width:7px;height:7px;flex:none;border-radius:50%;background:currentColor}
+.stb.confirm{--c:#7fd6a8}
+.stb.discuss{--c:#ffb36b}
+.stb.impl{--c:#8db8ff}
+.stb.research{--c:#c6a5f7}
+.stb.wb-state-wait .wb-state-dot{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-items.css:62-66 ---- */
+time.tago, time.entry-at[data-at] { display: inline-block; contain: layout style; min-inline-size: 7ch; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.eta { contain: layout style; }
+.tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
+.tbar .tnote-toggle:hover { opacity: 1; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-items.css:78-78 ---- */
+.tophead { background: var(--wb-card); box-shadow: 0 -12px 0 var(--wb-bg); }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-items.css:115-123 ---- */
+/* markdown in item fields: inline code everywhere, blocks inside .md */
+:not(pre) > code { font-size: .92em; background: var(--wb-muted); border-radius: 4px; padding: 0 4px; }
+.cbar code { background: rgb(255 255 255 / .18); }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md table, .md blockquote { margin: 0 0 6px; }
+.md ul, .md ol { padding-left: 18px; }
+.md li { margin: 2px 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: inherit; margin: 0 0 4px; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-items.css:204-206 ---- */
+.btn { font-size: 13px; background: var(--wb-muted); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+.btn { display: inline-flex; align-items: center; justify-content: center; }
+.btn.mini { padding: 0; width: 24px; height: 22px; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css:1-31 ---- */
+/* topic recap: author and time lead the body's first line inline; inside a
+   closed topic's fold it sits above the body. */
+.trecap { margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+/* last in its box (a closed fold's summary takes no room): keep the gutter below */
+.trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
+/* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
+.trecap { contain: paint; }
+/* Clamp topic recaps, never panel-card titles or stored text. */
+.trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.trecap .rtext { display: inline; min-width: 0; overflow-wrap: anywhere; }
+.trecap .rtext > p:first-child { display: inline; }
+.trecap .rat { font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trecap .rat .evi { display: inline-flex; vertical-align: -3px; margin-right: 5px; }
+/* An open topic's head summary line: the latest agent line as plain muted
+   text on the head's surface (no card), sharing the line with the check pill,
+   which wraps under it when narrow; a hairline under the head ends it. */
+.tsub { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); overflow: hidden; }
+/* Content chooses the height, capped at four whole lines (4 x 1.45em).
+   Use the same clamp in both sticky states: sticking itself must not reflow
+   the recap. A changed recap may legitimately grow or shrink the header. */
+.tsub > .trecap { flex: 1 1 22em; min-width: 0; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+.tsub > .trecap .rat { font-size: 10.5px; }
+/* Inline role/media boxes must fit the same line grid as the recap text. */
+.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }
+.tsub > .trecap :is(img, svg) { max-height: 1em; width: auto; vertical-align: middle; }
+/* A recap whose clock chip is a button jumps to its log row (stream.js); the
+   text is a pointer shortcut. contain: paint clips an outer outline, so the
+   chip's focus ring is drawn inside. */
+.trecap:has(> .rat[role="button"]) { cursor: pointer; }
+.tsub > .trecap:has(> .rat[role="button"]):hover { color: var(--wb-fg); }
+.trecap > .rat[role="button"]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; border-radius: 3px; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css:55-101 ---- */
+/* Topic stream: one chronological column under a thin divider, full card
+   width with no side rail, always shown. One quiet header row carries the
+   title/count and counts meta. Questions, their preceding report, answers,
+   current state and latest batch stay live; other rows ship inside inert
+   gaps. Shared per-scroller owners preserve the reading line on admission. */
+.topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
+.topic-stream .mhead, .tstream > .mhead { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }
+.wb-history > .mhead > .wb-mtitle { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long localized label shortens first; the icon and the count stay whole. */
+.wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-mtitle > svg, .wb-mtitle > .n { flex: none; }
+.wb-history > .mhead > .mmeta { grid-column: 3; justify-self: end; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.system-run > summary > .lbl::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.system-run[open] > summary > .lbl::before { transform: rotate(90deg); }
+.topic-stream .mhead .i, .tstream > .mhead .i { width: 12px; height: 12px; }
+.topic-stream .mhead .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream .mhead .mmeta { font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.wb-history { overflow-anchor: none; }
+.history-live { display: flow-root; width: 100%; }
+.timeline-row { display: flow-root; min-width: 0; }
+.history-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 2px 0; padding: 0 0 0 calc(var(--h-av) + var(--h-gap)); font-size: 11.5px; line-height: 20px; color: var(--wb-muted-fg); }
+.gap-label { font-weight: 500; opacity: .8; }
+.gap-range { font: 11px var(--wb-mono); opacity: .8; }
+.gap-actions { display: inline-flex; gap: 4px; }
+/* Load controls are filled capsules without an outline, so they read as
+   buttons beside the dimmed gap label. */
+.gap-actions button { border: 0; border-radius: 999px; padding: 0 10px; background: var(--wb-muted); color: var(--wb-fg); font-size: 11.5px; font-weight: 500; line-height: 20px; cursor: pointer; }
+.gap-actions button:hover { background: color-mix(in srgb, var(--wb-fg) 14%, var(--wb-muted)); }
+.gap-actions button:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.gap-actions button[hidden] { display: none; }
+.wb-entry { min-width: 0; overflow-wrap: anywhere; }
+/* log rows: role badge, then body with its time inline on the first line */
+.entry-line { display: flex; align-items: baseline; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
+.entry-line:hover { background: var(--wb-wash); }
+.entry-line .entry-at { font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .8; cursor: default; }
+.entry-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wb-entry.agent > .entry-line { color: var(--wb-fg); font-size: 12.5px; }
+
+.wb-entry.system .entry-text { overflow-wrap: anywhere; }
+.evi { flex: none; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
+/* The role badge stays beside the body's first line when the text wraps. */
+.entry-line > .evi { align-self: flex-start; margin-top: 2px; }
+.evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.evi.owner { background: color-mix(in srgb, var(--wb-accent-policy) 22%, transparent); color: var(--wb-accent-policy); }
+.evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
+.ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css:103-161 ---- */
+/* system chips: adjacent system events behind one quiet row
+   led by a short dotted rule */
+.system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.system-run > summary::-webkit-details-marker { display: none; }
+.system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.system-run > summary > .lbl { min-width: 0; }
+/* panel: an unboxed recap with metadata and native actions on the right;
+   only its body carries a quiet guide. A recap-only panel is a message. */
+.wb-entry.panel { position: relative; margin: 6px 0; }
+.entry-panel { container-type: inline-size; background: transparent; min-width: 0; }
+/* Native maximize reuses this shell; transparent renderer bodies need a sheet. */
+.entry-panel[data-max] { background: var(--wb-bg); }
+.entry-panel > summary { list-style: none; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
+/* Dashboard actions are siblings of .pmeta, not children of it. Both share
+   one slot; dashboard.css switches which action is displayed when large. */
+.entry-panel > summary:has(> button) { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+.entry-panel > summary > button { grid-column: 4; grid-row: 1; min-width: 24px; min-height: 24px; margin: 0; }
+.entry-panel > summary::-webkit-details-marker { display: none; }
+/* An unread republish stays conspicuous until the owner opens it. */
+.wb-panel-updated { flex: none; padding: 2px 7px; border: 2px solid var(--wb-primary); border-radius: 5px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 10px; line-height: 16px; font-weight: 850; letter-spacing: .04em; box-shadow: 0 0 0 2px var(--wb-bg); }
+.wb-panel-updated[hidden] { display: none; }
+.wb-panel-pending > .entry-panel { box-shadow: inset 0 0 0 2px var(--wb-primary); }
+.wb-panel-pending > .entry-panel > summary { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-bg)); }
+.entry-panel > summary:hover { background: var(--wb-wash); }
+.entry-panel > summary::before { content: "\25B8"; grid-column: 1; grid-row: 1; width: 10px; font-size: 10px; line-height: 24px; color: var(--wb-muted-fg); }
+.entry-panel[open] > summary::before { content: "\25BE"; }
+.entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+.entry-panel.msg > summary { cursor: default; }
+.entry-panel.msg > summary:hover { background: transparent; }
+.entry-panel.msg > summary::before { content: ""; width: 3px; align-self: stretch; margin: 2px 4px 2px 0; border-radius: 2px; background: var(--wb-accent-policy); }
+.entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; }
+.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }
+.entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
+.pmeta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 24px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmeta .entry-at { font: 11px var(--wb-mono); }
+.pmeta a.mref { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.pmeta a.mref:hover { color: var(--wb-primary); }
+.entry-body.doc-body { font-size: 13.5px; }
+.entry-panel > .entry-body.doc-body { margin: 6px 0 0 18px; padding: 0 0 1px 12px; border-left: 1px solid var(--wb-line); }
+.historical .entry-recap { font-weight: 400; }
+/* panel versions, each at its own write position: the bound name, a vN
+   badge, an earlier version's newer-version and exact links, and the
+   link-copy menu stream.js opens */
+.pfname { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+@container (max-width: 520px) { .pfname { display: none; } }
+.pfver { padding: 0 6px; border-radius: 999px; font: 700 10.5px/16px var(--wb-sans); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.pfver.old { background: var(--wb-muted); color: var(--wb-muted-fg); font-weight: 600; }
+.pmeta a.pfnewer { font: 600 11px var(--wb-mono); color: var(--wb-primary); text-decoration: none; }
+.pmeta a.pfnewer:hover { text-decoration: underline; }
+.pmeta .pflink { width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.pmeta .pflink .i { width: 13px; height: 13px; }
+.pmeta .pflink.on, .pmeta .pflink:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.historical > .entry-panel > summary .entry-recap { color: var(--wb-muted-fg); }
+.historical > .entry-panel > .entry-body.doc-body { border-left-style: dashed; }
+.pfoldnote { display: flex; align-items: center; gap: 6px; width: fit-content; margin: 6px 0 0 18px; padding: 3px 8px; border-radius: 6px; background: var(--wb-muted); font-size: 11.5px; color: var(--wb-muted-fg); }
+.pfoldnote .i { width: 12px; height: 12px; flex: none; }
+.pfoldnote a, .pfprev a { color: var(--wb-primary); text-decoration: none; font-weight: 600; }
+.pfprev { margin: 4px 0 2px 30px; font-size: 11.5px; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css:162-170 ---- */
+.pfmenu { position: absolute; right: 30px; top: 26px; z-index: 6; width: 268px; max-width: calc(100vw - 40px); padding: 4px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card, var(--wb-bg)); box-shadow: var(--wb-shadow-hi); }
+.pfmh { padding: 4px 8px 2px; font-size: 10.5px; font-weight: 700; color: var(--wb-muted-fg); letter-spacing: .02em; }
+.pfmi { display: grid; grid-template-columns: 16px minmax(0, 1fr) 14px; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); text-align: left; font: inherit; cursor: pointer; }
+.pfmi:hover, .pfmi:focus { outline: none; background: var(--wb-wash); }
+.pfmi .i { width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.pfmt { display: flex; flex-direction: column; min-width: 0; }
+.pfmt .pfk { font-size: 12.5px; font-weight: 600; }
+.pfmt .pfk code { font: 600 11.5px var(--wb-mono); color: var(--wb-primary); }
+.pfmt .pfd { font-size: 11px; color: var(--wb-muted-fg); }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css:206-208 ---- */
+.doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
+.doc-body > :first-child { margin-top: 0; }
+.doc-body > :last-child { margin-bottom: 0; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css:212-223 ---- */
+/* change marks of a topic body's latest edit (chg.js): thin bars in the gutter
+   left of the text column, so they never read as a blockquote's border */
+.wb-chg-layer { position: relative; height: 0; }
+.wb-chg-bar { position: absolute; width: 2px; border-radius: 1px; pointer-events: none; --chg: transparent; background: var(--chg); }
+.wb-chg-hit { position: absolute; pointer-events: auto; }
+.wb-chg-hit:hover > .wb-chg-bar { transform: scaleX(2); }
+.wb-chg-hit:hover > .wb-chg-bar.del { transform: scaleY(2); }
+.wb-chg-tip { position: fixed; z-index: 10; pointer-events: none; max-width: calc(100vw - 8px); box-sizing: border-box; padding: 3px 7px; border-radius: 4px; background: var(--wb-fg); color: var(--wb-bg); font: 12px/1.4 system-ui, sans-serif; }
+.wb-chg-tip[hidden] { display: none; }
+.wb-chg-bar.new { --chg: light-dark(#1a7f37, #3fb950); }
+.wb-chg-bar.mod { --chg: light-dark(#0969da, #58a6ff); }
+.wb-chg-bar.del { --chg: light-dark(#cf222e, #f85149); width: 8px; height: 2px; }
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page-stream.css:240-258 ---- */
+/* Calm history frame: every row kind shares one grid: avatar gutter (18px),
+   time (38px), then content. Time-less rows keep the empty cell so content
+   aligns. Secondary text is muted; only content that needs grouping (a
+   nested control card) keeps a surface. */
+.history-live { --h-av: 18px; --h-time: 64px; --h-gap: 8px; margin-left: 12px; width: auto; }
+.history-live .evi, .history-live .wb-hmark { width: var(--h-av); height: var(--h-av); font-size: 9px; }
+.history-live .evi.lead, .history-live .evi.owner, .history-live .wb-hmark { background: color-mix(in srgb, var(--wb-haccent, var(--wb-primary)) 12%, transparent); }
+.history-live .evi.owner { --wb-haccent: var(--wb-accent-policy); color: var(--wb-accent-policy); }
+.history-live .entry-line { gap: var(--h-gap); padding: 1px 0; font-size: 12.5px; line-height: 20px; border-radius: 4px; }
+.history-live .entry-line > .evi { margin-top: 1px; }
+.history-live .entry-text { padding-left: calc(var(--h-time) + var(--h-gap)); text-indent: calc(-1 * (var(--h-time) + var(--h-gap))); color: var(--wb-fg); }
+.history-live .entry-text > .entry-at, .history-live .wb-htime { display: inline-block; width: var(--h-time); margin-right: var(--h-gap); text-indent: 0; font: 10px/20px var(--wb-mono); color: var(--wb-muted-fg); opacity: .85; vertical-align: top; }
+.history-live .entry-text > .sep { display: none; }
+/* inline-block badges inherit the hanging indent and would draw outside their pill */
+.history-live .entry-text .ptag, .history-live .entry-text .entry-imported { text-indent: 0; }
+.history-live .wb-entry.system .entry-line, .history-live .wb-entry.system .entry-text { color: var(--wb-muted-fg); }
+.history-live .system-run > summary { padding: 0; font-size: 11.5px; line-height: 20px; }
+.history-live .system-run > summary > .rl { width: var(--h-av); }
+.history-live .srow { padding: 1px 0; }
+/* ==== NEW (mockup only): panel diff gutter. Everything below is proposed, not in the product. ==== */
+/* Colors reuse the topic-body change-mark palette (page-stream.css:221-223). */
+:root {
+  --pdg-new: light-dark(#1a7f37, #3fb950);
+  --pdg-mod: light-dark(#0969da, #58a6ff);
+  --pdg-del: light-dark(#cf222e, #f85149);
+}
+/* Marked blocks keep their layout; only the box reaches back to the body's
+   guide line so a hover tint starts at the gutter (body padding-left 12px,
+   list indent 18px). */
+.entry-body .pdg-b, .entry-body li.pdg-gone { position: relative; isolation: isolate; }
+.entry-body .pdg-b::before, .entry-body li.pdg-gone::before { content: ""; position: absolute; z-index: -1; top: 0; bottom: 0; left: -12px; right: 0; border-radius: 0 4px 4px 0; background: var(--pdg-tint, transparent); transition: background .12s; }
+.entry-body li.pdg-b::before, .entry-body li.pdg-gone::before { left: -30px; }
+/* inserted words: invisible at rest, tinted while their block is hot or in compare view */
+.pdg-ins { border-radius: 3px; text-decoration: none; transition: background .12s; }
+.pdg-hot .pdg-ins, .pdg-diffview .pdg-ins { background: color-mix(in srgb, var(--pdg-new) 22%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--pdg-new) 22%, transparent); }
+.pdg-b.pdg-mod.pdg-hot { --pdg-tint: color-mix(in srgb, var(--pdg-mod) 8%, transparent); }
+.pdg-b.pdg-new.pdg-hot { --pdg-tint: color-mix(in srgb, var(--pdg-new) 8%, transparent); }
+/* removed words / removed blocks exist in the DOM but only show in compare view */
+.entry-body del.pdg-w { display: none; }
+.entry-body li.pdg-gone { display: none; }
+.pdg-diffview del.pdg-w { display: inline; }
+del.pdg-w, .pdg-pop del { color: color-mix(in srgb, var(--pdg-del) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--pdg-del) 14%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--pdg-del) 70%, transparent); border-radius: 3px; }
+.pdg-diffview li.pdg-gone { display: list-item; --pdg-tint: color-mix(in srgb, var(--pdg-del) 8%, transparent); color: var(--wb-muted-fg); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--pdg-del) 55%, transparent); }
+.pdg-diffview .pdg-b.pdg-new { --pdg-tint: color-mix(in srgb, var(--pdg-new) 8%, transparent); }
+.pdg-diffview .pdg-b.pdg-mod { --pdg-tint: color-mix(in srgb, var(--pdg-mod) 6%, transparent); }
+
+/* gutter layer: a zero-height sibling after the body, like .wb-chg-layer, so
+   the body's overflow-x:auto (page-stream.css:206) cannot clip the marks */
+.pdg-layer { position: relative; height: 0; }
+.pdg-hit { position: absolute; width: 14px; cursor: pointer; }
+.pdg-bar { position: absolute; left: 5.5px; top: 1px; bottom: 1px; width: 3px; border-radius: 2px; background: var(--k); transition: width .1s, left .1s; }
+.pdg-hit.new { --k: var(--pdg-new); }
+.pdg-hit.mod { --k: var(--pdg-mod); }
+.pdg-hit.del { --k: var(--pdg-del); }
+.pdg-hit:hover .pdg-bar, .pdg-hit.hot .pdg-bar { left: 4.5px; width: 5px; }
+/* deletion point: a small wedge on the guide pointing into the text column */
+.pdg-hit.del .pdg-bar { left: 6px; top: 50%; bottom: auto; width: 0; height: 0; margin-top: -4.5px; border-radius: 0; background: none; border-left: 6px solid var(--pdg-del); border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; transform-origin: left center; transition: transform .1s; }
+.pdg-hit.del:hover .pdg-bar, .pdg-hit.del.hot .pdg-bar { left: 6px; width: 0; transform: scale(1.45); }
+/* a removed block shown in compare view: a full red bar instead of the wedge */
+.pdg-hit.delblock { --k: var(--pdg-del); }
+
+/* header chip: change counts against the previous version; toggles compare view */
+.pdg-chip { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font: 600 10.5px/16px var(--wb-sans); color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.pdg-chip:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.pdg-chip .n { font: 700 10.5px/16px var(--wb-mono); }
+.pdg-chip .n.a { color: var(--pdg-new); }
+.pdg-chip .n.m { color: var(--pdg-mod); }
+.pdg-chip .n.d { color: var(--pdg-del); }
+.pdg-chip[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 45%, transparent); color: var(--wb-primary); }
+/* compare-view note: reuses the earlier-version note's shape (.pfoldnote) */
+.pdg-note { display: none; }
+.entry-panel.pdg-on > .pdg-note { display: flex; }
+.pdg-note button { border: 0; padding: 0; background: none; color: var(--wb-primary); font-weight: 600; font-size: 11.5px; cursor: pointer; }
+
+/* popover: the copy-menu surface (.pfmenu, page-stream.css:162), placed in
+   page coordinates so the topic card's overflow cannot clip it */
+.pdg-pop { position: absolute; z-index: 20; width: 520px; max-width: calc(100vw - 40px); border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card, var(--wb-bg)); box-shadow: var(--wb-shadow-hi); font-size: 12.5px; }
+.pdg-pop::before { content: ""; position: absolute; left: -1px; top: -7px; width: 14px; height: 7px; }
+.pdg-ph { display: flex; align-items: center; gap: 8px; padding: 6px 6px 5px 10px; border-bottom: 1px solid var(--wb-line); font-size: 11px; color: var(--wb-muted-fg); }
+.pdg-ph .k { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; letter-spacing: .02em; color: var(--kc); }
+.pdg-ph .k::before { content: ""; width: 3px; height: 12px; border-radius: 2px; background: var(--kc); }
+.pdg-pop.del .pdg-ph .k::before { width: 0; height: 0; border-radius: 0; background: none; border-left: 6px solid var(--kc); border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; }
+.pdg-pop.mod { --kc: var(--pdg-mod); }
+.pdg-pop.del { --kc: var(--pdg-del); }
+.pdg-ph .v { font: 11px var(--wb-mono); font-variant-numeric: tabular-nums; }
+.pdg-ph .sp { flex: 1; }
+.pdg-ph button { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.pdg-ph button:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.pdg-ph button .i { width: 13px; height: 13px; }
+.pdg-ph .pin[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 14%, transparent); color: var(--wb-primary); }
+.pdg-ph .close { display: none; }
+.pdg-pop.pinned .pdg-ph .close { display: inline-flex; }
+.pdg-pl { padding: 7px 12px 0; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.pdg-pb { padding: 3px 12px 9px; font-size: 13px; line-height: 1.55; }
+.pdg-pb ul { margin: 0; padding-left: 18px; }
+.pdg-pb li.gone { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--pdg-del) 60%, transparent); color: color-mix(in srgb, var(--wb-fg) 72%, transparent); background: color-mix(in srgb, var(--pdg-del) 8%, transparent); border-radius: 4px; padding: 2px 6px; margin-left: -6px; }
+.pdg-pf { display: flex; align-items: center; gap: 8px; padding: 5px 10px 6px 12px; border-top: 1px solid var(--wb-line); font-size: 11px; color: var(--wb-muted-fg); }
+.pdg-pf .sp { flex: 1; }
+.pdg-pf a { color: var(--wb-primary); text-decoration: none; font-weight: 600; }
+.pdg-pop.pinned .pdg-pf .hint { display: none; }
+/* an added block's hover: the topic body's one-line tip (.wb-chg-tip, page-stream.css:219) */
+.pdg-tip { position: absolute; z-index: 20; padding: 3px 7px; border-radius: 4px; background: var(--wb-fg); color: var(--wb-bg); font: 12px/1.4 system-ui, sans-serif; white-space: nowrap; }
+
+/* ==== mockup chrome (not product) ==== */
+.mk-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 8px 12px; border: 1px dashed color-mix(in srgb, var(--wb-fg) 30%, transparent); border-radius: 8px; font-size: 12px; color: var(--wb-muted-fg); }
+.mk-bar b { color: var(--wb-fg); }
+.mk-bar .sp { flex: 1; }
+.mk-bar button { border: 1px solid var(--wb-line); background: var(--wb-card); border-radius: 6px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.mk-cap { display: flex; align-items: baseline; gap: 10px; margin: 22px 2px 8px; font-size: 13px; color: var(--wb-fg); }
+.mk-cap .l { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #8a4fd8; color: #fff; font: 800 11px var(--wb-sans); flex: none; align-self: center; }
+.mk-cap .d { color: var(--wb-muted-fg); font-size: 12px; }
+.mk-space { height: var(--h, 0px); }
+.mk-legend { margin-top: 26px; padding: 12px 14px; border: 1px dashed color-mix(in srgb, var(--wb-fg) 30%, transparent); border-radius: 8px; font-size: 12.5px; }
+.mk-legend h4 { margin: 0 0 8px; font-size: 12px; color: var(--wb-muted-fg); letter-spacing: .04em; }
+.mk-legend table { border-collapse: collapse; width: 100%; }
+.mk-legend td { padding: 5px 10px 5px 0; vertical-align: middle; border-top: 1px solid var(--wb-line); }
+.mk-legend tr:first-child td { border-top: 0; }
+.mk-legend td:first-child { width: 150px; }
+.mk-sw { display: inline-block; vertical-align: middle; margin-right: 8px; }
+.mk-sw.bar { width: 3px; height: 16px; border-radius: 2px; background: var(--c); }
+.mk-sw.wedge { width: 0; height: 0; border-left: 6px solid var(--pdg-del); border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; }
+.mk-legend .note { color: var(--wb-muted-fg); }
+</style>
+</head>
+<body class="full">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<!-- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/sprite.svg (i-pen, i-link, i-list, i-history, i-x) -->
+<symbol id="i-pen" viewBox="0 0 16 16"><path d="M10.4 2.8l2.8 2.8-7.6 7.6H2.8v-2.8z"/></symbol>
+<symbol id="i-link" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.3 9a2.6 2.6 0 0 0 3.7 3.7l.9-.9"/></symbol>
+<symbol id="i-list" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></symbol>
+<symbol id="i-history" viewBox="0 0 16 16"><path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.8"/><path d="M2.6 2.6v2.6h2.6M8 5.2V8l2 1.4"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></symbol>
+<!-- NEW (mockup): pin -->
+<symbol id="i-pin" viewBox="0 0 16 16"><path d="M9.8 2.4l3.8 3.8-1.7.8-2.2 2.2.3 2.9-.9.9-5.4-5.4.9-.9 2.9.3 2.2-2.2zM5.9 10.1l-3.3 3.3"/></symbol>
+</svg>
+
+<div class="wrap">
+  <div class="mk-bar"><b>목업</b> 패널 변경 거터 (panel diff gutter) · 261116 · 제품 코드 아님<span class="sp"></span>테마
+    <button type="button" data-set-theme="light">라이트</button><button type="button" data-set-theme="dark">다크</button></div>
+
+  <div class="top"><h1>화이트보드</h1><span class="meta">wb-session · #12</span></div>
+
+  <!-- (A) -->
+  <div class="mk-cap"><span class="l">A</span><b>평소 상태</b><span class="d">최신 버전(v3) 본문의 가이드 선 위에만 마크가 놓입니다. 초록 = 추가, 파랑 = 수정, 빨간 쐐기 = 삭제 지점. 헤더 칩은 v2 대비 변경 수. 이 카드는 실제로 hover/클릭이 동작합니다.</span></div>
+  <div class="scene" data-force="">
+    <section class="topic" data-state="discussing">
+      <div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">세션 목록 정렬</span></span><span class="topic-state"><span class="stb discuss"><span class="wb-state-dot" aria-hidden="true"></span>논의 중</span></span><time class="tago" title="마지막 변경">3분 전</time><button class="btn mini tnote-toggle" title="이 주제에 대한 메모"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div>
+        <div class="tsub"><div class="trecap"><span class="rat" role="button" tabindex="0"><span class="evi lead" title="에이전트 로그">L</span>10:24 · <time class="tago">3분 전</time></span> — <div class="rtext md">유휴 기준을 30분으로 줄인 설계안 v3 게시, 확인 대기</div></div></div></div>
+      <div class="topic-stream"><div class="wb-history" aria-label="기록">
+        <div class="mhead"><span class="wb-mtitle"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg><span class="wb-mlabel">기록</span><span class="n">9</span></span><span></span><span class="mmeta">패널 1 · 버전 3 · 로그 4줄</span></div>
+        <div class="history-live">
+          <div class="timeline-row"><article class="wb-entry agent"><div class="entry-line"><span class="evi lead" title="에이전트 로그">L</span><span class="entry-text"><time class="entry-at">09:40</time><span class="sep"> — </span>정렬 기준 초안 작성 시작</span></div></article></div>
+          <div class="timeline-row"><details class="system-run"><summary><span class="rl"></span><span class="lbl">시스템 이벤트 1개 · 09:40</span></summary></details></div>
+          <div class="timeline-row"><article class="wb-entry panel historical" data-kind="panel"><details class="entry-panel"><summary><span class="entry-recap" title="정렬 기준 초안">정렬 기준 초안</span><span class="pmeta"><span class="pfname" title="패널 이름">design</span><span class="pfver old" title="버전 1 / 3">v1</span><time class="entry-at">09:48</time><a class="pfnewer" href="#p1">→ v3 · 10:20</a><a class="mref pfexact" href="#e3">#e3</a><button type="button" class="ibtn pflink" title="링크 복사"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg></button></span></summary></details></article></div>
+          <div class="timeline-row"><article class="wb-entry agent"><div class="entry-line"><span class="evi lead" title="에이전트 로그">L</span><span class="entry-text"><time class="entry-at">09:52</time><span class="sep"> — </span>보조 정렬(이름순) 추가 검토</span></div></article></div>
+          <div class="timeline-row"><article class="wb-entry panel historical" data-kind="panel"><details class="entry-panel"><summary><span class="entry-recap" title="보조 정렬 추가">보조 정렬 추가</span><span class="pmeta"><span class="pfname" title="패널 이름">design</span><span class="pfver old" title="버전 2 / 3">v2</span><time class="entry-at">09:55</time><a class="pfnewer" href="#p1">→ v3 · 10:20</a><a class="mref pfexact" href="#e6">#e6</a><button type="button" class="ibtn pflink" title="링크 복사"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg></button></span></summary></details></article></div>
+          <div class="timeline-row"><article class="wb-entry agent"><div class="entry-line"><span class="evi lead" title="에이전트 로그">L</span><span class="entry-text"><time class="entry-at">10:12</time><span class="sep"> — </span>이름순은 사용 빈도가 낮아 빼기로 함, 유휴 기준 재조정</span></div></article></div>
+          <div class="timeline-row slot-v3"></div>
+          <div class="timeline-row"><article class="wb-entry agent current"><div class="entry-line"><span class="evi lead" title="에이전트 로그">L</span><span class="entry-text"><time class="entry-at">10:24</time><span class="sep"> — </span>유휴 기준 30분 확인 대기<span class="ptag">현재 상태</span></span></div></article></div>
+        </div>
+      </div></div>
+    </section>
+  </div>
+
+  <!-- (B) -->
+  <div class="mk-cap"><span class="l">B</span><b>수정 마크 hover</b><span class="d">막대가 굵어지고 해당 블록이 옅게 칠해지며, 본문에서는 새로 들어간 단어가 초록으로, 팝오버에서는 이전 문장과 지워진 단어가 빨간 취소선으로 보입니다.</span></div>
+  <div class="scene" data-force="mod:hover">
+    <section class="topic" data-state="discussing">
+      <div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">세션 목록 정렬</span></span><span class="topic-state"><span class="stb discuss"><span class="wb-state-dot" aria-hidden="true"></span>논의 중</span></span><time class="tago">3분 전</time><button class="btn mini tnote-toggle"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div></div>
+      <div class="topic-stream"><div class="wb-history">
+        <div class="mhead"><span class="wb-mtitle"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg><span class="wb-mlabel">기록</span><span class="n">9</span></span><span></span><span class="mmeta">패널 1 · 버전 3 · 로그 4줄</span></div>
+        <div class="history-live">
+          <div class="history-gap"><span class="gap-label">⋯ 7개 로그 항목</span><span class="gap-range">09:40–10:12</span><span class="gap-actions"><button type="button">▲ 위쪽 더 불러오기</button></span></div>
+          <div class="timeline-row slot-v3"></div>
+          <div class="timeline-row"><article class="wb-entry agent current"><div class="entry-line"><span class="evi lead">L</span><span class="entry-text"><time class="entry-at">10:24</time><span class="sep"> — </span>유휴 기준 30분 확인 대기<span class="ptag">현재 상태</span></span></div></article></div>
+        </div>
+      </div></div>
+    </section>
+  </div>
+
+  <!-- (C) -->
+  <div class="mk-cap"><span class="l">C</span><b>삭제 마크 클릭 (고정됨)</b><span class="d">쐐기가 커지고 지워진 항목이 팝오버로 뜹니다. 클릭하면 고정되어 포인터를 떼도 남고, 핀 해제·× 또는 Esc로 닫힙니다.</span></div>
+  <div class="scene" data-force="del:pin">
+    <section class="topic" data-state="discussing">
+      <div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">세션 목록 정렬</span></span><span class="topic-state"><span class="stb discuss"><span class="wb-state-dot" aria-hidden="true"></span>논의 중</span></span><time class="tago">3분 전</time><button class="btn mini tnote-toggle"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div></div>
+      <div class="topic-stream"><div class="wb-history">
+        <div class="mhead"><span class="wb-mtitle"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg><span class="wb-mlabel">기록</span><span class="n">9</span></span><span></span><span class="mmeta">패널 1 · 버전 3 · 로그 4줄</span></div>
+        <div class="history-live">
+          <div class="history-gap"><span class="gap-label">⋯ 7개 로그 항목</span><span class="gap-range">09:40–10:12</span><span class="gap-actions"><button type="button">▲ 위쪽 더 불러오기</button></span></div>
+          <div class="timeline-row slot-v3"></div>
+          <div class="timeline-row"><article class="wb-entry agent current"><div class="entry-line"><span class="evi lead">L</span><span class="entry-text"><time class="entry-at">10:24</time><span class="sep"> — </span>유휴 기준 30분 확인 대기<span class="ptag">현재 상태</span></span></div></article></div>
+        </div>
+      </div></div>
+    </section>
+  </div>
+
+  <!-- (D) -->
+  <div class="mk-cap"><span class="l">D</span><b>전체 비교 보기</b><span class="d">헤더의 "v2 대비 +1 ~1 −1" 칩을 누르면 본문 안에서 바로 비교합니다: 지워진 항목·단어는 빨간 취소선으로 제자리에, 추가된 부분은 초록으로. 다시 누르거나 "비교 끄기"로 돌아갑니다.</span></div>
+  <div class="scene" data-force="diff">
+    <section class="topic" data-state="discussing">
+      <div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">세션 목록 정렬</span></span><span class="topic-state"><span class="stb discuss"><span class="wb-state-dot" aria-hidden="true"></span>논의 중</span></span><time class="tago">3분 전</time><button class="btn mini tnote-toggle"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div></div>
+      <div class="topic-stream"><div class="wb-history">
+        <div class="mhead"><span class="wb-mtitle"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg><span class="wb-mlabel">기록</span><span class="n">9</span></span><span></span><span class="mmeta">패널 1 · 버전 3 · 로그 4줄</span></div>
+        <div class="history-live">
+          <div class="history-gap"><span class="gap-label">⋯ 7개 로그 항목</span><span class="gap-range">09:40–10:12</span><span class="gap-actions"><button type="button">▲ 위쪽 더 불러오기</button></span></div>
+          <div class="timeline-row slot-v3"></div>
+          <div class="timeline-row"><article class="wb-entry agent current"><div class="entry-line"><span class="evi lead">L</span><span class="entry-text"><time class="entry-at">10:24</time><span class="sep"> — </span>유휴 기준 30분 확인 대기<span class="ptag">현재 상태</span></span></div></article></div>
+        </div>
+      </div></div>
+    </section>
+  </div>
+
+  <div class="mk-legend">
+    <h4>표시 규칙 (제안)</h4>
+    <table>
+      <tr><td><span class="mk-sw bar" style="--c:var(--pdg-new)"></span>추가</td><td>v2에 없던 블록. hover하면 한 줄 툴팁 "추가됨 · v3 10:20"만 표시(비교할 이전 내용이 없음).</td></tr>
+      <tr><td><span class="mk-sw bar" style="--c:var(--pdg-mod)"></span>수정</td><td>v2의 블록을 고쳐 쓴 경우. hover → 이전 내용 팝오버(지워진 단어 빨간 취소선) + 본문의 새 단어 초록 강조. 클릭 → 고정.</td></tr>
+      <tr><td><span class="mk-sw wedge"></span>삭제</td><td>블록이 빠진 자리. hover → 지워진 내용 팝오버. 클릭 → 고정.</td></tr>
+      <tr><td><span class="pdg-chip" style="pointer-events:none"><span>v2 대비</span><span class="n a">+1</span><span class="n m">~1</span><span class="n d">−1</span></span></td><td>최신 버전 헤더에만. 클릭하면 본문 전체를 제자리 비교로 전환(D).</td></tr>
+      <tr><td class="note">범위</td><td class="note">최신 버전과 바로 이전 버전만 비교합니다. 접힌 옛 버전(v1, v2)에는 마크를 그리지 않습니다. 블록 단위 짝짓기는 토픽 본문 변경 마크(changes.go diffBodies)와 같은 규칙, 색은 같은 팔레트(page-stream.css:221-223).</td></tr>
+    </table>
+  </div>
+</div>
+
+<template id="tpl-v3">
+<article class="wb-entry panel" data-kind="panel" data-panel="p1"><details class="entry-panel" open><summary><span class="entry-recap" title="유휴 기준 30분, 재정렬 지연 추가">유휴 기준 30분, 재정렬 지연 추가</span><span class="pmeta"><button type="button" class="pdg-chip" aria-pressed="false" title="v2 · 09:55 대비 변경 — 클릭하면 본문에서 전체 비교"><span>v2 대비</span><span class="n a">+1</span><span class="n m">~1</span><span class="n d">−1</span></button><span class="pfname" title="패널 이름">design</span><span class="pfver" title="버전 3 / 3 · 최신">v3</span><time class="entry-at">10:20</time><a class="mref" href="#p1" title="최신 패널 링크">#p1</a><button type="button" class="ibtn pflink" title="링크 복사"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg></button></span></summary><div class="pfoldnote pdg-note"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>v2 · 09:55 대비 변경을 본문에 표시하고 있습니다. <button type="button" class="pdg-off">비교 끄기</button></div><div class="doc-body entry-body md"><h3>정렬 기준 설계안</h3>
+<p><strong>결론</strong> — 기본 정렬은 <strong>최근 활동순</strong>, 고정한 세션은 항상 맨 위에 둡니다.</p>
+<ul>
+<li class="pdg-b pdg-mod" data-pdg="mod" data-pop="pop-mod"><strong>최근 활동</strong>: 마지막 로그<ins class="pdg-ins">·패널 갱신</ins> 시각 기준, <del class="pdg-w">1시간</del><ins class="pdg-ins">30분</ins> 넘게 조용하면 “유휴”로 내림</li>
+<li><strong>고정 세션</strong>: 정렬과 무관하게 상단 고정, 고정끼리는 고정한 순서 유지</li>
+<li class="pdg-gone" data-pdg="del" data-pop="pop-del"><strong>이름순</strong>: 보조 정렬 옵션으로 드롭다운에 제공</li>
+<li><strong>닫힌 세션</strong>: 목록 하단 “닫힘” 접힘 영역으로 이동</li>
+</ul>
+<p class="pdg-b pdg-new" data-pdg="new" data-tip="추가됨 · v3 10:20"><strong>재정렬 지연</strong> — 사용자가 스크롤 중이거나 포인터가 목록 위에 있으면 재정렬을 3초 미룹니다. 손 아래에서 목록이 튀지 않게 하기 위함입니다.</p>
+<h4>남은 질문</h4>
+<p>고정 세션 수에 상한을 둘지 — 많아지면 최근 활동 영역이 화면 밖으로 밀립니다.</p></div><div class="pfprev"><a href="#e6">이전 버전 v2 · 09:55 ↑</a></div></details></article>
+</template>
+
+<template id="pop-mod">
+<div class="pdg-pop mod" role="dialog" aria-label="이전 내용">
+  <div class="pdg-ph"><span class="k">수정됨</span><span class="v">v2 09:55 → v3 10:20</span><span class="sp"></span><button type="button" class="pin" aria-pressed="false" title="고정"><svg class="i" aria-hidden="true"><use href="#i-pin"/></svg></button><button type="button" class="close" title="닫기"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="pdg-pl">이전 내용</div>
+  <div class="pdg-pb md"><ul><li><strong>최근 활동</strong>: 마지막 로그 시각 기준, <del>1시간</del> 넘게 조용하면 “유휴”로 내림</li></ul></div>
+  <div class="pdg-pf"><span class="hint">클릭하면 고정 · Esc로 닫기</span><span class="sp"></span><a href="#e6">v2 전체 보기 ↑</a></div>
+</div>
+</template>
+<template id="pop-del">
+<div class="pdg-pop del" role="dialog" aria-label="지워진 내용">
+  <div class="pdg-ph"><span class="k">삭제됨</span><span class="v">v2 09:55 → v3 10:20</span><span class="sp"></span><button type="button" class="pin" aria-pressed="false" title="고정"><svg class="i" aria-hidden="true"><use href="#i-pin"/></svg></button><button type="button" class="close" title="닫기"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="pdg-pl">지워진 내용</div>
+  <div class="pdg-pb md"><ul><li class="gone"><strong>이름순</strong>: 보조 정렬 옵션으로 드롭다운에 제공</li></ul></div>
+  <div class="pdg-pf"><span class="hint">클릭하면 고정 · Esc로 닫기</span><span class="sp"></span><a href="#e6">v2 전체 보기 ↑</a></div>
+</div>
+</template>
+
+<script>
+/* NEW (mockup only). Same architecture as chg.js (agents-plugin-tool/internal/wswhiteboard/assets/chg.js:8-97):
+   marks live in a zero-height layer after the body; popovers are placed in page
+   coordinates so neither the body's overflow nor the topic card's clip them. */
+(function () {
+  var root = document.documentElement;
+  function setTheme(v) { root.setAttribute("data-theme", v); relayoutAll(); }
+  if (location.hash === "#dark") root.setAttribute("data-theme", "dark");
+  document.querySelectorAll("[data-set-theme]").forEach(function (b) {
+    b.addEventListener("click", function () { setTheme(b.getAttribute("data-set-theme")); });
+  });
+
+  var tpl = document.getElementById("tpl-v3");
+  document.querySelectorAll(".slot-v3").forEach(function (slot) { slot.appendChild(tpl.content.cloneNode(true)); });
+
+  var open = []; // {hit, pop, pinned}
+  function closeAll(keepForced) {
+    open = open.filter(function (o) {
+      if (keepForced && o.forced) return true;
+      o.pop.remove(); o.hit.classList.remove("hot"); o.hit.pdgBlock.classList.remove("pdg-hot");
+      return false;
+    });
+  }
+  function closeOne(o) {
+    o.pop.remove(); o.hit.classList.remove("hot"); o.hit.pdgBlock.classList.remove("pdg-hot");
+    open = open.filter(function (x) { return x !== o; });
+  }
+  function findOpen(hit) { return open.filter(function (o) { return o.hit === hit; })[0]; }
+
+  function place(o) {
+    var r = o.hit.getBoundingClientRect(), b = o.hit.pdgBlock;
+    var left = r.left + window.scrollX + 14, top;
+    if (o.hit.classList.contains("del")) top = r.top + r.height / 2 + window.scrollY + 3;
+    else top = b.getBoundingClientRect().bottom + window.scrollY + 3;
+    o.pop.style.left = left + "px"; o.pop.style.top = top + "px";
+  }
+
+  function show(hit, pin, forced) {
+    var o = findOpen(hit);
+    if (!o) {
+      open.filter(function (x) { return !x.pinned && !x.forced; }).forEach(closeOne);
+      var block = hit.pdgBlock, pop;
+      if (block.dataset.pop) {
+        pop = document.getElementById(block.dataset.pop).content.firstElementChild.cloneNode(true);
+      } else {
+        pop = document.createElement("div"); pop.className = "pdg-tip"; pop.textContent = block.dataset.tip || "";
+      }
+      document.body.appendChild(pop);
+      o = { hit: hit, pop: pop, pinned: false, forced: !!forced };
+      open.push(o);
+      hit.classList.add("hot"); block.classList.add("pdg-hot");
+      var pb = pop.querySelector(".pin"), cb = pop.querySelector(".close");
+      if (pb) pb.addEventListener("click", function () { setPin(o, !o.pinned); if (!o.pinned) closeOne(o); });
+      if (cb) cb.addEventListener("click", function () { closeOne(o); });
+      pop.addEventListener("pointerleave", function (e) { if (!o.pinned && !o.forced && e.relatedTarget !== hit) closeOne(o); });
+      if (block.dataset.tip && !block.dataset.pop) {
+        var r = hit.getBoundingClientRect();
+        pop.style.left = (r.right + window.scrollX + 4) + "px"; pop.style.top = (r.top + window.scrollY) + "px";
+      } else place(o);
+    }
+    if (pin) setPin(o, true);
+    return o;
+  }
+  function setPin(o, v) {
+    o.pinned = v; o.pop.classList.toggle("pinned", v);
+    var pb = o.pop.querySelector(".pin"); if (pb) pb.setAttribute("aria-pressed", v ? "true" : "false");
+  }
+
+  function layout(panel) {
+    var body = panel.querySelector(".entry-body"), layer = body.nextElementSibling;
+    if (!layer || !layer.classList.contains("pdg-layer")) {
+      layer = document.createElement("div"); layer.className = "pdg-layer"; body.parentNode.insertBefore(layer, body.nextSibling);
+    }
+    layer.textContent = "";
+    var o = layer.getBoundingClientRect(), bx = body.getBoundingClientRect();
+    var gx = bx.left - o.left + 0.5; // center of the body's 1px guide (border-left)
+    body.querySelectorAll("[data-pdg]").forEach(function (el) {
+      var kind = el.dataset.pdg, r = el.getBoundingClientRect(), top, h;
+      if (kind === "del") {
+        if (r.height > 1) { kind = "delblock"; top = r.top - o.top; h = r.height; }
+        else { var prev = el.previousElementSibling.getBoundingClientRect(); top = prev.bottom - o.top + 1 - 7; h = 14; }
+      } else { top = r.top - o.top; h = r.height; }
+      var hit = document.createElement("div");
+      hit.className = "pdg-hit " + kind;
+      hit.style.left = (gx - 7) + "px"; hit.style.top = top + "px"; hit.style.height = h + "px";
+      hit.innerHTML = '<div class="pdg-bar"></div>';
+      hit.pdgBlock = el;
+      layer.appendChild(hit);
+      hit.addEventListener("pointerenter", function () { show(hit, false); });
+      hit.addEventListener("pointerleave", function (e) {
+        var x = findOpen(hit); if (x && !x.pinned && !x.forced && !x.pop.contains(e.relatedTarget)) closeOne(x);
+      });
+      hit.addEventListener("click", function () {
+        var x = findOpen(hit);
+        if (x && x.pinned) closeOne(x); else show(hit, true);
+      });
+    });
+  }
+
+  function setDiff(panel, on) {
+    var details = panel.querySelector(".entry-panel"), body = panel.querySelector(".entry-body");
+    details.classList.toggle("pdg-on", on); body.classList.toggle("pdg-diffview", on);
+    panel.querySelector(".pdg-chip").setAttribute("aria-pressed", on ? "true" : "false");
+    layout(panel);
+  }
+
+  var panels = Array.prototype.slice.call(document.querySelectorAll(".slot-v3 > .wb-entry.panel"));
+  panels.forEach(function (panel) {
+    panel.querySelector(".pdg-chip").addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation(); closeAll(true);
+      setDiff(panel, panel.querySelector(".pdg-chip").getAttribute("aria-pressed") !== "true");
+    });
+    panel.querySelector(".pdg-off").addEventListener("click", function () { closeAll(true); setDiff(panel, false); });
+  });
+
+  function applyForced() {
+    panels.forEach(function (panel) {
+      var f = panel.closest(".scene").getAttribute("data-force");
+      if (f === "diff") setDiff(panel, true);
+      var hits = panel.querySelectorAll(".pdg-hit");
+      if (f === "mod:hover") show(panel.querySelector(".pdg-hit.mod"), false, true);
+      if (f === "del:pin") show(panel.querySelector(".pdg-hit.del"), true, true);
+    });
+  }
+  function relayoutAll() {
+    panels.forEach(layout);
+    open.forEach(function (o) {
+      // the layer was rebuilt: rebind forced popovers to the new hit boxes
+      var b = o.hit.pdgBlock, nh = b.closest(".entry-panel").querySelectorAll(".pdg-hit");
+      for (var i = 0; i < nh.length; i++) if (nh[i].pdgBlock === b) { o.hit = nh[i]; nh[i].classList.add("hot"); }
+      place(o);
+    });
+  }
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeAll(true); });
+  window.addEventListener("resize", relayoutAll);
+  panels.forEach(layout);
+  applyForced();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayoutAll);
+})();
+</script>
+</body>
+</html>

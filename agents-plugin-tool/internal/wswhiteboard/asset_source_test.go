@@ -11,7 +11,7 @@ func whiteboardTestAsset(name string) ([]byte, error) {
 }
 
 func TestPageSourceAssembly(t *testing.T) {
-	files := []string{"page.css", "page-items.css", "page-stream.css", "page-panels.css", "page-sticky.css"}
+	files := []string{"page.css", "page-items.css", "page-stream.css", "page-panel-diff.css", "page-panels.css", "page-sticky.css"}
 	var calls []string
 	raw, err := readPageSource(func(name string) ([]byte, error) {
 		calls = append(calls, name)
