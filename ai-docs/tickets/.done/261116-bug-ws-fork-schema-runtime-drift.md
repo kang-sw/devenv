@@ -21,7 +21,8 @@ identity/authority incidents.
 
 ## Decisions
 
-- Compatibility tier: **T0**, description-only drift tolerance. The lead captures
+- Compatibility tier: **T0**, compatible additive and description-only drift
+  tolerance (R1 correction; see Edition below). The lead captures
   tool metadata in `agents-plugin-pi/src/fork.ts:350` through
   `captureRegisteredTools` (`src/fork-context.ts:84`; remaining `src/` paths
   below are relative to `agents-plugin-pi/`); the child and parent read
@@ -32,12 +33,15 @@ identity/authority incidents.
   Launch/context version and durable data are unchanged; old readers still
   read new snapshots, and reopening needs no migration or recovery. Old
   adapters retain their existing strict refusal; this fix adds no boundary.
-- Choose the smallest evidenced fix: ignore tool descriptions and JSON Schema
-  descriptions at schema nodes, and compare objects independent of key order.
-  Preserve literal `const`/`enum`/`default` values and description-named arguments.
-  Optional-property additions, other schema changes, missing/extra callables,
-  and callable reordering remain fail-closed. General schema subtyping is out
-  of scope; current runtime metadata stays authoritative, never replayed.
+- R1 scope: ignore descriptions at schema nodes and tool-level prose; accept
+  runtime-only optional properties and runtime `required` subsets, recursively
+  through existing properties. Other keywords remain deep-equal after prose
+  stripping, including type/enum/const and additionalProperties. Preserve literal
+  data and description-named arguments. Missing/extra callables and callable
+  reordering still refuse; diagnostics include the differing schema path.
+  Current runtime metadata stays authoritative for existing tools. This does not
+  change missing-task-tool stubs, which replay captured metadata and refuse
+  dispatch; nor can call-shape comparison detect handler semantic changes.
 - Owner's implementation instruction supersedes the backlog's open-ended live
   repro requirement: use a deterministic regression and one passing scoped
   check; no local native ws processes. Design/completeness ceremony skipped
@@ -87,3 +91,35 @@ Live host probing and general additive-schema compatibility are not in scope.
 - Dogfood surprise: ticket query/move/close tools were unavailable in this
   worker profile; used documented filesystem/Git fallbacks. No other surprises
   or Forward items; no live fork probe or local native execution.
+
+#### Edition (780516c87) - 2026-11-16
+
+- R1 correction to the original Result's diagnosis and completion claim:
+  `3b2fe2596` added optional `force` to worktree.release at 2026-11-15 23:51,
+  before the wording-only `a2918bc7e`/`bb2c53eec` changes. A lead registered
+  before that addition captures no `force`, while a fresh child registers it.
+  This is a **source-derived likely cause**, not an observed live failure;
+  the actual lead build time and failed request were not captured. The original
+  wording-only fixture did not cover this additive shape.
+- Replace equality with bounded directional compatibility: optional runtime
+  properties and fewer required properties are accepted recursively through
+  captured properties. New requirements, removed captured properties, added
+  additionalProperties:false, type/enum/const changes, and other keyword
+  changes remain rejected. Descriptions under items/anyOf/$defs are ignored;
+  literal descriptions in const/enum/default remain relevant. The check concerns
+  call shape only, not handler semantics. Compatibility remains **T0**: no
+  snapshot/protocol/store change or new old-reader boundary; reopening needs
+  no recovery. Existing runtime registrations are not replaced.
+- Changed-tool refusals now name a JSON Pointer schema path, for example
+  `ws__worktree_release (/parameters/required/force: new required property)`.
+  Test titles now describe the optional-property fixture they actually prove.
+- Before this fix, the revised additive and nested/subset tests failed against
+  the description-only comparator (11 passed, 2 failed). After fix,
+  **13/13 passed** with:
+  `cd agents-plugin-pi && TMPDIR=D:/Temp/exec4 TEMP=D:/Temp/exec4 TMP=D:/Temp/exec4 node --test test/fork-context.test.ts`.
+  `git diff --check` passed. No subprocess/launcher imports were added; no
+  local Go, native ws executable, launcher, or test binary ran. Remote Go was
+  not repeated, per the owner's TS-only R1 instruction.
+- R1 C1 and M1-M4 addressed. M5's missing-tool stub replay stays unchanged and
+  is explicitly excluded from the existing-registration no-replacement claim.
+  No new dogfood surprises or Forward items.
