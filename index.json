@@ -310,16 +310,6 @@
         }
       }
     },
-    "261114-feat-ws-topic-latest-panel-recap-summary": {
-      "registered_at": "2026-11-14T11:35:43Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-16T17:44:27Z"
-      }
-    },
     "261114-feat-ws-whiteboard-center-reference-scroll": {
       "registered_at": "2026-11-14T11:48:51Z"
     },
@@ -544,6 +534,9 @@
     },
     "261116-feat-ws-dashboard-generalized-mentions": {
       "registered_at": "2026-11-16T13:07:35Z"
+    },
+    "261116-feat-ws-dashboard-session-page-payload-and-render-cost": {
+      "registered_at": "2026-11-16T20:29:44Z"
     },
     "261116-feat-ws-session-outside-git-folder": {
       "registered_at": "2026-11-16T12:11:42Z"
