@@ -7,8 +7,9 @@
   // dashboard page it frames (the index and the session pages) in a
   // same-origin frame of its own: the page's path with ?frame=1, which the
   // daemon lets only its own origin frame.
-  // Each session switch destroys the previous frame and loads a fresh one;
-  // the shell keeps no hidden-session cache. The address bar keeps the page's
+  // Safe session pages share a bounded cache; hidden pages suspend streams,
+  // clocks and nested documents. Unsafe/tool pages still navigate fresh.
+  // The address bar keeps the page's
   // own path (history.pushState). The frame streams its own regions from the
   // daemon; the shell streams the rail alone.
   //
@@ -53,6 +54,9 @@
   //     theme   {theme}               another page picked the theme
   //     settings {layout, input}      shell's current choices, independent
   //                                   of whether browser persistence works
+  // Frontend-only bound, not a persisted setting or manifest key. Zero keeps
+  // the fresh-load path for diagnostics; one destination may be loading.
+  var CACHE_LIMIT = 5;
   var KINDS = {
     head: { html: "?string", qs: "string", pad: "number", top: "number" },
     title: { title: "string" },
@@ -119,5 +123,5 @@
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
   }
 
-  window.WsShell = { message: message, framed: framed, src: src, alpha: alpha };
+  window.WsShell = { message: message, framed: framed, src: src, alpha: alpha, cacheLimit: CACHE_LIMIT };
 })();

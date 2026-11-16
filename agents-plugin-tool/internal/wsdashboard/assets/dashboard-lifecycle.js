@@ -247,12 +247,22 @@
       return unsaved;
     }));
   }
-  if (framed) window.wsSaveSessionDraft = saveDraft;
+  if (framed) {
+    window.wsSaveSessionDraft = saveDraft;
+    window.wsCanCacheSession = function () {
+      saveDraft();
+      // Arbitrary web/tool runtimes cannot be frozen by ordinary page code.
+      // Keep their existing guarded fresh navigation instead of caching them.
+      return !!rid && !draftUnsaved && !imgs.some(function (p) { return !p.ref; }) &&
+        !q('iframe:not(.doc-frame), .bcard, .fpane[data-max]').length && !visible(fpane) && !tkBusy &&
+        (!window.WsTerm || (window.WsTerm.cacheSafe && window.WsTerm.cacheSafe())) && !Object.keys(supChats).length;
+    };
+  }
 
   // --- iframe shell -------------------------------------------------------------
-  // The shell page (shell) owns just one session frame. A switch navigates
-  // the old document through its native beforeunload guard before removing
-  // it, then loads a fresh frame. A cancelled leave keeps the current page. The
+  // Safe, loaded session pages are retained up to shell.js's code bound.
+  // Unsafe/tool/non-session pages still navigate through their native leave
+  // guard; a cancelled destructive leave keeps the current page. The
   // address bar names the shown page (pushState; popstate shows the page it
   // goes back to). The shell's header mirrors the shown frame's (the head
   // message): its head region, its search button, and the header's padding
@@ -273,6 +283,7 @@
   function shRestoreDone() {
     clearTimeout(shRestoreTimer); shRestoreTimer = null;
     shRestoring = null;
+    shIndex = shHistoryIndex();
     var nav = shRestoreNav; shRestoreNav = null;
     if (nav) shOpen(nav.href, nav.push);
   }
@@ -289,7 +300,12 @@
     var leave = shLeaving;
     if (!leave || leave.ent !== ent || leave.attempt !== attempt) return;
     leave.stayed = true;
+    ent.el.inert = false;
     shLeaving = null;
+    shIndex = leave.from;
+    // A ready but never-shown destination has no reader edits. Do not keep
+    // its runtime after Stay; ent.leave still lets an accepted blank win.
+    if (shWant && shWant !== ent) shDrop(shWant);
     // Back has already moved history. Restore the position, never its URL:
     // replaceState here would erase the destination entry from Back/Forward.
     if (shHistoryIndex() !== leave.from) {
@@ -345,6 +361,27 @@
     try { ent.el.contentWindow.postMessage(m, location.origin); } catch (x) { /* unloading */ }
   }
   function shEnt(win) { return shFrames.filter(function (x) { return x.el.contentWindow === win; })[0] || null; }
+  function shCacheable(ent) {
+    if (!window.WsShell.cacheLimit || !ent || !ent.loaded || !ent.f.rid || ent.leave) return false;
+    try { return !!(ent.el.contentWindow.wsCanCacheSession && ent.el.contentWindow.wsCanCacheSession()); } catch (e) { return false; }
+  }
+  function shDrop(ent) {
+    try {
+      if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
+      if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView();
+    } catch (e) { /* only safe or never-shown documents are discarded */ }
+    shFrames.splice(shFrames.indexOf(ent), 1);
+    if (shWant === ent) shWant = null;
+    ent.el.remove();
+  }
+  function shPrune() {
+    var limit = Math.max(1, window.WsShell.cacheLimit || 0);
+    while (shFrames.length > limit) {
+      var old = shFrames.filter(function (x) { return x !== shOn && x !== shWant; })[0];
+      if (!old) break;
+      shDrop(old);
+    }
+  }
   // A blank navigation fires load only after the existing beforeunload
   // confirmation accepted it. Removing an iframe directly would bypass that
   // guard. Late loads/messages from a removed frame have no shell authority.
@@ -388,8 +425,12 @@
     if (shRestoring !== null) { shRestoreNav = { href: href, push: push }; return; }
     var u = new URL(href, location.href), f = window.WsShell.framed(u, location.origin);
     if (!f) { location.href = u.href; return; }
+    // A destination that never became visible owns no reader edits. A rapid
+    // pick supersedes it without parking an extra loading document.
+    if (window.WsShell.cacheLimit && shOn && shWant && shWant !== shOn) shDrop(shWant);
     var ent = shOn || shWant;
     if (ent && ent.f.path === f.path && !shLeaving) {
+      ent.el.inert = false;
       if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
       if (!push) shIndex = shHistoryIndex();
       if (f.hash !== ent.f.hash) {
@@ -405,7 +446,20 @@
       shLeaving.f = f; shLeaving.push = push; shLeaving.index = shHistoryIndex();
       return;
     }
-    shLeaving = { ent: ent, f: f, push: push, from: shIndex, index: shHistoryIndex(), attempt: ++shLeaveSeq };
+    if (shCacheable(ent)) {
+      try { if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView(); } catch (e) {}
+      // The outgoing page may remain painted during a cold load, but cannot
+      // acquire a new unsaved edit after the cache-safety check.
+      ent.el.inert = true;
+      if (ent.el.blur) ent.el.blur();
+      shStart(f, push, shIndex);
+      return;
+    }
+    shLeave(ent, f, push);
+  }
+  function shLeave(ent, f, push, from) {
+    ent.el.inert = false;
+    shLeaving = { ent: ent, f: f, push: push, from: from === undefined ? shIndex : from, index: shHistoryIndex(), attempt: ++shLeaveSeq };
     ent.leave = shLeaving;
     // Save even a draft whose debounce has not fired. The native navigation,
     // not a custom confirm or a remove(), asks before losing pasted images.
@@ -416,14 +470,24 @@
       ent.el.contentWindow.location.replace("about:blank");
     } catch (x) { ent.leave = null; shLeaving = null; }
   }
-  function shStart(f, push) {
+  function shStart(f, push, from) {
     if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
+    if (!push) shIndex = shHistoryIndex();
+    var cached = window.WsShell.cacheLimit && shFrames.filter(function (x) { return x.loaded && x.f.rid && x.f.path === f.path && !x.leave; })[0];
+    if (cached) {
+      if (cached.f.hash !== f.hash) try { cached.el.contentWindow.location.hash = f.hash; } catch (e) {}
+      cached.f = f;
+      shShow(cached, from);
+      return;
+    }
     var el = doc.createElement("iframe");
-    el.className = "sframe on";
+    el.className = shOn ? "sframe" : "sframe on";
     el.title = doc.title;
     shWant = shAdd(el, f);
+    shWant.from = from;
     el.src = window.WsShell.src(f);
     $("frames").appendChild(el);
+    if (shOn) return; // Keep the previous pixels until the target loads.
     shRid(f.rid);
     shHead({ head: null });
     shLayout({ pincol: false, dim: 0 });
@@ -436,20 +500,37 @@
     root.setAttribute("data-rid", id);
     railMarks();
   }
-  function shShow(ent) {
-    shWant = null;
+  function shShow(ent, from) {
     var was = shOn;
     if (was === ent) return;
+    // Async tool/draft callbacks can change eligibility during a cold load.
+    // Keep the ready destination, but obtain native leave acceptance before
+    // hiding or destroying an outgoing document that is no longer safe.
+    if (was && !shCacheable(was)) {
+      shSend(ent, "shown", { shown: false });
+      if (!shLeaving) shLeave(was, ent.f, false, from === undefined ? ent.from : from);
+      return;
+    }
+    shWant = null;
     // A rename in progress names the session it was started for.
     var sn = region("head") && region("head").querySelector(".sname");
     if (sn && labelEditing()) labelEnd(sn);
     headHeld = null;
     shOn = ent;
+    shFrames.splice(shFrames.indexOf(ent), 1); shFrames.push(ent);
+    if (ent.cached) {
+      shSettings(ent);
+      shSend(ent, "theme", { theme: root.getAttribute("data-theme") || "" });
+      ent.cached = false;
+    }
+    ent.el.inert = false;
     ent.el.classList.add("on");
     if (was) {
+      was.cached = true;
       was.el.classList.remove("on");
       shSend(was, "shown", { shown: false });
     }
+    shPrune();
     shSend(ent, "shown", { shown: true });
     shRid(ent.f.rid);
     shHead(ent);
@@ -602,6 +683,7 @@
     }
     function post() {
       queued = null;
+      if (shHidden) return;
       var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
       var head = top ? {
         html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
@@ -620,7 +702,7 @@
       if (head) send("head", head);
       send("layout", layout);
     }
-    function queue() { if (!queued) queued = requestAnimationFrame(post); }
+    function queue() { if (!shHidden && !queued) queued = requestAnimationFrame(post); }
     doc.addEventListener("ws-overview", queue);
     var top = doc.querySelector(".dwrap > .top");
     if (window.MutationObserver) {
@@ -662,9 +744,16 @@
       if (!m) return;
       if (m.wsShell === "shown") {
         shHidden = !m.shown;
+        if (shHidden && queued) { cancelAnimationFrame(queued); queued = null; }
         syncPageVisibility();
-        if (shHidden) return;
+        if (shHidden) {
+          // Opaque author scripts have no safe general pause API. Retain
+          // their placeholder heights, not their running child documents.
+          suspendDocFrames();
+          return;
+        }
         showRegions();
+        mountFramesPaced(doc);
         tickTimes();
         if (shTrackerRev !== null) { var rev = shTrackerRev; shTrackerRev = null; trackerNudge(rev); }
         queue();
