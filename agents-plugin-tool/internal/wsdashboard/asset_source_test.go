@@ -19,7 +19,7 @@ func TestDashboardSourceAssembly(t *testing.T) {
 	}{
 		{"dashboard.js", []string{"dashboard.js", "dashboard-board.js", "dashboard-conversation.js", "dashboard-bundles.js", "dashboard-composer.js", "dashboard-actions.js", "dashboard-drawer.js", "dashboard-frames.js", "dashboard-git.js", "dashboard-tracker.js", "dashboard-selection.js", "dashboard-stream.js", "dashboard-rail.js", "dashboard-rail-popovers.js", "dashboard-leads.js", "dashboard-session-view.js", "dashboard-lifecycle.js"}},
 		{"dashboard.css", []string{"dashboard.css", "dashboard-conversation.css", "dashboard-board.css", "dashboard-layout.css", "dashboard-drawer.css", "dashboard-menus.css", "dashboard-rail.css", "dashboard-shell.css"}},
-		{"tracker.js", []string{"tracker.js"}},
+		{"tracker.js", []string{"tracker.js", "tracker-mount.js"}},
 		{"rail.js", []string{"rail.js"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
