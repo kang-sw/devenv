@@ -14,7 +14,11 @@ import (
 
 // DefaultPollInterval is the polling backstop: every registered session is
 // re-read this often, which catches a store write whose nudge was lost.
-const DefaultPollInterval = 30 * time.Second
+const DefaultPollInterval = 5 * time.Minute
+
+// indexClockInterval preserves the previous liveness-check cadence. Between
+// safety scans only an expiry/recovery of known evidence needs a targeted read.
+const indexClockInterval = 30 * time.Second
 
 // SessionData is what a SessionSource reads from one session's stores.
 type SessionData struct {
@@ -30,6 +34,9 @@ type SessionData struct {
 	// SnapshotUpdatedAt is the live snapshot's updatedAt (its writer's last
 	// write or heartbeat); zero when the session has no readable snapshot.
 	SnapshotUpdatedAt time.Time
+	// SnapshotStaleAt is the first instant the already-read snapshot is stale.
+	// Zero means no snapshot evidence. This is an in-memory deadline only.
+	SnapshotStaleAt time.Time
 	// Resumable reports a session whose record names the harness
 	// conversation behind it (its harness reported one at login), which
 	// the daemon needs to take the session over from a terminal.
@@ -109,6 +116,9 @@ type Index struct {
 	mu         sync.Mutex
 	sessions   map[string]*indexEntry
 	readErrors map[string]bool // transient reads, including not-yet-indexed sessions
+	// Hosted clock handoffs can precede the first source read/insertion.
+	liveClocks    map[string]indexLiveClock
+	nextLiveClock uint64
 
 	// loaded is set once a Refresh has read the whole registry (Loaded).
 	loaded atomic.Bool
@@ -134,9 +144,16 @@ type lane struct {
 }
 
 type indexEntry struct {
-	session     Session
-	fingerprint string
-	retry       bool // bypass endedApplied until a successful read
+	session         Session
+	fingerprint     string
+	retry           bool // bypass endedApplied until a successful read
+	snapshotStaleAt time.Time
+	snapshotStale   bool
+}
+
+type indexLiveClock struct {
+	generation  uint64
+	at, staleAt time.Time
 }
 
 // NewIndex returns an empty index; Refresh fills it.
@@ -261,12 +278,42 @@ func (x *Index) Reread(replyID string) {
 // SetSnapshotUpdatedAt sets the indexed session's SnapshotUpdatedAt in
 // place, for a hosted session's in-memory snapshot hand-off
 // (LiveSlot.Publish): like a heartbeat-only re-read, it raises no Rev and
-// calls no change hook. A session the index does not hold is left alone.
-func (x *Index) SetSnapshotUpdatedAt(replyID string, at time.Time) {
+// calls no change hook. A handoff arriving during the first source read is
+// retained until insertion; it does not create or authorize an index entry.
+func (x *Index) SetSnapshotUpdatedAt(replyID string, at, staleAt time.Time) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	if x.liveClocks == nil {
+		x.liveClocks = map[string]indexLiveClock{}
+	}
+	x.nextLiveClock++
+	x.liveClocks[replyID] = indexLiveClock{generation: x.nextLiveClock, at: at, staleAt: staleAt}
 	if entry, ok := x.sessions[replyID]; ok {
 		entry.session.SnapshotUpdatedAt = at
+		entry.snapshotStaleAt = staleAt
+	}
+}
+
+// RefreshClock examines only evidence already in memory. A due liveness
+// transition schedules one targeted authoritative read, rather than declaring
+// a legacy writer dead from an old cached heartbeat. Healthy hosted beats
+// move their deadlines directly, so an idle clock tick does no filesystem work.
+func (x *Index) RefreshClock() {
+	now := x.opts.Now()
+	x.mu.Lock()
+	var due []string
+	for id, entry := range x.sessions {
+		s := entry.session
+		stale := !entry.snapshotStaleAt.IsZero() && !now.Before(entry.snapshotStaleAt)
+		// Keep checking already-stale, non-ended writers at the previous
+		// cadence too: a legacy writer may resume without sending a nudge.
+		if s.EndedAt == "" && (!s.Registration.Live(now) || stale || s.Live != s.Registration.Live(now) || s.Lifecycle != DeriveSessionLifecycle(s.Registration, s.Hidden, now) || stale != entry.snapshotStale) {
+			due = append(due, id)
+		}
+	}
+	x.mu.Unlock()
+	for _, id := range due {
+		x.Reread(id)
 	}
 }
 
@@ -380,6 +427,11 @@ func (x *Index) readLane(replyID string, l *lane) {
 // apply re-reads one session from its registration (nil when it has none)
 // and its stores, and reports whether the index entry changed.
 func (x *Index) apply(replyID string, reg *Registration) bool {
+	// A hosted heartbeat can publish while the source read is in flight.
+	// Its newer clock handoff must not be rolled back by that older read.
+	x.mu.Lock()
+	liveGeneration := x.liveClocks[replyID].generation
+	x.mu.Unlock()
 	var data SessionData
 	keep := reg != nil
 	if keep {
@@ -414,6 +466,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	delete(x.readErrors, replyID)
 	entry, known := x.sessions[replyID]
 	if !keep {
+		delete(x.liveClocks, replyID)
 		if !known {
 			return false
 		}
@@ -421,21 +474,28 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s removed (project %s)\n", replyID, entry.session.Project)
 		return true
 	}
+	if clock := x.liveClocks[replyID]; clock.generation != 0 && clock.generation != liveGeneration {
+		data.SnapshotUpdatedAt = clock.at
+		data.SnapshotStaleAt = clock.staleAt
+	}
+	snapshotStale := !data.SnapshotStaleAt.IsZero() && !now.Before(data.SnapshotStaleAt)
 	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, Label: label, SnapshotUpdatedAt: data.SnapshotUpdatedAt, Hidden: hidden, Lifecycle: DeriveSessionLifecycle(*reg, hidden, now)}
 	if !known {
 		next.Rev = 1
-		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint}
+		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint, snapshotStaleAt: data.SnapshotStaleAt, snapshotStale: snapshotStale}
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s added (project %s)\n", replyID, reg.Project)
 		return true
 	}
 	entry.retry = false
+	sameClock := entry.snapshotStale == snapshotStale
+	entry.snapshotStaleAt, entry.snapshotStale = data.SnapshotStaleAt, snapshotStale
 	next.Rev = entry.session.Rev
 	same := next
 	same.SnapshotUpdatedAt = entry.session.SnapshotUpdatedAt
 	// Retain fresh heartbeat evidence without waking every page for a timestamp
 	// alone. Live and Lifecycle are still compared, including stale/recovery.
 	same.HeartbeatAt = entry.session.HeartbeatAt
-	if same == entry.session && data.Fingerprint == entry.fingerprint {
+	if same == entry.session && data.Fingerprint == entry.fingerprint && sameClock {
 		entry.session = next
 		return false
 	}
