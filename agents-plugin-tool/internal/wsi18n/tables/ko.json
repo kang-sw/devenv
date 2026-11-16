@@ -440,6 +440,7 @@
   "js.term.loadfail": "터미널 에뮬레이터를 불러오지 못했습니다",
   "js.board.toolbar.label": "보드 작업",
   "js.board.toolbar.overview": "한 눈에 보기",
+  "js.board.toolbar.overview.title": "한 눈에 보기 (Ctrl+Q)",
   "js.board.toolbar.search": "검색",
   "js.board.toolbar.files": "파일",
   "js.board.overview.hint": "바깥 클릭·Esc: 원래 자리로 · 카드 클릭: 그 카드로",
