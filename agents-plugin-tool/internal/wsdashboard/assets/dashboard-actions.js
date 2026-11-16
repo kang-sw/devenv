@@ -118,6 +118,12 @@
       .catch(function () { toast(wsT("js.login.copyfail")); })
       .finally(function () { button.disabled = false; });
   }
+  // The native menu owns the clipboard write; this payload-free callback only
+  // acknowledges the explicit click, using the same localized Settings toast.
+  var desktopLogin = window.werkschaftDesktop && window.werkschaftDesktop.login;
+  if (desktopLogin && typeof desktopLogin.onCopied === "function") {
+    desktopLogin.onCopied(function () { toast(wsT("js.login.copied")); });
+  }
   // --- session label: the head's name -----------------------------------------
   // The head's name (sname, dashboard.tmpl) shows the session's display
   // label, or its reply-id when it has none; a click on it copies the

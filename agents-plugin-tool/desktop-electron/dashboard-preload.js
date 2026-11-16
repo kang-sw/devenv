@@ -1,10 +1,14 @@
 'use strict';
-// The dashboard's only native bridge: the app-update toasts and the settings
-// row (none / available / ready, with Restart now). Every call is a
-// payload-light IPC message the main process accepts only from the attached
-// dashboard origin's main frame.
+// Bounded native bridge: update controls and a payload-free notification
+// after an explicit native menu copy. No login URL, cookie or bearer is exposed.
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('werkschaftDesktop', Object.freeze({
+  login: Object.freeze({
+    onCopied(callback) {
+      if (typeof callback !== 'function') return;
+      ipcRenderer.on('werkschaft:login-copied', () => callback());
+    },
+  }),
   update: Object.freeze({
     check() { ipcRenderer.send('werkschaft:update-check'); },
     download() { ipcRenderer.send('werkschaft:update-download'); },

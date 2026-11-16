@@ -39,17 +39,17 @@ function endpointFile(root) {
   }
   return value;
 }
-// Discovery never returns credentials. Only the controlled shutdown path reads
-// the bearer token, immediately before sending it to this same endpoint.
+// Discovery never returns credentials. Controlled shutdown and browser-login
+// helpers read the bearer only in the main process, immediately before use.
 function readEndpoint(root) {
   const { port, pid } = endpointFile(root);
   return { port, pid };
 }
-function readShutdownEndpoint(root, expected) {
+function readBearerEndpoint(root, expected) {
   const value = endpointFile(root);
   if (value.port !== expected.port || value.pid !== expected.pid ||
       typeof value.token !== 'string' || !/^[a-f0-9]{64}$/.test(value.token)) {
-    throw new Error('Dashboard identity or shutdown credential changed; retry');
+    throw new Error('Dashboard identity or credential changed; retry');
   }
   return { port: value.port, pid: value.pid, token: value.token };
 }
@@ -111,20 +111,76 @@ function sameDaemon(a, b) {
     a?.health?.started_at === b?.health?.started_at &&
     observedTokens.get(a.endpoint) === observedTokens.get(b.endpoint);
 }
-async function shutdown(root, observed) {
-  const ep = readShutdownEndpoint(root, observed.endpoint);
+async function checkedEndpoint(root, observed) {
+  const ep = readBearerEndpoint(root, observed.endpoint);
   if (!observedTokens.has(observed.endpoint) ||
       observedTokens.get(observed.endpoint) !== crypto.createHash('sha256').update(ep.token).digest('hex')) {
-    throw new Error('Dashboard shutdown credential changed; retry');
+    throw new Error('Dashboard credential changed; retry');
   }
-  // Reinspect immediately before draining: never send a stale token to a
-  // different daemon. A concurrent winner after this check needs a Go guard.
+  // Reinspect immediately before authenticated use: never send a stale token
+  // to a different observed daemon. The route still verifies the bearer.
   const current = await inspect(root);
   if (!sameDaemon(observed, current)) {
-    throw new Error('Dashboard changed before shutdown; retry');
+    throw new Error('Dashboard changed before authenticated request; retry');
   }
-  if (readShutdownEndpoint(root, ep).token !== ep.token) throw new Error('Dashboard shutdown credential changed; retry');
+  if (readBearerEndpoint(root, ep).token !== ep.token) throw new Error('Dashboard credential changed; retry');
+  return ep;
+}
+async function shutdown(root, observed) {
+  const ep = await checkedEndpoint(root, observed);
   await requestJSON(ep, 'POST', '/shutdown', ep.token, 3000);
 }
+async function authJSON(root, observed, route, body = {}) {
+  const ep = await checkedEndpoint(root, observed);
+  return new Promise((resolve, reject) => {
+    let request;
+    const fail = () => { request?.destroy(); reject(new Error('Dashboard browser login request failed')); };
+    const payload = JSON.stringify(body);
+    // Direct loopback only; no Origin, cookies, proxy or redirect following.
+    request = http.request({ hostname: '127.0.0.1', port: ep.port, path: route,
+      method: 'POST', agent: false, headers: { Authorization: `Bearer ${ep.token}`,
+        'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } }, response => {
+      // An old daemon has no auth route. Do not try another credential path.
+      if (response.statusCode === 404) { response.resume(); resolve(undefined); return; }
+      if (response.statusCode !== 200) return fail();
+      let size = 0;
+      const chunks = [];
+      response.on('data', chunk => {
+        size += chunk.length;
+        if (size > MAX_JSON) return fail();
+        chunks.push(chunk);
+      });
+      response.on('error', fail);
+      response.on('aborted', fail);
+      response.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+        catch { fail(); }
+      });
+    });
+    const timer = setTimeout(fail, 3000);
+    request.on('close', () => clearTimeout(timer));
+    request.on('error', fail);
+    request.end(payload);
+  });
+}
+async function browserCookie(root, observed) {
+  const value = await authJSON(root, observed, '/auth/cookie');
+  if (value === undefined) return null;
+  if (!value || typeof value.name !== 'string' || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value.name) ||
+      typeof value.value !== 'string' || !/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/.test(value.value) ||
+      !Number.isInteger(value.maxAge) || value.maxAge <= 0 || value.maxAge > 34560000) {
+    throw new Error('Invalid dashboard browser cookie response');
+  }
+  return { name: value.name, value: value.value, maxAge: value.maxAge };
+}
+async function browserLoginLink(root, observed, path = '/') {
+  const value = await authJSON(root, observed, '/auth/link', { path });
+  let url;
+  try { url = new URL(value?.url); } catch { throw new Error('Invalid dashboard browser login link'); }
+  if (url.origin !== new URL(observed.url).origin || url.username || url.password || !url.searchParams.get('login')) {
+    throw new Error('Invalid dashboard browser login link');
+  }
+  return url.href;
+}
 async function discover(root = cacheRoot()) { return (await inspect(root)).url; }
-module.exports = { cacheRoot, readEndpoint, checkHealth, discover, inspect, shutdown, sameDaemon, MAX_JSON };
+module.exports = { cacheRoot, readEndpoint, checkHealth, discover, inspect, shutdown, sameDaemon, browserCookie, browserLoginLink, MAX_JSON };

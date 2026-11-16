@@ -520,6 +520,27 @@ Verification expectations (`desktop-electron` node tests):
 - The existing `main.test.js`, `endpoint.test.js` and `daemon-controller`
   tests pass.
 
+### Result (this-commit) - 2026-11-17
+
+Implemented checked-identity Electron cookie injection before navigation on both
+window layouts, repeated on Retry and Replace. The bearer is re-read immediately
+before use and checked against the observed port, process identity and credential;
+neither discovery nor renderer IPC returns it. Native cookies are HttpOnly,
+SameSite Strict, root-scoped and expire with the daemon's Max-Age. A 404 from an
+older daemon, or any other authentication/injection failure, still navigates.
+
+The Connection menu now has a separator and the owner-approved (1239) label
+“Copy Browser Login Link to Clipboard”. Only an explicit menu click mints and
+copies a link, preserving the current path, query and fragment; failures leave
+the clipboard untouched. A payload-free preload event asks the dashboard to
+show the same localized success toast as Settings, without exposing the link.
+
+Verification: `cd agents-plugin-tool/desktop-electron && npm test` passes all
+123 Node tests, including cookie-before-load ordering, retry/replacement,
+old-daemon fallback, changed identity, click-only copying and bounded preload
+notifications. No Electron process was launched. The parent also reran the named
+Go page/stream/script/terminal/visibility regression batch successfully.
+
 ### Phase 3: Gate UI per mockup and Chromium acceptance
 
 Depends on Phase 1. It can run in parallel with Phase 2.
