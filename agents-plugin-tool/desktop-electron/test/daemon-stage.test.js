@@ -81,6 +81,9 @@ test('builder accepts only a supplied validated input and copies entire package 
     }
     assert(visited.has('daemon-controller.js'));
     assert(visited.has('daemon-version.js'));
+    assert(visited.has('python.js'));
+    assert.equal(fs.readFileSync(path.join(dir, 'python-missing.html'), 'utf8'),
+      fs.readFileSync(path.resolve(__dirname, '../python-missing.html'), 'utf8'));
     assert.equal(typeof require(path.join(dir, 'daemon-controller.js')).connectDaemon, 'function');
     return [dir];
   };
