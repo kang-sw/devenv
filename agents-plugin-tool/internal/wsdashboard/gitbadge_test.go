@@ -92,6 +92,31 @@ func expectRead(t *testing.T, f *fakeGit, root string) {
 	}
 }
 
+// expectReads accepts concurrent reads in any order, but requires each root
+// exactly as many times as it appears in roots.
+func expectReads(t *testing.T, f *fakeGit, roots ...string) {
+	t.Helper()
+	want := make([]string, len(roots))
+	for i, root := range roots {
+		want[i] = gitKey(root)
+	}
+	got := make([]string, 0, len(roots))
+	deadline := time.After(2 * time.Second)
+	for range roots {
+		select {
+		case root := <-f.reads:
+			got = append(got, root)
+		case <-deadline:
+			t.Fatalf("reads %q, want %q (in any order)", got, want)
+		}
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("reads %q, want %q (in any order)", got, want)
+	}
+}
+
 func expectNoRead(t *testing.T, f *fakeGit) {
 	t.Helper()
 	select {
