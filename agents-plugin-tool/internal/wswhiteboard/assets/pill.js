@@ -49,7 +49,8 @@
   function retitle() {
     var n = items.filter(function (el) { return !answered(el); }).length;
     if (hosted) { if (window.wbTitleCount) window.wbTitleCount(n); return; }
-    d.title = (n ? "(" + n + ") " : "") + base;
+    var title = (n ? "(" + n + ") " : "") + base;
+    if (d.title !== title) d.title = title;
   }
 
   // Two zero-height sticky wrappers, first and last in the host, carry the
@@ -130,12 +131,14 @@
     var p = pills[edge], pending = edge === "top" && st.pending > 0;
     // The top capsule has nothing to offer at the very top with no board
     // update pending (no item above either); a latched change keeps it.
-    p.hidden = edge === "top" ? !pending && !list.length && atTop() : !list.length;
+    var hide = edge === "top" ? !pending && !list.length && atTop() : !list.length;
+    if (p.hidden !== hide) p.hidden = hide;
     p.classList.toggle("board-updated", !!pending);
     if (edge === "top") {
       var updates = p.querySelector(".oq-updates");
-      updates.hidden = !pending;
-      updates.textContent = pending ? wsT("js.board.hold.pill") + " " + st.pending : "";
+      if (updates.hidden !== !pending) updates.hidden = !pending;
+      var label = pending ? wsT("js.board.hold.pill") + " " + st.pending : "";
+      if (updates.textContent !== label) updates.textContent = label;
     }
     var groups = { open: [], ans: [], nt: [] };
     list.forEach(function (el) {
@@ -146,9 +149,10 @@
     target[edge] = {};
     Array.prototype.forEach.call(p.querySelectorAll(".oq-seg"), function (b) {
       var k = b.getAttribute("data-k"), g = groups[k] || [];
-      b.hidden = !g.length;
-      b.querySelector(".n").textContent = String(g.length);
-      b.setAttribute("aria-label", b.title + " (" + g.length + ")");
+      if (b.hidden !== !g.length) b.hidden = !g.length;
+      var count = b.querySelector(".n"), text = String(g.length), label = b.title + " (" + g.length + ")";
+      if (count.textContent !== text) count.textContent = text;
+      if (b.getAttribute("aria-label") !== label) b.setAttribute("aria-label", label);
       if (g.length) target[edge][k] = edge === "top" ? g[g.length - 1] : g[0];
     });
     // Animate the one outer capsule, not a second update capsule. Its final
@@ -157,7 +161,7 @@
     if (shape !== p.wbShape) {
       var from = p.wbGrow && p.wbGrow.playState === "running" ? p.offsetWidth : p.wbWidth;
       if (p.wbGrow) p.wbGrow.cancel();
-      p.style.overflow = "";
+      if (p.style.overflow) p.style.overflow = "";
       var width = p.offsetWidth;
       if (p.animate && from && width && from !== width && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
         p.style.overflow = "clip";
@@ -191,25 +195,25 @@
       if (r.bottom > rt && r.top < rb) return; // currently in view
       (r.top < rt ? above : below).push(el);
     });
+    // Read reply clearance before either capsule writes.
+    var reply = host.querySelector(".reply"), replyHeight = reply ? reply.offsetHeight : 0;
+    var bottom = "calc(" + (replyHeight ? replyHeight + 18 : 10) + "px + var(--wb-rail-bot, 0px))";
     show("top", above);
     show("bot", below);
     retitle();
-    // Keep the bottom pill clear of the sticky reply bar and of the topic
-    // rail's bottom capsules (rail.js sets --wb-rail-bot on this wrapper).
-    var reply = host.querySelector(".reply");
-    wraps.bot.style.bottom = "calc(" + (reply && reply.offsetHeight ? reply.offsetHeight + 18 : 10) + "px + var(--wb-rail-bot, 0px))";
+    if (wraps.bot.style.bottom !== bottom) wraps.bot.style.bottom = bottom;
   }
 
   // Watch topic positions, not every far control's rendered visibility.
   // Counts always come from the data-backed items and one current layout.
-  var io = new IntersectionObserver(update, { root: root });
+  var io = new IntersectionObserver(redrawSoon, { root: root });
   positions.forEach(function (el) { io.observe(el); });
 
   // A jump scroll can carry an item past the view without a crossing the
   // observer reports, and a hidden board column changes size without one; a
   // settled-scroll or resize refresh covers both.
   var timer = 0;
-  function later() { clearTimeout(timer); timer = setTimeout(update, 120); }
+  function later() { clearTimeout(timer); timer = setTimeout(redrawSoon, 120); }
   var scroller = root || window;
   scroller.addEventListener("scroll", later, { passive: true });
   window.addEventListener("resize", later);
@@ -226,7 +230,7 @@
   // Typing redraws once a frame at most (redrawSoon): read right after
   // form.js grew the note, every item's rect forced a second layout per
   // keystroke.
-  function redraw() { update(); }
+  function redraw() { redrawSoon(); }
   var typed = 0;
   function redrawSoon() { if (!typed) typed = requestAnimationFrame(function () { typed = 0; update(); }); }
   host.addEventListener("click", redraw);

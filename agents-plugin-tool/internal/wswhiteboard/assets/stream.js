@@ -43,7 +43,13 @@
     if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
     if (window.wbAgo) window.wbAgo(h);
     if (window.wbBindBoard) window.wbBindBoard(h);
-    h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
+    if (!h._wbHistoryNotify) {
+      h._wbHistoryNotify = true;
+      window.requestAnimationFrame(function () {
+        h._wbHistoryNotify = false;
+        if (h.isConnected !== false) h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
+      });
+    }
   }
   function take(gap, direction) {
     if (!gap) return null;
@@ -61,39 +67,87 @@
     var height = row.getBoundingClientRect().height;
     return height > 0 ? height : null;
   }
-  // One pending operation per gap; a late panel height resumes only the
-  // unfinished window. Settled membership never changes on resize.
+  // Initial histories share rounds: write every topic's next batch, then
+  // read all rows without intervening writes. Surplus stays inert and never
+  // binds or mounts frames. Exact whole-row windows and unknown-height waits
+  // remain unchanged; 32 tiny rows cost one layout, not 32 layouts.
+  var initialOps = null, resumeHistories = new Set(), resumeFrame = false;
+  function resume(h) {
+    resumeHistories.add(h);
+    if (resumeFrame) return;
+    resumeFrame = true;
+    window.requestAnimationFrame(function () {
+      resumeFrame = false;
+      var histories = Array.from(resumeHistories).filter(function (h) { return h.isConnected !== false; });
+      resumeHistories.clear();
+      initialOps = [];
+      histories.forEach(function (h) {
+        h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
+        if (h._wbHistoryFilling) fill(h);
+      });
+      var pending = initialOps; initialOps = null;
+      progressBatch(pending);
+    });
+  }
   function progress(h, op) {
-    if (op.busy || op.done) return;
-    op.busy = true;
-    var kept = kit.keep(h), changed = false, touched = new Set();
+    if (initialOps) { initialOps.push({ h: h, op: op }); return; }
+    progressBatch([{ h: h, op: op }]);
+  }
+  function progressBatch(items) {
+    items = items.filter(function (item) { return !item.op.busy && !item.op.done; });
+    items.forEach(function (item) {
+      item.op.busy = true; item.kept = kit.keep(item.h);
+      item.touched = new Set(); item.changed = false;
+    });
     try {
-      while (op.height < WINDOW_PX) {
-        if (!op.row) {
-          op.row = take(op.gap, op.direction);
-          if (!op.row) {
-            if (op.fallback) { op.gap = op.fallback; op.fallback = null; op.direction = 'up'; continue; }
-            break;
+      var active = items.slice();
+      while (active.length) {
+        active.forEach(function (item) {
+          var op = item.op, rows = item.rows = [], pending = op.row;
+          if (pending) rows.push(pending);
+          while (rows.length < 32 && op.height < WINDOW_PX) {
+            var row = take(op.gap, op.direction);
+            if (!row) break;
+            rows.push(row); item.touched.add(op.gap);
           }
-          if (op.loaded) loadedRows.add(op.row);
-          touched.add(op.gap);
-          changed = true;
-        }
-        var height = readyHeight(op.row);
-        if (height === null) return;
-        op.height += height;
-        op.row = null;
+          item.pending = pending;
+        });
+        // One read phase for the entire board, including all 27 topics.
+        active.forEach(function (item) { item.heights = item.rows.map(readyHeight); });
+        active = active.filter(function (item) {
+          var op = item.op, used = 0, waiting = false;
+          while (used < item.rows.length && op.height < WINDOW_PX) {
+            var row = item.rows[used], height = item.heights[used++];
+            if (row !== item.pending) { item.changed = true; if (op.loaded) loadedRows.add(row); }
+            op.row = height === null ? row : null;
+            if (height === null) { waiting = true; break; }
+            op.height += height;
+          }
+          // Undo speculative admission in reverse take order.
+          var held = op.gap && payload(op.gap);
+          for (var i = item.rows.length - 1; i >= used; i--) {
+            if (op.direction === 'up') held.appendChild(item.rows[i]);
+            else held.insertBefore(item.rows[i], held.children[0] || null);
+          }
+          if (waiting) return false;
+          if (op.height < WINDOW_PX && item.rows.length) return true;
+          if (op.height < WINDOW_PX && op.fallback) {
+            op.gap = op.fallback; op.fallback = null; op.direction = 'up'; return true;
+          }
+          op.done = true;
+          item.h._wbHistoryPending = item.h._wbHistoryPending.filter(function (p) { return p !== op; });
+          if (!op.loaded) {
+            if (op.height >= WINDOW_PX) item.h._wbHistoryFilling = false;
+            else if (item.h._wbHistoryFilling) resume(item.h);
+          }
+          return false;
+        });
       }
-      op.done = true;
-      h._wbHistoryPending = h._wbHistoryPending.filter(function (p) { return p !== op; });
     } finally {
-      touched.forEach(refresh);
-      if (changed) admitted(h);
-      op.busy = false; kept.apply();
-      // Owner-initiated load above: the row that sat under the gap keeps its
-      // place; the new rows land above it. Measured after keep, so a
-      // reading-line compensation is never doubled.
-      if (changed && op.pin) op.pin.apply();
+      items.forEach(function (item) { item.touched.forEach(refresh); });
+      items.forEach(function (item) { if (item.changed) admitted(item.h); item.op.busy = false; });
+      items.forEach(function (item) { item.kept.apply(); });
+      items.forEach(function (item) { if (item.changed && item.op.pin) item.op.pin.apply(); });
     }
   }
   function load(h, gap, direction, fallback, pinned) {
@@ -330,7 +384,10 @@
     fresh.forEach(function (h) { h._wbHistoryHeight = Math.ceil(h.querySelector('.history-live').getBoundingClientRect().height); });
     // Fill inside the shared capture: each fill's own keep() joins it, so
     // N histories cost one capture per scroller, not one per history.
+    initialOps = [];
     fresh.forEach(function (h) { h._wbHistoryFilling = true; fill(h); });
+    var pending = initialOps; initialOps = null;
+    progressBatch(pending);
     kept.forEach(function (k) { k.apply(); });
     fresh.forEach(function (h) {
       h.addEventListener('focusin', function (e) {
@@ -348,14 +405,8 @@
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          if ((!h._wbHistoryPending.length && !h._wbHistoryFilling) || h._wbHistoryFrame) return;
-          h._wbHistoryFrame = true;
-          window.requestAnimationFrame(function () {
-            h._wbHistoryFrame = false;
-            if (!h.isConnected) return;
-            h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
-            if (h._wbHistoryFilling) fill(h);
-          });
+          if (!h._wbHistoryPending.length && !h._wbHistoryFilling) return;
+          resume(h);
         });
         observer.observe(h.querySelector('.history-live'));
         h._wbHistoryObserver = observer;
@@ -466,6 +517,7 @@
   // over ordinary transactions, and input cancels it immediately.
   function viewKit(win) {
     var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map(), owners = new Map();
+    var watchNodes = new Set(), watchFrame = false;
     var IO = win.IntersectionObserver, bands = !!(IO && IO.prototype && "scrollMargin" in IO.prototype);
     function observer(margin) {
       if (observers[margin]) return observers[margin];
@@ -508,7 +560,17 @@
       var handle = { node: node, unwatch: function () { drop(sub); } };
       sub.handle = handle;
       if (!node || !win.IntersectionObserver) { sub.gone = true; return handle; }
-      if (rendered(node)) owner(scrollerOf(node));
+      watchNodes.add(node);
+      if (!watchFrame) {
+        watchFrame = true;
+        win.requestAnimationFrame(function () {
+          watchFrame = false;
+          var scrollers = new Set();
+          watchNodes.forEach(function (n) { if (rendered(n)) scrollers.add(scrollerOf(n)); });
+          watchNodes.clear();
+          scrollers.forEach(owner);
+        });
+      }
       var o = observer(sub.margin), list = o.subs.get(node);
       // A node already observed reports only on a change: observing it
       // again gives the new subscription its first report.

@@ -89,6 +89,7 @@
     return wsT("js.wb.body.updated", age);
   }
   function ago(root) {
+    if (document.hidden || document.documentElement.hasAttribute("data-animation-paused")) return;
     var now = Date.now();
     Array.prototype.forEach.call(root.querySelectorAll("time.tago[data-at]"), function (t) {
       put(t, text(+t.getAttribute("data-at"), now));
@@ -175,5 +176,9 @@
   // One document-owned clock, shared with updated-ago. Query live nodes each
   // tick, including pinned/adopted topics; no captured list retains old boards.
   // A second-level tick handles run-relative minute boundaries, not wall minutes.
-  if (!window.wbAgoTimer) window.wbAgoTimer = setInterval(function () { window.wbAgo(document); }, 1000);
+  if (!window.wbAgoTimer) {
+    window.wbAgoTimer = setInterval(function () { window.wbAgo(document); }, 1000);
+    document.addEventListener("visibilitychange", function () { window.wbAgo(document); });
+    document.addEventListener("ws-page-visibility", function () { window.wbAgo(document); });
+  }
 })();

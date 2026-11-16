@@ -14,9 +14,9 @@ func TestRailHarnessIcon(t *testing.T) {
 	for _, want := range []string{
 		"@keyframes rail-orbit { to { transform: rotate(360deg); } }",
 		".rail .hi .rrun { position: absolute;",
-		"animation: rail-orbit 1.3s linear infinite; }",
+		"animation: rail-orbit 1.3s steps(12) infinite; }",
 		"@keyframes rail-nudge {",
-		".rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s ease-in-out infinite; }",
+		".rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s steps(4) infinite; }",
 		".rail .hi.claude { background: #D97757; }",
 		".rail .hi.codex { background: #10A37F; }",
 		".rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }",

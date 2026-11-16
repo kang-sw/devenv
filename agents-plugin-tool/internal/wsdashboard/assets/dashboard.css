@@ -149,16 +149,20 @@
 .phase.idle { background: var(--wb-muted); color: var(--wb-muted-fg); }
 .phase.none { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); font-weight: 600; }
 .ahead .phase, .peer .phase, .sess .phase { height: 18px; font-size: 11px; padding: 0 7px 0 6px; gap: 5px; }
-.spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: dash-spin .8s linear infinite; flex: none; display: inline-block; }
+.spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: dash-spin .8s steps(12) infinite; flex: none; display: inline-block; }
 .sess .spin, .activity .spin, .brow .mk .spin { width: 10px; height: 10px; }
 @keyframes dash-spin { to { transform: rotate(360deg); } }
 .idle-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .55; flex: none; display: inline-block; }
 /* the agents popover's running-agent mark: a pulsing dot, never rotating, so
    it reads apart from a live tool row's spinner */
-.pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; display: inline-block; animation: dash-pulse 1.6s ease-in-out infinite; }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; display: inline-block; animation: dash-pulse 1.6s steps(4) infinite; }
 @keyframes dash-pulse { 50% { opacity: .3; } }
 /* A running Pi subagent's mark: a "pi" tag blinking as the pulse does. */
-.pibadge { flex: none; display: inline-block; font: 800 9px/1 var(--wb-mono); padding: 1px 2px; border: 1px solid currentColor; border-radius: 3px; animation: dash-pulse 1.6s ease-in-out infinite; }
+.pibadge { flex: none; display: inline-block; font: 800 9px/1 var(--wb-mono); padding: 1px 2px; border: 1px solid currentColor; border-radius: 3px; animation: dash-pulse 1.6s steps(4) infinite; }
+/* The drawer skeleton and tracker search spinner live in their own sheets. */
+:root .dskel i { animation-timing-function: steps(4); }
+:root .tk .tk-qspin { animation-timing-function: steps(12); }
+:root[data-animation-paused] :is(.spin, .pulse, .pibadge, .caret, .ibadge.busy .istop, .rail .drkwork, .rail .hi .rrun, .rail .hi.perm, .rail .sbn, .dskel i, .tk .tk-qspin, .oq-pill.board-updated) { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .spin, .caret, .pulse, .pibadge { animation: none; } }
 .args { font-family: var(--wb-mono); font-size: 12px; color: var(--wb-muted-fg); }
 code.fpath { font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }

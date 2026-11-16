@@ -123,8 +123,7 @@
         drApply(false);
       }
     }
-    drRoom();
-    drFill();
+    drFill(true);
   }
   // drFill stretches cards into the empty cells of the panels grid's last
   // row: the card directly above each empty cell spans two rows. Cards keep
@@ -135,34 +134,38 @@
   // read 0px). Spans clear first, and only while the body is a grid: the
   // narrow layout (a flex column) and the git sheet (body hidden) get none.
   // A card already placed or spanned by a stylesheet skips the fill.
-  var drFilled = [];
-  function drFill() {
-    if (!drbody) return;
+  var drFilled = [], drFillFrame = 0, drFillRoom = false;
+  function drFill(room) {
+    if (room === true) drFillRoom = true;
+    if (drFillFrame) return;
     drFilled.forEach(function (el) { el.style.gridRow = ""; });
     drFilled = [];
-    var cs = getComputedStyle(drbody);
-    if (drbody.hidden || cs.display !== "grid") return;
-    var n = cs.gridTemplateColumns.split(/\s+/).filter(function (w) { return parseFloat(w) > 0; }).length;
-    var cards = [];
-    (function items(el) {
-      Array.prototype.forEach.call(el.children, function (c) {
-        var d = getComputedStyle(c).display;
-        if (d === "contents") items(c);
-        else if (d !== "none") cards.push(c);
-      });
-    })(drbody);
-    var k = cards.length, rem = n > 0 ? k % n : 0;
-    if (n < 2 || k <= n || !rem) return;
-    var placed = cards.some(function (c) {
-      var s = getComputedStyle(c);
-      return [s.gridRowStart, s.gridRowEnd, s.gridColumnStart, s.gridColumnEnd].some(function (v) { return v !== "auto"; });
+    drFillFrame = requestAnimationFrame(function () {
+      drFillFrame = 0;
+      var fill = [], cs = drbody && getComputedStyle(drbody);
+      if (drbody && !drbody.hidden && cs.display === "grid") {
+        var n = cs.gridTemplateColumns.split(/\s+/).filter(function (w) { return parseFloat(w) > 0; }).length;
+        var cards = [];
+        (function items(el) {
+          Array.prototype.forEach.call(el.children, function (c) {
+            var d = getComputedStyle(c).display;
+            if (d === "contents") items(c);
+            else if (d !== "none") cards.push(c);
+          });
+        })(drbody);
+        var k = cards.length, rem = n > 0 ? k % n : 0;
+        if (n >= 2 && k > n && rem && !cards.some(function (c) {
+          var s = getComputedStyle(c);
+          return [s.gridRowStart, s.gridRowEnd, s.gridColumnStart, s.gridColumnEnd].some(function (v) { return v !== "auto"; });
+        })) {
+          var above = (Math.floor(k / n) - 1) * n;
+          for (var c = rem; c < n; c++) fill.push(cards[above + c]);
+        }
+      }
+      if (drFillRoom) { drFillRoom = false; drRoom(); }
+      fill.forEach(function (el) { el.style.gridRow = "span 2"; });
+      drFilled = fill;
     });
-    if (placed) return;
-    var above = (Math.floor(k / n) - 1) * n;
-    for (var c = rem; c < n; c++) {
-      cards[above + c].style.gridRow = "span 2";
-      drFilled.push(cards[above + c]);
-    }
   }
   function drDot() {
     var d = drhandle.querySelector(".tdot");
@@ -241,8 +244,9 @@
   // toggle only.
   function drApply(anim) {
     if (!drawer) return;
-    drMeasure();
+    drTop = drHeaderBottom();
     var h = drClamp(drH), git = drMode === "git", search = drMode === "search";
+    drawer.style.setProperty("--drtop", drTop + "px");
     drawer.classList.toggle("anim", !!anim);
     drawer.classList.toggle("open", drOpen);
     drbody.hidden = git || search;

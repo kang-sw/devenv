@@ -136,13 +136,15 @@
   // height: no scroll writer, replacement controls, or transient measuring DOM.
   function floatToolbar() {
     if (!window.ResizeObserver) return;
-    var face = toolbar.firstChild, row = face.firstChild, scrollBox = null;
+    var face = toolbar.firstChild, row = face.firstChild, scrollBox = null, cachedScroller = null, frame = 0;
     function style(n, key, value) {
       if (n.style.getPropertyValue(key) !== value) n.style.setProperty(key, value);
     }
     function update() {
-      if (!face.getClientRects().length || !face.getBoundingClientRect().width) return;
-      var s = scroller(board) || doc.scrollingElement, main = s === doc.scrollingElement;
+      frame = 0;
+      var faceRect = face.getBoundingClientRect();
+      if (!faceRect.width) return;
+      var s = cachedScroller || (cachedScroller = scroller(board) || doc.scrollingElement), main = s === doc.scrollingElement;
       // Document boards share the viewport with the fixed drawer handles.
       // Keep the face below them, rather than raising the
       // toolbar over unrelated controls or changing horizontal action boxes.
@@ -152,10 +154,8 @@
         var r = n.getBoundingClientRect();
         if (r.top <= 0 && r.bottom > 0) inset = Math.max(inset, r.bottom + 4);
       });
-      style(toolbar, "--toolbar-top", inset + "px");
       var top = main ? inset : s.getBoundingClientRect().top + s.clientTop;
       var floating = board.getBoundingClientRect().top < top;
-      toolbar.toggleAttribute("data-floating", floating);
       var rows = {};
       Array.prototype.forEach.call(row.children, function (n) {
         var r = n.getBoundingClientRect();
@@ -163,22 +163,30 @@
         var key = Math.round((r.top + r.bottom) * 2) / 4;
         rows[key] = 30;
       });
-      toolbar.toggleAttribute("data-wrapped-actions", Object.keys(rows).length > 1);
+      var wrapped = Object.keys(rows).length > 1;
       var keys = Object.keys(rows), reserved = 16 + Math.max(0, keys.length - 1) * 6;
       keys.forEach(function (key) { reserved += rows[key]; });
-      style(toolbar, "--toolbar-reserved", (floating ? reserved : face.getBoundingClientRect().height) + "px");
-      var height = face.getBoundingClientRect().height;
+      var height = faceRect.height;
+      // All geometry above, all writes below; ResizeObserver settles a face
+      // whose dimensions change when floating or wrapping changes.
+      style(toolbar, "--toolbar-top", inset + "px");
+      if (toolbar.hasAttribute("data-floating") !== floating) toolbar.toggleAttribute("data-floating", floating);
+      if (toolbar.hasAttribute("data-wrapped-actions") !== wrapped) toolbar.toggleAttribute("data-wrapped-actions", wrapped);
+      style(toolbar, "--toolbar-reserved", (floating ? reserved : height) + "px");
       // The rail already exposes a host inset; include the lower hit extension.
       style(doc.getElementById("bcol") || board, "--wb-rail-inset", (inset + height + 6) + "px");
       if (scrollBox && scrollBox !== s) scrollBox.style.removeProperty("scroll-padding-top");
       scrollBox = s;
       style(s, "scroll-padding-top", (inset + height + 10) + "px");
-      if (maxed && maxed.files) style(maxed.el, "--files-top", Math.max(52, face.getBoundingClientRect().bottom + 8) + "px");
+      if (maxed && maxed.files) style(maxed.el, "--files-top", Math.max(52, faceRect.bottom + 8) + "px");
     }
-    doc.addEventListener("scroll", update, { capture: true, passive: true });
-    window.addEventListener("resize", update);
-    new window.ResizeObserver(update).observe(face);
-    update();
+    function queue() { if (!frame) frame = requestAnimationFrame(update); }
+    function resized() { cachedScroller = null; queue(); }
+    doc.addEventListener("scroll", queue, { capture: true, passive: true });
+    window.addEventListener("resize", resized);
+    var observer = new window.ResizeObserver(resized);
+    observer.observe(face); observer.observe(board);
+    queue();
   }
   function filterMark(value) {
     var n = mk("span", value === "cards" ? "board-state-icon" : "board-state-dot");

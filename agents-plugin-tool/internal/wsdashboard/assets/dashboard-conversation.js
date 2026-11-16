@@ -253,6 +253,9 @@
       var h = convo.scrollHeight, top = convo.scrollTop;
       var added = mergeEntries(box, frag(res.html || ""));
       added.forEach(sweepOutImgs);
+      // Pagination supersedes any WS restoration queued before this fetch
+      // completed; its compensated reading position is now authoritative.
+      scrollRestore.delete(convo);
       // Keep what the user was reading in place: the prepended height goes
       // above the scroll offset.
       convo.scrollTop = top + (convo.scrollHeight - h);
