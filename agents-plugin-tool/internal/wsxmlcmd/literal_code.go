@@ -179,6 +179,66 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 	return end
 }
 
+// A panel-level quote may contain whole wrapper examples or a quoted opener,
+// but it must not end halfway through a structural operand. Otherwise the raw
+// payload can silently replace a patch instead of leaving a visible refusal.
+// Walk only the candidate's bytes, skipping operand bodies by their own raw
+// close (and CDATA), just as structural reading does.
+func literalOperandCrossing(s string, at, end int, wrapper *bodyWrapper) string {
+	inside := false
+	for at < end {
+		next := strings.IndexByte(s[at:end], '<')
+		if next < 0 {
+			break
+		}
+		at += next
+		rest := s[at:end]
+		if strings.HasPrefix(rest, "<![CDATA[") {
+			close := strings.Index(rest[9:], "]]>")
+			if close < 0 {
+				break
+			}
+			at += 9 + close + 3
+			continue
+		}
+		if inside && strings.HasPrefix(rest, "</"+wrapper.tag+">") {
+			inside = false
+			at += len(wrapper.tag) + 3
+			continue
+		}
+		match := !inside && openingTagPrefix(rest, wrapper.tag)
+		if inside {
+			for _, field := range wrapper.fields {
+				match = match || openingTagPrefix(rest, field)
+			}
+		}
+		if !match {
+			at++
+			continue
+		}
+		probe := tokenizer{s: s[:end], i: at, linePos: at, p: &Problems{}}
+		tag, ok := probe.readOpen()
+		if !ok {
+			at++
+			continue
+		}
+		at = probe.i
+		if !inside {
+			inside = !tag.selfClosing
+			continue
+		}
+		if !tag.selfClosing {
+			closing := "</" + tag.name + ">"
+			close := firstBodyClose(s, at, end, closing)
+			if close < 0 {
+				return tag.name
+			}
+			at = close + len(closing)
+		}
+	}
+	return ""
+}
+
 // Matching indexes positions only; no fallback grammar walk licenses crossings.
 func (t *tokenizer) matchCodeLiteral(at, bodyStart, lineStart int, closing string, limit int) int {
 	mark := t.s[at]
