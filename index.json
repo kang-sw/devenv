@@ -475,7 +475,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-16T08:41:47Z",
         "impl": {
           "branch": "impl/develop/kudos-pasta-boney"
