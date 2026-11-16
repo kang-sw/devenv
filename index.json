@@ -516,6 +516,9 @@
     "261116-bug-ws-whiteboard-ask-missing-from-board": {
       "registered_at": "2026-11-16T03:08:25Z"
     },
+    "261116-feat-ws-daemon-hub-first-polling": {
+      "registered_at": "2026-11-16T07:23:26Z"
+    },
     "261116-feat-ws-dashboard-restore-session-iframe-cache": {
       "registered_at": "2026-11-16T03:49:02Z"
     },
