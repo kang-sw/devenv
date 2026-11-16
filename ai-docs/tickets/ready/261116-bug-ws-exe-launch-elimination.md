@@ -145,6 +145,11 @@ startup can still reach a ws executable through `main`/`connect`,
 
 ## Decisions
 
+- item 4 deferred to follow-up by owner direction 10:56
+  The isolated Codex admission implementation is parked at local branch
+  `parked/exe-phase1-item4-codex` and reverted from this ticket's retained
+  branch. The owner-directed Codex REST follow-up is not implemented here.
+
 - Live-daemon inspection uses REST normally and retains the existing
   network-only `/mcp` hello fallback for compatible older daemons whose
   `/health` lacks a version (coordinator approval, 2026-11-16 01:14:40Z).

@@ -16,7 +16,7 @@ import (
 
 var errPlanUsage = errors.New("usage unavailable")
 
-func (s *planUsageStore) query(ctx context.Context, force bool, index *Index) {
+func (s *planUsageStore) query(ctx context.Context, force bool) {
 	s.queryMu.Lock()
 	defer s.queryMu.Unlock()
 	// Coalesce simultaneous popover opens as well as ordinary page polls.
@@ -37,11 +37,7 @@ func (s *planUsageStore) query(ctx context.Context, force bool, index *Index) {
 	var entry planUsageEntry
 	var err error
 	if codex {
-		// Suppression is a failed Codex attempt, never permission to use Pi's token.
-		err = errPlanUsage
-		if s.goos != "windows" || liveUsageCodex(index) {
-			entry, err = s.queryCodex(ctx)
-		}
+		entry, err = s.queryCodex(ctx)
 	} else {
 		entry, err = s.queryPi(ctx)
 	}
@@ -66,17 +62,6 @@ func (s *planUsageStore) query(ctx context.Context, force bool, index *Index) {
 	}
 	s.saveLocked()
 	s.lastQuery = time.Now()
-}
-
-func liveUsageCodex(index *Index) bool {
-	if index != nil {
-		for _, session := range index.Sessions() {
-			if session.Harness == "codex" && session.Live {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 type codexUsageWindow struct {
