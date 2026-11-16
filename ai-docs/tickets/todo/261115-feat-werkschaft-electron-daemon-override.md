@@ -1,70 +1,110 @@
 ---
-title: "Electron shell owns the daemon: override a plugin-started daemon without stopping session holders"
+title: "Electron standalone daemon start and replacement without stopping session holders"
 related:
-  261115-feat-werkschaft-electron-shell: "records (1115)/(1124)=b as a reversal of its Decision 2 'in a later release'; says Phases 1-3 keep Decision 2 until this phase is ticketed"
-  261115-feat-ws-daemon-release-auto-update: "earlier user-click daemon swap from ws-mcp GitHub releases; predates (1115) and must be reconciled with this ticket"
+  261115-feat-werkschaft-electron-shell: "attach-only first slice and planned missing-daemon start"
+  261115-feat-ws-daemon-release-auto-update: "separate user-approved release download and swap; reconcile ownership"
+  261115-feat-ws-dev-daemon-accepted-build-recovery: "development accepted-build recovery and rollback follow-up"
 ---
 
-# Electron shell owns the daemon: override a plugin-started daemon without stopping session holders
+# Electron standalone daemon start and replacement
 
 ## Background
 
-Whiteboard topic `ship-electron` (Electron 배포). The owner reversed the
-shell's attach-only daemon rule (Decision 2 of
-`261115-feat-werkschaft-electron-shell`). Owner (1115):
-
-> electron이 데몬을 띄우는 역할입니다. 정확히는, 클로드 코드가 띄운 데몬이
-> 있으면 일렉트론 데몬이 내리고 자기 것을 띄우는 식으로, 플러그인 데몬을
-> 오버라이드하는 식으로 갑니다.
-
-Timing (1124)=b: this does not ship in v0.50.0. It ships afterwards, through
-the Electron auto-updater that did ship in v0.50.0 ((1116)=a, `4d950d704`).
-
-The owner set one hard constraint (1124):
-
-> 데몬 홀더라는 건 에이전트 세션 홀딩하는 그 파이썬 프로세스들을 말합니다.
-> 이건 절대로 데몬 교체 때 임의로 내리지 않습니다. (세션 종료시에만 내려가는
-> 프로세스)
-
-The Electron ticket records this decision and says Phases 1-3 keep
-Decision 2 "until that phase is ticketed". This ticket is that phase.
+The owner requires Electron itself to start **and** replace the daemon
+standalone, without a plugin session or `scripts/dev.py` starting it first
+(2026-11-16). The existing shell only discovers an endpoint and connects; on
+failure it asks the user to start the dashboard normally
+(`agents-plugin-tool/desktop-electron/endpoint.js:8-75`,
+`agents-plugin-tool/desktop-electron/connection.html:14-19`). The earlier
+(1115) override decision reverses the shell's attach-only rule after v0.50.0;
+(1124)=b schedules it through the Electron auto-updater.
 
 ## Decisions
 
-- When a plugin-started daemon (for example, one Claude Code started) is
-  running, the shell replaces it with its own beside-exe daemon ((1115)).
-- A daemon replacement never stops, signals or restarts a session holder
-  process. Holders exit only when their session ends; they detach and
-  re-attach to the new daemon ((1124)).
-- It ships after v0.50.0 through the auto-updater ((1124)=b).
+- **(1196)=c:** Electron launches the daemon binary bundled with the app by
+  default. A setting can select a development build for dogfooding. Neither
+  path depends on an installed plugin runtime.
+- **(1197)=b:** The newer numeric core wins between Electron and plugin
+  daemons. If the bundled core is older, Electron attaches rather than
+  replacing it. For equal cores retain the existing rule: ordinary connection
+  keeps the daemon; explicit `--replace` requests one swap, regardless of build
+  time or hash. A newer core is never downgraded
+  (`agents-plugin-tool/internal/wsdashboard/ensure.go:45-53,86-106,163-173`).
+  This monotonic core precedence prevents cross-core replace loops and avoids
+  replacing a newer-minor daemon with an older one. It does **not** remove
+  existing cross-minor hello refusals
+  (`agents-plugin-tool/internal/wsdashboard/proxy.go:232-254`).
+- **(1198)=a:** The daemon always outlives Electron; app exit and daemon
+  shutdown are separate. The daemon stops only through explicit shutdown,
+  including the authenticated drain for a designated replacement. On Windows,
+  the current job-object breakaway fallback can leave it inside the app's job
+  and kill it with the host; a phase must handle that risk, not silently claim
+  the lifetime guarantee (`agents-plugin-tool/internal/wsdashboard/spawn_windows.go:12-32`).
+- **(1124):** Replacement never stops, signals or restarts session holders;
+  their PIDs remain the same and sessions detach and reconnect. Holders exit
+  only when their sessions end. This applies to standalone replacement too.
+- **Compatibility target T0** for this feature: retain existing protocol,
+  endpoint, lock and store meanings and transparent old-client behavior. The
+  replacement itself has no independent tier; grade each affected call and
+  store path directionally, including recovery, before release. Existing
+  cross-minor hello refusal is a **T3 boundary**, not evidence of transparent
+  cross-minor compatibility. Any new T3 boundary requires a minor release and
+  explicit owner approval; T4 must not ship
+  (`ai-docs/manuals/release-compatibility.md:27-51,80-91,108-119`).
 
-## Open Decisions
+## Open Decision Queue
 
-- Version precedence: a plugin launcher's newest-wins rule may replace the
-  shell's daemon again with a newer plugin build. Which daemon wins, and how
-  is a replace loop between the shell and a launcher avoided?
-- Minor lockout: the beside-exe daemon may be a newer minor than an attached
-  plugin session. Does the override warn and list affected sessions, as
-  (868)=a does in `261115-feat-ws-daemon-release-auto-update`, or proceed
-  silently?
-- Relationship to `261115-feat-ws-daemon-release-auto-update`: does this
-  override supersede that ticket's ws-mcp-release download-and-swap path,
-  or do both remain?
-- Compatibility tier for any change to the daemon handoff, `endpoint.json`
-  or the lock, if one is needed.
+- Does the separate user-approved ws-mcp release-download swap in
+  `261115-feat-ws-daemon-release-auto-update` remain alongside shell-bundled
+  updates, and which source wins when both are available?
+- How should the development selector interact with accepted-build recovery and
+  rollback in `261115-feat-ws-dev-daemon-accepted-build-recovery`? That ticket
+  does not yet define recovery ownership or authorization.
+- For sessions actually affected by existing minor/protocol refusal, should the
+  shell warn and list them before a swap, and what action is offered? Newer-core
+  precedence alone does not make an older session compatible.
 
 ## Phases
 
-### Phase 1: Shell-owned daemon override
+All lifecycle tests use isolated `WS_CACHE_HOME` and isolated daemons, never
+replace the shared daemon.
 
-Acceptance:
+### Phase 1: Provenance and compatibility specification
 
-- With a plugin-started daemon running and live hosted sessions attached,
-  starting the shell replaces the daemon with its own build. Every holder
-  process keeps its PID before and after, and every session reconnects. The
-  test uses an isolated `WS_CACHE_HOME` and an isolated daemon, never the
-  shared daemon.
-- No shell code path stops, signals or kills a holder process. A test or
-  audit asserts this.
-- The behaviour settled under Open Decisions is covered by tests on macOS
-  and Windows packaged builds.
+Specify bundled and selected-dev binary provenance, selection and validation;
+port the relevant Python launcher compatibility gate (hash-bound metadata,
+version, protocol and capabilities) without requiring Python or an installed
+plugin. Specify how the packaged app supplies `WS_RSRC_ROOT` and
+`WS_SKILLS_ROOT`, including dev selection and failure reporting
+(`agents-plugin/bin/ws-mcp-launcher.py:134-150,730-755,841-863`). Trace
+old/new call and store directions and recovery against the T0 target; stop for
+approval if a higher tier is needed. Reconcile the open updater and recovery
+questions before implementing affected paths.
+
+### Phase 2: Standalone missing-daemon start
+
+Start the selected binary when no daemon is available, using the existing
+`daemon-start`/`Ensure` handoff and endpoint/health verification; handle races,
+hung daemons and failures without killing holders
+(`agents-plugin-tool/cmd/ws-mcp/proxy.go:360-420`,
+`agents-plugin-tool/internal/wsdashboard/ensure.go:86-106`). Ensure app exit
+does not stop the daemon, including a verified solution or explicit failure
+for Windows job-object breakaway failure, rather than the current unsafe
+fallback. Test first start, retry and app exit in isolation.
+
+### Phase 3: Controlled replacement and reconnect
+
+Apply newer-core precedence and the existing explicit equal-core rule; verify
+which daemon actually answers after handoff. Test older, equal and newer cores,
+concurrent plugin starts, failed drain and reconnect. Prove every holder retains
+its PID and each compatible session reconnects; audit that no shell path kills,
+signals or restarts holders. Surface incompatibility rather than claiming
+reconnect overrides the existing hello gate.
+
+### Phase 4: Packaged acceptance
+
+On packaged Windows and macOS builds, verify clean-machine standalone start,
+bundled and selected-dev provenance, replacement and newer-core attach,
+resource/skills availability, holder continuity, and daemon survival after app
+exit. Verify explicit shutdown separately and cover the agreed update and
+recovery integration; document results and limitations before closing the ticket.

@@ -73,24 +73,55 @@ func TestDevAssetsOffServesTheEmbeddedPages(t *testing.T) {
 func TestDevAssetsShowEditsWithoutARestart(t *testing.T) {
 	dash, wb := devSource(t)
 	f := startPageFixture(t)
+	// Every request rebuilds dev assets. These edit/content checks have no
+	// health-probe latency contract; keep real HTTP and bound it by the test.
+	client := testClient()
+	client.Timeout = 0
+	t.Cleanup(client.CloseIdleConnections)
+	ctx := context.Background()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+	getPage := func(path string) string {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.base+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d: %s", path, resp.StatusCode, body)
+		}
+		return string(body)
+	}
 
 	// The dashboard's own stylesheet, script, and template.
 	editFile(t, dash("dashboard.css"), "{", "{/*devdashcss*/")
 	editFile(t, dash("dashboard.js"), "(function", "/*devdashjs*/(function")
 	editFile(t, dash("dashboard.tmpl"), `{{define "r-head"}}`, `{{define "r-head"}}<i>devdashtmpl</i>`)
-	_, session := get(t, f.base+"/s/livesession")
+	session := getPage("/s/livesession")
 	for _, want := range []string{"devdashcss", "devdashjs", "<i>devdashtmpl</i>"} {
 		if !strings.Contains(session, want) {
 			t.Errorf("an edit marked %q does not show on the session page", want)
 		}
 	}
-	if _, index := get(t, f.base+"/?frame=1"); !strings.Contains(index, "devdashcss") {
+	if index := getPage("/?frame=1"); !strings.Contains(index, "devdashcss") {
 		t.Error("a css edit does not show on the index page")
 	}
 
 	// The whiteboard stylesheet the session page inlines through PageAssets.
 	editFile(t, wb("page.css"), "{", "{/*devwbcss*/")
-	if _, body := get(t, f.base+"/s/livesession"); !strings.Contains(body, "devwbcss") {
+	if body := getPage("/s/livesession"); !strings.Contains(body, "devwbcss") {
 		t.Error("a whiteboard css edit does not show on the session page")
 	}
 
@@ -98,13 +129,13 @@ func TestDevAssetsShowEditsWithoutARestart(t *testing.T) {
 	editFile(t, dash("dashboard-board.js"), "function", "/*devdashfragmentjs*/function")
 	editFile(t, dash("dashboard-board.css"), "{", "{/*devdashfragmentcss*/")
 	editFile(t, wb("page-sticky.css"), "{", "{/*devwbfragmentcss*/")
-	if _, body := get(t, f.base+"/s/livesession"); !strings.Contains(body, "devdashfragmentjs") || !strings.Contains(body, "devdashfragmentcss") || !strings.Contains(body, "devwbfragmentcss") {
+	if body := getPage("/s/livesession"); !strings.Contains(body, "devdashfragmentjs") || !strings.Contains(body, "devdashfragmentcss") || !strings.Contains(body, "devwbfragmentcss") {
 		t.Error("a source fragment edit does not show on the session page")
 	}
 
 	// A further edit shows on the next request too.
 	editFile(t, dash("dashboard.css"), "devdashcss", "devdashcss2")
-	if _, body := get(t, f.base+"/s/livesession"); !strings.Contains(body, "devdashcss2") {
+	if body := getPage("/s/livesession"); !strings.Contains(body, "devdashcss2") {
 		t.Error("a second edit does not show")
 	}
 }

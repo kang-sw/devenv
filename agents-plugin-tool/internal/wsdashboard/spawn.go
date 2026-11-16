@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 )
 
 // stagedBinDir holds the copies a daemon runs from on Windows.
@@ -53,8 +52,8 @@ func DaemonExecutable(exe, dir string) (string, error) {
 // reusing an existing copy. Other entries are left alone: one of them is
 // the executable the running daemon was started from (it respawns itself
 // from that path on a LAN mode change), and the daemon that holds the lock
-// prunes the directory to its own executable (PruneStagedExecutables). The
-// launcher's stage_daemon_binary does the same.
+// retains settled copies until their process-use and rollback safety can be
+// established (PruneStagedExecutables). The launcher stages the same names.
 func StageExecutable(exe, binDir string) (string, error) {
 	sum, err := fileSHA256(exe)
 	if err != nil {
@@ -73,39 +72,15 @@ func StageExecutable(exe, binDir string) (string, error) {
 	return target, nil
 }
 
-// stagedPruneGrace keeps an entry younger than this from a prune: a
-// launcher may be staging it this moment (a .tmp file, or a copy it is
-// about to start) for a daemon of its own, which the lock will sort out.
-const stagedPruneGrace = 2 * time.Minute
-
-// PruneStagedExecutables removes every entry of dir's staged-binary
-// directory except the one exe names, when exe lives there. The daemon
-// calls it once it holds the lock: only then is every other settled copy
-// known unused (the previous daemon is gone, and a copy staged for a start
-// that lost the lock race is not needed). Temp files and entries younger
-// than stagedPruneGrace stay: another launcher's staging in flight is not
-// settled yet. A copy still running cannot be deleted on Windows; that
-// failure is ignored and a later daemon removes it.
-func PruneStagedExecutables(dir, exe string) {
-	binDir := filepath.Join(dir, stagedBinDir)
-	if filepath.Dir(exe) != binDir {
-		return
-	}
-	entries, err := os.ReadDir(binDir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if name == filepath.Base(exe) || strings.HasSuffix(name, ".tmp") {
-			continue
-		}
-		if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < stagedPruneGrace {
-			continue
-		}
-		_ = os.RemoveAll(filepath.Join(binDir, name))
-	}
-}
+// PruneStagedExecutables currently retains every settled artifact. Holding
+// the singleton does not prove the previous draining process has exited, or
+// that an unused executable is not an accepted/rollback target. There is no
+// authoritative retention source yet. Never infer it from age, a hash-shaped
+// name, or missing metadata; directories, symlinks and unknown metadata are
+// not ours to remove either. Each failed copy cleans only its own temp file
+// in copyExecutable (and the Python launcher's stage_daemon_binary).
+// Keep the entry point for callers, without inventing a retention API.
+func PruneStagedExecutables(dir, exe string) {}
 
 // ExecutableContentHash is the sha256 of the file at path, the daemon's
 // content identity for /health (HealthInfo.ContentHash); "" when the file

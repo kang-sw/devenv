@@ -148,6 +148,47 @@ policy must return to the owner before implementation.
   Rejected: one phase (too large for one worker cycle); three tickets (would
   duplicate the shared decision set).
 
+## Additional dogfood evidence — 2026-11-16 (#4/#7)
+
+A Claude session started before a daemon replacement continued to see the old
+MCP tool inventory: newly added `session.request_hire` and `session.roster` were
+unavailable even after the daemon serving calls had changed. The host's
+`request_mcp_reconnect` attempt failed with the exact message:
+
+> Reconnect, enable, and disable aren't available in this session
+
+The only reported recovery was `/reload-plugins` or restarting the session.
+This is owner-supplied runtime evidence, not a new host probe performed during
+this docs capture. It strengthens Phase 1's existing refresh scope and shows
+that a reconnect lever cannot be assumed available on every Claude host.
+
+Reproduction: start an isolated Claude session before a compatible daemon swap;
+record its initial tools/list, swap to a daemon advertising the new tools, and
+compare the cached inventory with the serving daemon. Attempt the reconnect
+lever on the same host, retain the refusal, then compare reload/restart recovery.
+Do not replace the owner's daemon or reload its session for ticket capture.
+
+Candidate directions: implement/verify the existing tools/list-changed
+notification plan (using the MCP-standard notification spelling supported by
+the transport), or refresh/re-advertise the proxy-side tool inventory after
+replacement. Distinguish a proxy re-fetch from the host actually exposing the
+new list; neither restores removed calls. Compatibility target remains **T0**
+for additive refresh with existing calls preserved, subject to the source-backed
+assessment in Decisions; no hello/protocol or old-client boundary is selected.
+
+Open questions before Phase 1 readiness:
+
+- Does this exact Claude host honor list-change notifications, and what tool
+  refresh mechanism remains available when reconnect is refused?
+- Can the proxy refresh the host-visible inventory without a session restart,
+  and how are repeated swaps/in-flight calls ordered?
+- What explicit degraded recovery should be shown when the host cannot refresh?
+
+Extend Phase 1 verification with this host's unavailable-reconnect case,
+old-session/new-daemon inventory comparison, repeated replacement and preserved
+legacy calls. This update adds evidence only; it does not authorize live swaps,
+change the existing compatibility policy, or claim a test pass.
+
 ## Constraints
 
 - Cross-version surfaces here follow the current assessment in `## Decisions`

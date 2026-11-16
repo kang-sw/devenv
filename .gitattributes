@@ -10,3 +10,16 @@
 
 # Generated single-file Pi extension bundle (scripts/bundle.mjs); review src/ instead.
 agents-plugin-pi/dist/** linguist-generated=true -diff
+
+# Producer-built native Pi closures; review the canonical Pi sources instead.
+agents-plugin/native-pi/closure-manifest.json linguist-generated=true -diff
+agents-plugin-wsflow/native-pi/closure-manifest.json linguist-generated=true -diff
+agents-plugin/native-pi/closure.zip binary linguist-generated=true
+agents-plugin-wsflow/native-pi/closure.zip binary linguist-generated=true
+# Small generated first-party text keeps ordinary text diff/delta behavior.
+agents-plugin*/native-pi/first-party/** linguist-generated=true
+agents-plugin*/native-pi/first-party-manifest.json linguist-generated=true
+# Owner (1209)=c 2026-11-16: byte-identical launcher copies are exempt from the size guard.
+/agents-plugin/bin/ws-mcp-launcher.py -ws-size-guard
+/agents-plugin-pi/bin/ws-mcp-launcher.py -ws-size-guard
+/agents-plugin-wsflow/bin/ws-mcp-launcher.py -ws-size-guard

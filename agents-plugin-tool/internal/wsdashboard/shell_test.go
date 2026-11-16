@@ -246,14 +246,7 @@ check("Windows worktree preserves its drive", S.framed(U("/w/C:/work/repo#file")
 check("worktrees keep the shell origin and query guards", [S.framed(new URL("http://evil:1/w/home/me"), O), S.framed(U("/w/home/me?root=other"), O), S.framed(U("/w/"), O)], [null, null, null]);
 check("a route the shell does not frame", S.framed(U("/tracker/stores/x/view"), O), null);
 check("src", S.src({ path: "/s/abc123", hash: "#files" }), "/s/abc123?frame=1#files");
-var t = S.touch([], "a");
-check("the first frame", t, { order: ["a"], evict: [] });
-t = S.touch(["e", "d", "c", "b", "a"], "f");
-check("a sixth frame evicts the least recently shown", t, { order: ["f", "e", "d", "c", "b"], evict: ["a"] });
-t = S.touch(["e", "d", "c", "b", "a"], "a");
-check("showing a kept frame evicts none", t, { order: ["a", "e", "d", "c", "b"], evict: [] });
-check("a given limit", S.touch(["b", "a"], "c", 2), { order: ["c", "b"], evict: ["a"] });
-check("LIMIT", S.LIMIT, 5);
+check("no hidden-session cache helpers", ["touch" in S, "LIMIT" in S], [false, false]);
 check("alpha", [S.alpha("rgb(0, 0, 0)"), S.alpha("rgba(0, 0, 0, 0.4)"), S.alpha("rgb(0 0 0 / 50%)"), S.alpha("transparent"), S.alpha("")], [1, 0.4, 0.5, 0, 0]);
 if (bad.length) console.log(bad.join("\n"));
 `

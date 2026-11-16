@@ -4,7 +4,7 @@
   // update held back while the tab is hidden (hiddenRegions, see connect)
   // counts as held: a reconnect meanwhile names its hash, and the update
   // still lands when the tab shows.
-  var modeHash = "", hiddenRegions = {}, treeRendered = null, entryRendered = null;
+  var modeHash = "", hiddenRegions = {}, treeRendered = null, entryRendered = null, panelRendered = null;
   // pageHidden tells whether nobody sees the page (a hidden tab, or a frame
   // the shell hides): region updates are held (hiddenRegions) while it
   // holds, and land when it ends (showRegions).
@@ -21,7 +21,7 @@
     var el = region(name);
     if (!el) return;
     var board = name === "board";
-    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; if (name === "entries" && typeof html !== "string") entryRendered = html; return; }
+    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; if (name === "entries" && typeof html !== "string") entryRendered = html; if (name === "panels" && typeof html !== "string") panelRendered = html; return; }
     if (board && window.WsOverview && window.WsOverview.holding()) { boardOverviewHeld = { hash: hash, html: html }; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
@@ -64,6 +64,7 @@
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var treeFocus = name === "tree" ? doc.activeElement : null;
+    var panelReader = name === "panels" ? panelReaderState(el) : null;
     var answers = board ? boardRead(readAnswers) : null;
     var railTop = name === "rail" ? railScrollTop() : null, railFoc = name === "rail" ? railFocus() : null;
     var frameH = board ? boardRead(frameHeights) : null;
@@ -73,7 +74,8 @@
     var before = board && !boardFrozen.length && !still && !reducedMotion() ? boardSpots(el) : null;
     var kept = board ? boardKeep() : null, boardTop = before && kept ? el.getBoundingClientRect().top : null;
     // The entries merge and the board morph prepare only the nodes they
-    // insert; any other region is replaced whole. A finished reply's mermaid
+    // insert; tree and panel row merges prepare only changed units too.
+    // A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
     // code blocks.
     var ins = null;
@@ -91,15 +93,25 @@
         restoreOpen(el); fmtTimes(el); sweepOutImgs(el);
       } else ins.forEach(function (n) { restoreOpen(n); fmtTimes(n); sweepOutImgs(n); });
     }
+    else if (name === "panels") {
+      var panelNext = typeof html === "string" ? panelInputFull(html) : html;
+      ins = panelNext && mergePanelRows(el, panelRendered, panelNext);
+      panelRendered = panelNext;
+      if (!ins) {
+        el.innerHTML = panelNext ? panelInputHTML(panelNext) : html;
+        restoreOpen(el); fmtTimes(el); sweepOutImgs(el);
+      } else ins.forEach(function (n) { restoreOpen(n); fmtTimes(n); sweepOutImgs(n); });
+    }
     else if (board) {
       ins = morphBoard(el, html, boardFrozen, boardPagedEdits);
       boardPagedEdits = [];
-      if (window.wbHistory && window.wbHistory.sweep) { window.wbHistory.sweep(); ins.forEach(watchBoard); }
+      if (window.wbHistory && window.wbHistory.sweep) window.wbHistory.sweep();
       ins.forEach(bandBoard);
       ins.forEach(function (n) {
         // Materialize the reader's older pages before restoring disclosures
         // and frame heights, including immutable panel versions off the tail.
         if (window.wbHistory) { window.wbHistory.init(n); window.wbHistory.restore(n, history); }
+        watchBoard(n);
         restoreOpen(n);
         fmtTimes(n);
         sweepOutImgs(n);
@@ -137,7 +149,7 @@
       if (mpend && !mpend.locked && mpend.frame && !doc.contains(mpend.frame)) hideMention();
     }
     if (board || name === "convlive") applySent(board);
-    if (name === "panels") drawerSync();
+    if (name === "panels") { drawerSync(); restorePanelReader(el, panelReader); }
     if (name === "git") gitSwapped();
     if (treeFocus && treeFocus.isConnected && doc.activeElement !== treeFocus) treeFocus.focus({ preventScroll: true });
     restoreScroll(scroll);
@@ -183,7 +195,7 @@
   // bytes (TopicHTML, render.go), compared in place of the HTML (topicSeen).
   var boardSeen = {}, boardRendered = null, boardLatest = null, boardPending = Object.create(null), boardFrozen = [], boardRelease = false;
   var boardOwn = Object.create(null), boardImmediate = Object.create(null), boardSnap = null, boardExposedUnits = null;
-  var boardChanges = [], boardOffered = null, boardReleaseFrame = 0, boardHomeWrites = new WeakSet();
+  var boardChanges = [], boardOffered = null, boardReleaseFrame = 0, boardScrollTimer = 0, boardHomeWrites = new WeakSet();
   var boardPaged = Object.create(null), boardPagedEdits = [];
   var boardTopHeld = Object.create(null), boardTopOrder = null;
   function topicKey(n) {
@@ -828,15 +840,20 @@
   // Short owner captures, once per actual scroller, including independent
   // pins. No post-morph target selection or ordinary resize following.
   function boardKeep(nodes) {
-    var w = window.wbHistory, handles = [], scrollers = new Set();
+    var w = window.wbHistory, handles = [], scrollers = new Set(), resolved = new Map();
     if (!w || !w.keep) return null;
+    var lookup = w.snapshot && w.snapshot();
     (nodes || boardBoxes().map(function (b) { return b.firstElementChild || b; })).forEach(function (n) {
-      var inspect = w.keep(n, { capture: false });
-      if (scrollers.has(inspect.scroller)) return;
-      scrollers.add(inspect.scroller);
+      if (w.rendered && !w.rendered(n)) return;
+      // A height batch shares ancestor/scroller lookup; inspecting keep() for
+      // every frame repeated style/scrollHeight walks through the same topic.
+      var s = lookup ? lookup.scroller(n) : w.keep(n, { capture: false }).scroller;
+      resolved.set(n, s);
+      if (scrollers.has(s)) return;
+      scrollers.add(s);
       handles.push(w.keep(n));
     });
-    return { h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
+    return { scroller: function (n) { return resolved.get(n); }, h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
   }
   // Asset reloads cross a document boundary. Keep only tab-local, short-lived
   // identities; placement and late frame layout still belong to wbHistory.
@@ -950,11 +967,16 @@
   }
   function boardExposed(n) {
     if (!n || n.isConnected === false) return false;
-    if (boardSnap) return boardSnap.visible(n);
     var w = window.wbHistory;
+    if (w && w.rendered && !w.rendered(n)) return false;
+    if (boardSnap) return boardSnap.visible(n);
     return !!(w && w.keep && w.keep(n, { capture: false }).visible(n));
   }
-  function boardScroller(n) { return boardSnap ? boardSnap.scroller(n) : window.wbHistory.keep(n, { capture: false }).scroller; }
+  function boardScroller(n) {
+    var w = window.wbHistory;
+    if (!n || (w && w.rendered && !w.rendered(n))) return null;
+    return boardSnap ? boardSnap.scroller(n) : w && w.keep ? w.keep(n, { capture: false }).scroller : null;
+  }
   // Freeze the interval, not just the reading reference. A single scroll
   // delta cannot repair an insertion/reorder between two visible units.
   // Units outside the interval retain canonical order and render normally.
@@ -991,8 +1013,9 @@
   }
   // The mounted panels only: inert history pages are never exposed.
   function boardLivePanels(n) {
+    var w = window.wbHistory;
     return q(".entry-panel, .wb-entry:not(.panel), .doc-frame", n).filter(function (p) {
-      return !p.classList.contains("doc-frame") || !p.closest(".entry-panel");
+      return (!w || !w.rendered || w.rendered(p)) && (!p.classList.contains("doc-frame") || !p.closest(".entry-panel"));
     });
   }
   function boardPanelKey(n) { return n.id || n.getAttribute("data-key") || n.getAttribute("data-entry") || n.getAttribute("data-doc-key"); }
@@ -1278,7 +1301,8 @@
     // Exposed panels set the frozen interval across topics (the leading and
     // trailing span in boardRenderBlockers), so another topic's panel leaving
     // can release a block whose own panels are all still in view.
-    return units.concat(panels).filter(boardExposed);
+    var w = window.wbHistory;
+    return units.concat(panels).filter(function (n) { return !w || !w.rendered || w.rendered(n); }).filter(boardExposed);
   }
   // A scroll or resize re-stages only when a release can follow: a pending
   // panel left the view (its topic's rendering may release), or the exposed
@@ -1313,20 +1337,54 @@
         return;
       }
     }
+    // IO uses the raw viewport, not the inset below sticky heads. One idle
+    // check per gesture restores that exact boundary without per-scroll scans.
+    if (Object.keys(boardPending).length && !("onscrollend" in doc)) {
+      clearTimeout(boardScrollTimer);
+      boardScrollTimer = setTimeout(function () { boardViewedTrailing(e); }, 120);
+    }
+    // Modern hosts get exposure changes from IO, not from scanning the whole
+    // board on every raw scroll. Old engines retain one coalesced fallback.
+    if (!window.IntersectionObserver) boardViewedExposure();
+  }
+  function boardViewedTrailing(e) {
+    if (e && e.target && e.target !== doc && e.target !== doc.scrollingElement &&
+        e.target !== $('bcol') && e.target !== $('bpins') && !inBoard(e.target)) return;
+    clearTimeout(boardScrollTimer);
+    boardScrollTimer = 0;
+    boardViewedExposure();
+  }
+  function boardViewedExposure(report) {
+    if (report && report.node) {
+      if (report.node.wbViewedExposure === report.visible) return;
+      report.node.wbViewedExposure = report.visible;
+    }
     if (!boardReleaseFrame && Object.keys(boardPending).length) boardReleaseFrame = requestAnimationFrame(function () {
       boardReleaseFrame = 0;
       if (Object.keys(boardPending).length && boardReleaseDue()) boardFlushViewed(false);
     });
   }
   doc.addEventListener("scroll", boardViewedScroll, { capture: true, passive: true });
-  window.addEventListener("resize", boardViewedScroll);
-  // watchBoard puts the board's topic sections under root (root itself
-  // included) under the shared visibility source (wbHistory.watch), once
-  // each; a swap sweeps the ones it removed. wbHistory.seen reads their
-  // reports.
+  doc.addEventListener("scrollend", boardViewedTrailing, { capture: true, passive: true });
+  window.addEventListener("resize", function () { if (!window.IntersectionObserver) boardViewedExposure(); });
+  doc.addEventListener("toggle", function (e) {
+    var n = e.target;
+    if (!n || n.tagName !== "DETAILS" || !inBoard(n)) return;
+    if (n.open) watchBoard(n);
+    boardViewedExposure();
+  }, true);
+  // Watch topics, panels and placement groups through the shared IO source.
+  // A swap sweeps removed subscriptions. Observing closed content is safe:
+  // watch() skips its scroller inspection, and IO reports when it opens.
+  // Exposure transitions, board disclosures and a trailing gesture check gate
+  // release; ordinary modern scroll events do no per-unit geometry work.
   function watchBoard(root) {
     if (!window.wbHistory || !window.wbHistory.watch || !root || root.nodeType !== 1) return;
+    var w = window.wbHistory;
     var list = root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root);
-    list.forEach(function (n) { if (!n.wbWatch) n.wbWatch = window.wbHistory.watch(n); });
+    list = list.concat(q(".entry-panel, .wb-entry:not(.panel), .doc-frame, [data-card], .closed-page, .bpins", root));
+    list.forEach(function (n) {
+      if (!n.wbWatch) n.wbWatch = w.watch(n, { onChange: boardViewedExposure });
+    });
   }
 

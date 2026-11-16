@@ -743,6 +743,10 @@ func newLeadHarness(t *testing.T) *leadHarness {
 		Mail:      h.mail,
 		heartbeat: 50 * time.Millisecond,
 	}
+	// Every harness PID a test writes (4002, 9001, ...) is dead unless the
+	// test marks it alive: the real process table of a CI runner can hold
+	// any of them.
+	h.opts.Alive = (&processTable{}).check
 	return h
 }
 

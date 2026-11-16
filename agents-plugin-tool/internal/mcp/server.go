@@ -1517,7 +1517,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			profiles, err := resolveWorktreeProfiles(&resolver)
 			return staticProfileLookup(profiles, err)(name)
 		}
-		result, err := releaseWorktree(context.Background(), s.gitRunner(), s.environ(), path, poolRV.Value, lookup)
+		force, _ := params.Arguments["force"].(bool)
+		caller := &worktreeReleaseCaller{LeadKey: key, WorkerKey: workerKey, Force: force}
+		result, err := releaseWorktreeAs(context.Background(), s.gitRunner(), s.environ(), path, poolRV.Value, lookup, caller)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -4905,12 +4907,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool: run its profile's pre_release hooks (a failure leaves it unchanged and leased), clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes and every ignored path its profile does not preserve), detach HEAD so it becomes reuse-eligible, record the size of the preserved artifacts it kept for acquire's nudge, and remove its worktree lease. Never deletes the worktree (worktree.remove does) and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool: run its profile's pre_release hooks (a failure leaves it unchanged and leased), clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes and every ignored path its profile does not preserve), detach HEAD so it becomes reuse-eligible, record the size of the preserved artifacts it kept for acquire's nudge, and remove its worktree lease. Never deletes the worktree (worktree.remove does) and does not retire the worker key. Identify it by path or by a worker session key bound to it. Refuses, changing nothing, a worktree leased to another holder (the caller's session key is neither the lease's parent_key nor its worker_key, and the key argument is not its worker_key) and a dirty worktree with no lease, unless force is true. Cleaning up a worktree whose owner is gone: pass force: true. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
 					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
+					"force":  boolProperty("For whoever cleans up stale worktrees (a lead or the user): release a worktree leased to another holder, or a dirty one with no lease. Cleaning up a worktree whose owner is gone: pass force: true, only when you have confirmed the lease owner is gone or agreed; the release discards its uncommitted work."),
 					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 			},

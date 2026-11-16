@@ -153,7 +153,7 @@
 .sess .spin, .activity .spin, .brow .mk .spin { width: 10px; height: 10px; }
 @keyframes dash-spin { to { transform: rotate(360deg); } }
 .idle-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .55; flex: none; display: inline-block; }
-/* the agents panel's running-agent mark: a pulsing dot, never rotating, so
+/* the agents popover's running-agent mark: a pulsing dot, never rotating, so
    it reads apart from a live tool row's spinner */
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; display: inline-block; animation: dash-pulse 1.6s ease-in-out infinite; }
 @keyframes dash-pulse { 50% { opacity: .3; } }

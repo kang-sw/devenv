@@ -1093,6 +1093,7 @@ func TestMailboxLookupPeersSelfAddressGatedByOwnership(t *testing.T) {
 // degrade). It asserts both the resolver output and that the playbook.read
 // dispatch actually substitutes the value into the shipped mailbox body.
 func TestMailboxWaitCommandRenderVariable(t *testing.T) {
+	t.Setenv(envCLIName, "python3 /plugin/bin/ws-mcp-launcher.py")
 	// Scenario 1: key + explicit WS_MAILBOX → concrete command with the exact
 	// registered "name@scope" slug.
 	t.Run("explicit_slug", func(t *testing.T) {
@@ -1245,9 +1246,8 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		}
 	})
 
-	// Scenario 5: WS_MCP_CLI_NAME, when declared, replaces os.Args[0] as the
-	// command name; empty or unset keeps os.Args[0].
-	t.Run("cli_name_env_prefers_shim", func(t *testing.T) {
+	// Only a recognizable Python launcher is echoed, never an executable override.
+	t.Run("cli_name_requires_python_launcher", func(t *testing.T) {
 		setupMailboxTestEnv(t)
 		root := t.TempDir()
 		initGit(t, root)
@@ -1256,14 +1256,17 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		s := NewServer(root, "test")
 		key := mailboxLogin(t, s, 1, root)
 
-		t.Setenv(envCLIName, "ws-cli")
-		if got, want := mailboxWaitCommandVar(s, key), "ws-cli mailbox wait --session-key "+key; got != want {
-			t.Fatalf("declared CLI name: got %q, want %q", got, want)
+		for _, name := range []string{"python3 /plugin/bin/ws-mcp-launcher.py", "'/path with spaces/python3' '/plugin path/ws-mcp-launcher.py'"} {
+			t.Setenv(envCLIName, name)
+			if got, want := mailboxWaitCommandVar(s, key), name+" mailbox wait --session-key "+key; got != want {
+				t.Fatalf("launcher %q: got %q, want %q", name, got, want)
+			}
 		}
-		for _, unset := range []string{"", "   "} {
-			t.Setenv(envCLIName, unset)
-			if got, want := mailboxWaitCommandVar(s, key), os.Args[0]+" mailbox wait --session-key "+key; got != want {
-				t.Fatalf("CLI name %q: got %q, want os.Args[0] form %q", unset, got, want)
+		t.Setenv("WS_MCP_RUNTIME_BINARY", "/runtime/ws-mcp.exe")
+		for _, name := range []string{"", "   ", "ws-cli", "/runtime/ws-mcp.exe", "/runtime/ws-mcp-python.exe /plugin/ws-mcp-launcher.py", "python3 /plugin/ws-mcp-launcher.py; /runtime/ws-mcp.exe", "python3 /evil.exe /plugin/ws-mcp-launcher.py"} {
+			t.Setenv(envCLIName, name)
+			if got, want := mailboxWaitCommandVar(s, key), "python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key "+key; got != want {
+				t.Fatalf("unsafe CLI name %q: got %q, want %q", name, got, want)
 			}
 		}
 	})

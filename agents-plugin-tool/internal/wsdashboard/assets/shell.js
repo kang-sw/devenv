@@ -7,10 +7,10 @@
   // dashboard page it frames (the index and the session pages) in a
   // same-origin frame of its own: the page's path with ?frame=1, which the
   // daemon lets only its own origin frame.
-  // The LIMIT most recently shown frames stay loaded, hidden but for the
-  // shown one, so going back to one shows it at once; the address bar keeps
-  // the page's own path (history.pushState). Each frame streams its own
-  // regions from the daemon; the shell streams the rail alone.
+  // Each session switch destroys the previous frame and loads a fresh one;
+  // the shell keeps no hidden-session cache. The address bar keeps the page's
+  // own path (history.pushState). The frame streams its own regions from the
+  // daemon; the shell streams the rail alone.
   //
   // Messages between the shell and its frames are UI control only, never
   // data. Each is an object whose wsShell field names its kind; a receiver
@@ -27,6 +27,7 @@
   //     nav     {href}                a page the shell frames was picked in
   //                                   the frame (a link, the palette, a
   //                                   spawn): the shell shows it
+  //     stay    {attempt}             the native leave guard kept this frame
   //     key     {key}                 a key the shell acts on, pressed in
   //                                   the frame: "rail" (Ctrl+`), "esc"
   //     layout  {pincol, dim, popover?} the frame shows the pinned column
@@ -52,11 +53,11 @@
   //     theme   {theme}               another page picked the theme
   //     settings {layout, input}      shell's current choices, independent
   //                                   of whether browser persistence works
-  var LIMIT = 5;
   var KINDS = {
     head: { html: "?string", qs: "string", pad: "number", top: "number" },
     title: { title: "string" },
     nav: { href: "string" },
+    stay: { attempt: "number" },
     key: { key: "string" },
     layout: { pincol: "boolean", dim: "number" },
     scroll: { y: "number" },
@@ -106,14 +107,6 @@
   // hash.
   function src(f) { return f.path + "?frame=1" + (f.hash || ""); }
 
-  // touch puts key first in order (the frames, most recently shown first)
-  // and returns {order, evict}: the new order, kept to limit (LIMIT when
-  // not given), and the keys it dropped, oldest last.
-  function touch(order, key, limit) {
-    var n = limit || LIMIT, next = [key].concat(order.filter(function (k) { return k !== key; }));
-    return { order: next.slice(0, n), evict: next.slice(n) };
-  }
-
   // alpha reads a computed CSS colour's alpha: 1 for rgb(), the fourth
   // component for rgba() or rgb(... / a), 0 for anything else (transparent,
   // none).
@@ -126,5 +119,5 @@
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
   }
 
-  window.WsShell = { LIMIT: LIMIT, message: message, framed: framed, src: src, touch: touch, alpha: alpha };
+  window.WsShell = { message: message, framed: framed, src: src, alpha: alpha };
 })();

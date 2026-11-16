@@ -260,6 +260,52 @@ func TestObservedRetentionProtectedFiles(t *testing.T) {
 	}
 }
 
+func TestObservedRetentionProtectsUniqueSymlinkRepeat(t *testing.T) {
+	withoutPruneInterval(t)
+	dir := t.TempDir()
+	records := retentionRecords("", 12)
+	writeFixture(t, dir, records)
+	// The unique t2 record repeats t1's model and precedes the recent eight
+	// (t5..t12), so only the regular-file guard protects this link.
+	link := evidencePath(dir, records[1])
+	target := filepath.Join(dir, "outside-target.json")
+	if err := os.Rename(link, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlinks unavailable on this Windows fixture: %v", err)
+		}
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantModels, wantSnap := visibleModels(t, dir)
+	var cache ObservedCache
+	cache.Load(dir)
+	pruneObserved(filepath.Join(dir, ObservedDirName))
+	if got, err := os.Readlink(link); err != nil || got != target {
+		t.Fatalf("unique same-model symlink repeat was pruned or changed: %q: %v", got, err)
+	}
+	if got, err := os.ReadFile(target); err != nil || !reflect.DeepEqual(got, raw) {
+		t.Fatalf("symlink target changed: %v", err)
+	}
+	for _, r := range records[2:4] {
+		if _, err := os.Stat(evidencePath(dir, r)); !os.IsNotExist(err) {
+			t.Fatalf("ordinary repeat was not pruned: %s: %v", r.ID, err)
+		}
+	}
+	if got := evidenceCount(t, dir); got != 10 { // first, protected link, recent eight
+		t.Fatalf("kept %d records, want 10", got)
+	}
+	gotModels, gotSnap := visibleModels(t, dir)
+	if !reflect.DeepEqual(gotModels, wantModels) || !reflect.DeepEqual(gotSnap, wantSnap) || !reflect.DeepEqual(cache.Load(dir).models, wantModels) {
+		t.Fatal("protected symlink repeat prune changed visible models")
+	}
+}
+
 func TestObservedRetentionProtectedSymlinkChanges(t *testing.T) {
 	withoutPruneInterval(t)
 	for _, duplicate := range []bool{false, true} {

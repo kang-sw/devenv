@@ -91,7 +91,7 @@ check("show applies only the newest complete snapshot",[applied.length,texts(app
 s.msg("board-topics",{hash:"invalid",order:["unknown"],topics:[]});
 check("invalid patch closes old socket",s.closed,true);
 advance(0);
-check("recovery omits board hash but keeps head and mode and opt-in",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("head.head-hash,mode.m1")+"&topics=1&railrows=1&treerows=1&entryrows=1");
+check("recovery omits board hash but keeps head and mode and opt-in",sockets[1].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("head.head-hash,mode.m1")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1");
 check("invalid patch did not reach swap",applied.length,1);
 process.stdout.write(bad.join("\n"));
 `)

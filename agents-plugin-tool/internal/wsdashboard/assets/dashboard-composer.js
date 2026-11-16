@@ -363,51 +363,48 @@
   // for them: noteWarn for a failure or warning, noteOk for a success.
   function noteWarn(text) { if (window.WsToast) window.WsToast.show(text, { kind: "warn" }); }
   function noteOk(text) { if (window.WsToast) window.WsToast.show(text); }
-  // grow sizes the message box to its text; an empty box is sized to its
-  // wrapped placeholder instead, because an empty textarea's scrollHeight
-  // need not count it. The placeholder is measured in a hidden copy of the
-  // mention layer (.chl, same font, padding and wrapping), so the two
-  // cannot drift. A width change or a placeholder swap grows it again
-  // (see growCtext below).
-  var cmeasure = null;
-  function placeholderHeight() {
-    var ph = ctext.getAttribute("placeholder");
-    if (!ph || !ctext.parentNode) return 0;
+  // The contenteditable capsule editor is a normal block: CSS min/max-height
+  // and overflow size it naturally, including its placeholder. Never reset its
+  // height and read scrollHeight here: that forces document layout per input.
+  // Plain textareas use field-sizing where supported. Only older browsers
+  // need a hidden .chl copy, measured once per frame without resetting the
+  // visible field's height. Width/font/placeholder changes take the same path.
+  var cmeasure = null, ctextFrame = 0;
+  var ctextFieldSizing = !!(window.CSS && window.CSS.supports("field-sizing", "content"));
+  function ctextHeight() {
+    if (!ctext.parentNode) return 0;
     if (!cmeasure) {
       cmeasure = doc.createElement("div");
       cmeasure.className = "chl chm";
       cmeasure.setAttribute("aria-hidden", "true");
       ctext.parentNode.appendChild(cmeasure);
     }
-    cmeasure.style.paddingRight = chl ? chl.style.paddingRight : "";
-    cmeasure.textContent = ph;
+    var paddingRight = chl ? chl.style.paddingRight : "";
+    if (cmeasure.style.paddingRight !== paddingRight) cmeasure.style.paddingRight = paddingRight;
+    // A trailing newline needs a final line even in a pre-wrap measuring div.
+    var text = ctext.value || ctext.getAttribute("placeholder") || "";
+    if (text.slice(-1) === "\n" || !text) text += "\u200b";
+    if (cmeasure.textContent !== text) cmeasure.textContent = text;
     return cmeasure.offsetHeight;
   }
   function grow() {
-    if (ctext.wsc) {
-      var editor = ctext.wsc.editor;
-      editor.style.height = "auto";
-      editor.style.height = Math.min(160, Math.max(38, editor.scrollHeight)) + "px";
-      return;
-    }
-    ctext.style.height = "auto";
-    var h = ctext.scrollHeight;
-    if (!ctext.value) h = Math.max(h, placeholderHeight());
-    ctext.style.height = Math.min(160, h) + "px";
+    if (ctext.wsc || ctextFieldSizing || ctextFrame) return;
+    ctextFrame = requestAnimationFrame(function () {
+      ctextFrame = 0;
+      var height = Math.min(160, Math.max(38, ctextHeight())) + "px";
+      if (ctext.style.height !== height) ctext.style.height = height;
+    });
   }
-  // growCtext keeps an empty box fitted to its placeholder: at first render
-  // and once the fonts load, after each placeholder swap (setInput,
-  // renderCmd call it), and when only the width changes (the observer skips
-  // height-only changes, so setting the height cannot loop).
+  // CSS-sized fields need no resize observer or font-ready measurement.
   function growCtext() { if (ctext) grow(); }
-  if (ctext) {
+  if (ctext && !ctext.wsc && !ctextFieldSizing) {
     var ctextW = -1;
     if (window.ResizeObserver) new ResizeObserver(function () {
-      var w = (ctext.wsc ? ctext.wsc.editor : ctext).offsetWidth;
+      var w = ctext.offsetWidth;
       if (w === ctextW) return;
       ctextW = w;
       grow();
-    }).observe(ctext.wsc ? ctext.wsc.editor : ctext);
+    }).observe(ctext);
     if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(growCtext);
     growCtext();
   }

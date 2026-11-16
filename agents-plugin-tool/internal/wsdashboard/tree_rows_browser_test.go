@@ -59,7 +59,7 @@ func TestTreeRowsBrowser(t *testing.T) {
 	}))
 	defer updates.Close()
 	functions := "var TREE_SLOT = /<!--ws-tree-row-(\\d+)-->/g;\n" + dashboardFuncs(t,
-		"treeRowKey", "treeSlot", "treeSlots", "treeInputFull", "treeRowNode", "treeSame", "treeInputPatch", "treeInputHTML", "mergeTreeRows")
+		"treeRowKey", "treeSlot", "treeSlots", "treeInputFull", "treeRowNode", "keyedSame", "keyedInputPatch", "keyedInputHTML", "treeInputPatch", "treeInputHTML", "mergeTreeRows")
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "testdata/tree-rows.browser.cjs")

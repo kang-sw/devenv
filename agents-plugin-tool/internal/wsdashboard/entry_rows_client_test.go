@@ -18,7 +18,7 @@ function entryInputFull(html) { return html==="invalid-full" ? null : {value:htm
 function entryInputPatch(base,ev) { bases.push(base && base.value); return base && ev && ev.valid ? {value:base.value+ev.add} : null; }
 `+src+`
 connect(); var s=sockets[0];
-check("session opts in",s.url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("entries.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1");
+check("session opts in",s.url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("entries.old,head.kept")+"&topics=1&railrows=1&treerows=1&entryrows=1&panelrows=1");
 s.msg("region",{name:"entries",hash:"old",html:"A"});
 check("first full with held hash still reaches owner",applied,[["entries","old","A"]]);
 doc.hidden=true;
@@ -48,7 +48,7 @@ check("closed socket cannot contaminate pending input",hiddenRegions.entries.htm
 shHidden=false;showRegions();
 check("show applies reconnected latest",applied[4],["entries","reconnected-delta","GH"]);
 framed=true;connect();
-check("frame opts in without rail rows",sockets[4].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("entries.old,head.kept")+"&frame=1&topics=1&treerows=1&entryrows=1");
+check("frame opts in without rail rows",sockets[4].url,"ws://localhost:1234/s/rid1/events?h="+encodeURIComponent("entries.old,head.kept")+"&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1");
 shell=true;connect();
 check("shell excludes entry rows",sockets[5].url,"ws://localhost:1234/rail/events?h="+encodeURIComponent("entries.old,head.kept")+"&frame=1&railrows=1");
 shell=false;framed=false;mode="index";connect();

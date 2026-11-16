@@ -334,6 +334,7 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 			pr.regions = regions
 			pr.tree = splitTreeRows(string(regions[regionTree].HTML))
 			pr.entries = splitEntryRows(string(regions[regionEntries].HTML))
+			pr.panels = splitPanelRows(string(regions[regionPanels].HTML))
 			if view.HasBoard && view.BoardUnits != nil {
 				pr.board = view.BoardUnits.rendered(theme).topics
 			} else {
@@ -458,17 +459,21 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 	if r.URL.Query().Get("topics") == "1" && only.has(regionBoard) && src.key.replyID != "" {
 		topics = &boardTopicState{}
 	}
-	var rail *railRowState
+	var rail *keyedRowState
 	if r.URL.Query().Get("railrows") == "1" && only.has(regionRail) {
-		rail = &railRowState{}
+		rail = &keyedRowState{name: regionRail}
 	}
-	var tree *treeRowState
+	var tree *keyedRowState
 	if r.URL.Query().Get("treerows") == "1" && only.has(regionTree) && src.key.replyID != "" {
-		tree = &treeRowState{}
+		tree = &keyedRowState{name: regionTree}
 	}
-	var entries *entryRowState
+	var entries *keyedRowState
 	if r.URL.Query().Get("entryrows") == "1" && only.has(regionEntries) && src.key.replyID != "" {
-		entries = &entryRowState{}
+		entries = &keyedRowState{name: regionEntries}
+	}
+	var panels *keyedRowState
+	if r.URL.Query().Get("panelrows") == "1" && only.has(regionPanels) && src.key.replyID != "" {
+		panels = &keyedRowState{name: regionPanels}
 	}
 	var parts []sidePart
 	if side != nil {
@@ -504,7 +509,10 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			}
 			regions := only.apply(pr.regions)
 			sent := false
-			sent, ok := d.sendEntryRegions(sink, regions, held, topics, pr.board, rail, pr.rail, tree, pr.tree, entries, pr.entries)
+			sent, ok := d.sendRegions(sink, regions, held, topics, pr.board, []rowRegion{
+				{state: rail, next: pr.rail}, {state: tree, next: pr.tree},
+				{state: entries, next: pr.entries}, {state: panels, next: pr.panels},
+			})
 			if !ok {
 				return false
 			}
@@ -525,7 +533,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			if !pr.ok {
 				return true
 			}
-			sent, ok := d.sendRowRegions(sink, only.apply(pr.regions), held, nil, nil, rail, pr.rail)
+			sent, ok := d.sendRegions(sink, only.apply(pr.regions), held, nil, nil, []rowRegion{{state: rail, next: pr.rail}})
 			return ok && (!sent || sink.flush() == nil)
 		}
 		if !send(first, at) {
@@ -631,40 +639,26 @@ type sidePart struct {
 // sendRegions writes the regions whose hash differs from what the browser
 // holds, recording each sent hash in held; sent reports that one was
 // written, ok false that the connection failed.
-func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics) (sent, ok bool) {
-	return d.sendRowRegions(sink, regions, held, topics, board, nil, nil)
-}
-
-func (d *Daemon) sendRowRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics, rail *railRowState, rows *railRows) (sent, ok bool) {
-	return d.sendTreeRegions(sink, regions, held, topics, board, rail, rows, nil, nil)
-}
-
-func (d *Daemon) sendTreeRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics, rail *railRowState, rows *railRows, tree *treeRowState, treeUnits *treeRows) (sent, ok bool) {
-	return d.sendEntryRegions(sink, regions, held, topics, board, rail, rows, tree, treeUnits, nil, nil)
-}
-
-func (d *Daemon) sendEntryRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics, rail *railRowState, rows *railRows, tree *treeRowState, treeUnits *treeRows, entries *entryRowState, entryUnits *entryRows) (sent, ok bool) {
+func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics, rows []rowRegion) (sent, ok bool) {
 	for _, name := range sortedRegionNames(regions) {
 		region := regions[name]
 		isBoard := name == regionBoard && topics != nil
-		isRail := name == regionRail && rail != nil
-		isTree := name == regionTree && tree != nil
-		isEntries := name == regionEntries && entries != nil
-		if held[name] == region.Hash && !(isBoard && topics.previous == nil) && !(isRail && !rail.initialized) && !(isTree && !tree.initialized) && !(isEntries && !entries.initialized) {
+		var row rowRegion
+		for _, candidate := range rows {
+			if candidate.state != nil && candidate.state.name == name {
+				row = candidate
+				break
+			}
+		}
+		if held[name] == region.Hash && !(isBoard && topics.previous == nil) && !(row.state != nil && !row.state.initialized) {
 			continue
 		}
 		event, data := "region", any(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
 		if isBoard {
 			event, data = topics.event(region, board)
 		}
-		if isRail {
-			event, data = rail.event(region, rows)
-		}
-		if isTree {
-			event, data = tree.event(region, treeUnits)
-		}
-		if isEntries {
-			event, data = entries.event(region, entryUnits)
+		if row.state != nil {
+			event, data = row.state.event(region, row.next)
 		}
 		payload, _ := json.Marshal(data)
 		if sink.event(event, payload) != nil {
@@ -673,14 +667,8 @@ func (d *Daemon) sendEntryRegions(sink streamSink, regions regionSet, held map[s
 		if isBoard {
 			topics.previous = board
 		}
-		if isRail {
-			rail.previous, rail.initialized = rows, true
-		}
-		if isTree {
-			tree.previous, tree.initialized = treeUnits, true
-		}
-		if isEntries {
-			entries.previous, entries.initialized = entryUnits, true
+		if row.state != nil {
+			row.state.previous, row.state.initialized = row.next, true
 		}
 		d.stats.Sends.Add(1)
 		held[name] = region.Hash

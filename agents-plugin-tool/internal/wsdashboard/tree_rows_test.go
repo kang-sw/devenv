@@ -29,7 +29,7 @@ func TestTreeRowsNestedDiffAndParity(t *testing.T) {
 		}
 		return markup
 	}
-	if got := render(first.shell); got != raw {
+	if got := render(first.shell[0]); got != raw {
 		t.Fatalf("changed bytes: %s", got)
 	}
 	for _, r := range first.rows {
@@ -39,9 +39,9 @@ func TestTreeRowsNestedDiffAndParity(t *testing.T) {
 	}
 	nextRaw := strings.Replace(raw, `<summary>B</summary>`, `<summary>new B</summary>`, 1)
 	next := splitTreeRows(nextRaw)
-	state := treeRowState{previous: first, initialized: true}
+	state := keyedRowState{name: regionTree, previous: first, initialized: true}
 	name, data := state.event(newRegion(nextRaw), next)
-	patch, ok := data.(treeRowsEvent)
+	patch, ok := data.(keyedRowsEvent)
 	if name != "tree-rows" || !ok || len(patch.Rows) != 1 || patch.Rows[0].Key != "agent-b" || !reflect.DeepEqual(patch.Order, first.order) {
 		t.Fatalf("nested edit invalidated unrelated rows: %s %+v", name, data)
 	}
@@ -54,12 +54,12 @@ func TestTreeRowsFallbacks(t *testing.T) {
 	raw := `<div class="tree">` + treeTestRow("a", "A", treeTestRow("b", "B", "")) + `</div>`
 	first := splitTreeRows(raw)
 	for _, nextRaw := range []string{strings.Replace(raw, "tree", "tree changed", 1), `<div class="tree">` + treeTestRow("a", "A", "") + treeTestRow("b", "B", "") + `</div>`, treeTestRow("b", "B", treeTestRow("a", "A", "")), treeTestRow("a", "A", "")} {
-		state := treeRowState{previous: first, initialized: true}
+		state := keyedRowState{name: regionTree, previous: first, initialized: true}
 		if name, _ := state.event(newRegion(nextRaw), splitTreeRows(nextRaw)); name != "region" {
 			t.Fatal("uncertain shell/topology did not fall back")
 		}
 	}
-	state := treeRowState{}
+	state := keyedRowState{name: regionTree}
 	if name, _ := state.event(newRegion(raw), first); name != "region" {
 		t.Fatal("first must be full")
 	}

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -191,6 +192,114 @@ func TestResolveImplBranchRequestValidationAndDefaultFormat(t *testing.T) {
 	want := "branch: " + implTicketBranch("develop", stem) + "\nmerge_root: develop\n"
 	if text != want {
 		t.Fatalf("default response = %q, want compact response %q", text, want)
+	}
+}
+
+func TestImplIdentityVouchedLandedTargetRoute(t *testing.T) {
+	useLeadProfile(t)
+	for _, base := range []string{"develop", "goal/develop/topic"} {
+		for _, uniqueTarget := range []bool{false, true} {
+			name := base + "/landed"
+			if uniqueTarget {
+				name = base + "/unique"
+			}
+			t.Run(name, func(t *testing.T) {
+				root := t.TempDir()
+				initGit(t, root)
+				root = canonicalRootForTest(t, root)
+				stem := "260921-feat-vouched-reentry"
+				path := writeImplIdentityReadyTicket(t, root, stem)
+				runGit(t, root, "switch", "-c", base)
+				runGit(t, root, "add", ".")
+				runGit(t, root, "commit", "-m", "fixture")
+				target := implTicketBranch(base, stem)
+				runGit(t, root, "switch", "-c", target)
+				runGit(t, root, "commit", "--allow-empty", "-m", "earlier phase")
+				runGit(t, root, "switch", base)
+				runGit(t, root, "merge", "--no-ff", target, "-m", "land earlier phase")
+				if uniqueTarget {
+					runGit(t, root, "switch", target)
+					runGit(t, root, "commit", "--allow-empty", "-m", "unique target work")
+					runGit(t, root, "switch", base)
+				}
+				branch := "impl/" + base + "/manual"
+				runGit(t, root, "switch", "-c", branch)
+				runGit(t, root, "commit", "--allow-empty", "-m", "vouched current work")
+				runGit(t, root, "branch", "--set-upstream-to", base)
+				refsBefore := string(runGitOutput(t, root, "show-ref", "--heads"))
+				currentTip := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", branch)))
+				baseTip := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", base)))
+				upstream := string(runGitOutput(t, root, "config", "--get-regexp", "^branch\\."))
+
+				t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+				server := NewServer(root, "test")
+				key, err := server.sessions.mint(root, roleLead, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				args := implIdentityRouteArgs(stem, path, "no")
+				policy := args["policy"].(map[string]any)["branch"].(map[string]any)
+				policy["identity_vouch"] = map[string]any{"branch": branch, "ticket_stem": stem}
+				policy["merge_target"] = "ignored-root"
+				text := callToolWithKey(t, server, 1, key, "route.resolve_implement", args)
+				var routed implementResult
+				if err := json.Unmarshal([]byte(text), &routed); err != nil {
+					t.Fatalf("route response: %v\n%s", err, text)
+				}
+				if got := string(runGitOutput(t, root, "show-ref", "--heads")); got != refsBefore {
+					t.Fatalf("routing mutated refs: before %s, after %s", refsBefore, got)
+				}
+				if got := strings.TrimSpace(string(runGitOutput(t, root, "symbolic-ref", "--short", "HEAD"))); got != branch {
+					t.Fatalf("routing switched current branch to %s", got)
+				}
+				if got := string(runGitOutput(t, root, "config", "--get-regexp", "^branch\\.")); got != upstream {
+					t.Fatalf("routing changed tracking: %s", got)
+				}
+				plan := routed.Verdict.BranchPlan
+				if uniqueTarget {
+					if plan.Action != "stop" || strings.Contains(routed.NextInstruction, "git branch -d") {
+						t.Fatalf("unique target became cleanup-eligible: %+v\n%s", plan, routed.NextInstruction)
+					}
+					return
+				}
+				if plan.Action != "recreate" || plan.CurrentBranch != branch || plan.TargetBranch != target || plan.MergeTarget != base || plan.StartCommit != currentTip {
+					t.Fatalf("wrong recreate plan: %+v", plan)
+				}
+				for _, want := range []string{"git branch -d", target, "recreate it from " + base} {
+					if !strings.Contains(routed.NextInstruction, want) {
+						t.Fatalf("missing %q in %s", want, routed.NextInstruction)
+					}
+				}
+				for _, warning := range routed.Warnings {
+					if strings.Contains(warning, "not on an implementation branch") {
+						t.Fatalf("name-rooted recreate was misreported as create-path: %s", warning)
+					}
+				}
+
+				// Even an eligible plan does not authorize forced deletion of a
+				// branch held by another worktree. Git must refuse and keep refs.
+				held := filepath.Join(t.TempDir(), "held-target")
+				runGit(t, root, "worktree", "add", held, target)
+				if _, err := server.gitRunner().RunGit(context.Background(), root, "branch", "-d", target); err == nil {
+					t.Fatal("non-forced deletion removed a checked-out target")
+				}
+				if got := string(runGitOutput(t, root, "show-ref", "--heads")); got != refsBefore {
+					t.Fatalf("refused deletion changed refs: %s", got)
+				}
+				runGit(t, root, "worktree", "remove", held)
+				runGit(t, root, "branch", "-d", target)
+				runGit(t, root, "switch", "-c", target, base)
+				if got := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD"))); got != baseTip {
+					t.Fatalf("recreated target starts at %s, want merge root %s", got, baseTip)
+				}
+				if got := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", branch))); got != currentTip {
+					t.Fatalf("prior current work lost: %s, want %s", got, currentTip)
+				}
+				if got := string(runGitOutput(t, root, "config", "--get-regexp", "^branch\\.")); got != upstream {
+					t.Fatalf("recreation changed prior branch tracking: %s", got)
+				}
+			})
+		}
 	}
 }
 

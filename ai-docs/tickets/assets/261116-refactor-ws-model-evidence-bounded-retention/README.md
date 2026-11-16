@@ -3,30 +3,31 @@
 ## Scope and preserved anchors
 
 This is MAIN-authorized, evidence-only cleanup of delivery
-`01d14188534b2e26fe49840f162b61c3eec96b86`. Production source, tests, contract
-and the closed ticket body are unchanged. Result anchor `7bee94167` and final
+`01d14188534b2e26fe49840f162b61c3eec96b86`. Production source, tests and contract
+are unchanged by the evidence cleanup. Result anchor `7bee94167` and final
 source anchor `fb5739515` remain the implementation references.
 
 The root lead consolidated the four unpushed docs/evidence commits into
 `cae8e7ea530be240295b378b20a9c8d66e797fe2`, retaining the sanitized tree
 exactly and preserving source/preparation history through `fb5739515`.
 Every commit in the resulting implementation range is manifest-free; no
-recovery ref was created. The private old/new mapping is at
-`/tmp/ws-retention-module-choosing-tartar/history-rewrite-mapping.txt`.
-Source/tests and the closed ticket remain byte-identical to the original
-delivery. No Go rerun, runtime action, integration or push occurred.
+recovery ref was created. The private old/new mapping is not retained in this
+public evidence. Source/tests remained byte-identical to the original delivery.
+No Go rerun, runtime action, integration or push occurred in that cleanup.
+
+The later E3 tidy-up removes local paths and environment dumps from these
+public summaries and log headers. The closed ticket records an appended
+correction Edition and a minimal captured-session-name redaction; its other
+historical Result text is preserved.
 
 ## Private archive and deterministic aggregates
 
-Private root `P = /tmp/ws-retention-module-choosing-tartar`.
-Archive `A = P/precleanup-01d141885` contains 29 byte-identical original public
-artifacts under `public-evidence/`, plus 15 byte-original logs under
-`byte-original-logs/`. `A/archive-index.json` records every archived file's
-size and SHA-256. Copies were independently written, synced and verified,
-not hard-linked. Both manifests also have independent copies at:
-
-- `P/private-manifests/copy-manifest.json`
-- `P/private-manifests/final-copy-manifest.json`
+The historical cleanup reported a private archive of 29 original public
+artifacts and 15 byte-original logs, an archive index of sizes/SHA-256 values,
+and independently written, synced and verified copies (not hard links).
+That archive, index, private mapping, manifests and raw per-agent reports
+are **not retained in this public evidence**; their current availability is
+unverified. The aggregates below survive without per-file provenance.
 
 | Capture | Files | Total record bytes | Sorted-pair SHA-256 |
 |---|---:|---:|---|
@@ -45,9 +46,10 @@ remain private, not public rows.
 These are historical commands/results from the reviewed implementation,
 not new runs or a claim that its former public manifest paths still exist:
 
-- `validated-wslive-race.log`: exact full wslive `-race` command/output.
-- `final-focused-consumers.log`: exact five-test consumer filter/output.
-- `final-private-copy-prune.log`: exact private-copy command/output;
+- `validated-wslive-race.log`: full wslive `-race` command/output.
+- `final-focused-consumers.log`: five-test consumer filter/output.
+- `final-private-copy-prune.log`: private-copy command with local input/output
+  paths redacted and full test output;
   **3,848 -> 1,101 files**, **2,747 actual deletions**, all **141 agents'**
   Current/History, overlay and warm cache equal. Every eligible bound passed.
 - `final-private-copy.log`: aggregate capture summary, 12 directories and
@@ -55,25 +57,24 @@ not new runs or a claim that its former public manifest paths still exist:
 - `verification-proofs.log`: six byte-identical original `7ad4a0627`
   equivalence assertion blocks and historical summarizer identity.
 - `final-proofs.log`: retained-byte/source digests and scoped PID summary.
-- `measurement.json` and `final-measurement.json`: aggregate results plus
-  hashes/locations of the complete private reports, without per-agent rows.
+- `measurement.json` and `final-measurement.json`: aggregate results and
+  hashes of private reports, without per-agent rows or retained raw reports.
 
-`independent-review.md` is unchanged byte-for-byte: its clean one-pass Lite
-verdict covers the original correctness/contract/T0/test review, not this
-cleanup. Separate Fit/convention review was outside that partition. Its
-historical file:line references resolve against `A/public-evidence/`.
+`independent-review.md` retains its historical clean one-pass Lite verdict
+for correctness/contract/T0/test integrity, not a review of either cleanup.
+Its private report path is omitted; references to removed inputs are marked
+not retained. Separate Fit/convention review was outside that partition.
+File:line references describe the original evidence before header redaction.
 
-The closed Result's existing artifact names are preserved as historical
-locators: any removed artifact, including manifests, scripts, the overlay
-fixture and superseded logs, is at `A/public-evidence/<original-name>`.
-Archived scripts/harness are original historical inputs, not a relocated
-ready-to-run recipe. Byte-original logs are at
-`A/byte-original-logs/<original-name>`. The final unpruned private seed remains
-at `P/final-seed/model-evidence`; it was not touched by cleanup.
+The closed Result's removed artifact names are historical locators only.
+Manifests, scripts, the overlay fixture, superseded logs, byte-original logs
+and the final unpruned private seed are not retained here. The historical
+cleanup reported leaving the seed untouched; no current availability or
+reproducible private-copy recipe is claimed.
 
 ## Preserved failure diagnoses and limits
 
-Raw failures remain in the archive. Concise diagnoses:
+Raw failure logs are not retained here. Historical diagnoses:
 
 1. Broad cache enumeration exceeded 10 seconds; enumeration narrowed to the
    known directory schema without a timeout increase.
@@ -89,5 +90,4 @@ Raw failures remain in the archive. Concise diagnoses:
 The ticket's historical measurements remain unverified. T0 means identical
 folds of retained input, not recovery of deleted evidence or universal
 late-arrival equivalence. Original/live stores were not accessed during
-cleanup. Lease and worktree remain held for MAIN; integration, shared runtime,
-push and CI remain lead-owned.
+cleanup. Integration, shared runtime, push and CI were lead-owned.

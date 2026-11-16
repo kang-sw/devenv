@@ -9,11 +9,22 @@ if [ -z "$version" ]; then
   if git -C "$tool_dir" describe --tags --exact-match >/dev/null 2>&1; then
     version=$(git -C "$tool_dir" describe --tags --exact-match)
   else
-    version=0.50.0-dev
+    version=0.50.1-dev
   fi
 fi
 version=${version#v}
 source_commit=$(git -C "$tool_dir" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')
+
+# Node-less consumer gate: prepared closures must match each other and source.
+repo_dir=$(CDPATH= cd -- "$tool_dir/.." && pwd -P)
+for product in agents-plugin agents-plugin-wsflow; do
+  python3 "$repo_dir/$product/bin/ws-pi-payload.py" \
+    --plugin "$repo_dir/$product" --check-source "$repo_dir"
+done
+for artifact in native-pi/closure-manifest.json native-pi/closure.zip native-pi/first-party-manifest.json bin/ws-pi-payload.py; do
+  cmp "$repo_dir/agents-plugin/$artifact" "$repo_dir/agents-plugin-wsflow/$artifact"
+done
+diff -r "$repo_dir/agents-plugin/native-pi/first-party" "$repo_dir/agents-plugin-wsflow/native-pi/first-party"
 
 dist_dir=$tool_dir/dist
 rm -rf "$dist_dir"
