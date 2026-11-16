@@ -99,24 +99,20 @@ import {
   markAgentExited,
   markLeadInterrupted,
   observeChildSubtree,
-  probeAgentLiveness,
   promptAgent,
   pushSpawnFailed,
   pushToLead,
   recordReport,
   registerPushFlush,
   shouldPushToLead,
-  startLivenessProbe,
   stopAgent,
   REPORT_LOG_CAP,
   REPORT_TO_LEAD_TOOL_NAME,
   GATED_EXEC_TOOL_NAME,
   attachApprovalChannel,
   syncOwnershipProtection,
-  getAgentTranscriptPath,
   listAgents,
   sendToAgent,
-  startForkFinish,
   buildRpcClientOptions as buildRpcClientOptionsBase,
   inheritModelFromToolCtx,
   resolveSpawnToolGroup,
@@ -164,9 +160,21 @@ import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecyc
 import { agentViewUpstreamRef, type AgentViewModel } from "../src/agent-view.ts";
 import { batchViews, createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
 import { fakeParentChannel, fakeUplink, idleOwnTurn, until } from "./fixtures/subtree-channels.ts";
+import {
+  formatConcreteModelWarning,
+  formatTierWarning,
+  modelCatalogFromToolCtx,
+  suggestModels,
+  tierWarningNotifierFromToolCtx,
+  validateConcreteModel,
+} from "../src/model-catalog.ts";
+import { freshRpcRecord, liveRpcRecord, fakePi, fakeRpcClient } from "./fixtures/spawner-records.ts";
+
 /** One event-loop turn: lets the zero-delay settle-time wake timer run. */
 const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+
 // Stands in for the child half of the control channel: the hello plus the
 // role's stage-2 readiness (web for Explore, fork for a fork launch).
 async function startRpcWithFakeChild(this: { options?: { env?: Record<string, string>; args?: string[] } }) {
@@ -176,11 +184,13 @@ async function startRpcWithFakeChild(this: { options?: { env?: Record<string, st
 // Deliberately contains spaces: argv is passed as an array, so this exact
 // loaded-entry identity must reach the child without shell escaping/rebuilds.
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
+
 function buildRpcClientOptions(...args: any[]) {
   return buildRpcClientOptionsBase(
     args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], TEST_EXTENSION_ENTRY, ...args.slice(10),
   );
 }
+
 /** Test-only adapters over retained low-level lifecycle functions, NOT production
  * registrations. Public tool absence is covered in native-agent-retirement.test.ts. */
 function createEngineTestHarness(pi: any, bridge: any, sessionCtx: any) {
@@ -213,10 +223,12 @@ function createEngineTestHarness(pi: any, bridge: any, sessionCtx: any) {
 }
 
 const storageRoots = new Set<string>();
+
 afterEach(() => {
   for (const root of storageRoots) rmSync(root, { recursive: true, force: true });
   storageRoots.clear();
 });
+
 function storageRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
   storageRoots.add(root);
@@ -295,15 +307,6 @@ describe("resolveSpawnToolGroup (review fix, relay #1, TEST finding #3)", () => 
     assert.equal(resolveSpawnToolGroup("full-worker"), resolveSpawnToolGroup(undefined));
   });
 });
-
-import {
-  formatConcreteModelWarning,
-  formatTierWarning,
-  modelCatalogFromToolCtx,
-  suggestModels,
-  tierWarningNotifierFromToolCtx,
-  validateConcreteModel,
-} from "../src/model-catalog.ts";
 
 const tierCatalog = ["cheap-model", "big-model", "reviewer-model"].map(id => ({ provider: "openrouter", id, hasAuth: true }));
 
@@ -495,9 +498,6 @@ describe("concrete Pi model validation", () => {
     assert.match(formatConcreteModelWarning(noAuth.rejected!, false), /provider openrouter has no configured auth/);
   });
 });
-
-import { registerExecuteGateway } from "../src/execute-gateway.ts";
-import { ensureRespondent, createThreadRegistryHandle } from "../src/ask.ts";
 
 // Offline registered-wrapper coverage: only these test-process RPC methods are stubbed.
 // No installed Pi source is edited and no child/provider is started.
@@ -1341,68 +1341,6 @@ describe("inheritModelFromToolCtx", () => {
   });
 });
 
-function freshRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
-  return {
-    agentId: "rpc-agent-1",
-    sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
-    systemPromptPath: "/tmp/ws-pi-agent-x/prompt.md",
-    wsToolNames: [],
-    toolGroup: "full-worker",
-    streaming: false,
-    running: false,
-    reportLog: [],
-    ...overrides,
-  };
-}
-
-/**
- * A record in the LIVE resting state. 260905 (alias/park/cap ticket):
- * presence no longer depends on `client` — any non-threadBound registry
- * member (dormant/parked included) keeps `computeRunningStatusLine`'s line
- * present — but most fan-in fixtures below still want a live client to
- * exercise `running`/`streaming` transitions. Never a real `RpcClient`.
- */
-function liveRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
-  return freshRpcRecord({ client: {} as RpcClient, ...overrides });
-}
-
-/**
- * Duck-typed `ExtensionAPI` stand-in exposing only the push methods. `sent`
- * is the item-level delivery view used by the lifecycle assertions below:
- * a `ws-push-batch` is flattened back to its structured `details.items` while
- * dedicated push-wake tests assert the real one-envelope transport.
- */
-function fakePi(overrides: { sendMessage?: (message: unknown, options?: unknown) => void } = {}): {
-  api: Parameters<typeof pushToLead>[0];
-  wakes: unknown[];
-  sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }>;
-} {
-  const sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }> = [];
-  const wakes: unknown[] = [];
-  leadIdleRef.current ??= () => true;
-  const handlers = new Map<string, () => void>();
-  const api = {
-    on: (event: string, handler: () => void) => handlers.set(event, handler),
-    sendUserMessage: (content: unknown) => {
-      wakes.push(content);
-      const accessor = leadIdleRef.current;
-      leadIdleRef.current = () => false;
-      handlers.get("agent_start")?.();
-      leadIdleRef.current = accessor;
-    },
-    sendMessage:
-      overrides.sendMessage ??
-      ((message: unknown, options?: unknown) => {
-        const candidate = message as { customType?: string; details?: { items?: unknown[] } };
-        if (candidate.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(candidate.details?.items)) {
-          for (const item of candidate.details.items) sent.push({ message: item as never, options: options as never });
-        } else sent.push({ message: message as never, options: options as never });
-      }),
-  };
-  registerPushFlush(api as never, { delayMs: () => 10 });
-  return { api: api as unknown as Parameters<typeof pushToLead>[0], sent, wakes };
-}
-
 describe("applyRpcEvent", () => {
   test("agent_start flips streaming true and returns an empty outcome (no push)", () => {
     const record = freshRpcRecord({ running: true });
@@ -1731,29 +1669,6 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
     assert.equal(record.pendingApproval?.cwd, undefined);
   });
 });
-
-/**
- * Duck-typed `RpcClient` stand-in exposing only the methods these tests
- * drive (`steer`/`followUp`/`prompt`/`getLastAssistantText`), cast as
- * `RpcClient` — mirroring the existing `client: {} as RpcClient` pattern
- * already used by the `listAgents` tests above. Never a real `RpcClient`
- * construction, never a subprocess.
- */
-function fakeRpcClient(overrides: {
-  steer?: (message: string) => Promise<void>;
-  followUp?: (message: string) => Promise<void>;
-  prompt?: (message: string) => Promise<void>;
-  getLastAssistantText?: () => Promise<string | null>;
-} = {}): { client: RpcClient; calls: Array<[string, string]> } {
-  const calls: Array<[string, string]> = [];
-  const client = {
-    steer: overrides.steer ?? (async (message: string) => void calls.push(["steer", message])),
-    followUp: overrides.followUp ?? (async (message: string) => void calls.push(["followUp", message])),
-    prompt: overrides.prompt ?? (async (message: string) => void calls.push(["prompt", message])),
-    getLastAssistantText: overrides.getLastAssistantText ?? (async () => null),
-  };
-  return { client: client as unknown as RpcClient, calls };
-}
 
 describe("shouldPushToLead (the push gate)", () => {
   test("lead, fork, worker, and persistent Explore owners push to their direct parent", () => {
