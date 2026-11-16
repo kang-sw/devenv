@@ -53,6 +53,15 @@ const (
 	// Builtin default: off, held on the bare key only.
 	ItemWorkflowTrackerEnabled = "workflow.tracker_enabled"
 
+	// ItemWorkflowProfile selects the lead playbook profile: direct reads the
+	// base playbooks, orchestrate selects the <name>.orchestrate.md profile
+	// variants where present, for top-level lead keys only. It is
+	// harness-bucketed like ItemWorkflowWhiteboardEnabled: values are stored
+	// under ItemWorkflowProfile+"."+<claude|codex|pi|all>, and a value under
+	// this bare key is a legacy value read in the all position.
+	// Builtin default: direct, held on the bare key only.
+	ItemWorkflowProfile = "workflow.profile"
+
 	// ItemSageReview is the layered config key for the completeness stage of the
 	// sage review gate at actionable ready/ promotion. Value "auto" requires the
 	// completeness reviewer; "ask" recommends it; absent/empty/"off" skips it.
@@ -189,6 +198,12 @@ func init() {
 	RegisterDefaultScope(ItemWorkflowTrackerEnabled, ScopeGlobal)
 	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
 		RegisterDefaultScope(ItemWorkflowTrackerEnabled+"."+bucket, ScopeGlobal)
+	}
+	// workflow.profile is the same cross-project habit, so it takes the same
+	// global default on the bare key and every bucket key.
+	RegisterDefaultScope(ItemWorkflowProfile, ScopeGlobal)
+	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
+		RegisterDefaultScope(ItemWorkflowProfile+"."+bucket, ScopeGlobal)
 	}
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)
