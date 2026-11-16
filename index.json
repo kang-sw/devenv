@@ -140,7 +140,17 @@
       "registered_at": "2026-11-09T15:09:33Z"
     },
     "261111-bug-ws-dashboard-daemon-idle-cpu-windows": {
-      "registered_at": "2026-11-11T07:52:16Z"
+      "registered_at": "2026-11-11T07:52:16Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-16T01:58:17Z",
+        "impl": {
+          "branch": "impl/develop/phony-eel-cramp"
+        }
+      }
     },
     "261111-bug-ws-tracker-body-merge-minor-gaps": {
       "registered_at": "2026-11-11T10:28:07Z"
