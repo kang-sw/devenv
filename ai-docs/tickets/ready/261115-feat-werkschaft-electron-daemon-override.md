@@ -252,6 +252,11 @@ Node fixtures and injected spawns only until platform acceptance is authorized.
 - Review: R1 lite raised three Important findings (canonical symlink escape, concurrency lock-winner simulation, app-quit test using only a healthy stub); fix `14f4217726` addresses all three, and fixes-only R2 marked all fixed. No replacement-capable CLI flag, Phase 3 swap, accepted-build promotion, downloader, endpoint/store/hello change or shared daemon action was introduced. Compatibility target remains shell-private T0; cross-minor hello's existing T3 refusal is unchanged.
 - Verification: `TMPDIR=TEMP=TMP=D:/Temp/exec3-daemon`, `sys_lock.sh run exec3-daemon 3 -- node --test` scoped to `daemon-selection.test.js`, `daemon-controller.test.js`, `daemon-stage.test.js`, `main.test.js`: 42 pass after initial corrections; after review fixes, focused controller/stage/main: 39 pass, 0 fail; `git diff --check` passed. All daemon bytes in fixtures were non-executable and all launches injected; the REST attach test bound only an ephemeral loopback port, not 29417. **No real macOS or Windows binary start/lifetime or packaged acceptance was run**. Windows strict-lifetime owner gate, macOS packaged/real survival, cross-version replacement and holder continuity remain unverified future boundaries; the ticket stays in `ready/` for Phases 3–4.
 
+#### Edition (5d9c14ef01) - 2026-11-16
+
+- Corrected the Phase 2 Claude package selector to validate the MCP launcher and config references under `mcpServers[plugin.name]`: the real wsflow manifest declares `mcpServers.wsflow`, not `mcpServers.ws`. An unrelated ws server no longer stands in for wsflow. Non-executable bundled and selected-dev wsflow fixtures now pass with matching runtime contracts; the existing ws fixture remains passing.
+- Verification: `TMPDIR=TEMP=TMP=D:/Temp/exec3-daemon` with `sys_lock.sh run exec3-daemon 3 -- node --test agents-plugin-tool/desktop-electron/test/daemon-selection.test.js`: 6 pass, 0 fail; `git diff --check` passed. No real binary, Go test, lifecycle, Phase 3 replacement or platform acceptance run. Windows strict-lifetime gate and Phase 3–4 boundaries remain unchanged.
+
 ### Phase 3: Controlled replacement and reconnect
 
 Apply newer-core precedence and the existing explicit equal-core rule; verify
