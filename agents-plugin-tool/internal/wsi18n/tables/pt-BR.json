@@ -440,6 +440,7 @@
   "js.term.loadfail": "Não foi possível carregar o emulador de terminal",
   "js.board.toolbar.label": "Ações do quadro",
   "js.board.toolbar.overview": "Visão geral",
+  "js.board.toolbar.overview.title": "Visão geral (Ctrl+Q)",
   "js.board.toolbar.search": "Buscar",
   "js.board.toolbar.files": "Arquivos",
   "js.board.overview.hint": "Clique fora · Esc: voltar · Clique no cartão: ir ao cartão",

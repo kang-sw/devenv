@@ -280,6 +280,18 @@ func TestDashboardNudgeFailureLeavesTheToolResultUnchanged(t *testing.T) {
 
 	run := func(t *testing.T, mode string) string {
 		dir := dashboardSessionEnv(t)
+		var s *Server
+		// Register before the fake daemon: release its hung requests before
+		// joining the sender, but keep cache/config homes until it has exited.
+		t.Cleanup(func() {
+			if s != nil && s.dashboard.nudgesDone != nil {
+				select {
+				case <-s.dashboard.nudgesDone:
+				case <-time.After(5 * time.Second):
+					t.Error("nudge sender did not exit before subtest cleanup")
+				}
+			}
+		})
 		var fake *fakeDaemon
 		switch mode {
 		case "ok":
@@ -291,6 +303,9 @@ func TestDashboardNudgeFailureLeavesTheToolResultUnchanged(t *testing.T) {
 		}
 		root := dashboardGitRoot(t)
 		s, key, loginRoot := dashboardSessionServer(t, root, true)
+		// Close stops queueing but drains asynchronously; the earlier cleanup
+		// joins it before Setenv can expose the next subtest's daemon.
+		t.Cleanup(s.Close)
 		started := time.Now()
 		resp := dashCall(t, s, "todo.add", map[string]any{"session_key": key, "key": "step", "title": "a step"})
 		if elapsed := time.Since(started); elapsed > 2*time.Second {

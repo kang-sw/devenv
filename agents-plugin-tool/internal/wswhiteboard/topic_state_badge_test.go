@@ -38,10 +38,10 @@ function topic(state='implementing'){
  const bar=n.appendChild(new E('tbar'));bar.appendChild(new E('tlead'));document.appendChild(n);return n;
 }
 var n=topic();
-function pill(){return n.querySelector('.sb');}
+function pill(){return n.querySelector('.wb-state-pill');}
 function elapsed(){return pill().querySelector('b');}
 function tick(at){now=at;timers[0].fn();}
-function expected(minutes,over){assert.equal(elapsed().textContent,String(minutes));assert.equal(pill().classList.contains('over'),!!over);assert.equal(pill().getAttribute('aria-label'),'구현 중 · <img src=x onerror=attack()> · ETA 30분 중 '+minutes+'분 경과'+(over?' · '+over+'분 초과':''));}
+function expected(minutes,over){assert.equal(elapsed().textContent,String(minutes));assert.equal(pill().classList.contains('wb-state-over'),!!over);assert.equal(pill().getAttribute('aria-label'),'구현 중 · <img src=x onerror=attack()> · ETA 30분 중 '+minutes+'분 경과'+(over?' · '+over+'분 초과':''));}
 `
 
 func badgeNode(t *testing.T, body string) {
@@ -66,7 +66,7 @@ func TestTopicStateBadgeResearchingMetadata(t *testing.T) {
 	badgeNode(t, `
 tick(start+47*60000);expected(47,17);
 n.setAttribute('data-state','researching');window.wbAgo(n);
-assert.equal(pill().className,'sb research');
+assert.equal(pill().className,'wb-state-pill research');
 assert.equal(pill().querySelector('use').getAttribute('href'),'#i-st-research');
 assert.equal(pill().textContent,'~30m');
 assert.equal(n.querySelector('.who').textContent,'<img src=x onerror=attack()>');
@@ -84,7 +84,7 @@ for(const [owner,minutes] of [['next owner','7'],['','7'],['owner only',''],['',
  assert.equal(pill().classList.contains('solo'),!minutes);
 }
 for(const bad of ['0','-1','1.5','NaN','9007199254740992']) {
- n.setAttribute('data-state-eta-minutes',bad);window.wbAgo(n);assert.equal(pill().querySelector('.t'),null);
+ n.setAttribute('data-state-eta-minutes',bad);window.wbAgo(n);assert.equal(pill().querySelector('.wb-state-time'),null);
 }
 n.setAttribute('data-state-owner','researcher');n.setAttribute('data-state-eta-minutes','7');window.wbAgo(n);
 for(const state of ['waiting','discussing','awaiting-confirmation','implementing']) {
@@ -111,14 +111,14 @@ assert.equal(pill().getAttribute('aria-live'),null);
 for(const [delta,min,over] of [[-1,0,0],[0,0,0],[30*60000-1,29,0],[30*60000,30,0],[31*60000-1,30,0],[31*60000,31,1],[47*60000,47,17]]) {tick(start+delta);expected(min,over);assert.equal(pill(),original);assert.equal(elapsed(),number);assert.equal(pill().querySelector('svg'),icon);}
 const run=n.getAttribute('data-state-run'),started=n.getAttribute('data-state-started-at');
 n.setAttribute('data-state-eta-minutes','60');n.setAttribute('data-state-extensions','1');n.setAttribute('data-state-deadline-at',new Date(start+60*60000).toISOString());window.wbAgo(n);
-assert.equal(pill().textContent,'47/60m');assert.equal(pill().classList.contains('over'),false);
+assert.equal(pill().textContent,'47/60m');assert.equal(pill().classList.contains('wb-state-over'),false);
 assert(pill().getAttribute('aria-label').endsWith('연장 1회 · 최초 30분'));
 assert.equal(n.querySelector('.ext').textContent,'연장 1회 · 최초 30분');
 assert.equal(n.getAttribute('data-state-run'),run);assert.equal(n.getAttribute('data-state-started-at'),started);
 const deps=n.querySelector('.tlead').appendChild(new E('dw'));
 for(const [state,cls] of [['awaiting-confirmation','confirm'],['waiting','wait'],['discussing','discuss']]) {
  n.setAttribute('data-state',state);window.wbAgo(document);
- assert.equal(pill().className,'sb '+cls+' solo');assert.equal(pill().querySelector('use').getAttribute('href'),'#i-st-'+cls);
+ assert.equal(pill().className,'wb-state-pill '+cls+' solo');assert.equal(pill().querySelector('use').getAttribute('href'),'#i-st-'+cls);
  assert.equal(pill().getAttribute('aria-label'),wsT('js.wb.state.'+state));
 }
 assert.equal(n.querySelector('.dw'),deps,'transitions preserve dependency wrapper');

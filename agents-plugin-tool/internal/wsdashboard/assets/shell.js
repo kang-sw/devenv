@@ -47,6 +47,7 @@
   //                                   hidden one holds its region updates,
   //                                   the clock, and tracker reads
   //     search  {}                    open the search palette
+  //     overview {}                   toggle the visible board's Overview
   //     menu    {}                    open the session menu (the head's
   //                                   harness chip, which the shell mirrors)
   //     sync    {}                    send the header, layout, and title
@@ -70,6 +71,7 @@
     settings: { layout: "string", input: "string" },
     shown: { shown: "boolean" },
     search: {},
+    overview: {},
     menu: {},
     sync: {}
   };

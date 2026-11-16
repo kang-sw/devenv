@@ -46,6 +46,7 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.FilesScript}}</script>{{if .Terminal}}
 <script>{{.Assets.TerminalScript}}</script>{{end}}{{if and .SysOpen (not .Worktree)}}
 <script>{{.Assets.WebScript}}</script>{{end}}
+<script>{{.Assets.SelectAllScript}}</script>
 {{if .Frame}}<script src="/s/{{.Assets.ScriptFile}}"></script>{{else}}<script>{{.Assets.Script}}</script>{{end}}
 </body></html>
 {{end}}
@@ -91,6 +92,7 @@ until then. */}}
 <script>{{.Assets.ShellScript}}</script>{{if .SysOpen}}
 <script>{{.Assets.CardsScript}}</script>
 <script>{{.Assets.FilesScript}}</script>{{end}}
+<script>{{.Assets.SelectAllScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
@@ -372,6 +374,7 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 <script>{{.Assets.MemoScript}}</script>
 <script>{{.Assets.UsageScript}}</script>
 <script>{{.Assets.ShellScript}}</script>
+<script>{{.Assets.SelectAllScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}

@@ -458,7 +458,7 @@ func TestWhiteboardFilePageResolvesTopicTickets(t *testing.T) {
 	f.update(t, `<wb:topic name="t" tickets="261101-feat-go 261101-bug-gone 261101-chore-nowhere"><wb:log>working</wb:log></wb:topic>`)
 	page := f.fullPage(t)
 	for _, want := range []string{
-		`data-topic="t"`, `<span class="tname">t</span>`, `data-kind="agent"`, "working",
+		`data-topic="t"`, `<span class="tname" title="t">t</span>`, `data-kind="agent"`, "working",
 		`<span class="dw wbtk">`, `<span class="bd">3</span>`,
 		`<span class="row open" data-ticket="261101-feat-go" data-status="ready">`,
 		`<span class="row dropped" data-ticket="261101-bug-gone" data-status="dropped">`,

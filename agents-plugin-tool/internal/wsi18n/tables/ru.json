@@ -440,6 +440,7 @@
   "js.term.loadfail": "Не удалось загрузить эмулятор терминала",
   "js.board.toolbar.label": "Действия доски",
   "js.board.toolbar.overview": "Обзор",
+  "js.board.toolbar.overview.title": "Обзор (Ctrl+Q)",
   "js.board.toolbar.search": "Поиск",
   "js.board.toolbar.files": "Файлы",
   "js.board.overview.hint": "Щелчок снаружи · Esc: назад · Щелчок по карточке: перейти к ней",

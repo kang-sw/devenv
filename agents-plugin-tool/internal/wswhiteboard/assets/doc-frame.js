@@ -15,7 +15,8 @@
   // dashboard's live board offers to add to the message as a mention
   // ({wbDoc: "sel"}, see below); and the host's rail key, Ctrl+`
   // ({wbDoc: "rail"}, see the end); and the palette shortcut, Ctrl+K or
-  // Ctrl+Space ({wbDoc: "search"}, see the end).
+  // Ctrl+Space ({wbDoc: "search"}, see the end); and Ctrl+Q toggles the
+  // host board's Overview ({wbDoc: "overview"}).
   // A plain link needs no help: <base target="_blank"> opens it in a new tab.
   var d = document, body = d.querySelector(".doc-body");
 
@@ -221,5 +222,13 @@
     if (e.metaKey ? e.ctrlKey || !k : !k && e.code !== "Space" && e.key !== " ") return;
     e.preventDefault();
     post({ wbDoc: "search" });
+  });
+  // Like the session document, leave editing, terminal and IME input native.
+  d.addEventListener("keydown", function (e) {
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || !e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || (e.key || "").toLowerCase() !== "q") return;
+    var t = e.target;
+    if (t && (t.isContentEditable || (t.closest && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"]), .xterm, .tm-host")))) return;
+    e.preventDefault();
+    post({ wbDoc: "overview" });
   });
 })();

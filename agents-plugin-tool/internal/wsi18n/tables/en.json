@@ -440,6 +440,7 @@
   "js.term.loadfail": "The terminal emulator could not be loaded",
   "js.board.toolbar.label": "Board actions",
   "js.board.toolbar.overview": "Overview",
+  "js.board.toolbar.overview.title": "Overview (Ctrl+Q)",
   "js.board.toolbar.search": "Search",
   "js.board.toolbar.files": "Files",
   "js.board.overview.hint": "Outside click · Esc: back to your place · Card click: go to that card",
