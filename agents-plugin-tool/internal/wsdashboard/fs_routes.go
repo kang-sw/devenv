@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -511,7 +512,9 @@ func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID st
 		fsNotFound(w)
 		return
 	}
-	if localViewer(r) {
+	// Resolving a Windows symlink can contact a UNC target before localPath
+	// can reject it. Keep links opaque during automatic directory listing.
+	if localViewer(r) && runtime.GOOS != "windows" {
 		for i := range entries {
 			e := &entries[i]
 			if !e.Link {
@@ -749,7 +752,7 @@ const pdfContentSecurityPolicy = "default-src 'none'; object-src 'self'; frame-s
 // is served as the image route serves one, so an SVG opened on its own runs
 // no script in the daemon's origin.
 func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID string) {
-	root, session, ok := d.browseRoot(r, replyID)
+	root, _, ok := d.browseRoot(r, replyID)
 	if !ok {
 		fsNotFound(w)
 		return
@@ -783,8 +786,6 @@ func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID str
 	h.Set("Content-Security-Policy", policy)
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Referrer-Policy", "no-referrer")
-	if !session {
-		h.Set("Cross-Origin-Resource-Policy", "same-origin")
-	}
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	http.ServeContent(w, r, "", info.ModTime(), f)
 }

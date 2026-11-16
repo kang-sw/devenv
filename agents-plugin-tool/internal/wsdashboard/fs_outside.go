@@ -49,9 +49,9 @@ import (
 //   - a folder too wide to hand out grants the linked file alone
 //     (wideFolder): a volume root, the user's home, or a folder directly
 //     under either;
-//   - a path at or under an always-denied folder (outsideDenied: ~/.ssh,
-//     ~/.gnupg, ~/.aws, ~/.config/gh, ~/.netrc, ~/.docker) never opens, by
-//     the path as written or as resolved, whatever links it;
+//   - a path at or under an always-denied credential location (outsideDenied)
+//     never opens, by written/resolved path or file identity, whatever links
+//     it; Linux process environment files are denied too;
 //   - below the granted folder, a path with a dot-named segment is refused
 //     as the in-root capability route refuses it for a browser on this
 //     machine (framedDenied, which every viewer of these routes is), so a
@@ -102,7 +102,10 @@ const (
 
 // outsideDenied are the always-denied folders and files, relative to the
 // user's home.
-var outsideDenied = []string{".ssh", ".gnupg", ".aws", ".config/gh", ".netrc", ".docker"}
+var outsideDenied = []string{
+	".ssh", ".gnupg", ".aws", ".config/gh", ".netrc", ".docker",
+	".kube", ".git-credentials", ".codex/auth.json", ".claude/.credentials.json",
+}
 
 // OutsideLinkSource is a PageSource that also lists the files outside the
 // session's project root its board links: the absolute path the renderer
@@ -165,10 +168,14 @@ func atOrBelow(base, path string) bool {
 }
 
 // alwaysDenied reports a cleaned absolute path at or under an always-denied
-// folder of a home in homes, the folder taken as written and as it
-// resolves. Without a home it cannot place them, so it refuses a path with
-// one of their names anywhere in it.
+// folder of a home in homes. String checks are only the fast path: file
+// identities also cover filesystem aliases that EvalSymlinks leaves intact
+// (Unicode folding and macOS firmlinks). Without a home, deny these names
+// anywhere in the path. Linux process environments are denied separately.
 func alwaysDenied(path string, homes []string) bool {
+	if deniedProcEnviron(path) {
+		return true
+	}
 	if len(homes) == 0 {
 		slashed := "/" + strings.ToLower(filepath.ToSlash(path)) + "/"
 		for _, name := range outsideDenied {
@@ -184,12 +191,9 @@ func alwaysDenied(path string, homes []string) bool {
 			if atOrBelow(base, path) {
 				return true
 			}
-			if real, err := filepath.EvalSymlinks(base); err == nil && atOrBelow(real, path) {
-				return true
-			}
 		}
 	}
-	return false
+	return deniedFileIdentity(path, homes)
 }
 
 // wideFolder reports a resolved folder too wide to grant: a volume root, a

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -85,7 +86,8 @@ func escapeTree(t *testing.T, f *pageFixture) (outside string, symlinks bool) {
 
 // TestFSListLocalPathsAndLANConfinement pins local traversal and symlink
 // directory listings, LAN confinement, and refusal of files and missing dirs.
-// Local symlink entries are usable files/folders; LAN entries remain links.
+// Local symlink entries are usable files/folders except on Windows, where
+// resolving them automatically could contact a UNC target; LAN keeps links too.
 func TestFSListLocalPathsAndLANConfinement(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	local, lan := fsViewers(t, f)
@@ -99,7 +101,7 @@ func TestFSListLocalPathsAndLANConfinement(t *testing.T) {
 		want := []string{"docs/", "notes.txt", "shot.png"}
 		if symlinks {
 			want = []string{"docs/", "alias.txt@", "escape.png@", "escape.txt@", "notes.txt", "outlink@", "shot.png"}
-			if v.name == local.name {
+			if v.name == local.name && runtime.GOOS != "windows" {
 				want = []string{"docs/", "outlink/", "alias.txt", "escape.png", "escape.txt", "notes.txt", "shot.png"}
 			}
 		}

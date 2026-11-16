@@ -237,6 +237,7 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Referrer-Policy", "no-referrer")
 	if ctype, ok := imageType(rel); ok {
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("Content-Type", ctype)
 		h.Set("Content-Security-Policy", imageContentSecurityPolicy)
 		http.ServeContent(w, r, "", info.ModTime(), f)

@@ -57,8 +57,9 @@ const pathSegment = `[\p{L}\p{N}_.+@%-]+`
 // barePathAttr marks a link the path parser generated.
 var barePathAttr = []byte("wbBarePath")
 
-// bareLinkParsers keep written links/tags ahead of generated links. The
-// path parser precedes strikethrough, which otherwise consumes a leading ~.
+// bareLinkParsers keep written links/tags and emphasis ahead of generated
+// links. Only the home-prefix parser precedes strikethrough, which would
+// otherwise consume a leading ~.
 func bareLinkParsers() []util.PrioritizedValue {
 	url := extension.NewLinkifyParser(
 		extension.WithLinkifyAllowedProtocols([]string{"http:", "https:"}),
@@ -68,7 +69,8 @@ func bareLinkParsers() []util.PrioritizedValue {
 	)
 	return []util.PrioritizedValue{
 		util.Prioritized(outsideRawTags{url}, 600),
-		util.Prioritized(outsideRawTags{barePathParser{}}, 400),
+		util.Prioritized(outsideRawTags{homePathParser{}}, 400),
+		util.Prioritized(outsideRawTags{barePathParser{}}, 700),
 	}
 }
 
@@ -105,6 +107,20 @@ func inRawTag(parent ast.Node, source []byte) bool {
 		}
 	}
 	return false
+}
+
+// homePathParser handles only a leading ~/ before strikethrough can claim it.
+// Other path triggers must wait until emphasis has had its turn.
+type homePathParser struct{ barePathParser }
+
+func (homePathParser) Trigger() []byte { return []byte{'~'} }
+
+func (p homePathParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
+	line, _ := block.PeekLine()
+	if !strings.HasPrefix(string(line), "~/") {
+		return nil
+	}
+	return p.barePathParser.Parse(parent, block, pc)
 }
 
 // barePathParser links a bare file path (barePath). It starts where
