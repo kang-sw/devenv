@@ -74,64 +74,11 @@ import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } f
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, registerPushFlush, buildPushWakeLine, pushToLead, sendBatchToLead, type RpcAgentRegistry, type TerminalDelivery } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { DEFAULT_DIALOG_BUDGET_BYTES, DEFAULT_REREAD_BUDGET_BYTES, extractLeadProse, LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
+import { LABEL, labeled, prose, compactionEvent, tmpDir, writeConfig, fileReader } from "./fixtures/goal-loop.ts";
 
-/** First line of every adapter-injected user message (261007). */
-const LABEL = "[system message from ws-pi-plugin]";
-/** `text` as the adapter sends it: under the label line. */
-const labeled = (text: string): string => `${LABEL}\n${text}`;
-
-/** The lever's rendered prose for a single `current_work` field — the carry the old lever passed raw. */
-const prose = (text: string): string => renderLeadProse({ current_work: text });
-
-/** A `session_before_compact` event with Pi's preparation fields the lead handler reads. */
-function compactionEvent(reason: "manual" | "threshold" | "overflow", branchEntries: unknown[] = [], extra: Record<string, unknown> = {}): never {
-  return {
-    type: "session_before_compact",
-    reason,
-    branchEntries,
-    willRetry: false,
-    signal: new AbortController().signal,
-    preparation: {
-      firstKeptEntryId: "kept-entry",
-      tokensBefore: 1234,
-      messagesToSummarize: [],
-      turnPrefixMessages: [],
-      isSplitTurn: false,
-      fileOps: { read: new Set(["/tmp/read.ts"]), written: new Set(), edited: new Set(["/tmp/edit.ts"]) },
-      settings: { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 },
-    },
-    ...extra,
-  } as never;
-}
-
-const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
-
-function writeConfig(name: string, contents: string): string {
-  const path = join(tmpDir, name);
-  writeFileSync(path, contents, "utf8");
-  return path;
-}
-
-/**
- * A synchronous reader over a JSON file, re-read at each use: the test
- * stand-in for ws-mcp's store, so rewriting the file mid-test is a "tuned
- * value" the next read sees. A missing or malformed file reads as nothing
- * tuned, as an unreachable ws-mcp does.
- */
-function fileReader(path: string): GoalLoopConfigReader {
-  return (keys) => {
-    let config: GoalLoopConfig = {};
-    try {
-      config = JSON.parse(readFileSync(path, "utf8")) as GoalLoopConfig;
-    } catch {
-      // nothing tuned
-    }
-    return staticConfigReader(config)(keys);
-  };
-}
 
 describe("resolveAgentWaitAnimation", () => {
   test("defaults to enabled and only literal false disables the owner-wait cue", () => {
