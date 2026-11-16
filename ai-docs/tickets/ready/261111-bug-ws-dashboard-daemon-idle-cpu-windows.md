@@ -4,6 +4,8 @@ related:
   261111-feat-ws-mailbox-wait-without-process-relaunch: "sibling from the same CPU probe (board (288) b); that ticket covers the per-wake process cost, this one the daemon's own CPU"
   261116-bug-ws-exe-launch-elimination: "separate lead-owned exe-spawn elimination; count legitimate git subprocesses without conflating them with ws exe probes"
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: "client render/input measurements remain separate from backend CPU"
+  261116-bug-ws-dashboard-daemon-idle-file-touches: "follow-up for metadata/file-touch costs exposed by the Phase 1 Windows after capture"
+  261116-research-ws-polling-minimization-event-ledger: "separate design study for polling minimization; no event-ledger mechanism is selected here"
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7ce830ae41c31c47
@@ -115,8 +117,9 @@ Candidate Phase 1 fixes: an incremental discovery index, or a cache invalidated
 by appropriate directory/record mtime or explicit identity lifecycle events.
 Directory mtime alone does not detect every in-place record change. Preserve
 new/changed/deleted identities, both current and legacy roots, corruption/error
-handling, pending revalidation and authority checks. No persistence or cache
-invalidation policy is selected here.
+handling, pending revalidation and authority checks. These were pre-implementation
+candidates; the selected process-local cache and measured outcome are recorded
+below. No persisted index was introduced.
 
 ## Decisions
 
@@ -218,13 +221,13 @@ This is backend performance-only work with no intended visual/behavior change.
 
 ## Blocked (2026-11-16)
 
-The Phase 1 code candidate has passed remote scoped tests/benchmark and the
-independent fixes-only R2. The remaining gate is coordinating-lead approval
-and sequencing of a daemon rebuild/swap, followed by the profiling lead's
-REST-only after capture against the retained contextual baseline. No worker is
-authorized to rebuild, swap or claim live Windows performance acceptance around
-that gate. Phase 1 remains without a Result; Phase 2 has not started. Resume
-with the approved measurement step, not an unneeded new implementation sweep.
+The approved live after capture is complete and its actual outcome is recorded
+under Phase 1. The cache reduced record-content work, but the Windows capture
+did not establish a performance win; metadata operations now dominate. Keep
+this bug open. The coordinating lead explicitly holds further optimization
+here while the related idle-file-touch ticket and polling-minimization design
+study settle the next work. Phase 2 has not started; do not dispatch another
+discovery optimization or daemon rebuild/swap from this ticket.
 
 ## Phases
 
@@ -240,7 +243,7 @@ identity writes, absent roots, legacy data, invalid identities, pending targets
 and invalidation races. Do not introduce a persisted index as an incidental
 optimization without settling its compatibility.
 
-#### Implementation candidate — pending after measurement (2026-11-16)
+#### Implementation candidate — pre-after checkpoint (2026-11-16)
 
 Commits `c3715b0bd` and `692d07930` add an in-process identity-only
 metadata-gated discovery cache. Split files retain precedence over legacy;
@@ -287,10 +290,76 @@ not establish zero Windows file opens or a Windows CPU win. Preserve that
 correctness check until live focal after evidence shows whether it is a cost
 that needs another measured correction.
 
-The coordinating lead must approve any daemon rebuild/swap; only afterward may
-the profiling lead capture a comparable 125-second after pprof with identity
-counts, streams/nudges and activity context. Until that measurement gate,
-**Phase 1 has no Result and is not complete**; Phase 2 is blocked.
+This checkpoint preceded the approved live after measurement. The Result below
+records the observed outcome rather than treating the Linux fixture result as
+Windows acceptance; Phase 2 remains held by the coordinating lead.
+
+### Result (4f5716178) - 2026-11-16
+
+- The identity-only cache and its scoped tests landed through merge
+  `4f5716178`. Remote w5090 tests/benchmark and independent fixes-only R2 passed
+  as recorded above. Warm Linux record-content reads fell from 3,500 to 0 per
+  scan, but explicit metadata stats increased from 1,167 to 7,311. Those are
+  source-level fixture counters, not Windows file-touch or physical-I/O counts.
+- After the coordinating lead's batched rebuild/swap and hosted-session restart,
+  the approved REST-only after capture ran at 03:48:54Z–03:50:59Z for 125.01 s.
+  PID 2516 and binary hash
+  `fbafb6d6e9847038857a55d1465fb35895dcb66a4d144ac4c9277395e02dda81`
+  were unchanged at both ends; source `7bdf11e74` was supplied by the lead.
+  Profiling was enabled by `WS_MCP_DASHBOARD_PPROF=1`, not a config key.
+  The earlier PID 27736 attempt returned pprof HTTP404 and supplied no CPU
+  evidence; it is excluded from the comparison. No daemon was started,
+  rebuilt, swapped or shut down by this profiling session.
+- **Observed Windows outcome: no performance win established.** Compared with
+  the contextual second 125 s baseline, `WhiteboardNudges.discover` increased
+  from **7.65 s to 13.60 s cumulative** (about 78%). The 7.25 s
+  `readRecordFile` discovery stack no longer appears in the low-threshold after
+  view; this is not proof of zero runtime read calls. Metadata now dominates:
+  `os.Stat` is **8.19 s versus 0.18 s** (`GetFileAttributesEx` 8.15 s after),
+  and `SameFile`/`loadFileId` adds **5.12 s**, including **4.28 s CreateFile**.
+  This confirms the warned-about implicit Windows handle-open path. Fewer JSON
+  content reads alone did not remove the expensive file touches. The owner
+  reports a DLP agent inspecting every touch; reads, stats, writes and legitimate
+  git subprocesses are therefore first-class measurement costs.
+- The windows are observed, not controlled or causally isolated. Identity names
+  were 3,633–3,637 before versus 3,691 after (legacy 2,644 unchanged); page/rail
+  stream snapshots were 6/1 versus 2/1, hosted processes 14–16 versus 10–9,
+  running conversation states 7–6 versus 6–3, and nudge deltas 25 versus 11.
+  Builds, launcher freshness and other activity also changed. No absolute idle
+  process-CPU, physical-I/O, runtime syscall/spawn-count or nudge-latency
+  improvement is claimed from sampled seconds.
+- Low-threshold after attribution: global `CreateFile` 87.43 s,
+  `GetFileAttributesEx` 61.82 s, `os.Stat` 60.31 s, `os.ReadFile` 38.70 s and
+  `loadRecordWithBoard` 35.67 s are overlapping filesystem/handle-bound stacks,
+  not additive disk-operation counts. **68.73 s of the 70.35 s ReadFile stack
+  sits in exec output-pipe reader goroutines**, not ordinary disk reads.
+  The git-focused subset is **22.11 s**, including tracker `RunGit` 12.23 s,
+  `wsgit.RunGit` 8.78 s and git-badge `RunGit` 1.16 s; it is wait-dominated
+  (18.17 s `WaitForSingleObject`). Global exec includes `Cmd.Run` 50.35 s,
+  `CreateProcess` 6.73 s and `WaitForSingleObject` 43.51 s. Windows wait stacks
+  can inflate totals; none of these sample durations establishes invocation
+  counts or actual process utilization.
+- Raw before/after profiles, health/workload metadata, zero-threshold views and
+  the comparison summary remain as small gate evidence under
+  `D:/Temp/exec3-perf/` (`comparison.md`, `after-cpu.pprof`,
+  `after-metadata.json`, `analysis/*discovery-precise.txt`, filesystem/exec
+  views). Analysis used remote Go pprof only; no local Go test/build, test
+  executable, ws executable or launcher run occurred. This Result records the
+  cache experiment and its remaining cost; **the idle-CPU bug is not fixed or
+  closed**, and no new optimization phase starts here.
+
+#### Forward
+
+- `pageCache.get` took **13.45 s cumulative in the first 125 s before window**
+  and **22.47 s in the second**. Page streaming/SSE/hidden-frame share was not
+  broken down; syscall/`WaitForSingleObject` stacks may inflate totals. It was
+  kept outside the discovery-cache phase. The after value is 82.29 s under a
+  different workload/build, not an isolated page-cache regression claim.
+- Per-identity stat plus `SameFile` metadata cost is the next measured target.
+  Follow-up implementation belongs to related
+  `261116-bug-ws-dashboard-daemon-idle-file-touches`; polling-minimization
+  design belongs to `261116-research-ws-polling-minimization-event-ledger`.
+  Link those threads rather than selecting or restating their mechanisms here.
 
 ### Phase 2: Optimize the remaining candidates ranked by measurement
 
@@ -299,5 +368,6 @@ fan-out per event, board reconciliation replay, mailbox full rereads and
 per-request git spawns; fix only the demonstrated next hotspots. Count legitimate
 git invocations and coordinate process-lifecycle changes with the separate
 exe-spawn ticket. Preserve delivery, reconciliation, authority and tool results;
-report before/after profiles and any deferred candidates. No builds, tests,
-executables, profiles or live daemon mutations are run by this docs capture.
+report before/after profiles and any deferred candidates. Phase 2 has not
+started; the coordination gate above reserves further work to the linked
+follow-up tickets and the coordinating lead's next direction.
