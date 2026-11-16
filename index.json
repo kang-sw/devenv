@@ -510,6 +510,9 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
+    "261116-bug-ticket-handler-split-gaps": {
+      "registered_at": "2026-11-16T07:47:51Z"
+    },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
     },
