@@ -504,7 +504,17 @@
       "registered_at": "2026-11-16T00:53:09Z"
     },
     "261116-bug-ws-exe-launch-elimination": {
-      "registered_at": "2026-11-16T00:55:02Z"
+      "registered_at": "2026-11-16T00:55:02Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-16T01:27:57Z",
+        "impl": {
+          "branch": "impl/develop/down-frame-gooey"
+        }
+      }
     },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
