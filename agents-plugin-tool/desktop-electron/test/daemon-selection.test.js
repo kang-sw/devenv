@@ -1,0 +1,103 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { selectDaemon, SETTING } = require('../daemon-selection');
+
+const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+function fixture(t, platform = 'win32') {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-daemon-input-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const appRoot = path.join(base, 'app'), userData = path.join(base, 'userData');
+  fs.mkdirSync(appRoot); fs.mkdirSync(userData);
+  const binaryName = platform === 'win32' ? 'ws-mcp.exe' : 'ws-mcp';
+  function make(root, version = '0.50.1-dev') {
+    fs.mkdirSync(root, { recursive: true });
+    const binary = path.join(root, binaryName), contractFile = path.join(root, 'runtime.json');
+    // These bytes cannot execute. Tests never invoke a binary or child process.
+    fs.writeFileSync(binary, 'fixture bytes, not an executable');
+    const contract = { plugin_version: '0.50.1', mcp_protocol: '2025-03-26',
+      tools: { 'runtime.read': '>=0.50.1' }, commands: { 'runtime.info': '>=0.50.1' } };
+    const metadata = { schema_version: 1, version, binary_sha256: sha(fs.readFileSync(binary)),
+      mcp_protocol: '2025-03-26', tools: ['runtime.read'], commands: ['runtime.info'] };
+    const save = (file, value) => fs.writeFileSync(file, JSON.stringify(value));
+    save(contractFile, contract); save(binary + '.metadata.json', metadata);
+    for (const [tree, rel] of [['rsrc', 'hello/hello.md'], ['skills', 'hello/SKILL.md']]) {
+      const dir = path.join(root, tree); fs.mkdirSync(path.join(dir, 'hello'), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), 'hello\r\nworld\r\n');
+      save(path.join(dir, 'manifest.json'), { schema_version: 1, files: { [rel]: sha('hello\nworld\n') } });
+    }
+    return { root, binary, contract, metadata, contractFile, save };
+  }
+  const bundled = make(path.join(appRoot, 'daemon'));
+  const dev = make(path.join(base, 'selected'), '0.50.3-dev');
+  const choose = value => fs.writeFileSync(path.join(userData, SETTING), JSON.stringify(value));
+  const select = () => selectDaemon({ appRoot, userData, platform });
+  return { base, appRoot, userData, bundled, dev, choose, select };
+}
+test('bundled and explicit dev roots bind matching binary, contract, resources and skills without executing bytes', t => {
+  const f = fixture(t);
+  const bundled = f.select();
+  assert.equal(bundled.source, 'bundled');
+  assert.equal(bundled.binary, f.bundled.binary);
+  assert.deepEqual(bundled.env, { WS_RSRC_ROOT: path.join(f.bundled.root, 'rsrc'), WS_SKILLS_ROOT: path.join(f.bundled.root, 'skills') });
+  f.choose({ schema_version: 1, root: f.dev.root });
+  const selected = f.select();
+  assert.equal(selected.source, 'development');
+  assert.equal(selected.binary, f.dev.binary);
+  assert.equal(selected.metadata.version, '0.50.3-dev');
+  assert.equal(selected.env.WS_RSRC_ROOT, path.join(f.dev.root, 'rsrc'));
+  assert.equal(selected.env.WS_SKILLS_ROOT, path.join(f.dev.root, 'skills'));
+  assert.equal(fs.existsSync(path.join(f.userData, 'update-state.json')), false);
+});
+test('selection is shell-local and fails closed on malformed, relative or missing dev input', t => {
+  const f = fixture(t, 'darwin');
+  for (const value of [{ root: f.dev.root }, { schema_version: 1, root: '../selected' },
+    { schema_version: 1, root: f.dev.root, accepted: true }, { schema_version: 2, root: f.dev.root }]) {
+    f.choose(value); assert.throws(f.select, /Invalid daemon selection/);
+  }
+  fs.writeFileSync(path.join(f.userData, SETTING), '{');
+  assert.throws(f.select, /Invalid daemon selection/);
+  f.choose({ schema_version: 1, root: path.join(f.base, 'missing') });
+  assert.throws(f.select, /Cannot use development daemon/);
+  assert(fs.existsSync(f.bundled.binary), 'a bad dev selection cannot silently fall back to bundled');
+});
+test('binary hash, version, optional protocol and inventory gates match the launcher', t => {
+  const f = fixture(t);
+  const { bundled: b } = f;
+  const save = (file, value) => b.save(file, value);
+  function rejected(change, file = b.binary + '.metadata.json') {
+    save(file, change); assert.throws(f.select, /Cannot use bundled daemon/);
+  }
+  fs.appendFileSync(b.binary, 'tampered'); assert.throws(f.select, /hash mismatch/);
+  fs.writeFileSync(b.binary, 'fixture bytes, not an executable');
+  for (const version of ['0.50.0', '0.51.1', 'garbage']) rejected({ ...b.metadata, version });
+  rejected({ ...b.metadata, mcp_protocol: 'old' });
+  rejected({ ...b.metadata, tools: [] });
+  rejected({ ...b.metadata, commands: [] });
+  save(b.binary + '.metadata.json', { ...b.metadata, tools: ['runtime.read', 'extra'] });
+  assert.equal(f.select().metadata.tools.length, 2, 'non-exact contracts permit extra capabilities');
+  save(b.contractFile, { ...b.contract, runtime_capabilities: { match: 'exact' } });
+  assert.throws(f.select, /unexpected tools/);
+  save(b.binary + '.metadata.json', { schema_version: 1, version: '0.50.1', binary_sha256: b.metadata.binary_sha256 });
+  assert.equal(f.select().metadata.tools, undefined, 'legacy producer inventories/protocol are unknown, not empty');
+});
+test('resource/skills paths and manifest bytes must belong to the selected root', t => {
+  const f = fixture(t);
+  for (const tree of ['rsrc', 'skills']) {
+    const file = path.join(f.bundled.root, tree, 'hello', tree === 'rsrc' ? 'hello.md' : 'SKILL.md');
+    fs.appendFileSync(file, 'tampered');
+    assert.throws(f.select, /hash mismatch/);
+    fs.writeFileSync(file, 'hello\r\nworld\r\n');
+    const manifest = path.join(f.bundled.root, tree, 'manifest.json');
+    const original = fs.readFileSync(manifest);
+    f.bundled.save(manifest, { schema_version: 1, files: { '../outside': sha('outside') } });
+    assert.throws(f.select, /Invalid .* manifest entry/);
+    fs.writeFileSync(manifest, original);
+    fs.rmSync(manifest); assert.throws(f.select, /Cannot use bundled daemon/);
+    fs.writeFileSync(manifest, original);
+  }
+});
