@@ -1,5 +1,7 @@
 ---
 title: Composer autosize forces a full-document layout on every keystroke
+sage-review-design: skipped
+sage-review-completeness: skipped
 related:
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: parent perf ticket; this splits out the measured composer typing cost
 ---
@@ -43,6 +45,8 @@ machine-local):
 - Remove the duplicate work from the nested synthetic `input` (capsules.js
   notify) if it re-runs `grow()` for the same change.
 
+- Per the owner's lightweight-promotion instruction, skip formal Sage stages;
+  use the quick design sanity pass below and lead-arranged independent review.
 - Design sanity pass: the live capsule editor is a contenteditable `div`,
   not a textarea. Its existing block layout already grows/shrinks naturally
   within the CSS 38–160px bounds with internal overflow; no JS measurement
@@ -74,3 +78,39 @@ machine-local):
   one per frame); a before/after DevTools trace or Performance-panel note
   from a live check arranged with the lead (no local Go / ws exe runs on the
   owner's PC; Go tests remote on w5090).
+
+### Result (f96bb52ec) - 2026-11-16
+
+- The live contenteditable composer now relies entirely on its existing
+  CSS block sizing, 38px minimum, 160px maximum, and internal overflow.
+  `grow()` performs no height write or layout read and installs no resize
+  observer/font-ready measurement for that path.
+- Plain textareas use `field-sizing: content`. Unsupported browsers measure
+  the existing hidden layer at most once per animation frame, never reset
+  visible height to `auto`, and write visible height only when it differs.
+  Placeholder, trailing-newline, width-change, and font-ready behavior are
+  covered by deterministic tests; actual rendered layout remains a live-check
+  responsibility.
+- Retained capsule input forwarding: source and the 30-input regression show
+  that the native editor event stops propagation and produces exactly one
+  backing-field notification. Nested dispatch is not a second composer input
+  in this checkout, so removing `notify()` would lose the input contract.
+- Local PASS: `node agents-plugin-tool/internal/wsdashboard/testdata/composer-autosize.test.cjs`
+  and `node agents-plugin-tool/internal/wsdashboard/testdata/capsules.test.cjs`.
+  The new node-vm fixture executes production autosize setup and the actual
+  input listener with visible-field geometry getters that throw; CSS-sized
+  paths produce zero measurements/height writes/frame callbacks across an
+  input burst. The legacy fallback coalesces the burst and skips unchanged
+  visible-height writes. `git diff --check` passed.
+- Remote PASS on w5090, via the owner-prescribed sys_lock sync/run command:
+  `go test ./internal/wsdashboard/ -run "TestComposer|TestInlineCapsules" -count=1 -v`.
+  Node-dependent and opt-in browser cases skipped as expected (no Node there);
+  asset ownership, placeholder/width wiring, and no-note-row checks passed.
+- No local Go/ws/test binary, launcher, or daemon lifecycle operation ran.
+  No board/stream exposure changes or worker-created temporary files.
+- Pending lead acceptance: independent review plus a before/after typing/IME
+  Performance-panel trace in Chrome SPA/Electron, including wrapping,
+  shrink-after-delete, long placeholder, max-height scrolling, and width/font
+  changes. No live latency improvement is claimed from the deterministic tests.
+- Workflow surprise: `tickets.move` refused the occupied assigned worker
+  checkout; used the documented `git mv` fallback to promote the ticket.
