@@ -81,6 +81,10 @@ async function build({ platform = process.platform, arch = process.arch, daemonI
       platform, arch, electronVersion: version,
       electronZipDir: zipDir, appBundleId: 'dev.werkschaft.desktop',
       appVersion, buildVersion: appVersion,
+      // Packager 20 defaults to ASAR. Keep every daemon input (including dot
+      // directories/manifests) on disk: open/copy of packed entries extracts
+      // persistent temp files even when the shell only attaches to a daemon.
+      asar: { unpackDir: 'daemon' },
       icon, overwrite: true, prune: false, osxSign: false, osxNotarize: false,
     });
     console.log(outputs.join('\n'));
