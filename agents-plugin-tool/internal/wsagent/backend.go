@@ -70,6 +70,8 @@ type StartSpec struct {
 
 // LeadSpec is what a lead conversation's process starts with.
 type LeadSpec struct {
+	// DaemonVersion is the running daemon's version, not the plugin starter's.
+	DaemonVersion string
 	// PermissionMode is the permission mode to launch in (claude).
 	PermissionMode string
 	// PluginIsolation is default (replace ws only) or isolated (bundled only).

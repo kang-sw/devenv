@@ -28,13 +28,16 @@ var preparePiLeadLaunch = piLeadLaunch
 // lead isolated instead of failing. Every other resolution error still fails.
 var errPiNoSDK = errors.New("pi default plugin isolation requires the Pi JavaScript SDK beside its CLI; install Pi with npm or select isolated mode")
 
+// piExtensionFallbackMarker identifies bridge-only launches in persisted warnings.
+const piExtensionFallbackMarker = "Bundled Pi extension unavailable"
+
 // piNoSDKWarning names the isolated start, so it stays distinguishable from
 // the bridge fallback warning it may be combined with.
 const piNoSDKWarning = "Pi has no JavaScript SDK beside its CLI, so default plugin isolation cannot keep its other extensions; started in isolated mode (bundled ws extension only). Install Pi with npm to restore default mode."
 
 func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []string, error) {
 	args := append(piLeadArgs(spec), "--no-extensions")
-	root, packageWarning, bundleErr := piBundledPluginRoot()
+	root, packageWarning, bundleErr := piBundledPluginRoot(spec.Lead.DaemonVersion)
 	var entries []string
 	if bundleErr == nil {
 		// Keep the selected package's policy even when the native extension
@@ -47,8 +50,13 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 			spec.Lead.Env = map[string]string{}
 		}
 		for name, value := range packageEnv {
-			spec.Lead.Env[name] = value
+			if strings.HasPrefix(name, "WS_MCP_") {
+				spec.Lead.Env[name] = value
+			}
 		}
+		// Resource roots belong to the selected package, not its manifest env.
+		spec.Lead.Env["WS_RSRC_ROOT"] = filepath.Join(root, "rsrc")
+		spec.Lead.Env["WS_SKILLS_ROOT"] = filepath.Join(root, "skills")
 		spec.Lead.Env["WS_PI_WORKFLOW_ROOT"] = root
 		entries, bundleErr = piBundledEntriesFrom(root)
 	}
@@ -72,7 +80,7 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 			return "", nil, err
 		}
 		entries = []string{"builtin:mcp"}
-		warnings = append(warnings, fmt.Sprintf("[ws Pi] EXTENSION NOT LOADED: Bundled Pi extension unavailable (%v); using the ws MCP bridge instead. Native lead tools (ws-execute, ws__*) are unavailable. Mail remains reachable through MCP. Repair/reinstall the extension and restart this session.", bundleErr))
+		warnings = append(warnings, fmt.Sprintf("[ws Pi] EXTENSION NOT LOADED: %s (%v); using the ws MCP bridge instead. Native lead tools (ws-execute, ws__*) are unavailable. Mail remains reachable through MCP. Repair/reinstall the extension and restart this session.", piExtensionFallbackMarker, bundleErr))
 	}
 	// This tiny dependency-free extension also watches a nominally healthy
 	// load: Pi catches extension factory/session_start errors and continues.
@@ -147,8 +155,8 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (
 // Source checkouts use the sibling when their valid payload is stale against
 // source inputs (the helper logs why). Invalid local payloads remain errors;
 // only source drift, never failed archive validation, permits that substitution.
-func piBundledEntries() ([]string, error) {
-	root, _, err := piBundledPluginRoot()
+func piBundledEntries(daemonVersion string) ([]string, error) {
+	root, _, err := piBundledPluginRoot(daemonVersion)
 	if err != nil {
 		return nil, err
 	}

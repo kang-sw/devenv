@@ -27,7 +27,7 @@ func claudeLeadPluginArgs(spec StartSpec) ([]string, error) {
 	if isolation != "" && isolation != "default" && isolation != "isolated" {
 		return nil, fmt.Errorf("claude lead: invalid plugin isolation %q", isolation)
 	}
-	root, warning, err := ResolveHostedPlugin()
+	root, warning, err := ResolveHostedPlugin(spec.Lead.DaemonVersion)
 	if err != nil {
 		return nil, fmt.Errorf("claude lead: %w", err)
 	}

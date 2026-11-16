@@ -21,8 +21,8 @@ func TestPiHostedPackageRegistrySettingMatrix(t *testing.T) {
 		if owner == "wsflow" {
 			noAgent = "1"
 		}
-		piLeadFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), fmt.Sprintf(`{"name":%q,"mcpServers":{%q:{"env":{"WS_MCP_NAMESPACE":%q,"WS_MCP_NO_AGENT":%q,"WS_MCP_CONFIG_MANIFESTS":"${CLAUDE_PLUGIN_ROOT}/config-manifest.json;${CLAUDE_PLUGIN_ROOT}/dashboard-config-manifest.json"}}}}`, owner, owner, owner, noAgent))
-		if err := RegisterHostedPlugin(dir, filepath.Join(root, "rsrc")); err != nil {
+		piLeadFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), fmt.Sprintf(`{"name":%q,"version":"0.50.1","mcpServers":{%q:{"env":{"WS_MCP_NAMESPACE":%q,"WS_MCP_NO_AGENT":%q,"WS_MCP_CONFIG_MANIFESTS":"${CLAUDE_PLUGIN_ROOT}/config-manifest.json;${CLAUDE_PLUGIN_ROOT}/dashboard-config-manifest.json"}}}}`, owner, owner, owner, noAgent))
+		if err := RegisterHostedPlugin(dir, filepath.Join(root, "rsrc"), hostedPluginTestVersion); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,7 +43,7 @@ func TestPiHostedPackageRegistrySettingMatrix(t *testing.T) {
 				if want == "" {
 					want = "wsflow"
 				}
-				spec := StartSpec{Root: base, Dir: t.TempDir(), Lead: &LeadSpec{PluginIsolation: "isolated"}}
+				spec := StartSpec{Root: base, Dir: t.TempDir(), Lead: &LeadSpec{DaemonVersion: hostedPluginTestVersion, PluginIsolation: "isolated"}}
 				piLeadFile(t, filepath.Join(piDir(spec.Dir), ".keep"), "")
 				warning := "stale"
 				spec.Lead.PluginWarning = func(text string) { warning = text }

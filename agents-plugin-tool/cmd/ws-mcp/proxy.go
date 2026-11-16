@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -77,7 +78,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 	// Learning a root never changes this connection's own package policy and
 	// invalid evidence must not refuse an otherwise compatible caller.
 	if h.dir != "" {
-		if err := wsagent.RegisterHostedPlugin(h.dir, hello.Env[wsrsrc.EnvRsrcRoot]); err != nil && h.logw != nil {
+		if err := wsagent.RegisterHostedPlugin(h.dir, hello.Env[wsrsrc.EnvRsrcRoot], hello.Version); err != nil && !errors.Is(err, os.ErrNotExist) && h.logw != nil {
 			fmt.Fprintf(h.logw, "dashboard: hosted plugin root not registered: %v\n", err)
 		}
 	}

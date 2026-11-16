@@ -18,7 +18,7 @@ func TestPiLeadSourceSiblingUsesSelectedPackage(t *testing.T) {
 				noAgent = "1"
 			}
 			piLeadFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), fmt.Sprintf(`{"name":%q,"mcpServers":{%q:{"env":{"WS_MCP_NAMESPACE":%q,"WS_MCP_NO_AGENT":%q,"WS_MCP_CONFIG_MANIFESTS":"${CLAUDE_PLUGIN_ROOT}/config-manifest.json;${CLAUDE_PLUGIN_ROOT}/dashboard-config-manifest.json"}}}}`, owner, owner, owner, noAgent))
-			piBundledPluginRoot = func() (string, string, error) { return root, "Hosted plugin fallback notice", nil }
+			piBundledPluginRoot = func(string) (string, string, error) { return root, "Hosted plugin fallback notice", nil }
 			spec.Lead.PluginIsolation = "isolated"
 			spec.Env = []string{"WS_MCP_NAMESPACE=starter", "WS_MCP_NO_AGENT=starter", "WS_SKILLS_ROOT=starter", "WS_PI_WORKFLOW_ROOT=starter"}
 			var warning string

@@ -11,8 +11,8 @@ import (
 
 // bundledPluginRoot resolves the configured hosted package, never the session's
 // project or an inferred marketplace path. Runtime evidence supplies all roots.
-func bundledPluginRoot() (string, error) {
-	root, _, err := ResolveHostedPlugin()
+func bundledPluginRoot(daemonVersion string) (string, error) {
+	root, _, err := ResolveHostedPlugin(daemonVersion)
 	return root, err
 }
 
@@ -43,19 +43,27 @@ func validateBundledPlugin(root string) error {
 }
 
 func bundledPluginName(root string) (string, error) {
+	manifest, err := readBundledPluginManifest(root)
+	return manifest.Name, err
+}
+
+type bundledPluginManifest struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+func readBundledPluginManifest(root string) (bundledPluginManifest, error) {
+	var manifest bundledPluginManifest
 	path := filepath.Join(root, ".claude-plugin", "plugin.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
-	}
-	var manifest struct {
-		Name string `json:"name"`
+		return manifest, fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
 	}
 	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return "", fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
+		return manifest, fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
 	}
 	if manifest.Name != "ws" && manifest.Name != "wsflow" {
-		return "", fmt.Errorf("bundled plugin manifest %s has unsupported name %q", path, manifest.Name)
+		return manifest, fmt.Errorf("bundled plugin manifest %s has unsupported name %q", path, manifest.Name)
 	}
-	return manifest.Name, nil
+	return manifest, nil
 }

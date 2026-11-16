@@ -108,6 +108,8 @@ var mailboxIdentityEnv = []string{"WS_MAILBOX", "WS_MAILBOX_AUTO"}
 
 // Options configures a Runner.
 type Options struct {
+	// DaemonVersion bounds hosted package registry roots to this daemon's minor.
+	DaemonVersion string
 	// Dir is the dashboard daemon's state directory; conversations live in
 	// its session registry (wsdashboard.SessionDir).
 	Dir      string
@@ -2406,6 +2408,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		Env:         environ(),
 		Holder:      holder,
 		Lead: &LeadSpec{
+			DaemonVersion:   c.r.opts.DaemonVersion,
 			PermissionMode:  rec.PermissionMode,
 			PluginIsolation: leadPluginIsolation(rec.PluginIsolation),
 			PluginWarning: func(warning string) {

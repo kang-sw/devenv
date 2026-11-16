@@ -17,9 +17,9 @@ func piLeadFixture(t *testing.T) (StartSpec, string) {
 	root := filepath.Join(base, "agents-plugin-wsflow")
 	piLeadFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), `{"name":"wsflow"}`)
 	restore := piBundledPluginRoot
-	piBundledPluginRoot = func() (string, string, error) { return root, "", nil }
+	piBundledPluginRoot = func(string) (string, string, error) { return root, "", nil }
 	t.Cleanup(func() { piBundledPluginRoot = restore })
-	spec := StartSpec{Root: base, Cwd: filepath.Join(base, "project"), Dir: filepath.Join(base, "session"), Lead: &LeadSpec{}}
+	spec := StartSpec{Root: base, Cwd: filepath.Join(base, "project"), Dir: filepath.Join(base, "session"), Lead: &LeadSpec{DaemonVersion: hostedPluginTestVersion}}
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +57,13 @@ func piLeadDeps(t *testing.T, dir string) {
 func TestPiLeadBundledEntries(t *testing.T) {
 	_, root := piLeadFixture(t)
 	entry := piLeadBundle(t, root)
-	entries, err := piBundledEntries()
+	entries, err := piBundledEntries(hostedPluginTestVersion)
 	if err != nil || !slices.Equal(entries, []string{entry}) {
 		t.Fatalf("manifest entry = %v, %v", entries, err)
 	}
 	for _, text := range []string{`{`, `{}`, `{"pi":{"extensions":["../escape.ts"]}}`, `{"pi":{"extensions":[""]}}`, `{"pi":{"extensions":["gone.ts"]}}`} {
 		piLeadFile(t, filepath.Join(root, "package.json"), text)
-		if got, err := piBundledEntries(); err == nil {
+		if got, err := piBundledEntries(hostedPluginTestVersion); err == nil {
 			t.Fatalf("%s: accepted %v", text, got)
 		}
 	}

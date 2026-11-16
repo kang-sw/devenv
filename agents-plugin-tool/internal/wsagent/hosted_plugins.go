@@ -18,8 +18,9 @@ const hostedPluginRootsFile = "hosted-plugin-roots.json"
 
 // RegisterHostedPlugin remembers only manifest-validated runtime evidence from a
 // hello. The manifest, not the caller's namespace or directory name, is the key.
+// Equal/newer hellos win; an older caller cannot downgrade a usable stored root.
 // This daemon-owned file is independent of session records and config overrides.
-func RegisterHostedPlugin(dir, rsrc string) error {
+func RegisterHostedPlugin(dir, rsrc, helloVersion string) error {
 	if rsrc == "" {
 		return nil
 	}
@@ -52,6 +53,12 @@ func RegisterHostedPlugin(dir, rsrc string) error {
 	}
 	if roots[name] == root {
 		return nil
+	}
+	if storedRoot := roots[name]; filepath.IsAbs(storedRoot) {
+		if stored, err := readBundledPluginManifest(storedRoot); err == nil && stored.Name == name &&
+			wsdashboard.CompareVersions(helloVersion, stored.Version) < 0 {
+			return nil
+		}
 	}
 	roots[name] = root
 	raw, err := json.MarshalIndent(roots, "", "  ")
@@ -112,38 +119,53 @@ func HostedPluginEnvironment(plugin string) (map[string]string, error) {
 // Registry entries are revalidated: removed or replaced installs fall back to
 // the starter's own bundle with a visible warning, never a missing-package
 // launch refusal. No connection's config home participates in this decision.
-func ResolveHostedPlugin() (root, warning string, err error) {
+func ResolveHostedPlugin(daemonVersion string) (root, warning string, err error) {
 	resolver := wsconfig.NewResolver(wsconfig.Options{}, map[string]string{wsconfig.HostedPluginPackageKey: "wsflow"}, nil, nil)
 	selected, configErr := resolver.Get("", wsconfig.HostedPluginPackageKey)
 	name := selected.Value
 	if name != "ws" && name != "wsflow" {
+		if configErr == nil {
+			warning = fmt.Sprintf("invalid %s %q; using wsflow.", wsconfig.HostedPluginPackageKey, name)
+		}
 		name = "wsflow"
 	}
+	// The starter's own selected package is authoritative. Connecting older
+	// sessions must not switch it to another installed patch of that package.
+	root, ownErr := daemonPluginRoot()
+	var fallback string
+	if ownErr == nil {
+		fallback, _ = bundledPluginName(root)
+	}
+	if ownErr == nil && fallback == name && configErr == nil {
+		return root, warning, nil
+	}
+	reason := "selected package root is unavailable"
 	dir, registryErr := wsdashboard.Dir("")
 	if registryErr == nil && configErr == nil {
 		var roots map[string]string
 		roots, registryErr = readHostedPluginRoots(dir)
 		if registryErr == nil {
 			if candidate := roots[name]; filepath.IsAbs(candidate) {
-				if actual, e := bundledPluginName(candidate); e == nil && actual == name {
-					return candidate, "", nil
+				if manifest, e := readBundledPluginManifest(candidate); e == nil && manifest.Name == name {
+					if wsdashboard.SameMinor(manifest.Version, daemonVersion) {
+						return candidate, warning, nil
+					}
+					reason = fmt.Sprintf("selected package version %q does not match daemon version %q's minor", manifest.Version, daemonVersion)
 				}
 			}
 		}
 	}
-	root, err = daemonPluginRoot()
-	if err != nil {
-		return "", "", err
+	if ownErr != nil {
+		return "", "", ownErr
 	}
-	fallback, _ := bundledPluginName(root)
-	if fallback == name && configErr == nil {
-		return root, "", nil
-	}
-	reason := "selected package root is unavailable"
 	if configErr != nil {
 		reason = fmt.Sprintf("cannot read global package setting: %v", configErr)
 	} else if registryErr != nil {
 		reason = fmt.Sprintf("cannot read package registry: %v", registryErr)
 	}
-	return root, fmt.Sprintf("Hosted plugin %s: %s; using daemon package %s at %s instead.", name, reason, fallback, root), nil
+	fallbackWarning := fmt.Sprintf("Hosted plugin %s: %s; using daemon package %s at %s instead.", name, reason, fallback, root)
+	if warning != "" {
+		fallbackWarning = warning + " " + fallbackWarning
+	}
+	return root, fallbackWarning, nil
 }

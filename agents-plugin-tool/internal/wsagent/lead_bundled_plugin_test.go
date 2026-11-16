@@ -11,7 +11,7 @@ import (
 func leadBundledFixture(t *testing.T, name string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeLeadPluginFixture(t, filepath.Join(root, ".claude-plugin", "plugin.json"), `{"name":"`+name+`"}`)
+	writeLeadPluginFixture(t, filepath.Join(root, ".claude-plugin", "plugin.json"), `{"name":"`+name+`","version":"`+hostedPluginTestVersion+`"}`)
 	if err := os.MkdirAll(filepath.Join(root, "rsrc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestBundledPluginRootUsesDaemonPackage(t *testing.T) {
 	for _, name := range []string{"ws", "wsflow"} {
 		t.Run(name, func(t *testing.T) {
 			want := leadBundledFixture(t, name)
-			got, err := bundledPluginRoot()
+			got, err := bundledPluginRoot(hostedPluginTestVersion)
 			if err != nil || got != want {
 				t.Fatalf("bundledPluginRoot = %q, %v; want %q", got, err, want)
 			}
@@ -51,7 +51,7 @@ func TestBundledPluginRootUsesDaemonPackage(t *testing.T) {
 				return
 			}
 			t.Setenv(wsrsrc.EnvRsrcRoot, rel)
-			got, err = bundledPluginRoot()
+			got, err = bundledPluginRoot(hostedPluginTestVersion)
 			if err != nil || got != want {
 				t.Fatalf("relative bundledPluginRoot = %q, %v; want %q", got, err, want)
 			}
@@ -67,7 +67,7 @@ func TestBundledPluginRootInvalidExplicitRootDoesNotFallBack(t *testing.T) {
 				writeLeadPluginFixture(t, filepath.Join(root, ".claude-plugin", "plugin.json"), manifest)
 			}
 			t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(root, "rsrc"))
-			if got, err := bundledPluginRoot(); err == nil || got != "" {
+			if got, err := bundledPluginRoot(hostedPluginTestVersion); err == nil || got != "" {
 				t.Fatalf("bad explicit root must refuse, not use checkout: %q, %v", got, err)
 			}
 		})
@@ -79,7 +79,7 @@ func TestBundledPluginRootInvalidExplicitRootDoesNotFallBack(t *testing.T) {
 // source-tree fallback.
 func TestBundledPluginRootWithoutResourceRootHasNoSourceFallback(t *testing.T) {
 	t.Setenv(wsrsrc.EnvRsrcRoot, "")
-	root, err := bundledPluginRoot()
+	root, err := bundledPluginRoot(hostedPluginTestVersion)
 	if err == nil || root != "" {
 		t.Fatalf("bundledPluginRoot without resource root = %q, %v; want refusal", root, err)
 	}

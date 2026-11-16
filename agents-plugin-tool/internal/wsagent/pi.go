@@ -325,7 +325,7 @@ func PiMCPOnly(rec Record, def *Profile) bool {
 		return false
 	}
 	if rec.Lead {
-		return strings.Contains(rec.PluginWarning, "Bundled Pi extension unavailable")
+		return strings.Contains(rec.PluginWarning, piExtensionFallbackMarker)
 	}
 	if def == nil {
 		return true

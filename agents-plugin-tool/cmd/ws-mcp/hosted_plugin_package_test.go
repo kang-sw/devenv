@@ -33,7 +33,7 @@ func hostedPackageFixture(t *testing.T, name string) string {
 	if name == "wsflow" {
 		env["WS_MCP_NAMESPACE"], env["WS_MCP_NO_AGENT"], env["WS_MCP_SETUP_TOOL"] = name, "1", "setup"
 	}
-	raw, _ := json.Marshal(map[string]any{"name": name, "mcpServers": map[string]any{name: map[string]any{"env": env}}})
+	raw, _ := json.Marshal(map[string]any{"name": name, "version": "0.50.1", "mcpServers": map[string]any{name: map[string]any{"env": env}}})
 	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "plugin.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
 	for _, name := range []string{"ws", "wsflow"} {
 		roots[name] = hostedPackageFixture(t, name)
 		// Existing hellos feed the registry without a package-name field.
-		hello := wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeCLI, Cwd: roots[name], Env: map[string]string{wsrsrc.EnvRsrcRoot: "rsrc", "WS_MCP_NAMESPACE": name}}
+		hello := wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeCLI, Version: "0.50.1", Cwd: roots[name], Env: map[string]string{wsrsrc.EnvRsrcRoot: "rsrc", "WS_MCP_NAMESPACE": name}}
 		session, err := host.Accept(hello)
 		if err != nil {
 			t.Fatal(err)
@@ -92,7 +92,7 @@ func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
 			if want == "" {
 				want = "wsflow"
 			}
-			cmd, err := agentMCPCommand(workerRoot)
+			cmd, err := agentMCPCommand(workerRoot, "0.50.1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,10 +112,10 @@ func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
 	}
 	// An invalid hello remains usable but cannot poison a remembered package.
 	bad := hostedPackageFixture(t, "unrelated")
-	if _, err := host.Accept(wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeCLI, Cwd: bad, Env: map[string]string{wsrsrc.EnvRsrcRoot: filepath.Join(bad, "rsrc"), "WS_MCP_NAMESPACE": "wsflow"}}); err != nil {
+	if _, err := host.Accept(wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeCLI, Version: "0.50.1", Cwd: bad, Env: map[string]string{wsrsrc.EnvRsrcRoot: filepath.Join(bad, "rsrc"), "WS_MCP_NAMESPACE": "wsflow"}}); err != nil {
 		t.Fatal(err)
 	}
-	root, warning, err := wsagent.ResolveHostedPlugin()
+	root, warning, err := wsagent.ResolveHostedPlugin("0.50.1")
 	if err != nil || root != roots["wsflow"] || warning != "" {
 		t.Fatalf("invalid hello poisoned registry: %q %q %v", root, warning, err)
 	}
@@ -145,7 +145,7 @@ func TestHostedPackageSelectionLeavesNonHostedHelloPolicy(t *testing.T) {
 			}
 			env["WS_CONFIG_HOME"], env["WS_CACHE_HOME"] = os.Getenv("WS_CONFIG_HOME"), os.Getenv("WS_CACHE_HOME")
 			host := &proxyHost{dir: t.TempDir(), logw: io.Discard}
-			session, err := host.Accept(wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeMCP, Cwd: t.TempDir(), Env: env, OwnerPID: os.Getpid()})
+			session, err := host.Accept(wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeMCP, Version: "0.50.1", Cwd: t.TempDir(), Env: env, OwnerPID: os.Getpid()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -195,7 +195,7 @@ func TestAgentMCPSelectedPackageMissingFallsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(wsholder.PythonEnv, python)
-	cmd, err := agentMCPCommand(t.TempDir())
+	cmd, err := agentMCPCommand(t.TempDir(), "0.50.1")
 	if err != nil || cmd.Args[0] != filepath.Join(ws, "bin", "ws-mcp-launcher.py") || !strings.Contains(cmd.PluginWarning, "wsflow") || !strings.Contains(cmd.PluginWarning, "daemon package ws at ") {
 		t.Fatalf("fallback = %+v, %v", cmd, err)
 	}

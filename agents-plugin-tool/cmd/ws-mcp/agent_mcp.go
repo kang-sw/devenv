@@ -15,8 +15,8 @@ import (
 
 // agentMCPCommand uses the configured hosted package, not the daemon's staged
 // executable or the worker's project directory. The starter supplies Python.
-func agentMCPCommand(root string) (wsagent.MCPCommand, error) {
-	plugin, warning, err := wsagent.ResolveHostedPlugin()
+func agentMCPCommand(root, daemonVersion string) (wsagent.MCPCommand, error) {
+	plugin, warning, err := wsagent.ResolveHostedPlugin(daemonVersion)
 	if err != nil {
 		return wsagent.MCPCommand{}, fmt.Errorf("cannot resolve ws-mcp launcher: %w", err)
 	}
