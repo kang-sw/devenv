@@ -36,7 +36,6 @@ func TestDaemonExplicitHomeDoesNotQueryUsage(t *testing.T) {
 	}))
 	defer upstream.Close()
 	d.planUsage.usageURL = upstream.URL
-	d.planUsage.codexBinary = filepath.Join(t.TempDir(), "nonexistent-codex")
 	response := httptest.NewRecorder()
 	d.handlePlanUsage(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/rail/usage", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"entries":[]`) || requests.Load() != 0 || !d.planUsage.lastQuery.IsZero() {
