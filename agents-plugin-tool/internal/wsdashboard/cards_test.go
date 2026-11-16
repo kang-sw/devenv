@@ -727,6 +727,79 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+// TestColumnGrabsPush pins the two width handles together on a page with a
+// split while the pinned column shows (cards.js freeze, edgeHandle,
+// splitHandle), the whole script executed under node over the minimal DOM
+// when node is installed: each handle sizes only the panel on its left and
+// the pinned column takes the difference. The column's handle sets the
+// board's own width (--boardw with data-boardw, saved as bb) and first
+// holds the conversation at the width it shows; the split handle sets the
+// conversation's and first holds the board's; either stops where the
+// column would drop below PINW_MIN, the board at SPLITB_MIN; a double
+// click resets only its own panel, holding the other; without the column
+// the split handle leaves the board's width alone; a bw saved before the
+// split (the whole cell) is dropped.
+func TestColumnGrabsPush(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := json.Marshal(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "column grabs push", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+var store = {}, colW = 500, A;
+function served() { A = topic("a", 300); return [A, reply()]; }
+function start(pin) {
+  boot(store, served, { wide: true, split: true });
+  page.col.getBoundingClientRect = function () { return { top: 0, bottom: 0, left: 0, right: colW, width: colW, height: 0 }; };
+  if (pin) clickPin(A);
+}
+function prop(k) { return page.doc.documentElement.style.props[k] || null; }
+function widths() { return [prop("--convow"), prop("--boardw"), page.doc.documentElement.hasAttribute("data-boardw")]; }
+function saved() { var r = JSON.parse(store.cards || "{}"); return [r.cw, r.bb, r.bw]; }
+function ev(x, button) { return { button: button === undefined ? 0 : button, clientX: x, pointerId: 1, preventDefault: function () {} }; }
+function drag(e, by) { e.fire("pointerdown", ev(1000)); e.fire("pointermove", ev(1000 + by)); e.fire("pointerup", ev(1000)); }
+start(true);
+check("the column shows", page.layouts[page.layouts.length - 1], true);
+var be = page.col.querySelector(".bp-edge"), ce = page.split.querySelector(".dcv-edge");
+page.gridCols = "600px 840px";
+drag(be, 100);
+check("the column's handle sizes the board and holds the conversation", [widths(), saved()], [["600px", "940px", true], [600, 940, undefined]]);
+page.gridCols = "600px 940px"; colW = 400;
+drag(ce, 50);
+check("the split handle sizes the conversation and keeps the board", [widths(), saved()], [["650px", "940px", true], [650, 940, undefined]]);
+page.gridCols = "650px 940px"; colW = 350;
+drag(ce, 5000);
+check("the split handle stops where the column keeps PINW_MIN", widths(), ["720px", "940px", true]);
+page.gridCols = "720px 940px"; colW = 280;
+drag(be, 5000);
+check("the column's handle stops there too", widths(), ["720px", "940px", true]);
+drag(be, -5000);
+check("the board stops at SPLITB_MIN", widths(), ["720px", "360px", true]);
+ce.fire("dblclick", {});
+check("a double click on the split handle resets the conversation alone", [widths(), saved()], [[null, "360px", true], [0, 360, undefined]]);
+store = {};
+start(true);
+page.gridCols = "500px 700px";
+be = page.col.querySelector(".bp-edge"); ce = page.split.querySelector(".dcv-edge");
+be.fire("dblclick", {});
+check("a double click on the column's handle resets the board and holds the conversation", widths(), ["500px", null, false]);
+ce.fire("dblclick", {});
+check("a double click on the split handle holds the board", widths(), [null, "700px", true]);
+store = {};
+start(false);
+page.gridCols = "500px 700px";
+drag(page.split.querySelector(".dcv-edge"), 40);
+check("without the column the split handle leaves the board's width alone", widths(), ["540px", null, false]);
+store = { cards: JSON.stringify({ cards: [], topics: [], bw: 1200, cw: 0 }) };
+start(false);
+check("a bw from before the split is dropped", [widths(), saved()], [[null, null, false], [undefined, undefined, undefined]]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // TestBoardPinnedClosedPagesCount pins the closed pages' show-more index
 // under pins (dashboard.js morphBoard with cards.js, executed under node
 // over the minimal DOM when node is installed): a topic pinned out of a

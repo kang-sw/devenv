@@ -682,19 +682,25 @@
   }
 
   // --- storage ----------------------------------------------------------------
-  // The record is {cards, topics, bw, cw}: the cards' view state, the
-  // topics pinned or moved by hand, the board's width beside the pinned
-  // column, and the conversation's beside the board. A record from before topics joined is the cards' list alone; a
+  // The record is {cards, topics, bw or bb, cw}: the cards' view state,
+  // the topics pinned or moved by hand, the width left of the pinned
+  // column's handle (bw: the board's .dgrid cell; bb on a page with a
+  // split, the board's own column), and the conversation's beside the
+  // board. A record from before topics joined is the cards' list alone; a
   // record's w (the column's own width, before the column filled the
-  // window) is dropped.
+  // window) is dropped, and so is the other one of bw and bb: a bw from
+  // before the split counted the conversation too.
   function persist() {
     if (!opt) return;
     var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at || r.folded; }).map(function (r) {
       return { n: r.name, p: r.pinned, a: r.at, b: r.bar, f: !!r.folded, rank: r.rank };
     });
-    opt.save(opt.key, cards.length || ts.length || boardw || convow ? JSON.stringify({ cards: cards.map(function (c) {
+    var rec = { cards: cards.map(function (c) {
       return { id: c.id, kind: c.kind, pinned: c.pinned, at: c.at, rank: c.rank, fold: c.folded, h: c.h, data: c.data };
-    }), topics: ts, bw: boardw, cw: convow }) : null);
+    }), topics: ts };
+    rec[opt.split ? "bb" : "bw"] = boardw;
+    rec.cw = convow;
+    opt.save(opt.key, cards.length || ts.length || boardw || convow ? JSON.stringify(rec) : null);
   }
   function stored() {
     var v = null;
@@ -704,7 +710,7 @@
     return {
       cards: (Array.isArray(v.cards) ? v.cards : []).filter(function (r) { return r && typeof r.kind === "string" && kinds[r.kind]; }),
       topics: (Array.isArray(v.topics) ? v.topics : []).filter(function (r) { return r && typeof r.n === "string" && (+r.p || +r.a || r.f); }),
-      bw: +v.bw || 0,
+      bw: +v[opt.split ? "bb" : "bw"] || 0,
       cw: +v.cw || 0
     };
   }
@@ -1318,15 +1324,22 @@
   // --- the pinned column ----------------------------------------------------------
   // The page hands an empty element (opt.column's host); the framework
   // fills it: a width handle on its left edge,
-  // where it meets the board, and the pin list while the column shows. The
-  // column fills the window right of the board, so the handle sizes the
-  // board (--boardw, the width of the board's .dgrid cell, kept with the
-  // pins; double click goes back to the stylesheet's): at least BOARDW_MIN,
-  // and at most what leaves the column PINW_MIN.
+  // where it meets the board, and the pin list while the column shows.
+  // Each width handle sizes only the panel on its left and pushes the
+  // panels on its right: the rightmost one (the pinned column, which fills
+  // the window, else the board) takes the difference, and a drag stops
+  // where that one would drop below its floor. This handle sizes the board
+  // (--boardw with data-boardw on the root, kept with the pins; double
+  // click goes back to the stylesheet's): on a page with a split
+  // (opt.split) the board's own column, at least SPLITB_MIN, the
+  // stylesheet making the board's cell the conversation, the gap and the
+  // board; elsewhere the board's .dgrid cell, at least BOARDW_MIN. At most
+  // it leaves the column PINW_MIN.
   function setWidth(w) {
-    boardw = w ? Math.max(BOARDW_MIN, Math.round(w)) : 0;
-    if (boardw) doc.documentElement.style.setProperty("--boardw", boardw + "px");
-    else doc.documentElement.style.removeProperty("--boardw");
+    var r = doc.documentElement;
+    boardw = w ? Math.max(opt.split ? SPLITB_MIN : BOARDW_MIN, Math.round(w)) : 0;
+    if (boardw) { r.style.setProperty("--boardw", boardw + "px"); r.setAttribute("data-boardw", ""); }
+    else { r.style.removeProperty("--boardw"); r.removeAttribute("data-boardw"); }
   }
   function boardCell() { return board.closest && board.closest(".dgrid"); }
   function buildCol() {
@@ -1334,33 +1347,54 @@
   }
   function edgeHandle() {
     grab("bp-edge", col, function () {
-      var cell = boardCell(), w = cell ? cell.getBoundingClientRect().width : 0;
+      freeze();
+      var t = tracks(), cell = boardCell(), w = t ? t[1] : cell ? cell.getBoundingClientRect().width : 0;
       return w ? { w: w, max: w + col.getBoundingClientRect().width - PINW_MIN } : null;
     }, function (from, dx) {
-      setWidth(Math.min(from.w + dx, Math.max(from.max, BOARDW_MIN)));
-    }, function () { setWidth(0); }).setAttribute("data-edge", "left");
+      setWidth(Math.min(from.w + dx, Math.max(from.max, opt.split ? SPLITB_MIN : BOARDW_MIN)));
+    }, function () { freeze(); setWidth(0); }).setAttribute("data-edge", "left");
   }
   // The split handle stands in the gap between the conversation and the
   // board of the page's grid (opt.split; the stylesheet shows it where the
   // two stand side by side) and sizes the conversation's column (--convow,
   // with data-convow, on the root, kept with the pins; double click goes
   // back to the stylesheet's split): at least CONVW_MIN, and at most what
-  // leaves the board SPLITB_MIN. The grid's own resolved tracks give the
-  // widths, so the handle needs no knowledge of the grid's children; the
-  // stylesheet clamps a width saved on a wider window.
+  // leaves the rightmost panel its floor: the pinned column PINW_MIN while
+  // it shows (the board keeps its width), else the board SPLITB_MIN. The
+  // grid's own resolved tracks give the widths, so the handle needs no
+  // knowledge of the grid's children; the stylesheet clamps a width saved
+  // on a wider window.
   function setConvo(w) {
     var r = doc.documentElement;
     convow = w ? Math.max(CONVW_MIN, Math.round(w)) : 0;
     if (convow) { r.style.setProperty("--convow", convow + "px"); r.setAttribute("data-convow", ""); }
     else { r.style.removeProperty("--convow"); r.removeAttribute("data-convow"); }
   }
+  // tracks is the split grid's two resolved columns in px (conversation,
+  // board), or null where it shows one.
+  function tracks() {
+    if (!opt.split) return null;
+    var t = (getComputedStyle(opt.split).gridTemplateColumns.match(/[\d.]+(?=px)/g) || []).map(Number);
+    return t.length === 2 && t[0] > 0 ? t : null;
+  }
+  // freeze holds the conversation and the board at the widths they show
+  // while the pinned column does, before a handle sizes one of them: a
+  // width left to the stylesheet is a share of the cell, which would move
+  // with the other handle.
+  function freeze() {
+    var t = colOn && tracks();
+    if (!t) return;
+    if (!convow) setConvo(t[0]);
+    if (!boardw) setWidth(t[1]);
+  }
   function splitHandle(grid) {
     grab("dcv-edge", grid, function () {
-      var t = (getComputedStyle(grid).gridTemplateColumns.match(/[\d.]+(?=px)/g) || []).map(Number);
-      return t.length === 2 && t[0] > 0 ? { w: t[0], max: t[0] + t[1] - SPLITB_MIN } : null;
+      freeze();
+      var t = tracks();
+      return t ? { w: t[0], max: t[0] + (colOn ? col.getBoundingClientRect().width - PINW_MIN : t[1] - SPLITB_MIN) } : null;
     }, function (from, dx) {
       setConvo(Math.min(from.w + dx, Math.max(from.max, CONVW_MIN)));
-    }, function () { setConvo(0); });
+    }, function () { freeze(); setConvo(0); });
   }
   // grab makes a width handle (class cls) in host: a press of the main
   // button starts a drag where start() gives its state (null: nothing to
