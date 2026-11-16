@@ -65,8 +65,6 @@ import {
   deliverQueuedAnswers,
   resolveLeadAskEscapeAction,
   runLeadAskEscapeAction,
-  type LeadAskEscapeAction,
-  type WithdrawOutcome,
   captureForkResume,
   rehydrateForkRecord,
   getLeafEntryId,
@@ -106,23 +104,24 @@ import {
 import { ConversationViewComponent, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
 import {
   agentWidgetRefreshRef,
-  applyRpcEvent,
   computeRunningStatusLine,
   flushHeldPushes,
   heldPushQueue,
   leadCompactingRef,
   leadWakeStartPendingRef,
-  REPORT_TO_LEAD_TOOL_NAME,
   sendToAgent,
   stopAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
-  leadIdleRef, registerPushFlush, clearWakeStart,
+  leadIdleRef,
+  registerPushFlush,
+  clearWakeStart,
 } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { allocateAgentHome, createAgentStorageContext } from "../src/agent-storage.ts";
 import { rmSync } from "node:fs";
+import { capturePush, thread } from "./fixtures/ask-threads.ts";
 
 // 260905 (live-agent widget ticket): every widget-refresh call site in
 // ask.ts now fires through spawner.ts's module-level `agentWidgetRefreshRef`
@@ -142,28 +141,6 @@ afterEach(() => {
   heldPushQueue.length = 0;
   leadWakeStartPendingRef.current = false;
 });
-
-/** Keep item-level lifecycle assertions while the transport delivers a batch envelope. */
-function capturePush(sent: Array<{ message: unknown; options: unknown }>, message: unknown, options: unknown): void {
-  const batch = message as { customType?: string; details?: { items?: unknown[] } };
-  if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
-    for (const item of batch.details.items) sent.push({ message: item, options });
-  } else {
-    sent.push({ message, options });
-  }
-}
-
-function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
-  return {
-    threadId: "q1",
-    title: "a question",
-    status: "pending",
-    origin: "fork-raised",
-    createdAt: "2026-09-05T10:00:00.000Z",
-    touchedAt: "2026-09-05T10:00:00.000Z",
-    ...overrides,
-  };
-}
 
 describe("tool names", () => {
   test("260911: renamed from ws-ask/ws-resolve; fork role handlers refuse execution instead of hiding schemas", () => {
