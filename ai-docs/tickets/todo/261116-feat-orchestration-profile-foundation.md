@@ -1,9 +1,28 @@
 ---
 title: "Orchestration profile foundation: profile-aware playbooks, sub-lead protocol, sub-lead board status"
 parent: 261116-epic-lead-orchestration-profile
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # Orchestration profile foundation: profile-aware playbooks, sub-lead protocol, sub-lead board status
+
+## Open Decision Queue
+
+Last ID: (67)
+
+(51) [open] [policy] Which keys may write status to the top-level lead's board (reopened by design review: as confirmed, it admits every parented lead key).
+- Context: `role: worker` renders mint parented lead keys (`childRoleForPlaybookRole`), so "any parented lead key" admits every `lead-run` worker and `ticket-handler`, not only sub-leads; and ready ticket `261115-feat-ws-whiteboard-agent-card` pins "every unrelated parented caller's existing denial. No global child permission" with a verification for unchanged parented denial. No key-level marker separates a sub-lead from a worker today.
+- Alternative a: only sub-lead keys. A new playbook role `role: sublead` mints a parented lead key whose session record carries a sub-lead marker (the minting playbook name); only marked keys are admitted, resolving to the top-level lead's board by walking `Parent`, `wb:log` and `wb:panel` inside an existing open `wb:topic` only, `whiteboard.query` read-only. Workers and card children keep the ordinary denial. Compatibility: an old daemon ignores the marker field (session records are read with `json.Unmarshal`), so it denies the key as today - status lines lost, no data change (T1).
+- Alternative b: any parented lead key, as confirmed; supersede the card ticket's ordinary-denial constraint by name and coordinate its tests.
+> a: matches the epic's "sub-lead key" framing (03), (15) and keeps the ready card ticket's contract intact.
+
+(61) [open] [policy] A sub-lead status write when the top-level lead's whiteboard knob resolves off (builtin default off).
+- Context: a successful `whiteboard.update` today calls `enableWhiteboardKnobForSession` and returns lead-only directives (the `full:` URL, the applied-info line); reusing it for a sub-lead write would switch the user's board on as a side effect.
+- Alternative a: accept the write into the board store without touching any knob; the sub-lead's success output is a single acknowledgement line with no lead directives; the status shows whenever the user opens the board.
+- Alternative b: refuse the write with a short message; the sub-lead keeps status in its report only.
+- Alternative c: auto-enable the board, as the handler does for a lead.
+> a: a sub-lead never branches on the lead's knob, and the knob stays the user's switch.
 
 ## Background
 
@@ -45,12 +64,23 @@ since both touch how playbook text varies by knob.
   delegate -> explore) on Claude, Codex, and Pi; only verified harnesses seed
   the whitelist; host versions and probe date are a comment at the
   whitelist. Rejected: a new manual. (50)
-- **Sub-lead board path.** A parented lead key's `whiteboard.update`
-  resolves to its top-level lead's board by walking `Parent` and admits only
-  `wb:log` and `wb:panel` inside a `wb:topic` naming an existing open topic;
-  every other command is refused. `whiteboard.query` is admitted read-only on
-  that board. Rejected: a separate sub-lead board; sub-lead topic creation.
-  (51)
+- **Probe criterion.** A harness is verified when the full lead -> sub-lead
+  -> worker -> delegate -> explore chain completes and the deepest result
+  returns to the lead. The Phase 1 Result lists every host probed and every
+  host left unprobed (an unprobed host stays off the whitelist). Pi is off
+  the whitelist by ws's own cap, not a host limit: `pi.spawn` allows at most
+  two levels below the lead (`pi_forward.go`); the whitelist comment cites
+  that cap. (63) auto-confirmed (review)
+- **Attribution and panels.** The implementer picks the prefix form and a
+  test pins it; a sub-lead's `wb:panel` carries no `id`, so it always mints a
+  new panel and never rewrites one it did not author. (64) auto-confirmed
+  (review)
+- **Keyless and FRESH loads.** A keyless `Load` (for example
+  `wsdoc/project_tree.go`) uses base files; the `workflow_manual` FRESH
+  sentinel resolves the profile through the canonical-root resolver it
+  already builds for the whiteboard knob. (66) auto-confirmed (review)
+- **Flat playbooks.** The flat `<root>/<name>.md` fallback has no profile
+  variant; validation treats it the same way. (67) auto-confirmed (review)
 - **Sub-lead board syntax.** A separate short `whiteboard-status` print
   playbook teaches the status-only subset (`wb:log`, `wb:panel` inside an
   existing `wb:topic`), read on demand by a sub-lead that posts status;
@@ -91,6 +121,38 @@ since both touch how playbook text varies by knob.
   as a top-level config member or an object value (an old binary drops an
   unknown top-level member on rewrite and fails on an object inside
   `overrides`).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin/hooks/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+
+## Prior Decisions
+
+- 261116-epic-lead-orchestration-profile (2026-11-16, Cross-Child Decisions): "File selection. `playbook.read` and `workflow_manual` select `<name>/<name>.<profile>.md` when present, else `<name>/<name>.md`. Rejected: Go text substitution (`applyKnobVariants`)" — bearing: supports
+- 261116-epic-lead-orchestration-profile (2026-11-16, Cross-Child Decisions): "Sub-lead whiteboard path. The foundation child gives a sub-lead key a write path for status log lines and panels on its top-level lead's board, and none for asks" — bearing: supports
+- 261116-epic-lead-orchestration-profile (2026-11-16, Cross-Child Decisions): "Harness whitelist. ... Setting `orchestrate` for a harness off the whitelist is allowed, with a warning nudge at set time" — bearing: supports
+- 1f5f4ae3 (2026-11-16, commit): "User chose (59)=a: an on-demand playbook over a section inside sublead-protocol (every sub-lead would carry it) or the full playbook." — bearing: supports
+- 42bbcd46 (2026-06-12, commit): "wsrsrc.Load resolves <root>/<name>/<name>.md (subdir) first, then falls back to a flat <root>/<name>.md; a flat file can be both an include target and a loadable var-free playbook." — bearing: constrains
+- bd9f1cae (2026-06-09, commit): "Includes are flat (no nesting) by design; cycle detection is not needed." — bearing: constrains
+- f98d8e83 (2026-11-04, commit): "Knob-on text is applied code-side in printPlaybook (the prefer_subagent precedent) with replace-or-append fallback, so rsrc mirrors stay byte-identical and a prompt override that drops the anchor text loses nothing." — bearing: constrains
+- 261113-feat-ws-pi-mini-lead-profile (2026-11-13, Decisions): "`pi-mini-lead` = `pi-worker` tools plus `tickets.query/acquire/release/ close/move/verify/checklist`, ... No note, whiteboard, or tracker writes." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsrsrc/loader.go, internal/mcp/server.go, config_registry.go, whiteboard_tools.go, ticket_review_text.go, internal/wsconfig/scope.go; Phase 2 rsrc playbooks and their wsflow and pi mirrors |
+| scope.surface | cross-module | wsrsrc.Load callers in internal/mcp/playbook_tools.go and internal/wsdoc/project_tree.go; config.tune key; whiteboard gate at server.go#L774 |
+| scope.new_public_symbol | yes | workflow.profile config key (wsconfig item constant) and the sublead-protocol and whiteboard-status playbooks |
+| scope.new_type_contract | yes | wsrsrc.Load gains a profile selection input; the sublead-protocol report block is a new cross-skill contract |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsrsrc/whiteboard_selection_test.go, internal/mcp/ticket_review_text_test.go, whiteboard_tools_test.go; the auto-ack pin test named in the ticket is absent (search for "exactly once" in ticket_review*_test.go returned nothing) |
+| complexity.reuse_points | confirmed | harnessBuckets, harnessBucketKey, resolveIncludePath overlay probe, replaceOrAppend, the shadowed: line shape in config_structured.go and server.go |
+| complexity.side_effect_risk | high | wsrsrc.Load feeds playbook.read, playbook.render, workflow_manual and project_tree, and the whiteboard gate relaxes for parented lead keys |
+| risk.correctness | moderate | lookup order, top-level-only selection and the Parent walk are new logic on shared load paths |
+| risk.fit | moderate | selection site in wsrsrc.Load departs from the applyKnobVariants precedent, by recorded decision (46) |
+| risk.test | moderate | many new unit cases across wsrsrc and mcp; nested-spawn probe is manual per host |
+| risk.security_or_contract | high | session gate admits parented lead keys on the top-level lead's board (T1 declared in (56)); config key and rsrc file additions are cross-version surfaces |
 
 ## Phases
 
@@ -133,8 +195,13 @@ since both touch how playbook text varies by knob.
 
 Written by the lead with the user in session (54).
 
-- `sublead-protocol` include: the report block of epic decision (01) and the
-  `approved:` executor guard of (02).
+- `sublead-protocol` include: the report block of epic decision (01) -
+  `status: ask-user | done | blocked`, `ask:` items in the workflow manual's
+  classes, `on_answer:` for mid-run resumption, `next: <playbook> · needs:
+  approval|none · inputs: <...>` for joints, `result:` / `blocker:` - and the
+  executor guard of (02): an approval-gated action runs only with the user's
+  words relayed as `approved:` in the task block, else the sub-lead returns
+  `ask-user`. (62) auto-confirmed (review)
 - Workflow manual split into a lead core and a sub-lead part as includes:
   `lead-workflow-manual.md` includes both (the `direct` manual, unchanged in
   content); `lead-workflow-manual.orchestrate.md` includes the core plus the
@@ -145,6 +212,31 @@ Written by the lead with the user in session (54).
   `sublead-protocol` points a sub-lead that posts status at it. The
   `whiteboard` playbook's "workers and subagents do not use the board" line
   is updated to point sub-leads there.
-- Verification: `playbook.read` of `lead-workflow-manual` under each profile
-  for a top-level key, and under `orchestrate` for a parented key (base
-  manual); manifest and mirror regeneration tests.
+- Verification: `playbook.read` of `lead-workflow-manual` for a top-level
+  key under `direct` is byte-identical to the pre-split output (captured
+  before the split); under `orchestrate` it holds the core and the generic
+  loop and none of the sub-lead part; under `orchestrate` for a parented key
+  it is the base manual; manifest and mirror regeneration tests. (65)
+  auto-confirmed (review)
+
+## Blocked (2026-11-16)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Parented-key board admission contradicts ready ticket 261115-feat-ws-whiteboard-agent-card | critical | missing |
+| 2 | Sub-lead status write versus the lead's whiteboard knob (default off) is undefined | important | missing |
+| 3 | Profile input for keyless and FRESH Load callers is unstated | minor | autonomous |
+| 4 | Flat-playbook fallback not covered by the lookup order | minor | autonomous |
+| 5 | Nested-spawn probe execution across hosts; Pi is capped by ws itself | minor | autonomous |
+| 6 | Attribution prefix content and panel-id override unspecified | minor | autonomous |
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Phase 2 content depends on epic decisions not restated | minor |
+| 2 | Nested-spawn probe has no explicit pass criterion or record location | minor |
+| 3 | Attribution prefix format unspecified | minor |
+| 4 | Phase 2 verification has no expected outcome for the direct manual | minor |
