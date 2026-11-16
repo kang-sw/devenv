@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,6 +41,16 @@ func (g gitReadGate) delay(now time.Time, interval time.Duration) time.Duration 
 	return interval
 }
 
+func writeGitMetadata(w io.Writer, path string, info fs.FileInfo) {
+	size := info.Size()
+	// Windows directory enumeration returns an undefined EndOfFile value.
+	// WalkDir already fingerprints every child, so directory size adds no hint.
+	if info.IsDir() {
+		size = 0
+	}
+	fmt.Fprintf(w, "%q:%d:%d:%d\n", path, info.Mode(), size, info.ModTime().UnixNano())
+}
+
 // gitMetadataStamp reads only Git administration metadata, never worktree
 // contents or objects. The old status/list commands read these and much more;
 // a stable hint suppresses their process launches until the safety deadline.
@@ -62,9 +73,7 @@ func gitMetadataStamp(root string) (string, error) {
 		return "", fmt.Errorf("git root is not a directory")
 	}
 	h := sha256.New()
-	metadata := func(path string, info fs.FileInfo) {
-		fmt.Fprintf(h, "%q:%d:%d:%d\n", path, info.Mode(), info.Size(), info.ModTime().UnixNano())
-	}
+	metadata := func(path string, info fs.FileInfo) { writeGitMetadata(h, path, info) }
 	var admin string
 	for dir := root; ; dir = filepath.Dir(dir) {
 		path := filepath.Join(dir, ".git")

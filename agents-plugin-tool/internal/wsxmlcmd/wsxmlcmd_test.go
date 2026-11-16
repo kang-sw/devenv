@@ -121,6 +121,48 @@ func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
 	}
 }
 
+func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{
+		"payload": {Kind: Leaf, Wrapper: "change", Fields: []string{"old", "new"}},
+		"text":    {Kind: Leaf},
+	}}
+	for _, body := range []string{
+		"` <x:change><x:old>alpha ` x</x:old><x:new>z</x:new></x:change>",
+		"` <x:change><x:old>alpha</x:old><x:new>z ` x</x:new></x:change>",
+		"```\n<x:change><x:old>alpha\n```\nx</x:old><x:new>z</x:new></x:change>",
+	} {
+		input := "<x:payload>" + body + "</x:payload><x:text>keep</x:text>"
+		for _, ordered := range []bool{false, true} {
+			p := &Problems{}
+			var cmds []Command
+			complete := true
+			if ordered {
+				cmds, complete = ParseOrdered(p, g, input)
+			} else {
+				cmds = Parse(p, g, input)
+			}
+			if !complete || len(p.List) == 0 || len(cmds) != 2 || len(cmds[0].Children) != 1 || cmds[1].Body != "keep" || !strings.Contains(strings.Join(p.List, " "), "ends inside") {
+				t.Fatalf("ordered=%v input=%q commands=%+v complete=%v problems=%v", ordered, input, cmds, complete, p.List)
+			}
+			if ordered && (len(cmds[0].Problems) == 0 || len(cmds[1].Problems) != 0) {
+				t.Fatalf("refusal was not command-local: %+v", cmds)
+			}
+		}
+	}
+	// Whole quoted wrappers, quoted openers, and CDATA examples stay inert.
+	for _, body := range []string{
+		"`<x:change><x:old>a</x:old><x:new>b</x:new></x:change>`",
+		"`<x:change>`",
+		"`<![CDATA[<x:change><x:old>a]]>`",
+		"`<x:change><x:old><![CDATA[</x:old>]]>a</x:old></x:change>`",
+	} {
+		cmds, p := parse(g, "<x:payload>"+body+"</x:payload>")
+		if len(p) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 0 {
+			t.Fatalf("legal literal %q: %+v %v", body, cmds, p)
+		}
+	}
+}
+
 func TestLiteralCodeDoesNotPairAcrossStructuralBodies(t *testing.T) {
 	g := Grammar{Prefix: "x:", LiteralCode: true, RefuseFieldOpenings: true, Commands: map[string]Spec{
 		"text": {Kind: Leaf}, "other": {Kind: Leaf},

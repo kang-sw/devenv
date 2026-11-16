@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -78,7 +79,7 @@ func TestRailMetadataSelectiveSafetyAndVisibleResumption(t *testing.T) {
 	l.after = timers.after
 	var changed atomic.Bool
 	l.probe = func(root string) (string, error) {
-		if root == "/a" && changed.Load() {
+		if root == filepath.Clean("/a") && changed.Load() {
 			return "changed", nil
 		}
 		return "stable", nil
@@ -115,6 +116,7 @@ func TestRailMetadataSelectiveSafetyAndVisibleResumption(t *testing.T) {
 	}
 	release()
 	waitFor(t, "rail hidden", func() bool { l.mu.Lock(); defer l.mu.Unlock(); return !l.running })
+	clock.Add(int64(gitRefreshGap))
 	release = l.watchFresh()
 	_ = nextWait(t, timers, 3*time.Minute)
 	if fake.count("/a") != 4 || fake.count("/b") != 4 {

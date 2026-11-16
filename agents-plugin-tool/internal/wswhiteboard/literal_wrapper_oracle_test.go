@@ -242,7 +242,9 @@ const literalWrapperInlineCounterexample = "<wb:topic name=\"t\"><wb:panel name=
 
 func literalWrapperPositiveBodies() []string {
 	return []string{
-		"`<wb:change><wb:old>`</wb:old><wb:new></wb:new></wb:change>",
+		// Whole wrapper examples remain inert; a quote ending inside an
+		// operand is covered by the panel-to-operand refusal regression.
+		"`<wb:change><wb:old>a</wb:old><wb:new>b</wb:new></wb:change>`",
 		"`<wb:change/>`",
 		"~~~xml\n<wb:change/> ` x `\n~~~",
 		"```xml\n<wb:change/> ` x `\n```",

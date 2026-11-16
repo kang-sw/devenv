@@ -682,14 +682,15 @@
   }
 
   // --- storage ----------------------------------------------------------------
-  // The record is {cards, topics, bw or bb, cw}: the cards' view state,
+  // The record is {cards, topics, bw, bb, cw}: the cards' view state,
   // the topics pinned or moved by hand, the width left of the pinned
   // column's handle (bw: the board's .dgrid cell; bb on a page with a
   // split, the board's own column), and the conversation's beside the
   // board. A record from before topics joined is the cards' list alone; a
   // record's w (the column's own width, before the column filled the
-  // window) is dropped, and so is the other one of bw and bb: a bw from
-  // before the split counted the conversation too.
+  // window) is dropped. bb's presence marks the post-split width layout:
+  // only a legacy bw without bb is dropped on its first split-page load.
+  // Both modes share a key, so each save preserves the other mode's width.
   function persist() {
     if (!opt) return;
     var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at || r.folded; }).map(function (r) {
@@ -698,16 +699,21 @@
     var rec = { cards: cards.map(function (c) {
       return { id: c.id, kind: c.kind, pinned: c.pinned, at: c.at, rank: c.rank, fold: c.folded, h: c.h, data: c.data };
     }), topics: ts };
+    var widths = stored().widths;
+    rec.bb = +widths.bb || 0;
+    if ("bw" in widths) rec.bw = +widths.bw || 0;
     rec[opt.split ? "bb" : "bw"] = boardw;
     rec.cw = convow;
-    opt.save(opt.key, cards.length || ts.length || boardw || convow ? JSON.stringify(rec) : null);
+    opt.save(opt.key, cards.length || ts.length || rec.bb || rec.bw || convow ? JSON.stringify(rec) : null);
   }
   function stored() {
     var v = null;
     try { v = JSON.parse(opt.load(opt.key) || "null"); } catch (e) { v = null; }
     if (Array.isArray(v)) v = { cards: v };
     if (!v || typeof v !== "object") v = {};
+    if (opt.split && !("bb" in v)) delete v.bw;
     return {
+      widths: v,
       cards: (Array.isArray(v.cards) ? v.cards : []).filter(function (r) { return r && typeof r.kind === "string" && kinds[r.kind]; }),
       topics: (Array.isArray(v.topics) ? v.topics : []).filter(function (r) { return r && typeof r.n === "string" && (+r.p || +r.a || r.f); }),
       bw: +v[opt.split ? "bb" : "bw"] || 0,

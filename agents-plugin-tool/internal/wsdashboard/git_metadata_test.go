@@ -1,6 +1,8 @@
 package wsdashboard
 
 import (
+	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,6 +114,41 @@ func TestGitMetadataLinkedPointersRefsIndexAndWorktrees(t *testing.T) {
 	}
 	if stamp() == previous {
 		t.Fatal("metadata deletion missed")
+	}
+}
+
+type gitMetadataInfo struct {
+	fs.FileInfo
+	size int64
+}
+
+func (i gitMetadataInfo) Size() int64 { return i.size }
+
+func TestGitMetadataIgnoresUndefinedDirectorySize(t *testing.T) {
+	info, err := os.Stat(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := func(size int64) string {
+		var b bytes.Buffer
+		writeGitMetadata(&b, "refs", gitMetadataInfo{FileInfo: info, size: size})
+		return b.String()
+	}
+	// Windows directory enumeration exposes EndOfFile, which is undefined
+	// for directories. Inject differing values without changing the entry.
+	if stamp(0) != stamp(0x123456789) {
+		t.Fatal("undefined directory size changed the metadata hint")
+	}
+	file := filepath.Join(t.TempDir(), "HEAD")
+	if err := os.WriteFile(file, []byte("ref: refs/heads/main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err = os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stamp(1) == stamp(2) {
+		t.Fatal("regular file size no longer changes the hint")
 	}
 }
 

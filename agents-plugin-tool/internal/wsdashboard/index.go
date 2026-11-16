@@ -225,16 +225,25 @@ func (x *Index) Refresh() {
 // store keyed by reply-id (the rail layout) must not drop it as forgotten.
 func (x *Index) Loaded() bool { return x.loaded.Load() }
 
-// hierarchyReady is stronger than Loaded: an incomplete startup listing or
-// source read must not turn a stored parent into false top-level authority.
-// Retain approval intent until recovery; this checks only existing memory.
-func (x *Index) hierarchyReady(replyID string) bool {
+// hierarchyReady checks the requester's row and stored ancestors only. An
+// unreadable ancestor must not become false top-level authority, but unrelated
+// corrupt registrations must not stall approval replay. A missing ancestor
+// without a read error was authoritatively removed by the completed listing.
+func (x *Index) hierarchyReady(replyID string, ancestors ...string) bool {
 	if x == nil || !x.Loaded() {
 		return false
 	}
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	return x.sessions[replyID] != nil && len(x.readErrors) == 0
+	if x.sessions[replyID] == nil || x.readErrors[replyID] {
+		return false
+	}
+	for _, id := range ancestors {
+		if x.readErrors[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // endedApplied reports whether reg is an ended registration the index
