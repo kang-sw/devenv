@@ -108,6 +108,7 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
       assert.equal(options.arch, 'x64');
       assert.equal(options.electronVersion, pkg.devDependencies.electron);
       assert.equal(options.electronZipDir, nested);
+      assert.deepEqual(options.asar, { unpackDir: 'daemon' }, 'the complete daemon input must be outside app.asar');
       assert.equal(options.icon, path.join(options.dir, 'icons/icon.ico'));
       assert.equal(options.appBundleId, 'dev.werkschaft.desktop');
       staged = options.dir;

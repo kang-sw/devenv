@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fixture, sha } = require('./daemon-fixture.cjs');
-const { SETTING } = require('../daemon-selection');
+const { selectDaemon, SETTING } = require('../daemon-selection');
 test('bundled and explicit dev roots bind matching binary, contract, resources and skills without executing bytes', t => {
   const f = fixture(t);
   const bundled = f.select();
@@ -19,6 +19,44 @@ test('bundled and explicit dev roots bind matching binary, contract, resources a
   assert.equal(selected.env.WS_RSRC_ROOT, path.join(f.dev.root, 'rsrc'));
   assert.equal(selected.env.WS_SKILLS_ROOT, path.join(f.dev.root, 'skills'));
   assert.equal(fs.existsSync(path.join(f.userData, 'update-state.json')), false);
+});
+test('validation hashes binary bytes and normalized text through path reads, never a direct fd open', t => {
+  const f = fixture(t);
+  const bytes = Buffer.alloc(1024 * 1024 + 7, 0xff);
+  fs.writeFileSync(f.bundled.binary, bytes);
+  f.bundled.save(f.bundled.binary + '.metadata.json', { ...f.bundled.metadata, binary_sha256: sha(bytes) });
+  const readFile = fs.readFileSync, open = fs.openSync, paths = new Set();
+  let readingByPath = false;
+  t.mock.method(fs, 'readFileSync', function (file, ...args) {
+    assert.equal(typeof file, 'string', 'no fd reads (Electron would have extracted the file already)');
+    paths.add(file);
+    readingByPath = true;
+    try { return readFile.call(this, file, ...args); }
+    finally { readingByPath = false; }
+  });
+  t.mock.method(fs, 'openSync', function (...args) {
+    assert(readingByPath, 'selection must not open an fd directly on a possibly packed file');
+    return open.apply(this, args); // Plain Node readFileSync internally opens a real file.
+  });
+  assert.equal(f.select().metadata.binary_sha256, sha(bytes));
+  for (const file of [f.bundled.binary, path.join(f.bundled.root, 'rsrc/hello/hello.md'),
+    path.join(f.bundled.root, 'skills/hello/SKILL.md')]) assert(paths.has(file), file);
+});
+test('ASAR bundles select physical unpacked input, fail closed if absent, and preserve explicit dev selection', t => {
+  for (const platform of ['win32', 'darwin']) {
+    const f = fixture(t, platform);
+    const appRoot = path.join(f.base, 'app.asar'), unpacked = appRoot + '.unpacked';
+    fs.renameSync(f.appRoot, unpacked);
+    fs.writeFileSync(appRoot, 'not an archive: Node must never read daemon inputs here');
+    const select = () => selectDaemon({ appRoot, userData: f.userData, platform });
+    assert.equal(select().root, path.join(unpacked, 'daemon'));
+    assert.equal(select().binary, path.join(unpacked, 'daemon', path.basename(f.bundled.binary)));
+    fs.renameSync(path.join(unpacked, 'daemon'), path.join(unpacked, 'missing'));
+    assert.throws(select, /Cannot use bundled daemon/, 'never fall back to packed input');
+    f.choose({ schema_version: 1, root: f.dev.root });
+    assert.equal(select().root, f.dev.root);
+    assert.equal(select().source, 'development');
+  }
 });
 test('selection is shell-local and fails closed on malformed, relative or missing dev input', t => {
   const f = fixture(t, 'darwin');
