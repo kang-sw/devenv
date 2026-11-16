@@ -533,17 +533,7 @@
       "registered_at": "2026-11-16T00:49:34Z"
     },
     "261116-bug-ws-whiteboard-ask-missing-from-board": {
-      "registered_at": "2026-11-16T03:08:25Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-11-16T03:08:25Z",
-        "impl": {
-          "branch": "impl/develop/apron-duh-dust"
-        }
-      }
+      "registered_at": "2026-11-16T03:08:25Z"
     }
   }
 }
