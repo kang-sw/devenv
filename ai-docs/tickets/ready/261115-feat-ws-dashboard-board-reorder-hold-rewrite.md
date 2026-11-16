@@ -491,6 +491,18 @@ Verification from the repository root:
   fixture server requires a Go-built test. Owner prohibits Go, test binaries and
   launcher execution on this PC. No daemon, merge or push; no dogfood surprise.
 
+#### Edition (arrow visibility) - 2026-11-16
+
+Owner (1300): the top capsule's up-arrow may disappear when there is no pending
+board update and the board is already at the top. `wswhiteboard/assets/pill.js`
+`show("top")` now hides the capsule only when no update is pending, no item sits
+above the view, and the scroller's `scrollTop`/`scrollY` is <= 4; a latched
+change (`wbPill.pending > 0`) keeps arrow and badge visible at the top, so the
+1ce2bf78c hand-home behavior holds. The scroll read happens inside the existing
+120 ms-debounced `update()`, not on the raw scroll path. T0, frontend only.
+Whiteboard Go tests pass remotely except two node-required tests (no node on
+w5090); browser acceptance not run on this PC.
+
 ### Phase 2: rise hold gaps
 Only what Phase 0 shows missing: visible topic rising holds in place, releases when all involved
 cards are off-screen, batched, deferrals (selection, focus, hover, hidden, overview, maximize).

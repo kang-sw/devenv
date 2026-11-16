@@ -125,9 +125,12 @@
   // last one, at the bottom edge the first. Each segment jumps to the nearest
   // item of its own state: still open, answered, or answered with a note
   // (noted items are a subset of the answered ones).
+  function atTop() { return (root ? root.scrollTop : window.scrollY) <= 4; }
   function show(edge, list) {
     var p = pills[edge], pending = edge === "top" && st.pending > 0;
-    p.hidden = edge !== "top" && !list.length;
+    // The top capsule has nothing to offer at the very top with no board
+    // update pending (no item above either); a latched change keeps it.
+    p.hidden = edge === "top" ? !pending && !list.length && atTop() : !list.length;
     p.classList.toggle("board-updated", !!pending);
     if (edge === "top") {
       var updates = p.querySelector(".oq-updates");
