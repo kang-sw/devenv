@@ -21,9 +21,10 @@ const [base, standalone, shots] = process.argv.slice(2);
         return { text: s.toString(), expected: el.innerText, exact: r.startContainer === el && r.startOffset === 0 && r.endContainer === el && r.endOffset === el.childNodes.length };
       }, selector);
       assert.equal(result.exact, true, selector + ': range covers only the chosen block');
-      // Chromium serializes paragraph breaks around option buttons differently
-      // for Selection and innerText; the range endpoints above remain exact.
-      const comparable = text => exact ? text : text.trim().replace(/\s+/g, ' ');
+      // Selection omits trailing source newlines that innerText retains, and
+      // serializes option-button paragraph breaks differently. Range endpoints
+      // above still require the entire block, including its trailing nodes.
+      const comparable = text => exact ? text.trimEnd() : text.trim().replace(/\s+/g, ' ');
       assert.equal(comparable(result.text), comparable(result.expected), selector + ': text excludes chrome and neighboring blocks');
     }
     async function clickSelect(page, selector, mod = 'Control', exact = true) {
