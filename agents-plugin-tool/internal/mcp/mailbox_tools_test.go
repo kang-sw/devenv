@@ -1246,8 +1246,8 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		}
 	})
 
-	// Only a recognizable Python launcher is echoed, never an executable override.
-	t.Run("cli_name_requires_python_launcher", func(t *testing.T) {
+	// A declared shim or recognizable Python launcher is echoed, never a runtime override.
+	t.Run("cli_name_requires_shim_or_python_launcher", func(t *testing.T) {
 		setupMailboxTestEnv(t)
 		root := t.TempDir()
 		initGit(t, root)
@@ -1256,14 +1256,14 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		s := NewServer(root, "test")
 		key := mailboxLogin(t, s, 1, root)
 
-		for _, name := range []string{"python3 /plugin/bin/ws-mcp-launcher.py", "'/path with spaces/python3' '/plugin path/ws-mcp-launcher.py'"} {
+		for _, name := range []string{"ws-cli", "wsflow-cli", "python3 /plugin/bin/ws-mcp-launcher.py", "/opt/python@3.13/bin/python3 /plugin/bin/ws-mcp-launcher.py", "'/path with spaces/python3' '/plugin path/ws-mcp-launcher.py'"} {
 			t.Setenv(envCLIName, name)
 			if got, want := mailboxWaitCommandVar(s, key), name+" mailbox wait --session-key "+key; got != want {
 				t.Fatalf("launcher %q: got %q, want %q", name, got, want)
 			}
 		}
 		t.Setenv("WS_MCP_RUNTIME_BINARY", "/runtime/ws-mcp.exe")
-		for _, name := range []string{"", "   ", "ws-cli", "/runtime/ws-mcp.exe", "/runtime/ws-mcp-python.exe /plugin/ws-mcp-launcher.py", "python3 /plugin/ws-mcp-launcher.py; /runtime/ws-mcp.exe", "python3 /evil.exe /plugin/ws-mcp-launcher.py"} {
+		for _, name := range []string{"", "   ", "/runtime/ws-mcp.exe", "/runtime/ws-mcp-python.exe /plugin/ws-mcp-launcher.py", "python3 /plugin/ws-mcp-launcher.py; /runtime/ws-mcp.exe", "python3 /evil.exe /plugin/ws-mcp-launcher.py"} {
 			t.Setenv(envCLIName, name)
 			if got, want := mailboxWaitCommandVar(s, key), "python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key "+key; got != want {
 				t.Fatalf("unsafe CLI name %q: got %q, want %q", name, got, want)

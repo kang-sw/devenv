@@ -351,7 +351,7 @@ func TestMailboxWaitRearmReminderOnMailExit(t *testing.T) {
 	if !strings.Contains(text, "re-arm:") {
 		t.Fatalf("mailbox wait output = %q, want a re-arm: line on the mail exit", text)
 	}
-	// The re-arm command reprints the binary + the flags it was invoked with.
+	// The re-arm command reprints the launcher + the flags it was invoked with.
 	if !strings.Contains(text, "mailbox wait --session-key "+sessionKey) || !strings.Contains(text, "--timeout 10s") {
 		t.Fatalf("mailbox wait output = %q, want a runnable re-arm command carrying --session-key and --timeout", text)
 	}
@@ -389,7 +389,7 @@ func TestMailboxWaitRearmReminderOnTimeoutExit(t *testing.T) {
 }
 
 // TestMailboxWaitRearmCommandName checks that re-arm guidance uses a safe
-// Python launcher, never the runtime executable or an unsafe override.
+// Python launcher or declared shim, never the runtime executable or an unsafe override.
 func TestMailboxWaitRearmCommandName(t *testing.T) {
 	bin := buildWsMCPMailboxTestBin(t)
 	for _, tc := range []struct {
@@ -397,7 +397,9 @@ func TestMailboxWaitRearmCommandName(t *testing.T) {
 		want    string
 	}{
 		{"python3 /plugin/bin/ws-mcp-launcher.py", "re-arm: python3 /plugin/bin/ws-mcp-launcher.py mailbox wait --session-key "},
-		{"ws-cli", "re-arm: python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key "},
+		{"ws-cli", "re-arm: ws-cli mailbox wait --session-key "},
+		{"wsflow-cli", "re-arm: wsflow-cli mailbox wait --session-key "},
+		{"/opt/homebrew/opt/python@3.13/bin/python3 /plugin/bin/ws-mcp-launcher.py", "re-arm: /opt/homebrew/opt/python@3.13/bin/python3 /plugin/bin/ws-mcp-launcher.py mailbox wait --session-key "},
 		{"", "re-arm: python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key "},
 	} {
 		env := append(mailboxTestEnv(t), "WS_MCP_CLI_NAME="+tc.cliName)
