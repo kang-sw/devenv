@@ -899,17 +899,25 @@ type itemData struct {
 	Static bool
 	// History is set only for the unified full-page timeline row.
 	History *EntryView
-	// AskClock/AskAt/AskReasked put an anchored question's ask time and
-	// re-ask time in its own row instead of a caption line above it.
+	// AskClock/AskAt/AskReasked put a question's ask time and re-ask time in
+	// its own history row, or in a stacked open card's jump to that row.
 	AskClock, AskAt, AskReasked string
 	// AskMs/AskStamp give the ask clock the same relative-time data every
 	// other history clock carries.
 	AskMs    int64
 	AskStamp string
+	// AskEntry is a bottom-stacked open ask's history event: its card links
+	// there (the ask-time line) through the shared fragment navigation.
+	AskEntry string
 }
 
 // ItemOf pairs an item with the page for the item templates.
 func (p *pageData) ItemOf(iv ItemView) itemData { return itemData{ItemView: iv, Page: p} }
+
+// AskOf is an open ask's bottom card: the item with its ask-time line.
+func (p *pageData) AskOf(a openAsk) itemData {
+	return itemData{ItemView: a.Item, Page: p, AskEntry: a.Entry, AskClock: a.Clock, AskAt: a.At, AskMs: a.Ms, AskStamp: a.Stamp, AskReasked: a.Reasked}
+}
 
 // Num is the item's number as its label shows it, without the parentheses;
 // the reply grammar wraps it back as (nn).
@@ -943,10 +951,11 @@ func (d itemData) AsStatic() itemData {
 	return d
 }
 
-// TimelineCheck keeps the check's summary anchored while its real controls
-// can fold or lift into the sticky pill. Embeds retain their compact list.
+// TimelineCheck keeps an assumed check's real controls (its veto note) in
+// its history row. An open check's controls stack at the topic's bottom
+// instead; embeds retain their compact list.
 func (d itemData) TimelineCheck() bool {
-	return d.Page != nil && d.Page.Full && d.Class == ClassCheck && d.HistoryAnchor() && (d.Status == StatusOpen || d.Assumed())
+	return d.Page != nil && d.Page.Full && d.Class == ClassCheck && d.HistoryAnchor() && d.Assumed()
 }
 
 // Expandable reports whether a row has controls, options or rationale beyond

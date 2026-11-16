@@ -457,13 +457,14 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	}
 	block := out[start:]
 	block = block[:strings.Index(block, "</section>")]
-	// Eventless items, including open controls, retain stored item order
-	// together at the head of the always-open timeline.
+	// Eventless settled items retain stored item order at the head of the
+	// always-open timeline; the open policy stacks after the history.
 	policy, list, assumed, settled := strings.Index(block, `id="item-73"`), strings.Index(block, `<div class="topic-stream">`), strings.Index(block, `id="item-76"`), strings.Index(block, `id="item-72"`)
+	asks := strings.Index(block, `<div class="tbody wb-asks">`)
 	wantAll(t, block, `data-history-item="76"`, `data-history-item="72"`, "Time unknown")
 	wantNone(t, block, `<details class="settled"`, `<details class="topic-stream"`)
-	if !(list >= 0 && list < policy && policy < assumed && assumed < settled) {
-		t.Errorf("block order policy %d, settled list %d, assumed %d, settled %d", policy, list, assumed, settled)
+	if !(list >= 0 && list < assumed && assumed < settled && settled < asks && asks < policy) {
+		t.Errorf("block order settled list %d, assumed %d, settled %d, asks %d, policy %d", list, assumed, settled, asks, policy)
 	}
 	if !strings.Contains(block, `<span class="chip policy" title="to answer">`) || strings.Contains(block, "chip assumed") {
 		t.Errorf("title bar chips: want the policy count and no assumed count")
@@ -473,8 +474,8 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	block = out[start:]
 	block = block[:strings.Index(block, "</section>")]
 	policy, ack, settled := strings.Index(block, `id="item-77"`), strings.Index(block, `id="item-78"`), strings.Index(block, `id="item-69"`)
-	if !(policy >= 0 && policy < ack && ack < settled) {
-		t.Errorf("block order policy %d, ack %d, settled %d", policy, ack, settled)
+	if !(settled >= 0 && settled < policy && policy < ack) {
+		t.Errorf("block order settled %d, policy %d, ack %d", settled, policy, ack)
 	}
 }
 

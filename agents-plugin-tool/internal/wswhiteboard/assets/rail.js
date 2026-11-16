@@ -193,7 +193,6 @@
     moved = member;
     var bar = s && s.bar, shadow = s && s.stuck ? bar : null;
     if (stuck !== shadow) {
-      if (lifted && lifted.head !== shadow) drop();
       if (stuck) stuck.classList.remove("wb-stuck");
       if (shadow) shadow.classList.add("wb-stuck");
       stuck = shadow;
@@ -452,82 +451,6 @@
   wraps.top.addEventListener("click", jump);
   wraps.bot.addEventListener("click", jump);
 
-  // Check pill (button.ckbtn in an open topic's head). At rest it folds the
-  // topic's in-flow check list. On a stuck head the list is out of view, so
-  // the pill lifts the list itself into the head, where page.css hangs it as
-  // a popover over the body; a spacer of the list's height keeps its place,
-  // so nothing under it moves. The real list moves rather than a copy: its
-  // answer controls are what form.js reads. A second click, the head
-  // unsticking, or a teardown puts it back (drop).
-  var lifted = null;
-  function drop() {
-    var l = lifted;
-    lifted = null;
-    if (!l) return;
-    if (l.parts) {
-      l.parts.forEach(function (p) {
-        if (p.spacer.parentNode) p.spacer.parentNode.replaceChild(p.list, p.spacer);
-        else if (p.list.parentNode) p.list.parentNode.removeChild(p.list);
-        p.list.hidden = p.hid;
-      });
-      if (l.list.parentNode) l.list.parentNode.removeChild(l.list);
-      l.btn.setAttribute('aria-expanded', l.parts.every(function (p) { return p.hid; }) ? 'false' : 'true');
-      return;
-    }
-    if (l.spacer.parentNode) l.spacer.parentNode.replaceChild(l.list, l.spacer);
-    else if (l.list.parentNode) l.list.parentNode.removeChild(l.list);
-    l.list.hidden = l.hid;
-    l.btn.setAttribute("aria-expanded", l.hid ? "false" : "true");
-  }
-  function pill(e) {
-    var btn = e.target.closest && e.target.closest("button.ckbtn"), head = btn && btn.closest(".tophead");
-    if (!head || !box.contains(head)) return;
-    if (lifted && lifted.head === head) return drop();
-    var list = head.parentNode.querySelector(":scope > .checks");
-    if (!list) {
-      // Interleaved checks keep their own chronological positions. Lift the
-      // real lists together, with one spacer at each original position.
-      var lists = Array.from(head.parentNode.querySelectorAll('.timeline-row .checks'));
-      if (!lists.length) return;
-      if (!head.classList.contains('wb-stuck')) {
-        var hide = lists.some(function (n) { return !n.hidden; });
-        lists.forEach(function (n) { n.hidden = hide; });
-        btn.setAttribute('aria-expanded', hide ? 'false' : 'true');
-        return;
-      }
-      if (!lists.some(function (n) { return Array.from(n.querySelectorAll('.ckrow')).some(function (r) { return getComputedStyle(r).display !== 'none'; }); })) return;
-      drop();
-      list = d.createElement('div'); list.className = 'checks';
-      var parts = lists.map(function (n) {
-        var cs = getComputedStyle(n), spacer = d.createElement('div'), hid = n.hidden;
-        spacer.className = 'ckspace'; spacer.setAttribute('aria-hidden', 'true');
-        if (!hid) spacer.style.cssText = 'height:' + n.offsetHeight + 'px;margin:' + cs.marginTop + ' 0 ' + cs.marginBottom;
-        n.parentNode.replaceChild(spacer, n); n.hidden = false; list.appendChild(n);
-        return { list: n, spacer: spacer, hid: hid };
-      });
-      lifted = { head: head, list: list, parts: parts, btn: btn };
-      head.appendChild(list); btn.setAttribute('aria-expanded', 'true');
-      return;
-    }
-    if (!head.classList.contains("wb-stuck")) {
-      list.hidden = !list.hidden;
-      btn.setAttribute("aria-expanded", list.hidden ? "false" : "true");
-      return;
-    }
-    // Every row hidden (all answered, "hide answered" on): nothing to lift, or the popover opens empty.
-    if (!Array.prototype.some.call(list.querySelectorAll(".ckrow"), function (r) { return getComputedStyle(r).display !== "none"; })) return;
-    drop();
-    var cs = getComputedStyle(list), spacer = d.createElement("div");
-    spacer.className = "ckspace";
-    spacer.setAttribute("aria-hidden", "true");
-    if (!list.hidden) spacer.style.cssText = "height:" + list.offsetHeight + "px;margin:" + cs.marginTop + " 0 " + cs.marginBottom;
-    lifted = { head: head, list: list, spacer: spacer, btn: btn, hid: list.hidden };
-    list.parentNode.replaceChild(spacer, list);
-    list.hidden = false;
-    head.appendChild(list);
-    btn.setAttribute("aria-expanded", "true");
-  }
-  box.addEventListener("click", pill);
   kick();
 
   st.off = function () {
@@ -538,8 +461,6 @@
     window.removeEventListener("resize", reflow);
     wraps.top.removeEventListener("click", jump);
     wraps.bot.removeEventListener("click", jump);
-    box.removeEventListener("click", pill);
-    drop();
     if (stuck) stuck.classList.remove("wb-stuck");
     stuck = null;
     dropGhost();

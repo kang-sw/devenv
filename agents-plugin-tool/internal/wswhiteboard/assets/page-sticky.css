@@ -64,9 +64,6 @@ button.oq-arr:hover { color: var(--wb-fg); background: var(--wb-muted); }
 .wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
 /* the book button stays at the card's top and scrolls away under a stuck head, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tophead.wb-stuck > .tbar { padding-right: 12px; }
-/* The check pill of a stuck head lifts the topic's check list into the head
-   (rail.js): it hangs under the head as a popover over the body. */
-.tophead > .checks { position: absolute; left: 10px; right: 10px; top: 100%; z-index: 1; margin: 4px 0 0; max-height: 46vh; overflow-y: auto; box-shadow: var(--wb-shadow-hi), 0 0 0 1px var(--wb-line); }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
 .wb-rail-wrap { position: sticky; height: 0; z-index: 2; pointer-events: none; }
 .wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }

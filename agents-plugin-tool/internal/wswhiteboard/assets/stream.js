@@ -65,7 +65,11 @@
       return !parseFloat(f.style.height);
     })) return null;
     var height = row.getBoundingClientRect().height;
-    return height > 0 ? height : null;
+    if (height > 0) return height;
+    // A laid-out row whose content is all hidden (display:none inside) still
+    // has a box: it is ready at zero height and must not block the window.
+    // Only a row with no box (a host not laid out yet) waits for a resize.
+    return row.getClientRects && row.getClientRects().length ? 0 : null;
   }
   // Initial histories share rounds: write every topic's next batch, then
   // read all rows without intervening writes. Surplus stays inert and never
@@ -372,7 +376,7 @@
       h._wbGapShell = first ? shell(first) : null;
       fresh.push(h);
     });
-    // The server folds every row except open questions and the latest batch;
+    // The server folds every row except the current state and latest batch;
     // fill() then cuts the visible bottom window client-side. Batch disclosure
     // writes before any result reads and share one capture per scroller.
     var kept = new Map();

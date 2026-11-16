@@ -188,6 +188,10 @@ type TopicView struct {
 	PanelRecaps []EntryView
 	// Timeline carries live anchors and inert gaps over the complete stream.
 	Timeline []timelinePart
+	// Asks are the full page's open asks in creation order, stacked at the
+	// bottom of the topic after the history (the timeline keeps only their
+	// ask-time lines). The embed keeps its Policy/Acks/Checks lists.
+	Asks []askGroup
 	// Policy and Acks are the topic's items waiting on the user; they never
 	// collapse.
 	Policy []ItemView
@@ -320,11 +324,12 @@ func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string
 }
 
 // HeadSummary reports whether the topic's head carries its summary line: an
-// open topic with a latest agent line or checks. The line holds the agent
-// line (never a legacy recap or a system event) and the check pill. Keep
-// that pill after the last open check settles: it reveals answered history.
+// open topic with a latest agent line, or with checks on the embed. The line
+// holds the agent line (never a legacy recap or a system event) and, on the
+// embed only, the check pill heading its in-flow check list; the full page
+// stacks open checks at the bottom and carries no pill.
 func (t TopicView) HeadSummary() bool {
-	return !t.Closed && (t.LatestAgent != nil || len(t.Checks) > 0)
+	return !t.Closed && (t.LatestAgent != nil || (len(t.Checks) > 0 && !t.fullHistory))
 }
 
 // LegacyRecapOpen reports whether an open topic shows an unconverted legacy
@@ -701,7 +706,7 @@ func BuildView(state *State, in ViewInput) View {
 		inputs := boardInputs(state)
 		for _, name := range order {
 			block := blocks[name]
-			block.Timeline = timelineView(*block, state.Items, inputs, in.Location)
+			block.Timeline, block.Asks = timelineView(*block, state.Items, inputs, in.Location)
 		}
 	}
 	stampUpdated(state, blocks, in.Location)

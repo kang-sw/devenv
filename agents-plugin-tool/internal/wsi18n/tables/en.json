@@ -4,6 +4,7 @@
   "wb.timeline.down": "▼ Load below",
   "wb.timeline.reasked": "Asked again",
   "wb.timeline.original": "Original question",
+  "wb.timeline.askjump": "Show where this was asked in the history",
   "js.capsule.topics": "Topics",
   "worktree.page": "worktree",
   "worktree.local": "local only",

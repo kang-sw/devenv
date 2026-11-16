@@ -208,6 +208,19 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .btn.primary .i { width: 17px; height: 17px; }
 .actions { display: inline-flex; gap: 4px; flex: none; }
 
+/* The full page's open asks stack after the history (.wb-asks), in
+   creation order. Each card's history chip (.wb-askjump) links to the line
+   where it was asked. */
+.tbody.wb-asks > .checks { margin: 0; }
+.wb-askjump { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 20px; padding: 0 7px; border-radius: 999px; font-size: 11px; line-height: 1; color: var(--wb-muted-fg); text-decoration: none; white-space: nowrap; }
+.wb-askjump:hover { color: var(--wb-fg); background: var(--wb-muted); }
+.wb-askjump .i { width: 12px; height: 12px; }
+.wb-askjump .entry-at { font: 11px var(--wb-mono); }
+.wb-askjump .wb-askre { margin-left: 2px; }
+.cbar .wb-askjump { color: inherit; opacity: .85; }
+.cbar .wb-askjump:hover { color: inherit; opacity: 1; background: rgb(255 255 255 / .16); }
+.arow > .wb-askjump, .ckrow > .wb-askjump { margin-top: 7px; }
+
 /* acknowledgement rows: a filled class tag leads each row */
 .acks { border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
 .arow { display: flex; flex-wrap: wrap; align-items: flex-start; padding-right: 8px; }
@@ -278,9 +291,6 @@ label.ck { cursor: pointer; }
 .ckhide[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
 html:not([data-ck-hide]) .ckhide { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }
-/* Completed checks moved to HISTORY with the same hide control. Assumed
-   correction rows and explicitly undated legacy rows remain visible. */
-html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not([data-check-live]):not(.void):not(:has(.wb-hunknown)) { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:nth-child(1 of .ckrow[data-id]) { border-top: 0; }
 
 /* settled: collapsed tonal chip */

@@ -38,7 +38,7 @@ func TestTimelineAnchorsOutsidePagingAndGapRanges(t *testing.T) {
 	mustApply(t, st, `<wb:answer id="1" value="a">first quote</wb:answer>`)
 	tv := topicView(t, st, LayoutFull, "t")
 	live, held := timelineRows(tv)
-	asks, answers, preceding := 0, 0, 0
+	asks, answers := 0, 0
 	for _, row := range live {
 		if row.Ask {
 			asks += max(1, len(row.Created))
@@ -46,15 +46,14 @@ func TestTimelineAnchorsOutsidePagingAndGapRanges(t *testing.T) {
 		if row.Answer {
 			answers++
 		}
-		if row.Preceding {
-			preceding++
-			if !row.Page.Runs[0].Entry.Open {
-				t.Fatal("question panel folded")
-			}
-		}
 	}
-	if asks != 2 || answers != 1 || preceding != 1 || len(held) < 100 {
-		t.Fatalf("anchors: asks=%d answers=%d preceding=%d hidden=%d", asks, answers, preceding, len(held))
+	// Ask lines, open or not, fold like logs; the latest batch (the answer)
+	// stays live. The open ask stacks after the history instead.
+	if asks != 0 || answers != 1 || len(held) < 100 {
+		t.Fatalf("anchors: asks=%d answers=%d hidden=%d", asks, answers, len(held))
+	}
+	if len(tv.Asks) != 1 || tv.Asks[0].Kind != "ack" || len(tv.Asks[0].Asks) != 1 || tv.Asks[0].Asks[0].Item.ID != 2 || tv.Asks[0].Asks[0].Entry == "" {
+		t.Fatalf("open asks: %+v", tv.Asks)
 	}
 	for i, p := range tv.Timeline {
 		if p.Gap && (p.Count < 1 || p.From == "" || p.To == "" || p.Above != (i > 0)) {
@@ -62,9 +61,9 @@ func TestTimelineAnchorsOutsidePagingAndGapRanges(t *testing.T) {
 		}
 	}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull})))
-	wantAll(t, out, `class="history-gap"`, `<template data-history-gap>`, `id="item-1"`, `id="item-2"`, `Original question`, `question-lead`)
-	wantNone(t, out, `class="tbody"`, `history-clip`, `history-older`, `data-history-page`)
-	if strings.Count(out, `id="item-1"`) != 1 {
+	wantAll(t, out, `class="history-gap"`, `<template data-history-gap>`, `id="item-1"`, `<div class="tbody wb-asks"><div class="acks"><div class="arow" id="item-2"`, `<a class="wb-askjump" href="#`+tv.Asks[0].Asks[0].Entry+`"`, `Original question`)
+	wantNone(t, out, `class="tbody"`, `question-lead`, `history-clip`, `history-older`, `data-history-page`)
+	if strings.Count(out, `id="item-1"`) != 1 || strings.Count(out, `id="item-2"`) != 1 {
 		t.Fatal("question anchor duplicated")
 	}
 }
@@ -120,7 +119,7 @@ func TestTimelineReaskKeepsFirstPositionAndEveryAnswer(t *testing.T) {
 	}
 }
 
-func TestTimelineConvertedItemsKeepControlsAtHead(t *testing.T) {
+func TestTimelineConvertedItemsStackOpenAsksAndKeepSettledAtHead(t *testing.T) {
 	legacy := &State{Items: []Item{
 		{ID: 2, Topic: "t", Class: ClassTechnical, Title: "second", Status: StatusOpen},
 		{ID: 1, Topic: "t", Class: ClassPolicy, Title: "first", Options: []string{"A", "B"}, Status: StatusOpen},
@@ -129,15 +128,28 @@ func TestTimelineConvertedItemsKeepControlsAtHead(t *testing.T) {
 	st := folderOpen(t, t.TempDir(), legacy)
 	tv := topicView(t, st, LayoutFull, "t")
 	live := allTimelineRows(tv)
-	for i, id := range []int{2, 1, 3} {
-		if live[i].Item == nil || live[i].Item.ID != id || live[i].Clock != "" {
-			t.Fatal("conversion order/time", live)
+	if live[0].Item == nil || live[0].Item.ID != 3 || live[0].Clock != "" {
+		t.Fatal("settled conversion not at the timeline head", live)
+	}
+	// Open converted items keep stored order at the bottom, with no
+	// ask-time line to jump to.
+	var stacked []int
+	for _, g := range tv.Asks {
+		for _, a := range g.Asks {
+			stacked = append(stacked, a.Item.ID)
+			if a.Entry != "" || a.Clock != "" {
+				t.Fatal("converted ask invented a time", a)
+			}
 		}
+	}
+	if fmt.Sprint(stacked) != "[2 1]" {
+		t.Fatal("open conversion order", stacked)
 	}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull})))
 	wantAll(t, out, `id="item-1" data-id="01"`, `data-opt="a"`, `id="item-2" data-id="02"`, `id="item-3"`, `retained`)
-	if strings.Index(out, `id="item-3"`) > strings.Index(out, `id="e1"`) {
-		t.Fatal("orphans not at timeline head")
+	wantNone(t, out, `class="wb-askjump"`)
+	if strings.Index(out, `id="item-3"`) > strings.Index(out, `id="e1"`) || strings.Index(out, `id="item-2"`) < strings.Index(out, `id="item-3"`) || strings.Index(out, `id="item-1"`) < strings.Index(out, `id="item-2"`) {
+		t.Fatal("orphans not at timeline head or open asks not stacked in stored order")
 	}
 }
 

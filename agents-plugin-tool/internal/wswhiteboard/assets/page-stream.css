@@ -31,8 +31,6 @@
 .trecap > .rat[role="button"]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; border-radius: 3px; }
 .ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
 .ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }
-button.ckbtn { cursor: pointer; }
-button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .ckbtn .i { width: 12px; height: 12px; }
 .ckbtn .prog { font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
 
@@ -275,4 +273,3 @@ iframe.doc-frame { display: block; width: 100%; height: 0; border: 0; }
   .owner-input, .timeline-answer > summary { grid-template-columns: var(--h-av) minmax(0, 1fr); }
   .owner-input .entry-at, .timeline-answer .entry-at { grid-column: 2; }
 }
-.wb-askmeta { margin: 0 0 1px calc(var(--h-av, 18px) + var(--h-time, 38px) + 2 * var(--h-gap, 8px)); font-size: 10.5px; color: var(--wb-muted-fg); }

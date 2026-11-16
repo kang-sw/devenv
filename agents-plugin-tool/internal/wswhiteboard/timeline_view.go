@@ -28,7 +28,7 @@ type timelineRow struct {
 	Page                                 EntryPage
 	Item                                 *ItemView
 	Created                              []timelineRow
-	Ask, Answer, Preceding, LatestAnswer bool
+	Ask, Answer, LatestAnswer            bool
 	Clock, At                            string
 	Ms                                   int64
 	Stamp                                string
@@ -42,6 +42,35 @@ type timelinePart struct {
 	Gap, Above bool
 	Count      int
 	From, To   string
+}
+
+// openAsk is one item still waiting on the owner. Its card stacks at the
+// bottom of the topic, after the history; Entry names the history event
+// that asked it (empty for an eventless converted item), where the card's
+// jump lands.
+type openAsk struct {
+	Item                  ItemView
+	Entry, Clock, Reasked string
+	At, Stamp             string
+	Ms                    int64
+}
+
+// askGroup is a run of consecutive open asks of one card kind (policy,
+// check, or ack), so each run shares its kind's list frame.
+type askGroup struct {
+	Kind string
+	Asks []openAsk
+}
+
+func askKind(item Item) string {
+	switch {
+	case inCheckList(item):
+		return "check"
+	case item.Class == ClassPolicy:
+		return "policy"
+	default:
+		return "ack"
+	}
 }
 
 func boardInputs(st *State) map[int][]inputHeader {
@@ -59,7 +88,11 @@ func boardInputs(st *State) map[int][]inputHeader {
 	return out
 }
 
-func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *time.Location) []timelinePart {
+// timelineView projects a topic's history into live rows and inert gaps,
+// and lists its open asks in creation order (eventless items first). Open
+// asks render only as their ask-time line in the history; they never anchor
+// the history or pull rows out of its folds.
+func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *time.Location) ([]timelinePart, []askGroup) {
 	if loc == nil {
 		loc = time.Local
 	}
@@ -99,25 +132,26 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		}
 	}
 	var rows []timelineRow
+	var asks []openAsk
 	anchors := map[string]bool{}
-	leads, openPanels := map[string]bool{}, map[string]bool{}
-	// Converted items deliberately have no synthetic add event or clock.
+	// Converted items deliberately have no synthetic add event or clock; an
+	// open one has no ask-time line and shows only in the bottom stack.
 	for _, item := range items {
 		id := item.ID
 		if item.Topic != t.Name || firstAsk[id] != "" {
 			continue
 		}
 		iv := itemView(item)
-		key := "item-" + strconv.Itoa(id)
-		rows = append(rows, timelineRow{Key: key, Item: &iv, Ask: true, AnswerTarget: lastAnswer[id]})
-		// Only an open question is pulled out of the fold; closed ones fold like logs.
-		anchors[key] = item.Status == StatusOpen
+		if item.Status == StatusOpen {
+			asks = append(asks, openAsk{Item: iv, Reasked: clock(item.ReaskedAt)})
+			continue
+		}
+		rows = append(rows, timelineRow{Key: "item-" + strconv.Itoa(id), Item: &iv, Ask: true, AnswerTarget: lastAnswer[id]})
 	}
 	seenBatch := map[int]bool{}
-	preceding, cluster := "", false
 	for _, e := range all {
-		// The unified stream already carries undated settled-item prefixes.
-		// The timeline's permanent head rows above also include open items.
+		// The unified stream already carries undated settled-item prefixes;
+		// the head rows above hold them (open items stack at the bottom).
 		if e.Kind == "item" {
 			continue
 		}
@@ -157,27 +191,14 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 			if firstAsk[id] == e.ID {
 				iv := itemView(byID[id])
 				r.Created = append(r.Created, timelineRow{Item: &iv, Ask: true, AnswerTarget: lastAnswer[id], Reasked: clock(byID[id].ReaskedAt)})
+				if iv.Status == StatusOpen {
+					asks = append(asks, openAsk{Item: iv, Entry: e.ID, Clock: e.Clock, At: e.At, Stamp: e.Stamp, Ms: e.Ms, Reasked: clock(byID[id].ReaskedAt)})
+				}
 			}
 		}
 		if len(r.Created) > 0 && e.ItemID == 0 {
 			r.Ask = true
 			r.Clock, r.At = e.Clock, e.At
-			anyOpen := false
-			for _, row := range r.Created {
-				if row.Item.Status == StatusOpen {
-					anyOpen = true
-					if preceding != "" {
-						openPanels[preceding] = true
-					}
-				}
-			}
-			if anyOpen {
-				anchors[e.ID] = true
-				if !cluster && preceding != "" {
-					anchors[preceding], leads[preceding] = true, true
-				}
-				cluster = true
-			}
 		}
 		if firstAsk[e.ItemID] == e.ID || e.OwnerAnswer() {
 			if item, ok := byID[e.ItemID]; ok {
@@ -206,22 +227,6 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 					r.LatestAnswer = currentAnswer
 				}
 			}
-			if r.Ask && r.Item != nil && r.Item.Status == StatusOpen {
-				anchors[e.ID] = true
-				if !cluster && preceding != "" {
-					anchors[preceding] = true
-					leads[preceding] = true
-				}
-				// A question-leading rich panel stays open while any ask in
-				// the cluster waits, even outside the usual latest three.
-				if preceding != "" && r.Item.Status == StatusOpen {
-					openPanels[preceding] = true
-				}
-				cluster = true
-			}
-		}
-		if e.Kind == EntryAgent || e.Kind == EntryPanel {
-			preceding, cluster = e.ID, false
 		}
 		if e.Current {
 			anchors[e.ID] = true
@@ -243,11 +248,6 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 	}
 	var out []timelinePart
 	for _, r := range rows {
-		r.Preceding = leads[r.Key]
-		// An earlier panel version stays folded even when it leads a question.
-		if openPanels[r.Key] && len(r.Page.Runs) > 0 && !r.Page.Runs[0].Entry.Historical {
-			r.Page.Runs[0].Entry.Open = true
-		}
 		gap := !anchors[r.Key]
 		if len(out) == 0 || out[len(out)-1].Gap != gap {
 			out = append(out, timelinePart{Gap: gap, Above: len(out) > 0, From: r.From})
@@ -269,7 +269,16 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		p.Count += r.Count()
 		p.To = r.To
 	}
-	return out
+	var groups []askGroup
+	for _, a := range asks {
+		kind := askKind(byID[a.Item.ID])
+		if len(groups) == 0 || groups[len(groups)-1].Kind != kind || kind == "policy" {
+			groups = append(groups, askGroup{Kind: kind})
+		}
+		g := &groups[len(groups)-1]
+		g.Asks = append(g.Asks, a)
+	}
+	return out, groups
 }
 
 func timelineEntries(p EntryPage) []EntryView {

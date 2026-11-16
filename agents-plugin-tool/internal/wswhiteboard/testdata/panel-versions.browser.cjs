@@ -37,11 +37,7 @@ const rows = p => p.evaluate(sel => [...document.querySelector(sel).querySelecto
 const menu = p => p.evaluate(() => [...document.querySelectorAll('.pfmenu .pfmi')].map(b => b.textContent.replace(/\s+/g, ' ').trim()));
 // A new tab each time: the file page restores its own folds per tab.
 async function tab(b, width) {
-  const p = await b.newPage({ viewport: { width, height: 900 }, colorScheme: 'dark' });
-  // Answered checks shown, as in the mockup. A hidden answered check at
-  // the live edge has no height, and the initial fill waits on it.
-  await p.addInitScript(() => localStorage.setItem('ws.wb.checks.hideAnswered', '0'));
-  return p;
+  return b.newPage({ viewport: { width, height: 900 }, colorScheme: 'dark' });
 }
 (async () => {
   const b = await chromium.launch();

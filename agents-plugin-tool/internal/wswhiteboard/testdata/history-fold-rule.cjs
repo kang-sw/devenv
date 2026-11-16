@@ -1,8 +1,9 @@
 // args: fold.html labels.json [shotdir]. labels maps data-row -> server class
-// (log, closed-ask, answer, input, latest-input, open-ask, open-lead).
-// Asserts the bottom-up initial cut, closed Q/A and old-input folding, the
-// open-question lift-out, and anchor delta 0 with the same cut on expand, in
-// dark and light. With shotdir, saves {initial,expanded}-{dark,light}.png.
+// (log, closed-ask, answer, input, latest-input, open-ask).
+// Asserts the bottom-up initial cut, one top fold holding closed Q/A, the old
+// input and the open question's ask line, the open card stacked after the
+// history, and anchor delta 0 with the same cut on expand, in dark and light.
+// With shotdir, saves {initial,expanded}-{dark,light}.png.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
@@ -67,22 +68,25 @@ async function expand(p, index, what) {
       assert(last >= 0, scheme + ': the history folds');
       const bottom = all.slice(last + 1), above = all.slice(0, last);
       const px = cut(bottom, false, scheme + ' initial cut');
-      // Closed questions, answers and the older owner input fold like logs.
+      // Closed questions, answers, the older owner input and the open
+      // question's ask line all fold like logs, in one fold above the cut.
       const shown = all.filter(r => !r.gap);
-      ['closed-ask', 'answer', 'input'].forEach(l => assert(!shown.some(r => r.label === l), `${scheme}: a ${l} row is shown: ${JSON.stringify(shown.filter(r => r.label === l))}`));
+      ['closed-ask', 'answer', 'input', 'open-ask'].forEach(l => assert(!shown.some(r => r.label === l), `${scheme}: a ${l} row is shown: ${JSON.stringify(shown.filter(r => r.label === l))}`));
       assert(bottom.some(r => r.label === 'latest-input'), scheme + ': the latest owner input stays in the bottom window');
-      // Above the cut, only the open question (with its leading entry) is
-      // lifted out, between folds.
       const lifted = above.filter(r => !r.gap);
-      assert(lifted.some(r => r.label === 'open-ask'), scheme + ': open question lifted out of the fold');
-      lifted.forEach(r => assert(['open-ask', 'open-lead'].includes(r.label), `${scheme}: ${r.label} row ${r.key} shown above the cut`));
-      assert(above[0].gap, scheme + ': a fold above the open question');
+      assert.equal(lifted.length, 0, scheme + ': nothing is lifted out above the cut');
+      assert.equal(last, 0, scheme + ': one fold, at the top');
+      // The open question's card stacks after the history.
+      assert(await p.evaluate(() => {
+        const card = document.querySelector('.wb-asks [id^="item-"]'), history = document.querySelector('.wb-history');
+        return !!card && !!(history.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING) && !history.contains(card);
+      }), scheme + ': the open card stacks after the history');
       if (shots) await p.screenshot({ path: `${shots}/initial-${scheme}.png`, fullPage: true });
-      // Expand the fold over the bottom window, then the one over the open
-      // question: same cut, anchor in place, folded Q/A rows come back as logs.
+      // Expand the fold twice: same cut, anchor in place, folded Q/A rows
+      // come back as logs.
       const gaps = all.filter(r => r.gap).length;
-      const first = await expand(p, gaps - 1, scheme + ' expand bottom fold');
-      const second = await expand(p, 0, scheme + ' expand fold over the open question');
+      const first = await expand(p, 0, scheme + ' expand the fold');
+      const second = await expand(p, 0, scheme + ' expand the fold again');
       assert(first.labels.includes('answer') || first.labels.includes('closed-ask'), `${scheme}: expanding shows folded Q/A rows: ${first.labels}`);
       if (shots) {
         await p.evaluate(() => { document.activeElement && document.activeElement.blur(); });

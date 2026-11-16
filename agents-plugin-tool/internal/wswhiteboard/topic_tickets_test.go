@@ -304,8 +304,11 @@ func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
 	mustApply(t, st, `<wb:topic name="t"><wb:log>agent line</wb:log></wb:topic>`)
 	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	section := page[strings.Index(page, `data-topic="t"`):]
-	head := section[:strings.Index(section, `<div class="checks">`)]
-	for _, frag := range []string{`<div class="tophead"><div class="tbar">`, `<textarea class="note tnote"`, `<div class="tsub"><div class="trecap" data-entry=`, `agent line`, `<div class="ckpill"><button type="button" class="ckbtn" aria-expanded="true">`, `<span class="prog">answered 3 / 4</span>`} {
+	head := section[:strings.Index(section, `<div class="tbody wb-asks">`)]
+	// The full page carries no check-answer chip: open checks stack at the
+	// card bottom, answered ones stay in the history.
+	wantNone(t, section, `class="ckpill"`, `answered 3 / 4`)
+	for _, frag := range []string{`<div class="tophead"><div class="tbar">`, `<textarea class="note tnote"`, `<div class="tsub"><div class="trecap" data-entry=`, `agent line`} {
 		if !strings.Contains(head, frag) {
 			t.Errorf("head lacks %q:\n%s", frag, head)
 		}
