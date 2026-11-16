@@ -3,6 +3,7 @@ title: "Topic summary: include the latest panel recap"
 related:
   261113-feat-ws-whiteboard-topic-panels-and-log: "existing panel/log model and agent-only summary; completed contract, not edited here"
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "existing head explicitly excludes panel recaps; requested extension captured separately"
+completed: 2026-11-17
 ---
 
 # Topic summary includes panel recaps
@@ -124,3 +125,8 @@ visually checked against option A, outside the repository:
 
 No shared daemon lifecycle operation, Electron launch, merge, push, or SSH.
 Integration remains with the lead; this worker leaves the ticket in `todo`.
+
+
+## Resolution (2026-11-17)
+
+Implemented and merged on develop (panel recap summary with the P marker; capture compared side by side with mockup A). Closed at the e93073373..cf13f1327 review sweep ledger commit.
