@@ -158,6 +158,9 @@ type pageAssetsData struct {
 	MermaidInit      template.JS
 	MermaidFile      string
 	ViewerScript     template.JS
+	// SelectAllScript is shared with standalone whiteboards, separate from
+	// the assembled dashboard script and loaded once in every page kind.
+	SelectAllScript template.JS
 	// TrackerCSS and TrackerScript are the tracker renderer (tracker.js),
 	// which dashboard.js mounts when the daemon serves the tracker routes.
 	TrackerCSS    template.CSS
@@ -272,7 +275,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 	}
 	a := &dashboardAssets{data: pageAssetsData{
 		CSS:              template.CSS(get("dashboard.css") + "\n" + get("memo.css") + "\n" + get("usage.css")),
-		Script:           template.JS(string(wb.SelectAllScript) + "\n" + get("dashboard.js")),
+		Script:           template.JS(get("dashboard.js")),
 		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		TrackerCSS:       template.CSS(get("tracker.css")),
 		TrackerScript:    template.JS(get("tracker.js")),
@@ -298,6 +301,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		MermaidInit:      wb.MermaidInit,
 		MermaidFile:      mermaidName,
 		ViewerScript:     wb.ViewerScript,
+		SelectAllScript:  wb.SelectAllScript,
 	}}
 	source := get("dashboard.tmpl")
 	if err != nil {

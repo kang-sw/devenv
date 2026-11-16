@@ -8,7 +8,7 @@
     if (active && !active.isConnected) close(false);
     return node && node.closest ? node.closest('.dw') : null;
   }
-  function trigger(w) { return w.querySelector('.dbtn') || w.querySelector('.sb'); }
+  function trigger(w) { return w.querySelector('.dbtn') || w.querySelector('.wb-state-pill'); }
   function expanded(w, value) {
     var b = w.querySelector('.dbtn');
     if (b) b.setAttribute('aria-expanded', value);

@@ -100,12 +100,12 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 							}
 						}
 						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wait", StateDiscussing: "discuss", StateImplementing: "impl", StateResearching: "research"}
-						wantAll(t, out, `<span class="topic-state dw"><span class="sb `+classes[value], `tabindex="0" role="img" aria-label="`+labels[value], `<use href="#i-st-`+classes[value]+`"/>`, `<span class="tname" title="Work">Work</span>`)
+						wantAll(t, out, `<span class="topic-state dw"><span class="wb-state-pill `+classes[value], `tabindex="0" role="img" aria-label="`+labels[value], `<use href="#i-st-`+classes[value]+`"/>`, `<span class="tname" title="Work">Work</span>`)
 						wantNone(t, out, `<span class="stb `, `<span class="eta`, `<span class="state-estimate">`, `aria-live=`)
 						if value == StateImplementing {
 							wantAll(t, out, `<small>/10m</small>`, `<span class="who">executor &#34;&lt;&amp;&gt;&#39;</span>`)
 						} else {
-							wantAll(t, out, `class="sb `+classes[value]+` solo"`)
+							wantAll(t, out, `class="wb-state-pill `+classes[value]+` solo"`)
 						}
 						tag := stateTopicTag(t, out, "Work")
 						wantAll(t, tag, `data-state="`+value+`"`)
@@ -147,7 +147,7 @@ func TestTopicStateViewResearchingBadgeMetadata(t *testing.T) {
 					if lang == "ko" {
 						label, estimate = "연구 중", fmt.Sprintf("예상 %d분", current.ETAMinutes)
 					}
-					wantAll(t, out, `<span class="topic-state dw"><span class="sb research`, `aria-label="`+label, `<use href="#i-st-research"/>`)
+					wantAll(t, out, `<span class="topic-state dw"><span class="wb-state-pill research`, `aria-label="`+label, `<use href="#i-st-research"/>`)
 					if current.Owner == "" {
 						wantNone(t, tag, "data-state-owner")
 						wantNone(t, out, `<span class="who">`)
@@ -164,7 +164,7 @@ func TestTopicStateViewResearchingBadgeMetadata(t *testing.T) {
 						wantNone(t, out, `<span class="state-estimate">`)
 					} else {
 						wantAll(t, tag, fmt.Sprintf(`data-state-eta-minutes="%d"`, current.ETAMinutes))
-						wantAll(t, out, `<span class="tl">`+estimate+`</span>`, fmt.Sprintf(`<span class="t est"><small>~%dm</small></span>`, current.ETAMinutes))
+						wantAll(t, out, `<span class="tl">`+estimate+`</span>`, fmt.Sprintf(`<span class="wb-state-time est"><small>~%dm</small></span>`, current.ETAMinutes))
 					}
 					if current.Run != nil {
 						t.Fatalf("%s: research acquired a run", name)

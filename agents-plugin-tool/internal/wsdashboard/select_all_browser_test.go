@@ -7,12 +7,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
+
+// The shared handler has its own slot, leaving the content-addressed main
+// bundle identical to the assembled dashboard sources on frames and the index.
+func TestPagesCarryScopedSelectAllScript(t *testing.T) {
+	f := startPageFixture(t)
+	wb, err := wswhiteboard.PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "<script>" + string(wb.SelectAllScript) + "</script>"
+	for _, path := range []string{"/s/livesession", "/s/livesession?frame=1", "/s/boardsession?frame=1", "/", "/?frame=1"} {
+		code, page := get(t, f.base+path)
+		if code != http.StatusOK || strings.Count(page, script) != 1 {
+			t.Errorf("%s: status %d, scoped select-all script count %d, want 200 and one", path, code, strings.Count(page, script))
+		}
+	}
+}
 
 // Exercises the actual dashboard (shell and session), standalone whiteboard,
 // and file-preview sheet, without connecting to the shared daemon.

@@ -56,7 +56,7 @@ async function waitMarks(page, selector = latest) {
       const removed = page.locator(latest + ' .pdg-hit.del');
       await removed.click();
       assert.equal(await page.locator('.pdg-pop.del.pinned').count(), 1);
-      assert((await page.locator('.pdg-pop .pdg-pb').innerText()).includes('이름순'));
+      assert((await page.locator('.pdg-pop .pdg-pb.wb-pdg-removed').innerText()).includes('이름순'));
       await page.mouse.move(1200, 800);
       await page.waitForTimeout(200);
       assert.equal(await page.locator('.pdg-pop.pinned').count(), 1);

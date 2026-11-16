@@ -114,7 +114,7 @@
       head.append(el('span', 'k', label(change.k)), el('span', 'v', version(data.prior) + ' → ' + version(data.current)), el('span', 'sp'), pb, cb);
       var content = el('div', 'pdg-pb md'); content.innerHTML = change.old || '';
       if (change.k === 'mod') words(content.firstElementChild || content, change.words || [], true);
-      else content.classList.add('gone');
+      else content.classList.add('wb-pdg-removed');
       if (content.firstElementChild && content.firstElementChild.tagName === 'LI') {
         var ul = d.createElement('ul'); while (content.firstChild) ul.appendChild(content.firstChild); content.appendChild(ul);
       }

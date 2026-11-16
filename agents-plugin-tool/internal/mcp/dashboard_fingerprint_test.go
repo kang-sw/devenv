@@ -220,7 +220,7 @@ func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 
 	checkBoard := func(board, status string) {
 		t.Helper()
-		for _, want := range []string{`data-topic="t"`, `<span class="tname">t</span>`, `<span class="dw wbtk">`, `data-ticket="261101-feat-linked" data-status="` + status + `"`, `data-kind="agent"`, "working"} {
+		for _, want := range []string{`data-topic="t"`, `<span class="tname" title="t">t</span>`, `<span class="dw wbtk">`, `data-ticket="261101-feat-linked" data-status="` + status + `"`, `data-kind="agent"`, "working"} {
 			if !strings.Contains(board, want) {
 				t.Errorf("the board lacks %q", want)
 			}

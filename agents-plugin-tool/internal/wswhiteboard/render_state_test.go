@@ -15,10 +15,10 @@ func TestTopicStateCompactTemplateTimes(t *testing.T) {
 			state *TopicState
 			want  []string
 		}{
-			{"eta", &TopicState{Value: StateImplementing, Run: run}, []string{`class="sb impl"`, `<span class="t"><b>5</b><small>/20m</small></span>`, `ETA 20분 중 5분 경과`, `연장 1회 · 최초 10분`, `<span class="who">executor &lt;&amp;&gt;</span>`}},
-			{"no-run", &TopicState{Value: StateImplementing}, []string{`class="sb impl solo"`, `aria-label="구현 중"`}},
-			{"estimate", &TopicState{Value: StateResearching, ETAMinutes: 30}, []string{`class="sb research"`, `<span class="t est"><small>~30m</small></span>`, `aria-label="연구 중 · 예상 30분"`}},
-			{"no-estimate", &TopicState{Value: StateResearching, Owner: "researcher"}, []string{`class="sb research solo"`, `aria-label="연구 중 · researcher"`}},
+			{"eta", &TopicState{Value: StateImplementing, Run: run}, []string{`class="wb-state-pill impl"`, `<span class="wb-state-time"><b>5</b><small>/20m</small></span>`, `ETA 20분 중 5분 경과`, `연장 1회 · 최초 10분`, `<span class="who">executor &lt;&amp;&gt;</span>`}},
+			{"no-run", &TopicState{Value: StateImplementing}, []string{`class="wb-state-pill impl solo"`, `aria-label="구현 중"`}},
+			{"estimate", &TopicState{Value: StateResearching, ETAMinutes: 30}, []string{`class="wb-state-pill research"`, `<span class="wb-state-time est"><small>~30m</small></span>`, `aria-label="연구 중 · 예상 30분"`}},
+			{"no-estimate", &TopicState{Value: StateResearching, Owner: "researcher"}, []string{`class="wb-state-pill research solo"`, `aria-label="연구 중 · researcher"`}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				view := View{Layout: layout, Lang: "ko", Topics: []TopicView{{Name: tc.name, Label: `Long "<&> title`, State: tc.state}}}
@@ -31,7 +31,7 @@ func TestTopicStateCompactTemplateTimes(t *testing.T) {
 		}
 		for _, topic := range []TopicView{{Closed: true, State: &TopicState{Value: StateWaiting}}, {State: &TopicState{Value: StateWaiting}, StateDiagnostic: &StateDiagnostic{Code: "malformed"}}, {}} {
 			for _, out := range stateViewOutputs(t, View{Layout: layout, Topics: []TopicView{topic}}) {
-				wantNone(t, out, `<span class="topic-state dw">`, `<span class="sb `)
+				wantNone(t, out, `<span class="topic-state dw">`, `<span class="wb-state-pill `)
 			}
 		}
 	}
@@ -55,6 +55,6 @@ func TestTopicStateCompactElapsedBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll(t, string(css), ".sb.wait{--c:#b9bdc6}")
+	wantAll(t, string(css), ".dw .wb-state-pill.wait{--c:#b9bdc6}")
 	wantNone(t, string(css), ".stb.wb-state-wait", "flex-basis:100%")
 }
