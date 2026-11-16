@@ -81,7 +81,7 @@ func TestPiLeadIsolatedLaunch(t *testing.T) {
 	if err != nil || command != "pi-test" || warning != "" {
 		t.Fatalf("command %q, warning %q, error %v", command, warning, err)
 	}
-	if !slices.Equal(args, append([]string{"cli-test"}, append(piLeadArgs(spec), "--no-extensions", "--extension", entry)...)) {
+	if !slices.Equal(args, append([]string{"cli-test"}, append(piLeadArgs(spec), "--no-extensions", "--extension", entry, "--extension", filepath.Join(piDir(spec.Dir), piBridgeFile))...)) {
 		t.Fatalf("isolated args = %v", args)
 	}
 	for _, banned := range []string{"--no-skills", "--no-context-files", "--no-approve", "--no-tools"} {
@@ -109,7 +109,7 @@ func TestPiLeadDefaultLaunchUsesHostSDK(t *testing.T) {
 			adapter := filepath.Join(piDir(spec.Dir), "ws-lead.mjs")
 			realCLI, _ := filepath.EvalSymlinks(cli)
 			realSDK := filepath.Join(filepath.Dir(realCLI), "index.js")
-			want := append([]string{adapter, realSDK, realCLI, "--offline"}, append(piLeadArgs(spec), "--no-extensions", "--extension", entry)...)
+			want := append([]string{adapter, realSDK, realCLI, "--offline"}, append(piLeadArgs(spec), "--no-extensions", "--extension", entry, "--extension", filepath.Join(piDir(spec.Dir), piBridgeFile))...)
 			if !slices.Equal(args, want) {
 				t.Fatalf("default args = %v, want %v", args, want)
 			}
@@ -140,7 +140,7 @@ func TestPiLeadMissingBundleFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, `const sessionKey = "lead-key";`) || !strings.Contains(text, `pi.on("before_agent_start"`) || slices.Contains(args, "--append-system-prompt") {
+	if !strings.Contains(text, `const sessionKey = "lead-key";`) || !strings.Contains(text, `pi.on("before_agent_start"`) || !strings.Contains(text, "EXTENSION NOT LOADED") || !strings.Contains(text, "ws-execute") || slices.Contains(args, "--append-system-prompt") {
 		t.Fatalf("fallback must supply its identity without replacing user prompt sources: %s", text)
 	}
 	var servers map[string]map[string]any
@@ -241,7 +241,7 @@ func TestPiLeadStandaloneDefaultStartsIsolated(t *testing.T) {
 			if err != nil || got != command {
 				t.Fatalf("command %q, error %v", got, err)
 			}
-			if !slices.Equal(args, append(piLeadArgs(spec), "--no-extensions", "--extension", entry)) {
+			if !slices.Equal(args, append(piLeadArgs(spec), "--no-extensions", "--extension", entry, "--extension", filepath.Join(piDir(spec.Dir), piBridgeFile))) {
 				t.Fatalf("isolated fallback args = %v", args)
 			}
 			if warning != piNoSDKWarning {

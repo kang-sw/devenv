@@ -2404,6 +2404,8 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 				c.update(func(rec *Record) { rec.PluginWarning = warning })
 				if warning != "" {
 					fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, warning)
+					c.setStatus(func() { c.lastErr = warning })
+					c.changed(false)
 				}
 			},
 			WSMCP: func() (MCPCommand, error) {

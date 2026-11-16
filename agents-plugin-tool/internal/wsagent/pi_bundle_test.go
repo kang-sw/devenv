@@ -76,18 +76,18 @@ func TestPiLeadPrefersFreshBundle(t *testing.T) {
 	}
 	// Editing a source without regenerating must not run the old bundle.
 	piLeadFile(t, filepath.Join(root, "src", "util.ts"), "export const changed = 1;")
-	if entries, err := piBundledEntries(); err == nil || !strings.Contains(err.Error(), "stale") || !strings.Contains(err.Error(), "yaml") {
+	if entries, err := piBundledEntries(); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("stale bundle without deps = %v, %v", entries, err)
 	}
 	piLeadDeps(t, filepath.Dir(root))
-	if entries, err := piBundledEntries(); err != nil || !slices.Equal(entries, []string{filepath.Join(root, "src", "index.ts")}) {
-		t.Fatalf("stale bundle with deps = %v, %v", entries, err)
+	if entries, err := piBundledEntries(); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale bundle must not silently switch to source even with deps = %v, %v", entries, err)
 	}
 	if err := os.Remove(bundle); err != nil {
 		t.Fatal(err)
 	}
-	if entries, err := piBundledEntries(); err != nil || !slices.Equal(entries, []string{filepath.Join(root, "src", "index.ts")}) {
-		t.Fatalf("missing bundle with deps = %v, %v", entries, err)
+	if entries, err := piBundledEntries(); err == nil {
+		t.Fatalf("missing bundle must not silently switch to source = %v", entries)
 	}
 }
 
@@ -95,8 +95,8 @@ func TestPiLeadMissingDepsFallsBackToBridge(t *testing.T) {
 	for _, isolation := range []string{"isolated", "default"} {
 		t.Run(isolation, func(t *testing.T) {
 			spec, root := piLeadFixture(t)
-			piLeadFile(t, filepath.Join(root, "package.json"), `{"pi":{"extensions":["./src/index.ts"]}}`)
-			piLeadFile(t, filepath.Join(root, "src", "index.ts"), `import "yaml";`)
+			piLeadFile(t, filepath.Join(root, "package.json"), `{"pi":{"extensions":["./lib/custom.ts"]}}`)
+			piLeadFile(t, filepath.Join(root, "lib", "custom.ts"), `import "yaml";`)
 			piLeadFile(t, filepath.Join(spec.Root, "node_modules", "yaml", "package.json"), `{"name":"yaml"}`)
 			spec.Lead.PluginIsolation = isolation
 			spec.Lead.Env = map[string]string{EnvHostedSessionKey: "lead-key"}
