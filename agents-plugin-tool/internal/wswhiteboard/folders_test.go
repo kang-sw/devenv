@@ -272,6 +272,17 @@ func TestFolderPanelNamesThroughV050Writer(t *testing.T) {
 			if !reflect.DeepEqual(entries(t, got, "Work")[:len(entries(t, before, "Work"))], entries(t, before, "Work")) {
 				t.Fatal("named update mutated historical entries")
 			}
+			// The reopened history shows every version at its write position,
+			// the old writer's id-only one bound to the panel name as well.
+			var versions []string
+			for _, e := range pageEntries(topicView(t, got, LayoutFull, "Work").Stream) {
+				if e.Kind == EntryPanel {
+					versions = append(versions, fmt.Sprintf("%s v%d/%d %s %v", e.Text, e.Version, e.Of, e.BoundName, e.Historical))
+				}
+			}
+			if want := []string{"Pending anchor v1/4 implementation true", "Complete anchor v2/4 implementation true", "Legacy id payload v3/4 implementation true", "New named payload v4/4 implementation false"}; !reflect.DeepEqual(versions, want) {
+				t.Fatalf("reopened versions\n got %q\nwant %q", versions, want)
+			}
 			// All refusal cases run against an already-open store as well.
 			tree := folderTree(t, dir)
 			historicalCall(t, binary, dir, "update", oldPatch, true)

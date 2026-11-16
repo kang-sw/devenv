@@ -13,20 +13,54 @@ const HistoryWindow = 50
 
 // EntryView is an immutable entry with display-only disclosure and clock data.
 // Ms is At in Unix milliseconds for the hover's relative time. Current marks
-// the topic's latest agent line, the current-state line. A latest panel
-// version carries its earlier versions, newest first, in Versions: they render
-// folded under it, not at their own chronological position.
+// the topic's latest agent line, the current-state line. Every panel version
+// renders at its own write position: Version counts from 1 in write order up
+// to Of, an earlier (Historical) version links to its panel's Newest version,
+// and each version to its Prior one. BoundName is the panel's topic-local
+// name, which legacy id-only reposts do not repeat.
 type EntryView struct {
 	Entry
-	Clock, Stamp string
-	Ms           int64
-	Open         bool
-	Historical   bool
-	Current      bool
-	Versions     []EntryView
+	Clock, Stamp  string
+	Ms            int64
+	Open          bool
+	Historical    bool
+	Current       bool
+	Version, Of   int
+	Newest, Prior VersionRef
+	BoundName     string
 	// Item is the current settled item projected at its recorded transition.
 	// It is display-only; Entry and durable item/event records stay unchanged.
 	Item *ItemView
+}
+
+// VersionRef names one panel version for a link: its entry ID, 1-based
+// version number and clock.
+type VersionRef struct {
+	ID, Clock string
+	Version   int
+}
+
+// Label is the version as its links show it: "v2 · 09:55", or "v2" when the
+// version has no recorded time.
+func (r VersionRef) Label() string {
+	if r.Clock == "" {
+		return fmt.Sprintf("v%d", r.Version)
+	}
+	return fmt.Sprintf("v%d · %s", r.Version, r.Clock)
+}
+
+// VersionLabel labels this panel version like VersionRef.Label.
+func (e EntryView) VersionLabel() string {
+	return VersionRef{ID: e.ID, Clock: e.Clock, Version: e.Version}.Label()
+}
+
+// panelEventPattern matches the system event every panel post appends. The
+// panel row itself shows that post, so the history leaves the event out; the
+// store and query keep it.
+var panelEventPattern = regexp.MustCompile(`^Panel \[p[1-9][0-9]*\]\(#p[1-9][0-9]*\) (?:added|re-posted): `)
+
+func panelEvent(e Entry) bool {
+	return e.Kind == EntrySystem && e.ItemID == 0 && panelEventPattern.MatchString(e.Text)
 }
 
 // OwnerAnswer includes actual owner input (a choice or a comment), never
@@ -34,19 +68,6 @@ type EntryView struct {
 func (e EntryView) OwnerAnswer() bool {
 	prefix := fmt.Sprintf("Item {{%d}} ", e.ItemID)
 	return e.Kind == EntrySystem && e.ItemID > 0 && (strings.HasPrefix(e.Text, prefix+"answered [") || strings.HasPrefix(e.Text, prefix+"user commented ["))
-}
-
-var panelImagePattern = regexp.MustCompile(`!\[[^\]]*\]\(|<img\b`)
-
-// ImageCount and LineCount are a panel payload's size hint on its title row.
-func (e EntryView) ImageCount() int { return len(panelImagePattern.FindAllStringIndex(e.Text, -1)) }
-
-func (e EntryView) LineCount() int {
-	text := strings.TrimRight(e.Text, "\n")
-	if text == "" {
-		return 0
-	}
-	return strings.Count(text, "\n") + 1
 }
 
 // EntryRun folds only adjacent system entries, never a panel or agent line.
@@ -109,12 +130,10 @@ func clockRange(entries []EntryView) string {
 	return first + "–" + last
 }
 
-// Segments lays the page out as one chronological stream: each latest panel
-// a card, the log lines between two panels one run, every line shown. An
-// owner answer is the owner's own line, so it stays a row of its own instead
-// of folding into a system chip. Earlier panel versions render inside their
-// latest card (EntryView.Versions), so their slots are skipped, and system
-// events on either side of such a slot join one chip.
+// Segments lays the page out as one chronological stream: each panel version
+// a card at its own write position, the log lines between two panels one
+// run, every line shown. An owner answer is the owner's own line, so it stays
+// a row of its own instead of folding into a system chip.
 func (p EntryPage) Segments() []StreamSegment {
 	var out []StreamSegment
 	var rows []StreamRow
@@ -143,9 +162,6 @@ func (p EntryPage) Segments() []StreamSegment {
 			flush()
 			out = append(out, StreamSegment{Rows: []StreamRow{{Entry: run.Entry}}})
 		case run.Entry.Kind == EntryPanel:
-			if run.Entry.Historical {
-				continue
-			}
 			flush()
 			out = append(out, StreamSegment{Panel: run.Entry})
 		default:
@@ -180,14 +196,31 @@ func (t TopicView) StreamLines() int {
 	return n
 }
 
+// PanelVersions counts the topic's panel versions across every history page.
+func (t TopicView) PanelVersions() int {
+	n := 0
+	for _, page := range append([]EntryPage{t.Stream}, t.Older...) {
+		for _, run := range page.Runs {
+			if len(run.Systems) == 0 && run.Entry.Kind == EntryPanel {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView) (latest []EntryView, stream EntryPage, older []EntryPage) {
 	if loc == nil {
 		loc = time.Local
 	}
-	last := map[string]int{}
+	last, counts, names := map[string]int{}, map[string]int{}, map[string]string{}
 	for i, e := range doc.Entries {
 		if e.Kind == EntryPanel {
 			last[e.PanelID] = i
+			counts[e.PanelID]++
+			if e.PanelName != "" {
+				names[e.PanelID] = e.PanelName
+			}
 		}
 	}
 	viewOf := func(e Entry) EntryView {
@@ -198,39 +231,42 @@ func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView)
 		return v
 	}
 	var all []EntryView
+	prior := map[string]VersionRef{}
 	for i, e := range doc.Entries {
+		if panelEvent(e) {
+			continue
+		}
 		v := viewOf(e)
 		if e.Kind == EntryPanel {
 			v.Historical = last[e.PanelID] != i
+			v.Of, v.BoundName, v.Prior = counts[e.PanelID], names[e.PanelID], prior[e.PanelID]
+			v.Version = v.Prior.Version + 1
+			prior[e.PanelID] = VersionRef{ID: e.ID, Clock: v.Clock, Version: v.Version}
 			if !v.Historical {
 				latest = append(latest, v)
 			}
 		}
 		all = append(all, v)
 	}
+	for i := range all {
+		if all[i].Kind == EntryPanel {
+			all[i].Newest = prior[all[i].PanelID]
+		}
+	}
 	// Distinct latest panel versions, not the last three panel records.
 	expanded := map[string]bool{}
 	for i := max(0, len(latest)-3); i < len(latest); i++ {
 		expanded[latest[i].ID] = !closed
 	}
-	versions := map[string][]EntryView{}
 	current := -1
 	for i := range all {
 		all[i].Open = expanded[all[i].ID]
-		if all[i].Historical {
-			versions[all[i].PanelID] = append([]EntryView{all[i]}, versions[all[i].PanelID]...)
-		}
 		if all[i].Kind == EntryAgent {
 			current = i
 		}
 	}
 	if current >= 0 {
 		all[current].Current = true
-	}
-	for i := range all {
-		if all[i].Kind == EntryPanel && !all[i].Historical {
-			all[i].Versions = versions[all[i].PanelID]
-		}
 	}
 	all = projectHistoryItems(all, items)
 	page := func(entries []EntryView) EntryPage {
