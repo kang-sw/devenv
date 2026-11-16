@@ -219,9 +219,9 @@ func TestTopicTicketIcon(t *testing.T) {
 		for _, r := range rows {
 			wantAll(t, page, `<span class="row `+r.group+`" data-ticket="`+r.stem+`" data-status="`+r.status+`">`, `title="`+r.stem+`">`+r.stem+`</span><span class="st">`+r.text+`</span>`)
 		}
-		fragments := []string{`data-topic="t"`, "Authored 261112-feat-live content", "Review 261112-feat-live item"}
+		fragments := []string{`data-topic="t"`, "Current content", "Review 261112-feat-live item"}
 		if body {
-			fragments = append(fragments, "Authored 261112-feat-live body")
+			fragments = append(fragments, "Authored 261112-feat-live body", "Authored 261112-feat-live content")
 		}
 		wantAll(t, page, fragments...)
 	}
@@ -295,8 +295,8 @@ func TestTopicTicketIcon(t *testing.T) {
 }
 
 // TestTopicHeadHoldsTheSummaryLine pins the sticky head: an open topic's
-// .tophead holds its bar, note, and a summary line with the latest agent
-// line and the check pill (done/total, as the closed fold's header reads), the check rows staying in flow
+// .tophead holds its bar, note, and a summary line with the latest log or
+// panel recap and the check pill (done/total, as the closed fold's header reads), the check rows staying in flow
 // after the head; a topic with no checks has no pill; a closed topic's head
 // has no summary line; and a legacy recap stays a card under the head.
 func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
@@ -325,6 +325,15 @@ func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
 	mustApply(t, plain, `<wb:topic name="p"><wb:log>only a line</wb:log></wb:topic>`)
 	if page := render(t, BuildView(plain, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Contains(page, `class="ckpill"`) || !strings.Contains(page, `<div class="tsub"><div class="trecap"`) {
 		t.Error("a topic with no checks: pill shown or agent line missing from the head")
+	}
+
+	panel := &State{}
+	mustApply(t, panel, `<wb:topic name="panel-only"><wb:panel recap="only a panel">body</wb:panel></wb:topic>`)
+	for _, layout := range layouts() {
+		page := render(t, BuildView(panel, ViewInput{Layout: layout, ReplyID: "r"}))
+		wantAll(t, page, `<div class="tsub"><div class="trecap" data-entry="e1" data-kind="panel"`,
+			`class="evi wb-evi-panel"`, `class="rtext md" title="only a panel">only a panel</div>`)
+		wantNone(t, page, `class="ckpill"`)
 	}
 
 	closed := &State{}

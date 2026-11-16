@@ -79,7 +79,7 @@ func claudeEnv(env []string) []string {
 // ws-mcp launcher state (project root, runtime binary, resource tree), and
 // its own hosted-session variables must not reach another session. The
 // user's state locations (WS_CACHE_HOME, WS_CONFIG_HOME) stay.
-var leadDropEnv = []string{"WS_MAILBOX", "WS_MCP_", "WS_RSRC", "WS_HOSTED_"}
+var leadDropEnv = []string{"WS_MAILBOX", "WS_MCP_", "WS_RSRC", "WS_SKILLS_ROOT", "WS_HOSTED_"}
 
 // claudeLeadEnv is a lead conversation's environment: env without the
 // parent harness session's CLAUDE* variables and leadDropEnv, plus the
@@ -96,8 +96,8 @@ func claudeLeadEnv(spec StartSpec) []string {
 
 // claudeLeadArgs is the command line of a lead conversation: print mode
 // with stream-json both ways, user/project settings, hooks, memory, and MCP
-// servers. Plugin overrides replace installed ws copies with the daemon's
-// bundle, or disable all other plugins in isolated mode. Tool permission
+// servers. Plugin overrides replace installed ws copies with the configured
+// hosted bundle, or disable all other plugins in isolated mode. Tool permission
 // prompts come to the daemon (--permission-prompt-tool stdio).
 func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	plugins, err := claudeLeadPluginArgs(spec)

@@ -171,6 +171,7 @@
       over = true;
       cleanup();
       try { ws.close(); } catch (x) {}
+      if (window.wsDashboardLoginProbe) window.wsDashboardLoginProbe();
       if (on.drop) on.drop();
     }
     ws.onopen = function () { if (!over) { visibility(); if (on.open) on.open(); } };

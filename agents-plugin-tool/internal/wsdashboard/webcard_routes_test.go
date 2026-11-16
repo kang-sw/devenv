@@ -31,7 +31,7 @@ func webFromLAN(t *testing.T, f *pageFixture, peer, method, path, body string) *
 	}
 	req.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: readLANToken(t, f.dir)})
 	rec := httptest.NewRecorder()
-	f.d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 	return rec
 }
 

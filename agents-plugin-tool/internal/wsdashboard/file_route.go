@@ -217,6 +217,10 @@ type fileViewPage struct {
 
 // handleFile serves the file view of one session.
 func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID string) {
+	if crossSiteFetch(r) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
 	if d.index == nil || !ValidReplyID(replyID) {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
@@ -235,6 +239,7 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 	defer f.Close()
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Referrer-Policy", "no-referrer")
 	if ctype, ok := imageType(rel); ok {

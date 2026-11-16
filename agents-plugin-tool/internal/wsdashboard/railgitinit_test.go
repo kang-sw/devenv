@@ -38,7 +38,7 @@ func gitInitFixture(t *testing.T) (*pageFixture, string) {
 
 func postGitInit(t *testing.T, f *pageFixture, path string) (int, string) {
 	t.Helper()
-	code, _, raw := postJSONWith(t, &http.Client{Timeout: 15 * time.Second}, f.base+workspaceGitInitRoute, f.base, pathBody(t, "path", path))
+	code, _, raw := postJSONWith(t, &http.Client{Timeout: 15 * time.Second, Transport: localhostTestHTTPTransport()}, f.base+workspaceGitInitRoute, f.base, pathBody(t, "path", path))
 	return code, raw
 }
 

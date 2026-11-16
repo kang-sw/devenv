@@ -111,21 +111,86 @@ func TestFSLocalOutsidePathsAndSymlinks(t *testing.T) {
 	}
 }
 
-func TestImageLocalInRootOpaqueFrameFallback(t *testing.T) {
+func TestImageLocalInRootRequiresLoginAndOwnOrigin(t *testing.T) {
 	o := startOutsideFixture(t)
-	data := strings.Repeat("x", imageDataMax+1)
+	const secret = "LARGE-LOCAL-SECRET"
+	data := secret + strings.Repeat("x", imageDataMax+1)
 	o.write(t, o.project, "large.png", data)
 	if src := ImageDataURL(o.project, "large.png"); src != "" {
 		t.Fatal("large image unexpectedly inlined")
 	}
-	req := httptest.NewRequest(http.MethodGet, "/s/livesession/image?path=large.png", nil)
-	req.RemoteAddr, req.Host = o.local.peer, o.local.host
-	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	req.Header.Set("Origin", "null")
-	rec := httptest.NewRecorder()
-	o.d.Handler().ServeHTTP(rec, req)
-	if rec.Code != 200 || rec.Body.Len() != len(data) || rec.Header().Get("Cross-Origin-Resource-Policy") != "" {
-		t.Errorf("opaque frame in-root fallback = %d, size %d, headers %v", rec.Code, rec.Body.Len(), rec.Header())
+	for _, c := range []struct {
+		site  string
+		login bool
+		want  int
+	}{
+		{"same-origin", false, http.StatusUnauthorized},
+		{"cross-site", false, http.StatusUnauthorized},
+		{"cross-site", true, http.StatusNotFound},
+		{"same-site", true, http.StatusNotFound},
+		{"same-origin", true, http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/s/livesession/image?path=large.png", nil)
+		req.RemoteAddr, req.Host = o.local.peer, o.local.host
+		req.Header.Set("Sec-Fetch-Site", c.site)
+		if c.site == "cross-site" {
+			req.Header.Set("Origin", "null")
+		}
+		if c.login {
+			addLocalhostTestCookie(t, o.d, req)
+		}
+		rec := httptest.NewRecorder()
+		o.d.Handler().ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("site=%s login=%v: status=%d, want %d", c.site, c.login, rec.Code, c.want)
+		}
+		if c.want == http.StatusOK {
+			if rec.Body.String() != data || rec.Header().Get("Cross-Origin-Resource-Policy") != "same-origin" {
+				t.Errorf("authenticated same-origin image: size=%d, headers=%v", rec.Body.Len(), rec.Header())
+			}
+		} else if strings.Contains(rec.Body.String(), secret) {
+			t.Errorf("site=%s login=%v leaked image bytes", c.site, c.login)
+		}
+	}
+}
+
+func TestFSLocalOutsideAndDeniedFilesRequireLogin(t *testing.T) {
+	o := startOutsideFixture(t)
+	const content = "LOCAL-FILE-CONTENT-MUST-NOT-LEAK"
+	for _, c := range []struct {
+		base    string
+		allowed bool
+	}{{o.away, true}, {filepath.Join(o.home, ".ssh"), false}} {
+		path := o.write(t, c.base, "secret.png", content)
+		body, err := json.Marshal(fsOutsideRequest{Path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes := []struct{ method, target, body string }{
+			{http.MethodGet, "/s/livesession/file?path=" + url.QueryEscape(path), ""},
+			{http.MethodGet, "/s/livesession/image?path=" + url.QueryEscape(path), ""},
+			{http.MethodGet, "/s/livesession/fs/preview?path=" + url.QueryEscape(path), ""},
+			{http.MethodGet, "/s/livesession/fs/raw?path=" + url.QueryEscape(path), ""},
+			{http.MethodGet, "/s/livesession/fs/list?root=" + url.QueryEscape(filepath.Dir(path)), ""},
+			{http.MethodPost, "/s/livesession/fs/outside", string(body)},
+		}
+		for _, route := range routes {
+			for _, login := range []bool{false, true} {
+				v := o.local
+				v.localCookie = login
+				r := serve(o.d, v, route.method, route.target, route.body)
+				want := http.StatusUnauthorized
+				if login {
+					want = http.StatusNotFound
+					if c.allowed {
+						want = http.StatusOK
+					}
+				}
+				if r.Code != want || (want != http.StatusOK && strings.Contains(r.Body.String(), content)) {
+					t.Errorf("%s login=%v: %d, want %d", route.target, login, r.Code, want)
+				}
+			}
+		}
 	}
 }
 

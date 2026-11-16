@@ -23,6 +23,8 @@ import (
 )
 
 func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	python := filepath.Join(t.TempDir(), "chosen python")
 	if goruntime.GOOS == "windows" {
 		python += ".exe"
@@ -43,9 +45,19 @@ func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
 			if err := os.WriteFile(launcher, nil, 0o644); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			manifestName := name
+			if name == "pi" {
+				manifestName = "ws"
+			}
+			if err := os.WriteFile(filepath.Join(plugin, ".claude-plugin", "plugin.json"), []byte(`{"name":"`+manifestName+`","version":"0.50.1"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			rsrc := filepath.Join(plugin, "rsrc")
 			t.Setenv(wsrsrc.EnvRsrcRoot, rsrc)
-			cmd, err := agentMCPCommand(root)
+			cmd, err := agentMCPCommand(root, "0.50.1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +84,7 @@ func TestAgentMCPCommandFailsWithoutALauncher(t *testing.T) {
 				}
 			}
 			t.Setenv(wsrsrc.EnvRsrcRoot, rsrc)
-			cmd, err := agentMCPCommand(t.TempDir())
+			cmd, err := agentMCPCommand(t.TempDir(), "0.50.1")
 			if err == nil || !strings.Contains(err.Error(), "cannot resolve ws-mcp launcher") || cmd.Command != "" {
 				t.Fatalf("must refuse, never fall back to the daemon executable: command=%+v, error=%v", cmd, err)
 			}
@@ -102,7 +114,7 @@ func TestAgentMCPHostedWorkerKeepsTokenForwarding(t *testing.T) {
 	defer runner.Close()
 	host := &proxyHost{agents: runner, logw: io.Discard}
 	session, err := host.Accept(wsdashboard.ProxyHello{
-		Mode: wsdashboard.ProxyModeMCP, Cwd: root, ProjectRoot: root, OwnerPID: os.Getpid(),
+		Mode: wsdashboard.ProxyModeMCP, Version: "0.50.1", Cwd: root, ProjectRoot: root, OwnerPID: os.Getpid(),
 		Env: map[string]string{
 			"WS_CACHE_HOME": cache, "WS_CONFIG_HOME": os.Getenv("WS_CONFIG_HOME"),
 			wsrsrc.EnvRsrcRoot: os.Getenv(wsrsrc.EnvRsrcRoot), "WS_MCP_NO_DASHBOARD": "1",

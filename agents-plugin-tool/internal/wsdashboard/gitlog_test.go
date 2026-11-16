@@ -397,7 +397,7 @@ func TestGitLogRoutes(t *testing.T) {
 	work := f.project
 	pushRepos(t, work, 0)
 	gitCommit(t, work, "b")
-	gitClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	gitClient := &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}
 	read := func(path string) (int, string) {
 		t.Helper()
 		resp, err := gitClient.Get(f.base + path)

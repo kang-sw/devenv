@@ -15,24 +15,20 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
-// LAN access. With LAN mode off the daemon binds loopback only and every
-// route passes the loopback Host guard (hostGuard). With it on the daemon
-// binds every interface and admits a request when either holds:
+// Browser access is deny-by-default in both modes. A local viewer needs the
+// persisted localhost credential; a non-local viewer in LAN mode needs the
+// separate LAN token. Neither credential grants access in the other branch.
+// Loopback mode also keeps hostGuard's DNS-rebinding defense. Machine routes
+// retain their own checks (accessExempt); auth routes check their own callers.
 //
-//   - its peer address and its Host header are both loopback: a browser on
-//     this machine, which keeps the token-free localhost URI of the pointer
-//     line working, and requiring a loopback Host as well still refuses a
-//     DNS-rebinding page;
-//   - it carries the LAN access token.
-//
-// Two routes need neither, both because a sandboxed frame's opaque origin
-// sends no cookie:
+// Sandboxed frames have opaque origins and send no cookie, so these read
+// routes use fixed assets or path capabilities instead:
 //
 //   - GET and HEAD of the shared mermaid script and the shared frame
 //     stylesheet and script (publicAsset), which a topic body's sandboxed
 //     frame loads. That frame also inlines its images as
-//     data: URLs (ImageDataURL, up to 2 MiB); a larger image falls back to
-//     the image route, which a LAN viewer's frame cannot load.
+//     data: URLs (ImageDataURL, up to 2 MiB); a larger image is relayed by
+//     the same-origin host page through the protected image route.
 //   - GET and HEAD of the HTML preview's capability route
 //     (previewCapability, fs_capability.go), which a preview card's
 //     sandboxed frame loads with its relative assets, and of the file
@@ -93,11 +89,26 @@ func (d *Daemon) lanToken() (string, error) {
 	return token, nil
 }
 
-// lanGuard is LAN mode's access guard (see the file comment).
-func (d *Daemon) lanGuard(next http.Handler) http.Handler {
+// accessGuard covers every mux route, including future additions.
+func (d *Daemon) accessGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if localViewer(r) || publicAsset(r) || previewCapability(r) {
+		if accessExempt(r) {
 			next.ServeHTTP(w, r)
+			return
+		}
+		if localViewer(r) {
+			if d.loginNavigation(w, r) {
+				return
+			}
+			if d.localhostAuthenticated(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			d.refuseLogin(w, r, false)
+			return
+		}
+		if !d.lan {
+			loginRequired(w)
 			return
 		}
 		token, err := d.lanToken()
@@ -164,7 +175,8 @@ func localViewer(r *http.Request) bool {
 // close, and tool approval): local reports a browser on this machine
 // (localViewer; a caller answers 404 without it, as if the route did not
 // exist), and sameOrigin that the request carries the daemon's own Origin
-// (a caller answers 403 without it). The LAN token alone never passes.
+// (a caller answers 403 without it). Browser routes additionally require the
+// localhost cookie at the outer access guard. The LAN token alone never passes.
 func TrustedWrite(r *http.Request) (local, own bool) {
 	return localViewer(r), sameOrigin(r)
 }

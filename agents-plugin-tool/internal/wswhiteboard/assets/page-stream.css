@@ -97,6 +97,7 @@
 .entry-line > .evi { align-self: flex-start; margin-top: 2px; }
 .evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
 .evi.owner { background: color-mix(in srgb, var(--wb-accent-policy) 22%, transparent); color: var(--wb-accent-policy); }
+.evi.wb-evi-panel { background: color-mix(in srgb, var(--wb-fg) 11%, transparent); color: var(--wb-muted-fg); }
 .evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
 .ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
 .entry-imported { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); }

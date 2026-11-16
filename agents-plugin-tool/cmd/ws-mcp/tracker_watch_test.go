@@ -26,10 +26,21 @@ func TestTrackerWatchBumpsTheDaemonRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
+	credential := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/auth/cookie", nil)
+	credential.RemoteAddr = "127.0.0.1:12345"
+	credential.Header.Set("Authorization", "Bearer "+d.Endpoint().Token)
+	credentials := httptest.NewRecorder()
+	d.Handler().ServeHTTP(credentials, credential)
+	var cookie struct{ Name, Value string }
+	if err := json.Unmarshal(credentials.Body.Bytes(), &cookie); err != nil || credentials.Code != http.StatusOK || cookie.Name == "" {
+		t.Fatalf("browser credential: %d %s (%v)", credentials.Code, credentials.Body, err)
+	}
 	rev := func() int64 {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/tracker/stores", nil)
 		req.Host = "127.0.0.1"
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.AddCookie(&http.Cookie{Name: cookie.Name, Value: cookie.Value})
 		rec := httptest.NewRecorder()
 		d.Handler().ServeHTTP(rec, req)
 		var body struct {

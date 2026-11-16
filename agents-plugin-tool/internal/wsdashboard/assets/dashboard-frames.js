@@ -315,16 +315,16 @@
     return /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i.test(path) ? href : "";
   }
   // relayImage answers a topic-body frame's image request: the frame's
-  // opaque origin cannot load an image outside the session root from the
-  // image route, which refuses it a cross-site request, so this page, same
-  // origin and served that image only for a loopback viewer, fetches it and
-  // posts the frame the bytes as a Blob. This is a security boundary between
+  // opaque origin cannot load the protected image route, so this same-origin
+  // page fetches images too large to inline and outside-root images (the
+  // latter served only for a loopback viewer), then posts their bytes as a
+  // Blob to the frame. This is a security boundary between
   // a body's scripts and this page's origin, and it stays narrow: only a
   // message from one of this page's own body frames (docFrame), only a URL
   // relayHref allows for that frame, only an answer that is an image, and
   // only back to the frame that asked. It is never a generic fetch relay. A
-  // failed fetch (a LAN viewer, a missing file) answers nothing, and the
-  // frame keeps the path text.
+  // failed fetch (a LAN viewer's outside-root image, a missing file) answers
+  // nothing, and the frame keeps the path text.
   function relayImage(f, m) {
     var href = relayHref(f.getAttribute("data-relay") || "", m.href), id = m.id;
     if (!href || typeof id !== "number" || !window.fetch) return;

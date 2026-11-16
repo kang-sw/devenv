@@ -31,6 +31,7 @@ func openWhiteboardStreamForTest(t *testing.T, daemon *wsdashboard.Daemon, reply
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.AddCookie(dashboardCookieForTest(t, daemon))
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
 	resp, err := client.Do(req)
 	if err != nil {

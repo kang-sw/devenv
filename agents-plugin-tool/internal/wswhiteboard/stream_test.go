@@ -49,8 +49,11 @@ func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 	st := streamFixture()
 	before := mustMarshal(t, st)
 	tv := topicView(t, st, LayoutFull, "t")
-	if tv.LatestAgent == nil || tv.LatestAgent.ID != "e5" || tv.Summary() != "agent state" {
-		t.Fatalf("summary replaced by non-agent entry: %+v", tv.LatestAgent)
+	if tv.LatestAgent == nil || tv.LatestAgent.ID != "e5" {
+		t.Fatalf("latest-log identity changed: %+v", tv.LatestAgent)
+	}
+	if tv.Head == nil || tv.Head.ID != "e9" || tv.Summary() != "recap e9" {
+		t.Fatalf("latest panel did not replace head summary: %+v", tv.Head)
 	}
 	if tv.Stream.Count != 10 || len(tv.Stream.Runs[0].Systems) != 2 || tv.Stream.Runs[1].Entry.ID != "e3" || len(tv.Stream.Runs[2].Systems) != 1 {
 		t.Fatalf("system folding swallowed/reordered a panel: %+v", tv.Stream)
@@ -91,8 +94,8 @@ func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 // Every panel post appends a version at its own write position. An earlier
 // version stays folded in place, links to the newest version and keeps its
 // exact eN link, while the latest keeps the pN target. Panel post events are
-// left out of the view but stay in the store; the header remains the latest
-// agent log line.
+// left out of the view but stay in the store; a later agent log replaces
+// the panel recap in the header.
 func TestPanelVersionsKeepWriteOrderAndLinks(t *testing.T) {
 	st := &State{}
 	at := func(minutes int, commands string) {
@@ -342,8 +345,8 @@ func TestStreamEmbedOnlyLatestLineAndPanelRecaps(t *testing.T) {
 	}
 	view := BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r", FullBoardLink: "file:///board/index.html"})
 	out := render(t, view)
-	wantAll(t, out, `data-entry="e5" data-kind="agent"`, "agent state", `href="file:///board/index.html">Open full board</a>`, `href="file:///board/index.html#p1"`, "recap e9")
-	wantNone(t, markup(out), "CURRENT-CONTENT-PAYLOAD", "PANEL-PAYLOAD", "first system", "last system", "recap e3", `class="wb-history"`, "srcdoc=", `class="doc-body`)
+	wantAll(t, out, `class="trecap" data-entry="e9" data-kind="panel"`, `class="evi wb-evi-panel"`, `href="file:///board/index.html">Open full board</a>`, `href="file:///board/index.html#p1"`, "recap e9")
+	wantNone(t, markup(out), "CURRENT-CONTENT-PAYLOAD", "PANEL-PAYLOAD", "first system", "last system", "agent state", "recap e3", `class="wb-history"`, "srcdoc=", `class="doc-body`)
 	if len(out) > (2<<20)*44/100 {
 		t.Fatalf("compact embed exceeds 44%% of the 2 MiB budget: %d bytes", len(out))
 	}

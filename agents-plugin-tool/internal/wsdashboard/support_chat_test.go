@@ -42,7 +42,7 @@ func TestCardEntryRendersTheItemReference(t *testing.T) {
 // named regions and nothing else, not even the mode pseudo-region.
 func TestStreamSendsOnlyTheRegionsItNames(t *testing.T) {
 	f := startPageFixture(t)
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?regions=entries,convlive")
 	if err != nil {
 		t.Fatal(err)

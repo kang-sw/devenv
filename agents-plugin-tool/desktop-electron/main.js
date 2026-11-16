@@ -3,6 +3,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { connectDaemon } = require('./daemon-controller');
+const { cacheRoot, inspect, browserCookie, browserLoginLink } = require('./endpoint');
+const LOGIN_COPIED = 'werkschaft:login-copied';
 const { pythonAvailable } = require('./python');
 const { nextZoom, destination } = require('./policy');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
@@ -28,7 +30,7 @@ function failStartup({ app, dialog }, error) {
   } finally { app.exit(1); }
 }
 
-function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
+function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session, clipboard }, platform = process.platform) {
   app.setName('Werkschaft');
   if (!app.requestSingleInstanceLock()) { app.quit(); return; }
   let window, pin = null, connecting = false, title = 'Werkschaft — Connecting…';
@@ -62,8 +64,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     app.on('will-quit', () => {
       try { updater.applyOnQuit(relaunch); } catch (error) { console.error(`Update apply at quit failed: ${error.message}`); }
     });
-    // The dashboard's only preload is the update bridge (dashboard-preload.js);
-    // its IPC is accepted from the pinned dashboard origin only. No permissions.
+    // The dashboard preload exposes update controls and a payload-free login
+    // copy notification. Renderer IPC is pinned to the dashboard main frame.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     const Window = platform === 'win32' ? BaseWindow : BrowserWindow;
@@ -244,6 +246,12 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (navigation === attempt) navigation = null;
       }
     }
+    async function observeConnection(url) {
+      const root = cacheRoot();
+      const observed = await inspect(root);
+      if (observed.url !== `${new URL(url).origin}/`) throw new Error('Dashboard connection changed; retry');
+      return { root, observed };
+    }
     async function connect(replace = false) {
       if (connecting || window.isDestroyed()) return;
       const attempt = beginNavigation();
@@ -280,6 +288,16 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           return;
         }
         if (!isCurrent(attempt)) return;
+        try {
+          const { root, observed } = await observeConnection(url);
+          const cookie = await browserCookie(root, observed);
+          if (!isCurrent(attempt)) return;
+          if (cookie) await session.defaultSession.cookies.set({
+            url: observed.url, name: cookie.name, value: cookie.value, path: '/',
+            httpOnly: true, sameSite: 'strict', expirationDate: Date.now() / 1000 + cookie.maxAge,
+          });
+        } catch { /* Missing auth route or any failure still navigates to the daemon's gate. */ }
+        if (!isCurrent(attempt)) return;
         pin = url;
         setTitle('Werkschaft');
         await navigate(url, attempt);
@@ -315,6 +333,23 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       zoom = nextZoom(zoom, step);
       wc.setZoomFactor(zoom);
     }
+    let copyingLogin = false;
+    async function copyBrowserLoginLink() {
+      if (!pin || connecting || copyingLogin || window.isDestroyed()) return;
+      copyingLogin = true;
+      const origin = pin;
+      try {
+        const { root, observed } = await observeConnection(origin);
+        const current = wc.mainFrame.url;
+        const target = destination(current, origin) === 'dashboard' ? new URL(current) : new URL(origin);
+        const url = await browserLoginLink(root, observed, target.pathname + target.search + target.hash);
+        if (pin !== origin || connecting || window.isDestroyed() || wc.isDestroyed()) return;
+        clipboard.writeText(url);
+        // Neither the link nor any credential crosses the preload bridge.
+        if (destination(wc.mainFrame.url, pin) === 'dashboard') wc.send(LOGIN_COPIED);
+      } catch { /* Leave the clipboard untouched when minting fails. */ }
+      finally { copyingLogin = false; }
+    }
     const menu = [
       { role: 'appMenu' },
       { label: 'File', submenu: [{ role: 'close' }] },
@@ -332,6 +367,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       { label: 'Connection', submenu: [
         { id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: () => connect() },
         { id: 'replace_daemon', label: 'Replace daemon (same core)', click: () => connect(true) },
+        { type: 'separator' },
+        { id: 'copy_browser_login', label: 'Copy Browser Login Link to Clipboard', click: copyBrowserLoginLink },
       ] },
     ];
     applicationMenu = Menu.buildFromTemplate(menu);

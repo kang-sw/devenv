@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="{{.Lang}}"{{with .Theme}} data-theme="{{.}}"{{end}} data-login-gate>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{t "login.title"}} · Werkschaft</title><style>{{.CSS}}</style></head>
+<body><div class="lg-page"><main class="lg-card">
+<div class="lg-brand" aria-label="Werkschaft">{{.Logo}}</div>
+<div id="lg-form">
+<div class="lg-hd"><h1>{{t "login.title"}}</h1><p>{{t "login.subtitle"}}</p></div>
+{{if .Clipboard}}<div id="lg-native"><button class="lg-copy" id="lg-copy" type="button" autofocus><svg class="i" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M16 4h2a2 2 0 0 1 2 2v4M21 14H11m4-4-4 4 4 4"/></svg>{{t "login.native.copy"}}</button><p class="lg-sub" id="lg-sub">{{t "login.native.sub"}}</p><p class="lg-msg note" id="lg-native-msg" role="status" hidden><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><span id="lg-native-message"></span></p></div>
+<div class="lg-or" id="lg-or">{{t "login.or"}}</div>{{else}}<p class="lg-msg note">{{t "login.native.unavailable"}}</p>{{end}}
+<div class="lg-hint go" id="lg-hint" role="status" hidden><span class="lg-copied"><svg class="i" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>{{t "login.native.copied"}}</span><span class="lg-do">{{t "login.native.now"}}</span><kbd id="lg-mod">Ctrl</kbd><span class="lg-plus">+</span><kbd>V</kbd>{{if .Clipboard}}<button class="lg-again" id="lg-again" type="button">{{t "login.native.again"}}</button>{{end}}</div>
+<form class="lg-row" id="lg-row"><input class="lg-in{{if .Invalid}} bad{{end}}" id="lg-input" placeholder="{{t "login.placeholder"}}" aria-label="{{t "login.input"}}" autocomplete="off" spellcheck="false"{{if not .Clipboard}} autofocus{{end}}><button class="lg-go" id="lg-go" disabled>{{t "login.confirm"}}</button></form>
+<p class="lg-msg {{if .RateLimited}}warn{{else}}bad{{end}}" id="lg-msg" role="alert"{{if not (or .Invalid .RateLimited)}} hidden{{end}}><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><span id="lg-message">{{if .RateLimited}}{{t "login.rate"}}{{else if .Invalid}}{{if .Clipboard}}{{t "login.invalid"}}{{else}}{{t "login.invalid.external"}}{{end}}{{end}}</span></p>
+<button class="btn lg-clip" id="lg-clip" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M11 14h10M16 4h2a2 2 0 0 1 2 2v1.344m-3 10.656 4-4-4-4M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 1.793-1.113"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>{{t "login.clipboard"}}</button>
+<p class="lg-where">{{loginSources}}</p>
+</div>
+<div class="lg-done" id="lg-done" role="status" hidden><span class="lg-ok"><svg class="i" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg></span><b>{{t "login.connected"}}</b><span>{{t "login.continuing"}}</span><span class="lg-bar"></span></div>
+</main></div>
+<script>window.wsLogin = {next: {{.Next}}, invalid: {{.Invalid}}, checking: {{t "login.checking"}}, invalidText: {{if .Clipboard}}{{t "login.invalid"}}{{else}}{{t "login.invalid.external"}}{{end}}, rate: {{t "login.rate"}}, clipfail: {{t "login.clipfail"}}, unavailable: {{t "login.native.unavailable"}}};</script><script>{{.Script}}</script></body></html>

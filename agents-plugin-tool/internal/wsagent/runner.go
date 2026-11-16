@@ -108,6 +108,8 @@ var mailboxIdentityEnv = []string{"WS_MAILBOX", "WS_MAILBOX_AUTO"}
 
 // Options configures a Runner.
 type Options struct {
+	// DaemonVersion bounds hosted package registry roots to this daemon's minor.
+	DaemonVersion string
 	// Dir is the dashboard daemon's state directory; conversations live in
 	// its session registry (wsdashboard.SessionDir).
 	Dir      string
@@ -1270,8 +1272,8 @@ func closedState(rec Record) State {
 	if rec.Lead {
 		st.Lifecycle = wsdashboard.SessionPendingDeletion
 		st.PluginIsolation = leadPluginIsolation(rec.PluginIsolation)
-		st.PluginWarning = rec.PluginWarning
 	}
+	st.PluginWarning = rec.PluginWarning
 	if rec.Parent != nil {
 		parent := *rec.Parent
 		st.Parent = &parent
@@ -2264,6 +2266,10 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		if err != nil {
 			return fmt.Errorf("ws-mcp command: %w", err)
 		}
+		c.update(func(rec *Record) { rec.PluginWarning = cmd.PluginWarning })
+		if cmd.PluginWarning != "" {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, cmd.PluginWarning)
+		}
 		env := map[string]string{}
 		for k, v := range cmd.Env {
 			env[k] = v
@@ -2402,13 +2408,15 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		Env:         environ(),
 		Holder:      holder,
 		Lead: &LeadSpec{
+			DaemonVersion:   c.r.opts.DaemonVersion,
 			PermissionMode:  rec.PermissionMode,
 			PluginIsolation: leadPluginIsolation(rec.PluginIsolation),
 			PluginWarning: func(warning string) {
 				c.update(func(rec *Record) { rec.PluginWarning = warning })
 				if warning != "" {
 					fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, warning)
-					c.setStatus(func() { c.lastErr = warning })
+					// A usable package fallback is a persisted warning, not a
+					// process/recovery error. Real launch errors use lastErr.
 					c.changed(false)
 				}
 			},

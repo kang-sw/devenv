@@ -70,6 +70,8 @@ type StartSpec struct {
 
 // LeadSpec is what a lead conversation's process starts with.
 type LeadSpec struct {
+	// DaemonVersion is the running daemon's version, not the plugin starter's.
+	DaemonVersion string
 	// PermissionMode is the permission mode to launch in (claude).
 	PermissionMode string
 	// PluginIsolation is default (replace ws only) or isolated (bundled only).
@@ -85,9 +87,11 @@ type LeadSpec struct {
 
 // MCPCommand is a stdio MCP server's launch command.
 type MCPCommand struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	// PluginWarning is a runtime-only package fallback notice for this launch.
+	PluginWarning string            `json:"-"`
+	Command       string            `json:"command"`
+	Args          []string          `json:"args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
 }
 
 // Process is one running backend process. Its methods are safe to call from

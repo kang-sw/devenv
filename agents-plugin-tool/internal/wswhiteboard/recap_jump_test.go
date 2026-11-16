@@ -10,8 +10,7 @@ import (
 // summarizes: on the full page an agent recap's clock chip is a keyboard
 // button and the recap's data-entry is the stream's current agent row. The
 // recap itself is not a button, since its text may hold links. The chat
-// embed has no log rows, and a topic without an agent line has nothing to
-// jump to.
+// embed has no history rows; panels use the same exact-version jump.
 func TestRecapJumpButtonNamesItsLogRow(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="open"><wb:log>old</wb:log><wb:log>latest [see](https://example.com)</wb:log></wb:topic>`+
@@ -43,12 +42,27 @@ func TestRecapJumpButtonNamesItsLogRow(t *testing.T) {
 		`.trecap > .rat[role="button"]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px;`)
 }
 
+// A panel recap jumps to its immutable eN version, not just its stable pN.
+func TestPanelRecapJumpNamesExactVersion(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="panel-only"><wb:panel name="plan" recap="Draft">draft</wb:panel><wb:panel name="plan" recap="Final [see](https://example.com)">final</wb:panel></wb:topic>`)
+	head := st.Topics[0].LatestSummary()
+	if head == nil || head.Kind != EntryPanel || head.ID == "e1" {
+		t.Fatalf("head is not the latest panel version: %+v", head)
+	}
+	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, full, `class="trecap" data-entry="`+head.ID+`" data-kind="panel"><span class="rat" role="button" tabindex="0"`,
+		`class="evi wb-evi-panel" title="Panels">P</span>`,
+		`class="wb-entry panel" id="`+head.ID+`" data-history-anchor="`+head.ID+`" data-entry="`+head.ID+`" data-kind="panel" data-panel="p1"`,
+		`class="rtext md" title="Final [see](https://example.com)">Final <a href="https://example.com"`)
+	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
+	wantAll(t, embed, `class="trecap" data-entry="`+head.ID+`" data-kind="panel"><span class="rat" title=`)
+	wantNone(t, embed, `class="rat" role="button"`)
+}
+
 // TestRecapJumpScriptUnderNode drives the recap-jump block of stream.js
-// against a fake page: the chip's click or Enter/Space loads its row through
-// wbHistory.loadTarget at once; a plain text click does so once the
-// double-click interval passes, and a real double-click (down, click 1,
-// down, click 2) never does. Links, drags, selections, and modified clicks
-// keep their own behavior, and the loader's flash is the only highlight.
+// against a fake page: click or Enter/Space loads the row through wbHistory.
+// Links, drags, selections and double-clicks keep their existing behavior.
 func TestRecapJumpScriptUnderNode(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

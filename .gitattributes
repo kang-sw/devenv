@@ -23,3 +23,5 @@ agents-plugin*/native-pi/first-party-manifest.json linguist-generated=true
 /agents-plugin/bin/ws-mcp-launcher.py -ws-size-guard
 /agents-plugin-pi/bin/ws-mcp-launcher.py -ws-size-guard
 /agents-plugin-wsflow/bin/ws-mcp-launcher.py -ws-size-guard
+# Owner (1223)=a 2026-11-16: the rail script grew past 1000 lines; raise its own soft limit.
+/agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail.js ws-size-guard=1300

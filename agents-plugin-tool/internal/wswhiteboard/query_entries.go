@@ -393,6 +393,13 @@ func makeQueryTopic(state *State, name string, items []Item, body bool, view Top
 		if agent, ok := doc.LatestAgent(); ok {
 			t.LatestAgent = &agent
 		}
+		if summary := doc.LatestSummary(); summary != nil {
+			entry := *summary
+			if entry.Kind == EntryPanel {
+				entry.Text = ""
+			}
+			t.LatestSummary = &entry
+		}
 	}
 	if !latest.IsZero() {
 		t.LastChange = latest.UTC().Format(time.RFC3339Nano)
@@ -413,7 +420,7 @@ func writeQueryCurrent(sb *strings.Builder, e *Entry) {
 		if e.Imported {
 			provenance = " [imported]"
 		}
-		line := fmt.Sprintf("current %s%s %s: %s", e.ID, provenance, queryAt(e.At), e.Text)
+		line := fmt.Sprintf("current %s%s %s: %s", e.ID, provenance, queryAt(e.At), e.Summary())
 		sb.WriteString(strings.ReplaceAll(line, "\n", "\n  ") + "\n")
 	}
 }
@@ -437,7 +444,7 @@ func formatEntryQuery(r QueryResult) string {
 	for _, topic := range r.Topics {
 		sb.WriteString(topicLine(topic) + "\n")
 		writeQueryState(&sb, topic)
-		writeQueryCurrent(&sb, topic.LatestAgent)
+		writeQueryCurrent(&sb, topic.LatestSummary)
 		for _, e := range topic.Entries {
 			kind, text := e.Kind, e.Text
 			if e.Kind == EntryPanel {

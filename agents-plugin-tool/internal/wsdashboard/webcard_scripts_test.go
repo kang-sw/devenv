@@ -76,7 +76,7 @@ process.stdout.write(bad.join("\n"));
 func TestWebCardScriptRidesOnlyALocalViewersPage(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	const kind = "window.WsWeb = {"
 	page := serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String()

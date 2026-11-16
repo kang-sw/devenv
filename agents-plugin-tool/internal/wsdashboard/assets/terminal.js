@@ -208,7 +208,10 @@
     ws.onclose = function () {
       if (s.ws !== ws) return;
       s.ws = null;
-      if (!s.gone) retry(c);
+      if (!s.gone) {
+        if (window.wsDashboardLoginProbe) window.wsDashboardLoginProbe();
+        retry(c);
+      }
     };
   }
   // retry connects again after a delay that grows with each failure; a

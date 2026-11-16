@@ -90,7 +90,7 @@ print(json.dumps(module.reader_fixture(pathlib.Path(sys.argv[2]), sys.argv[3])))
 			for key, value := range fixture.StartEnv {
 				t.Setenv(key, value)
 			}
-			root, err := bundledPluginRoot()
+			root, err := bundledPluginRoot(hostedPluginTestVersion)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +118,7 @@ print(json.dumps(module.reader_fixture(pathlib.Path(sys.argv[2]), sys.argv[3])))
 					t.Fatalf("wrong owning Claude assets/defaults: %s", name)
 				}
 			}
-			entries, err := piBundledEntries()
+			entries, err := piBundledEntries(hostedPluginTestVersion)
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("old Pi reader must return a real entry, not the MCP bridge: %v, %v", entries, err)
 			}

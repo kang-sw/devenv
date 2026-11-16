@@ -42,7 +42,7 @@ func TestFSMediaPreviewAndRange(t *testing.T) {
 				}
 				req.Header.Set("Range", "bytes=10-19")
 				rec := httptest.NewRecorder()
-				f.d.Handler().ServeHTTP(rec, req)
+				localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 				if rec.Code != http.StatusPartialContent || rec.Header().Get("Content-Type") != tt.ctype ||
 					rec.Header().Get("Content-Range") != "bytes 10-19/500" || rec.Body.String() != body[10:20] ||
 					rec.Header().Get("X-Content-Type-Options") != "nosniff" || rec.Header().Get("Content-Security-Policy") != imageContentSecurityPolicy {

@@ -67,6 +67,33 @@ func (d TopicDoc) LatestAgent() (Entry, bool) {
 	return Entry{}, false
 }
 
+// LatestSummary returns the newest agent log or panel version for display.
+// Timestamps decide recency; equal timestamps use the larger durable eN ID.
+// System events never replace the head, and LatestAgent stays log-only.
+func (d TopicDoc) LatestSummary() *Entry {
+	var latest *Entry
+	var latestAt time.Time
+	for i := range d.Entries {
+		e := &d.Entries[i]
+		if e.Kind != EntryAgent && e.Kind != EntryPanel {
+			continue
+		}
+		at, _ := time.Parse(time.RFC3339Nano, e.At)
+		if latest == nil || at.After(latestAt) || (at.Equal(latestAt) && folderNumber(e.ID, "e") > folderNumber(latest.ID, "e")) {
+			latest, latestAt = e, at
+		}
+	}
+	return latest
+}
+
+// Summary is the display text of a log or panel, never a panel's payload.
+func (e Entry) Summary() string {
+	if e.Kind == EntryPanel {
+		return e.Recap
+	}
+	return e.Text
+}
+
 // LatestAgent returns topic's latest agent log entry, if any.
 func (s *State) LatestAgent(topic string) (Entry, bool) {
 	if s != nil {

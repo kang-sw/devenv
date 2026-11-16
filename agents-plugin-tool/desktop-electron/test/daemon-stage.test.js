@@ -87,7 +87,7 @@ test('builder accepts only a supplied validated input and copies entire package 
     assert.equal(typeof require(path.join(dir, 'daemon-controller.js')).connectDaemon, 'function');
     return [dir];
   };
-  const run = (_tar, args) => { archived++; fs.writeFileSync(args[args.indexOf('-f') + 1], 'archive fixture'); };
+  const run = (_tar, args) => { archived++; fs.writeFileSync(args.find(arg => arg.endsWith('.zip')), 'archive fixture'); };
   const options = { platform: 'win32', arch: 'x64', daemonInput: f.bundled.root, cache, packageApp, out, run };
   await assert.rejects(build({ ...options, daemonInput: undefined }), /preassembled daemonInput/);
   fs.rmSync(f.bundled.pluginFile);

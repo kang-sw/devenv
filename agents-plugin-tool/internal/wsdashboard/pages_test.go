@@ -520,7 +520,7 @@ func TestUnknownPagesAreNotFound(t *testing.T) {
 		t.Errorf("unreadable page = %d, want 404", code)
 	}
 	// The page has one URL, since it loads its assets by relative path.
-	noFollow := &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{Proxy: nil},
+	noFollow := &http.Client{Timeout: 500 * time.Millisecond, Transport: localhostTestHTTPTransport(),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if resp, err := noFollow.Get(f.base + "/s/livesession/"); err != nil {
 		t.Fatal(err)
@@ -733,7 +733,7 @@ func TestStreamSendsOnlyChangedRegions(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/boardsession?frame=1")
 	modeHash := newRegion(modeBoard).Hash
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/boardsession/events?frame=1&h=" + heldOf(page) + ",mode." + modeHash)
 	if err != nil {
 		t.Fatal(err)
@@ -783,7 +783,7 @@ func TestStreamSendsOnlyChangedRegions(t *testing.T) {
 func TestStreamSendsTheModeWhenTheAdapterAppears(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/boardsession?frame=1")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/boardsession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeBoard).Hash)
 	if err != nil {
 		t.Fatal(err)

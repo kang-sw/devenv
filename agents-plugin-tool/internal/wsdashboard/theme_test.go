@@ -114,7 +114,7 @@ func TestTopicFramesCarryThePinnedTheme(t *testing.T) {
 		if c.cookie != "" {
 			req.AddCookie(&http.Cookie{Name: themeCookie, Value: c.cookie})
 		}
-		resp, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(req)
+		resp, err := (&http.Client{Transport: localhostTestHTTPTransport()}).Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}

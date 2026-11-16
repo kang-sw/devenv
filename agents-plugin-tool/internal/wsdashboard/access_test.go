@@ -40,11 +40,12 @@ func readLANToken(t *testing.T, dir string) string {
 // viewer is how a request reaches the daemon: its peer address, its Host
 // header, and the credential it carries.
 type viewer struct {
-	name   string
-	peer   string
-	host   string
-	query  string // the token query parameter, when set
-	cookie string // the token cookie, when set
+	name        string
+	peer        string
+	host        string
+	query       string // the token query parameter, when set
+	cookie      string // the LAN token cookie, when set
+	localCookie bool   // carry the real localhost credential
 }
 
 // serve runs one request through the daemon's handler as v and returns the
@@ -67,6 +68,13 @@ func serve(d *Daemon, v viewer, method, target, body string) *httptest.ResponseR
 	}
 	if v.cookie != "" {
 		req.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: v.cookie})
+	}
+	if v.localCookie {
+		value, err := d.localhostCookieValue()
+		if err != nil {
+			panic(err)
+		}
+		req.AddCookie(&http.Cookie{Name: localhostCookieName, Value: value})
 	}
 	ctx, cancel := context.WithCancel(req.Context())
 	cancel()
@@ -223,7 +231,7 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 }
 
 // TestLANModeGuardsEveryRoute pins the LAN access rule on every route: a
-// loopback peer that addressed a loopback Host passes with no token; a
+// loopback peer that addressed a loopback Host passes with its localhost cookie; a
 // loopback peer with a foreign Host, and a foreign peer with a loopback
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
@@ -245,8 +253,8 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 	port := strconv.Itoa(f.d.Endpoint().Port)
 	lanHost := "192.168.7.20:" + port
 	pass := []viewer{
-		{name: "loopback peer and Host", peer: "127.0.0.1:50000", host: "127.0.0.1:" + port},
-		{name: "loopback peer and localhost Host", peer: "[::1]:50000", host: "localhost:" + port},
+		{name: "loopback peer and Host", peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true},
+		{name: "loopback peer and localhost Host", peer: "[::1]:50000", host: "localhost:" + port, localCookie: true},
 		{name: "foreign peer with the token query", peer: "192.168.7.30:50000", host: lanHost, query: token},
 		{name: "foreign peer with the token cookie", peer: "192.168.7.30:50000", host: lanHost, cookie: token},
 		{name: "loopback peer, foreign Host, token cookie", peer: "127.0.0.1:50000", host: lanHost, cookie: token},
@@ -270,6 +278,26 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 		}
 		for _, v := range refuse {
 			rec := serve(f.d, v, route.method, route.path, route.body)
+			assertNoCORS(t, rec.Header())
+			// Machine routes now bypass the browser gate in both modes,
+			// retaining their own route-level checks.
+			switch route.path {
+			case "/health":
+				if rec.Code != http.StatusOK {
+					t.Errorf("machine health as %s = %d, want 200", v.name, rec.Code)
+				}
+				continue
+			case "/shutdown":
+				if rec.Code != http.StatusUnauthorized {
+					t.Errorf("machine shutdown without bearer as %s = %d, want 401", v.name, rec.Code)
+				}
+				continue
+			case "/nudge":
+				if refusedByGuard(rec) || rec.Code != http.StatusNotFound {
+					t.Errorf("machine nudge as %s = %d, want unknown-session 404", v.name, rec.Code)
+				}
+				continue
+			}
 			if !refusedByGuard(rec) {
 				t.Errorf("%s %s as %s = %d (%s), want the guard's 401", route.method, route.path, v.name, rec.Code, strings.TrimSpace(rec.Body.String()))
 			}
@@ -281,11 +309,11 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 	}
 	// The token query sets the cookie; a request passing by the cookie or
 	// by loopback sets none.
-	if c := serve(f.d, pass[2], http.MethodGet, "/health", "").Result().Cookies(); len(c) != 1 || c[0].Name != lanTokenCookie || c[0].Value != token || !c[0].HttpOnly || c[0].Path != "/" || c[0].MaxAge <= 0 {
+	if c := serve(f.d, pass[2], http.MethodGet, "/s/livesession", "").Result().Cookies(); len(c) != 1 || c[0].Name != lanTokenCookie || c[0].Value != token || !c[0].HttpOnly || c[0].Path != "/" || c[0].MaxAge <= 0 {
 		t.Fatalf("cookie from the token query = %+v", c)
 	}
 	for _, v := range []viewer{pass[0], pass[3]} {
-		if c := serve(f.d, v, http.MethodGet, "/health", "").Result().Cookies(); len(c) != 0 {
+		if c := serve(f.d, v, http.MethodGet, "/s/livesession", "").Result().Cookies(); len(c) != 0 {
 			t.Errorf("%s set cookies %+v", v.name, c)
 		}
 	}
@@ -303,7 +331,7 @@ func TestPprofRoutesAreOptInAndLoopbackOnly(t *testing.T) {
 	off := startPageFixture(t, lanMode)
 	offPort := strconv.Itoa(off.d.Endpoint().Port)
 	for _, path := range paths {
-		if rec := serve(off.d, viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + offPort}, http.MethodGet, path, ""); rec.Code != http.StatusNotFound {
+		if rec := serve(off.d, viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + offPort, localCookie: true}, http.MethodGet, path, ""); rec.Code != http.StatusNotFound {
 			t.Errorf("pprof off: GET %s from loopback = %d, want 404", path, rec.Code)
 		}
 	}
@@ -313,8 +341,8 @@ func TestPprofRoutesAreOptInAndLoopbackOnly(t *testing.T) {
 	port := strconv.Itoa(on.d.Endpoint().Port)
 	lanHost := "192.168.7.20:" + port
 	local := []viewer{
-		{name: "loopback peer and Host", peer: "127.0.0.1:50000", host: "127.0.0.1:" + port},
-		{name: "loopback peer and localhost Host", peer: "[::1]:50000", host: "localhost:" + port},
+		{name: "loopback peer and Host", peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true},
+		{name: "loopback peer and localhost Host", peer: "[::1]:50000", host: "localhost:" + port, localCookie: true},
 	}
 	tokened := []viewer{
 		{name: "foreign peer with the token query", peer: "192.168.7.30:50000", host: lanHost, query: token},
@@ -394,7 +422,7 @@ func TestLANTokenSurvivesARestartAndRotatesWhenDeleted(t *testing.T) {
 	}
 	first := start()
 	token := readLANToken(t, dir)
-	if rec := serve(first, lan(token), http.MethodGet, "/health", ""); rec.Code != http.StatusOK {
+	if rec := serve(first, lan(token), http.MethodGet, "/", ""); rec.Code != http.StatusOK {
 		t.Fatalf("token before restart = %d", rec.Code)
 	}
 	first.Close()
@@ -403,21 +431,21 @@ func TestLANTokenSurvivesARestartAndRotatesWhenDeleted(t *testing.T) {
 	if again := readLANToken(t, dir); again != token {
 		t.Fatalf("token after restart = %q, want %q", again, token)
 	}
-	if rec := serve(second, lan(token), http.MethodGet, "/health", ""); rec.Code != http.StatusOK {
+	if rec := serve(second, lan(token), http.MethodGet, "/", ""); rec.Code != http.StatusOK {
 		t.Fatalf("token after restart = %d", rec.Code)
 	}
 
 	if err := os.Remove(filepath.Join(dir, LANTokenFileName)); err != nil {
 		t.Fatal(err)
 	}
-	if rec := serve(second, lan(token), http.MethodGet, "/health", ""); !refusedByGuard(rec) {
+	if rec := serve(second, lan(token), http.MethodGet, "/", ""); !refusedByGuard(rec) {
 		t.Fatalf("old token after deleting the file = %d", rec.Code)
 	}
 	rotated := readLANToken(t, dir)
 	if rotated == token {
 		t.Fatal("deleting the token file kept the token")
 	}
-	if rec := serve(second, lan(rotated), http.MethodGet, "/health", ""); rec.Code != http.StatusOK {
+	if rec := serve(second, lan(rotated), http.MethodGet, "/", ""); rec.Code != http.StatusOK {
 		t.Fatalf("new token = %d", rec.Code)
 	}
 }
@@ -429,7 +457,7 @@ func TestSettingsShowsTheLANTokenToALocalViewerOnly(t *testing.T) {
 	token := readLANToken(t, f.dir)
 	port := strconv.Itoa(f.d.Endpoint().Port)
 	for _, path := range []string{"/", "/s/livesession", "/s/boardsession"} {
-		local := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, path, "")
+		local := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port, localCookie: true}, http.MethodGet, path, "")
 		body := local.Body.String()
 		if local.Code != http.StatusOK || !strings.Contains(body, `class="lanbox"`) || !strings.Contains(body, ":"+port+"/?token="+token) {
 			t.Fatalf("local Settings at %s (%d) lacks the token address", path, local.Code)
@@ -444,7 +472,7 @@ func TestSettingsShowsTheLANTokenToALocalViewerOnly(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"/?frame=1", "/s/livesession?frame=1", "/events", railEventsRoute, "/s/livesession/events", "/s/livesession/events?frame=1"} {
-		if rec := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, path, ""); strings.Contains(rec.Body.String(), token) {
+		if rec := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port, localCookie: true}, http.MethodGet, path, ""); strings.Contains(rec.Body.String(), token) {
 			t.Errorf("%s carries the token", path)
 		}
 	}

@@ -38,6 +38,8 @@ func runTestMain(m *testing.M) int {
 	}
 	defer os.RemoveAll(configHome)
 	_ = os.Setenv("WS_CONFIG_HOME", configHome)
+	// Hosted package lookup must not consult the developer's daemon registry.
+	_ = os.Setenv("WS_CACHE_HOME", filepath.Join(configHome, "cache"))
 	return m.Run()
 }
 

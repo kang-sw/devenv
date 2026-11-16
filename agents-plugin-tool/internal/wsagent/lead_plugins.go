@@ -9,11 +9,15 @@ import (
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
-// bundledPluginRoot uses the daemon's package, never the session's project or
-// an installed marketplace copy. It resolves only through the resource root
-// (WS_RSRC_ROOT or the executable-derived bundle); a source build gets its
-// package from the launcher environment, never from a source-tree path.
-func bundledPluginRoot() (string, error) {
+// bundledPluginRoot resolves the configured hosted package, never the session's
+// project or an inferred marketplace path. Runtime evidence supplies all roots.
+func bundledPluginRoot(daemonVersion string) (string, error) {
+	root, _, err := ResolveHostedPlugin(daemonVersion)
+	return root, err
+}
+
+// daemonPluginRoot resolves the starter's own bundle, the single-package fallback.
+func daemonPluginRoot() (string, error) {
 	rsrc, err := wsrsrc.ResolveRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve bundled plugin: %w", err)
@@ -34,19 +38,32 @@ func bundledPluginRoot() (string, error) {
 }
 
 func validateBundledPlugin(root string) error {
+	_, err := bundledPluginName(root)
+	return err
+}
+
+func bundledPluginName(root string) (string, error) {
+	manifest, err := readBundledPluginManifest(root)
+	return manifest.Name, err
+}
+
+type bundledPluginManifest struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+func readBundledPluginManifest(root string) (bundledPluginManifest, error) {
+	var manifest bundledPluginManifest
 	path := filepath.Join(root, ".claude-plugin", "plugin.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
-	}
-	var manifest struct {
-		Name string `json:"name"`
+		return manifest, fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
 	}
 	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
+		return manifest, fmt.Errorf("read bundled plugin manifest %s: %w", path, err)
 	}
 	if manifest.Name != "ws" && manifest.Name != "wsflow" {
-		return fmt.Errorf("bundled plugin manifest %s has unsupported name %q", path, manifest.Name)
+		return manifest, fmt.Errorf("bundled plugin manifest %s has unsupported name %q", path, manifest.Name)
 	}
-	return nil
+	return manifest, nil
 }

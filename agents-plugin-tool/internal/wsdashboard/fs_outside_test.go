@@ -194,7 +194,7 @@ func TestFSOutsideMintsForLocalViewerWithoutProvenance(t *testing.T) {
 			req.Header.Set("Origin", origin)
 		}
 		rec := httptest.NewRecorder()
-		o.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, o.d).ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "TEXT-BOARD") {
 			t.Errorf("mint with Origin %q = %d, want 403", origin, rec.Code)
 		}

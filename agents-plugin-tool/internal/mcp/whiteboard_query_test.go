@@ -90,8 +90,10 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 				t.Fatal("committed state did not render")
 			}
 			revive := toolText(t, f.call(t, "workflow_state", map[string]any{}))
-			if !strings.Contains(revive, "### Whiteboard topics\n- "+topic+": current agent line\n") || strings.Contains(revive, "Whiteboard recaps") || strings.Contains(revive, "full repost") {
-				t.Fatalf("revive did not use latest agent only: %s", revive)
+			// The repost is newer than the log: revive uses its recap, not
+			// the panel payload or a second, stale agent summary.
+			if !strings.Contains(revive, "### Whiteboard topics\n- "+topic+": full repost\n") || strings.Count(revive, "\n- "+topic+":") != 1 || strings.Contains(revive, "Whiteboard recaps") || strings.Contains(revive, "current agent line") || strings.Contains(revive, "payload &amp; exact") || strings.Contains(revive, "original content") {
+				t.Fatalf("revive did not use only the latest summary recap: %s", revive)
 			}
 
 			// A mention resolves the exact old version/log after daemon restart.

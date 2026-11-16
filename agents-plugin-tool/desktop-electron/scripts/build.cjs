@@ -56,9 +56,11 @@ async function build({ platform = process.platform, arch = process.arch, daemonI
     for (const file of ['icon.png', 'icon.ico']) {
       fs.copyFileSync(path.join(root, 'icons', file), path.join(source, 'icons', file));
     }
-    copyPackage(daemonInput, path.join(source, 'daemon'), 'bundled', platform);
+    const selected = copyPackage(daemonInput, path.join(source, 'daemon'), 'bundled', platform);
+    // The bundled runtime is the release authority, not the shell's source manifest.
+    const appVersion = selected.contract.plugin_version;
     fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({
-      name: pkg.name, productName: 'Werkschaft', version: pkg.version, main: pkg.main, author: pkg.author,
+      name: pkg.name, productName: 'Werkschaft', version: appVersion, main: pkg.main, author: pkg.author,
     }));
     let icon = platform === 'win32' ? path.join(source, 'icons/icon.ico') : undefined;
     if (platform === 'darwin') {
@@ -78,7 +80,7 @@ async function build({ platform = process.platform, arch = process.arch, daemonI
       dir: source, out, name: 'Werkschaft',
       platform, arch, electronVersion: version,
       electronZipDir: zipDir, appBundleId: 'dev.werkschaft.desktop',
-      appVersion: pkg.version, buildVersion: pkg.version,
+      appVersion, buildVersion: appVersion,
       icon, overwrite: true, prune: false, osxSign: false, osxNotarize: false,
     });
     console.log(outputs.join('\n'));

@@ -180,8 +180,9 @@ func TestLegacyPiLeadWithoutSDKStartsIsolated(t *testing.T) {
 		t.Run(map[bool]string{false: "standalone", true: "sdk"}[withSDK], func(t *testing.T) {
 			h := newLeadHarness(t)
 			bundle := filepath.Join(t.TempDir(), "agents-plugin-ws")
+			piLeadFile(t, filepath.Join(bundle, ".claude-plugin", "plugin.json"), `{"name":"ws"}`)
 			restore := piBundledPluginRoot
-			piBundledPluginRoot = func() (string, error) { return bundle, nil }
+			piBundledPluginRoot = func(string) (string, string, error) { return bundle, "", nil }
 			t.Cleanup(func() { piBundledPluginRoot = restore })
 			entry := piLeadBundle(t, filepath.Join(filepath.Dir(bundle), "agents-plugin-pi"))
 			command := filepath.Join(t.TempDir(), "pi")

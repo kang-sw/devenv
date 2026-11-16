@@ -238,7 +238,7 @@ func TestWorktreeAddRoute(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		code, _, out := postJSONWith(t, &http.Client{Timeout: 30 * time.Second}, f.base+route, f.base, string(raw))
+		code, _, out := postJSONWith(t, &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}, f.base+route, f.base, string(raw))
 		return code, out
 	}
 

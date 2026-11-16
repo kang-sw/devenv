@@ -286,7 +286,7 @@ func TestFSListCarriesGitMarks(t *testing.T) {
 // plain text, which a jump to a line needs; an image stays an image.
 func TestFSPreviewAsPlainText(t *testing.T) {
 	f := startPageFixture(t)
-	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1"}
+	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1", localCookie: true}
 	writeFile(t, filepath.Join(f.project, "doc.md"), "# Title\n")
 	writeFile(t, filepath.Join(f.project, "page.html"), "<h1>x</h1>")
 	writeFile(t, filepath.Join(f.project, "c.diff"), "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n")
