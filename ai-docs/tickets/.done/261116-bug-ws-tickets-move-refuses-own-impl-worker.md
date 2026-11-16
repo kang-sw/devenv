@@ -5,6 +5,7 @@ sage-review-completeness: skipped
 related:
   261030-bug-tickets-move-stages-on-occupied-root: "landed protection against another caller staging into an occupied worker index; preserve that boundary"
   261116-bug-ws-dashboard-composer-autosize-forced-layout: "today's worker promotion recorded the refusal and git mv fallback"
+completed: 2026-11-16
 ---
 
 # tickets.move refuses a worker in its own assigned implementation checkout
@@ -93,3 +94,8 @@ guard change or implementation is performed by this docs-only capture.
   postures and split implementation from this phase record so the heading cites
   the actual implementation commit, rather than a fabricated self-reference.
 - No Forward items; the one affected-package check passed.
+
+
+## Resolution (2026-11-16)
+
+Merged in 6fd90ec6a after independent R1 PASS WITH MINORS. Forward minors (accident-guard comment, tickets.close has no occupied-root guard, parentless-leaf refusal row, stale wsdoc citations) are recorded in the merge commit's AI Context.
