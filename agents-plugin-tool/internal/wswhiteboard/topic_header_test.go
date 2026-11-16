@@ -82,7 +82,8 @@ func TestTopicBarShowsItsLatestChange(t *testing.T) {
 
 	tz := time.FixedZone("test", 9*3600)
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Location: tz}))
-	wantAll(t, full, fmt.Sprintf(`<time class="tago" datetime="2026-11-04T10:35:00Z" title="last change" data-at="%d">19:35</time>`, later.UnixMilli()), `data-body-at="2026-11-04T10:35:00Z"`)
+	wantAll(t, full, fmt.Sprintf(`<time class="tago" datetime="2026-11-04T10:35:00Z" title="last change" data-at="%d">19:35</time>`, later.UnixMilli()))
+	wantNone(t, full, `class="tdoc"`) // Body is now an immutable panel, not a duplicate Doc.
 	wantNone(t, full, `class="body-age"`, `변경 시각 모름`)
 	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r", Location: tz}))
 	wantAll(t, embed, `<time class="tago" datetime="2026-11-04T10:35:00Z" title="last change">19:35</time>`)

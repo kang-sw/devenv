@@ -129,7 +129,7 @@ func TestTopicWithABodyIsNotQuiet(t *testing.T) {
 	mustApply(t, st, addXML(ClassTechnical, "acks", "k"))
 	mustApply(t, st, addXML(ClassPolicy, "policy", "p", "x", "y"))
 	wantTopicOrder(t, st, "policy", "acks", "notes", "filler", "quiet")
-	if notes := topicView(t, st, LayoutFull, "notes"); notes.Quiet || notes.Doc != "a body" || !notes.DocOpen(false) {
+	if notes := topicView(t, st, LayoutFull, "notes"); notes.Quiet || notes.Doc != "" || fixedContentView(t, notes).Text != "a body" || !fixedContentView(t, notes).Open {
 		t.Fatalf("notes = %+v", notes)
 	}
 	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || quiet.Doc != "" || quiet.Stream.Count == 0 {
@@ -142,7 +142,7 @@ func TestTopicWithABodyIsNotQuiet(t *testing.T) {
 	}
 	// A quiet topic that gains a body is no longer quiet.
 	mustApply(t, st, topicXML("quiet", "now with notes"))
-	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || !quiet.DocOpen(false) {
+	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || quiet.Doc != "" || !fixedContentView(t, quiet).Open {
 		t.Fatalf("a quiet topic that gains an open body is not quiet: %+v", quiet)
 	}
 	wantTopicOrder(t, st, "quiet", "policy", "acks", "notes", "filler")
@@ -173,12 +173,12 @@ func TestContentOnlyTopicInTheView(t *testing.T) {
 		t.Fatalf("view = %+v", view)
 	}
 	notes := view.Topics[0]
-	if notes.Name != "notes" || notes.Doc != "just notes" || notes.Quiet || notes.Closed || !notes.DocOpen(false) || notes.SettledCount() != 0 {
+	if notes.Name != "notes" || notes.Doc != "" || fixedContentView(t, notes).Text != "just notes" || notes.Quiet || notes.Closed || !fixedContentView(t, notes).Open || notes.SettledCount() != 0 {
 		t.Fatalf("notes = %+v", notes)
 	}
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	notes = topicView(t, st, LayoutFull, "notes")
-	if notes.Quiet || !notes.Closed || notes.Stream.Count == 0 || notes.Doc != "just notes" || notes.DocOpen(false) || notes.DocOpen(true) {
+	if notes.Quiet || !notes.Closed || notes.Stream.Count == 0 || notes.Doc != "" || fixedContentView(t, notes).Text != "just notes" || fixedContentView(t, notes).Open || notes.DocOpen(false) || notes.DocOpen(true) {
 		t.Fatalf("closed notes = %+v", notes)
 	}
 }
@@ -186,11 +186,11 @@ func TestContentOnlyTopicInTheView(t *testing.T) {
 func TestBodyOpenOnTheFullPageUnlessClosed(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
-	if tv := topicView(t, st, LayoutFull, "t"); !tv.DocOpen(false) || tv.DocNew {
+	if tv := topicView(t, st, LayoutFull, "t"); tv.Doc != "" || !fixedContentView(t, tv).Open || tv.DocNew {
 		t.Fatalf("full page topic = %+v", tv)
 	}
 	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
-	if tv := topicView(t, st, LayoutFull, "t"); tv.DocOpen(false) || tv.Doc != "body" {
+	if tv := topicView(t, st, LayoutFull, "t"); tv.DocOpen(false) || tv.Doc != "" || fixedContentView(t, tv).Text != "body" || fixedContentView(t, tv).Open {
 		t.Fatalf("closed topic on the full page = %+v", tv)
 	}
 	// No body, nothing to open.
@@ -212,7 +212,7 @@ func TestEmbedOmitsCurrentContent(t *testing.T) {
 	}
 	st.LastEmbedSeq = st.Seq
 	mustApply(t, st, topicXML("b", "body b2"))
-	if full := topicView(t, st, LayoutFull, "b"); full.Doc != "body b2" || !full.DocOpen(false) {
+	if full := topicView(t, st, LayoutFull, "b"); full.Doc != "" || fixedContentView(t, full).Text != "body b2" || !fixedContentView(t, full).Open {
 		t.Fatalf("full page current content lost: %+v", full)
 	}
 	if embed := topicView(t, st, LayoutEmbed, "b"); embed.Doc != "" || embed.DocNew {
@@ -269,8 +269,12 @@ func TestDocStaleClassReachesBothRenderPaths(t *testing.T) {
 	mustApply(t, st, topicXML("t", "one\n\ntwo"))
 	mustApply(t, st, topicXML("t", "one\n\ntwo\n\nthree"))
 	fresh := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	// Exercise the retained unmigrated Doc renderer's marks separately from
+	// the panel-first view, which intentionally suppresses this projection.
+	fresh.Topics[0].Doc = st.TopicBody("t")
 	mustApply(t, st, addXML(ClassTechnical, "t", "added"))
 	stale := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	stale.Topics[0].Doc = st.TopicBody("t")
 
 	if page := render(t, stale); !strings.Contains(page, `<div class="doc-body md chg-stale">`) {
 		t.Error("the disk page's stale body lacks chg-stale")

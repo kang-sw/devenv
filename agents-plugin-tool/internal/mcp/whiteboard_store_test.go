@@ -140,7 +140,7 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if rec.Whiteboard.Counter != 42 || rec.Whiteboard.Seq != 9 || len(rec.Whiteboard.Items) != 1 || len(rec.Whiteboard.Topics) != 3 || rec.Whiteboard.EntrySeq != 3 {
+				if rec.Whiteboard.Counter != 42 || rec.Whiteboard.Seq != 9 || len(rec.Whiteboard.Items) != 1 || len(rec.Whiteboard.Topics) != 3 || rec.Whiteboard.EntrySeq != 5 || rec.Whiteboard.PanelCounter != 2 {
 					t.Fatalf("conversion lost snapshot or fabricated history: %+v", rec.Whiteboard)
 				}
 				item := rec.Whiteboard.Items[0]
@@ -148,8 +148,18 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 					t.Fatalf("conversion changed owner answer: %+v", item)
 				}
 				for i, doc := range rec.Whiteboard.Topics {
-					if doc.Recap != "" || len(doc.Entries) != 1 {
+					wantEntries := 1
+					if doc.Body != "" {
+						wantEntries = 2
+					}
+					if doc.Recap != "" || len(doc.Entries) != wantEntries {
 						t.Fatalf("recap was not converted exactly once: %+v", doc)
+					}
+					if doc.Body != "" {
+						panel := doc.Entries[1]
+						if panel.Kind != wswhiteboard.EntryPanel || !panel.LegacyContent || !panel.Imported || panel.Text != doc.Body || panel.At != doc.ChangedAt {
+							t.Fatalf("content migration lost payload/time: %+v", panel)
+						}
 					}
 					e := doc.Entries[0]
 					if e.ID != fmt.Sprintf("e%d", i+1) || e.Kind != wswhiteboard.EntryAgent || !e.Imported || e.At == "" {
@@ -366,7 +376,7 @@ func TestWhiteboardFolderChangeInvalidatesDashboardWithoutSeqChange(t *testing.T
 		t.Fatal("folder-only change kept the dashboard fingerprint")
 	}
 	next := readPageOK(t, src, reg)
-	if next.Seq != first.Seq || !strings.Contains(string(next.Board.Board), "after-marker") || strings.Contains(string(next.Board.Board), "before-marker") || boardRenders(src) != beforeRenders+1 {
+	if next.Seq != first.Seq || !strings.Contains(string(next.Board.Board), "after-marker") || !strings.Contains(string(next.Board.Board), "before-marker") || boardRenders(src) != beforeRenders+1 {
 		t.Fatalf("equal-sequence folder change did not invalidate the dashboard memo: seq %d, renders %d", next.Seq, boardRenders(src))
 	}
 }

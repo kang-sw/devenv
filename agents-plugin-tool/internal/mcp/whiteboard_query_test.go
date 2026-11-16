@@ -68,7 +68,7 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 				t.Fatal("accepted commands did not produce entries")
 			}
 			text = queryWhiteboardForTest(t, f, map[string]any{"topic": topic})
-			if !strings.Contains(text, "panel p1 ("+panel.ID+")") || !strings.Contains(text, "current "+agent.ID) || strings.Contains(text, "payload &amp; exact") || strings.Contains(text, "original content") {
+			if !strings.Contains(text, "panel p3 ("+panel.ID+")") || !strings.Contains(text, "current "+agent.ID) || strings.Contains(text, "payload &amp; exact") || strings.Contains(text, "original content") {
 				t.Fatalf("discovery payload leak or missing metadata: %s", text)
 			}
 			item := queryWhiteboardForTest(t, f, map[string]any{"id": 43, "depth": "full"})
@@ -79,12 +79,12 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 			if !strings.Contains(body, "original content\n") || strings.Contains(body, payload) {
 				t.Fatalf("explicit content retrieval: %s", body)
 			}
-			if queryPayloadForTest(t, queryWhiteboardForTest(t, f, map[string]any{"panel": "p1"})) != payload {
+			if queryPayloadForTest(t, queryWhiteboardForTest(t, f, map[string]any{"panel": "p3"})) != payload {
 				t.Fatal("latest panel payload changed bytes")
 			}
 
 			// Payload retrieval supports full repost, not a panel-targeted edit.
-			f.update(t, `<wb:topic name="`+topic+`"><wb:panel id="p1" recap="full repost">`+"\n"+payload+"\n"+`</wb:panel></wb:topic>`)
+			f.update(t, `<wb:topic name="`+topic+`"><wb:panel id="p3" recap="full repost">`+"\n"+payload+"\n"+`</wb:panel></wb:topic>`)
 			page := string(readFileForTest(t, f.pagePath()))
 			if !strings.Contains(page, "full repost") || !strings.Contains(page, "current agent line") {
 				t.Fatal("committed state did not render")
@@ -107,7 +107,7 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 			if got := queryPayloadForTest(t, queryWhiteboardForTest(t, f, map[string]any{"topic": parsed[1].Topic, "entry": parsed[1].Entry})); got != "current agent line" {
 				t.Fatal("log mention redirected")
 			}
-			if latest := queryWhiteboardForTest(t, f, map[string]any{"panel": "p1"}); strings.Contains(strings.SplitN(latest, "\n", 2)[0], "entry "+panel.ID+" ") {
+			if latest := queryWhiteboardForTest(t, f, map[string]any{"panel": "p3"}); strings.Contains(strings.SplitN(latest, "\n", 2)[0], "entry "+panel.ID+" ") {
 				t.Fatal("stable target did not advance to the repost")
 			}
 			for _, selector := range []string{"panel", "entry"} {

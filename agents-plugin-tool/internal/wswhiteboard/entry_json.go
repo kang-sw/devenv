@@ -16,7 +16,7 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	for _, key := range []string{"id", "kind", "panel_id", "panel_name", "item_id", "recap", "text", "at", "imported", "topic_state", "board_notice", "waiting_on", "unblocked_receipt", "inputs", "inputs_floor", "seq", "answer_sent_at"} {
+	for _, key := range []string{"id", "kind", "panel_id", "panel_name", "legacy_content", "item_id", "recap", "text", "at", "imported", "topic_state", "board_notice", "waiting_on", "unblocked_receipt", "inputs", "inputs_floor", "seq", "answer_sent_at"} {
 		delete(fields, key)
 	}
 	*e = Entry(known)

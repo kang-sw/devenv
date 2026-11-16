@@ -25,7 +25,7 @@ func TestSemanticEffectsResolvedIdentitiesAndCommandOrder(t *testing.T) {
 <wb:topic name="design" label="Design" tickets="261115-feat-example">
 <wb:add class="policy"><wb:title>Choose</wb:title><wb:option>First</wb:option><wb:option>Second</wb:option><wb:recommend>a</wb:recommend><wb:why>Reason</wb:why><wb:link>docs/a.md</wb:link></wb:add>
 <wb:body>old body</wb:body><wb:edit><wb:old>old</wb:old><wb:new>new</wb:new></wb:edit>
-<wb:panel recap="first">payload one</wb:panel><wb:panel id="p1" recap="second">payload two</wb:panel><wb:log>Ready</wb:log>
+<wb:panel recap="first">payload one</wb:panel><wb:panel id="p2" recap="second">payload two</wb:panel><wb:log>Ready</wb:log>
 </wb:topic>
 <wb:answer id="41" value="b">Second, please.</wb:answer>
 <wb:topic name="other"><wb:add id="60" class="check"><wb:title>Check</wb:title></wb:add></wb:topic>`)
@@ -50,7 +50,7 @@ func TestSemanticEffectsResolvedIdentitiesAndCommandOrder(t *testing.T) {
 	wantEffect(t, out.Effects, "topic", "body", "old body", "new body")
 	first := wantEffect(t, out.Effects, "panel", "payload", "", "payload one")
 	second := wantEffect(t, out.Effects, "panel", "payload", "", "payload two")
-	if first.PanelID != "p1" || second.PanelID != "p1" || first.EntryID == second.EntryID || first.EntryID == "" {
+	if first.PanelID != "p2" || second.PanelID != "p2" || first.EntryID == second.EntryID || first.EntryID == "" {
 		t.Fatalf("panel versions: %+v %+v", first, second)
 	}
 	wantEffect(t, out.Effects, "panel", "recap", "", "second")

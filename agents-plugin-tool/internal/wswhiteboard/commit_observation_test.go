@@ -72,7 +72,7 @@ func TestFolderCommitObservationUsesDurableIntentNotCallbackOrFinalError(t *test
 				// A new reader materializes the installed decision exactly once.
 				// This does not call the observer or guarantee a ring projection.
 				s := folderOpen(t, f.Dir, nil)
-				if s.TopicBody("one") != "After" || s.PanelCounter != 1 {
+				if s.TopicBody("one") != "After" || s.PanelCounter != 2 {
 					t.Fatalf("installed intent not recovered: %+v", s)
 				}
 				if commits != 1 || publishes > 1 {

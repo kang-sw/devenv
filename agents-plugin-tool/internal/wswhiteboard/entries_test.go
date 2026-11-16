@@ -336,9 +336,9 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	}
 	// The default-state event separates the first creation from the remaining
 	// contiguous creations in the same accepted batch; neither is reordered.
-	itemIDs := []int{1, 0, 0, 1, 2, 1, 2, 3, 3, 0, 0, 0}
-	entryIDs := []string{"e1", "e2", "e3", "e5", "e6", "e7", "e8", "e9", "e10", "e11", "e12", "e13"}
-	if st.EntrySeq != 13 {
+	itemIDs := []int{1, 0, 0, 1, 2, 1, 2, 3, 3, 0, 0, 0, 0, 0}
+	entryIDs := []string{"e1", "e2", "e3", "e5", "e6", "e7", "e8", "e9", "e10", "e11", "e12", "e13", "e14", "e15"}
+	if st.EntrySeq != 15 {
 		t.Fatalf("coalescing must not recycle allocated event IDs: %d", st.EntrySeq)
 	}
 	for i, entry := range entries(t, st, "t") {
@@ -436,12 +436,12 @@ func TestContentClearAndRevertKeepHistory(t *testing.T) {
 	before := topicEntry(t, st, "t")
 	mustApply(t, st, topicXML("t", "beta")+topicXML("t", "alpha"))
 	got := topicEntry(t, st, "t")
-	if got.Changed != before.Changed || got.ChangedAt != before.ChangedAt || len(got.Entries) != 4 {
+	if got.Changed != before.Changed || got.ChangedAt != before.ChangedAt || len(got.Entries) != 7 {
 		t.Fatalf("revert must preserve body marks but record both real transitions: %+v", got)
 	}
 	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/><wb:body/></wb:topic>`)
 	got = topicEntry(t, st, "t")
-	if got.Body != "" || got.Changed != 0 || got.ChangedAt != "" || !st.topicClosed("t") || len(got.Entries) != 6 {
+	if got.Body != "" || got.Changed != 0 || got.ChangedAt != "" || !st.topicClosed("t") || len(got.Entries) != 10 {
 		t.Fatalf("clearing content must keep history without reopening: %+v", got)
 	}
 	seq := st.EntrySeq

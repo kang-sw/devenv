@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestRenderRegionsMatchThePage pins the dashboard's reuse contract: the
@@ -346,7 +345,8 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 		t.Fatalf("frames = %d, want one per body", len(docs))
 	}
 	for name, want := range map[string]string{"one": "first body", `say "hi" & <go>`: "second body", "closed": "third body"} {
-		doc, ok := docs[name]
+		id := legacyVersions(t, st, name)[0].ID
+		doc, ok := docs["entry:"+id]
 		if !ok || !strings.Contains(doc, `<div class="doc-body md">`+want+`</div>`) {
 			t.Errorf("frame %q = %.200q, want %q", name, doc, want)
 		}
@@ -358,10 +358,10 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 	}
 	// The name (its &amp; decoded on input) reaches the attribute escaped, so
 	// it cannot end the attribute.
-	wantAll(t, string(regions.Board), `data-doc="topic:say &#34;hi&#34; &amp; &lt;go&gt;"`)
-	// Dashboard bodies use only the shared whole-card fold, closed topics too.
-	wantAll(t, string(regions.Board), `<div class="tdoc" data-body-at="`+testNow.Format(time.RFC3339)+`"><div class="doc-body framed">`)
-	wantNone(t, string(regions.Board), `<details class="tdoc"`, `data-key="doc:closed"`, "has-doc")
+	wantAll(t, string(regions.Board), `data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"`)
+	// Migrated bodies use panel folds, never a second topic Doc surface.
+	wantAll(t, string(regions.Board), `<details class="entry-panel`)
+	wantNone(t, string(regions.Board), `class="tdoc"`, `data-key="doc:closed"`, "has-doc")
 }
 
 func TestDashboardTopicBodyUsesWholeCardFold(t *testing.T) {
@@ -373,11 +373,12 @@ func TestDashboardTopicBodyUsesWholeCardFold(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	wantAll(t, board, `<div class="tdoc" data-body-at="`+testNow.Format(time.RFC3339)+`"><div class="doc-body framed">`, `<div class="topic-stream"><div class="wb-history"`, `<details class="entry-panel`)
+	wantAll(t, board, `<div class="topic-stream"><div class="wb-history"`, `<details class="entry-panel`)
 	wantNone(t, board, `<details class="tdoc"`, `data-key="doc:shared"`, "has-doc")
-	// The standalone page has no shared card framework and keeps its toggle.
+	// Standalone pages also retain only the panel folds after migration.
 	page := render(t, view)
-	wantAll(t, page, "has-doc", `<details class="tdoc" data-key="doc:shared" data-body-at="`+testNow.Format(time.RFC3339)+`" open><summary`)
+	wantAll(t, page, `<details class="entry-panel`)
+	wantNone(t, markup(page), "has-doc", `class="tdoc"`)
 }
 
 // TestServedBoardFramesArePlaceholders pins the lazy mount's served form
@@ -405,8 +406,8 @@ func TestServedBoardFramesArePlaceholders(t *testing.T) {
 			t.Errorf("placeholder sandbox = %q, want %q", m[2], frameSandbox)
 		}
 	}
-	if kinds["topic"] != 2 || kinds["entry"] < 1 || len(holders) != strings.Count(board, `<div class="doc-frame"`) {
-		t.Errorf("placeholders = %v of %d, want both topic bodies and the panel entry", kinds, strings.Count(board, `<div class="doc-frame"`))
+	if kinds["topic"] != 0 || kinds["entry"] != 3 || len(holders) != strings.Count(board, `<div class="doc-frame"`) {
+		t.Errorf("placeholders = %v of %d, want the two content panels and authored panel, without duplicate topic bodies", kinds, strings.Count(board, `<div class="doc-frame"`))
 	}
 }
 

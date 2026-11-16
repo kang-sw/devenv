@@ -155,7 +155,7 @@ func TestCommandAcceptanceRollbackOrderAndCompleteRetry(t *testing.T) {
 	closeA := `<wb:topic name="a"><wb:close result="do not withdraw"/></wb:topic>`
 	closeB := `<wb:topic name="b"><wb:close result="also blocked"/></wb:topic>`
 	mixed(t, s, panel+bad+good+edit+badEdit+log+closeA+closeB, panel+good+edit+log)
-	if s.SettleSeq != 1 || s.AnswerSeq != s.Seq || s.PanelCounter != 1 || item(t, s, 2).Status != StatusOpen {
+	if s.SettleSeq != 1 || s.AnswerSeq != s.Seq || s.PanelCounter != 2 || item(t, s, 2).Status != StatusOpen {
 		t.Fatalf("failed multi-ID bookkeeping leaked: %+v", s)
 	}
 	out, p := Apply(s, panel+badEdit+`<wb:patch id="2" mystery="kept"><wb:why>full fields &amp; text</wb:why></wb:patch>`, testEnv())
@@ -217,7 +217,7 @@ func TestCommandAcceptanceParserPayloadsAndScopes(t *testing.T) {
 	if len(p) < 3 || !strings.Contains(out.Failed, badGroup) || !strings.Contains(out.Failed, unknown) || !strings.Contains(out.Failed, badAttr) || strings.Contains(out.Failed, "accepted only") || strings.Index(out.Failed, unknown) > strings.Index(out.Failed, badAttr) {
 		t.Fatalf("scope/payload/order lost: %s %v", out.Failed, p)
 	}
-	if s.topicKnown("g") || s.PanelCounter != 0 {
+	if s.topicKnown("g") || s.PanelCounter != 1 {
 		t.Fatal("failed scope children mutated board")
 	}
 	retry := strings.TrimSuffix(strings.TrimPrefix(out.Failed, "<wb:failed>\n"), "\n</wb:failed>")
@@ -232,7 +232,7 @@ func TestCommandAcceptanceParserPayloadsAndScopes(t *testing.T) {
 			break
 		}
 	}
-	if s.PanelCounter != 2 || s.TopicLabel("g") != "Title & More" || payload != "\t<div>raw &amp; <wb:like>HTML</wb:like></div>\nown </wb:panel> closing text" {
+	if s.PanelCounter != 3 || s.TopicLabel("g") != "Title & More" || payload != "\t<div>raw &amp; <wb:like>HTML</wb:like></div>\nown </wb:panel> closing text" {
 		t.Fatal("corrected source payload changed", s.Topics[1])
 	}
 	// A recoverable parse error is local even without failed metadata.

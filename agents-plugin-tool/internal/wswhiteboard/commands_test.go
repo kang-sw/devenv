@@ -229,7 +229,7 @@ func TestLiteralNestedOpenersCannotSwallowFollowingCommands(t *testing.T) {
 			if log, _ := st.LatestAgent("t"); log.Text != "done ` ok" {
 				t.Fatal("following log was swallowed")
 			}
-			if leaf == "panel" && st.PanelCounter != 2 || leaf != "panel" && st.PanelCounter != 1 {
+			if (leaf == "panel" || leaf == "body") && st.PanelCounter != 2 || leaf == "answer" && st.PanelCounter != 1 {
 				t.Fatal("following panel was swallowed")
 			}
 			if leaf == "body" && st.TopicBody("t") != payload {
@@ -281,7 +281,7 @@ func TestLastFieldCodeCannotPairWithFollowingCommands(t *testing.T) {
 		if log, _ := st.LatestAgent("t"); log.Text != "e `f" {
 			t.Fatal("following log was swallowed")
 		}
-		if !patch && st.TopicBody("t") != "c `d" || patch && queryResult(t, st, `{"panel":"p1"}`).Direct.Entry.Text != "c `d" {
+		if !patch && st.TopicBody("t") != "c `d" || patch && queryResult(t, st, `{"panel":"p2"}`).Direct.Entry.Text != "c `d" {
 			t.Fatal("last new operand changed")
 		}
 	}

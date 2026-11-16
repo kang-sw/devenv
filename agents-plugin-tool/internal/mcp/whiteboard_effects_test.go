@@ -168,7 +168,7 @@ func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
 	wb.update(t, `<wb:topic name="known"><wb:add class="policy"><wb:title>First</wb:title></wb:add><wb:add class="check"><wb:title>Second</wb:title></wb:add></wb:topic>`)
 	board := readBoard()
 	known := entriesFor(board, "known")
-	if len(known) != 2 || known[0].Text != "Content updated." || known[1].ItemID != 0 || known[1].Text != "Items added: policy {{3}}, check {{4}}." {
+	if len(known) != 3 || known[0].Kind != wswhiteboard.EntryPanel || !known[0].LegacyContent || known[1].Text != "Content updated." || known[2].ItemID != 0 || known[2].Text != "Items added: policy {{3}}, check {{4}}." {
 		t.Fatalf("known creation batch was not one stored line: %+v", known)
 	}
 	if got := entriesFor(board, "legacy"); !reflect.DeepEqual(got, legacyBefore) {

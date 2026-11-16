@@ -192,7 +192,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 
 func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	f.update(t, `<wb:topic name="versions"><wb:body>content-marker</wb:body><wb:add class="technical"><wb:title>item-marker</wb:title></wb:add><wb:log>agent-marker</wb:log><wb:panel recap="old-recap">old-payload</wb:panel><wb:panel id="p1" recap="latest-recap">latest-payload</wb:panel></wb:topic>`)
+	f.update(t, `<wb:topic name="versions"><wb:body>content-marker</wb:body><wb:add class="technical"><wb:title>item-marker</wb:title></wb:add><wb:log>agent-marker</wb:log><wb:panel recap="old-recap">old-payload</wb:panel><wb:panel id="p2" recap="latest-recap">latest-payload</wb:panel></wb:topic>`)
 	rec, err := newSessionStore().readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
@@ -203,6 +203,11 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 	entryTags := regexp.MustCompile(`<[^>]*\bdata-entry="e[0-9]+"[^>]*>`)
 	for name, html := range map[string]string{"file index": file, "dashboard": served} {
 		for _, entry := range rec.Whiteboard.Topics[0].Entries {
+			// Panel rows already carry their post; the view suppresses only
+			// these redundant system notices, not their durable store records.
+			if entry.Kind == wswhiteboard.EntrySystem && strings.HasPrefix(entry.Text, "Panel [") {
+				continue
+			}
 			found := false
 			for _, tag := range entryTags.FindAllString(html, -1) {
 				if strings.Contains(tag, `data-entry="`+entry.ID+`"`) && strings.Contains(tag, `data-kind="`+entry.Kind+`"`) {
@@ -225,7 +230,7 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 				}
 			}
 		}
-		if strings.Count(html, `id="p1"`) != 1 || !strings.Contains(html, "latest-recap") || !strings.Contains(html, "old-recap") {
+		if strings.Count(html, `id="p2"`) != 1 || !strings.Contains(html, "latest-recap") || !strings.Contains(html, "old-recap") {
 			t.Errorf("%s lost latest panel target or immutable versions", name)
 		}
 	}

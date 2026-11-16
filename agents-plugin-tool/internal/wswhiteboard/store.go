@@ -647,6 +647,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 
 func applyCommands(state *State, cmds []command, env Env, p *problems, defaults map[int]bool) (*State, Outcome, *topicUpdates) {
 	work := state.clone()
+	work.migrateLegacyContent()
 	statesBefore := state.TopicStates()
 	updates := newTopicUpdates(state)
 	origins := bodyOrigins{}
@@ -722,7 +723,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 			case "wb:edit":
 				applyEdit(p, work, origins, cmd, topicOf, mark, env.Now)
 			case "wb:panel":
-				applyPanel(p, work, cmd, topicOf, env.Now)
+				applyPanel(p, work, origins, cmd, topicOf, mark, env.Now)
 			case "wb:log":
 				applyLog(p, work, cmd, topicOf, env.Now)
 			case "wb:state":
@@ -1233,6 +1234,7 @@ func applyBody(p *problems, work *State, base bodyOrigins, cmd command, topicOf 
 	body := cmd.Body
 	if strings.TrimSpace(body) == "" {
 		if work.TopicBody(name) != "" {
+			work.appendLegacyContent(name, "", now)
 			work.event(name, now, "Content cleared.")
 			work.clearTopicBody(name)
 		}
@@ -1245,6 +1247,7 @@ func applyBody(p *problems, work *State, base bodyOrigins, cmd command, topicOf 
 	if work.TopicBody(name) != body {
 		work.setTopicBody(name, body, mark, base)
 		work.reopenWithEvent(name, now)
+		work.appendLegacyContent(name, body, now)
 		work.event(name, now, "Content updated.")
 	}
 }
@@ -1283,6 +1286,7 @@ func applyEdit(p *problems, work *State, base bodyOrigins, cmd command, topicOf 
 	}
 	next := strings.ReplaceAll(body, old, repl)
 	if strings.TrimSpace(next) == "" {
+		work.appendLegacyContent(name, "", now)
 		work.event(name, now, "Content cleared.")
 		work.clearTopicBody(name)
 		return
@@ -1294,6 +1298,7 @@ func applyEdit(p *problems, work *State, base bodyOrigins, cmd command, topicOf 
 	if next != body {
 		work.setTopicBody(name, next, mark, base)
 		work.reopenWithEvent(name, now)
+		work.appendLegacyContent(name, next, now)
 		work.event(name, now, "Content edited.")
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
@@ -250,18 +249,19 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
-		`<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`" open>`, "<h1>Plan</h1>", "<li>one</li>")
+	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
+		`<details class="entry-panel`, `data-key="entry:e1" id="p1" open>`, "<h1>Plan</h1>", "<li>one</li>")
+	wantNone(t, out, `class="tdoc"`)
 	wantNone(t, out, `class="tbody"`)
 	// Nothing to answer: the reply bar waits hidden for a topic note.
 	wantAll(t, out, `<div class="reply solo" data-idle hidden>`)
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic closed has-doc" id="`+topicAnchor("notes")+`" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic closed" id="`+topicAnchor("notes")+`" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<div class="topic-stream">`,
-		`<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`"><summary`, "<h1>Plan</h1>")
-	wantNone(t, out, `<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`" open>`)
+		`<details class="entry-panel`, `data-key="entry:e1" id="p1"><summary`, "<h1>Plan</h1>")
+	wantNone(t, out, `class="tdoc"`, `data-key="entry:e1" id="p1" open>`)
 }
 
 // TestRenderPageTopicKeyAttribute: every topic section carries its name as

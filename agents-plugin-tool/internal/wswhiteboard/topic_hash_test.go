@@ -86,8 +86,9 @@ func TestTopicHashCoversTheRenderedSection(t *testing.T) {
 		t.Errorf("data-th unchanged when the topic closed")
 	}
 	p := newPageData(view, a, true)
-	p.docs[topic.Name] = template.HTML(strings.Replace(string(p.docs[topic.Name]), "first body", "first body!", 1))
-	if !strings.Contains(string(p.docs[topic.Name]), "first body!") {
+	id := fixedContentView(t, topic).ID
+	p.entries[id] = template.HTML(strings.Replace(string(p.entries[id]), "first body", "first body!", 1))
+	if !strings.Contains(string(p.entries[id]), "first body!") {
 		t.Fatal("the frame's document did not change")
 	}
 	if hash(p, topic) == base {
