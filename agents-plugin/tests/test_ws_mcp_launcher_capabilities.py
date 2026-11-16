@@ -96,6 +96,11 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                     binary.write_bytes(b"repaired runtime")
                     launcher.write_runtime_metadata(binary, self.capability_payload())
 
+                def serve(link, *args):
+                    # The proxy's authorized starter triggers deferred repair;
+                    # mocking the entire proxy must not skip that boundary.
+                    return 0 if link.repair_runtime() else 1
+
                 stderr = io.StringIO()
                 with mock.patch.dict(os.environ, env, clear=True), \
                      mock.patch.object(launcher, "__file__", str(plugin / "bin" / "ws-mcp-launcher.py")), \
@@ -104,7 +109,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                      mock.patch.object(launcher, "detect_project_root"), \
                      mock.patch.object(launcher, "wait_for_rsrc_tree"), \
                      mock.patch.object(launcher.DaemonLink, "probe", return_value=(None, None)), \
-                     mock.patch.object(launcher, "proxy_serve", return_value=0), \
+                     mock.patch.object(launcher, "proxy_serve", side_effect=serve), \
                      mock.patch.object(launcher, "install_runtime", side_effect=install) as installer, \
                      mock.patch.multiple(launcher.subprocess, run=mock.DEFAULT, call=mock.DEFAULT, Popen=mock.DEFAULT) as processes:
                     self.assertEqual(launcher.main(), 0)
@@ -273,6 +278,47 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                 self.assertEqual(sorted(p.name for p in runtime_dir.iterdir()), ["ws-mcp", "ws-mcp.metadata.json"])
                 run.assert_not_called()
                 popen.assert_not_called()
+
+    def test_bootstrap_version_installs_and_reports_build_even_with_live_daemon(self):
+        for live in (False, True):
+            with self.subTest(live=live), tempfile.TemporaryDirectory() as temp_dir:
+                launcher = load_launcher()
+                root = Path(temp_dir)
+                plugin = root / "plugin"
+                plugin.mkdir()
+                contract = self.capability_contract()
+                contract_path = plugin / "runtime.json"
+                contract_path.write_text(json.dumps(contract), encoding="utf-8")
+                runtime = root / "runtime"
+                runtime.mkdir()
+                binary = runtime / launcher.runtime_binary_name(contract, contract_path, launcher.host_os())
+                # A forced build must replace even an already compatible local copy.
+                binary.write_bytes(b"previous build")
+                launcher.write_runtime_metadata(binary, self.capability_payload())
+                source = root / "build"
+                source.write_bytes(b"new build")
+                launcher.write_runtime_metadata(source, self.capability_payload())
+                health = {"version": "0.18.9"} if live else None
+                output = io.StringIO()
+                env = {"WS_CACHE_HOME": str(root / "cache"), "WS_MCP_RUNTIME_DIR": str(runtime),
+                       "WS_MCP_BOOTSTRAP_BINARY": str(source)}
+                with mock.patch.dict(os.environ, env, clear=True), \
+                     mock.patch.object(launcher, "__file__", str(plugin / "bin/ws-mcp-launcher.py")), \
+                     mock.patch.object(launcher.sys, "argv", ["launcher", "version"]), \
+                     mock.patch.object(launcher.sys, "stdout", output), \
+                     mock.patch.object(launcher, "detect_project_root"), \
+                     mock.patch.object(launcher.DaemonLink, "probe", return_value=(None, health)), \
+                     mock.patch.object(launcher.DaemonLink, "start_daemon") as start, \
+                     mock.patch.multiple(launcher.subprocess, run=mock.DEFAULT, call=mock.DEFAULT, Popen=mock.DEFAULT) as children:
+                    self.assertEqual(launcher.main(), 0)
+                    self.assertEqual(output.getvalue(), "0.18.1\n")
+                    self.assertEqual(binary.read_bytes(), b"new build")
+                    self.assertEqual(launcher.read_runtime_metadata(binary), launcher.read_runtime_metadata(source))
+                    self.assertTrue(launcher.compatibility_stamp_current(binary, contract, contract_path, runtime))
+                    start.assert_not_called()
+                    for child in children.values():
+                        child.assert_not_called()
+                self.assertFalse((root / "cache/dashboard").exists())
 
     def test_bootstrap_without_identity_fails_without_running_binary(self):
         launcher = load_launcher()

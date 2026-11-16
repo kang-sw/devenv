@@ -11,13 +11,13 @@
     "execute-worker-guide.md": "8bbb4a1e3cb4a47e869168251da64322b452389220d2f147bed3b0eae048f44c",
     "explore-guide.md": "51a53b386cca4c8418dcbd81137b6329c0c5791520883b07eeee6ea8bbc8931a",
     "lead-compact-guide.md": "f7f6e03b8dbbe891a81b842f76091fcc74a22271ed22456d73c386c70fe774fe",
-    "package.json": "cea0157a7d928f4fa6e43ff54ed60a89681a157700f42eb06084df10704b70d6",
+    "package.json": "f7717d6e00c90529c948ff626ae94980a5fdc5d811fdd327b84de396cd060031",
     "pi-lead-guide.md": "06fbb6f9751841f8c2570461087af2c7bff4e8e6108b66cbf4584053cdcc9503",
     "src/helper-host.mjs": "b9be5babbf7e6d81dcd8397e6014625125528333ca47fc5e231a0ad1e1dd9f88",
     "src/web-search-helper.mjs": "9ad060b6e12a22622d0657bf94fee2e2f5493eff1d9af1724da0db42c2693792",
-    "workflow-bundles/manifest.json": "e435a5b486f9ccd07e462bc9c2a3886279bc6cd7b2cf1da9a0df88b808c28154",
-    "workflow-bundles/ws.zip": "f8afda3bcad7faffe7f77188c67a5ed80b43872d2cbb1a5ad2b1ff691e817ed7",
-    "workflow-bundles/wsflow.zip": "543870b7446f2232c819f66478482a539738c0b8f5e797c47b24bfe69de2fb23"
+    "workflow-bundles/manifest.json": "0ed099730f22d7177fe7408455d22238ae402e1e226a4687e9b07aecc9c4c9d1",
+    "workflow-bundles/ws.zip": "4c6db9f982a61f002adc029c336d92399c67baaa3abc99f7b5a1ac2f97438462",
+    "workflow-bundles/wsflow.zip": "0615d4478f7c69b2e6d504bfc9e0fb38819f7744ad4ed09b912ae497efd7b665"
   },
   "inputs": {
     "agents-plugin-pi/bin/ws-pi-forward.mjs": "6101d609e6b7bf4bd683a368c700029640d1a8a03e67a0ef087061f6328a26a1",
@@ -30,12 +30,13 @@
     "agents-plugin-pi/explore-guide.md": "51a53b386cca4c8418dcbd81137b6329c0c5791520883b07eeee6ea8bbc8931a",
     "agents-plugin-pi/lead-compact-guide.md": "f7f6e03b8dbbe891a81b842f76091fcc74a22271ed22456d73c386c70fe774fe",
     "agents-plugin-pi/package-lock.json": "a8dd08cf61ccc9bdfb084bfc327499ff4bb718f8953b38afc99f2b71c8c9a212",
-    "agents-plugin-pi/package.json": "1e8e5bc25735adac645060da8001fa086f0082faa5de14299e9639be6c80e305",
+    "agents-plugin-pi/package.json": "40cf3d5001e5fea684b12d9916b792dcfea0df7df4c1b98e099d3e7e18b63fda",
     "agents-plugin-pi/pi-lead-guide.md": "06fbb6f9751841f8c2570461087af2c7bff4e8e6108b66cbf4584053cdcc9503",
     "agents-plugin-pi/scripts/bundle.mjs": "d7c09a0064e7f982ba4090275b193ae27ea5982b6ca0cec2233f58b82c638c7f",
     "agents-plugin-pi/scripts/copy-skills.mjs": "9bdc5a3b1d8339a7c11cc51b9a75ec522308713b9fa8e9ba79d312313c021d2d",
     "agents-plugin-pi/scripts/prepare-native-payload.py": "5f7056d6c6ea6de99dd1f43879c68142d369085be5ef91e391a7a877cd85b78d",
     "agents-plugin-pi/scripts/prepare-workflow-bundles.py": "73bbee99f4dffdb846abb824c5d8d8f29acdbc2bbb20e4753816dadae1c027e8",
+    "agents-plugin-pi/scripts/python.mjs": "ffc68acc5ecfdf463b4ba781297a958f5de44729b9c2008f8e7c674cf195fa67",
     "agents-plugin-pi/scripts/verify-display-summary-host.mjs": "e0e77a6043c34a02635a82946de7f22195f1038dd28d93053a3db9b7f860d60d",
     "agents-plugin-pi/src/adapter-config.ts": "3481659ed9f666c5d012df64498a3dc52e017a425ca8eb6a0646c8e7571aa6b3",
     "agents-plugin-pi/src/adapter-label.ts": "c64a3c34d24f48b698694458e8ca8440654906cc0a21f0613025468d08d2666d",
@@ -120,9 +121,9 @@
     "agents-plugin-pi/src/word-chain-id.ts": "92c05a1662b4b33898588b57ea5caefc35ee1435912cf8e5b27dfe8dba788194",
     "agents-plugin-pi/src/workflow-owner.ts": "c938045e38fcd1fad2d4b5e10d464ad2670d22cafc59d819bebf55813adf6e9c",
     "agents-plugin-pi/src/write-scopes.ts": "74156ad253e5d16e0ac653737eb7017b49d8e7b9a205aa4e745b74239775dbdc",
-    "agents-plugin-pi/workflow-bundles/manifest.json": "e435a5b486f9ccd07e462bc9c2a3886279bc6cd7b2cf1da9a0df88b808c28154",
-    "agents-plugin-pi/workflow-bundles/ws.zip": "f8afda3bcad7faffe7f77188c67a5ed80b43872d2cbb1a5ad2b1ff691e817ed7",
-    "agents-plugin-pi/workflow-bundles/wsflow.zip": "543870b7446f2232c819f66478482a539738c0b8f5e797c47b24bfe69de2fb23"
+    "agents-plugin-pi/workflow-bundles/manifest.json": "0ed099730f22d7177fe7408455d22238ae402e1e226a4687e9b07aecc9c4c9d1",
+    "agents-plugin-pi/workflow-bundles/ws.zip": "4c6db9f982a61f002adc029c336d92399c67baaa3abc99f7b5a1ac2f97438462",
+    "agents-plugin-pi/workflow-bundles/wsflow.zip": "0615d4478f7c69b2e6d504bfc9e0fb38819f7744ad4ed09b912ae497efd7b665"
   },
   "schema_version": 1
 }

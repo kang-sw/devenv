@@ -1,4 +1,5 @@
 """Starter coordination and cold CLI contracts; all executable spawns mocked."""
+from contextlib import contextmanager, ExitStack
 import importlib.util
 import io
 import json
@@ -45,6 +46,20 @@ class LauncherStartContractTest(unittest.TestCase):
 
     def new_link(self):
         return self.m.DaemonLink(self.binary, "0.50.1", "windows", self.env, answer_budget=0.01, start_budget=0.1)
+
+    @contextmanager
+    def daemon_lock(self):
+        """Hold the Go singleton's byte-zero lock, not the launcher lock."""
+        self.link.daemon_dir.mkdir(parents=True, exist_ok=True)
+        with (self.link.daemon_dir / "dashboard.lock").open("a+b") as file:
+            if os.name == "nt":
+                import msvcrt
+                file.seek(0)
+                msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield
 
     def test_lock_is_persistent_noninheritable_and_exclusive(self):
         a = self.m.LauncherStartLock(self.link.daemon_dir)
@@ -130,14 +145,15 @@ class LauncherStartContractTest(unittest.TestCase):
     def test_huge_pid_mcp_path_refuses_start_with_controlled_unavailable(self):
         from types import SimpleNamespace
         endpoint = dict(self.endpoint, pid=10**100)
-        with mock.patch.object(self.link, "probe", return_value=(endpoint, None)), \
+        with self.daemon_lock(), \
+             mock.patch.object(self.link, "probe", return_value=(endpoint, None)), \
              mock.patch.object(self.link, "wait_healthy", return_value=(endpoint, None)), \
              mock.patch.object(self.m.os, "kill", side_effect=OverflowError("native PID conversion")), \
              mock.patch.dict(sys.modules, {"_winapi": SimpleNamespace(OpenProcess=mock.Mock(side_effect=OverflowError("native PID conversion")))}), \
              mock.patch.object(self.link, "start_daemon") as starter:
             err = io.StringIO()
             self.assertEqual(self.m.proxy_serve(self.link, ["serve", "--stdio"], io.BytesIO(), io.BytesIO(), err), 1)
-            self.assertIn("live or unqueryable", err.getvalue())
+            self.assertIn("refusing absence startup", err.getvalue())
             starter.assert_not_called()
         self.assertFalse((self.link.daemon_dir / "bin").exists())
 
@@ -145,8 +161,8 @@ class LauncherStartContractTest(unittest.TestCase):
         for grace in (0, 20):  # initial connect and reconnect
             now = [0.0]
             def probe(timeout):
-                return (self.endpoint, self.health) if now[0] >= 4 else (None, None)
-            with self.subTest(grace=grace), \
+                return self.endpoint, self.health if now[0] >= 4 else None
+            with self.subTest(grace=grace), self.daemon_lock(), \
                  mock.patch.object(self.m.time, "monotonic", side_effect=lambda: now[0]), \
                  mock.patch.object(self.m.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
                  mock.patch.object(self.link, "probe", side_effect=probe), \
@@ -161,14 +177,21 @@ class LauncherStartContractTest(unittest.TestCase):
     def test_no_successor_starts_once_only_after_the_full_health_window(self):
         now = [0.0]
         started_at = []
+        held = ExitStack()
+        self.addCleanup(held.close)
+        held.enter_context(self.daemon_lock())
         def probe(timeout):
-            return (self.endpoint, self.health) if started_at else (None, None)
+            return self.endpoint, self.health if started_at else None
+        def sleep(seconds):
+            now[0] += seconds
+            if now[0] >= 20:
+                held.close()
         def start(*args, **kwargs):
             started_at.append(now[0])
             self.assertGreaterEqual(now[0], 20)
             return True
         with mock.patch.object(self.m.time, "monotonic", side_effect=lambda: now[0]), \
-             mock.patch.object(self.m.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
+             mock.patch.object(self.m.time, "sleep", side_effect=sleep), \
              mock.patch.object(self.link, "probe", side_effect=probe), \
              mock.patch.object(self.link, "start_daemon", side_effect=start) as starter:
             self.m.DAEMON_RETRY_SECONDS = 75
@@ -176,6 +199,69 @@ class LauncherStartContractTest(unittest.TestCase):
             self.link.ensure_healthy(grace=20)
             starter.assert_called_once()
         self.assertEqual(started_at, [20])
+
+    def test_cold_start_without_endpoint_skips_swap_grace(self):
+        for grace in (0, 20):
+            with self.subTest(grace=grace), \
+                 mock.patch.object(self.link, "probe", return_value=(None, None)), \
+                 mock.patch.object(self.link, "wait_healthy", return_value=(self.endpoint, self.health)) as wait, \
+                 mock.patch.object(self.link, "start_daemon", return_value=True) as start:
+                self.assertEqual(self.link.ensure_healthy(grace=grace), (self.endpoint, self.health))
+                start.assert_called_once()
+                wait.assert_called_once_with(self.link.start_budget)
+
+    def test_stale_endpoint_lock_proves_absence_despite_reused_or_unknown_pid(self):
+        import errno
+        from types import SimpleNamespace
+        endpoint = dict(self.endpoint, pid=os.getpid())
+        self.link.daemon_dir.mkdir()
+        path = self.link.daemon_dir / "endpoint.json"
+        path.write_text(json.dumps(endpoint), encoding="utf-8")
+        for platform_name, unknown in (("posix", False), ("posix", True), ("nt", True)):
+            with self.subTest(platform=platform_name, unknown=unknown), \
+                 mock.patch.object(self.m.os, "name", platform_name), \
+                 mock.patch.object(self.m.os, "kill", side_effect=PermissionError(errno.EPERM, "denied") if unknown else None), \
+                 mock.patch.dict(sys.modules, {"_winapi": SimpleNamespace(OpenProcess=mock.Mock(side_effect=PermissionError("access denied")))}):
+                self.assertIs(self.m.endpoint_process_alive(endpoint), None if unknown else True)
+            # Use the host's actual file locking, independent of PID-query API.
+            started = [False]
+            with mock.patch.object(self.link, "probe", return_value=(endpoint, None)), \
+                 mock.patch.object(self.m, "endpoint_process_alive", return_value=None if unknown else True), \
+                 mock.patch.object(self.link, "wait_healthy", side_effect=lambda budget: (endpoint, self.health if started[0] else None)) as wait:
+                def start(*args, **kwargs):
+                    with self.daemon_lock():  # probe must release before starter
+                        pass
+                    started[0] = True
+                    return True
+                with mock.patch.object(self.link, "start_daemon", side_effect=start) as starter:
+                    self.assertEqual(self.link.ensure_healthy(), (endpoint, self.health))
+                    starter.assert_called_once()
+                wait.assert_called_once_with(self.link.start_budget)
+                self.assertEqual(json.loads(path.read_text()), endpoint)
+
+    def test_absence_is_rechecked_under_starter_lock_and_probe_errors_fail_closed(self):
+        with mock.patch.object(self.m.os, "open", side_effect=PermissionError("lock denied")):
+            self.assertFalse(self.m.daemon_absence_proven(self.link.daemon_dir))
+        with mock.patch.object(self.link, "probe", return_value=(self.endpoint, None)), \
+             mock.patch.object(self.m, "daemon_absence_proven", side_effect=[True, False]) as absence, \
+             mock.patch.object(self.link, "wait_healthy") as wait, \
+             mock.patch.object(self.link, "start_daemon") as start:
+            with self.assertRaisesRegex(self.m.DaemonUnavailable, "refusing absence startup"):
+                self.link.ensure_healthy()
+            self.assertEqual(absence.call_count, 2)
+            wait.assert_not_called()
+            start.assert_not_called()
+
+    def test_malformed_stale_endpoint_does_not_block_start_with_free_singleton(self):
+        self.link.daemon_dir.mkdir()
+        path = self.link.daemon_dir / "endpoint.json"
+        path.write_text("invalid endpoint", encoding="utf-8")
+        with mock.patch.object(self.link, "wait_healthy", return_value=(self.endpoint, self.health)) as wait, \
+             mock.patch.object(self.link, "start_daemon", return_value=True) as start:
+            self.assertEqual(self.link.ensure_healthy(), (self.endpoint, self.health))
+            start.assert_called_once()
+            wait.assert_called_once_with(self.link.start_budget)
+        self.assertEqual(path.read_text(), "invalid endpoint", "only the real starter owns endpoint publication")
 
     def test_connect_timeout_is_unreachable_but_established_timeout_is_hung(self):
         import http.client
@@ -196,7 +282,7 @@ class LauncherStartContractTest(unittest.TestCase):
                         conn.request.assert_not_called()
                 conn.close.assert_called_once()
         # Other post-connect errors keep their old unreachable result; that
-        # result alone never bypasses the live/unqueryable recorded-PID veto.
+        # result alone never bypasses the singleton lock's absence check.
         conn = mock.Mock()
         conn.getresponse.side_effect = ConnectionResetError("peer reset")
         with mock.patch.object(http.client, "HTTPConnection", return_value=conn):
@@ -206,21 +292,22 @@ class LauncherStartContractTest(unittest.TestCase):
         self.link.daemon_dir.mkdir()
         path = self.link.daemon_dir / "endpoint.json"
         for alive in (True, None):
-            with self.subTest(alive=alive), \
+            with self.subTest(alive=alive), self.daemon_lock(), \
                  mock.patch.object(self.link, "probe", return_value=(self.endpoint, None)), \
                  mock.patch.object(self.link, "wait_healthy", return_value=(self.endpoint, None)), \
                  mock.patch.object(self.m, "endpoint_process_alive", return_value=alive), \
                  mock.patch.object(self.link, "start_daemon") as start:
                 path.write_text(json.dumps(self.endpoint), encoding="utf-8")
                 before = path.read_bytes()
-                with self.assertRaisesRegex(self.m.DaemonUnavailable, "live or unqueryable"):
+                with self.assertRaisesRegex(self.m.DaemonUnavailable, "refusing absence startup"):
                     self.link.ensure_healthy()
                 self.assertEqual(path.read_bytes(), before)
                 start.assert_not_called()
         path.write_text("invalid endpoint", encoding="utf-8")
-        with mock.patch.object(self.link, "probe", return_value=(None, None)), \
+        with self.daemon_lock(), \
+             mock.patch.object(self.link, "probe", return_value=(None, None)), \
              mock.patch.object(self.link, "wait_healthy", return_value=(None, None)):
-            with self.assertRaisesRegex(self.m.DaemonUnavailable, "unreadable or invalid"):
+            with self.assertRaisesRegex(self.m.DaemonUnavailable, "refusing absence startup"):
                 self.link.ensure_healthy()
         self.assertFalse((self.link.daemon_dir / "bin").exists())
 

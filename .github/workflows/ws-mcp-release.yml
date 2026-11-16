@@ -101,7 +101,8 @@ jobs:
           # devDependencies), so compare only the parsed dependencies object,
           # not the whole file.
           diff <(jq -S '.dependencies' ../package.json) <(jq -S '.dependencies' ../agents-plugin-pi/package.json)
-          # Prepared native Pi closures are verified without Node/npm/network.
+          # Prepared native Pi closures and workflow bundles need no Node/npm/network.
+          python3 ../agents-plugin-pi/scripts/prepare-workflow-bundles.py --check
           for product in agents-plugin agents-plugin-wsflow; do
             python3 "../$product/bin/ws-pi-payload.py" --plugin "../$product" --check-source ..
           done
