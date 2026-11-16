@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -14,7 +16,27 @@ import (
 // it is detached and unleased. The file lives outside reset/clean's reach and
 // stays in place so no contender can lock a second inode at the same path.
 func worktreeReleaseLock(ctx context.Context, runner wsgit.Runner, target string) (*flock.Flock, error) {
-	dir, err := worktreeAdminDir(ctx, runner, target)
+	// A pooled linked worktree has a gitfile. Resolve it without spawning Git:
+	// a short contention deadline must reach the guard, not expire during
+	// process startup (especially on Windows). Git still validates ownership
+	// after admission; this pointer alone never authorizes cleanup.
+	dir := ""
+	if data, err := os.ReadFile(filepath.Join(strings.TrimSpace(target), ".git")); err == nil {
+		if pointer, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:"); ok {
+			dir = strings.TrimSpace(pointer)
+			if dir != "" && !filepath.IsAbs(dir) {
+				dir = filepath.Join(strings.TrimSpace(target), dir)
+			}
+		}
+	}
+	if dir == "" {
+		var err error
+		dir, err = worktreeAdminDir(ctx, runner, target)
+		if err != nil {
+			return nil, err
+		}
+	}
+	dir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -38,11 +60,11 @@ func worktreeReleasing(ctx context.Context, runner wsgit.Runner, target string) 
 }
 
 func reserveWorktreeRelease(ctx context.Context, runner wsgit.Runner, path, pool string, caller *worktreeReleaseCaller) (string, worktreeEntry, func(), error) {
-	target, _, _, err := ownedPoolWorktree(ctx, runner, path, pool, "worktree.release")
-	if err != nil {
-		return "", worktreeEntry{}, nil, err
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", worktreeEntry{}, nil, fmt.Errorf("worktree.release requires a path")
 	}
-	lock, err := worktreeReleaseLock(ctx, runner, target)
+	lock, err := worktreeReleaseLock(ctx, runner, path)
 	if err != nil {
 		return "", worktreeEntry{}, nil, fmt.Errorf("worktree.release: %w", err)
 	}
@@ -56,15 +78,15 @@ func reserveWorktreeRelease(ctx context.Context, runner wsgit.Runner, path, pool
 		return "", worktreeEntry{}, nil, fmt.Errorf("worktree.release: contention waiting for target release lock: %w; nothing was changed, release again", err)
 	}
 	unlock := func() { _ = lock.Unlock() }
-	unlockPool, err := lockWorktreePool(ctx, runner, target, "worktree.release")
+	unlockPool, err := lockWorktreePool(ctx, runner, path, "worktree.release")
 	if err != nil {
 		unlock()
 		return "", worktreeEntry{}, nil, fmt.Errorf("%w; nothing was changed, release again", err)
 	}
 	defer unlockPool()
-	// Refresh checkout facts after any preceding acquire finished. The facts
-	// read before admission may describe a previous holder or branch.
-	target, entry, _, err := ownedPoolWorktree(ctx, runner, target, pool, "worktree.release")
+	// Validate ownership and read checkout facts only after admission and
+	// after any preceding acquire has published its holder and branch.
+	target, entry, _, err := ownedPoolWorktree(ctx, runner, path, pool, "worktree.release")
 	if err == nil && caller != nil && !caller.Force {
 		err = releaseHolderCheck(ctx, runner, target, *caller)
 	}

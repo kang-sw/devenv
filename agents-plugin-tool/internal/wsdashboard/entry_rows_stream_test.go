@@ -43,10 +43,16 @@ func TestEntryRowsRenderedSharedParity(t *testing.T) {
 	for _, lang := range []string{"en", "ko"} {
 		src := f.d.sessionPageSource("livesession", lang, "")
 		a, b := f.d.cache.acquire(src.key), f.d.cache.acquire(src.key)
-		first, _ := f.d.cache.get(a, src, false)
-		second, _ := f.d.cache.get(b, src, false)
-		if first.entries == nil || len(first.entries.order) != 4 || first.entries != second.entries {
-			t.Fatalf("%s: decomposition missing or not shared", lang)
+		first, firstAt := f.d.cache.get(a, src, false)
+		second, secondAt := f.d.cache.get(b, src, false)
+		if first.entries == nil {
+			t.Fatalf("%s: decomposition missing", lang)
+		}
+		if len(first.entries.order) != 4 {
+			t.Fatalf("%s: decomposition has %d rows, want 4", lang, len(first.entries.order))
+		}
+		if first.entries != second.entries {
+			t.Fatalf("%s: decomposition not shared (broker sequence %d -> %d)", lang, firstAt, secondAt)
 		}
 		r := first.regions[regionEntries]
 		before, _ := json.Marshal(first.entries.rows)
