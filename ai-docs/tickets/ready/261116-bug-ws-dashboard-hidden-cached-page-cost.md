@@ -1,5 +1,7 @@
 ---
 title: "P3: Reduce hidden cached-page overhead and make relative clocks visibility-aware"
+sage-review-design: skipped
+sage-review-completeness: skipped
 related:
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: "P1 render transaction and P4 composer evidence; coordinate visibility/render integration"
   261113-feat-ws-whiteboard-board-frontend-performance: "landed board performance work; retain frame laziness, history and draft guarantees"
@@ -141,15 +143,54 @@ callback firing is not zero ticks. Visible labels retain their current meaning,
 formatting and visual appearance. Do not extend this clock cancellation rule to
 unrelated network/authority timers without their own analysis.
 
+### Implementation design sanity pass — 2026-11-16
+
+Assignment authorized promotion with a light design check, not full Sage
+ceremony. Sanity check: preserve same-path hash navigation; save serializable
+session drafts synchronously before detach; discard superseded loading frames;
+ignore late messages/load events from detached frames. Use the existing
+whiteboard age asset for one document clock, including dashboard time labels;
+observe visible labels instead of walking every label on a timer. Propagate
+clipped visibility to opaque body frames using parent/source and document-key
+checks, preserving existing tooltip holds. Keep this private client state,
+without configuration, shared-store or daemon protocol changes.
+
+Cadence keeps current label formats: second-level freshness below one minute,
+minute-level thereafter (older minute/hour/day age labels use their next actual
+boundary). Reveal refreshes once at the current time rather than replaying ticks.
+Render-transaction work, input-box work and Electron diagnostics stay outside
+this Phase 1.
+
+Owner answer (2026-11-16 10:18), verbatim:
+
+> 1206의 경우 지금도 a이긴 합니다. 이건 이미 대비된 동작이긴 해요.
+
+Reuse the existing native beforeunload confirmation path unchanged: confirm
+before discarding unpersistable content, and cancellation keeps the current
+session. `WsRail.leaveGuard` already covers pasted images. Session-frame teardown
+must navigate through that native guard before removing the element; simply
+calling iframe.remove() would bypass it. Save serializable drafts synchronously
+before starting navigation. No hidden-frame exception, IndexedDB or new custom
+confirmation mechanism is selected.
+
 ## Open questions
 
-- Which age boundaries preserve all existing elapsed/overdue/usage semantics,
-  including current duration labels that display seconds beyond one minute?
-- How should unsent text/images, selection and scroll be preserved or explicitly
-  handled when the previous session document is destroyed? The cache-removal
-  decision is settled; keeping a draft-bearing hidden session is not a fallback.
-- How should the scheduler obtain effective visibility across opaque documents
-  without weakening source/origin checks or held-tooltip consistency?
+- What fresh-switch latency bound should Phase 2 target?
+
+## Constraints
+
+- Work only in the assigned isolated worktree/impl branch; never implement on
+  develop. No local ws executable, launcher, Go or test-binary execution. Local
+  Node tests must spawn no ws executable. Scoped Go tests run on w5090 only.
+- Do not rebuild/restart the shared daemon; live acceptance needs the lead's
+  arranged swap. One R1 review, fixes-only R2; no co-author commit trailer.
+- Preserve source/origin/key checks, draft format, written attachment refs,
+  literal clock formats, history and same-session hash routes. Cancel timers
+  on hidden/pagehide; do not pause unrelated network/authority timers here.
+- Read before implementation: ai-docs/manuals/shipped-surface-boundary.md and
+  ai-docs/manuals/release-compatibility.md. Both read in the assigned worktree.
+- The initially open unpersistable-content decision was answered before
+  implementation: preserve the existing native confirmation path unchanged.
 
 ## Phases
 
