@@ -128,17 +128,28 @@ The owner has now confirmed the Windows interface above. Keep this ticket open
 and retain `impl/develop/cape-barn-hence` and its leased worktree without merging
 or releasing. Before touching cmd/ws-mcp daemon-start/staging or dashboard spawn
 files, coordinate exact paths with the lead because Exec1 is editing the startup
-path in parallel. The lead authorized shell REST/controller code and test
-scaffolding now, but explicitly holds cmd/ws-mcp, Ensure and spawn source until
-Exec1's reviewed startup fix merges. Wait for the lead's merge-commit ping, then
-branch the Go part from that fresh develop; do not base it on this old feature
-branch or edit those files early. The approved sequencing seam is the opt-in
-Ensure SpawnBeforeShutdown bool (not a callback/prestarted-object abstraction),
-with PreserveRunningLAN applied within Ensure's live health observation. A
-strict spawn fails on breakaway error without plain retry; its successor lock
-wait is bounded and covers the drain. Default plugin behavior stays unchanged.
-No extra executable probe or starter is allowed. No real Windows/macOS
-acceptance has been claimed.
+path in parallel. The lead released cmd/ws-mcp, Ensure and spawn edits after
+Exec1 merged as 74924b4c0 and explicitly authorized merging/rebasing this feature
+onto that baseline before Go work. Merge b0e5ee290 brings current develop
+(including 74924b4c0) into this retained feature checkout; no shared-root branch
+was changed. The earlier separate-Go-branch hold is superseded by that explicit
+integration instruction. The approved sequencing seam is the opt-in Ensure
+SpawnBeforeShutdown bool (not a callback/prestarted-object abstraction), with
+PreserveRunningLAN applied within Ensure's live health observation. A strict
+spawn fails on breakaway error without plain retry; its successor lock wait is
+bounded and covers the drain. Default plugin behavior stays unchanged. No extra
+executable probe or starter is allowed. No real Windows/macOS acceptance has
+been claimed.
+
+Preflight means that the OS accepted the independently detached successor
+creation before authenticated drain. It does not promise that the child has
+parsed every argument, become healthy, or reached the lock while its predecessor
+owns it. A later initialization/lock/health failure is the separately required
+post-preflight failure mode and must report unavailable without claiming the
+predecessor survived. Do not turn the shell review's stronger lock-ready
+assumption into a new unpublished readiness protocol, executable probe, or a
+permanent production replacement refusal; implement the approved detachment
+ordering and its explicit late-failure handling.
 
 ## Constraints
 
@@ -335,10 +346,16 @@ semantics; close the accepted rare Electron-vs-launcher race if taking the same
 lock is cheap, otherwise report its exact boundary as Forward. Do not implement
 an unpublished lock format or edit Exec1's code before its merge ping.
 
-The currently authorized slice is shell REST/controller code and Node test
-scaffolding only. Keep Go source untouched until the separate fresh-develop Go
-part is authorized. Record a tested shell candidate without a Phase 3 Result
-while that Go dependency and end-to-end holder/reconnect evidence remain open.
+The shell candidate below predates the released Go boundary. Current work may
+complete strict lifetime/Ensure/start-lock integration on the refreshed feature
+base. First fix the shell candidate's missing daemon-version.js packaging copy
+and pin the packaged source's helper closure with a Node-only regression.
+Evaluate the published launcher-start.lock byte-zero semantics directly; use
+the existing Go flock dependency when cheap, but never add a Node native addon
+or helper executable just to acquire it. Report any remaining single authorized
+starter race precisely instead of claiming it was eliminated. Write a Phase 3
+Result only when its integration and holder/reconnect verification boundary is
+actually satisfied; real packaged Windows/macOS acceptance remains Phase 4.
 
 #### Phase 3 shell candidate (5b07ad43f3) - 2026-11-16 (NOT A RESULT)
 
