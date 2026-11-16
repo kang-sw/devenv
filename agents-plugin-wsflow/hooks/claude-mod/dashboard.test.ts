@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { writeFileSync } from 'node:fs'
 
 import {
   ADAPTER,
@@ -1102,10 +1101,9 @@ describe('observed response evidence', () => {
     expect(begin).toBeGreaterThanOrEqual(0)
     expect(output > begin && end > output).toBe(true)
     expect(events[begin]?.at).toBe(start)
-    // Offline cross-language verification feeds these actual recovered adapter
-    // events through the Go intake/reducer, not a test-side model of it.
-    const capture = process.env.WS_CLAUDE_RETRY_CAPTURE
-    if (capture?.startsWith('/tmp/')) writeFileSync(capture, JSON.stringify(events))
+    // TestObservedClaudeRetryAdapterToReducer in live_observed_test.go pins the
+    // same observed shape (id, model, source, at, effort, effortSource, outputTps)
+    // and turn ordering with a hand-reduced fixture, not this full event stream.
     expect(observed(events)).toEqual([{ id: 'rate-response', model: 'claude-opus-5-5', source: 'claude.step', at, effort: 'high', effortSource: 'request', outputTps: 100 }])
   })
 
