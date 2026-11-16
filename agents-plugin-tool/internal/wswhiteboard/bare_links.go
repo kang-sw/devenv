@@ -37,7 +37,8 @@ var (
 	// extension; each with an optional ":line" or ":line:col". Group 1 is
 	// the path, the link's destination.
 	barePath = regexp.MustCompile(`^(` +
-		`/` + pathSegment + `(?:/` + pathSegment + `)+` +
+		`~/` + pathSegment + `(?:/` + pathSegment + `)*` +
+		`|/` + pathSegment + `(?:/` + pathSegment + `)+` +
 		`|[A-Za-z]:[\\/]` + pathSegment + `(?:[\\/]` + pathSegment + `)+` +
 		`|` + pathSegment + `(?:/` + pathSegment + `)*/[\p{L}\p{N}_.+@%-]*\.[A-Za-z][A-Za-z0-9]*` +
 		`)(?::[0-9]+(?::[0-9]+)?)?$`)
@@ -49,15 +50,16 @@ var (
 	rawSkipClose = regexp.MustCompile(`(?i)^</(a|code)\s*>`)
 )
 
-// pathSegment holds no "~", so a home path ("~/x/a.md") never links as
-// the relative or absolute path it would otherwise contain.
+// A home prefix is recognized separately; it is not an ordinary segment.
+// The serving handler, not this shared renderer, decides whether to expand it.
 const pathSegment = `[\p{L}\p{N}_.+@%-]+`
 
 // barePathAttr marks a link the path parser generated.
 var barePathAttr = []byte("wbBarePath")
 
-// bareLinkParsers are the URL and path parsers, after every parser an author
-// writes a link or tag with.
+// bareLinkParsers keep written links/tags and emphasis ahead of generated
+// links. Only the home-prefix parser precedes strikethrough, which would
+// otherwise consume a leading ~.
 func bareLinkParsers() []util.PrioritizedValue {
 	url := extension.NewLinkifyParser(
 		extension.WithLinkifyAllowedProtocols([]string{"http:", "https:"}),
@@ -67,6 +69,7 @@ func bareLinkParsers() []util.PrioritizedValue {
 	)
 	return []util.PrioritizedValue{
 		util.Prioritized(outsideRawTags{url}, 600),
+		util.Prioritized(outsideRawTags{homePathParser{}}, 400),
 		util.Prioritized(outsideRawTags{barePathParser{}}, 700),
 	}
 }
@@ -104,6 +107,20 @@ func inRawTag(parent ast.Node, source []byte) bool {
 		}
 	}
 	return false
+}
+
+// homePathParser handles only a leading ~/ before strikethrough can claim it.
+// Other path triggers must wait until emphasis has had its turn.
+type homePathParser struct{ barePathParser }
+
+func (homePathParser) Trigger() []byte { return []byte{'~'} }
+
+func (p homePathParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
+	line, _ := block.PeekLine()
+	if !strings.HasPrefix(string(line), "~/") {
+		return nil
+	}
+	return p.barePathParser.Parse(parent, block, pc)
 }
 
 // barePathParser links a bare file path (barePath). It starts where

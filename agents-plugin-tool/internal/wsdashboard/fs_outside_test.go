@@ -58,6 +58,10 @@ func startOutsideFixture(t *testing.T) *outsideFixture {
 	}
 	t.Setenv("HOME", o.home)
 	t.Setenv("USERPROFILE", o.home)
+	// Relocated credentials in the developer's environment are not fixtures.
+	for _, key := range []string{"GH_CONFIG_DIR", "XDG_CONFIG_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "KUBECONFIG", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"} {
+		t.Setenv(key, "")
+	}
 	o.pageFixture = startPageFixture(t, lanMode)
 	o.local, o.lan = fsViewers(t, o.pageFixture)
 	o.bare = viewer{name: "LAN peer, no token", peer: "192.168.7.31:50000", host: "192.168.7.20:" + strconv.Itoa(o.d.Endpoint().Port)}
@@ -116,14 +120,9 @@ func (o *outsideFixture) read(target string) *httptest.ResponseRecorder {
 // under is the URL of name under the capability prefix of a document URL.
 func under(doc, name string) string { return doc[:strings.LastIndex(doc, "/")+1] + name }
 
-// TestFSOutsideMintsOnlyForALinkTheSessionShows pins the mint route's
-// gate: a loopback, same-origin POST naming a path the session's board, a
-// lead reply in its live ring, or its streaming reply links outside the
-// root gets the card's answer; a path nothing links, a path a reply only
-// carries inside a code span (no link on the page), a path the root
-// holds, a path another session links, a GET, a LAN viewer with the token,
-// and another origin's POST get none.
-func TestFSOutsideMintsOnlyForALinkTheSessionShows(t *testing.T) {
+// Local same-origin requests need no board/live-ring provenance. LAN
+// token holders still cannot mint, even for a path the board links.
+func TestFSOutsideMintsForLocalViewerWithoutProvenance(t *testing.T) {
 	o := startOutsideFixture(t)
 	board := o.write(t, o.away, "board.txt", "TEXT-BOARD")
 	reply := o.write(t, o.away, "reply.txt", "TEXT-REPLY")
@@ -145,37 +144,37 @@ func TestFSOutsideMintsOnlyForALinkTheSessionShows(t *testing.T) {
 	writeSnapshot(t, o.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
 		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: "still writing [this](" + filepath.ToSlash(streamed) + ")"}}})
 
-	for path, want := range map[string]string{board: "TEXT-BOARD", reply: "TEXT-REPLY", streamed: "TEXT-STREAMED"} {
+	for path, want := range map[string]string{board: "TEXT-BOARD", reply: "TEXT-REPLY", streamed: "TEXT-STREAMED", unlinked: "TEXT-UNLINKED", mentioned: "TEXT-MENTIONED", other: "TEXT-OTHER", inside: "TEXT-INSIDE"} {
 		code, a := o.open(t, o.local, path)
-		if code != http.StatusOK || a.Kind != "text" || a.Text != want || a.Abs != path || a.Frame != "" || a.Src != "" || a.View != "" {
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code != http.StatusOK || a.Kind != "text" || a.Text != want || a.Abs != real || a.Frame != "" || a.Src != "" || a.View != "" {
 			t.Errorf("mint %s = %d %+v, want its text", path, code, a)
 		}
 	}
 	for why, path := range map[string]string{
-		"a path nothing links":         unlinked,
-		"a path a reply only mentions": mentioned,
-		"a path another session links": other,
-		"a path inside the root":       inside,
-		"a relative path":              "board.txt",
-		"an empty path":                "",
-		"a path that does not exist":   filepath.Join(o.away, "missing.txt"),
-		"the linked file's folder":     o.away,
-		"a path past the linked one":   board + string(filepath.Separator) + "x",
-		"a network path":               "//server/share/board.txt",
+		"a relative path":            "board.txt",
+		"an empty path":              "",
+		"a path that does not exist": filepath.Join(o.away, "missing.txt"),
+		"the linked file's folder":   o.away,
+		"a path past the linked one": board + string(filepath.Separator) + "x",
+		"a network path":             "//server/share/board.txt",
 	} {
 		if code, a := o.open(t, o.local, path); code != http.StatusNotFound {
 			t.Errorf("%s: mint %q = %d %+v, want 404", why, path, code, a)
 		}
 	}
 	// The posted path is cleaned before it is matched: the linked file
-	// spelled through a dot step and a doubled separator still opens, and
-	// the same spelling of an unlinked file does not.
+	// spelled through a dot step and a doubled separator still opens,
+	// whether or not a page links it.
 	sep := string(filepath.Separator)
 	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"board.txt"); code != http.StatusOK {
 		t.Errorf("mint of the linked path spelled through a dot step = %d, want 200", code)
 	}
-	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"unlinked.txt"); code != http.StatusNotFound {
-		t.Errorf("mint of an unlinked path spelled through a dot step = %d, want 404", code)
+	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"unlinked.txt"); code != http.StatusOK {
+		t.Errorf("mint of an unlinked path spelled through a dot step = %d, want 200", code)
 	}
 
 	// A LAN viewer holding the token is refused as if the route did not
@@ -417,15 +416,15 @@ func TestFSOutsideNeverOpensAnAlwaysDeniedPath(t *testing.T) {
 	folder := filepath.Join(o.away, "keys")
 	if os.Symlink(filepath.Join(o.home, ".ssh", "id.txt"), into) == nil && os.Symlink(filepath.Join(o.home, ".ssh"), folder) == nil {
 		o.refused(t, "a symlink into a denied folder", into)
-		// A denied path as written stays closed under the name it resolves
-		// to, which nothing else links.
+		// The ordinary target is readable independently of the denied alias;
+		// provenance no longer determines whether a local user may read it.
 		plain := o.write(t, o.away, "plain.txt", "SECRET-PLAIN")
 		if err := os.Symlink(plain, filepath.Join(o.home, ".ssh", "plain.txt")); err != nil {
 			t.Fatal(err)
 		}
 		o.src.link("livesession", filepath.Join(o.home, ".ssh", "plain.txt"))
-		if code, a := o.open(t, o.local, plain); code != http.StatusNotFound {
-			t.Errorf("mint of the path a denied link resolves to = %d %+v, want 404", code, a)
+		if code, a := o.open(t, o.local, plain); code != http.StatusOK {
+			t.Errorf("mint of the ordinary target of a denied alias = %d %+v, want 200", code, a)
 		}
 		// The link itself is refused by the path as written alone: the
 		// file it resolves to is under no denied folder.
@@ -740,11 +739,11 @@ func TestFSOutsideExpiredPageRemintsByPostOnly(t *testing.T) {
 	if rec := navigate(under(fresh.View, "sub/next%20page.html")); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "NEXT-AWAY") {
 		t.Errorf("the fresh URL = %d, want the file", rec.Code)
 	}
-	// Once the board no longer links the file, the re-mint is refused.
+	// Re-mint remains available after a link leaves the board/live history.
 	o.src.mu.Lock()
 	o.src.outside = nil
 	o.src.mu.Unlock()
-	if code, _ := o.open(t, o.local, page); code != http.StatusNotFound {
-		t.Errorf("the re-mint of a link the board dropped = %d, want 404", code)
+	if code, _ := o.open(t, o.local, page); code != http.StatusOK {
+		t.Errorf("the re-mint of a link the board dropped = %d, want 200", code)
 	}
 }

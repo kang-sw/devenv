@@ -93,8 +93,15 @@ func TestFSPDFPreviewRawAndGuards(t *testing.T) {
 		for _, path := range []string{filepath.Join(outside, "secret.pdf"), "../secret.pdf", "missing.pdf"} {
 			for _, route := range []string{"preview", "raw"} {
 				rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/"+route+"?path="+url.QueryEscape(path), "")
-				if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "PDF-") {
-					t.Errorf("%s %s %q = %d", v.name, route, path, rec.Code)
+				want := http.StatusNotFound
+				if v.name == local.name && path == filepath.Join(outside, "secret.pdf") {
+					want = http.StatusOK
+				}
+				if rec.Code != want || (want != http.StatusOK && strings.Contains(rec.Body.String(), "PDF-")) {
+					t.Errorf("%s %s %q = %d, want %d", v.name, route, path, rec.Code, want)
+				}
+				if want == http.StatusOK && route == "raw" && !strings.Contains(rec.Body.String(), "PDF-OUTSIDE") {
+					t.Errorf("local outside PDF bytes missing: %s", rec.Body.String())
 				}
 			}
 		}
@@ -146,8 +153,15 @@ func TestFSPDFPreviewRawAndGuards(t *testing.T) {
 			for _, path := range []string{"alias.pdf", "escape.pdf", "outlink/secret.pdf"} {
 				for _, route := range []string{"preview", "raw"} {
 					rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/"+route+"?path="+url.QueryEscape(path), "")
-					if rec.Code != http.StatusNotFound {
-						t.Errorf("%s symlink %s %s = %d", v.name, route, path, rec.Code)
+					want := http.StatusNotFound
+					if v.name == local.name {
+						want = http.StatusOK
+					}
+					if rec.Code != want || (want == http.StatusNotFound && strings.Contains(rec.Body.String(), "PDF-")) {
+						t.Errorf("%s symlink %s %s = %d, want %d", v.name, route, path, rec.Code, want)
+					}
+					if want == http.StatusOK && route == "raw" && !strings.Contains(rec.Body.String(), "PDF-") {
+						t.Errorf("local PDF symlink bytes missing: %s", rec.Body.String())
 					}
 				}
 			}
