@@ -1,5 +1,6 @@
 ---
 title: "worktree.release refuses another holder's or ownerless-dirty worktree unless force"
+completed: 2026-11-16
 ---
 
 # worktree.release refuses another holder's or ownerless-dirty worktree unless force
