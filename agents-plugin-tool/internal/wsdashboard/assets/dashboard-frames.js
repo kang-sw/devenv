@@ -35,7 +35,9 @@
   // sandbox set later applies only to the next navigation, and an iframe
   // connected without srcdoc commits about:blank at once. data-srcdoc stays
   // for comparisons.
+  var mountTimer = 0;
   function mountFrame(p) {
+    if (shHidden) return p;
     var f = doc.createElement("iframe");
     Array.prototype.forEach.call(p.attributes, function (a) { if (a.name !== "data-sandbox") f.setAttribute(a.name, a.value); });
     f.setAttribute("sandbox", p.getAttribute("data-sandbox") || "");
@@ -53,6 +55,7 @@
     return f;
   }
   function mountFrames(el) {
+    if (shHidden) return;
     q("div.doc-frame[data-srcdoc]", el).forEach(function (p) {
       if (frameShown(p) && frameNear(p)) mountFrame(p);
     });
@@ -65,10 +68,13 @@
   // board performance harness). A placeholder a swap or a toggle open took
   // meanwhile is skipped (frameShown checks it is still connected).
   function mountFramesPaced(el) {
+    if (shHidden) return;
     mountList = mountList.concat(q("div.doc-frame[data-srcdoc]", el));
     if (!mountTask) mountSlice();
   }
   function mountSlice() {
+    mountTimer = 0;
+    if (shHidden) { mountList = []; mountTask = false; return; }
     var t = performance.now();
     mountTask = true;
     while (mountList.length && performance.now() - t < 8) {
@@ -76,7 +82,7 @@
       if (frameShown(p) && frameNear(p)) mountFrame(p);
     }
     mountTask = mountList.length > 0;
-    if (mountTask) setTimeout(mountSlice, 0);
+    if (mountTask) mountTimer = setTimeout(mountSlice, 0);
   }
   function frameToggle(e) {
     var d = e.target;
@@ -145,6 +151,16 @@
   // the one it reported last when that has not landed yet, and the marks
   // a board swap left for its first height (wbKeep, wbGrow), which the
   // frame mounted again takes; it is marked as unmounted (wbUnmounted).
+  function suspendDocFrames() {
+    clearTimeout(mountTimer); mountTimer = 0; mountList = []; mountTask = false;
+    if (frameSizeFrame) cancelAnimationFrame(frameSizeFrame);
+    frameSizeFrame = 0;
+    // Finish replacement ownership while both live documents still exist;
+    // placeholders must never inherit a permanently hidden next-frame shell.
+    q("iframe.doc-frame").forEach(function (f) { if (f.wbNext) frameReveal(f); });
+    q("iframe.doc-frame").forEach(unmountFrame);
+    frameSizes.clear();
+  }
   function unmountFrame(f) {
     var w = window.wbHistory, kept = frameSizes.has(f) && w && w.keep ? w.keep(f) : null;
     var p = doc.createElement("div");
@@ -169,6 +185,7 @@
   // user reads, and any other change (a frame already shown reporting a new
   // height) is left as it was before the bands.
   function topicResized(list) {
+    if (shHidden) return;
     var w = window.wbHistory;
     list.forEach(function (e) {
       var t = e.target, was = t.wbSize, box = e.borderBoxSize && e.borderBoxSize[0], h = box ? box.blockSize : e.contentRect.height;
@@ -331,10 +348,12 @@
   // stylesheet's iframe.doc-frame starts it, so nothing reads layout.
   var frameSizes = new Map(), frameSizeFrame = 0;
   function queueFrameHeight(f, h) {
+    if (shHidden) return;
     frameSizes.set(f, h);
     if (!frameSizeFrame) frameSizeFrame = requestAnimationFrame(applyFrameHeights);
   }
   function applyFrameHeights() {
+    if (shHidden) { frameSizes.clear(); frameSizeFrame = 0; return; }
     // While overview is active or transitioning, board frames are inside
     // display:none containers and report collapsed heights. Applying those
     // would overwrite the saved inline heights that exit uses to restore the

@@ -7,18 +7,20 @@ const source = readAssetSource('wsdashboard', 'dashboard.js');
 const stream = source.match(/\n  var sseOn = true;\n[\s\S]*?\n  \/\/ showRegions applies/)[0];
 
 function fixture(framed = false) {
-  let now = 0;
-  const timers = [], sockets = [], probes = [], banners = [], swaps = [];
+  let now = 0, timerId = 0;
+  const timers = [], sockets = [], probes = [], banners = [], swaps = [], handlers = {};
   const drafts = { composer: 'unsent', answers: ['choice'], images: ['image'], notes: ['note'] };
   const dom = { html: '<p>last good board</p>', drafts };
   const ctx = {
-    shell: false, framed, mode: 'session', rid: 'rid1', heldNow: 'board.1',
+    shell: false, framed, shHidden: false, worktree: '', mode: 'session', rid: 'rid1', heldNow: 'board.1',
+    doc: { addEventListener(type, fn) { handlers[type] = fn; } }, AbortController,
     window: {}, location: { protocol: 'http:', host: 'isolated.invalid' },
     q: () => [], wsT: k => k, trackerLost() {},
     held: () => ctx.heldNow, banner: text => banners.push(text),
     pageHidden: () => false, swap: (...args) => swaps.push(args),
-    boardInputFull: () => null,
-    setTimeout(fn, delay) { timers.push({ at: now + delay, fn }); },
+    boardInputFull: () => null, boardInputPatch: () => null,
+    setTimeout(fn, delay) { const id = ++timerId; timers.push({ id, at: now + delay, fn }); return id; },
+    clearTimeout(id) { const i = timers.findIndex(t => t.id === id); if (i >= 0) timers.splice(i, 1); },
     fetch(url, options) {
       let resolve, reject;
       const promise = new Promise((a, b) => { resolve = a; reject = b; });
@@ -38,6 +40,7 @@ function fixture(framed = false) {
   ctx.connect();
   return {
     ctx, sockets, probes, banners, swaps, dom, timers,
+    shown(value) { ctx.shHidden = !value; handlers['ws-page-visibility'](); },
     advance(ms) {
       now += ms;
       for (;;) {
@@ -88,6 +91,49 @@ for (const framed of [false, true]) {
     assert.equal(JSON.stringify(f.dom), original);
   });
 }
+
+test('shell hide cancels retries and reveal reconnects once with fresh hashes', () => {
+  const f = fixture(true);
+  f.sockets[0].fail();
+  assert.equal(f.timers.length, 1);
+  f.shown(false);
+  assert.equal(f.timers.length, 0);
+  f.advance(30000);
+  assert.equal(f.sockets.length, 1);
+  f.ctx.heldNow = 'board.9';
+  f.shown(true); f.shown(true);
+  assert.equal(f.sockets.length, 2);
+  assert.match(f.sockets[1].url, /h=board.9/);
+  f.shown(false);
+  assert.equal(f.sockets[1].closed, true);
+  f.advance(30000);
+  assert.equal(f.sockets.length, 2);
+});
+
+test('hide cancels an invalid-patch reconnect', () => {
+  const f = fixture(true);
+  f.sockets[0].msg('board-topics');
+  assert.equal(f.timers.length, 1);
+  f.shown(false);
+  assert.equal(f.timers.length, 0);
+  f.advance(100);
+  assert.equal(f.sockets.length, 1);
+  f.shown(true);
+  assert.equal(f.sockets.length, 2);
+});
+
+test('hide aborts a gone probe and discards its late result after reveal', async () => {
+  const f = fixture(true);
+  f.sockets[0].msg('gone'); f.advance(3000);
+  f.shown(false);
+  assert.equal(f.probes[0].options.signal.aborted, true);
+  f.shown(true);
+  await f.reply(404);
+  f.advance(30000);
+  assert.equal(f.sockets.length, 2);
+  assert.deepEqual(f.banners, []);
+  assert.equal(f.timers.length, 0);
+});
 
 test('confirmed 404 banners once and never reconnects', async () => {
   const f = fixture();

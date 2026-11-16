@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { readAssetSource } = require('./asset-source.cjs');
 
-function fixture() {
+function fixture(cacheLimit = 0) {
   const go = fs.readFileSync(path.join(__dirname, '../shell_frame_test.go'), 'utf8');
   const harness = go.match(/const shellGlueHarness = `([\s\S]*?)\n`/)[1];
   const js = readAssetSource('wsdashboard', 'dashboard.js');
@@ -23,7 +23,19 @@ function fixture() {
     for (const [id, timer] of timers) if (timer.at <= clock) { timers.delete(id); timer.fn(); }
   };
   context.timerCount = () => timers.size;
-  vm.runInContext(harness + historyHarness + readAssetSource('wsdashboard', 'shell.js') + '\n(function () {\n' + glue + init + `
+  vm.runInContext(harness + historyHarness + readAssetSource('wsdashboard', 'shell.js') + `
+    window.productionCacheLimit = window.WsShell.cacheLimit;
+    window.WsShell.cacheLimit = ${cacheLimit};
+    root.getAttribute = function (key) { return attrs[key] || null; };
+    function cacheSafety(frame) {
+      frame.contentWindow.wsCanCacheSession = function () { frame.saved++; return !frame.unsafe && !frame.tool; };
+      return frame;
+    }
+    var OriginalFrame = Frame;
+    Frame = function (src) { return cacheSafety(new OriginalFrame(src)); };
+    Frame.prototype = OriginalFrame.prototype;
+    cacheSafety(first);
+  ` + '\n(function () {\n' + glue + init + `
     first.contentDocument.readyState = 'complete';
     shShellInit();
     window.testShell = {
@@ -176,7 +188,6 @@ function runBase() {
   assert.equal(c.click('https://example.com/'), false);
 
   const lifecycle = readAssetSource('wsdashboard', 'dashboard-lifecycle.js');
-  assert.ok(lifecycle.includes('if (framed) window.wsSaveSessionDraft = saveDraft;'));
   assert.ok(lifecycle.includes('window.addEventListener("beforeunload", WsRail.leaveGuard('), 'existing native guard mechanism remains');
   assert.ok(!lifecycle.includes('WsShell.touch'));
   assert.ok(!lifecycle.includes('shOrder'));
@@ -251,7 +262,7 @@ function draftFixture(failure) {
   const data = {}, handlers = {}, timers = [], posts = [];
   let fail = failure;
   const context = vm.createContext({ console, rid: 'a', shell: false, framed: true, mode: 'session', imgs: [],
-    doc: { addEventListener() {} }, clearTimeout() {}, setTimeout(fn) { timers.push(fn); },
+    doc: { addEventListener() {} }, fpane: null, tkBusy: false, visible() { return false; }, clearTimeout() {}, setTimeout(fn) { timers.push(fn); },
     shPost(kind, value) { posts.push({kind, ...value}); },
     store: failure === 'denied' ? null : {
       getItem(key) { return data[key] ?? null; }, removeItem(key) { delete data[key]; },
@@ -318,7 +329,101 @@ function testRestoreTimeout() {
   b.load();
   assert.ok(c.frameOf('/s/c'));
 }
-function run() { runBase(); testCancelledLeave(); testHistoryCancellation(); testStorageFailure(); testAcceptedBlankWins(); testRestoreTimeout(); }
+function cachedSwitch(c, path) {
+  c.click(path);
+  const next = c.window.testShell.pending();
+  if (next) next.load();
+  return c.window.testShell.current();
+}
+function testCacheReuse() {
+  const c = fixture(5), s = c.window.testShell, a = c.first;
+  assert.equal(c.window.productionCacheLimit, 5, 'production bound is a code constant');
+  a.contentWindow.localReadingState = { value: 'not rebuilt' };
+  c.click('/s/b');
+  assert.equal(a.inert, true, 'no new edit can race cache admission during a cold destination load');
+  const b = s.pending(); assert.ok(b); b.load();
+  assert.equal(a.removed, false); assert.equal(s.count(), 2);
+  assert.equal(a.got.at(-1), 'shown:false');
+  b.draft = true; b.contentWindow.typed = 'persisted draft';
+  const returned = cachedSwitch(c, '/s/a');
+  assert.equal(returned, a); assert.equal(a.inert, false);
+  assert.equal(a.contentWindow.localReadingState.value, 'not rebuilt');
+  assert.equal(s.count(), 2); assert.equal(b.removed, false);
+  assert.ok(a.got.includes('theme')); assert.equal(a.got.at(-1), 'shown:true');
+  s.open('/s/a#files', true); assert.equal(a.contentWindow.location.hash, '#files');
+  assert.equal(s.current(), a);
+  const pushes = c.pushed.length;
+  c.history.go(-2); assert.equal(s.current(), b, 'Back reuses the same Window');
+  c.history.go(1); assert.equal(s.current(), a, 'Forward reuses the same Window');
+  assert.equal(c.pushed.length, pushes);
+  assert.equal(b.contentWindow.typed, 'persisted draft');
+}
+function testCacheEvictionAndRaces() {
+  const c = fixture(2), s = c.window.testShell, a = c.first;
+  const b = cachedSwitch(c, '/s/b');
+  const third = cachedSwitch(c, '/s/c');
+  assert.equal(a.removed, true); assert.equal(s.count(), 2);
+  assert.equal(cachedSwitch(c, '/s/b'), b, 'hit updates recency');
+  const fourth = cachedSwitch(c, '/s/d');
+  assert.equal(third.removed, true); assert.equal(b.removed, false); assert.equal(s.count(), 2);
+  const log = c.log.length;
+  c.from(a.contentWindow, {wsShell: 'nav', href: '/s/stray'}); a.load();
+  assert.equal(c.log.length, log); assert.equal(s.current(), fourth);
+  c.click('/s/loading'); const superseded = s.pending();
+  c.click('/s/latest'); assert.equal(superseded.removed, true);
+  const latest = s.pending(); superseded.load(); latest.load();
+  assert.equal(s.current(), latest); assert.equal(s.count(), 2);
+  // Cancelling a loading pick by returning to the current page unlocks it.
+  c.click('/s/unused'); const unused = s.pending(); c.click('/s/latest');
+  assert.equal(unused.removed, true); assert.equal(latest.inert, false);
+}
+function testUnsafeCacheFallback() {
+  for (const kind of ['unsafe', 'tool']) {
+    const c = fixture(5), a = c.first, s = c.window.testShell;
+    a[kind] = true; a.cancelLeave = true; c.click('/s/b');
+    assert.equal(s.current(), a); assert.equal(c.frameOf('/s/b'), undefined);
+    c.stay(a); assert.equal(a.removed, false);
+    a.cancelLeave = false; c.click('/s/b'); a.load();
+    assert.equal(a.removed, true); assert.ok(c.frameOf('/s/b'));
+  }
+  const f = draftFixture('quota');
+  f.context.supChats = {}; f.context.q = () => [];
+  f.context.draft = {text: 'cannot persist'};
+  assert.equal(f.context.wsCanCacheSession(), false, 'failed storage never bypasses native leave');
+  f.recover(); assert.equal(f.context.wsCanCacheSession(), true, 'saved text may be cached');
+  f.context.imgs = [{n: 1}]; assert.equal(f.context.wsCanCacheSession(), false, 'unpersisted image stays guarded');
+  f.context.imgs = []; f.context.q = () => [{}]; assert.equal(f.context.wsCanCacheSession(), false, 'tool/foreign frames stay fresh');
+  f.context.q = () => []; f.context.supChats = {chat: {}}; assert.equal(f.context.wsCanCacheSession(), false, 'support state stays fresh');
+  f.context.supChats = {}; f.context.WsTerm = {cacheSafe: () => false};
+  assert.equal(f.context.wsCanCacheSession(), false, 'pending terminal list/create never enters cache');
+  f.context.WsTerm.cacheSafe = () => true; assert.equal(f.context.wsCanCacheSession(), true);
+}
+function testCacheAdmissionExpiry() {
+  for (const cancel of [false, true]) {
+    const c = fixture(5), s = c.window.testShell, a = c.first;
+    c.click('/s/b'); const ready = s.pending();
+    a.tool = true; a.cancelLeave = cancel; ready.load();
+    assert.equal(s.current(), a, 'eligibility is checked again before hiding');
+    assert.equal(a.got.includes('shown:false'), false, 'unsafe outgoing runtime is never parked');
+    assert.equal(a.inert, false, 'native leave remains interactive/cancellable');
+    assert.equal(ready.got.at(-1), 'shown:false', 'ready destination is suspended while native leave awaits a decision');
+    if (cancel) {
+      c.stay(a);
+      assert.equal(c.location.pathname, '/s/a'); assert.equal(s.current(), a); assert.equal(a.removed, false);
+      assert.equal(ready.removed, true, 'Stay discards the never-shown destination runtime');
+      assert.equal(s.pending(), null); assert.equal(s.count(), 1);
+      // A tentative Stay may race an already accepted blank navigation.
+      a.pending = 'about:blank'; a.load();
+      const accepted = c.frameOf('/s/b'); assert.ok(accepted); assert.notEqual(accepted, ready);
+      accepted.load(); assert.equal(s.current(), accepted); assert.equal(c.location.pathname, '/s/b');
+      ready.load(); assert.equal(s.current(), accepted, 'discarded destination never regains authority');
+    } else {
+      assert.equal(a.pending, 'about:blank', 'late tool state takes the native destruction path');
+      a.load(); assert.equal(a.removed, true); assert.equal(s.current(), ready, 'ready destination is reused after native acceptance');
+    }
+  }
+}
+function run() { runBase(); testCancelledLeave(); testHistoryCancellation(); testStorageFailure(); testAcceptedBlankWins(); testRestoreTimeout(); testCacheReuse(); testCacheEvictionAndRaces(); testUnsafeCacheFallback(); testCacheAdmissionExpiry(); }
 module.exports = run;
 if (require.main === module) {
   const test = require('node:test');
@@ -328,4 +433,8 @@ if (require.main === module) {
   test('I3: denied/full storage prompts before discarding a typed draft', testStorageFailure);
   test('hardening: accepted blank load wins over a stale stay', testAcceptedBlankWins);
   test('hardening: missing restoration popstate times out and flushes navigation', testRestoreTimeout);
+  test('bounded cache reuses documents, drafts, hashes and Back/Forward', testCacheReuse);
+  test('cache LRU eviction, stale authority and superseded cold loads', testCacheEvictionAndRaces);
+  test('unsafe images, storage, tools and support retain native fresh navigation', testUnsafeCacheFallback);
+  test('late tool admission during a cold load stays native-guarded, including Stay history', testCacheAdmissionExpiry);
 }

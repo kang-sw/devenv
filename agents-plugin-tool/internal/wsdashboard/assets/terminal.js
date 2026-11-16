@@ -503,10 +503,13 @@
   var REFUSAL = { not_absolute: "js.term.err.relative", not_found: "js.term.err.missing", not_a_folder: "js.term.err.notdir" };
   // create opens a terminal in the folder body names ({folder, path}) and
   // shows its card; done(err) gets the refusal's text, or null.
+  var creating = 0;
   function create(body, done) {
     if (!hooks.post) { done(wsT("js.post.nobrowser")); return; }
+    creating++;
     var req = { folder: worktree ? "path" : body.folder || "worktree", path: worktree || body.path || "", rows: ROWS, cols: guessCols() };
     hooks.post("terminals", req, function (ok, v) {
+      creating--;
       if (!ok) { done(REFUSAL[v] ? wsT(REFUSAL[v]) : wsT("js.term.err.failed", v)); return; }
       show(v);
       done(null);
@@ -664,6 +667,9 @@
   }
 
   window.WsTerm = {
+    // A late list/create result can introduce an active runtime after a
+    // shell cache check. Never admit the page while either is in flight.
+    cacheSafe: function () { return !listWait && !creating; },
     // setup hands the kind the page's own pieces: post (a session write
     // route, which passes a refusal's text through) and toast.
     setup: function (h) { hooks = h || {}; },

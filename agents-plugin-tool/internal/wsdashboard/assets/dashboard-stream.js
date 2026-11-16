@@ -340,8 +340,31 @@
   }
 
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
+  var mainStream = null, mainRetry = null, mainProbe = null, mainEpoch = 0, mainPaused = false;
+  function stopMainStream() {
+    mainEpoch++;
+    if (mainRetry !== null) { clearTimeout(mainRetry); mainRetry = null; }
+    if (mainProbe) { mainProbe.abort(); mainProbe = null; }
+    if (mainStream) { mainStream.close(); mainStream = null; }
+  }
+  function syncMainStream() {
+    // Browser-hidden tabs retain their stream; only cached frames stop it.
+    if (shHidden === mainPaused) return;
+    mainPaused = shHidden;
+    if (mainPaused) { stopMainStream(); connected(false); trackerLost(); }
+    else connect();
+  }
+  doc.addEventListener("ws-page-visibility", syncMainStream);
   function connect(withoutBoard) {
-    if (!window.WebSocket) return;
+    if (!window.WebSocket || shHidden) return;
+    stopMainStream();
+    var epoch = mainEpoch;
+    function current() { return epoch === mainEpoch && !shHidden; }
+    function retry(fn, delay) {
+      if (!current()) return;
+      if (mainRetry !== null) clearTimeout(mainRetry);
+      mainRetry = setTimeout(function () { mainRetry = null; if (current()) fn(); }, delay);
+    }
     var boardInput = null, railInput = null, treeInput = null, entryInput = null, panelInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
@@ -353,12 +376,13 @@
       drop: function () {
         connected(false);
         trackerLost();
-        setTimeout(connect, 3000);
+        retry(connect, 3000);
       },
       events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, "tree-rows": onTreeRows, "entry-rows": onEntryRows, "panel-rows": onPanelRows, tracker: onTracker, gone: onGone }
     });
+    mainStream = st;
     function onRegion(ev) {
-      if (!ev) return;
+      if (!current() || !ev) return;
       if (worktree && ev.name !== "rail") return;
       if (ev.name === "mode") {
         if (ev.html !== mode) modeChanged(ev.html);
@@ -393,7 +417,7 @@
       var next = panelInputPatch(panelInput, ev);
       if (!next) {
         st.close(); connected(false);
-        setTimeout(connect, 0);
+        retry(connect, 0);
         return;
       }
       panelInput = next;
@@ -403,7 +427,7 @@
       var next = entryInputPatch(entryInput, ev);
       if (!next) {
         st.close(); connected(false);
-        setTimeout(connect, 0);
+        retry(connect, 0);
         return;
       }
       entryInput = next;
@@ -413,7 +437,7 @@
       var next = treeInputPatch(treeInput, ev);
       if (!next) {
         st.close(); connected(false);
-        setTimeout(connect, 0);
+        retry(connect, 0);
         return;
       }
       treeInput = next;
@@ -424,7 +448,7 @@
       if (!next) {
         // Close before reopening: the new connection always sends a full rail.
         st.close(); connected(false);
-        setTimeout(connect, 0);
+        retry(connect, 0);
         return;
       }
       railInput = next;
@@ -437,7 +461,7 @@
         // reopening without the board hash; other regions keep their hashes.
         st.close();
         connected(false);
-        setTimeout(function () { connect(true); }, 0);
+        retry(function () { connect(true); }, 0);
         return;
       }
       boardInput = next;
@@ -491,16 +515,23 @@
       st.close();
       connected(false);
       trackerLost();
-      setTimeout(recheckGone, 3000);
+      retry(recheckGone, 3000);
     }
     function recheckGone() {
-      fetch(path + (framed && mode !== "index" ? "?frame=1" : ""), { cache: "no-store" }).then(function (res) {
-        // The GET is only a status probe, not another long-lived SSE stream.
+      if (!current()) return;
+      var ctl = typeof AbortController === "function" ? new AbortController() : null;
+      mainProbe = ctl;
+      var options = { cache: "no-store" };
+      if (ctl) options.signal = ctl.signal;
+      fetch(path + (framed && mode !== "index" ? "?frame=1" : ""), options).then(function (res) {
+        // Cancel the response even if it arrived after the frame was hidden.
         if (res.body) res.body.cancel().catch(function () {});
+        if (!current()) return;
+        mainProbe = null;
         if (res.status === 404) { banner(wsT("js.banner.gone")); return; }
         if (res.ok) { connect(); return; }
-        setTimeout(recheckGone, 3000);
-      }).catch(function () { setTimeout(recheckGone, 3000); });
+        retry(recheckGone, 3000);
+      }).catch(function () { if (current()) { mainProbe = null; retry(recheckGone, 3000); } });
     }
   }
   // showRegions applies, once each and in arrival order, the region updates

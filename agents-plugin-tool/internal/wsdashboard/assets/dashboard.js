@@ -28,8 +28,8 @@
   if (framed && window.parent === window) { location.replace(location.pathname + location.hash); return; }
   function syncPageVisibility() {
     var paused = doc.hidden || shHidden;
-    if (root.hasAttribute("data-animation-paused") === paused) return;
-    root.toggleAttribute("data-animation-paused", paused);
+    if (root.hasAttribute("data-animation-paused") !== paused) root.toggleAttribute("data-animation-paused", paused);
+    // Shell visibility can change while the browser tab is already hidden.
     doc.dispatchEvent(new CustomEvent("ws-page-visibility"));
   }
   doc.addEventListener("visibilitychange", syncPageVisibility);
@@ -149,8 +149,17 @@
     tickSets.times.forEach(function (t) { fmtTime(t, now); });
     tickSets.paces.forEach(function (e) { pace(e, now); });
   }
-  setInterval(tickTimes, 1000);
-  doc.addEventListener("visibilitychange", tickTimes);
+  var tickTimer = null;
+  function syncTickTimer() {
+    if (doc.hidden || shHidden) {
+      if (tickTimer !== null) { clearInterval(tickTimer); tickTimer = null; }
+      return;
+    }
+    if (tickTimer === null) tickTimer = setInterval(tickTimes, 1000);
+    tickTimes();
+  }
+  doc.addEventListener("ws-page-visibility", syncTickTimer);
+  syncTickTimer();
 
   function region(name) { return $("r-" + name); }
   // The board frames' paced mount list and the viewport bands' state
