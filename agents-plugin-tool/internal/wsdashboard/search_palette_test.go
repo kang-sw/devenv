@@ -14,7 +14,7 @@ import (
 )
 
 func TestSearchPaletteAssets(t *testing.T) {
-	tracker, err := dashboardFS.ReadFile("assets/tracker.js")
+	tracker, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestSearchDrawerSplitOwnership(t *testing.T) {
 }
 
 func TestSearchPaletteChromeDeletions(t *testing.T) {
-	tracker, err := dashboardFS.ReadFile("assets/tracker.js")
+	tracker, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

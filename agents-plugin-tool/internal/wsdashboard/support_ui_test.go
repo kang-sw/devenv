@@ -49,7 +49,7 @@ func TestUIEntryRendersTheCommandLine(t *testing.T) {
 // panel's keys: the scope keys of tracker.js's SCOPES, in order, and the
 // view mode keys its SCOPE_MODES offers across the scopes.
 func TestUIScopesMatchTheTrackerRenderer(t *testing.T) {
-	raw, err := dashboardFS.ReadFile("assets/tracker.js")
+	raw, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

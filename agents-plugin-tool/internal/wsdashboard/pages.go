@@ -68,6 +68,10 @@ var dashboardStyleFiles = []string{
 	"dashboard-shell.css",
 }
 
+var trackerScriptFiles = []string{
+	"tracker.js",
+}
+
 func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte, error) {
 	var files []string
 	switch name {
@@ -75,6 +79,8 @@ func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte
 		files = dashboardScriptFiles
 	case "dashboard.css":
 		files = dashboardStyleFiles
+	case "tracker.js":
+		files = trackerScriptFiles
 	default:
 		return read(name)
 	}

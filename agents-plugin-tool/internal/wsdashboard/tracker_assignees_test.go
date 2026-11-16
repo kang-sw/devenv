@@ -16,7 +16,7 @@ import (
 // records, and that an ended record's pill is its end-state text. The filter
 // cases execute under node when it is installed.
 func TestTrackerAssigneeListHidesStackedEndedRecords(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,11 +1,9 @@
 // Run locally: node agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const path = require('node:path');
 const vm = require('node:vm');
-const assets = path.join(__dirname, '..', 'assets');
-const tracker = fs.readFileSync(path.join(assets, 'tracker.js'), 'utf8');
 const { readAssetSource } = require('./asset-source.cjs');
+const tracker = readAssetSource('wsdashboard', 'tracker.js');
 const dashboard = readAssetSource('wsdashboard', 'dashboard.js');
 function block(source, from, to) {
   const start = source.indexOf(from), end = source.indexOf(to, start);

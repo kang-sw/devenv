@@ -11,7 +11,7 @@ import (
 // not including, the regexp end.
 func trackerBlock(t *testing.T, start, end string) string {
 	t.Helper()
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ function done() { if (bad.length) { console.log(bad.join('\n')); process.exit(1)
 // list-only mode, and the chip's count. The cases execute under node when it
 // is installed.
 func TestTrackerRelatedScope(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ done();
 // CC step's pick and item.uncc {item, member} from a row's remove. The
 // cases execute under node when it is installed.
 func TestTrackerItemWindowCC(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
