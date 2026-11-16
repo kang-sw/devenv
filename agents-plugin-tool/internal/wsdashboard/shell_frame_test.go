@@ -223,12 +223,13 @@ function Frame(src) {
     remove: function (c) { self.className = self.className.split(" ").filter(function (x) { return x !== c; }).join(" "); },
     contains: function (c) { return self.className.split(" ").indexOf(c) >= 0; }
   };
-  this.contentWindow = { location: { hash: "" }, focus: function () {}, postMessage: function (m, o) { if (o === ORIGIN) self.got.push(m.wsShell + (m.wsShell === "shown" ? ":" + m.shown : "")); }, wsHoldsDraft: function () { return !!self.draft; } };
+  this.saved = 0;
+  this.contentWindow = { location: { hash: "", href: ORIGIN + this._src, replace: function (href) { if (!self.cancelLeave) self.pending = href; } }, wsSaveSessionDraft: function () { self.saved++; }, focus: function () {}, postMessage: function (m, o) { if (o === ORIGIN) self.got.push(m.wsShell + (m.wsShell === "shown" ? ":" + m.shown : "")); }, wsHoldsDraft: function () { return !!self.draft; } };
   this.contentDocument = { readyState: "loading" };
 }
 Object.defineProperty(Frame.prototype, "src", { get: function () { return this._src; }, set: function (v) { this._src = v; this.contentDocument.readyState = "loading"; } });
 Frame.prototype.addEventListener = function (t, fn) { if (t === "load") this.onload.push(fn); };
-Frame.prototype.load = function () { this.contentDocument.readyState = "complete"; this.onload.forEach(function (fn) { fn(); }); };
+Frame.prototype.load = function () { this.contentDocument.readyState = "complete"; this.contentWindow.location.href = this.pending || ORIGIN + this._src; this.pending = null; this.onload.forEach(function (fn) { fn(); }); };
 Frame.prototype.remove = function () { this.removed = true; };
 Frame.prototype.focus = function () {};
 var first = new Frame("/s/a?frame=1");
@@ -269,69 +270,12 @@ function click(href, mods) {
 // (dashboard.js's shell block): it takes the frame it loaded with by its
 // address's path and hash (a query such as a LAN token is not the page's),
 // trusts a message only from one of its frames on its own origin, shows a
-// page once its frame loaded (pushState on a pick, none on popstate), tells
-// each frame on every load whether it shows, keeps the shown and the most
-// recently opened frames to the limit while a frame holding unsent work
-// stays, and takes plain clicks on the pages it frames. The cases execute
-// under node when it is installed.
+// page once its fresh frame loaded (pushState on a pick, none on popstate),
+// saves drafts before native-guarded teardown, retains the current page on
+// cancellation, and ignores removed frames. The same cases run directly with
+// node --test, without a daemon or a Go-built fixture.
 func TestShellSwitchesFramesThroughItsGlue(t *testing.T) {
-	js := mustAsset(t, "dashboard.js")
-	glue := regexp.MustCompile(`(?s)\n  var shFrames = \[\].*?\n  // shFrameInit wires`).FindString(js)
-	init := regexp.MustCompile(`(?s)\n  function shShellInit\(\) \{.*?\n  \}\n`).FindString(js)
-	if glue == "" || init == "" {
-		t.Fatal("dashboard.js holds no shell block")
-	}
-	runNode(t, "shell glue", shellGlueHarness+mustAsset(t, "shell.js")+"\n(function () {\n"+glue+init+`
-first.contentDocument.readyState = "complete";
-shShellInit();
-check("the first frame is taken by its path despite a query, loaded, and asked to sync", [shOn && shOn.el === first, shOn && shOn.loaded, first.got], [true, true, ["sync", "settings"]]);
-from(first.contentWindow, { wsShell: "head", html: "<b>a</b>", qs: "", pad: 0, top: 40 });
-check("the shown frame's head is shown", log, ["swap:head:<b>a</b>"]);
-log = [];
-from(first.contentWindow, { wsShell: "head", html: "<b>evil</b>", qs: "", pad: 0, top: 40 }, "http://evil:1");
-from({}, { wsShell: "head", html: "<b>stray</b>", qs: "", pad: 0, top: 40 });
-from(first.contentWindow, { wsShell: "head", html: 1, qs: "", pad: 0, top: 40 });
-from(first.contentWindow, { wsShell: "nav", href: "/s/b" }, "http://evil:1");
-check("another origin, a window that is no frame, and a malformed message are ignored", [log, pushed], [[], []]);
-from(first.contentWindow, { wsShell: "layout", pincol: false, dim: 0, popover: true });
-check("a frame popover lifts the frame", root.hasAttribute("data-fpopover"), true);
-from(first.contentWindow, { wsShell: "layout", pincol: false, dim: 0.4 });
-check("a modal lifts the frame and clears the popover state", [root.hasAttribute("data-fdim"), root.hasAttribute("data-fpopover")], [true, false]);
-from(first.contentWindow, { wsShell: "layout", pincol: false, dim: 0 });
-check("closing overlays restores the shell layer", [root.hasAttribute("data-fdim"), root.hasAttribute("data-fpopover")], [false, false]);
-
-check("a plain click on a session link is taken", click("/s/b"), true);
-var b = frameOf("/s/b");
-check("a new frame loads hidden while the shown one stays", [pushed, live(), on(), attrs["data-rid"]], [["/s/b"], ["/s/a", "/s/b"], ["/s/a?frame=1"], "b"]);
-b.load();
-check("once loaded it shows; each frame is told", [on(), first.got, b.got], [["/s/b?frame=1"], ["sync", "settings", "shown:false"], ["settings", "shown:true"]]);
-check("a modified click and another route are left to the browser", [click("/s/c", { ctrlKey: true }), click("/tracker/x"), click("https://example.com/")], [false, false, false]);
-
-from(first.contentWindow, { wsShell: "nav", href: "/s/c" });
-check("a hidden frame's nav is ignored", pushed, ["/s/b"]);
-from(b.contentWindow, { wsShell: "nav", href: "/s/c" });
-from(b.contentWindow, { wsShell: "nav", href: "/s/d" });
-var c = frameOf("/s/c"), d = frameOf("/s/d");
-c.load();
-check("a frame superseded before it showed is told it is hidden", [c.got, on()], [["settings", "shown:false"], ["/s/b?frame=1"]]);
-d.load();
-check("the last pick shows", on(), ["/s/d?frame=1"]);
-first.load();
-check("a hidden frame's reload is told it is hidden", first.got.slice(-1), ["shown:false"]);
-
-location.pathname = "/s/a"; location.hash = "";
-listeners.popstate.forEach(function (fn) { fn({}); });
-check("back shows a kept frame at once, pushing nothing", [on(), pushed], [["/s/a?frame=1"], ["/s/b", "/s/c", "/s/d"]]);
-
-d.draft = true;
-["/s/e", "/s/f", "/s/g", "/s/h"].forEach(function (p) { click(p); });
-check("the shown frame stays and a frame holding a draft stays past the limit; the least recent go", live(), ["/s/a", "/s/d", "/s/e", "/s/f", "/s/g", "/s/h"]);
-d.draft = false;
-click("/s/i");
-check("the draft frame goes once it holds none; a frame never shown goes before the shown one", live(), ["/s/a", "/s/f", "/s/g", "/s/h", "/s/i"]);
-process.stdout.write(bad.join("\n"));
-})();
-`)
+	runNode(t, "shell lifecycle", `require("./testdata/shell-lifecycle.test.cjs")();`)
 }
 
 // TestShellHotkeyForwarderLeavesSearchKeysToTerminals pins the shell
