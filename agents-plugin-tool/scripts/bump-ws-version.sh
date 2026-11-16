@@ -166,3 +166,9 @@ print(f"dev version: {dev_version}")
 print(f"runtime range: {contract_range}")
 print("agents-plugin-pi/ mirrors resynced from agents-plugin/")
 PY
+
+# dist does not embed the package version; only the workflow archives and
+# first-party payload depend on these edits. Refresh in dependency order,
+# reusing the committed dependency closure without npm or network access.
+python3 "$repo_root/agents-plugin-pi/scripts/prepare-workflow-bundles.py"
+python3 "$repo_root/agents-plugin-pi/scripts/prepare-native-payload.py" --first-party-only
