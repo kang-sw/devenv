@@ -35,15 +35,20 @@ const row = id => `#r-rail .rs[data-rid="${id}"]`;
       assert.equal(await page.locator(row('metaparent') + ' .qdot').getAttribute('aria-label'), '2 items to answer', scheme + ': dot label');
       assert.equal(await page.locator(row('kidone') + ' .qdot').getAttribute('aria-label'), '1 item to answer', scheme + ': child dot label');
       assert.equal(await page.locator(row('plainrow') + ' .qdot').count(), 0, scheme + ': no dot without questions');
-      // The name's x holds with and without a count or dot; so does the icon's.
-      const nameX = await left(row('plainrow') + ' .rid');
-      for (const id of ['agentsrow', 'dotrow', 'metaparent', 'idleparent']) {
-        assert.ok(Math.abs(await left(row(id) + ' .rid') - nameX) < 0.5, scheme + ': ' + id + ' name x');
+      // No count reserves no space: the mockup's name-to-icon gap is 6px.
+      // A count flows 2.5px after the icon and pushes the name by its width.
+      const gap = id => page.locator(row(id)).evaluate(r => r.querySelector('.rid').getBoundingClientRect().left - r.querySelector('.hi').getBoundingClientRect().right);
+      assert.equal(await gap('plainrow'), 6, scheme + ': no-count gap matches the mockup');
+      assert.equal(await gap('idleparent'), 6, scheme + ': no reserved count slot');
+      for (const id of ['agentsrow', 'dotrow', 'metaparent', 'kidone']) {
+        const width = await page.locator(row(id) + ' .sbn').evaluate(e => e.getBoundingClientRect().width);
+        assert.ok(Math.abs(await gap(id) - (8.5 + width)) < 0.1, scheme + ': ' + id + ' count pushes name');
       }
       const iconX = await left(row('plainrow') + ' .hi');
       assert.ok(Math.abs(await left(row('dotrow') + ' .hi') - iconX) < 0.5, scheme + ': the dot keeps the icon x');
       const kidX = await left(row('kidfour') + ' .rid');
-      assert.ok(Math.abs(await left(row('kidone') + ' .rid') - kidX) < 0.5, scheme + ': child name x');
+      assert.ok(await left(row('kidone') + ' .rid') > kidX, scheme + ': child count pushes name');
+      assert.equal(await gap('kidfour'), 6, scheme + ': child no-count gap');
       // Child rows stay one line, badges or not.
       const kidH = await height('kidfour');
       for (const id of ['kidone', 'kidtwo', 'kidthree', 'kidfive']) {

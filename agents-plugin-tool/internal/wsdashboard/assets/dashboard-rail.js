@@ -26,6 +26,13 @@
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
   var RAIL_XWIDE = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
+  var RENAME_NEW = "ws.dashboard.renameNew", renameNewFrame = null;
+  // Reload must not replay an unconsumed creation intent. Frames share the
+  // tab's storage, but only the page owning the rail consumes this marker.
+  try {
+    var nav = window.performance && window.performance.getEntriesByType("navigation")[0];
+    if (!framed && nav && nav.type === "reload") sessionStorage.removeItem(RENAME_NEW);
+  } catch (_) { /* storage may be unavailable */ }
   // rp is the open rail popover (the next blocks): its controller P, kind,
   // what it concerns (ws: a workspace, the folder a new session starts in,
   // the viewed session, or a row menu's session), and the button it hangs
@@ -70,13 +77,43 @@
     if (usageGutter) usageGutter.sync();
     admissionSync();
     railPopSync();
+    railRenameNew();
+  }
+  // A creation intent belongs only to this tab and expires after ten seconds.
+  // Wait for the new row (or the shell's new header) and finish navigation's
+  // focus work first. Never fill the default reply-id as a saved label.
+  function railRenameNew() {
+    if (framed || renameNewFrame) return;
+    renameNewFrame = requestAnimationFrame(function () {
+      renameNewFrame = null;
+      var intent;
+      try { intent = JSON.parse(sessionStorage.getItem(RENAME_NEW) || "null"); } catch (_) { return; }
+      if (!intent) return;
+      if (!intent.id || !(Date.now() - intent.at >= 0 && Date.now() - intent.at < 10000)) {
+        try { sessionStorage.removeItem(RENAME_NEW); } catch (_) {}
+        return;
+      }
+      if (rid !== intent.id || (shell && (!shOn || !shOn.loaded || shOn.f.rid !== intent.id))) return;
+      var r = region("rail"), row = r && WsRail.refind(r, { cls: "rs", attr: "data-rid", val: intent.id });
+      var h = region("head"), sn = h && h.querySelector(".sname");
+      if (railWide() ? !row || railEditing() : !sn || labelEditing()) return;
+      try { sessionStorage.removeItem(RENAME_NEW); } catch (_) { return; }
+      if (railWide()) {
+        var ws = row.closest(".rws");
+        if (ws && ws.classList.contains("col")) {
+          colSet.toggle(ws.getAttribute("data-ws"));
+          WsRail.marks(r, railSets, rid);
+        }
+        railRename(row);
+      } else labelStart(labelHead(sn));
+    });
   }
   // railFocus is what holds the focus in the rail before a swap replaces
   // every row: a row's link or one of its buttons, by the row's reply-id;
   // railRefocus puts it back on the new row after the swap, unless the
   // focus went elsewhere meanwhile. A keyboard move (Alt and an arrow)
   // lands its swap on the row it moved, so the next key still finds it.
-  var RAIL_FOCUS = [".rl", ".star", ".kidtog", ".drren", ".drcopy", ".drarch", ".rrev"];
+  var RAIL_FOCUS = [".rl", ".kidtog", ".drren", ".drcopy", ".drarch", ".rrev"];
   function railFocus() {
     var a = doc.activeElement, row = a && railEl && WsRail && railEl.contains(a) && a.closest ? a.closest(".rs") : null;
     if (!row) return null;
@@ -366,19 +403,18 @@
     if (body) layoutPost(body, function (status, v) { WsRail.legacyDone(railStore, v); });
   }
   // railRename runs the head's rename (labelStart) on a rail row: the name,
-  // its hosted mark and branch tag, the star, and a parent's toggle give
-  // way to the input (before the star, or the row's tail on a child, which
-  // has none), which posts to
-  // that session's label route; a save shows the label in the row and, for
+  // its hosted mark and branch tag give way to the input before the row's
+  // tail, which posts to that session's label route; a save shows the label
+  // in the row and, for
   // the viewed session, in the head. The rail swap waits while it is open.
   function railRename(row) {
     if (!row || railEditing()) return;
     var id = row.getAttribute("data-rid") || "", s1 = row.querySelector(".s1"), nm = row.querySelector(".rid");
-    var pen = row.querySelector(".drren"), cp = row.querySelector(".drcopy"), star = row.querySelector(".star"), list = $("rlist");
-    var at = star || row.querySelector(".drtail");
+    var pen = row.querySelector(".drren"), cp = row.querySelector(".drcopy"), list = $("rlist");
+    var at = row.querySelector(".drtail");
     if (!id || !s1 || !nm || !pen || !at) return;
     labelStart({
-      box: s1, at: at, cls: "drinp", hide: [nm, row.querySelector(".hosted"), row.querySelector(".rbt"), star], route: "/s/" + encodeURIComponent(id) + "/label",
+      box: s1, at: at, cls: "drinp", hide: [nm, row.querySelector(".hosted"), row.querySelector(".rbt")], route: "/s/" + encodeURIComponent(id) + "/label",
       label: pen.getAttribute("data-label") || "", max: +(list && list.getAttribute("data-max")) || 64,
       ph: id, aria: pen.getAttribute("aria-label") || "",
       saved: function (label) {
@@ -392,6 +428,25 @@
       },
       ended: railRelease
     });
+  }
+  // Favorite changes show the badge immediately; the existing layout op
+  // moves the row on the next rail render. A refusal restores the badge.
+  function railStar(row, on) {
+    if (!row || !row.hasAttribute("data-star")) return;
+    function show(value) {
+      row.setAttribute("data-star", value ? "1" : "0");
+      var badge = row.querySelector(".hstar"), wrap = row.querySelector(".hiw");
+      if (value && !badge && wrap) {
+        badge = wrap.appendChild(mk("span", "hstar"));
+        badge.setAttribute("role", "img");
+        badge.setAttribute("aria-label", wsT("js.rail.starred"));
+        badge.title = wsT("js.rail.starred");
+        badge.appendChild(gIcon("pin"));
+      } else if (!value && badge) badge.remove();
+    }
+    var was = WsRail.starred(row);
+    show(on);
+    layoutSave({ op: on ? "star" : "unstar", rid: row.getAttribute("data-rid") || "" }, function () { show(was); });
   }
   // railMove shows the session row's move z (WsRail.keyMove's, or the row
   // menu's) at once, the focus kept on the row's link, and posts its op;
@@ -452,19 +507,6 @@
     railEl.addEventListener("click", function (e) {
       var t = e.target;
       if (admissionClick(t)) { e.preventDefault(); return; }
-      // A star shows pressed at once; the rail swap after the op moves the
-      // row.
-      var star = t.closest && t.closest(".star");
-      if (star) {
-        e.preventDefault();
-        var row = star.closest(".rs"), on = star.getAttribute("aria-pressed") !== "true";
-        if (!row) return;
-        star.setAttribute("aria-pressed", String(on));
-        layoutSave({ op: on ? "star" : "unstar", rid: row.getAttribute("data-rid") || "" }, function () {
-          star.setAttribute("aria-pressed", String(!on));
-        });
-        return;
-      }
       var kt = t.closest && t.closest(".kidtog");
       if (kt) {
         e.preventDefault();

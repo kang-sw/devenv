@@ -1027,7 +1027,7 @@ func TestRailMarkupRevive(t *testing.T) {
 	// Ignore inert hover content when checking visible row boundaries.
 	html := regexp.MustCompile(`(?s)<template class="shp-source"[^>]*>.*?</template>`).ReplaceAllString(string(region.HTML), "")
 	rowOf := func(id string) string {
-		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`">`)
+		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`" data-star="0">`)
 		if !ok {
 			t.Fatalf("no ended row for %s:\n%s", id, html)
 		}
@@ -1172,7 +1172,7 @@ func TestRailMarkupTree(t *testing.T) {
 	}
 	a1 := rowOf("a1")
 	for _, want := range []string{` data-kids="1"`, `class="kidtog" aria-expanded="true" title="2 sessions under this one: show or hide"`, `<span class="kn">2</span>`,
-		`<span class="chip perm kap" title="1 session under this one awaits approval">?</span>`, `<span class="orb kidorb">`, `class="star"`} {
+		`<span class="chip perm kap" title="1 session under this one awaits approval">?</span>`, `<span class="orb kidorb">`, `data-star="0"`} {
 		if !strings.Contains(a1, want) {
 			t.Errorf("the parent a1 lacks %s:\n%s", want, a1)
 		}
@@ -1181,7 +1181,7 @@ func TestRailMarkupTree(t *testing.T) {
 		t.Errorf("the render carries a collapse state:\n%s", html)
 	}
 	a2 := rowOf("a2")
-	if !strings.Contains(a2, ` data-g="/w/repo" title="the whole last message">`) || strings.Contains(a2, `class="drmsg"`) || strings.Contains(a2, `class="star"`) || strings.Contains(a2, `class="rbt"`) {
+	if !strings.Contains(a2, ` data-g="/w/repo" title="the whole last message">`) || strings.Contains(a2, `class="drmsg"`) || strings.Contains(a2, `data-star=`) || strings.Contains(a2, `class="rbt"`) {
 		t.Errorf("the child a2 is not one starless untagged line titled with its message:\n%s", a2)
 	}
 	if !strings.Contains(a2, `<span class="chip perm" title=`) {
@@ -1194,10 +1194,10 @@ func TestRailMarkupTree(t *testing.T) {
 	if a3 := rowOf("a3"); !strings.Contains(a3, ` data-kids="1"`) || strings.Contains(a3, "kidtog") || strings.Contains(a3, "kap") {
 		t.Errorf("a3, a parent of an ended child only, is marked wrong:\n%s", a3)
 	}
-	if ae := rowOf("ae"); strings.Contains(ae, `class="star"`) || strings.Contains(ae, "data-g=") {
+	if ae := rowOf("ae"); strings.Contains(ae, `data-star=`) || strings.Contains(ae, "data-g=") {
 		t.Errorf("the ended child ae shows a star or sits as a child:\n%s", ae)
 	}
-	if a4 := rowOf("a4"); strings.Contains(a4, "data-kids") || !strings.Contains(a4, `class="star"`) {
+	if a4 := rowOf("a4"); strings.Contains(a4, "data-kids") || !strings.Contains(a4, `data-star="0"`) {
 		t.Errorf("a4 is marked as a parent or lost its star:\n%s", a4)
 	}
 	css, err := dashboardTestAsset("assets/dashboard.css")

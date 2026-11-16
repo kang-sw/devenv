@@ -50,7 +50,7 @@ function memStore() {
   var m = {};
   return { m: m, load: function (k) { return k in m ? m[k] : null; }, save: function (k, v) { if (v === null) delete m[k]; else m[k] = v; } };
 }
-function row(rid) { var r = new El("rs", { "data-rid": rid }); r.appendChild(new El("star", { "aria-pressed": "false" })); r.appendChild(new El("rl")); return r; }
+function row(rid) { var r = new El("rs", { "data-rid": rid, "data-star": "0" }); r.appendChild(new El("rl")); return r; }
 `
 
 const railJSCases = `
@@ -98,7 +98,7 @@ check("the guard asks while images are held", [ev.prevented, ev.returnValue], [t
 var ss = memStore(), box = new El("rsessions");
 ["r1", "r2", "r3"].forEach(function (id) { box.appendChild(row(id)); });
 check("collapsed workspaces persist", [R.collapsed(ss).toggle("/w/repo"), R.collapsed(ss).has("/w/repo")], [true, true]);
-function star(r, on) { r.querySelector(".star").setAttribute("aria-pressed", on ? "true" : "false"); return r; }
+function star(r, on) { r.setAttribute("data-star", on ? "1" : "0"); return r; }
 check("a row's star is the rendered one", [R.starred(star(row("a"), true)), R.starred(row("b")), R.starred(new El("rs")), R.starred(null)], [true, false, false, false]);
 
 // drop: a live row moves within its group on its side of the stars, a

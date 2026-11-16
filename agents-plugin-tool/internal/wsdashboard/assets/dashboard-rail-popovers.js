@@ -520,7 +520,8 @@
   // Every session row has a menu: a right click on the row, a long touch on
   // it (RM_HOLD; a touch on its grip drags at once instead), or Shift+F10
   // or the ContextMenu key on it (the rail's keydown) opens it. It renames
-  // and copies the address as the row's own buttons do, moves the row under
+  // and copies the address as the row's own buttons do, toggles favorites
+  // on eligible rows, moves the row under
   // another session (the rows WsRail.underRows allows, a list that opens in
   // place; shown disabled, with the reason, when there is none), detaches a
   // child from its parent (where Alt+Left puts it), and revives an ended
@@ -611,6 +612,15 @@
         railPopClose(true);
         if (c) copyText(c.getAttribute("data-copy") || "");
       });
+      if (row.hasAttribute("data-star")) {
+        var on = WsRail.starred(row);
+        var favorite = item(list, "pin", wsT(on ? "js.rail.menu.unstar" : "js.rail.menu.star"), function (r) {
+          railPopClose(true);
+          railStar(r, !WsRail.starred(r));
+        });
+        favorite.setAttribute("data-on", String(on));
+        favorite.querySelector(".i").classList.add("rmstar");
+      }
       if (d.live) {
         var u = WsRail.underRows(row), chev = gIcon("chev");
         under = item(list, "", wsT("js.rail.menu.under"), function () {

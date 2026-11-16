@@ -16,7 +16,8 @@ import (
 // TestRailRowMetaBrowser drives a rail row's badges and meta line in
 // Chromium over disposable fixture sessions, never an installed/shared
 // daemon: the own-subagent count and the question dot on the harness
-// icon, which keep the icon's and the name's x; a parent's toggle and
+// icon, which keep the icon's x and shift the name only for counts;
+// a parent's toggle and
 // working count opening its second line; child rows staying one line; no
 // robot badge or policy capsule in a row; no pulse under reduced motion.
 // WS_RAIL_ROW_META_SHOTS, when set to an absolute directory, also takes
