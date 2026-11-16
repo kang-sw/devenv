@@ -26,6 +26,7 @@ The initial no-daemon-dependency compatibility premise failed; d7d88bfd5 records
 - On a new adapter with an old daemon, make returned legacy native-tool wording harmless by translating daemon guidance to available `pi.*` idioms and/or a clear system-level translation. Account for rendered prompt artifacts as well as displayed return text. For only the exact unknown-builtin-`explore` refusal, use the pre-existing `search-answer-pi` profile with the same caller tier and evidence brief only after verifying the effective fallback is still read-only; whole-profile overrides may change its capabilities. Refuse clearly if that cannot be proved. Never retry transport/unknown-outcome errors. Preserve explicit Pi disable and availability/version gates rather than force spawning.
 - Pi default enablement: change only the existing Pi package's `dashboard.pi_spawn_enabled` default to true; canonical ws is already true, while wsflow's explicit conservative false default remains. Explicit configured false still wins. Default-value-only change is T0; no key/shape addition.
 - Safety-preserving scope refinement: keep a **live execution-only** native registry/engine for retained `ws-execute` / `ws-approve`, including approval correlation, intermediate progress, descendant/status projection and execute-worker recovery. Replacing that approval transport is not needed to retire general native-agent tools and would enlarge this ticket dangerously. Supersedes the earlier all-registry migration sketch in f9aaaa3bd/d7d88bfd5. Do not retain a dead registry or a second public general-agent path. Keep `ws-report-to-lead` only for internal execution workers if needed. Existing general/fork sidecars are quarantined before revival, files preserved with an explicit non-recovery notice; do not silently revive or claim daemon adoption of native processes/history.
+- R1 preservation refinement: every fresh execution record pins its approval relay across dormant /audit resume. Retired owned histories receive intentional durable `liveness.ownerHeld:true` protection before quarantine and during global retention scans; this existing field is understood by old readers/pruners (`agent-storage.ts` read/update/removal checks), not a new schema or a live-process claim. Unknown/unreadable/unquarantinable source data blocks sidecar writes, fresh persistent execution and that startup's retention, with explicit notice, until preservation is established. No daemon API/Profile/manifest shape changes are involved.
 - Shipped guidance must use namespace-correct `pi.*` / `pi.spawn(profile: "explore")`, capability tiers and the real retained execution tools. Preserve non-Pi harness wording. Mirror canonical rsrc through the documented generator; rebuild Pi dist/notices and both first-party native payloads together. Keep closure archives unchanged if dependencies are unchanged.
 
 ## Retained Daemon API Inventory
@@ -69,7 +70,7 @@ Pre-retirement call/handler citations refer to develop d7534a5f7; deleting exten
 | scope.span | multi-file | Pi index/spawner/bridge/bootstrap, builtin profiles, terminology, guidance and generated artifacts |
 | scope.surface | cross-module | Client initialize metadata and rendered terminology interoperate with existing daemon APIs |
 | scope.new_public_symbol | yes | Add builtin explore profile, no new wire tool or Profile field |
-| scope.new_type_contract | no | Existing Profile, standard MCP experimental map and generic asset inventories |
+| scope.new_type_contract | yes | Optional standard MCP experimental capability semantics and internal sidecar recovery outcome; existing Profile and all persisted/API shapes remain |
 | scope.test_surface | existing | builtin/profile/playbook tests, Pi bridge/native agent tests and bundle-freshness test |
 | complexity.reuse_points | confirmed | BuiltinProfiles, read-only search-answer-pi, piListed, existing bridge result mapping, execute-worker engine, native producer |
 | complexity.side_effect_risk | moderate | Tool retirement and persisted native sidecar quarantine; no shared store migration |
@@ -77,6 +78,11 @@ Pre-retirement call/handler citations refer to develop d7534a5f7; deleting exten
 | risk.fit | moderate | Preserve safe execution path rather than redesign daemon approval transport |
 | risk.test | high | Mixed client/daemon versions, capability gates and retired registrations need focused regressions |
 | risk.security_or_contract | high | Preserve profile/tier ceilings and every old daemon call contract |
+
+## Forward
+
+- Owner (1225): separately design write-path limiting, not a shell sandbox or a new field in this ticket.
+- R1 M1 (minor, not an R2 blocker): `execute-gateway.ts` still has live descriptions/abort wording referring to retired native spawn/explore/stop names (d609726e2:686,714,834). Update them to daemon/retained-execution wording in a later change and rebuild artifacts then. System-level legacy translation already mitigates this; left untouched per the owner's minor-to-Forward rule.
 
 ## Sage Gate (2026-11-16)
 

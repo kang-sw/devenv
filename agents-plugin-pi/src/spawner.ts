@@ -140,6 +140,16 @@ import { isExecutionAgent, withoutRetiredNativeTools } from "./native-agent-poli
 // Only the retained execution gateway owns a native runtime registry. Keep
 // lower-level lifecycle helpers testable without reviving public delegation.
 const executionRegistries = new WeakSet<RpcAgentRegistry>();
+const persistenceBlockedRegistries = new WeakSet<RpcAgentRegistry>();
+
+/** A retained, unreadable/unquarantined sidecar must not be replaced by new execution history. */
+export function blockExecutionPersistence(registry: RpcAgentRegistry): void {
+  persistenceBlockedRegistries.add(registry);
+}
+
+export function assertExecutionPersistenceAvailable(registry: RpcAgentRegistry): void {
+  if (persistenceBlockedRegistries.has(registry)) throw new Error("ws-pi-agent: persistent execution is blocked while the existing native sidecar/history cannot be safely preserved; resolve the reported preservation failure first");
+}
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -3765,6 +3775,7 @@ export async function spawnAgent(
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
 ): Promise<{ agent_id: string; alias?: string; evicted?: string; write_scopes?: WriteScopeDiagnostic }> {
+  assertExecutionPersistenceAvailable(registry);
   if (executionRegistries.has(registry) && (!isExecutionAgent(ctx) || ctx.forkFrom || ctx.explicitTools || params.writeScopes)) {
     throw new Error("ws-pi-agent: native delegation is retired; this registry accepts execution workers only");
   }
@@ -3863,6 +3874,9 @@ export async function spawnAgent(
       sessionPath,
       ownership,
       systemPromptPath: promptPath,
+      // Pin the relay beyond this launch's listener so /audit dormant resume
+      // cannot strand a new gated command after process loss.
+      ...(toolGroup === "execute-worker" ? { onApprovalPending: ctx.onApprovalPending } : {}),
       delegation,
       modelBase,
       // Explicit effort wins; "default" retains the selected source's policy.

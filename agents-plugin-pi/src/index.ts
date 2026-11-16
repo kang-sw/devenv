@@ -194,6 +194,7 @@ import {
   agentCostRefreshRef,
   agentDashboardRefreshRef,
   agentWidgetRefreshRef,
+  blockExecutionPersistence,
   heldPushQueue,
   isLeadInterrupted,
   isOwningAgentIdle,
@@ -212,7 +213,7 @@ import {
 } from "./spawner.ts";
 import { createAgentWidgetController, registerAgentWidgetCommand, resolveAgentWidgetRows, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
-import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readExecutionSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
+import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readExecutionSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type ExecutionSidecarRecovery, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
 import { registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
@@ -355,18 +356,30 @@ export function reviveSessionOrphans(
   });
 }
 
+/** Publish preservation failure to the production registry before it can spawn. */
+export function prepareExecutionSidecar(registry: RpcAgentRegistry, path: string, notice: (message: string) => void): ExecutionSidecarRecovery {
+  const recovery = readExecutionSidecarAt(path, notice);
+  if (!recovery.writable) blockExecutionPersistence(registry);
+  return recovery;
+}
+
 export function applySessionStartAgentRetention(
   role: SpawnRole | undefined,
   root: string,
   config: GoalLoopConfig,
   recovered: PersistedOrphan[],
   prune: typeof pruneStaleAgentHomes = pruneStaleAgentHomes,
+  recovery?: ExecutionSidecarRecovery,
+  notice?: (message: string) => void,
 ): PersistedOrphan[] {
   // Tree-root lead only (no spawn role): the prune scans every owner namespace
   // on the machine, so a fork child must not repeat it from inside a tree.
-  if (role !== undefined) return recovered;
+  if (role !== undefined || recovery?.retentionSafe === false) return recovered;
   try {
-    const retention = prune(root, resolveChildRetentionTtlDays(config), { evictionCost: retentionEvictionCost });
+    const retention = prune(root, resolveChildRetentionTtlDays(config), {
+      evictionCost: retentionEvictionCost, preserveRetiredHistory: recovery !== undefined,
+      onRetiredHistoryHeld: home => notice?.(`ws-pi-agent: permanent owner-held history protection (ownerHeld:true; no live-process claim) now preserves retired native history at ${home} from automatic retention until explicitly released.`),
+    });
     if (retention.deletedHomes.length === 0) return recovered;
     const deletedHomes = new Set(retention.deletedHomes);
     return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
@@ -382,10 +395,11 @@ export async function persistShutdownAgentSnapshots(
   agentTools: AgentToolsHandle | undefined,
   sidecar: string | undefined,
   threads: ThreadRegistryHandle,
-): Promise<void> {
+): Promise<boolean> {
   const orphans = agentTools ? captureOrphans(agentTools.rpcRegistry) : undefined;
   await agentTools?.stopAll();
-  if (!sidecar || !agentTools || !orphans) return;
+  if (!agentTools || !orphans) return true;
+  if (!sidecar) return orphans.length === 0;
   for (const orphan of orphans) {
     const record = agentTools.rpcRegistry.get(orphan.agentId);
     if (!record) continue;
@@ -395,13 +409,14 @@ export async function persistShutdownAgentSnapshots(
     orphan.observedEffort = record.observedEffort;
     orphan.observedContextTokens = record.observedContextTokens;
   }
-  writeSidecarAt(sidecar, orphans);
+  if (!writeSidecarAt(sidecar, orphans)) return false;
   for (const thread of threads.threads.values()) {
     if (!thread.respondentAgentId) continue;
     const record = agentTools.rpcRegistry.get(thread.respondentAgentId);
     if (record) thread.forkResume = captureForkResume(record);
   }
   if (threads.pathRef.current) saveThreadRegistryFile(threads.pathRef.current, [...threads.threads.values()]);
+  return true;
 }
 
 /**
@@ -1074,9 +1089,12 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadSessionFile = dispatchSessionFile ?? undefined;
     const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
     leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
+    const recovery = prepareExecutionSidecar(agentTools.rpcRegistry, leadSidecarPath, message => notifyNativeSidecarRetirement(pi, ctx.ui, message));
+    // Neither shutdown nor a superseded bootstrap may overwrite retained raw
+    // bytes. writeSidecarAt also enforces the blocked path for every caller.
+    if (!recovery.writable) leadSidecarPath = undefined;
     generation.sidecar = leadSidecarPath;
-    let recoveredRegistry = readExecutionSidecarAt(leadSidecarPath, message => notifyNativeSidecarRetirement(pi, ctx.ui, message));
-    recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recoveredRegistry);
+    let recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recovery.orphans, undefined, recovery, message => notifyNativeSidecarRetirement(pi, ctx.ui, message));
     if (recoveredRegistry.length > 0) reviveSessionOrphans(pi, agentTools.rpcRegistry, recoveredRegistry, onApprovalPending);
     publishSubtree(agentTools.rpcRegistry);
     // Revival marks nothing dirty, and the rows' first sample ran before it.
@@ -1239,7 +1257,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // captureOrphans snapshots pre-stop child state, including dormant
     // records read-and-cleared from the sidecar. Persist using the claimed
     // registry/path before stopAll can mutate it, never newer globals.
-    await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);
+    const saved = await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);
+    if (!saved) _ctx.ui.notify("[ws Pi] execution shutdown snapshot was not saved; the existing native sidecar remains preserved/write-blocked or its write failed. No recovery is claimed.", "warning");
     if (shutdownEpoch === sessionStartEpoch) {
       descendantUsageReporterRef.current?.setSource(undefined);
       agentViewUpstreamRef.current?.setSource(undefined);

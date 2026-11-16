@@ -460,6 +460,18 @@ function updateOwnershipWhen(home: string, updateOf: OwnershipUpdate | ((current
 }
 export function touchOwnership(home: string): boolean { return updateOwnership(home, { lastActivityAt: Date.now() }) !== undefined; }
 
+/** Retired native history is intentionally owner-held indefinitely. Reuse the
+ * existing durable protection understood by old readers and ordinary TTL
+ * maintenance; this is not a live-process or resumability assertion. */
+export function holdRetiredOwnedHistory(ownership: AgentOwnership): boolean {
+  if (!validDescriptor(ownership)) return false;
+  const held = updateOwnershipWhen(ownership.home, current => ({ liveness: { ...current.liveness, ownerHeld: true } }), current => {
+    if (!sameOwnershipIdentity(ownership, current)) throw new Error("retired history ownership identity changed");
+    return current.liveness.ownerHeld !== true;
+  });
+  return !!held && sameOwnershipIdentity(ownership, held) && held.liveness.ownerHeld === true;
+}
+
 function samePersisted(persisted: unknown, next: unknown): boolean {
   // The persisted side is parsed JSON; round-trip the in-memory side so
   // undefined-valued keys and key order cannot count as a change.
@@ -641,6 +653,10 @@ export interface StaleAgentPruneResult {
 }
 
 interface StaleAgentPruneOptions {
+  /** Retirement startup: protect legacy roles across ALL scanned owner namespaces,
+   * including homes whose sidecar belongs to another lead or cannot be read. */
+  preserveRetiredHistory?: boolean;
+  onRetiredHistoryHeld?: (home: string) => void;
   now?: () => number;
   observeSession?: (home: string, sessionPath: string) => void;
   removeOwned?: (ownership: AgentOwnership) => OwnedHomeRemovalResult;
@@ -681,6 +697,13 @@ export function pruneStaleAgentHomes(root: string, ttlDays: number | false, opti
           const home = join(ownerRoot, childEntry.name);
           let metadata = readOwnership(home);
           if (!metadata) { result.retained += 1; continue; }
+          if (options.preserveRetiredHistory && metadata.role !== "execute-worker") {
+            if (holdRetiredOwnedHistory(metadata)) {
+              result.retained += 1;
+              if (!metadata.liveness.ownerHeld) options.onRetiredHistoryHeld?.(home);
+            } else result.failed += 1;
+            continue;
+          }
           if (metadata.sessionPath) observe(home, metadata.sessionPath);
           metadata = readOwnership(home);
           if (!metadata || metadata.lastActivityAt > cutoff) { result.retained += 1; continue; }

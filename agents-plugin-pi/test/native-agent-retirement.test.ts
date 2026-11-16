@@ -12,6 +12,7 @@ import { notifyNativeSidecarRetirement, reviveSessionOrphans } from "../src/inde
 import { registerExecuteGateway } from "../src/execute-gateway.ts";
 import { dashboardAgentEntries } from "../src/dashboard-feed.ts";
 import { addForkToolIfLead, computeForkToolSurface } from "../src/fork.ts";
+import { allocateAgentHome, createAgentStorageContext } from "../src/agent-storage.ts";
 
 function harness() {
   const tools = new Map<string, any>();
@@ -112,17 +113,21 @@ test("runtime registry refuses general/fork launches and resumes before any tran
 test("mixed sidecar is quarantined byte-for-byte; only execution records are recoverable", t => {
   const root = temp(t);
   const path = join(root, "registry.json");
-  const history = join(root, "legacy.jsonl");
+  const owned = ["general", "fork", "ambiguous"].map(id => allocateAgentHome(createAgentStorageContext("legacy-owner", root), id, id === "fork" ? "fork" : "worker"));
+  const history = owned[0].sessionPath!;
   writeFileSync(history, "retained history\n");
   const raw = serializeOrphans([
     execution(),
-    execution({ agentId: "general", toolGroup: "full-worker", spawnRole: "worker", sessionPath: history }),
-    execution({ agentId: "fork", toolGroup: "full-worker", spawnRole: "fork" }),
-    execution({ agentId: "ambiguous", spawnRole: "worker" }),
+    execution({ agentId: "general", toolGroup: "full-worker", spawnRole: "worker", sessionPath: history, ownership: owned[0] }),
+    execution({ agentId: "fork", toolGroup: "full-worker", spawnRole: "fork", sessionPath: owned[1].sessionPath!, ownership: owned[1] }),
+    execution({ agentId: "ambiguous", spawnRole: "worker", sessionPath: owned[2].sessionPath!, ownership: owned[2] }),
   ]);
   writeFileSync(path, raw);
   const notices: string[] = [];
-  const recovered = readExecutionSidecarAt(path, text => notices.push(text));
+  const recovery = readExecutionSidecarAt(path, text => notices.push(text));
+  assert.equal(recovery.writable, true);
+  assert.equal(recovery.retentionSafe, true);
+  const recovered = recovery.orphans;
   assert.deepEqual(recovered.map(o => o.agentId), ["execute-1"]);
   assert.equal(existsSync(path), false);
   const archive = readdirSync(root).find(name => name.startsWith("registry.json.retired-"))!;
@@ -130,7 +135,7 @@ test("mixed sidecar is quarantined byte-for-byte; only execution records are rec
   assert.equal(readFileSync(history, "utf8"), "retained history\n");
   assert.match(notices[0], /NOT resumed or adopted/);
   assert.match(notices[0], /preserved at/);
-  assert.deepEqual(readExecutionSidecarAt(path, text => notices.push(text)), []);
+  assert.deepEqual(readExecutionSidecarAt(path, text => notices.push(text)).orphans, []);
   assert.equal(notices.length, 1, "consumed source is not falsely recovered twice");
 });
 
@@ -140,10 +145,13 @@ test("unrecognized sidecars are preserved instead of silently consumed", t => {
     const path = join(root, `registry-${index}.json`);
     writeFileSync(path, raw);
     const notices: string[] = [];
-    assert.deepEqual(readExecutionSidecarAt(path, text => notices.push(text)), []);
-    const archive = readdirSync(root).find(name => name.startsWith(`registry-${index}.json.retired-`))!;
-    assert.equal(readFileSync(join(root, archive), "utf8"), raw);
+    const recovery = readExecutionSidecarAt(path, text => notices.push(text));
+    assert.deepEqual(recovery.orphans, []);
+    assert.equal(recovery.writable, false);
+    assert.equal(recovery.retentionSafe, false);
+    assert.equal(readFileSync(path, "utf8"), raw);
     assert.match(notices[0], /NOT resumed or adopted/);
+    assert.match(notices[0], /retention are blocked/);
   }
 });
 
@@ -151,7 +159,7 @@ test("execution-only recovery retains approval hook, progress and dashboard iden
   const root = temp(t);
   const path = join(root, "registry.json");
   writeFileSync(path, serializeOrphans([execution({ delegation: { version: 1, depth: 1, maxDepth: 2, authority: "leaf", tools: ["read", GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME, "explore", "ws-agent-spawn"] } })]));
-  const recovered = readExecutionSidecarAt(path, () => assert.fail("execution-only sidecar is not quarantined"));
+  const recovered = readExecutionSidecarAt(path, () => assert.fail("execution-only sidecar is not quarantined")).orphans;
   assert.equal(existsSync(path), false);
   assert.deepEqual(recovered[0].delegation?.tools, ["read", GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME]);
   const h = harness();

@@ -53,7 +53,7 @@ test("Pi session generations use Python mailbox waits and preserve recovery acro
   const indexPath = join(plugin, "src", "index.ts");
   const indexSource = readFileSync(indexPath, "utf8");
   const footerCall = "    await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);";
-  const shutdownCall = "    await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);";
+  const shutdownCall = "    const saved = await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);";
   assert.ok(indexSource.includes(footerCall) && indexSource.includes(shutdownCall));
   const pauseAt = (trigger: string, entered: string, release: string): string => [
     `const fs = await import('node:fs');`,
