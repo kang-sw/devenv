@@ -1606,6 +1606,7 @@
   "rail.unarchive": "Désarchiver · revient en veille ; le courrier en attente est livré",
   "rail.deleteat": "Quand le registre supprime cette session terminée",
   "rail.folder": "dossier (pas un dépôt git)",
+  "rail.home": "Accueil",
   "rail.lasttool": "dernier appel d'outil",
   "rail.live.title": "sessions en direct",
   "rail.refresh": "Relire les listes de worktrees",

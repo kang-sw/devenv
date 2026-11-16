@@ -1606,6 +1606,7 @@
   "rail.unarchive": "アーカイブ解除 · スリープに戻り、溜まったメールを配信",
   "rail.deleteat": "終了したセッションが整理で削除される時刻",
   "rail.folder": "フォルダー (git リポジトリではありません)",
+  "rail.home": "ホーム",
   "rail.lasttool": "最後のツール呼び出し",
   "rail.live.title": "ライブセッション",
   "rail.refresh": "ワークツリー一覧を再読み込み",

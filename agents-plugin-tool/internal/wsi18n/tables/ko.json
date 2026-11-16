@@ -1606,6 +1606,7 @@
   "rail.unarchive": "보관 해제 · 잠듦으로 돌아감, 쌓인 메일 전달",
   "rail.deleteat": "종료된 세션이 정리되어 삭제되는 시각",
   "rail.folder": "폴더 (git 저장소 아님)",
+  "rail.home": "홈",
   "rail.lasttool": "마지막 도구 호출",
   "rail.live.title": "실시간 세션",
   "rail.refresh": "워크트리 목록 다시 읽기",
