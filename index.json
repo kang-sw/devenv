@@ -507,16 +507,6 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
-    "261116-bug-ws-dashboard-composer-autosize-forced-layout": {
-      "registered_at": "2026-11-16T01:25:12Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-16T03:37:13Z"
-      }
-    },
     "261116-bug-ws-exe-launch-elimination": {
       "registered_at": "2026-11-16T00:55:02Z",
       "lease": {
@@ -538,6 +528,9 @@
     },
     "261116-bug-ws-whiteboard-ask-missing-from-board": {
       "registered_at": "2026-11-16T03:08:25Z"
+    },
+    "261116-feat-ws-dashboard-restore-session-iframe-cache": {
+      "registered_at": "2026-11-16T03:49:02Z"
     }
   }
 }
