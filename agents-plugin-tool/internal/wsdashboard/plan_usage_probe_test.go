@@ -68,6 +68,16 @@ func init() {
 			os.Exit(23)
 		}
 	}
+	if path := os.Getenv("WS_TEST_USAGE_CODEX_CALLS"); path != "" {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			os.Exit(24)
+		}
+		_, err = f.WriteString("called\n")
+		if closeErr := f.Close(); err != nil || closeErr != nil {
+			os.Exit(24)
+		}
+	}
 	read("initialize", 1)
 	fmt.Println(`{"id":1,"result":{}}`)
 	read("initialized", 0)
@@ -154,6 +164,8 @@ func TestPlanUsageFallbackOrderAndCadence(t *testing.T) {
 	for _, mode := range []string{"chatgpt", "apikey", "missing", "cli-fails"} {
 		t.Run(mode, func(t *testing.T) {
 			s := usageTestStore(t)
+			// Source selection and cadence are independent of the Windows registry gate.
+			s.goos = "linux"
 			setPiUsageAuth(t, s, time.Now().Add(time.Hour).UnixMilli())
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +189,7 @@ func TestPlanUsageFallbackOrderAndCadence(t *testing.T) {
 				reply = `{"id":2,"error":{"message":"fake-secret-access"}}`
 			}
 			fakeUsageCodex(t, s, reply)
-			s.query(context.Background(), false)
+			s.query(context.Background(), false, nil)
 			entries := s.entries()
 			if len(entries) != 1 {
 				t.Fatal("GPT not detected")
@@ -199,7 +211,7 @@ func TestPlanUsageFallbackOrderAndCadence(t *testing.T) {
 			var wg sync.WaitGroup
 			for i := 0; i < 4; i++ {
 				wg.Add(1)
-				go func() { defer wg.Done(); s.query(context.Background(), true) }()
+				go func() { defer wg.Done(); s.query(context.Background(), true, nil) }()
 			}
 			wg.Wait()
 			if calls.Load() > 1 {
@@ -221,13 +233,13 @@ func TestPlanUsagePiExpiryFailureRetentionAndNoLeaks(t *testing.T) {
 	defer server.Close()
 	s.usageURL = server.URL
 	s.gpt = planUsageEntry{Harness: "codex", Source: "via Pi", AsOf: 123, Windows: []planUsageWindow{{Kind: "seven_day", Percent: 37, ResetsAt: 2100000000000, AsOf: 123}}}
-	s.query(context.Background(), false)
+	s.query(context.Background(), false, nil)
 	if calls.Load() != 0 || s.entries()[0].Status != "Pi token expired - open Pi to refresh" {
 		t.Fatal("expired Pi made a request or wrong status")
 	}
 	setPiUsageAuth(t, s, time.Now().Add(time.Hour).UnixMilli())
 	s.lastQuery = time.Time{}
-	s.query(context.Background(), false)
+	s.query(context.Background(), false, nil)
 	e := s.entries()[0]
 	if calls.Load() != 1 || e.Status != "usage unavailable" || e.AsOf != 123 || e.Windows[0].Percent != 37 {
 		t.Fatal("failed query lost last value")

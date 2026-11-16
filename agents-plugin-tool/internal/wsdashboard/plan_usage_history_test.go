@@ -233,7 +233,7 @@ func TestPlanUsageHistoryGPTAcquisitionAndOptionalAPI(t *testing.T) {
 		runtime.Gosched()
 	}
 	s.lastQuery = time.Time{}
-	s.query(context.Background(), false)
+	s.query(context.Background(), false, nil)
 	if len(s.history(time.Now().UnixMilli()).Samples) != 2 {
 		t.Fatal("fresh unchanged successful GPT response lost")
 	}
@@ -242,14 +242,14 @@ func TestPlanUsageHistoryGPTAcquisitionAndOptionalAPI(t *testing.T) {
 	}
 	percent = 12
 	s.lastQuery = time.Time{}
-	s.query(context.Background(), false)
+	s.query(context.Background(), false, nil)
 	p := s.history(time.Now().UnixMilli())
 	if len(p.Samples) != 3 || p.Samples[2].Percent != 12 || s.gpt.Windows[0].Percent != 12 {
 		t.Fatal("real GPT decrease clamped or discarded")
 	}
 	fail = true
 	s.lastQuery = time.Time{}
-	s.query(context.Background(), false)
+	s.query(context.Background(), false, nil)
 	if len(s.history(time.Now().UnixMilli()).Samples) != 3 || s.gpt.Status != "usage unavailable" {
 		t.Fatal("failed acquisition created history or changed latest failure state")
 	}

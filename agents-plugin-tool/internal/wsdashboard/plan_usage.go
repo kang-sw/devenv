@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,12 +42,13 @@ type planUsageStore struct {
 	lastQuery   time.Time
 	// Request dependencies are private test seams, not configuration knobs.
 	codexBinary string
+	goos        string
 	usageURL    string
 	client      *http.Client
 }
 
 func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageStore {
-	s := &planUsageStore{dir: dir, home: home, getenv: getenv, usageURL: "https://chatgpt.com/backend-api/wham/usage", client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	s := &planUsageStore{dir: dir, home: home, getenv: getenv, goos: runtime.GOOS, usageURL: "https://chatgpt.com/backend-api/wham/usage", client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	var saved struct {
 		Claude planUsageEntry `json:"claude"`
 		GPT    planUsageEntry `json:"gpt"`
@@ -226,7 +228,7 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cross-origin pages cannot set the custom header without a CORS preflight, which the daemon does not grant.
 	refresh := r.URL.Query().Get("refresh") == "1" && (r.Header.Get("Sec-Fetch-Site") == "same-origin" || sameOrigin(r) || r.Header.Get("X-WS-Usage-Refresh") == "1")
-	d.planUsage.query(r.Context(), refresh)
+	d.planUsage.query(r.Context(), refresh, d.index)
 	body := map[string]any{"entries": d.planUsage.entries(), "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
 	if r.URL.Query().Get("history") == "1" {
 		body["history"] = d.planUsage.history(time.Now().UnixMilli())
