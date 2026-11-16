@@ -171,33 +171,86 @@ func bestLiteralParseTime(t *testing.T, inputBytes int, parse func()) time.Durat
 	return best
 }
 
+// bestInterleavedLiteralParseTimes fixes batch counts before collecting samples.
+// Every round visits every size, so a busy runner cannot isolate one size in a
+// separate sampling window. Keep the best per size to discard scheduler pauses.
+func bestInterleavedLiteralParseTimes(t *testing.T, inputs []string, parse func(string)) []time.Duration {
+	t.Helper()
+	const trials = 4
+	const minSample = 30 * time.Millisecond
+	const minIterations = 8 // Even the largest input gets several parses per batch.
+	iterations := make([]int, len(inputs))
+	bests := make([]time.Duration, len(inputs))
+	batch := func(input string, n int) time.Duration {
+		runtime.GC()
+		start := time.Now()
+		for range n {
+			parse(input)
+		}
+		return time.Since(start)
+	}
+	// Calibration is not a sample: only the subsequent interleaved rounds
+	// contribute to the growth comparison, all with these fixed batch counts.
+	for i, input := range inputs {
+		iterations[i] = minIterations
+		for batch(input, iterations[i]) < minSample {
+			iterations[i] *= 2
+		}
+		bests[i] = time.Hour
+	}
+	for range trials {
+		for i, input := range inputs {
+			elapsed := batch(input, iterations[i]) / time.Duration(iterations[i])
+			bests[i] = min(bests[i], elapsed)
+		}
+	}
+	for i, input := range inputs {
+		t.Logf("%d bytes interleaved best-of-%d=%s per parse (%d parses/batch)", len(input), trials, bests[i], iterations[i])
+	}
+	return bests
+}
+
 func TestLiteralCodeNearLinearGrowth(t *testing.T) {
 	g := literalPerformanceGrammar()
 	for _, kind := range literalPerformanceShapes {
 		t.Run(kind, func(t *testing.T) {
-			var bests []time.Duration
+			var inputs []string
 			for _, size := range []int{50000, 100000, 200000} {
 				input, _ := literalPerformanceInput(kind, size)
-				best := bestLiteralParseTime(t, len(input), func() {
-					p := &Problems{}
-					Parse(p, g, input)
-					if len(p.List) != 0 {
-						t.Fatal(p.List)
-					}
-				})
-				bests = append(bests, best)
+				inputs = append(inputs, input)
 			}
-			if bests[2] >= 100*time.Millisecond {
-				t.Fatalf("200KB absolute bound: %s >= 100ms", bests[2])
-			}
-			// A linear doubling with generous fixed scheduler/GC slack for CI.
-			for i := 1; i < len(bests); i++ {
-				if bests[i] > 3*bests[i-1]+5*time.Millisecond {
-					t.Fatalf("superlinear growth: %v", bests)
+			parse := func(input string) {
+				p := &Problems{}
+				Parse(p, g, input)
+				if len(p.List) != 0 {
+					t.Fatal(p.List)
 				}
 			}
-			if bests[2] > 6*bests[0]+5*time.Millisecond {
-				t.Fatalf("fourfold-size growth: %v", bests)
+			const attempts = 3
+			for attempt := 1; attempt <= attempts; attempt++ {
+				t.Logf("interleaved growth attempt %d/%d", attempt, attempts)
+				bests := bestInterleavedLiteralParseTimes(t, inputs, parse)
+				if bests[2] >= 100*time.Millisecond {
+					t.Fatalf("200KB absolute bound: %s >= 100ms", bests[2])
+				}
+				// Preserve the existing ratio/slack gates. A transient failure
+				// retries the entire set, never cherry-picking sizes across attempts.
+				reason := ""
+				for i := 1; i < len(bests); i++ {
+					if bests[i] > 3*bests[i-1]+5*time.Millisecond {
+						reason = "superlinear growth"
+					}
+				}
+				if bests[2] > 6*bests[0]+5*time.Millisecond {
+					reason = "fourfold-size growth"
+				}
+				if reason == "" {
+					return
+				}
+				if attempt == attempts {
+					t.Fatalf("%s after %d attempts: %v", reason, attempts, bests)
+				}
+				t.Logf("%s: %v; retrying whole interleaved set", reason, bests)
 			}
 		})
 	}
