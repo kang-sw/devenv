@@ -38,6 +38,7 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 	// PluginWarning holds one value: every warning of this launch is joined
 	// into it, and an empty one clears a stale warning.
 	var warnings []string
+	var servers map[string]any
 	if bundleErr != nil {
 		if spec.Lead.WSMCP == nil {
 			return "", nil, fmt.Errorf("pi bundled extension unavailable (%v); no ws MCP fallback configured", bundleErr)
@@ -46,17 +47,20 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 		if err != nil {
 			return "", nil, fmt.Errorf("pi lead MCP fallback: %w", err)
 		}
-		servers, err := piMCPServers(StartSpec{Root: spec.Root, Cwd: spec.Cwd, WSMCP: &mcp})
+		servers, err = piMCPServers(StartSpec{Root: spec.Root, Cwd: spec.Cwd, WSMCP: &mcp})
 		if err != nil {
 			return "", nil, err
 		}
-		bridge, err := writePiLeadBridge(spec, servers)
-		if err != nil {
-			return "", nil, err
-		}
-		entries = []string{"builtin:mcp", bridge}
-		warnings = append(warnings, fmt.Sprintf("Bundled Pi extension unavailable (%v); using the ws MCP bridge instead.", bundleErr))
+		entries = []string{"builtin:mcp"}
+		warnings = append(warnings, fmt.Sprintf("[ws Pi] EXTENSION NOT LOADED: Bundled Pi extension unavailable (%v); using the ws MCP bridge instead. Native lead tools (ws-execute, explore, ws__*) are unavailable. Mail remains reachable through MCP. Repair/reinstall the extension and restart this session.", bundleErr))
 	}
+	// This tiny dependency-free extension also watches a nominally healthy
+	// load: Pi catches extension factory/session_start errors and continues.
+	bridge, err := writePiLeadBridge(spec, servers, strings.Join(warnings, " "))
+	if err != nil {
+		return "", nil, err
+	}
+	entries = append(entries, bridge)
 	for _, entry := range entries {
 		args = append(args, "--extension", entry)
 	}
@@ -103,9 +107,9 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 // writePiLeadBridge adds the hosted identity to the effective prompt without
 // --append-system-prompt, which would suppress the user's APPEND_SYSTEM.md.
 // Native MCP does not fill session_key or expose the hosted key to the model.
-func writePiLeadBridge(spec StartSpec, servers map[string]any) (string, error) {
+func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (string, error) {
 	key := spec.Lead.Env[EnvHostedSessionKey]
-	if key == "" {
+	if len(servers) > 0 && key == "" {
 		return "", fmt.Errorf("pi lead MCP fallback requires a hosted session key")
 	}
 	raw, err := json.Marshal(servers)
@@ -113,7 +117,8 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any) (string, error) {
 		return "", err
 	}
 	keyJSON, _ := json.Marshal(key)
-	source := "const servers = " + string(raw) + ";\nconst sessionKey = " + string(keyJSON) + ";\n" + piLeadBridgeSource
+	warningJSON, _ := json.Marshal(warning)
+	source := "const servers = " + string(raw) + ";\nconst sessionKey = " + string(keyJSON) + ";\nconst launchWarning = " + string(warningJSON) + ";\n" + piLeadBridgeSource
 	path := filepath.Join(piDir(spec.Dir), piBridgeFile)
 	return path, writeFileAtomic(path, []byte(source), 0o600)
 }
@@ -159,20 +164,17 @@ func piBundledEntries() ([]string, error) {
 		}
 		// Pi loads a local package in place and never installs its npm
 		// dependencies, so a source entry needs them on disk or the Pi process
-		// exits at load. Prefer the self-contained bundle while it is fresh; a
-		// missing dependency is a bundleErr so the caller takes the MCP bridge.
-		var bundleNote error
+		// exits at load. Never hide stale bundle inputs by switching to source:
+		// installed and checkout launches must use the same verified artifact.
 		if filepath.ToSlash(rel) == piBundleSource {
-			if bundleNote = piBundleFresh(root); bundleNote == nil {
-				entries = append(entries, filepath.Join(root, filepath.FromSlash(piBundleFile)))
-				continue
+			if err := piBundleFresh(root); err != nil {
+				return nil, err
 			}
+			entries = append(entries, filepath.Join(root, filepath.FromSlash(piBundleFile)))
+			continue
 		}
 		if missing := piMissingLoadDeps(path); len(missing) > 0 {
 			err := fmt.Errorf("%s cannot load: npm dependencies %s are not installed in any node_modules above it", path, strings.Join(missing, ", "))
-			if bundleNote != nil {
-				err = fmt.Errorf("%w, and %v", err, bundleNote)
-			}
 			return nil, err
 		}
 		entries = append(entries, path)

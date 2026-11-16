@@ -163,13 +163,13 @@ test("fallback bridge preserves effective prompt and supplies hosted session ide
   const source = readFileSync(new URL("../pi_lead_bridge.mjs", import.meta.url), "utf8");
   const servers = { ws: { command: "bundled-ws", exposure: "direct" } };
   const sessionKey = 'lead-key-"quoted"';
-  const prelude = `const servers = ${JSON.stringify(servers)}; const sessionKey = ${JSON.stringify(sessionKey)};\n`;
+  const prelude = `const servers = ${JSON.stringify(servers)}; const sessionKey = ${JSON.stringify(sessionKey)}; const launchWarning = "[ws Pi] EXTENSION NOT LOADED";\n`;
   const { default: register } = await import("data:text/javascript;base64," + Buffer.from(prelude + source).toString("base64"));
   const registered = {};
   let handler;
-  register({ registerMcpServer(name, config) { registered[name] = config; }, on(event, fn) { assert.equal(event, "before_agent_start"); handler = fn; } });
+  register({ events: { on() {} }, registerMcpServer(name, config) { registered[name] = config; }, getAllTools() { return []; }, on(event, fn) { if (event === "before_agent_start") handler = fn; } });
   assert.deepEqual(registered, servers);
-  const result = handler({ systemPrompt: "Pi defaults\nUser APPEND_SYSTEM.md\nProject instructions" });
+  const result = handler({ systemPrompt: "Pi defaults\nUser APPEND_SYSTEM.md\nProject instructions" }, { ui: { notify() {} } });
   assert(result.systemPrompt.startsWith("Pi defaults\nUser APPEND_SYSTEM.md\nProject instructions\n\n"));
   assert(result.systemPrompt.includes(JSON.stringify(sessionKey)));
   assert(result.systemPrompt.includes("Pass it as session_key"));

@@ -241,7 +241,7 @@ def generate(repo, offline=False, npm_cache=None, report=None):
             closure = {**candidate, "archive_sha256": payload.digest((native / "closure.zip").read_bytes())}
             (native / "closure-manifest.json").write_bytes(payload.canonical(closure) + b"\n")
         first = native / "first-party"
-        for name in payload.FIRST_PARTY_FILES:
+        for name in (*payload.FIRST_PARTY_FILES, "dist/THIRD_PARTY_NOTICES"):
             target = first / name
             target.parent.mkdir(parents=True, exist_ok=True)
             if name == "package.json":

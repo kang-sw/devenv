@@ -13,7 +13,7 @@
 // sha256 over "<path>\n<sha256 hex of the file bytes>\n" per input.
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,7 +41,8 @@ function bundleInputHash() {
 
 const outdir = join(pkg, "dist");
 mkdirSync(outdir, { recursive: true });
-await build({
+const result = await build({
+  metafile: true,
   // Keep generated module labels package-relative, even when producer tooling
   // supplies dependencies through a temporary node_modules symlink.
   absWorkingDir: pkg,
@@ -68,5 +69,49 @@ await build({
     ].join("\n"),
   },
 });
+// The published boolbase 1.0.0 tarball omits its license file. This is the
+// upstream repository LICENSE (https://github.com/fb55/boolbase/blob/master/LICENSE).
+const boolbaseLicense = `Copyright (c) 2014-2015, Felix Boehm <me@feedic.com>
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.`;
+
+const lock = JSON.parse(readFileSync(join(pkg, "package-lock.json"), "utf8"));
+const roots = new Set();
+for (const input of Object.keys(result.metafile.inputs)) {
+  const parts = input.replaceAll("\\", "/").split("/");
+  const last = parts.lastIndexOf("node_modules");
+  if (last < 0) continue;
+  const end = last + (parts[last + 1].startsWith("@") ? 3 : 2);
+  roots.add(parts.slice(0, end).join("/"));
+}
+const notices = ["Third-party licenses for dependencies inlined in dist/index.js.",
+  "Host-provided and separately distributed dependencies are not included here.\n"];
+for (const root of [...roots].sort()) {
+  const metadata = lock.packages[root];
+  if (!metadata?.version || !metadata.license) throw new Error(`Missing lockfile license metadata: ${root}`);
+  const manifest = JSON.parse(readFileSync(join(pkg, root, "package.json"), "utf8"));
+  if (manifest.version !== metadata.version) throw new Error(`Installed version differs from lockfile: ${root}`);
+  const licenseFiles = readdirSync(join(pkg, root)).filter(name => /^licen[cs]e(?:[.-].*)?$/i.test(name)).sort();
+  let license;
+  if (licenseFiles.length) {
+    license = licenseFiles.map(name => readFileSync(join(pkg, root, name), "utf8").trimEnd()).join("\n\n");
+  } else if (manifest.name === "boolbase" && metadata.version === "1.0.0") {
+    license = boolbaseLicense;
+  } else {
+    throw new Error(`Missing installed license text: ${root}`);
+  }
+  notices.push(`===== ${manifest.name}@${metadata.version} (${metadata.license}) =====\n${license}\n`);
+}
+writeFileSync(join(outdir, "THIRD_PARTY_NOTICES"), notices.join("\n") + "\n");
 // word-chain-id.ts reads the wordlist relative to its own module URL.
 copyFileSync(join(pkg, wordlist), join(outdir, "eff_large_wordlist.txt"));
