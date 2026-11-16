@@ -342,6 +342,7 @@
   // focusTopicNote brings a topic's note into view on the board, opening it
   // through the topic's pen when it is closed.
   function focusTopicNote(name) {
+    if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(function () { focusTopicNote(name); })) return;
     var n = topicNote(name), topic = n && n.closest(".topic");
     if (!n) return;
     if (live && !tabShown("board")) setTab("board");
