@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ws dashboard - config.list 기반 워크플로 설정 UI 목업 (261116)</title>
+<script>
+  // ?theme=dark|light pins the theme the same way the dashboard does (root data-theme).
+  (function () { var m = /[?&]theme=(dark|light)/.exec(location.search); document.documentElement.setAttribute("data-theme", m ? m[1] : "light"); })();
+</script>
+<style>
+/* ---- copied verbatim: agents-plugin-tool/internal/wswhiteboard/assets/page.css:5-34 (light tokens; color-scheme line from :35) ---- */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* ---- copied verbatim (subset of variables): wswhiteboard/assets/page.css:77-103 (pinned dark palette) ---- */
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+/* ---- copied verbatim: wswhiteboard/assets/page.css:104,115-120 ---- */
+* { box-sizing: border-box; }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.id, code { font-family: var(--wb-mono); }
+button { font: inherit; color: inherit; }
+/* ---- copied verbatim: wswhiteboard/assets/page.css:133 ---- */
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+/* ---- copied (status tokens only): wsdashboard/assets/dashboard.css:6-48 ---- */
+:root { --wb-ok: #1d7348; --wb-fail: #c0262d; --wb-warn: #c27a00; --wb-warn-ink: #a35f00; }
+:root[data-theme="dark"] { --wb-ok: #6cc39a; --wb-fail: #f0797e; --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:15 (.rail), :136 (.rail .rhd), :370-372 (.rail .rfoot) ---- */
+.rail { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
+.rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard.css:99-100 (.gear) ---- */
+.gear { height: 28px; width: 32px; padding: 0; }
+.gear .i { width: 17px; height: 17px; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:377-380 (.rpop) ---- */
+.rpop { position: fixed; z-index: var(--z-popovers); width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
+  background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
+.rpop[hidden] { display: none; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-rail.css:427 (.rpop .sphd) ---- */
+.rpop .sphd { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; font-weight: 800; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard-drawer.css:49,54 (.settings-pop, .gmenu.gcard) ---- */
+.settings-pop { width: 300px; }
+.gmenu.gcard { position: static; width: auto; box-shadow: none; padding: 0; background: transparent; }
+/* ---- copied verbatim: wsdashboard/assets/dashboard.css:101-113 (.gmenu) ---- */
+.gmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: 270px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; display: grid; gap: 3px; }
+.gmenu .gt { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 4px 2px; }
+.gmenu .gt2 { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--wb-muted); }
+.gmenu button { display: flex; align-items: center; gap: 9px; border: 0; background: transparent; border-radius: 8px; padding: 6px 8px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.gmenu button:hover { background: var(--wb-muted); }
+.gmenu button[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); font-weight: 700; }
+.gmenu .gk { font: 800 11px/20px var(--wb-mono); width: 26px; text-align: center; border-radius: 5px; background: var(--wb-muted); flex: none; }
+.gmenu .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
+.gmenu select { width: 100%; box-sizing: border-box; border: 1px solid var(--wb-muted); background: var(--wb-card); color: inherit; font: inherit; font-size: 13px; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+.gmenu .gh { padding: 0 4px; }
+.gmenu .gn { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; white-space: nowrap; }
+.gmenu .gn .settings-version { margin-left: auto; flex: none; }
+/* ---- copied, selector re-scoped from ".rpop" to ".cfg": wsdashboard/assets/dashboard-rail.css:429-443,450 (.spsec .splbl .spreset .spseg .spline .spq .spfrom .spsel .spnote) ---- */
+.cfg .spsec { display: grid; gap: 5px; min-width: 0; }
+.cfg .splbl { display: flex; align-items: baseline; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.cfg .spreset { font: inherit; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; border: 0; background: none; padding: 0; color: var(--wb-primary); cursor: pointer; }
+.cfg .spreset:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.cfg .spseg { display: flex; flex-wrap: wrap; gap: 2px; width: fit-content; background: var(--wb-muted); border-radius: 999px; padding: 2px; }
+.cfg .spseg button { font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 999px; padding: 2px 12px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.cfg .spseg button[aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.cfg .spseg button:disabled { opacity: .45; cursor: not-allowed; }
+.cfg .spseg button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.cfg .spline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cfg .spq { font: inherit; font-size: 12.5px; width: 100%; min-width: 0; box-sizing: border-box; border: 0; border-radius: 8px; padding: 4px 8px; background: var(--wb-muted); color: inherit; }
+.cfg .spq.mono { font-family: var(--wb-mono); font-size: 12px; }
+.cfg .spq:focus-visible, .cfg .spsel:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.cfg .spfrom { font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.cfg .spsel { font: 12px var(--wb-mono); border: 0; border-radius: 8px; padding: 4px 6px; background: var(--wb-muted); color: inherit; }
+.cfg .spnote { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+/* ---- copied verbatim: wsdashboard/assets/usage.css:27 (.usage-close) ---- */
+.usage-close { margin-left: auto; padding: 0 3px; border: 0; background: none; color: var(--wb-muted-fg); font: inherit; cursor: pointer; }
+
+/* ======================================================================
+   mockup-only (new): page frame, annotations
+   ====================================================================== */
+.mk { max-width: 1232px; margin: 0 auto; padding: 22px 24px 60px; }
+.mk-head { display: flex; align-items: flex-start; gap: 16px; }
+.mk-head h1 { margin: 0; font-size: 20px; }
+.mk-head .sub { margin: 4px 0 0; color: var(--wb-muted-fg); font-size: 13px; max-width: 860px; }
+.mk-theme { margin-left: auto; flex: none; }
+.mk h2 { font-size: 15px; margin: 30px 0 4px; }
+.mk h2 .n { display: inline-block; min-width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 6px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 12px; margin-right: 6px; }
+.mk .lead { margin: 0 0 12px; color: var(--wb-muted-fg); font-size: 13px; max-width: 980px; }
+.anno { font-size: 13px; line-height: 1.6; }
+.anno ul { margin: 6px 0 0; padding-left: 18px; }
+.anno li { margin: 3px 0; }
+.anno b { font-weight: 700; }
+.newtag { display: inline-block; font-size: 10px; font-weight: 800; padding: 0 6px; border-radius: 999px; background: var(--wb-announced); color: var(--wb-on-announced); margin-left: 4px; vertical-align: 1px; text-transform: none; letter-spacing: 0; }
+
+/* section 1: rail + popover stage (popover drawn in-flow instead of fixed) */
+.stage1 { display: grid; grid-template-columns: 300px 300px minmax(0, 1fr); gap: 18px; align-items: end; }
+.stage1 .rail { height: 560px; }
+.rail .rhd .rt { color: var(--wb-fg); }
+.rail .rbody { flex: 1 1 auto; padding: 0 10px; display: grid; align-content: start; gap: 6px; font-size: 12.5px; }
+.rail .rws { border-radius: 8px; padding: 6px 8px; background: var(--wb-wash); }
+.rail .rws b { font-size: 12.5px; }
+.rail .rws .sx { display: block; color: var(--wb-muted-fg); font-size: 11.5px; padding-left: 10px; }
+.rail .rfoot .gear { border: 0; border-radius: 7px; background: transparent; display: inline-flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rfoot .gear[aria-expanded="true"] { background: var(--wb-muted); color: var(--wb-fg); }
+.rail .rfoot .usage { margin-left: auto; color: var(--wb-muted-fg); font-size: 11.5px; }
+.stage1 .rpop { position: static; max-height: none; }
+.gmenu .wfsum { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 2px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.gmenu .wfsum .chip { height: 18px; font-size: 11px; padding: 0 7px; }
+.gmenu .wfsum .chip.ov { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); color: var(--wb-primary); }
+.gmenu .gn.wrap { white-space: normal; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ======================================================================
+   mockup-only (new): the workflow-settings sheet (.cfg)
+   In the product it opens as a modal over the dashboard
+   (width min(1120px, 100vw - 32px), height 100dvh - 64px) and only the
+   knob list scrolls; here it is drawn in-flow at full height.
+   ====================================================================== */
+.cfg { position: relative; background: var(--wb-card); color: var(--wb-fg); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 12.5px; overflow: hidden; }
+.cfg .chd { display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--wb-muted); }
+.cfg .chd b { font-size: 14px; }
+.cfg .chd .ctx { font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); }
+.cfg .ctb { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 16px; border-bottom: 1px solid var(--wb-muted); background: color-mix(in srgb, var(--wb-muted) 35%, var(--wb-card)); }
+.cfg .ctb .grp { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cfg .ctb .spseg button .hk { font-family: var(--wb-mono); font-size: 10.5px; opacity: .7; margin-left: 3px; }
+.cfg .ctb .ws { font: 12px var(--wb-mono); }
+.cfg .ctb .flt { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--wb-muted-fg); cursor: pointer; user-select: none; }
+.cfg .ctb .flt input { margin: 0; accent-color: var(--wb-primary); }
+.cfg .ctb .srch { width: 190px; margin-left: auto; }
+.cfg .cbody { display: grid; grid-template-columns: 186px minmax(0, 1fr); min-height: 260px; }
+.cfg .cnav { border-right: 1px solid var(--wb-muted); padding: 10px 8px; display: grid; align-content: start; gap: 2px; }
+.cfg .cnav button { display: flex; align-items: center; gap: 6px; border: 0; background: transparent; border-radius: 7px; padding: 5px 8px; text-align: left; cursor: pointer; font-size: 12.5px; color: var(--wb-fg); }
+.cfg .cnav button:hover { background: var(--wb-muted); }
+.cfg .cnav button[aria-current="true"] { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); font-weight: 700; }
+.cfg .cnav button .c { margin-left: auto; font-size: 11px; color: var(--wb-muted-fg); font-weight: 400; }
+.cfg .cnav button .od { width: 6px; height: 6px; border-radius: 50%; background: var(--wb-primary); flex: none; }
+.cfg .cnav button .od.none { background: transparent; }
+.cfg .cnav .navnote { margin: 10px 6px 0; font-size: 11px; color: var(--wb-muted-fg); line-height: 1.45; }
+.cfg .clist { min-width: 0; padding: 4px 0 8px; }
+.cfg .ghd { display: flex; align-items: baseline; gap: 8px; padding: 12px 16px 4px; font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.cfg .ghd .gsub { font-weight: 400; letter-spacing: 0; }
+.cfg .gempty { margin: 2px 16px 6px; padding: 8px 10px; border-radius: 8px; background: var(--wb-wash); color: var(--wb-muted-fg); font-size: 12px; }
+/* knob row: meta | control | source */
+.cfg .kr { display: grid; grid-template-columns: minmax(0, 1fr) 290px 176px; gap: 14px; align-items: start; padding: 9px 16px; border-top: 1px solid color-mix(in srgb, var(--wb-muted) 70%, transparent); }
+.cfg .kr.mx { grid-template-columns: minmax(0, 1fr) 556px; }
+.cfg .kr.wide { grid-template-columns: minmax(0, 1fr) 480px; }
+.cfg .kr.dirty { box-shadow: inset 3px 0 0 var(--wb-warn); background: color-mix(in srgb, var(--wb-warn) 6%, var(--wb-card)); }
+.cfg .kr.err { box-shadow: inset 3px 0 0 var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 6%, var(--wb-card)); }
+.cfg .kmeta { min-width: 0; }
+.cfg .kl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
+.cfg .kl .kdot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-warn); flex: none; }
+.cfg .kl .tag { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); line-height: 17px; }
+.cfg .kl .tag.h { background: color-mix(in srgb, var(--wb-technical) 16%, var(--wb-card)); color: var(--wb-technical); }
+:root[data-theme="dark"] .cfg .kl .tag.h { color: var(--wb-on-technical); background: var(--wb-technical); }
+.cfg .kl .tag.lock { background: color-mix(in srgb, var(--wb-policy) 14%, var(--wb-card)); color: var(--wb-policy); }
+:root[data-theme="dark"] .cfg .kl .tag.lock { color: var(--wb-on-policy); background: var(--wb-policy); }
+.cfg .kk { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.cfg .kd { font-size: 12px; color: var(--wb-muted-fg); margin-top: 2px; line-height: 1.45; }
+.cfg .kctl { min-width: 0; display: grid; gap: 5px; }
+.cfg .kctl .spline .unit { font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.cfg .kctl .hint { font-size: 11px; color: var(--wb-muted-fg); }
+.cfg .kctl .hint.bad { color: var(--wb-fail); font-weight: 600; }
+.cfg .kctl input[type="number"] { width: 120px; }
+.cfg .kctl .spsel { max-width: 100%; }
+.cfg .ksrc { min-width: 0; display: grid; gap: 3px; justify-items: start; }
+/* source badge */
+.src { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); max-width: 100%; white-space: nowrap; }
+.src.here { background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-primary); }
+.src.shadow { background: color-mix(in srgb, var(--wb-warn) 18%, var(--wb-card)); color: var(--wb-warn-ink); }
+.src.pend { background: color-mix(in srgb, var(--wb-warn) 18%, var(--wb-card)); color: var(--wb-warn-ink); }
+.src.bad { background: color-mix(in srgb, var(--wb-fail) 15%, var(--wb-card)); color: var(--wb-fail); }
+.ksrc .was { font-size: 11px; color: var(--wb-muted-fg); }
+.ksrc .was s { font-family: var(--wb-mono); }
+/* switch */
+.tg { position: relative; width: 34px; height: 20px; border-radius: 999px; border: 0; padding: 0; background: color-mix(in srgb, var(--wb-fg) 22%, var(--wb-card)); cursor: pointer; flex: none; }
+.tg::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--wb-card); box-shadow: 0 1px 2px rgb(0 0 0 / .3); transition: left .12s; }
+.tg[aria-checked="true"] { background: var(--wb-primary); }
+.tg[aria-checked="true"]::after { left: 17px; }
+.tg:disabled { opacity: .45; cursor: not-allowed; }
+.tgl { font-size: 12px; }
+/* long text preview */
+.lprev { font-size: 11.5px; line-height: 1.45; color: var(--wb-muted-fg); background: var(--wb-wash); border-radius: 8px; padding: 0; border: solid transparent; border-width: 5px 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.lprev.empty { font-style: italic; }
+.lbtn { justify-self: start; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; border: 0; border-radius: 7px; padding: 3px 10px; background: var(--wb-muted); cursor: pointer; }
+.lbtn:hover { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.lmeta { font-size: 11px; color: var(--wb-muted-fg); }
+/* harness matrix (전체 tab, harness-bucketed knobs) */
+.kmx { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.kmx .mc { min-width: 0; border-radius: 8px; padding: 6px 7px; background: var(--wb-wash); display: grid; gap: 4px; align-content: start; }
+.kmx .mc.dirty { box-shadow: inset 0 0 0 1.5px var(--wb-warn); }
+.kmx .mh { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); display: flex; align-items: center; gap: 4px; }
+.kmx .mh .star { font-family: var(--wb-mono); font-weight: 400; }
+.kmx .mv { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.kmx .src { font-size: 10.5px; padding: 0 6px; white-space: normal; line-height: 1.35; padding-top: 1px; padding-bottom: 1px; border-radius: 7px; }
+.kmx .lbtn { padding: 2px 8px; font-size: 11.5px; }
+/* tier table */
+.tier { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tier th { text-align: left; font-size: 11px; color: var(--wb-muted-fg); font-weight: 700; padding: 0 4px 3px; }
+.tier td { padding: 2px 4px; vertical-align: middle; }
+.tier td.t { font-family: var(--wb-mono); font-weight: 700; width: 58px; }
+.tier th.wb { width: 104px; } .tier th.we { width: 92px; } .tier th.ws { width: 104px; }
+.tmx td .cell { display: block; line-height: 1.35; }
+.tmx td .cell i { display: block; }
+.tier .spq, .tier .spsel { width: 100%; }
+.tier tr.dirty td { background: color-mix(in srgb, var(--wb-warn) 10%, transparent); }
+.tier .src { font-size: 10.5px; }
+.tmx td .cell { font-family: var(--wb-mono); font-size: 11.5px; }
+.tmx td .cell i { font-style: normal; color: var(--wb-muted-fg); font-family: var(--wb-sans); font-size: 11px; }
+/* families */
+.fam { display: grid; gap: 4px; }
+.fam .fr { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.fam .fr .nm { font-family: var(--wb-mono); font-size: 11.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fam .add { justify-self: start; }
+.pchips { display: flex; flex-wrap: wrap; gap: 4px; }
+.pchips .chip { font-family: var(--wb-mono); font-weight: 600; font-size: 11px; height: 19px; padding: 0 8px; }
+.pchips .chip.user { background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-primary); }
+/* footer */
+.cfoot { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--wb-muted); background: color-mix(in srgb, var(--wb-muted) 35%, var(--wb-card)); flex-wrap: wrap; }
+.cfoot.has { background: color-mix(in srgb, var(--wb-warn) 10%, var(--wb-card)); }
+.cfoot .cnt { font-weight: 700; }
+.cfoot .chg { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; flex: 1 1 300px; }
+.cfoot .chg .chip { font-family: var(--wb-mono); font-weight: 600; font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.cfoot .chg .chip.bad { background: color-mix(in srgb, var(--wb-fail) 15%, var(--wb-card)); color: var(--wb-fail); }
+.cfoot .meta { color: var(--wb-muted-fg); font-size: 12px; }
+.btnx { font-size: 12.5px; font-weight: 700; border: 0; border-radius: 8px; padding: 5px 14px; background: var(--wb-muted); cursor: pointer; }
+.btnx.pri { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.btnx:disabled { opacity: .45; cursor: not-allowed; }
+.btnx.ghost { background: transparent; color: var(--wb-fail); padding: 5px 8px; }
+.ctoast { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 14px; font-size: 12.5px; box-shadow: var(--wb-shadow-hi); white-space: nowrap; z-index: 5; }
+/* long-text editor drawer */
+.edscrim { position: absolute; inset: 0; background: rgb(0 0 0 / .16); z-index: 3; }
+:root[data-theme="dark"] .edscrim { background: rgb(0 0 0 / .4); }
+.ed { position: absolute; top: 0; right: 0; bottom: 0; width: 500px; max-width: 100%; z-index: 4; background: var(--wb-card); box-shadow: var(--wb-shadow-hi), inset 1px 0 0 var(--wb-line); display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+.ed .edhd { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ed .edhd b { font-size: 14px; }
+.ed .edhd .kk { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ed .edsub { font-size: 12px; color: var(--wb-muted-fg); margin-top: -6px; }
+.ed .edrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ed .edrow .splbl { width: 76px; }
+.ed .edtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--wb-muted); }
+.ed .edtabs button { border: 0; background: none; padding: 5px 10px; font-size: 12px; font-weight: 600; color: var(--wb-muted-fg); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.ed .edtabs button[aria-selected="true"] { color: var(--wb-fg); border-bottom-color: var(--wb-primary); }
+.ed textarea { flex: 1 1 auto; min-height: 260px; resize: none; font: 13px/1.6 var(--wb-sans); border: 0; border-radius: 8px; padding: 10px 12px; background: var(--wb-muted); color: inherit; }
+.ed textarea:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.ed .seed { flex: 1 1 auto; min-height: 260px; border-radius: 8px; padding: 10px 12px; background: var(--wb-wash); font: 12px/1.6 var(--wb-mono); color: var(--wb-muted-fg); white-space: pre-wrap; overflow: auto; }
+.ed .diff { flex: 1 1 auto; min-height: 260px; border-radius: 8px; padding: 8px 0; background: var(--wb-wash); font: 12px/1.6 var(--wb-mono); overflow: auto; }
+.ed .diff div { padding: 0 12px; white-space: pre-wrap; }
+.ed .diff .a { background: color-mix(in srgb, var(--wb-ok) 16%, transparent); }
+.ed .diff .d { background: color-mix(in srgb, var(--wb-fail) 14%, transparent); text-decoration: line-through; color: var(--wb-muted-fg); }
+.ed .edfoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ed .edfoot .meta { font-size: 11.5px; color: var(--wb-muted-fg); }
+.ed .edfoot .sp { flex: 1; }
+#sheetC .cbody { min-height: 600px; }
+/* section 4 table, section 5 notes */
+.tbl { width: 100%; border-collapse: collapse; background: var(--wb-card); border-radius: var(--wb-radius); overflow: hidden; box-shadow: var(--wb-shadow); font-size: 12.5px; }
+.tbl th, .tbl td { text-align: left; vertical-align: top; padding: 7px 10px; border-top: 1px solid var(--wb-muted); }
+.tbl th { background: color-mix(in srgb, var(--wb-muted) 50%, var(--wb-card)); font-size: 11.5px; color: var(--wb-muted-fg); border-top: 0; }
+.tbl td code { font-size: 11.5px; overflow-wrap: anywhere; }
+.tbl td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.impl { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); padding: 6px 22px 18px; font-size: 13px; line-height: 1.65; }
+.impl h3 { font-size: 14px; margin: 18px 0 4px; }
+.impl ul, .impl ol { margin: 4px 0; padding-left: 20px; }
+.impl li { margin: 4px 0; }
+.impl code { font-size: 12px; background: var(--wb-wash); padding: 0 4px; border-radius: 4px; overflow-wrap: anywhere; }
+.impl .q { list-style: none; padding-left: 0; }
+.impl .q li { padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--wb-policy) 8%, var(--wb-card)); box-shadow: inset 3px 0 0 var(--wb-policy); margin: 6px 0; }
+:root[data-theme="dark"] .impl .q li { background: color-mix(in srgb, var(--wb-policy) 40%, var(--wb-card)); box-shadow: inset 3px 0 0 var(--wb-accent-policy, #e0a36c); }
+.impl .q b { color: var(--wb-policy); }
+:root[data-theme="dark"] .impl .q b { color: var(--wb-on-policy); }
+.tierbadge { display: inline-block; font-weight: 800; padding: 0 8px; border-radius: 999px; background: var(--wb-announced); color: var(--wb-on-announced); font-size: 12px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+</svg>
+<div class="mk">
+
+<header class="mk-head">
+  <div>
+    <h1>config.list 기반 워크플로 설정 UI <span class="chip">목업 · 261116</span></h1>
+    <p class="sub">좌하단 톱니(설정) 팝오버를 진입점으로, <code>config.list</code>가 돌려주는 37개 노브 카탈로그(쓰기 계약·셀렉터·현재 값)를 그대로 렌더링해 하네스별·범위별로 조정하는 화면입니다. 값은 모두 예시이며 실제 설정 값을 담지 않았습니다. 버튼·토글·입력은 실제로 동작합니다(저장은 흉내만).</p>
+  </div>
+  <div class="mk-theme cfg"><div class="spseg" role="radiogroup" aria-label="테마"><button type="button" data-theme-btn="light" aria-checked="true">라이트</button><button type="button" data-theme-btn="dark" aria-checked="false">다크</button></div></div>
+</header>
+
+<h2><span class="n">1</span>진입점: 기존 설정 팝오버에 “워크플로 설정” 섹션 추가</h2>
+<p class="lead">지금의 설정 팝오버(<code>dashboard.tmpl:124-126</code>, 300px)는 레이아웃·입력·테마·언어처럼 <b>이 브라우저에만</b> 저장되는 항목뿐입니다. 37개 노브를 300px 팝오버에 넣는 대신, 팝오버 맨 아래에 요약과 “열기” 버튼을 두고 넓은 시트로 넘깁니다.</p>
+<div class="stage1">
+  <aside class="rail" aria-label="세션 레일 (축약)">
+    <div class="r-rail" style="display:flex;flex-direction:column;flex:1 1 auto;min-height:0">
+      <div class="rhd"><b class="rt">세션</b><span style="flex:1"></span><span class="chip">실시간 3</span></div>
+      <div class="rbody">
+        <div class="rws"><b>my-app</b><span class="sx">main · 리드 세션 2</span><span class="sx">feature/search · 리드 세션 1</span></div>
+        <div class="rws"><b>docs-site</b><span class="sx">main · 세션 없음</span></div>
+      </div>
+      <div class="rfoot"><button type="button" class="gear" aria-expanded="true" aria-label="설정"><svg class="i"><use href="#i-gear"/></svg></button><button type="button" class="gear" aria-label="홈"><svg class="i"><use href="#i-house"/></svg></button><span class="usage">Plan usage</span></div>
+    </div>
+  </aside>
+  <div class="rpop settings-pop" role="dialog" aria-label="설정">
+    <div class="sphd">설정<button type="button" class="usage-close" aria-label="닫기">×</button></div>
+    <div class="gmenu gcard">
+      <span class="gt">레이아웃</span>
+      <button aria-pressed="true"><span class="gk">-</span><span>자동<span class="gs">나란히, 좁은 화면에서는 탭</span></span></button>
+      <button aria-pressed="false"><span class="gk">A</span><span>나란히</span></button>
+      <button aria-pressed="false"><span class="gk">B</span><span>탭</span></button>
+      <span class="gt gt2">테마</span>
+      <button aria-pressed="true"><span class="gk">&#9680;</span><span>시스템 설정 따르기</span></button>
+      <span class="gt gt2">언어</span>
+      <select aria-label="언어"><option>브라우저 설정 따르기</option></select>
+      <span class="gn">이 브라우저에 저장됩니다.<span class="meta settings-version">v0.50.1</span></span>
+      <span class="gt gt2">워크플로 설정 <span class="newtag">새로 추가</span></span>
+      <span class="wfsum"><span class="chip">my-app</span><span class="chip ov">재정의 9</span><span class="chip">하네스별 4</span></span>
+      <button type="button" data-open-sheet><span class="gk"><svg class="i" style="margin:3px auto"><use href="#i-sliders"/></svg></span><span>워크플로 설정 열기…<span class="gs">Claude · Codex · Pi 설정을 범위별로 조정</span></span></button>
+      <span class="gn wrap">워크플로 설정은 설정 파일(전역 · 프로젝트 · 저장소)에 저장됩니다.</span>
+    </div>
+  </div>
+  <div class="anno">
+    <b>왜 팝오버 안에 다 넣지 않나</b>
+    <ul>
+      <li>37개 노브 중 12개는 Claude 어댑터, 15개는 Pi 어댑터 전용이고, 4개는 하네스마다 값이 따로입니다. 300px 폭에서는 “하네스 × 범위 × 값” 세 축을 함께 보여 줄 수 없습니다.</li>
+      <li>기존 항목(브라우저 로컬)과 새 항목(설정 파일)은 <b>저장 위치가 다르므로</b> 섹션과 각주로 분리합니다. 지금의 “이 브라우저에 저장됩니다.” 문구는 위 섹션에만 걸리게 됩니다.</li>
+      <li>요약 칩: 이 레일이 보고 있는 작업공간, 기본값이 아닌 노브 수, 하네스별로 값이 갈리는 노브 수.</li>
+      <li>시트는 모달로 열리며 Esc·바깥 클릭으로 닫힙니다. 저장하지 않은 변경이 있으면 닫기 전에 확인합니다.</li>
+    </ul>
+  </div>
+</div>
+
+<h2><span class="n">2</span>워크플로 설정 시트 · Claude 탭 · 저장 위치 “프로젝트” · 저장하지 않은 변경 있음</h2>
+<p class="lead">하네스 탭은 <b>보기 필터이자 편집 대상 버킷</b>입니다. Claude 탭에서는 공통 노브 + Claude 버킷 + Claude 어댑터 설정만 보이고, 하네스별 노브(화이트보드, 트래커, 프롬프트 재정의, 모델 티어)는 Claude 버킷을 편집합니다. 오른쪽 열은 <b>실제로 적용되는 값의 출처</b>를 저장 위치와 비교해 보여 줍니다(“전역에서 상속”, “프로젝트에 저장됨”, “기본값”). 변경은 바로 쓰지 않고 아래 바에 모았다가 한 번에 저장합니다.</p>
+<div class="cfg" id="sheetA"></div>
+
+<h2><span class="n">3</span>전체 탭 · “하네스별 설정만” 필터 · 저장 위치 “전역”</h2>
+<p class="lead">전체 탭에서 하네스별 노브는 Claude / Codex / Pi / 공통(<code>*</code>) 네 칸으로 펼쳐져 한눈에 비교됩니다. 각 칸은 해당 하네스에 실제로 적용되는 값과 출처를 보여 줍니다. 저장 위치를 “전역”으로 두었을 때 더 높은 범위(프로젝트)에 값이 있으면 <b>“프로젝트 값이 우선”</b> 경고로 “바꿔도 효과 없음”을 미리 알립니다. 해석 순서는 실제 코드와 같습니다: 하네스 버킷(모든 범위) → 공통 버킷(모든 범위) → 기본값 (<code>mcp/config_registry.go:166-182</code>). 그래서 공통 버킷의 프로젝트 값은 Claude 버킷의 전역 쓰기를 가리지 <b>않으며</b>, 경고도 같은 버킷 안에서만 뜹니다(트래커 행 참고).</p>
+<div class="cfg" id="sheetB"></div>
+
+<h2><span class="n">4</span>긴 프롬프트 재정의 편집: 목록에는 미리보기만, 편집은 측면 편집기</h2>
+<p class="lead">프롬프트 재정의와 캡션 스타일 같은 긴 문자열은 목록에 두 줄 미리보기와 글자 수만 보여 주고, “편집…”을 누르면 시트 오른쪽에 편집기가 열립니다. 편집기 안에서 하네스 버킷을 바꿔 가며 같은 노브의 다른 버킷을 고칠 수 있고, 기본 블록(seed)과 비교할 수 있습니다. “변경 대기열에 추가”는 바로 쓰지 않고 시트 하단의 변경 묶음에 넣습니다.</p>
+<div class="cfg" id="sheetC"></div>
+
+<h2><span class="n">5</span>스키마 → 컨트롤 매핑 (config.list 37개 노브 전수)</h2>
+<p class="lead">config.list의 <code>kind</code>만으로는 컨트롤을 정할 수 없습니다. 실제로 쓰는 신호는 <code>value_fields[].enum</code>, 값 필드 개수, <code>selector_fields</code>의 유무·enum, <code>value_schema</code>, 그리고 <b>설명 문장 속 산문</b>(“an integer of at least 1”)입니다. 마지막 것은 기계가 읽을 수 없어 공백(아래 G1)입니다.</p>
+<table class="tbl">
+  <thead><tr><th style="width:186px">kind</th><th class="n" style="width:52px;white-space:nowrap">개수</th><th>필드 형태 (config.list에서 보이는 그대로)</th><th>제안 컨트롤</th><th>해당 노브</th></tr></thead>
+  <tbody>
+    <tr><td><code>workflow_preference</code></td><td class="n">8</td><td>value enum <code>on|off</code>, selector 없음</td><td>토글 + “전역 전용” 잠금 태그</td><td><code>workflow.prefer_subagent</code>, <code>bootstrap_alarm</code></td></tr>
+    <tr><td></td><td></td><td>value enum <code>on|off</code>, selector <code>harness</code>(claude/codex/pi/*) + <code>scope</code></td><td>토글. 단일 탭: 해당 버킷 · 전체 탭: 4칸 매트릭스</td><td><code>workflow.whiteboard_enabled</code>, <code>workflow.tracker_enabled</code></td></tr>
+    <tr><td></td><td></td><td>value enum <code>on|off</code> / <code>off|lite|full</code>, selector <code>scope</code></td><td>토글 / 세그먼트</td><td><code>ticket_review_auto_ack</code>, <code>review_phase</code></td></tr>
+    <tr><td></td><td></td><td>자유 문자열 (enum 없음)</td><td>한 줄 입력 / 경로 목록 입력(전역 전용)</td><td><code>workflow.lang</code>, <code>agent.git_search_roots</code></td></tr>
+    <tr><td><code>sage_review</code></td><td class="n">2</td><td>value enum <code>off|ask|auto</code>, selector <code>scope</code></td><td>세그먼트</td><td><code>sage_review</code>, <code>sage_review_design</code></td></tr>
+    <tr><td><code>prompt_override</code></td><td class="n">1</td><td>value <code>prompt</code>(required, 비어 있으면 안 됨), selector <code>harness</code>+<code>scope</code>, current = 버킷별 목록(빈 버킷 생략)</td><td>미리보기 + 측면 편집기 (버킷 전환, seed 비교)</td><td><code>prompt.UserPreferenceSection</code></td></tr>
+    <tr><td><code>user_preference</code></td><td class="n">1</td><td>이름 템플릿 키 <code>preference.&lt;slot&gt;</code>, 이름 규칙은 설명 산문 속 정규식</td><td>슬롯 목록 + “슬롯 추가”(이름 검증)</td><td><code>preference.&lt;slot&gt;</code></td></tr>
+    <tr><td><code>model_tier</code></td><td class="n">1</td><td>value 4개(<code>tier</code> enum + backend/model/effort 자유 문자열), harness enum은 <code>default</code>(다른 노브는 <code>*</code>), scope는 project/global만</td><td>티어 4행 × 3열 표. 전체 탭은 하네스 4열 요약</td><td><code>agents.tier</code></td></tr>
+    <tr><td><code>worktree_profile</code> · <code>agent_profile</code></td><td class="n">2</td><td>이름 템플릿 + <code>value_schema</code>(JSON Schema 전체 객체), current = 이름·범위·정의 목록</td><td>읽기 전용 칩 목록 + JSON 보기 (질문 Q4)</td><td><code>worktree.profile.&lt;name&gt;</code>, <code>agent.profile.&lt;name&gt;</code></td></tr>
+    <tr><td><code>worktree_nudge</code> · <code>git_merge_size</code></td><td class="n">5</td><td>“Value as a string: an integer of at least 1/0” (산문) / “any string”</td><td>숫자 입력(최소값은 산문에서 사람이 옮김) / 한 줄 입력</td><td><code>worktree.nudge_*</code>, <code>git.merge_size_*</code></td></tr>
+    <tr><td><code>adapter_setting</code></td><td class="n">17</td><td>enum <code>true|false</code> · enum · 정수(산문) · 패턴(산문 속 정규식) · 긴 문자열, <code>default</code> 필드 있음, selector <code>scope</code>, <code>repo_scope</code>가 false인 키 있음</td><td>토글 / 세그먼트·선택 / 숫자 / 형식 검증 입력 / 측면 편집기. 저장소 범위 불가 키는 비활성</td><td><code>claude.*</code> 12, <code>dashboard.*</code> 5 (이 세션 기준)</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="n">6</span>구현 시 바뀌는 것</h2>
+<div class="impl">
+  <h3>필요한 데몬 라우트</h3>
+  <ul>
+    <li><b>지금은 없음.</b> 대시보드 데몬의 라우트 등록(<code>wsdashboard/daemon.go:729-776</code>, <code>Handler</code>)에 config 읽기·쓰기 라우트가 없고, <code>wsdashboard</code> 패키지는 <code>wsconfig</code>를 전혀 import하지 않습니다. 기존 설정 팝오버는 브라우저 로컬 저장만 씁니다: 레이아웃·입력은 localStorage(<code>dashboard.js:40-48</code>, 키 <code>ws.dashboard.layout</code> · <code>ws.dashboard.input</code> <code>dashboard.js:408</code>), 언어는 쿠키 <code>ws_dashboard_lang</code>(<code>dashboard.js:443</code>). 팝오버 열기는 <code>dashboard-rail-popovers.js:442-447</code>.</li>
+    <li><b>추가할 것 (제안)</b>: <code>GET /config?root=&lt;작업공간&gt;</code> — config.list JSON과 같은 모양(카탈로그 + 범위별 값, 세션 키 없이). <code>POST /config/tune</code> — <code>{key, harness?, scope, value | reset, root}</code> 묶음을 받아 config.tune과 같은 검증·쓰기 경로로 처리하고 노브별 결과를 돌려줌. 시트의 “저장”은 한 번의 POST로 여러 변경을 보냅니다.</li>
+    <li><b>게이트</b>: 두 라우트 모두 기존 <code>TrustedWrite</code>(<code>wsdashboard/access.go:162-171</code>: 이 컴퓨터의 브라우저 + same-origin, LAN 토큰만으로는 불가)를 씁니다. GET도 프롬프트 재정의 원문을 담으므로 LAN에서는 숨기는 편이 맞습니다.</li>
+    <li><b>로직 위치</b>: config.list/config.tune은 MCP 서버 메서드에 묶여 있습니다(<code>mcp/server.go:971-1003</code> list, <code>:1009-</code> tune, <code>buildTuningCatalog</code> <code>:2864</code>, 어댑터 노브 <code>mcp/config_manifest.go:468-494</code>). 데몬이 직접 부르려면 카탈로그 생성과 쓰기 검증을 공유 패키지로 옮겨야 합니다. 살아 있는 세션의 MCP로 프록시하는 대안은 세션이 없을 때 동작하지 않아 비권장.</li>
+  </ul>
+
+  <h3>호환성 등급: <span class="tierbadge">T0 예상 (추가만)</span></h3>
+  <ul>
+    <li>새 HTTP 라우트와 새 시트는 순수 추가입니다. 구버전 바이너리는 이 라우트를 모르고, 쓰지도 않습니다.</li>
+    <li>쓰는 파일은 config.tune과 같습니다: 전역 <code>~/.ws/config.json</code>, 프로젝트 <code>~/.ws@&lt;id&gt;/config.json</code>, 저장소 <code>&lt;repo&gt;/.ws-workflow/config.json</code> (<code>wsconfig/scope.go:9-26</code>). <b>조건</b>: 데몬이 wsconfig의 기존 쓰기 경로를 재사용해야 합니다. 자체 직렬화로 파일을 통째로 다시 쓰면 모르는 필드가 사라져 T0이 깨집니다(AGENTS.md 기준 복구 경로 없는 전체 파일 손실은 T2도 아님).</li>
+    <li>UI를 위해 config.list에 필드(<code>type</code>, <code>minimum</code>, <code>label</code> 등)를 더하면 JSON 추가 필드이므로 구버전 소비자는 무시합니다(T0). 기존 필드의 의미를 바꾸지는 않습니다.</li>
+  </ul>
+
+  <h3>config.list가 UI에 주지 않는 것 (스키마 공백)</h3>
+  <ol>
+    <li><b>G1. 값 타입·범위가 기계 판독 불가.</b> 내장 노브는 “Value as a string: an integer of at least 1”처럼 산문으로만 말합니다. 어댑터 매니페스트에는 <code>type</code>/<code>minimum</code>/<code>maximum</code>/<code>pattern</code>이 있지만(<code>agents-plugin/config-manifest.json</code>, <code>mcp/config_manifest.go:68-78</code>) 카탈로그로 옮길 때 <code>default</code>만 남고 나머지는 버려집니다(<code>config_manifest.go:468-494</code>, <code>tuningField</code>는 name/description/enum/required뿐 <code>server.go:2842-2847</code>).</li>
+    <li><b>G2. 내장 노브의 기본값 필드 없음.</b> <code>default</code>는 어댑터 노브에만 있고 내장 노브는 설명 산문(“builtin off”)에 묻혀 있습니다(<code>server.go:2816-2818</code>). “기본값으로” 미리보기에 필요합니다.</li>
+    <li><b>G3. 짧은 라벨·그룹·다국어 없음.</b> id와 긴 영어 설명뿐입니다. 대시보드는 11개 언어로 현지화되어 있으므로 라벨/설명의 번역 소유자가 필요합니다(질문 Q5). 이 목업의 한국어 라벨과 그룹은 손으로 만든 것입니다.</li>
+    <li><b>G4. 하네스별 현재 값이 불완전.</b> 화이트보드·트래커는 버킷 노브인데도 <code>current</code>가 <b>호출한 세션의 하네스</b> 하나의 <code>{value, scope}</code>뿐입니다(<code>currentHarnessBucketedValue</code> <code>server.go:3252-3258</code>, <code>s.currentHarness()</code>). 프롬프트 재정의는 버킷별로 주지만 빈 버킷은 생략합니다. 4칸 매트릭스를 그리려면 버킷 × 범위 전부가 필요합니다.</li>
+    <li><b>G5. 이긴 값만 있고 범위별 스택이 없음.</b> <code>current</code>와 <code>resolved_overrides</code> 모두 승자 하나만 줍니다. “전역에 있는 값이 프로젝트 값에 가려짐”, “지우면 무엇으로 돌아가나”를 보여 주려면 범위별 값 목록이 필요합니다.</li>
+    <li><b>G6. 카탈로그가 호출자에 따라 달라짐.</b> 어댑터 노브는 그 MCP 인스턴스를 띄운 패키지의 매니페스트(<code>WS_MCP_CONFIG_MANIFESTS</code>, <code>config_manifest.go:17-27</code>)에서만 옵니다. 그래서 Claude 세션의 config.list에는 <code>pi.*</code> 15개가 없고, 실제로 <code>resolved_overrides</code>에는 <code>pi.*</code> 값이 보이는데 노브 목록에는 없습니다. 하네스 무관한 데몬은 설치된 패키지(ws·wsflow·pi) 매니페스트의 합집합이 필요합니다. 같은 키라도 패키지마다 기본값이 다릅니다(예: <code>claude.mailbox_drain</code>은 ws 매니페스트가 <code>direct</code>, 이 세션의 카탈로그는 <code>notice</code>).</li>
+    <li><b>G7. 셀렉터 enum 불일치.</b> 공통 버킷이 프롬프트·화이트보드·트래커는 <code>*</code>, 모델 티어는 <code>default</code>, 저장 키(<code>repo_key</code>)는 <code>all</code>입니다. 또 <code>scope</code> enum에 <code>repo</code>가 있어도 <code>repo_scope:false</code>인 키(<code>dashboard.lan_enabled</code> 등)가 있어 두 필드를 함께 봐야 합니다.</li>
+    <li><b>G8. 적용 시점 정보 없음.</b> workflow.*는 “다음 워크플로 매뉴얼 로드부터”, 어댑터 설정은 세션 재시작, <code>dashboard.port</code>는 데몬 재시작이 필요하지만 설명 산문에만 있습니다. 저장 토스트에 “언제 적용되는지”를 말하려면 필드가 필요합니다.</li>
+    <li><b>G9. 프롬프트 재정의의 기본 블록(seed) 원문 없음.</b> 설명 한 줄만 있어 편집기의 “기본 블록 보기/변경 비교”를 채울 수 없습니다.</li>
+    <li><b>G10. writer 계약이 MCP 도구 이름.</b> <code>writer.tool = "config.tune"</code>은 MCP 호출 계약이라 브라우저에는 그대로 쓸 수 없습니다. HTTP 라우트가 같은 인자 모양을 받는다면 매핑은 기계적입니다.</li>
+  </ol>
+
+  <h3>위험</h3>
+  <ul>
+    <li><b>기본 저장 범위.</b> 시트는 세션 밖에서 열리므로 세션 범위는 의미가 없습니다(세션 키가 없으면 세션 값도 안 보입니다). 남는 선택은 전역 · 프로젝트(작업공간마다 다름) · 저장소(커밋되는 파일). 기본값을 무엇으로 둘지는 제품 결정입니다(Q1).</li>
+    <li><b>버킷 우선순위 함정.</b> Claude 버킷의 <b>전역</b> 값이 공통 버킷의 <b>프로젝트</b> 값보다 이깁니다(하네스 버킷을 모든 범위에서 먼저 찾음, <code>config_registry.go:166-182</code>). 사용자 직관(“프로젝트가 전역을 이긴다”)과 어긋나므로 출처 배지에 버킷까지 표시해야 합니다.</li>
+    <li><b>저장소 범위 쓰기는 작업 트리를 더럽힘.</b> config.tune처럼 스테이징하지 않으므로 git 서랍에 ±로 나타납니다. 시트에서 저장소 범위를 고르면 “커밋 대상 파일” 경고가 필요합니다.</li>
+    <li><b>권한 모델 우회.</b> config.tune은 일부 키에 리드 세션 키를 요구합니다(<code>server.go:1043-1052</code>). 대시보드 저장은 사용자의 직접 조작이라 정당하지만, 그 게이트 밖의 새 쓰기 경로가 생깁니다. <code>TrustedWrite</code>로 이 컴퓨터의 브라우저로만 묶어야 합니다.</li>
+    <li><b>실행 권한을 담은 노브.</b> <code>worktree.profile.*</code>의 훅은 argv 명령을 실행하고, <code>agent.profile.*</code>은 도구·권한을 정하고, <code>agent.git_search_roots</code>는 읽기 범위를 넓힙니다. 1차는 읽기 전용을 제안합니다(Q4).</li>
+    <li><b>동시 편집.</b> 리드가 config.tune을 하는 사이 대시보드가 저장하면 마지막 쓰기가 이깁니다. GET 응답에 파일별 수정 시각/해시를 주고 POST에서 비교해 충돌을 알리는 편이 안전합니다.</li>
+    <li><b>적용 시점 오해.</b> 저장 직후 아무 변화가 없으면 사용자는 실패로 읽습니다. G8이 해결되기 전까지는 노브 그룹별 고정 문구로라도 적용 시점을 보여 줘야 합니다.</li>
+  </ul>
+
+  <h3>열린 제품 질문</h3>
+  <ul class="q">
+    <li><b>Q1.</b> 시트의 기본 저장 범위는 전역입니까, 레일이 보고 있는 작업공간의 프로젝트입니까? (목업은 프로젝트를 기본으로 그림)</li>
+    <li><b>Q2.</b> 커밋되는 저장소 범위(<code>.ws-workflow/config.json</code>) 쓰기를 대시보드에서 허용합니까?</li>
+    <li><b>Q3.</b> 세션 범위는 이 시트에서 빼고, 세션 메뉴(세션별 팝오버)에서만 다루면 됩니까?</li>
+    <li><b>Q4.</b> 워크트리·에이전트 프로필(명령 실행 훅·도구 권한 포함)은 읽기 전용으로 둡니까, JSON 편집까지 허용합니까?</li>
+    <li><b>Q5.</b> 라벨·설명의 현지화는 누가 소유합니까: config.list 스키마에 label/i18n 키 추가, 아니면 대시보드 i18n 테이블에 노브 id별 문구?</li>
+    <li><b>Q6.</b> Claude 세션이 없어도 Pi 어댑터 설정을 보여야 합니까? (그렇다면 데몬이 설치된 모든 패키지의 매니페스트를 합쳐 읽어야 함, G6)</li>
+    <li><b>Q7.</b> 프롬프트 재정의 편집기에 기본 블록(seed) 원문 보기·비교가 필요합니까? (필요하면 카탈로그 확장, G9)</li>
+    <li><b>Q8.</b> 진입점은 “설정 팝오버 → 넓은 시트”가 맞습니까, 아니면 홈 화면 같은 별도 페이지(<code>/settings</code>)가 낫습니까?</li>
+  </ul>
+</div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+  // ---------- theme toggle ----------
+  function markTheme() {
+    var t = document.documentElement.getAttribute("data-theme");
+    document.querySelectorAll("[data-theme-btn]").forEach(function (b) { b.setAttribute("aria-checked", String(b.getAttribute("data-theme-btn") === t)); });
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-theme-btn]");
+    if (b) { document.documentElement.setAttribute("data-theme", b.getAttribute("data-theme-btn")); markTheme(); }
+    if (e.target.closest("[data-open-sheet]")) document.getElementById("sheetA").scrollIntoView({ behavior: "smooth" });
+  });
+  markTheme();
+
+  // ---------- vocabulary ----------
+  var SC = { session: "세션", project: "프로젝트", repo: "저장소", global: "전역", builtin: "기본값" };
+  var RANK = { builtin: 0, global: 1, repo: 2, project: 3 };
+  var HN = { claude: "Claude", codex: "Codex", pi: "Pi", "*": "공통", "default": "기본" };
+  var ONOFF = { on: "켜짐", off: "꺼짐", "true": "켜짐", "false": "꺼짐" };
+  var GROUPS = [
+    ["wf", "워크플로"], ["review", "리뷰 게이트"], ["pref", "프롬프트·선호"], ["tier", "모델 티어"],
+    ["adapter", "하네스 어댑터"], ["dash", "대시보드"], ["git", "Git·워크트리"], ["prof", "프로필"]
+  ];
+  var ALL3 = ["project", "repo", "global"];
+
+  // ---------- knob data (labels/groups hand-made; values are placeholders) ----------
+  // harness: null = shared by every harness, "bucket" = harness-bucketed,
+  //          "claude"/"pi" = adapter knob that only that harness reads.
+  function K(o) { o.scopes = o.scopes || ALL3; o.layers = o.layers || {}; if (o.repoOk === undefined) o.repoOk = true; return o; }
+  var P_CLAUDE = "결론을 먼저 말하고 근거는 파일:줄로 짧게 붙인다.\n작업 범위 밖의 수정은 제안만 하고 직접 고치지 않는다.\n용어는 프로젝트 문서의 표기를 따른다.\n검증하지 않은 주장은 '추정'으로 표시한다.\n긴 목록 대신 세 줄 요약을 먼저 둔다.";
+  var P_PI = "Reports use plain sentences and short bullet lists.\nState what changed, what was verified, and what is still open.\nAsk before widening the scope.";
+  var SEED = "(기본 블록 원문 자리)\n\n현재 config.list는 이 노브의 기본 블록 텍스트를 주지 않습니다.\n카탈로그에 seed 원문 또는 그것을 읽는 경로가 추가되면\n여기에 원문을, '변경 비교' 탭에 줄 단위 비교를 보여 줍니다. (G9)";
+  var STYLE_DEFAULT = "Length: intention at most one short sentence; result at most two short sentences. Style: a terse note style with no filler.";
+  var KN = [
+    K({ id: "workflow.prefer_subagent", g: "wf", label: "기본 위임 성향", d: "조사·진단·초안 같은 범위가 분명한 작업을 서브에이전트에 맡기는 상시 지침을 추가합니다.", ctl: "toggle", opts: ["on", "off"], builtin: "off", globalOnly: true, scopes: ["global"], layers: { global: "on" } }),
+    K({ id: "workflow.whiteboard_enabled", g: "wf", harness: "bucket", label: "화이트보드를 주 채널로", d: "사용자에게 묻는 항목과 설명을 세션 화이트보드에 올리도록 매뉴얼 섹션을 켭니다.", ctl: "toggle", opts: ["on", "off"], builtin: "off",
+      buckets: { claude: { project: "on" }, codex: {}, pi: { global: "off" }, "*": { global: "on" } } }),
+    K({ id: "workflow.tracker_enabled", g: "wf", harness: "bucket", label: "트래커 섹션", d: "등록된 트래커에 작업을 기록하라는 매뉴얼 섹션을 켭니다.", ctl: "toggle", opts: ["on", "off"], builtin: "off",
+      buckets: { claude: {}, codex: {}, pi: {}, "*": { project: "on" } } }),
+    K({ id: "workflow.lang", g: "wf", label: "대화 언어", d: "리드 응답과 사용자용 요약의 언어. 비우면 언어를 고정하지 않습니다.", ctl: "text", ph: "예: Korean", builtin: "", layers: { global: "Korean" } }),
+    K({ id: "bootstrap_alarm", g: "wf", label: "부트스트랩 낡음 경고", d: "AGENTS.md 템플릿이 배포 템플릿보다 뒤처졌을 때 세션 시작 경고를 띄웁니다.", ctl: "toggle", opts: ["on", "off"], builtin: "on", globalOnly: true, scopes: ["global"] }),
+    K({ id: "sage_review", g: "review", label: "완결성 리뷰 (ready 승격)", d: "off 건너뜀 · ask 사용자에게 물음 · auto 필수.", ctl: "seg", opts: ["off", "ask", "auto"], builtin: "auto", layers: { global: "auto" } }),
+    K({ id: "sage_review_design", g: "review", label: "설계 리뷰 (ready 승격)", d: "설계 리뷰어 통과를 요구할지. 기본은 꺼짐(옵트인).", ctl: "seg", opts: ["off", "ask", "auto"], builtin: "off", layers: { project: "ask" } }),
+    K({ id: "ticket_review_auto_ack", g: "review", label: "리뷰 지적 자동 확인", d: "티켓 정착 중 리뷰가 올린 기술적 결정을 리드가 스스로 확인할 수 있게 합니다.", ctl: "toggle", opts: ["on", "off"], builtin: "on" }),
+    K({ id: "review_phase", g: "review", label: "단계별 코드 리뷰", d: "lite 중간 티어 리뷰어 1회 · full 위험 기반 2라운드 · off 건너뜀.", ctl: "seg", opts: ["off", "lite", "full"], builtin: "lite" }),
+    K({ id: "prompt.UserPreferenceSection", g: "pref", harness: "bucket", label: "사용자 선호 섹션 (프롬프트 재정의)", d: "소통 방식·용어·워크플로 동작에 대한 상시 지침. 설정하면 기본 블록을 통째로 대체합니다.", ctl: "long", required: true, builtin: "",
+      buckets: { claude: { project: P_CLAUDE }, codex: {}, pi: { global: P_PI }, "*": {} } }),
+    K({ id: "preference.<slot>", g: "pref", label: "이름 붙은 선호 슬롯", d: "슬롯별 짧은 선호 문장. 세션 > 프로젝트 > 저장소 > 전역 순으로 슬롯마다 첫 값이 이깁니다.", ctl: "family", builtin: "",
+      slots: [{ n: "tone", v: "결론부터, 근거는 짧게", s: "global" }, { n: "commit-style", v: "본문은 영어, 요약 한 줄", s: "project" }] }),
+    K({ id: "agents.tier", g: "tier", harness: "bucket", tierKnob: true, label: "능력 티어 → 모델", d: "small·medium·large·xlarge 티어를 하네스별 백엔드/모델/추론 강도에 연결합니다. 프로젝트·전역 범위만.", ctl: "tier", scopes: ["project", "global"], repoOk: false,
+      tiers: {
+        claude: { small: { global: ["claude", "haiku", ""] }, medium: { global: ["claude", "sonnet", "medium"] }, large: { global: ["claude", "opus", "high"] }, xlarge: { project: ["claude", "opus", "max"] } },
+        codex: { small: { global: ["codex", "gpt-5-mini", "low"] }, medium: { global: ["codex", "gpt-5", "medium"] }, large: { global: ["codex", "gpt-5", "high"] }, xlarge: {} },
+        pi: { small: {}, medium: {}, large: {}, xlarge: {} },
+        "default": { small: { global: ["claude", "haiku", ""] }, medium: { global: ["claude", "sonnet", ""] }, large: { global: ["claude", "sonnet", "high"] }, xlarge: { global: ["claude", "opus", "high"] } }
+      } }),
+    // Claude adapter (agents-plugin/config-manifest.json)
+    K({ id: "claude.compaction_advisory_enabled", g: "adapter", harness: "claude", label: "압축 권고", d: "자동 압축 전에 권고 턴과 알림 턴 두 번을 보냅니다.", ctl: "toggle", opts: ["true", "false"], builtin: "false", layers: { global: "true" } }),
+    K({ id: "claude.compaction_advisory_percent", g: "adapter", harness: "claude", label: "압축 권고 시점", d: "압축 창의 퍼센트, 토큰 수, 또는 둘 다(먼저 닿는 쪽).", ctl: "pattern", re: /^((100|[1-9][0-9]?)%?|[0-9]+(\.[0-9]+)?[km])(\|((100|[1-9][0-9]?)%?|[0-9]+(\.[0-9]+)?[km]))?$/, hint: "50% · 120k · 50%|120k", builtin: "50%", layers: { global: "65%" } }),
+    K({ id: "claude.dashboard_enabled", g: "adapter", harness: "claude", label: "대시보드에 활동 전달", d: "턴·도구 호출·서브에이전트 활동을 세션 대시보드 보기로 넘깁니다.", ctl: "toggle", opts: ["true", "false"], builtin: "true" }),
+    K({ id: "claude.display_summary_enabled", g: "adapter", harness: "claude", label: "도구 행 캡션", d: "접힌 도구 행에 짧은 캡션을 그립니다.", ctl: "toggle", opts: ["true", "false"], builtin: "false", layers: { global: "true" } }),
+    K({ id: "claude.display_summary_model", g: "adapter", harness: "claude", label: "캡션 모델", d: "캡션을 쓰는 모델 별칭 또는 전체 id. 비우면 기본.", ctl: "text", ph: "haiku", mono: true, builtin: "haiku" }),
+    K({ id: "claude.display_summary_context_tokens", g: "adapter", harness: "claude", label: "캡션 모델 컨텍스트", d: "캡션 요청이 보내는 대화의 창 크기.", ctl: "int", min: 1, unit: "토큰", builtin: "200000" }),
+    K({ id: "claude.display_summary_style", g: "adapter", harness: "claude", label: "캡션 스타일 지침", d: "캡션 필드 길이·어조·세부 수준. 설정하면 기본 문구를 대체합니다.", ctl: "long", builtin: STYLE_DEFAULT }),
+    K({ id: "claude.mailbox_drain", g: "adapter", harness: "claude", label: "메일 전달 방식", d: "direct 프롬프트로 바로 제출 · notice 알림만.", ctl: "seg", opts: ["direct", "notice"], builtin: "notice" }),
+    K({ id: "claude.manual_injection_enabled", g: "adapter", harness: "claude", label: "매뉴얼 자동 주입", d: "리드 대화 시작 시 세션 키를 발급하고 워크플로 매뉴얼을 넣습니다.", ctl: "toggle", opts: ["true", "false"], builtin: "true" }),
+    K({ id: "claude.mcp_watchdog_enabled", g: "adapter", harness: "claude", label: "MCP 감시", d: "도구 목록이 사라지면 재연결을 시도합니다.", ctl: "toggle", opts: ["true", "false"], builtin: "false" }),
+    K({ id: "claude.mcp_watchdog_interval_minutes", g: "adapter", harness: "claude", label: "MCP 감시 간격", d: "감시가 도구 목록을 확인하는 간격.", ctl: "int", min: 1, unit: "분", builtin: "10" }),
+    K({ id: "claude.status_band_enabled", g: "adapter", harness: "claude", label: "상태 밴드", d: "프롬프트 위에 모델·폴더·브랜치·컨텍스트 사용량 밴드를 그립니다.", ctl: "toggle", opts: ["true", "false"], builtin: "false", layers: { global: "true", project: "false" } }),
+    // Pi adapter (agents-plugin-pi/config-manifest.json) - absent from a Claude session's config.list (G6)
+    K({ id: "pi.agent_wait_animation", g: "adapter", harness: "pi", label: "대기 애니메이션", d: "자식이 리드를 기다리는 동안 위젯을 움직입니다.", ctl: "toggle", opts: ["true", "false"], builtin: "true" }),
+    K({ id: "pi.agent_widget_rows", g: "adapter", harness: "pi", label: "에이전트 위젯 행 수", d: "라이브 에이전트 위젯이 보여 줄 행 수.", ctl: "int", min: 1, max: 5, unit: "행", builtin: "3" }),
+    K({ id: "pi.agent_widget_batch_summary_enabled", g: "adapter", harness: "pi", label: "일괄 요약", d: "여러 자식을 한 줄로 요약합니다.", ctl: "toggle", opts: ["true", "false"], builtin: "false" }),
+    K({ id: "pi.dashboard_enabled", g: "adapter", harness: "pi", label: "대시보드에 활동 전달", d: "Pi 세션 활동을 대시보드로 넘깁니다.", ctl: "toggle", opts: ["true", "false"], builtin: "true" }),
+    K({ id: "pi.runaway_threshold", g: "adapter", harness: "pi", label: "폭주 감지 임계값", d: "반복 호출이 이 횟수를 넘으면 멈춥니다.", ctl: "int", min: 1, unit: "회", builtin: "10" }),
+    K({ id: "pi.settle_delay_ms", g: "adapter", harness: "pi", label: "안정화 지연", d: "출력이 멈춘 뒤 완료로 보기까지 기다리는 시간.", ctl: "int", min: 1, unit: "ms", builtin: "5000" }),
+    K({ id: "pi.compaction_advisory_percent", g: "adapter", harness: "pi", label: "압축 권고 시점", d: "퍼센트 또는 토큰 수.", ctl: "pattern", re: /^((100|[1-9][0-9]?)%?|[0-9]+(\.[0-9]+)?[km])(\|((100|[1-9][0-9]?)%?|[0-9]+(\.[0-9]+)?[km]))?$/, hint: "50% · 120k", builtin: "50%", layers: { global: "55%" } }),
+    K({ id: "pi.compaction_hard_percent", g: "adapter", harness: "pi", label: "강제 압축 시점", d: "이 지점에서는 권고가 아니라 압축합니다.", ctl: "pattern", re: /^((100|[1-9][0-9]?)%?|[0-9]+(\.[0-9]+)?[km])(\|((100|[1-9][0-9]?)%?|[0-9]+(\.[0-9]+)?[km]))?$/, hint: "80% · 180k", builtin: "80%" }),
+    K({ id: "pi.context_window_override", g: "adapter", harness: "pi", label: "컨텍스트 창 재정의", d: "0이면 모델이 알려 주는 값을 씁니다.", ctl: "int", min: 0, unit: "토큰", builtin: "0" }),
+    K({ id: "pi.compaction_dialog_budget_bytes", g: "adapter", harness: "pi", label: "압축 대화 예산", d: "압축 요약에 넣을 대화 분량.", ctl: "int", min: 1, unit: "바이트", builtin: "40960" }),
+    K({ id: "pi.compaction_reread_budget_bytes", g: "adapter", harness: "pi", label: "재읽기 예산", d: "압축 뒤 다시 읽을 분량.", ctl: "int", min: 1, unit: "바이트", builtin: "40960" }),
+    K({ id: "pi.child_retention_ttl_days", g: "adapter", harness: "pi", label: "자식 기록 보존", d: "끝난 자식 에이전트 기록을 지우기까지의 날 수.", ctl: "int", min: 0, unit: "일", builtin: "30" }),
+    K({ id: "pi.display_summary_model", g: "adapter", harness: "pi", label: "캡션 모델", d: "비우면 세션 모델.", ctl: "text", mono: true, ph: "(세션 모델)", builtin: "" }),
+    K({ id: "pi.display_summary_effort", g: "adapter", harness: "pi", label: "캡션 추론 강도", d: "캡션 모델의 추론 강도.", ctl: "select", opts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"], builtin: "medium" }),
+    K({ id: "pi.display_summary_style", g: "adapter", harness: "pi", label: "캡션 스타일 지침", d: "설정하면 기본 문구를 대체합니다.", ctl: "long", builtin: "Each field is one or two sentences." }),
+    // dashboard (dashboard-config-manifest.json)
+    K({ id: "dashboard.enabled", g: "dash", label: "대시보드에 세션 표시", d: "이 MCP 서버가 리드 세션을 대시보드에 올리고 브라우저를 엽니다.", ctl: "toggle", opts: ["true", "false"], builtin: "true", applies: "세션 재시작" }),
+    K({ id: "dashboard.port", g: "dash", label: "포트", d: "루프백 포트. 0은 OS가 고릅니다.", ctl: "int", min: 0, max: 65535, builtin: "29417", applies: "데몬 재시작" }),
+    K({ id: "dashboard.lan_enabled", g: "dash", label: "LAN 접근", d: "같은 네트워크의 다른 기기가 토큰으로 열 수 있게 합니다.", ctl: "toggle", opts: ["true", "false"], builtin: "false", repoOk: false, applies: "데몬 재시작" }),
+    K({ id: "dashboard.mailbox_undelivered_minutes", g: "dash", label: "미전달 메일 알림", d: "읽히지 않은 메일에 대해 보낸 쪽에 알림을 보내기까지의 시간.", ctl: "int", min: 1, unit: "분", builtin: "3", repoOk: false }),
+    K({ id: "dashboard.pi_spawn_enabled", g: "dash", label: "Pi 서브에이전트 도구", d: "pi.* 도구를 노출해 세션이 Pi 서브에이전트를 띄우게 합니다.", ctl: "toggle", opts: ["true", "false"], builtin: "false" }),
+    // git / worktree
+    K({ id: "git.merge_size_soft_lines", g: "git", label: "병합 크기 경고 (소프트)", d: "병합이 파일을 이 줄 수 위로 밀어 올리면 경고합니다.", ctl: "int", min: 0, unit: "줄", builtin: "1000" }),
+    K({ id: "git.merge_size_hard_lines", g: "git", label: "병합 크기 경고 (하드)", d: "병합 후 이 줄 수 이상인 파일을 고쳤으면 경고합니다.", ctl: "int", min: 0, unit: "줄", builtin: "2000" }),
+    K({ id: "git.merge_size_extensions", g: "git", label: "검사할 확장자", d: "공백으로 구분, 점 없이. 비우면 검사 끔.", ctl: "text", mono: true, builtin: "go js ts tsx py rs java kt c cpp h" }),
+    K({ id: "worktree.nudge_stale_days", g: "git", label: "오래된 워크트리 알림", d: "활동이 없는 브랜치 워크트리를 알리기까지의 날 수.", ctl: "int", min: 1, unit: "일", builtin: "7" }),
+    K({ id: "worktree.nudge_preserved_gb", g: "git", label: "보존 산출물 알림", d: "분리된 워크트리의 보존 산출물이 이 크기 이상이면 알립니다.", ctl: "int", min: 1, unit: "GB", builtin: "1" }),
+    K({ id: "agent.git_search_roots", g: "git", label: "git.search 추가 경로", d: "호스팅 에이전트의 읽기 전용 git.search가 더 읽을 수 있는 디렉터리(절대 경로).", ctl: "text", mono: true, ph: "비어 있음 · 최근 7일 프로젝트 루트만", builtin: "", globalOnly: true, scopes: ["global"], repoOk: false }),
+    // profiles
+    K({ id: "worktree.profile.<name>", g: "prof", label: "워크트리 프로필", d: "풀 파티션과 수명주기(sparse, preserve, 훅). 훅은 argv 명령을 실행합니다.", ctl: "profile", scopes: ["project", "repo", "global"], profiles: [["full", "builtin"], ["housekeeping", "builtin"], ["web-e2e", "repo"]] }),
+    K({ id: "agent.profile.<name>", g: "prof", label: "에이전트 프로필", d: "데몬의 에이전트 러너가 띄우는 헤드리스 대화 정의(백엔드, 도구, 권한).", ctl: "profile", scopes: ["project", "repo", "global"], profiles: [["explore", "builtin"], ["worker", "builtin"], ["lead-claude", "builtin"], ["lead-pi", "builtin"], ["search-answer", "builtin"], ["release-notes", "global"]] })
+  ];
+  var BY = {}; KN.forEach(function (k) { BY[k.id] = k; });
+
+  // ---------- resolution ----------
+  function firstScoped(L) {
+    for (var i = 0; i < 3; i++) { var s = ["project", "repo", "global"][i]; if (L && L[s] != null && L[s] !== "") return { v: L[s], s: s }; }
+    return null;
+  }
+  function ekey(id, b, sub) { return id + "|" + (b || "") + "|" + (sub || ""); }
+  // layers of one (knob, bucket) with this sheet's pending edits applied
+  function layersWith(st, k, b) {
+    var base = b ? (k.buckets[b] || {}) : k.layers, L = {};
+    for (var s in base) L[s] = base[s];
+    var e = st.edits[ekey(k.id, b, "")];
+    if (e) { if (e.v === null) delete L[e.s]; else L[e.s] = e.v; }
+    return L;
+  }
+  // resolve (knob, harness) -> {v, s, b} following config_registry.go:166-182
+  function resolve(st, k, h, pending) {
+    if (k.harness === "bucket") {
+      var order = h === "*" ? ["*"] : [h, "*"];
+      for (var i = 0; i < order.length; i++) {
+        var r = firstScoped(pending ? layersWith(st, k, order[i]) : (k.buckets[order[i]] || {}));
+        if (r) { r.b = order[i]; return r; }
+      }
+      return { v: k.builtin, s: "builtin" };
+    }
+    var r2 = firstScoped(pending ? layersWith(st, k, "") : k.layers);
+    return r2 || { v: k.builtin, s: "builtin" };
+  }
+  function writeScope(st, k) { return k.globalOnly ? "global" : st.target; }
+  function targetAllowed(st, k) {
+    var ws = writeScope(st, k);
+    if (k.scopes.indexOf(ws) < 0) return false;
+    if (ws === "repo" && !k.repoOk) return false;
+    return true;
+  }
+  function visible(st, k) {
+    if (st.onlyBucket && k.harness !== "bucket") return false;
+    if (st.group !== "all" && k.g !== st.group) return false;
+    if (k.harness === "claude" || k.harness === "pi") return st.harness === "all" || st.harness === k.harness;
+    return true;
+  }
+  function validate(k, v) {
+    if (v === null || v === undefined) return "";
+    if (k.ctl === "int") {
+      if (!/^-?[0-9]+$/.test(v)) return "정수만";
+      var n = parseInt(v, 10);
+      if (k.min != null && n < k.min) return k.min + " 이상이어야 함";
+      if (k.max != null && n > k.max) return k.max + " 이하여야 함";
+    }
+    if (k.ctl === "pattern" && v !== "" && !k.re.test(v)) return "형식 오류 (" + k.hint + ")";
+    if (k.ctl === "long" && k.required && v.trim() === "") return "비워 둘 수 없음";
+    return "";
+  }
+  function show(k, v) {
+    if (v === null || v === undefined) return "";
+    if (k.ctl === "toggle") return ONOFF[v] || v;
+    if (k.ctl === "long") return v ? v.length + "자" : "(없음)";
+    return v === "" ? "(비어 있음)" : v;
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  // source badge for a resolved value relative to the write scope
+  function srcBadge(st, k, r, bucketCtx) {
+    var ws = writeScope(st, k), bl = "";
+    if (bucketCtx && r.b && r.b !== bucketCtx) bl = " · " + HN[r.b] + " 버킷";
+    else if (bucketCtx === undefined && r.b) bl = r.b === "*" ? " · 공통 버킷" : "";
+    if (r.s === "builtin") return '<span class="src">기본값' + bl + "</span>";
+    if (r.s === ws && !bl) return '<span class="src here">' + SC[r.s] + "에 저장됨</span>";
+    if (RANK[r.s] > RANK[ws] && !bl) return '<span class="src shadow" title="이 범위에 저장해도 가려집니다">' + SC[r.s] + " 값이 우선</span>";
+    return '<span class="src">' + SC[r.s] + "에서 상속" + bl + "</span>";
+  }
+
+  // ---------- controls ----------
+  function ctlHTML(st, k, b, cur, dis) {
+    var d = dis ? " disabled" : "", data = ' data-id="' + esc(k.id) + '" data-b="' + esc(b || "") + '"';
+    switch (k.ctl) {
+      case "toggle":
+        var on = cur === k.opts[0];
+        return '<div class="spline"><button type="button" class="tg" role="switch" aria-checked="' + on + '" data-act="toggle"' + data + d + '></button><span class="tgl">' + (ONOFF[cur] || cur) + "</span></div>";
+      case "seg":
+        return '<div class="spseg" role="radiogroup">' + k.opts.map(function (o) { return '<button type="button" role="radio" aria-checked="' + (o === cur) + '" data-act="set" data-v="' + o + '"' + data + d + ">" + o + "</button>"; }).join("") + "</div>";
+      case "select":
+        return '<select class="spsel" data-act="input"' + data + d + ">" + k.opts.map(function (o) { return "<option" + (o === cur ? " selected" : "") + ">" + o + "</option>"; }).join("") + "</select>";
+      case "int":
+        return '<div class="spline"><input class="spq mono" type="number" value="' + esc(cur) + '"' + (k.min != null ? ' min="' + k.min + '"' : "") + (k.max != null ? ' max="' + k.max + '"' : "") + ' data-act="input"' + data + d + '>' + (k.unit ? '<span class="unit">' + k.unit + "</span>" : "") + '<span class="unit">' + (k.min != null ? "≥" + k.min : "") + (k.max != null ? " ≤" + k.max : "") + "</span></div>";
+      case "pattern":
+        return '<input class="spq mono" value="' + esc(cur) + '" data-act="input"' + data + d + '><span class="hint">형식: ' + esc(k.hint) + "</span>";
+      case "text":
+        return '<input class="spq' + (k.mono ? " mono" : "") + '" value="' + esc(cur) + '" placeholder="' + esc(k.ph || "") + '" data-act="input"' + data + d + ">";
+      case "long":
+        var lines = cur ? cur.split("\n").length : 0;
+        return '<div class="lprev' + (cur ? "" : " empty") + '">' + (cur ? esc(cur) : "재정의 없음 · 기본 블록 사용") + '</div><div class="spline"><button type="button" class="lbtn" data-act="edit"' + data + d + '><svg class="i"><use href="#i-pen"/></svg>편집…</button><span class="lmeta">' + (cur ? cur.length + "자 · " + lines + "줄" : "") + "</span></div>";
+    }
+    return "";
+  }
+
+  function rowSingle(st, k) {
+    var h = st.harness, b = k.harness === "bucket" ? h : "";
+    var r0 = resolve(st, k, h, false), r1 = resolve(st, k, h, true);
+    var e = st.edits[ekey(k.id, b, "")];
+    var allowed = targetAllowed(st, k);
+    var ws = writeScope(st, k);
+    var err = e && e.v !== null ? validate(k, e.v) : "";
+    var tags = "";
+    if (k.harness === "bucket") tags += '<span class="tag h">' + HN[h] + " 버킷</span>";
+    else if (k.harness === "claude" || k.harness === "pi") tags += st.harness === "all" ? '<span class="tag h">' + HN[k.harness] + " 전용</span>" : "";
+    else tags += '<span class="tag">모든 하네스</span>';
+    if (k.globalOnly) tags += '<span class="tag lock">전역 전용</span>';
+    var cls = "kr" + (e ? (err ? " err" : " dirty") : "");
+    var cur = e ? (e.v === null ? r1.v : e.v) : r0.v;
+    var src = "";
+    if (e) {
+      src = err ? '<span class="src bad">저장 불가</span>' : '<span class="src pend">저장 안 됨 → ' + SC[e.s] + "</span>";
+      src += '<span class="was">이전 <s>' + esc(show(k, r0.v)) + "</s>" + (e.v === null ? " · 지운 뒤 " + esc(show(k, r1.v)) + " (" + SC[r1.s] + ")" : "") + "</span>";
+      src += '<button type="button" class="spreset" data-act="undo" data-id="' + esc(k.id) + '" data-b="' + esc(b) + '">되돌리기</button>';
+    } else {
+      src = srcBadge(st, k, r0, b || undefined);
+      var L = b ? (k.buckets[b] || {}) : k.layers;
+      if (allowed && L[ws] != null && L[ws] !== "") src += '<button type="button" class="spreset" data-act="reset" data-id="' + esc(k.id) + '" data-b="' + esc(b) + '">' + SC[ws] + " 값 지우기</button>";
+      if (!allowed) src += '<span class="was">' + (ws === "repo" ? "저장소 범위에 저장할 수 없음" : SC[ws] + " 범위 미지원") + "</span>";
+      if (k.applies) src += '<span class="was">적용: ' + k.applies + "</span>";
+    }
+    return '<div class="' + cls + '"><div class="kmeta"><div class="kl">' + (e ? '<span class="kdot"></span>' : "") + esc(k.label) + tags + '</div><div class="kk">' + esc(k.id) + '</div><div class="kd">' + esc(k.d) + "</div></div>" +
+      '<div class="kctl">' + ctlHTML(st, k, b, cur, !allowed) + (err && k.ctl !== "pattern" ? '<span class="hint bad">' + esc(err) + "</span>" : "") + "</div>" +
+      '<div class="ksrc">' + src + "</div></div>";
+  }
+
+  function rowMatrix(st, k) {
+    var allowed = targetAllowed(st, k);
+    var cells = ["claude", "codex", "pi", "*"].map(function (h) {
+      var e = st.edits[ekey(k.id, h, "")];
+      var r0 = resolve(st, k, h, false), r1 = resolve(st, k, h, true);
+      var cur = e ? (e.v === null ? r1.v : e.v) : r0.v;
+      var body;
+      if (k.ctl === "toggle") {
+        body = '<div class="mv"><button type="button" class="tg" role="switch" aria-checked="' + (cur === k.opts[0]) + '" data-act="toggle" data-id="' + esc(k.id) + '" data-b="' + h + '"' + (allowed ? "" : " disabled") + '></button><span class="tgl">' + (ONOFF[cur] || cur) + "</span></div>";
+      } else {
+        body = '<div class="mv"><button type="button" class="lbtn" data-act="edit" data-id="' + esc(k.id) + '" data-b="' + h + '">' + (cur ? cur.length + "자 · 편집" : "설정") + "</button></div>";
+      }
+      var badge = e ? '<span class="src pend">저장 안 됨 → ' + SC[e.s] + "</span>" : srcBadge(st, k, r0, h);
+      return '<div class="mc' + (e ? " dirty" : "") + '"><span class="mh">' + (h === "*" ? '공통 <span class="star">*</span>' : HN[h]) + "</span>" + body + badge + "</div>";
+    }).join("");
+    var anyDirty = ["claude", "codex", "pi", "*"].some(function (h) { return st.edits[ekey(k.id, h, "")]; });
+    return '<div class="kr mx' + (anyDirty ? " dirty" : "") + '"><div class="kmeta"><div class="kl">' + (anyDirty ? '<span class="kdot"></span>' : "") + esc(k.label) + '<span class="tag h">하네스별</span></div><div class="kk">' + esc(k.id) + '</div><div class="kd">' + esc(k.d) + "</div></div><div class=\"kmx\">" + cells + "</div></div>";
+  }
+
+  function tierCurrent(k, h, t) {
+    var L = k.tiers[h][t] || {};
+    var r = firstScoped({ project: L.project && L.project.join("\u0001"), global: L.global && L.global.join("\u0001") });
+    if (r) return { vals: r.v.split("\u0001"), s: r.s, b: h };
+    return null;
+  }
+  function rowTier(st, k) {
+    var allowed = targetAllowed(st, k);
+    if (st.harness === "all") {
+      var hs = ["claude", "codex", "pi", "default"];
+      var rows = ["small", "medium", "large", "xlarge"].map(function (t) {
+        return "<tr><td class=\"t\">" + t + "</td>" + hs.map(function (h) {
+          var c = tierCurrent(k, h, t);
+          if (!c) return '<td><span class="cell"><i>' + (h === "default" ? "설정 없음" : "기본 버킷 상속") + "</i></span></td>";
+          return '<td><span class="cell">' + esc(c.vals[1]) + "<i>" + (c.vals[2] ? esc(c.vals[2]) + " · " : "") + SC[c.s] + "</i></span></td>";
+        }).join("") + "</tr>";
+      }).join("");
+      return '<div class="kr mx"><div class="kmeta"><div class="kl">' + esc(k.label) + '<span class="tag h">하네스별</span><span class="tag">저장소 범위 없음</span></div><div class="kk">' + esc(k.id) + '</div><div class="kd">' + esc(k.d) + ' 하네스 enum의 공통 버킷 이름이 <code>default</code>입니다(다른 노브는 <code>*</code>).</div></div>' +
+        '<div class="kctl"><table class="tier tmx"><thead><tr><th>티어</th>' + hs.map(function (h) { return "<th>" + HN[h] + "</th>"; }).join("") + "</tr></thead><tbody>" + rows + "</tbody></table></div></div>";
+    }
+    var h = st.harness;
+    var body = ["small", "medium", "large", "xlarge"].map(function (t) {
+      var c = tierCurrent(k, h, t), inh = false;
+      if (!c) { c = tierCurrent(k, "default", t); inh = true; }
+      var vals = c ? c.vals : ["", "", ""];
+      var dirty = ["backend", "model", "effort"].some(function (f) { return st.edits[ekey(k.id, h, t + "." + f)]; });
+      function cv(i, f) { var e = st.edits[ekey(k.id, h, t + "." + f)]; return e ? e.v : vals[i]; }
+      var dis = allowed ? "" : " disabled";
+      var badge = dirty ? '<span class="src pend">저장 안 됨</span>' : !c ? '<span class="src">설정 없음</span>' : inh ? '<span class="src">기본 버킷 · ' + SC[c.s] + "</span>" : srcBadgeTier(st, c.s);
+      return '<tr class="' + (dirty ? "dirty" : "") + '"><td class="t">' + t + '</td><td><select class="spsel" data-act="tier" data-id="agents.tier" data-b="' + h + '" data-sub="' + t + '.backend"' + dis + ">" + ["", "claude", "codex", "pi"].map(function (o) { return "<option value=\"" + o + "\"" + (o === cv(0, "backend") ? " selected" : "") + ">" + (o || "(모델로 추론)") + "</option>"; }).join("") +
+        '</select></td><td><input class="spq mono" value="' + esc(cv(1, "model")) + '" data-act="tier" data-id="agents.tier" data-b="' + h + '" data-sub="' + t + '.model"' + dis + '></td><td><select class="spsel" data-act="tier" data-id="agents.tier" data-b="' + h + '" data-sub="' + t + '.effort"' + dis + ">" + ["", "low", "medium", "high", "xhigh", "max"].map(function (o) { return "<option value=\"" + o + "\"" + (o === cv(2, "effort") ? " selected" : "") + ">" + (o || "(없음)") + "</option>"; }).join("") + "</select></td><td>" + badge + "</td></tr>";
+    }).join("");
+    return '<div class="kr wide"><div class="kmeta"><div class="kl">' + esc(k.label) + '<span class="tag h">' + HN[h] + ' 버킷</span><span class="tag">저장소 범위 없음</span></div><div class="kk">' + esc(k.id) + '</div><div class="kd">' + esc(k.d) + (allowed ? "" : " <b>저장소 범위에는 저장할 수 없습니다.</b>") + "</div></div>" +
+      '<div class="kctl"><table class="tier"><thead><tr><th>티어</th><th class="wb">백엔드</th><th>모델</th><th class="we">추론 강도</th><th class="ws">출처</th></tr></thead><tbody>' + body + "</tbody></table></div></div>";
+  }
+  function srcBadgeTier(st, s) {
+    var ws = st.target === "repo" ? "project" : st.target;
+    if (s === ws) return '<span class="src here">' + SC[s] + "에 저장됨</span>";
+    if (RANK[s] > RANK[ws]) return '<span class="src shadow">' + SC[s] + " 값이 우선</span>";
+    return '<span class="src">' + SC[s] + "에서 상속</span>";
+  }
+
+  function rowFamily(st, k) {
+    var list = k.slots.map(function (s) {
+      return '<div class="fr"><span class="nm">' + esc(s.n) + '</span><input class="spq" value="' + esc(s.v) + '" aria-label="' + esc(s.n) + '"><span class="src' + (s.s === st.target ? " here" : "") + '">' + SC[s.s] + "</span></div>";
+    }).join("");
+    return '<div class="kr wide"><div class="kmeta"><div class="kl">' + esc(k.label) + '<span class="tag">모든 하네스</span></div><div class="kk">' + esc(k.id) + '</div><div class="kd">' + esc(k.d) + " 슬롯 이름: <code>^[a-z0-9][a-z0-9_-]*$</code>. 빈 문자열은 그 슬롯을 숨깁니다.</div></div>" +
+      '<div class="kctl"><div class="fam">' + list + '<div class="fr"><input class="spq mono" placeholder="새 슬롯 이름"><input class="spq" placeholder="선호 문장"><button type="button" class="lbtn add">추가</button></div></div></div></div>';
+  }
+  function rowProfile(st, k) {
+    var chips = k.profiles.map(function (p) { return '<span class="chip' + (p[1] === "builtin" ? "" : " user") + '" title="' + SC[p[1]] + '">' + esc(p[0]) + (p[1] === "builtin" ? "" : " · " + SC[p[1]]) + "</span>"; }).join("");
+    return '<div class="kr wide"><div class="kmeta"><div class="kl">' + esc(k.label) + '<span class="tag">모든 하네스</span><span class="tag lock">읽기 전용 제안</span></div><div class="kk">' + esc(k.id) + '</div><div class="kd">' + esc(k.d) + "</div></div>" +
+      '<div class="kctl"><div class="pchips">' + chips + '</div><div class="spline"><button type="button" class="lbtn">JSON 보기</button><span class="lmeta">value_schema 기반 폼 편집은 범위 밖 (질문 Q4)</span></div></div></div>';
+  }
+
+  // ---------- sheet ----------
+  function countFor(st, g) {
+    var n = 0, o = 0;
+    KN.forEach(function (k) {
+      var save = st.group; st.group = g; var vis = visible(st, k); st.group = save;
+      if (!vis) return;
+      n++;
+      var h = st.harness === "all" ? "claude" : st.harness;
+      if (k.ctl === "family" || k.ctl === "profile" || k.ctl === "tier") return;
+      if (resolve(st, k, h, false).s !== "builtin") o++;
+    });
+    return [n, o];
+  }
+  function render(root, st) {
+    var hs = [["all", "전체"], ["claude", "Claude"], ["codex", "Codex"], ["pi", "Pi"]];
+    var tg = [["global", "전역"], ["project", "프로젝트"], ["repo", "저장소"]];
+    var html = '<div class="chd"><svg class="i" style="width:16px;height:16px"><use href="#i-sliders"/></svg><b>워크플로 설정</b><span class="ctx">config.list · 37개 노브 + Pi 어댑터 15개</span><button type="button" class="usage-close" aria-label="닫기">×</button></div>';
+    html += '<div class="ctb"><div class="grp"><span class="splbl">하네스</span><div class="spseg" role="radiogroup">' + hs.map(function (h) { return '<button type="button" role="radio" aria-checked="' + (st.harness === h[0]) + '" data-act="harness" data-v="' + h[0] + '">' + h[1] + "</button>"; }).join("") + "</div></div>";
+    html += '<div class="grp"><span class="splbl">저장 위치</span><div class="spseg" role="radiogroup">' + tg.map(function (t) { return '<button type="button" role="radio" aria-checked="' + (st.target === t[0]) + '" data-act="target" data-v="' + t[0] + '">' + t[1] + "</button>"; }).join("") + '</div><select class="spsel ws"' + (st.target === "global" ? " disabled" : "") + '><option>my-app</option><option>docs-site</option></select></div>';
+    html += '<label class="flt"><input type="checkbox" data-act="only"' + (st.onlyBucket ? " checked" : "") + ">하네스별 설정만</label>";
+    html += '<input class="spq srch" placeholder="키 또는 이름 검색" aria-label="검색"></div>';
+    // nav
+    html += '<div class="cbody"><nav class="cnav" aria-label="그룹">';
+    var tot = countFor(st, "all");
+    html += '<button type="button" data-act="group" data-v="all" aria-current="' + (st.group === "all") + '"><span class="od' + (tot[1] ? "" : " none") + '"></span>모든 그룹<span class="c">' + tot[0] + "</span></button>";
+    GROUPS.forEach(function (g) {
+      var c = countFor(st, g[0]);
+      html += '<button type="button" data-act="group" data-v="' + g[0] + '" aria-current="' + (st.group === g[0]) + '"><span class="od' + (c[1] ? "" : " none") + '"></span>' + g[1] + '<span class="c">' + c[0] + "</span></button>";
+    });
+    html += '<p class="navnote">● 기본값이 아닌 노브가 있는 그룹. 그룹·라벨은 config.list에 없어 대시보드가 정한 것입니다(G3).</p></nav><div class="clist">';
+    GROUPS.forEach(function (g) {
+      var ks = KN.filter(function (k) { return k.g === g[0] && visible(st, k); });
+      if (st.group !== "all" && st.group !== g[0]) return;
+      if (!ks.length && !(g[0] === "adapter" && st.harness === "codex" && !st.onlyBucket)) return;
+      var sub = g[0] === "adapter" ? (st.harness === "claude" ? "Claude 매니페스트 · 12" : st.harness === "pi" ? "Pi 매니페스트 · 15 (Claude 세션의 config.list에는 없음, G6)" : st.harness === "all" ? "Claude 12 · Pi 15" : "") : "";
+      html += '<div class="ghd">' + g[1].toUpperCase() + (sub ? '<span class="gsub">' + sub + "</span>" : "") + "</div>";
+      if (g[0] === "adapter" && st.harness === "codex") html += '<div class="gempty">Codex 패키지는 어댑터 설정을 선언하지 않습니다. Codex에 적용되는 것은 공통 노브와 하네스별 노브의 Codex 버킷뿐입니다.</div>';
+      ks.forEach(function (k) {
+        if (k.ctl === "tier") html += rowTier(st, k);
+        else if (k.ctl === "family") html += rowFamily(st, k);
+        else if (k.ctl === "profile") html += rowProfile(st, k);
+        else if (k.harness === "bucket" && st.harness === "all") html += rowMatrix(st, k);
+        else html += rowSingle(st, k);
+      });
+    });
+    html += "</div></div>";
+    // footer
+    var keys = Object.keys(st.edits), bad = 0;
+    var chips = keys.map(function (x) {
+      var e = st.edits[x], p = x.split("|"), k = BY[p[0]];
+      var err = e.v !== null && k.ctl !== "tier" ? validate(k, e.v) : "";
+      if (err) bad++;
+      var lbl = p[0] + (p[1] ? "[" + HN[p[1]] + "]" : "") + (p[2] ? "." + p[2] : "");
+      var val = e.v === null ? "지움" : (k.ctl === "long" ? e.v.length + "자" : (e.v === "" ? "(빈 값)" : e.v));
+      return '<span class="chip' + (err ? " bad" : "") + '" title="' + esc(lbl) + '">' + esc(lbl) + " → " + esc(val) + " @" + SC[e.s] + "</span>";
+    }).join("");
+    if (keys.length) {
+      html += '<div class="cfoot has"><span class="cnt">저장하지 않은 변경 ' + keys.length + "개</span>" + '<div class="chg">' + chips + "</div>" + (bad ? '<span class="meta" style="color:var(--wb-fail)">오류 ' + bad + "개를 고치면 저장할 수 있습니다</span>" : "") + '<button type="button" class="btnx" data-act="discard">모두 되돌리기</button><button type="button" class="btnx pri" data-act="save"' + (bad ? " disabled" : "") + ">저장</button></div>";
+    } else {
+      html += '<div class="cfoot"><span class="meta">저장하지 않은 변경 없음 · 저장 위치: ' + SC[st.target] + (st.target === "global" ? "" : " (my-app)") + " · 세션 범위 값은 이 화면에서 보이지 않습니다(세션 밖)</span></div>";
+    }
+    if (st.toast) html += '<div class="ctoast">' + esc(st.toast) + "</div>";
+    if (st.editor) html += editorHTML(st);
+    root.innerHTML = html;
+  }
+
+  function editorHTML(st) {
+    var ed = st.editor, k = BY[ed.id];
+    var b = ed.b || "";
+    var r0 = resolve(st, k, b || "claude", false);
+    var stored = (b ? (k.buckets[b] || {}) : k.layers)[writeScope(st, k)] || "";
+    var draft = ed.draft;
+    var changed = draft !== (stored || r0.v || "");
+    var err = validate(k, draft);
+    var bseg = k.harness === "bucket" ? '<div class="edrow"><span class="splbl">하네스 버킷</span><div class="spseg" role="radiogroup">' + ["claude", "codex", "pi", "*"].map(function (h) { var has = firstScoped(k.buckets[h] || {}); return '<button type="button" role="radio" aria-checked="' + (h === b) + '" data-act="edbucket" data-v="' + h + '">' + HN[h] + (has ? " ●" : "") + "</button>"; }).join("") + "</div></div>" : "";
+    var tabs = '<div class="edtabs" role="tablist">' + [["text", "재정의 텍스트"], ["seed", "기본 블록 보기"], ["diff", "변경 비교"]].map(function (t) { return '<button type="button" role="tab" aria-selected="' + (ed.tab === t[0]) + '" data-act="edtab" data-v="' + t[0] + '">' + t[1] + "</button>"; }).join("") + "</div>";
+    var pane;
+    if (ed.tab === "seed") pane = '<div class="seed">' + esc(k.ctl === "long" && k.id.indexOf("prompt.") === 0 ? SEED : (k.builtin || "")) + "</div>";
+    else if (ed.tab === "diff") {
+      var a = (stored || "").split("\n"), c = draft.split("\n"), out = "";
+      a.forEach(function (l) { if (c.indexOf(l) < 0) out += '<div class="d">' + esc(l) + "</div>"; });
+      c.forEach(function (l) { out += a.indexOf(l) < 0 ? '<div class="a">' + esc(l) + "</div>" : "<div>" + esc(l) + "</div>"; });
+      pane = '<div class="diff">' + out + "</div>";
+    } else pane = '<textarea data-act="eddraft" spellcheck="false" aria-label="재정의 텍스트">' + esc(draft) + "</textarea>";
+    var srcNow = stored ? '<span class="src here">' + SC[writeScope(st, k)] + "에 저장됨</span>" : srcBadge(st, k, r0, b || undefined);
+    return '<div class="edscrim" data-act="edclose"></div><aside class="ed" role="dialog" aria-label="긴 값 편집"><div class="edhd"><b>' + esc(k.label) + '</b><span class="kk">' + esc(k.id) + '</span><button type="button" class="usage-close" data-act="edclose" aria-label="닫기">×</button></div>' +
+      '<div class="edsub">' + esc(k.d) + "</div>" + bseg +
+      '<div class="edrow"><span class="splbl">저장 위치</span><span>' + SC[writeScope(st, k)] + (writeScope(st, k) === "global" ? "" : " (my-app)") + "</span>" + srcNow + "</div>" + tabs + pane +
+      '<div class="edfoot"><span class="meta">' + draft.length + "자 · " + (draft ? draft.split("\n").length : 0) + "줄" + (changed ? " · 수정됨" : "") + (err ? ' · <b style="color:var(--wb-fail)">' + err + "</b>" : "") + '</span><span class="sp"></span>' +
+      (stored ? '<button type="button" class="btnx ghost" data-act="edclear">재정의 지우기</button>' : "") +
+      '<button type="button" class="btnx" data-act="edclose">취소</button><button type="button" class="btnx pri" data-act="edapply"' + (err || !changed ? " disabled" : "") + ">변경 대기열에 추가</button></div>" +
+      '<p class="spnote" style="margin:0">적용 시점: 다음 워크플로 매뉴얼 로드부터. 저장은 시트 하단 “저장”에서 다른 변경과 함께 한 번에 합니다.</p></aside>';
+  }
+
+  // ---------- interaction ----------
+  function setEdit(st, k, b, sub, v) {
+    var key = ekey(k.id, b, sub), ws = writeScope(st, k);
+    if (!sub) {
+      var L = b ? (k.buckets[b] || {}) : k.layers;
+      var stored = L[ws] != null ? L[ws] : null;
+      var eff = resolve(st, k, b || st.harness, false).v;
+      if (v === stored || (stored === null && v === eff && v !== null)) { delete st.edits[key]; return; }
+    }
+    st.edits[key] = { s: ws, v: v };
+  }
+  function bind(root, st) {
+    root.addEventListener("click", function (e) {
+      var t = e.target.closest("[data-act]"); if (!t || t.disabled) return;
+      var act = t.getAttribute("data-act"), k = BY[t.getAttribute("data-id")], b = t.getAttribute("data-b") || "";
+      st.toast = "";
+      if (act === "harness") { st.harness = t.getAttribute("data-v"); }
+      else if (act === "target") { st.target = t.getAttribute("data-v"); }
+      else if (act === "group") { st.group = t.getAttribute("data-v"); }
+      else if (act === "toggle") { var on = t.getAttribute("aria-checked") === "true"; setEdit(st, k, b, "", on ? k.opts[1] : k.opts[0]); }
+      else if (act === "set") { setEdit(st, k, b, "", t.getAttribute("data-v")); }
+      else if (act === "reset") { st.edits[ekey(k.id, b, "")] = { s: writeScope(st, k), v: null }; }
+      else if (act === "undo") { delete st.edits[ekey(k.id, b, "")]; }
+      else if (act === "discard") { st.edits = {}; }
+      else if (act === "save") {
+        var n = Object.keys(st.edits).length;
+        Object.keys(st.edits).forEach(function (x) {
+          var p = x.split("|"), kk = BY[p[0]], ed = st.edits[x];
+          if (p[2]) return; // tier fields: not modelled in the mock store
+          var L = p[1] ? (kk.buckets[p[1]] = kk.buckets[p[1]] || {}) : kk.layers;
+          if (ed.v === null) delete L[ed.s]; else L[ed.s] = ed.v;
+        });
+        st.edits = {};
+        st.toast = n + "개 저장됨 (POST /config/tune 1회) · workflow.*는 다음 매뉴얼 로드부터, 어댑터 설정은 세션 재시작 후 적용";
+      }
+      else if (act === "edit") { var bb = b || ""; var cur = st.edits[ekey(k.id, bb, "")]; var r = resolve(st, k, bb || st.harness, false); var L2 = bb ? (k.buckets[bb] || {}) : k.layers; st.editor = { id: k.id, b: bb, tab: "text", draft: cur && cur.v !== null ? cur.v : (L2[writeScope(st, k)] || r.v || "") }; }
+      else if (act === "edclose") { if (e.target.closest(".ed") && t.classList.contains("edscrim")) return; st.editor = null; }
+      else if (act === "edtab") { var ta = root.querySelector(".ed textarea"); if (ta) st.editor.draft = ta.value; st.editor.tab = t.getAttribute("data-v"); }
+      else if (act === "edbucket") { var kk2 = BY[st.editor.id], nb = t.getAttribute("data-v"); var L3 = kk2.buckets[nb] || {}; var r3 = firstScoped(L3); st.editor.b = nb; st.editor.draft = r3 ? r3.v : ""; st.editor.tab = "text"; }
+      else if (act === "edapply") { var ta2 = root.querySelector(".ed textarea"); if (ta2) st.editor.draft = ta2.value; var ke = BY[st.editor.id]; st.edits[ekey(ke.id, st.editor.b, "")] = { s: writeScope(st, ke), v: st.editor.draft }; st.editor = null; }
+      else if (act === "edclear") { var kc = BY[st.editor.id]; st.edits[ekey(kc.id, st.editor.b, "")] = { s: writeScope(st, kc), v: null }; st.editor = null; }
+      else return;
+      render(root, st);
+    });
+    root.addEventListener("change", function (e) {
+      var t = e.target, act = t.getAttribute("data-act");
+      if (act === "only") { st.onlyBucket = t.checked; render(root, st); return; }
+      if (act === "input") { setEdit(st, BY[t.getAttribute("data-id")], t.getAttribute("data-b") || "", "", t.value); render(root, st); }
+      if (act === "tier") { st.edits[ekey("agents.tier", t.getAttribute("data-b"), t.getAttribute("data-sub"))] = { s: st.target === "repo" ? "project" : st.target, v: t.value }; render(root, st); }
+    });
+    root.addEventListener("input", function (e) {
+      var t = e.target;
+      if (t.getAttribute("data-act") === "eddraft") {
+        st.editor.draft = t.value;
+        var meta = root.querySelector(".ed .edfoot .meta"), btn = root.querySelector('.ed [data-act="edapply"]');
+        if (meta) meta.textContent = t.value.length + "자 · " + t.value.split("\n").length + "줄 · 수정됨";
+        if (btn) btn.disabled = !!validate(BY[st.editor.id], t.value);
+      }
+    });
+  }
+  function sheet(id, st) { var el = document.getElementById(id); bind(el, st); render(el, st); }
+
+  // A: Claude tab, project target, pending edits (one invalid, one reset)
+  sheet("sheetA", { harness: "claude", target: "project", group: "all", onlyBucket: false, editor: null, toast: "",
+    edits: (function () { var e = {};
+      e[ekey("review_phase", "", "")] = { s: "project", v: "full" };
+      e[ekey("claude.compaction_advisory_percent", "", "")] = { s: "project", v: "70%" };
+      e[ekey("claude.status_band_enabled", "", "")] = { s: "project", v: null };
+      e[ekey("claude.mcp_watchdog_interval_minutes", "", "")] = { s: "project", v: "0" };
+      return e; })() });
+  // B: all-harness matrix, global target, harness-bucketed only
+  sheet("sheetB", { harness: "all", target: "global", group: "all", onlyBucket: true, editor: null, toast: "",
+    edits: (function () { var e = {}; e[ekey("workflow.whiteboard_enabled", "codex", "")] = { s: "global", v: "on" }; return e; })() });
+  // C: long prompt editor open on the Claude bucket
+  sheet("sheetC", { harness: "claude", target: "project", group: "pref", onlyBucket: false, toast: "", edits: {},
+    editor: { id: "prompt.UserPreferenceSection", b: "claude", tab: "text",
+      draft: P_CLAUDE.replace("긴 목록 대신 세 줄 요약을 먼저 둔다.", "긴 목록 대신 세 줄 요약을 먼저 둔다.\n사용자에게 묻는 질문은 한 번에 하나만 한다.") } });
+})();
+</script>
+</body>
+</html>
