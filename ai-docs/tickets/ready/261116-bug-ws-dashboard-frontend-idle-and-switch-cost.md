@@ -25,6 +25,16 @@ Trace E (`1e5c5357-01-perf-trace-e-idle-and-switch.md`, 2026-11-16) measured a s
 - Gather load-time geometry reads from `drawerSync`, `restoreScroll`, lifecycle `post`, and `scrollerOf` into one read phase after writes.
 - Target the trace's long-session switch from 4.4 s to about 2 s and short-session switch from 1.4 s to about 0.9 s, measured to settled/usable, not just first paint. These are estimates, not additive guarantees.
 
+### Result (226928a56) - 2026-11-16
+
+- Batched whiteboard history admission in 32-row speculative rounds across all topics, not just the conversation. Each round writes all topics then reads heights; surplus returns to inert gaps before binding. Preserved whole-row 1000px windows, gap order, pending frame waits, target navigation, swap restore and auto-fold.
+- Coalesced history notifications and late height resumes; deferred `watchBoard` subscriptions' `checkVisibility`/scroller inspection into one read phase before owner writes. The board iframe still loads fresh and its sandboxed doc frames retain existing paced/near-view mounting; no iframe-cache changes.
+- Drawer fill and lifecycle posts use rAF read-before-write passes; numeric scroll restoration batches reads and yields to input, owned scrollers, pinned conversation and asynchronous pagination.
+- Verification: `node --test agents-plugin-tool/internal/wsdashboard/frontend-history.test.js agents-plugin-tool/internal/wsdashboard/frontend-geometry.test.js agents-plugin-tool/internal/wsdashboard/frontend-scroll.test.js` — 7/7 passed. The 27-topic synthetic board preserves 141 exact rows/topic with at most 7 modeled dirty-read flushes (versus roughly 3,780 row-by-row writes/reads for the same fixture); watch subscriptions perform no synchronous visibility probes. These are scheduling contracts, not browser timing measurements.
+- R1: one Important pagination/restoration race; fixed with pending-restore cancellation and actual-callback interleaving regression. Fixes-only R2: resolved, no outstanding substantive findings.
+- Estimate for the owner's 27-topic board: observed 3,000–4,000 ms switch -> approximately 1,800–2,400 ms settled/usable, saving roughly 1,200–1,800 ms. Trace E's longer case suggests up to ~2,400 ms saved (4,400 -> ~2,000 ms); short case ~300–500 ms. The ~450 ms history/watch visibility chain should fall to one shared read phase rather than repeated write/read flushes (~300–400 ms estimated reduction); savings overlap, not additive guarantees.
+- Forward: owner capture of representative 27-topic switch and board/doc-frame load is required to confirm actual timing and visual/scroll behavior; Node cannot measure layout or iframe readiness. No local Go/ws/test executable, launcher or dev.py was run.
+
 ### Phase 2: Idle and scroll
 
 - Identify the active infinite CSS animations (Trace E candidates include rail orbit/blink, `.spin`, `.pulse`, `.pibadge`, and composer busy spinner); use `steps()` and pause them when hidden or not running.
