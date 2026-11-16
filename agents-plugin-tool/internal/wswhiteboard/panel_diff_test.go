@@ -113,7 +113,7 @@ func TestPanelDiffRenderLatestOnly(t *testing.T) {
 	if data.Prior.ID != "e4" || data.Prior.Version != 2 || data.Current.ID != "e6" || data.Current.Version != 3 || len(data.Changes) != 3 {
 		t.Fatalf("not latest vs immediate prior: %+v", data)
 	}
-	wantAll(t, out, `<span>v2 대비</span><span class="n a">+1</span><span class="n m">~1</span><span class="n d">−1</span>`, `v2 · 09:55 대비 변경`, `<!--wbpdg:0-->`)
+	wantAll(t, out, `<span>v2 대비</span><span class="n a">+1</span><span class="n m">~1</span><span class="n wb-pdg-del">−1</span>`, `v2 · 09:55 대비 변경`, `<!--wbpdg:0-->`)
 	for _, c := range data.Changes {
 		if strings.Contains(c.Old, "2시간") {
 			t.Fatal("diff compared to v1, not v2")
@@ -123,7 +123,7 @@ func TestPanelDiffRenderLatestOnly(t *testing.T) {
 		}
 	}
 	live := render(t, panelDiffFixture(t, true))
-	wantAll(t, live, `<span>v3 대비</span><span class="n a">+0</span><span class="n m">~1</span><span class="n d">−0</span>`)
+	wantAll(t, live, `<span>v3 대비</span><span class="n a">+0</span><span class="n m">~1</span><span class="n wb-pdg-del">−0</span>`)
 	if strings.Count(live, `<!--wbpdg-data:`) != 1 {
 		t.Fatal("older version retained its marks after republish")
 	}
