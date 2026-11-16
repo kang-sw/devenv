@@ -256,12 +256,31 @@ passed; no deadline policy changed.
 
 Independent Lite R1 reported two Important test/benchmark integrity findings;
 `692d07930` fixes both (full-workload comparison and quiet same-size in-place
-mtime change) and scoped tests/benchmark passed after those fixes. The required
-fixes-only R2 CLI did not return a verdict in two bounded attempts; do not
-claim independent R2 clearance. The coordinating lead must approve any daemon
-rebuild/swap and alone capture a matched 125-second after pprof with identity
-counts, streams/nudges and activity context. Until that gate and review
-clearance, **Phase 1 has no Result and is not complete**; Phase 2 is blocked.
+mtime change). Two initial R2 CLI attempts timed out without a verdict; a new
+bounded fixes-only R2 recovered both findings and independently marked each
+FIXED. It confirmed the mirrored old loop includes listing/board/collision
+work, and the same-size/same-inode changed-mtime test now asserts a content
+reread while both timestamps are quiet. No new broad review was claimed.
+
+Lead verification reran the remote scoped WhiteboardNudge tests and a one-pass
+3,500-identity benchmark: PASS; cached/old were 27.7/60.9 ms, 0/3,500 successful
+content reads, 7,311/1,167 explicit metadata stats, 5.62/8.71 MB and
+47,961/93,050 allocations per scan. Different iteration counts are reported
+separately, not combined into one timing comparison.
+
+**Windows measurement caveat:** `os.SameFile` can lazily call CreateFile to
+resolve a fresh os.Stat value's file identity (`os/types_windows.go`,
+`fileStat.loadFileId`). This implicit handle-open work is not a content read or
+an explicitly counted metadata stat in these fixtures. The identity comparison
+protects same-size/equal-mtime replacements, but zero warm content reads does
+not establish zero Windows file opens or a Windows CPU win. Preserve that
+correctness check until live focal after evidence shows whether it is a cost
+that needs another measured correction.
+
+The coordinating lead must approve any daemon rebuild/swap; only afterward may
+the profiling lead capture a comparable 125-second after pprof with identity
+counts, streams/nudges and activity context. Until that measurement gate,
+**Phase 1 has no Result and is not complete**; Phase 2 is blocked.
 
 ### Phase 2: Optimize the remaining candidates ranked by measurement
 
