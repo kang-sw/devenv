@@ -458,7 +458,8 @@ func TestStandaloneClosedTopicWithHistoryKeepsBodyCollapsed(t *testing.T) {
 	st := streamFixture()
 	st.ClosedTopics = []string{"t"}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
-	topic := regexp.MustCompile(`<section class="topic[^>]* data-topic="t"[^>]*>.*?</section>`).FindString(out)
+	// Panel diff annotations can put newlines in the rendered body.
+	topic := regexp.MustCompile(`(?s)<section class="topic[^>]* data-topic="t"[^>]*>.*?</section>`).FindString(out)
 	if topic == "" {
 		t.Fatal("closed topic missing")
 	}
