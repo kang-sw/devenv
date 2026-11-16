@@ -140,6 +140,7 @@ func openContained(root, path string) (*os.File, string, os.FileInfo, bool) {
 // check runs after Lstat and symlink resolution, before opening. Keeping
 // authorization between the identity checks catches a parent directory
 // swapped to a sensitive symlink after the caller's initial path check.
+// A non-nil check also enables the local post-open credential identity check.
 func openContainedChecked(root, path string, check func(full, real string) bool) (*os.File, string, os.FileInfo, bool) {
 	rel, ok := relativeInside(root, path)
 	if !ok {
@@ -173,7 +174,7 @@ func openContainedChecked(root, path string, check func(full, real string) bool)
 	}
 	// The file opened must be the one Lstat saw, not one swapped in since.
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linfo, info) {
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linfo, info) || (check != nil && deniedOpenedFile(info)) {
 		_ = f.Close()
 		return nil, "", nil, false
 	}

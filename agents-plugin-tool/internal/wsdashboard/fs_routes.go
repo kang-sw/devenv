@@ -375,16 +375,20 @@ func gitMarks(dir string) (marks map[string]string, dirs, gone map[string]bool) 
 // listDir lists the directory full: directories first, then by name
 // without case, at most fsListMax entries, each with its ignore and git
 // status marks. An entry git reports deleted is listed too, marked gone.
-func listDir(full string) (entries []fsEntry, more, repo bool, err error) {
+func listDir(full string, allowGit bool) (entries []fsEntry, more, repo bool, err error) {
 	read, err := os.ReadDir(full)
 	if err != nil {
 		return nil, false, false, err
 	}
-	return listDirEntries(full, read)
+	return listDirEntries(full, read, allowGit)
 }
 
-func listDirEntries(full string, read []os.DirEntry) (entries []fsEntry, more, repo bool, err error) {
-	marks, markDirs, gone := gitMarks(full)
+func listDirEntries(full string, read []os.DirEntry, allowGit bool) (entries []fsEntry, more, repo bool, err error) {
+	var marks map[string]string
+	var markDirs, gone map[string]bool
+	if allowGit {
+		marks, markDirs, gone = gitMarks(full)
+	}
 	entries = make([]fsEntry, 0, len(read))
 	for _, e := range read {
 		link := e.Type()&fs.ModeSymlink != 0
@@ -404,7 +408,10 @@ func listDirEntries(full string, read []os.DirEntry) (entries []fsEntry, more, r
 			names = append(names, e.Name)
 		}
 	}
-	ignored, repo := gitIgnored(full, names)
+	var ignored map[string]bool
+	if allowGit {
+		ignored, repo = gitIgnored(full, names)
+	}
 	for i := range entries {
 		e := &entries[i]
 		// The repository's own directory is no content of the tree: it is
@@ -485,6 +492,39 @@ func (d *Daemon) handleFSRoutes(w http.ResponseWriter, r *http.Request, replyID,
 	}
 }
 
+// listingGitAllowed keeps automatic Git execution inside registered session
+// roots. Git status can execute repository-configured clean/process filters,
+// even with fsmonitor disabled. A selected browsing root is not a trust grant:
+// require containment both as written and after resolving symlinks, under the
+// same registered root. In particular, an in-root symlink escape is untrusted.
+func (d *Daemon) listingGitAllowed(full string) bool {
+	if d.index == nil {
+		return false
+	}
+	real, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return false
+	}
+	for _, s := range d.index.Sessions() {
+		if s.Project == "" || !filepath.IsAbs(s.Project) {
+			continue
+		}
+		rel, err := filepath.Rel(s.Project, full)
+		if err != nil || (rel != "." && !insideRel(rel)) {
+			continue
+		}
+		realRoot, err := filepath.EvalSymlinks(s.Project)
+		if err != nil {
+			continue
+		}
+		rel, err = filepath.Rel(realRoot, real)
+		if err == nil && (rel == "." || insideRel(rel)) {
+			return true
+		}
+	}
+	return false
+}
+
 // handleFSList serves the listing route.
 func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID string) {
 	root, session, ok := d.browseRoot(r, replyID)
@@ -507,7 +547,7 @@ func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID st
 		fsNotFound(w)
 		return
 	}
-	entries, more, repo, err := listDirEntries(full, read)
+	entries, more, repo, err := listDirEntries(full, read, d.listingGitAllowed(full))
 	if err != nil {
 		fsNotFound(w)
 		return

@@ -86,10 +86,11 @@ func TestOutsideListingDoesNotExecuteFSMonitor(t *testing.T) {
 		t.Fatal(err)
 	}
 	git("config", "core.fsmonitor", monitor)
-	code, _ := fsList(t, f, local, "dir="+url.QueryEscape(outside))
+	code, a := fsList(t, f, local, "dir="+url.QueryEscape(outside))
 	if code != http.StatusOK {
 		t.Fatalf("outside listing = %d", code)
 	}
+	assertNoListingGit(t, a)
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("configured fsmonitor executed (or stat failed): %v", err)
 	}

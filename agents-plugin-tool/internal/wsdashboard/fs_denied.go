@@ -5,49 +5,86 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 )
 
-// Keep one immutable identity snapshot, scoped to the home spellings. Refresh
-// base stats once per authorization, not once per candidate ancestor. A TTL
-// alone would allow an alias to newly created/replaced credentials until it
-// expired; missing bases and identity changes must rotate the snapshot now.
-var deniedIdentityCache struct {
-	sync.Mutex
-	homes string
-	infos []os.FileInfo
-}
-
-func deniedBaseIdentities(homes []string) ([]os.FileInfo, bool) {
-	var fresh []os.FileInfo
+// Keep the default locations protected even when a tool relocates its current
+// credentials. Relocated homes protect the same credential files as defaults,
+// not unrelated history/session files in those directories.
+func deniedBasePaths(homes []string) []string {
+	var bases []string
+	seen := map[string]bool{}
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		path = filepath.FromSlash(homePath(path))
+		if !filepath.IsAbs(path) {
+			var err error
+			path, err = filepath.Abs(path)
+			if err != nil {
+				return
+			}
+		}
+		path = filepath.Clean(path)
+		if !seen[path] {
+			seen[path] = true
+			bases = append(bases, path)
+		}
+	}
 	for _, home := range homes {
 		for _, name := range outsideDenied {
-			info, err := os.Stat(filepath.Join(home, filepath.FromSlash(name)))
-			if os.IsNotExist(err) {
-				continue
-			}
-			if err != nil {
-				return nil, false
-			}
-			fresh = append(fresh, info)
+			add(filepath.Join(home, filepath.FromSlash(name)))
 		}
 	}
-	key := strings.Join(homes, "\x00")
-	deniedIdentityCache.Lock()
-	defer deniedIdentityCache.Unlock()
-	same := deniedIdentityCache.homes == key && len(deniedIdentityCache.infos) == len(fresh)
-	if same {
-		for i, info := range fresh {
-			if !os.SameFile(info, deniedIdentityCache.infos[i]) {
-				same = false
-				break
-			}
+	for _, key := range []string{"GH_CONFIG_DIR", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"} {
+		add(os.Getenv(key))
+	}
+	for _, c := range []struct{ key, name string }{
+		{"XDG_CONFIG_HOME", "gh"}, {"XDG_CONFIG_HOME", "gcloud"},
+		{"CODEX_HOME", "auth.json"}, {"CLAUDE_CONFIG_DIR", ".credentials.json"},
+	} {
+		if dir := os.Getenv(c.key); dir != "" {
+			add(filepath.Join(dir, c.name))
 		}
 	}
-	if !same {
-		deniedIdentityCache.homes, deniedIdentityCache.infos = key, fresh
+	for _, path := range filepath.SplitList(os.Getenv("KUBECONFIG")) {
+		add(path)
 	}
-	return deniedIdentityCache.infos, true
+	return bases
+}
+
+// Stat each base once for this authorization, rather than once per candidate
+// ancestor. No cache: freshly created/replaced credentials are protected now.
+// ENOTDIR, missing, and unreadable bases cannot supply identities, but remain
+// lexically protected by alwaysDenied; one broken base never blocks other reads.
+func deniedBaseIdentities(homes []string) []os.FileInfo {
+	var infos []os.FileInfo
+	for _, base := range deniedBasePaths(homes) {
+		// Do not trigger network/device access just to inspect a configured
+		// credential location. Such paths remain lexically denied.
+		if networkPath(base) || deviceElement(base) {
+			continue
+		}
+		if info, err := os.Stat(base); err == nil {
+			infos = append(infos, info)
+		}
+	}
+	return infos
+}
+
+func sameDeniedFile(info os.FileInfo, bases []os.FileInfo) bool {
+	for _, base := range bases {
+		if os.SameFile(info, base) {
+			return true
+		}
+	}
+	return false
+}
+
+// Inspect the identity of the actual opened handle too: a pathname can change
+// between authorization and open, or gain a credential hardlink in that window.
+func deniedOpenedFile(info os.FileInfo) bool {
+	return sameDeniedFile(info, deniedBaseIdentities(homeDirs()))
 }
 
 // Check the resolved file and each ancestor by identity. EvalSymlinks alone
@@ -60,20 +97,13 @@ func deniedFileIdentity(path string, homes []string) bool {
 	if deniedProcEnviron(path) {
 		return true
 	}
-	bases, ok := deniedBaseIdentities(homes)
-	if !ok {
-		return true
-	}
+	bases := deniedBaseIdentities(homes)
 	if len(bases) == 0 {
 		return false
 	}
 	for candidate := filepath.Clean(path); ; candidate = filepath.Dir(candidate) {
-		if info, err := os.Stat(candidate); err == nil {
-			for _, base := range bases {
-				if os.SameFile(info, base) {
-					return true
-				}
-			}
+		if info, err := os.Stat(candidate); err == nil && sameDeniedFile(info, bases) {
+			return true
 		}
 		if filepath.Dir(candidate) == candidate {
 			return false

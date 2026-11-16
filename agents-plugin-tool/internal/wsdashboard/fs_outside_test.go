@@ -58,6 +58,10 @@ func startOutsideFixture(t *testing.T) *outsideFixture {
 	}
 	t.Setenv("HOME", o.home)
 	t.Setenv("USERPROFILE", o.home)
+	// Relocated credentials in the developer's environment are not fixtures.
+	for _, key := range []string{"GH_CONFIG_DIR", "XDG_CONFIG_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "KUBECONFIG", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"} {
+		t.Setenv(key, "")
+	}
 	o.pageFixture = startPageFixture(t, lanMode)
 	o.local, o.lan = fsViewers(t, o.pageFixture)
 	o.bare = viewer{name: "LAN peer, no token", peer: "192.168.7.31:50000", host: "192.168.7.20:" + strconv.Itoa(o.d.Endpoint().Port)}

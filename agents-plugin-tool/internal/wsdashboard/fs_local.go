@@ -89,7 +89,7 @@ func readViewerDir(r *http.Request, full string) ([]os.DirEntry, error) {
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.IsDir() {
+	if err != nil || !info.IsDir() || deniedOpenedFile(info) {
 		return nil, os.ErrPermission
 	}
 	_, real, ok := localPath(full, ".")

@@ -174,6 +174,15 @@ func searchText(root, rel string) (string, bool) {
 	return string(data), true
 }
 
+// Outside roots use the bounded filesystem fallback, never Git, even for
+// candidate discovery. Choosing a browsing root does not trust its config.
+func (d *Daemon) browseCandidates(root string) []fileCandidate {
+	if !d.listingGitAllowed(root) {
+		return fileCandidates(walkFiles(root, filesWalkDepth, filesWalkMax))
+	}
+	return d.files.get(root)
+}
+
 // handleFSFind serves the name search.
 func (d *Daemon) handleFSFind(w http.ResponseWriter, r *http.Request, replyID string) {
 	root, session, ok := d.browseRoot(r, replyID)
@@ -182,7 +191,7 @@ func (d *Daemon) handleFSFind(w http.ResponseWriter, r *http.Request, replyID st
 		fsNotFound(w)
 		return
 	}
-	items := rankRoot(viewerCandidates(r, root, d.files.get(root)), q)
+	items := rankRoot(viewerCandidates(r, root, d.browseCandidates(root)), q)
 	if items == nil {
 		items = []fileItem{}
 	}
@@ -210,7 +219,7 @@ func (d *Daemon) handleFSSearch(w http.ResponseWriter, r *http.Request, replyID 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), fsSearchTimeout)
 	defer cancel()
-	list := viewerCandidates(r, root, d.files.get(root))
+	list := viewerCandidates(r, root, d.browseCandidates(root))
 	if localViewer(r) {
 		a := searchFilesRead(ctx, list, re, func(path string) (string, bool) {
 			f, _, info, ok := openLocalContained(root, path)

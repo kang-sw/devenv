@@ -105,6 +105,8 @@ const (
 var outsideDenied = []string{
 	".ssh", ".gnupg", ".aws", ".config/gh", ".netrc", ".docker",
 	".kube", ".git-credentials", ".codex/auth.json", ".claude/.credentials.json",
+	".config/gcloud", ".azure", ".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml",
+	".vault-token", ".password-store", "Library/Keychains",
 }
 
 // OutsideLinkSource is a PageSource that also lists the files outside the
@@ -179,18 +181,14 @@ func alwaysDenied(path string, homes []string) bool {
 	if len(homes) == 0 {
 		slashed := "/" + strings.ToLower(filepath.ToSlash(path)) + "/"
 		for _, name := range outsideDenied {
-			if strings.Contains(slashed, "/"+name+"/") {
+			if strings.Contains(slashed, "/"+strings.ToLower(name)+"/") {
 				return true
 			}
 		}
-		return false
 	}
-	for _, home := range homes {
-		for _, name := range outsideDenied {
-			base := filepath.Join(home, filepath.FromSlash(name))
-			if atOrBelow(base, path) {
-				return true
-			}
+	for _, base := range deniedBasePaths(homes) {
+		if atOrBelow(base, path) {
+			return true
 		}
 	}
 	return deniedFileIdentity(path, homes)

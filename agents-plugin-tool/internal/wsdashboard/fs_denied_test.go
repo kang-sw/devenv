@@ -32,7 +32,10 @@ func assertSensitiveDirRefused(t *testing.T, o *outsideFixture, path string) {
 
 func TestFSLocalDeniedCredentialFileIdentities(t *testing.T) {
 	o := startOutsideFixture(t)
-	for i, name := range []string{".netrc", ".git-credentials", ".codex/auth.json", ".claude/.credentials.json"} {
+	for i, name := range []string{
+		".netrc", ".git-credentials", ".codex/auth.json", ".claude/.credentials.json",
+		".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".vault-token",
+	} {
 		t.Run(name, func(t *testing.T) {
 			secret := o.write(t, o.home, name, "DENIED-CREDENTIAL")
 			assertSensitiveReadsRefused(t, o, secret)
@@ -47,7 +50,7 @@ func TestFSLocalDeniedCredentialFileIdentities(t *testing.T) {
 	}
 }
 
-func TestFSLocalDeniedIdentityCacheRotates(t *testing.T) {
+func TestFSLocalDeniedIdentitiesFollowReplacement(t *testing.T) {
 	o := startOutsideFixture(t)
 	plain := o.write(t, o.away, "plain.png", "PLAIN")
 	if alwaysDenied(plain, homeDirs()) {
@@ -69,10 +72,9 @@ func TestFSLocalDeniedIdentityCacheRotates(t *testing.T) {
 	}
 	assertSensitiveReadsRefused(t, o, replaced)
 	if alwaysDenied(first, homeDirs()) {
-		t.Error("identity snapshot still uses the replaced base")
+		t.Error("identity checks still use the replaced base")
 	}
-	// A base that did not exist in earlier snapshots must be denied now,
-	// without waiting for a cache TTL or restarting the daemon.
+	// A newly created base must be denied immediately, without a restart.
 	added := o.write(t, o.home, ".claude/.credentials.json", "ADDED")
 	alias := filepath.Join(o.away, "added.png")
 	if err := os.Link(added, alias); err != nil {
@@ -81,9 +83,13 @@ func TestFSLocalDeniedIdentityCacheRotates(t *testing.T) {
 	assertSensitiveReadsRefused(t, o, alias)
 }
 
-func TestFSLocalDeniedKubeDirectory(t *testing.T) {
+func TestFSLocalDeniedCredentialDirectories(t *testing.T) {
 	o := startOutsideFixture(t)
-	secret := o.write(t, o.home, ".kube/config.png", "DENIED-KUBE")
-	assertSensitiveReadsRefused(t, o, secret)
-	assertSensitiveDirRefused(t, o, filepath.Dir(secret))
+	for _, name := range []string{".kube", ".config/gcloud", ".azure", ".password-store", "Library/Keychains"} {
+		t.Run(name, func(t *testing.T) {
+			secret := o.write(t, o.home, name+"/config.png", "DENIED-CREDENTIAL")
+			assertSensitiveReadsRefused(t, o, secret)
+			assertSensitiveDirRefused(t, o, filepath.Dir(secret))
+		})
+	}
 }
