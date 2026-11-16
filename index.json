@@ -476,7 +476,7 @@
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-16T07:21:30Z",
+        "touched_at": "2026-11-16T08:40:11Z",
         "impl": {
           "branch": "impl/develop/kudos-pasta-boney"
         }
@@ -531,9 +531,6 @@
           "branch": "impl/develop/polling-hub-phase1"
         }
       }
-    },
-    "261116-feat-ws-dashboard-restore-session-iframe-cache": {
-      "registered_at": "2026-11-16T03:49:02Z"
     },
     "261116-research-ws-polling-minimization-event-ledger": {
       "registered_at": "2026-11-16T04:15:13Z"
