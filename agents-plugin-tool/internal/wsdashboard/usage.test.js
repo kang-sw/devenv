@@ -418,7 +418,7 @@ test('compact footer keeps percent, period and pace inline with wrapping rather 
   for (const selector of ['.usage-harness', '.usage-columns']) assert.match(rule(selector), /flex-wrap: wrap/);
   const column = rule('.usage-column');
   assert.match(column, /display: inline-flex/);
-  assert.doesNotMatch(column, /flex-direction: column/);
+  assert.match(column, /flex-direction: column/); // current % above pace delta
   assert.match(rule('.usage-number'), /11px\/1\.2/);
   assert.match(rule('.usage-pace'), /10px\/1\.2/);
   assert.match(rule('.usage-key'), /9px\/1\.2/);
