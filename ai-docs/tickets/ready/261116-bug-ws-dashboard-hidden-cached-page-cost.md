@@ -366,3 +366,68 @@ slow, optimize the measured first-load bottleneck while preserving the fresh
 load on every session change; do not reintroduce a cache. The acceptable latency
 bound remains an explicit owner question. No visual change is intended. This
 docs capture runs no tests, browsers, builds or live cache mutation.
+
+### Result (c658c4798) - 2026-11-16
+
+Phase 2 implementation boundary on `impl/develop/dock-book-hertz`, based on
+merged develop `e6e0ebf44`. Full code-level request/server/render/parse/stream/
+terminal/draft breakdown and limitations:
+[phase2-load-audit.md](../assets/261116-bug-ws-dashboard-hidden-cached-page-cost/phase2-load-audit.md).
+
+- Framed sessions reference a shared content-hashed main-script URL with
+  immutable caching; all prerequisite modules retain their order. Shell,
+  index and standalone rendering retain the existing inline path. Main script
+  bytes are unchanged by transfer and still initialize in every fresh document.
+- Concurrent terminal-list readers share only the in-flight request. Off-screen
+  terminal cards defer emulator/font/socket/full-ring replay until near-view;
+  near folded cards still replay for their last-line preview. Fresh emulators
+  continue from sequence zero, avoiding incomplete terminal buffers.
+- Fresh frames save/restore at most 50 tab-local per-session scroll records,
+  independently of drafts. Includes hidden pane offsets and conversation
+  bottom-follow; explicit hash routes and user input take precedence. Board
+  scroll placement uses its existing history owner. No old frame/output cache,
+  board exposure/frame-height implementation or composer change.
+
+Short before/after table (code-level counts/raw source bytes, not a live trace):
+
+| Bucket | Before | After |
+|---|---|---|
+| Main-script tag per framed HTML | 591,999 B | 64 B: 591,935 B removed from this HTML bucket |
+| Shared main-script fetch | Inline in every no-store document | +1 cold GET, 595,238 B; 0 network GETs when immutable cache is warm |
+| Two concurrent terminal-list readers | 2 GETs | 1 GET, both callbacks |
+| N restored terminals, K near-view | N emulators/sockets/ring replays immediately | K immediately; N-K postponed |
+| Return scroll metadata | Lost with removed document | Bounded per-session tab-local records |
+
+The cold main-script bucket grows by 3,303 raw bytes and one request, including
+new scroll logic and URL-tag overhead. Other inline code/CSS remains, and
+JavaScript initialization is not removed. Terminal backlog travels over its
+WebSocket, not a separate HTTP fetch; ring sizes and end-to-end timing remain
+unmeasured. Existing immutable Xterm/Mermaid/font/body-frame assets need no new
+cache layer.
+
+Verification executed:
+
+- Local `node --test` for `testdata/session-load.test.cjs` and
+  `testdata/shell-lifecycle.test.cjs`: **11/11 PASS**. Pins deduplication,
+  lazy terminal activation/disposal and folded preview, independent session
+  scroll records, owned board placement, hash/input priority, bottom-follow,
+  denied storage and the 50-record cap, static asset wiring, and all Phase 1
+  guard/history races.
+- Remote w5090 job `9e8eceae540b4c028691da80d9c1a34d`:
+  `go test ./internal/wsdashboard/ -run "Test.*(Asset|FreshSession|TerminalCardScript|WebCardScriptRides|SessionURL|Shell|Settings|SessionPage|IndexPage|DashboardSourceAssembly)" -count=1`
+  **PASS** (16.625s). Old inline-script order/dev-source assertions were updated
+  to check the external reference and exact fetched bytes. Node/browser-only
+  cases skip on the remote as expected.
+- Final embedded-source check on w5090 job `533b612e23e1484995c2535e6db19de7`:
+  fresh-session/static-asset/terminal/web-card/source-assembly/dev-asset cases
+  **PASS** (1.404s). Remote `gofmt -d` and local `git diff --check` passed.
+- No local Go/ws/test binary, launcher, browser run or daemon lifecycle action.
+  No worker-created temporary files.
+
+Pending lead acceptance: independent review, then cold/warm Chrome/Electron
+trace after the arranged swap, including cache hits, first usable composer/
+board, near/off-screen terminals and return scrolling. Scroll records restore
+current-layout offsets; changed content can clamp them, and older conversation
+pages outside the fresh newest window are not proactively fetched to recreate
+an old history anchor. Exact long-history restoration and the numeric latency
+bound remain explicit follow-up/owner questions, not claimed measured wins.
