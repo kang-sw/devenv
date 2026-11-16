@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import test, { after, before } from 'node:test';
+import { runPython } from '../scripts/python.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Consumer/ESM semantics proof only: no launcher, real SDK, or daemon is loaded.
@@ -104,7 +105,7 @@ before(() => {
     const archive = join(root, `${owner}.zip`), destination = join(root, owner);
     writeFileSync(archive, bytes);
     // Extraction is Python stdlib zipfile only, never the producer/launcher helper.
-    execFileSync('python', ['-I', '-c', [
+    runPython(['-I', '-c', [
       'import pathlib, sys, zipfile',
       'with zipfile.ZipFile(sys.argv[1]) as archive:',
       '    names = archive.namelist()',

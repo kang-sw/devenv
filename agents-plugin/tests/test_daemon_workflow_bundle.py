@@ -199,6 +199,13 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
         self.assert_package(root, identity)
         return root
 
+    def test_ci_and_release_gates_check_workflow_source_freshness(self):
+        for path in (".github/workflows/ws-mcp-ci.yml", ".github/workflows/ws-mcp-release.yml",
+                     "agents-plugin-tool/scripts/build-release-assets.sh"):
+            with self.subTest(path=path):
+                text = (REPO / path).read_text(encoding="utf-8")
+                self.assertRegex(text, r"prepare-workflow-bundles\.py[\"']? --check")
+
     def test_producer_inventory_and_common_first_party_are_complete(self):
         records = PRODUCER.prepare(REPO / "agents-plugin-pi", check=True)
         self.assertEqual((REPO / "agents-plugin-pi/bundle-inputs/lock.json").read_bytes(),

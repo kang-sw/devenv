@@ -923,7 +923,7 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertFalse(hasattr(self.launcher, "ProcessStream"))
         self.assertFalse(hasattr(self.launcher, "proxy_disabled"))
 
-    def run_main(self, argv, *, input_text="", input_encoding="utf-8", forbid_install=False, allow_build=False, local_devenv=False, allow_lifecycle=False):
+    def run_main(self, argv, *, input_text="", input_encoding="utf-8", forbid_install=False, allow_build=False, local_devenv=False, allow_lifecycle=False, lifecycle_code=0):
         stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         stderr = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         env = dict(self.env, WS_MCP_RUNTIME_DIR=str(self.root), WS_MCP_LAUNCHER_DIRECT="1")
@@ -939,7 +939,7 @@ class LauncherProxyTest(unittest.TestCase):
              mock.patch.multiple(self.launcher.os, execv=mock.DEFAULT, execve=mock.DEFAULT, execvpe=mock.DEFAULT) as execs, \
              mock.patch.object(self.launcher, "install_runtime", side_effect=AssertionError("unexpected repair")) if forbid_install else mock.patch.object(self.launcher, "note"):
             if allow_lifecycle:
-                processes["run"].return_value = subprocess.CompletedProcess([], 0, '{"outcome":"replaced"}\n', "")
+                processes["run"].return_value = subprocess.CompletedProcess([], lifecycle_code, '{"outcome":"failed"}\n' if lifecycle_code else '{"outcome":"replaced"}\n', "starter failed" if lifecycle_code else "")
             if allow_build:
                 processes["run"].side_effect = self.launcher.subprocess.TimeoutExpired(["fake-go", "build"], 0.05)
             code = self.launcher.main()
@@ -1070,6 +1070,16 @@ class LauncherProxyTest(unittest.TestCase):
             with self.subTest(flag=flag):
                 code, _, _ = self.run_main(["daemon-start", flag, "--build-time", "123"], forbid_install=True, allow_lifecycle=True)
                 self.assertEqual(code, 0)
+
+    def test_failed_lifecycle_forwards_json_and_starter_exit_code(self):
+        for code in (2, 7):
+            with self.subTest(code=code):
+                actual, stdout, stderr = self.run_main(["daemon-start"], forbid_install=True,
+                                                      allow_lifecycle=True, lifecycle_code=code)
+                self.assertEqual(actual, code)
+                self.assertEqual(json.loads(stdout), {"outcome": "failed"})
+                self.assertIn(b"starter failed", stderr)
+                self.assertTrue((self.root / "last-launch-error").is_file())
 
     def test_equal_core_build_hash_and_suffix_matrix_never_requests_replacement(self):
         digest = self.launcher.sha256_file(self.binary)

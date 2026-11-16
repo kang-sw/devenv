@@ -15,8 +15,9 @@ fi
 version=${version#v}
 source_commit=$(git -C "$tool_dir" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')
 
-# Node-less consumer gate: prepared closures must match each other and source.
+# Node-less gate: prepared closures and workflow bundles must match source.
 repo_dir=$(CDPATH= cd -- "$tool_dir/.." && pwd -P)
+python3 "$repo_dir/agents-plugin-pi/scripts/prepare-workflow-bundles.py" --check
 for product in agents-plugin agents-plugin-wsflow; do
   python3 "$repo_dir/$product/bin/ws-pi-payload.py" \
     --plugin "$repo_dir/$product" --check-source "$repo_dir"

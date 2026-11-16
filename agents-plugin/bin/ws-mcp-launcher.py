@@ -947,8 +947,8 @@ def stage_daemon_binary(binary: Path, bin_dir: Path) -> Path:
     The copy is written beside its target and renamed into place, so a
     concurrent starter never runs a half-written file. Other entries are left
     alone: one of them is the executable the running daemon was started from
-    (it respawns itself from that path on a LAN mode change), and the daemon
-    that holds the lock prunes the directory down to its own executable.
+    (it respawns itself from that path on a LAN mode change). Settled staged
+    executables are retained because another starter may still need them.
     """
     digest = sha256_file(binary)
     name = staged_daemon_name(binary, digest)
@@ -1076,11 +1076,11 @@ def endpoint_process_alive(endpoint: dict) -> bool | None:
 
 
 class LauncherStartLock:
-    """Persistent advisory starter lock, never the daemon-held singleton lock."""
+    """Nonblocking advisory lock, defaulting to starter serialization."""
 
-    def __init__(self, daemon_dir: Path) -> None:
+    def __init__(self, daemon_dir: Path, *, name: str = "launcher-start.lock") -> None:
         daemon_dir.mkdir(parents=True, exist_ok=True)
-        self.fd = os.open(daemon_dir / "launcher-start.lock", os.O_CREAT | os.O_RDWR, 0o600)
+        self.fd = os.open(daemon_dir / name, os.O_CREAT | os.O_RDWR, 0o600)
         self.locked = False
         try:
             os.set_inheritable(self.fd, False)
@@ -1127,6 +1127,24 @@ class LauncherStartLock:
                     fcntl.flock(self.fd, fcntl.LOCK_UN)
         finally:
             os.close(self.fd)
+
+
+def daemon_absence_proven(daemon_dir: Path) -> bool:
+    """Probe the Go daemon's singleton lock; never hold it across a starter.
+
+    PIDs in stale endpoints can be reused or unqueryable after reboot. Only
+    the kernel lock proves the recorded daemon is absent. The starter still
+    arbitrates any race after this instantaneous probe releases the lock.
+    """
+    try:
+        lock = LauncherStartLock(daemon_dir, name="dashboard.lock")
+        try:
+            return lock.acquire()
+        finally:
+            lock.close()
+    except OSError as exc:
+        note(f"cannot prove daemon absence via dashboard lock: {exc}")
+        return False
 
 
 def daemon_health(port: int, timeout: float) -> dict | None:
@@ -1540,6 +1558,7 @@ class DaemonLink:
         self.started = False
         self.start_error = ""
         self.start_output = ""
+        self.start_returncode: int | None = None
         metadata = read_runtime_metadata(binary)
         self.binary_version = metadata["version"] if metadata is not None else runtime_version
         if metadata is None:
@@ -1654,6 +1673,7 @@ class DaemonLink:
             note(self.start_error)
             return False
         self.start_output = proc.stdout
+        self.start_returncode = proc.returncode
         for line in proc.stderr.splitlines():
             note(f"daemon-start: {line}")
         if proc.returncode != 0:
@@ -1674,16 +1694,17 @@ class DaemonLink:
             return health is None or self.needs_start(health) or (
                 explicit_replace and same_core(str(health.get("version", "")), self.binary_version))
 
-        if grace > 0 and may_start:
-            endpoint, health = self.wait_healthy(min(grace, max(0, deadline - time.monotonic())))
-        else:
-            endpoint, health = self.probe(self.answer_budget)
+        endpoint, health = self.probe(self.answer_budget)
         if not may_start:
             if endpoint is None or health is None:
                 raise DaemonUnavailable("daemon not running; CLI and inspection never start one")
             return endpoint, health
-        if health is None and grace <= 0:
-            endpoint, health = self.wait_healthy(min(DAEMON_SWAP_GRACE_SECONDS, max(0, deadline - time.monotonic())))
+        if health is None and (endpoint is not None or (self.daemon_dir / DAEMON_ENDPOINT_FILE).exists()):
+            if not daemon_absence_proven(self.daemon_dir):
+                # A held singleton may be handing off to a successor. A cold
+                # cache or a stale endpoint with a free lock needs no grace.
+                endpoint, health = self.wait_healthy(min(grace if grace > 0 else DAEMON_SWAP_GRACE_SECONDS,
+                                                        max(0, deadline - time.monotonic())))
         if not needs_start(health):
             return endpoint, health
         try:
@@ -1700,12 +1721,9 @@ class DaemonLink:
                     endpoint, health = self.probe(min(self.answer_budget, remaining))
                     if not needs_start(health):
                         return endpoint, health
-                    if health is None:
-                        if endpoint is not None:
-                            if endpoint_process_alive(endpoint) is not False:
-                                raise DaemonUnavailable("daemon not answering; recorded PID is live or unqueryable; refusing absence startup")
-                        elif (self.daemon_dir / DAEMON_ENDPOINT_FILE).exists():
-                            raise DaemonUnavailable("daemon endpoint is unreadable or invalid; refusing absence startup")
+                    if health is None and (endpoint is not None or (self.daemon_dir / DAEMON_ENDPOINT_FILE).exists()):
+                        if not daemon_absence_proven(self.daemon_dir):
+                            raise DaemonUnavailable("daemon not answering; dashboard lock is held or unqueryable; refusing absence startup")
                     if not self.start_daemon(lifecycle_argv, deadline=deadline):
                         raise DaemonUnavailable(self.start_error or "no daemon could be started")
                     endpoint, health = self.wait_healthy(min(self.start_budget, max(0, deadline - time.monotonic())))
@@ -2149,11 +2167,11 @@ def main() -> int:
         note(str(exc))
         health = None
 
-    if inspection:
+    if inspection and not bootstrap_forced:
         return inspect_runtime(link, argv, health)
     usable_daemon = health is not None and same_minor(str(health.get("version", "")), link.runtime_version) and (
         compare_daemon_versions(str(health["version"]), link.runtime_version) >= 0 or same_core(str(health["version"]), link.runtime_version))
-    cli_uses_daemon = mode == "cli"
+    cli_uses_daemon = mode == "cli" and not inspection
     need_install = False
     if cli_uses_daemon:
         # CLI proxies have no repair/start authority even on a cold cache.
@@ -2194,7 +2212,10 @@ def main() -> int:
                 fail(f"dashboard daemon not reachable: runtime repair failed: {exc}")
             return False
 
-    # Repair is deferred until startup is authorized under the starter lock.
+    # Explicit bootstrap inspection installs a child runtime without starting
+    # or replacing a daemon. Ordinary repair waits for starter authorization.
+    if inspection:
+        repair_runtime(force=need_install)
     link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ,
                       allow_start=mode in {"mcp", "lifecycle"},
                       repair_runtime=lambda: repair_runtime(force=need_install))
@@ -2205,6 +2226,12 @@ def main() -> int:
         try:
             _, health = link.ensure_healthy(lifecycle_argv=argv)
         except (DaemonUnavailable, DaemonHung) as exc:
+            if link.start_returncode not in (None, 0):
+                print(link.start_output, end="")
+                message = f"dashboard daemon not reachable: {exc}"
+                print(f"ws-mcp-launcher: {message}", file=sys.stderr)
+                write_launch_breadcrumb(message)
+                return link.start_returncode
             fail(f"dashboard daemon not reachable: {exc}")
         if link.started:
             print(link.start_output, end="")

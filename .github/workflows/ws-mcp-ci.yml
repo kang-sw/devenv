@@ -1,7 +1,7 @@
 name: ws-mcp CI
 
 # Runs the default Go test group on Linux and Windows for pull requests that touch
-# the Go tree and on manual dispatch (`gh workflow run ws-mcp-ci.yml --ref
+# the tooling or plugin trees and on manual dispatch (`gh workflow run ws-mcp-ci.yml --ref
 # develop`). A develop push starts no run; the ship flow dispatches this
 # workflow on the exact commit it is about to tag, so a Windows-specific failure
 # is caught before release. It is also the release's only test run: the
@@ -14,6 +14,9 @@ on:
     paths:
       - ".github/workflows/ws-mcp-ci.yml"
       - "agents-plugin-tool/**"
+      - "agents-plugin/**"
+      - "agents-plugin-wsflow/**"
+      - "agents-plugin-pi/**"
   workflow_dispatch:
     inputs:
       long_tests:
@@ -76,6 +79,10 @@ jobs:
         with:
           go-version-file: agents-plugin-tool/go.mod
           cache-dependency-path: agents-plugin-tool/go.sum
+
+      - name: Check workflow bundle freshness
+        if: runner.os == 'Linux'
+        run: python3 ../agents-plugin-pi/scripts/prepare-workflow-bundles.py --check
 
       - name: Run tests
         run: bash scripts/ci-test-shard.sh ${{ matrix.args }}
