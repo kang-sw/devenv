@@ -17,12 +17,26 @@ const [base, light, dark, shots] = process.argv.slice(2);
       const errors = [];
       page.on('pageerror', e => errors.push(e.message));
       await page.goto(base + '/s/livesession');
-      const workspace = page.locator(`.rws[data-ws=${JSON.stringify(folder)}]`);
+      const workspaceSelector = `.rws[data-ws=${JSON.stringify(folder)}]`;
+      const workspace = page.locator(workspaceSelector);
       const button = workspace.locator('.rgit');
       const dialog = page.locator('dialog.rgitdlg');
+      const closed = async () => {
+        await dialog.waitFor({ state: 'hidden' });
+        // Native close() hides immediately; its queued close event then
+        // restores the trigger's aria state and keyboard focus.
+        await page.waitForFunction(selector => {
+          const b = document.querySelector(selector);
+          return b && b.getAttribute('aria-expanded') === 'false' && document.activeElement === b;
+        }, workspaceSelector + ' .rgit');
+      };
       const shot = async name => {
         if (shots) await page.screenshot({ path: path.join(shots, theme + '-' + name + '.png') });
       };
+      // At 1280px the real rail is an overlay, opened through its header
+      // control just as in the other rail browser tests.
+      await button.waitFor({ state: 'attached' });
+      if (!(await button.isVisible())) await page.locator('#railbtn').click();
       await button.waitFor({ state: 'visible' });
       assert.equal(await button.getAttribute('title'), 'git init하기');
       assert.equal(await button.getAttribute('aria-label'), 'git init하기');
@@ -56,12 +70,12 @@ const [base, light, dark, shots] = process.argv.slice(2);
       await shot('modal');
 
       await dialog.locator('.pbtn:not(.go)').click();
-      await dialog.waitFor({ state: 'hidden' });
+      await closed();
       assert.equal(await button.getAttribute('aria-expanded'), 'false');
       assert.equal(await button.evaluate(b => document.activeElement === b), true);
       await button.click();
       await page.keyboard.press('Escape');
-      await dialog.waitFor({ state: 'hidden' });
+      await closed();
       // Same sysopen visibility and dispatch gate as the other local controls.
       await page.evaluate(() => document.documentElement.removeAttribute('data-sysopen'));
       assert.equal(await button.isVisible(), false);
