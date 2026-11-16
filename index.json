@@ -516,7 +516,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/playbook",
         "phase": "active",
-        "touched_at": "2026-11-16T14:40:13Z"
+        "touched_at": "2026-11-16T14:40:54Z",
+        "impl": {
+          "branch": "impl/track/playbook/utter-crepe-ecard"
+        }
       }
     },
     "261116-feat-ws-daemon-hub-first-polling": {
