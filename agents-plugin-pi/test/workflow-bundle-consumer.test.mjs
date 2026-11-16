@@ -3,13 +3,15 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import test, { after, before } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Consumer/ESM semantics proof only: no launcher, real SDK, or daemon is loaded.
 const repo = fileURLToPath(new URL('../../', import.meta.url));
-const tempRoot = 'D:/Temp/exec2';
+const tempRoot = process.env.WS_TEST_TMP_ROOT || tmpdir();
+const minFreeGiB = Number(process.env.WS_TEST_MIN_FREE_GIB || 0);
 const peer = '3d791f606a633141ef496cf09c821fbb3f7ae12f';
 const peerFiles = {
   'daemon-selection.js': 'aa9240e32fa4b079c9991c2885bf60f3b135616bcb4c73c88e9a73fb030111fc',
@@ -22,8 +24,10 @@ let root, producer, bundleManifest, validateDaemonRoot, copyPackage;
 const packages = new Map();
 
 function freeSpace() {
+  assert.ok(Number.isSafeInteger(minFreeGiB) && minFreeGiB >= 0, 'WS_TEST_MIN_FREE_GIB must be a nonnegative integer');
+  if (minFreeGiB === 0) return;
   const disk = statfsSync(tempRoot, { bigint: true });
-  assert.ok(disk.bavail * disk.bsize >= 20n * 1024n ** 3n, 'STOP: D: free space below 20 GiB');
+  assert.ok(disk.bavail * disk.bsize >= BigInt(minFreeGiB) * 1024n ** 3n, `STOP: ${tempRoot} free space below ${minFreeGiB} GiB`);
 }
 function git(...args) {
   return execFileSync('git', args, { cwd: repo, env: process.env, maxBuffer: 32 * 1024 * 1024 });
@@ -74,7 +78,7 @@ function refuse(packageRoot, destination, pattern) {
 }
 
 before(() => {
-  assert.ok(isAbsolute(tempRoot), 'this bounded proof requires the D:/Temp/exec2 scratch area');
+  assert.ok(isAbsolute(tempRoot), 'WS_TEST_TMP_ROOT must be an absolute scratch path');
   for (const name of ['TMP', 'TEMP', 'TMPDIR']) process.env[name] = tempRoot;
   freeSpace();
   root = mkdtempSync(join(tempRoot, 'workflow-consumer-'));
@@ -127,6 +131,7 @@ after(() => { if (root) rmSync(root, { recursive: true, force: true }); });
 
 test('consumer provenance is pinned to immutable Exec3 sources', t => {
   t.diagnostic(`producer=${producer}; peer=${peer}; node=${process.version}`);
+  t.diagnostic(`scratch=${tempRoot}; minimum_free_gib=${minFreeGiB}`);
   for (const [name, hash] of Object.entries(peerFiles)) t.diagnostic(`${name} sha256=${hash}`);
   for (const owner of Object.keys(products)) {
     t.diagnostic(`${owner}.zip sha256=${bundleManifest[owner].archive_sha256}; version=${json(join(packages.get(owner), 'runtime.json')).plugin_version}`);
