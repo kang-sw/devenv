@@ -42,6 +42,44 @@ async function workspacePickerChecks() {
   check('picker preserves the daemon separator for Windows drive roots', windows.instance.selection().absolute, 'C:\\project space');
   windows.instance.destroy();
 
+  for (var winPaths of [true, false]) {
+    var discovered = winPaths ? { host: 'fixture-host', home: 'C:\\Users\\u', volumes: ['C:\\', 'D:\\'] }
+      : { host: 'fixture-host', home: '/home/u', volumes: ['/', '/mnt/data'] };
+    var nav = explorer('host0', true, { directoriesOnly: true, roots: discovered, location: { root: discovered.home } });
+    function hostListing(root) {
+      return Object.assign(listing(root, [{ name: 'child', dir: true }]), {
+        root: root.replace(/\\/g, '/'), abs: root, sep: winPaths ? '\\' : '/', dir: ''
+      });
+    }
+    nav.instance.shown(); await answer(take('host0', 'list'), hostListing(discovered.home));
+    var up = nav.at('.fbar-ctl').children.filter(n => n.tagName === 'BUTTON')[2];
+    check('local picker can leave home, and native dropdown remains selected', [up.disabled, nav.at('.froot-choices').value], [false, discovered.home]);
+    var refusedSelect = nav.at('.froot-choices'); refusedSelect.value = discovered.volumes[1]; event(refusedSelect, 'change');
+    await refuse(take('host0', 'list'));
+    check('refused volume restores the native home option and selection', [refusedSelect.value, nav.instance.selection().absolute], [discovered.home, discovered.home]);
+    up.click(); var parentReq = take('host0', 'list');
+    check('parent navigation uses a validated explicit root, never dot-dot', [parentReq.url.searchParams.get('root'), parentReq.url.searchParams.get('dir'), nav.instance.selection()], [winPaths ? 'C:/Users' : '/home', null, null]);
+    await answer(parentReq, hostListing(winPaths ? 'C:\\Users' : '/home'));
+    check('intermediate parent is labeled in the dropdown', nav.at('.froot-choices').value, winPaths ? 'C:\\Users' : '/home');
+    up.click(); await answer(take('host0', 'list'), hostListing(discovered.volumes[0]));
+    check('up stops only at the filesystem root while Home stays available', [up.disabled, nav.at('.fhome').disabled, nav.instance.selection().absolute], [true, false, discovered.volumes[0]]);
+    nav.at('.fhome').click(); var homeReq = take('host0', 'list');
+    check('Home crosses roots in one click', homeReq.url.searchParams.get('root'), discovered.home);
+    await answer(homeReq, hostListing(discovered.home));
+    var rootSelect = nav.at('.froot-choices'); rootSelect.value = discovered.volumes[1]; event(rootSelect, 'change');
+    await answer(take('host0', 'list'), hostListing(discovered.volumes[1]));
+    nav.at('[data-entry="child"]').click();
+    check('alternate volume selection keeps the native absolute path', nav.instance.selection().absolute, winPaths ? 'D:\\child' : '/mnt/data/child');
+    nav.instance.destroy();
+  }
+  for (var scope of [{ rid: 'session-picker', local: true }, { rid: 'host0', local: false }]) {
+    var confined = explorer(scope.rid, scope.local, { directoriesOnly: true, roots, location: { root: roots.home } });
+    confined.instance.shown(); await answer(take(scope.rid, 'list'), listing(roots.home, choices));
+    var confinedUp = confined.at('.fbar-ctl').children.filter(n => n.tagName === 'BUTTON')[2];
+    check('session and nonlocal pickers do not acquire ancestor navigation', [confinedUp.disabled, confined.at('.fhome').disabled], [true, true]);
+    confined.instance.destroy();
+  }
+
   // Minimal popover/route seams; the actual rpWsMake/rpWsBrowse and core run.
   El.prototype.showModal = function () { this.open = true; };
   El.prototype.close = function () { this.open = false; };
