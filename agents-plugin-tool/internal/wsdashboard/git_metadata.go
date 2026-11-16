@@ -42,13 +42,15 @@ func (g gitReadGate) delay(now time.Time, interval time.Duration) time.Duration 
 }
 
 func writeGitMetadata(w io.Writer, path string, info fs.FileInfo) {
-	size := info.Size()
-	// Windows directory enumeration returns an undefined EndOfFile value.
-	// WalkDir already fingerprints every child, so directory size adds no hint.
-	if info.IsDir() {
-		size = 0
+	var size, modified int64
+	// Directory size is undefined in Windows enumeration, and directory times
+	// can settle independently of file contents. WalkDir fingerprints child
+	// names and file metadata, so neither directory field adds a useful hint.
+	if !info.IsDir() {
+		size = info.Size()
+		modified = info.ModTime().UnixNano()
 	}
-	fmt.Fprintf(w, "%q:%d:%d:%d\n", path, info.Mode(), size, info.ModTime().UnixNano())
+	fmt.Fprintf(w, "%q:%d:%d:%d\n", path, info.Mode(), size, modified)
 }
 
 // gitMetadataStamp reads only Git administration metadata, never worktree
