@@ -169,12 +169,13 @@ func startPageFixture(t *testing.T, options ...func(*DaemonOptions)) *pageFixtur
 	options = append([]func(*DaemonOptions){func(o *DaemonOptions) { o.noGitBadge = true }}, options...)
 	f.d = startIndexedDaemon(t, f.dir, f.src, time.Hour, options...)
 	f.base = endpointURL(f.d.Endpoint(), "")
-	// The daemon's first index refresh runs beside its start; a page asked
-	// for before it lands is an unknown session.
-	waitFor(t, "the fixture sessions to be indexed", func() bool {
+	// Session insertion precedes its OnChange hook. Wait for the completed
+	// refresh too, or a startup wake can invalidate the first shared render
+	// after both sessions are already visible.
+	waitFor(t, "the fixture sessions' initial refresh to finish", func() bool {
 		_, live := f.d.Index().Session("livesession")
 		_, board := f.d.Index().Session("boardsession")
-		return live && board
+		return f.d.Index().Loaded() && live && board
 	})
 	return f
 }
