@@ -584,6 +584,29 @@
     try { shOn.el.focus(); } catch (x) { /* unloading */ }
     shSend(shOn, "search");
   }
+  function overviewButton(d) {
+    var b = d && d.querySelector(".board-overview");
+    return b && b.getClientRects().length ? b : null;
+  }
+  // Keyboard events do not cross the session iframe. The rail forwards to
+  // the shown frame; both paths activate the same visible toolbar control.
+  doc.addEventListener("keydown", function (e) {
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || !e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || (e.key || "").toLowerCase() !== "q") return;
+    var t = e.target;
+    if (t && (t.isContentEditable || (t.closest && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"]), .xterm, .tm-host")))) return;
+    var b;
+    if (shell) {
+      try { b = shOn && overviewButton(shOn.el.contentDocument); } catch (x) { return; }
+      if (!b) return;
+      shSend(shOn, "overview");
+    } else {
+      if (shHidden) return;
+      b = overviewButton(doc);
+      if (!b) return;
+      b.click();
+    }
+    e.preventDefault();
+  });
   if (shell && window.WsShell) {
     window.addEventListener("message", function (e) {
       if (e.origin !== location.origin) return;
@@ -760,6 +783,9 @@
       } else if (m.wsShell === "search") {
         // Open, do not toggle a hidden header button via a synthetic click.
         tkSearch();
+      } else if (m.wsShell === "overview") {
+        var b = !shHidden && overviewButton(doc);
+        if (b) b.click();
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);

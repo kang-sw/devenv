@@ -440,6 +440,7 @@
   "js.term.loadfail": "Der Terminal-Emulator konnte nicht geladen werden",
   "js.board.toolbar.label": "Board-Aktionen",
   "js.board.toolbar.overview": "Übersicht",
+  "js.board.toolbar.overview.title": "Übersicht (Ctrl+Q)",
   "js.board.toolbar.search": "Suchen",
   "js.board.toolbar.files": "Dateien",
   "js.board.overview.hint": "Außen klicken · Esc: zurück · Karte anklicken: zur Karte",

@@ -109,7 +109,9 @@
       row.appendChild(b);
       return b;
     }
-    action("board-overview", "chevrons-down-up", wsT("js.board.toolbar.overview"), actions.overview).setAttribute("aria-pressed", "false");
+    var overview = action("board-overview", "chevrons-down-up", wsT("js.board.toolbar.overview"), actions.overview);
+    overview.setAttribute("aria-pressed", "false");
+    overview.title = wsT("js.board.toolbar.overview.title");
     var term = mk("span", "board-term-slot");
     term.id = "board-term-slot";
     row.appendChild(term);
