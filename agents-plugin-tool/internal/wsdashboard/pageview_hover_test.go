@@ -115,7 +115,13 @@ func TestObservedHistoryIsReadableWithoutLiveActivity(t *testing.T) {
 func TestSessionHoverTooltipBoundary(t *testing.T) {
 	row := RailRow{ReplyID: "reply123", Label: "label", Harness: "pi", Live: true, Message: "last message", Child: true, LastTool: testNow.UnixMilli()}
 	html := renderNamed(t, "rrow", row)
-	contains(t, "row tooltips", html, `class="rid lbl">label</span>`, `title="pi · lead waiting"`, `title="last message"`, `title="Star: pin this session to the top of its worktree"`, `class="shp-source"`, `data-tl="last tool call"`)
+	contains(t, "row tooltips", html, `class="rid lbl">label</span>`, `title="pi · lead waiting"`, `title="last message"`, `data-star="0"`, `class="shp-source"`, `data-tl="last tool call"`)
+	if strings.Contains(html, `class="star"`) || strings.Contains(html, `class="hstar"`) {
+		t.Error("unstarred row has an inline favorite button or badge")
+	}
+	row.Starred = true
+	favorite := renderNamed(t, "rrow", row)
+	contains(t, "favorite badge tooltip", favorite, `data-star="1"`, `class="hstar" role="img" aria-label="Favorite" title="Favorite"`)
 	if strings.Contains(html, `class="rid lbl" title=`) {
 		t.Error("rail reply-ID tooltip remains")
 	}
