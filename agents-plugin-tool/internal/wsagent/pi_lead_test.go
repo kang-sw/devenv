@@ -15,8 +15,9 @@ func piLeadFixture(t *testing.T) (StartSpec, string) {
 	t.Helper()
 	base := t.TempDir()
 	root := filepath.Join(base, "agents-plugin-wsflow")
+	piLeadFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), `{"name":"wsflow"}`)
 	restore := piBundledPluginRoot
-	piBundledPluginRoot = func() (string, error) { return root, nil }
+	piBundledPluginRoot = func() (string, string, error) { return root, "", nil }
 	t.Cleanup(func() { piBundledPluginRoot = restore })
 	spec := StartSpec{Root: base, Cwd: filepath.Join(base, "project"), Dir: filepath.Join(base, "session"), Lead: &LeadSpec{}}
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {

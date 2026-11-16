@@ -76,6 +76,9 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 	for _, product := range []string{"ws", "wsflow"} {
 		for _, layout := range []string{".claude/plugins/cache/vendor", ".codex/plugins/cache/vendor", "shell-snapshot", "windows-snapshot"} {
 			t.Run(product+"/"+layout, func(t *testing.T) {
+				// This fixture tests the owning package's prepared payload, not
+				// the fixed wsflow default's single-package fallback warning.
+				setHostedPackage(t, product)
 				source := filepath.Join("..", "..", "..", "agents-plugin")
 				if product == "wsflow" {
 					source += "-wsflow"

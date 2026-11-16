@@ -13,19 +13,14 @@ import (
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
-// agentMCPCommand uses the package that started the daemon, not its staged
-// executable. The launcher supplies WS_RSRC_ROOT and its own Python interpreter
-// at daemon-start; neither is inferred from the worker's project directory.
+// agentMCPCommand uses the configured hosted package, not the daemon's staged
+// executable or the worker's project directory. The starter supplies Python.
 func agentMCPCommand(root string) (wsagent.MCPCommand, error) {
-	rsrc, err := wsrsrc.ResolveRoot()
+	plugin, warning, err := wsagent.ResolveHostedPlugin()
 	if err != nil {
-		return wsagent.MCPCommand{}, fmt.Errorf("resolve ws-mcp launcher: %w", err)
+		return wsagent.MCPCommand{}, fmt.Errorf("cannot resolve ws-mcp launcher: %w", err)
 	}
-	rsrc, err = filepath.Abs(rsrc)
-	if err != nil {
-		return wsagent.MCPCommand{}, fmt.Errorf("resolve ws-mcp launcher resource root: %w", err)
-	}
-	launcher := filepath.Join(filepath.Dir(rsrc), "bin", "ws-mcp-launcher.py")
+	launcher := filepath.Join(plugin, "bin", "ws-mcp-launcher.py")
 	if info, err := os.Stat(launcher); err != nil || !info.Mode().IsRegular() {
 		return wsagent.MCPCommand{}, fmt.Errorf("cannot resolve ws-mcp launcher at %s (from %s); start the daemon through the plugin's bin/ws-mcp-launcher.py", launcher, wsrsrc.EnvRsrcRoot)
 	}
@@ -33,12 +28,18 @@ func agentMCPCommand(root string) (wsagent.MCPCommand, error) {
 	if err != nil {
 		return wsagent.MCPCommand{}, err
 	}
+	env, err := wsagent.HostedPluginEnvironment(plugin)
+	if err != nil {
+		return wsagent.MCPCommand{}, err
+	}
+	env["WS_MCP_PROJECT_ROOT"] = root
 	return wsagent.MCPCommand{
-		Command: python,
+		Command:       python,
+		PluginWarning: warning,
 		// --root would disable the launcher's exact serve --stdio proxy
 		// match. Override the daemon's inherited project root in env instead.
 		Args: append(prefix, launcher, "serve", "--stdio"),
-		Env:  map[string]string{"WS_MCP_PROJECT_ROOT": root, wsrsrc.EnvRsrcRoot: rsrc},
+		Env:  env,
 	}, nil
 }
 

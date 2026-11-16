@@ -85,9 +85,11 @@ type LeadSpec struct {
 
 // MCPCommand is a stdio MCP server's launch command.
 type MCPCommand struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	// PluginWarning is a runtime-only package fallback notice for this launch.
+	PluginWarning string            `json:"-"`
+	Command       string            `json:"command"`
+	Args          []string          `json:"args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
 }
 
 // Process is one running backend process. Its methods are safe to call from

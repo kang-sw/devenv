@@ -103,6 +103,10 @@ session's pages exist follows `dashboard.enabled` per session; the daemon
 runs either way, and the MCP tools never depend on its pages. Its state lives
 under `<cache root>/dashboard/`:
 
+- `hosted-plugin-roots.json` - the last manifest-validated root seen for each
+  hosted workflow package (`ws`, `wsflow`), learned from connecting hellos and
+  retained across daemon replacement. This daemon-owned registry is independent
+  of session records and the global config overrides.
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
   pid, version, and the shutdown token; `launcher-start.lock` - the persistent
   advisory lock updated Python launchers hold across a necessary daemon start;
@@ -647,10 +651,16 @@ machine) or the daemon's own, so no other web page can drive an agent. After
 a daemon restart the runner re-registers each conversation with no process
 and starts one at its next send. An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
-and no mailbox identity. Its command is Python plus the starting plugin's
+and no mailbox identity. Its command is Python plus the selected hosted plugin's
 `bin/ws-mcp-launcher.py serve --stdio`, never the daemon's staged executable.
-The plugin is resolved beside `WS_RSRC_ROOT`; a missing launcher refuses the
-start. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused when
+The built-in global-only `hosted.plugin_package` key (`config.tune`, values
+`ws` or `wsflow`, fixed default `wsflow`, visible with no-agent) selects the
+whole package for hosted Claude/Pi leads and this attached MCP. Each process
+start reads the setting; running and holder-reattached processes stay unchanged.
+The daemon resolves roots learned from hellos, revalidates their manifest names,
+and falls back to its own package beside `WS_RSRC_ROOT` when the selected root
+is unavailable, persisting a visible `plugin_warning`. A missing fallback
+launcher still refuses the start. Non-hosted connections keep their own package. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused when
 known, else `python3` on PATH (Windows: `py -3` fallback). The conversation's
 root overrides `WS_MCP_PROJECT_ROOT` in that command's environment, keeping
 proxy mode's exact arguments and preventing the daemon's lead root leaking

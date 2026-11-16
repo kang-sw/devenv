@@ -1270,8 +1270,8 @@ func closedState(rec Record) State {
 	if rec.Lead {
 		st.Lifecycle = wsdashboard.SessionPendingDeletion
 		st.PluginIsolation = leadPluginIsolation(rec.PluginIsolation)
-		st.PluginWarning = rec.PluginWarning
 	}
+	st.PluginWarning = rec.PluginWarning
 	if rec.Parent != nil {
 		parent := *rec.Parent
 		st.Parent = &parent
@@ -2263,6 +2263,10 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		cmd, err := c.r.opts.WSMCP(rec.Root)
 		if err != nil {
 			return fmt.Errorf("ws-mcp command: %w", err)
+		}
+		c.update(func(rec *Record) { rec.PluginWarning = cmd.PluginWarning })
+		if cmd.PluginWarning != "" {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, cmd.PluginWarning)
 		}
 		env := map[string]string{}
 		for k, v := range cmd.Env {

@@ -16,7 +16,7 @@ var piLeadAdapter string
 //go:embed pi_lead_bridge.mjs
 var piLeadBridgeSource string
 
-var piBundledPluginRoot = bundledPluginRoot
+var piBundledPluginRoot = ResolveHostedPlugin
 
 // preparePiLeadLaunch is replaced by runner tests whose holders never execute
 // their fictitious Pi command. Resource discovery itself stays inside Pi: a
@@ -34,10 +34,30 @@ const piNoSDKWarning = "Pi has no JavaScript SDK beside its CLI, so default plug
 
 func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []string, error) {
 	args := append(piLeadArgs(spec), "--no-extensions")
-	entries, bundleErr := piBundledEntries()
+	root, packageWarning, bundleErr := piBundledPluginRoot()
+	var entries []string
+	if bundleErr == nil {
+		// Keep the selected package's policy even when the native extension
+		// comes from the shared source sibling instead of a prepared payload.
+		packageEnv, err := HostedPluginEnvironment(root)
+		if err != nil {
+			return "", nil, fmt.Errorf("pi workflow environment: %w", err)
+		}
+		if spec.Lead.Env == nil {
+			spec.Lead.Env = map[string]string{}
+		}
+		for name, value := range packageEnv {
+			spec.Lead.Env[name] = value
+		}
+		spec.Lead.Env["WS_PI_WORKFLOW_ROOT"] = root
+		entries, bundleErr = piBundledEntriesFrom(root)
+	}
 	// PluginWarning holds one value: every warning of this launch is joined
 	// into it, and an empty one clears a stale warning.
 	var warnings []string
+	if packageWarning != "" {
+		warnings = append(warnings, packageWarning)
+	}
 	var servers map[string]any
 	if bundleErr != nil {
 		if spec.Lead.WSMCP == nil {
@@ -128,10 +148,15 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (
 // source inputs (the helper logs why). Invalid local payloads remain errors;
 // only source drift, never failed archive validation, permits that substitution.
 func piBundledEntries() ([]string, error) {
-	root, err := piBundledPluginRoot()
+	root, _, err := piBundledPluginRoot()
 	if err != nil {
 		return nil, err
 	}
+	return piBundledEntriesFrom(root)
+}
+
+func piBundledEntriesFrom(root string) ([]string, error) {
+	var err error
 	if _, localErr := os.Stat(filepath.Join(root, "native-pi")); !os.IsNotExist(localErr) {
 		root, err = piPreparedPayload(root)
 		if err != nil {

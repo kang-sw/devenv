@@ -23,6 +23,8 @@ import (
 )
 
 func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	python := filepath.Join(t.TempDir(), "chosen python")
 	if goruntime.GOOS == "windows" {
 		python += ".exe"
@@ -41,6 +43,16 @@ func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(launcher, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			manifestName := name
+			if name == "pi" {
+				manifestName = "ws"
+			}
+			if err := os.WriteFile(filepath.Join(plugin, ".claude-plugin", "plugin.json"), []byte(`{"name":"`+manifestName+`"}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			rsrc := filepath.Join(plugin, "rsrc")
