@@ -36,7 +36,7 @@ func termRequest(d *Daemon, peer, host, method, target, body string, headers map
 	ctx, cancel := context.WithCancel(req.Context())
 	cancel()
 	rec := httptest.NewRecorder()
-	d.Handler().ServeHTTP(rec, req.WithContext(ctx))
+	localhostTestHandler(nil, d).ServeHTTP(rec, req.WithContext(ctx))
 	return rec
 }
 
@@ -151,7 +151,7 @@ func TestTerminalsAreOfferedToALocalViewerOnly(t *testing.T) {
 	manager := wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
 	f := startPageFixture(t, lanMode, withHolders(manager))
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	attr := ` data-term="` + name + `"`
 	const style = ".xterm .xterm-viewport"
@@ -167,7 +167,7 @@ func TestTerminalsAreOfferedToALocalViewerOnly(t *testing.T) {
 	}
 
 	plain := startPageFixture(t, withHolders(newFakeHolders()))
-	plainLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(plain.d.Endpoint().Port)}
+	plainLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(plain.d.Endpoint().Port), localCookie: true}
 	if page := serve(plain.d, plainLocal, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, "data-term=") {
 		t.Error("a daemon whose holder host cannot run terminals offers them")
 	}
@@ -197,7 +197,7 @@ func TestTerminalSymbolsFont(t *testing.T) {
 	manager := wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
 	f := startPageFixture(t, lanMode, withHolders(manager))
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	face := `@font-face { font-family: "` + termSymbolsFamily + `"; src: url("/s/` + name + `") format("woff2"); font-display: swap; }`
 	if page := serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); !strings.Contains(page, face) {
@@ -354,7 +354,7 @@ func startTermFixture(t *testing.T, holdersDir, python string, ringBytes int) *t
 	return &termFixture{pageFixture: f, manager: manager}
 }
 
-var termHTTP = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 60 * time.Second}
+var termHTTP = &http.Client{Transport: localhostTestHTTPTransport(), Timeout: 60 * time.Second}
 
 // do sends one request to a terminal route as the daemon's own page.
 func (f *termFixture) do(t *testing.T, method, path, body string) (int, string) {
@@ -419,6 +419,7 @@ func (f *termFixture) open(t *testing.T, id string, from uint64) *termClient {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.Header.Set("Cookie", localhostTestCookie(t, f.d).String())
 	conn, err := websocket.DialConfig(cfg)
 	if err != nil {
 		t.Fatalf("terminal websocket: %v", err)

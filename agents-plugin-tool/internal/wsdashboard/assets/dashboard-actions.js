@@ -46,6 +46,7 @@
     if (u) { if (!u.disabled) steerHeld(u); return; }
     if (ibadge && t.closest("#ibadge")) { if (!ibadge.disabled) interruptTurn(); return; }
     if (gmenu && t.closest("#settings-close")) { railPopClose(true); return; }
+    if (t.closest("#login-copy")) { copyLoginLink(t.closest("#login-copy")); return; }
     var th = t.closest(".gmenu [data-theme-set]");
     if (th) { setTheme(th.getAttribute("data-theme-set")); return; }
     var b = t.closest(".gmenu [data-input]");
@@ -106,6 +107,16 @@
       return navigator.clipboard.writeText(s).then(function () { if (!quiet) toast(wsT("js.toast.copydone")); return true; }, fallback);
     }
     return Promise.resolve(fallback());
+  }
+  function copyLoginLink(button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    fetch("/auth/link", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({path: location.pathname + location.search + location.hash})})
+      .then(function (r) { if (!r.ok) throw new Error("login link refused"); return r.json(); })
+      .then(function (body) { return copyText(body.url, true); })
+      .then(function (ok) { toast(wsT(ok ? "js.login.copied" : "js.login.copyfail")); })
+      .catch(function () { toast(wsT("js.login.copyfail")); })
+      .finally(function () { button.disabled = false; });
   }
   // --- session label: the head's name -----------------------------------------
   // The head's name (sname, dashboard.tmpl) shows the session's display

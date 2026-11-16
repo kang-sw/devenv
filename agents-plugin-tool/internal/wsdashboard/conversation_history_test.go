@@ -369,7 +369,7 @@ func TestSessionLeavingTheIndexDropsItsCachedEntries(t *testing.T) {
 func TestStreamSendsOnlyTheLiveRegionForAStreamingTick(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/livesession?frame=1")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)

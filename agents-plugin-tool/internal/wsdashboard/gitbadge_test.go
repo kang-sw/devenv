@@ -502,7 +502,7 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 		t.Fatalf("reads before any stream = %d", n)
 	}
 
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
@@ -589,7 +589,7 @@ func TestGitBadgeFollowsTheStreamedSnapshot(t *testing.T) {
 	}
 	snapshot("first reply", 1)
 	_, page := get(t, f.base+"/s/livesession?frame=1")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)

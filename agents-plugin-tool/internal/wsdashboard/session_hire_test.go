@@ -105,7 +105,7 @@ func hireHTTP(d *Daemon, path, body, origin, remote string) *httptest.ResponseRe
 	}
 	req.Header.Set("Content-Type", "application/json")
 	out := httptest.NewRecorder()
-	d.Handler().ServeHTTP(out, req)
+	localhostTestHandler(nil, d).ServeHTTP(out, req)
 	return out
 }
 func hirePost(d *Daemon, path, body string) *httptest.ResponseRecorder {
@@ -165,6 +165,7 @@ func assertHireMail(t *testing.T, d *Daemon, p HireProposal, status string) {
 
 func TestHiringFlagAndTrust(t *testing.T) {
 	f := startPageFixture(t)
+	waitFor(t, "hiring session index to load", f.d.Index().Loaded)
 	req := HireRequest{Reason: "why", RecoveryContext: "recover"}
 	if _, err := f.d.RequestHire("livesession", req); err == nil || !strings.Contains(err.Error(), "hiring is not enabled") {
 		t.Fatalf("unflagged: %v", err)
@@ -173,7 +174,7 @@ func TestHiringFlagAndTrust(t *testing.T) {
 		origin, remote string
 		code           int
 	}{
-		{"", "127.0.0.1:1", 403}, {"http://evil.test", "127.0.0.1:1", 403}, {"http://127.0.0.1", "192.0.2.1:1", 404},
+		{"", "127.0.0.1:1", 403}, {"http://evil.test", "127.0.0.1:1", 403}, {"http://127.0.0.1", "192.0.2.1:1", 401},
 	} {
 		res := hireHTTP(f.d, "/s/livesession/hiring", `{"enabled":true}`, test.origin, test.remote)
 		if res.Code != test.code {
@@ -284,7 +285,7 @@ func TestHiringLifecycle(t *testing.T) {
 	for _, remote := range []struct {
 		origin, addr string
 		code         int
-	}{{"", "127.0.0.1:1", 403}, {"http://127.0.0.1", "192.0.2.1:1", 404}} {
+	}{{"", "127.0.0.1:1", 403}, {"http://127.0.0.1", "192.0.2.1:1", 401}} {
 		res := hireHTTP(f.d, hireRoute+"/"+p.ID+"/approve", `{"harness":"pi"}`, remote.origin, remote.addr)
 		if res.Code != remote.code {
 			t.Fatalf("approval gate %d %s", res.Code, res.Body)

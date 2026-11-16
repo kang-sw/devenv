@@ -20,7 +20,7 @@ func TestTerminalCardScriptRidesOnlyAPageThatOffersTerminals(t *testing.T) {
 	manager := wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
 	f := startPageFixture(t, lanMode, withHolders(manager))
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	const kind = "window.WsTerm = {"
 	page := serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String()
@@ -35,7 +35,7 @@ func TestTerminalCardScriptRidesOnlyAPageThatOffersTerminals(t *testing.T) {
 		t.Error("a LAN viewer's page carries the terminal kind")
 	}
 	plain := startPageFixture(t, withHolders(newFakeHolders()))
-	plainLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(plain.d.Endpoint().Port)}
+	plainLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(plain.d.Endpoint().Port), localCookie: true}
 	if page := serve(plain.d, plainLocal, "GET", "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, kind) {
 		t.Error("a daemon that runs no terminals serves the terminal kind")
 	}

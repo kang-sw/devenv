@@ -98,7 +98,12 @@ func TestDashboardFolderIdleCPUFixture(t *testing.T) {
 	pprof.StopCPUProfile()
 	out.Close()
 	url := fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/streams", daemon.Endpoint().Port)
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(dashboardCookieForTest(t, daemon))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

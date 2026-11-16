@@ -57,7 +57,7 @@ func actRequestAs(d *Daemon, method, peer, host, origin, cookie, body string) *h
 		req.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: cookie})
 	}
 	rec := httptest.NewRecorder()
-	d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(nil, d).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -192,7 +192,7 @@ func TestFSActRoute(t *testing.T) {
 	req.RemoteAddr, req.Host = peer, local
 	req.Header.Set("Origin", "http://"+local)
 	r := httptest.NewRecorder()
-	f.d.Handler().ServeHTTP(r, req)
+	localhostTestHandler(t, f.d).ServeHTTP(r, req)
 	if r.Code != http.StatusNotFound || len(rec.take()) != 0 {
 		t.Errorf("unknown session act = %d, want 404", r.Code)
 	}

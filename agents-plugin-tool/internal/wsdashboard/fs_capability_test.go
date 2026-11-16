@@ -202,6 +202,15 @@ type capShape struct {
 func capFetch(f *pageFixture, v viewer, target string, s capShape) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	req.RemoteAddr, req.Host = v.peer, v.host
+	// In-root capabilities remain deliberately cookieless. Outside-root
+	// routes additionally require the authenticated local browser.
+	if v.localCookie && (strings.Contains(target, "/fs/ocap/") || strings.Contains(target, "/fs/oview/")) {
+		value, err := f.d.localhostCookieValue()
+		if err != nil {
+			panic(err)
+		}
+		req.AddCookie(&http.Cookie{Name: localhostCookieName, Value: value})
+	}
 	for k, val := range map[string]string{"Origin": strings.ReplaceAll(s.origin, ":daemon", "http://"+v.host), "Sec-Fetch-Site": s.site, "Sec-Fetch-Mode": s.mode, "Sec-Fetch-Dest": s.dest} {
 		if val != "" {
 			req.Header.Set(k, val)

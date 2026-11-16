@@ -141,7 +141,7 @@ func TestFSRootsRefuseBeforeEnumeration(t *testing.T) {
 				req.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: tc.cookie})
 			}
 			rec := httptest.NewRecorder()
-			f.d.Handler().ServeHTTP(rec, req)
+			localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 			if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), f.project) || src.calls.Load() != 0 {
 				t.Errorf("refusal = %d %s, reads %d", rec.Code, rec.Body.String(), src.calls.Load())
 			}

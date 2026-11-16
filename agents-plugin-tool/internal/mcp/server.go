@@ -34,6 +34,7 @@ type Server struct {
 	version           string
 	sourceCommit      string
 	whiteboardChanged func(cacheHome, root, key string)
+	loginLink         func(string) (string, error)
 	rootMu            sync.RWMutex
 	sessionHarness    string
 	piDaemonAgents    bool // initialize experimental capability, protected by rootMu

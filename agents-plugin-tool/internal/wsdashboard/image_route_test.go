@@ -288,7 +288,7 @@ func imageAs(d *Daemon, peer, host, cookie, fetchSite, path string) *httptest.Re
 		req.Header.Set("Sec-Fetch-Site", fetchSite)
 	}
 	rec := httptest.NewRecorder()
-	d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(nil, d).ServeHTTP(rec, req)
 	return rec
 }
 

@@ -143,6 +143,11 @@ type DaemonOptions struct {
 	ackDelay time.Duration
 	// hireNow is a fixture clock for proposal expiry.
 	hireNow func() time.Time
+	// authNow is a fixture clock for login codes and failed exchanges.
+	authNow func() time.Time
+	// clipboard replaces the native login-link clipboard writer in tests.
+	// Nil selects the platform writer; it never disables authentication.
+	clipboard clipboardWriter
 }
 
 // MailWaker receives the daemon's mailbox wake signals (DaemonOptions.MailWake).
@@ -212,8 +217,11 @@ type Daemon struct {
 	// index.
 	acks *ackChecker
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
-	lan       bool
-	tokenMu   sync.Mutex
+	lan     bool
+	tokenMu sync.Mutex
+	// auth holds bounded, ephemeral login codes and the exchange rate window.
+	auth      localhostAuth
+	clipboard clipboardWriter
 	memoMu    sync.Mutex      // serializes daemon-local memo read/modify/write
 	planUsage *planUsageStore // daemon-private account usage, never credentials
 	// pprof serves the pprof routes (pprofHandler).
@@ -393,6 +401,8 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		support:         opts.Support,
 		holders:         opts.Holders,
 		hireNow:         opts.hireNow,
+		auth:            localhostAuth{now: opts.authNow},
+		clipboard:       opts.clipboard,
 		hireWake:        make(chan struct{}, 1),
 		hireDone:        make(chan struct{}),
 		stop:            make(chan struct{}),
@@ -405,6 +415,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			Token:         token,
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
+	}
+	if d.clipboard == nil {
+		d.clipboard = newNativeClipboardWriter()
 	}
 	home, getenv := opts.Home, os.Getenv
 	if home == "" {
@@ -703,8 +716,9 @@ func (d *Daemon) Close() {
 }
 
 // Handler is the daemon's HTTP surface. Every route first passes the access
-// guard (the loopback Host guard, or in LAN mode the guard that also admits
-// the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
+// guard (localhost cookie, or the separate token for a non-local LAN viewer,
+// with explicit machine and frame exemptions; access.go). Loopback mode also
+// checks the Host against DNS rebinding; the daemon sends no CORS headers. The pages (/,
 // /s/<reply-id>, served as the iframe shell or, with ?frame=1, as the page
 // it frames; their SSE or WebSocket streams, the shell's rail stream
 // /rail/events, and a session's image, file view, and
@@ -730,6 +744,11 @@ func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
 	mux.HandleFunc("/shutdown", d.handleShutdown)
+	mux.HandleFunc("/auth/status", d.handleAuthStatus)
+	mux.HandleFunc("/auth/exchange", d.handleAuthExchange)
+	mux.HandleFunc("/auth/link", d.handleAuthLink)
+	mux.HandleFunc("/auth/cookie", d.handleAuthCookie)
+	mux.HandleFunc("/auth/clipboard", d.handleAuthClipboard)
 	if d.proxy != nil {
 		mux.HandleFunc(ProxyPath, d.handleProxy)
 	}
@@ -769,10 +788,11 @@ func (d *Daemon) Handler() http.Handler {
 		mux.Handle(pprofPrefix, pprofHandler(d.serveStreams))
 	}
 	mux.HandleFunc("/", d.handleIndex)
+	guarded := d.accessGuard(mux)
 	if d.lan {
-		return d.lanGuard(mux)
+		return guarded
 	}
-	return hostGuard(mux)
+	return hostGuard(guarded)
 }
 
 // hostGuard refuses a request whose Host header is not a loopback name. A
@@ -781,7 +801,13 @@ func (d *Daemon) Handler() http.Handler {
 func hostGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !loopbackHost(r.Host) {
-			http.Error(w, "forbidden host", http.StatusForbidden)
+			// The native clipboard route is deliberately undiscoverable to
+			// a non-local Host, in both serving modes. It remains refused.
+			if r.URL.Path == "/auth/clipboard" {
+				http.NotFound(w, r)
+			} else {
+				http.Error(w, "forbidden host", http.StatusForbidden)
+			}
 			return
 		}
 		next.ServeHTTP(w, r)

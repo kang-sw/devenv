@@ -249,6 +249,31 @@ Settled at drafting from the research (lead to confirm):
     T3 boundary with the owner's approval. Sending it only from new clients is
     not by itself a fix; enforcement is the fix.
 
+### Owner feedback during implementation (2026-11-17)
+
+- **(1239) Clipboard writes are explicit, click-only actions.** Settings keeps
+  “Copy browser login link” with subtext stating that it copies to the clipboard,
+  signs another browser in after pasting, and works once within ten minutes.
+  The Electron item is “Copy Browser Login Link to Clipboard”. No gate or
+  logged-in page reads or writes the clipboard on load or on login; browser
+  clipboard reads happen only on the paste button. Tests assert this and retain
+  the single-use exchange check.
+- **Owner clarification (00:04): add a native clipboard round trip from the
+  unauthenticated localhost gate.** An explicit button asks the daemon to mint
+  a ten-minute, single-use link and write it to this machine's OS clipboard;
+  the user pastes it back into the existing gate to prove access to that
+  clipboard. The route requires a loopback peer and Host, its own Origin, and
+  same-origin fetch metadata when present; it is rate-limited and never returns
+  the code or link. Native writers are injectable; unavailable writers disable
+  or hide the action. Existing agent links, Settings copy, Electron menu, and
+  paste exchange remain. The gate button's visual implementation waits for the
+  updated approved mockup (imported with its implementation branch cherry-pick).
+  Follow-up technical calls: A2 retains a small recopy text button; a runtime
+  clipboard failure (A3) leaves retry enabled, unlike the mockup's disabled
+  stand-in, and only a writer unavailable at render hides the action. All gate
+  states and Settings are captured in both themes in a temporary artifact folder,
+  not committed binary captures.
+
 ## Constraints
 
 - Read before editing, per AGENTS.md `### Implementation Conventions`:
@@ -417,6 +442,47 @@ Verification expectations (Go, `agents-plugin-tool`):
 - Web card proxy: the new cookie is stripped from proxied requests.
 - Regression: existing dashboard tests pass, moved onto the cookie helper
   where they hit gated routes. `go test ./...` passes.
+
+### Result (this-commit) - 2026-11-17
+
+Implemented the deny-by-default cookie guard, persisted owner-only HMAC secret,
+constant-time checks, bounded ten-minute single-use codes, exchange throttling,
+Strict re-entry probe, native cookie/link endpoints, hosted MCP login-link hook,
+and local-only Settings copy action. Machine, static-frame, PWA and capability
+exemptions retain their handler checks; the web-card proxy strips the new cookie.
+New nudge and roster clients send the endpoint bearer without requiring it.
+
+Owner feedback (1239) is applied: Settings explicitly names clipboard copying
+before the click, with the approved Korean explanatory subtext; clipboard access
+never runs on page load. The subsequent owner clarification adds `/auth/clipboard`:
+local peer plus Host, own Origin and fetch metadata, independent two-second and
+ten-per-minute throttles, no credential in its response, and an injectable native
+writer (pbcopy, Unicode-safe PowerShell stdin, Linux writer fallback). Failed writes
+revoke their unused code. The updated gate implements A/A2/A3/A4/B/C/C′/D, including
+the retry-enabled A3 and small A2 recopy technical calls. Chromium verification
+and visual comparison are retained for Phase 3.
+
+Verification: narrow `TestLocalhostAuth` tests pass, including `-race`; all i18n
+tests pass. MCP login-link, whiteboard pointer, machine-client, session lifecycle,
+stream, hiring and Pi forwarding batches pass (22 top-level tests plus ten
+subtests); existing proxy/ensure batch passes (23 plus 21); cmd hook/tracker tests
+pass (two). Adapted wsagent REST/support/Pi runner routes pass (21 plus 13).
+The full allowed wswhiteboard package passes. Existing dashboard callers now use
+real fixture cookies rather than a shipped bypass. All 595 inventoried affected
+existing tests ran in named batches (614 unique roots including adjacent prefix
+matches); the final command inventory is recorded with Phase 3 verification.
+
+Corrections against the drafted survey: the base already enforces an Origin and
+fetch-metadata check on `/nudge` and already relays large framed images through
+the host page; those protections remain unchanged. The temporary-capture and
+narrow-test instructions supersede the plan's tracked captures/full-suite command.
+The allowed full wsagent run found an unrelated lead-replay timeout, reproduced
+in isolation (two of three reruns pass); it is not changed here. Seven existing
+initial Chromium regression failures, and two additional browser failures plus
+one shell Node fixture failure, were reproduced against an untouched base archive,
+without weakening their assertions. Overall compatibility remains T1: old machine
+callers use the unchanged exemptions, old browser shells display the gate, and
+old daemons ignore the new cookie/bearers without any shared-store migration.
 
 ### Phase 2: Electron cookie injection and menu item
 

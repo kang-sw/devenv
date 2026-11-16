@@ -92,6 +92,9 @@ func TestSessionReadCrossSiteHardening(t *testing.T) {
 						req.Header.Set("Sec-Fetch-Site", site)
 						req.Header.Set("Origin", "http://"+v.host)
 					}
+					if v.localCookie {
+						addLocalhostTestCookie(t, f.d, req)
+					}
 					rec := httptest.NewRecorder()
 					f.d.Handler().ServeHTTP(rec, req)
 					if site == "cross-site" || site == "same-site" {
@@ -200,6 +203,9 @@ func TestReadHardeningRelaysLargeTopicImages(t *testing.T) {
 		req.Header.Set("Sec-Fetch-Site", "same-origin")
 		if v.cookie != "" {
 			req.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: v.cookie})
+		}
+		if v.localCookie {
+			addLocalhostTestCookie(t, f.d, req)
 		}
 		rec := httptest.NewRecorder()
 		f.d.Handler().ServeHTTP(rec, req)

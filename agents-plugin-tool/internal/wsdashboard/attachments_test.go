@@ -181,7 +181,7 @@ func TestMessageRouteRefusesBadImages(t *testing.T) {
 	}
 	// The image-size case posts a ~13 MB body, which outlasts testClient's
 	// 500 ms under -race; the multi-megabyte bodies go through a patient client.
-	bigClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	bigClient := &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}
 	for _, c := range cases {
 		client := testClient()
 		if len(c.body) > 1<<20 {

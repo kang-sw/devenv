@@ -83,6 +83,7 @@ func SendNudge(ctx context.Context, client *http.Client, ep Endpoint, body Nudge
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+ep.Token)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

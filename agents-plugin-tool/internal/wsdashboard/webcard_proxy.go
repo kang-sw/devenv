@@ -576,7 +576,7 @@ func (g *webRegistry) webAncestors() string {
 
 // dashboardCookies are the daemon's own cookies, which the proxy never
 // forwards to a target.
-var dashboardCookies = map[string]bool{themeCookie: true, wsi18n.CookieName: true, lanTokenCookie: true}
+var dashboardCookies = map[string]bool{themeCookie: true, wsi18n.CookieName: true, lanTokenCookie: true, localhostCookieName: true}
 
 // reverseProxy is a dev-server listener's proxy to target.
 func (g *webRegistry) reverseProxy(target *url.URL) *httputil.ReverseProxy {

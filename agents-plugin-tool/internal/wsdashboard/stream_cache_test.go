@@ -28,7 +28,7 @@ func openStreamWith(t *testing.T, url, cookie string) <-chan sseEvent {
 	if cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,8 @@ func (leadSessions) ReadSession(wsdashboard.Registration) (wsdashboard.SessionDa
 // daemonHarness serves a fresh runner from a real dashboard daemon.
 type daemonHarness struct {
 	*harness
-	base string
+	base   string
+	cookie *http.Cookie
 }
 
 func newDaemonHarness(t *testing.T, profiles map[string]string) *daemonHarness {
@@ -36,7 +38,23 @@ func newDaemonHarness(t *testing.T, profiles map[string]string) *daemonHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
-	return &daemonHarness{harness: h, base: fmt.Sprintf("http://127.0.0.1:%d", d.Endpoint().Port)}
+	return &daemonHarness{harness: h, base: fmt.Sprintf("http://127.0.0.1:%d", d.Endpoint().Port), cookie: daemonCookieForTest(t, d)}
+}
+
+// Obtain a browser credential through the production machine route rather
+// than bypassing the guard. Requests still exercise their own Origin checks.
+func daemonCookieForTest(t *testing.T, daemon *wsdashboard.Daemon) *http.Cookie {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/auth/cookie", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer "+daemon.Endpoint().Token)
+	out := httptest.NewRecorder()
+	daemon.Handler().ServeHTTP(out, req)
+	var cookie struct{ Name, Value string }
+	if err := json.Unmarshal(out.Body.Bytes(), &cookie); err != nil || out.Code != http.StatusOK || cookie.Name == "" || cookie.Value == "" {
+		t.Fatalf("browser credential: status=%d body=%s err=%v", out.Code, out.Body, err)
+	}
+	return &http.Cookie{Name: cookie.Name, Value: cookie.Value}
 }
 
 type reply struct {
@@ -55,6 +73,7 @@ func (d *daemonHarness) do(method, path, origin, contentType string, body any) r
 	if err != nil {
 		d.t.Fatal(err)
 	}
+	req.AddCookie(d.cookie)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -193,6 +212,7 @@ func TestRESTWritesRefuseOtherOrigins(t *testing.T) {
 	}
 	req, _ := http.NewRequest(http.MethodGet, d.base+"/agents", nil)
 	req.Host = "evil.example"
+	req.AddCookie(d.cookie)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

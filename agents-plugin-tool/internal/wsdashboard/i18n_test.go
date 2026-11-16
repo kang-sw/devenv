@@ -203,7 +203,7 @@ func TestStreamAndHistoryFollowTheCookie(t *testing.T) {
 	f := startPageFixture(t)
 	req, _ := http.NewRequest(http.MethodGet, f.base+"/s/livesession/events", nil)
 	req.AddCookie(&http.Cookie{Name: wsi18n.CookieName, Value: "ko"})
-	resp, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(req)
+	resp, err := (&http.Client{Transport: localhostTestHTTPTransport()}).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

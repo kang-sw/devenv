@@ -712,6 +712,11 @@ type shellPageData struct {
 
 func (p shellPageData) regionByName(name string) renderedRegion { return p.regions[name] }
 
+// LoginLocal keeps the Settings action outside shared regions and LAN pages.
+func (p shellPageData) LoginLocal() bool   { return p.SysOpen }
+func (p sessionPageData) LoginLocal() bool { return p.SysOpen }
+func (p indexPageData) LoginLocal() bool   { return p.Local }
+
 type indexPageData struct {
 	IndexView
 	Assets pageAssetsData

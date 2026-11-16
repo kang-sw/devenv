@@ -105,7 +105,7 @@ func TestDaemonRestartReattachesToARunningHolder(t *testing.T) {
 	sink := &holderOutput{}
 	second := wsholder.New(wsholder.Options{Dir: holdersDir, Python: python, Sink: sink})
 	f2 := startPageFixture(t, withHolders(second))
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f2.d.Endpoint().Port)}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f2.d.Endpoint().Port), localCookie: true}
 	var listed wsholder.Info
 	waitFor(t, "the second daemon to attach to the holder", func() bool {
 		list := decodeHolderList(t, serve(f2.d, local, http.MethodGet, "/holders", ""))
