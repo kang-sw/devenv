@@ -508,7 +508,17 @@
       "registered_at": "2026-11-15T02:27:24Z"
     },
     "261116-bug-ws-dashboard-daemon-idle-file-touches": {
-      "registered_at": "2026-11-16T04:15:13Z"
+      "registered_at": "2026-11-16T04:15:13Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-16T04:22:46Z",
+        "impl": {
+          "branch": "impl/develop/lying-dried-borax"
+        }
+      }
     },
     "261116-bug-ws-dashboard-frontend-idle-and-switch-cost": {
       "registered_at": "2026-11-16T04:15:13Z",
