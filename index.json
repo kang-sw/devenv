@@ -517,7 +517,17 @@
       "registered_at": "2026-11-16T03:08:25Z"
     },
     "261116-feat-ws-daemon-hub-first-polling": {
-      "registered_at": "2026-11-16T07:23:26Z"
+      "registered_at": "2026-11-16T07:23:26Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-16T07:25:45Z",
+        "impl": {
+          "branch": "impl/develop/polling-hub-phase1"
+        }
+      }
     },
     "261116-feat-ws-dashboard-restore-session-iframe-cache": {
       "registered_at": "2026-11-16T03:49:02Z"
