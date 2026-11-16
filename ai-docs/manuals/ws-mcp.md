@@ -1013,8 +1013,11 @@ conversation:
   is in the state and `host.backgroundTasks`; a subagent the lead's Agent
   call started takes its effort from an `effort-<level>` subagent type and
   its model and context size from its own assistant lines. Idle stop is
-  the profile's `idle_timeout_seconds` (600 by default for both lead backends;
-  0 disables it) and waits for the reported background task count to be zero.
+  the profile's `idle_timeout_seconds`: absent defaults to 0 (off) for leads
+  and 600 seconds for workers; an explicit 0 disables it. Idle stop waits for
+  no running turn or pending input, a zero reported background task count,
+  and no active spawned child (including a child's background work or held
+  report).
 - **Streaming.** A hosted Claude lead starts with
   `--include-partial-messages`. The `stream_event` mapper accumulates text
   deltas into the reply so far, emitting at most once per 100 ms within a
@@ -1353,11 +1356,15 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    `test_cache_root_and_staged_name_follow_the_go_rules` pins the parity.
 2. `endpoint.json` names the port and token; `GET /health` answers the
    daemon's version, `build_time`, and `content_hash` (the sha256 of the
-   daemon's executable). An unreachable endpoint gets a 20-second swap grace
-   before absence-based startup. A live or unqueryable recorded PID refuses
-   that startup; a connected port that never answers is diagnosed as hung.
-   TCP handshake failure alone establishes only unreachability. A missing
-   health route or version field falls back to the existing `/mcp` hello's
+   daemon's executable). For an unreachable endpoint, the launcher probes
+   Go's `dashboard.lock` non-blockingly to prove absence; it does not consult
+   the recorded PID. Only a held or unqueryable lock gets the 20-second swap
+   grace. A cold cache or a stale endpoint with a free lock starts without
+   that wait. After starter coordination and a health recheck, a lock still
+   held or unqueryable refuses absence-based startup; a connected port that
+   never answers is diagnosed as hung. TCP handshake failure alone establishes
+   only unreachability. A missing health route or version field falls back to
+   the existing `/mcp` hello's
    returned version, not to executable inspection.
 3. Ordinary startup starts an absent daemon or replaces an older numeric
    core using the selected runtime. Equal cores keep the healthy daemon,
@@ -1431,9 +1438,11 @@ Codex Stop retains its fail-open exit 0.
 
 Reconnect: when the connection ends while the client is still attached (the
 daemon was replaced or died), the session MCP proxy connects again (giving a
-successor the swap grace before coordinated absence startup), re-sends the client's captured `initialize`
-request under an id of its own (`ws-mcp-launcher-replay-<n>`, so a late
-answer from the old daemon can never be mistaken for it) and drops its
+successor the swap grace only when the unreachable endpoint's singleton lock
+is held or unqueryable, before coordinated absence startup), re-sends the
+client's captured `initialize` request under an id of its own
+(`ws-mcp-launcher-replay-<n>`, so a late answer from the old daemon can never
+be mistaken for it) and drops its
 answer, re-sends `notifications/initialized`, and answers every request that
 was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
 replaced"); the client never sees the server go away. Reconnecting is
