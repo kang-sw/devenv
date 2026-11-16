@@ -4,6 +4,7 @@ sage-review-design: skipped
 sage-review-completeness: skipped
 related:
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: parent perf ticket; this splits out the measured composer typing cost
+completed: 2026-11-16
 ---
 
 # Composer autosize forces a full-document layout on every keystroke
@@ -114,3 +115,8 @@ machine-local):
   changes. No live latency improvement is claimed from the deterministic tests.
 - Workflow surprise: `tickets.move` refused the occupied assigned worker
   checkout; used the documented `git mv` fallback to promote the ticket.
+
+
+## Resolution (2026-11-16)
+
+Owner live check (1213)=ok on 2026-11-16 12:36 KST against daemon 7bdf11e74: composer autosize no longer forces layout on input; Edge PWA verified, Electron deferred by owner.
