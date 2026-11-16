@@ -29,6 +29,30 @@ Compatibility target: **T0**, additive exposure of existing authorized tools,
 with current schemas, scope/depth ceilings and key/worktree binding preserved.
 This does not authorize exposing every lead-only tool to workers.
 
+Inventory audit (2026-11-16):
+- Add `git.resolve_impl_branch` to `pi-worker`; the inherited mini-lead
+  inventory also needs the same branch-identity primitive. It is already
+  registered and delegate-authorized; no resolver or authorization change.
+- Add `tickets.verify` to `pi-worker` for pre-commit ticket guardrails. Mini-lead
+  already exposed it; inherit it once instead of duplicating its entry.
+- Keep `tickets.create_empty` from `74924b4c0` unchanged. Ticket discovery,
+  acquire/release, move/close, route/checklist, context reads and review rendering
+  remain mini-lead capabilities, not an expansion of the ordinary coding worker.
+- The rendered ticket-worker procedure requires those mini-lead capabilities;
+  use that profile for a worker that owns the full ticket lifecycle. Ordinary
+  implementation/review workers need only the bounded additions above.
+- `worktree.acquire`/`release` remain outside both inventories and retain the
+  existing lead-scope gate. Their scoped worker permissions belong to
+  `261116-feat-ws-subagent-worktree-lease`. The occupied-index move refusal belongs
+  to `261116-bug-ws-tickets-move-refuses-own-impl-worker`.
+- The reported verification failure supplied the original-checkout session key,
+  not the housekeeping worker's bound key. `resolveToolRoot` already selects the
+  supplied key's root for verify/query/create/move/close; the Pi bridge forwards
+  explicit keys unchanged. Preserve this authority instead of falling back to
+  server cwd or adding a root override. Cross-worktree dispatch regressions
+  cover valid worker keys, the original key, unknown keys and rejected overrides.
+  No production routing defect was reproduced.
+
 ## Phases
 
 ### Phase 1: Complete the bounded worker worktree-tool inventory

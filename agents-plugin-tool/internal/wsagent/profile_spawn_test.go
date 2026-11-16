@@ -26,6 +26,21 @@ func setSpawnProfiles(t *testing.T, h *harness, profiles map[string]string) {
 	}
 }
 
+func TestPiWorkerLaunchWorktreeTools(t *testing.T) {
+	h, _ := childHarness(t)
+	h.spawnWorker("medium")
+	spec := h.backend.waitProcStart(t, 0)
+	if spec.WSMCP.Env[EnvAllowedTools] != strings.Join(PiWorkerWSTools, ",") {
+		t.Fatalf("worker MCP allowlist = %q", spec.WSMCP.Env[EnvAllowedTools])
+	}
+	tools, _ := flagValue(piArgs(spec, "bridge.ts"), "--tools")
+	for _, tool := range []string{"git.resolve_impl_branch", "tickets.create_empty", "tickets.verify"} {
+		if !slices.Contains(strings.Split(tools, ","), "mcp__ws__"+strings.ReplaceAll(tool, ".", "_")) {
+			t.Errorf("Pi --tools lacks %s: %s", tool, tools)
+		}
+	}
+}
+
 func TestPiMiniLeadLaunchSurface(t *testing.T) {
 	h, _ := childHarness(t)
 	st, err := h.runner.Spawn(SpawnSpec{Profile: PiMiniLeadProfile, Root: h.root, Prompt: "lead", Tier: "medium", Parent: &leadParent})
@@ -127,18 +142,22 @@ func TestPiParentSnapshotDoesNotWidenWithConfigOrDaemonRestart(t *testing.T) {
 }
 
 func TestPiParentSnapshotExcludesNewWorkerGrant(t *testing.T) {
-	h, _ := childHarness(t)
-	setSpawnProfiles(t, h, map[string]string{
-		ProfilePrefix + PiWorkerProfile: `{"backend":"pi","tools":["read"],"ws_tools":["pi.spawn"]}`,
-	})
-	w := h.spawnWorker("medium")
-	h.backend.waitProcStart(t, 0)
-	setSpawnProfiles(t, h, map[string]string{
-		ProfilePrefix + PiWorkerProfile: `{"backend":"pi","tools":["read"],"ws_tools":["pi.spawn","tickets.create_empty"]}`,
-	})
-	_, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "x", Tier: "small", Parent: &ParentRef{Kind: ParentConversation, ReplyID: w.ID}})
-	if err == nil || !strings.Contains(err.Error(), "ws_tools.tickets.create_empty") {
-		t.Fatalf("new grant must not widen the launched parent: %v", err)
+	for _, tool := range []string{"tickets.create_empty", "git.resolve_impl_branch", "tickets.verify"} {
+		t.Run(tool, func(t *testing.T) {
+			h, _ := childHarness(t)
+			setSpawnProfiles(t, h, map[string]string{
+				ProfilePrefix + PiWorkerProfile: `{"backend":"pi","tools":["read"],"ws_tools":["pi.spawn"]}`,
+			})
+			w := h.spawnWorker("medium")
+			h.backend.waitProcStart(t, 0)
+			setSpawnProfiles(t, h, map[string]string{
+				ProfilePrefix + PiWorkerProfile: `{"backend":"pi","tools":["read"],"ws_tools":["pi.spawn","` + tool + `"]}`,
+			})
+			_, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "x", Tier: "small", Parent: &ParentRef{Kind: ParentConversation, ReplyID: w.ID}})
+			if err == nil || !strings.Contains(err.Error(), "ws_tools."+tool) {
+				t.Fatalf("new grant must not widen the launched parent: %v", err)
+			}
+		})
 	}
 }
 
