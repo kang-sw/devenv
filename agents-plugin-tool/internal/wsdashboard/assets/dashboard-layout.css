@@ -117,9 +117,18 @@
 .dgrid.live[data-tab="board"] > .chead { display: none; }
 .dgrid.live[data-ctab="files"]:not([data-tab="board"]) > .fpane { display: flex; }
 .dgrid.live[data-ctab="files"] > .convo { display: none; }
+/* The split handle (.dcv-edge, cards.js splitHandle) stands in the gap left
+   of the board where the conversation and the board stand side by side,
+   styled as the pinned column's handle (.bp-edge). Dragging it sets the
+   conversation's column (--convow with data-convow on the root, kept with
+   the pins), 320px at least and at most what leaves the board 360px: a
+   width saved on a wider window is clamped to what this one leaves. */
+:root[data-convow] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--convow), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }
+.dgrid.live > .dcv-edge { display: none; grid-area: board; justify-self: start; position: relative; z-index: 2; width: 9px; margin-left: -12px; cursor: col-resize; touch-action: none; }
 @media (min-width: 760px) {
   .dgrid.live[data-layout="split"] { grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(96px, 1fr) auto;
     grid-template-areas: "chead board" "convo board" "composer board"; }
+  .dgrid.live[data-layout="split"] > .dcv-edge { display: block; }
   .dgrid.live[data-layout="split"] > .tabbar { display: none; }
   .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
   .dgrid.live[data-layout="split"] > .bcol { grid-area: board; }
@@ -130,6 +139,7 @@
 @media (min-width: 1100px) {
   .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(96px, 1fr) auto;
     grid-template-areas: "chead board" "convo board" "composer board"; }
+  .dgrid.live:not([data-layout="tabs"]) > .dcv-edge { display: block; }
   .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
   .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
   .dgrid.live:not([data-layout="tabs"]) > .bcol { grid-area: board; }

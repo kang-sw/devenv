@@ -61,16 +61,16 @@
   // Element.moveBefore even that move keeps the card's state; a move between
   // the board and the pinned column takes it too.
   var doc = document;
-  var BASE = 260, MIN = 72, STEP = 24, PINW_MIN = 280, BOARDW_MIN = 400;
+  var BASE = 260, MIN = 72, STEP = 24, PINW_MIN = 280, BOARDW_MIN = 400, CONVW_MIN = 320, SPLITB_MIN = 360;
   // A press drags past SLOP px; a touch drags after holding HOLD ms (the
   // session rail's drag thresholds), and EDGE px from a list's edge scrolls it.
   var SLOP = 5, HOLD = 380, EDGE = 28;
   var kinds = {}, cards = [], topics = {}, board = null, opt = null, maxed = null, scrim = null, seq = 0;
   // pins is the pin list: after the toolbar in the board, or the pinned
   // column's list while the page shows that column (colOn). boardw is the
-  // board's width beside the column as the user dragged it (0: the
-  // stylesheet's).
-  var pins = null, col = null, colOn = false, boardw = 0, zone = null;
+  // board's width beside the column as the user dragged it, convow the
+  // conversation's beside the board (0: the stylesheet's).
+  var pins = null, col = null, colOn = false, boardw = 0, convow = 0, zone = null;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
   var filterValues = ["all", "researching", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed", "cards"];
@@ -682,9 +682,9 @@
   }
 
   // --- storage ----------------------------------------------------------------
-  // The record is {cards, topics, bw}: the cards' view state, the topics
-  // pinned or moved by hand, and the board's width beside the pinned
-  // column. A record from before topics joined is the cards' list alone; a
+  // The record is {cards, topics, bw, cw}: the cards' view state, the
+  // topics pinned or moved by hand, the board's width beside the pinned
+  // column, and the conversation's beside the board. A record from before topics joined is the cards' list alone; a
   // record's w (the column's own width, before the column filled the
   // window) is dropped.
   function persist() {
@@ -692,9 +692,9 @@
     var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at || r.folded; }).map(function (r) {
       return { n: r.name, p: r.pinned, a: r.at, b: r.bar, f: !!r.folded, rank: r.rank };
     });
-    opt.save(opt.key, cards.length || ts.length || boardw ? JSON.stringify({ cards: cards.map(function (c) {
+    opt.save(opt.key, cards.length || ts.length || boardw || convow ? JSON.stringify({ cards: cards.map(function (c) {
       return { id: c.id, kind: c.kind, pinned: c.pinned, at: c.at, rank: c.rank, fold: c.folded, h: c.h, data: c.data };
-    }), topics: ts, bw: boardw }) : null);
+    }), topics: ts, bw: boardw, cw: convow }) : null);
   }
   function stored() {
     var v = null;
@@ -704,7 +704,8 @@
     return {
       cards: (Array.isArray(v.cards) ? v.cards : []).filter(function (r) { return r && typeof r.kind === "string" && kinds[r.kind]; }),
       topics: (Array.isArray(v.topics) ? v.topics : []).filter(function (r) { return r && typeof r.n === "string" && (+r.p || +r.a || r.f); }),
-      bw: +v.bw || 0
+      bw: +v.bw || 0,
+      cw: +v.cw || 0
     };
   }
 
@@ -1332,28 +1333,61 @@
     edgeHandle();
   }
   function edgeHandle() {
-    var edge = mk("div", "bp-edge"), from = null;
-    edge.setAttribute("data-edge", "left");
+    grab("bp-edge", col, function () {
+      var cell = boardCell(), w = cell ? cell.getBoundingClientRect().width : 0;
+      return w ? { w: w, max: w + col.getBoundingClientRect().width - PINW_MIN } : null;
+    }, function (from, dx) {
+      setWidth(Math.min(from.w + dx, Math.max(from.max, BOARDW_MIN)));
+    }, function () { setWidth(0); }).setAttribute("data-edge", "left");
+  }
+  // The split handle stands in the gap between the conversation and the
+  // board of the page's grid (opt.split; the stylesheet shows it where the
+  // two stand side by side) and sizes the conversation's column (--convow,
+  // with data-convow, on the root, kept with the pins; double click goes
+  // back to the stylesheet's split): at least CONVW_MIN, and at most what
+  // leaves the board SPLITB_MIN. The grid's own resolved tracks give the
+  // widths, so the handle needs no knowledge of the grid's children; the
+  // stylesheet clamps a width saved on a wider window.
+  function setConvo(w) {
+    var r = doc.documentElement;
+    convow = w ? Math.max(CONVW_MIN, Math.round(w)) : 0;
+    if (convow) { r.style.setProperty("--convow", convow + "px"); r.setAttribute("data-convow", ""); }
+    else { r.style.removeProperty("--convow"); r.removeAttribute("data-convow"); }
+  }
+  function splitHandle(grid) {
+    grab("dcv-edge", grid, function () {
+      var t = (getComputedStyle(grid).gridTemplateColumns.match(/[\d.]+(?=px)/g) || []).map(Number);
+      return t.length === 2 && t[0] > 0 ? { w: t[0], max: t[0] + t[1] - SPLITB_MIN } : null;
+    }, function (from, dx) {
+      setConvo(Math.min(from.w + dx, Math.max(from.max, CONVW_MIN)));
+    }, function () { setConvo(0); });
+  }
+  // grab makes a width handle (class cls) in host: a press of the main
+  // button starts a drag where start() gives its state (null: nothing to
+  // drag), each move hands move() that state and the distance from the
+  // press, and the release saves; a double click resets and saves.
+  function grab(cls, host, start, move, reset) {
+    var edge = mk("div", cls), from = null, x0 = 0;
     edge.setAttribute("role", "separator");
     edge.setAttribute("aria-orientation", "vertical");
     edge.title = wsT("js.pins.width");
     edge.setAttribute("aria-label", wsT("js.pins.width"));
-    col.appendChild(edge);
+    host.appendChild(edge);
     edge.addEventListener("pointerdown", function (e) {
-      var cell = boardCell(), w = cell ? cell.getBoundingClientRect().width : 0;
-      if ((e.button !== undefined && e.button !== 0) || !w) return;
-      from = { x: e.clientX, w: w, max: w + col.getBoundingClientRect().width - PINW_MIN };
+      if (e.button !== undefined && e.button !== 0) return;
+      from = start();
+      if (!from) return;
+      x0 = e.clientX;
       edge.classList.add("drag");
       try { edge.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the move still lands */ }
       e.preventDefault();
     });
-    edge.addEventListener("pointermove", function (e) {
-      if (from) setWidth(Math.min(from.w + e.clientX - from.x, Math.max(from.max, BOARDW_MIN)));
-    });
+    edge.addEventListener("pointermove", function (e) { if (from) move(from, e.clientX - x0); });
     function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
     edge.addEventListener("pointerup", end);
     edge.addEventListener("pointercancel", end);
-    edge.addEventListener("dblclick", function () { setWidth(0); persist(); });
+    edge.addEventListener("dblclick", function () { reset(); persist(); });
+    return edge;
   }
   // fetchMissing finds the pinned topics the served board lacks (closed
   // past its cap) through the closed route, page by page from the board's
@@ -1413,7 +1447,9 @@
     // hides), closed(from, done) (fetches the closed-topic page from index
     // from and hands its root to done, or null on a failure), adopted(node)
     // (a topic node the closed route brought, now placed), and drag(on) (a
-    // drag starts or ends: board updates wait meanwhile). toolbar supplies
+    // drag starts or ends: board updates wait meanwhile); split (optional)
+    // is the grid whose conversation column the split handle sizes, where
+    // it stands beside the board. toolbar supplies
     // overview(), search(), and optional files: {el, shown(), hidden()}
     // for the page-owned, independent toolbar explorer sheet.
     mount: function (el, o) {
@@ -1432,8 +1468,10 @@
         zone = doc.body.appendChild(mk("div", "bpzone", wsT("js.pins.drop")));
         zone.setAttribute("aria-hidden", "true");
       }
+      if (o.split) splitHandle(o.split);
       var s = stored();
       setWidth(s.bw);
+      setConvo(s.cw);
       s.topics.forEach(function (r) { topics[r.n] = { name: r.n, pinned: +r.p || 0, at: +r.a || 0, bar: r.b === null ? null : +r.b || 0, folded: !!r.f, rank: r.rank, el: null }; });
       s.cards.forEach(function (r) { add(r.kind, r); });
       // The pin list enters the page before anything moves into it, so a
