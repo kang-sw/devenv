@@ -229,15 +229,46 @@ def refresh_first_party(repo):
     input_hash = bundle_hash(pi)
     pkg = json.loads((pi / "package.json").read_text())
     _, lock = production_recipe(pkg, json.loads((pi / "package-lock.json").read_text()))
-    for product in ("agents-plugin", "agents-plugin-wsflow"):
-        owner = repo / product
-        manifests = payload.validate(owner)
-        closure = manifests["closure"]
-        if payload.normalized_lock(lock, pkg["dependencies"]) != closure["production_lock"]:
+    owners = [repo / product for product in ("agents-plugin", "agents-plugin-wsflow")]
+    for owner in owners:
+        closure = payload.validate(owner)["closure"]
+        if (payload.normalized_lock(lock, pkg["dependencies"]) != closure["production_lock"] or
+                closure["prune_version"] != PRUNE_RULE_VERSION):
             raise ValueError("CLOSURE inputs changed; full preparation required")
-        write_first_party(repo, owner / "native-pi", closure, input_hash, pkg)
-        payload.check_source(owner, repo)
+        for name in ("closure.zip", "closure-manifest.json"):
+            if (owner / "native-pi" / name).read_bytes() != (owners[0] / "native-pi" / name).read_bytes():
+                raise ValueError("committed dependency closure copies disagree")
+    # Validate a complete candidate before replacing either usable package.
+    # Missing first-party inputs must not partially overwrite a valid payload.
+    with tempfile.TemporaryDirectory(prefix="ws-native-first-party-") as tmp:
+        fixture = Path(tmp) / "fixture"
+        native = fixture / "native-pi"
+        native.mkdir(parents=True)
+        for name in ("closure.zip", "closure-manifest.json"):
+            shutil.copyfile(owners[0] / "native-pi" / name, native / name)
+        write_first_party(repo, native, closure, input_hash, pkg)
+        payload.check_source(fixture, repo)
+        publish_native(repo, native)
     print("native Pi first-party refreshed; dependency closure unchanged")
+
+
+def publish_native(repo, native):
+    for product in ("agents-plugin", "agents-plugin-wsflow"):
+        dest = repo / product / "native-pi"
+        ready, old = repo / product / ".native-pi-prepared", repo / product / ".native-pi-previous"
+        if old.exists():
+            raise ValueError(f"previous native backup exists: {old}")
+        shutil.rmtree(ready, ignore_errors=True)
+        shutil.copytree(native, ready)
+        if dest.exists():
+            dest.rename(old)
+        try:
+            ready.rename(dest)
+        except BaseException:
+            if old.exists():
+                old.rename(dest)
+            raise
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def generate(repo, offline=False, npm_cache=None, report=None):
@@ -289,22 +320,7 @@ def generate(repo, offline=False, npm_cache=None, report=None):
         fixture.mkdir()
         shutil.copytree(native, fixture / "native-pi")
         payload.validate(fixture)
-        for product in ("agents-plugin", "agents-plugin-wsflow"):
-            dest = repo / product / "native-pi"
-            ready, old = repo / product / ".native-pi-prepared", repo / product / ".native-pi-previous"
-            if old.exists():
-                raise ValueError(f"previous native backup exists: {old}")
-            shutil.rmtree(ready, ignore_errors=True)
-            shutil.copytree(native, ready)
-            if dest.exists():
-                dest.rename(old)
-            try:
-                ready.rename(dest)
-            except BaseException:
-                if old.exists():
-                    old.rename(dest)
-                raise
-            shutil.rmtree(old, ignore_errors=True)
+        publish_native(repo, native)
         sizes = sorted(((name, (deps / name).stat().st_size) for name in closure_files), key=lambda x: (-x[1], x[0]))
         result = {"closure_key": closure["key"], "zip_bytes": (native / "closure.zip").stat().st_size,
                   "closure_manifest_bytes": (native / "closure-manifest.json").stat().st_size,

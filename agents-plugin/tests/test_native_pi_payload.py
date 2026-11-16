@@ -348,6 +348,28 @@ class NativePiPayloadTests(unittest.TestCase):
         for product, inventory in before.items():
             self.assertEqual(inventory, PAYLOAD.tree(repo / product / "native-pi"))
 
+    def test_first_party_only_refresh_validates_before_publication(self):
+        repo = self.source_fixture()
+        shutil.copytree(REPO / "agents-plugin-wsflow/native-pi", repo / "agents-plugin-wsflow/native-pi")
+        products = ("agents-plugin", "agents-plugin-wsflow")
+        before = {p: PAYLOAD.tree(repo / p / "native-pi") for p in products}
+        source = repo / "agents-plugin-pi/workflow-bundles/wsflow.zip"
+        original = source.read_bytes()
+        source.unlink()
+        with patch.object(PRODUCER.subprocess, "run", side_effect=AssertionError("first-party refresh must not run npm")):
+            with self.assertRaises(OSError):
+                PRODUCER.refresh_first_party(repo)
+        for product in products:
+            self.assertEqual(PAYLOAD.tree(repo / product / "native-pi"), before[product])
+        source.write_bytes(original)
+        with patch.object(PRODUCER.subprocess, "run", side_effect=AssertionError("first-party refresh must not run npm")):
+            PRODUCER.refresh_first_party(repo)
+        for product in products:
+            PAYLOAD.check_source(repo / product, repo)
+            after = PAYLOAD.tree(repo / product / "native-pi")
+            for name in ("closure.zip", "closure-manifest.json"):
+                self.assertEqual(after[name], before[product][name])
+
     def test_snapshot_bodies_two_updates_and_invalid_input_rollback(self):
         shell = (REPO / "install.sh").read_text().split("<<'SNAPSHOTEOF'\n", 1)[1].split("\nSNAPSHOTEOF", 1)[0]
         windows = (REPO / "scripts/install-claude-plugin.ps1").read_text().split("$snapshotCode = @'\n", 1)[1].split("\n'@", 1)[0]

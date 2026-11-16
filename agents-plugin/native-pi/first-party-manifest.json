@@ -29,7 +29,7 @@
     "agents-plugin-pi/pi-lead-guide.md": "1629b17ee77ca83ea486249c132c21836334ec53b7839b2788d1e6dff2b8232c",
     "agents-plugin-pi/scripts/bundle.mjs": "1d28f773058057cd07888bd7fa1c5034abb522f5ccf468b932c7091cb801291e",
     "agents-plugin-pi/scripts/copy-skills.mjs": "9bdc5a3b1d8339a7c11cc51b9a75ec522308713b9fa8e9ba79d312313c021d2d",
-    "agents-plugin-pi/scripts/prepare-native-payload.py": "0d90fd33883d5acb0590f83f61586802970ba1cf378fefbcc2a0a76acfd86cab",
+    "agents-plugin-pi/scripts/prepare-native-payload.py": "58015a91ffee9e424c5c2de9749afac4bdff4919de14c882d8b0ed16f8e6791c",
     "agents-plugin-pi/scripts/prepare-workflow-bundles.py": "389198582037996ea7740e3b96cd49781ddc17071ee5e04add3dd4ce907e2012",
     "agents-plugin-pi/scripts/verify-display-summary-host.mjs": "e0e77a6043c34a02635a82946de7f22195f1038dd28d93053a3db9b7f860d60d",
     "agents-plugin-pi/src/adapter-config.ts": "3481659ed9f666c5d012df64498a3dc52e017a425ca8eb6a0646c8e7571aa6b3",
