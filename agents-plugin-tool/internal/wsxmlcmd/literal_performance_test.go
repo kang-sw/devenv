@@ -142,6 +142,35 @@ func TestLiteralCodePerformanceShapesPreserveBoundaries(t *testing.T) {
 	}
 }
 
+func bestLiteralParseTime(t *testing.T, inputBytes int, parse func()) time.Duration {
+	t.Helper()
+	const trials = 7
+	const minSample = 20 * time.Millisecond
+	iterations := 1
+	best := time.Hour
+	for trial := 0; trial < trials; {
+		runtime.GC()
+		start := time.Now()
+		for range iterations {
+			parse()
+		}
+		elapsed := time.Since(start)
+		// Single sub-millisecond parses are dominated by runner pauses and
+		// coarse timers. Require seven batches at the same iteration count,
+		// each long enough to amortize that noise, then normalize.
+		if elapsed < minSample {
+			iterations *= 2
+			best, trial = time.Hour, 0
+			continue
+		}
+		best = min(best, elapsed)
+		trial++
+	}
+	best /= time.Duration(iterations)
+	t.Logf("%d bytes best-of-%d=%s per parse (%d parses/batch)", inputBytes, trials, best, iterations)
+	return best
+}
+
 func TestLiteralCodeNearLinearGrowth(t *testing.T) {
 	g := literalPerformanceGrammar()
 	for _, kind := range literalPerformanceShapes {
@@ -149,35 +178,14 @@ func TestLiteralCodeNearLinearGrowth(t *testing.T) {
 			var bests []time.Duration
 			for _, size := range []int{50000, 100000, 200000} {
 				input, _ := literalPerformanceInput(kind, size)
-				const trials = 7
-				const minSample = 20 * time.Millisecond
-				iterations := 1
-				best := time.Hour
-				for trial := 0; trial < trials; {
-					runtime.GC()
-					start := time.Now()
-					for range iterations {
-						p := &Problems{}
-						Parse(p, g, input)
-						if len(p.List) != 0 {
-							t.Fatal(p.List)
-						}
+				best := bestLiteralParseTime(t, len(input), func() {
+					p := &Problems{}
+					Parse(p, g, input)
+					if len(p.List) != 0 {
+						t.Fatal(p.List)
 					}
-					elapsed := time.Since(start)
-					// Single sub-millisecond parses are dominated by runner
-					// pauses. Require seven batches at the same iteration count,
-					// each long enough to amortize that noise, then normalize.
-					if elapsed < minSample {
-						iterations *= 2
-						best, trial = time.Hour, 0
-						continue
-					}
-					best = min(best, elapsed)
-					trial++
-				}
-				best /= time.Duration(iterations)
+				})
 				bests = append(bests, best)
-				t.Logf("%s %d bytes best-of-%d=%s per parse (%d parses/batch)", kind, len(input), trials, best, iterations)
 			}
 			if bests[2] >= 100*time.Millisecond {
 				t.Fatalf("200KB absolute bound: %s >= 100ms", bests[2])
