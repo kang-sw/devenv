@@ -112,8 +112,8 @@ func TestWakeWaitRechecksOnASignalWithoutAPollTick(t *testing.T) {
 			if d := clock.nextArmed(t); d != WakeBackstopPoll {
 				t.Fatalf("backstop = %v, want %v", d, WakeBackstopPoll)
 			}
-			if WakeBackstopPoll != 10*time.Second {
-				t.Fatalf("WakeBackstopPoll = %v, want 10s", WakeBackstopPoll)
+			if WakeBackstopPoll != 5*time.Minute {
+				t.Fatalf("WakeBackstopPoll = %v, want 5m", WakeBackstopPoll)
 			}
 			seedWaitReplyMail(t, sessionKey, "arrived")
 			if kind == "hard" {
@@ -145,6 +145,49 @@ func TestWakeWaitBackstopStillRechecks(t *testing.T) {
 	clock.Advance(WakeBackstopPoll)
 	if result := awaitOutcome(t, done); len(result.Reply) != 1 {
 		t.Fatalf("Wait = %#v, want the mail the backstop found", result)
+	}
+}
+
+// TestWakeWaitIdleAndLostWake counts peeks without probing a filesystem.
+func TestWakeWaitIdleAndLostWake(t *testing.T) {
+	clock := newFakeTimers()
+	peeks := make(chan struct{}, 4)
+	var arrived bool
+	var mu sync.Mutex
+	done := make(chan waitOutcome, 1)
+	go func() {
+		r, err := waitLoop(func() (WaitResult, error) {
+			peeks <- struct{}{}
+			mu.Lock()
+			defer mu.Unlock()
+			if arrived {
+				return WaitResult{Board: 1}, nil
+			}
+			return WaitResult{}, nil
+		}, WaitOptions{Wake: &wswake.Hub{}, Now: clock.Now, After: clock.After})
+		done <- waitOutcome{r, err}
+	}()
+	<-peeks
+	if d := clock.nextArmed(t); d != 5*time.Minute {
+		t.Fatalf("backstop = %v", d)
+	}
+	clock.Advance(5*time.Minute - time.Nanosecond)
+	select {
+	case <-peeks:
+		t.Fatal("idle wait peeked before its backstop")
+	default:
+	}
+	mu.Lock()
+	arrived = true // foreign write with no wake
+	mu.Unlock()
+	clock.Advance(time.Nanosecond)
+	if result := awaitOutcome(t, done); result.Board != 1 {
+		t.Fatalf("lost wake recovery = %+v", result)
+	}
+	select {
+	case <-peeks:
+	default:
+		t.Fatal("backstop did not peek")
 	}
 }
 

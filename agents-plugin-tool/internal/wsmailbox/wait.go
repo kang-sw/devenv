@@ -100,7 +100,7 @@ const DefaultWaitPoll = 500 * time.Millisecond
 // WakeBackstopPoll is the recheck interval of a Wait whose WaitOptions.Wake
 // is set and Poll unset: the wakes carry the arrivals, and this backstop
 // covers a lost one.
-const WakeBackstopPoll = 10 * time.Second
+const WakeBackstopPoll = 5 * time.Minute
 
 // WakeNudgeInterval is the least time between two nudge-driven rechecks of
 // one Wait. A nudge names no store, and nudges for unrelated stores can

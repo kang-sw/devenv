@@ -17,6 +17,8 @@ import (
 
 const hireProposalsFile = "hire-proposals.json"
 const hireLifetime = 30 * time.Minute
+const hireSafetyPoll = 5 * time.Minute
+const hireRetry = time.Second
 
 // HireRequest contains preferences only. The owner chooses the final launch.
 type HireRequest struct {
@@ -74,6 +76,9 @@ func (d *Daemon) hireClock() time.Time {
 }
 
 func (d *Daemon) readHires() ([]HireProposal, error) {
+	if d.hireRead != nil {
+		return d.hireRead()
+	}
 	raw, err := os.ReadFile(filepath.Join(d.dir, hireProposalsFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return []HireProposal{}, nil
@@ -91,7 +96,13 @@ func (d *Daemon) saveHires(p []HireProposal) error {
 	if err != nil {
 		return err
 	}
-	return writePrivateFile(d.dir, hireProposalsFile, append(raw, '\n'))
+	if err := writePrivateFile(d.dir, hireProposalsFile, append(raw, '\n')); err != nil {
+		return err
+	}
+	if !d.hireInLoop {
+		d.pokeHires()
+	}
+	return nil
 }
 
 // hiringEligible reads the row on disk, not the eventually refreshed index:
@@ -203,38 +214,79 @@ func (d *Daemon) pokeHires() {
 
 func (d *Daemon) hireLoop() {
 	defer close(d.hireDone)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	safety := d.hireClock().Add(hireSafetyPoll)
 	for {
-		select {
-		case <-d.stop:
-			return
-		case <-d.hireWake:
-		case <-ticker.C:
-		}
 		select {
 		case <-d.stop:
 			return
 		default:
 		}
-		d.settleHires()
+		next := d.settleHiresNext()
+		now := d.hireClock()
+		if !now.Before(safety) {
+			safety = now.Add(hireSafetyPoll)
+		}
+		if next.IsZero() || safety.Before(next) {
+			next = safety
+		}
+		delay := next.Sub(now)
+		if delay < 0 {
+			delay = 0
+		}
+		after := d.hireAfter
+		if after == nil {
+			after = func(delay time.Duration) (<-chan time.Time, func()) {
+				timer := time.NewTimer(delay)
+				return timer.C, func() { timer.Stop() }
+			}
+		}
+		tick, stop := after(delay)
+		select {
+		case <-d.stop:
+			stop()
+			return
+		case <-d.hireWake:
+		case <-tick:
+		}
+		stop()
 	}
 }
 
-func (d *Daemon) settleHires() {
+func (d *Daemon) settleHires() { d.settleHiresNext() }
+
+func (d *Daemon) settleHiresNext() time.Time {
 	d.hireMu.Lock()
 	defer d.hireMu.Unlock()
+	d.hireInLoop = true
+	defer func() { d.hireInLoop = false }()
 	proposals, err := d.readHires()
+	var next time.Time
 	if err == nil {
-		err = d.settleHiresLocked(proposals)
+		next, err = d.settleHiresDeadlineLocked(proposals)
 	}
 	if err != nil {
 		fmt.Fprintf(d.log, "dashboard: hiring recovery: %v\n", err)
+		retry := d.hireClock().Add(hireRetry)
+		if next.IsZero() || retry.Before(next) {
+			next = retry
+		}
 	}
+	return next
 }
 
 // A stopped hosted process still has a live row and keeps its requests.
 func (d *Daemon) settleHiresLocked(proposals []HireProposal) error {
+	_, err := d.settleHiresDeadlineLocked(proposals)
+	return err
+}
+
+func (d *Daemon) settleHiresDeadlineLocked(proposals []HireProposal) (time.Time, error) {
+	var next time.Time
+	arm := func(at time.Time) {
+		if next.IsZero() || at.Before(next) {
+			next = at
+		}
+	}
 	var pendingErrors []error
 	for i := range proposals {
 		p := &proposals[i]
@@ -249,12 +301,29 @@ func (d *Daemon) settleHiresLocked(proposals []HireProposal) error {
 				pendingErrors = append(pendingErrors, err)
 				continue
 			case p.Launch != nil:
+				// Startup recovery now runs immediately. Do not replay an
+				// approval before the index supplies the hierarchy authority.
+				if !d.index.hierarchyReady(p.Requester) {
+					arm(d.hireClock().Add(hireRetry))
+					break
+				}
 				if err := d.approveHireLocked(proposals, i); err != nil {
 					// A failed creation leaves the request in the owner's queue;
 					// it is not a new outcome or an automatic provider retry loop.
 					p.Launch, p.CreationError = nil, err.Error()
 					if err := d.saveHires(proposals); err != nil {
-						return err
+						return next, err
+					}
+				}
+			}
+			if p.Status == "pending" {
+				arm(p.ExpiresAt)
+				if err == nil {
+					beat, parseErr := time.Parse(time.RFC3339, reg.HeartbeatAt)
+					if parseErr == nil {
+						// Live includes the boundary. Reread the row after it;
+						// an unnotified heartbeat may have advanced it.
+						arm(beat.Add(LiveWindow).Add(time.Nanosecond))
 					}
 				}
 			}
@@ -263,7 +332,7 @@ func (d *Daemon) settleHiresLocked(proposals []HireProposal) error {
 			// Commit the disposition before cleanup or mail, so a crash cannot
 			// revive a cancelled request. Failed side effects retry from disk.
 			if err := d.saveHires(proposals); err != nil {
-				return err
+				return next, err
 			}
 			// An interrupted approval may already have created its session before
 			// grouping/outcome committed. Cancel that provisional creation only;
@@ -286,12 +355,12 @@ func (d *Daemon) settleHiresLocked(proposals []HireProposal) error {
 			}
 			p.Notified = true
 			if err := d.saveHires(proposals); err != nil {
-				return err
+				return next, err
 			}
 			d.broker.wake(railListRepoKey)
 		}
 	}
-	return errors.Join(pendingErrors...)
+	return next, errors.Join(pendingErrors...)
 }
 
 func (d *Daemon) notifyHire(p *HireProposal) error {

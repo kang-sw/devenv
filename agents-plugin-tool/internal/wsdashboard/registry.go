@@ -258,6 +258,12 @@ func ReadRegistration(dir, replyID string) (Registration, error) {
 // whose file is missing, unreadable, or does not parse. A missing registry
 // is empty.
 func ReadRegistrations(dir string) ([]Registration, error) {
+	return readRegistrations(dir, nil)
+}
+
+// failed reports uncertainty without changing the public best-effort listing.
+// Consumers needing admission authority must not treat unreadable as absent.
+func readRegistrations(dir string, failed func(string, error)) ([]Registration, error) {
 	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -272,6 +278,8 @@ func ReadRegistrations(dir string) ([]Registration, error) {
 		}
 		if reg, err := ReadRegistration(dir, entry.Name()); err == nil {
 			out = append(out, reg)
+		} else if failed != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errRegistrationMismatch) {
+			failed(entry.Name(), err)
 		}
 	}
 	return out, nil
