@@ -51,6 +51,13 @@ since both touch how playbook text varies by knob.
   every other command is refused. `whiteboard.query` is admitted read-only on
   that board. Rejected: a separate sub-lead board; sub-lead topic creation.
   (51)
+- **Sub-lead board syntax.** A separate short `whiteboard-status` print
+  playbook teaches the status-only subset (`wb:log`, `wb:panel` inside an
+  existing `wb:topic`), read on demand by a sub-lead that posts status;
+  `sublead-protocol` names it, and the refusal a parented key receives names
+  it. Rejected: a section inside `sublead-protocol` (every sub-lead would
+  carry it); the full `whiteboard` playbook (its lead-only rules would reach
+  sub-leads). (59)
 - **Attribution.** A sub-lead's log line and panel recap carry a
   server-written attribution prefix in their text. Rejected: a new author
   field in the board store. (52)
@@ -96,7 +103,9 @@ since both touch how playbook text varies by knob.
 - Profile-aware selection in `wsrsrc.Load` per (46)-(48); every `Load`
   caller, including declared-variable collection, receives the same profile.
 - Whitelist and `config.tune` warning per (49); nested-spawn probe per (50).
-- Sub-lead board path per (51), (52).
+- Sub-lead board path per (51), (52); a refused command's message for a
+  parented key names the `whiteboard-status` playbook (59), which Phase 2
+  writes.
 - Auto-ack per (53). Approved knob-off text (match each on-text exactly
   against the text present when the phase runs):
   - `lead-ticket`: `- Only user-confirmed decisions, plus items the handler
@@ -132,7 +141,10 @@ Written by the lead with the user in session (54).
   generic loop over the protocol; sub-leads read the base manual.
 - `ticket-handler` report folded into the protocol (55); `lead-ticket`'s
   handler loop reads the folded report.
-- `whiteboard` playbook: sub-leads may write status lines and panels.
+- `whiteboard-status` playbook (59): the status-only subset for sub-leads;
+  `sublead-protocol` points a sub-lead that posts status at it. The
+  `whiteboard` playbook's "workers and subagents do not use the board" line
+  is updated to point sub-leads there.
 - Verification: `playbook.read` of `lead-workflow-manual` under each profile
   for a top-level key, and under `orchestrate` for a parented key (base
   manual); manifest and mirror regeneration tests.
