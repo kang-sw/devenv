@@ -170,6 +170,10 @@ plan target. `dashboard.js` (536 lines) is no longer oversized.
     series. Rejected: leaving pointers that no longer resolve.
   - Files above the 1000-line soft limit after a split are accepted; the guard
     baseline and limits do not change.
+- Owner (1249)=a: `internal/wswhiteboard/assets/mermaid/mermaid.min.js`
+  (3636 lines, third-party) is not split and is marked `linguist-vendored` in
+  `.gitattributes` - a classification, not a size-limit change.
+
 ## Execution Plan
 
 Phases touch disjoint source files and can run in parallel worktrees, one worker
@@ -194,13 +198,6 @@ tests), 3 (`internal/wsagent`), 4 (`internal/wsdashboard` tracker), 5 (Pi src),
   Lead check 2026-11-17: those three branches are parked (last commits
   2026-11-14/15, unmerged, no worker on them), so the split proceeds now and a
   parked branch rebases onto the split when it resumes.
-
-## Open Decisions
-
-1. **mermaid (owner):** `internal/wswhiteboard/assets/mermaid/mermaid.min.js`
-   (3636 lines) is third-party and is not split. Proposed: mark it
-   `linguist-vendored` in `.gitattributes` (a classification, not a limit
-   change). Not blocking any phase.
 
 ## Phases
 
