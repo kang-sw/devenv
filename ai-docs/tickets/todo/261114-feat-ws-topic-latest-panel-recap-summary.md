@@ -67,3 +67,60 @@ line with the larger `eN`; each must win consistently across all three
 surfaces (699). Retain the T0 boundary. Merge serially after B. Product
 verification is deferred to that execution; this lane performs ticket
 guardrails only.
+
+### Result (6302d9646) - 2026-11-16
+
+Implemented 2026-11-16 on `impl/develop/panel-recap-summary` (Phase 1).
+Owner's 23:12 request and `(1221)=a` approved option A in
+`ai-docs/assets/mockups/261116/panel-recap-title/mockup.html`:
+
+- One shared display projection selects the newest agent log or panel recap;
+  equal timestamps use the larger numeric `eN`, including `e9`/`e10` ties.
+  Board/page/embed, query `current`, and session-state topic lists agree.
+  System events cannot win; `LatestAgent` remains log-only for arrival blink.
+- Panel heads use the existing 12.5px muted, four-line-clamped summary slot,
+  the `P` marker with existing `wb.stream.panels` translation, panel recap
+  inline text, and the exact version's `data-entry`. A later log restores `L`.
+  Ctrl+Q Overview inherits the same summary and clamp. Panel history and
+  payloads remain unchanged; query summary metadata excludes panel payloads.
+  T0: no durable schema, store format, command, or migration change.
+- Legacy-body commands already produce panels titled `Current content`;
+  those now legitimately become summaries too. Unconverted legacy-recap
+  fallback tests remain separate. Closed panel-only topics retain their
+  summary inside the existing closed recap fold.
+
+Verification used isolated Go 1.23.12 at
+`/tmp/ws-panel-recap-go123/go/bin` (host Go is 1.26.2), with that directory
+first in `PATH` and `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+
+- `go test ./internal/wswhiteboard -count=1 -v` — PASS (255.319s);
+  panel-only, agent-only, mixed, timestamp recency, both numeric ties,
+  immutable state, exact panel-version jump markup, legacy fallback,
+  query projections/filters and panel-payload exclusion covered.
+- Narrow MCP recap/session-state tests in `workflow_manual_recaps_test.go`
+  (`TestRenderSessionState…` and
+  `TestWorkflowStateByteIdenticalToWorkflowManualWithSummaries`) — PASS.
+- `go test ./internal/wsdashboard -run '^TestCSSClassesDoNotCollideAcrossModules$' -count=1`
+  — PASS; the sole new product CSS class is `wb-evi-panel`.
+- `go test ./internal/wsdashboard -run '^TestPanelRecapHeadBrowser$' -count=1 -v`
+  — PASS, production-rendered dashboard HTML in headless Chromium, light and
+  dark: panel-only P, log → later panel P → later log L, recap jump to the
+  actual panel row, Ctrl+Q summary retention and real four-line overflow clamp.
+- `node internal/wswhiteboard/testdata/latest-log.browser.cjs` — PASS;
+  latest-log arrival and one/four-line sticky geometry unchanged.
+
+Browser runs used
+`PLAYWRIGHT_BROWSERS_PATH=$HOME/Library/Caches/ms-playwright` and
+`WS_PLAYWRIGHT_MODULE=$HOME/.npm/_npx/705bc6b22212b352/node_modules/playwright`.
+Required captures (`WS_PANEL_RECAP_SHOTS=/tmp/ws-panel-recap-shots`) were
+visually checked against option A, outside the repository:
+
+- `/tmp/ws-panel-recap-shots/panel-only-light.png`
+- `/tmp/ws-panel-recap-shots/panel-only-dark.png`
+- `/tmp/ws-panel-recap-shots/log-then-later-panel-light.png`
+- `/tmp/ws-panel-recap-shots/log-then-later-panel-dark.png`
+- `/tmp/ws-panel-recap-shots/overview-light.png`
+- `/tmp/ws-panel-recap-shots/overview-dark.png`
+
+No shared daemon lifecycle operation, Electron launch, merge, push, or SSH.
+Integration remains with the lead; this worker leaves the ticket in `todo`.

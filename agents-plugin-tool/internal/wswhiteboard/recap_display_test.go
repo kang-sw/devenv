@@ -19,7 +19,8 @@ func TestRecapDisplayClampAndContentSizedHeader(t *testing.T) {
 		t.Fatal("header recap reserves blank lines instead of shrinking to content")
 	}
 	// The author badge must not enlarge the first line beyond the line grid.
-	wantAll(t, css, `.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }`)
+	wantAll(t, css, `.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }`,
+		`.evi.wb-evi-panel { background: color-mix(in srgb, var(--wb-fg) 11%, transparent); color: var(--wb-muted-fg); }`)
 	// Sticking must not change the shared maximum or content-driven height.
 	if regexp.MustCompile(`(?m)^[^\n{]*\.wb-stuck[^\n{]*\.trecap\s*\{`).MatchString(css) {
 		t.Fatal("stuck recap overrides the shared clamp/height")
@@ -44,14 +45,15 @@ func TestRecapDisplayPanelTitleIsNotClipped(t *testing.T) {
 
 func TestRecapDisplayFullTextTitles(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, `<wb:topic name="current"><wb:log>agent "full" text</wb:log><wb:panel recap="panel &quot;full&quot; &amp; text">body</wb:panel><wb:panel id="p1" recap="new panel">new body</wb:panel></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="agent"><wb:log>agent "full" text</wb:log></wb:topic><wb:topic name="current"><wb:log>old log</wb:log><wb:panel recap="panel &quot;full&quot; &amp; text">body</wb:panel><wb:panel id="p1" recap="new &quot;panel&quot; &amp; text">new body</wb:panel></wb:topic>`)
 	legacyRecap(st, "legacy", `legacy "full" & text`)
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		wantAll(t, out,
 			`class="rtext md" title="agent &#34;full&#34; text"`,
 			`class="rtext md" title="legacy &#34;full&#34; &amp; text"`,
-			`class="entry-recap" title="new panel"`)
+			`class="entry-recap" title="new &#34;panel&#34; &amp; text"`,
+			`class="rtext md" title="new &#34;panel&#34; &amp; text"`)
 		if layout == LayoutFull {
 			// Historical versions retain their own full recap, not the latest one's.
 			wantAll(t, out, `class="entry-recap" title="panel &#34;full&#34; &amp; text"`)

@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -134,6 +135,54 @@ func TestQueryStreamFiltersBeforeLastAndChronological(t *testing.T) {
 	}
 	if r := queryResult(t, st, `{"topic":"a","kind":"agent","last":2}`); len(r.Topics[0].Panels) != 0 || r.Topics[0].Entries[0].ID != "e13" {
 		t.Fatal("kind filter ignored in discovery")
+	}
+}
+
+func TestQueryFilteredEntriesKeepLatestPanelSummaryWithoutPayload(t *testing.T) {
+	st := queryEntryBoard()
+	const at = "2026-11-13T13:00:00Z"
+	st.EntrySeq = 19
+	st.Topics[0].Entries = append(st.Topics[0].Entries, Entry{
+		ID: "e19", Kind: EntryPanel, PanelID: "p1", At: at,
+		Recap: "newest recap\ncontinued recap", Text: "newest private panel payload",
+	})
+	for _, tc := range []struct {
+		raw string
+		ids []string
+	}{
+		{`{"topic":"a","entries":"log","kind":"agent","last":1}`, []string{"e15"}},
+		// A historical payload match must retain its exact locator while the
+		// current summary stays independent of the selected entry window.
+		{`{"topic":"a","entries":"panel","text":"old payload token","last":1}`, []string{"e2"}},
+		{`{"topic":"a","entries":"all","since":"e19"}`, nil},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			r := queryResult(t, st, tc.raw)
+			if r.Mode != "stream" || len(r.Topics) != 1 {
+				t.Fatalf("unexpected stream: %+v", r)
+			}
+			q := r.Topics[0]
+			if !reflect.DeepEqual(queryEntryIDs(q.Entries), tc.ids) {
+				t.Fatalf("selected entries changed: %+v", q.Entries)
+			}
+			summary := q.LatestSummary
+			if summary == nil || summary.ID != "e19" || summary.Kind != EntryPanel || summary.PanelID != "p1" || summary.At != at || summary.Recap != "newest recap\ncontinued recap" || summary.Text != "" {
+				t.Fatalf("latest panel metadata: %+v", summary)
+			}
+			text := FormatQuery(r)
+			if !strings.Contains(text, "current e19 "+at+": newest recap\n  continued recap\n") {
+				t.Fatalf("latest panel current line missing:\n%s", text)
+			}
+			encoded, err := json.Marshal(q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, payload := range []string{"newest private panel payload", "old payload token", "latest payload secret"} {
+				if strings.Contains(text, payload) || strings.Contains(string(encoded), payload) {
+					t.Fatalf("panel payload %q leaked: %s\n%s", payload, text, encoded)
+				}
+			}
+		})
 	}
 }
 
