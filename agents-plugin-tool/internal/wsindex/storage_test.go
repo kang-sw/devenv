@@ -272,23 +272,28 @@ func TestA9IndexDiscoveredAfterAbsenceTTL(t *testing.T) {
 	h := newHarness(t)
 	x := h.clone("x", "x@example.com")
 	y := h.clone("y", "y@example.com")
-	if view, _ := x.client().Read(bg); view.State != ViewAbsent {
-		t.Fatalf("x Read = %s, want absent", view.State)
+	// TTL expiry uses the harness's fake clock, but discovery plus fetch
+	// shares a real deadline. Loaded Windows runners can exceed the short
+	// display-read budget after discovery, yielding ViewUnknown. This test
+	// exercises absence caching, not transport latency.
+	x.opts.ReadTimeout = DefaultWriteTimeout
+	if view, err := x.client().Read(bg); err != nil || view.State != ViewAbsent {
+		t.Fatalf("x Read = %s, %v; want absent", view.State, err)
 	}
 	h.initIndex(y)
 	h.submit(y.client(), "260924-feat-y")
 
 	h.clock.Advance(DefaultAbsenceTTL / 2)
 	before := x.runner.remoteCount()
-	if view, _ := x.client().Read(bg); view.State != ViewAbsent {
-		t.Fatalf("x Read within TTL = %s, want cached absent", view.State)
+	if view, err := x.client().Read(bg); err != nil || view.State != ViewAbsent {
+		t.Fatalf("x Read within TTL = %s, %v; want cached absent", view.State, err)
 	}
 	if x.runner.remoteCount() != before {
 		t.Fatal("a read within the absence TTL contacted the remote")
 	}
 	h.clock.Advance(DefaultAbsenceTTL)
 	view, err := x.client().Read(bg)
-	if err != nil || view.State != ViewFresh || view.Index.Registrations["260924-feat-y"] == nil {
+	if err != nil || view.State != ViewFresh || view.Index == nil || view.Index.Registrations["260924-feat-y"] == nil {
 		t.Fatalf("x Read after TTL = %+v, %v; want the new index", view, err)
 	}
 }

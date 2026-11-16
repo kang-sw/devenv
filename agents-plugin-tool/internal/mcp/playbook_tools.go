@@ -325,21 +325,22 @@ func resolveNamespaceVars(namespace string) map[string]string {
 // the shape rather than being handed a broken command.
 const mailboxWaitCommandGeneric = "python3 <plugin>/bin/ws-mcp-launcher.py mailbox wait --session-key <your key> [--slug <your address>] [--timeout <duration>]"
 
-// envCLIName is the launcher's shell-quoted Python command, when available.
+// envCLIName is the declared CLI shim or shell-quoted Python launcher command.
 const envCLIName = "WS_MCP_CLI_NAME"
 
-// Accept only simple shell words or single-quoted paths. In particular, never
-// echo an untrusted executable override or shell metacharacters into guidance.
-var launcherCommandPattern = regexp.MustCompile(`^(?:'(?:[A-Za-z0-9_./:\\ -]*[/\\])?python(?:3(?:\.[0-9]+)?)?(?:\.exe)?'|(?:[A-Za-z0-9_./:\\-]*[/\\])?python(?:3(?:\.[0-9]+)?)?(?:\.exe)?)[ ]+(?:'[A-Za-z0-9_./:\\ -]*ws-mcp-launcher\.py'|[A-Za-z0-9_./:\\-]*ws-mcp-launcher\.py)$`)
+// Unquoted paths use shlex's ordinary word characters; quoted paths may
+// contain any printable character except the quote itself. Shell operators
+// are safe only inside those quotes, never as extra words or commands.
+var launcherCommandPattern = regexp.MustCompile(`^(?:'(?:[^'\x00-\x1f\x7f]*[/\\])?python(?:3(?:\.[0-9]+)?)?(?:\.exe)?'|(?:[A-Za-z0-9_./:\\@%+=,\-]*[/\\])?python(?:3(?:\.[0-9]+)?)?(?:\.exe)?)[ ]+(?:'[^'\x00-\x1f\x7f]*ws-mcp-launcher\.py'|[A-Za-z0-9_./:\\@%+=,\-]*ws-mcp-launcher\.py)$`)
 
-// CLICommandName returns a Python launcher prefix for printed CLI guidance.
+// CLICommandName returns a launcher or declared shim prefix for CLI guidance.
 func CLICommandName() string { return CLICommandNameFrom(os.Getenv) }
 
 // CLICommandNameFrom falls back to an illustrative launcher path, never the
 // runtime executable, when the caller's launcher command is not recognizable.
 func CLICommandNameFrom(getenv func(string) string) string {
 	name := strings.TrimSpace(getenv(envCLIName))
-	if launcherCommandPattern.MatchString(name) {
+	if name == "ws-cli" || name == "wsflow-cli" || launcherCommandPattern.MatchString(name) {
 		return name
 	}
 	return "python3 <plugin>/bin/ws-mcp-launcher.py"

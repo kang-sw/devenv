@@ -310,24 +310,28 @@ const worktreeAcquireLockTimeout = 2 * time.Second
 // different pool/profile settings. The file stays in place: unlinking a held
 // lock would let another process lock a different inode at the same path.
 func lockWorktreeAcquire(ctx context.Context, runner wsgit.Runner, root string) (func(), error) {
+	return lockWorktreePool(ctx, runner, root, "worktree.acquire")
+}
+
+func lockWorktreePool(ctx context.Context, runner wsgit.Runner, root, tool string) (func(), error) {
 	ctx, cancel := context.WithTimeout(ctx, worktreeAcquireLockTimeout)
 	defer cancel()
 	commonDir, err := wtRun(ctx, runner, root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
-		return nil, fmt.Errorf("worktree.acquire: resolve common git directory: %w", err)
+		return nil, fmt.Errorf("%s: resolve common git directory: %w", tool, err)
 	}
 	commonDir, err = filepath.EvalSymlinks(commonDir)
 	if err != nil {
-		return nil, fmt.Errorf("worktree.acquire: canonicalize common git directory: %w", err)
+		return nil, fmt.Errorf("%s: canonicalize common git directory: %w", tool, err)
 	}
 	lockPath := filepath.Join(commonDir, "ws-worktree-acquire.lock")
 	fl := flock.New(lockPath)
 	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
 	if errors.Is(err, context.DeadlineExceeded) || (err == nil && !locked) {
-		return nil, fmt.Errorf("worktree.acquire: contention waiting for pool acquisition lock %s (wait bounded by %s): %w", lockPath, worktreeAcquireLockTimeout, context.DeadlineExceeded)
+		return nil, fmt.Errorf("%s: contention waiting for pool acquisition lock %s (wait bounded by %s): %w", tool, lockPath, worktreeAcquireLockTimeout, context.DeadlineExceeded)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("worktree.acquire: acquire pool acquisition lock: %w", err)
+		return nil, fmt.Errorf("%s: acquire pool acquisition lock: %w", tool, err)
 	}
 	return func() { _ = fl.Unlock() }, nil
 }
@@ -459,6 +463,9 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, env []string, r
 	for _, e := range entries {
 		if e.Path == mainRoot || !pathUnder(poolRoot, e.Path) || !e.Detached {
 			continue
+		}
+		if releasing, err := worktreeReleasing(ctx, runner, e.Path); err != nil || releasing {
+			continue // a release reserves even an unleased, detached candidate
 		}
 		marker, err := readWorktreeMarker(ctx, runner, e.Path)
 		if err != nil {
@@ -827,27 +834,16 @@ type worktreeReleaseCaller struct {
 // worker_key, or the worker key it named is the lease's worker_key), and a
 // dirty worktree with no lease, whose holder is unknown. A pool worktree is
 // reused once released, so a release from stale state would otherwise wipe
-// the next holder's work. For a caller it holds the pool's acquisition lock
-// from the check until the lease is gone, so no acquire can take the
-// worktree over in between and lose its work or its lease.
+// the next holder's work. A per-worktree release lock reserves the target
+// through hooks and cleanup; the pool lock covers only its initial holder
+// check against an acquire already in progress. Other worktrees stay usable.
 func releaseWorktreeAs(ctx context.Context, runner wsgit.Runner, env []string, wtPath, poolConfigValue string, lookup worktreeProfileLookup, caller *worktreeReleaseCaller) (worktreeReleaseResult, error) {
 	var res worktreeReleaseResult
-	target, entry, _, err := ownedPoolWorktree(ctx, runner, wtPath, poolConfigValue, "worktree.release")
+	target, entry, unlock, err := reserveWorktreeRelease(ctx, runner, wtPath, poolConfigValue, caller)
 	if err != nil {
 		return res, err
 	}
-	if caller != nil {
-		unlock, err := lockWorktreeAcquire(ctx, runner, target)
-		if err != nil {
-			return res, fmt.Errorf("worktree.release: %w; nothing was changed, release again", err)
-		}
-		defer unlock()
-		if !caller.Force {
-			if err := releaseHolderCheck(ctx, runner, target, *caller); err != nil {
-				return res, err
-			}
-		}
-	}
+	defer unlock()
 	var branch string
 	if !entry.Detached {
 		branch = strings.TrimPrefix(entry.Branch, "refs/heads/")

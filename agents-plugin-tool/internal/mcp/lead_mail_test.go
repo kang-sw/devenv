@@ -9,6 +9,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // TestFormatMailBatchMatchesTheClaudeAdapterPrompt pins the text a hosted
@@ -95,6 +96,79 @@ func TestPiMailLabelRoundTripsWithoutRecordingAContact(t *testing.T) {
 	}
 	if mailboxSender(wsmailbox.Envelope{}) != "system" {
 		t.Fatal("old senderless envelopes must still read as system")
+	}
+}
+
+func TestLeadMailboxRetriesFailedClaim(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	key, err := NewAgentKeyStore().MintLead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mail := NewLeadMailbox(stateDir)
+	defer mail.server.Close()
+	// No external wake may rescue the failed claim: only its retry does.
+	mail.wake = &wswake.Hub{}
+	path, err := mail.server.mailboxPaths().ReplyRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+		store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), wsmailbox.Envelope{Content: "retry me"})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type claim struct {
+		texts []string
+		err   error
+	}
+	claims := make(chan claim, 4)
+	attempt := 0
+	stop := mail.Watch(root, key, func() {
+		attempt++
+		if attempt == 1 {
+			// Peek succeeded, but the subsequent claim cannot read its store.
+			if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+				claims <- claim{err: err}
+				return
+			}
+			texts, err := mail.Drain(root, key)
+			if restoreErr := os.WriteFile(path, original, 0o600); restoreErr != nil {
+				err = restoreErr
+			}
+			claims <- claim{texts, err}
+			return
+		}
+		texts, err := mail.Drain(root, key)
+		claims <- claim{texts, err}
+	})
+	defer stop()
+	select {
+	case first := <-claims:
+		if first.err == nil || len(first.texts) != 0 {
+			t.Fatalf("first claim = %+v, want a failed drain", first)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial mail not signalled")
+	}
+	select {
+	case retry := <-claims:
+		if retry.err != nil || len(retry.texts) != 1 || !strings.HasSuffix(retry.texts[0], "\nretry me") {
+			t.Fatalf("retry = %+v, want the queued mail", retry)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("failed claim did not retry on a short backoff")
 	}
 }
 

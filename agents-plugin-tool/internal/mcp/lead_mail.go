@@ -47,6 +47,9 @@ const (
 	// canonical ones.
 	leadMailLabel    = "ws mailbox"
 	leadMailRecvTool = "mailbox.recv"
+	// A failed read or claim must retry independently of the much longer
+	// lost-notification backstop used while an empty queue waits for mail.
+	leadMailRetryBackoff = 10 * time.Second
 )
 
 // NewLeadMailbox returns the mailbox of the hosted lead sessions whose
@@ -128,7 +131,7 @@ func (m *LeadMailbox) watch(w *leadMailWatch, root string, changed func()) {
 		if err != nil {
 			// An unreadable store: look again later rather than end the
 			// session's only mail delivery.
-			if !pause(wsmailbox.WakeBackstopPoll, nil) {
+			if !pause(leadMailRetryBackoff, nil) {
 				return
 			}
 			continue
@@ -141,7 +144,7 @@ func (m *LeadMailbox) watch(w *leadMailWatch, root string, changed func()) {
 		// The mail stays queued until Drain claims it, and the wait would
 		// return over it at once: wait for the claim, and say so again
 		// when none came (a failed drain, a signal that folded away).
-		if !pause(wsmailbox.WakeBackstopPoll, w.claimed) {
+		if !pause(leadMailRetryBackoff, w.claimed) {
 			return
 		}
 	}
