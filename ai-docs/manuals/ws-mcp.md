@@ -664,8 +664,9 @@ restart a wait on a conversation that settled before it answers at once.
 `Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
 `git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`,
-`tickets.create_empty`, and the six `pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
-adds `tickets.query/acquire/release/close/move/verify/checklist`, read-only
+`git.resolve_impl_branch`, `tickets.create_empty`, `tickets.verify`, and the six
+`pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
+adds `tickets.query/acquire/release/close/move/checklist`, read-only
 `note.query`, `playbook.read`, `playbook.render`, `path.generate`, and
 `route.resolve_implement`. It keeps a delegate key, not lead authority, and
 adds no note, whiteboard, or tracker writes. A spawn records its `tier`

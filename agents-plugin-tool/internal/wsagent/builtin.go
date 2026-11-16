@@ -95,17 +95,18 @@ var PiWorkerTools = []string{"read", "bash", "edit", "write", "grep", "find", "l
 
 // PiWorkerWSTools are the ws tools the pi-worker profile allows: the commit
 // an implementation prompt ends with, the git reads a commit and a diff
-// review need, and the pi.* tools a spawning playbook needs. A worker's
+// review need, implementation-branch resolution, ticket creation and preflight
+// verification, and the pi.* tools a spawning playbook needs. A worker's
 // pi.* calls go to the daemon on its capability token (children.go), which
-// caps the spawn tree's depth and tier. Ticket creation is available to the
-// worker; the remaining ticket workflow tools belong to pi-mini-lead.
-var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.create_empty", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}
+// caps the spawn tree's depth and tier. Ticket lifecycle operations remain
+// on pi-mini-lead; worktree leasing has its own authorization boundary.
+var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.resolve_impl_branch", "tickets.create_empty", "tickets.verify", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}
 
 // PiMiniLeadWSTools adds ticket workflow reads and lifecycle operations, but
 // no lead-only tools or note, whiteboard, or tracker writes.
 var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 	"tickets.query", "tickets.acquire", "tickets.release", "tickets.close",
-	"tickets.move", "tickets.verify", "tickets.checklist", "note.query",
+	"tickets.move", "tickets.checklist", "note.query",
 	"playbook.read", "playbook.render", "path.generate", "route.resolve_implement",
 )
 
