@@ -240,8 +240,8 @@
       var unsaved = imgs.some(function (p) { return !p.ref; }) || draftUnsaved;
       if (unsaved && framed && typeof window.wsShellLeave === "number") {
         var attempt = window.wsShellLeave;
-        // Accepted navigation destroys this document before the timer runs.
-        // A surviving document tells the shell that the native guard kept it.
+        // Survival suggests cancellation, but is not proof: an accepted
+        // blank load remains authoritative if this timer races navigation.
         setTimeout(function () { shPost("stay", { attempt: attempt }); }, 0);
       }
       return unsaved;
@@ -263,22 +263,37 @@
   // and every link it would load as a page to the shell (go); shell.js
   // lists the messages.
   var shFrames = [], shOn = null, shWant = null, shLeaving = null, shHeadHtml = null, shSeq = 0, shTrackerRev = null;
-  var shIndex = 0, shRestoring = null, shRestoreNav = null, shLeaveSeq = 0;
+  var shIndex = 0, shRestoring = null, shRestoreNav = null, shRestoreTimer = null, shLeaveSeq = 0;
   var shTop = doc.querySelector(".dwrap > .top"), shBody = doc.querySelector(".dwrap > .dbody");
   function shHistoryIndex() { return history.state && Number.isSafeInteger(history.state.wsShellIndex) ? history.state.wsShellIndex : shIndex; }
   function shPush(f) {
     shIndex = shHistoryIndex() + 1;
     history.pushState({ wsShellIndex: shIndex }, "", f.path + f.hash);
   }
+  function shRestoreDone() {
+    clearTimeout(shRestoreTimer); shRestoreTimer = null;
+    shRestoring = null;
+    var nav = shRestoreNav; shRestoreNav = null;
+    if (nav) shOpen(nav.href, nav.push);
+  }
+  function shRestoreTo(index) {
+    shRestoring = index;
+    clearTimeout(shRestoreTimer);
+    // A traversal consumed by joint frame history may never emit a shell
+    // popstate. Do not leave all subsequent navigation queued indefinitely.
+    shRestoreTimer = setTimeout(shRestoreDone, 1000);
+    var delta = index - shHistoryIndex();
+    if (delta) history.go(delta);
+  }
   function shStay(ent, attempt) {
     var leave = shLeaving;
     if (!leave || leave.ent !== ent || leave.attempt !== attempt) return;
+    leave.stayed = true;
     shLeaving = null;
     // Back has already moved history. Restore the position, never its URL:
     // replaceState here would erase the destination entry from Back/Forward.
     if (shHistoryIndex() !== leave.from) {
-      shRestoring = leave.from;
-      history.go(leave.from - shHistoryIndex());
+      shRestoreTo(leave.from);
     }
   }
   // shPost sends a framed page's message of kind to its shell.
@@ -337,18 +352,23 @@
     var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
     el.addEventListener("load", function () {
       if (shFrames.indexOf(ent) < 0) return;
-      if (shLeaving && shLeaving.ent === ent) {
+      // Retain the latest attempt on the frame even after a tentative Stay.
+      // If its blank navigation commits, acceptance wins over that signal.
+      if (ent.leave) {
         var blank = false;
         try { blank = el.contentWindow.location.href === "about:blank"; } catch (x) { /* navigating */ }
         if (blank) {
-          var next = shLeaving;
-          shLeaving = null;
+          var next = ent.leave;
+          ent.leave = null; shLeaving = null;
           shFrames.splice(shFrames.indexOf(ent), 1);
           if (shOn === ent) shOn = null;
           if (shWant === ent) shWant = null;
           el.remove();
           if (!next.push) shIndex = next.index;
           shStart(next.f, next.push);
+          // A tentative Stay may already have restored (or be restoring)
+          // Back's position. Reconcile it with the accepted destination.
+          if (!next.push && next.stayed && (shRestoring !== null || shHistoryIndex() !== next.index)) shRestoreTo(next.index);
           return;
         }
       }
@@ -386,13 +406,14 @@
       return;
     }
     shLeaving = { ent: ent, f: f, push: push, from: shIndex, index: shHistoryIndex(), attempt: ++shLeaveSeq };
+    ent.leave = shLeaving;
     // Save even a draft whose debounce has not fired. The native navigation,
     // not a custom confirm or a remove(), asks before losing pasted images.
     try {
       if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
       ent.el.contentWindow.wsShellLeave = shLeaving.attempt;
       ent.el.contentWindow.location.replace("about:blank");
-    } catch (x) { shLeaving = null; }
+    } catch (x) { ent.leave = null; shLeaving = null; }
   }
   function shStart(f, push) {
     if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
@@ -509,11 +530,7 @@
       if (shRestoring !== null) {
         var delta = shRestoring - shHistoryIndex();
         if (delta) history.go(delta);
-        else {
-          shRestoring = null;
-          var nav = shRestoreNav; shRestoreNav = null;
-          if (nav) shOpen(nav.href, nav.push);
-        }
+        else shRestoreDone();
         return;
       }
       shOpen(location.pathname + location.hash, false);

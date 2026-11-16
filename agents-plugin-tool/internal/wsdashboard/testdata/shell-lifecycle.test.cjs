@@ -12,7 +12,17 @@ function fixture() {
   new vm.Script(js); // Also parse the complete shipped fragment concatenation.
   const glue = js.match(/\n  var shFrames = \[\][\s\S]*?\n  \/\/ shFrameInit wires/)[0];
   const init = js.match(/\n  function shShellInit\(\) \{[\s\S]*?\n  \}\n/)[0];
-  const context = vm.createContext({ URL, console });
+  let clock = 0, timerId = 0;
+  const timers = new Map();
+  const context = vm.createContext({ URL, console,
+    setTimeout(fn, ms) { const id = ++timerId; timers.set(id, {fn, at: clock + ms}); return id; },
+    clearTimeout(id) { timers.delete(id); }
+  });
+  context.advance = ms => {
+    clock += ms;
+    for (const [id, timer] of timers) if (timer.at <= clock) { timers.delete(id); timer.fn(); }
+  };
+  context.timerCount = () => timers.size;
   vm.runInContext(harness + historyHarness + readAssetSource('wsdashboard', 'shell.js') + '\n(function () {\n' + glue + init + `
     first.contentDocument.readyState = 'complete';
     shShellInit();
@@ -275,7 +285,40 @@ function testStorageFailure() {
   f.recover(); assert.equal(f.leave(), false, 'a successful retry clears the failure');
   f.context.imgs = [{n: 1}]; assert.equal(f.leave(), true, 'pasted images retain the existing guard');
 }
-function run() { runBase(); testCancelledLeave(); testHistoryCancellation(); testStorageFailure(); }
+function testAcceptedBlankWins() {
+  const c = fixture();
+  c.click('/s/b'); c.stay(c.first); c.first.load();
+  const b = c.frameOf('/s/b');
+  assert.ok(b, 'accepted blank load must swap even after stay for the same attempt');
+  b.load(); assert.equal(c.window.testShell.current(), b);
+  assert.equal(c.first.removed, true);
+  assert.equal(c.location.pathname, '/s/b');
+  for (const deferred of [false, true]) {
+    const back = fixture(), previous = switchTo(back, '/s/b');
+    back.history.go(-1);
+    back.history.deferred = deferred;
+    back.stay(previous); previous.load();
+    assert.ok(back.frameOf('/s/a'), 'accepted Back must not strand a blank session');
+    back.history.flush(); back.frameOf('/s/a').load();
+    assert.equal(back.window.testShell.current(), back.frameOf('/s/a'));
+    assert.equal(back.location.pathname, '/s/a', 'accepted Back wins over an earlier Stay traversal');
+    assert.deepEqual(plain(back.historyPaths()), ['/s/a', '/s/b']);
+    assert.equal(back.timerCount(), 0, 'completed restoration clears its fallback timer');
+  }
+}
+function testRestoreTimeout() {
+  const c = fixture(), b = switchTo(c, '/s/b');
+  b.cancelLeave = true; c.history.go(-1);
+  c.history.go = () => {}; // Joint frame history consumes traversal: no shell popstate.
+  c.stay(b);
+  c.window.testShell.open('/s/c', true);
+  c.advance(999); assert.equal(b.saved, 1, 'queued pick waits briefly for popstate');
+  b.cancelLeave = false;
+  c.advance(1); assert.equal(b.saved, 2, 'missing popstate cannot strand every later navigation');
+  b.load();
+  assert.ok(c.frameOf('/s/c'));
+}
+function run() { runBase(); testCancelledLeave(); testHistoryCancellation(); testStorageFailure(); testAcceptedBlankWins(); testRestoreTimeout(); }
 module.exports = run;
 if (require.main === module) {
   const test = require('node:test');
@@ -283,4 +326,6 @@ if (require.main === module) {
   test('I1: Stay clears leave intent before same-session routes and rail clicks', testCancelledLeave);
   test('I2: cancelled Back restores position and double Back preserves entries', testHistoryCancellation);
   test('I3: denied/full storage prompts before discarding a typed draft', testStorageFailure);
+  test('hardening: accepted blank load wins over a stale stay', testAcceptedBlankWins);
+  test('hardening: missing restoration popstate times out and flushes navigation', testRestoreTimeout);
 }
