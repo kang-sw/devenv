@@ -24,7 +24,7 @@ func TestPiPreparedSourceDriftWithoutRebuiltBundleUsesBridge(t *testing.T) {
 	copyPiOwner(t, filepath.Join("..", "..", "..", "agents-plugin-wsflow"), owner)
 	sibling := copyPiSourceInputs(t, owner, base)
 	t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(owner, "rsrc"))
-	entries, err := piBundledEntries()
+	entries, err := piBundledEntries(hostedPluginTestVersion)
 	if err != nil || len(entries) != 1 || !strings.HasPrefix(entries[0], filepath.Join(base, "cache")) {
 		t.Fatalf("current source payload must stay local: %v, %v", entries, err)
 	}
@@ -34,7 +34,7 @@ func TestPiPreparedSourceDriftWithoutRebuiltBundleUsesBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	piLeadFile(t, path, string(raw)+"\n// development edit\n")
-	entries, err = piBundledEntries()
+	entries, err = piBundledEntries(hostedPluginTestVersion)
 	if err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("stale sibling bundle must not select unchecked source: %v, %v", entries, err)
 	}

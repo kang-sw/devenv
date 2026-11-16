@@ -76,6 +76,9 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 	for _, product := range []string{"ws", "wsflow"} {
 		for _, layout := range []string{".claude/plugins/cache/vendor", ".codex/plugins/cache/vendor", "shell-snapshot", "windows-snapshot"} {
 			t.Run(product+"/"+layout, func(t *testing.T) {
+				// This fixture tests the owning package's prepared payload, not
+				// the fixed wsflow default's single-package fallback warning.
+				setHostedPackage(t, product)
 				source := filepath.Join("..", "..", "..", "agents-plugin")
 				if product == "wsflow" {
 					source += "-wsflow"
@@ -83,7 +86,7 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 				owner := filepath.Join(base, filepath.FromSlash(layout), product, "0.50.0")
 				copyPiOwner(t, source, owner)
 				t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(owner, "rsrc"))
-				entries, err := piBundledEntries()
+				entries, err := piBundledEntries(hostedPluginTestVersion)
 				if err != nil || len(entries) != 1 {
 					t.Fatalf("package-only native entries: %v, %v", entries, err)
 				}
@@ -96,12 +99,12 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 				if !strings.HasPrefix(root, filepath.Join(base, "cache", "native-pi")) || !strings.HasSuffix(entries[0], filepath.FromSlash(piBundleFile)) {
 					t.Fatalf("not a prepared native entry: %v", entries)
 				}
-				if got, err := piBundledEntries(); err != nil || !slices.Equal(got, entries) {
+				if got, err := piBundledEntries(hostedPluginTestVersion); err != nil || !slices.Equal(got, entries) {
 					t.Fatalf("unchanged second consumption: %v, %v", got, err)
 				}
 				// A valid source sibling must not displace the package-local payload.
 				copyPiSourceInputs(t, owner, filepath.Dir(owner))
-				if got, err := piBundledEntries(); err != nil || !slices.Equal(got, entries) {
+				if got, err := piBundledEntries(hostedPluginTestVersion); err != nil || !slices.Equal(got, entries) {
 					t.Fatalf("local-first selection: %v, %v", got, err)
 				}
 				for _, isolation := range []string{"default", "isolated"} {

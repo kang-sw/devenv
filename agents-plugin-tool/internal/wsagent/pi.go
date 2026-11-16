@@ -316,15 +316,16 @@ const piExtensionPackage = "ws-pi-bridge"
 // without the tools that extension registers. A spawned conversation is
 // MCP-only unless def's plugins load the extension, because piArgs starts it
 // with --no-extensions; a hosted lead is MCP-only when piLeadLaunch fell back
-// to the MCP bridge, which it records as PluginWarning (a successful bundled
-// launch clears it). def is the conversation's launched profile; a nil def
+// to the MCP bridge, identified by its extension-unavailable PluginWarning.
+// Other launch warnings do not imply the native extension is absent.
+// def is the conversation's launched profile; a nil def
 // loads no plugin. Records of other backends are never MCP-only.
 func PiMCPOnly(rec Record, def *Profile) bool {
 	if rec.Backend != BackendPi {
 		return false
 	}
 	if rec.Lead {
-		return rec.PluginWarning != ""
+		return strings.Contains(rec.PluginWarning, piExtensionFallbackMarker)
 	}
 	if def == nil {
 		return true

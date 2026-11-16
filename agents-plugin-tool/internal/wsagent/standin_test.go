@@ -42,7 +42,17 @@ func TestMain(m *testing.M) {
 			_ = os.Setenv("WS_RSRC_ROOT", rsrc)
 		}
 	}
-	os.Exit(m.Run())
+	// Hosted package resolution reads machine-global config and daemon state.
+	// Never let test launches consult the developer's actual package registry.
+	home, err := os.MkdirTemp("", "wsagent-test-homes-")
+	if err != nil {
+		panic(err)
+	}
+	_ = os.Setenv("WS_CONFIG_HOME", filepath.Join(home, "config"))
+	_ = os.Setenv("WS_CACHE_HOME", filepath.Join(home, "cache"))
+	code := m.Run()
+	_ = os.RemoveAll(home)
+	os.Exit(code)
 }
 
 // standin is the stand-in harness command and the directory it records to;

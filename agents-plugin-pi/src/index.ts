@@ -257,7 +257,7 @@ import { createHostedDashboardEvents, startRpcDashboardEvents } from "./hosted-d
 import { createReasoningSummaryObserver } from "./reasoning-summary.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
-import { applyWorkflowOwner } from "./workflow-owner.ts";
+import { consumeWorkflowOwner, hostedWorkflowRoot } from "./workflow-owner.ts";
 import { isExecutionAgent, withoutRetiredNativeTools } from "./native-agent-policy.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
@@ -266,7 +266,7 @@ import { isExecutionAgent, withoutRetiredNativeTools } from "./native-agent-poli
 const extensionEntryPath = fileURLToPath(import.meta.url);
 const srcDir = dirname(extensionEntryPath);
 const pluginDir = dirname(srcDir); // source package or prepared native payload
-applyWorkflowOwner(pluginDir);
+await consumeWorkflowOwner(pluginDir);
 const repoRoot = dirname(pluginDir);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
@@ -720,7 +720,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   }
   // This event fires for both startup and /reload, so local workflow syncs
   // replace the ignored generated tree before Pi rebuilds its skill list.
-  registerSkillResources(pi, pluginDir, repoRoot);
+  registerSkillResources(pi, pluginDir, repoRoot, hostedWorkflowRoot());
 
   // 261028: `/agents` toggles the live-agent widget's expanded mode. Lead and
   // fork processes only, like the widget; the handler reads the live handle,
@@ -771,7 +771,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const bridge = handle;
     if (!bridge) return undefined;
     return {
-      ownSkillsDir: resolveSkillsDir(pluginDir, repoRoot),
+      ownSkillsDir: resolveSkillsDir(pluginDir, repoRoot, undefined, hostedWorkflowRoot()),
       sessionKey: bridge.defaultSessionKeyRef.current,
       readPlaybook: async (name, sessionKey) => {
         const result = await bridge.client.callTool("playbook.read", { name, session_key: sessionKey });

@@ -586,6 +586,7 @@ func RuntimeNamespace() string {
 
 func builtinConfigDefaults() map[string]string {
 	return map[string]string{
+		wsconfig.HostedPluginPackageKey:        "wsflow",
 		wsconfig.ItemWorkflowPreferSubagent:    "off",
 		wsconfig.ItemWorkflowWhiteboardEnabled: "off",
 		wsconfig.ItemWorkflowTrackerEnabled:    "off",
@@ -2945,6 +2946,20 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: trackerEntry.SelectorFields,
 		ValueFields:    trackerEntry.ValueFields,
 		Current:        currentHarnessBucketedValue(resolver, sessionKey, trackerEntry.Key, harness),
+	})
+
+	hostedPackageEntry := registryEntryByKey(wsconfig.HostedPluginPackageKey)
+	appendKnob(hostedPackageEntry, tuningKnob{
+		ID:          hostedPackageEntry.Key,
+		Kind:        "hosted",
+		Description: "Plugin package for daemon-launched Claude and Pi leads and the ws MCP attached to spawned conversations. Global-only; builtin wsflow, independent of the daemon starter. Changes apply at the next process start, not to running or holder-reattached processes. Non-hosted sessions keep their own package. If the selected package is unavailable, the daemon uses its own package with a visible warning.",
+		Writer:      tuningWriter{Tool: hostedPackageEntry.WriterTool, FixedArguments: map[string]string{"key": hostedPackageEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           hostedPackageEntry.ResetTool,
+			FixedArguments: map[string]string{"key": hostedPackageEntry.Key, "reset": "true"},
+		},
+		ValueFields: hostedPackageEntry.ValueFields,
+		Current:     currentWorkflowPreference(resolver, sessionKey, hostedPackageEntry.Key),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)

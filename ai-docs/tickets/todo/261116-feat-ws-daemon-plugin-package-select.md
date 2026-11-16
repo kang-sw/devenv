@@ -285,3 +285,155 @@ Verification expectations:
   `WS_RSRC_ROOT` in `TestMain`), `pi_tools` gate tests, the launcher Python
   tests and the wsflow package tests pass. `go test ./...` passes under
   `agents-plugin-tool`.
+
+### Result (f1fa51a9a) - 2026-11-16
+
+Landed in `aee2b3bf5` (config) and `f1fa51a9a` (resolution and adapters).
+
+- Added built-in `hosted.plugin_package`, global-only through `config.tune`,
+  enum `ws|wsflow`, fixed default `wsflow`, visible on the no-agent surface.
+- Added daemon-owned `dashboard/hosted-plugin-roots.json`, with locked atomic
+  writes from existing hello resource roots. Manifest names determine registry
+  keys; each launch revalidates the selected association. No host-cache scan,
+  source-tree discovery, new Record field, hello field or protocol change.
+- Claude plugin args, Pi bundled entries and spawned-conversation MCP commands
+  share `ResolveHostedPlugin`. Missing/stale selections use the starter's own
+  valid package and persist the named fallback in existing `plugin_warning`.
+  Worker states expose the same warning. Live/reattached holders remain untouched;
+  tests prove a later process start uses the changed setting and clears stale warnings.
+- Whole-package selection also clears inherited skills/policy, reads the selected
+  MCP manifest env, and carries Pi ownership through both prepared and shared
+  source-extension paths. Pi skill discovery/preloads use the selected curated
+  tree read-only. Inherited launch-only selection is ignored by non-hosted Pi.
+  Package/isolation warnings no longer misclassify a native Pi lead as MCP-only.
+- Regenerated the Pi bundle and both packages' first-party native payload copies;
+  dependency closure archives, launchers, plugin manifests, rsrc and skill text
+  are unchanged. Updated the operations manual.
+- T0 remains as settled: global override RMW and Record serialization are unchanged;
+  old binaries never read the new registry; runtime-only MCP command warning data
+  is excluded from JSON.
+
+Verification: all commands below passed. Go commands ran from `agents-plugin-tool/`
+with the required offline/local toolchain environment. No whole `internal/mcp` or
+`internal/wsdashboard` test package was run.
+
+```bash
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^(TestHostedPlugin.*|TestHostedWorkerMCPWarningPersists|TestBundledPluginRoot.*|TestClaudeLeadPlugin.*|TestClaudeLeadArgs|TestClaudeLeadEnv|TestPiLead.*|TestPiHostedPackageRegistrySettingMatrix|TestPiMCPOnly.*|TestLeadIsolation.*|TestLegacyLeadIsolation.*|TestLegacyPiLead.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^(TestPiPrepared.*|TestPiBundled.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^(TestPiPreparedPackageOnlyLayouts|TestPiHostedPackageRegistrySettingMatrix|TestPiLeadSourceSiblingUsesSelectedPackage|TestPiMCPOnly.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^TestHostedPluginWarningPersistsAndSettingWaitsForProcessStart$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./cmd/ws-mcp -run '^(TestHostedPackage.*|TestAgentMCP.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsconfig ./internal/mcp -run '^(TestHostedPluginPackageGlobalOnly|TestConfigHostedPluginPackage|TestShippedAdapterManifestsLoad|TestShippedDashboardManifestsLoadBesideEachPackageManifest|TestShippedDashboardManifestsDifferOnlyInPerPackageDefaults|TestShippedClaudeManifestsDifferOnlyInDefaults|TestPiToolsGate|TestHostedServersReadOnlyTheirOwnEnvironment|TestHostedServerSubprocessUsesHelloEnvironment)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./...
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOOS=windows go vet ./...
+```
+
+The prepared-package/matrix command was rerun after the final Pi skill fix and
+artifact refresh (25.0 s). The holder warning test was additionally rerun after
+strengthening it to flip both `ws` and `wsflow` while the process runs (1.2 s).
+Native and Windows vet also passed after final changes.
+From `agents-plugin-pi/`:
+
+```bash
+npm test -- test/workflow-owner.test.ts test/hosted-workflow-owner.test.ts test/hosted-skills.test.ts
+npm test -- --test-name-pattern='production bridge launches ws-mcp with the adapter config manifest' test/bridge.test.ts
+```
+
+These passed 4 and 1 tests respectively. Bundle/bridge verification borrowed the
+existing local dependencies using a temporary link, with no network install:
+
+```bash
+test ! -e node_modules && ln -s /Users/kang-sw/devenv/agents-plugin-pi/node_modules node_modules
+trap 'rm node_modules' EXIT
+npm run bundle
+```
+
+The link was removed after each use. Prepared artifacts were refreshed with
+`python3 agents-plugin-pi/scripts/prepare-native-payload.py --first-party-only`
+from the worktree root; both copied bundles compare byte-identically to Pi's
+bundle. From the worktree root:
+
+```bash
+python3 -m unittest discover -s agents-plugin/tests -p 'test_ws_mcp_launcher*.py'
+python3 -m unittest discover -s agents-plugin-wsflow/tests
+git diff --check
+```
+
+Launcher tests: PASS, 133 tests, 1 skipped. wsflow: PASS, 22 tests, 2 skipped;
+rerun after the final artifact refresh. Diff whitespace check: PASS.
+
+Deviations/surprises: the owner's narrow-test override replaced `go test ./...`.
+An initial combined narrow Go run timed out at 120 s; splitting out prepared
+payload tests passed. Old package-only fixtures needed an explicit package
+selection because an unset ws-only launch now correctly warns about the wsflow
+fallback. Review found the shared Pi source path discarded selected manifests
+and skills, requiring the adapter changes and first-party refresh above. No
+contract deviation or unresolved finding remains. No shared daemon lifecycle,
+Electron, push, merge or SSH operation was performed; live harness acceptance
+was not attempted. Ticket status remains `todo` as requested.
+
+#### Edition (e08d04831) - 2026-11-17
+
+Independent-review repairs requested by the owner at 00:11 KST landed in
+`e08d04831`:
+
+- Prefer the daemon's own root whenever its manifest name is the selected
+  package, regardless of another installed patch remembered in the registry.
+- Registry revalidation now reads the plugin manifest version and requires the
+  explicitly supplied daemon major.minor. A mismatch starts the existing own-
+  package fallback and persists a warning naming both versions. The daemon
+  version flows through runner options/lead launch specs and attached MCP command
+  arguments; no wsagent global version was introduced.
+- While holding the registry write lock, compare each hello version with the
+  existing root's manifest version. Older hellos cannot downgrade a usable
+  remembered install; equal/newer versions retain last-seen-wins behavior.
+- Missing plugin manifests (including ordinary Pi roots) no longer log registration
+  errors on every hello; malformed and unsupported manifests still log. Invalid
+  hand-edited package values now warn before resolving the fixed `wsflow` default,
+  preserving that warning on both successful resolution and package fallback.
+- Pi bridge-only classification and warning formatting share one marker constant.
+  Only `WS_MCP_*` manifest env keys enter the Pi lead process; resource/skills roots
+  are derived from the selected root, not supplied by the manifest.
+- Added version-skew, own-root priority, no-downgrade/equal/newer replacement,
+  persisted version warning, invalid-setting, CLI/MCP quiet-registration and Pi
+  environment-boundary regressions. Existing fixtures now pass explicit versions.
+
+Compatibility remains T0: the registry is still the same package-to-path string
+map; version checks read the existing plugin manifest `version` field. Config
+RMW, Record and hello/protocol shapes are unchanged, and mismatched roots trigger
+fallback rather than a connection refusal. No TypeScript or generated package
+artifact changed in this repair.
+
+Verification: PASS for every command below. From `agents-plugin-tool/`:
+
+```bash
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^(TestHostedPlugin.*|TestHostedWorkerMCPWarningPersists|TestBundledPluginRoot.*|TestClaudeLeadPlugin.*|TestClaudeLeadArgs|TestClaudeLeadEnv|TestPiLead.*|TestPiHostedPackageRegistrySettingMatrix|TestPiMCPOnly.*|TestLeadIsolation.*|TestLegacyLeadIsolation.*|TestLegacyPiLead.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run '^(TestPiPrepared.*|TestPiBundled.*|TestPiDaemonWorkflow.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./cmd/ws-mcp -run '^(TestHostedPackage.*|TestAgentMCP.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsconfig ./internal/mcp -run '^(TestHostedPluginPackageGlobalOnly|TestConfigHostedPluginPackage|TestShippedAdapterManifestsLoad|TestShippedDashboardManifestsLoadBesideEachPackageManifest|TestShippedDashboardManifestsDifferOnlyInPerPackageDefaults|TestShippedClaudeManifestsDifferOnlyInDefaults|TestPiToolsGate|TestHostedServersReadOnlyTheirOwnEnvironment|TestHostedServerSubprocessUsesHelloEnvironment)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./...
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOOS=windows go vet ./...
+```
+
+The two wsagent groups passed in 22.6 s and 150.8 s; command tests passed in
+3.0 s; config/MCP groups passed in 0.4 s and 3.3 s. No full MCP/dashboard test
+package ran. From the worktree root:
+
+```bash
+python3 -m unittest discover -s agents-plugin/tests -p 'test_ws_mcp_launcher*.py'
+python3 -m unittest discover -s agents-plugin-wsflow/tests
+git diff --check
+```
+
+Launcher: PASS, 133 tests, 1 skipped. wsflow: PASS, 22 tests, 2 skipped.
+From `agents-plugin-pi/`, using the same temporary local dependency link for the
+bridge check as the original Result (removed afterward, no network install):
+
+```bash
+npm test -- test/workflow-owner.test.ts test/hosted-workflow-owner.test.ts test/hosted-skills.test.ts
+npm test -- --test-name-pattern='production bridge launches ws-mcp with the adapter config manifest' test/bridge.test.ts
+```
+
+Pi checks: PASS, 4 owner/skills tests and 1 bridge test. No unresolved findings.
+The shared daemon was not touched; no merge, push, SSH or Electron operation was
+performed. Ticket status remains `todo`.

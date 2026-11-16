@@ -16,7 +16,7 @@ func claudePluginLeadSpec(t *testing.T) StartSpec {
 	return StartSpec{
 		Root: t.TempDir(),
 		Env:  []string{"CLAUDE_CONFIG_DIR=" + t.TempDir()},
-		Lead: &LeadSpec{},
+		Lead: &LeadSpec{DaemonVersion: hostedPluginTestVersion},
 	}
 }
 

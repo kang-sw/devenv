@@ -1227,7 +1227,7 @@ func TestClaudeLeadEnv(t *testing.T) {
 		// The daemon's own session: its harness variables, mailbox
 		// identity, ws-mcp launcher state, and hosted-session variables.
 		"CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli", "CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=0", "CLAUDE_CONFIG_DIR=/claude",
-		"WS_MAILBOX=lead@m", "WS_MAILBOX_AUTO=1",
+		"WS_MAILBOX=lead@m", "WS_MAILBOX_AUTO=1", "WS_SKILLS_ROOT=/starter/skills",
 		"WS_MCP_ROOT=/elsewhere", "WS_MCP_ALLOWED_TOOLS=tracker.query", "WS_MCP_NO_DASHBOARD=1", "WS_RSRC=/rsrc", "WS_RSRC_DIR=/rsrc",
 		"WS_HOSTED_SESSION=1", "WS_HOSTED_SESSION_KEY=the-daemons-own", "WS_HOSTED_SESSION_ROW=/old/row", "WS_HOSTED_OTHER=x",
 	}
