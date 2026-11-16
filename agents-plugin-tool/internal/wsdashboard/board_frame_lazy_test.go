@@ -16,7 +16,7 @@ func dashboardFuncs(t *testing.T, names ...string) string {
 	}
 	src := ""
 	for _, name := range names {
-		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(string(board))
+		f := regexp.MustCompile(`(?s)\n  function ` + regexp.QuoteMeta(name) + `\([^\n]*\{[^\n]*\}\n|\n  function ` + regexp.QuoteMeta(name) + `\(.*?\n  \}\n`).FindString(string(board))
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)
 		}

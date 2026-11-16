@@ -169,8 +169,21 @@ for (const address of [base, updates]) {
         document.activeElement === todo.querySelector(':scope > summary') && todoReader.agenda === document.getElementById('p-agenda');
     }), 'a different changed card retains its own focus and scroll without replacing agenda');
 
-    const shown = value => page.evaluate(shown => document.querySelector('iframe.sframe.on').contentWindow.postMessage({ wsShell: 'shown', shown }, location.origin), value);
-    await shown(false); await frame.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+    const shown = async value => {
+      // Registered after production's shell listener: observing this message
+      // acknowledges that the hidden gate has already processed it.
+      await frame.evaluate(() => {
+        window.panelShownAck = null;
+        window.addEventListener('message', function ack(e) {
+          if (e.source !== parent || e.origin !== location.origin || e.data?.wsShell !== 'shown') return;
+          window.panelShownAck = e.data.shown;
+          window.removeEventListener('message', ack);
+        });
+      });
+      await page.evaluate(shown => document.querySelector('iframe.sframe.on').contentWindow.postMessage({ wsShell: 'shown', shown }, location.origin), value);
+      await frame.waitForFunction(shown => window.panelShownAck === shown, value);
+    };
+    await shown(false);
     oldHash = await hash();
     delta(await update('agenda', 'hidden agenda'), ['p-agenda']);
     delta(await update('todo', 'hidden task'), ['p-todo']);

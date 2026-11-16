@@ -55,25 +55,7 @@ func panelRowsPublish(t *testing.T, f *pageFixture, agenda, todo string) {
 
 func panelStreamEvent(t *testing.T, events <-chan sseEvent) sseEvent {
 	t.Helper()
-	all, closed := collect(events)
-	var found []sseEvent
-	for _, e := range all {
-		if e.name == "panel-rows" {
-			found = append(found, e)
-		} else if e.name == "region" {
-			var r regionEvent
-			if err := json.Unmarshal([]byte(e.data), &r); err != nil {
-				t.Fatal(err)
-			}
-			if r.Name == regionPanels {
-				found = append(found, e)
-			}
-		}
-	}
-	if closed || len(found) != 1 {
-		t.Fatalf("closed=%v panels=%+v all=%+v", closed, found, all)
-	}
-	return found[0]
+	return keyedStreamEvent(t, events, regionPanels, "panel-rows")
 }
 
 func TestPanelRowsRenderedSharedParity(t *testing.T) {
@@ -147,7 +129,7 @@ func TestPanelRowsStreams(t *testing.T) {
 				t.Fatal("delta transport parity")
 			}
 		}
-		var patch panelRowsEvent
+		var patch keyedRowsEvent
 		if err := json.Unmarshal([]byte(delta.data), &patch); err != nil {
 			t.Fatal(err)
 		}
@@ -195,10 +177,10 @@ func TestPanelRowsFailedSendAndUncertainBaseline(t *testing.T) {
 	d := &Daemon{stats: &streamStats{}}
 	raw := `<details class="panel" id="p-agenda"><summary>Agenda</summary><details data-key="agenda/plan"><summary>nested</summary>A</details></details> <details class="panel" id="p-todo"><summary>Tasks</summary>B</details>`
 	r, rows := newRegion(raw), splitPanelRows(raw)
-	sink, state := &railRowsSink{fail: true}, &panelRowState{}
+	sink, state := &railRowsSink{fail: true}, &keyedRowState{name: regionPanels}
 	held := map[string]string{regionPanels: r.Hash}
-	send := func(r renderedRegion, rows *panelRows) bool {
-		_, ok := d.sendPanelRegions(sink, regionSet{regionPanels: r}, held, nil, nil, nil, nil, nil, nil, nil, nil, state, rows)
+	send := func(r renderedRegion, rows *keyedRows) bool {
+		_, ok := d.sendRegions(sink, regionSet{regionPanels: r}, held, nil, nil, []rowRegion{{state: state, next: rows}})
 		return ok
 	}
 	if send(r, rows) || state.initialized || state.previous != nil || len(sink.events) != 0 || held[regionPanels] != r.Hash {

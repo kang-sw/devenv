@@ -174,8 +174,21 @@ for (const address of [base, updates]) {
     assert.deepEqual(deltaKeys(await update('peer', 'Entry Peer Renamed')), [keys.a]); await waitHash(oldHash);
     assert((await frame.locator('[data-entry="' + keys.a + '"]').textContent()).includes('Entry Peer Renamed'), 'same-key peer presentation refreshes');
 
-    const shown = value => page.evaluate(shown => document.querySelector('iframe.sframe.on').contentWindow.postMessage({ wsShell: 'shown', shown }, location.origin), value);
-    await shown(false); await frame.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+    const shown = async value => {
+      // Registered after production's shell listener: observing this message
+      // acknowledges that the hidden gate has already processed it.
+      await frame.evaluate(() => {
+        window.entryShownAck = null;
+        window.addEventListener('message', function ack(e) {
+          if (e.source !== parent || e.origin !== location.origin || e.data?.wsShell !== 'shown') return;
+          window.entryShownAck = e.data.shown;
+          window.removeEventListener('message', ack);
+        });
+      });
+      await page.evaluate(shown => document.querySelector('iframe.sframe.on').contentWindow.postMessage({ wsShell: 'shown', shown }, location.origin), value);
+      await frame.waitForFunction(shown => window.entryShownAck === shown, value);
+    };
+    await shown(false);
     oldHash = await hash();
     assert.deepEqual(deltaKeys(await update('a', 'off')), [keys.a]);
     assert.deepEqual(deltaKeys(await update('b', 'off')), [keys.b]);
