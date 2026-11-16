@@ -257,13 +257,15 @@ import { createHostedDashboardEvents } from "./hosted-dashboard-events.ts";
 import { createReasoningSummaryObserver } from "./reasoning-summary.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
+import { applyWorkflowOwner } from "./workflow-owner.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
 // installed package, or a cache). Every RPC child receives this path verbatim
 // rather than rediscovering an ambient extension copy.
 const extensionEntryPath = fileURLToPath(import.meta.url);
 const srcDir = dirname(extensionEntryPath);
-const pluginDir = dirname(srcDir); // agents-plugin-pi/
+const pluginDir = dirname(srcDir); // source package or prepared native payload
+applyWorkflowOwner(pluginDir);
 const repoRoot = dirname(pluginDir);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");

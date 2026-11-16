@@ -104,7 +104,9 @@ runs either way, and the MCP tools never depend on its pages. Its state lives
 under `<cache root>/dashboard/`:
 
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
-  pid, version, and the shutdown token; `dashboard.log` - the running daemon's
+  pid, version, and the shutdown token; `launcher-start.lock` - the persistent
+  advisory lock updated Python launchers hold across a necessary daemon start;
+  `dashboard.log` - the running daemon's
   log, including one line per session added to or removed from its index;
   `lan-token` - the LAN access token (LAN mode only), kept across daemon
   restarts; deleting it issues a new one at once. `last-port` - the port the
@@ -661,9 +663,10 @@ last reported turn is kept in the record (`last_turn`), so after a daemon
 restart a wait on a conversation that settled before it answers at once.
 `Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
-`git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
-six `pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
-adds `tickets.query/acquire/release/close/move/verify/checklist`, read-only
+`git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`,
+`git.resolve_impl_branch`, `tickets.create_empty`, `tickets.verify`, and the six
+`pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
+adds `tickets.query/acquire/release/close/move/checklist`, read-only
 `note.query`, `playbook.read`, `playbook.render`, `path.generate`, and
 `route.resolve_implement`. It keeps a delegate key, not lead authority, and
 adds no note, whiteboard, or tracker writes. A spawn records its `tier`
@@ -1291,7 +1294,10 @@ present without Python installed, install Python 3 and refresh the plugin.
 
 Every product command uses the Python launcher. `serve --stdio` copies MCP
 bytes to the cache root's dashboard daemon; other commands run in-process
-handlers there through the authenticated CLI transport. `version` can read
+handlers there through the authenticated CLI transport. CLI commands, including
+mailbox stream and one-shot waits, have network-only authority on initial
+connect and retry: they never repair, stage or start a runtime. An unavailable
+daemon yields an explicit error/backoff. `version` can read
 live health or content-bound build metadata locally. The only ws executable
 launch is a needed daemon start/replacement, never a probe or fallback.
 `WS_MCP_LAUNCHER_DIRECT` is obsolete and cannot restore an executable bypass.
@@ -1304,9 +1310,10 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    `test_cache_root_and_staged_name_follow_the_go_rules` pins the parity.
 2. `endpoint.json` names the port and token; `GET /health` answers the
    daemon's version, `build_time`, and `content_hash` (the sha256 of the
-   daemon's executable). A daemon whose endpoint answers nothing within
-   5 s (10 s on Windows) counts as absent; a port that accepts but never
-   answers is diagnosed as hung without starting a second server. A missing
+   daemon's executable). An unreachable endpoint gets a 20-second swap grace
+   before absence-based startup. A live or unqueryable recorded PID refuses
+   that startup; a connected port that never answers is diagnosed as hung.
+   TCP handshake failure alone establishes only unreachability. A missing
    health route or version field falls back to the existing `/mcp` hello's
    returned version, not to executable inspection.
 3. Ordinary startup starts an absent daemon or replaces an older numeric
@@ -1325,11 +1332,15 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    `WS_MCP_NO_DASHBOARD=1`) does not decide the LAN mode, the same rule as
    for a hosted session below: a running daemon keeps its mode, and with
    none running the global file's `dashboard.lan_enabled` decides.
-   The launcher leaves the other staged entries alone (one of them is the
-   running daemon's own executable, which it respawns from on a LAN mode
-   change); the daemon that wins the lock prunes the directory down to its
-   own, keeping `.tmp` files and entries younger than two minutes, which
-   another launcher may still be staging. The launcher then waits up to
+   Updated launchers first serialize on `launcher-start.lock`, recheck health,
+   and hold that lock through repair, staging and a healthy result or bounded
+   failure. Losers poll the network within the 75-second budget. This is
+   separate from the Go daemon-held singleton lock. Old launchers and Electron
+   do not participate; the singleton handles a rare losing Electron starter.
+   Staging reuses matching hashes and failed copies clean only their own temp
+   file. Settled artifacts remain: neither age nor singleton ownership proves
+   process exit or accepted/rollback safety, and no retention index exists.
+   The launcher then waits up to
    `DefaultStartWait` + 5 s (Windows
    + 10 s) for a healthy daemon and applies the replace rule to the one
    that answers: when that is still the older daemon (it refused to stop,
@@ -1376,8 +1387,8 @@ is sent. A failure after sending that hello or an MCP request is not retried.
 Codex Stop retains its fail-open exit 0.
 
 Reconnect: when the connection ends while the client is still attached (the
-daemon was replaced or died), the proxy connects again (giving a successor
-1.5 s before starting one), re-sends the client's captured `initialize`
+daemon was replaced or died), the session MCP proxy connects again (giving a
+successor the swap grace before coordinated absence startup), re-sends the client's captured `initialize`
 request under an id of its own (`ws-mcp-launcher-replay-<n>`, so a late
 answer from the old daemon can never be mistaken for it) and drops its
 answer, re-sends `notifications/initialized`, and answers every request that
@@ -1505,7 +1516,7 @@ Current launcher inputs:
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which lists the `pi.*` tools, default on in ws and off in wsflow and Pi) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
-| `WS_MCP_CLI_NAME` | Command name that printed agent-runnable CLI commands (the rendered `mailbox wait` command and its re-arm line) start with; empty or unset uses the invoked binary path (`os.Args[0]`). Set by the `ws-cli`/`wsflow-cli` shims and by the Claude manifests' `mcpServers.<name>.env`, where plugin `bin/` is on the agent's Bash PATH; left unset for Codex, which does not put plugin `bin/` on PATH. |
+| `WS_MCP_CLI_NAME` | Python launcher command used in printed mailbox wait and re-arm guidance when it matches the supported safe form. The launcher sets it unless already set; an absent or unrecognized value uses an illustrative Python launcher path, never the runtime binary. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC
 stream from the moment the launcher connects to the daemon.

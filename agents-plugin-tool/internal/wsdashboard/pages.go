@@ -53,6 +53,7 @@ var dashboardScriptFiles = []string{
 	"dashboard-rail.js",
 	"dashboard-rail-popovers.js",
 	"dashboard-leads.js",
+	"dashboard-session-view.js",
 	"dashboard-lifecycle.js",
 }
 
@@ -148,6 +149,7 @@ func (a *dashboardAssets) templateFor(lang string) *template.Template {
 type pageAssetsData struct {
 	CSS              template.CSS
 	Script           template.JS
+	ScriptFile       string // Content-addressed page script for fresh session frames.
 	Sprite           template.HTML
 	WhiteboardCSS    template.CSS
 	WhiteboardSprite template.HTML
@@ -307,6 +309,8 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 			icons[m[1]] = true
 		}
 	}
+	scriptHash := sha256.Sum256([]byte(a.data.Script))
+	a.data.ScriptFile = "dashboard-" + hex.EncodeToString(scriptHash[:12]) + ".js"
 	a.data.ID = assetID(a.data, source)
 	a.tmpls = map[string]*template.Template{}
 	for _, l := range wsi18n.Languages() {
@@ -1259,6 +1263,22 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !readMethod(w, r) {
+		return
+	}
+	if strings.HasPrefix(rest, "dashboard-") && strings.HasSuffix(rest, ".js") {
+		a, err := loadDashboardAssets()
+		if err != nil {
+			http.Error(w, "assets unavailable", http.StatusInternalServerError)
+			return
+		}
+		if rest != a.data.ScriptFile {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write([]byte(a.data.Script))
 		return
 	}
 	if name, _ := wswhiteboard.MermaidAsset(); rest == name {

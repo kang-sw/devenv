@@ -67,9 +67,7 @@ sys.exit(2)
 """
 
 
-# Windows platform.uname() spawns `cmd /c ver` on its first call; take it now,
-# before run_main replaces subprocess with mocks that forbid any process.
-platform.uname()
+# No executable fixtures run here: even permitted daemon-start is simulated.
 
 
 def run_fake_runtime_under_python(real_run):
@@ -194,6 +192,7 @@ class FakeDaemon:
             return
         finally:
             try:
+                reader.close()
                 conn.close()
             except OSError:
                 pass
@@ -306,6 +305,8 @@ class ProxyClient:
         self.thread.join(timeout)
         if self.thread.is_alive():
             raise AssertionError("proxy_serve did not return after stdin closed")
+        for stream in (self.stdin, self.stdout, self.reader):
+            stream.close()
         return self.result.get("code")
 
 
@@ -316,8 +317,21 @@ class LauncherProxyTest(unittest.TestCase):
         # Exercise exhaustion without spending the production 75s per test.
         self.launcher.DAEMON_RETRY_SECONDS = 0.3
         self.launcher.DAEMON_RETRY_POLL_SECONDS = 0.05
-        if os.name == "nt":
-            patcher = mock.patch.object(subprocess, "run", run_fake_runtime_under_python(subprocess.run))
+        self.launcher.DAEMON_SWAP_GRACE_SECONDS = 0.02
+        # 4242 is a protocol fixture PID, never an admission probe of the PC.
+        patcher = mock.patch.object(self.launcher, "endpoint_process_alive", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in ("Popen", "call"):
+            patcher = mock.patch.object(subprocess, name, side_effect=AssertionError("unexpected executable spawn"))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(subprocess, "run", side_effect=self.fake_starter)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # host_os/host_arch otherwise ask platform, which may invoke cmd /c ver.
+        for name, value in (("host_os", "windows" if os.name == "nt" else "linux"), ("host_arch", "amd64")):
+            patcher = mock.patch.object(self.launcher, name, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix="ws-launcher-proxy.")
@@ -347,6 +361,18 @@ class LauncherProxyTest(unittest.TestCase):
     def tearDown(self):
         for daemon in self.daemons:
             daemon.close()
+
+    def fake_starter(self, args, **kwargs):
+        self.assertEqual(args[1], "daemon-start", "only a permitted daemon starter may execute")
+        with (self.cache / "fake-runtime.log").open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"exe": args[0], "args": args[1:], "env_marker": kwargs["env"].get("FAKE_MARKER", ""),
+                                  "holder_python": kwargs["env"].get("WS_MCP_HOLDER_PYTHON")}) + "\n")
+        target = json.loads((self.cache / "fake-daemon.json").read_text(encoding="utf-8"))
+        if target.get("fail"):
+            return subprocess.CompletedProcess(args, 1, "", "daemon-start: told to fail")
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        (self.daemon_dir / "endpoint.json").write_text(json.dumps(dict(target, pid=4242)), encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0, json.dumps({"outcome": "started"}) + "\n", "")
 
     def daemon(self, **kwargs):
         daemon = FakeDaemon(**kwargs)
@@ -584,7 +610,8 @@ class LauncherProxyTest(unittest.TestCase):
     def test_a_daemon_that_dies_with_no_successor_is_restarted(self):
         old = self.daemon(name="old")
         old.write_endpoint(self.daemon_dir)
-        client = ProxyClient(self.launcher, self.link())
+        client = ProxyClient(self.launcher, self.link(answer_budget=0.02))
+        self.addCleanup(client.close)
         client.send("initialize")
         client.recv()
         new = self.daemon(name="new", build_time=2_000_000_000_001)
@@ -802,6 +829,7 @@ class LauncherProxyTest(unittest.TestCase):
         client.thread.join(5.0)
         self.assertFalse(client.thread.is_alive())
         self.assertEqual(client.result.get("code"), 0)
+        self.assertEqual(client.close(), 0)
 
     # --- mailbox wait -------------------------------------------------------------
 
@@ -884,7 +912,7 @@ class LauncherProxyTest(unittest.TestCase):
         argv = ["mailbox", "wait", "--session-key", "k"]
         self.assertEqual(self.launcher.proxy_cli(self.link(), argv, io.BytesIO(), stderr), 1)
         self.assertIn(b"dashboard daemon not reachable", stderr.getvalue())
-        self.assertEqual([r["args"][0] for r in self.runtime_log()], ["daemon-start"])
+        self.assertEqual(self.runtime_log(), [], "CLI failure must not invoke even a daemon starter")
 
     def test_proxy_mode_has_no_catch_all_executable_escape(self):
         self.assertEqual(self.launcher.proxy_mode(["serve", "--stdio"]), "mcp")
@@ -911,7 +939,7 @@ class LauncherProxyTest(unittest.TestCase):
              mock.patch.multiple(self.launcher.os, execv=mock.DEFAULT, execve=mock.DEFAULT, execvpe=mock.DEFAULT) as execs, \
              mock.patch.object(self.launcher, "install_runtime", side_effect=AssertionError("unexpected repair")) if forbid_install else mock.patch.object(self.launcher, "note"):
             if allow_lifecycle:
-                processes["call"].return_value = 0
+                processes["run"].return_value = subprocess.CompletedProcess([], 0, '{"outcome":"replaced"}\n', "")
             if allow_build:
                 processes["run"].side_effect = self.launcher.subprocess.TimeoutExpired(["fake-go", "build"], 0.05)
             code = self.launcher.main()
@@ -921,7 +949,7 @@ class LauncherProxyTest(unittest.TestCase):
                     for call in process.call_args_list:
                         self.assertEqual(call.args[0][0], "fake-go")
                         self.assertEqual(call.kwargs["timeout"], self.launcher.RUNTIME_BUILD_TIMEOUT)
-                elif allow_lifecycle and name == "call":
+                elif allow_lifecycle and name == "run":
                     process.assert_called_once()
                     self.assertEqual(process.call_args.args[0][1:], argv)
                 else:
@@ -996,6 +1024,24 @@ class LauncherProxyTest(unittest.TestCase):
             clear_stamp.assert_not_called()
         self.assertEqual(self.runtime_log(), [])
         self.assertFalse((self.daemon_dir / "bin").exists())
+
+    def test_cold_cli_main_never_repairs_stages_or_starts(self):
+        self.binary.unlink()
+        self.launcher.runtime_metadata_path(self.binary).unlink()
+        with mock.patch.object(self.launcher, "bootstrap_runtime_forced", return_value=True), \
+             mock.patch.object(self.launcher, "runtime_install_forced", return_value=True), \
+             mock.patch.object(self.launcher, "stage_daemon_binary", side_effect=AssertionError("CLI staged")), \
+             mock.patch.object(self.launcher, "clear_compatibility_stamp", side_effect=AssertionError("CLI repaired")), \
+             mock.patch.object(self.launcher.DaemonLink, "start_daemon", side_effect=AssertionError("CLI started")):
+            for argv in (["mailbox", "wait", "--session-key", "k"],
+                         ["mailbox", "wait", "--session-key", "k", "--stream"],
+                         ["tools"], ["call", "tickets.create_empty", "{}"], ["mailbox", "codex-stop-hook"]):
+                with self.subTest(argv=argv):
+                    code, _, stderr = self.run_main(argv, forbid_install=True, local_devenv=True)
+                    self.assertEqual(code, 0 if argv[1:2] == ["codex-stop-hook"] else 1)
+                    self.assertIn(b"daemon not running", stderr)
+        self.assertFalse((self.daemon_dir / "bin").exists())
+        self.assertFalse((self.daemon_dir / "launcher-start.lock").exists())
 
     def test_stale_source_reuses_compatible_runtime_for_interactive_stdio(self):
         daemon = self.daemon()
@@ -1126,7 +1172,9 @@ class LauncherProxyTest(unittest.TestCase):
         self.launcher.runtime_metadata_path(self.binary).unlink()
         payload = '{"jsonrpc":"2.0","id":"cold","method":"initialize"}\n{"jsonrpc":"2.0","id":3,"method":"tools/call"}\n'
         started = time.monotonic()
-        with mock.patch.object(self.launcher, "RUNTIME_DOWNLOAD_TIMEOUT", 0.05):
+        # Inject the network timeout: local proxy/AV state is not this contract.
+        with mock.patch.object(self.launcher, "RUNTIME_DOWNLOAD_TIMEOUT", 0.05), \
+             mock.patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
             code, output, stderr = self.run_main(["serve", "--stdio"], input_text=payload)
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual(code, 1)
@@ -1171,7 +1219,8 @@ class LauncherProxyTest(unittest.TestCase):
                     old.write_endpoint(self.daemon_dir)
                 else:
                     (self.daemon_dir / "endpoint.json").unlink(missing_ok=True)
-                client = ProxyClient(self.launcher, self.link(repair_runtime=repair))
+                client = ProxyClient(self.launcher, self.link(answer_budget=0.02, repair_runtime=repair))
+                self.addCleanup(client.close)
                 client.send("initialize")
                 client.recv()
                 if not transient_initial_failure:
@@ -1210,8 +1259,13 @@ class LauncherProxyTest(unittest.TestCase):
 
     def test_cache_root_and_staged_name_follow_the_go_rules(self):
         link_root = self.root / "link"
-        os.symlink(self.cache, link_root)
-        self.assertEqual(self.launcher.proxy_cache_root({"WS_CACHE_HOME": str(link_root)}), Path(os.path.realpath(self.cache)))
+        try:
+            os.symlink(self.cache, link_root)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != 1314:
+                raise
+        else:
+            self.assertEqual(self.launcher.proxy_cache_root({"WS_CACHE_HOME": str(link_root)}), Path(os.path.realpath(self.cache)))
         self.assertEqual(self.launcher.proxy_cache_root({"WS_CACHE_HOME": str(self.root / "missing")}), self.root / "missing")
         self.assertEqual(self.launcher.proxy_cache_root({"HOME": "/nowhere"}).name, "ws@kang-sw-devenv")
         self.assertEqual(self.launcher.proxy_daemon_dir(self.env), Path(os.path.realpath(self.cache)) / "dashboard")

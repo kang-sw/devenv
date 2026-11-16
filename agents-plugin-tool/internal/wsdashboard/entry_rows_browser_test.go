@@ -18,6 +18,15 @@ import (
 
 // Real page, history and stream handlers on disposable loopback fixtures only.
 func TestEntryRowsBrowser(t *testing.T) {
+	testEntryRowsBrowser(t, "testdata/entry-rows.browser.cjs")
+}
+
+func TestEntryRowsMissingBaselineBrowser(t *testing.T) {
+	testEntryRowsBrowser(t, "testdata/entry-rows-first-full.browser.cjs")
+}
+
+func testEntryRowsBrowser(t *testing.T, script string) {
+	t.Helper()
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE for disposable Chromium acceptance")
 	}
@@ -88,10 +97,10 @@ func TestEntryRowsBrowser(t *testing.T) {
 	}))
 	defer updates.Close()
 	functions := "var ENTRY_SLOT = /<!--ws-entry-row-(\\d+)-->/g; var ENTRY_CAP = 150;\n" + dashboardFuncs(t,
-		"frag", "entriesBox", "entryKeys", "resetEntries", "mergeEntries", "gapped", "evictEntries", "entrySame", "entryInputFull", "entryRowNode", "entryInputPatch", "entryInputHTML", "mergeEntriesRegion")
+		"frag", "entriesBox", "entryKeys", "resetEntries", "mergeEntries", "gapped", "evictEntries", "keyedSame", "keyedInputPatch", "keyedInputHTML", "entryInputFull", "entryRowNode", "entryInputPatch", "entryInputHTML", "mergeEntriesRegion")
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, "testdata/entry-rows.browser.cjs")
+	cmd := exec.CommandContext(ctx, node, script)
 	cmd.Env = append(os.Environ(), "ENTRY_ROWS_BASE="+f.base, "ENTRY_ROWS_UPDATES="+updates.URL, "ENTRY_ROWS_FUNCTIONS="+functions)
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()

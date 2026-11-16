@@ -32,7 +32,11 @@
   try { store = window.localStorage; store.getItem("ws.dashboard.layout"); } catch (e) { store = null; }
   function load(k) { try { return store ? store.getItem(k) : null; } catch (e) { return null; } }
   function save(k, v) {
-    try { if (store) { if (v === null) store.removeItem(k); else store.setItem(k, v); } } catch (e) { /* full or denied */ }
+    try {
+      if (!store) return false;
+      if (v === null) store.removeItem(k); else store.setItem(k, v);
+      return true;
+    } catch (e) { return false; /* full or denied */ }
   }
 
   // --- times: the server writes epoch ms; the page shows local or relative time

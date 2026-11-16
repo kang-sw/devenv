@@ -81,8 +81,10 @@ func TestWebCardScriptRidesOnlyALocalViewersPage(t *testing.T) {
 	const kind = "window.WsWeb = {"
 	page := serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String()
 	cardsAt, at := strings.Index(page, "window.WsCards = {"), strings.Index(page, kind)
-	setupAt, mountAt := strings.Index(page, "window.WsWeb.setup("), strings.Index(page, "window.WsWeb.mount(")
-	if cardsAt < 0 || at < 0 || setupAt < 0 || mountAt < 0 || !(cardsAt < at && at < setupAt && setupAt < mountAt) {
+	scriptAt := strings.Index(page, `<script src="/s/dashboard-`)
+	script := mustAsset(t, "dashboard.js")
+	setupAt, mountAt := strings.Index(script, "window.WsWeb.setup("), strings.Index(script, "window.WsWeb.mount(")
+	if cardsAt < 0 || at < 0 || scriptAt < 0 || setupAt < 0 || mountAt < 0 || !(cardsAt < at && at < scriptAt && setupAt < mountAt) {
 		t.Errorf("a local viewer's page lacks the web card kind between the card framework and the page script (framework %d, kind %d, setup %d, mount %d)", cardsAt, at, setupAt, mountAt)
 	}
 	for _, icon := range []string{"globe", "square-mouse-pointer", "bug"} {

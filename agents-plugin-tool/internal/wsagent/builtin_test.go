@@ -78,8 +78,8 @@ func TestBuiltinPiWorkerProfileResolves(t *testing.T) {
 	if want := []string{"read", "bash", "edit", "write", "grep", "find", "ls"}; !slices.Equal(p.Tools, want) {
 		t.Errorf("pi-worker tools = %v, want %v", p.Tools, want)
 	}
-	if want := []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}; !slices.Equal(p.WSTools, want) {
-		t.Errorf("pi-worker ws_tools = %v, want unchanged set %v", p.WSTools, want)
+	if want := []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.resolve_impl_branch", "tickets.create_empty", "tickets.verify", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}; !slices.Equal(p.WSTools, want) {
+		t.Errorf("pi-worker ws_tools = %v, want %v", p.WSTools, want)
 	}
 	var pi []string
 	for _, tool := range p.WSTools {
@@ -108,7 +108,7 @@ func TestBuiltinPiMiniLeadProfileResolves(t *testing.T) {
 	if p.Backend != BackendPi || p.Lead || !slices.Equal(p.Tools, PiWorkerTools) || p.Instructions != "" || p.Skills || p.ListInIndex || len(p.MCPServers)+len(p.Plugins) != 0 {
 		t.Fatalf("mini-lead must be an ordinary non-lead coding profile: %+v", p)
 	}
-	want := append(append([]string{}, PiWorkerWSTools...), "tickets.query", "tickets.acquire", "tickets.release", "tickets.close", "tickets.move", "tickets.verify", "tickets.checklist", "note.query", "playbook.read", "playbook.render", "path.generate", "route.resolve_implement")
+	want := append(append([]string{}, PiWorkerWSTools...), "tickets.query", "tickets.acquire", "tickets.release", "tickets.close", "tickets.move", "tickets.checklist", "note.query", "playbook.read", "playbook.render", "path.generate", "route.resolve_implement")
 	if !slices.Equal(p.WSTools, want) {
 		t.Fatalf("mini-lead ws_tools = %v, want %v", p.WSTools, want)
 	}

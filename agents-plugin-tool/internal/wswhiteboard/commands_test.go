@@ -116,6 +116,193 @@ func TestFieldBodiesRefuseSiblingOpenings(t *testing.T) {
 	}
 }
 
+func TestPanelAndLogCodeLiteralsAreInert(t *testing.T) {
+	for _, payload := range []string{
+		"Inline `</wb:panel></wb:topic><wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>` stays text.",
+		"Use ``a ` backtick </wb:panel><wb:change/>`` literally.",
+		"```xml\n</wb:panel></wb:topic>\n<wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>\n```\n\nAfter fence.",
+		"```xml\ninterior ``` </wb:panel><wb:change/> remains code\n```",
+		"~~~xml\n</wb:panel> and <wb:change/>\n~~~",
+		"  ~~~~xml\n</wb:panel> and <wb:change/>\n~~~\n  ~~~~~\nAfter tilde fence.",
+		"<![CDATA[<wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>]]>",
+	} {
+		input := panelXML("t", "sample", payload) + logXML("t", "after sample")
+		if !strings.HasPrefix(payload, "<![CDATA[") {
+			// Owner (1208)=b: keep the original raw-close inputs, but
+			// structural parsing/refusal wins. CDATA is the safe spelling.
+			assertLiteralOwnerBReading(t, input)
+			assertLiteralOwnerBApply(t, input)
+		}
+		protected := payload
+		if !strings.HasPrefix(payload, "<![CDATA[") {
+			protected = "<![CDATA[" + payload + "]]>"
+		}
+		cmds := mustParse(t, panelXML("t", "sample", protected)+logXML("t", "after sample"))
+		want := strings.TrimSuffix(strings.TrimPrefix(payload, "<![CDATA["), "]]>")
+		if len(cmds) != 2 || cmds[0].Body != want || len(cmds[0].Children) != 0 || cmds[1].Body != "after sample" {
+			t.Fatalf("literal payload changed structure or bytes: %+v", cmds)
+		}
+		st := &State{}
+		mustApply(t, st, panelXML("t", "sample", protected))
+		if entries(t, st, "t")[0].Text != want {
+			t.Fatal("literal panel was not stored verbatim")
+		}
+	}
+	line := "Literal `</wb:log></wb:topic><wb:change><wb:old>x</wb:old><wb:new>y</wb:new></wb:change>` is inert."
+	assertLiteralOwnerBReading(t, logXML("t", line))
+	assertLiteralOwnerBApply(t, logXML("t", line))
+	st := &State{}
+	mustApply(t, st, logXML("t", "<![CDATA["+line+"]]>"))
+	if got, _ := st.LatestAgent("t"); got.Text != line {
+		t.Fatalf("literal log = %+v", got)
+	}
+	// Fences do not relax the independent one-source-line log contract.
+	refused(t, st, logXML("t", "```xml\n</wb:log>\n```"))
+	for _, operand := range []string{
+		"`<wb:new></wb:old><wb:change/>`",
+		"```xml\n<wb:new></wb:old><wb:change/>\n```",
+	} {
+		input := `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>` + operand + `</wb:old><wb:new/></wb:change></wb:panel></wb:topic>`
+		assertLiteralOwnerBReading(t, input)
+		cmds := mustParse(t, `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old><![CDATA[`+operand+`]]></wb:old><wb:new/></wb:change></wb:panel></wb:topic>`)
+		if len(cmds[0].Children) != 1 || cmds[0].Children[0].FieldsOf("wb:old")[0] != operand {
+			t.Fatalf("literal patch operand changed: %+v", cmds)
+		}
+		// The existing sibling-opening guard still applies outside literals.
+		_, problems := parse(`<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>x<wb:new>y</wb:old><wb:new/></wb:change></wb:panel></wb:topic>`)
+		wantProblems(t, problems, "body holds an opening <wb:new>")
+	}
+	old := "`<wb:old></wb:panel><wb:change/>`"
+	newText := "~~~xml\n<wb:new></wb:panel><wb:change/>\n~~~"
+	st = &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="sample" recap="Literal"><![CDATA[`+old+`]]></wb:panel></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="sample"><wb:change><wb:old>`+old+`</wb:old><wb:new>`+newText+`</wb:new></wb:change></wb:panel></wb:topic>`)
+	if latest := queryResult(t, st, `{"panel":"p1"}`).Direct.Entry; latest.Text != newText {
+		t.Fatal("literal operands did not patch stored payload verbatim")
+	}
+}
+
+func TestUnmatchedCodeInSeparateLegacyBodiesStaysSeparate(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel recap="one">a `+"`"+`</wb:panel><wb:panel recap="two">b `+"`"+`</wb:panel></wb:topic>`)
+	if st.PanelCounter != 2 || queryResult(t, st, `{"panel":"p1"}`).Direct.Entry.Text != "a `" || queryResult(t, st, `{"panel":"p2"}`).Direct.Entry.Text != "b `" {
+		t.Fatal("unmatched backticks merged separate full panel writes")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel recap="three">c `+"`"+`</wb:panel><wb:log>d `+"`"+`</wb:log></wb:topic>`)
+	if latest, _ := st.LatestAgent("t"); st.PanelCounter != 3 || latest.Text != "d `" {
+		t.Fatal("unmatched backticks merged panel/log writes")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:body>alpha `+"`"+`</wb:body><wb:edit><wb:old>alpha `+"`"+`</wb:old><wb:new>beta `+"`"+`</wb:new></wb:edit></wb:topic>`)
+	if st.TopicBody("t") != "beta `" {
+		t.Fatal("unmatched operand backticks changed legacy edit")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="work" recap="four">alpha `+"`"+`</wb:panel></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="work"><wb:change><wb:old>alpha `+"`"+`</wb:old><wb:new>beta `+"`"+`</wb:new></wb:change></wb:panel></wb:topic>`)
+	if queryResult(t, st, `{"panel":"p4"}`).Direct.Entry.Text != "beta `" {
+		t.Fatal("unmatched operand backticks changed panel patch")
+	}
+}
+
+func TestLiteralNestedOpenersCannotSwallowFollowingCommands(t *testing.T) {
+	for _, leaf := range []string{"panel", "body", "answer"} {
+		t.Run(leaf, func(t *testing.T) {
+			st := &State{}
+			attrs := ` recap="r"`
+			if leaf == "body" {
+				attrs = ""
+			}
+			if leaf == "answer" {
+				mustApply(t, st, addXML(ClassTechnical, "t", "answer me"))
+				attrs = ` id="1" value="ok"`
+			}
+			payload := "Writing ` <wb:" + leaf + ` id="p2"> is how`
+			first := "<wb:" + leaf + attrs + ">" + payload + "</wb:" + leaf + ">"
+			tail := "<wb:log>done ` ok</wb:log><wb:panel recap=\"s\">two</wb:panel>"
+			input := `<wb:topic name="t">` + first + tail + `</wb:topic>`
+			if leaf == "answer" {
+				input = first + `<wb:topic name="t">` + tail + `</wb:topic>`
+			}
+			if cmds := mustParse(t, input); len(cmds) != 3 || cmds[0].Body != payload {
+				t.Fatalf("merged commands: %+v", cmds)
+			}
+			mustApply(t, st, input)
+			if log, _ := st.LatestAgent("t"); log.Text != "done ` ok" {
+				t.Fatal("following log was swallowed")
+			}
+			if leaf == "panel" && st.PanelCounter != 2 || leaf != "panel" && st.PanelCounter != 1 {
+				t.Fatal("following panel was swallowed")
+			}
+			if leaf == "body" && st.TopicBody("t") != payload {
+				t.Fatal("body payload changed")
+			}
+			if leaf == "answer" && item(t, st, 1).AnswerQuote != payload {
+				t.Fatal("answer payload changed")
+			}
+		})
+	}
+}
+
+func TestLiteralContainerFieldCloseCannotSwallowCommands(t *testing.T) {
+	input := "<wb:topic name=\"t\"><wb:panel recap=\"r\">a `</wb:panel><wb:add class=\"technical\"><wb:title>literal </wb:add> `</wb:title></wb:add><wb:panel recap=\"s\">two</wb:panel></wb:topic>"
+	cmds, parseProblems := parse(input)
+	st := &State{}
+	out, applyProblems := Apply(st, input, testEnv())
+	t.Logf("parser commands=%d problems=%v; Apply accepted=%d panels=%d questions=%d problems=%v failed=%q", len(cmds), parseProblems, out.Accepted, st.PanelCounter, len(st.Items), applyProblems, out.Failed)
+	if len(parseProblems) != 0 || len(cmds) != 3 {
+		t.Errorf("container raw field merged parser commands: %+v", cmds)
+	}
+	if len(applyProblems) != 0 || out.Accepted != 3 || st.PanelCounter != 2 || len(st.Items) != 1 {
+		t.Errorf("container raw field lost applied commands: %+v", st)
+	}
+	if len(st.Items) == 1 && st.Items[0].Title != "literal </wb:add> `" {
+		t.Errorf("raw field changed: %q", st.Items[0].Title)
+	}
+}
+
+func TestLastFieldCodeCannotPairWithFollowingCommands(t *testing.T) {
+	for _, field := range []string{"why", "recommend", "link"} {
+		for _, next := range []string{"<wb:log>c `d</wb:log>", "<wb:panel recap=\"c `\">end</wb:panel>"} {
+			input := `<wb:topic name="t"><wb:add class="technical"><wb:title>x</wb:title><wb:` + field + ">a `b</wb:" + field + `></wb:add>` + next + `</wb:topic>`
+			cmds := mustParse(t, input)
+			if len(cmds) != 2 || cmds[0].FieldsOf("wb:" + field)[0] != "a `b" {
+				t.Fatalf("field crossed command boundary: %+v", cmds)
+			}
+		}
+	}
+	for _, patch := range []bool{false, true} {
+		st := &State{}
+		mustApply(t, st, topicXML("t", "original")+panelCommandXML("t", `name="work" recap="first"`, "original"))
+		change := "<wb:old>original</wb:old><wb:new>c `d</wb:new>"
+		edit := "<wb:edit>" + change + "</wb:edit>"
+		if patch {
+			edit = `<wb:panel name="work"><wb:change>` + change + `</wb:change></wb:panel>`
+		}
+		mustApply(t, st, `<wb:topic name="t">`+edit+"<wb:log>e `f</wb:log></wb:topic>")
+		if log, _ := st.LatestAgent("t"); log.Text != "e `f" {
+			t.Fatal("following log was swallowed")
+		}
+		if !patch && st.TopicBody("t") != "c `d" || patch && queryResult(t, st, `{"panel":"p1"}`).Direct.Entry.Text != "c `d" {
+			t.Fatal("last new operand changed")
+		}
+	}
+}
+
+func TestCDATAStillUnwrapsInsideLiteralCode(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, logXML("t", "close with `<![CDATA[</wb:log>]]>` tag"))
+	if log, _ := st.LatestAgent("t"); log.Text != "close with `</wb:log>` tag" {
+		t.Fatalf("CDATA markers stored in log: %+v", log)
+	}
+	for _, fence := range []string{"```", "~~~"} {
+		payload := fence + "xml\n<![CDATA[<wb:panel id=\"p1\">x</wb:panel> &amp;]]>\n" + fence
+		mustApply(t, st, panelXML("t", "code", payload))
+		want := fence + "xml\n<wb:panel id=\"p1\">x</wb:panel> &amp;\n" + fence
+		if latest := entries(t, st, "t")[len(entries(t, st, "t"))-2]; latest.Text != want {
+			t.Fatalf("CDATA markers stored in fence: %q", latest.Text)
+		}
+	}
+}
+
 func TestCDATAHoldsALiteralClosingTag(t *testing.T) {
 	cmds := mustParse(t, `<wb:topic name="t"><wb:body>use <![CDATA[</wb:body> and <b> & ]]> here</wb:body></wb:topic>`)
 	if want := "use </wb:body> and <b> & " + " here"; cmds[0].Body != want {

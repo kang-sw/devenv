@@ -22,13 +22,14 @@ var itemFieldNames = []string{"title", "option", "recommend", "why", "link"}
 var grammar = wsxmlcmd.Grammar{
 	Prefix:              "wb:",
 	RefuseFieldOpenings: true,
+	LiteralCode:         true,
 	// wb:topic once took the body itself; the hint shows the form that
 	// replaced it to a caller still writing the old one.
 	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Extras: []string{"label", "tickets"}, Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},
 	Commands: map[string]wsxmlcmd.Spec{
 		"body":      {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"replace_all"}, Fields: []string{"old", "new"}, Scoped: true},
-		"panel":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "recap"}, Scoped: true},
+		"panel":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "name", "recap"}, Wrapper: "change", Fields: []string{"old", "new"}, Scoped: true},
 		"log":       {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class"}, Fields: itemFieldNames, DecodeFields: itemFieldNames, Scoped: true},
 		"close":     {Kind: wsxmlcmd.Empty, Attrs: []string{"result"}, Scoped: true},

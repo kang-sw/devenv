@@ -67,14 +67,16 @@
   }
 
   // drafts is the draft store: load(rid), save(rid, draft) (an empty draft
-  // clears), and clear(rid). Beyond cap sessions the oldest saved is dropped.
+  // clears), and clear(rid). Saves return the storage adapter's write result
+  // (false means failure). Beyond cap sessions the oldest saved is dropped.
   function drafts(store, cap) {
     cap = cap || DRAFT_CAP;
     function index() { return strings(parse(store.load(DRAFTS), [])); }
     function clear(rid) {
-      store.save(DRAFT + rid, null);
+      var saved = store.save(DRAFT + rid, null);
       var ids = index(), rest = ids.filter(function (x) { return x !== rid; });
       if (rest.length !== ids.length) store.save(DRAFTS, rest.length ? JSON.stringify(rest) : null);
+      return saved;
     }
     return {
       load: function (rid) {
@@ -82,12 +84,12 @@
         return d && typeof d === "object" && !Array.isArray(d) ? d : null;
       },
       save: function (rid, d) {
-        if (emptyDraft(d)) { clear(rid); return; }
+        if (emptyDraft(d)) return clear(rid);
         var ids = index().filter(function (x) { return x !== rid; });
         ids.push(rid);
         while (ids.length > cap) store.save(DRAFT + ids.shift(), null);
         store.save(DRAFTS, JSON.stringify(ids));
-        store.save(DRAFT + rid, JSON.stringify(d));
+        return store.save(DRAFT + rid, JSON.stringify(d));
       },
       clear: clear
     };
@@ -604,7 +606,7 @@
 
   // leaveGuard is a beforeunload listener that asks the browser to confirm
   // leaving while holds() reports input the draft store cannot keep (pasted
-  // images), and does nothing otherwise.
+  // images or a failed draft write), and does nothing otherwise.
   function leaveGuard(holds) {
     return function (e) {
       if (!holds()) return undefined;

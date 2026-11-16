@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { helperHost } from './helper-host.mjs';
 
 export const MAX_FRAME = 64 * 1024;
 export const PROXY_KEYS = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'];
@@ -61,8 +62,8 @@ export function normalizeSearch(data, query) {
     return { title: text(item.title, 500), url: text(url.href, 2000), snippet: text(item.snippet, 1500) };
   }) };
 }
-export async function createReadOnlyRegistry() {
-  const { ModelRuntime, ModelRegistry, getAgentDir } = await import('@earendil-works/pi-coding-agent');
+export async function createReadOnlyRegistry(host) {
+  const { ModelRuntime, ModelRegistry, getAgentDir } = await import(host ? pathToFileURL(host.sdk).href : '@earendil-works/pi-coding-agent');
   const authPath = join(getAgentDir(), 'auth.json');
   const auth = existsSync(authPath) ? JSON.parse(readFileSync(authPath, 'utf8')) : {};
   if (!auth || typeof auth !== 'object' || Array.isArray(auth)) throw Error('invalid auth');
@@ -164,9 +165,10 @@ async function main() {
   if (manifest.name !== 'pi-web-access' || manifest.version !== '0.29.0') throw Error('wrong package');
   const require = createRequire(import.meta.url);
   const { createJiti } = require('jiti');
-  const jiti = createJiti(import.meta.url, { fsCache: false, moduleCache: false });
+  const host = helperHost(process.argv[3]);
+  const jiti = createJiti(import.meta.url, { fsCache: false, moduleCache: false, ...(host ? { alias: host.alias } : {}) });
   const extension = await jiti.import(join(root, 'index.ts'));
-  const registry = request.mode === 'search' ? await createReadOnlyRegistry() : undefined;
+  const registry = request.mode === 'search' ? await createReadOnlyRegistry(host) : undefined;
   const execute = await captureSearch(extension.default, registry, shortcutNames);
   return request.mode === 'probe' ? { ready: true } : { result: await execute(query) };
 }

@@ -280,7 +280,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 			t.Errorf("live session page lacks %q", want)
 		}
 	}
-	if m, d := strings.Index(live, "window.wsMention = {"), strings.Index(live, "--- composer file mentions"); m < 0 || d < m {
+	if m, d := strings.Index(live, "window.wsMention = {"), strings.Index(live, `<script src="/s/dashboard-`); m < 0 || d < m {
 		t.Errorf("live session page does not load the mention module ahead of the page script (module at %d, page script at %d)", m, d)
 	}
 	// The composer sends on a key or the thin icon-only send button; the

@@ -102,7 +102,7 @@ export function createWebSearch(options: WebSearchOptions = {}) {
     childEnv.JITI_FS_CACHE = 'false';
     const timeoutMs = Math.min(30_000, Math.max(1, options.timeoutMs ?? 30_000));
     return await new Promise<any>((resolve, reject) => {
-      const child = spawn(process.execPath, [...permissionFlags, helper, root], {
+      const child = spawn(process.execPath, [...permissionFlags, helper, root, process.argv[1] ?? ''], {
         shell: false, env: childEnv, cwd: options.cwd ?? packageRoot,
         stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
       });

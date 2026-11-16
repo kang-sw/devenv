@@ -29,14 +29,17 @@ const (
 // Text is the raw panel payload or log text. Imported marks legacy provenance.
 // Folder-store schema versioning belongs to the persistence boundary, not State.
 type Entry struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind"`
-	PanelID  string `json:"panel_id,omitempty"`
-	ItemID   int    `json:"item_id,omitempty"`
-	Recap    string `json:"recap,omitempty"`
-	Text     string `json:"text,omitempty"`
-	At       string `json:"at"`
-	Imported bool   `json:"imported,omitempty"`
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	PanelID string `json:"panel_id,omitempty"`
+	// PanelName binds a topic-local name in retained immutable history. Legacy
+	// id-only versions may omit it; the binding survives those reposts.
+	PanelName string `json:"panel_name,omitempty"`
+	ItemID    int    `json:"item_id,omitempty"`
+	Recap     string `json:"recap,omitempty"`
+	Text      string `json:"text,omitempty"`
+	At        string `json:"at"`
+	Imported  bool   `json:"imported,omitempty"`
 	// TopicState is immutable machine metadata, parsed separately from Text.
 	TopicState       json.RawMessage `json:"topic_state,omitempty"`
 	BoardNotice      json.RawMessage `json:"board_notice,omitempty"`
@@ -103,7 +106,30 @@ var panelIDPattern = regexp.MustCompile(`^p[1-9][0-9]*$`)
 func applyPanel(p *problems, work *State, cmd command, topicOf topicResolver, now time.Time) {
 	before := len(p.List)
 	topic, topicOK := topicOf(cmd)
-	recap, recapOK := wsxmlcmd.RequiredAttr(p, cmd, "recap")
+	patch := len(cmd.Children) > 0
+	name, hasName := cmd.Attr("name")
+	if hasName {
+		name = strings.TrimSpace(name)
+		wsxmlcmd.NonEmpty(p, cmd.At("name"), name)
+	}
+	if patch && !hasName {
+		// v0.50.0 refuses name before publishing a command. An id-only patch
+		// could instead become a literal full replacement on that old parser.
+		p.Add("%s: patches require name; id alone is not a safe patch selector", cmd.At("name"))
+	}
+	namedID := ""
+	if topicOK && hasName {
+		if i := work.topicDocIndex(topic); i >= 0 {
+			for _, entry := range work.Topics[i].Entries {
+				if entry.Kind == EntryPanel && entry.PanelName == name && name != "" {
+					if namedID != "" && namedID != entry.PanelID {
+						p.Add("%s: panel name %q has conflicting history", cmd.At("name"), name)
+					}
+					namedID = entry.PanelID
+				}
+			}
+		}
+	}
 	id, override := cmd.Attr("id")
 	if override {
 		if !panelIDPattern.MatchString(id) {
@@ -125,13 +151,69 @@ func applyPanel(p *problems, work *State, cmd command, topicOf topicResolver, no
 			}
 		}
 	}
-	if !utf8.ValidString(cmd.Body) {
+	if override && hasName && (namedID == "" || id != namedID) {
+		p.Add("%s: id and name must resolve to the same existing panel", cmd.Label())
+	}
+	if !override && namedID != "" {
+		id, override = namedID, true
+	}
+	var latest Entry
+	if topicOK && override {
+		if i := work.topicDocIndex(topic); i >= 0 {
+			for _, entry := range work.Topics[i].Entries {
+				if entry.Kind == EntryPanel && entry.PanelID == id {
+					latest = entry
+				}
+			}
+		}
+	}
+	recap, recapOK := cmd.Attr("recap")
+	if patch && !recapOK {
+		recap, recapOK = latest.Recap, latest.ID != ""
+	} else {
+		recap, recapOK = wsxmlcmd.RequiredAttr(p, cmd, "recap")
+	}
+	body := cmd.Body
+	if patch {
+		if latest.ID == "" {
+			p.Add("%s: panel name %q does not exist; post a full payload first", cmd.At("name"), name)
+		}
+		if strings.TrimSpace(body) != "" {
+			p.Add("%s: patches take only change wrappers, not text or a full payload outside them", cmd.Label())
+		}
+		body = latest.Text
+		for _, change := range cmd.Children {
+			old, hasOld := change.Single(p, "wb:old")
+			repl, hasNew := change.Single(p, "wb:new")
+			if !hasOld {
+				p.Add("%s: <wb:old> required", change.Label())
+			} else if old == "" {
+				p.Add("%s: <wb:old> must be non-empty", change.Label())
+			}
+			if !hasNew {
+				p.Add("%s: <wb:new> required (empty deletes the match)", change.Label())
+			}
+			if !hasOld || old == "" || !hasNew {
+				continue
+			}
+			match := strings.Index(body, old)
+			switch {
+			case match < 0:
+				p.Add("%s: <wb:old> matches nothing in panel %s", change.Label(), id)
+			case strings.Contains(body[match+1:], old):
+				p.Add("%s: <wb:old> matches multiple places in panel %s; widen it to one", change.Label(), id)
+			default:
+				body = body[:match] + repl + body[match+len(old):]
+			}
+		}
+	}
+	if !utf8.ValidString(body) {
 		p.Add("%s: panel payload must be valid UTF-8", cmd.Label())
 	}
-	if len(cmd.Body) > MaxPanelBytes {
+	if len(body) > MaxPanelBytes {
 		p.Add("%s: panel payload exceeds 2 MiB of UTF-8; split it into panels or link an external file", cmd.Label())
 	}
-	if fullDocument(cmd.Body) {
+	if fullDocument(body) {
 		p.Add("%s: a panel takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.Label())
 	}
 	if len(p.List) != before || !topicOK || !recapOK {
@@ -143,7 +225,7 @@ func applyPanel(p *problems, work *State, cmd command, topicOf topicResolver, no
 	}
 	work.reopenWithEvent(topic, now)
 	recap = strings.TrimSpace(recap)
-	work.appendEntry(topic, Entry{Kind: EntryPanel, PanelID: id, Recap: recap, Text: cmd.Body}, now)
+	work.appendEntry(topic, Entry{Kind: EntryPanel, PanelID: id, PanelName: name, Recap: recap, Text: body}, now)
 	action := "added"
 	if override {
 		action = "re-posted"

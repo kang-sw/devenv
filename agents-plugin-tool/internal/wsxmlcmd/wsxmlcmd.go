@@ -22,7 +22,9 @@
 //   - A body is raw text up to the first exact closing tag of its element
 //     (`</wb:why>`), so `<`, `&`, inline HTML, and mermaid are written as is.
 //     A CDATA section (`<![CDATA[...]]>`) passes its content through
-//     literally, for a body that must contain its own closing tag.
+//     literally, for a body that must contain its own closing tag. A grammar
+//     may also opt into inert Markdown code spans/fences (Grammar.LiteralCode),
+//     provided a candidate contains no raw close of its own body outside CDATA.
 //   - A body loses one newline right after its opening tag and one right
 //     before its closing tag, so a body written on its own lines keeps its
 //     text exactly; nothing else is trimmed.
@@ -35,7 +37,8 @@
 //     written: it may carry HTML whose entities are meant, or be an operand
 //     matched against stored text.
 //   - An unknown tag or attribute is a problem; so is text between commands
-//     (inside a group too) or between a command's fields.
+//     (inside a group too) or between a command's fields. A leaf may declare
+//     an alternative of repeated wrapped field sets (Spec.Wrapper).
 //
 // The workflow manual's shared command-syntax section states these rules to
 // the lead; a change here changes that text's contract.
@@ -79,6 +82,10 @@ type Spec struct {
 	// Scoped marks a command that sits only inside the grammar's group and
 	// takes the group's attribute from it (Command.Scoped).
 	Scoped bool
+	// Wrapper lets a Leaf alternatively hold repeated wrapped field sets.
+	// Body retains text outside wrappers so the caller can refuse mixed payloads;
+	// Children holds each wrapper's fields in written order.
+	Wrapper string
 }
 
 // Group is a grammar's one level of grouping: an element at the root whose
@@ -111,6 +118,9 @@ type Grammar struct {
 	Group    *Group
 	// RefuseFieldOpenings rejects literal sibling field openings in field bodies.
 	RefuseFieldOpenings bool
+	// LiteralCode makes non-crossing Markdown code spans and fences inert in bodies.
+	// Other grammars retain their original delimiter behavior.
+	LiteralCode bool
 }
 
 func (g Grammar) isGroup(tag string) bool {
@@ -219,8 +229,9 @@ type Command struct {
 	Tag      string
 	Attrs    []Attr
 	// Body is a leaf command's text.
-	Body   string
-	Fields []Field
+	Body     string
+	Fields   []Field
+	Children []Command
 	// Scope is the group the command sits in, nil at the root. Commands of
 	// one group share it.
 	Scope *Scope
@@ -317,6 +328,7 @@ func ParseOrdered(p *Problems, g Grammar, s string) (commands []Command, complet
 
 func (r *parser) read() {
 	g := r.g
+	r.literalCode = g.LiteralCode
 	for !r.fatal {
 		r.skipSpace()
 		if r.i >= len(r.s) {
@@ -399,7 +411,11 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 	if !tag.selfClosing {
 		switch spec.Kind {
 		case Leaf:
-			body, ok := r.readBody(tag.name, tag.at, spec.DecodeBody, nil, "")
+			var wrapper *bodyWrapper
+			if spec.Wrapper != "" {
+				wrapper = &bodyWrapper{tag: r.g.Prefix + spec.Wrapper, fields: r.g.fieldTags(spec), children: &cmd.Children, refuseOpenings: r.g.RefuseFieldOpenings, parent: cmd}
+			}
+			body, ok := r.readContent(tag.name, tag.at, spec.DecodeBody, bodyFieldRules{}, "", wrapper, nil)
 			if !ok {
 				return false
 			}
@@ -498,7 +514,7 @@ func (r *parser) group(tag openTag) {
 			if r.ordered {
 				body, ok := r.readBodyContent(tag.name, tag.at, false, nil, scope.Label(), &r.g)
 				if ok {
-					p.Add("%s: text before its first command: %q%s", scope.Label(), excerpt(body), hint)
+					r.problem(r.i, "%s: text before its first command: %q%s", scope.Label(), excerpt(body), hint)
 				}
 				return
 			}
@@ -507,7 +523,7 @@ func (r *parser) group(tag openTag) {
 				r.fail(tag.at, "<%s> has no closing %s", tag.name, closing)
 				return
 			}
-			p.Add("%s: text before its first command: %q%s", scope.Label(), excerpt(rest[:end]), hint)
+			r.problem(r.i+end, "%s: text before its first command: %q%s", scope.Label(), excerpt(rest[:end]), hint)
 			r.i += end + len(closing)
 			return
 		}
@@ -571,19 +587,52 @@ func excerpt(s string) string {
 
 // tokenizer reads a command string; fatal is set once reading cannot go on.
 type tokenizer struct {
-	s       string
-	i       int
-	p       *Problems
-	fatal   bool
-	ordered bool
+	s                           string
+	i                           int
+	p                           *Problems
+	fatal                       bool
+	ordered                     bool
+	literalCode                 bool
+	literals                    *literalIndex
+	linePos                     int
+	lineCount                   int
+	crossings                   int
+	crossingFrom, crossingUntil int
 }
 
 func (t *tokenizer) lineAt(i int) int {
+	// Normal reading asks about monotonically increasing source positions.
+	// Count each intervening byte once, not the entire command prefix per body.
+	if i >= t.linePos {
+		t.lineCount += strings.Count(t.s[t.linePos:i], "\n")
+		t.linePos = i
+		return t.lineCount + 1
+	}
 	return strings.Count(t.s[:i], "\n") + 1
 }
 
+const crossingGuidance = "; code containing its own closing tag is structural text: use <![CDATA[...]]> for the literal example; split any ]]> across adjacent CDATA sections"
+
+func (t *tokenizer) guideProblems(from int) {
+	for i := from; i < len(t.p.List); i++ {
+		if !strings.Contains(t.p.List[i], crossingGuidance) {
+			t.p.List[i] += crossingGuidance
+		}
+	}
+}
+
+// Decorate an existing structural problem only within a rejected candidate.
+// This never creates a diagnostic or changes fatal/command-local handling.
+func (t *tokenizer) problem(at int, format string, args ...any) {
+	before := len(t.p.List)
+	t.p.Add(format, args...)
+	if t.crossingUntil > 0 && at >= t.crossingFrom && at < t.crossingUntil {
+		t.guideProblems(before)
+	}
+}
+
 func (t *tokenizer) fail(i int, format string, args ...any) {
-	t.p.Add("line %d: %s", t.lineAt(i), fmt.Sprintf(format, args...))
+	t.problem(t.i, "line %d: %s", t.lineAt(i), fmt.Sprintf(format, args...))
 	t.fatal = true
 }
 
@@ -682,14 +731,49 @@ type bodySegment struct {
 // sections through, and strips the one newline at each end; with decode, it
 // then decodes the text outside CDATA.
 func (t *tokenizer) readBody(name string, from int, decode bool, fields []string, label string) (string, bool) {
-	return t.readBodyContent(name, from, decode, fields, label, nil)
+	return t.readContent(name, from, decode, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, nil)
+}
+
+// Field boundaries are grammar metadata even when skipped content suppresses
+// sibling-opening diagnostics. Literal lookahead must never lose those tags.
+type bodyFieldRules struct {
+	tags           []string
+	refuseOpenings bool
+}
+
+type bodyWrapper struct {
+	label          string // explicit diagnostic owner for rejected-group skips
+	tag            string
+	fields         []string
+	children       *[]Command
+	refuseOpenings bool
+	parent         Command
 }
 
 // A rejected group body still needs structural boundaries: unlike a command's
 // raw body, a nested group makes its closing tag ambiguous. Quoted attributes,
 // comments, CDATA and command payloads cannot introduce a nested group.
 func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields []string, label string, group *Grammar) (string, bool) {
+	return t.readContent(name, from, decode, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, group)
+}
+
+func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
+	bodyStart, lineStart := t.i, t.i
+	literalUntil, literalLimit := t.i, len(t.s)
 	closing := "</" + name + ">"
+	before, crossings := len(t.p.List), t.crossings
+	defer func() {
+		if t.crossings > crossings {
+			t.guideProblems(before)
+		}
+	}()
+	// Only inspect newly consumed bytes, never the whole body prefix.
+	advance := func(end int) {
+		if newline := strings.LastIndexByte(t.s[t.i:end], '\n'); newline >= 0 {
+			lineStart = t.i + newline + 1
+		}
+		t.i = end
+	}
 	var segs []bodySegment
 	var text strings.Builder
 	flush := func() {
@@ -699,19 +783,30 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 		}
 	}
 	for {
-		next := strings.IndexByte(t.s[t.i:], '<')
-		if next < 0 {
+		if t.i >= len(t.s) {
 			t.fail(from, "<%s> has no closing %s", name, closing)
 			return "", false
 		}
-		text.WriteString(t.s[t.i : t.i+next])
-		t.i += next
+		if t.literalCode && t.i >= literalUntil {
+			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, &literalLimit)
+			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
+				text.WriteString(t.s[t.i:literalUntil])
+				advance(literalUntil)
+				continue
+			}
+		}
+		if t.s[t.i] != '<' {
+			text.WriteByte(t.s[t.i])
+			if t.s[t.i] == '\n' {
+				lineStart = t.i + 1
+			}
+			t.i++
+			continue
+		}
 		rest := t.s[t.i:]
 		switch {
-		case strings.HasPrefix(rest, closing):
-			t.i += len(closing)
-			flush()
-			return joinBody(segs, decode), true
+		// CDATA always unwraps, including inside code. Keep its segment raw
+		// for DecodeBody callers and retain source offsets for retry trees.
 		case strings.HasPrefix(rest, "<![CDATA["):
 			end := strings.Index(rest[9:], "]]>")
 			if end < 0 {
@@ -720,7 +815,33 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 			}
 			flush()
 			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
-			t.i += 9 + end + 3
+			advance(t.i + 9 + end + 3)
+		case t.i < literalUntil:
+			text.WriteByte('<')
+			t.i++
+		case strings.HasPrefix(rest, closing):
+			t.i += len(closing)
+			flush()
+			return joinBody(segs, decode), true
+		case wrapper != nil && openingTagPrefix(rest, wrapper.tag):
+			start := t.i
+			tag, ok := t.readOpen()
+			if !ok {
+				return "", false
+			}
+			child := Command{Pos: wrapper.parent.Pos, Line: t.lineAt(tag.at), Tag: tag.name, Scope: wrapper.parent.Scope}
+			childLabel := child.Label()
+			if wrapper.label != "" {
+				childLabel = wrapper.label + " <" + tag.name + ">"
+			}
+			checkAttrs(t.p, childLabel, tag.attrs, nil)
+			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, childLabel) {
+				return "", false
+			}
+			*wrapper.children = append(*wrapper.children, child)
+			end := t.i
+			t.i = start
+			advance(end)
 		default:
 			if group != nil {
 				end := 1
@@ -743,7 +864,10 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 					}
 					if end > 1 {
 						var quote byte
-						for ; end < len(rest); end++ {
+						// A rejected literal candidate established the fallback
+						// close. Rejected-group tag probes cannot quote past it.
+						probeLimit := min(len(rest), literalLimit-t.i)
+						for ; end < probeLimit; end++ {
 							c := rest[end]
 							if quote != 0 {
 								if c == quote {
@@ -762,14 +886,23 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 					}
 				}
 				text.WriteString(rest[:end])
-				t.i += end
+				advance(t.i + end)
 				if strings.HasPrefix(tagName, group.Prefix) && !strings.HasSuffix(rest[:end], "/>") {
 					start := t.i
-					if spec, known := group.lookup(tagName); known && spec.Kind == Container {
-						// Use the ordinary field boundaries, but attribute diagnostics
-						// to the rejected group: skipped commands have no position.
-						cmd := Command{Tag: tagName, Line: t.lineAt(start - end)}
-						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, label+" skipped <"+tagName+">") {
+					spec, known := group.lookup(tagName)
+					cmd := Command{Tag: tagName, Line: t.lineAt(start - end)}
+					skippedLabel := label + " skipped <" + tagName + ">"
+					if known && spec.Kind == Container {
+						// Preserve raw field boundaries while attributing diagnostics
+						// to the rejected group, not a synthetic command position.
+						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, skippedLabel) {
+							return "", false
+						}
+					} else if known && spec.Wrapper != "" {
+						// Wrapped operands have the same boundary authority while
+						// skipping a rejected group as in an accepted command.
+						wrapped := &bodyWrapper{label: skippedLabel, tag: group.Prefix + spec.Wrapper, fields: group.fieldTags(spec), children: &cmd.Children, parent: cmd}
+						if _, ok := t.readContent(tagName, start-end, false, bodyFieldRules{}, skippedLabel, wrapped, nil); !ok {
 							return "", false
 						}
 					} else if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
@@ -777,19 +910,29 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 						return "", false
 					}
 					text.WriteString(t.s[start:t.i])
+					end := t.i
+					t.i = start
+					advance(end)
 				}
 				continue
 			}
-			for _, field := range fields {
-				if strings.HasPrefix(rest, "<"+field+">") {
-					t.p.Add("%s field <%s> (line %d): body holds an opening <%s> - missing </%s>?", label, name, t.lineAt(t.i), field, name)
-					break
+			if fields.refuseOpenings {
+				for _, field := range fields.tags {
+					if strings.HasPrefix(rest, "<"+field+">") {
+						t.p.Add("%s field <%s> (line %d): body holds an opening <%s> - missing </%s>?", label, name, t.lineAt(t.i), field, name)
+						break
+					}
 				}
 			}
 			text.WriteByte('<')
 			t.i++
 		}
 	}
+}
+
+func openingTagPrefix(s, tag string) bool {
+	prefix := "<" + tag
+	return strings.HasPrefix(s, prefix) && len(s) > len(prefix) && (isSpace(s[len(prefix)]) || s[len(prefix)] == '>' || s[len(prefix)] == '/')
 }
 
 // joinBody strips the body's one newline at each end before decoding, so a
@@ -941,7 +1084,7 @@ func (t *tokenizer) strayClosing() bool {
 		t.i = len(t.s)
 		return true
 	}
-	t.p.Add("line %d: %s closes nothing open", t.lineAt(t.i), t.s[t.i:t.i+end+1])
+	t.problem(t.i, "line %d: %s closes nothing open", t.lineAt(t.i), t.s[t.i:t.i+end+1])
 	t.i += end + 1
 	return true
 }
@@ -955,7 +1098,7 @@ func (t *tokenizer) skipText(where string) {
 	} else {
 		t.i += next
 	}
-	t.p.Add("line %d: text %s: %q", t.lineAt(start), where, excerpt(t.s[start:t.i]))
+	t.problem(start, "line %d: text %s: %q", t.lineAt(start), where, excerpt(t.s[start:t.i]))
 }
 
 func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
@@ -1021,7 +1164,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		}
 		line := t.lineAt(tag.at)
 		if !known {
-			t.p.Add("%s: unknown field <%s> (fields: %s)", label, tag.name, strings.Join(fields, ", "))
+			t.problem(tag.at, "%s: unknown field <%s> (fields: %s)", label, tag.name, strings.Join(fields, ", "))
 			t.skipUnknown(tag)
 			if t.fatal {
 				return false
@@ -1031,11 +1174,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", label, tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			var openings []string
-			if refuseOpenings {
-				openings = fields
-			}
-			body, ok := t.readBody(tag.name, tag.at, decode[tag.name], openings, label)
+			body, ok := t.readContent(tag.name, tag.at, decode[tag.name], bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, label, nil, nil)
 			if !ok {
 				return false
 			}

@@ -12,6 +12,7 @@
   "files": [
     "src/",
     "dist/",
+    "scripts/",
     "bin/",
     "rsrc/",
     "skills/",
@@ -48,6 +49,7 @@
     "test": "env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE -u WS_PI_DELEGATION_POLICY -u WS_PI_LEAD_MEMORY_LOG node --test",
     "copy-skills": "node scripts/copy-skills.mjs",
     "bundle": "node scripts/bundle.mjs",
+    "native-payload": "python3 scripts/prepare-native-payload.py",
     "prepack": "npm run copy-skills",
     "prepare": "npm run copy-skills"
   }

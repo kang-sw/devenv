@@ -8,7 +8,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
-func panelRowsRebuild(rows *panelRows) string {
+func panelRowsRebuild(rows *keyedRows) string {
 	var out strings.Builder
 	for i, key := range rows.order {
 		out.WriteString(rows.shell[i])
@@ -59,9 +59,9 @@ func TestPanelRowsBoundariesAndFallback(t *testing.T) {
 	}
 	nextRaw := strings.Replace(raw, "one", "two", 1)
 	next := splitPanelRows(nextRaw)
-	state := &panelRowState{previous: rows, initialized: true}
+	state := &keyedRowState{name: regionPanels, previous: rows, initialized: true}
 	name, payload := state.event(newRegion(nextRaw), next)
-	event, ok := payload.(panelRowsEvent)
+	event, ok := payload.(keyedRowsEvent)
 	if name != "panel-rows" || !ok || len(event.Rows) != 1 || event.Rows[0].Key != "p-agenda" || event.Hash != newRegion(nextRaw).Hash {
 		t.Fatalf("changed card: %s %#v", name, payload)
 	}
@@ -73,6 +73,7 @@ func TestPanelRowsBoundariesAndFallback(t *testing.T) {
 	for _, invalid := range []string{
 		`<details class="panel"><summary>missing key</summary></details>`,
 		`<details class="panel" id="p-"></details>`,
+		`<details class="panel" id="p-a" id="p-b"></details>`,
 		`<details class="panel" id="p-a"></details><details class="panel" id="p-a"></details>`,
 		`<div class="panel" id="p-a"></div>`,
 		`<details class="panel" id="p-a"><details class="panel" id="p-b"></details></details>`,
@@ -89,7 +90,7 @@ func TestPanelRowsBoundariesAndFallback(t *testing.T) {
 	if empty := splitPanelRows(""); empty == nil || len(empty.order) != 0 {
 		t.Fatal("empty panel region is a valid baseline")
 	}
-	if name, _ := (&panelRowState{}).event(newRegion(raw), rows); name != "region" {
+	if name, _ := (&keyedRowState{name: regionPanels}).event(newRegion(raw), rows); name != "region" {
 		t.Fatal("first must be full")
 	}
 	if name, _ := state.event(newRegion(raw), nil); name != "region" {

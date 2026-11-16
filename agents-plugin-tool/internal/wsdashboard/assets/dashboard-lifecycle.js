@@ -98,7 +98,7 @@
   // restored draft says so, and while the page holds one, leaving it asks
   // first (the browser's leave-page confirmation).
   // The shell holds no draft: its frames keep their own.
-  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false, draftUnsaved = false;
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
@@ -127,7 +127,10 @@
     if (!draftStore || restoring) return;
     clearTimeout(draftTimer);
     draftTimer = null;
-    draftStore.save(rid, readDraft());
+    var d = readDraft();
+    // View state alone is not unsent content requiring a native prompt.
+    var saved = draftStore.save(rid, d);
+    draftUnsaved = saved === false && !WsRail.emptyDraft(Object.assign({}, d, { open: {}, tab: "" }));
   }
   function queueDraft() {
     if (!draftStore || restoring) return;
@@ -232,13 +235,24 @@
     ["input", "change", "click", "toggle"].forEach(function (t) { doc.addEventListener(t, queueDraft, true); });
     window.addEventListener("pagehide", saveDraft);
     doc.addEventListener("visibilitychange", function () { if (doc.hidden) saveDraft(); });
-    window.addEventListener("beforeunload", WsRail.leaveGuard(function () { return imgs.some(function (p) { return !p.ref; }); }));
+    window.addEventListener("beforeunload", WsRail.leaveGuard(function () {
+      saveDraft();
+      var unsaved = imgs.some(function (p) { return !p.ref; }) || draftUnsaved;
+      if (unsaved && framed && typeof window.wsShellLeave === "number") {
+        var attempt = window.wsShellLeave;
+        // Survival suggests cancellation, but is not proof: an accepted
+        // blank load remains authoritative if this timer races navigation.
+        setTimeout(function () { shPost("stay", { attempt: attempt }); }, 0);
+      }
+      return unsaved;
+    }));
   }
+  if (framed) window.wsSaveSessionDraft = saveDraft;
 
   // --- iframe shell -------------------------------------------------------------
-  // The shell page (shell) shows one frame at a time (.on) and keeps the
-  // WsShell.LIMIT most recently opened; a page not yet loaded loads in a
-  // hidden frame while the shown one stays, and shows once loaded. The
+  // The shell page (shell) owns just one session frame. A switch navigates
+  // the old document through its native beforeunload guard before removing
+  // it, then loads a fresh frame. A cancelled leave keeps the current page. The
   // address bar names the shown page (pushState; popstate shows the page it
   // goes back to). The shell's header mirrors the shown frame's (the head
   // message): its head region, its search button, and the header's padding
@@ -248,8 +262,40 @@
   // header, title, layout, scroll, and the shell's hotkeys to the shell,
   // and every link it would load as a page to the shell (go); shell.js
   // lists the messages.
-  var shFrames = [], shOn = null, shWant = null, shOrder = [], shHeadHtml = null, shSeq = 0, shTrackerRev = null;
+  var shFrames = [], shOn = null, shWant = null, shLeaving = null, shHeadHtml = null, shSeq = 0, shTrackerRev = null;
+  var shIndex = 0, shRestoring = null, shRestoreNav = null, shRestoreTimer = null, shLeaveSeq = 0;
   var shTop = doc.querySelector(".dwrap > .top"), shBody = doc.querySelector(".dwrap > .dbody");
+  function shHistoryIndex() { return history.state && Number.isSafeInteger(history.state.wsShellIndex) ? history.state.wsShellIndex : shIndex; }
+  function shPush(f) {
+    shIndex = shHistoryIndex() + 1;
+    history.pushState({ wsShellIndex: shIndex }, "", f.path + f.hash);
+  }
+  function shRestoreDone() {
+    clearTimeout(shRestoreTimer); shRestoreTimer = null;
+    shRestoring = null;
+    var nav = shRestoreNav; shRestoreNav = null;
+    if (nav) shOpen(nav.href, nav.push);
+  }
+  function shRestoreTo(index) {
+    shRestoring = index;
+    clearTimeout(shRestoreTimer);
+    // A traversal consumed by joint frame history may never emit a shell
+    // popstate. Do not leave all subsequent navigation queued indefinitely.
+    shRestoreTimer = setTimeout(shRestoreDone, 1000);
+    var delta = index - shHistoryIndex();
+    if (delta) history.go(delta);
+  }
+  function shStay(ent, attempt) {
+    var leave = shLeaving;
+    if (!leave || leave.ent !== ent || leave.attempt !== attempt) return;
+    leave.stayed = true;
+    shLeaving = null;
+    // Back has already moved history. Restore the position, never its URL:
+    // replaceState here would erase the destination entry from Back/Forward.
+    if (shHistoryIndex() !== leave.from) {
+      shRestoreTo(leave.from);
+    }
+  }
   // shPost sends a framed page's message of kind to its shell.
   function shPost(kind, m) {
     if (!framed) return;
@@ -298,14 +344,34 @@
     m.wsShell = kind;
     try { ent.el.contentWindow.postMessage(m, location.origin); } catch (x) { /* unloading */ }
   }
-  function shFind(path) { return shFrames.filter(function (x) { return x.f.path === path; })[0] || null; }
   function shEnt(win) { return shFrames.filter(function (x) { return x.el.contentWindow === win; })[0] || null; }
-  // Each load (a first one, a reload) tells the frame whether it shows: a
-  // page loads believing it shows, and a hidden frame's reload, or a frame
-  // superseded before it ever showed, must hold its updates.
+  // A blank navigation fires load only after the existing beforeunload
+  // confirmation accepted it. Removing an iframe directly would bypass that
+  // guard. Late loads/messages from a removed frame have no shell authority.
   function shAdd(el, f) {
     var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
     el.addEventListener("load", function () {
+      if (shFrames.indexOf(ent) < 0) return;
+      // Retain the latest attempt on the frame even after a tentative Stay.
+      // If its blank navigation commits, acceptance wins over that signal.
+      if (ent.leave) {
+        var blank = false;
+        try { blank = el.contentWindow.location.href === "about:blank"; } catch (x) { /* navigating */ }
+        if (blank) {
+          var next = ent.leave;
+          ent.leave = null; shLeaving = null;
+          shFrames.splice(shFrames.indexOf(ent), 1);
+          if (shOn === ent) shOn = null;
+          if (shWant === ent) shWant = null;
+          el.remove();
+          if (!next.push) shIndex = next.index;
+          shStart(next.f, next.push);
+          // A tentative Stay may already have restored (or be restoring)
+          // Back's position. Reconcile it with the accepted destination.
+          if (!next.push && next.stayed && (shRestoring !== null || shHistoryIndex() !== next.index)) shRestoreTo(next.index);
+          return;
+        }
+      }
       ent.loaded = true;
       shSettings(ent);
       if (shWant === ent) shShow(ent);
@@ -317,38 +383,51 @@
   // shOpen shows the page href names (a page the shell frames; any other
   // loads at the top level); push adds a history entry for it.
   function shOpen(href, push) {
+    // history.go is asynchronous; a pick after Stay must wait until Back's
+    // position is restored, rather than pushing from its destination entry.
+    if (shRestoring !== null) { shRestoreNav = { href: href, push: push }; return; }
     var u = new URL(href, location.href), f = window.WsShell.framed(u, location.origin);
     if (!f) { location.href = u.href; return; }
-    if (push && location.pathname + location.hash !== f.path + f.hash) history.pushState(null, "", f.path + f.hash);
-    var ent = shFind(f.path);
-    if (!ent) {
-      var el = doc.createElement("iframe");
-      el.className = "sframe";
-      el.title = doc.title;
-      ent = shAdd(el, f);
-      el.src = window.WsShell.src(f);
-      $("frames").appendChild(el);
-    } else if (f.hash !== ent.f.hash) {
-      try { ent.el.contentWindow.location.hash = f.hash; } catch (x) { /* unloading */ }
+    var ent = shOn || shWant;
+    if (ent && ent.f.path === f.path && !shLeaving) {
+      if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
+      if (!push) shIndex = shHistoryIndex();
+      if (f.hash !== ent.f.hash) {
+        try { ent.el.contentWindow.location.hash = f.hash; } catch (x) { /* unloading */ }
+      }
+      ent.f = f;
+      return;
     }
-    ent.f = f;
-    // The page opened is the most recent, the one shown until it loads the
-    // next: pages opened and left before they ever showed go first. A frame
-    // holding unsent work stays loaded past the limit (removing it would
-    // drop its pasted images unasked) and is dropped once it holds none.
-    var a = shOn ? window.WsShell.touch(shOrder, shOn.f.path) : { order: shOrder, evict: [] }, t = window.WsShell.touch(a.order, f.path);
-    shOrder = t.order;
-    a.evict.concat(t.evict).forEach(function (p) {
-      var x = shFind(p);
-      if (!x) return;
-      if (x === shOn || shHolds(x)) { shOrder.push(p); return; }
-      shFrames.splice(shFrames.indexOf(x), 1);
-      x.el.remove();
-    });
+    if (!ent) { shStart(f, push); return; }
+    if (shLeaving && shLeaving.ent === ent) {
+      // A rapid second Back/rail pick replaces only the destination, not the
+      // history entries or the native navigation already awaiting acceptance.
+      shLeaving.f = f; shLeaving.push = push; shLeaving.index = shHistoryIndex();
+      return;
+    }
+    shLeaving = { ent: ent, f: f, push: push, from: shIndex, index: shHistoryIndex(), attempt: ++shLeaveSeq };
+    ent.leave = shLeaving;
+    // Save even a draft whose debounce has not fired. The native navigation,
+    // not a custom confirm or a remove(), asks before losing pasted images.
+    try {
+      if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
+      if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView();
+      ent.el.contentWindow.wsShellLeave = shLeaving.attempt;
+      ent.el.contentWindow.location.replace("about:blank");
+    } catch (x) { ent.leave = null; shLeaving = null; }
+  }
+  function shStart(f, push) {
+    if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
+    var el = doc.createElement("iframe");
+    el.className = "sframe on";
+    el.title = doc.title;
+    shWant = shAdd(el, f);
+    el.src = window.WsShell.src(f);
+    $("frames").appendChild(el);
     shRid(f.rid);
-    if (ent === shOn) { shWant = null; return; }
-    shWant = ent;
-    if (ent.loaded) shShow(ent);
+    shHead({ head: null });
+    shLayout({ pincol: false, dim: 0 });
+    shScroll({ y: 0 });
   }
   // shRid marks the session the shell shows (rid, the rail's viewed row,
   // the memo pad's workspace).
@@ -433,6 +512,7 @@
         case "head": ent.head = m; if (on) shHead(ent); break;
         case "title": ent.title = m.title; if (on) doc.title = m.title; break;
         case "nav": if (on) shOpen(m.href, true); break;
+        case "stay": shStay(ent, m.attempt); break;
         case "key":
           if (!on) break;
           if (m.key === "rail") railKey();
@@ -440,14 +520,22 @@
           break;
         case "layout": ent.pincol = m.pincol; ent.dim = m.dim; ent.popover = m.popover === true; if (on) shLayout(ent); break;
         case "scroll": ent.y = m.y; if (on) shScroll(ent); break;
-        case "hash": if (on && location.hash !== m.hash) history.replaceState(null, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
+        case "hash": if (on && !shLeaving && shRestoring === null && location.hash !== m.hash) history.replaceState(history.state, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
         case "theme":
           setTheme(m.theme, true);
           shFrames.forEach(function (x) { if (x !== ent) shSend(x, "theme", { theme: m.theme }); });
           break;
       }
     });
-    window.addEventListener("popstate", function () { shOpen(location.pathname + location.hash, false); });
+    window.addEventListener("popstate", function () {
+      if (shRestoring !== null) {
+        var delta = shRestoring - shHistoryIndex();
+        if (delta) history.go(delta);
+        else shRestoreDone();
+        return;
+      }
+      shOpen(location.pathname + location.hash, false);
+    });
     // The shell's hotkeys besides the rail's: the search palette's keys
     // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K,
     // Ctrl+Space and Cmd+K stay with a terminal by qShortcut's target rule.
@@ -599,9 +687,10 @@
   function shShellInit() {
     var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(location.pathname + location.hash, location.origin), location.origin);
     if (!el || !f) return;
+    shIndex = shHistoryIndex();
+    history.replaceState(Object.assign({}, history.state, { wsShellIndex: shIndex }), "", location.href);
     var ent = shAdd(el, f);
     shOn = ent;
-    shOrder = [f.path];
     if (f.hash) { el.src = window.WsShell.src(f); return; }
     try { ent.loaded = el.contentDocument.readyState === "complete"; } catch (x) { /* not yet */ }
     shSend(ent, "sync");
@@ -642,6 +731,7 @@
   fmtTimes(doc);
   mermaid();
   pinConvo();
+  restoreSessionView();
   nearTop();
   if (framed) shFrameInit();
   if (shell && window.WsShell) shShellInit();

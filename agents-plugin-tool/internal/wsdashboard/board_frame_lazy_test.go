@@ -16,7 +16,7 @@ func dashboardFuncs(t *testing.T, names ...string) string {
 	}
 	src := ""
 	for _, name := range names {
-		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(string(board))
+		f := regexp.MustCompile(`(?s)\n  function ` + regexp.QuoteMeta(name) + `\([^\n]*\{[^\n]*\}\n|\n  function ` + regexp.QuoteMeta(name) + `\(.*?\n  \}\n`).FindString(string(board))
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)
 		}
@@ -275,7 +275,7 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 		"history load":   `"wbhistoryload", function \(e\) \{\n[^}]*restoreOpen\(el\);\n\s+mountFrames\(el\);`,
 		"toggle capture": `doc\.addEventListener\("toggle", frameToggle, true\);`,
 		"bands at load":  `if \(window\.wbForm\) window\.wbForm\(\);\n\s+bindCapsuleNotes\(\);\n(\s+//[^\n]*\n)*\s+boardBoxes\(\)\.forEach\(bandBoard\);\n\s+mountFramesPaced\(doc\);`,
-		"bands at swap":  `ins\.forEach\(watchBoard\); \}\n\s+ins\.forEach\(bandBoard\);`,
+		"bands at swap":  `window\.wbHistory\.sweep\(\);\n\s+ins\.forEach\(bandBoard\);`,
 		"bands adopted":  `adopted: function \(n\) \{\n[^}]*watchBoard\(n\);\n\s+bandBoard\(n\);`,
 		"bands closed":   `watchBoard\(page\);\n\s+bandBoard\(page\);`,
 	} {

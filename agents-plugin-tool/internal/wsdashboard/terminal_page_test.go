@@ -24,7 +24,7 @@ func TestTerminalCardScriptRidesOnlyAPageThatOffersTerminals(t *testing.T) {
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	const kind = "window.WsTerm = {"
 	page := serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String()
-	at, cardsAt, mountAt := strings.Index(page, kind), strings.Index(page, "window.WsCards = {"), strings.Index(page, "window.WsTerm.mount(")
+	at, cardsAt, mountAt := strings.Index(page, kind), strings.Index(page, "window.WsCards = {"), strings.Index(page, `<script src="/s/dashboard-`)
 	if at < 0 || cardsAt < 0 || mountAt < 0 || !(cardsAt < at && at < mountAt) {
 		t.Errorf("a local viewer's page lacks the terminal kind between the card framework and the page script (kind %d, framework %d, mount %d)", at, cardsAt, mountAt)
 	}

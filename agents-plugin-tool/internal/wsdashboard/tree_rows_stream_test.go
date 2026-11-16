@@ -26,7 +26,7 @@ func treeRowsFixture(t *testing.T) (*pageFixture, wslive.Snapshot) {
 	return f, snap
 }
 
-func treeRowsRebuild(rows *treeRows) string {
+func treeRowsRebuild(rows *keyedRows) string {
 	var fill func(string) string
 	fill = func(raw string) string {
 		for i, key := range rows.order {
@@ -36,7 +36,7 @@ func treeRowsRebuild(rows *treeRows) string {
 		}
 		return raw
 	}
-	return fill(rows.shell)
+	return fill(rows.shell[0])
 }
 
 func treeStreamEvent(t *testing.T, events <-chan sseEvent) sseEvent {
@@ -125,7 +125,7 @@ func TestTreeRowsStreams(t *testing.T) {
 		if delta.name != "tree-rows" || delta != treeStreamEvent(t, ws) || delta != treeStreamEvent(t, reconnect) || delta != treeStreamEvent(t, reconnectWS) {
 			t.Fatalf("delta transport mismatch: %+v", delta)
 		}
-		var patch treeRowsEvent
+		var patch keyedRowsEvent
 		if err := json.Unmarshal([]byte(delta.data), &patch); err != nil {
 			t.Fatal(err)
 		}
@@ -175,10 +175,10 @@ func TestTreeRowsFailedSendAndUncertainBaseline(t *testing.T) {
 	d := &Daemon{stats: &streamStats{}}
 	r := newRegion(treeTestRow("a", "A", ""))
 	rows := splitTreeRows(string(r.HTML))
-	sink, state := &railRowsSink{fail: true}, &treeRowState{}
+	sink, state := &railRowsSink{fail: true}, &keyedRowState{name: regionTree}
 	held := map[string]string{regionTree: r.Hash}
-	send := func(r renderedRegion, rows *treeRows) bool {
-		_, ok := d.sendTreeRegions(sink, regionSet{regionTree: r}, held, nil, nil, nil, nil, state, rows)
+	send := func(r renderedRegion, rows *keyedRows) bool {
+		_, ok := d.sendRegions(sink, regionSet{regionTree: r}, held, nil, nil, []rowRegion{{state: state, next: rows}})
 		return ok
 	}
 	if send(r, rows) || state.initialized || state.previous != nil || len(sink.events) != 0 {

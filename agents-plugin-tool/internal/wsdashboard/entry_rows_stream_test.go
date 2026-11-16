@@ -10,7 +10,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-func entryRowsRebuild(rows *entryRows) string {
+func entryRowsRebuild(rows *keyedRows) string {
 	var out strings.Builder
 	for i, key := range rows.order {
 		out.WriteString(rows.shell[i])
@@ -35,25 +35,7 @@ func entryRowsSetBodies(t *testing.T, f *pageFixture, bodies map[string]string) 
 
 func entryStreamEvent(t *testing.T, events <-chan sseEvent) sseEvent {
 	t.Helper()
-	all, closed := collect(events)
-	var found []sseEvent
-	for _, e := range all {
-		if e.name == "entry-rows" {
-			found = append(found, e)
-		} else if e.name == "region" {
-			var r regionEvent
-			if err := json.Unmarshal([]byte(e.data), &r); err != nil {
-				t.Fatal(err)
-			}
-			if r.Name == regionEntries {
-				found = append(found, e)
-			}
-		}
-	}
-	if closed || len(found) != 1 {
-		t.Fatalf("closed=%v entries events=%+v all=%+v", closed, found, all)
-	}
-	return found[0]
+	return keyedStreamEvent(t, events, regionEntries, "entry-rows")
 }
 
 func TestEntryRowsRenderedSharedParity(t *testing.T) {
@@ -124,7 +106,7 @@ func TestEntryRowsStreams(t *testing.T) {
 				t.Fatal("delta transport parity")
 			}
 		}
-		var patch entryRowsEvent
+		var patch keyedRowsEvent
 		if err := json.Unmarshal([]byte(delta.data), &patch); err != nil {
 			t.Fatal(err)
 		}
@@ -185,10 +167,10 @@ func TestEntryRowsFailedSendAndUncertainBaseline(t *testing.T) {
 	raw := `<div class="thead">title</div><details class="modelhistory">model</details><div class="centries"><div data-entry="a">A</div><div data-entry="b">B</div></div>`
 	r := newRegion(raw)
 	rows := splitEntryRows(raw)
-	sink, state := &railRowsSink{fail: true}, &entryRowState{}
+	sink, state := &railRowsSink{fail: true}, &keyedRowState{name: regionEntries}
 	held := map[string]string{regionEntries: r.Hash}
-	send := func(r renderedRegion, rows *entryRows) bool {
-		_, ok := d.sendEntryRegions(sink, regionSet{regionEntries: r}, held, nil, nil, nil, nil, nil, nil, state, rows)
+	send := func(r renderedRegion, rows *keyedRows) bool {
+		_, ok := d.sendRegions(sink, regionSet{regionEntries: r}, held, nil, nil, []rowRegion{{state: state, next: rows}})
 		return ok
 	}
 	if send(r, rows) || state.initialized || state.previous != nil || len(sink.events) != 0 {

@@ -48,7 +48,7 @@ func TestPanelRowsBrowser(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer updates.Close()
-	functions := "var PANEL_SLOT = /<!--ws-panel-row-(\\d+)-->/g;\n" + dashboardFuncs(t, "treeSame", "panelRowKey", "panelInputFull", "panelInputPatch", "panelInputHTML", "panelRowNode", "mergePanelRows", "panelReaderState", "restorePanelReader")
+	functions := "var PANEL_SLOT = /<!--ws-panel-row-(\\d+)-->/g;\n" + dashboardFuncs(t, "keyedSame", "keyedInputPatch", "keyedInputHTML", "panelRowKey", "panelInputFull", "panelInputPatch", "panelInputHTML", "panelRowNode", "mergePanelRows", "panelReaderState", "restorePanelReader")
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "testdata/panel-rows.browser.cjs")
