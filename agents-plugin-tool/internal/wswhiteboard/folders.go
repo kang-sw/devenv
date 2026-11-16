@@ -199,7 +199,11 @@ func (f FolderStore) withGuard(create bool, guard func() error, fn func() error)
 		}
 	}
 	lock := flock.New(filepath.Join(f.Dir, ".lock"))
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// This is a queue budget, not a single transaction's I/O budget. The
+	// holder syncs several files and may retry Windows sharing violations
+	// for two seconds per file; concurrent writers must outwait that work.
+	// Keep the wait finite if a holder stalls, including during publication.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	ok, err := lock.TryLockContext(ctx, 10*time.Millisecond)
 	if err != nil {
