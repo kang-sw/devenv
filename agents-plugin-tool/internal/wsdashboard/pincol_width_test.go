@@ -51,7 +51,8 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 // 48px, so it leaves the board column to its own reorder drops; below
 // 1780px, where that strip is narrow, its label runs vertically. From
 // 1780px it stands there idle as the empty column's placeholder while
-// nothing is pinned, the layout is not "tabs", and no store page shows.
+// nothing is pinned, the layout is not "tabs", and no store page shows
+// (from 2200px the column itself shows instead: data-pincol hides it).
 func TestEdgePinZoneFitsTheStripRightOfThePage(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	zone := ""
@@ -71,6 +72,74 @@ func TestEdgePinZoneFitsTheStripRightOfThePage(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}
+	}
+}
+
+// TestPinnedColumnSlotFromTheRailDockedWidth pins the four-panel width:
+// from 2200px, where the rail stays docked beside the pinned column, the
+// page shows the column with nothing pinned too (dashboard.js
+// pinColumnFits, asked again when the window crosses 2200px), so the
+// column's board-width handle works before the first pin, and the column's
+// empty pin list is the idle pin zone's quiet "drop here" placeholder, lit
+// while a drag runs; below 2200px the column still waits for a pin.
+func TestPinnedColumnSlotFromTheRailDockedWidth(t *testing.T) {
+	js := mustAsset(t, "dashboard.js")
+	for _, want := range []string{
+		`var PIN_SLOT = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;`,
+		`return (n > 0 || !!(PIN_SLOT && PIN_SLOT.matches)) && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");`,
+		`[PIN_WIDE, PIN_SLOT].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { window.WsCards.relayout(); }); });`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("dashboard.js lacks %q", want)
+		}
+	}
+	css := mustAsset(t, "dashboard.css")
+	head := "@media (min-width: 2200px) {\n  /* rail and column both show */"
+	at := strings.Index(css, head)
+	if at < 0 {
+		t.Fatalf("dashboard.css lacks %q", head)
+	}
+	block := css[at:]
+	block = block[:strings.Index(block, "\n}")]
+	for _, want := range []string{
+		`  :root[data-pincol] body:not(.tk-paged) .bpcol > .bpins:empty { display: grid; place-items: center; padding: 12px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent);`,
+		`  :root[data-pincol] .bpcol > .bpins:empty::before { content: attr(data-drop); }`,
+		`  :root[data-pincol][data-bdrag] body:not(.tk-paged) .bpcol > .bpins:empty { border-color: var(--wb-primary);`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("the 2200px block lacks %q", want)
+		}
+	}
+}
+
+// TestConversationSplitHandle pins the live grid's conversation/board
+// split: the handle (.dcv-edge, cards.js splitHandle) is mounted on the
+// live grid only, shows only where the conversation and the board stand
+// side by side (an explicit "split" from 760px, anything but "tabs" from
+// 1100px), stands in the gap left of the board styled as the pinned
+// column's handle, and a dragged width (--convow with data-convow) keeps
+// the conversation 320px and the board 360px at least, while the default
+// split stays the stylesheet's 5:7.
+func TestConversationSplitHandle(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		".dgrid { --dgrid-cols: minmax(320px, 5fr) minmax(0, 7fr); --dgrid-gap: 16px; }",
+		":root[data-convow] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--convow), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }",
+		".dgrid.live > .dcv-edge { display: none; grid-area: board; justify-self: start; position: relative; z-index: 2; width: 9px; margin-left: -12px; cursor: col-resize; touch-action: none; }",
+		`  .dgrid.live[data-layout="split"] > .dcv-edge { display: block; }`,
+		`  .dgrid.live:not([data-layout="tabs"]) > .dcv-edge { display: block; }`,
+		`.bp-edge::after, .dcv-edge::after { content: "";`,
+		".bp-edge:hover::after, .bp-edge.drag::after, .dcv-edge:hover::after, .dcv-edge.drag::after { background: var(--wb-primary); }",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("dashboard.css lacks %q", want)
+		}
+	}
+	if want := `split: grid && grid.classList.contains("live") ? grid : null,`; !strings.Contains(mustAsset(t, "dashboard.js"), want) {
+		t.Errorf("dashboard.js lacks %q", want)
+	}
+	if want := "CONVW_MIN = 320, SPLITB_MIN = 360;"; !strings.Contains(mustAsset(t, "cards.js"), want) {
+		t.Errorf("cards.js lacks %q: its clamps follow the stylesheet's", want)
 	}
 }
 
