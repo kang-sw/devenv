@@ -3,6 +3,8 @@ package wsdashboard
 import (
 	"encoding/json"
 	"html"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -437,7 +439,13 @@ func TestOutsideRemintPagePostsOnceAndGoesOnlyToItsOwnRoute(t *testing.T) {
 	o.write(t, o.away, "sub/next page.html", "<h1>NEXT-AWAY</h1>")
 	a := o.linked(t, page)
 	clock.advance(fsCapabilityTTL + time.Second)
-	body := capFetch(o.pageFixture, o.local, under(a.View, "sub/next%20page.html"), capShape{"", "none", "navigate", "document"}).Body.String()
+	r := httptest.NewRequest(http.MethodGet, under(a.View, "sub/next%20page.html"), nil)
+	r.RemoteAddr, r.Host = o.local.peer, o.local.host
+	r.Header.Set("Sec-Fetch-Site", "none")
+	r.Header.Set("Sec-Fetch-Mode", "navigate")
+	r.Header.Set("Sec-Fetch-Dest", "document")
+	r.AddCookie(authCookie(t, o.d))
+	body := authServe(o.d, r).Body.String()
 
 	script := regexp.MustCompile(`<script nonce="[0-9a-f]{32}">([\s\S]*?)</script>`).FindStringSubmatch(body)
 	if script == nil || strings.Count(body, "<script") != 1 {
