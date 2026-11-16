@@ -585,6 +585,48 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
   Swap evidence is under `D:/Temp/daemon-swap-1116/`; old in-memory launchers
   are the previously accepted single-flight boundary, not a new defect.
 
+### Result (30e401608) - 2026-11-16
+
+Item 4 live acceptance: **PASS**. This result records the coordinator-authorized
+Codex REST check only; it does not re-certify every historical Phase 1 sampling
+claim or remove the accepted old-launcher/Electron and retention boundaries.
+The ticket remains open for the coordinator's final disposition.
+
+- Integration: item 4 final source handoff `30e401608` was merged as
+  `8072be902`. Coordinator 06:22:08Z authorized acceptance on the swapped
+  daemon, reported as develop `529c0255e`, including that merge. Before and
+  after the check, `/health` confirmed the same PID 2404, version
+  `0.50.1-dev`, start time `2026-11-16T06:17:21Z`, and content SHA256
+  `84a3ccf259151abf8b7cbdc967ce6bf40c49a46b09e2db69b9cd4d111901c98a`.
+- Approved standard-Python HTTP requests addressed only the running localhost
+  dashboard. All returned HTTP 200: `/health` at 06:25:41.418-41.423Z,
+  `/rail/usage?history=1` at 06:25:41.423-41.993Z, same-origin
+  `/rail/usage?history=1&refresh=1` at 06:25:47.193-47.498Z after a 5.2-second
+  cadence wait, and final `/health` at 06:25:47.498-47.510Z. No shutdown token
+  was used. Real credential acquisition remained inside the daemon's existing
+  usage path; no credential document, token or account identifier was exposed.
+- The Codex row populated successfully with plan `pro`, empty success status,
+  source `via Codex CLI` (the approved legacy credential-provenance identifier)
+  and a `seven_day` window. Refresh advanced AsOf from `1794810341980` to
+  `1794810347487`; usage remained 44% and reset `1795332373000`. Unchanged
+  percentage therefore did not conceal a stale-cache-only observation.
+- History grew from 212 to 213 total samples and from 41 to 42 Codex samples.
+  Exactly one new Codex sample matched the refreshed row's source, kind,
+  AsOf `1794810347487`, usage 44% and reset `1795332373000`. This verifies
+  fresh successful REST acquisition plus append with the kept identifier;
+  the independent frozen old-history read/append/new-reopen test remains
+  the separate directional T0 compatibility proof.
+- Coordinator separately reported zero `codex.exe` spawns over the swap
+  interval from 30 seconds before to three minutes after. That is provided
+  sampler evidence, not a process measurement performed by this acceptance
+  executor. It is not expanded into a blanket all-executable claim.
+- Evidence is the redacted execute-worker output in this lead session, worker
+  `0eceb4bd-bd0e-4419-b9c0-1bed158b1e48`; no evidence/scratch files were
+  created. The D: free-space guard passed. No credential file was opened by
+  the executor, no direct authenticated upstream call was made outside the
+  daemon, and no local Go/ws/launcher/test executable, build, PID query,
+  sampling, daemon lifecycle action or shared-root write was performed.
+
 ## Constraints
 
 - Python launcher, holder, and hosted harness process creation remain
