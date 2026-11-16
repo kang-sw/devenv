@@ -93,8 +93,11 @@ failure it asks the user to start the dashboard normally
   detached `dashboard --port ...` equivalent NEW-daemon entry. StartDaemon's
   lock arbitrates concurrent starts without a drain, unlike daemon-start's
   possible LAN-probe race. Controlled REST-authenticated replacement remains
-  Phase 3. Electron does not take or depend on the launcher's separate
-  launcher-start.lock; a rare losing Electron-vs-launcher launch is accepted.
+  Phase 3. Phase 2 does not take the launcher's separate launcher-start.lock;
+  the coordinating lead accepted a rare losing launch there. For Phase 3, use
+  Exec1's merged start-lock semantics if participating is cheap; evaluate only
+  after that implementation lands rather than inventing a parallel lock
+  protocol or depending on an unpublished format.
 
 - **Windows strict lifetime, (1203)=a (owner 2026-11-16 11:14):** add the
   Windows-only `daemon-start --require-independent-lifetime` flag. Only Electron
@@ -125,11 +128,17 @@ The owner has now confirmed the Windows interface above. Keep this ticket open
 and retain `impl/develop/cape-barn-hence` and its leased worktree without merging
 or releasing. Before touching cmd/ws-mcp daemon-start/staging or dashboard spawn
 files, coordinate exact paths with the lead because Exec1 is editing the startup
-path in parallel. Exact Go-path availability has been requested from the lead;
-no cmd/ws-mcp, Ensure or spawn source has been edited while that answer is
-pending. Source-only exploration recommends a strict pre-drain spawn ordering
-option rather than another executable probe or bootstrap starter. No real
-Windows/macOS acceptance has been claimed.
+path in parallel. The lead authorized shell REST/controller code and test
+scaffolding now, but explicitly holds cmd/ws-mcp, Ensure and spawn source until
+Exec1's reviewed startup fix merges. Wait for the lead's merge-commit ping, then
+branch the Go part from that fresh develop; do not base it on this old feature
+branch or edit those files early. The approved sequencing seam is the opt-in
+Ensure SpawnBeforeShutdown bool (not a callback/prestarted-object abstraction),
+with PreserveRunningLAN applied within Ensure's live health observation. A
+strict spawn fails on breakaway error without plain retry; its successor lock
+wait is bounded and covers the drain. Default plugin behavior stays unchanged.
+No extra executable probe or starter is allowed. No real Windows/macOS
+acceptance has been claimed.
 
 ## Constraints
 
@@ -321,7 +330,15 @@ Repeat this guard at Ensure's actual healthy-daemon replacement decision, not
 only the shell's earlier REST check: a compatible initial daemon can race with
 a different cross-minor winner before the starter runs. Test that raced winner
 is not drained. Apply LAN preservation at the same fresh observation point.
-Keep staging outside the replaceable app and do not take launcher-start.lock.
+Keep staging outside the replaceable app. Follow Exec1's merged start-lock
+semantics; close the accepted rare Electron-vs-launcher race if taking the same
+lock is cheap, otherwise report its exact boundary as Forward. Do not implement
+an unpublished lock format or edit Exec1's code before its merge ping.
+
+The currently authorized slice is shell REST/controller code and Node test
+scaffolding only. Keep Go source untouched until the separate fresh-develop Go
+part is authorized. Record a tested shell candidate without a Phase 3 Result
+while that Go dependency and end-to-end holder/reconnect evidence remain open.
 
 ### Phase 4: Packaged acceptance
 
