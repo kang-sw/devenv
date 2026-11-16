@@ -1,19 +1,25 @@
 'use strict';
-// The dashboard entry takes StartDaemon's lock. Replacement prestarts a
-// detached macOS successor before authenticated drain; Windows remains gated
-// until the approved strict daemon-start implementation is integrated.
+// macOS prestarts a detached dashboard successor before authenticated drain.
+// Windows daemon-start strictly breaks away and performs that ordering in Ensure.
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { cacheRoot, inspect, shutdown } = require('./endpoint');
+const { cacheRoot, inspect, shutdown, sameDaemon } = require('./endpoint');
 const { version, core } = require('./daemon-version');
 const { selectDaemon } = require('./daemon-selection');
 const { stageDaemon } = require('./daemon-stage');
 
-function launch(binary, options, args = ['dashboard']) {
+function launch(binary, options, args = ['dashboard'], waitForExit = false) {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, { ...options, detached: true, stdio: 'ignore', windowsHide: true });
     child.once('error', reject);
-    child.once('spawn', () => { child.removeListener('error', reject); child.unref(); resolve(); });
+    child.once('spawn', () => {
+      child.unref();
+      if (!waitForExit) { child.removeListener('error', reject); resolve(); }
+    });
+    if (waitForExit) child.once('exit', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`daemon-start exited with status ${code}`));
+    });
   });
 }
 function launchEnv(inherited, staged, root) {
@@ -59,8 +65,8 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
       notify('Cannot safely replace across minor/protocol boundary: attached client versions are unknown. Keeping this daemon; update connected plugins, then retry after verifying compatibility.');
       return running.url;
     }
-    if (platform !== 'darwin') {
-      notify('Replacement requires independently detached daemon-start --require-independent-lifetime; integration is pending. Keeping the current daemon.');
+    if (!['darwin', 'win32'].includes(platform)) {
+      notify('Replacement is unavailable on this platform; keeping the current daemon.');
       return running.url;
     }
     const staged = stage(selected, userData, platform, appRoot);
@@ -69,53 +75,75 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
     let latest;
     try { latest = await find(root); }
     catch { notify('Dashboard health became uncertain during staging; keeping the current connection. Retry later.'); return running.url; }
-    if (latest.endpoint?.pid !== running.endpoint.pid || latest.endpoint.port !== running.endpoint.port ||
-        latest.health.started_at !== running.health.started_at) return latest.url;
+    if (!sameDaemon(latest, running)) return latest.url;
     const refreshed = version(selected.metadata.version, latest.health.version);
     if (refreshed === null || core(selected.metadata.version).slice(0, 2).some((n, i) => n !== core(latest.health.version)[i])) {
       notify('Daemon compatibility changed during staging; keeping the current connection. Update connected plugins before retrying.');
       return latest.url;
     }
     if (refreshed < 0) return latest.url;
-    // The existing dashboard entry exposes no signal proving that its detached
-    // successor reached the lock wait. A spawn event alone cannot authorize
-    // draining a healthy daemon. Until the Go startup seam supplies a verified
-    // preflight, production replacement stays attached (no child, no drain).
-    if (!deps.preflight) {
-      notify('Replacement needs a verified detached successor preflight before drain; startup integration is pending. Keeping the current daemon.');
-      return latest.url;
-    }
-    try {
-      // Injected preflight models a confirmed independent successor waiting
-      // on the lock; an injected spawn event alone is NOT that confirmation.
-      await deps.preflight(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root) },
-        ['dashboard', '--port', String(latest.endpoint.port), '--lock-wait', '8s',
-          ...(latest.health.lan ? ['--lan'] : [])]);
-    } catch {
-      notify('Replacement preflight failed; the incumbent was not drained. Retry later.');
-      return running.url;
-    }
-    try { await (deps.shutdown || shutdown)(root, latest); }
-    catch {
-      notify('Authenticated drain failed or the daemon changed; replacement outcome is uncertain. Check dashboard health before retrying.');
-      return running.url;
+    const options = { cwd: staged.root, env: launchEnv(env, staged, root) };
+    if (platform === 'win32') {
+      // Go strict Ensure holds launcher-start.lock and repeats the LAN,
+      // compatibility and numeric-core guards at its fresh REST observation.
+      try {
+        await (deps.launch || launch)(staged.binary, options,
+          ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', '--replace'], true);
+      } catch (error) {
+        let still;
+        try { still = await find(root); } catch { /* A late failure can leave no daemon. */ }
+        if (still && sameDaemon(still, latest)) {
+          notify(`Replacement did not drain the incumbent: ${error.message}. Retry after checking daemon health.`);
+          return still.url;
+        }
+        throw new Error(`Replacement starter failed after the incumbent changed; availability is uncertain: ${error.message}`);
+      }
+      const still = await find(root).catch(() => null);
+      if (still && sameDaemon(still, latest)) {
+        notify('Replacement was refused by the starter; keeping the current connection. Check connected plugin versions before retrying.');
+        return still.url;
+      }
+    } else {
+      try {
+        // Detached process creation accepted by the OS is the approved
+        // preflight, not a claim of health or arrival at dashboard.lock.
+        await (deps.preflight || deps.launch || launch)(staged.binary, options,
+          ['dashboard', '--port', String(latest.endpoint.port), '--lock-wait', '8s',
+            ...(latest.health.lan ? ['--lan'] : [])]);
+      } catch {
+        notify('Replacement preflight failed; the incumbent was not drained. Retry later.');
+        return latest.url;
+      }
+      try { await (deps.shutdown || shutdown)(root, latest); }
+      catch {
+        notify('Authenticated drain failed or the daemon changed; outcome is uncertain. Check dashboard health before retrying.');
+        const still = await find(root).catch(() => null);
+        if (still && sameDaemon(still, latest)) return still.url;
+        if (still && sameMinorCandidate(selected.metadata.version, still.health?.version) &&
+            version(selected.metadata.version, still.health.version) <= 0) return still.url;
+        throw new Error('Authenticated drain outcome uncertain; no compatible daemon can be attached — retry after inspecting health');
+      }
     }
     return await waitForDaemon(find, root, deps, latest, selected.metadata.version,
       selected.metadata.binary_sha256, notify);
   }
   if (running) return running.url;
-  if (platform !== 'darwin') {
+  if (!['darwin', 'win32'].includes(platform)) {
     try { return (await find(root)).url; } catch { /* A concurrent winner may still attach. */ }
-    throw new Error(platform === 'win32'
-      ? 'Cannot start dashboard on Windows: independent daemon lifetime is unavailable (strict integration pending); connect to a running daemon or retry later'
-      : 'Standalone dashboard start is unavailable on this platform; connect to a running daemon');
+    throw new Error('Standalone dashboard start is unavailable on this platform; connect to a running daemon');
   }
   const selected = select({ appRoot, userData, platform });
   const staged = stage(selected, userData, platform, appRoot);
   try { return (await find(root)).url; } catch { /* Only a new dashboard may start. */ }
-  try { await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root) }); }
+  try { await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root) },
+    platform === 'win32' ? ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s'] : ['dashboard'],
+    platform === 'win32'); }
   catch (error) { throw new Error(`Cannot start dashboard daemon: ${error.message}`); }
   return waitForDaemon(find, root, deps);
+}
+function sameMinorCandidate(candidate, running) {
+  const a = core(candidate), b = core(running);
+  return a && b && a[0] === b[0] && a[1] === b[1];
 }
 async function waitForDaemon(find, root, deps, predecessor, candidateVersion, candidateHash, notify) {
   const sleep = deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
@@ -133,6 +161,9 @@ async function waitForDaemon(find, root, deps, predecessor, candidateVersion, ca
         const relation = version(candidateVersion, answer.health?.version);
         if (relation === null || relation > 0) {
           throw new Error('An older or unidentified daemon won the handoff; retry after inspecting the current connection');
+        }
+        if (!sameMinorCandidate(candidateVersion, answer.health?.version)) {
+          throw new Error('A cross-minor daemon won the handoff; attached client versions are unknown. Update connected plugins before retrying');
         }
         if (answer.health?.content_hash && answer.health.content_hash !== candidateHash) {
           notify?.('A different daemon won the handoff; attaching to its verified REST identity, not attributing it to the selected package.');
