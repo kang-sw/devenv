@@ -67,8 +67,8 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .wb-mtitle > svg, .wb-mtitle > .n { flex: none; }
 .wb-history > .mhead > .mmeta { grid-column: 3; justify-self: end; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
-.system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
+.system-run > summary > .lbl::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.system-run[open] > summary > .lbl::before { transform: rotate(90deg); }
 .topic-stream .mhead .i, .tstream > .mhead .i { width: 12px; height: 12px; }
 .topic-stream .mhead .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .topic-stream .mhead .mmeta { font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
@@ -111,7 +111,7 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .system-run > summary > .lbl { min-width: 0; }
 /* panel: an unboxed recap with metadata and native actions on the right;
    only its body carries a quiet guide. A recap-only panel is a message. */
-.wb-entry.panel { margin: 6px 0; }
+.wb-entry.panel { position: relative; margin: 6px 0; }
 .entry-panel { container-type: inline-size; background: transparent; min-width: 0; }
 /* Native maximize reuses this shell; transparent renderer bodies need a sheet. */
 .entry-panel[data-max] { background: var(--wb-bg); }
@@ -138,17 +138,44 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
 .pmeta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 24px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pmeta .entry-at { font: 11px var(--wb-mono); }
-.pmeta .hint { padding: 0 6px; border-radius: 999px; background: var(--wb-muted); line-height: 16px; }
 .pmeta a.mref { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
 .pmeta a.mref:hover { color: var(--wb-primary); }
 .entry-body.doc-body { font-size: 13.5px; }
 .entry-panel > .entry-body.doc-body { margin: 6px 0 0 18px; padding: 0 0 1px 12px; border-left: 1px solid var(--wb-line); }
-.panel-versions { margin: 0 10px 8px; }
-.entry-panel[open]:not(.msg) > .panel-versions { margin-top: 8px; }
-.panel-versions > summary { list-style: none; display: flex; align-items: center; width: fit-content; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; color: var(--wb-muted-fg); cursor: pointer; }
-.panel-versions > summary::-webkit-details-marker { display: none; }
-.panel-versions > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
 .historical .entry-recap { font-weight: 400; }
+/* panel versions, each at its own write position: the bound name, a vN
+   badge, an earlier version's newer-version and exact links, and the
+   link-copy menu stream.js opens */
+.pfname { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+@container (max-width: 520px) { .pfname { display: none; } }
+.pfver { padding: 0 6px; border-radius: 999px; font: 700 10.5px/16px var(--wb-sans); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.pfver.old { background: var(--wb-muted); color: var(--wb-muted-fg); font-weight: 600; }
+.pmeta a.pfnewer { font: 600 11px var(--wb-mono); color: var(--wb-primary); text-decoration: none; }
+.pmeta a.pfnewer:hover { text-decoration: underline; }
+.pmeta .pflink { width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.pmeta .pflink .i { width: 13px; height: 13px; }
+.pmeta .pflink.on, .pmeta .pflink:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.historical > .entry-panel > summary .entry-recap { color: var(--wb-muted-fg); }
+.historical > .entry-panel > .entry-body.doc-body { border-left-style: dashed; }
+.pfoldnote { display: flex; align-items: center; gap: 6px; width: fit-content; margin: 6px 0 0 18px; padding: 3px 8px; border-radius: 6px; background: var(--wb-muted); font-size: 11.5px; color: var(--wb-muted-fg); }
+.pfoldnote .i { width: 12px; height: 12px; flex: none; }
+.pfoldnote a, .pfprev a { color: var(--wb-primary); text-decoration: none; font-weight: 600; }
+.pfprev { margin: 4px 0 2px 30px; font-size: 11.5px; }
+.pfmenu { position: absolute; right: 30px; top: 26px; z-index: 6; width: 268px; max-width: calc(100vw - 40px); padding: 4px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card, var(--wb-bg)); box-shadow: var(--wb-shadow-hi); }
+.pfmh { padding: 4px 8px 2px; font-size: 10.5px; font-weight: 700; color: var(--wb-muted-fg); letter-spacing: .02em; }
+.pfmi { display: grid; grid-template-columns: 16px minmax(0, 1fr) 14px; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); text-align: left; font: inherit; cursor: pointer; }
+.pfmi:hover, .pfmi:focus { outline: none; background: var(--wb-wash); }
+.pfmi .i { width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.pfmt { display: flex; flex-direction: column; min-width: 0; }
+.pfmt .pfk { font-size: 12.5px; font-weight: 600; }
+.pfmt .pfk code { font: 600 11.5px var(--wb-mono); color: var(--wb-primary); }
+.pfmt .pfd { font-size: 11px; color: var(--wb-muted-fg); }
+/* An arrival flash rings the whole panel, just outside it. */
+.entry-panel.flash { border-radius: 4px; animation-name: wb-flash-panel; }
+@keyframes wb-flash-panel {
+  from { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+  to { outline: 2px solid transparent; outline-offset: 2px; }
+}
 /* Query the actual panel width, including inside a wide host or maximized. */
 @container (max-width: 420px) {
   .entry-panel > summary { grid-template-columns: 10px minmax(0, 1fr); }

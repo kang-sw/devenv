@@ -84,8 +84,101 @@ func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 		t.Fatal("closed topic's whole history must remain visible")
 	}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
-	wantAll(t, out, `<div class="topic-stream">`, `data-key="entry:e3:history"`, `data-key="versions:e9"`, `<details class="system-run`)
-	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:t"`, `<details class="settled"`)
+	wantAll(t, out, `<div class="topic-stream">`, `class="wb-entry panel historical" id="e3"`, `data-key="entry:e3:history"`, `<details class="system-run`)
+	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:t"`, `<details class="settled"`, `data-key="versions:`)
+}
+
+// Every panel post appends a version at its own write position. An earlier
+// version stays folded in place, links to the newest version and keeps its
+// exact eN link, while the latest keeps the pN target. Panel post events are
+// left out of the view but stay in the store; the header remains the latest
+// agent log line.
+func TestPanelVersionsKeepWriteOrderAndLinks(t *testing.T) {
+	st := &State{}
+	at := func(minutes int, commands string) {
+		t.Helper()
+		env := testEnv()
+		env.Now = testNow.Add(time.Duration(minutes) * time.Minute)
+		if _, problems := Apply(st, commands, env); len(problems) > 0 {
+			t.Fatalf("Apply(%s) refused: %v", commands, problems)
+		}
+	}
+	at(0, `<wb:topic name="t"><wb:panel name="plan" recap="Plan draft">PLAN-V1</wb:panel>`+
+		`<wb:add class="policy"><wb:title>Pick a plan</wb:title><wb:option>A</wb:option><wb:option>B</wb:option></wb:add></wb:topic>`)
+	at(5, `<wb:topic name="t"><wb:log>between versions</wb:log></wb:topic>`)
+	at(10, panelCommandXML("t", `id="p1" recap="Plan revised"`, "PLAN-V2")) // id-only, as legacy reposts are
+	at(15, panelCommandXML("t", `recap="Other"`, "OTHER-V1"))
+	at(20, panelCommandXML("t", `name="plan" recap="Plan final"`, "PLAN-V3"))
+	at(25, `<wb:topic name="t"><wb:log>latest agent line</wb:log></wb:topic>`)
+	var ids []string
+	events := 0
+	for _, e := range st.Topics[0].Entries {
+		if e.Kind == EntryPanel {
+			ids = append(ids, e.ID)
+		}
+		if panelEvent(e) {
+			events++
+		}
+	}
+	if len(ids) != 4 || events != 4 {
+		t.Fatalf("store must keep every version and its post event: panels %v, events %d", ids, events)
+	}
+	v1, v2, other, v3 := ids[0], ids[1], ids[2], ids[3]
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Location: time.UTC})
+	tv := view.Topics[0]
+	if tv.Summary() != "latest agent line" || tv.PanelVersions() != 4 || len(tv.PanelRecaps) != 2 {
+		t.Fatalf("header %q, versions %d, latest panels %d", tv.Summary(), tv.PanelVersions(), len(tv.PanelRecaps))
+	}
+	var got []string
+	for _, e := range pageEntries(tv.Stream) {
+		if panelEvent(e.Entry) {
+			t.Fatalf("panel post event %q shown in the history", e.Text)
+		}
+		if e.Kind == EntryPanel {
+			got = append(got, fmt.Sprintf("%s v%d/%d %s hist=%v newest=%s prior=%s", e.ID, e.Version, e.Of, e.BoundName, e.Historical, e.Newest.ID, e.Prior.Label()))
+		}
+	}
+	want := []string{
+		v1 + " v1/3 plan hist=true newest=" + v3 + " prior=v0",
+		v2 + " v2/3 plan hist=true newest=" + v3 + " prior=v1 · 09:00",
+		other + " v1/1  hist=false newest=" + other + " prior=v0",
+		v3 + " v3/3 plan hist=false newest=" + v3 + " prior=v2 · 09:10",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("versions\n got %q\nwant %q", got, want)
+	}
+	out := markup(render(t, view))
+	previous, rows := -1, 0
+	for _, e := range st.Topics[0].Entries {
+		if e.Kind != EntryPanel && e.Kind != EntryAgent {
+			continue
+		}
+		rows++
+		index := strings.Index(out, `id="`+e.ID+`"`)
+		if index < previous || index < 0 {
+			t.Fatalf("%s %q moved from its write position", e.ID, e.Text)
+		}
+		previous = index
+	}
+	if rows != 6 {
+		t.Fatalf("logs and panels: %d", rows)
+	}
+	wantAll(t, out, "PLAN-V1", "PLAN-V2", "PLAN-V3", "OTHER-V1",
+		`<article class="wb-entry panel historical" id="`+v1+`"`,
+		// The question it leads cannot reopen an earlier version.
+		`data-key="entry:`+v1+`:history"><summary>`,
+		`<span class="pfname" title="Panel name">plan</span><span class="pfver old" title="Version 1 of 3">v1</span>`,
+		`<a class="pfnewer" href="#`+v3+`" title="Go to the newer version">→ v3 · 09:20</a><a class="mref pfexact" href="#`+v1+`" title="Link to this version (fixed)">#`+v1+`</a>`,
+		`Earlier version v1 · 09:00. <a href="#`+v3+`">Latest is v3 · 09:20 ↓</a></div>`,
+		`<span class="pfver" title="Version 3 of 3 · latest">v3</span>`,
+		`<a class="mref" href="#p1" title="Link to the latest panel">#p1</a>`,
+		`<div class="pfprev"><a href="#`+v2+`">Earlier version v2 · 09:10 ↑</a></div>`,
+		`data-ver="v1 · 09:00" data-newest="v3 · 09:20"`, `data-ver="v3 · 09:20" data-newest="v3"`,
+		`panels 2 · versions 4 · log `)
+	wantNone(t, out, "re-posted: Plan", "added: Plan", `class="panel-versions"`)
+	if strings.Count(out, `id="p1"`) != 1 || strings.Count(out, `class="pfver`) != 3 || strings.Count(out, `class="pfoldnote"`) != 2 {
+		t.Fatal("one pN target, versions only on the three-version panel, notes only on earlier versions")
+	}
 }
 
 // A previously expanded latest version must not inherit that open state once
@@ -176,17 +269,16 @@ func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
 	}
 	board := string(regions.Board)
 	topic := board[:strings.Index(board, `data-topic="t/e3"`)]
-	// The stream is chronological, except that p1's earlier version (e3)
-	// folds under its latest version's card (e9) instead of its own slot.
+	// The stream is chronological; p1's earlier version (e3) keeps its slot.
 	previous := -1
-	for _, i := range []int{1, 2, 4, 5, 6, 7, 8, 9, 3, 10} {
+	for i := 1; i <= 10; i++ {
 		index := strings.Index(topic, fmt.Sprintf(`id="e%d"`, i))
 		if index < previous || index < 0 {
 			t.Fatalf("entry %d moved from its chronological slot", i)
 		}
 		previous = index
 	}
-	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `System events 3 · `, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`, `<details class="panel-versions" data-key="versions:e9">`, `Earlier versions 1`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
+	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `System events 2 · `, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`, `<span class="pfver old" title="Version 1 of 2">v1</span>`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
 	if strings.Count(board, `id="p1"`) != 1 || strings.Contains(board, `data-id="17"`) {
 		t.Fatal("panel target duplicated or event attribution became an answer control")
 	}
