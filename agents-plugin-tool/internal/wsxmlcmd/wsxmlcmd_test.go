@@ -178,6 +178,43 @@ func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
 	}
 }
 
+func TestLiteralCodeQuotedWrapperAllowsIndependentTail(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{
+		"payload": {Kind: Leaf, Wrapper: "change", Fields: []string{"old", "new"}},
+		"text":    {Kind: Leaf},
+	}}
+	for _, tc := range []struct {
+		body     string
+		children int
+	}{
+		{"`<x:change>` then <x:change><x:old>a</x:old><x:new>b</x:new></x:change>", 1},
+		{"`<x:change>` then `x` <x:old>raw</x:old>", 0},
+		{"`<x:change>` then <x:new>raw", 0},
+	} {
+		for _, ordered := range []bool{false, true} {
+			input := "<x:payload>" + tc.body + "</x:payload><x:text>keep</x:text>"
+			p := &Problems{}
+			var cmds []Command
+			complete := true
+			if ordered {
+				cmds, complete = ParseOrdered(p, g, input)
+			} else {
+				cmds = Parse(p, g, input)
+			}
+			if !complete || len(p.List) != 0 || len(cmds) != 2 || len(cmds[0].Children) != tc.children || cmds[1].Body != "keep" {
+				t.Fatalf("ordered=%v body=%q: commands=%+v complete=%v problems=%v", ordered, tc.body, cmds, complete, p.List)
+			}
+			want := tc.body
+			if tc.children != 0 {
+				want = "`<x:change>` then "
+			}
+			if cmds[0].Body != want {
+				t.Fatalf("ordered=%v body=%q: got body %q, want %q", ordered, tc.body, cmds[0].Body, want)
+			}
+		}
+	}
+}
+
 func TestLiteralCodeDoesNotPairAcrossStructuralBodies(t *testing.T) {
 	g := Grammar{Prefix: "x:", LiteralCode: true, RefuseFieldOpenings: true, Commands: map[string]Spec{
 		"text": {Kind: Leaf}, "other": {Kind: Leaf},
