@@ -229,6 +229,44 @@ Real browser native-confirm and restored-draft acceptance remain separately
 arranged by the lead, not inferred from VM mocks. Leave clock, exposure and
 composer source unchanged; make no Electron-root-cause or measured-lag fix claim.
 
+### Result (257e52c8d) - 2026-11-16
+
+Implemented on `impl/develop/dock-book-hertz`, based on develop `0593c6b32`:
+
+- Removed the five-page cache/recency helpers. Normal session switches save the
+  draft synchronously, navigate the old frame to blank through its existing
+  native beforeunload guard, remove it after acceptance, and create one fresh
+  target frame. No old session document remains hidden after a successful switch.
+- Cancellation leaves the current frame present; same-session hashes remain
+  in place. Removed-window messages/load callbacks cannot act on the shell.
+  Rapidly superseded targets and repeated switches retain one tracked frame.
+- Updated Settings browser expectations from hidden-frame retention to stored
+  draft restoration, fresh-session settings delivery and detached old frames.
+- The experimental shared scheduler was discarded completely before commit.
+  `dashboard.js`, whiteboard `ago.js` and composer/exposure source are unchanged.
+  The trace-driven scope correction in Decisions is authoritative.
+
+Verification actually executed:
+
+- Local `node --test agents-plugin-tool/internal/wsdashboard/testdata/shell-lifecycle.test.cjs`:
+  PASS, one VM contract (including actual shipped-source parsing, shell URL/message
+  cases, save-before-leave, mocked native-cancel/accept outcomes, fresh return,
+  repeated/rapid/loading-target switches, hash/history basics and stale events).
+- Local `node --check agents-plugin-tool/internal/wsdashboard/testdata/settings-root.browser.cjs`
+  and `git diff --check`: PASS. The Settings browser behavior itself was NOT run.
+- Remote w5090 job `5b353498b5b04171abc80c048cce677e`:
+  `go test ./internal/wsdashboard/ ./internal/wswhiteboard/ -run "^Test(SessionURLServesTheShell|IndexServesTheShell|ShellScript$|ShellSwitchesFramesThroughItsGlue$|ShellHotkeyForwarder|ShellStreamsTheRail)"`
+  PASS (`wsdashboard` 3.815 s; `wswhiteboard` no matching tests).
+  Node-only Go wrapper cases skip on this Node-less remote; the VM contract was
+  run directly with Node locally, not inferred from that Go result.
+
+R1 requested from the lead; not yet a review pass. Real browser native-dialog
+accept/cancel, popstate/history behavior and actual text/image restoration need
+the lead's arranged acceptance. A fake VM navigation outcome is not proof of
+native confirmation behavior. No daemon rebuild/restart/swap, local Go/ws/test
+binary, live browser measurement or push was performed. Phase 2 remains open;
+this result makes no measured-lag improvement claim.
+
 ### Phase 2: Measure and improve fresh session-switch load performance
 
 Depends on Phase 1's landed Result. Measure cold/warm session switches, initial
