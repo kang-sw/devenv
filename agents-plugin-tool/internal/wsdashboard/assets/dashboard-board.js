@@ -1216,6 +1216,18 @@
     var pill = window.wbPill || (window.wbPill = {});
     pill.pending = boardPendingNames().length;
     pill.home = boardHome;
+    // Explicit board navigation acknowledges the same staged snapshot as home,
+    // without starting a competing scroll-to-top operation.
+    pill.apply = function (retry) {
+      if (!Object.keys(boardPending).length) return true;
+      var overview = window.WsOverview;
+      if (overview && overview.holding()) {
+        if (retry) overview.after(retry);
+        return false;
+      }
+      boardFlushViewed(true);
+      return true;
+    };
     if (pill.update) pill.update();
   }
   function boardFlash(names, inView) {

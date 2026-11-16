@@ -438,8 +438,13 @@
   // it will have once current.
   function jump(e) {
     var b = e.target.closest && e.target.closest(".wb-cap"), t = b && b.wbTopic;
-    if (!t || !t.isConnected) return;
-    var j = topics.indexOf(t);
+    if (!t) return;
+    if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(function () { jump(e); })) return;
+    if (!t.isConnected) t = t.id ? d.getElementById(t.id) : null;
+    if (!t) return;
+    var peers = Array.prototype.slice.call(box.querySelectorAll(ITEMS)).filter(function (n) { return n.getBoundingClientRect().height; });
+    var j = peers.indexOf(t);
+    readInset();
     var delta = t.getBoundingClientRect().top - (viewTop() + capH(Math.min(2, Math.max(0, j))));
     var smooth = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
     scroller.scrollBy({ top: delta, behavior: smooth ? "smooth" : "auto" });

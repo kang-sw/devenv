@@ -244,7 +244,7 @@
   retitle();
 
   function click(edge) {
-    return function (e) {
+    return function activate(e) {
       if (edge === "top" && e.target.closest && e.target.closest(".oq-arr, .oq-updates")) {
         if (st.home) st.home();
         else if (window.wbHistory && window.wbHistory.jump) window.wbHistory.jump(pills.top, { top: 0, behavior: "smooth" });
@@ -254,6 +254,16 @@
       var b = e.target.closest && e.target.closest(".oq-seg");
       var el = b && target[edge][b.getAttribute("data-k")];
       if (!el) return;
+      if (st.apply) {
+        if (!st.apply(function () { activate(e); })) return;
+        if (el.isConnected === false) {
+          // Applied history can put the old target back in an inert gap.
+          var history = window.wbHistory;
+          if (el.id && history && history.loadTarget && history.loadTarget(d, el.id, window.WsCards && window.WsCards.unfoldTopic)) return;
+          el = el.id ? d.getElementById(el.id) : null;
+        }
+        if (!el) return;
+      }
       var w = window.wbHistory;
       if (w && w.jump) w.jump(el, { block: "center", behavior: "smooth" });
       else el.scrollIntoView({ block: "center", behavior: window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
