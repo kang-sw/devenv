@@ -507,6 +507,9 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
+    "261116-bug-ws-dashboard-usage-indicator-stale-window-and-layout": {
+      "registered_at": "2026-11-16T03:49:02Z"
+    },
     "261116-bug-ws-exe-launch-elimination": {
       "registered_at": "2026-11-16T00:55:02Z",
       "lease": {
