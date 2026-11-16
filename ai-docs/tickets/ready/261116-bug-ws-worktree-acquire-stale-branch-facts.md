@@ -2,8 +2,8 @@
 title: "worktree.acquire hides a stale reused branch; the route resolver blocks a new branch while a merged canonical ref remains"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: b594b03d5ece0a8f
-sage-review-completeness-reviewed: b594b03d5ece0a8f
+sage-review-design-reviewed: 76e3925e5b9cf75f
+sage-review-completeness-reviewed: 76e3925e5b9cf75f
 ---
 
 # worktree.acquire hides a stale reused branch; the route resolver blocks a new branch while a merged canonical ref remains
@@ -13,31 +13,34 @@ sage-review-completeness-reviewed: b594b03d5ece0a8f
 Two dogfood surprises reported by a peer lead (EXEC2) on 2026-11-16 and
 relayed by MAIN as an assignment:
 
-1. **Stale reused branch is invisible.** `worktree.acquire` with a
-   `target_branch` that already exists switches to that branch and never
+1. **Stale reused branch was invisible before Phase 1.** `worktree.acquire`
+   with a `target_branch` that already exists switches to that branch and never
    resets it to `base` (by design, so committed work on it survives; see the
-   branch step in the acquire path, VERIFIED at
-   `agents-plugin-tool/internal/mcp/worktree_tools.go:467-493`). The result
-   (`worktreeAcquireResult`, `agents-plugin-tool/internal/mcp/worktree_tools.go#L21-L38`) carries path, worker
-   key, reused, pool, profile, provisioned, hooks, nudge and warnings, but no
-   HEAD commit, no statement that the target branch pre-existed, and no
-   ahead/behind relative to `base`. A caller therefore cannot tell a fresh
-   branch from a stale retained one. EXEC2 started work on a stale
-   `b9f141522` this way.
+   current branch step at
+   `agents-plugin-tool/internal/mcp/worktree_tools.go#L523-L551`). The pre-Phase-1
+   result (`worktreeAcquireResult`,
+   `69096ff0d:agents-plugin-tool/internal/mcp/worktree_tools.go#L21-L38`) carried
+   path, worker key, reused, pool, profile, provisioned, hooks, nudge and warnings,
+   but no HEAD commit, branch-preexistence fact or ahead/behind relative to
+   `base`. A caller therefore could not tell a fresh branch from a stale
+   retained one. Phase 1 added those optional facts
+   (`agents-plugin-tool/internal/mcp/worktree_tools.go#L22-L43`). EXEC2 reported
+   starting work on a stale `b9f141522` this way.
 2. **Resolver blocks a fresh branch after an earlier phase merged.** For a
    multi-phase ticket the route resolver keeps deriving the same canonical
    impl branch name. When that old ref still exists (fully merged) and the
    lead vouches identity for a new branch, the vouch path only continues when
    the canonical target does not exist
-   (`agents-plugin-tool/internal/mcp/implement_resolver.go:944-949`), and
+   (`agents-plugin-tool/internal/mcp/implement_resolver.go#L947-L951`), and
    otherwise stops: with rename allowed it reaches the `target implementation
    branch already exists` stop, while disabled rename reaches the earlier
    rename-not-allowed stop
-   (`agents-plugin-tool/internal/mcp/implement_resolver.go#L952-L960`). The
+   (`agents-plugin-tool/internal/mcp/implement_resolver.go#L953-L961`). The
    non-implementation-branch create path already selects deletion and recreation
    of a fully landed leftover target
-   (`agents-plugin-tool/internal/mcp/implement_resolver.go#L835-L884`). EXEC2 had to delete a fully merged local
-   branch by hand before Phase 4 could start.
+   (`agents-plugin-tool/internal/mcp/implement_resolver.go#L835-L884`). EXEC2 reported
+   having to delete a fully merged local branch by hand before Phase 4 could
+   start; the local deletion itself is not independently verifiable from source.
 
 ## Decisions
 
@@ -66,6 +69,37 @@ relayed by MAIN as an assignment:
   successful branch step, the acquire still succeeds (the worktree is usable);
   the fact is omitted and a warning names the failure. Rejected: failing the
   acquire (would turn an informational addition into a new refusal).
+- **Phase 2 scope (owner (1184)=a, 2026-11-16):** a matching lead identity
+  vouch may select the existing `recreate` action when the different canonical
+  name-rooted target has zero commits ahead of its encoded merge root. Reuse
+  the non-implementation path's delete/recreate semantics: create the canonical
+  branch from that merge root, leaving the differently named current branch
+  and its commits/tracking untouched. This applies before rename-policy or
+  current-branch tracking refusals because recreation does not rename the
+  current branch. Rejected: manual deletion as the normal remedy and retaining
+  the fully-landed collision refusal (the approved dogfood fix removes it).
+- **Technical: Phase 2 safety boundary.** Only the exact matching branch/ticket
+  vouch lifts the identity stop; targets with unique commits still stop and
+  failed ahead-state observation still fails closed. An already canonical
+  current branch continues unchanged. Rootless legacy targets retain their
+  current behavior because their observation does not establish an encoded
+  merge root. Rejected: treating an unmeasured zero as landed, broadening
+  unvouched cleanup, or deleting/resetting the current branch.
+- **Compatibility: Phase 2 T0**, relative to `deb8289d2`. No tool argument,
+  response member, action enum, or persistent schema is added. The existing old
+  writer already emits `recreate` for fully-landed targets
+  (`agents-plugin-tool/internal/mcp/implement_resolver.go:868-884`), and the old
+  instruction reader already handles it
+  (`agents-plugin-tool/internal/mcp/implement_resolver.go#L1004-L1005`).
+  The unchanged handler marshals the same agenda/branch-plan shape and writes
+  it through `enterMode` (`agents-plugin-tool/internal/mcp/session_state.go:1137-1152`);
+  the shape is `implement_resolver.go:101-128`. New routing reuses that shape
+  for the owner-approved additional case. Old callers send the same calls;
+  old readers see a known action, and old writers can still write their prior
+  refusal without losing new data. A new invocation after reopening reobserves
+  Git (`session_state.go:1123-1131`), so there is no lost field to recover.
+  Verify these references against the completed implementation in Phase 2's
+  Result; this changes routing behavior, not the cross-version contract.
 
 ## Constraints
 
@@ -81,41 +115,43 @@ relayed by MAIN as an assignment:
 - No change to `worktree.acquire` arguments, branch selection, hygiene, hooks,
   lease records or the worktree pool. No change to the route resolver in
   Phase 1.
-- **Deferred (owner decision pending): Phase 2 resolver behavior.** Changing
-  how the resolver treats an old canonical impl ref changes observable routing
-  behavior and needs owner approval before any phase plan is written or
-  implemented. Candidate options recorded for the owner, none chosen:
-  (a) in the vouched path, treat a canonical ref with no commits ahead of its
-  merge root (fully landed, an ancestor of the merge root or goal branch) as
-  finished, and delete/recreate it like the non-vouched leftover path;
-  (b) keep the refusal but make its reason name the fully landed state and the
-  exact remedy (delete the merged branch), a message-only change;
-  (c) leave the behavior as is.
+- Phase 2 changes only resolver handling and its regression tests. Existing
+  acquire behavior and Phase 1 are untouched; no Git mutation is performed by
+  the resolver itself. Branch deletion remains the existing non-forced
+  `git branch -d` worker action; another worktree's checkout or a changed Git
+  state may refuse it rather than authorizing forced cleanup.
+- Phase 2 implements owner (1184)=a. Options (b), improving the manual-cleanup
+  refusal only, and (c), leaving behavior unchanged, were not selected.
+- Verification is one scoped MCP test family on the configured remote worker,
+  not a whole-package run; record any proven pre-existing slow failure as one
+  Forward instead of expanding this ticket.
 
 ## Prior Decisions
 
 - 47401fef (2026-11-15, commit): "The lock is acquired before the eligibility snapshot and released only after all checkout mutations finish" — bearing: constrains
-- 261020-feat-worktree-profiles (2026-10-20, commit 6ad303b0): "The nudge runs after the lease is written, so the worktree just acquired is never listed; a failed nudge is a result warning, never an acquire failure." — bearing: supports
-- 260921-feat-ws-impl-branch-identity-resolver (2026-09-21, commit 065d86c2): "A vouched shared/tracking branch or rename-disabled branch continues in place; target-name collisions remain blocking." — bearing: constrains
+- 261020-feat-worktree-profiles (2026-10-20, Result (6ad303b09)): "The nudge runs after the lease is written, so the worktree just acquired is never listed, and a nudge failure is a result warning, never an acquire failure." — bearing: constrains
+- 260921-feat-ws-impl-branch-identity-resolver (2026-09-21, Result (065d86c2)): "Without a matching vouch, the safety stop remains. Target-name collisions remain blocking." — bearing: constrains; owner (1184)=a supersedes only the verified fully-landed name-rooted target collision in Phase 2.
+- 43f0bfb7 (2026-09-15, commit): "Computed only when TargetExists and fails closed on an unverifiable count, matching the existing current-branch guard." — bearing: supports
 - 260918-feat-ws-sparse-housekeeping-worktree-occupied-root (2026-09-18, commit 76a45c38): "Direct-base checkout uses `git switch --no-guess -- <base>`; Git's one-checkout-per-branch rule is the safety net" — bearing: constrains
 - 260910-feat-lead-run-worktree-parallel-route (2026-09-15, commit 95d18ff6): "Branch setup uses `git switch` (branch-only verb) not `checkout`, and never resets an existing branch to base, so committed work on a re-entered target_branch is preserved" — bearing: constrains
 - 260825-feat-impl-branch-single-ticket-scope-merge-timing (2026-08-25, commit 3db94261): "Per plan, commit-content parsing was explicitly rejected as a resolver input" — bearing: constrains
+- 523054ba (2026-08-10, commit): "Parsing rule is strip "impl/", split on the LAST "/": everything before is <merge-root> (may itself contain "/"), final segment is <stem>." — bearing: constrains
 
 ## Route Facts
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | Phase 1 names agents-plugin-tool/internal/mcp/worktree_tools.go and existing acquire tests in agents-plugin-tool/internal/mcp/worktree_tools_test.go; implement_resolver.go is Phase 2 only, not yet planned. |
-| scope.surface | public-interface | worktree.acquire adds JSON response members and compact text lines; agents-plugin-tool/internal/mcp/server.go#L1488-L1491 selects the existing response format. |
-| scope.new_public_symbol | yes | New wire response fields head, target_branch_existed, ahead_of_base and behind_base; no new MCP tool or exported Go type is planned. |
-| scope.new_type_contract | yes | Decisions define optional facts on computation failure, a tri-state target_branch_existed (true/false/absent), and integer ahead/behind counts; current shape is agents-plugin-tool/internal/mcp/worktree_tools.go#L21-L38. |
-| scope.test_surface | existing | agents-plugin-tool/internal/mcp/worktree_tools_test.go#L494-L551 covers dispatch/JSON, #L697-L735 covers direct-base checkout; worktree_acquire_concurrent_test.go#L21-L25 supplies an injectable Runner. |
-| complexity.reuse_points | confirmed | agents-plugin-tool/internal/mcp/worktree_tools.go: wtRun, worktreeAcquireResult.text, acquireWorktree and provisionWorktree provide the runner, result, rendering and locked lifecycle; server.go#L1488-L1491 already serializes the same result for JSON/text. |
-| complexity.side_effect_risk | moderate | Facts are read-only additions, but must run inside the acquisition lock without changing switch/reset/clean, hooks or lease publication (agents-plugin-tool/internal/mcp/worktree_tools.go#L283-L317, #L467-L590). |
-| risk.correctness | moderate | Must distinguish pooled-worktree reuse from branch preexistence, orient divergence counts correctly, retain zero/false values, and omit failed facts without failing acquire. |
-| risk.fit | moderate | Phase 1 must preserve generic ticket-unaware acquire and the locked lifecycle; Phase 2 has no approved behavior yet and must preserve identity/collision boundaries until approved. |
-| risk.test | moderate | Existing fixtures cover creation, reuse, dispatch and direct-base checkout, but new assertions must discriminate retained divergent branches, omission versus false/zero, text/JSON parity and injected fact failures. |
-| risk.security_or_contract | moderate | Public MCP output changes target T0, with no new arguments, persistence, reset or authority; compatibility still requires the source-backed consumer audit specified in Constraints. |
+| scope.span | multi-file | Remaining Phase 2: agents-plugin-tool/internal/mcp/implement_resolver.go, impl_identity_test.go, implement_resolver_test.go and impl_identity_integration_test.go in that directory; completed Phase 1 is excluded. |
+| scope.surface | public-interface | route.resolve_implement changes its branch-plan decision for a vouched, fully-landed name-rooted collision; existing MCP handler is agents-plugin-tool/internal/mcp/session_state.go#L1100-L1161. |
+| scope.new_public_symbol | no | No new tool, argument, response member or action; recreate already exists at agents-plugin-tool/internal/mcp/implement_resolver.go#L868-L884 and #L1004-L1005. |
+| scope.new_type_contract | no | Reuses implementBranchPlan and implementAgenda without a new signature or schema (agents-plugin-tool/internal/mcp/implement_resolver.go#L103-L128). |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/impl_identity_test.go#L35-L76, implement_resolver_test.go#L267-L462 and impl_identity_integration_test.go#L222-L274 provide the existing vouch, safety and route fixtures. |
+| complexity.reuse_points | confirmed | Read finishImplementBranchPlanTail, TargetAheadOfMergeRoot observation, create-path recreate and its instruction at agents-plugin-tool/internal/mcp/implement_resolver.go#L503-L549, #L868-L884, #L927-L970 and #L1004-L1005. |
+| complexity.side_effect_risk | high | Resolver does not mutate Git refs, but its plan authorizes worker deletion/recreation of a canonical ref; the current branch and tracking must survive (agents-plugin-tool/internal/mcp/implement_resolver.go#L1004-L1005). |
+| risk.correctness | high | Exact branch/ticket vouch and measured target zero must precede recreation; a rootless default zero is not landing evidence, and unique target work must never be deleted (agents-plugin-tool/internal/mcp/implement_resolver.go#L523-L539, #L933-L961). |
+| risk.fit | moderate | Shared tail serves both name-rooted and legacy paths; the owner-approved exception must preserve rootless behavior, canonical-current continue, and unvouched identity stops (agents-plugin-tool/internal/mcp/implement_resolver.go#L887-L961). |
+| risk.test | moderate | Existing identity collision cases expect stop; extend them and add real-Git coverage for nested roots, tracking, failed observation, unchanged refs during routing and retained current-branch commits after following the plan. |
+| risk.security_or_contract | moderate | Existing recreate vocabulary and agenda shape support T0, but selecting destructive worker guidance must remain bounded by lead vouch and observed landing; handler persistence is agents-plugin-tool/internal/mcp/session_state.go#L1137-L1151. |
 
 ## Phases
 
@@ -216,9 +252,45 @@ stays with its same-email holder on the develop track.
 
 ### Phase 2: Resolver handling of a fully landed canonical impl ref
 
-Not yet planned. Blocked on the deferred owner decision in `## Constraints`;
-a later ticket edit replaces this paragraph with the approved plan before any
-implementation.
+Depends on completed Phase 1 and owner (1184)=a, now recorded below.
+
+In `finishImplementBranchPlanTail` in
+`agents-plugin-tool/internal/mcp/implement_resolver.go`, select the existing
+`recreate` plan for a different, existing canonical name-rooted target whose
+observed ahead-of-merge-root count is zero, only after validating the matching
+lead vouch and retaining the current-branch identity boundary. Apply this
+before rename permission/tracking checks; otherwise preserve the existing
+continue/rename/stop decisions. Reuse the existing recreate instruction rather
+than adding an action or a branch-mutating tool. Recreating starts from the
+encoded merge root; the current vouched branch remains available with its
+original commits and tracking. Keep legacy rootless collision behavior intact.
+
+Verification (`./internal/mcp` only, `-run`, `-count=1`; execute Go remotely
+through the configured build lock):
+
+1. Extend `impl_identity_test.go` / existing resolver fixtures: a valid vouch
+   plus a fully-landed canonical target returns `recreate`, including when
+   rename is disabled or the current branch has tracking state. Cover develop
+   and a nested goal merge root. Non-landed canonical targets still stop;
+   absent/wrong branch/wrong ticket vouches do not bypass identity safety.
+2. Retain canonical-current `continue`, no-target vouch rename/continue,
+   unvouched unique-current stop, and rootless legacy collision behavior.
+3. Add a real-Git route regression in the existing identity integration
+   surface: an earlier canonical branch is fully merged, a different current
+   branch is vouched, and routing emits existing delete/recreate instructions
+   without mutating either ref. Follow the plan using safe Git operations and
+   prove the new canonical tip starts at the merge root while the prior
+   current branch and its commits remain reachable. A canonical target with
+   unique work is never cleanup-eligible; unresolved target ahead state fails
+   closed. Do not force-delete a branch checked out elsewhere.
+4. Run the single scoped family covering changed identity/resolver tests, for
+   example `go test ./internal/mcp -run 'ImplIdentity|ResolveImplement|ObserveImplementBranch' -count=1`.
+   Record the actual command and result; no broad package/build/vet sweep is
+   required for this bounded change. Record source-backed T0 compatibility
+   against `deb8289d2` and run `git diff --check`.
+5. Independent R1 review of the implementation; fixes-only R2 only for
+   substantive findings. Record minor/style findings as Forward. Append the
+   Phase 2 Result without changing Phase 1 history.
 
 ## Owner Decisions (2026-11-16)
 
