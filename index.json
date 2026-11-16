@@ -513,7 +513,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-16T04:30:19Z",
         "impl": {
           "branch": "impl/develop/down-frame-gooey"
@@ -522,9 +522,6 @@
     },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
-    },
-    "261116-bug-ws-shared-daemon-launcher-dependent-claude-plugin-root": {
-      "registered_at": "2026-11-16T00:49:34Z"
     },
     "261116-bug-ws-whiteboard-ask-missing-from-board": {
       "registered_at": "2026-11-16T03:08:25Z"
