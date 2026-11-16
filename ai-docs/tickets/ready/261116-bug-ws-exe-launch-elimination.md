@@ -163,6 +163,13 @@ startup can still reach a ws executable through `main`/`connect`,
   ignore hash/build time; do not change that policy based on process age.
   Coordinator-owned repeat sampling, not a worker runtime operation, must
   determine any remaining anomaly after repairing the dev gate bypass.
+  Coordinator correction at 03:11:45Z: 02:54:29 was process creation plus
+  health-request start, not independently observed health. The sampler first
+  recorded healthy around 02:57:00; old retry waves stopped and dashboard
+  reconnect logging appeared around 02:55:08. Reachability may have begun
+  between 02:54:29 and 02:55:08, so an unpublished-endpoint window plausibly
+  explains PID 3452 at 02:54:52, but its exact admission cause remains unproven.
+  Do not pursue that historical anomaly or add diagnostics in this repair.
 - Repair compatibility tier: T0, internal Python caller coordination and
   result handling only. Existing lock, endpoint and Go JSON outcome shapes
   remain unchanged. Old launchers ignore the persistent gate; new launchers
@@ -727,6 +734,51 @@ mailbox/CLI proxy, reconnect-to-successor and model-tool paths launch none.
    approved rare Electron losing-starter exception separately. A 250-ms poll
    can miss short-lived processes; report that measurement limit. Preserve
    only small acceptance evidence and remove owned temporary artifacts later.
+
+## Live-acceptance repair source checkpoint - 2026-11-16
+
+- Reviewed code HEAD: `d286b8eaf9fffc4dbfb2ae1ab86096de8e6d7a05`.
+  Only `scripts/dev.py` and `scripts/test_dev.py` changed from planning HEAD
+  `04e06b7b5fc080d824fb3b0d4a835bcf8e90f188`. The existing launcher gate is
+  reused without a cross-module interface change; builds, seeding and staging
+  finish outside it. One 60-second lifecycle deadline covers lock contention,
+  explicit `--replace`, and expected-content-hash REST confirmation. Only
+  parsed exit 1 / `outcome: unavailable` permits nonzero reconciliation;
+  diagnostics remain visible and no second starter is invoked.
+- Focused local command (all executable/PID/network boundaries mocked):
+  `TMP=D:/Temp/exe-dev-repair TEMP=D:/Temp/exe-dev-repair DEV_TEST_TMP=D:/Temp/exe-dev-repair PYTHONDONTWRITEBYTECODE=1 python -B -m unittest scripts.test_dev.DevLifecycleTest -v`
+  passed all 12 tests (0.593s); full output read at
+  `D:/Temp/exe-dev-repair/dev-lifecycle-1.txt`. Actual advisory-lock checks and
+  virtual clocks cover a dev-held gate through MCP contention beyond the
+  production 20-second grace and successor publication at t25 with zero extra
+  starters, shared-budget expiry, terminal release, explicit replacement,
+  unavailable recovery, malformed/unrelated failures, old/no/PID-only health,
+  late confirmation and hung responses. No executable fixture files were
+  created by this focused family. This is not a full-suite or live proof.
+- Independent focused R1 returned CLEAN for
+  `04e06b7b5..d286b8eaf`, with no Critical, Important or Minor findings.
+  Full report:
+  `C:/Users/user/.cache/ws@kang-sw-devenv/proj/de04b4ac@392ca909/review-paths/61cdf1a0-01-exe-dev-repair-r1.md`.
+  No R1 fixes were required, so the conditional substantive-fix R2 does not
+  apply. The reviewer read source and the supplied full test log; it ran no
+  tests or live operations. This documentation checkpoint changes no reviewed
+  source inputs.
+- No Go/ws/test executable, launcher CLI, native PID query, build, install,
+  runtime probe, daemon swap, sampling, merge, push or release ran. Temporary
+  test directories were cleaned; only the small full-output record remains.
+  Original accepted Phase 1 source, retention policy and the old in-memory
+  launcher boundary are unchanged. PID 3452's historical cause is not proved.
+- Ticket remains open without a phase Result: the coordinator owns integration
+  and actual live acceptance. Stop before those live actions. Item 4 REST must
+  be planned afresh after this repair lands; the parked CLI-admission branch
+  is not a REST implementation and was not applied.
+- Coordinator direction at 03:22:51Z folds duplicate
+  `261116-bug-ws-dev-rerun-daemon-false-failure` into this repair. It is closed
+  as absorbed, with a Resolution naming the reviewed code, focused tests and
+  live-acceptance limit, so it cannot be assigned twice. Its unexecuted
+  standalone phase warning is explicitly accepted for duplicate absorption,
+  not treated as independent phase completion. No package-root/env-selection
+  interface changed; the existing dev package selection is retained.
 
 ## Forward
 
