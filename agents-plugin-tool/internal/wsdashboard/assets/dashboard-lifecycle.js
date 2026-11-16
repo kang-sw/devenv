@@ -411,6 +411,7 @@
     // not a custom confirm or a remove(), asks before losing pasted images.
     try {
       if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
+      if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView();
       ent.el.contentWindow.wsShellLeave = shLeaving.attempt;
       ent.el.contentWindow.location.replace("about:blank");
     } catch (x) { ent.leave = null; shLeaving = null; }
@@ -730,6 +731,7 @@
   fmtTimes(doc);
   mermaid();
   pinConvo();
+  restoreSessionView();
   nearTop();
   if (framed) shFrameInit();
   if (shell && window.WsShell) shShellInit();
