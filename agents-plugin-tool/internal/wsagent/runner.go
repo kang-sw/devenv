@@ -3274,10 +3274,16 @@ func (c *conv) processEnded() {
 	c.clearApprovals()
 	c.harnessState = ""
 	c.checkAction(false)
+	hadBackgroundTasks := c.bgTasks != 0
 	c.setStatus(func() {
 		c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil
 		c.background, c.monitors = nil, nil
 	})
+	if hadBackgroundTasks {
+		// A settled child's background work may have suppressed its
+		// parent's idle timer; ending the process must re-arm it too.
+		c.watched()
+	}
 	c.mcpSeen, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, nil
 	c.retry, c.alerted = nil, false
 	c.syncHost(true)
