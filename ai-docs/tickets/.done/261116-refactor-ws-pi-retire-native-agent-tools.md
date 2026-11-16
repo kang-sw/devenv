@@ -4,6 +4,7 @@ related:
   - 261116-feat-ws-pi-bundle-hardening-and-notices
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-11-16
 ---
 
 # Retire native Pi agent tools in favor of daemon Pi agents
@@ -96,10 +97,44 @@ Pre-retirement call/handler citations refer to develop d7534a5f7; deleting exten
 
 Add the existing-fields-only builtin explorer; update Pi/default terminology with actual-client/effective-tool gating. Preserve non-Pi behavior, explicit disable, old APIs and same-minor compatibility. Acceptance: focused remote Go checks cover builtin fields/read-only instructions, profile/tier ceilings, conditional terminology/namespace output, old/unmarked clients, MCP-only workers and configured opt-out; source-backed API inventory and both version-direction verdicts are recorded.
 
+### Result (d609726e2) - 2026-11-16
+
+- Added builtin `explore` with Pi backend, read/grep/find/ls, minimal evidence instructions and no model/effort/network/write fields. Caller tier selects the model; no Profile field was added. Pi package spawn default is now true; ws stays true, wsflow stays false, and explicit false remains authoritative.
+- Daemon-rendered idioms use actual capability/availability, not numeric freshness. Marked eligible owner leads and record/profile-backed MCP-only callers with both spawn/send permissions get namespace-correct daemon terms; legacy/unavailable callers get neutral prose. Non-Pi idioms are preserved.
+- Old plugin + new daemon is T0 under the owner's corrected scenario: the inventoried APIs and all other existing daemon handlers/schemas remain unchanged. New plugin + old equal-core daemon is handled without a T3 boundary: standard optional initialize metadata is ignored by old daemons; displayed/returned/rendered-file legacy guidance is superseded explicitly; only an exact pre-allocation unknown-explore refusal permits a same-tier fallback after effective read-only profile verification. Uncertain/unsafe failures never retry. Old text can be display-degraded (T1), not a nonexistent-tool/version lockout.
+- Focused remote Go wsagent/mcp checks passed (44.438s / 0.391s, job `4fcca51c641f43c9ad3c49e28a2a5acd`). Patterns included builtin/Profile, Pi capability/rendering/tool gates/spawn resolution, shipped defaults and retained config.resolve_agent. Independent R1 reviewed both version directions and found no daemon API or Profile/manifest shape break.
+
 ### Phase 2: Retire public native tools and isolate retained execution
 
 Remove public native general-agent/explore/fork registrations and fork wiring. Preserve the live execution-only registry, approval decisions/progress/status/recovery without broad protocol changes; quarantine old general/fork sidecars with explicit preserved-file diagnostics. Adapt legacy daemon guidance and exact unknown-explorer fallback without retrying uncertain calls. Acceptance: pure Node tests cover registration absence, partial/active loadouts, old/new daemon text and prompt artifacts, exact profile fallback, tier/read-only preservation, sidecar classification and retained approval/progress flows. No duplicate daemon/native child projection or completion claim.
 
+### Result (d609726e2) - 2026-11-16
+
+- Removed public native spawn/send/list/stop/transcript, Explore and fork registration/wiring, including lazy discussion entry points. Retired permissions are filtered and denied; progress reporting is internal to execution workers. The live execution registry preserves command approval correlation, progress, dashboard identity and audit-style recovery rather than masquerading as daemon child management.
+- Updated the four Pi guides and bootstrap/bridge guidance to actual transports. General daemon completion is ordinary final-answer/mail delivery, not intermediate approval/progress transport. Rendered legacy prompt files are adapted before provenance capture, not just their displayed response.
+- Initial launcher-free focused Node set passed 198 tests with one Windows symlink-permission skip; full output read. R1 found three Important preservation/resume composition gaps, corrected in the Edition below; M1 is explicitly Forward.
+
+#### Edition (160bd9d01) - 2026-11-16
+
+- I1: every fresh execution record pins its approval relay so process loss and /audit dormant resume cannot strand a new command. Regression uses the production marked registry and registered gateway, with only transport/working-context execution stubbed; it checks exactly-correlated approval, stale-id rejection and a valid denial.
+- I2: preserve actual owned transcript/prompt bytes, not only registry metadata. Existing durable `liveness.ownerHeld:true` holds are established with locked identity checks before quarantine and across retirement-aware all-owner retention scans; existing old/new readers honor that field. Tests use expired owned homes and an eligible execution control, then prove raw sidecar/history bytes survive real pruning and a later startup 100 days later.
+- I3: explicit writable/retentionSafe outcomes block every sidecar writer, new persistent execution (before even the optional initial command), and unsafe startup retention when read/protection/consume/quarantine fails. Shutdown cannot overwrite retained source bytes or falsely claim recovery. Read/rename fault tests restore filesystem access before attempting nonempty shutdown snapshots, then assert exact original bytes and subsequent safe recovery.
+- After-fix filesystem/in-process RPC regressions: 56/56 passed; final compatibility/bootstrap/health/freshness set: 45 passed, 0 failed, 1 Windows symlink skip. No actual or synthetic launcher ran. Independent fixes-only R2 reviewed committed `160bd9d01ffe413a47a012d5f60ba50a8ca548a0` and is CLEAN for I1-I3; no remaining substantive findings, M1 Forward. No third review round.
+
 ### Phase 3: Ship guidance/mirrors and close after review
 
 Update shipped guides/playbooks/conventions to actual transports; regenerate wsflow rsrc if canonical rsrc changes. Rebuild dist/THIRD_PARTY_NOTICES and both first-party native copies using the existing producer. Acceptance: one final focused remote Go/local pure-Node set, freshness hashes and mirrored notices pass; R1 substantive findings fixed and fixes-only R2 clean. Record Results and Forward, close ticket; no merge/release implied.
+
+### Result (d609726e2) - 2026-11-16
+
+- Canonical skills/rsrc/conventions had no searched literal retired-tool instruction; their harness-specific wording is supplied by the changed Go renderer. No unnecessary canonical rsrc edit or wsflow rsrc regen was performed. Both native products carry the updated first-party guides and dist.
+- Source/dist/native payloads were regenerated together, retaining prior bundle input/header/notice guards and the awaited initialization-complete signal. Third-party notices and both closure ZIPs/manifests remain byte-identical. No dependency, package version, API shape or persisted schema field change.
+
+#### Edition (160bd9d01) - 2026-11-16
+
+- R1 fix source and regenerated dist/native artifacts landed in the same commit. Final source/native input hash is `d3f8b9e54a51ad2dea18981b52c87e012bd0948ccf13b16295953edf2ff9478b`; notices remain SHA-256 `efcf20f46412a1c4f28bb0a7889783e3f179fdbf8483cd9850a2008478538884` in all three distributions.
+- Final remote bundle/prepared-payload checks passed 38.538s, job `0108a5453d584c719978f1182adf8030`. Command: approved sys_lock w5090 run exec11 25 with this worktree sync, Go PATH, `cd agents-plugin-tool && go test ./internal/wsagent/... -count=1 -run "TestPiBundleCommittedIsFresh|TestPiPreparedPackageOnlyLayouts|TestPiPreparedSourceDrift"`.
+- Final local commands (TMP/TEMP/TMPDIR under D:/Temp/exec11, PYTHONUTF8=1, role/policy env unset): `node --test` on native-retirement-r1, native-agent-retirement, persistent-explore, session-retention, fork, approval-protocol and session-bootstrap-guard test files passed 56; daemon-agent-compat, lead-bootstrap, testdata/pi-lead-health and bundle-freshness passed 45 with one skip. Logs were read in full. `git diff --check` passed.
+- Review: R1 had I1-I3 Important and M1 Minor; fixes-only R2 is clean for I1-I3 on reviewed implementation HEAD `160bd9d01ffe413a47a012d5f60ba50a8ca548a0`. M1 remains Forward as directed. Detailed temporary review reports/logs were read and their outcomes recorded here before cleanup.
+- Surprise: the first remote sync attempted during concurrent source edits failed SHA256 validation before tests started. A frozen-source retry recovered successfully; later final sync was clean. No implementation test failed. Missing local SDK imports during early inspection were resolved through a locked-dependency junction under the approved temp root; no launcher was run to resolve them.
+- Omitted: full npm suite, launcher-dependent integration tests (actual and synthetic), remote Node tests (w5090 has no Node), live installed-plugin/daemon rollout and provider probes under owner restrictions. No merge/push or prohibited local executable/build occurred. Owned dependency junction/caches, logs and review artifacts are removed at close. Compatibility settled T0/T1, with no unavoidable T3 boundary.
