@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -85,8 +86,9 @@ import (
 // in-root routes' (capRefused, capCORS, the policy, serveCapabilityFile).
 //
 // A document navigation to the oview route with a capability that no
-// longer verifies (a reload after the expiry or a daemon restart) gets the
-// re-mint page: a daemon-origin page whose script posts the mint for the
+// longer verifies (a reload after the expiry or a daemon restart) requires
+// the localhost login before showing the re-mint page: a daemon-origin page
+// whose script posts the mint for the
 // path the URL names and replaces itself with the fresh URL, or says the
 // file is no longer available when the mint is refused. A GET never mints.
 // The path it posts comes from a URL nobody verified; the mint's own checks
@@ -107,7 +109,7 @@ var outsideDenied = []string{
 	".kube", ".git-credentials", ".codex/auth.json", ".claude/.credentials.json",
 	".config/gcloud", ".azure", ".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml",
 	".vault-token", ".password-store", "Library/Keychains",
-	".cache/ws@kang-sw-devenv/dashboard",
+	".cache/" + wsstate.DefaultCacheDirName + "/dashboard",
 }
 
 // OutsideLinkSource is a PageSource that also lists the files outside the
@@ -493,8 +495,15 @@ type outsideRemintPage struct {
 
 // writeOutsideRemint answers a document navigation to the oview route
 // whose capability no longer verifies with the re-mint page (see the file
-// comment); 404 when the URL names no capability shape at all.
+// comment); 404 when the URL names no capability shape at all. Unlike a
+// valid capability read, posting the unverified path requires a logged-in page.
 func (d *Daemon) writeOutsideRemint(w http.ResponseWriter, r *http.Request, replyID, capability, path string) {
+	if !d.localhostAuthenticated(r) {
+		if !d.loginNavigation(w, r) {
+			d.refuseLogin(w, r, false)
+		}
+		return
+	}
 	_, _, g, ok := parseOutside(capability)
 	a, err := loadDashboardAssets()
 	var raw [16]byte

@@ -165,6 +165,7 @@ func TestNonLoopbackHostIsRefused(t *testing.T) {
 				method = http.MethodPost
 			}
 			req := httptest.NewRequest(method, path, nil)
+			req.RemoteAddr = "127.0.0.1:50000"
 			req.Host = host
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)

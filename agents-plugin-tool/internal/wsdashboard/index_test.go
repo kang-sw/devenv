@@ -513,6 +513,7 @@ func TestNudgeRoute(t *testing.T) {
 		t.Fatalf("non-loopback Host nudge = %d, want 403", code)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/nudge", nil)
+	req.RemoteAddr = "127.0.0.1:50000"
 	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 	d.Handler().ServeHTTP(rec, req)

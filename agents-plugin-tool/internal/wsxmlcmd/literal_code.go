@@ -255,9 +255,10 @@ func (t *tokenizer) literalOperandCrossing(at, end, lineStart int, wrapper *body
 	return ""
 }
 
-// Cache the next structural tail marker (or command close). Many bare quoted
-// openers must not each rescan the same remaining body, even when none has a
-// continuation. Candidates arrive in source order, so each suffix is walked once.
+// Cache the next wrapper boundary (or command close). Only a wrapper close
+// continues a quoted opener; a fresh opener owns its own operands. Many bare
+// quoted openers must not each rescan the same remaining body, even when none
+// has a continuation. Candidates arrive in source order, so each suffix is walked once.
 type literalWrapperTail struct {
 	at         int
 	structural bool
@@ -317,11 +318,11 @@ func (tail *literalWrapperTail) continues(t *tokenizer, at, lineStart int, wrapp
 			advance(at + 9 + close + 3)
 			continue
 		}
-		structural := strings.HasPrefix(rest, "</"+wrapper.tag+">")
-		for _, field := range wrapper.fields {
-			structural = structural || openingTagPrefix(rest, field)
+		if openingTagPrefix(rest, wrapper.tag) {
+			tail.at, tail.structural = at, false
+			return false
 		}
-		if structural {
+		if strings.HasPrefix(rest, "</"+wrapper.tag+">") {
 			tail.at, tail.structural = at, true
 			return true
 		}

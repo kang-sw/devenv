@@ -123,25 +123,10 @@ func accessExempt(r *http.Request) bool {
 	return publicAsset(r) || previewCapability(r)
 }
 
-// Machine/PWA exemptions are local only; remote peers retain the LAN-token
-// gate. Browsers must also address a loopback Host (DNS rebinding). Legacy
-// machine clients send neither Origin nor fetch metadata and keep working.
+// Machine/PWA exemptions require both a loopback peer and Host. A rebound
+// browser fetch may omit Origin and fetch metadata just like a machine client.
 func loopbackExemptCaller(r *http.Request) bool {
-	if !loopbackPeer(r.RemoteAddr) {
-		return false
-	}
-	if localViewer(r) {
-		return true
-	}
-	if len(r.Header.Values("Origin")) != 0 || strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html") {
-		return false
-	}
-	for key := range r.Header {
-		if strings.HasPrefix(strings.ToLower(key), "sec-fetch-") {
-			return false
-		}
-	}
-	return true
+	return localViewer(r)
 }
 
 func loginNavigationRequest(r *http.Request) bool {
