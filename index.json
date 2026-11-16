@@ -500,6 +500,9 @@
     "261116-bug-ws-dev-rerun-daemon-false-failure": {
       "registered_at": "2026-11-16T00:53:09Z"
     },
+    "261116-bug-ws-exe-launch-elimination": {
+      "registered_at": "2026-11-16T00:55:02Z"
+    },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
     },
