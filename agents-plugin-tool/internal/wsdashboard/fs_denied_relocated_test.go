@@ -94,6 +94,7 @@ func TestFSLocalDeniedRelocatedCredentials(t *testing.T) {
 	}{
 		{"GH_CONFIG_DIR", "", true},
 		{"XDG_CONFIG_HOME", "gh", true}, {"XDG_CONFIG_HOME", "gcloud", true},
+		{"APPDATA", "GitHub CLI", true}, {"APPDATA", "gcloud", true},
 		{"CODEX_HOME", "auth.json", false}, {"CLAUDE_CONFIG_DIR", ".credentials.json", false},
 		{"AWS_SHARED_CREDENTIALS_FILE", "", false}, {"AWS_CONFIG_FILE", "", false},
 	} {

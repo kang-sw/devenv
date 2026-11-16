@@ -46,6 +46,7 @@ type viewer struct {
 	query       string // the token query parameter, when set
 	cookie      string // the LAN token cookie, when set
 	localCookie bool   // carry the real localhost credential
+	browser     bool   // include an Origin on reads too, unlike machine callers
 }
 
 // serve runs one request through the daemon's handler as v and returns the
@@ -62,8 +63,10 @@ func serve(d *Daemon, v viewer, method, target, body string) *httptest.ResponseR
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	req.RemoteAddr = v.peer
 	req.Host = v.host
-	if method == http.MethodPost {
+	if method == http.MethodPost || v.browser {
 		req.Header.Set("Origin", "http://"+v.host)
+	}
+	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if v.cookie != "" {
@@ -101,6 +104,9 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/health", ""},
 		{http.MethodPost, "/shutdown", ""},
 		{http.MethodPost, "/nudge", `{"reply_id":"livesession"}`},
+		{http.MethodGet, "/session-hire/roster?requester=livesession", ""},
+		{http.MethodGet, "/pwa/manifest.webmanifest", ""},
+		{http.MethodGet, "/pwa/icon-192.png", ""},
 		{http.MethodGet, "/", ""},
 		{http.MethodGet, "/events", ""},
 		{http.MethodGet, "/s/livesession", ""},
@@ -120,12 +126,10 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession/fs/find?q=shot", ""},
 		{http.MethodGet, "/s/livesession/fs/search?q=shot", ""},
 		{http.MethodPost, "/s/livesession/fs/act", `{"path":"shot.png","action":"guard"}`},
-		// The outside-link routes: a path no board links, and a capability
-		// that verifies nowhere, so a passing request reads no file. They
-		// answer a loopback viewer only (TestFSOutsideIsLoopbackOnly).
+		// The outside mint needs the browser credential. Its capability
+		// reads are exempt by shape, but local-only in their own handlers
+		// (TestFSOutsideIsLoopbackOnly).
 		{http.MethodPost, "/s/livesession/fs/outside", `{"path":"/guard/not-linked.txt"}`},
-		{http.MethodGet, "/s/livesession/fs/ocap/guard/page.html", ""},
-		{http.MethodGet, "/s/livesession/fs/oview/guard/page.html", ""},
 		{http.MethodGet, "/s/livesession/attachment/0123456789abcdef-1.png", ""},
 		{http.MethodPost, "/s/livesession/message", `{"text":"from the guard test"}`},
 		{http.MethodPost, "/s/livesession/cancel", `{"id":"x"}`},
@@ -261,8 +265,8 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 	}
 	refuse := []viewer{
 		{name: "foreign peer, no token", peer: "192.168.7.30:50000", host: lanHost},
-		{name: "loopback peer, foreign Host", peer: "127.0.0.1:50000", host: lanHost},
-		{name: "loopback peer, rebinding Host", peer: "127.0.0.1:50000", host: "evil.example:" + port},
+		{name: "loopback browser, foreign Host", peer: "127.0.0.1:50000", host: lanHost, browser: true},
+		{name: "loopback browser, rebinding Host", peer: "127.0.0.1:50000", host: "evil.example:" + port, browser: true},
 		{name: "foreign peer, loopback Host", peer: "192.168.7.30:50000", host: "127.0.0.1:" + port},
 		{name: "foreign peer, wrong token", peer: "192.168.7.30:50000", host: lanHost, query: "wrong", cookie: "wrong"},
 		{name: "foreign peer, endpoint token query", peer: "192.168.7.30:50000", host: lanHost, query: f.d.Endpoint().Token},
@@ -279,25 +283,6 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 		for _, v := range refuse {
 			rec := serve(f.d, v, route.method, route.path, route.body)
 			assertNoCORS(t, rec.Header())
-			// Machine routes now bypass the browser gate in both modes,
-			// retaining their own route-level checks.
-			switch route.path {
-			case "/health":
-				if rec.Code != http.StatusOK {
-					t.Errorf("machine health as %s = %d, want 200", v.name, rec.Code)
-				}
-				continue
-			case "/shutdown":
-				if rec.Code != http.StatusUnauthorized {
-					t.Errorf("machine shutdown without bearer as %s = %d, want 401", v.name, rec.Code)
-				}
-				continue
-			case "/nudge":
-				if refusedByGuard(rec) || rec.Code != http.StatusNotFound {
-					t.Errorf("machine nudge as %s = %d, want unknown-session 404", v.name, rec.Code)
-				}
-				continue
-			}
 			if !refusedByGuard(rec) {
 				t.Errorf("%s %s as %s = %d (%s), want the guard's 401", route.method, route.path, v.name, rec.Code, strings.TrimSpace(rec.Body.String()))
 			}

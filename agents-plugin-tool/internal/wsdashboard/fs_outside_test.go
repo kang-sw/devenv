@@ -59,7 +59,7 @@ func startOutsideFixture(t *testing.T) *outsideFixture {
 	t.Setenv("HOME", o.home)
 	t.Setenv("USERPROFILE", o.home)
 	// Relocated credentials in the developer's environment are not fixtures.
-	for _, key := range []string{"GH_CONFIG_DIR", "XDG_CONFIG_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "KUBECONFIG", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"} {
+	for _, key := range []string{"GH_CONFIG_DIR", "XDG_CONFIG_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "KUBECONFIG", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "APPDATA"} {
 		t.Setenv(key, "")
 	}
 	o.pageFixture = startPageFixture(t, lanMode)
@@ -220,6 +220,7 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 	page := o.write(t, o.away, "page.html", `<link rel="stylesheet" href="style.css"><img src="img/a.png"><h1>HTML-AWAY</h1>`)
 	o.write(t, o.away, "style.css", "body{color:red}/*CSS-AWAY*/")
 	o.write(t, o.away, "img/a.png", "PNG-AWAY")
+	o.write(t, o.away, "app.mjs", "export default 'MODULE-AWAY'")
 	o.write(t, o.away, "other.html", "<h1>OTHER-AWAY</h1>")
 	secret := o.write(t, filepath.Dir(o.away), "secret.txt", "SECRET-PARENT")
 	escape := os.Symlink(secret, filepath.Join(o.away, "escape.txt")) == nil &&
@@ -231,7 +232,11 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 		t.Fatalf("mint of an HTML file = %+v", a)
 	}
 	for _, doc := range []string{a.Frame, a.View} {
-		rec := o.read(doc)
+		dest := "iframe"
+		if doc == a.View {
+			dest = "document"
+		}
+		rec := capFetch(o.pageFixture, o.local, doc, capShape{"", "same-origin", "navigate", dest})
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "HTML-AWAY") || rec.Header().Get("Content-Type") != "text/html; charset=utf-8" {
 			t.Fatalf("GET %s = %d %q", doc, rec.Code, rec.Body.String())
 		}
@@ -256,6 +261,24 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 		for _, name := range refused {
 			if rec := o.read(under(doc, name)); rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "SECRET") {
 				t.Errorf("GET %s = %d %q, want a refusal", under(doc, name), rec.Code, rec.Body.String())
+			}
+		}
+		// Opaque-origin subresources cannot send the Strict localhost cookie.
+		for _, c := range []struct {
+			path, want string
+			shape      capShape
+		}{
+			{"style.css", "CSS-AWAY", capShape{"", "cross-site", "no-cors", "style"}},
+			{"img/a.png", "PNG-AWAY", capShape{"", "cross-site", "no-cors", "image"}},
+			{"app.mjs", "MODULE-AWAY", capShape{"", "cross-site", "no-cors", "script"}},
+			{"app.mjs", "MODULE-AWAY", capShape{"null", "cross-site", "cors", "script"}},
+		} {
+			rec := capFetch(o.pageFixture, o.local, under(doc, c.path), c.shape)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), c.want) || len(rec.Result().Cookies()) != 0 {
+				t.Errorf("cookieless %s %+v = %d %q", c.path, c.shape, rec.Code, rec.Body.String())
+			}
+			if c.shape.origin == "null" && rec.Header().Get("Access-Control-Allow-Origin") != "null" {
+				t.Errorf("opaque module lacks CORS grant: %v", rec.Header())
 			}
 		}
 		// A fetch reads nothing, as on the in-root routes.
@@ -553,8 +576,8 @@ func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 
 // TestFSOutsideIsLoopbackOnly pins that a capability that left this
 // machine reads nothing: a LAN viewer holding the token and a valid
-// outside capability gets 404 from both serving routes, a peer without the
-// token meets the guard, and a loopback peer that addressed a foreign Host
+// outside capability gets 404 from both serving routes, even without the
+// LAN token, and a loopback peer that addressed a foreign Host
 // gets 404, for the document, a relative file, and an image alike.
 func TestFSOutsideIsLoopbackOnly(t *testing.T) {
 	o := startOutsideFixture(t)
@@ -566,13 +589,10 @@ func TestFSOutsideIsLoopbackOnly(t *testing.T) {
 		if rec := o.read(target); rec.Code != http.StatusOK {
 			t.Fatalf("GET %s as the local viewer = %d, want 200", target, rec.Code)
 		}
-		for _, v := range []viewer{o.lan, rebound} {
+		for _, v := range []viewer{o.lan, o.bare, rebound} {
 			if rec := serve(o.d, v, http.MethodGet, target, ""); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "AWAY") {
 				t.Errorf("GET %s as %s = %d, want 404", target, v.name, rec.Code)
 			}
-		}
-		if rec := serve(o.d, o.bare, http.MethodGet, target, ""); !refusedByGuard(rec) {
-			t.Errorf("GET %s as a LAN peer without the token = %d, want the guard's 401", target, rec.Code)
 		}
 	}
 	// An expired page's navigation gets a LAN viewer no re-mint page.

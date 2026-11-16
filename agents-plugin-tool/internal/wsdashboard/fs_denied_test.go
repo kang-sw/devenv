@@ -83,6 +83,43 @@ func TestFSLocalDeniedIdentitiesFollowReplacement(t *testing.T) {
 	assertSensitiveReadsRefused(t, o, alias)
 }
 
+func TestFSLocalDeniedDaemonState(t *testing.T) {
+	for _, relocated := range []bool{false, true} {
+		t.Run(map[bool]string{false: "default", true: "relocated"}[relocated], func(t *testing.T) {
+			o := startOutsideFixture(t)
+			t.Setenv("WS_CACHE_HOME", "")
+			if relocated {
+				t.Setenv("WS_CACHE_HOME", filepath.Join(o.away, "cache"))
+			}
+			dir, err := Dir("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{localhostSecretFile, LANTokenFileName, endpointFileName} {
+				secret := o.write(t, dir, name, "DENIED-DAEMON-CREDENTIAL")
+				assertSensitiveReadsRefused(t, o, secret)
+				alias := filepath.Join(o.away, name+".png")
+				if err := os.Link(secret, alias); err != nil {
+					t.Skipf("hardlinks unavailable: %v", err)
+				}
+				assertSensitiveReadsRefused(t, o, alias)
+				info, err := os.Stat(alias)
+				if err != nil || !deniedOpenedFile(info) {
+					t.Errorf("opened daemon credential alias not denied: %v", err)
+				}
+			}
+			assertSensitiveDirRefused(t, o, dir)
+			aliasDir := filepath.Join(o.away, "state-alias")
+			if err := os.Symlink(dir, aliasDir); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			assertSensitiveDirRefused(t, o, aliasDir)
+			assertSensitiveReadsRefused(t, o, filepath.Join(aliasDir, localhostSecretFile))
+			assertOrdinaryLocalReads(t, o, o.write(t, o.away, "ordinary.txt", "ORDINARY"))
+		})
+	}
+}
+
 func TestFSLocalDeniedCredentialDirectories(t *testing.T) {
 	o := startOutsideFixture(t)
 	for _, name := range []string{".kube", ".config/gcloud", ".azure", ".password-store", "Library/Keychains"} {

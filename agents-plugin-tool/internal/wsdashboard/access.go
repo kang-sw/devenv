@@ -18,8 +18,9 @@ import (
 // Browser access is deny-by-default in both modes. A local viewer needs the
 // persisted localhost credential; a non-local viewer in LAN mode needs the
 // separate LAN token. Neither credential grants access in the other branch.
-// Loopback mode also keeps hostGuard's DNS-rebinding defense. Machine routes
-// retain their own checks (accessExempt); auth routes check their own callers.
+// Loopback mode also keeps hostGuard's DNS-rebinding defense. Machine/PWA
+// exemptions are loopback-only, with a loopback Host for browser requests
+// (accessExempt); route-level checks and auth routes' own checks still apply.
 //
 // Sandboxed frames have opaque origins and send no cookie, so these read
 // routes use fixed assets or path capabilities instead:

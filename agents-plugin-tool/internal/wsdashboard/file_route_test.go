@@ -284,7 +284,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 	writeFile(t, filepath.Join(f.project, "docs", "guide", "font.woff2"), "WOFF2")
 	writeFile(t, filepath.Join(f.project, "docs", "guide", "sub.htm"), "<p>SUB</p>")
 	writeFile(t, filepath.Join(f.project, "docs", "huge.html"), strings.Repeat("x", fileViewMax+1))
-	writeFile(t, filepath.Join(f.project, "docs", "nul.html"), "<p>\x00</p>")
+	writeFile(t, filepath.Join(f.project, "docs", "contains-nul.html"), "<p>\x00</p>")
 	writeFile(t, filepath.Join(f.project, ".site", "page.html"), "<p>DOT-INSIDE</p>")
 
 	page := pageRedirect(t, f, lan, "docs/guide/page.html")
@@ -344,7 +344,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 	refused := []string{
 		prefix + "../../../../etc/hosts", prefix + "docs/../../secret.txt", prefix + "docs%2F..%2F..%2Fsecret.txt",
 		prefix + `docs\..\..\secret.txt`, prefix + "notes.txt%00.html", prefix + "docs", prefix + "missing.html", prefix,
-		prefix + "/" + filepath.ToSlash(filepath.Join(outside, "secret.txt")), prefix + "docs/huge.html", prefix + "docs/nul.html",
+		prefix + "/" + filepath.ToSlash(filepath.Join(outside, "secret.txt")), prefix + "docs/huge.html", prefix + "docs/contains-nul.html",
 		prefix + ".site/page.html",
 	}
 	if symlinks {
@@ -383,7 +383,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 	}
 	// An HTML file the page route refuses stays what the file view showed:
 	// the not-viewable page, or plain text.
-	for path, want := range map[string]string{"docs/huge.html": "text/html; charset=utf-8", "docs/nul.html": "text/html; charset=utf-8", ".site/page.html": "text/plain; charset=utf-8"} {
+	for path, want := range map[string]string{"docs/huge.html": "text/html; charset=utf-8", "docs/contains-nul.html": "text/html; charset=utf-8", ".site/page.html": "text/plain; charset=utf-8"} {
 		rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), "")
 		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != want || rec.Header().Get("Location") != "" {
 			t.Errorf("file view of %s = %d %v", path, rec.Code, rec.Header())

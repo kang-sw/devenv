@@ -78,8 +78,8 @@ import (
 // daemon key, so the serving route learns the folder and the one exempt
 // file from the URL and trusts neither until the MAC verifies. The route
 // parts differ from the in-root ones, so neither capability verifies on the
-// other's routes. Serving is loopback-only too: the routes are not among
-// the ones LAN mode admits by shape (previewCapability), and the handler
+// other's routes. Serving is loopback-only too: the guard admits the shapes
+// without a cookie for sandboxed loads (previewCapability), but the handler
 // answers 404 to any request that is not a localViewer, so a capability
 // that leaked reads nothing from another host. Everything else is the
 // in-root routes' (capRefused, capCORS, the policy, serveCapabilityFile).
@@ -107,6 +107,7 @@ var outsideDenied = []string{
 	".kube", ".git-credentials", ".codex/auth.json", ".claude/.credentials.json",
 	".config/gcloud", ".azure", ".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml",
 	".vault-token", ".password-store", "Library/Keychains",
+	".cache/ws@kang-sw-devenv/dashboard",
 }
 
 // OutsideLinkSource is a PageSource that also lists the files outside the

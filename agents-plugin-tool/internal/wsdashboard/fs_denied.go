@@ -31,16 +31,31 @@ func deniedBasePaths(homes []string) []string {
 			bases = append(bases, path)
 		}
 	}
+	addDaemonDir := func(dir string) {
+		add(dir)
+		// Individual identities also protect hardlinks outside the directory.
+		for _, name := range []string{localhostSecretFile, LANTokenFileName, endpointFileName} {
+			add(filepath.Join(dir, name))
+		}
+	}
 	for _, home := range homes {
 		for _, name := range outsideDenied {
 			add(filepath.Join(home, filepath.FromSlash(name)))
 		}
+		if dir, err := Dir(filepath.Join(home, ".cache", "ws@kang-sw-devenv")); err == nil {
+			addDaemonDir(dir)
+		}
+	}
+	// Use the daemon's own resolver, including WS_CACHE_HOME relocation.
+	if dir, err := Dir(""); err == nil {
+		addDaemonDir(dir)
 	}
 	for _, key := range []string{"GH_CONFIG_DIR", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"} {
 		add(os.Getenv(key))
 	}
 	for _, c := range []struct{ key, name string }{
 		{"XDG_CONFIG_HOME", "gh"}, {"XDG_CONFIG_HOME", "gcloud"},
+		{"APPDATA", "GitHub CLI"}, {"APPDATA", "gcloud"},
 		{"CODEX_HOME", "auth.json"}, {"CLAUDE_CONFIG_DIR", ".credentials.json"},
 	} {
 		if dir := os.Getenv(c.key); dir != "" {

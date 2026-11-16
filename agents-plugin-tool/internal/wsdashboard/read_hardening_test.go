@@ -39,6 +39,7 @@ func TestNudgeBrowserOriginGuard(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, f.base+"/nudge", strings.NewReader(string(body)))
+			req.RemoteAddr = "127.0.0.1:50000"
 			if tc.originPresent {
 				req.Header.Set("Origin", tc.origin)
 			}
