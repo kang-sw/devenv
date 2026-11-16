@@ -3,6 +3,7 @@ package wsxmlcmd
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -148,19 +149,35 @@ func TestLiteralCodeNearLinearGrowth(t *testing.T) {
 			var bests []time.Duration
 			for _, size := range []int{50000, 100000, 200000} {
 				input, _ := literalPerformanceInput(kind, size)
+				const trials = 7
+				const minSample = 20 * time.Millisecond
+				iterations := 1
 				best := time.Hour
-				for trial := 0; trial < 3; trial++ {
-					p := &Problems{}
+				for trial := 0; trial < trials; {
+					runtime.GC()
 					start := time.Now()
-					Parse(p, g, input)
+					for range iterations {
+						p := &Problems{}
+						Parse(p, g, input)
+						if len(p.List) != 0 {
+							t.Fatal(p.List)
+						}
+					}
 					elapsed := time.Since(start)
-					if len(p.List) != 0 {
-						t.Fatal(p.List)
+					// Single sub-millisecond parses are dominated by runner
+					// pauses. Require seven batches at the same iteration count,
+					// each long enough to amortize that noise, then normalize.
+					if elapsed < minSample {
+						iterations *= 2
+						best, trial = time.Hour, 0
+						continue
 					}
 					best = min(best, elapsed)
+					trial++
 				}
+				best /= time.Duration(iterations)
 				bests = append(bests, best)
-				t.Logf("%s %d bytes best-of-3=%s", kind, len(input), best)
+				t.Logf("%s %d bytes best-of-%d=%s per parse (%d parses/batch)", kind, len(input), trials, best, iterations)
 			}
 			if bests[2] >= 100*time.Millisecond {
 				t.Fatalf("200KB absolute bound: %s >= 100ms", bests[2])
