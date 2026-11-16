@@ -80,11 +80,12 @@ function validateTree(root, label) {
 function packageFiles(root) {
   const plugin = readJSON(path.join(root, '.claude-plugin', 'plugin.json'));
   if (!['ws', 'wsflow'].includes(plugin?.name)) throw new Error('Invalid Claude plugin manifest (expected ws or wsflow)');
-  if (!Array.isArray(plugin.agents) || !plugin.agents.length || !plugin.mcpServers?.ws ||
-      !Array.isArray(plugin.mcpServers.ws.args)) throw new Error('Incomplete Claude plugin references');
+  const server = plugin.mcpServers?.[plugin.name];
+  if (!Array.isArray(plugin.agents) || !plugin.agents.length || !server ||
+      !Array.isArray(server.args)) throw new Error('Incomplete Claude plugin references');
   const prefix = '${CLAUDE_PLUGIN_ROOT}/';
-  const args = plugin.mcpServers.ws.args;
-  const manifests = plugin.mcpServers.ws.env?.WS_MCP_CONFIG_MANIFESTS?.split(';');
+  const args = server.args;
+  const manifests = server.env?.WS_MCP_CONFIG_MANIFESTS?.split(';');
   if (!args.includes(prefix + 'bin/ws-mcp-launcher.py') ||
       !Array.isArray(manifests) || manifests.length !== 2 ||
       !manifests.includes(prefix + 'config-manifest.json') ||

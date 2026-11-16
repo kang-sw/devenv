@@ -74,12 +74,18 @@ test('bundled and dev must be complete hostable Claude packages (Pi-only is not 
     }
   }
 });
-test('wsflow package name must agree with its runtime contract', t => {
+test('wsflow package uses its named MCP server and matching runtime contract', t => {
   const f = fixture(t);
-  f.bundled.save(f.bundled.pluginFile, { ...f.bundled.plugin, name: 'wsflow' });
-  assert.throws(f.select, /plugin\/runtime mismatch/);
-  f.bundled.save(f.bundled.contractFile, { ...f.bundled.contract, plugin: 'wsflow' });
-  assert.equal(f.select().contract.plugin, 'wsflow');
+  for (const selected of [f.bundled, f.dev]) {
+    if (selected === f.dev) f.choose({ schema_version: 1, root: selected.root });
+    selected.save(selected.pluginFile, { ...selected.plugin, name: 'wsflow',
+      mcpServers: { wsflow: selected.plugin.mcpServers.ws } });
+    assert.throws(f.select, /plugin\/runtime mismatch/);
+    selected.save(selected.contractFile, { ...selected.contract, plugin: 'wsflow' });
+    assert.equal(f.select().contract.plugin, 'wsflow');
+    selected.save(selected.pluginFile, { ...selected.plugin, name: 'wsflow' });
+    assert.throws(f.select, /Incomplete Claude plugin references/, 'the ws server cannot stand in for wsflow');
+  }
 });
 test('resource/skills paths and manifest bytes must belong to the selected root', t => {
   const f = fixture(t);
