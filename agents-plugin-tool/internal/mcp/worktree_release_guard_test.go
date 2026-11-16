@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsgit"
 )
@@ -168,7 +170,7 @@ func TestWorktreeReleaseWaitsOutAnAcquire(t *testing.T) {
 	}
 	rel := callToolOnce(t, s, 2, "worktree.release", map[string]any{"session_key": leadA, "path": acq.Path})
 	unlock()
-	if !toolIsError(t, rel) || !strings.Contains(toolText(t, rel), "nothing was changed") {
+	if !toolIsError(t, rel) || !strings.Contains(toolText(t, rel), "nothing was changed") || !strings.Contains(toolText(t, rel), "worktree.release: contention") || strings.Contains(toolText(t, rel), "worktree.acquire:") {
 		t.Fatalf("a release during an acquire must fail with nothing changed: %s", rel)
 	}
 	if _, err := os.Stat(draft); err != nil {
@@ -176,5 +178,70 @@ func TestWorktreeReleaseWaitsOutAnAcquire(t *testing.T) {
 	}
 	if rel := callToolOnce(t, s, 3, "worktree.release", map[string]any{"session_key": leadA, "path": acq.Path}); toolIsError(t, rel) {
 		t.Fatalf("release after the acquire let go failed: %s", rel)
+	}
+}
+
+func TestWorktreeReleaseSlowHookAllowsOtherWorktrees(t *testing.T) {
+	// Include a detached, unleased target: branch/lease checks alone cannot
+	// reserve it against reuse while its release hook is still running.
+	for _, detached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "leased", true: "unleased-detached"}[detached], func(t *testing.T) {
+			s, root, base, parent := worktreeListServer(t)
+			pool := acquireTempDir(t)
+			gate := filepath.Join(t.TempDir(), "release")
+			t.Setenv("WS_TEST_ACQUIRE_HOOK_GATE", gate)
+			profile := hookProfile(t, "slow-release", nil, map[string][]map[string]any{
+				worktreeHookPreRelease: {hook([]string{os.Args[0], "-test.run=^TestWorktreeAcquireGateHook$"})},
+			})
+			acquire := func(branch string) worktreeAcquireResult {
+				t.Helper()
+				res, err := acquireWithServer(context.Background(), s, s.gitRunner(), root, base, branch, profile, pool, parent)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return res
+			}
+			target := acquire("impl/test/releasing")
+			other := acquire("impl/test/other")
+			if detached {
+				runGit(t, target.Path, "checkout", "--detach")
+				if err := removeWorktreeLease(context.Background(), s.gitRunner(), target.Path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan struct{})
+			var releaseErr error
+			t.Cleanup(func() { _ = os.WriteFile(gate+".resume", nil, 0o600); <-done })
+			go func() {
+				_, releaseErr = releaseWorktreeAs(context.Background(), s.gitRunner(), s.environ(), target.Path, pool, lookupOf(profile), &worktreeReleaseCaller{LeadKey: parent})
+				close(done)
+			}()
+			waitAcquireGate(t, gate+".held")
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			_, err := releaseWorktreeAs(ctx, s.gitRunner(), s.environ(), target.Path, pool, lookupOf(profile), &worktreeReleaseCaller{LeadKey: parent, Force: true})
+			cancel()
+			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "worktree.release: contention") {
+				t.Fatalf("a second release must not enter the same target: %v", err)
+			}
+			// Outlast the pool lock's contention budget with the hook gated.
+			time.Sleep(worktreeAcquireLockTimeout + 100*time.Millisecond)
+			later := acquire("impl/test/later")
+			if later.Path == target.Path {
+				t.Fatal("acquire reused a worktree whose release is still running")
+			}
+			plain := profile
+			plain.Definition.Hooks = nil
+			if _, err := releaseWorktreeAs(context.Background(), s.gitRunner(), s.environ(), other.Path, pool, lookupOf(plain), &worktreeReleaseCaller{LeadKey: parent}); err != nil {
+				t.Fatalf("release of another worktree: %v", err)
+			}
+			if err := os.WriteFile(gate+".resume", nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			<-done
+			if releaseErr != nil {
+				t.Fatalf("slow release: %v", releaseErr)
+			}
+			assertAcquiredLease(t, s, later, "impl/test/later", parent)
+		})
 	}
 }
