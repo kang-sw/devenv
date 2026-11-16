@@ -32,7 +32,7 @@ related:
 
 ## Child Tickets
 
-- Planned: foundation - profile-aware file selection, the `workflow.profile`
+- `261116-feat-orchestration-profile-foundation` - todo; profile-aware file selection, the `workflow.profile`
   knob with the harness whitelist and its set-time warning, the
   `sublead-protocol` include, the workflow manual core/sub-lead split, the
   sub-lead whiteboard status path, the per-host nested-spawn check.
