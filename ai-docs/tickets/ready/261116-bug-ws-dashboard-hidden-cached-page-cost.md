@@ -267,6 +267,49 @@ native confirmation behavior. No daemon rebuild/restart/swap, local Go/ws/test
 binary, live browser measurement or push was performed. Phase 2 remains open;
 this result makes no measured-lag improvement claim.
 
+#### Edition (50ad47ccb) - 2026-11-16
+
+Fixes-only takeover after R1 (`48d09ea57`), authorized by the lead:
+
+- I1: a surviving document's native-beforeunload timer sends an attempt-scoped
+  cancellation signal. Clear the pending leave; later same-session hash routes
+  and current-row clicks no longer re-prompt/reload. Stale signals cannot cancel
+  a newer attempt.
+- I2: tag shell history entries with a private index. Never replace a popped
+  destination entry. On Stay, restore the prior position with `history.go`;
+  defer new picks until asynchronous restoration completes. Accepted and
+  cancelled double Back preserve the full history list.
+- I3 lead decision: a failed synchronous draft save makes nonempty unsent
+  content unpersistable, just like pasted images. Propagate the write result
+  through the storage adapter/draft store and widen only the existing native
+  leave-guard predicate; save again during beforeunload. Successful retry or an
+  empty/view-only draft does not prompt. No new UI or stored-draft shape.
+- M3: Settings browser fixture now waits for the new index iframe's `#grid`
+  after Back, not the old live frame's identically named root.
+- RED evidence: each new I1/I2/I3 Node test failed against pre-fix production
+  source: repeated save on same-session route, `[B,B]` history corruption, and
+  no prompt for quota-failed text respectively.
+- GREEN: `node --test agents-plugin-tool/internal/wsdashboard/testdata/shell-lifecycle.test.cjs`
+  passed all four cases (existing lifecycle plus I1, I2 and I3). Includes
+  cancelled current-row/hash navigation, stale attempt rejection, Back/Forward,
+  accepted/cancelled double Back, asynchronous restore, denied/full storage,
+  retry and pasted-image guard coverage. Settings browser script syntax check
+  and `git diff --check` passed. One scoped passing check closes this fixes-only
+  pass per the lead; no Go checks, local binaries, browser run or daemon change.
+- Native dialog/sticky-activation behavior and real Settings browser acceptance
+  still require the lead's arranged live check; VM timers/traversal are models.
+
+Forward findings retained from R1 (not part of this fixes-only pass):
+
+- M1: remove obsolete hidden-frame `shown:false`/`shHidden`/draft plumbing later.
+- M2: strengthen the stale-load guard regression to assert no settings/shown
+  delivery to a removed frame, or deliberately drop the redundant guard.
+- M4 (Phase 2): measure lost scroll-position restoration, terminal ring replay
+  and transient empty-header cost on fresh return; no iframe cache restoration.
+- M5: live acceptance must cover dropping an image into a fresh frame without
+  prior click/key activation; Chromium may suppress the native prompt. Also
+  assess Electron's existing whole-app leave-dialog copy on a session switch.
+
 ### Phase 2: Measure and improve fresh session-switch load performance
 
 Depends on Phase 1's landed Result. Measure cold/warm session switches, initial
