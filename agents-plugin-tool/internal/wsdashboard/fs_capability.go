@@ -268,9 +268,9 @@ func (d *Daemon) capabilityURL(part, capability, replyID, rel string) string {
 // previewCapability reports a read of the capability route or the page
 // route by its shape alone: the session routes LAN mode serves without the
 // token, since the sandboxed document they serve sends no cookie. The route
-// itself checks the capability (handleFSCapability) and answers 404 without
-// a valid one, and to a fetch or another origin's request (capRefused) in
-// LAN mode as on loopback.
+// itself checks the capability and answers 404 without a valid one, and to
+// a fetch or another origin's request (capRefused). Outside-root handlers
+// additionally require localViewer, even when the capability is valid.
 func previewCapability(r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -280,8 +280,15 @@ func previewCapability(r *http.Request) bool {
 		return false
 	}
 	replyID, sub, ok := strings.Cut(rest, "/")
-	return ok && ValidReplyID(replyID) &&
-		(strings.HasPrefix(sub, strings.TrimPrefix(fsCapRoutePart, "/")) || strings.HasPrefix(sub, strings.TrimPrefix(fsViewRoutePart, "/")))
+	if !ok || !ValidReplyID(replyID) {
+		return false
+	}
+	for _, part := range []string{fsCapRoutePart, fsViewRoutePart, fsOutCapRoutePart, fsOutViewRoutePart} {
+		if strings.HasPrefix(sub, strings.TrimPrefix(part, "/")) {
+			return true
+		}
+	}
+	return false
 }
 
 // capRefused reports a request the capability and page routes refuse

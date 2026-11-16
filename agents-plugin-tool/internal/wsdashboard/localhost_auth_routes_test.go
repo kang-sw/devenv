@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,13 +28,17 @@ func rawAuthClient(t *testing.T) *http.Client {
 func TestLocalhostAuthMachineRoutesWithoutCookie(t *testing.T) {
 	f := startPageFixture(t)
 	client := rawAuthClient(t)
+	nudge, err := json.Marshal(NudgeBody{ReplyID: "livesession", Project: f.project})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, bearer := range []string{"", "Bearer " + f.d.Endpoint().Token} {
 		for _, tc := range []struct {
 			method, path, body string
 			want               int
 		}{
 			{"GET", "/health", "", 200},
-			{"POST", "/nudge", `{"reply_id":"livesession","project":"` + f.project + `"}`, 204},
+			{"POST", "/nudge", string(nudge), 204},
 			{"POST", "/nudge", `{"reply_id":"unknown"}`, 404},
 			{"GET", "/session-hire/roster?requester=livesession", "", 200},
 		} {
@@ -76,6 +81,58 @@ func TestLocalhostAuthMachineRoutesWithoutCookie(t *testing.T) {
 		}
 	}
 	waitDone(t, d)
+}
+
+func TestLocalhostAuthMachineExemptionsStayLocal(t *testing.T) {
+	d := authFixture(t)
+	d.lan = true
+	token, err := d.lanToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/health"}, {"HEAD", "/health"}, {"POST", "/nudge"},
+		{"GET", "/session-hire/roster"}, {"GET", "/pwa/manifest.webmanifest"},
+		{"HEAD", "/pwa/icon-192.png"},
+	} {
+		for _, caller := range []struct {
+			name, peer, host, origin, site, accept string
+			wantPass                               bool
+		}{
+			{"LAN machine", "192.168.7.30:50000", "192.168.7.20:43210", "", "", "", false},
+			{"LAN browser", "192.168.7.30:50000", "192.168.7.20:43210", "http://192.168.7.20:43210", "same-origin", "", false},
+			{"rebound Origin", "127.0.0.1:50000", "evil.example:43210", "http://evil.example:43210", "same-origin", "", false},
+			{"rebound fetch without Origin", "127.0.0.1:50000", "evil.example:43210", "", "same-origin", "", false},
+			{"rebound legacy navigation", "127.0.0.1:50000", "evil.example:43210", "", "", "text/html", false},
+			{"loopback machine", "127.0.0.1:50000", "127.0.0.1:43210", "", "", "", true},
+			{"IPv6 machine", "[::1]:50000", "localhost:43210", "", "", "", true},
+			{"legacy machine Host", "127.0.0.1:50000", "machine.example:43210", "", "", "", true},
+			{"local browser", "127.0.0.1:50000", "127.0.0.1:43210", "http://127.0.0.1:43210", "same-origin", "", true},
+		} {
+			for _, withToken := range []bool{false, true} {
+				r := authRequest(route.method, route.path, "")
+				r.RemoteAddr, r.Host = caller.peer, caller.host
+				for key, value := range map[string]string{"Origin": caller.origin, "Sec-Fetch-Site": caller.site, "Accept": caller.accept} {
+					if value != "" {
+						r.Header.Set(key, value)
+					}
+				}
+				if withToken {
+					r.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: token})
+				}
+				// A sentinel isolates the outer guard from each route's own checks.
+				w := httptest.NewRecorder()
+				d.accessGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
+				want := http.StatusUnauthorized
+				if caller.wantPass || withToken {
+					want = http.StatusNoContent
+				}
+				if w.Code != want {
+					t.Errorf("%s %s %s LAN token=%v: %d %s, want %d", route.method, route.path, caller.name, withToken, w.Code, w.Body.String(), want)
+				}
+			}
+		}
+	}
 }
 
 // The real worker capability handler is covered by the unchanged pi_forward

@@ -497,6 +497,7 @@ func TestNudgeRoute(t *testing.T) {
 	post := func(host, body string) int {
 		req := httptest.NewRequest(http.MethodPost, "/nudge", bytes.NewBufferString(body))
 		req.Host = host
+		req.RemoteAddr = "127.0.0.1:50000"
 		rec := httptest.NewRecorder()
 		d.Handler().ServeHTTP(rec, req)
 		return rec.Code
@@ -669,6 +670,7 @@ func TestNudgeWakesMailWaitsBeforeTheRegistrationCheck(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "/nudge", bytes.NewBufferString(`{not json`))
 	req.Host = "127.0.0.1"
+	req.RemoteAddr = "127.0.0.1:50000"
 	d.Handler().ServeHTTP(httptest.NewRecorder(), req)
 	if wakes, nudges := wake.counts(); nudges != 2 || wakes != 0 {
 		t.Fatalf("after a registered and a malformed nudge: %d wakes, %d nudges; want 0, 2", wakes, nudges)
