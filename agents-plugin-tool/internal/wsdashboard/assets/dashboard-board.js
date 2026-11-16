@@ -1329,9 +1329,12 @@
         if (s.scrollTop <= 4) return;
       }
       if (s && s.scrollTop <= 4 && (s === $('bcol') || s === doc.scrollingElement)) {
-        // Reaching home by hand acknowledges the signal, not the staged data.
-        var names = boardPendingNames();
-        boardChanges = []; boardPendingBadge(); boardFlash(names, true);
+        // A top latch is click-only: home neither shows nor releases it, so
+        // its signal survives; only scroll-releasable changes are acknowledged.
+        var latched = function (k) { return Object.prototype.hasOwnProperty.call(boardTopHeld, k); };
+        var names = boardPendingNames().filter(function (k) { return !latched(k); });
+        boardChanges = boardChanges.map(function (c) { return { names: c.names.filter(latched) }; }).filter(function (c) { return c.names.length; });
+        boardPendingBadge(); boardFlash(names, true);
         if (boardReleaseFrame) cancelAnimationFrame(boardReleaseFrame);
         boardReleaseFrame = 0;
         return;
