@@ -490,17 +490,52 @@ func TestResultWithContextEndsAWaitWhenTheContextEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = Abort(root, res.ExecKey) }()
-	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(300*time.Millisecond, cancel)
-	start := time.Now()
-	out, err := ResultWithContext(ctx, root, res.ExecKey, 20*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if elapsed := time.Since(start); elapsed > 3*time.Second {
-		t.Fatalf("the wait ran %v past a context that ended at 300ms", elapsed)
-	}
-	if terminal(out.Status) {
-		t.Fatalf("status = %s, want the job still running", out.Status)
+	for attempt := 1; attempt <= 2; attempt++ {
+		// Returning current state includes synchronous store I/O, even with
+		// no wait. Observe that cost on this runner rather than assuming it
+		// is negligible under Windows CI contention. Cap the allowance well
+		// below the 20s result timeout so ignoring cancellation still fails.
+		start := time.Now()
+		baseline, err := Result(root, res.ExecKey)
+		baselineElapsed := time.Since(start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if terminal(baseline.Status) {
+			t.Fatalf("baseline status = %s, want the job still running", baseline.Status)
+		}
+		budget := min(3*time.Second+baselineElapsed, 5*time.Second)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelledAt := make(chan time.Time, 1)
+		timer := time.AfterFunc(300*time.Millisecond, func() {
+			at := time.Now()
+			cancel()
+			cancelledAt <- at
+		})
+		out, err := ResultWithContext(ctx, root, res.ExecKey, 20*time.Second)
+		returnedAt := time.Now()
+		timer.Stop()
+		ended := ctx.Err() != nil
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ended {
+			t.Fatal("result wait returned before cancellation")
+		}
+		if terminal(out.Status) {
+			t.Fatalf("status = %s, want the job still running", out.Status)
+		}
+		// Measure from actual cancellation, not the timer's requested delay:
+		// a loaded runner may schedule the callback substantially later.
+		elapsed := returnedAt.Sub(<-cancelledAt)
+		if elapsed <= budget {
+			return
+		}
+		if attempt == 2 {
+			t.Fatalf("wait returned %v after cancellation (budget %v, nonblocking baseline %v) on retry", elapsed, budget, baselineElapsed)
+		}
+		t.Logf("wait returned %v after cancellation (budget %v, nonblocking baseline %v); retrying once for runner contention", elapsed, budget, baselineElapsed)
 	}
 }

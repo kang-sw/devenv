@@ -760,6 +760,7 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
 	bodyStart, lineStart := t.i, t.i
 	literalUntil, literalLimit := t.i, len(t.s)
+	var wrapperTail literalWrapperTail
 	closing := "</" + name + ">"
 	before, crossings := len(t.p.List), t.crossings
 	defer func() {
@@ -790,7 +791,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 		if t.literalCode && t.i >= literalUntil {
 			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, &literalLimit)
 			if wrapper != nil && literalUntil > t.i {
-				if field := literalOperandCrossing(t.s, t.i, literalUntil, wrapper); field != "" {
+				if field := t.literalOperandCrossing(t.i, literalUntil, lineStart, wrapper, closing, &wrapperTail); field != "" {
 					owner := wrapper.parent.Label()
 					if wrapper.label != "" {
 						owner = wrapper.label

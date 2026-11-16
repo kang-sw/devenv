@@ -129,6 +129,12 @@ func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
 	for _, body := range []string{
 		"` <x:change><x:old>alpha ` x</x:old><x:new>z</x:new></x:change>",
 		"` <x:change><x:old>alpha</x:old><x:new>z ` x</x:new></x:change>",
+		"` <x:change><x:old>alpha</x:old> ` <x:new>z</x:new></x:change>",
+		"` <x:change> ` <x:old>alpha</x:old><x:new>z</x:new></x:change>",
+		"` <x:change><x:old>alpha</x:old><x:new>z</x:new> ` </x:change>",
+		"` <x:change> ` </x:change>",
+		"` <x:change> ` `<x:old>quoted</x:old>` <x:new>z</x:new></x:change>",
+		"```\n<x:change><x:old>alpha</x:old>\n```\n<x:new>z</x:new></x:change>",
 		"```\n<x:change><x:old>alpha\n```\nx</x:old><x:new>z</x:new></x:change>",
 	} {
 		input := "<x:payload>" + body + "</x:payload><x:text>keep</x:text>"
@@ -153,6 +159,11 @@ func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
 	for _, body := range []string{
 		"`<x:change><x:old>a</x:old><x:new>b</x:new></x:change>`",
 		"`<x:change>`",
+		"`<x:change>` <![CDATA[<x:old>a</x:old></x:change>]]>",
+		"`<x:change>` `<x:old>a</x:old>`",
+		"`<x:change>`\n~~~\n<x:old>a</x:old></x:change>\n~~~",
+		"`<x:change><![CDATA[` <x:old>a</x:old>]]>",
+		"`<x:change>` `<![CDATA[` <x:old>a</x:old>]]>",
 		"`<![CDATA[<x:change><x:old>a]]>`",
 		"`<x:change><x:old><![CDATA[</x:old>]]>a</x:old></x:change>`",
 	} {
@@ -160,6 +171,10 @@ func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
 		if len(p) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 0 {
 			t.Fatalf("legal literal %q: %+v %v", body, cmds, p)
 		}
+	}
+	cmds, p := parse(g, "<x:payload>`<x:change>`</x:payload><x:text><x:old>a</x:old></x:change></x:text>")
+	if len(p) != 0 || len(cmds) != 2 || len(cmds[0].Children) != 0 {
+		t.Fatalf("continuation must not cross a command close: %+v %v", cmds, p)
 	}
 }
 

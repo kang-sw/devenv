@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var literalContextShapes = []string{"wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog", "panel-foo-desync", "rejected-group-html-fence", "rejected-group-html-inline"}
+var literalContextShapes = []string{"quoted-wrapper-openers", "wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog", "panel-foo-desync", "rejected-group-html-fence", "rejected-group-html-inline"}
 
 func literalContextGrammar() Grammar {
 	g := literalPerformanceGrammar()
@@ -17,6 +17,10 @@ func literalContextGrammar() Grammar {
 }
 
 func literalContextInput(kind string, size int) (string, int) {
+	if kind == "quoted-wrapper-openers" {
+		body := strings.Repeat("`<wb:change>` ", max(1, size/13))
+		return `<wb:topic name="t"><wb:panel name="p" recap="r">` + body + `</wb:panel></wb:topic>`, 1
+	}
 	if kind == "panel-foo-desync" {
 		unit := "<wb:panel name=\"p\" recap=\"r\">`<wb:change><wb:old>x</wb:panel><wb:foo>y</wb:old><wb:new>z</wb:new></wb:change></wb:panel>"
 		n := max(1, size/len(unit))
@@ -69,6 +73,15 @@ func checkLiteralContext(t *testing.T, kind, input string, count int, ordered bo
 	}
 	if !complete {
 		t.Fatalf("incomplete: %v", p.List)
+	}
+	if kind == "quoted-wrapper-openers" {
+		if ordered {
+			cmds = cmds[1:]
+		}
+		if len(p.List) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 0 || !strings.HasPrefix(cmds[0].Body, "`<wb:change>` ") {
+			t.Fatalf("quoted openers: commands=%+v problems=%v", cmds, p.List)
+		}
+		return
 	}
 	if kind == "panel-foo-desync" {
 		if ordered {

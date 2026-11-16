@@ -106,6 +106,15 @@ func TestPiIdleStopWaitsForChildren(t *testing.T) {
 }
 
 func TestPiIdleStopWaitsForChildBackgroundWork(t *testing.T) {
+	testPiIdleStopAfterChildBackgroundWork(t, false)
+}
+
+func TestPiIdleStopAfterChildProcessEndedWithBackgroundWork(t *testing.T) {
+	testPiIdleStopAfterChildBackgroundWork(t, true)
+}
+
+func testPiIdleStopAfterChildBackgroundWork(t *testing.T, processEnds bool) {
+	t.Helper()
 	h, _ := newFakePiRecoveryHarness(t)
 	h.globalProfile(PiWorkerProfile, `{"backend":"pi","idle_timeout_seconds":1}`)
 	parent, holder := spawnRecoveryWorker(t, h)
@@ -136,7 +145,14 @@ func TestPiIdleStopWaitsForChildBackgroundWork(t *testing.T) {
 	if !h.state(parent.ID).Process || !h.state(child.ID).Process {
 		t.Fatal("background work must protect the settled worker and its parent")
 	}
-	h.holders.out(childHolder, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":0,"monitors":0}`)))
+	if processEnds {
+		// The turn already settled: only clearing background work can wake
+		// the parent's expired idle timer when this process exits.
+		h.idle(child.ID)
+		h.holders.exit(childHolder, 0)
+	} else {
+		h.holders.out(childHolder, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":0,"monitors":0}`)))
+	}
 	eventually(t, "task completion", func() bool {
 		c := h.runner.conv(child.ID)
 		c.mu.Lock()
