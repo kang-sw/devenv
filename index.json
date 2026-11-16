@@ -569,7 +569,17 @@
       "registered_at": "2026-11-16T03:49:02Z"
     },
     "261116-feat-ws-pi-bundle-hardening-and-notices": {
-      "registered_at": "2026-11-16T04:22:48Z"
+      "registered_at": "2026-11-16T04:22:48Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-16T04:24:26Z",
+        "impl": {
+          "branch": "impl/develop/pi-bundle-hardening"
+        }
+      }
     },
     "261116-refactor-ws-pi-retire-native-agent-tools": {
       "registered_at": "2026-11-16T04:16:49Z"
