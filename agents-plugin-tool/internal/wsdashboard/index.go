@@ -432,8 +432,11 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	next.Rev = entry.session.Rev
 	same := next
 	same.SnapshotUpdatedAt = entry.session.SnapshotUpdatedAt
+	// Retain fresh heartbeat evidence without waking every page for a timestamp
+	// alone. Live and Lifecycle are still compared, including stale/recovery.
+	same.HeartbeatAt = entry.session.HeartbeatAt
 	if same == entry.session && data.Fingerprint == entry.fingerprint {
-		entry.session.SnapshotUpdatedAt = next.SnapshotUpdatedAt
+		entry.session = next
 		return false
 	}
 	next.Rev++

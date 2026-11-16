@@ -896,11 +896,26 @@ func (r pageReader) readSnapshotWithoutObserved(replyID string) *wslive.Snapshot
 	return r.snapshots.snapshotWithoutObserved(r.dir, replyID)
 }
 
-// Refresh stamps need only snapshot freshness, not retained evidence overlays.
-// The parsed snapshot is stat-identity checked; expiry is still judged now.
+// Write-route admission keeps its read-through check. Refresh stamps use
+// adapterStamp instead, so bounded presentation evidence is not authority.
 func (r pageReader) adapterPresent(replyID string, now time.Time) bool {
 	p, err := r.snapshots.read(wslive.SnapshotPath(SessionDir(r.dir, replyID)))
 	return err == nil && adapterPresent(&p.snap, now)
+}
+
+// adapterStamp ages already-read evidence without probing disk. Include the
+// evidence itself, not just its current presence: a render may load a new
+// snapshot after the pre-render stamp, and it must not reuse that older stamp
+// merely because both the old and new evidence later read as absent.
+func (r pageReader) adapterStamp(replyID string, now time.Time) (bool, string) {
+	snap := r.snapshots.lastKnown(r.dir, replyID)
+	if snap == nil {
+		return false, ""
+	}
+	if adapterPresent(snap, now) {
+		return true, "" // a healthy heartbeat alone changes no visible stamp
+	}
+	return false, fmt.Sprintf("%d/%d/%d/%s", snap.SchemaVersion, snap.UpdatedAt, snap.HeartbeatMs, snap.Adapter)
 }
 
 func (r pageReader) readPage(s Session) (PageContent, bool, error) {
@@ -1082,8 +1097,8 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 	h := newStampHash()
 	for _, id := range in.ids {
 		s, ok := r.index.Session(id)
-		present := ok && r.adapterPresent(id, now)
-		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x01", id, ok, s.Rev, ok && s.Registration.Live(now), present)
+		present, evidence := r.adapterStamp(id, now)
+		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x00%s\x01", id, ok, s.Rev, ok && s.Registration.Live(now), ok && present, evidence)
 	}
 	StampWatched(h, in.watch)
 	for _, pid := range in.pids {
@@ -1132,8 +1147,9 @@ func (r pageReader) indexStamp() (string, bool) {
 			continue
 		}
 		reg := s.Registration
-		fmt.Fprintf(h, "%s\x00%d\x00%t\x00%t\x00%t\x01", reg.ReplyID, s.Rev, reg.Live(now),
-			r.adapterPresent(reg.ReplyID, now), now.Sub(reg.LastSeen()) <= endedSessionWindow)
+		present, evidence := r.adapterStamp(reg.ReplyID, now)
+		fmt.Fprintf(h, "%s\x00%d\x00%t\x00%t\x00%t\x00%s\x01", reg.ReplyID, s.Rev, reg.Live(now),
+			present, now.Sub(reg.LastSeen()) <= endedSessionWindow, evidence)
 	}
 	return sumHex(h), true
 }

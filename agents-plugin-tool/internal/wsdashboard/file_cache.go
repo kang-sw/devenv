@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // FileCache holds values parsed from small files that other processes
@@ -54,9 +56,9 @@ func (c *FileCache[T]) Load(path string, load func(path string) (T, error)) (T, 
 	return c.load(path, load, false)
 }
 
-// LoadIdentity checks same-file identity and mode as well as size and mtime,
-// including recently written files. Atomic replacements invalidate immediately;
-// an in-place edit preserving all four properties is outside this contract.
+// LoadIdentity checks file identity metadata, mode, size and mtime, including
+// recently written files. Equal metadata is not proof of unchanged content;
+// on Windows creation time is an identity hint, not a unique file ID.
 // Dashboard freshness and contact stamps use this rather than a time window.
 func (c *FileCache[T]) LoadIdentity(path string, load func(path string) (T, error)) (T, error) {
 	return c.load(path, load, true)
@@ -76,7 +78,7 @@ func (c *FileCache[T]) load(path string, load func(path string) (T, error), iden
 	c.mu.Lock()
 	e, ok := c.entries[path]
 	c.mu.Unlock()
-	if ok && e.size == size && e.mod == mod && (!identity || (e.info != nil && os.SameFile(e.info, info) && e.info.Mode() == info.Mode())) {
+	if ok && e.size == size && e.mod == mod && (!identity || wsstate.SameFileMetadata(e.info, info)) {
 		c.hits.Add(1)
 		return e.val, nil
 	}

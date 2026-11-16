@@ -78,6 +78,30 @@ func (c *SnapshotCache) read(path string) (parsedSnapshot, error) {
 	return c.files.LoadIdentity(path, load)
 }
 
+// lastKnown returns snapshot evidence already read by the index or a page,
+// without probing disk. The index polling backstop/nudges keep file evidence
+// current; the clock still ages it on every stamp. Live copies take priority.
+func (c *SnapshotCache) lastKnown(stateDir, replyID string) *wslive.Snapshot {
+	if c == nil {
+		// Uncached standalone readers retain their existing read-through behavior.
+		return c.snapshotWithoutObserved(stateDir, replyID)
+	}
+	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
+	c.liveMu.Lock()
+	p, ok := c.live[path]
+	c.liveMu.Unlock()
+	if ok {
+		return &p.snap
+	}
+	c.files.mu.Lock()
+	e, ok := c.files.entries[path]
+	c.files.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return &e.val.snap
+}
+
 // SetLive serves snap as session replyID's snapshot under stateDir in place
 // of its file, until ClearLive, and reports whether it differs from the
 // copy it replaces beyond updatedAt (a first copy always does). The cache

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -130,6 +131,10 @@ func newPageCache(b *broker, stats *streamStats) *pageCache {
 }
 
 // sharedPage is one page's latest render.
+// pageStampInterval bounds the extra staleness when streams sharing a page
+// refresh together. Broker wakes never use this shortcut.
+const pageStampInterval = 2 * time.Second
+
 type sharedPage struct {
 	// refs counts the streams holding the page; pageCache.mu guards it.
 	refs int
@@ -149,6 +154,9 @@ type sharedPage struct {
 	// refresh tick re-renders once.
 	stamp   string
 	stampOK bool
+	// checked is when a successful full refresh last established this render
+	// current. It is shared by all streams, not renewed by cache hits.
+	checked time.Time
 }
 
 // acquire returns the shared page for key, holding it for the caller.
@@ -190,7 +198,7 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	current := p.rendered && p.r.err == nil && c.broker.unchangedSince(p.r.deps, p.at)
-	if current && !refresh {
+	if current && (!refresh || (!p.checked.IsZero() && time.Since(p.checked) < pageStampInterval)) {
 		c.stats.Shared.Add(1)
 		return p.r, p.at
 	}
@@ -206,6 +214,7 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 		stamp, stampOK = src.stamp(p.r.inputs)
 		unchanged := stampOK && p.stampOK && stamp == p.stamp
 		if current && unchanged {
+			p.checked = time.Now()
 			c.stats.RefreshSkips.Add(1)
 			return p.r, p.at
 		}
@@ -228,10 +237,14 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 		r.err = err
 	}
 	p.r, p.at, p.rendered = r, at, true
+	p.checked = time.Time{}
 	// The stamp was taken before this read, from the previous render's
 	// inputs: it is this render's only when the inputs did not change. A
 	// failed render (no regions) keeps none, so the next tick retries it.
 	p.stamp, p.stampOK = stamp, r.err == nil && stampOK && r.inputs.equal(prev) && (r.regions != nil || !r.ok)
+	if p.stampOK {
+		p.checked = time.Now()
+	}
 	return r, at
 }
 
@@ -245,6 +258,7 @@ func (c *pageCache) renderLive(p *sharedPage, src pageSource) (pageRender, uint6
 		return !c.broker.unchangedSince([]string{token}, since)
 	}})
 	p.r, p.at = r, at
+	p.checked = time.Time{}
 	p.stampOK = p.stampOK && r.err == nil && r.inputs.equal(prev.inputs) && (r.regions != nil || !r.ok)
 	return r, at
 }

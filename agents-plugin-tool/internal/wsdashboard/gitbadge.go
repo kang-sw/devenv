@@ -92,37 +92,61 @@ type GitBadge struct {
 func readGitBadge(root string) GitBadge {
 	ctx, cancel := context.WithTimeout(context.Background(), gitReadTimeout)
 	defer cancel()
-	run := &gitBadgeRunner{}
+	return readGitBadgeWith(ctx, &gitBadgeRunner{}, root)
+}
+
+// One porcelain read covers both refs and working-tree state. HEAD/index
+// metadata alone cannot gate this: in-place edits and untracked files would
+// otherwise be missed. Keep the existing polling/explicit-refresh backstop.
+func readGitBadgeWith(ctx context.Context, run wsgit.Runner, root string) GitBadge {
 	badge := GitBadge{State: gitOK, Root: root}
-	st, ok := wsgit.BranchSync(ctx, run, root)
-	if !ok {
+	out, err := run.RunGit(ctx, root, "--no-optional-locks", "status", "--porcelain=v2", "--branch", "--ahead-behind", "--untracked-files=normal")
+	if err != nil {
 		badge.State = gitFailed
 		switch {
-		case run.err == nil:
-			badge.Err = "HEAD names no commit"
-		case strings.Contains(run.err.Error(), "not a git repository"):
+		case strings.Contains(err.Error(), "not a git repository"):
 			badge.State = gitNoRepo
 		default:
-			badge.Err = gitErrText(run.err)
+			badge.Err = gitErrText(err)
 		}
 		return badge
 	}
 	if top, err := run.RunGit(ctx, root, "rev-parse", "--show-toplevel"); err == nil {
 		badge.TopLevel = strings.TrimSuffix(string(top), "\n")
 	}
-	badge.Branch, badge.Upstream, badge.Ahead, badge.Behind = st.Head, st.Upstream, st.Ahead, st.Behind
-	if st.Head == "" {
-		badge.Branch, badge.Detached = st.OID, true
-	} else if h := branchHandle(st.Head, false); h.Impl || h.Goal {
-		badge.Ticket = ticketTitles.title(root, h.Text, time.Now())
-	}
-	run.err = nil
-	counts, ok := wsgit.WorkingTreeCounts(ctx, run, root)
-	if !ok {
-		badge.State, badge.Err = gitFailed, gitErrText(run.err)
+	st := wsgit.ParseStatus(out)
+	if st.Branch.OID == "(initial)" || st.Branch.OID == "" {
+		badge.State, badge.Err = gitFailed, "HEAD names no commit"
 		return badge
 	}
-	badge.Modified, badge.Staged, badge.Untracked = counts.Modified, counts.Staged, counts.Untracked
+	badge.Branch, badge.Upstream, badge.Ahead, badge.Behind = st.Branch.Head, st.Branch.Upstream, st.Branch.Ahead, st.Branch.Behind
+	if st.Branch.Head == "(detached)" {
+		short, err := run.RunGit(ctx, root, "rev-parse", "--short", "HEAD")
+		if err != nil {
+			badge.State, badge.Err = gitFailed, gitErrText(err)
+			return badge
+		}
+		badge.Branch, badge.Detached = strings.TrimSpace(string(short)), true
+	} else if h := branchHandle(st.Branch.Head, false); h.Impl || h.Goal {
+		badge.Ticket = ticketTitles.title(root, h.Text, time.Now())
+	}
+	for _, file := range st.ChangedFiles {
+		x, y := file.IndexStatus, file.WorktreeStatus
+		switch {
+		case file.Status == "?":
+			badge.Untracked++
+		case file.Status == "!":
+		case x == "U" || y == "U" || file.Status == "AA" || file.Status == "DD":
+			badge.Modified++
+		default:
+			if x != "." && x != "" {
+				badge.Staged++
+			}
+			if y != "." && y != "" {
+				badge.Modified++
+			}
+		}
+	}
 	return badge
 }
 
