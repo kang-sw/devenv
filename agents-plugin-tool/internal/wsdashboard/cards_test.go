@@ -800,6 +800,55 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+func TestBoardModeWidthsSurviveOtherModeSaves(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ := json.Marshal(string(data))
+	runNode(t, "board mode widths", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+var store = {}, A;
+function served() { A = topic("a", 300); return [A, reply()]; }
+function width() { return page.doc.documentElement.style.props["--boardw"] || null; }
+function saved() { var r = JSON.parse(store.cards || "{}"); return [r.bw, r.bb]; }
+function drag(edge, by) {
+  function ev(x) { return { button: 0, clientX: x, pointerId: 1, preventDefault: function () {} }; }
+  edge.fire("pointerdown", ev(1000)); edge.fire("pointermove", ev(1000 + by)); edge.fire("pointerup", ev(1000 + by));
+}
+boot(store, served, {wide: true});
+page.board.classList.add("dgrid");
+page.board.getBoundingClientRect = function () { return {width: 1000}; };
+page.col.getBoundingClientRect = function () { return {width: 600}; };
+drag(page.col.querySelector(".bp-edge"), -160);
+check("board-only save marks its width as post-migration", saved(), [840, 0]);
+boot(store, served, {wide: true, split: true});
+check("switching to live keeps the other mode's width without applying it", [width(), saved()], [null, [840, 0]]);
+clickPin(A);
+check("a pin in live mode does not erase the board-only width", saved(), [840, 0]);
+page.gridCols = "600px 700px";
+page.col.getBoundingClientRect = function () { return {width: 500}; };
+drag(page.col.querySelector(".bp-edge"), 100);
+check("live width saves independently", saved(), [840, 800]);
+boot(store, served, {wide: true});
+check("board reload restores its own width and retains live width", [width(), saved()], ["840px", [840, 800]]);
+clickPin(A);
+check("unpin in board mode retains both widths", saved(), [840, 800]);
+boot(store, served, {wide: true, split: true});
+check("live reload restores the live width", width(), "800px");
+page.col.querySelector(".bp-edge").fire("dblclick", {});
+page.split.querySelector(".dcv-edge").fire("dblclick", {});
+// Resetting the split freezes the board, so reset it again after the split.
+page.col.querySelector(".bp-edge").fire("dblclick", {});
+check("clearing live widths cannot remove a record holding the other mode's width", saved(), [840, 0]);
+boot(store, served, {wide: true});
+check("board width survives the live reset", width(), "840px");
+store = {cards: JSON.stringify({cards: [], topics: [], bw: 1200})};
+boot(store, served, {split: true});
+check("legacy pre-split width still migrates once", width(), null);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // TestBoardPinnedClosedPagesCount pins the closed pages' show-more index
 // under pins (dashboard.js morphBoard with cards.js, executed under node
 // over the minimal DOM when node is installed): a topic pinned out of a
