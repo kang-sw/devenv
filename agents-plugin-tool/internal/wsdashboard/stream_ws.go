@@ -1,8 +1,10 @@
 package wsdashboard
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/websocket"
@@ -19,7 +21,7 @@ import (
 // Framing: each event is one text frame {"event": name, "data": json}, with
 // the SSE stream's event name and the same data bytes. The idle frame is
 // {"event":"ping"}, which the page answers with any frame (it sends
-// {"event":"pong"}); the daemon reads nothing else from the page.
+// {"event":"pong"}); opted-in streams may also report visibility.
 //
 // A hijacked connection's request context does not end when the peer leaves,
 // so the connection runs its own read loop: a close frame, a read error, or
@@ -35,7 +37,7 @@ const (
 	// wsWriteTimeout bounds one frame write, so a peer that stopped reading
 	// cannot hold the stream forever.
 	wsWriteTimeout = 10 * time.Second
-	// wsMaxFrame bounds a frame the page sends; it only ever sends a pong.
+	// wsMaxFrame bounds a frame the page sends.
 	wsMaxFrame = 1 << 10
 )
 
@@ -55,13 +57,21 @@ func wsOriginAllowed(r *http.Request) bool {
 // serveWebSocket upgrades r and runs run over the connection until it
 // returns, then closes the connection and waits for its read loop to end.
 // The caller has checked the Origin and that w can be hijacked.
-func (d *Daemon) serveWebSocket(w http.ResponseWriter, r *http.Request, run func(streamSink)) {
+func (d *Daemon) serveWebSocket(w http.ResponseWriter, r *http.Request, run func(streamSink), watches ...func(bool) func()) {
 	window := wsReadWindow * d.keepAlive
 	websocket.Server{Handler: func(ws *websocket.Conn) {
 		ws.MaxPayloadBytes = wsMaxFrame
 		sink := &wsSink{ws: ws, done: make(chan struct{})}
+		if len(watches) > 0 {
+			sink.visibility = &displayWatch{acquire: watches[0]}
+			sink.visibility.set(r.URL.Query().Get("display") == "1")
+			defer sink.visibility.close()
+		}
 		go sink.read(window)
 		run(sink)
+		if sink.visibility != nil {
+			sink.visibility.close()
+		}
 		_ = ws.Close()
 		<-sink.done
 	}}.ServeHTTP(w, r)
@@ -69,19 +79,64 @@ func (d *Daemon) serveWebSocket(w http.ResponseWriter, r *http.Request, run func
 
 // wsSink frames events as WebSocket text frames (see the file comment).
 type wsSink struct {
-	ws   *websocket.Conn
-	done chan struct{}
+	ws         *websocket.Conn
+	done       chan struct{}
+	visibility *displayWatch
+}
+
+// displayWatch serializes visibility transitions with disconnect cleanup.
+type displayWatch struct {
+	mu      sync.Mutex
+	acquire func(bool) func()
+	release func()
+	closed  bool
+}
+
+func (w *displayWatch) set(visible bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return
+	}
+	if visible && w.release == nil && w.acquire != nil {
+		w.release = w.acquire(true)
+	} else if !visible && w.release != nil {
+		w.release()
+		w.release = nil
+	}
+}
+
+func (w *displayWatch) close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.closed = true
+	if w.release != nil {
+		w.release()
+		w.release = nil
+	}
 }
 
 // read consumes the page's frames until the connection fails, closes, or
 // goes quiet for window, then closes done.
 func (s *wsSink) read(window time.Duration) {
 	defer close(s.done)
+	if s.visibility != nil {
+		defer s.visibility.close()
+	}
 	for {
 		_ = s.ws.SetReadDeadline(time.Now().Add(window))
 		var frame string
 		if err := websocket.Message.Receive(s.ws, &frame); err != nil {
 			return
+		}
+		if s.visibility != nil {
+			var message struct {
+				Event   string `json:"event"`
+				Visible *bool  `json:"visible"`
+			}
+			if json.Unmarshal([]byte(frame), &message) == nil && message.Event == "visibility" && message.Visible != nil {
+				s.visibility.set(*message.Visible)
+			}
 		}
 	}
 }

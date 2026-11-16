@@ -783,11 +783,19 @@ func (ls *liveSession) currentRepo(now time.Time, ends uint64) (*wslive.Repo, bo
 // repoReadTimeout bounds one session's git reads.
 const repoReadTimeout = 5 * time.Second
 
+// Leave cheap refs a live budget when a worktree scan times out, preserving
+// the old branch-first partial result without exceeding the overall bound.
+const repoStatusTimeout = 3 * time.Second
+
 // readSessionRepo reads root's folder, branch standing, and working-tree
 // counts; a root that is not a repository has the folder alone. A failed
 // working-tree read leaves the counts zero, so the page shows no change chip
 // while the branch and sync still show.
 func readSessionRepo(root string) wslive.Repo {
+	return readSessionRepoWith(wsgit.ExecRunner{}, root)
+}
+
+func readSessionRepoWith(runner wsgit.Runner, root string) wslive.Repo {
 	repo := wslive.Repo{Folder: filepath.Base(root)}
 	if root == "" {
 		repo.Folder = ""
@@ -795,16 +803,51 @@ func readSessionRepo(root string) wslive.Repo {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), repoReadTimeout)
 	defer cancel()
-	st, ok := wsgit.BranchSync(ctx, nil, root)
-	if !ok {
+	if runner == nil {
+		runner = wsgit.ExecRunner{}
+	}
+	statusCtx, stopStatus := context.WithTimeout(ctx, repoStatusTimeout)
+	out, err := runner.RunGit(statusCtx, root, "--no-optional-locks", "status", "--porcelain=v2", "--branch", "--ahead-behind", "--untracked-files=normal")
+	stopStatus()
+	if err != nil {
+		// Preserve branch data when only the working-tree read failed.
+		st, ok := wsgit.BranchSync(ctx, runner, root)
+		if ok {
+			repo.Branch, repo.Upstream, repo.Ahead, repo.Behind = st.Head, st.Upstream, st.Ahead, st.Behind
+			if st.Head == "" {
+				repo.Branch, repo.Detached = st.OID, true
+			}
+		}
 		return repo
 	}
-	repo.Branch, repo.Upstream, repo.Ahead, repo.Behind = st.Head, st.Upstream, st.Ahead, st.Behind
-	if st.Head == "" {
-		repo.Branch, repo.Detached = st.OID, true
+	st := wsgit.ParseStatus(out)
+	if st.Branch.OID == "" || st.Branch.OID == "(initial)" {
+		return repo
 	}
-	if c, ok := wsgit.WorkingTreeCounts(ctx, nil, root); ok {
-		repo.Modified, repo.Staged, repo.Untracked = c.Modified, c.Staged, c.Untracked
+	repo.Branch, repo.Upstream, repo.Ahead, repo.Behind = st.Branch.Head, st.Branch.Upstream, st.Branch.Ahead, st.Branch.Behind
+	if st.Branch.Head == "(detached)" {
+		short, err := runner.RunGit(ctx, root, "rev-parse", "--short", "HEAD")
+		if err != nil || strings.TrimSpace(string(short)) == "" {
+			return wslive.Repo{Folder: repo.Folder}
+		}
+		repo.Branch, repo.Detached = strings.TrimSpace(string(short)), true
+	}
+	for _, file := range st.ChangedFiles {
+		x, y := file.IndexStatus, file.WorktreeStatus
+		switch {
+		case file.Status == "?":
+			repo.Untracked++
+		case file.Status == "!":
+		case x == "U" || y == "U" || file.Status == "AA" || file.Status == "DD":
+			repo.Modified++
+		default:
+			if x != "." && x != "" {
+				repo.Staged++
+			}
+			if y != "." && y != "" {
+				repo.Modified++
+			}
+		}
 	}
 	return repo
 }

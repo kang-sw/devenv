@@ -251,24 +251,39 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 	}
 	lang, _ := requestLang(r)
 	only := parseRegionFilter(r.URL.Query().Get("regions"))
-	// The stream is the page's presence: the git handle's root is read while
-	// some stream watches it.
-	if d.git != nil && s.Project != "" && only.has(regionGit) {
-		release := d.git.watch(s.Project)
-		defer release()
-	}
+	gitWatch := d.git != nil && s.Project != "" && only.has(regionGit)
 	// The session rail is a render of its own, shared by every session
 	// page, sent over the same stream; its worktree lists are read while
 	// some stream shows it. A page the shell frames (?frame=1) shows no
 	// rail: the shell's own stream carries it (handleRailEvents).
 	var side *pageSource
-	if only.has(regionRail) && !framedRequest(r) {
-		release := d.rail.watch()
-		defer release()
+	railWatch := only.has(regionRail) && !framedRequest(r)
+	if railWatch {
 		rail := d.railPageSource(lang, requestTheme(r))
 		side = &rail
 	}
-	d.stream(w, r, d.sessionPageSource(replyID, lang, requestTheme(r)), only, side)
+	d.stream(w, r, d.sessionPageSource(replyID, lang, requestTheme(r)), only, side, func(fresh bool) func() {
+		var releases []func()
+		if gitWatch {
+			if fresh {
+				releases = append(releases, d.git.watchFresh(s.Project))
+			} else {
+				releases = append(releases, d.git.watch(s.Project))
+			}
+		}
+		if railWatch {
+			if fresh {
+				releases = append(releases, d.rail.watchFresh())
+			} else {
+				releases = append(releases, d.rail.watch())
+			}
+		}
+		return func() {
+			for _, release := range releases {
+				release()
+			}
+		}
+	})
 }
 
 // handleRailEvents serves GET /rail/events: the iframe shell's stream, the
@@ -280,9 +295,12 @@ func (d *Daemon) handleRailEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lang, _ := requestLang(r)
-	release := d.rail.watch()
-	defer release()
-	d.stream(w, r, d.railPageSource(lang, requestTheme(r)), nil, nil)
+	d.stream(w, r, d.railPageSource(lang, requestTheme(r)), nil, nil, func(fresh bool) func() {
+		if fresh {
+			return d.rail.watchFresh()
+		}
+		return d.rail.watch()
+	})
 }
 
 // sessionPageSource renders replyID's session page in lang and theme for
@@ -427,7 +445,7 @@ func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
 // subscription and is re-rendered only on a wake it hears or a refresh
 // tick, so a change that reaches one page never re-renders the other. Only
 // src decides that the page is gone.
-func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, only regionFilter, side *pageSource) {
+func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, only regionFilter, side *pageSource, watches ...func(bool) func()) {
 	upgrade := wsUpgrade(r)
 	if upgrade && !wsOriginAllowed(r) {
 		http.Error(w, "cross-origin stream refused", http.StatusForbidden)
@@ -438,6 +456,16 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 	if (upgrade && !canHijack) || (!upgrade && !canFlush) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
+	}
+	var watch func(bool) func()
+	if len(watches) > 0 {
+		watch = watches[0]
+	}
+	display := r.URL.Query().Get("display")
+	optIn := upgrade && (display == "0" || display == "1")
+	if watch != nil && !optIn {
+		release := watch(false)
+		defer release()
 	}
 	page := d.cache.acquire(src.key)
 	defer d.cache.release(src.key, page)
@@ -616,7 +644,11 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 		}
 	}
 	if upgrade {
-		d.serveWebSocket(w, r, run)
+		if optIn {
+			d.serveWebSocket(w, r, run, watch)
+		} else {
+			d.serveWebSocket(w, r, run)
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")

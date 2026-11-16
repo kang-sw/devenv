@@ -151,14 +151,29 @@
   // the connection opens, on.events[name](data) per event, and on.drop once
   // when the connection fails or closes, never after the returned close().
   function openStream(path, on) {
-    var ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + path), over = false;
+    var visible = !pageHidden();
+    var ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + path + (path.indexOf("?") < 0 ? "?" : "&") + "display=" + (visible ? "1" : "0")), over = false;
+    function visibility() {
+      if (over || ws.readyState !== WebSocket.OPEN) return;
+      try { ws.send(JSON.stringify({ event: "visibility", visible: !pageHidden() })); } catch (x) {}
+    }
+    function cleanup() {
+      if (!doc.removeEventListener) return;
+      doc.removeEventListener("visibilitychange", visibility);
+      doc.removeEventListener("ws-page-visibility", visibility);
+    }
+    if (doc.removeEventListener) {
+      doc.addEventListener("visibilitychange", visibility);
+      doc.addEventListener("ws-page-visibility", visibility);
+    }
     function drop() {
       if (over) return;
       over = true;
+      cleanup();
       try { ws.close(); } catch (x) {}
       if (on.drop) on.drop();
     }
-    ws.onopen = function () { if (!over && on.open) on.open(); };
+    ws.onopen = function () { if (!over) { visibility(); if (on.open) on.open(); } };
     ws.onerror = drop;
     ws.onclose = drop;
     ws.onmessage = function (e) {
@@ -170,7 +185,7 @@
       var fn = on.events && Object.prototype.hasOwnProperty.call(on.events, m.event) && on.events[m.event];
       if (typeof fn === "function") fn(m.data);
     };
-    return { close: function () { over = true; try { ws.close(); } catch (x) {} } };
+    return { close: function () { over = true; cleanup(); try { ws.close(); } catch (x) {} } };
   }
   // Immutable tree inputs keep each nested row independent of its children.
   // Slots are private transport comments; materialization removes every slot

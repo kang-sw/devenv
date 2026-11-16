@@ -27,7 +27,9 @@ import (
 //
 // The daemon reads a root only while some page of a session under it holds
 // its SSE stream open (gitWatcher): once when the first such stream opens,
-// then every gitReadInterval until the last one closes, and at once when a
+// then checks Git metadata each gitReadInterval until the last one closes.
+// Unchanged metadata suppresses commands, never beyond five minutes; explicit
+// refresh and resumption bypass the hint. It also reads at once when a
 // page asks (POST /s/<reply-id>/git, which the drawer sends as it opens). One
 // goroutine per watched root runs every read, so pages sharing a root share
 // one read and a burst of refresh requests never runs git concurrently for
@@ -96,8 +98,8 @@ func readGitBadge(root string) GitBadge {
 }
 
 // One porcelain read covers both refs and working-tree state. HEAD/index
-// metadata alone cannot gate this: in-place edits and untracked files would
-// otherwise be missed. Keep the existing polling/explicit-refresh backstop.
+// metadata alone cannot prove freshness: the watcher retains a forced complete
+// safety read for in-place edits/untracked contents and explicit refresh.
 func readGitBadgeWith(ctx context.Context, run wsgit.Runner, root string) GitBadge {
 	badge := GitBadge{State: gitOK, Root: root}
 	out, err := run.RunGit(ctx, root, "--no-optional-locks", "status", "--porcelain=v2", "--branch", "--ahead-behind", "--untracked-files=normal")
@@ -222,6 +224,8 @@ type gitWatcher struct {
 	interval, gap time.Duration
 	// after is time.After, injected so a test drives the clock.
 	after func(time.Duration) <-chan time.Time
+	now   func() time.Time
+	probe func(string) (string, error)
 	// changed is told the root after each read.
 	changed func(root string)
 	// stop ends every root's goroutine.
@@ -243,6 +247,7 @@ type gitRoot struct {
 	// seen is the repo figures each session's snapshot last brought (by
 	// reply-id), in comparable form (followRepo).
 	seen map[string]wslive.Repo
+	gate gitReadGate // owned by this root's worker, not the viewer goroutines
 }
 
 func newGitWatcher(read func(string) GitBadge, changed func(string), stop <-chan struct{}) *gitWatcher {
@@ -251,6 +256,8 @@ func newGitWatcher(read func(string) GitBadge, changed func(string), stop <-chan
 		interval: gitReadInterval,
 		gap:      gitRefreshGap,
 		after:    time.After,
+		now:      time.Now,
+		probe:    gitMetadataStamp,
 		changed:  changed,
 		stop:     stop,
 		roots:    map[string]*gitRoot{},
@@ -262,7 +269,12 @@ func gitKey(root string) string { return filepath.Clean(root) }
 
 // watch adds a viewer of root and returns its release. The first viewer
 // starts the root's goroutine, which reads at once.
-func (g *gitWatcher) watch(root string) (release func()) {
+func (g *gitWatcher) watch(root string) (release func()) { return g.watchWithRefresh(root, false) }
+
+// A visible resumption refreshes even when another tab kept this root alive.
+func (g *gitWatcher) watchFresh(root string) (release func()) { return g.watchWithRefresh(root, true) }
+
+func (g *gitWatcher) watchWithRefresh(root string, fresh bool) (release func()) {
 	key := gitKey(root)
 	g.mu.Lock()
 	r := g.roots[key]
@@ -271,6 +283,8 @@ func (g *gitWatcher) watch(root string) (release func()) {
 		r.wake <- struct{}{}
 		g.roots[key] = r
 		go g.run(key, r)
+	} else if fresh {
+		signal(r.wake)
 	}
 	r.viewers++
 	g.mu.Unlock()
@@ -374,7 +388,7 @@ func (g *gitWatcher) run(key string, r *gitRoot) {
 		if !g.viewed(key, r) {
 			return
 		}
-		if wait := g.gap - time.Since(last); woken && !last.IsZero() && wait > 0 {
+		if wait := g.gap - g.now().Sub(last); woken && !last.IsZero() && wait > 0 {
 			// A refresh inside the gap after a read waits for its end;
 			// requests that arrive meanwhile fold into that one read.
 			select {
@@ -390,10 +404,19 @@ func (g *gitWatcher) run(key string, r *gitRoot) {
 				return
 			}
 		}
+		stamp, probeErr := g.probe(key)
+		if probeErr != nil {
+			stamp = ""
+		}
+		if !r.gate.needed(stamp, g.now(), woken) {
+			tick = g.after(r.gate.delay(g.now(), g.interval))
+			continue
+		}
 		badge := g.read(key)
-		last = time.Now()
+		last = g.now()
+		r.gate.complete(stamp, last, badge.State == gitOK)
 		badge.At = last.UnixMilli()
-		tick = g.after(g.interval)
+		tick = g.after(r.gate.delay(last, g.interval))
 		g.mu.Lock()
 		same := r.badge != nil && sameBadge(*r.badge, badge)
 		r.badge = &badge
