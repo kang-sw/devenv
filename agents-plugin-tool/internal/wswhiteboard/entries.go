@@ -35,11 +35,13 @@ type Entry struct {
 	// PanelName binds a topic-local name in retained immutable history. Legacy
 	// id-only versions may omit it; the binding survives those reposts.
 	PanelName string `json:"panel_name,omitempty"`
-	ItemID    int    `json:"item_id,omitempty"`
-	Recap     string `json:"recap,omitempty"`
-	Text      string `json:"text,omitempty"`
-	At        string `json:"at"`
-	Imported  bool   `json:"imported,omitempty"`
+	// LegacyContent binds the fixed body/edit panel across old writer saves.
+	LegacyContent bool   `json:"legacy_content,omitempty"`
+	ItemID        int    `json:"item_id,omitempty"`
+	Recap         string `json:"recap,omitempty"`
+	Text          string `json:"text,omitempty"`
+	At            string `json:"at"`
+	Imported      bool   `json:"imported,omitempty"`
 	// TopicState is immutable machine metadata, parsed separately from Text.
 	TopicState       json.RawMessage `json:"topic_state,omitempty"`
 	BoardNotice      json.RawMessage `json:"board_notice,omitempty"`
@@ -103,7 +105,7 @@ func (s *State) reopenWithEvent(topic string, now time.Time) {
 
 var panelIDPattern = regexp.MustCompile(`^p[1-9][0-9]*$`)
 
-func applyPanel(p *problems, work *State, cmd command, topicOf topicResolver, now time.Time) {
+func applyPanel(p *problems, work *State, origins bodyOrigins, cmd command, topicOf topicResolver, mark int, now time.Time) {
 	before := len(p.List)
 	topic, topicOK := topicOf(cmd)
 	patch := len(cmd.Children) > 0
@@ -225,7 +227,19 @@ func applyPanel(p *problems, work *State, cmd command, topicOf topicResolver, no
 	}
 	work.reopenWithEvent(topic, now)
 	recap = strings.TrimSpace(recap)
-	work.appendEntry(topic, Entry{Kind: EntryPanel, PanelID: id, PanelName: name, Recap: recap, Text: body}, now)
+	legacy := false
+	if doc, ok := baseDoc(work, topic); ok {
+		fixed, exists := doc.legacyContentPanel()
+		legacy = exists && fixed.PanelID == id
+	}
+	work.appendEntry(topic, Entry{Kind: EntryPanel, PanelID: id, PanelName: name, LegacyContent: legacy, Recap: recap, Text: body}, now)
+	if legacy {
+		if body == "" {
+			work.clearTopicBody(topic)
+		} else {
+			work.setTopicBody(topic, body, mark, origins)
+		}
+	}
 	action := "added"
 	if override {
 		action = "re-posted"

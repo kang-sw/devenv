@@ -328,7 +328,7 @@ func TestTopicStateHistoricalSchema2Writer(t *testing.T) {
 			if !reflect.DeepEqual(reasons, []string{"historical first extension", "historical second extension"}) {
 				t.Fatal("historical writer lost individual extension payloads", reasons)
 			}
-			e := got.Topics[0].Entries[2]
+			e := got.Topics[0].Entries[3] // The first body call now also minted e1/p1.
 			if e.unknown["future_entry"] == nil || e.Seq != 7 || e.AnswerSentAt != 123 || e.InputsFloor != "floor" || !bytes.Contains(e.Inputs, []byte(`"kept"`)) {
 				t.Fatal("historical append/render lost optional Entry metadata")
 			}

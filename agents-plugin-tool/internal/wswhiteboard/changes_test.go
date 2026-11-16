@@ -196,6 +196,9 @@ func TestRenderDocWritesMarksAsComments(t *testing.T) {
 	mustApply(t, st, topicXML("t", "intro\n\n- a\n- b\n\n```mermaid\ngraph TD; A-->B\n```\n\n<div>raw</div>\n\nend"))
 	mustApply(t, st, topicXML("t", "intro\n\n- a\n- b\n- c\n\n```mermaid\ngraph TD; A-->B\n```\n\n<div>RAW</div>"))
 	view := BuildView(st, ViewInput{Layout: LayoutFull})
+	// Pin the retained unmigrated Doc renderer's mark comments; migrated
+	// topics use dated panel snapshots instead of this duplicate projection.
+	view.Topics[0].Doc = st.TopicBody("t")
 	page, err := RenderPage(view)
 	if err != nil {
 		t.Fatal(err)

@@ -55,8 +55,8 @@ func TestWhiteboardUpdateSummariesNetMixedTopicsAnswersAndLifecycle(t *testing.T
 	}{
 		{`<wb:topic name="b"><wb:body/></wb:topic><wb:answer ids="1 3 2" value="yes">Yes.</wb:answer><wb:topic name="a"><wb:close result="Done"/></wb:topic>`, []string{"topic updated: b (answered 1)", "topic updated: a (answered 2, closed)"}},
 		{`<wb:topic name="new"><wb:add class="check"><wb:title>New</wb:title></wb:add></wb:topic><wb:answer id="4" value="yes">Yes.</wb:answer><wb:topic name="new"><wb:body>More</wb:body></wb:topic>`, []string{"topic added: new (state: discussing, default)"}},
-		{`<wb:patch id="3"><wb:title>Changed</wb:title></wb:patch><wb:topic name="b"><wb:body>Body</wb:body></wb:topic>`, []string{"topic updated: b (patched 1, body)"}},
-		{`<wb:topic name="b"><wb:body>Interim</wb:body><wb:body>Body</wb:body></wb:topic><wb:topic name="a" label="Temporary"/><wb:topic name="a" label="A"/>`, nil},
+		{`<wb:patch id="3"><wb:title>Changed</wb:title></wb:patch><wb:topic name="b"><wb:body>Body</wb:body></wb:topic>`, []string{"topic updated: b (patched 1, panels 1, body)"}},
+		{`<wb:topic name="b"><wb:body>Interim</wb:body><wb:body>Body</wb:body></wb:topic><wb:topic name="a" label="Temporary"/><wb:topic name="a" label="A"/>`, []string{"topic updated: b (panels 2)"}},
 		{`<wb:topic name="b"><wb:state value="waiting"/><wb:state value="discussing"/></wb:topic>`, nil},
 		{`<wb:answer id="3" value="yes">Yes.</wb:answer>`, nil},
 		{``, nil},

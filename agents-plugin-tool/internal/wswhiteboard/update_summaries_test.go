@@ -142,11 +142,11 @@ func TestTopicUpdateLegacyAdoptionRenameAndLifecycle(t *testing.T) {
 	wantSummaries(t, stateApply(t, s, "", stateNow))
 	out := stateApply(t, s, `<wb:topic name="old" label="Old title"/>`, stateNow)
 	wantSummaries(t, out, "topic updated: old (renamed from Old title)")
-	if s.TopicStates()["old"].State != nil || s.EntrySeq != 0 {
+	if s.TopicStates()["old"].State != nil || s.EntrySeq != 1 {
 		t.Fatal("adoption backfilled")
 	}
 	out = stateApply(t, s, `<wb:topic name="old" label="New title"><wb:body>Updated</wb:body></wb:topic>`, stateNow)
-	wantSummaries(t, out, "topic updated: old (body, renamed from Old title)")
+	wantSummaries(t, out, "topic updated: old (panels 1, body, renamed from Old title)")
 	if s.TopicStates()["old"].State != nil {
 		t.Fatal("update backfilled")
 	}
@@ -178,7 +178,7 @@ func TestTopicUpdateLegacyAdoptionRenameAndLifecycle(t *testing.T) {
 	stateApply(t, s, `<wb:topic name="fresh"><wb:state value="implementing" owner="executor" eta_minutes="10"/></wb:topic>`, stateNow)
 	run := *s.TopicStates()["fresh"].State.Run
 	out = stateApply(t, s, `<wb:topic name="fresh" label="Fresh"><wb:body>Content</wb:body></wb:topic>`, stateNow.Add(time.Minute))
-	wantSummaries(t, out, "topic updated: fresh (body, renamed from fresh)")
+	wantSummaries(t, out, "topic updated: fresh (panels 1, body, renamed from fresh)")
 	if !reflect.DeepEqual(run, *s.TopicStates()["fresh"].State.Run) {
 		t.Fatal("rename changed run")
 	}
@@ -199,7 +199,7 @@ func TestTopicUpdateNetChangesFirstTouchAndRootAnswers(t *testing.T) {
 	out = stateApply(t, s, `<wb:patch id="3"><wb:title>Changed</wb:title></wb:patch>`, stateNow)
 	wantSummaries(t, out, "topic updated: b (patched 1)")
 	out = stateApply(t, s, `<wb:topic name="b"><wb:body>Interim</wb:body><wb:body/></wb:topic><wb:topic name="a" label="Interim"/><wb:topic name="a" label="A"/><wb:patch id="3"><wb:title>Interim</wb:title></wb:patch><wb:patch id="3"><wb:title>Changed</wb:title></wb:patch>`, stateNow)
-	wantSummaries(t, out)
+	wantSummaries(t, out, "topic updated: b (panels 2)")
 	stateApply(t, s, `<wb:topic name="b"><wb:state value="waiting"/></wb:topic>`, stateNow)
 	out = stateApply(t, s, `<wb:topic name="b"><wb:state value="discussing"/><wb:state value="waiting"/></wb:topic>`, stateNow)
 	wantSummaries(t, out)
@@ -210,7 +210,7 @@ func TestTopicUpdateNetChangesFirstTouchAndRootAnswers(t *testing.T) {
 func TestTopicUpdateAdoptionKeepsFirstTouchAndExplicitIdentity(t *testing.T) {
 	s := &State{Counter: 1, Items: []Item{{ID: 1, Topic: "Old", Class: ClassCheck, Status: StatusOpen, Title: "Check"}}, Topics: []TopicDoc{{Name: "other", Body: "Other"}}}
 	out := stateApply(t, s, `<wb:answer id="1" value="yes">Yes.</wb:answer><wb:topic name="other"><wb:body>Changed</wb:body></wb:topic><wb:topic name="new" label="Old"/>`, stateNow)
-	wantSummaries(t, out, "topic updated: new (answered 1, renamed from Old)", "topic updated: other (body)")
+	wantSummaries(t, out, "topic updated: new (answered 1, renamed from Old)", "topic updated: other (panels 2, body)")
 	if s.TopicStates()["new"].State != nil {
 		t.Fatal("root answer/adoption backfilled")
 	}

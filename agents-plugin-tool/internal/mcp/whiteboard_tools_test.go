@@ -604,8 +604,8 @@ background body-marker line
 </wb:body></wb:topic>`)
 	pagePath := f.pagePath()
 	page, _ := os.ReadFile(pagePath)
-	if body, item := strings.Index(string(page), "body-marker"), strings.Index(string(page), "settle me"); body < 0 || body > item {
-		t.Fatalf("a topic body must render above its items (body %d, item %d)", body, item)
+	if body, item := strings.Index(string(page), "body-marker"), strings.Index(string(page), "settle me"); body < 0 || item < 0 || body < item {
+		t.Fatalf("a legacy body panel must render after the earlier item in write order (body %d, item %d)", body, item)
 	}
 	if strings.Contains(string(page), `id="wb-now"`) || strings.Contains(string(page), `class="now`) {
 		t.Fatalf("the page must carry no Now slot")

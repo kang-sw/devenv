@@ -192,7 +192,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 
 func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	f.update(t, `<wb:topic name="versions"><wb:body>content-marker</wb:body><wb:add class="technical"><wb:title>item-marker</wb:title></wb:add><wb:log>agent-marker</wb:log><wb:panel recap="old-recap">old-payload</wb:panel><wb:panel id="p1" recap="latest-recap">latest-payload</wb:panel></wb:topic>`)
+	f.update(t, `<wb:topic name="versions"><wb:body>content-marker</wb:body><wb:add class="technical"><wb:title>item-marker</wb:title></wb:add><wb:log>agent-marker</wb:log><wb:panel recap="old-recap">old-payload</wb:panel><wb:panel id="p2" recap="latest-recap">latest-payload</wb:panel></wb:topic>`)
 	rec, err := newSessionStore().readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
@@ -204,8 +204,8 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 	// represent them in the rendered stream. Pin the fixture independently
 	// of the view's filtering predicate.
 	panelEvents := map[string]bool{
-		"Panel [p1](#p1) added: old-recap":        false,
-		"Panel [p1](#p1) re-posted: latest-recap": false,
+		"Panel [p2](#p2) added: old-recap":        false,
+		"Panel [p2](#p2) re-posted: latest-recap": false,
 	}
 	omitted := map[string]bool{}
 	for _, entry := range rec.Whiteboard.Topics[0].Entries {
@@ -251,7 +251,7 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 				}
 			}
 		}
-		if strings.Count(html, `id="p1"`) != 1 || !strings.Contains(html, "latest-recap") || !strings.Contains(html, "old-recap") {
+		if strings.Count(html, `id="p2"`) != 1 || !strings.Contains(html, "latest-recap") || !strings.Contains(html, "old-recap") {
 			t.Errorf("%s lost latest panel target or immutable versions", name)
 		}
 	}

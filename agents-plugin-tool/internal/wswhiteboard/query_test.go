@@ -69,7 +69,7 @@ topic "b" [open] items: open 1; body: 10 chars; ` + changedAt + `
   state: discussing; entry: e6
   (04) [open] [technical] open b
 topic "d" [open] items: none; body: 8 chars; ` + changedAt + `
-  state: discussing; entry: e11
+  state: discussing; entry: e13
 omitted: 2 items not open (answered 1, assumed 1), shown by status, topic, or ids; 1 closed topic with 1 item, listed by closed: true or topic
 `
 	if text != want {
@@ -157,7 +157,7 @@ func TestQueryTopic(t *testing.T) {
 	wantText(t, "topic list", text,
 		[]string{"(01) [open]", "    a) optx first", "(02) [answered]", "(03) [assumed]", `topic "c" [closed] items: withdrawn 1; ` + changedAt + "; result: done c\n  (05) [withdrawn] [technical] close me"},
 		[]string{`topic "b"`, "omitted:"})
-	if text := queryText(t, st, `{"topic":"d","body":true}`); text != `topic "d" [open] items: none; body: 8 chars; `+changedAt+"\n  state: discussing; entry: e11\ntopic body:\n<<<\n배경 notes\n>>>\n" {
+	if text := queryText(t, st, `{"topic":"d","body":true}`); text != `topic "d" [open] items: none; body: 8 chars; `+changedAt+"\n  state: discussing; entry: e13\ntopic body:\n<<<\n배경 notes\n>>>\n" {
 		t.Fatalf("body-only topic: %q", text)
 	}
 	if text := queryText(t, st, `{"topic":"nothing","depth":"items"}`); text != "no matching items\n" {
@@ -290,7 +290,7 @@ func TestQuerySummary(t *testing.T) {
 	st := summaryBoard(t)
 	text := queryText(t, st, `{"topic":"s","depth":"summary","body":true}`)
 	want := `topic "s" [open] items: open 1, answered 5, assumed 1, withdrawn 1; body: 35 chars; ` + changedAt + `
-  state: discussing; entry: e2
+  state: discussing; entry: e3
 topic body:
 <<<
 body <code>kept</code> <b>as is</b>

@@ -126,8 +126,8 @@ func (f FolderStore) Open(legacy *State) (*State, error) {
 
 // Update runs fn on a fresh authoritative state while holding the session
 // flock through durable publication. fn receives a nonnil state, even for a
-// new board. A refused callback writes nothing (apart from first-open legacy
-// conversion). Render bookkeeping can use this same boundary without events.
+// new board. A refused callback writes nothing apart from load-time legacy
+// conversion/content migration. Render bookkeeping uses this boundary too.
 func (f FolderStore) Update(legacy *State, fn func(*State) error) error {
 	return f.UpdateAndPublish(legacy, fn, nil)
 }
@@ -319,7 +319,21 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 	}
 	if exists {
 		state, err := f.readState(&meta)
-		return state, &meta, err
+		if err != nil {
+			return nil, nil, err
+		}
+		work := state.clone()
+		if work.migrateLegacyContent() {
+			intent, err := f.plan(&meta, state, work)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := f.commit(intent); err != nil {
+				return nil, nil, err
+			}
+			return work, &intent.Session, nil
+		}
+		return state, &meta, nil
 	}
 	if _, err := os.Stat(filepath.Join(f.Dir, "committed.json")); !errors.Is(err, os.ErrNotExist) {
 		if err != nil {
@@ -331,8 +345,8 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		return nil, nil, nil
 	}
 	work := legacy.clone()
-	// The legacy recap is the only provable historical event. Keep its time,
-	// even if absent; do not manufacture owner answers or body/item events.
+	// Keep recorded recap/content times, even if absent; migration never
+	// manufactures owner answers or item transitions.
 	for _, doc := range work.Topics {
 		for _, e := range doc.Entries {
 			work.EntrySeq = max(work.EntrySeq, folderNumber(e.ID, "e"))
@@ -347,6 +361,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		}
 		d.Recap, d.RecapAt, d.RecapChanged = "", "", 0
 	}
+	work.migrateLegacyContent()
 	if err := f.hit("conversion"); err != nil {
 		return nil, nil, err
 	}

@@ -882,7 +882,7 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 		st := &State{}
 		mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
 		mustApply(t, st, clear)
-		if st.TopicBody("t") != "" || len(st.Topics) != 1 || len(st.Topics[0].Entries) != 4 {
+		if st.TopicBody("t") != "" || len(st.Topics) != 1 || len(st.Topics[0].Entries) != 6 {
 			t.Fatalf("%s: topics = %+v", name, st.Topics)
 		}
 		if len(st.Items) != 1 {
@@ -1025,7 +1025,7 @@ func TestApplyEditReplaceAllAndDelete(t *testing.T) {
 	}
 	// An edit that leaves nothing clears the body like an empty wb:body.
 	mustApply(t, st, `<wb:topic name="t"><wb:edit replace_all="true"><wb:old>A</wb:old><wb:new/></wb:edit></wb:topic>`)
-	if st.TopicBody("t") != "" || len(entries(t, st, "t")) != 7 {
+	if st.TopicBody("t") != "" || len(entries(t, st, "t")) != 13 {
 		t.Fatalf("clearing must keep edit history: %+v", st.Topics)
 	}
 }

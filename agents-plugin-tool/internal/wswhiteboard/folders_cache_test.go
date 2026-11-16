@@ -21,6 +21,7 @@ func folderIdleBoard(tb testing.TB) FolderStore {
 			s.EntrySeq++
 			s.Topics = append(s.Topics, TopicDoc{Name: fmt.Sprintf("topic-%d", i), Body: "unchanged topic body", Entries: []Entry{{ID: fmt.Sprintf("e%d", s.EntrySeq), Kind: EntryAgent, Text: "history", At: "2026-11-15T00:00:00Z"}}})
 		}
+		s.migrateLegacyContent() // Seed a fully migrated board for steady-state cache tests.
 		return nil
 	}); err != nil {
 		tb.Fatal(err)
@@ -68,6 +69,7 @@ func TestFolderCacheIdleOpenAndOtherWriter(t *testing.T) {
 	writer := FolderStore{Dir: f.Dir}
 	if err := writer.Update(nil, func(s *State) error {
 		s.Topics[0].Body = "external write"
+		s.migrateLegacyContent()
 		return nil // deliberately keep Seq unchanged
 	}); err != nil {
 		t.Fatal(err)
@@ -150,7 +152,7 @@ func TestFolderCacheRecoveryAfterPartialPublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := folderOpen(t, f.Dir, nil)
-			if !reflect.DeepEqual(got.clone(), want) || got.EntrySeq != 5 {
+			if !reflect.DeepEqual(got.clone(), want) || got.EntrySeq != 7 {
 				t.Fatalf("cached recovery at %s lost or duplicated entries", stage)
 			}
 		})
@@ -172,7 +174,7 @@ func TestFolderCacheObservesAnotherProcess(t *testing.T) {
 		t.Fatalf("external writer: %v\n%s", err, out)
 	}
 	got, err := cache.Open(f, nil)
-	if err != nil || len(got.Topics[0].Entries) != 3 || got.EntrySeq != 3 {
+	if err != nil || len(got.Topics[0].Entries) != 4 || got.EntrySeq != 4 {
 		t.Fatalf("missed another process's write: %v", err)
 	}
 }

@@ -68,7 +68,13 @@ func folderCheckMetaWrites(t *testing.T, f FolderStore, change func(*State) erro
 		}
 		return nil
 	}
-	if err := f.Update(nil, change); err != nil {
+	if err := f.Update(nil, func(s *State) error {
+		if err := change(s); err != nil {
+			return err
+		}
+		s.migrateLegacyContent()
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	total := counts["intent"] + counts["panel"] + counts["topic-meta"] + counts["session-meta"] + counts["cleanup"]
@@ -76,7 +82,7 @@ func folderCheckMetaWrites(t *testing.T, f FolderStore, change func(*State) erro
 	if !reflect.DeepEqual(paths, wantPaths) || counts["topic-meta"] != len(wantPaths) {
 		t.Fatalf("metadata writes = %v (%d replacements), want %v", paths, counts["topic-meta"], wantPaths)
 	}
-	if counts["intent"] != 1 || counts["session-meta"] != 1 || counts["cleanup"] != 1 || total != len(wantPaths)+3 {
+	if counts["intent"] != 1 || counts["session-meta"] != 1 || counts["cleanup"] != 1 || total != len(wantPaths)+3+counts["panel"] {
 		t.Fatalf("unexpected atomic replacements: %v", counts)
 	}
 	for path, info := range before {
@@ -137,6 +143,7 @@ func TestFolderChangedTopicMetaRecovery(t *testing.T) {
 				s.Topics[0].Body = "committed despite crash"
 				s.EntrySeq++
 				s.Topics[0].Entries = append(s.Topics[0].Entries, Entry{ID: fmt.Sprintf("e%d", s.EntrySeq), Kind: EntryAgent, Text: "recover once"})
+				s.migrateLegacyContent()
 				return nil
 			}
 			if err := change(want); err != nil {
@@ -212,7 +219,7 @@ func TestFolderChangedTopicMetaLifecycle(t *testing.T) {
 
 func TestFolderChangedTopicMetaNewMappingExistingBytes(t *testing.T) {
 	f := FolderStore{Dir: t.TempDir()}
-	folderOpen(t, f.Dir, &State{Topics: []TopicDoc{{Name: "old", Body: "body"}, {Name: "unchanged"}}})
+	folderOpen(t, f.Dir, &State{Topics: []TopicDoc{{Name: "old"}, {Name: "unchanged"}}})
 	var topic folderTopic
 	if err := json.Unmarshal(folderRead(t, filepath.Join(f.Dir, "t1", "meta.json")), &topic); err != nil {
 		t.Fatal(err)

@@ -680,6 +680,10 @@ func BuildView(state *State, in ViewInput) View {
 		block.Tickets = ticketBadges(doc.Tickets, in.Tickets, ticketStatus)
 		block.Live = slices.ContainsFunc(block.Tickets, TicketBadge.live)
 		block.Doc = doc.Body
+		if _, migrated := doc.legacyContentPanel(); migrated {
+			// Body is retained for old callers, not a duplicate rendering surface.
+			block.Doc = ""
+		}
 		block.DocMarks = doc.Marks
 		block.BodyUpdatedAt = doc.validatedBodyTime()
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed

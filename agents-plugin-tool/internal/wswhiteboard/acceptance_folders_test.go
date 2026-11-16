@@ -53,7 +53,7 @@ func TestCommandAcceptanceFolderFaultsAcceptedOnly(t *testing.T) {
 					t.Fatal("uncommitted intent changed state")
 				}
 			} else {
-				if commits != 1 || got.PanelCounter != 1 || got.Counter != 1 || len(got.Items) != 1 || got.Seq != before.Seq+1 {
+				if commits != 1 || got.PanelCounter != 2 || got.Counter != 1 || len(got.Items) != 1 || got.Seq != before.Seq+1 {
 					t.Fatal("commit count/counters", commits, got)
 				}
 				var panels, logs int
@@ -68,7 +68,7 @@ func TestCommandAcceptanceFolderFaultsAcceptedOnly(t *testing.T) {
 						t.Fatal("rejected event persisted")
 					}
 				}
-				if panels != 1 || logs != 1 {
+				if panels != 2 || logs != 1 {
 					t.Fatal("recovery duplicated accepted entries", panels, logs)
 				}
 			}

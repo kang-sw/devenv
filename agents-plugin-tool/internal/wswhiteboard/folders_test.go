@@ -96,6 +96,7 @@ func folderAdd(s *State) error {
 		s.Topics[0].Entries = append(s.Topics[0].Entries, e)
 	}
 	s.Topics[0].Body = "new current content"
+	s.migrateLegacyContent() // Keep this raw writer fixture coherent with its fixed panel.
 	return nil
 }
 
@@ -311,8 +312,8 @@ func TestFolderPanelNamesThroughV050Writer(t *testing.T) {
 		}
 		historicalCall(t, binary, dir, "update", panelXML("Old", "old recap", "old panel"), false)
 		got = folderOpen(t, dir, nil)
-		mustApply(t, got, `<wb:topic name="Old"><wb:panel id="p1" recap="new recap">new full panel</wb:panel><wb:body>alpha</wb:body><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit></wb:topic>`)
-		if got.TopicBody("Old") != "beta" || queryResult(t, got, `{"panel":"p1"}`).Direct.Entry.Text != "new full panel" {
+		mustApply(t, got, `<wb:topic name="Old"><wb:panel id="p2" recap="new recap">new full panel</wb:panel><wb:body>alpha</wb:body><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit></wb:topic>`)
+		if got.TopicBody("Old") != "beta" || queryResult(t, got, `{"panel":"p2"}`).Direct.Entry.Text != "new full panel" {
 			t.Fatal("old full/id/body/edit calls broke on new parser")
 		}
 	})
@@ -449,6 +450,8 @@ func TestFolderConversionAndRestart(t *testing.T) {
 		d.Entries = []Entry{{ID: fmt.Sprintf("e%d", i+1), Kind: EntryAgent, Text: d.Recap, At: d.RecapAt, Imported: true}}
 		d.Recap, d.RecapAt, d.RecapChanged = "", "", 0
 	}
+	want.EntrySeq, want.PanelCounter = 3, 1
+	want.Topics[0].Entries = append(want.Topics[0].Entries, Entry{ID: "e3", Kind: EntryPanel, PanelID: "p1", LegacyContent: true, Recap: "Current content", Text: legacy.Topics[0].Body, At: legacy.Topics[0].ChangedAt, Imported: true})
 	if !reflect.DeepEqual(want, got) {
 		t.Fatalf("conversion lost snapshots\nwant %s\ngot  %s", folderJSON(want), folderJSON(got))
 	}
@@ -511,7 +514,7 @@ func TestFolderImmutableVersionsAndLog(t *testing.T) {
 			t.Fatal("entries duplicated into topic metadata")
 		}
 	}
-	if panels != 2 {
+	if panels != 4 {
 		t.Fatalf("panel versions = %d", panels)
 	}
 	// Render-only bookkeeping never changes log bytes or immutable versions.
@@ -667,7 +670,7 @@ func TestFolderRecoveryRepeatedPartialAppend(t *testing.T) {
 		}
 	}
 	got := folderOpen(t, dir, nil)
-	if len(got.Topics[0].Entries) != 4 || got.EntrySeq != 5 {
+	if len(got.Topics[0].Entries) != 6 || got.EntrySeq != 7 {
 		t.Fatalf("duplicated entries: %s", folderJSON(got))
 	}
 }
@@ -819,7 +822,10 @@ func TestFolderConversionAdoptionIgnoresStaleCloseMapping(t *testing.T) {
 				ClosedTopics: []string{"s"}, CloseResults: map[string]string{"s": "stale destination result"},
 			}
 			converted := folderOpen(t, dir, legacy)
-			wantImport := []Entry{{ID: "e1", Kind: EntryAgent, Text: "imported history", At: legacy.Topics[0].RecapAt, Imported: true}}
+			wantImport := []Entry{
+				{ID: "e1", Kind: EntryAgent, Text: "imported history", At: legacy.Topics[0].RecapAt, Imported: true},
+				{ID: "e2", Kind: EntryPanel, PanelID: "p1", LegacyContent: true, Recap: "Current content", Text: "body", Imported: true},
+			}
 			if !reflect.DeepEqual(entries(t, converted, "Old title"), wantImport) {
 				t.Fatal("conversion lost imported entry identity")
 			}
@@ -922,12 +928,12 @@ func TestFolderConcurrentWriters(t *testing.T) {
 		}
 	}
 	got := folderOpen(t, dir, nil)
-	if len(got.Topics[0].Entries) != writers || got.EntrySeq != writers {
+	if len(got.Topics[0].Entries) != writers+1 || got.EntrySeq != writers+1 {
 		t.Fatalf("lost concurrent writes: %s", folderJSON(got))
 	}
 	texts := map[string]bool{}
-	for i, e := range got.Topics[0].Entries {
-		if e.ID != fmt.Sprintf("e%d", i+1) || texts[e.Text] {
+	for i, e := range got.Topics[0].Entries[1:] {
+		if e.ID != fmt.Sprintf("e%d", i+2) || texts[e.Text] {
 			t.Fatalf("duplicate/reordered entry: %+v", e)
 		}
 		texts[e.Text] = true
@@ -972,7 +978,7 @@ func TestFolderConcurrentProcesses(t *testing.T) {
 		}
 	}
 	got := folderOpen(t, dir, nil)
-	if len(got.Topics[0].Entries) != 12 || got.EntrySeq != 12 {
+	if len(got.Topics[0].Entries) != 13 || got.EntrySeq != 13 {
 		t.Fatalf("lost cross-process writes: %s", folderJSON(got))
 	}
 }
