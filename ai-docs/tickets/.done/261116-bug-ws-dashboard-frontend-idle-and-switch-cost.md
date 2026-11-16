@@ -4,6 +4,7 @@ related:
   261116-feat-ws-dashboard-restore-session-iframe-cache: "Restore the session iframe cache later, separately"
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-11-16
 ---
 
 # Reduce dashboard frontend idle and session-switch cost
@@ -41,6 +42,18 @@ Trace E (`1e5c5357-01-perf-trace-e-idle-and-switch.md`, 2026-11-16) measured a s
 - Add CSS containment around clock labels so `wbAgo` (`ago.js:109/178`) does not relayout the whole document; hidden-gate it like `tickTimes`. Contain the composer dock and `#bcol`, checking layout and paint behavior.
 - Remove scroll-path forced layouts: make `pill.js` show writes idempotent, cache `notePanes` visibility, and rAF-coalesce lifecycle `post` and `cards.js` update. Move the rail ghost animation to transform/opacity. Make `scrollState`/`restoreScroll` avoid forced style on each WS message.
 
+### Result (fe8eda6e8) - 2026-11-16
+
+- Source inventory identified infinite rail orbit/blink/approval, spin/pulse/Pi badges, composer busy spinner/caret, drawer skeleton, tracker query spinner and board-update sway. Smooth candidates now use stepped timing; native document and shell visibility share a pause marker. Existing running/busy/render predicates remain authoritative, while display-none elements do not animate. Trace E cannot identify the exact runtime compositor element, so attribution remains for the owner's capture.
+- `wbAgo` skips hidden/shell-hidden work and catches up when shown. Clock labels use layout/style containment, a stable minimum inline width and tabular numerals. Composer and board use layout/style (not paint/size) containment. Board containment releases for maximized sheets, open fixed popovers and the toolbar's body-portaled Files-sheet state, preserving viewport controls and scrim layering.
+- Pane visibility comes from ResizeObserver; scroll bookkeeping no longer probes layout with `getClientRects`. Offset snapshots remain live before swap writes (deliberately not cached across programmatic scrolling), and owned scrollers are omitted. Pill counts/labels/visibility are idempotent, observer/draft updates share rAF, toolbar updates share rAF and cached scroller lookup, and rail ghost animation uses only transform/opacity keyframes. Lifecycle rAF/read-before-write was delivered as a Phase 1 prerequisite.
+- Verification: `node --test agents-plugin-tool/internal/wsdashboard/frontend-idle.test.js agents-plugin-tool/internal/wsdashboard/frontend-interaction.test.js agents-plugin-tool/internal/wsdashboard/frontend-scroll.test.js agents-plugin-tool/internal/wsdashboard/frontend-geometry.test.js agents-plugin-tool/internal/wsdashboard/frontend-history.test.js` — 14/14 passed after review fixes; `git diff --check` passed. Coverage includes hidden/show clock catch-up, shell visibility integration, idempotent pill writes, scroll-only compositable ghosts, toolbar coalescing/scroller invalidation, cached visibility, exact history windows and pagination interleaving.
+- R1: one Important Files-sheet toolbar stacking regression; fixed by releasing layout containment on `.board-toolbar[data-files]` and testing actual toolbar/portal wiring. Fixes-only R2: resolved, no outstanding substantive findings.
+- Estimated savings, not measured: animation CPU from ~180 ms/s of one core to ~30–50 ms/s (save ~130–150 ms CPU/s); clock rollover ~21–29 ms -> roughly 3–8 ms (save ~15–25 ms when width stays stable); scroll-path/ghost changes aim to remove several hundred ms of layout/paint over a representative 6 s scroll. These overlap and require owner traces; no guarantee of eliminating every forced layout.
+- Forward: owner capture of representative switch/10 s idle/scroll traces and UI checks remains necessary, especially clock containment, maximized/topic/Files sheets, fixed popovers and transformed ghost appearance. Pure Node establishes contracts, not actual browser geometry/paint savings.
+- Forward: owner-reported six `usage.test.js` chart failures already fail at base; not rerun or investigated.
+- Omitted: local Go/build/test/ws executables, launchers, dev.py, remote Go and live browser captures; the passing focused pure Node check closes the phase per owner steering. No temporary artifacts were retained, no iframe cache was restored, and no merge or push was performed.
+
 ## Constraints
 
 - Keep history, scrolling, visibility, animation state and live updates correct. The owner wants the session iframe cache restored later under the related ticket; do not fold it into this work.
@@ -52,4 +65,5 @@ Trace E (`1e5c5357-01-perf-trace-e-idle-and-switch.md`, 2026-11-16) measured a s
 - Light design/completeness check completed by implementing worker per explicit owner instruction (2026-11-16): scope, invariants, two phases and verification boundary are executable; no unresolved design decisions. Implementation details: use bounded speculative history batches with a write-free height read pass, returning surplus rows to the inert gap before binding; preserve exact whole-row 1000px windows, unknown-frame waits, and pending snapshots. Coalesce follow-up observers/events with rAF, not a new scheduler or configuration.
 - Collect drawer and lifecycle geometry before writes; defer watch-owner geometry until after history writes. Phase 2 depends on Phase 1 and uses cached pane visibility, idempotent pill writes, event-driven rAF work, stepped running animations and hidden-page gates. Prefer layout/style containment without paint clipping of composer popovers.
 - Scope is frontend JS/CSS and focused pure Node tests only; no iframe-cache restore or daemon Go edits. No protocol/store change. Per owner: one passing focused check closes each phase; R1 independent review and fixes-only R2 for substantive findings; minor findings go to Forward.
+- Containment must not trap viewport overlays: do not use paint/size containment; release board layout containment while its maximized/fixed popover or body-portaled Files-toolbar state is active. Keep offset snapshots live rather than caching them across programmatic scrolling; cache only pane visibility.
 - Local Go/build/ws/test executables, launchers and dev.py are forbidden (AhnLab V3). Remote Go only via the owner's w5090 command if needed; local tests must be pure Node without ws spawning. Timing savings are trace-derived estimates pending owner switch/idle/scroll captures, not measured acceptance claims.
