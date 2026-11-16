@@ -7,7 +7,7 @@ related:
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4bf35c6c91796d9c
-sage-review-design-reviewed: 4bf35c6c91796d9c
+sage-review-design-reviewed: 8393f7f6d33d780e
 ---
 
 # Electron standalone daemon start and replacement
@@ -101,6 +101,10 @@ failure it asks the user to start the dashboard normally
   `.claude-plugin/plugin.json` with supported name ws or wsflow, matching
   `internal/wsagent/lead_plugins.go:16-53`. Apply to both bundled and selected
   dev input, and fail closed for missing/invalid/Pi-only package metadata.
+  Snapshot the complete prepared package, not only rsrc/skills and the descriptor:
+  validate and retain manifest-referenced `bin/ws-mcp-launcher.py`, the config
+  manifests, and `claude-agents/` entries so Claude --plugin-dir can use the
+  staged root. The daemon start itself still requires no Python execution.
 - **Independent replacement ordering (coordinating lead 2026-11-16):** prove
   strict detachment before draining a healthy predecessor, through preflight or
   an already-independent starter. Test failed strict preflight leaves the old
@@ -217,8 +221,15 @@ setting so the next phase consumes a concrete contract.
 ### Phase 2: Standalone missing-daemon start
 
 Start the selected binary when no daemon is available, using the existing
-`daemon-start`/`Ensure` handoff and endpoint/health verification; handle races,
-hung daemons and failures without killing holders
+single-instance daemon lock and endpoint/health verification; handle races,
+hung daemons and failures without killing holders. For this missing-only slice,
+the existing `dashboard` entry is an equivalent NEW-daemon start under the
+owner's REST-only contract: a detached launch takes the existing StartDaemon
+lock and never requests a drain. Do not invoke replacement-capable Ensure just
+to discover whether a concurrent daemon exists; it can turn a failed early LAN
+probe into an unintended equal-core mode-change drain. Healthy REST discovery
+attaches without execution; a concurrent lock winner is verified and retained.
+Controlled replacement remains Phase 3. Source references:
 (`agents-plugin-tool/cmd/ws-mcp/proxy.go:354-420`,
 `agents-plugin-tool/internal/wsdashboard/ensure.go:89-160`). Ensure app exit
 does not stop the daemon, including a verified solution or explicit failure
