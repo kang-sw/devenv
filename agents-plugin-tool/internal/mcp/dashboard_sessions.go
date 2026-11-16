@@ -597,12 +597,29 @@ func (s *Server) runDashboardNudges(queue <-chan wsdashboard.NudgeBody) {
 			s.recordDashboardNudges(batch, 0)
 			continue
 		}
-		ep, err := wsdashboard.ReadEndpoint(dir)
-		if err != nil {
-			s.recordDashboardNudges(batch, 0)
+		// A hosted daemon can accept its own cache's invalidations without
+		// touching endpoint.json or making a loopback request. Other cache
+		// roots and older hosts retain the HTTP path.
+		pending := batch[:0]
+		host, _ := s.live.host.(wsdashboard.ChangeHost)
+		for _, body := range batch {
+			if host != nil {
+				if port, handled := host.NotifySessionChange(dir, body); handled {
+					s.recordDashboardNudges([]wsdashboard.NudgeBody{body}, port)
+					continue
+				}
+			}
+			pending = append(pending, body)
+		}
+		if len(pending) == 0 {
 			continue
 		}
-		for _, body := range batch {
+		ep, err := wsdashboard.ReadEndpoint(dir)
+		if err != nil {
+			s.recordDashboardNudges(pending, 0)
+			continue
+		}
+		for _, body := range pending {
 			ctx, cancel := context.WithTimeout(context.Background(), dashboardNudgeTimeout)
 			err := wsdashboard.SendNudge(ctx, client, ep, body)
 			cancel()
@@ -797,7 +814,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	}
 	h := sha256.New()
 	h.Write(raw)
-	updatedAt := src.hashLiveStores(h, reg.ReplyID)
+	updatedAt, staleAt := src.hashLiveStores(h, reg.ReplyID)
 	replies, repliesOK := src.loadReplies()
 	if record.Whiteboard != nil {
 		boardPrint(h, key, record, reg.ReplyID, replies, repliesOK)
@@ -834,6 +851,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 		Resumable:         record.HarnessSession != "" && record.HarnessCwd != "",
 		Fingerprint:       fp,
 		SnapshotUpdatedAt: updatedAt,
+		SnapshotStaleAt:   staleAt,
 	}, true, nil
 }
 
@@ -939,14 +957,14 @@ func (src *DashboardSessionSource) clock() time.Time {
 }
 
 // hashLiveStores folds the session's live stores into h and returns the
-// snapshot's updatedAt (wsdashboard.SnapshotCache.HashLiveStores, under this
-// source's state dir, clock, and snapshot cache).
-func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) time.Time {
+// snapshot's updatedAt and in-memory expiry (under this source's state dir,
+// clock, and snapshot cache). Reading the expiry adds no filesystem probe.
+func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) (time.Time, time.Time) {
 	dir, err := src.resolveStateDir()
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, time.Time{}
 	}
-	return src.snapshots.HashLiveStores(h, dir, replyID, src.clock())
+	return src.snapshots.HashLiveStoresClock(h, dir, replyID, src.clock())
 }
 
 // resolveStateDir resolves the daemon state directory.

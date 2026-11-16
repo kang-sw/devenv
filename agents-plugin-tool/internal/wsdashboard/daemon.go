@@ -614,7 +614,8 @@ func (d *Daemon) agentChanged(replyID, _ string) {
 }
 
 // poll fills the session index at once and then re-reads every registered
-// session each interval until the daemon stops.
+// session at the external safety interval. Clock-only checks retain the old
+// cadence, with targeted reads only when known liveness evidence expires.
 func (d *Daemon) poll(interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultPollInterval
@@ -623,6 +624,8 @@ func (d *Daemon) poll(interval time.Duration) {
 	d.pokeHires()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	clock := time.NewTicker(min(indexClockInterval, interval))
+	defer clock.Stop()
 	for {
 		select {
 		case <-d.stop:
@@ -630,6 +633,8 @@ func (d *Daemon) poll(interval time.Duration) {
 		case <-ticker.C:
 			d.index.Refresh()
 			d.pokeHires()
+		case <-clock.C:
+			d.index.RefreshClock()
 		}
 	}
 }

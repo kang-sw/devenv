@@ -159,7 +159,7 @@ func (s *daemonLiveSlot) Publish(snap wslive.Snapshot) {
 	d.live.mu.Unlock()
 	d.planUsage.pushClaude(&snap)
 	if d.index != nil && snap.UpdatedAt > 0 {
-		d.index.SetSnapshotUpdatedAt(s.replyID, time.UnixMilli(snap.UpdatedAt))
+		d.index.SetSnapshotUpdatedAt(s.replyID, time.UnixMilli(snap.UpdatedAt), snapshotStaleAt(&snap))
 	}
 	if changed {
 		d.stats.WakeLive.Add(1)

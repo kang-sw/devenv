@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -100,6 +101,18 @@ func (c *SnapshotCache) lastKnown(stateDir, replyID string) *wslive.Snapshot {
 		return nil
 	}
 	return &e.val.snap
+}
+
+func snapshotStaleAt(snap *wslive.Snapshot) time.Time {
+	if snap == nil {
+		return time.Time{}
+	}
+	beat := snap.HeartbeatMs
+	if beat <= 0 {
+		beat = wslive.HeartbeatInterval.Milliseconds()
+	}
+	// Snapshot.Stale uses a strict greater-than millisecond comparison.
+	return time.UnixMilli(snap.UpdatedAt + wslive.StaleAfterBeats*beat + 1)
 }
 
 // SetLive serves snap as session replyID's snapshot under stateDir in place

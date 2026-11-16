@@ -35,7 +35,10 @@
    "tabs", the page sets data-pincol on the root and the list moves into
    the column (.bpcol), the page body's last grid column. Below 2200px the
    column takes the session rail's place and the rail overlays as it does
-   below 1600px (the arrow and Ctrl+` open it); from 2200px both show. The
+   below 1600px (the arrow and Ctrl+` open it); from 2200px both show, and
+   the column shows with nothing pinned too, so its handle sizes the board
+   before the first pin: its empty pin list is the idle pin zone's quiet
+   "drop here" placeholder (as .bpzone below), lit while a drag runs. The
    store page (.tk-spage) takes the hidden grid's cell in every one of
    these grids. The board keeps its no-pin width (--pbw: the 1680px page
    less its paddings, the rail and its gap; the board-first page's 900px
@@ -63,8 +66,8 @@
 .bpcol > .bpins .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
 .bpcol > .bpins .bcard:not([data-max]) .bc-hd { position: sticky; top: 0; z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
-.bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
-.bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
+.bp-edge::after, .dcv-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
+.bp-edge:hover::after, .bp-edge.drag::after, .dcv-edge:hover::after, .dcv-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {
   :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
   :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
@@ -87,6 +90,9 @@
   :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
   :root[data-pincol] .bpcol { grid-column: 3; }
+  :root[data-pincol] body:not(.tk-paged) .bpcol > .bpins:empty { display: grid; place-items: center; padding: 12px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); border-radius: var(--wb-radius); color: var(--wb-muted-fg); font-weight: 700; font-size: 13px; text-align: center; }
+  :root[data-pincol] .bpcol > .bpins:empty::before { content: attr(data-drop); }
+  :root[data-pincol][data-bdrag] body:not(.tk-paged) .bpcol > .bpins:empty { border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; }
 }
 /* the pin button in a topic's title bar, and dragging a topic or card by
    its header: the dragged one dims, a line shows where it lands, and the
@@ -98,7 +104,9 @@
    reorder drops; where the strip is narrow its label runs vertically.
    From 1780px, where the strip is wide, the zone stands there idle while
    nothing is pinned and the column could show (not the "tabs" layout, not
-   a store page): a quiet placeholder for the column, lit when a drag runs. */
+   a store page): a quiet placeholder for the column, lit when a drag runs.
+   From 2200px the column itself shows instead (data-pincol), so the zone
+   stays hidden there. */
 .tbar .tpin { color: inherit; opacity: .45; }
 .tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
 .tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }

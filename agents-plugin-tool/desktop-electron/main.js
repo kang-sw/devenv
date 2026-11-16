@@ -99,6 +99,9 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           if (input.type === 'keyDown') {
             altOnly = input.key === 'Alt' && !input.control && !input.shift && !input.meta;
             if (altOnly) event.preventDefault();
+            if (input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta) {
+              event.preventDefault(); wc.toggleDevTools();
+            }
           }
           if (input.key === 'Alt' && input.type === 'keyUp' && altOnly) {
             event.preventDefault(); altOnly = false; openMenu();
@@ -284,7 +287,9 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       { label: 'File', submenu: [{ role: 'close' }] },
       { role: 'editMenu' },
       { label: 'View', submenu: [
-        { role: 'togglefullscreen' }, { type: 'separator' },
+        { role: 'togglefullscreen' },
+        { id: 'devtools', label: 'Toggle Developer Tools', accelerator: platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: () => dashboardContents().toggleDevTools() },
+        { type: 'separator' },
         { id: 'zoom_reset', label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoomBy('reset') },
         { id: 'zoom_in', label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoomBy('in') },
         { id: 'zoom_in_shifted', label: 'Zoom In', accelerator: 'CmdOrCtrl+Shift+=', click: () => zoomBy('in') },

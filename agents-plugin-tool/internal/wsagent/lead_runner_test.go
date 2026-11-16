@@ -2026,13 +2026,16 @@ func TestPiLeadMapper(t *testing.T) {
 
 	// Explicit timeouts, including zero, override the lead default.
 	seconds, zero := 90, 0
-	for want, p := range map[time.Duration]Profile{
-		0:                  {Backend: BackendPi, Lead: true, IdleTimeoutSeconds: &zero},
-		90 * time.Second:   {Backend: BackendPi, Lead: true, IdleTimeoutSeconds: &seconds},
-		DefaultIdleTimeout: {Backend: BackendPi, Lead: true},
+	for _, tc := range []struct {
+		profile Profile
+		want    time.Duration
+	}{
+		{Profile{Backend: BackendPi, Lead: true, IdleTimeoutSeconds: &zero}, 0},
+		{Profile{Backend: BackendPi, Lead: true, IdleTimeoutSeconds: &seconds}, 90 * time.Second},
+		{Profile{Backend: BackendPi, Lead: true}, 0},
 	} {
-		if got := p.IdleTimeout(); got != want {
-			t.Errorf("%+v idle timeout = %v, want %v", p, got, want)
+		if got := tc.profile.IdleTimeout(); got != tc.want {
+			t.Errorf("%+v idle timeout = %v, want %v", tc.profile, got, tc.want)
 		}
 	}
 

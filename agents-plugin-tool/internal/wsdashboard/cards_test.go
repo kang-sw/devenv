@@ -417,25 +417,28 @@ function reply() { var r = mk("div.reply"); r.label = "reply"; return r; }
 function label(n) { return n.label || (n.hasAttribute("data-card") ? n.card || "card" : n.hasAttribute("data-pins") ? "PINS" : n.classList.contains("board-toolbar") ? "TOOLBAR" : n.tagName); }
 function names(el) { return el.children.map(label); }
 // boot loads cards.js into a fresh page whose board region holds served,
-// over store (a reload keeps it), with the pinned column shown when wide.
+// over store (a reload keeps it), with the pinned column shown when wide,
+// and with split a grid for the split handle (its resolved columns:
+// page.gridCols).
 function boot(store, served, o) {
   o = o || {};
-  page = { doc: null, store: store, layouts: [], closedCalls: [], adopted: [] };
+  page = { doc: null, store: store, layouts: [], closedCalls: [], adopted: [], gridCols: "none" };
   page.doc = new Doc();
   var dbody = page.doc.body.appendChild(new El("div", page.doc));
   page.board = dbody.appendChild(new El("div", page.doc));
   page.board.id = "r-board";
   served().forEach(function (n) { page.board.appendChild(n); });
   page.col = dbody.appendChild(new El("aside", page.doc));
+  page.split = o.split ? dbody.appendChild(new El("main", page.doc)) : null;
   var win = page.win = { listeners: {}, getSelection: function () { return null; }, addEventListener: function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }, innerWidth: 2000, innerHeight: 800 };
-  new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible" }; }, function () {});
+  new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible", gridTemplateColumns: page.gridCols }; }, function () {});
   page.W = win.WsCards;
   page.W.register("k", { open: function (c) { c.title({ name: c.data.name }); c.el.card = c.data.name; } });
   (o.kinds || []).forEach(function (kind) { page.W.register(kind, { open: function () {} }); });
   page.W.mount(page.board, {
     toolbar: o.toolbar,
     key: "cards", load: function (k) { return store[k] || null; }, save: function (k, v) { if (v === null) delete store[k]; else store[k] = v; },
-    column: page.col, shows: function (n) { return !!o.wide && n > 0; },
+    column: page.col, shows: function (n) { return !!o.wide && n > 0; }, split: page.split,
     layout: function (on) { page.layouts.push(on); },
     closed: function (from, done) { page.closedCalls.push(from); if (!o.pending) done(o.closed ? o.closed(from) : null); },
     adopted: function (n) { page.adopted.push(n.getAttribute("data-topic")); }
@@ -657,6 +660,69 @@ check("a reload brings the width back", boardw(), "840px");
 store.cards = JSON.stringify({ cards: [], topics: [], w: 640 });
 start();
 check("a stored column width is dropped", [boardw(), JSON.parse(store.cards || "{}").w], [null, undefined]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestConversationSplitWidth pins the conversation/board split handle
+// (cards.js splitHandle), the whole script executed under node over the
+// minimal DOM when node is installed: the page's grid gets one separator,
+// and dragging it sets the conversation's column live through --convow
+// (with data-convow) from the grid's resolved tracks; the width stops at
+// CONVW_MIN and where the board would drop below SPLITB_MIN, is saved with
+// the pins (cw) on release, even with nothing else to keep, and comes back
+// after a reload; a one-column grid drags nothing; a double click goes
+// back to the stylesheet's split; a press of another button drags nothing.
+func TestConversationSplitWidth(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := json.Marshal(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "conversation split width", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+var store = {};
+function served() { return [topic("a", 300), reply()]; }
+function start() { boot(store, served, { split: true }); page.gridCols = "840px 1036px"; }
+start();
+function convow() { return page.doc.documentElement.style.props["--convow"] || null; }
+function flagged() { return page.doc.documentElement.hasAttribute("data-convow"); }
+function savedW() { return store.cards ? JSON.parse(store.cards).cw : 0; }
+function ev(x, button) { return { button: button === undefined ? 0 : button, clientX: x, pointerId: 1, preventDefault: function () {} }; }
+function drag(e, by) { e.fire("pointerdown", ev(1000)); e.fire("pointermove", ev(1000 + by)); }
+function release(e) { e.fire("pointerup", ev(1000)); }
+var hs = page.split.querySelectorAll(".dcv-edge");
+check("the grid has one split handle, a separator", hs.map(function (e) { return e.getAttribute("role"); }), ["separator"]);
+check("no split is set before a drag", [convow(), flagged(), savedW()], [null, false, 0]);
+var e = hs[0];
+drag(e, 100);
+check("dragging right widens the conversation live", [convow(), flagged(), e.classList.contains("drag"), savedW()], ["940px", true, true, 0]);
+release(e);
+check("the release saves the width with the pins", [savedW(), e.classList.contains("drag")], [940, false]);
+page.gridCols = "940px 936px";
+drag(e, -5000);
+release(e);
+check("it stops at CONVW_MIN", [convow(), savedW()], ["320px", 320]);
+page.gridCols = "320px 1556px";
+drag(e, 5000);
+release(e);
+check("it stops where the board keeps SPLITB_MIN", [convow(), savedW()], ["1516px", 1516]);
+page.gridCols = "1892px";
+drag(e, -400);
+release(e);
+check("a one-column grid drags nothing", [convow(), e.classList.contains("drag")], ["1516px", false]);
+e.fire("dblclick", {});
+check("a double click goes back to the stylesheet's split", [convow(), flagged(), savedW()], [null, false, 0]);
+page.gridCols = "840px 1036px";
+e.fire("pointerdown", ev(1000, 2));
+e.fire("pointermove", ev(1100));
+check("another button drags nothing", convow(), null);
+drag(e, -40);
+release(e);
+start();
+check("a reload brings the width back", [convow(), flagged()], ["800px", true]);
 process.stdout.write(bad.join("\n"));
 `)
 }

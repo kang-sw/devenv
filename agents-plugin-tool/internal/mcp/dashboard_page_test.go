@@ -288,7 +288,9 @@ func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
 // (PageContent.WatchPIDs).
 func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
-	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); strings.Contains(out, "error") {
+	// A successful URL can contain "error" inside its generated reply ID.
+	// Assert the expected new item instead of searching opaque identifiers.
+	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); !strings.HasPrefix(out, "ids: (01)\n") {
 		t.Fatalf("whiteboard.update: %s", out)
 	}
 	mustSend(t, hf.serverB, 50, hf.keyB, wsmailbox.ReplyIDPrefix+wsmailbox.ReplyID(hf.keyA), "hello")

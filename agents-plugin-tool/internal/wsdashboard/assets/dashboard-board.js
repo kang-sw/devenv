@@ -223,10 +223,14 @@
   // button stands beside it, and their picks and console errors go to the
   // composer's chips (web picks, below).
   // The pinned column (bpcol) is the page body's last column: from 1600px,
-  // while anything is pinned, unless the layout menu says "tabs" (one
-  // column at a time, where the pins stand atop the board). The root's
-  // data-pincol carries it to the stylesheet and the session rail (railWide):
-  // below 2200px the column takes the rail's place and the rail overlays.
+  // while anything is pinned, and from 2200px (rail docked beside it) with
+  // nothing pinned too, its empty pin list the drop placeholder, so its
+  // handle sizes the board before the first pin; never while the layout
+  // menu says "tabs" (one column at a time, where the pins stand atop the
+  // board). The root's data-pincol carries it to the stylesheet and the
+  // session rail (railWide): below 2200px the column takes the rail's place
+  // and the rail overlays. On the live grid the split handle sizes the
+  // conversation's column beside the board (split).
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
   // Two owners, not two views onto one explorer. Keep the tab's existing
@@ -274,9 +278,10 @@
   }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
+  var PIN_SLOT = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
   function pinColumnFits(n) {
-    return n > 0 && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");
+    return (n > 0 || !!(PIN_SLOT && PIN_SLOT.matches)) && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");
   }
   if (cardBoard) {
     if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: worktree ? browsePost : post, toast: toast });
@@ -301,7 +306,7 @@
         files: worktree ? null : filesSheet
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
-      column: bpcol, shows: pinColumnFits,
+      column: bpcol, shows: pinColumnFits, split: grid && grid.classList.contains("live") ? grid : null,
       leading: function (c) { return worktree && c.preview && !(PIN_WIDE && PIN_WIDE.matches); },
       layout: function (on) {
         if (on) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
@@ -361,7 +366,7 @@
     }
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
     if (window.WsWeb) window.WsWeb.mount($("bcol"));
-    if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
+    [PIN_WIDE, PIN_SLOT].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { window.WsCards.relayout(); }); });
   }
   boardBoxes().forEach(watchBoard);
   // morphBoard applies a board region event to el and returns the element
