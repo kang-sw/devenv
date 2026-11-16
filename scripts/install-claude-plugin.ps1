@@ -50,39 +50,58 @@ function Invoke-Py([string]$Code, [string[]]$PyArgs) {
     if ($LASTEXITCODE -ne 0) { throw "python3 step failed (exit $LASTEXITCODE)" }
 }
 
-# --- 1. snapshot agents-plugin -> $PluginWs (mirror) --------------------------
-Info 'Syncing ws plugin snapshot...'
-if (-not $DryRun) {
-    if (Test-Path $PluginWs) { Remove-Item -Recurse -Force $PluginWs }
-    New-Item -ItemType Directory -Force -Path $PluginWs | Out-Null
-    Copy-Item -Path (Join-Path $AgentsPlugin '*') -Destination $PluginWs -Recurse -Force
-}
+# --- 1-2. validate, stage snapshot + marketplace, then publish -----------------
+Info 'Syncing ws plugin snapshot and marketplace...'
+$snapshotCode = @'
+import json, shutil, subprocess, sys, tempfile
+from pathlib import Path
 
-# --- 2. generate marketplace.json under the snapshot --------------------------
-Info 'Generating marketplace.json...'
-$mktCode = @'
-import json, os, sys
-cache, ws_dir = sys.argv[1], sys.argv[2]
-plugin = json.load(open(os.path.join(ws_dir, ".claude-plugin", "plugin.json")))
-marketplace = {
-    "name": "kang-sw-devenv",
-    "description": "kang-sw personal devenv plugin marketplace",
-    "owner": {"name": "kang-sw"},
-    "plugins": [{
-        "name": plugin["name"],
-        "version": plugin.get("version"),
-        "description": plugin.get("description", ""),
-        "author": plugin.get("author", {"name": "kang-sw"}),
-        "source": "./ws",
-    }],
-}
-out = os.path.join(cache, ".claude-plugin", "marketplace.json")
-os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-with open(out, "w") as f:
-    json.dump(marketplace, f, indent=2)
-    f.write("\n")
+repo, cache = map(Path, sys.argv[1:3])
+go = sys.argv[3]
+source = repo / "agents-plugin"
+helper = source / "bin/ws-pi-payload.py"
+subprocess.run([sys.executable, str(helper), "--plugin", str(source), "--check-source", str(repo), "--allow-stale-source"], check=True)
+cache.parent.mkdir(parents=True, exist_ok=True)
+stage = Path(tempfile.mkdtemp(prefix=".ws-snapshot-", dir=cache.parent))
+backup = stage / "previous"
+try:
+    shutil.copytree(source, stage / "ws")
+    subprocess.run([sys.executable, str(stage / "ws/bin/ws-pi-payload.py"), "--plugin", str(stage / "ws")], check=True)
+    # Deliberate ws-only dogfood marker, never part of the native archive.
+    (stage / "ws/.local-devenv-runtime").write_bytes((json.dumps({
+        "schema_version": 1, "source_root": str(repo),
+        "tool_dir": str(repo / "agents-plugin-tool"), "go": go,
+    }) + "\n").encode("utf-8"))
+    plugin = json.loads((stage / "ws/.claude-plugin/plugin.json").read_text())
+    marketplace = {
+        "name": "kang-sw-devenv",
+        "description": "kang-sw personal devenv plugin marketplace",
+        "owner": {"name": "kang-sw"},
+        "plugins": [{"name": plugin["name"], "version": plugin.get("version"),
+                     "description": plugin.get("description", ""),
+                     "author": plugin.get("author", {"name": "kang-sw"}), "source": "./ws"}],
+    }
+    (stage / ".claude-plugin").mkdir()
+    (stage / ".claude-plugin/marketplace.json").write_text(json.dumps(marketplace, indent=2) + "\n")
+    ready = stage / "ready"
+    ready.mkdir()
+    for name in ("ws", ".claude-plugin"):
+        (stage / name).rename(ready / name)
+    if cache.exists():
+        cache.rename(backup)
+    try:
+        ready.rename(cache)
+    except BaseException:
+        if backup.exists():
+            backup.rename(cache)
+        raise
+finally:
+    if backup.exists() and not cache.exists():
+        print(f"Snapshot rollback needs recovery from {backup}", file=sys.stderr)
+    else:
+        shutil.rmtree(stage)
 '@
-Invoke-Py $mktCode @($PluginCache, $PluginWs)
+Invoke-Py $snapshotCode @($RepoDir, $PluginCache, $GoPath)
 
 # --- 3. patch settings.json (marketplace + enabled plugin) --------------------
 Info 'Registering marketplace + enabling plugin in settings.json...'
@@ -124,19 +143,8 @@ with open(km_path, "w") as f:
 '@
 Invoke-Py $knownCode @($KnownMkts, $PluginCache)
 
-# --- 5. write the local-devenv marker (builds from THIS clone) ----------------
-Info 'Writing .local-devenv-runtime marker...'
-if (-not $DryRun) {
-    $marker = [ordered]@{
-        schema_version = 1
-        source_root    = $RepoDir
-        tool_dir       = $ToolDir
-        go             = $GoPath
-    } | ConvertTo-Json
-    # BOM-less UTF-8 on both Windows PowerShell 5.1 and pwsh: 5.1's
-    # `Set-Content -Encoding utf8` prepends a BOM.
-    [System.IO.File]::WriteAllText((Join-Path $PluginWs '.local-devenv-runtime'), $marker, (New-Object System.Text.UTF8Encoding $false))
-}
+# --- 5. BOM-less UTF-8 marker was published with the validated snapshot -------
+Info '.local-devenv-runtime marker included in staged ws snapshot.'
 
 # --- 6. install via claude CLI if present (drops a stale record first) --------
 $claude = Get-Command claude -ErrorAction SilentlyContinue

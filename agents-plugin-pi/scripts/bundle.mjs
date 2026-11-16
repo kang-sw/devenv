@@ -42,6 +42,10 @@ function bundleInputHash() {
 const outdir = join(pkg, "dist");
 mkdirSync(outdir, { recursive: true });
 await build({
+  // Keep generated module labels package-relative, even when producer tooling
+  // supplies dependencies through a temporary node_modules symlink.
+  absWorkingDir: pkg,
+  preserveSymlinks: true,
   entryPoints: [join(pkg, "src", "index.ts")],
   outfile: join(outdir, "index.js"),
   bundle: true,
