@@ -983,9 +983,7 @@ func replyMarkdown(root, replyID string) replyRender {
 	return replyRenderUnder(servedTargets(root, replyID))
 }
 
-// replyRenderUnder is replyMarkdown under the link rule targets: the
-// outside-link route renders the same replies with a recorder on the rule
-// (outsideReplyLinks), so both resolve a target the same way.
+// replyRenderUnder is replyMarkdown under the link rule targets.
 func replyRenderUnder(targets wswhiteboard.TextTargets) replyRender {
 	streaming, finished := targets, targets
 	finished.Mermaid = true

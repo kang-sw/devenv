@@ -83,12 +83,10 @@ func escapeTree(t *testing.T, f *pageFixture) (outside string, symlinks bool) {
 	return outside, symlinks
 }
 
-// TestFSListStaysInsideTheRoot pins the listing route's containment: the
-// root and a folder under it are listed, directories first, a symlink
-// listed as a link and never as a folder; a ".." escape, an absolute path
-// outside the root, a symlinked folder that leaves it, a file, and a
-// missing folder all answer 404.
-func TestFSListStaysInsideTheRoot(t *testing.T) {
+// TestFSListLocalPathsAndLANConfinement pins local traversal and symlink
+// directory listings, LAN confinement, and refusal of files and missing dirs.
+// Local symlink entries are usable files/folders; LAN entries remain links.
+func TestFSListLocalPathsAndLANConfinement(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	local, lan := fsViewers(t, f)
 	outside, symlinks := escapeTree(t, f)
@@ -101,6 +99,9 @@ func TestFSListStaysInsideTheRoot(t *testing.T) {
 		want := []string{"docs/", "notes.txt", "shot.png"}
 		if symlinks {
 			want = []string{"docs/", "alias.txt@", "escape.png@", "escape.txt@", "notes.txt", "outlink@", "shot.png"}
+			if v.name == local.name {
+				want = []string{"docs/", "outlink/", "alias.txt", "escape.png", "escape.txt", "notes.txt", "shot.png"}
+			}
 		}
 		if got := entryNames(a); strings.Join(got, " ") != strings.Join(want, " ") {
 			t.Errorf("%s: root entries = %v, want %v", v.name, got, want)
@@ -113,9 +114,28 @@ func TestFSListStaysInsideTheRoot(t *testing.T) {
 		if code, a = fsList(t, f, v, "dir="+url.QueryEscape(filepath.Join(f.project, "docs", "deep"))); code != http.StatusOK || a.Dir != "docs/deep" {
 			t.Errorf("%s: absolute in-root dir = %d dir %q", v.name, code, a.Dir)
 		}
-		refused := []string{"..", "docs/../..", "../" + filepath.Base(outside), outside, "notes.txt", "missing", "docs/missing"}
+		widened := []string{"..", "docs/../..", outside}
 		if symlinks {
-			refused = append(refused, "outlink", "outlink/sub")
+			widened = append(widened, "outlink", "outlink/sub")
+		}
+		refused := []string{"notes.txt", "missing", "docs/missing"}
+		if v.name == lan.name {
+			refused = append(refused, widened...)
+		} else {
+			for _, dir := range widened {
+				code, a := fsList(t, f, v, "dir="+url.QueryEscape(dir))
+				if code != http.StatusOK || a.Abs == "" {
+					t.Errorf("local list dir %q = %d %+v, want 200", dir, code, a)
+				}
+				req := httptest.NewRequest(http.MethodGet, "/s/livesession/fs/list?dir="+url.QueryEscape(dir), nil)
+				req.RemoteAddr, req.Host = local.peer, local.host
+				req.Header.Set("Sec-Fetch-Site", "cross-site")
+				rec := httptest.NewRecorder()
+				f.d.Handler().ServeHTTP(rec, req)
+				if rec.Code != http.StatusNotFound {
+					t.Errorf("cross-site local list %q = %d, want 404", dir, rec.Code)
+				}
+			}
 		}
 		for _, dir := range refused {
 			rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/list?dir="+url.QueryEscape(dir), "")
@@ -147,40 +167,88 @@ func TestFSPathBarCanonicalDirectories(t *testing.T) {
 			}
 		}
 	}
-	// The existing strict relativeInside guard refuses the absolute root
-	// itself; callers address the root with an empty path or "." instead.
+	// Local callers may also address the root by its absolute path; the
+	// LAN route retains its strict relativeInside guard.
 	for _, v := range []viewer{local, lan} {
-		if code, _ := fsList(t, f, v, "dir="+url.QueryEscape(f.project)); code != http.StatusNotFound {
-			t.Errorf("%s: absolute root path = %d, want existing 404", v.name, code)
+		want := http.StatusNotFound
+		if v.name == local.name {
+			want = http.StatusOK
+		}
+		if code, a := fsList(t, f, v, "dir="+url.QueryEscape(f.project)); code != want || (code == http.StatusOK && a.Dir != "") {
+			t.Errorf("%s: absolute root path = %d %+v, want %d", v.name, code, a, want)
 		}
 	}
 	if err := os.Symlink(filepath.Join(f.project, "docs"), filepath.Join(f.project, "alias")); err == nil {
 		for _, v := range []viewer{local, lan} {
 			for _, input := range []string{"alias", filepath.Join(f.project, "alias")} {
-				if code, _ := fsList(t, f, v, "dir="+url.QueryEscape(input)); code != http.StatusNotFound {
-					t.Errorf("%s: typed final in-root symlink %q = %d, want 404", v.name, input, code)
+				want := http.StatusNotFound
+				if v.name == local.name {
+					want = http.StatusOK
+				}
+				if code, a := fsList(t, f, v, "dir="+url.QueryEscape(input)); code != want || (code == http.StatusOK && strings.Join(entryNames(a), " ") != "deep/") {
+					t.Errorf("%s: typed final in-root symlink %q = %d %+v, want %d", v.name, input, code, a, want)
 				}
 			}
 		}
 	}
 }
 
-// TestFSPreviewAndRawStayInsideTheRoot pins the containment of the preview
-// and raw routes: a traversal, an outside path, a symlink (even one that
-// stays inside the root), a path through a symlinked folder, a folder, and
-// a missing file all answer 404 without the file's bytes, for a browser on
-// this machine and a LAN token holder alike.
-func TestFSPreviewAndRawStayInsideTheRoot(t *testing.T) {
+// TestFSPreviewAndRawLocalPathsAndLANConfinement pins widened local reads
+// and unchanged LAN confinement. Raw still serves only supported media.
+func TestFSPreviewAndRawLocalPathsAndLANConfinement(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	local, lan := fsViewers(t, f)
 	outside, symlinks := escapeTree(t, f)
 
-	refused := []string{"../" + filepath.Base(outside) + "/secret.txt", "docs/../../x", filepath.Join(outside, "secret.txt"),
-		filepath.Join(outside, "secret.png"), "docs", "missing.txt", "missing.png", ""}
+	widened := map[string]string{
+		filepath.Join(outside, "secret.txt"): "TEXT-OUTSIDE",
+		filepath.Join(outside, "secret.png"): "PNG-OUTSIDE",
+	}
+	for _, name := range []string{"secret.txt", "secret.png"} {
+		rel, err := filepath.Rel(f.project, filepath.Join(outside, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		widened[rel] = widened[filepath.Join(outside, name)]
+	}
 	if symlinks {
-		refused = append(refused, "escape.txt", "escape.png", "alias.txt", "outlink/secret.txt", "outlink/secret.png", "outlink/sub/page.html")
+		for path, body := range map[string]string{"escape.txt": "TEXT-OUTSIDE", "escape.png": "PNG-OUTSIDE", "alias.txt": "TEXT-INSIDE",
+			"outlink/secret.txt": "TEXT-OUTSIDE", "outlink/secret.png": "PNG-OUTSIDE", "outlink/sub/page.html": "<h1>HTML-OUTSIDE</h1>"} {
+			widened[path] = body
+		}
 	}
 	for _, v := range []viewer{local, lan} {
+		refused := []string{"docs/../../x", "docs", "missing.txt", "missing.png", ""}
+		for path, body := range widened {
+			if v.name == lan.name {
+				refused = append(refused, path)
+				continue
+			}
+			for _, route := range []string{"preview", "raw"} {
+				req := httptest.NewRequest(http.MethodGet, "/s/livesession/fs/"+route+"?path="+url.QueryEscape(path), nil)
+				req.RemoteAddr, req.Host = local.peer, local.host
+				req.Header.Set("Sec-Fetch-Site", "cross-site")
+				rec := httptest.NewRecorder()
+				f.d.Handler().ServeHTTP(rec, req)
+				if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), body) {
+					t.Errorf("cross-site local %s %q = %d %q, want 404", route, path, rec.Code, rec.Body.String())
+				}
+			}
+			code, a := fsPreview(t, f, v, "path="+url.QueryEscape(path))
+			if code != http.StatusOK || (strings.HasSuffix(path, ".txt") && a.Text != body) ||
+				(strings.HasSuffix(path, ".png") && a.Kind != "image") ||
+				(strings.HasSuffix(path, ".html") && (a.Text != body || a.Frame != "" || !a.Source)) {
+				t.Errorf("local preview %q = %d %+v", path, code, a)
+			}
+			rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/raw?path="+url.QueryEscape(path), "")
+			if strings.HasSuffix(path, ".png") {
+				if rec.Code != http.StatusOK || rec.Body.String() != body {
+					t.Errorf("local raw %q = %d %q", path, rec.Code, rec.Body.String())
+				}
+			} else if rec.Code != http.StatusNotFound {
+				t.Errorf("local raw non-media %q = %d, want 404", path, rec.Code)
+			}
+		}
 		for _, path := range refused {
 			for _, route := range []string{"preview", "raw"} {
 				rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/"+route+"?path="+url.QueryEscape(path), "")
@@ -381,7 +449,7 @@ func TestFSListAbsoluteRootWithoutDir(t *testing.T) {
 // this machine lists, previews, and reads an image under another absolute
 // folder, where an HTML file shows as its source with no capability; a LAN
 // token holder, a cross-site request, and a root that is no absolute
-// folder get 404; reads still stay inside the chosen root.
+// folder get 404; local reads may traverse beyond the chosen root.
 func TestFSChangeRootIsLoopbackOnly(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	local, lan := fsViewers(t, f)
@@ -417,10 +485,14 @@ func TestFSChangeRootIsLoopbackOnly(t *testing.T) {
 	if code, a = fsList(t, f, local, "root="+url.QueryEscape(f.project)); code != http.StatusOK || !a.Session {
 		t.Errorf("the session root as the root parameter = %d session %v", code, a.Session)
 	}
-	// Reads stay inside the chosen root.
-	for _, q := range []string{root + "&path=" + url.QueryEscape("../"+filepath.Base(f.project)+"/inside.txt"), root + "&path=" + url.QueryEscape(filepath.Join(f.project, "inside.txt"))} {
-		if rec := serve(f.d, local, http.MethodGet, "/s/livesession/fs/preview?"+q, ""); rec.Code != http.StatusNotFound {
-			t.Errorf("preview %q = %d, want 404", q, rec.Code)
+	// The selected root is a navigation base, not a local confinement boundary.
+	rel, err := filepath.Rel(other, filepath.Join(f.project, "inside.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{rel, filepath.Join(f.project, "inside.txt")} {
+		if code, p := fsPreview(t, f, local, root+"&path="+url.QueryEscape(path)); code != http.StatusOK || p.Text != "SESSION-ROOT" {
+			t.Errorf("preview beyond selected root %q = %d %+v", path, code, p)
 		}
 	}
 	// A LAN token holder never leaves the session root.

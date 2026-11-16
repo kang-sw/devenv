@@ -23,12 +23,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
-	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
-// Outside-root file links. A link the lead writes on the board or in a
-// reply to a file outside the session's project root opens in the preview
+// Outside-root file links. A file link anywhere on the dashboard, outside
+// the session's project root, opens in the preview
 // card, and an HTML one in a tab of its own, for a browser on the daemon's
 // machine only:
 //
@@ -38,12 +37,10 @@ import (
 //
 // The POST is the only way in. It answers a browser on this machine
 // (localViewer; anyone else gets 404) that sent the daemon's own Origin
-// (sameOrigin; else 403), and only for a path the session links: the
-// absolute path the renderer resolved for a file target outside the root
-// in the session's board (OutsideLinkSource) or in a lead reply the live
-// ring still holds (outsideReplyLinks). Board and reply markup reaches LAN
-// viewers too, so no capability is ever rendered into it; it is minted
-// here, on the click.
+// (sameOrigin; else 403). There is no board/live-ring provenance check:
+// older messages, user messages, tool output and file mentions work alike.
+// Shared markup reaches LAN viewers too, so no capability is rendered into
+// it; it is minted here, on the click. Home-relative paths expand here only.
 //
 // What a link grants (grantOutside) is the folder that holds the linked
 // file, so an HTML file's relative style sheets and images load, with
@@ -111,8 +108,8 @@ var outsideDenied = []string{".ssh", ".gnupg", ".aws", ".config/gh", ".netrc", "
 // session's project root its board links: the absolute path the renderer
 // resolved (FileAction.Abs) for every file target of the board's topic
 // bodies and items that is not inside the root, the capped closed topics
-// included. The outside-link route opens only a path on this list or in a
-// lead reply. ok is false when the session is gone.
+// included. This is render metadata, not an authorization boundary: local
+// viewers may open unlisted paths too. ok is false when the session is gone.
 type OutsideLinkSource interface {
 	ReadOutsideLinks(reg Registration) (abs []string, ok bool)
 }
@@ -325,70 +322,6 @@ func (d *Daemon) outsideCapability(part, capability, replyID, project string) (o
 	return g, true
 }
 
-// outsideReplyLinks lists the files outside the project root that the
-// session's lead replies link: the replies its live ring holds and the one
-// still streaming, each rendered under the served page's link rule with a
-// recorder on it. A reply that aged out of the ring is not read.
-func (d *Daemon) outsideReplyLinks(s Session) []string {
-	reg := s.Registration
-	var links []string
-	targets := servedTargets(reg.Project, reg.ReplyID)
-	targets.FileActions, targets.OutsideImage = RecordOutsideLinks(targets.FileActions, targets.OutsideImage, func(abs string) { links = append(links, abs) })
-	render := replyRenderUnder(targets)
-	if d.entryFiles != nil {
-		ring, _ := d.entryFiles.readRing(reg.ReplyID, wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
-		for _, r := range ring {
-			if r.Kind == wslive.RingReply {
-				render.finished(r.Text)
-			}
-		}
-	}
-	if snap := d.snapshots.snapshotWithoutObserved(d.dir, reg.ReplyID); snap != nil && snap.Lead.Reply != nil {
-		render.streaming(snap.Lead.Reply.Text)
-	}
-	return links
-}
-
-// outsideLinked reports whether the session links the absolute path abs
-// outside its root, on its board or in a lead reply: the mint's membership
-// check, on the path the renderer resolved, never on markdown text. abs is
-// a link's path as the page carries it, or the path that link resolves to
-// through its symlinks.
-func (d *Daemon) outsideLinked(s Session, abs string) bool {
-	if abs == "" || strings.ContainsRune(abs, 0) {
-		return false
-	}
-	want := filepath.Clean(filepath.FromSlash(abs))
-	has := func(links []string) bool {
-		for _, l := range links {
-			if filepath.Clean(l) == want {
-				return true
-			}
-		}
-		// The path a link resolves to names the same file, and it is the
-		// only one the re-mint page knows (the capability holds the resolved
-		// folder). A link that is always-denied as written stays closed
-		// under its resolved name too, and a link on no plain volume is
-		// never resolved.
-		for _, l := range links {
-			c := filepath.Clean(l)
-			if !filepath.IsAbs(c) || networkPath(l) || !driveOrRootPath(c) || deviceElement(c) {
-				continue
-			}
-			if real, err := filepath.EvalSymlinks(c); err == nil && real == want && !alwaysDenied(c, homeDirs()) {
-				return true
-			}
-		}
-		return false
-	}
-	if src, ok := d.source.(OutsideLinkSource); ok {
-		if links, ok := src.ReadOutsideLinks(s.Registration); ok && has(links) {
-			return true
-		}
-	}
-	return has(d.outsideReplyLinks(s))
-}
-
 // fsOutsideRequest is the mint route's body. Unknown fields are ignored.
 type fsOutsideRequest struct {
 	Path string `json:"path"`
@@ -431,16 +364,12 @@ func (d *Daemon) handleFSOutside(w http.ResponseWriter, r *http.Request, replyID
 		http.Error(w, "malformed request", http.StatusBadRequest)
 		return
 	}
-	if !d.outsideLinked(s, req.Path) {
-		fsNotFound(w)
-		return
-	}
-	g, ok := grantOutside(req.Path)
+	g, ok := grantOutside(homePath(req.Path))
 	if !ok {
 		fsNotFound(w)
 		return
 	}
-	f, rel, info, ok := openContained(g.Root, g.Name)
+	f, rel, info, ok := openLocalContained(g.Root, g.Name)
 	if !ok {
 		fsNotFound(w)
 		return
@@ -528,7 +457,7 @@ func (d *Daemon) handleFSOutsideCapability(w http.ResponseWriter, r *http.Reques
 		fsNotFound(w)
 		return
 	}
-	f, rel, info, ok := openContained(g.Root, path)
+	f, rel, info, ok := openLocalContained(g.Root, path)
 	if !ok {
 		fsNotFound(w)
 		return

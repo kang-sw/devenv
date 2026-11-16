@@ -29,14 +29,12 @@ func fileView(t *testing.T, f *pageFixture, path string) (int, http.Header, stri
 	return resp.StatusCode, resp.Header, string(raw)
 }
 
-// TestFileViewServesOnlyInsideTheProjectRoot pins the file view's
-// containment: a file under the session's project root is served, by
-// relative or absolute path; an absolute path outside it, a ".." escape, a
-// symlink (even one that stays inside the root), a path through a symlinked
-// directory that leads outside, a directory, and a missing file all answer
-// the same 404 without the file's bytes.
-func TestFileViewServesOnlyInsideTheProjectRoot(t *testing.T) {
-	f := startPageFixture(t)
+// TestFileViewLocalPathsAndLANConfinement pins local absolute, traversal,
+// and symlink reads while LAN token holders remain confined to regular
+// files inside the project. Directories and missing files remain refused.
+func TestFileViewLocalPathsAndLANConfinement(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	local, lan := fsViewers(t, f)
 	outside := filepath.Join(t.TempDir(), "outside")
 	writeFile(t, filepath.Join(f.project, "notes.txt"), "TEXT-INSIDE")
 	writeFile(t, filepath.Join(f.project, "docs", "deep", "c.go"), "package c // GO-INSIDE")
@@ -58,6 +56,31 @@ func TestFileViewServesOnlyInsideTheProjectRoot(t *testing.T) {
 		filepath.ToSlash(filepath.Join(f.project, "notes.txt")): "TEXT-INSIDE",
 		filepath.Join(f.project, "docs", "deep", "c.go"):        "package c // GO-INSIDE",
 	}
+	widened := map[string]string{filepath.Join(outside, "secret.txt"): "TEXT-OUTSIDE"}
+	if rel, err := filepath.Rel(f.project, filepath.Join(outside, "secret.txt")); err == nil {
+		widened[rel] = "TEXT-OUTSIDE"
+	} else {
+		t.Fatal(err)
+	}
+	if symlinks {
+		widened["escape.txt"] = "TEXT-OUTSIDE"
+		widened["outlink/secret.txt"] = "TEXT-OUTSIDE"
+		widened["alias.txt"] = "TEXT-INSIDE"
+	}
+	for path, want := range widened {
+		served[path] = want
+		if rec := serve(f.d, lan, http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), ""); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), want) {
+			t.Errorf("LAN file %q = %d %q, want 404", path, rec.Code, rec.Body.String())
+		}
+		req := httptest.NewRequest(http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), nil)
+		req.RemoteAddr, req.Host = local.peer, local.host
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		rec := httptest.NewRecorder()
+		f.d.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), want) {
+			t.Errorf("cross-site local file %q = %d %q, want 404", path, rec.Code, rec.Body.String())
+		}
+	}
 	for path, want := range served {
 		code, h, body := fileView(t, f, path)
 		if code != http.StatusOK || body != want {
@@ -72,20 +95,10 @@ func TestFileViewServesOnlyInsideTheProjectRoot(t *testing.T) {
 
 	refused := []string{
 		"",
-		filepath.Join(outside, "secret.txt"),
-		filepath.ToSlash(filepath.Join(outside, "secret.txt")),
-		"../" + filepath.Base(outside) + "/secret.txt",
-		"docs/../../outside/secret.txt",
 		"dir.txt",
 		"missing.txt",
 		".",
 		"notes.txt\x00.txt",
-	}
-	if rel, err := filepath.Rel(f.project, filepath.Join(outside, "secret.txt")); err == nil {
-		refused = append(refused, rel, filepath.ToSlash(rel))
-	}
-	if symlinks {
-		refused = append(refused, "escape.txt", "outlink/secret.txt", "alias.txt")
 	}
 	for _, path := range refused {
 		code, _, body := fileView(t, f, path)
@@ -344,8 +357,15 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 		}
 	}
 	if symlinks {
-		if rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path=outlink/sub/page.html", ""); rec.Code != http.StatusNotFound {
-			t.Errorf("file view of an HTML file through a symlinked folder = %d, want 404", rec.Code)
+		for _, v := range []viewer{local, lan} {
+			rec := serve(f.d, v, http.MethodGet, "/s/livesession/file?path=outlink/sub/page.html", "")
+			if v.name == local.name {
+				if rec.Code != http.StatusOK || rec.Body.String() != "<h1>HTML-OUTSIDE</h1>" || rec.Header().Get("Location") != "" || rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+					t.Errorf("local outside HTML = %d %v %q, want source without a capability", rec.Code, rec.Header(), rec.Body.String())
+				}
+			} else if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "HTML-OUTSIDE") {
+				t.Errorf("LAN outside HTML = %d %q, want 404", rec.Code, rec.Body.String())
+			}
 		}
 	}
 	if rec := serve(f.d, bare, http.MethodPost, page, ""); !refusedByGuard(rec) {

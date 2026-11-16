@@ -364,7 +364,11 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 		fsNotFound(w)
 		return
 	}
-	f, rel, info, ok := openContained(s.Project, path)
+	open := openContained
+	if localViewer(r) {
+		open = openLocalContained
+	}
+	f, rel, info, ok := open(s.Project, path)
 	if !ok {
 		fsNotFound(w)
 		return

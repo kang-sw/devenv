@@ -44,13 +44,10 @@ import (
 // touched, under the files route's rules for an absolute directory
 // (browseRootParam).
 //
-// Every read stays inside the chosen root. A directory is listed only when
-// it stays inside the root lexically and once resolved through every
-// symlink, and is itself no symlink (containedDir); a file is read through
-// the file view's openContained, so a symlinked file, a path through a
-// symlinked directory that leads outside, and a file swapped after the
-// check are refused. Every refusal answers 404, so the routes tell nothing
-// about which paths exist.
+// LAN reads stay inside the chosen root (containedDir, openContained).
+// Local reads may follow symlinks and leave it, but check the sensitive-path
+// denylist on both the written and resolved path (fs_local.go). Every
+// refusal answers 404, so the routes tell nothing about which paths exist.
 
 const (
 	// fsListMax bounds the entries one listing carries; a longer directory
@@ -64,7 +61,7 @@ const (
 type fsEntry struct {
 	Name string `json:"name"`
 	Dir  bool   `json:"dir,omitempty"`
-	// Link marks a symlink: it is listed and never opened or descended.
+	// Link marks a symlink that this viewer cannot open or descend.
 	Link bool `json:"link,omitempty"`
 	// Ignored marks an entry git's ignore rules exclude, and .git itself.
 	Ignored bool `json:"ign,omitempty"`
@@ -184,11 +181,11 @@ func browseRootParam(raw string) (string, bool) {
 		return "", false
 	}
 	clean := filepath.Clean(native)
-	if deviceElement(clean) {
+	if deviceElement(clean) || alwaysDenied(clean, homeDirs()) {
 		return "", false
 	}
 	real, err := filepath.EvalSymlinks(clean)
-	if err != nil || networkPath(real) || !driveOrRootPath(real) {
+	if err != nil || networkPath(real) || !driveOrRootPath(real) || deviceElement(real) || alwaysDenied(real, homeDirs()) {
 		return "", false
 	}
 	if info, err := os.Stat(real); err != nil || !info.IsDir() {
@@ -206,7 +203,7 @@ func (d *Daemon) browseRoot(r *http.Request, replyID string) (root string, sessi
 		if !localBrowseViewer(r) {
 			return "", false, false
 		}
-		root, ok = browseRootParam(r.URL.Query().Get("root"))
+		root, ok = browseRootParam(homePath(r.URL.Query().Get("root")))
 		return root, false, ok
 	}
 	if d.index == nil || !ValidReplyID(replyID) {
@@ -223,7 +220,7 @@ func (d *Daemon) browseRoot(r *http.Request, replyID string) (root string, sessi
 	if !localViewer(r) || crossSiteFetch(r) {
 		return "", false, false
 	}
-	root, ok = browseRootParam(raw)
+	root, ok = browseRootParam(homePath(raw))
 	if !ok {
 		return "", false, false
 	}
@@ -382,6 +379,10 @@ func listDir(full string) (entries []fsEntry, more, repo bool, err error) {
 	if err != nil {
 		return nil, false, false, err
 	}
+	return listDirEntries(full, read)
+}
+
+func listDirEntries(full string, read []os.DirEntry) (entries []fsEntry, more, repo bool, err error) {
 	marks, markDirs, gone := gitMarks(full)
 	entries = make([]fsEntry, 0, len(read))
 	for _, e := range read {
@@ -392,16 +393,7 @@ func listDir(full string) (entries []fsEntry, more, repo bool, err error) {
 	for name := range gone {
 		entries = append(entries, fsEntry{Name: name, Dir: markDirs[name], Gone: true})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		a, b := entries[i], entries[j]
-		if a.Dir != b.Dir {
-			return a.Dir
-		}
-		if la, lb := strings.ToLower(a.Name), strings.ToLower(b.Name); la != lb {
-			return la < lb
-		}
-		return a.Name < b.Name
-	})
+	sortEntries(entries)
 	if len(entries) > fsListMax {
 		entries, more = entries[:fsListMax], true
 	}
@@ -430,6 +422,19 @@ func listDir(full string) (entries []fsEntry, more, repo bool, err error) {
 		}
 	}
 	return entries, more, repo, nil
+}
+
+func sortEntries(entries []fsEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.Dir != b.Dir {
+			return a.Dir
+		}
+		if la, lb := strings.ToLower(a.Name), strings.ToLower(b.Name); la != lb {
+			return la < lb
+		}
+		return a.Name < b.Name
+	})
 }
 
 func fsNotFound(w http.ResponseWriter) { http.Error(w, "not found", http.StatusNotFound) }
@@ -491,15 +496,34 @@ func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID st
 		fsNotFound(w)
 		return
 	}
-	full, rel, ok := containedDir(root, dir)
+	full, rel, ok := viewerDir(r, root, dir)
 	if !ok {
 		fsNotFound(w)
 		return
 	}
-	entries, more, repo, err := listDir(full)
+	read, err := readViewerDir(r, full)
 	if err != nil {
 		fsNotFound(w)
 		return
+	}
+	entries, more, repo, err := listDirEntries(full, read)
+	if err != nil {
+		fsNotFound(w)
+		return
+	}
+	if localViewer(r) {
+		for i := range entries {
+			e := &entries[i]
+			if !e.Link {
+				continue
+			}
+			if _, real, ok := localPath(full, e.Name); ok {
+				if info, err := os.Stat(real); err == nil && (info.IsDir() || info.Mode().IsRegular()) {
+					e.Link, e.Dir = false, info.IsDir()
+				}
+			}
+		}
+		sortEntries(entries)
 	}
 	clean := filepath.Clean(root)
 	writeFSJSON(w, !session, fsListAnswer{Root: filepath.ToSlash(clean), Name: filepath.Base(clean), Session: session,
@@ -615,17 +639,19 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 		fsNotFound(w)
 		return
 	}
-	f, rel, info, ok := openContained(root, r.URL.Query().Get("path"))
+	path := r.URL.Query().Get("path")
+	f, rel, info, ok := openViewerFile(r, root, path)
 	if !ok {
 		fsNotFound(w)
 		return
 	}
 	defer f.Close()
+	session = session && ownRootFile(root, path)
 	outside := ""
 	if !session {
 		outside = root
 	}
-	a := fsPreviewAnswer{Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(root), rel), Size: info.Size()}
+	a := fsPreviewAnswer{Rel: filepath.ToSlash(rel), Abs: resolveAgainst(root, rel), Size: info.Size()}
 	lang, _ := requestLang(r)
 	_, image := imageType(rel)
 	_, video := videoType(rel)
@@ -741,7 +767,7 @@ func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID str
 			}
 		}
 	}
-	f, _, info, ok := openContained(root, path)
+	f, _, info, ok := openViewerFile(r, root, path)
 	if !ok {
 		fsNotFound(w)
 		return

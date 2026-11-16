@@ -584,7 +584,7 @@ func TestMarkdownBarePaths(t *testing.T) {
 			)
 			wantAll(t, out,
 				`fix <a href="L/internal/a/b.go">internal/a/b.go:12</a>, then <a href="L//srv/notes/x">/srv/notes/x</a>.`,
-				`and/or a/b x1.5/2.5 ~/home/a.md <a href="L/ai-docs/c.md"><code>ai-docs/c.md</code></a> a/b.go:note (<a href="L/ai-docs/x.md">ai-docs/x.md</a>) <a href="L/docs/q.md">docs/q.md:3:4</a>: <a href="L/C:%5CUsers%5Ca.txt">C:\Users\a.txt</a>`,
+				`and/or a/b x1.5/2.5 <a href="L/~/home/a.md">~/home/a.md</a> <a href="L/ai-docs/c.md"><code>ai-docs/c.md</code></a> a/b.go:note (<a href="L/ai-docs/x.md">ai-docs/x.md</a>) <a href="L/docs/q.md">docs/q.md:3:4</a>: <a href="L/C:%5CUsers%5Ca.txt">C:\Users\a.txt</a>`,
 			)
 		})
 	}

@@ -17,8 +17,8 @@ import (
 
 // The image route: GET /s/<reply-id>/image?path=<path> serves an image file a
 // board item references, only when the file resolves inside the session's
-// project root (its registration's root path), in LAN mode and localhost mode
-// alike. path is a path relative to that root, or an absolute path inside it,
+// project root (its registration's root path), for LAN/token viewers.
+// path is a path relative to that root, or an absolute path inside it,
 // with forward or native slashes.
 //
 // Containment is checked twice. First lexically, before the filesystem is
@@ -32,9 +32,9 @@ import (
 // image name. Every refusal answers 404, so the route tells nothing about
 // which paths outside the root exist.
 //
-// One widening, for a browser on this machine only (localViewer): an image
-// outside the root, which a served lead reply or board item names by an
-// absolute path (OutsideImage), is served too, under outsideImage's rules.
+// Local viewers may also read outside images, including symlink escapes,
+// ../ and ~/ paths. Both written and resolved sensitive home paths are
+// denied (localPath), and both names must retain an image extension.
 // Such a response is refused, with the same 404, to a request whose
 // Sec-Fetch-Site is same-site or cross-site, and carries
 // Cross-Origin-Resource-Policy: same-origin, so another site open in the
@@ -73,7 +73,7 @@ func imageType(name string) (string, bool) {
 // when the route would refuse the path on its name alone: it leaves root, or
 // it has no image extension; the page then shows the path as text.
 func ImageSrc(root, replyID, path string) string {
-	if !ValidReplyID(replyID) {
+	if !ValidReplyID(replyID) || strings.HasPrefix(path, "~/") {
 		return ""
 	}
 	rel, ok := relativeInside(root, path)
@@ -96,6 +96,10 @@ func ImageSrc(root, replyID, path string) string {
 func OutsideImage(root, replyID string) func(path string) wswhiteboard.FileAction {
 	return func(path string) wswhiteboard.FileAction {
 		abs, ok := outsideImagePath(root, path)
+		if strings.HasPrefix(path, "~/") {
+			_, ok = imageType(path)
+			abs = path
+		}
 		if !ok || !ValidReplyID(replyID) {
 			return wswhiteboard.FileAction{}
 		}
@@ -423,25 +427,32 @@ func (d *Daemon) handleImage(w http.ResponseWriter, r *http.Request, replyID str
 	path := r.URL.Query().Get("path")
 	file, ctype, ok := containedImage(s.Project, path)
 	outside := false
-	if !ok && localViewer(r) && !crossSiteFetch(r) {
-		file, ctype, ok = outsideImage(s.Project, path)
-		outside = ok
+	if localViewer(r) {
+		_, real, allowed := localPath(s.Project, path)
+		if !allowed {
+			ok = false
+		} else if !ok && !crossSiteFetch(r) {
+			ctype, ok = imageType(path)
+			if ok {
+				file, ok = resolvedImage(real)
+				outside = ok
+			}
+		}
 	}
 	if !ok {
 		http.Error(w, "image not found", http.StatusNotFound)
 		return
 	}
-	f, err := os.Open(file)
-	if err != nil {
+	open := openContained
+	if localViewer(r) {
+		open = openLocalContained
+	}
+	f, _, info, ok := open(filepath.Dir(file), filepath.Base(file))
+	if !ok {
 		http.Error(w, "image not found", http.StatusNotFound)
 		return
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		http.Error(w, "image not found", http.StatusNotFound)
-		return
-	}
 	h := w.Header()
 	h.Set("Content-Type", ctype)
 	h.Set("X-Content-Type-Options", "nosniff")

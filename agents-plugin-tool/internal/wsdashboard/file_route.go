@@ -19,13 +19,11 @@ import (
 )
 
 // The file view: GET /s/<reply-id>/file?path=<path> shows a file inside the
-// session's project root, the target a served page's file links open. path
-// is relative to that root, or absolute inside it, as for the image route,
-// whose containment rule it shares: the path must stay inside the root
-// lexically, and the file it resolves to after every symlink must stay
-// inside the resolved root. On top of that the file itself must not be a
-// symlink (Lstat, as the attachment route), and the file opened must be the
-// one Lstat saw. Every file inside the root is served, dotfiles and
+// session's project root, the target a served page's file links open. Local
+// viewers may also read outside it and follow symlinks, except sensitive
+// home paths (fs_local.go); LAN viewers retain lexical and resolved root
+// containment and cannot open symlinked files. The opened file must match
+// the checked identity. Every file inside the root is served, dotfiles and
 // git-ignored ones included, to a loopback viewer and a LAN token holder
 // alike: the token is the user's own and already lets its holder message
 // the session, whose lead reads any file anyway. Every refusal answers 404.
@@ -72,6 +70,11 @@ func FileActions(root, replyID string) func(path string) wswhiteboard.FileAction
 	return func(path string) wswhiteboard.FileAction {
 		if root == "" || path == "" || strings.ContainsRune(path, 0) {
 			return wswhiteboard.FileAction{}
+		}
+		// Keep home-relative targets opaque in shared markup; only a local
+		// request may expand them to the daemon user's home.
+		if strings.HasPrefix(path, "~/") {
+			return wswhiteboard.FileAction{Abs: path}
 		}
 		if rel, ok := relativeInside(root, path); ok && ValidReplyID(replyID) {
 			_, image := imageType(rel)
@@ -131,6 +134,13 @@ func fileViewTargets(root, replyID, base string) wswhiteboard.TextTargets {
 // view, with its path relative to root and its info; false when the file
 // view refuses it.
 func openContained(root, path string) (*os.File, string, os.FileInfo, bool) {
+	return openContainedChecked(root, path, nil)
+}
+
+// check runs after Lstat and symlink resolution, before opening. Keeping
+// authorization between the identity checks catches a parent directory
+// swapped to a sensitive symlink after the caller's initial path check.
+func openContainedChecked(root, path string, check func(full, real string) bool) (*os.File, string, os.FileInfo, bool) {
 	rel, ok := relativeInside(root, path)
 	if !ok {
 		return nil, "", nil, false
@@ -152,6 +162,9 @@ func openContained(root, path string) (*os.File, string, os.FileInfo, bool) {
 		return nil, "", nil, false
 	}
 	if realRel, err := filepath.Rel(realRoot, real); err != nil || !insideRel(realRel) {
+		return nil, "", nil, false
+	}
+	if check != nil && !check(full, real) {
 		return nil, "", nil, false
 	}
 	f, err := os.Open(full)
@@ -212,7 +225,8 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
-	f, rel, info, ok := openContained(s.Project, r.URL.Query().Get("path"))
+	path := r.URL.Query().Get("path")
+	f, rel, info, ok := openViewerFile(r, s.Project, path)
 	if !ok {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
@@ -229,7 +243,7 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		return
 	}
 	lang, _ := requestLang(r)
-	page := fileViewPage{Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(s.Project), rel), Lang: lang, Theme: requestTheme(r)}
+	page := fileViewPage{Rel: filepath.ToSlash(rel), Abs: resolveAgainst(s.Project, rel), Lang: lang, Theme: requestTheme(r)}
 	if info.Size() > fileViewMax {
 		page.Reason = wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		d.writeFilePage(w, "file-none", page)
@@ -250,7 +264,8 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(rel))
-	if ext == ".html" || ext == ".htm" {
+	own := ownRootFile(s.Project, path)
+	if own && (ext == ".html" || ext == ".htm") {
 		if u := d.fsViewURL(replyID, s.Project, rel); u != "" && !dotDenied(s.Project, rel) {
 			h.Set("Cache-Control", "no-store")
 			h.Set("Content-Security-Policy", imageContentSecurityPolicy)
@@ -260,7 +275,11 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 	}
 	switch ext {
 	case ".md", ".markdown":
-		page.HTML = wswhiteboard.RenderText(string(data), fileViewTargets(s.Project, replyID, filepath.Dir(rel)))
+		targets := wswhiteboard.TextTargets{}
+		if own {
+			targets = fileViewTargets(s.Project, replyID, filepath.Dir(rel))
+		}
+		page.HTML = wswhiteboard.RenderText(string(data), targets)
 		d.writeFilePage(w, "file-md", page)
 	default:
 		h.Set("Content-Type", "text/plain; charset=utf-8")

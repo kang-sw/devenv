@@ -24,15 +24,12 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// TestImageRouteServesOnlyInsideTheProjectRoot pins the image route's
-// containment: a file under the session's project root is served, by
-// relative or absolute path; a ".." escape, a symlink pointing outside, a
-// non-image file or a symlink to one, a directory, and a missing file all
-// answer the same 404 without the file's bytes. (An absolute path outside
-// the root is served to a loopback viewer alone, as
-// TestImageRouteServesOutsideImagesToLoopbackViewersOnly pins.)
-func TestImageRouteServesOnlyInsideTheProjectRoot(t *testing.T) {
-	f := startPageFixture(t)
+// TestImageRouteLocalPathsAndLANConfinement pins local traversal and
+// symlink reads and unchanged LAN confinement. Both requested and resolved
+// filenames must have image extensions; directories and missing files fail.
+func TestImageRouteLocalPathsAndLANConfinement(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	_, lan := fsViewers(t, f)
 	outside := filepath.Join(t.TempDir(), "outside")
 	writeFile(t, filepath.Join(f.project, "shot.png"), "PNG-INSIDE")
 	writeFile(t, filepath.Join(f.project, "docs", "deep", "b.JPG"), "JPG-INSIDE")
@@ -44,7 +41,8 @@ func TestImageRouteServesOnlyInsideTheProjectRoot(t *testing.T) {
 	symlinks := os.Symlink(filepath.Join(outside, "secret.png"), filepath.Join(f.project, "escape.png")) == nil &&
 		os.Symlink(filepath.Join(outside), filepath.Join(f.project, "outlink")) == nil &&
 		os.Symlink(filepath.Join(f.project, "notes.txt"), filepath.Join(f.project, "renamed.png")) == nil &&
-		os.Symlink(filepath.Join(f.project, "shot.png"), filepath.Join(f.project, "alias.png")) == nil
+		os.Symlink(filepath.Join(f.project, "shot.png"), filepath.Join(f.project, "alias.png")) == nil &&
+		os.Symlink(filepath.Join(outside, "secret.png"), filepath.Join(f.project, "image.txt")) == nil
 
 	image := func(path string) (int, http.Header, string) {
 		t.Helper()
@@ -69,6 +67,25 @@ func TestImageRouteServesOnlyInsideTheProjectRoot(t *testing.T) {
 	if symlinks {
 		served["alias.png"] = "PNG-INSIDE" // a symlink that stays inside
 	}
+	widened := map[string]string{filepath.Join(outside, "secret.png"): "PNG-OUTSIDE"}
+	rel, err := filepath.Rel(f.project, filepath.Join(outside, "secret.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	widened[rel] = "PNG-OUTSIDE"
+	if symlinks {
+		widened["escape.png"] = "PNG-OUTSIDE"
+		widened["outlink/secret.png"] = "PNG-OUTSIDE"
+	}
+	for path, want := range widened {
+		served[path] = want
+		if rec := serve(f.d, lan, http.MethodGet, "/s/livesession/image?path="+url.QueryEscape(path), ""); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), want) {
+			t.Errorf("LAN image %q = %d %q, want 404", path, rec.Code, rec.Body.String())
+		}
+		if rec := imageAs(f.d, "127.0.0.1:50000", "127.0.0.1:"+strconv.Itoa(f.d.Endpoint().Port), "", "cross-site", path); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), want) {
+			t.Errorf("cross-site local image %q = %d %q, want 404", path, rec.Code, rec.Body.String())
+		}
+	}
 	for path, want := range served {
 		code, h, body := image(path)
 		if code != http.StatusOK || body != want {
@@ -86,19 +103,14 @@ func TestImageRouteServesOnlyInsideTheProjectRoot(t *testing.T) {
 
 	refused := []string{
 		"",
-		"../" + filepath.Base(outside) + "/secret.png",
-		"docs/../../outside/secret.png",
 		"notes.txt",
 		"dir.png",
 		"missing.png",
 		".",
 		"shot.png\x00.png",
 	}
-	if rel, err := filepath.Rel(f.project, filepath.Join(outside, "secret.png")); err == nil {
-		refused = append(refused, rel, filepath.ToSlash(rel))
-	}
 	if symlinks {
-		refused = append(refused, "escape.png", "outlink/secret.png", "renamed.png")
+		refused = append(refused, "renamed.png", "image.txt")
 	}
 	for _, path := range refused {
 		code, _, body := image(path)
@@ -293,13 +305,13 @@ func imageAs(d *Daemon, peer, host, cookie, fetchSite, path string) *httptest.Re
 }
 
 // TestImageRouteServesOutsideImagesToLoopbackViewersOnly pins the route's
-// one widening: a browser on this machine is served an image outside the
-// root by its absolute path, symlinks followed to a file that is an image
+// local widening: a browser on this machine is served an image outside the
+// root by absolute or relative path, symlinks followed to a file that is an image
 // too, under the image CSP with Cross-Origin-Resource-Policy: same-origin.
 // A request the user started (Sec-Fetch-Site: none) is served too. A LAN
 // viewer with the token, a request another site started (Sec-Fetch-Site
 // same-site or cross-site), a non-image, a
-// directory, a missing file, a relative escape, a symlink to a non-image,
+// directory, a missing file, a symlink to a non-image,
 // and a UNC or device path (refused on its spelling, even where it names a
 // real file) all get the uniform 404. An in-root image is unchanged: no
 // CORP header, and no Sec-Fetch-Site check.
@@ -320,7 +332,11 @@ func TestImageRouteServesOutsideImagesToLoopbackViewersOnly(t *testing.T) {
 	symlinks := os.Symlink(secret, filepath.Join(outside, "alias.png")) == nil &&
 		os.Symlink(filepath.Join(outside, "notes.txt"), filepath.Join(outside, "renamed.png")) == nil
 
-	served := []string{secret, filepath.ToSlash(secret)}
+	rel, err := filepath.Rel(f.project, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := []string{secret, filepath.ToSlash(secret), rel, filepath.ToSlash(rel)}
 	if symlinks {
 		served = append(served, filepath.Join(outside, "alias.png"))
 	}
@@ -348,7 +364,8 @@ func TestImageRouteServesOutsideImagesToLoopbackViewersOnly(t *testing.T) {
 		"non-image":                         imageAs(f.d, peer, local, "", "", filepath.Join(outside, "notes.txt")),
 		"directory":                         imageAs(f.d, peer, local, "", "", filepath.Join(outside, "dir.png")),
 		"missing":                           imageAs(f.d, peer, local, "", "", filepath.Join(outside, "missing.png")),
-		"relative escape":                   imageAs(f.d, peer, local, "", "", "../"+filepath.Base(outside)+"/secret.png"),
+		"LAN relative escape":               imageAs(f.d, lanPeer, lanHost, token, "", rel),
+		"cross-site relative escape":        imageAs(f.d, peer, local, "", "cross-site", rel),
 		"double-slash spelling of the file": imageAs(f.d, peer, local, "", "", "/"+filepath.ToSlash(secret)),
 		"UNC":                               imageAs(f.d, peer, local, "", "", `\\server\share\x.png`),
 		"UNC, forward slashes":              imageAs(f.d, peer, local, "", "", "//server/share/x.png"),
