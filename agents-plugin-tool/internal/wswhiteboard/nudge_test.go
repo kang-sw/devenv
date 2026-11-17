@@ -74,10 +74,12 @@ func TestStaleNudgeResearchingUsesUnchangedGeneralPolicy(t *testing.T) {
 		t.Fatalf("research stale debounce changed: %s", out.Info)
 	}
 	// Open asks, not StateWaiting, exclude a topic; agent activity refreshes age.
-	applyAt(t, st, `<wb:topic name="A"><wb:add class="check"><wb:title>Question</wb:title></wb:add></wb:topic><wb:topic name="B"><wb:log>Fresh evidence</wb:log></wb:topic>`, testNow.Add(119*time.Minute))
-	out = applyAt(t, st, "", testNow.Add(120*time.Minute))
+	out = applyAt(t, st, `<wb:topic name="A"><wb:add class="check"><wb:title>Question</wb:title></wb:add></wb:topic><wb:topic name="B"><wb:log>Fresh evidence</wb:log></wb:topic>`, testNow.Add(119*time.Minute))
 	if want := "3 of 5 open topics unchanged for 60+ min (C, D, E); if finished, close them with wb:close and a one-line result."; out.Info != want {
 		t.Fatalf("research altered open-item/activity criteria: %q", out.Info)
+	}
+	if out := applyAt(t, st, "", testNow.Add(120*time.Minute)); out.Info != "" {
+		t.Fatalf("unchanged revision repeated stale notice: %q", out.Info)
 	}
 }
 
@@ -118,7 +120,7 @@ func TestStaleNudgeCapsListedNames(t *testing.T) {
 	}
 }
 
-func TestStaleNudgeAtMostOncePerHour(t *testing.T) {
+func TestStaleNudgeOncePerBoardRevision(t *testing.T) {
 	st := staleBoard(t)
 	first := testNow.Add(61 * time.Minute)
 	if out := applyAt(t, st, ``, first); nudgeOf(out) == "" {
@@ -127,8 +129,8 @@ func TestStaleNudgeAtMostOncePerHour(t *testing.T) {
 	if out := applyAt(t, st, ``, first.Add(59*time.Minute)); nudgeOf(out) != "" {
 		t.Fatalf("a nudge within the hour must not repeat; info = %q", nudgeOf(out))
 	}
-	if out := applyAt(t, st, ``, first.Add(60*time.Minute)); nudgeOf(out) == "" {
-		t.Fatalf("after the hour the nudge must return")
+	if out := applyAt(t, st, ``, first.Add(60*time.Minute)); nudgeOf(out) != "" {
+		t.Fatalf("unchanged board must stay quiet; info = %q", nudgeOf(out))
 	}
 }
 

@@ -238,7 +238,7 @@ func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView)
 	prior := map[string]VersionRef{}
 	priorText := map[string]string{}
 	for i, e := range doc.Entries {
-		if panelEvent(e) {
+		if panelEvent(e) || staleReceipt(e) || internalRevisionMarker(e) {
 			continue
 		}
 		v := viewOf(e)

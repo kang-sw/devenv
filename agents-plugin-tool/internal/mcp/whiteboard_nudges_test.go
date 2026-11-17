@@ -288,15 +288,15 @@ func TestWhiteboardNudgeRestartResumeIsolationAndCopy(t *testing.T) {
 	}
 	f.n.alive = func(int) bool { return true }
 	next := f.n.process(f.target, nudgeNow.Add(8*time.Hour))
-	if len(f.queue(t)) != 1 || !next.Equal(nudgeNow.Add(8*time.Hour+30*time.Minute)) {
+	if len(f.queue(t)) != 1 || !next.IsZero() {
 		t.Fatal("catch-up accounting", next)
 	}
 	restarted := NewWhiteboardNudges(f.n.dir, nil, io.Discard)
-	restarted.process(f.target, nudgeNow.Add(8*time.Hour))
+	restarted.process(f.target, nudgeNow.Add(16*time.Hour))
 	if len(f.queue(t)) != 1 {
-		t.Fatal("restart replayed missed intervals")
+		t.Fatal("restart replayed missed intervals on an unchanged board")
 	}
-	// A second board's clock and receipts do not share this one's debounce.
+	// A second board's clock and receipts do not share this one's suppression.
 	dest := nudgeTarget{"nudge-destination-lead", f.target.root}
 	nudgeWriteJSON(t, restarted.dirs().partPath(dest.key, partKey), f.record)
 	row := f.row

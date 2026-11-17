@@ -296,6 +296,11 @@ type State struct {
 	// nudge (RFC 3339); empty, as on a store written before the field, is
 	// never.
 	LastNudgeAt string `json:"last_nudge_at,omitempty"`
+	// MetadataRevision distinguishes successive quiet metadata changes,
+	// including a change followed by a revert. It is not a topic entry.
+	MetadataRevision uint64 `json:"metadata_revision,omitempty"`
+	// StaleNudgeRevision is a receipt, not authored topic history.
+	StaleNudgeRevision string `json:"stale_nudge_revision,omitempty"`
 }
 
 // Env carries the side effects Apply needs, so the store stays testable.
@@ -825,6 +830,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
+	work.markMetadataRevision(out.Effects)
 	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
 	return work, out, updates
 }

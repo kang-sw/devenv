@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-const noticeDebounce = 30 * time.Minute
-
 type noticeCoverage struct {
 	TopicDir string `json:"topic_dir"`
 	RunID    string `json:"run_id"`
@@ -25,6 +23,7 @@ type boardNotice struct {
 	SentAt      string           `json:"sent_at"`
 	Reasons     []string         `json:"reasons"`
 	HourlyEpoch string           `json:"hourly_epoch,omitempty"`
+	Revision    string           `json:"revision,omitempty"`
 	Covered     []noticeCoverage `json:"covered"`
 }
 
@@ -99,14 +98,23 @@ func sooner(a, b time.Time) time.Time {
 }
 
 func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) noticePlan {
-	p := noticePlan{receipt: boardNotice{V: 1, ReplyID: reply, Covered: []noticeCoverage{}}}
+	p := noticePlan{receipt: boardNotice{V: 1, ReplyID: reply, Revision: s.boardRevision(), Covered: []noticeCoverage{}}}
 	if _, ok := stateTimestamp(now); !ok {
 		return p
 	}
 	views := s.TopicStates()
 	epoch, activation := s.hourlyEpoch()
-	last := map[noticeCoverage]time.Time{}
+	// A matching older receipt is not evidence that the current revision was
+	// notified: authority can return to an earlier fingerprint after a revert.
+	// Retain only the newest receipt for each covered run and hourly epoch.
+	type coveredReceipt struct {
+		id       int
+		revision string
+	}
+	covered := map[noticeCoverage]coveredReceipt{}
 	var hourly time.Time
+	var hourlyID int
+	hourlyRevision := ""
 	future := false
 	for _, event := range s.stateEvents() {
 		n, ok := parseBoardNotice(event.entry, reply)
@@ -118,13 +126,19 @@ func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) 
 			future = true
 		}
 		// Every full overdue section covers its entries, including hourly-only sends.
+		id := folderNumber(event.entry.ID, "e")
 		for _, c := range n.Covered {
-			if sent.After(last[c]) {
-				last[c] = sent
+			if id > covered[c].id {
+				covered[c] = coveredReceipt{id, n.Revision}
 			}
 		}
-		if n.HourlyEpoch == epoch && slices.Contains(n.Reasons, "hourly") && sent.After(hourly) {
-			hourly = sent
+		if n.HourlyEpoch == epoch && slices.Contains(n.Reasons, "hourly") {
+			if sent.After(hourly) {
+				hourly = sent
+			}
+			if id > hourlyID {
+				hourlyID, hourlyRevision = id, n.Revision
+			}
 		}
 	}
 	topics := make([]string, 0, len(dirs))
@@ -161,19 +175,15 @@ func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) 
 		overdue = append(overdue, topic)
 		c := noticeCoverage{dirs[topic], run.ID, v.State.Entry}
 		p.receipt.Covered = append(p.receipt.Covered, c)
-		due := now
-		if at, ok := last[c]; ok {
-			due = at.Add(noticeDebounce)
-		}
-		p.next = sooner(p.next, due)
-		if !now.Before(due) {
+		if covered[c].id == 0 || covered[c].revision != p.receipt.Revision {
+			p.next = sooner(p.next, now)
 			trigger = true
 		}
 	}
 	if trigger {
 		p.receipt.Reasons = append(p.receipt.Reasons, "overdue")
 	}
-	if eligible && epoch != "" {
+	if eligible && epoch != "" && (hourlyID == 0 || hourlyRevision != p.receipt.Revision) {
 		due := activation.Add(time.Hour)
 		if !hourly.IsZero() {
 			due = hourly.Add(time.Hour)
