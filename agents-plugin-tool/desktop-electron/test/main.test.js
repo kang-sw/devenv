@@ -269,6 +269,22 @@ test('native navigation, redirect, initial subframe requests and popup policies'
   assert.deepEqual(w.popup({ url: 'https://example.com/popup' }), { action: 'deny' });
   assert.equal(f.opened.at(-1), 'https://example.com/popup');
 });
+test('session request guard exempts only the DevTools frontend, not dashboard frames', async () => {
+  const f = await fixture(undefined, 'win32');
+  const dashboard = f.views[0].webContents;
+  dashboard.devToolsWebContents = { id: 99 };
+  const request = (url, webContentsId, resourceType = 'mainFrame') => {
+    let decision;
+    f.session.webRequest.handler({ url, resourceType, webContentsId }, value => { decision = value; });
+    return decision;
+  };
+  for (const url of ['devtools://devtools/bundled/devtools_app.html?remoteBase=https://example.com/',
+    'chrome-devtools://devtools/bundled/inspector.html', 'https://example.com/frame']) {
+    assert.deepEqual(request(url, 99), {});
+    assert.deepEqual(request(url, dashboard.id, 'subFrame'), { cancel: true });
+  }
+  assert.deepEqual(request('devtools://devtools/bundled/devtools_app.html', undefined), { cancel: true });
+});
 test('native same-core action is one explicit attempt, never renderer IPC; refusal retains connection', async () => {
   const requests = [];
   const f = await fixture(async (options, deps) => {

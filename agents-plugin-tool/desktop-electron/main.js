@@ -192,6 +192,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : localPages.includes(url))) retained = target;
     });
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      // DevTools shares this session, but its frontend is not dashboard content.
+      if (wc.devToolsWebContents && details.webContentsId === wc.devToolsWebContents.id) return callback({});
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
       if (details.resourceType === 'mainFrame' && localPages.includes(details.url)) return callback({});
       const action = destination(details.url, pin, details.resourceType === 'mainFrame');
