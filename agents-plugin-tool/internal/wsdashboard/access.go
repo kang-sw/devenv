@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -78,7 +79,7 @@ func (d *Daemon) lanToken() (string, error) {
 // persistedSecret returns the secret in the state directory's file name,
 // minting and persisting a new one when the file is missing or blank; the
 // bool reports a mint. It runs on every guarded request, so a hit holds no
-// lock and opens no file: readSecret serves it from memory after one stat.
+// lock and reads no bytes: readSecret checks readability and stats the file.
 // tokenMu serializes only minting, and the file is read again under it, so
 // concurrent first requests agree on one secret.
 func (d *Daemon) persistedSecret(name string) (string, bool, error) {
@@ -107,10 +108,29 @@ func (d *Daemon) persistedSecret(name string) (string, bool, error) {
 // request after a rotation sees the new secret or its absence. Only a
 // rewrite that keeps mode, size, mtime and file identity (an in-place edit
 // that restores the old stamp, as touch -r does) goes unseen; every writer
-// here replaces the file with a fresh mtime. Any other stat or read failure
-// is returned, and the caller refuses.
+// here replaces the file with a fresh mtime. A read-only open/close on every
+// call also checks Windows ACL changes, which need not change stat metadata.
+// This keeps cached bytes without a revocation grace interval or per-request
+// content reads. Any open, close, stat or read failure is returned and refused.
 func (d *Daemon) readSecret(name string) (string, error) {
-	raw, err := wsstate.ReadFileCached(filepath.Join(d.dir, name))
+	return d.readSecretWithOpen(name, os.Open)
+}
+
+// readSecretWithOpen keeps the readability check injectable for ACL failures
+// that leave stat metadata unchanged.
+func (d *Daemon) readSecretWithOpen(name string, open func(string) (*os.File, error)) (string, error) {
+	path := filepath.Join(d.dir, name)
+	f, err := open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	raw, err := wsstate.ReadFileCached(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
