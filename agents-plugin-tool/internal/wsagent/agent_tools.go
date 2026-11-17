@@ -815,6 +815,8 @@ func (r *Runner) expire(id string) bool {
 	}
 	if _, err := r.CloseConversation(id); err != nil && !errors.Is(err, errClosed) {
 		fmt.Fprintf(r.opts.Log, "agent %s: expire: %v\n", id, err)
+		// A later heartbeat tries again.
+		c.do(func() { c.expiring = false })
 		return false
 	}
 	for _, d := range append(desc, id) {

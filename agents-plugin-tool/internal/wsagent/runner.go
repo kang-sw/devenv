@@ -192,9 +192,9 @@ type Runner struct {
 	// expiry is childWaitingExpiry's value, read once (expiryOnce).
 	expiryOnce sync.Once
 	expiry     time.Duration
-	quit          chan struct{}
-	wg            sync.WaitGroup
-	once          sync.Once
+	quit       chan struct{}
+	wg         sync.WaitGroup
+	once       sync.Once
 	// Separate from mu: held through summary mutation/write fencing without
 	// blocking the runner's ordinary List/Get or spawn snapshot reads.
 	summaryMu     sync.Mutex
