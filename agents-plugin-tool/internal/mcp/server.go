@@ -2097,7 +2097,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatTicketCreate(result)+s.indexPiggyback(root, wsindex.OpRegister, strings.TrimSuffix(filepath.Base(result.Path), ".md"), nil), nil)
+		return toolTextResponse(req.ID, strings.ReplaceAll(formatTicketCreate(result), "ws/", s.runtimeNamespace()+"/")+s.indexPiggyback(root, wsindex.OpRegister, strings.TrimSuffix(filepath.Base(result.Path), ".md"), nil), nil)
 	case "tickets.template":
 		typeStr, _ := params.Arguments["type"].(string)
 		text, err := wsdoc.TicketTemplate(typeStr)
@@ -2141,7 +2141,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// co-located real edits under a message that describes only the flip.
 		// The write rides the caller's own next ordinary ws/git.commit, the
 		// same guarded chokepoint every other ticket commit uses.
-		return toolTextResponse(req.ID, formatSageGate(result), nil)
+		return toolTextResponse(req.ID, strings.ReplaceAll(formatSageGate(result), "ws/", s.runtimeNamespace()+"/"), nil)
 	case "tickets.sage_stamp":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2165,7 +2165,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatSageRecord(result)+s.indexPiggyback(root, wsindex.OpRegister, stem, nil), nil)
+		return toolTextResponse(req.ID, strings.ReplaceAll(formatSageRecord(result), "ws/", s.runtimeNamespace()+"/")+s.indexPiggyback(root, wsindex.OpRegister, stem, nil), nil)
 	case "tickets.verify":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -3685,7 +3685,7 @@ func formatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
 func ticketMutateNextInstruction(verb string, result wsdoc.TicketMutateResult) string {
 	switch {
 	case verb == "moved" && strings.Contains(filepath.ToSlash(result.NewPath), "/ready/"):
-		return "Call tickets.sage_gate(stem, landing) next to resolve the sage-review gate for this promotion."
+		return "The sage-review gate must be resolved before moving a ticket to ready; if it was not resolved before this move, resolve it before promotion is complete."
 	case verb == "closed" && strings.Contains(result.Tip, "unresolved phase"):
 		return "This is a soft warning only (no block); resolve or explicitly accept the unresolved phase(s) before treating this ticket as truly closed."
 	default:
@@ -3846,7 +3846,7 @@ const sageGatePostureUncommittedNote = " Any sage-review posture this call wrote
 func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	switch result.Action {
 	case "skip":
-		return "next_instruction: Sage review gate resolved with no further review required; proceed to handoff." + sageGatePostureUncommittedNote
+		return "next_instruction: Sage review gate resolved with no further review required; proceed with the landing." + sageGatePostureUncommittedNote
 	case "stop_blocked":
 		// The recovery sentence exists because the bare "stop" read as a dead
 		// end while the ticket skill's reviewer-spawn step covers "each stage
@@ -3863,19 +3863,19 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 		// guaranteed to be write-free. The note's hedged "Any sage-review
 		// posture this call wrote" stays true on the branches that wrote
 		// nothing, which is why it can be attached unconditionally.
-		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker. This gate returns stop_blocked while the posture is blocked and never names a reviewer again, so a later invocation whose edits address the blocker spawns that stage's reviewer via On: Reviewer Spawn and clears the posture with ws/tickets.sage_stamp carrying fresh verdicts; read which stage is blocked from the ticket's sage-review-* frontmatter, which this result does not carry." + sageGatePostureUncommittedNote
+		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker. The blocked stage is recorded in the ticket's sage-review-* frontmatter. After addressing it, rerun that stage's reviewer and call ws/tickets.sage_stamp with fresh verdicts; this gate cannot clear a blocked posture." + sageGatePostureUncommittedNote
 	case "stop_missing_route_facts":
-		return "next_instruction: This ticket has no ## Route Facts section, and the implementation route reads its facts from there, so it cannot be routed as promoted. Render the `ticket-fact-populator` playbook on this ticket, apply what it returns, then call tickets.sage_gate again with the same stem/landing; the section's values are the completeness reviewer's subject, so no review runs until it exists." + sageGatePostureUncommittedNote
+		return "next_instruction: This ticket has no ## Route Facts section, and the implementation route reads its facts from there, so it cannot be routed as promoted. Render the `ticket-fact-populator` playbook on this ticket, apply what it returns, then call ws/tickets.sage_gate again with the same stem/landing; the section's values are the completeness reviewer's subject, so no review runs until it exists." + sageGatePostureUncommittedNote
 	case "stop_open_decision_queue":
 		// No posture note: this stop precedes every posture write on both
 		// landings, so the call wrote nothing.
-		return "next_instruction: This ticket still has a ## Open Decision Queue section, whose items are unsettled working state rather than decisions, so it cannot be reviewed or promoted yet. Settle the queue with the user (announced defaults and technical decisions acknowledged, every policy question settled), move each settled item into its home section, delete the section, then call tickets.sage_gate again with the same stem/landing."
+		return "next_instruction: This ticket still has a ## Open Decision Queue section, whose items are unsettled working state rather than decisions, so it cannot be reviewed or promoted yet. Settle the queue (announced defaults and technical decisions acknowledged, every policy question settled), move each settled item into its home section, delete the section, then call ws/tickets.sage_gate again with the same stem/landing."
 	case "ask":
-		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
+		return "next_instruction: Resolve ask_prompt, then call ws/tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":
-		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "." + sageGatePostureUncommittedNote
+		return "next_instruction: Run the listed reviewer(s), then call ws/tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "." + sageGatePostureUncommittedNote
 	case "check_review_required":
-		return "next_instruction: Inspect the ticket diff against review_baseline and decide whether to rerun the listed sage review stage(s), then call tickets.sage_gate again with the same stem/landing plus answer=yes|no; do not treat the prior completed review as current until that decision is made." + sageGatePostureUncommittedNote
+		return "next_instruction: Inspect the ticket diff against review_baseline and decide whether to rerun the listed sage review stage(s), then call ws/tickets.sage_gate again with the same stem/landing plus answer=yes|no; do not treat the prior completed review as current until that decision is made." + sageGatePostureUncommittedNote
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}
@@ -3931,12 +3931,12 @@ func formatSageRecord(result wsdoc.SageRecordResult) string {
 		// with no missing issue required, so the ungated text told the caller to
 		// weigh the criticality of a decision the same message reported as absent.
 		if result.Missing > 0 {
-			b.WriteString(" Recorded but not committed; commit this posture change via ws/git.commit before proceeding. The concern with a missing decision is surfaced — escalate to block manually only if the missing decision is judged critical.")
+			b.WriteString(" Recorded but not committed; include this posture change in the caller's next commit. The concern with a missing decision is surfaced — escalate to block manually only if the missing decision is judged critical.")
 		} else {
-			b.WriteString(" Recorded but not committed; commit this posture change via ws/git.commit before proceeding.")
+			b.WriteString(" Recorded but not committed; include this posture change in the caller's next commit.")
 		}
 	default:
-		b.WriteString(" Sage review posture recorded but not committed; commit this change via ws/git.commit, then proceed to handoff.")
+		b.WriteString(" Sage review posture recorded but not committed; include this change in the caller's next commit.")
 	}
 	return b.String()
 }

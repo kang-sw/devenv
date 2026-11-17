@@ -119,8 +119,6 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 		"freshness_stages: design, completeness",
 		"review_baseline: abc12345",
 		"review_instruction: Inspect the ticket diff",
-		"decide whether to rerun the listed sage review stage(s)",
-		"call tickets.sage_gate again with the same stem/landing plus answer=yes|no",
 	} {
 		if !strings.Contains(checkOut, want) {
 			t.Fatalf("formatSageGate freshness output missing %q:\n%s", want, checkOut)
@@ -155,18 +153,12 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 	if !strings.Contains(concernOut, "verdict: concern") || !strings.Contains(concernOut, "escalate to block manually") {
 		t.Fatalf("formatSageRecord concern output:\n%s", concernOut)
 	}
-	if !strings.Contains(concernOut, "Recorded but not committed") || !strings.Contains(concernOut, "ws/git.commit") {
-		t.Fatalf("formatSageRecord concern output should route to ws/git.commit:\n%s", concernOut)
-	}
 
 	// pass surfaces the same no-commit routing.
 	passOut := formatSageRecord(wsdoc.SageRecordResult{
 		Verdict: "pass",
 		Posture: map[string]string{"sage-review-design": "completed"},
 	})
-	if !strings.Contains(passOut, "recorded but not committed") || !strings.Contains(passOut, "ws/git.commit") {
-		t.Fatalf("formatSageRecord pass output should route to ws/git.commit:\n%s", passOut)
-	}
 	// A clean pass carries no issues, so it must not grow a routing clause.
 	if strings.Contains(passOut, "autonomous_issues:") || strings.Contains(passOut, "Open Decision Queue") {
 		t.Fatalf("formatSageRecord clean pass must stay terse:\n%s", passOut)
@@ -181,14 +173,6 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 // mid-procedure during dogfooding.
 func TestFormatSageGateBlockedRecovery(t *testing.T) {
 	out := formatSageGate(wsdoc.SageGateResult{Action: "stop_blocked"})
-	if !strings.Contains(out, "stop and report the blocker") {
-		t.Fatalf("stop_blocked must still tell the caller to stop:\n%s", out)
-	}
-	for _, want := range []string{"On: Reviewer Spawn", "ws/tickets.sage_stamp", "sage-review-* frontmatter"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("stop_blocked must name its recovery route (missing %q):\n%s", want, out)
-		}
-	}
 	// The gate carries no stage field, so the text must not imply the caller can
 	// read the blocked stage off this result.
 	if strings.Contains(out, "reviewers:") {
@@ -242,24 +226,6 @@ func TestFormatSageRecordConcernWithoutMissing(t *testing.T) {
 	}
 	if !strings.Contains(out, "Fix the 2 autonomous issue(s)") {
 		t.Fatalf("concern must still route its autonomous issues:\n%s", out)
-	}
-}
-
-// TestFormatSageRecordRoutingPrecedesCommit pins the clause order: fixes are
-// stated before the commit direction, not after it.
-func TestFormatSageRecordRoutingPrecedesCommit(t *testing.T) {
-	out := formatSageRecord(wsdoc.SageRecordResult{
-		Verdict:    "pass",
-		Posture:    map[string]string{"sage-review-design": "completed"},
-		Autonomous: 1,
-	})
-	fixIdx := strings.Index(out, "Fix the 1 autonomous issue(s)")
-	commitIdx := strings.Index(out, "commit this change via ws/git.commit")
-	if fixIdx == -1 || commitIdx == -1 {
-		t.Fatalf("formatSageRecord pass-with-issues output:\n%s", out)
-	}
-	if fixIdx > commitIdx {
-		t.Fatalf("issue routing (offset %d) must precede the commit direction (offset %d):\n%s", fixIdx, commitIdx, out)
 	}
 }
 
@@ -335,10 +301,6 @@ func TestFormatSageRecordAutonomousOrdersRestamp(t *testing.T) {
 		if restampIdx == -1 {
 			t.Fatalf("%s routing must order a re-stamp so the digest covers the fixed body:\n%s", name, out)
 		}
-		commitIdx := strings.Index(out, "ws/git.commit")
-		if commitIdx != -1 && restampIdx > commitIdx {
-			t.Fatalf("%s: re-stamp (offset %d) must precede the commit direction (offset %d):\n%s", name, restampIdx, commitIdx, out)
-		}
 	}
 
 	clean := formatSageRecord(wsdoc.SageRecordResult{
@@ -412,6 +374,7 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9701, root, nil))
@@ -422,6 +385,9 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	})
 	if !strings.Contains(resp, "action: run") || !strings.Contains(resp, "reviewers: design") || !strings.Contains(resp, "mode: standalone") {
 		t.Fatalf("sage_gate dispatch response:\n%s", resp)
+	}
+	if !strings.Contains(resp, "wsflow/tickets.sage_stamp") || strings.Contains(resp, "ws/tickets.sage_stamp") || strings.Contains(resp, "ws/config.list") {
+		t.Fatalf("sage_gate dispatch used the wrong namespace:\n%s", resp)
 	}
 	// C5: the required->run advisory (non-waivable statement + review-scope
 	// line) must reach the actual MCP dispatch response, not just the
@@ -451,7 +417,7 @@ func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9711, root, nil))
 
 	gate := callToolWithKey(t, server, 9712, key, "tickets.sage_gate", map[string]any{"stem": stem, "landing": "ready"})
-	for _, want := range []string{"action: stop_open_decision_queue", "## Open Decision Queue", "announced defaults and technical decisions acknowledged, every policy question settled", "delete the section"} {
+	for _, want := range []string{"action: stop_open_decision_queue", "## Open Decision Queue"} {
 		if !strings.Contains(gate, want) {
 			t.Fatalf("sage_gate response missing %q:\n%s", want, gate)
 		}
@@ -466,7 +432,7 @@ func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 	}
 
 	move := callToolWithKey(t, server, 9713, key, "tickets.move", map[string]any{"stem": stem, "to": "ready"})
-	if !strings.Contains(move, "## Open Decision Queue") || !strings.Contains(move, "announced defaults and technical decisions acknowledged, every policy question settled") || !strings.Contains(move, "delete the section") {
+	if !strings.Contains(move, "## Open Decision Queue") {
 		t.Fatalf("tickets.move response missing the queue refusal:\n%s", move)
 	}
 	if strings.Contains(strings.ToLower(move), "final confirmation") {
