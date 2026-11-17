@@ -51,6 +51,15 @@ func isAgentWorkerProfile(name string) bool {
 	return ok && agentWorkerBackends[backend]
 }
 
+// RemovesSubagents reports whether rec's launches remove the harness's
+// native subagent tool (StartSpec.RemoveSubagents), so that it delegates
+// through agent.spawn alone: a hosted lead and an agent.spawn child do.
+// The internal and dashboard profiles that rely on the native tool (the
+// Claude tracker support profile, whose only tool it is) keep it.
+func RemovesSubagents(rec Record) bool {
+	return rec.Lead || isAgentWorkerProfile(rec.Profile)
+}
+
 // MaxSpawnWidth caps an agent's awake direct children; a sleeping child
 // does not count, and a wake through Deliver ignores the cap.
 const MaxSpawnWidth = 99

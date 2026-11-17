@@ -144,7 +144,7 @@ func TestClaudeInitShapeDemotes(t *testing.T) {
 		"commands without compact": {func(i map[string]any) { i["slash_commands"] = []string{"review"} }, []CapabilityItem{ItemCompaction}},
 		"no command list":          {func(i map[string]any) { delete(i, "slash_commands") }, nil},
 		"no model":                 {func(i map[string]any) { delete(i, "model") }, []CapabilityItem{ItemModelEffort}},
-		"no tools, lead removal already unsupported": {func(i map[string]any) { delete(i, "tools") }, nil},
+		"no tools":                 {func(i map[string]any) { delete(i, "tools") }, []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval}},
 	} {
 		t.Run("lead "+name, func(t *testing.T) {
 			caps := lead(tc.edit)
@@ -187,6 +187,52 @@ func TestClaudeInitShapeDemotes(t *testing.T) {
 	evs := newClaudeMapper(fixtureWorkerSpec(t)).mapLine(raw, nopReplies{})
 	if len(evs) != 1 || evs[0].Fatal == nil {
 		t.Fatalf("a tool outside the profile still refuses the launch: %+v", evs)
+	}
+}
+
+// TestClaudeInitShapeSubtractsRemovedTools: the tools a launch removed on
+// purpose are subtracted from the expected init tool set, so their absence
+// demotes nothing, while a removed tool the init still lists (the removal
+// did not take, or a process started without it rejoined) demotes tool and
+// subagent removal for a lead and refuses a worker's launch.
+func TestClaudeInitShapeSubtractsRemovedTools(t *testing.T) {
+	removal := []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval}
+	lead := leadSpec()
+	lead.RemoveSubagents = true
+	for name, tc := range map[string]struct {
+		tools []string
+		want  []CapabilityItem
+	}{
+		"removed":           {[]string{"Bash", "Read"}, nil},
+		"still listed":      {[]string{"Task", "Bash", "Read"}, removal},
+		"still listed, new": {[]string{"Agent", "Bash", "Read"}, removal},
+	} {
+		t.Run("lead "+name, func(t *testing.T) {
+			init := fixtureInit(t, "claude-lead-turn-2.1.326.jsonl")
+			init["tools"] = tc.tools
+			if got := resolveFixture(t, lead, init).Demoted; !slices.Equal(got, tc.want) {
+				t.Fatalf("demoted %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// A worker profile that lists the subagent tool: the launch's removal
+	// wins, so the init without it is no mismatch, and with it the leak
+	// refuses the launch.
+	worker := claudeSpec(t, `{"backend":"claude","tools":["Read","Agent"]}`)
+	worker.RemoveSubagents = true
+	init := fixtureInit(t, "claude-worker-turn-2.1.326.jsonl")
+	init["tools"] = []string{"Read"}
+	if got := resolveFixture(t, worker, init).Demoted; len(got) != 0 {
+		t.Fatalf("a removed profile tool missing from init: demoted %v", got)
+	}
+	for _, leaked := range []string{"Agent", "Task"} {
+		init["tools"] = []string{"Read", leaked}
+		raw, _ := json.Marshal(init)
+		evs := newClaudeMapper(worker).mapLine(raw, nopReplies{})
+		if len(evs) != 1 || evs[0].Fatal == nil {
+			t.Fatalf("a removed tool %s the init lists must refuse the worker's launch: %+v", leaked, evs)
+		}
 	}
 }
 

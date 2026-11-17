@@ -58,6 +58,7 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 	spec.Model, spec.Effort, spec.SessionID = "opus", "high", "resume-id"
 	spec.Instructions = "/must/not/append"
 	spec.WSMCP = &MCPCommand{Command: "/must/not/replace/user/mcp"}
+	spec.RemoveSubagents = RemovesSubagents(Record{Backend: BackendClaude, Lead: true})
 	for _, mode := range []string{"", "default", "isolated"} {
 		t.Run("mode="+mode, func(t *testing.T) {
 			spec.Lead.PluginIsolation = mode
@@ -79,6 +80,8 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 				"--plugin-dir": bundle, "--permission-mode": "plan", "--permission-prompt-tool": "stdio",
 				"--model": "opus", "--effort": "high", "--resume": "resume-id",
 				"--input-format": "stream-json", "--output-format": "stream-json",
+				// Every isolation mode removes the native subagent tool alone.
+				"--disallowedTools": "Agent,Task",
 			} {
 				if got, ok := flagValue(args, flag); !ok || got != value {
 					t.Errorf("%s = %q (present %v), want %q", flag, got, ok, value)

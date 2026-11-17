@@ -113,6 +113,8 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		Cwd:          rec.Cwd,
 		Instructions: instructions,
 		Env:          environ(),
+		// An agent.spawn child delegates through agent.spawn only.
+		RemoveSubagents: RemovesSubagents(rec),
 	}
 	if attach && len(def.WSTools) > 0 {
 		// The mapper needs the original ws tool surface, not a new bridge.
@@ -269,6 +271,10 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		SessionFile: rec.SessionFile,
 		Env:         environ(),
 		Holder:      holder,
+		// A hosted lead delegates through agent.spawn only. A rejoin builds
+		// no command line; the replayed init's shape shows whether the
+		// running process was started without the tool.
+		RemoveSubagents: RemovesSubagents(rec),
 		Lead: &LeadSpec{
 			DaemonVersion:   c.r.opts.DaemonVersion,
 			PermissionMode:  rec.PermissionMode,

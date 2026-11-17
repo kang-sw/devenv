@@ -43,9 +43,9 @@ func shortActionGrace(t *testing.T) {
 }
 
 // TestLeadSpawnRunsUnderAHolder: a lead's first message launches a holder
-// and spawns the harness under it with the hosted-session environment, the
-// session's row names the spawned process, and a turn runs end to end
-// through the real backend and mapper.
+// and spawns the harness under it with the hosted-session environment and
+// without the native subagent tool, the session's row names the spawned
+// process, and a turn runs end to end through the real backend and mapper.
 func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 	h := newLeadHarness(t).start()
 	st := h.lead(BackendClaude, LeadOptions{Model: "opus", Effort: "high", PermissionMode: "plan"})
@@ -70,7 +70,7 @@ func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 	if spec.Argv[0] != "/opt/harness/claude" || spec.Cwd != h.root || spec.Mode != "pipe" {
 		t.Fatalf("spawn = %+v", spec)
 	}
-	for flag, want := range map[string]string{"--permission-prompt-tool": "stdio", "--permission-mode": "plan", "--model": "opus", "--effort": "high"} {
+	for flag, want := range map[string]string{"--permission-prompt-tool": "stdio", "--permission-mode": "plan", "--model": "opus", "--effort": "high", "--disallowedTools": "Agent,Task"} {
 		if got, ok := flagValue(spec.Argv, flag); !ok || got != want {
 			t.Fatalf("%s = %q (present %v), want %q: %v", flag, got, ok, want, spec.Argv)
 		}
