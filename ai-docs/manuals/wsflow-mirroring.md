@@ -32,6 +32,12 @@ Before editing any full ws lead skill or shared lead playbook:
    verification, or the exclusion rationale need updates.
 5. Keep wsflow distributed text non-ws-aware. Users should see wsflow names,
    wsflow skill invocations, and wsflow MCP notation.
+6. Any change under `agents-plugin/rsrc/`, `skills/`, or `hooks/` also
+   regenerates the Pi archives in the same push:
+   `python3 agents-plugin-pi/scripts/prepare-workflow-bundles.py` and
+   `python3 agents-plugin-pi/scripts/prepare-native-payload.py --first-party-only`,
+   output staged with the change. The `wsrsrc` mirror tests pass without it;
+   only CI's workflow bundle freshness step catches the stale archive.
 
 ## Shipped wsflow Skills
 
