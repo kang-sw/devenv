@@ -3,7 +3,7 @@
  *
  * §2 invariant (verbatim, carried into the lead guide's verb table and this
  * module's tool descriptions): the gate exists because `ws.execute` proxies
- * lead-consensus-caliber actions; daemon `pi.spawn` workers carry no
+ * lead-consensus-caliber actions; daemon `agent.spawn` children carry no
  * such gate.
  *
  * Delivers the whole gateway through the "no special harness support"
@@ -712,7 +712,7 @@ export function registerExecuteGateway(
     name: EXECUTE_TOOL_NAME,
     label: EXECUTE_TOOL_NAME,
     description:
-      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a daemon pi.spawn worker. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true inherits your own model instead of the default light one. Returns {agent_id, warning?} immediately — end your turn afterwards; its approval requests, reports and settles arrive as pushed messages.",
+      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a daemon agent.spawn child. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true inherits your own model instead of the default light one. Returns {agent_id, warning?} immediately — end your turn afterwards; its approval requests, reports and settles arrive as pushed messages.",
     parameters: {
       type: "object",
       properties: {
