@@ -125,6 +125,11 @@ type fakeHolders struct {
 	// negative n fails every one), as a write to a gone child does; the
 	// failed input reaches no child.
 	failInput map[string]int
+	// acp answers an ACP request (a JSON-RPC line with a method and an
+	// id) written to holder id's child: result is the raw JSON result, or
+	// errMsg an error answer; ok false leaves it unanswered. It runs
+	// without the lock held, so it may call into the runner.
+	acp func(id, method string, params json.RawMessage) (result, errMsg string, ok bool)
 }
 
 func newFakeHolders() *fakeHolders {
@@ -326,11 +331,21 @@ func (f *fakeHolders) Input(id string, data []byte, eof bool) error {
 		f.mu.Unlock()
 		return errors.New("holder: write to the child: broken pipe")
 	}
+	type acpRequest struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	var acpRequests []acpRequest
 	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
 		if len(line) == 0 {
 			continue
 		}
 		h.inputs = append(h.inputs, string(line))
+		var r acpRequest
+		if f.acp != nil && json.Unmarshal(line, &r) == nil && r.Method != "" && len(r.ID) > 0 {
+			acpRequests = append(acpRequests, r)
+		}
 		var d struct {
 			Type      string `json:"type"`
 			RequestID string `json:"request_id"`
@@ -348,6 +363,27 @@ func (f *fakeHolders) Input(id string, data []byte, eof bool) error {
 			}
 			answer, _ := json.Marshal(map[string]any{"type": "control_response", "response": response})
 			f.appendLocked(h, wsholder.Event{Event: "output", Stream: "stdout", Data: append(answer, '\n')})
+		}
+	}
+	if len(acpRequests) > 0 {
+		acp := f.acp
+		f.mu.Unlock()
+		var answers [][]byte
+		for _, r := range acpRequests {
+			result, errMsg, ok := acp(id, r.Method, r.Params)
+			if !ok {
+				continue
+			}
+			answer := map[string]any{"jsonrpc": "2.0", "id": r.ID, "result": json.RawMessage(result)}
+			if errMsg != "" {
+				answer = map[string]any{"jsonrpc": "2.0", "id": r.ID, "error": map[string]any{"code": -32603, "message": errMsg}}
+			}
+			raw, _ := json.Marshal(answer)
+			answers = append(answers, append(raw, '\n'))
+		}
+		f.mu.Lock()
+		for _, raw := range answers {
+			f.appendLocked(h, wsholder.Event{Event: "output", Stream: "stdout", Data: raw})
 		}
 	}
 	if eof && !h.exited {
@@ -521,6 +557,28 @@ func (f *fakeHolders) inputs(id, kind string) []string {
 		_ = json.Unmarshal([]byte(line), &d)
 		if kind == "" || d.Type == kind {
 			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// acpInputs are the params of the ACP lines of method written to the
+// holder's child, oldest first.
+func (f *fakeHolders) acpInputs(id, method string) []json.RawMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	h := f.holders[id]
+	if h == nil {
+		return nil
+	}
+	var out []json.RawMessage
+	for _, line := range h.inputs {
+		var d struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &d) == nil && d.Method == method {
+			out = append(out, d.Params)
 		}
 	}
 	return out

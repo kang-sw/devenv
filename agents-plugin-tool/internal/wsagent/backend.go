@@ -100,6 +100,11 @@ type LeadSpec struct {
 	// Env is set on the child over the backend's own scrub: the
 	// hosted-session variables.
 	Env map[string]string
+	// Spawned records a new process before Start returns, for a backend
+	// whose start waits on its harness reaching ws-mcp (agy's session
+	// request): ws-mcp confirms a hosted session by the registration's
+	// host_pid, so the row must name the process first.
+	Spawned func(holderID string, pid int)
 }
 
 // MCPCommand is a stdio MCP server's launch command.

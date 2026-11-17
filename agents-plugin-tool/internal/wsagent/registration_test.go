@@ -24,6 +24,7 @@ func TestPermissionModesLegacyFallback(t *testing.T) {
 	}{
 		{"standalone claude", BackendClaude, nil, LeadPermissionModes},
 		{"standalone pi", BackendPi, nil, LeadPermissionModes},
+		{"standalone agy", BackendAgy, nil, AgyPermissionModes},
 		{"standalone extension", "fixture", nil, nil},
 		{"registered claude", BackendClaude, []map[string]BackendRegistration{registry}, []string{"review"}},
 		{"registered pi retains legacy modes", BackendPi, []map[string]BackendRegistration{registry}, LeadPermissionModes},
@@ -68,6 +69,7 @@ func TestRegisteredBackendAdmission(t *testing.T) {
 	production := map[string]BackendRegistration{
 		BackendClaude: {LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes},
 		BackendPi:     {LeadProfile: LeadProfilePi},
+		BackendAgy:    {LeadProfile: LeadProfileAgy, PermissionModes: AgyPermissionModes},
 	}
 	if !reflect.DeepEqual(ProfileValueSchema(), ProfileValueSchema(production)) {
 		t.Fatal("production profile schema changed from the builtin-only contract")

@@ -12,10 +12,12 @@ import (
 
 func registerFixtureAgentBackends(s *Server) {
 	// Real runner metadata, no process start. The extra backend exists only
-	// in this fixture's private config; production still admits Claude/Pi.
+	// in this fixture's private config; production admits Claude, Pi and
+	// agy, whose builtin profiles must resolve.
 	s.pi.agents = wsagent.NewRunner(wsagent.Options{Backends: map[string]wsagent.BackendRegistration{
 		wsagent.BackendClaude: {LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes},
 		wsagent.BackendPi:     {LeadProfile: wsagent.LeadProfilePi},
+		wsagent.BackendAgy:    {LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes},
 		"fixture":             {LeadProfile: "fixture-lead", PermissionModes: []string{"review"}},
 	}})
 }
@@ -61,7 +63,7 @@ func TestConfigRegisteredAgentProfile(t *testing.T) {
 	}
 	for _, knob := range catalog.Knobs {
 		if knob.ID == "agent.profile.<name>" {
-			if knob.Error != "" || !reflect.DeepEqual(knob.ValueSchema.Properties.Backend.Enum, []string{"claude", "fixture", "pi"}) {
+			if knob.Error != "" || !reflect.DeepEqual(knob.ValueSchema.Properties.Backend.Enum, []string{"agy", "claude", "fixture", "pi"}) {
 				t.Fatalf("registered catalog = %+v", knob)
 			}
 			return
@@ -77,7 +79,7 @@ func TestConfigRegisteredAgentProfileRefusesAbsentBackend(t *testing.T) {
 		"key": "agent.profile.fixture-lead", "scope": "project",
 		"value": map[string]any{"backend": "unregistered", "lead": true, "permission_mode": "review"},
 	})
-	want := `config.tune: agent.profile.fixture-lead backend must be "claude" or "fixture" or "pi"; got "unregistered"`
+	want := `config.tune: agent.profile.fixture-lead backend must be "agy" or "claude" or "fixture" or "pi"; got "unregistered"`
 	if !toolIsError(t, resp) || toolText(t, resp) != want {
 		t.Fatalf("unregistered profile write = %s, want refusal %q", resp, want)
 	}

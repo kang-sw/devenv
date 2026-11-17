@@ -260,6 +260,8 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			return errors.New("the session's registration could not be written, so no process was started")
 		}
 	}
+	// spawned: the backend recorded its process before Start returned (LeadSpec.Spawned).
+	var spawned bool
 	spec := StartSpec{
 		Root:        rec.Root,
 		Dir:         c.dir,
@@ -315,6 +317,11 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 				EnvHostedSessionRow: wsdashboard.RegistrationPath(c.r.opts.Dir, rec.ReplyID),
 			},
 			VariantDir: filepath.Join(c.r.opts.Dir, HostedVariantsDir),
+			Spawned: func(holderID string, pid int) {
+				spawned = true
+				c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = holderID, pid, 0 })
+				c.writeRegistration()
+			},
 		},
 	}
 	c.mcpStale = false
@@ -332,18 +339,32 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		// (restartIfDue).
 		fmt.Fprintf(c.r.opts.Log, "agent %s: the process's ws-mcp route %s is not this daemon's; it restarts at its first idle point\n", rec.ReplyID, rec.MCPURL)
 		c.mcpStale = true
+	case attach && rec.MCPToken == "" && rec.Backend == BackendAgy:
+		// An agy start the last daemon did not finish: Spawned named the
+		// process before its token was recorded. agy has no stdio
+		// fallback, so its ws tools are gone; it restarts before it takes
+		// input, as for a stale route.
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the agy process's start did not finish; it restarts at its first idle point\n", rec.ReplyID)
+		c.mcpStale = true
 	case attach && rec.MCPToken != "":
 		// The recorded token and hello, as the process was started with.
 		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
-	case rec.Backend == BackendClaude && !attach:
+	case (rec.Backend == BackendClaude || rec.Backend == BackendAgy) && !attach:
 		// The lead's ws-mcp goes over the daemon's HTTP route with a new
 		// token, from the bundle it then loads; without a session the
-		// bundle's stdio server serves.
+		// bundle's stdio server serves. An agy lead loads no bundle and has
+		// no stdio fallback: its backend refuses a start without a session.
 		cmd, err := spec.Lead.WSMCP()
 		if err != nil {
-			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp over HTTP unavailable, the bundle's stdio server serves: %v\n", rec.ReplyID, err)
+			fallback := "the bundle's stdio server serves"
+			if rec.Backend == BackendAgy {
+				fallback = "the agy start is refused"
+			}
+			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp over HTTP unavailable, %s: %v\n", rec.ReplyID, fallback, err)
 		} else if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
-			spec.Lead.Plugin, spec.Lead.PluginNote = cmd.Plugin, cmd.PluginWarning
+			if rec.Backend == BackendClaude {
+				spec.Lead.Plugin, spec.Lead.PluginNote = cmd.Plugin, cmd.PluginWarning
+			}
 			mcpEnv = cmd.Env
 		}
 	}
@@ -369,6 +390,11 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	}
 	if err != nil {
 		c.r.revokeToken(rec.ReplyID)
+		if spawned {
+			// The process the row named early is gone (the backend closed
+			// it); the deferred write says stopped.
+			c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+		}
 		return err
 	}
 	hp, ok := proc.(holderProcess)
