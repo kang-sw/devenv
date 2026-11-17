@@ -218,7 +218,10 @@ func (d *Daemon) sessionRoster(replyID string) ([]SessionRosterRow, error) {
 	if !ValidReplyID(replyID) {
 		return nil, fmt.Errorf("unknown requester")
 	}
-	view := d.railBaseView(d.pages())
+	reader := d.pages()
+	// The roster is an explicit current-state query, not a streamed rail render.
+	reader.freshSnapshots = true
+	view := d.railBaseView(reader)
 	facts := railFactsOf(view)
 	parent, ok := facts.rows[replyID]
 	if !ok {

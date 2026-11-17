@@ -45,7 +45,7 @@ func TestSpawnBurstInboxScanCountsAndTrailingUpdate(t *testing.T) {
 		t.Fatalf("initial tree: inbox scans=%d listings=%d", scans, lists)
 	}
 	before := scans
-	for i := range 20 {
+	for range 20 {
 		now = now.Add(time.Millisecond)
 		child.rec.Label = "latest"
 		child.turn, child.lastErr = false, "failed"
