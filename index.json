@@ -345,17 +345,7 @@
       }
     },
     "261115-feat-werkschaft-electron-shell": {
-      "registered_at": "2026-11-15T01:09:25Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec4/electron-phase1",
-        "phase": "active",
-        "touched_at": "2026-11-15T02:33:22Z",
-        "impl": {
-          "branch": "impl/exec4/electron-phase1/cake-ember-ramp"
-        }
-      }
+      "registered_at": "2026-11-15T01:09:25Z"
     },
     "261115-feat-ws-claude-reasoning-summary-producer": {
       "registered_at": "2026-11-15T09:31:58Z"
