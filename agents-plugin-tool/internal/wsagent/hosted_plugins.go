@@ -16,6 +16,10 @@ import (
 
 const hostedPluginRootsFile = "hosted-plugin-roots.json"
 
+// hostedPluginPackages are the packages a hosted lead's bundle may be
+// (ResolveHostedPlugin).
+var hostedPluginPackages = []string{"ws", "wsflow"}
+
 // RegisterHostedPlugin remembers only manifest-validated runtime evidence from a
 // hello. The manifest, not the caller's namespace or directory name, is the key.
 // Equal/newer hellos win; an older caller cannot downgrade a usable stored root.

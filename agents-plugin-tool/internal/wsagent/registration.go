@@ -17,10 +17,15 @@ type BackendRegistration struct {
 	PermissionModes []string
 	// PermissionLevels advertises supported lead selection paths only.
 	PermissionLevels []PermissionLevel
+	// Catalog is the backend's capability catalog (catalog.go): a ceiling
+	// over the instance handles, never a replacement for them. Nil keeps
+	// the backend handle-only: no hiding, demotion, or version warning.
+	Catalog *HarnessProfile
 }
 
 // BackendRegistrations exposes the runner's admitted set to in-process config
-// readers. The returned map and slices are copies; backend instances are shared.
+// readers. The returned map and slices are copies; backend instances and
+// catalogs are shared and read-only.
 func (r *Runner) BackendRegistrations() map[string]BackendRegistration {
 	out := make(map[string]BackendRegistration, len(r.opts.Backends))
 	for name, reg := range r.opts.Backends {

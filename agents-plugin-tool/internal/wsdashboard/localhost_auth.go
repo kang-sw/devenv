@@ -99,6 +99,8 @@ func accessExempt(r *http.Request) bool {
 		return read && loopbackExemptCaller(r)
 	case ProxyPath, "/session-hire/roster":
 		return r.Method == http.MethodGet && loopbackExemptCaller(r)
+	case ProxyHTTPPath:
+		return loopbackExemptCaller(r) // any method: the route answers 405 itself
 	case "/shutdown", "/nudge":
 		return r.Method == http.MethodPost && loopbackExemptCaller(r)
 	}

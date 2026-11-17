@@ -270,3 +270,64 @@ const optionNames = sel => sel.children.map(n => n.value);
     });
   });
 }
+
+// The harness notice: a hosted session whose state says its harness version
+// is unverified, or that names demoted items, shows one notice under the
+// banner; a state without either (or without capabilities) shows none.
+{
+  const table = {
+    'js.lead.harness.unverified': 'Harness version {0} is outside the verified range {1}; running on the capabilities of {2}.',
+    'js.lead.harness.unreported': 'unreported',
+    'js.lead.harness.demoted': 'Unavailable on this harness version: {0}.'
+  };
+  const wsT = (k, ...a) => (table[k] || k).replace(/\{(\d+)\}/g, (m, i) => String(a[Number(i)]));
+  const host = { children: [], insertBefore(n, ref) { n.parentNode = this; if (n.parentNode.children.includes(n)) this.children.splice(this.children.indexOf(n), 1); const i = ref ? this.children.indexOf(ref) : this.children.length; this.children.splice(i, 0, n); } };
+  const banner = { parentNode: host, nextSibling: null };
+  host.children.push(banner);
+  const mkNode = (tag, cls, text) => {
+    const n = { tag, cls, text: text || '', children: [], attrs: {},
+      setAttribute(k, v) { this.attrs[k] = v; },
+      appendChild(c) { this.children.push(c); return c; },
+      remove() { const i = host.children.indexOf(this); if (i >= 0) host.children.splice(i, 1); } };
+    return n;
+  };
+  const leadsSource = readAssetSource('wsdashboard', 'dashboard-leads.js');
+  const ctx = vm.createContext({ wsT, mk: mkNode, luIcon: name => mkNode('svg', 'i li', name), $: id => id === 'dash-banner' ? banner : null });
+  vm.runInContext(leadsSource.match(/  function leadGone\(st\) \{.*\}\n/)[0] +
+    leadsSource.match(/  var harnessEl = null;\n  function harnessDraw\(st\) \{[\s\S]*?\n  \}\n/)[0], ctx);
+  const notes = () => host.children.filter(n => n.cls === 'harnessnote');
+  const texts = n => n.children[1].children.map(c => c.text);
+  const caps = extra => ({ status: 'running', capabilities: Object.assign({ role: 'lead', profile_version: '2.1.326', oldest: '2.1.322', newest: '2.1.326' }, extra) });
+
+  ctx.harnessDraw({ status: 'running' });
+  assert.equal(notes().length, 0, 'a state without capabilities shows no notice');
+  ctx.harnessDraw(caps({ version: '2.1.326' }));
+  assert.equal(notes().length, 0, 'verified and not demoted shows no notice');
+  ctx.harnessDraw(caps({ version: '2.1.326', demoted: [] }));
+  assert.equal(notes().length, 0, 'an empty demoted list shows no notice');
+
+  ctx.harnessDraw(caps({ version: '2.1.399', unverified: true }));
+  assert.equal(notes().length, 1);
+  assert.equal(host.children[1], notes()[0], 'the notice sits right under the banner');
+  assert.deepEqual(texts(notes()[0]), ['Harness version 2.1.399 is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326.']);
+  ctx.harnessDraw(caps({ version: '2.1.399', unverified: true }));
+  assert.equal(notes().length, 1, 'an unchanged state keeps one notice');
+
+  ctx.harnessDraw(caps({ unverified: true, demoted: ['compaction', 'rewind'] }));
+  assert.equal(notes().length, 1);
+  assert.deepEqual(texts(notes()[0]), [
+    'Harness version unreported is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326.',
+    'Unavailable on this harness version: compaction, rewind.']);
+
+  ctx.harnessDraw(caps({ version: '2.1.326', demoted: ['skill_list'] }));
+  assert.deepEqual(texts(notes()[0]), ['Unavailable on this harness version: skill_list.'], 'demotion alone shows its own line');
+
+  ctx.harnessDraw(caps({ version: '2.1.326' }));
+  assert.equal(notes().length, 0, 'the notice goes when the state clears');
+  ctx.harnessDraw(caps({ unverified: true, version: '2.1.399' }));
+  ctx.harnessDraw({ status: 'running' });
+  assert.equal(notes().length, 0, 'capabilities gone takes the notice away');
+  ctx.harnessDraw(caps({ unverified: true, version: '2.1.399' }));
+  ctx.harnessDraw({ status: 'closed', capabilities: { unverified: true } });
+  assert.equal(notes().length, 0, 'a closed session shows no notice');
+}

@@ -55,6 +55,10 @@ type StartSpec struct {
 	// WSMCP is the ws-mcp server to attach, carrying the profile's ws tool
 	// allowlist; nil when the profile allows no ws tool.
 	WSMCP *MCPCommand
+	// MCPSession, when set, attaches the ws-mcp over the daemon's HTTP
+	// route (mcp_session.go) in place of WSMCP's command, or, for a lead,
+	// of its bundled plugin's stdio server.
+	MCPSession *MCPSession
 	// Env is the environment the child starts from; the backend removes the
 	// harness variables an inherited parent session leaves behind.
 	Env []string
@@ -80,6 +84,14 @@ type LeadSpec struct {
 	PluginWarning func(string)
 	// WSMCP resolves the bundled MCP launcher if Pi needs its bridge fallback.
 	WSMCP func() (MCPCommand, error)
+	// Plugin, when set, is the hosted bundle this start already resolved
+	// (with PluginNote its fallback warning): a Claude lead attached over
+	// HTTP loads the bundle its ws-mcp hello was built from. Empty
+	// resolves the selected bundle at launch.
+	Plugin, PluginNote string
+	// VariantDir is where a Claude lead attached over HTTP keeps its
+	// bundle's HTTP variants (claude_hosted_variant.go).
+	VariantDir string
 	// Env is set on the child over the backend's own scrub: the
 	// hosted-session variables.
 	Env map[string]string
@@ -88,10 +100,12 @@ type LeadSpec struct {
 // MCPCommand is a stdio MCP server's launch command.
 type MCPCommand struct {
 	// PluginWarning is a runtime-only package fallback notice for this launch.
-	PluginWarning string            `json:"-"`
-	Command       string            `json:"command"`
-	Args          []string          `json:"args,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
+	PluginWarning string `json:"-"`
+	// Plugin is the hosted bundle the launcher belongs to, when known.
+	Plugin  string            `json:"-"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // Process is one running backend process. Its methods are safe to call from
@@ -329,6 +343,9 @@ type Event struct {
 	// retrying is over (a response came, or the turn ended).
 	Retry    *wslive.Retry
 	RetryEnd bool
+	// Harness is the catalog report of a process's start: its harness
+	// version and the items its init shape demotes (catalog.go).
+	Harness *HarnessReport
 	// MCPServers is the MCP server list the harness reported with each
 	// server's status (an init line).
 	MCPServers []MCPServer

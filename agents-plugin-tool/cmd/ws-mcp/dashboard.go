@@ -282,8 +282,10 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		Dir:           dir,
 		DaemonVersion: version,
 		Backends: map[string]wsagent.BackendRegistration{
-			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels()},
-			wsagent.BackendPi:     {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
+			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog()},
+			// Pi has no catalog profile until its port of the Codex adapter:
+			// it stays handle-only.
+			wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
 		},
 		Keys: keys,
 		// A lead session's process runs under a session holder with a lead

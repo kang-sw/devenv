@@ -625,3 +625,34 @@ func TestLiveWriterEndAgents(t *testing.T) {
 		t.Fatalf("agents after endAgents: %v", got)
 	}
 }
+
+// TestClaudeMapperReadsResultsUnderTheAttachedServer: a result-reading ws
+// tool is read under the name its server has in the process: a worker's
+// inline ws server; a lead's hosted bundle's plugin server, either
+// package's, never the bare server name a lead does not have.
+func TestClaudeMapperReadsResultsUnderTheAttachedServer(t *testing.T) {
+	worker := newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`))
+	lead := newClaudeMapper(leadSpec())
+	for name, want := range map[string][2]string{
+		"mcp__ws__tracker_update":                    {TrackerWriteTool, ""},
+		"mcp__ws__tracker_show":                      {CardTool, ""},
+		"mcp__plugin_ws_ws__tracker_update":          {"", TrackerWriteTool},
+		"mcp__plugin_ws_ws__tracker_ui":              {"", UITool},
+		"mcp__plugin_wsflow_wsflow__tracker_show":    {"", CardTool},
+		"mcp__plugin_other_ws__tracker_update":       {"", ""},
+		"mcp__plugin_ws_ws__tickets_query":           {"", ""},
+		"mcp__plugin_wsflow_wsflow__tracker_update_": {"", ""},
+	} {
+		if got := worker.resultTool(name); got != want[0] {
+			t.Errorf("worker %s = %q, want %q", name, got, want[0])
+		}
+		if got := lead.resultTool(name); got != want[1] {
+			t.Errorf("lead %s = %q, want %q", name, got, want[1])
+		}
+	}
+	for _, pkg := range hostedPluginPackages {
+		if got := lead.resultTool(claudeMCPToolName(claudePluginServer(pkg, pkg), TrackerWriteTool)); got != TrackerWriteTool {
+			t.Errorf("hosted package %s's tracker write = %q", pkg, got)
+		}
+	}
+}

@@ -1568,6 +1568,52 @@ harness is detected from `initialize` as on stdio; the hello's `harness` is
 an optional hint. Closing the connection ends the session: its dashboard
 session, its mailbox presence, and any wait it holds.
 
+HTTP route (`internal/wsdashboard/proxy_http.go`): a session the agent runner
+hosts reaches the same server with no launcher, by MCP Streamable HTTP with
+JSON responses only. It exists only when the daemon hosts MCP sessions and its
+agent runner implements `AgentMCPTokenHost`. `POST /mcp/session` carries one
+JSON-RPC message with `Authorization: Bearer <per-session token>`, from a
+loopback peer with no `Origin` (403 otherwise); the token is resolved on every
+request (401 for a missing, unknown, or void one) to the hello a launcher would
+have sent, and other methods (a client's SSE `GET`, its exit `DELETE`) get 405.
+No `Mcp-Session-Id` is issued: the token is the session, one per token, built
+by the same `acceptProxy` and counted, drained, and closed with the stdio
+sessions; voiding the token (re-issue, process exit, close) cancels its calls
+in flight and ends it. A request
+is answered in its POST's body once the session writes the answer with that
+id; a notification or client response gets 202; a POST whose client goes away
+sends `notifications/cancelled` for its id; a session end answers `-32000`
+"ws-mcp session ended". A token's first message that is not `initialize` (its
+client initialized against a replaced daemon) is preceded by a replayed
+`initialize` (id `ws-mcp-http-replay-<n>`, `clientInfo` mapped from the
+hello's harness, answer dropped) and `notifications/initialized`. A body is
+limited to 65535 bytes (413), must be one JSON object (400: `-32700` invalid
+JSON, `-32600` batch), and is compacted to one line; a duplicate in-flight id
+gets `-32600`. A refused hello answers 403 and a draining daemon 503, each
+with a JSON-RPC error body.
+
+Who uses it (`internal/wsagent/mcp_session.go`): a hosted Claude process the
+runner starts while it knows its daemon endpoint. Every start draws a new
+token; the harness gets the URL and token in `WS_MCP_SESSION_URL` and
+`WS_MCP_SESSION_TOKEN`, never in argv or a file. A worker's inline
+`--mcp-config` entry is the HTTP server; a lead loads a hosted variant of its
+bundle (`<daemon dir>/hosted-bundles/<package>-<hash>`, one per bundle
+content, never removed) whose only MCP entry is the same `ws` key over HTTP,
+so the lead still has exactly one ws server named `plugin:<package>:<package>`.
+A held lead's token is kept in its `agent.json` (`mcp_token_secret`) with its
+URL (`mcp_url`), the ws-mcp environment its hello was built from (`mcp_env`:
+the bundle the lead loaded, which is also the one that hello describes) and
+the holder it was drawn for (`mcp_holder_id`), so a daemon that rejoins the
+process restores the token and its hello without resolving the package again.
+When the recorded URL is not the rejoining daemon's (it listens on another
+port) or the hello is missing, the process restarts at its first idle point
+with a new token; when the record names another holder (a daemon without
+this route started the process again over stdio), the token is forgotten and
+nothing restarts. With no endpoint
+the stdio launcher serves as before. A daemon without this route (an older
+one rejoining an HTTP lead) answers its calls `401 login_required` until the
+process restarts.
+
 In `cli` mode the daemon dispatches the existing command argv in-process.
 An optional `stdin` string carries Codex Stop JSON or `git commit
 --description-file -` input; older hellos omit it. A relative `--root`

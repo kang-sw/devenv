@@ -55,6 +55,17 @@ type AgentEndpointHost interface {
 	SetEndpoint(baseURL string)
 }
 
+// AgentMCPTokenHost is an AgentHost whose hosted sessions reach the daemon's
+// ws MCP server over HTTP (ProxyHTTPPath) with a per-session token.
+type AgentMCPTokenHost interface {
+	// ResolveMCPToken resolves a live per-session MCP token to the session's
+	// per-connection context, the hello a stdio launcher would have sent
+	// (mode, tool allowlist in its env, identity), and a channel closed once
+	// the token is void (its process ended, a new start re-issued it, or the
+	// conversation closed). ok is false for an unknown or void token.
+	ResolveMCPToken(token string) (hello ProxyHello, void <-chan struct{}, ok bool)
+}
+
 // AgentLiveHost is an optional AgentHost whose native lead snapshots are
 // delivered in RAM. The daemon binds it before Start; no wire protocol changes.
 type AgentLiveHost interface {

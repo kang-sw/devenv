@@ -135,6 +135,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		}
 		cmd.Env = env
 		spec.WSMCP = &cmd
+		if rec.Backend == BackendClaude {
+			// Over the daemon's HTTP route when it has one; a worker is
+			// never held, so its token is never persisted.
+			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0)
+		}
 	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil {
 		spec.Holder = &holderChild{host: c.r.opts.Holders, table: &c.r.holders,
@@ -284,7 +289,38 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 				EnvHostedSessionKey: rec.WSKey,
 				EnvHostedSessionRow: wsdashboard.RegistrationPath(c.r.opts.Dir, rec.ReplyID),
 			},
+			VariantDir: filepath.Join(c.r.opts.Dir, HostedVariantsDir),
 		},
+	}
+	c.mcpStale = false
+	var mcpEnv map[string]string
+	switch {
+	case attach && rec.MCPToken != "" && rec.MCPHolder != "" && rec.MCPHolder != rec.HolderID:
+		// The process was started again since its token was drawn, by a
+		// daemon that keeps the record's members without knowing them: it
+		// loaded the bundle's stdio server, and the token is no one's.
+		c.update(func(rec *Record) { rec.forgetMCP() })
+	case attach && rec.MCPToken != "" && (rec.MCPURL != c.r.mcpURL() || rec.MCPEnv == nil):
+		// The process sends its token to a route this daemon does not
+		// serve (it listens on another port), or its hello is unknown:
+		// its ws-mcp is gone until it restarts, at its first idle point
+		// (restartIfDue).
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the process's ws-mcp route %s is not this daemon's; it restarts at its first idle point\n", rec.ReplyID, rec.MCPURL)
+		c.mcpStale = true
+	case attach && rec.MCPToken != "":
+		// The recorded token and hello, as the process was started with.
+		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
+	case rec.Backend == BackendClaude && !attach:
+		// The lead's ws-mcp goes over the daemon's HTTP route with a new
+		// token, from the bundle it then loads; without a session the
+		// bundle's stdio server serves.
+		cmd, err := spec.Lead.WSMCP()
+		if err != nil {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp over HTTP unavailable, the bundle's stdio server serves: %v\n", rec.ReplyID, err)
+		} else if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
+			spec.Lead.Plugin, spec.Lead.PluginNote = cmd.Plugin, cmd.PluginWarning
+			mcpEnv = cmd.Env
+		}
 	}
 	if source == "explicit" {
 		spec.PermissionLevel = level
@@ -307,6 +343,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		}()
 	}
 	if err != nil {
+		c.r.revokeToken(rec.ReplyID)
 		return err
 	}
 	hp, ok := proc.(holderProcess)
@@ -316,6 +353,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	}
 	if !held {
 		_ = proc.Close()
+		c.r.revokeToken(rec.ReplyID)
 		return fmt.Errorf("the %s backend did not start the process under a session holder", rec.Backend)
 	}
 	c.setStatus(func() { c.proc = proc })
@@ -327,7 +365,13 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	}
 	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
 	c.seq, c.seqDirty, c.ringDirty = 0, false, false
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0 })
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
+		rec.forgetMCP()
+		if s := spec.MCPSession; s != nil {
+			rec.MCPToken, rec.MCPURL, rec.MCPEnv, rec.MCPHolder = s.Token, s.URL, mcpEnv, id
+		}
+	})
 	c.writeRegistration()
 	return nil
 }
@@ -481,6 +525,13 @@ func (c *conv) replayDone(lost bool) {
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 	// A message steered during the rejoin goes to the turn that still runs.
 	c.steer()
+	// A process whose ws-mcp route this daemon does not serve restarts
+	// before it takes input; any other restart waits for its usual idle
+	// point, as before a rejoin. A failed restart leaves no process: what
+	// is held then starts one, as with no process at all.
+	if c.mcpStale && c.restartIfDue() {
+		return
+	}
 	if !c.turn {
 		c.applySettings()
 		c.kick()
@@ -500,8 +551,8 @@ func (c *conv) recoveryFailed(reason string) {
 	}
 	c.stopProcess("")
 	c.r.revokeToken(c.rec.ReplyID)
-	if c.rec.Capability != "" {
-		c.update(func(rec *Record) { rec.Capability = "" })
+	if c.rec.Capability != "" || c.rec.MCPToken != "" {
+		c.update(func(rec *Record) { rec.Capability = ""; rec.forgetMCP() })
 	}
 	c.replaying, c.wrapHold = false, false
 }
