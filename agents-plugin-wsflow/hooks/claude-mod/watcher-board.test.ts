@@ -181,6 +181,82 @@ describe('board messages', () => {
     expect(h.board.submitted).toEqual([['later']])
   })
 
+  test('a late steer claim is delivered at the next boundary before newer messages, exactly once', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('first')
+    const hung = deferred<void>()
+    h.board.heldSteerDrains.push(hung)
+    const boundary = w.toolCompleted()
+    await tick()
+    h.sleeps.find((x) => x.ms === STEER_DRAIN_WAIT_MS)!.d.resolve()
+    await boundary
+    hung.resolve()
+    await tick()
+    h.board.steeredInbox.push('second')
+    await w.toolCompleted()
+    expect(h.board.steered).toEqual([['first']])
+    w.requestStarted()
+    await w.toolCompleted()
+    expect(h.board.steered).toEqual([['first'], ['second']])
+    w.requestStarted()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    expect(h.records).toEqual([])
+  })
+
+  test('a late claim follows an older refused row at the next boundary', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('first')
+    h.board.steerFailures.push(new Error('refused'))
+    await w.toolCompleted()
+    h.board.steeredInbox.push('second')
+    const drain = deferred<void>()
+    h.board.heldSteerDrains.push(drain)
+    const pending = w.toolCompleted()
+    await tick()
+    h.sleeps.filter((x) => x.ms === STEER_DRAIN_WAIT_MS).at(-1)!.d.resolve()
+    await pending
+    drain.resolve()
+    await tick()
+    await w.toolCompleted()
+    expect(h.board.steered).toEqual([['first', 'second']])
+    w.requestStarted()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+  })
+
+  test('a pending late-claim row prevents an overlapping boundary from overtaking it', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('first')
+    const drain = deferred<void>()
+    h.board.heldSteerDrains.push(drain)
+    const first = w.toolCompleted()
+    await tick()
+    h.sleeps.find((x) => x.ms === STEER_DRAIN_WAIT_MS)!.d.resolve()
+    await first
+    drain.resolve()
+    await tick()
+    h.board.steeredInbox.push('second')
+    const row = deferred<void>()
+    h.board.heldSteers.push(row)
+    const pending = w.toolCompleted()
+    await tick()
+    await w.toolCompleted()
+    expect(h.board.steerDrains).toEqual(['k1'])
+    expect(h.board.steered).toEqual([])
+    row.resolve()
+    await pending
+    await w.toolCompleted()
+    expect(h.board.steered).toEqual([['first'], ['second']])
+  })
+
   test('what a timed-out steered drain claims late is submitted at the turn end, or at once once that has passed', async () => {
     for (const lateAfterTurnEnd of [false, true]) {
       const { h, w } = await boardOn()
