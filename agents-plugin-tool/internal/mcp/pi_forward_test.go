@@ -161,7 +161,7 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	if out := callToolWithKey(t, s, 8, key, "pi.wait", map[string]any{"id": "kid1", "timeout_s": 5}); !strings.Contains(out, "Pi subagent kid1: turn done") || !strings.Contains(out, "kid finished") || route.last().body["timeout_s"] != float64(5) {
 		t.Fatalf("pi.wait = %q (%+v)", out, route.last())
 	}
-	if out := callToolWithKey(t, s, 9, key, "pi.stop", map[string]any{"id": "kid1"}); !strings.Contains(out, "closed Pi subagent kid1") || route.last().path != "/agents/by-token/stop" {
+	if out := callToolWithKey(t, s, 9, key, "pi.stop", map[string]any{"id": "kid1"}); !strings.Contains(out, "Pi subagent kid1 and its own subagents: sleep") || !strings.Contains(out, "its process stopped; pi.send resumes the same conversation") || route.last().path != "/agents/by-token/stop" {
 		t.Fatalf("pi.stop = %q", out)
 	}
 
@@ -175,6 +175,59 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	daemon.Close()
 	if out := callToolWithKey(t, s, 11, key, "pi.list", nil); !strings.Contains(out, "the dashboard daemon") || !strings.Contains(out, "did not answer") {
 		t.Fatalf("an unreachable daemon = %q", out)
+	}
+}
+
+func TestPiForwardShowsSleep(t *testing.T) {
+	setupMailboxTestEnv(t)
+	st := wsagent.State{ID: "kid", Status: wsagent.StatusClosed, Root: "/repo"}
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/list") {
+			json.NewEncoder(w).Encode(map[string]any{"conversations": []wsagent.State{st}})
+		} else if strings.HasSuffix(r.URL.Path, "/wait") {
+			json.NewEncoder(w).Encode(wsagent.TurnResult{ID: st.ID, Status: wsagent.TurnClosed})
+		} else {
+			json.NewEncoder(w).Encode(st)
+		}
+	}))
+	defer daemon.Close()
+	t.Setenv(wsagent.EnvPiToken, "tok123")
+	t.Setenv(wsagent.EnvPiEndpoint, daemon.URL)
+	s := NewServer(t.TempDir(), "test")
+	defer s.Close()
+	key, err := s.sessions.mint(s.root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"pi.spawn", "pi.list", "pi.send", "pi.stop", "pi.wait"} {
+		args := map[string]any{"format": "json"}
+		switch tool {
+		case "pi.spawn":
+			args["prompt"], args["tier"] = "work", "small"
+		case "pi.send":
+			args["id"], args["message"] = st.ID, "more"
+		case "pi.stop", "pi.wait":
+			args["id"] = st.ID
+		}
+		raw := callToolWithKey(t, s, 1, key, tool, args)
+		var out piChildOut
+		if tool == "pi.list" {
+			var list []piChildOut
+			if err := json.Unmarshal([]byte(raw), &list); err != nil || len(list) != 1 {
+				t.Fatalf("%s = %q: %v", tool, raw, err)
+			}
+			out = list[0]
+		} else if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Status != "sleep" {
+			t.Fatalf("%s status = %s", tool, out.Status)
+		}
+		delete(args, "format")
+		text := callToolWithKey(t, s, 2, key, tool, args)
+		if strings.Contains(text, "closed") || tool != "pi.send" && !strings.Contains(text, "sleep") {
+			t.Fatalf("%s text = %q", tool, text)
+		}
 	}
 }
 
@@ -787,14 +840,14 @@ func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
 		t.Fatalf("pi.transcript is empty")
 	}
 
-	// stop: 200 with the closed child; the list shows it closed.
+	// stop: REST keeps closed; MCP stop and list show sleep.
 	var stopped piChildOut
 	asJSON(10, "pi.stop", map[string]any{"id": kid.ID}, &stopped)
-	if a := log.last(t, "stop"); a.code != http.StatusOK || stopped.Status != wsagent.StatusClosed {
+	if a := log.last(t, "stop"); a.code != http.StatusOK || !strings.Contains(a.body, `"status":"closed"`) || stopped.Status != "sleep" {
 		t.Fatalf("stop = %d %s (%+v)", a.code, a.body, stopped)
 	}
 	asJSON(11, "pi.list", nil, &listed)
-	if len(listed) != 1 || listed[0].Status != wsagent.StatusClosed {
+	if len(listed) != 1 || listed[0].Status != "sleep" {
 		t.Fatalf("pi.list after the stop = %+v", listed)
 	}
 
