@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 7dfc3d227d301a01
 sage-review-design-reviewed: 7dfc3d227d301a01
+completed: 2026-11-17
 ---
 
 # Dashboard wide view: session drawer with 2-column ticket and notes panels
@@ -212,6 +213,17 @@ only the sibling's harness regression/fix commits as `d3ae80b0a` and
 `bae7372c3` (Windows .exe name and authenticated readiness); their four Node
 regressions pass. No sibling dashboard changes were imported.
 
+#### Edition (bddcedce4) - 2026-11-17
+
+The combined Chrome LOOK now resolves Phase 1's pending capture step, as
+amended by the lead. At 1920x1080 the sheet is 1280x648 at (624,40), with
+four 307.5px columns and 625px Tickets/Notes cards in the approved dense
+placement. At 759px it is a 727x320 flex stack with no horizontal overflow.
+Idea demand made zero requests before click and exactly one afterward.
+The 60vh height and existing 40px header differ intentionally from the
+mockup's 440px height and 48px header. See Phase 2's comparison evidence and
+minor visual Forward below. No baseline narrow capture was taken.
+
 ### Phase 2: Notes panel
 
 Depends on Phase 1's grid. Implement Decisions 6-8, 12-13: the daemon notes cache
@@ -223,3 +235,83 @@ Verification: Node contract tests pass locally; Go tests for touched packages
 that an in-daemon note write refreshes the cache without a file reread on
 the next drawer open, and that the refresh button rereads the layer files) pass on w5090; LOOK captures at 1920x1080 compared side by side
 with mockup states `#c` and `#c-lan`.
+
+### Result (bddcedce4) - 2026-11-17
+
+Implemented the Notes card, machine -> clone -> repo -> worktree sections,
+counts, priorities, relative ages, muted treatment, expandable safe-text
+previews, empty/error states and explicit header refresh. Notes spans two
+wide columns after the other cards and remains in the narrow stack.
+
+The daemon shares one path-keyed memory cache with its hosted MCP and CLI
+writers. Mutations publish the records already read for their committed
+write, preserving visibility; they do not reread files to update the cache.
+Read-only path resolution uses `Resolve`, not `Ensure`, and retains each
+session's caller config/cache/Git environment. View snapshots are session-
+keyed, so sessions at one root with different store homes stay separate.
+GET returns the retained snapshot immediately and starts a background initial
+load/repo directory-entry fingerprint check; `?wait=1` only joins that worker.
+Own-Origin POST explicitly rereads all layers. There are no note timers,
+per-event rereads or periodic rewrites. Every non-local response is filtered
+server-side to repo plus `local_only`; a failed local layer cannot suppress
+valid repo handoff notes or leak local error details.
+
+Verification:
+
+- Full remote w5090 check: `go test ./internal/wsnote ./internal/mcp
+  ./internal/wsdashboard ./internal/wsi18n ./cmd/ws-mcp` passed (2.396s,
+  481.017s, 273.901s, 2.480s, 130.041s). Ran through the prescribed
+  `D:/sys_lock.sh remote w5090 run wide-drawer ... --sync <worktree>` recipe,
+  with GOPROXY/GOSUMDB off. No local Go tests ran.
+- New Go coverage pins no-write path resolution, cached mutations without
+  rereads, external repo/in-place invalidation, explicit refresh, hosted
+  caller store overrides, same-root session isolation, local-layer failure
+  isolation, immediate asynchronous response, refresh queued during loading,
+  own-Origin refresh and server LAN filtering.
+- Final local selected Node contracts: 157 passed, zero failed. Includes
+  `frontend-drawer.test.js`, independently runnable dashboard testdata CJS
+  contracts, and the cherry-picked harness tests. The four Go-assembled CJS
+  fragments are not standalone Node programs. Base-proven exclusions are
+  recorded in the single test Forward below. `git diff --check` passed.
+- Independent R1 found two Important issues (caller store identity and local
+  failures suppressing repo); both fixed with regressions. Fixes-only R2 is
+  clean. A CSS class collision was implementation-caused and fixed using
+  drawer-scoped `notes-dim`, without weakening the collision check.
+- Combined LOOK used one Chrome pass, no retry. The parent inspected all
+  three side-by-side comparisons and the narrow Notes capture. Normal-state
+  captures precede the R1 data-isolation fixes, which do not change their
+  rendered state. Owned browser/daemon stopped; all non-PNG temp artifacts
+  under `D:/Temp/wide-drawer/` removed.
+
+Visual comparison (reference rendered at 1920x1080):
+
+- compared `D:/Temp/wide-drawer/combined-production-c.png` vs
+  `ai-docs/assets/mockups/261117/wide-drawer/drawer-wide.html#c`:
+  mismatch in minor Notes styling/intentional height and fixture content;
+  placement, spans, ticket rows, scrolling and layer order match.
+- compared `D:/Temp/wide-drawer/combined-production-c-idea.png` vs the same
+  reference `#c-idea`: same minor mismatches; idea demand/expanded stack match.
+- compared `D:/Temp/wide-drawer/combined-production-c-lan.png` vs the same
+  reference `#c-lan`: same minor mismatches; server repo-only filtering and
+  local-only hint match. LAN simulation succeeded, not skipped.
+- Side-by-side PNGs: `D:/Temp/wide-drawer/combined-compare-c.png`,
+  `D:/Temp/wide-drawer/combined-compare-c-idea.png`,
+  `D:/Temp/wide-drawer/combined-compare-c-lan.png`.
+- Narrow PNGs: `D:/Temp/wide-drawer/combined-production-narrow-759.png` and
+  `D:/Temp/wide-drawer/combined-production-narrow-759-notes.png`.
+  Reference PNGs are `combined-mockup-c.png`, `combined-mockup-c-idea.png`
+  and `combined-mockup-c-lan.png` in the same directory.
+
+Forward (minor visual): Notes rows/headings are plainer and unboxed, and
+priority badges squarer than the mockup. Height/header offsets deliberately
+follow the approved ticket decisions and existing header geometry. Fixture
+counts/worktree contents/repo handoff differ from the mockup, not behavior.
+No further style scope was added before the owner's handoff deadline.
+
+Forward (baseline tests, consolidated with Phase 1): eight JS failures and
+fourteen standalone CJS failures reproduce at `c79cdf133`; exclude them here
+without investigating. CJS roots are `paletteHistory` in search-palette,
+`hiddenRegions` in stream-gone, `$` in task_badges, and `window` in
+visibility-stream. The four other CJS exclusions (explorer-cards,
+file-card-state, files-explorer, preview-content) are Go-assembled fragments
+that need their injected fixtures, not standalone test entrypoints.
