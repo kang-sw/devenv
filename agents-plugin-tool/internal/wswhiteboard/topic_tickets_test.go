@@ -194,8 +194,8 @@ func TestTopicTicketIcon(t *testing.T) {
 
 	glow := regexp.MustCompile(`<section class="topic[^"]*\blive\b`)
 	// The icon block closes, then the lead closes, then the bar's own
-	// elements follow (state badge, time, chips, or the note button).
-	tail := regexp.MustCompile(`<span class="dw wbtk">.*?</span></span></span></span>(?:<span class="topic-state dw">|<time class="tago"|<span class="chip|<button)`)
+	// elements follow (time, chips, or the note button).
+	tail := regexp.MustCompile(`<span class="dw wbtk">.*?</span></span></span></span>(?:<time class="tago"|<span class="chip|<button)`)
 	type row struct{ stem, status, group, text string }
 	check := func(t *testing.T, page string, rows []row, body bool) {
 		t.Helper()
@@ -219,9 +219,9 @@ func TestTopicTicketIcon(t *testing.T) {
 		for _, r := range rows {
 			wantAll(t, page, `<span class="row `+r.group+`" data-ticket="`+r.stem+`" data-status="`+r.status+`">`, `title="`+r.stem+`">`+r.stem+`</span><span class="st">`+r.text+`</span>`)
 		}
-		fragments := []string{`data-topic="t"`, "Authored 261112-feat-live content", "Review 261112-feat-live item"}
+		fragments := []string{`data-topic="t"`, "Current content", "Review 261112-feat-live item"}
 		if body {
-			fragments = append(fragments, "Authored 261112-feat-live body")
+			fragments = append(fragments, "Authored 261112-feat-live body", "Authored 261112-feat-live content")
 		}
 		wantAll(t, page, fragments...)
 	}
@@ -284,10 +284,15 @@ func TestTopicTicketIcon(t *testing.T) {
 	topic := TopicView{Name: "work", Label: "Work", Anchor: "topic-work", UpdatedAt: "2026-11-15T00:00:00Z", UpdatedClock: "00:00", State: &TopicState{Value: StateWaiting}, Dependencies: []DependencyView{{Token: "owner", Label: "owner"}}, Tickets: want[:1]}
 	for _, layout := range layouts() {
 		for _, out := range stateViewOutputs(t, View{Layout: layout, ReplyID: "r", Topics: []TopicView{topic}}) {
-			bar := out[strings.Index(out, `<span class="tlead">`):]
-			clock, icon := strings.Index(bar, `href="#i-clock"`), strings.Index(bar, `<span class="dw wbtk">`)
-			state, tago := strings.Index(bar, `<span class="topic-state dw">`), strings.Index(bar, `<time class="tago"`)
-			if clock < 0 || icon < clock || strings.Count(bar[:icon], `<span class="dw">`) != 1 || state < icon || tago < state {
+			bar := out[strings.Index(out, `<div class="tbar">`):]
+			state, lead := strings.Index(bar, `<span class="topic-state dw">`), strings.Index(bar, `<span class="tlead">`)
+			lead2 := bar[lead:]
+			clock, icon := strings.Index(lead2, `href="#i-clock"`), strings.Index(lead2, `<span class="dw wbtk">`)
+			tago := strings.Index(lead2, `<time class="tago"`)
+			if state != len(`<div class="tbar">`) || lead < state {
+				t.Errorf("state badge is not the bar's first child: %.600s", bar)
+			}
+			if clock < 0 || icon < clock || strings.Count(lead2[:icon], `<span class="dw">`) != 1 || tago < icon {
 				t.Errorf("ticket icon not right after the waiting clock: %.600s", bar)
 			}
 		}
@@ -295,8 +300,8 @@ func TestTopicTicketIcon(t *testing.T) {
 }
 
 // TestTopicHeadHoldsTheSummaryLine pins the sticky head: an open topic's
-// .tophead holds its bar, note, and a summary line with the latest agent
-// line and the check pill (done/total, as the closed fold's header reads), the check rows staying in flow
+// .tophead holds its bar, note, and a summary line with the latest log or
+// panel recap and the check pill (done/total, as the closed fold's header reads), the check rows staying in flow
 // after the head; a topic with no checks has no pill; a closed topic's head
 // has no summary line; and a legacy recap stays a card under the head.
 func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
@@ -327,10 +332,19 @@ func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
 		t.Error("a topic with no checks: pill shown or agent line missing from the head")
 	}
 
+	panel := &State{}
+	mustApply(t, panel, `<wb:topic name="panel-only"><wb:panel recap="only a panel">body</wb:panel></wb:topic>`)
+	for _, layout := range layouts() {
+		page := render(t, BuildView(panel, ViewInput{Layout: layout, ReplyID: "r"}))
+		wantAll(t, page, `<div class="tsub"><div class="trecap" data-entry="e1" data-kind="panel"`,
+			`class="evi wb-evi-panel"`, `class="rtext md" title="only a panel">only a panel</div>`)
+		wantNone(t, page, `class="ckpill"`)
+	}
+
 	closed := &State{}
 	mustApply(t, closed, `<wb:topic name="c"><wb:log>end</wb:log><wb:close result="ok"/></wb:topic>`)
-	if page := render(t, BuildView(closed, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Contains(page, `class="tsub"`) {
-		t.Error("a closed topic's head carries the summary line")
+	if page := render(t, BuildView(closed, ViewInput{Layout: LayoutFull, ReplyID: "r"})); !strings.Contains(page, `class="tsub"`) || !strings.Contains(page, `title="ok">ok</div>`) {
+		t.Error("a closed topic's head must carry the latest summary line")
 	}
 
 	legacy := &State{Topics: []TopicDoc{{Name: "l", Recap: "old recap", Changed: 1}}}

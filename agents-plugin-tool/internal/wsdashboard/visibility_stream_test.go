@@ -70,7 +70,7 @@ func TestVisibilityLegacyAndRegionFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A second legacy stream gives the read loop time to consume the noise.
-	resp, err := http.Get(f.base + "/rail/events?display=0")
+	resp, err := (&http.Client{Transport: localhostTestHTTPTransport()}).Get(f.base + "/rail/events?display=0")
 	if err != nil {
 		t.Fatal(err)
 	}

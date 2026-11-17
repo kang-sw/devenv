@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -221,8 +222,32 @@ func TestDashboardDaemonRunsTheTrackerPoll(t *testing.T) {
 			t.Fatal("the daemon never took the tracker poll lock")
 		}
 	}
+	// Browser-only routes use the real credential from the native bearer exchange.
+	cookieReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/auth/cookie", ep.Port), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookieReq.Header.Set("Authorization", "Bearer "+ep.Token)
+	cookieResp, err := dashboardTestClient.Do(cookieReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var credential struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	decodeErr := json.NewDecoder(cookieResp.Body).Decode(&credential)
+	cookieResp.Body.Close()
+	if cookieResp.StatusCode != http.StatusOK || decodeErr != nil || credential.Name == "" || credential.Value == "" {
+		t.Fatalf("POST /auth/cookie = %d, decode: %v", cookieResp.StatusCode, decodeErr)
+	}
 	// The same daemon serves the tracker routes over its one host.
-	resp, err := dashboardTestClient.Get(fmt.Sprintf("http://127.0.0.1:%d/tracker/stores", ep.Port))
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/tracker/stores", ep.Port), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&http.Cookie{Name: credential.Name, Value: credential.Value})
+	resp, err := dashboardTestClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

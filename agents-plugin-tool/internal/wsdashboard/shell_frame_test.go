@@ -265,6 +265,8 @@ function railMarks() { log.push("marks:" + rid); }
 function railOpen() {}
 function railShown() { return false; }
 function railKey() { log.push("railKey"); }
+var renameChecks = 0;
+function railRenameNew() { renameChecks++; }
 function setTheme() {}
 function from(win, m, origin) { listeners.message.forEach(function (fn) { fn({ source: win, origin: origin || ORIGIN, data: m }); }); }
 function on() { return framesBox.kids.filter(function (f) { return f.classList.contains("on") && !f.removed; }).map(function (f) { return f.src; }); }

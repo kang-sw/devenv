@@ -4,10 +4,22 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fixture } = require('./daemon-fixture.cjs');
-const { stageDaemon } = require('../daemon-stage');
-const { validateDaemonRoot } = require('../daemon-selection');
+const { stageDaemon, isWithin } = require('../daemon-stage');
+const { selectDaemon, validateDaemonRoot } = require('../daemon-selection');
 const { build } = require('../scripts/build.cjs');
 
+test('Windows stage containment allows separate volumes and shares but rejects actual descendants', () => {
+  for (const [root, target, expected] of [
+    ['D:\\app\\resources\\app.asar', 'C:\\Users\\owner\\AppData\\Roaming\\Werkschaft\\daemon-stages', false],
+    ['D:\\app\\resources\\app.asar.unpacked\\daemon', 'C:\\Users\\owner\\daemon-stages', false],
+    ['D:\\app', 'D:\\other\\daemon-stages', false],
+    ['D:\\app', 'D:\\application\\daemon-stages', false],
+    ['D:\\app', 'D:\\app', true],
+    ['D:\\app', 'd:\\app\\user-data\\daemon-stages', true],
+    ['\\\\server\\apps\\Werkschaft', '\\\\server\\users\\owner\\daemon-stages', false],
+    ['\\\\server\\apps\\Werkschaft', '\\\\server\\apps\\Werkschaft\\daemon-stages', true],
+  ]) assert.equal(isWithin(root, target, path.win32), expected, `${root} -> ${target}`);
+});
 test('staging retains complete versions outside the app; cleans only its own failed partial', t => {
   const f = fixture(t, 'darwin');
   const selected = f.select();
@@ -29,6 +41,29 @@ test('staging retains complete versions outside the app; cleans only its own fai
     assert(fs.existsSync(path.join(staged.root, 'bin/ws-mcp-launcher.py')));
     assert(fs.existsSync(path.join(staged.root, 'claude-agents/effort-low.md')));
     assert.equal(validateDaemonRoot(staged.root, 'bundled', 'darwin').binary, staged.binary);
+  }
+});
+test('packaged ASAR input stages entirely from the physical unpacked tree', t => {
+  for (const platform of ['win32', 'darwin']) {
+    const f = fixture(t, platform);
+    const appRoot = path.join(f.base, 'app.asar'), unpacked = appRoot + '.unpacked';
+    fs.renameSync(f.appRoot, unpacked);
+    fs.writeFileSync(appRoot, 'archive placeholder: no Electron needed');
+    const selected = selectDaemon({ appRoot, userData: f.userData, platform });
+    const copy = fs.copyFileSync, copied = [];
+    const mock = t.mock.method(fs, 'copyFileSync', function (from, ...args) {
+      assert(from.startsWith(path.join(unpacked, 'daemon') + path.sep), from);
+      copied.push(path.relative(selected.root, from));
+      return copy.call(this, from, ...args);
+    });
+    const staged = stageDaemon(selected, f.userData, platform, appRoot);
+    mock.mock.restore();
+    for (const name of [path.basename(selected.binary), '.claude-plugin/plugin.json',
+      'bin/ws-mcp-launcher.py', 'rsrc/hello/hello.md', 'skills/hello/SKILL.md']) {
+      assert(copied.includes(path.normalize(name)), name);
+    }
+    fs.rmSync(unpacked, { recursive: true });
+    assert.equal(validateDaemonRoot(staged.root, 'bundled', platform).binary, staged.binary);
   }
 });
 test('untrusted version suffix cannot escape or name a path outside the staging container', t => {
@@ -87,7 +122,7 @@ test('builder accepts only a supplied validated input and copies entire package 
     assert.equal(typeof require(path.join(dir, 'daemon-controller.js')).connectDaemon, 'function');
     return [dir];
   };
-  const run = (_tar, args) => { archived++; fs.writeFileSync(args[args.indexOf('-f') + 1], 'archive fixture'); };
+  const run = (_tar, args) => { archived++; fs.writeFileSync(args.find(arg => arg.endsWith('.zip')), 'archive fixture'); };
   const options = { platform: 'win32', arch: 'x64', daemonInput: f.bundled.root, cache, packageApp, out, run };
   await assert.rejects(build({ ...options, daemonInput: undefined }), /preassembled daemonInput/);
   fs.rmSync(f.bundled.pluginFile);

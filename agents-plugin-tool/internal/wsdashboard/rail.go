@@ -2,10 +2,14 @@ package wsdashboard
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"reflect"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -59,20 +63,61 @@ func (d *Daemon) railBaseView(r pageReader) RailView {
 	now := r.clock()
 	var inputs []railInput
 	wanted := map[string][]Registration{}
+	d.railInputs.mu.Lock()
+	defer d.railInputs.mu.Unlock()
+	if d.railInputs.sessions == nil {
+		d.railInputs.sessions = map[string]cachedRailInput{}
+	}
+	seen := map[string]bool{}
 	for _, s := range d.index.Sessions() {
 		if s.Unlisted {
 			continue
 		}
 		reg := s.Registration
-		in := railInput{Session: s, Snapshot: r.readSnapshot(reg.ReplyID), Repo: railRepoRoot(reg), CanRevive: d.agents != nil}
-		if in.Repo != "" {
-			in.Linked = worktreeMain(reg.Project) != ""
+		seen[reg.ReplyID] = true
+		version := d.railInputVersion(s)
+		cached, have := d.railInputs.sessions[reg.ReplyID]
+		// Explicit current-state queries (the hiring roster) retain their
+		// read-through contract; only presentation passes reuse these inputs.
+		if r.freshSnapshots || !have || cached.retry || cached.version != version {
+			if r.freshSnapshots {
+				r.snapshots.Invalidate(r.dir, reg.ReplyID)
+			}
+			snap, err := r.snapshots.snapshotResult(r.dir, reg.ReplyID)
+			retry := err != nil && !errors.Is(err, os.ErrNotExist)
+			if retry && have && !r.freshSnapshots {
+				snap = cached.input.Snapshot // retain last-good presentation
+			}
+			in := railInput{Snapshot: snap, Repo: railRepoRoot(reg)}
+			if in.Repo != "" {
+				in.Linked = worktreeMain(reg.Project) != ""
+			}
+			var messageOK bool
+			in.Message, messageOK = d.railMsgs.lastResult(reg.ReplyID, railRev(s.Rev, version.ring), wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
+			cached = cachedRailInput{version: version, input: in, retry: retry || !messageOK}
+			d.railInputs.sessions[reg.ReplyID] = cached
+			if d.railInputs.onRead != nil {
+				d.railInputs.onRead(reg.ReplyID)
+			}
 		}
-		in.Message = d.railMsgs.last(reg.ReplyID, railRev(s.Rev, d.live.ringGen(reg.ReplyID)), wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
+		in := cached.input
+		// Heartbeat-only handoffs raise no revision or wake. Age the cached
+		// snapshot using the index's latest in-memory clock, never a stat.
+		if in.Snapshot != nil && !s.SnapshotUpdatedAt.IsZero() && s.SnapshotUpdatedAt.UnixMilli() > in.Snapshot.UpdatedAt {
+			snap := *in.Snapshot
+			snap.UpdatedAt = s.SnapshotUpdatedAt.UnixMilli()
+			in.Snapshot = &snap
+		}
+		in.Session, in.CanRevive = s, d.agents != nil
 		if in.Repo != "" {
 			wanted[in.Repo] = append(wanted[in.Repo], reg)
 		}
 		inputs = append(inputs, in)
+	}
+	for id := range d.railInputs.sessions {
+		if !seen[id] {
+			delete(d.railInputs.sessions, id)
+		}
 	}
 	// A stored repository's worktrees are listed whether or not a session
 	// runs in it.
@@ -86,6 +131,49 @@ func (d *Daemon) railBaseView(r pageReader) RailView {
 	view.CanAdd = d.workspaces != nil
 	view.CanSpawn = d.agents != nil
 	return view
+}
+
+// railInputCache shares immutable store inputs across languages and streams.
+// Only a session revision or a named session/snapshot/ring wake refreshes them;
+// clock-derived rows are rebuilt from these inputs on every rail pass.
+type railInputCache struct {
+	mu       sync.Mutex
+	sessions map[string]cachedRailInput
+	onRead   func(string) // test-only counting hook, under mu
+}
+
+type cachedRailInput struct {
+	version railInputVersion
+	input   railInput
+	retry   bool
+}
+
+func (c *railInputCache) retryPending() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, in := range c.sessions {
+		if in.retry {
+			return true
+		}
+	}
+	return false
+}
+
+type railInputVersion struct {
+	rev, ring, snapshot, session uint64
+}
+
+func (d *Daemon) railInputVersion(s Session) railInputVersion {
+	v := railInputVersion{rev: s.Rev, ring: d.live.ringGen(s.ReplyID)}
+	if d.broker != nil {
+		d.broker.mu.Lock()
+		v.snapshot = d.broker.changed[liveDep(s.ReplyID)]
+		v.session = d.broker.changed[s.ReplyID]
+		// A ring notification can arrive before the index read raises Rev.
+		v.ring = max(v.ring, d.broker.changed[ringDep(s.ReplyID)])
+		d.broker.mu.Unlock()
+	}
+	return v
 }
 
 // renderRailRegion renders the rail region in lang.
@@ -102,9 +190,10 @@ func renderRailRegion(view RailView, lang string) (renderedRegion, error) {
 }
 
 // railPageSource is the rail's shared render in lang and theme: one for
-// every session page's stream, keyed without a reply-id. Every wake re-reads
-// its view inputs, including clock liveness, worktrees, hover evidence and
-// layout, but only a changed view runs the template and row decomposition.
+// every session page's stream, keyed without a reply-id. Wakes refresh only
+// the named sessions' inputs, at most once a second with a trailing pass.
+// Clock liveness, worktree lists and layout are recomputed from memory;
+// only a changed view runs the template and row decomposition.
 func (d *Daemon) railPageSource(lang, theme string) pageSource {
 	return d.railSource(d.pagesIn(lang), lang, theme)
 }
@@ -113,6 +202,7 @@ func (d *Daemon) railSource(pages pageReader, lang, theme string) pageSource {
 	return pageSource{
 		key:          pageKey{kind: regionRail, lang: lang, theme: theme},
 		compareReads: true,
+		minInterval:  time.Second,
 		render: func(previous *liveRender) pageRender {
 			view := d.railView(pages)
 			if previous != nil {
@@ -134,6 +224,9 @@ func (d *Daemon) railSource(pages pageReader, lang, theme string) pageSource {
 		// layout's generation joins it, so a layout change (another
 		// process's write among them) is never skipped as unchanged.
 		stamp: func(refreshInputs) (string, bool) {
+			if d.railInputs.retryPending() {
+				return "", false // a refresh must retry failed inputs, even at the same revision
+			}
 			stamp, ok := pages.indexStamp()
 			_, gen := d.layout.current()
 			return stamp + "/" + strconv.FormatUint(gen, 10), ok

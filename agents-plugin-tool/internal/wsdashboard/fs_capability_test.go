@@ -197,8 +197,8 @@ type capShape struct {
 	origin, site, mode, dest string
 }
 
-// capFetch requests target as v with the shape's headers; ":daemon" in its
-// origin stands for v's own origin.
+// capFetch requests target without cookies, as an opaque-origin document's
+// loads do; ":daemon" in the shape's origin stands for v's own origin.
 func capFetch(f *pageFixture, v viewer, target string, s capShape) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	req.RemoteAddr, req.Host = v.peer, v.host

@@ -19,7 +19,7 @@ import (
 )
 
 func testClient() *http.Client {
-	return &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{Proxy: nil}}
+	return &http.Client{Timeout: 500 * time.Millisecond, Transport: localhostTestHTTPTransport()}
 }
 
 func startTestDaemon(t *testing.T, dir, version string) *Daemon {
@@ -165,6 +165,7 @@ func TestNonLoopbackHostIsRefused(t *testing.T) {
 				method = http.MethodPost
 			}
 			req := httptest.NewRequest(method, path, nil)
+			req.RemoteAddr = "127.0.0.1:50000"
 			req.Host = host
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
@@ -839,8 +840,9 @@ func TestSupportHandlerMountedUnderItsPrefix(t *testing.T) {
 	serve := func(method, path, host string) int {
 		req := httptest.NewRequest(method, path, nil)
 		req.Host = host
+		req.RemoteAddr = "127.0.0.1:50000"
 		rec := httptest.NewRecorder()
-		d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, d).ServeHTTP(rec, req)
 		return rec.Code
 	}
 	for _, path := range []string{"/support", "/support/choices", "/support/stores/a/send"} {
@@ -858,8 +860,9 @@ func TestSupportHandlerMountedUnderItsPrefix(t *testing.T) {
 	plain := startTestDaemon(t, t.TempDir(), "1.0.0")
 	req := httptest.NewRequest(http.MethodGet, "/support/choices", nil)
 	req.Host = "127.0.0.1"
+	req.RemoteAddr = "127.0.0.1:50000"
 	rec := httptest.NewRecorder()
-	plain.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(t, plain).ServeHTTP(rec, req)
 	if rec.Code == http.StatusTeapot {
 		t.Fatal("a daemon without a support handler served /support")
 	}

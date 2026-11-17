@@ -21,7 +21,9 @@ export function resolveSkillsDir(
   pluginDir: string,
   repoRoot: string,
   exists: (p: string) => boolean = existsSync,
+  selectedWorkflowRoot?: string,
 ): string {
+  if (selectedWorkflowRoot) return selectedWorkflowSkillsDir(selectedWorkflowRoot);
   const local = join(pluginDir, "skills");
   if (exists(local)) return local;
   return join(repoRoot, "agents-plugin", "skills");
@@ -180,11 +182,19 @@ export function validateGeneratedSkillTargets(skillsRoot: string, rsrcManifestPa
   }
 }
 
+function selectedWorkflowSkillsDir(root: string): string {
+  const skills = join(root, "skills");
+  // Selected package trees are curated inputs, never synchronization targets.
+  validateGeneratedSkillTargets(skills, join(root, "rsrc", "manifest.json"));
+  return skills;
+}
+
 /**
- * Reload-time preparation: local source checkouts synchronize on a content
- * mismatch, while installed tarballs validate the copy they already carry.
+ * Reload-time preparation: selected workflows are validated read-only. Otherwise,
+ * source checkouts synchronize and installed tarballs validate their own copy.
  */
-export function prepareSkillsDir(pluginDir: string, repoRoot: string): string {
+export function prepareSkillsDir(pluginDir: string, repoRoot: string, selectedWorkflowRoot?: string): string {
+  if (selectedWorkflowRoot) return selectedWorkflowSkillsDir(selectedWorkflowRoot);
   const source = join(repoRoot, "agents-plugin", "skills");
   const generated = join(pluginDir, "skills");
   const manifest = join(pluginDir, "rsrc", "manifest.json");
@@ -203,8 +213,9 @@ export function registerSkillResources(
   pi: SkillResourcesRegistrar,
   pluginDir: string,
   repoRoot: string,
+  selectedWorkflowRoot?: string,
 ): void {
   pi.on("resources_discover", () => ({
-    skillPaths: [prepareSkillsDir(pluginDir, repoRoot)],
+    skillPaths: [prepareSkillsDir(pluginDir, repoRoot, selectedWorkflowRoot)],
   }));
 }

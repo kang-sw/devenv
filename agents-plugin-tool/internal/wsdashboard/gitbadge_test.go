@@ -92,6 +92,31 @@ func expectRead(t *testing.T, f *fakeGit, root string) {
 	}
 }
 
+// expectReads accepts concurrent reads in any order, but requires each root
+// exactly as many times as it appears in roots.
+func expectReads(t *testing.T, f *fakeGit, roots ...string) {
+	t.Helper()
+	want := make([]string, len(roots))
+	for i, root := range roots {
+		want[i] = gitKey(root)
+	}
+	got := make([]string, 0, len(roots))
+	deadline := time.After(2 * time.Second)
+	for range roots {
+		select {
+		case root := <-f.reads:
+			got = append(got, root)
+		case <-deadline:
+			t.Fatalf("reads %q, want %q (in any order)", got, want)
+		}
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("reads %q, want %q (in any order)", got, want)
+	}
+}
+
 func expectNoRead(t *testing.T, f *fakeGit) {
 	t.Helper()
 	select {
@@ -502,7 +527,7 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 		t.Fatalf("reads before any stream = %d", n)
 	}
 
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
@@ -585,11 +610,14 @@ func TestGitBadgeFollowsTheStreamedSnapshot(t *testing.T) {
 		writeSnapshot(t, f.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
 			Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: reply}},
 			Repo: &wslive.Repo{Folder: "p", Branch: "main", Upstream: "origin/main", Ahead: ahead}})
+		// Direct broker injection also models the real index read's signal
+		// invalidation; no per-render TTL bypass is involved.
+		f.d.snapshots.Invalidate(f.dir, "livesession")
 		f.d.broker.wake("livesession")
 	}
 	snapshot("first reply", 1)
 	_, page := get(t, f.base+"/s/livesession?frame=1")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)

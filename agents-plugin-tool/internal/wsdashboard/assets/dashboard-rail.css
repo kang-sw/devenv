@@ -131,7 +131,7 @@
 .bpzone.over { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
 @media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }
 @media (min-width: 1780px) {
-  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not(:has(#grid[data-layout="tabs"])) .bpzone { display: grid; z-index: 1; border-color: color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); background: transparent; color: var(--wb-muted-fg); font-weight: 700; }
+  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not([data-dashboard-layout="tabs"]) .bpzone { display: grid; z-index: 1; border-color: color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); background: transparent; color: var(--wb-muted-fg); font-weight: 700; }
 }
 .rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
 .rail .rsp { flex: 1; }
@@ -140,6 +140,11 @@
 .rail .rref { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
 .rail .rref:hover, .rail .rref:focus-visible { color: var(--wb-primary); background: var(--wb-muted); }
 .rail .rref.busy { opacity: .5; cursor: progress; }
+/* the sleep (moon) button shares .rref; dimmed while no session looks idle,
+   and, like the new-session +, only a browser on the daemon's machine sees it */
+.rail .rref:disabled { cursor: default; color: var(--wb-muted-fg); background: transparent; }
+.rail .rref:disabled > .i { opacity: .4; }
+html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; }
 .rail .rlist > .empty { padding: 10px 12px; font-size: 12.5px; color: var(--wb-muted-fg); }
 .rail .rws + .rws { margin-top: 8px; }
@@ -170,7 +175,10 @@
 .rail .rgit:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
-.rail .rwt.empty { border-color: transparent; }
+/* a branch with no sessions carries .empty, which the global .empty placeholder
+   (dashboard.css: 8px margin, 1px dashed border) also matches; drop both so its
+   gaps equal a branch with sessions */
+.rail .rwt.empty { margin: 0; border: 0; }
 .rail .rwt.empty .wthd { opacity: .6; }
 .rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
 .rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }
@@ -503,6 +511,25 @@ dialog.rdeldlg [hidden] { display: none !important; }
 .rdeldlg .rdlead code { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); background: var(--wb-muted); padding: 0 4px; border-radius: 4px; }
 .rgitdlg .rdnote.bad { word-break: keep-all; }
 .rdeldlg .pbtn:disabled { opacity: .45; cursor: default; }
+/* the sleep modal: the delete modal's frame, a list of the sessions it will
+   stop (harness badge, name, workspace and branch, last activity) */
+dialog.rsleepdlg { line-height: 1.4; }
+.rdeldlg.rsleepdlg .rdhd .i { color: var(--wb-primary); }
+.rsleepdlg .rdlead b { color: var(--wb-fg); font-weight: 700; }
+.rsleepdlg .rdsleeplist { margin: 0; padding: 4px; list-style: none; max-height: 218px; overflow-y: auto; overscroll-behavior: contain; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rsleepdlg .rdsleeplist li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 6px; border-radius: 6px; }
+.rsleepdlg .rdsleeplist li + li { box-shadow: 0 -1px 0 var(--wb-muted); }
+.rsleepdlg .hi { width: 16px; height: 16px; display: inline-grid; place-items: center; flex: none; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; }
+.rsleepdlg .hi.claude { background: #D97757; }
+.rsleepdlg .hi.codex { background: #10A37F; }
+.rsleepdlg .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rsleepdlg .who { min-width: 0; flex: 1 1 auto; display: grid; }
+.rsleepdlg .who .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsleepdlg .who .pj { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsleepdlg .ago { flex: none; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.rsleepdlg .rdnote { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rsleepdlg .pbtn.go { display: inline-flex; align-items: center; gap: 5px; }
+.rsleepdlg .pbtn.go .i { width: 12px; height: 12px; }
 .rdeldlg .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 /* daemon-hosted lead sessions: the hosted mark beside a harness badge; the
    new-session button after a worktree row's label (styled with the + buttons

@@ -48,6 +48,9 @@ func TestDashboardBoardTopicCacheRetainsImageWatch(t *testing.T) {
 	if err := os.Chtimes(path, at, at); err != nil {
 		t.Fatal(err)
 	}
+	// The external image edit sends no signal; its watch stamp may be
+	// reused for one second, but must then invalidate the retained topic.
+	waitForDashboardValidation(t)
 	page = readPageOK(t, src, reg)
 	if !strings.Contains(string(page.Board.Board), base64.StdEncoding.EncodeToString([]byte("replacement-image-two"))) {
 		t.Fatal("image edit was hidden by topic cache")
@@ -135,6 +138,7 @@ func TestDashboardBoardTopicCache(t *testing.T) {
 	writeTicket(t, f.root, "ready", "261101-feat-topic-cache", "A ticket")
 	at := time.Now().Add(time.Second)
 	os.Chtimes(filepath.Join(f.root, "ai-docs", "tickets", "ready"), at, at)
+	waitForDashboardValidation(t) // external shared watch, no Index signal
 	readPageOK(t, src, reg)
 	for id, count := range topicRenderCounts(src) {
 		if count-before[id] != 1 {

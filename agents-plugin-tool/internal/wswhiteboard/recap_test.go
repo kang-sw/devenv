@@ -53,11 +53,14 @@ func recapBlock(t *testing.T, out, name string) string {
 
 func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "open", "x")+topicXML("open", "the body")+topicXML("shut", "closed body"))
+	mustApply(t, st, addXML(ClassTechnical, "open", "x"))
 	legacyRecap(st, "open", "**READY** · see ![shot](shot.png) <u>kept</u><script>alert(1)</script>")
 	legacyRecap(st, "shut", "was moving")
 	legacyRecap(st, "lone", "only a recap")
-	mustApply(t, st, `<wb:topic name="shut"><wb:close result="Shipped."/></wb:topic><wb:topic name="lone"><wb:close result="Dropped."/></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="shut"><wb:close/></wb:topic><wb:topic name="lone"><wb:close/></wb:topic>`)
+	// Unconverted snapshots have no panel entry to supersede the old recap.
+	st.topicDoc("open").Body = "the body"
+	st.topicDoc("shut").Body = "closed body"
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		block := recapBlock(t, out, "open")
@@ -66,7 +69,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 			itemContainer = `class="topic-stream"`
 		}
 		recap, doc, items := strings.Index(block, `<div class="trecap">`), strings.Index(block, `<details class="tdoc"`), strings.Index(block, itemContainer)
-		if recap < 0 || doc != -1 || recap > items {
+		if recap < 0 || (doc >= 0 && recap > doc) || recap > items {
 			t.Fatalf("%s: recap %d, doc %d, items %d", name, recap, doc, items)
 		}
 		wantAll(t, block, `<div class="rtext md" title="**READY**`, `"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`, `datetime="2026-11-04T09:00:00Z"`)
@@ -76,14 +79,15 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 		if fold == nil || strings.HasSuffix(shut[fold[0]:fold[1]], " open>") || strings.Index(shut, `<div class="trecap">`) < fold[1] {
 			t.Fatalf("%s: closed legacy recap is not folded: %s", name, shut)
 		}
-		wantAll(t, shut, `<span class="tresult" title="how the topic ended">Shipped.</span>`)
+		wantNone(t, shut, `class="tresult"`)
 		wantAll(t, recapBlock(t, out, "lone"), `<div class="rtext md" title="only a recap">only a recap</div>`)
 	}
 }
 
 func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "t", "target")+topicXML("t", "framed body"))
+	mustApply(t, st, addXML(ClassTechnical, "t", "target"))
+	st.topicDoc("t").Body = "framed body"
 	legacyRecap(st, "t", "waiting on {{1}}, see {{40}} and {{99}}; `{{1}}` <img src=x onerror=alert(1)>")
 	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
 		view := BuildView(st, ViewInput{Layout: layout, ReplyID: "r"})
@@ -111,6 +115,63 @@ func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 	}
 }
 
+// The page and embed share the display-only head projection, independent of
+// latest-log highlighting and without changing durable state or panel payloads.
+func TestRecapHeadChoosesNewestLogOrPanel(t *testing.T) {
+	const early = "2026-11-04T08:00:00Z"
+	const late = "2026-11-04T09:00:00Z"
+	agent := Entry{ID: "e9", Kind: EntryAgent, Text: "Agent **ready**", At: early}
+	panel := Entry{ID: "e10", Kind: EntryPanel, PanelID: "p1", Recap: "Panel **ready**", Text: "PRIVATE PANEL PAYLOAD", At: late}
+	withAt := func(e Entry, at string) Entry { e.At = at; return e }
+	withID := func(e Entry, id string) Entry { e.ID = id; return e }
+	for _, tc := range []struct {
+		name    string
+		entries []Entry
+		want    Entry
+	}{
+		{"panel-only", []Entry{panel}, panel},
+		{"agent-only", []Entry{agent}, agent},
+		{"later-panel", []Entry{agent, panel}, panel},
+		{"new-log-after-panel", []Entry{panel, withAt(agent, "2026-11-04T10:00:00Z")}, withAt(agent, "2026-11-04T10:00:00Z")},
+		{"equal-panel-larger-eN", []Entry{withAt(panel, early), agent}, withAt(panel, early)},
+		{"equal-agent-larger-eN", []Entry{withID(agent, "e10"), withID(withAt(panel, early), "e9")}, withID(agent, "e10")},
+		{"equivalent-time-offsets", []Entry{withAt(panel, "2026-11-04T10:00:00+01:00"), withAt(agent, late)}, withAt(panel, "2026-11-04T10:00:00+01:00")},
+		{"timestamps-before-ID", []Entry{panel, withID(agent, "e99")}, panel},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := append([]Entry(nil), tc.entries...)
+			entries = append(entries, Entry{ID: "e100", Kind: EntrySystem, Text: "never the summary", At: "2026-11-04T11:00:00Z"})
+			st := &State{EntrySeq: 100, PanelCounter: 1, Topics: []TopicDoc{{Name: "t", Entries: entries}}}
+			before := string(mustMarshal(t, st))
+			for _, layout := range layouts() {
+				view := BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Location: time.UTC})
+				tv := view.Topics[0]
+				if tv.Head == nil || tv.Head.ID != tc.want.ID || tv.Summary() != tc.want.Summary() || tv.Head.At != tc.want.At || !tv.HeadSummary() {
+					t.Fatalf("head = %+v, summary %q; want %+v", tv.Head, tv.Summary(), tc.want)
+				}
+				at, _ := time.Parse(time.RFC3339Nano, tc.want.At)
+				if tv.RecapAt != at.UTC().Format(time.RFC3339) || tv.RecapMs != at.UnixMilli() || tv.RecapClock != at.UTC().Format("15:04") {
+					t.Fatalf("head timestamp = %s/%d/%s, want %s", tv.RecapAt, tv.RecapMs, tv.RecapClock, tc.want.At)
+				}
+				out := render(t, view)
+				wantAll(t, out, `class="tsub"><div class="trecap" data-entry="`+tc.want.ID+`" data-kind="`+tc.want.Kind+`"`,
+					`class="rtext md" title="`+tc.want.Summary()+`">`, `<strong>ready</strong>`)
+				if tc.want.Kind == EntryPanel {
+					wantAll(t, out, `class="evi wb-evi-panel" title="Panels">P</span>`)
+				} else {
+					wantAll(t, out, `class="evi lead" title="Agent log line">L</span>`)
+				}
+			}
+			if string(mustMarshal(t, st)) != before {
+				t.Fatal("summary projection changed durable state")
+			}
+		})
+	}
+	if (TopicDoc{}).LatestSummary() != nil {
+		t.Fatal("empty topic has a summary")
+	}
+}
+
 func TestQueryReadsAgentLinesInsteadOfLegacyRecaps(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
@@ -118,7 +179,10 @@ func TestQueryReadsAgentLinesInsteadOfLegacyRecaps(t *testing.T) {
 	legacyRecap(st, "c", "closed recap")
 	mustApply(t, st, `<wb:topic name="c"><wb:close result="done"/></wb:topic>`)
 	// Import belongs to the locked loader, not to a pure query fallback.
-	wantText(t, "unconverted snapshot", queryText(t, st, `{"depth":"topics"}`), []string{`topic "t" [open]`}, []string{"legacy READY", "closed recap", "current "})
+	// The body command already published a content panel; its recap, not
+	// the unconverted legacy field, supplies the current summary.
+	head := st.Topics[0].LatestSummary()
+	wantText(t, "unconverted snapshot", queryText(t, st, `{"depth":"topics"}`), []string{`topic "t" [open]`, "current " + head.ID + " " + head.At + ": Current content"}, []string{"legacy READY", "closed recap"})
 	mustApply(t, st, `<wb:topic name="t"><wb:log>READY · current agent line</wb:log></wb:topic>`)
 	agent, _ := st.LatestAgent("t")
 	current := "current " + agent.ID + " " + agent.At + ": READY · current agent line"

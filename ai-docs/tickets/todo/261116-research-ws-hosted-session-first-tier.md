@@ -189,6 +189,13 @@ spec" means formalising that existing boundary or something wider is open.
   daemon `pi.*` (`agents-plugin-pi/src/index.ts:1-7`).
 - Hosted leads are launched without a tool whitelist (`claude.go:102-133`,
   `pi.go:366-380`).
+- The composer's `/` slash picker is fed by the session adapter's advertised
+  command list (`dashboard-composer.js:818-824`, the `cmds` region with name,
+  description, source, layer); a selection posts `{command, args}` as a message
+  (`dashboard-composer.js:900`, :927). The frontend holds no ws-side command
+  source today.
+- The ws MCP server implements no `prompts/*` methods (grep for `"prompts` in
+  `agents-plugin-tool/internal/mcp/` finds nothing).
 
 ### Confirmed Decisions
 
@@ -206,6 +213,16 @@ spec" means formalising that existing boundary or something wider is open.
   harness's own spawn tool, so subagent tracking comes from the daemon; this
   relies on harness tool whitelists (owner, 2026-11-16 23:02). The tool's name
   and shape are not settled.
+- In hosted (daemon-launched) sessions, workflow instructions reach the agent
+  through MCP playbooks, not harness skills/plugins; the agent loads playbooks
+  directly (skills are already thin wrappers over `playbook.read` /
+  `workflow_manual`) (owner, 2026-11-17 05:17).
+- User-facing entry points for hosted sessions are a curated set of `lead-*`
+  commands injected into the dashboard composer's `/` slash autocomplete list
+  (owner, 2026-11-17).
+- Goal: per-harness plugin loading stops mattering for hosted sessions; the
+  requirement is an MCP connection plus daemon-side automatic injection where
+  needed (e.g. the workflow manual) (owner, 2026-11-17).
 
 ### Proposals
 
@@ -230,6 +247,23 @@ Non-authoritative candidates from the survey.
   growing on the CLI tier: captions and any new dashboard-only telemetry.
 - Track each moved feature with a hosted-mode stand-down in the mod so a
   hosted lead never runs both copies.
+- Daemon-side slash expansion: add the ws `lead-*` set as another source for
+  the composer picker; the daemon, not the frontend, expands
+  `{command: "lead-ship", args}` into a harness-neutral turn ("read playbook
+  lead-ship and execute"). The list and expansion rule then live in one place,
+  every client (dashboard, Electron) behaves the same, and history shows
+  `/lead-ship`.
+- Replace what skills provide today: (1) model-side routing: skill
+  descriptions sit in the system prompt so the model picks e.g. lead-ship from
+  "release this"; move that routing table into the MCP initialize
+  `instructions` or the workflow manual; (2) hooks (post-compaction revive
+  nudge, response-language hooks) are not MCP, so the daemon injects turns from
+  stream events (same path as the compaction advisory proposal above); (3)
+  plugin-shipped subagent definitions (effort-tier agents) are replaced by the
+  already-decided daemon-owned `agent.spawn`.
+- The Claude CLI compatibility tier keeps the plugin; playbooks remain the
+  single source and skills are generated shims, so dual-maintenance cost stays
+  small.
 
 ### Open Questions
 
@@ -259,6 +293,13 @@ Non-authoritative candidates from the survey.
 8. Reconcile with `261114-epic-ws-common-session-foundation`'s decision that
    CLI-plugin and MCP-only hosted entry stay distinct and that common access
    does not substitute for harness-native integration.
+9. Does Claude Code expand MCP prompts (`prompts/list`) as slash commands in
+   `-p` stream-json input? If so the CLI tier could get the same command list
+   via MCP prompts (the ws MCP server implements no `prompts/*` today).
+10. What exactly goes into the injected routing table, and what is its size
+    budget in MCP instructions versus the workflow manual?
+11. Which `lead-*` commands are curated for the slash list, and are their
+    arguments free text?
 
 ### Rejected Alternatives
 

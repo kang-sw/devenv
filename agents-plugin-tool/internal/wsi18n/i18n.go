@@ -285,11 +285,53 @@ func Script(lang string) template.JS {
 	return script(lang, ClientTable(lang))
 }
 
+const (
+	subsetCacheLimit     = 64
+	subsetCacheMaxPrefix = 256
+)
+
+type subsetScriptKey struct {
+	lang, prefix string
+}
+
+// Tables are immutable after load. Bound both entry count and retained prefix
+// bytes because SubsetScript accepts arbitrary caller-supplied prefixes.
+var subsetScripts = struct {
+	sync.Mutex
+	entries map[subsetScriptKey]template.JS
+	order   [subsetCacheLimit]subsetScriptKey
+	next    int
+}{entries: make(map[subsetScriptKey]template.JS)}
+
 // SubsetScript is Script over only the client keys that start with prefix,
 // for a static page that loads one renderer and its strings from a file
 // instead of from a dashboard page.
 func SubsetScript(lang, prefix string) template.JS {
-	return filteredScript(lang, func(k string) bool { return strings.HasPrefix(k, prefix) })
+	if !Supported(lang) {
+		lang = Default
+	}
+	build := func() template.JS {
+		return filteredScript(lang, func(k string) bool { return strings.HasPrefix(k, prefix) })
+	}
+	if len(prefix) > subsetCacheMaxPrefix {
+		return build()
+	}
+
+	subsetScripts.Lock()
+	defer subsetScripts.Unlock()
+	key := subsetScriptKey{lang, prefix}
+	if cached, ok := subsetScripts.entries[key]; ok {
+		return cached
+	}
+	// Build under the lock so simultaneous cold requests build only once.
+	result := build()
+	delete(subsetScripts.entries, subsetScripts.order[subsetScripts.next])
+	// Do not retain a large caller string's backing storage through a slice.
+	key = subsetScriptKey{strings.Clone(lang), strings.Clone(prefix)}
+	subsetScripts.entries[key] = result
+	subsetScripts.order[subsetScripts.next] = key
+	subsetScripts.next = (subsetScripts.next + 1) % subsetCacheLimit
+	return result
 }
 
 // ScriptExcept is Script without the client keys that start with any prefix,

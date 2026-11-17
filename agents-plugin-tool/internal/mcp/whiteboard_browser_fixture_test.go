@@ -73,7 +73,12 @@ func TestWhiteboardBrowserFixture(t *testing.T) {
 	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return dir, nil }}
 	daemon := startWhiteboardDaemonForTest(t, dir, src)
 	base := fmt.Sprintf("http://127.0.0.1:%d", daemon.Endpoint().Port)
-	resp, err := http.Get(base + "/s/" + f.replyID())
+	req, err := http.NewRequest(http.MethodGet, base+"/s/"+f.replyID(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(dashboardCookieForTest(t, daemon))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -732,16 +732,17 @@ func newLeadHarness(t *testing.T) *leadHarness {
 	// Every send and restart in this harness shares the same envelope time.
 	now := time.Now()
 	h.opts = Options{
-		Now:       func() time.Time { return now },
-		Dir:       h.dir,
-		Backends:  map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi}},
-		Keys:      &fakeKeys{},
-		Config:    testConfig(t),
-		Log:       h.log,
-		Holders:   h.holders,
-		LeadKeys:  h.keys,
-		Mail:      h.mail,
-		heartbeat: 50 * time.Millisecond,
+		DaemonVersion: hostedPluginTestVersion,
+		Now:           func() time.Time { return now },
+		Dir:           h.dir,
+		Backends:      map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi}},
+		Keys:          &fakeKeys{},
+		Config:        testConfig(t),
+		Log:           h.log,
+		Holders:       h.holders,
+		LeadKeys:      h.keys,
+		Mail:          h.mail,
+		heartbeat:     50 * time.Millisecond,
 	}
 	// Every harness PID a test writes (4002, 9001, ...) is dead unless the
 	// test marks it alive: the real process table of a CI runner can hold

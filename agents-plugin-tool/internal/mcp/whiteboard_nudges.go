@@ -22,6 +22,10 @@ import (
 
 const whiteboardReconcileInterval = 30 * time.Second
 
+// Board transactions can poke faster than discovery can enumerate all keys.
+// Retain their targets and share one discovery per second, including startup.
+const whiteboardNudgeDiscoveryInterval = time.Second
+
 // Ticket status and external or interrupted writes are not fully represented by
 // the session metadata stamp. Periodically revisit even unchanged boards.
 const whiteboardNudgeRecoveryInterval = 5 * time.Minute
@@ -333,6 +337,7 @@ func nudgeReconcile(boards map[nudgeTarget]time.Time, stamps map[nudgeTarget]os.
 func (n *WhiteboardNudges) run() {
 	defer close(n.exited)
 	scan := n.now()
+	var discoverAfter time.Time
 	boards := map[nudgeTarget]time.Time{}
 	stamps := map[nudgeTarget]os.FileInfo{}
 	timer := time.NewTimer(0)
@@ -350,24 +355,35 @@ func (n *WhiteboardNudges) run() {
 		default:
 		}
 		now := n.now()
-		if !now.Before(scan) {
-			found := n.discover()
-			// The full safety scan recovers missed pokes, ticket-only changes
-			// and interrupted writes. Idle discovery itself is expensive, so
-			// do not rediscover every 30-second delivery retry interval.
-			boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, true)
-			scan = now.Add(whiteboardNudgeRecoveryInterval)
-		}
+		// Take only work that predates this discovery. A poke arriving while
+		// keys are being enumerated remains queued for a later, fresh scan.
 		n.mu.Lock()
 		pending := n.pending
 		n.pending = map[nudgeTarget]bool{}
 		n.mu.Unlock()
-		if len(pending) > 0 {
-			valid := n.discover()
-			boards, stamps = nudgeReconcile(boards, stamps, valid, n.boardStamps, false)
-			for t := range pending {
-				if _, ok := valid[t]; ok {
-					boards[t] = time.Time{}
+		recovery := !now.Before(scan)
+		var pendingDiscovery time.Time
+		if recovery || len(pending) > 0 {
+			if now.Before(discoverAfter) {
+				n.mu.Lock()
+				for t := range pending {
+					n.pending[t] = true
+				}
+				n.mu.Unlock()
+				pendingDiscovery = discoverAfter
+			} else {
+				found := n.discover()
+				discoverAfter = now.Add(whiteboardNudgeDiscoveryInterval)
+				// Safety recovery and explicit pokes share the same discovery
+				// deadline; a postponed recovery still performs full reconciliation.
+				boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, recovery)
+				if recovery {
+					scan = now.Add(whiteboardNudgeRecoveryInterval)
+				}
+				for t := range pending {
+					if _, ok := found[t]; ok {
+						boards[t] = time.Time{}
+					}
 				}
 			}
 		}
@@ -397,6 +413,12 @@ func (n *WhiteboardNudges) run() {
 			boards[t] = due
 		}
 		next := scan
+		if next.Before(discoverAfter) {
+			next = discoverAfter
+		}
+		if !pendingDiscovery.IsZero() && pendingDiscovery.Before(next) {
+			next = pendingDiscovery
+		}
 		for _, due := range boards {
 			if !due.IsZero() && due.Before(next) {
 				next = due

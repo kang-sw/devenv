@@ -29,14 +29,12 @@ func fileView(t *testing.T, f *pageFixture, path string) (int, http.Header, stri
 	return resp.StatusCode, resp.Header, string(raw)
 }
 
-// TestFileViewServesOnlyInsideTheProjectRoot pins the file view's
-// containment: a file under the session's project root is served, by
-// relative or absolute path; an absolute path outside it, a ".." escape, a
-// symlink (even one that stays inside the root), a path through a symlinked
-// directory that leads outside, a directory, and a missing file all answer
-// the same 404 without the file's bytes.
-func TestFileViewServesOnlyInsideTheProjectRoot(t *testing.T) {
-	f := startPageFixture(t)
+// TestFileViewLocalPathsAndLANConfinement pins local absolute, traversal,
+// and symlink reads while LAN token holders remain confined to regular
+// files inside the project. Directories and missing files remain refused.
+func TestFileViewLocalPathsAndLANConfinement(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	local, lan := fsViewers(t, f)
 	outside := filepath.Join(t.TempDir(), "outside")
 	writeFile(t, filepath.Join(f.project, "notes.txt"), "TEXT-INSIDE")
 	writeFile(t, filepath.Join(f.project, "docs", "deep", "c.go"), "package c // GO-INSIDE")
@@ -58,6 +56,31 @@ func TestFileViewServesOnlyInsideTheProjectRoot(t *testing.T) {
 		filepath.ToSlash(filepath.Join(f.project, "notes.txt")): "TEXT-INSIDE",
 		filepath.Join(f.project, "docs", "deep", "c.go"):        "package c // GO-INSIDE",
 	}
+	widened := map[string]string{filepath.Join(outside, "secret.txt"): "TEXT-OUTSIDE"}
+	if rel, err := filepath.Rel(f.project, filepath.Join(outside, "secret.txt")); err == nil {
+		widened[rel] = "TEXT-OUTSIDE"
+	} else {
+		t.Fatal(err)
+	}
+	if symlinks {
+		widened["escape.txt"] = "TEXT-OUTSIDE"
+		widened["outlink/secret.txt"] = "TEXT-OUTSIDE"
+		widened["alias.txt"] = "TEXT-INSIDE"
+	}
+	for path, want := range widened {
+		served[path] = want
+		if rec := serve(f.d, lan, http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), ""); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), want) {
+			t.Errorf("LAN file %q = %d %q, want 404", path, rec.Code, rec.Body.String())
+		}
+		req := httptest.NewRequest(http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), nil)
+		req.RemoteAddr, req.Host = local.peer, local.host
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		rec := httptest.NewRecorder()
+		localhostTestHandler(t, f.d).ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), want) {
+			t.Errorf("cross-site local file %q = %d %q, want 404", path, rec.Code, rec.Body.String())
+		}
+	}
 	for path, want := range served {
 		code, h, body := fileView(t, f, path)
 		if code != http.StatusOK || body != want {
@@ -72,20 +95,10 @@ func TestFileViewServesOnlyInsideTheProjectRoot(t *testing.T) {
 
 	refused := []string{
 		"",
-		filepath.Join(outside, "secret.txt"),
-		filepath.ToSlash(filepath.Join(outside, "secret.txt")),
-		"../" + filepath.Base(outside) + "/secret.txt",
-		"docs/../../outside/secret.txt",
 		"dir.txt",
 		"missing.txt",
 		".",
 		"notes.txt\x00.txt",
-	}
-	if rel, err := filepath.Rel(f.project, filepath.Join(outside, "secret.txt")); err == nil {
-		refused = append(refused, rel, filepath.ToSlash(rel))
-	}
-	if symlinks {
-		refused = append(refused, "escape.txt", "outlink/secret.txt", "alias.txt")
 	}
 	for _, path := range refused {
 		code, _, body := fileView(t, f, path)
@@ -131,7 +144,7 @@ func TestFileViewKinds(t *testing.T) {
 	if code != http.StatusOK || h.Get("Content-Type") != "image/svg+xml" || h.Get("Content-Security-Policy") != imageContentSecurityPolicy || h.Get("X-Content-Type-Options") != "nosniff" {
 		t.Errorf("svg = %d %v", code, h)
 	}
-	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port), localCookie: true}
 	if rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path=page.html", ""); rec.Code != http.StatusFound ||
 		!strings.HasPrefix(rec.Header().Get("Location"), "/s/livesession/fs/view/") || strings.Contains(rec.Body.String(), "<script>") {
 		t.Errorf("html = %d %v %q", rec.Code, rec.Header(), rec.Body.String())
@@ -271,7 +284,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 	writeFile(t, filepath.Join(f.project, "docs", "guide", "font.woff2"), "WOFF2")
 	writeFile(t, filepath.Join(f.project, "docs", "guide", "sub.htm"), "<p>SUB</p>")
 	writeFile(t, filepath.Join(f.project, "docs", "huge.html"), strings.Repeat("x", fileViewMax+1))
-	writeFile(t, filepath.Join(f.project, "docs", "nul.html"), "<p>\x00</p>")
+	writeFile(t, filepath.Join(f.project, "docs", "contains-nul.html"), "<p>\x00</p>")
 	writeFile(t, filepath.Join(f.project, ".site", "page.html"), "<p>DOT-INSIDE</p>")
 
 	page := pageRedirect(t, f, lan, "docs/guide/page.html")
@@ -331,7 +344,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 	refused := []string{
 		prefix + "../../../../etc/hosts", prefix + "docs/../../secret.txt", prefix + "docs%2F..%2F..%2Fsecret.txt",
 		prefix + `docs\..\..\secret.txt`, prefix + "notes.txt%00.html", prefix + "docs", prefix + "missing.html", prefix,
-		prefix + "/" + filepath.ToSlash(filepath.Join(outside, "secret.txt")), prefix + "docs/huge.html", prefix + "docs/nul.html",
+		prefix + "/" + filepath.ToSlash(filepath.Join(outside, "secret.txt")), prefix + "docs/huge.html", prefix + "docs/contains-nul.html",
 		prefix + ".site/page.html",
 	}
 	if symlinks {
@@ -344,8 +357,15 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 		}
 	}
 	if symlinks {
-		if rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path=outlink/sub/page.html", ""); rec.Code != http.StatusNotFound {
-			t.Errorf("file view of an HTML file through a symlinked folder = %d, want 404", rec.Code)
+		for _, v := range []viewer{local, lan} {
+			rec := serve(f.d, v, http.MethodGet, "/s/livesession/file?path=outlink/sub/page.html", "")
+			if v.name == local.name {
+				if rec.Code != http.StatusOK || rec.Body.String() != "<h1>HTML-OUTSIDE</h1>" || rec.Header().Get("Location") != "" || rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+					t.Errorf("local outside HTML = %d %v %q, want source without a capability", rec.Code, rec.Header(), rec.Body.String())
+				}
+			} else if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "HTML-OUTSIDE") {
+				t.Errorf("LAN outside HTML = %d %q, want 404", rec.Code, rec.Body.String())
+			}
 		}
 	}
 	if rec := serve(f.d, bare, http.MethodPost, page, ""); !refusedByGuard(rec) {
@@ -363,7 +383,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 	}
 	// An HTML file the page route refuses stays what the file view showed:
 	// the not-viewable page, or plain text.
-	for path, want := range map[string]string{"docs/huge.html": "text/html; charset=utf-8", "docs/nul.html": "text/html; charset=utf-8", ".site/page.html": "text/plain; charset=utf-8"} {
+	for path, want := range map[string]string{"docs/huge.html": "text/html; charset=utf-8", "docs/contains-nul.html": "text/html; charset=utf-8", ".site/page.html": "text/plain; charset=utf-8"} {
 		rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), "")
 		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != want || rec.Header().Get("Location") != "" {
 			t.Errorf("file view of %s = %d %v", path, rec.Code, rec.Header())
@@ -380,7 +400,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 			req.Header.Set("Sec-Fetch-Dest", dest)
 		}
 		rec := httptest.NewRecorder()
-		f.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 		return rec
 	}
 	if rec := nav(prefix+"docs/guide/style.css", "style"); rec.Code != http.StatusNotFound {
@@ -412,7 +432,7 @@ func TestFileViewPageServesAnIgnoredFolder(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	f := startPageFixture(t)
-	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port), localCookie: true}
 	gitRun(t, f.project, "init", "-q")
 	writeFile(t, filepath.Join(f.project, "paged", "doc", ".gitignore"), "*\n")
 	writeFile(t, filepath.Join(f.project, "paged", "doc", "document.html"), `<link rel="stylesheet" href="style.css">IGNORED-DOC`)

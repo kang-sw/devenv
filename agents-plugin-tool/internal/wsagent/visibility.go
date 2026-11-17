@@ -55,23 +55,45 @@ func (c *conv) setHidden(hidden bool) error {
 	return nil
 }
 
-// PageInput is the explicit own-page-input exception to passive archive
-// no-wake behavior. It is called only after a valid composer message was held;
+// PageInput admits a composer write without waiting for the conversation
+// loop. As with Send, mu serializes admission and the write against close.
+// A committed own-page message restores a hidden session asynchronously;
 // generic InboxChanged signals and Runner.Send remain passive.
-func (r *Runner) PageInput(id string) error {
+func (r *Runner) PageInput(id string, write func() bool) error {
 	c := r.conv(id)
 	if c == nil {
 		return errUnknown
 	}
-	var err error
-	if !c.do(func() {
-		if c.closed {
-			err = endedError(c.rec)
-		} else if c.hidden {
-			err = c.setHidden(false)
-		}
-	}) {
-		return errClosed
+	c.mu.Lock()
+	if c.closed {
+		err := endedError(c.rec)
+		c.mu.Unlock()
+		return err
 	}
-	return err
+	select {
+	case <-c.done:
+		c.mu.Unlock()
+		return errClosed
+	default:
+	}
+	committed := write()
+	hidden := c.hidden
+	c.mu.Unlock()
+	if committed && hidden {
+		go c.do(func() {
+			if c.closed {
+				return
+			}
+			if c.hidden {
+				if err := c.setHidden(false); err != nil {
+					c.setStatus(func() { c.lastErr = "restore session for page input: " + err.Error() })
+					c.r.notify(c.rec.ReplyID, c.rec.Root)
+					return
+				}
+			}
+			// The immediate post-write wake may have run while still hidden.
+			c.inboxChanged()
+		})
+	}
+	return nil
 }

@@ -465,7 +465,8 @@ func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 }
 
 // fileTarget resolves a file path: for an image in a framed topic body, as
-// the src DocImageSrc returns, when that is non-empty; for an image on a page with
+// the src DocImageSrc returns, when that is non-empty, otherwise by relaying
+// ImageSrc's daemon-path URL through the host; for an image on a page with
 // ImageSrc, as the src ImageSrc returns (the destination's own query and fragment are
 // dropped), when that is non-empty; for an image OutsideImage serves, as its
 // Href with its action kept for the image's own marks; else as path text on
@@ -481,6 +482,12 @@ func (p *pageData) fileTarget(path, suffix string, image bool) target {
 	}
 	if image && p.ImageSrc != nil {
 		if src := p.ImageSrc(path); src != "" {
+			// The inline limit was exceeded (or the file could not be read).
+			// An opaque frame cannot load a protected route itself; ask its
+			// same-origin host, just as for an outside-root image.
+			if p.framing && p.DocImageSrc != nil && daemonPath(src) {
+				return target{text: filepath.ToSlash(path), relay: p.recordImageRelay(src)}
+			}
 			return target{href: src}
 		}
 	}
@@ -540,7 +547,12 @@ func (p *pageData) relayImage(path string) string {
 	if !a.Outside || !daemonPath(a.Href) {
 		return ""
 	}
-	href := string(util.URLEscape([]byte(a.Href), false))
+	return p.recordImageRelay(a.Href)
+}
+
+// recordImageRelay records a daemon image URL in this frame's host allowlist.
+func (p *pageData) recordImageRelay(src string) string {
+	href := string(util.URLEscape([]byte(src), false))
 	for _, h := range p.relays {
 		if h == href {
 			return href

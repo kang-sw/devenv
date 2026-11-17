@@ -51,8 +51,11 @@ func TestDashboardStampReadsReuseFreshContactFiles(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// This raw registry write bypasses the Index signal path. The fixed
+	// source clock controls contact expiry, not the cache's one-second TTL.
+	waitForDashboardValidation(t)
 	if next, _ := src.MailPrint(reg); next == first {
-		t.Fatal("mail write did not invalidate cache")
+		t.Fatal("mail write did not invalidate cache within one second plus margin")
 	}
 	if _, n := src.replies.Counts(); n != replies+1 {
 		t.Fatal("changed registry did not read exactly once")

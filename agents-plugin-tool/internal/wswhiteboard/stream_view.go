@@ -229,6 +229,19 @@ func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView)
 	}
 	viewOf := func(e Entry) EntryView {
 		v := EntryView{Entry: e}
+		// Older writers included the result in the close event. Hide it only
+		// in the presentation copy; the stored event remains immutable.
+		if e.Kind == EntrySystem && !e.Imported && e.ItemID == 0 {
+			switch {
+			case strings.HasPrefix(e.Text, "Topic closed: "):
+				v.Text = "Topic closed."
+				if r, code := parseTopicState(e); code == "" && r.Op == "reset" && r.Run != nil {
+					v.Text += "; " + stateTransitionText(r)
+				}
+			case strings.HasPrefix(e.Text, "Topic close result updated: "):
+				v.Text = "Topic closed."
+			}
+		}
 		if at, err := time.Parse(time.RFC3339Nano, e.At); err == nil {
 			v.Clock, v.Stamp, v.Ms = at.In(loc).Format("15:04"), at.In(loc).Format("2006-01-02 15:04"), at.UnixMilli()
 		}
@@ -238,7 +251,7 @@ func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView)
 	prior := map[string]VersionRef{}
 	priorText := map[string]string{}
 	for i, e := range doc.Entries {
-		if panelEvent(e) {
+		if panelEvent(e) || staleReceipt(e) || internalRevisionMarker(e) {
 			continue
 		}
 		v := viewOf(e)
@@ -267,15 +280,10 @@ func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView)
 	for i := max(0, len(latest)-3); i < len(latest); i++ {
 		expanded[latest[i].ID] = !closed
 	}
-	current := -1
+	current, hasCurrent := doc.LatestAgent()
 	for i := range all {
 		all[i].Open = expanded[all[i].ID]
-		if all[i].Kind == EntryAgent {
-			current = i
-		}
-	}
-	if current >= 0 {
-		all[current].Current = true
+		all[i].Current = hasCurrent && all[i].Kind == EntryAgent && all[i].ID == current.ID
 	}
 	all = projectHistoryItems(all, items)
 	page := func(entries []EntryView) EntryPage {

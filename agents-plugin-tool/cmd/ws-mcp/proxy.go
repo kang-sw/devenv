@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -74,6 +75,13 @@ func (h *proxyHost) wait() { h.background.Wait() }
 // Accept builds the session for hello: an MCP server or a one-shot CLI run.
 func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySession, error) {
 	hello = callerHello(hello)
+	// Learning a root never changes this connection's own package policy and
+	// invalid evidence must not refuse an otherwise compatible caller.
+	if h.dir != "" {
+		if err := wsagent.RegisterHostedPlugin(h.dir, hello.Env[wsrsrc.EnvRsrcRoot], hello.Version); err != nil && !errors.Is(err, os.ErrNotExist) && h.logw != nil {
+			fmt.Fprintf(h.logw, "dashboard: hosted plugin root not registered: %v\n", err)
+		}
+	}
 	env := mcp.EnvFromMap(hello.Env)
 	switch hello.Mode {
 	case wsdashboard.ProxyModeMCP:
@@ -101,6 +109,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		}
 		if d := h.live.Load(); d != nil {
 			opts.Live = d
+			opts.LoginLink = d.LoginLink
 		}
 		// A worker now connects through the launcher too. Its capability
 		// token, not a lead runner handle, scopes its nested pi.* calls.
@@ -367,7 +376,7 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 	buildTime := fs.Int64("build-time", 0, "the build time of the ws-mcp this daemon stands for, in Unix milliseconds; 0 reads this executable's modification time")
 	startWait := fs.Duration("start-wait", 0, "how long to wait for a started daemon; 0 means the default")
 	replace := fs.Bool("replace", false, "explicitly replace an equal-core daemon once, even with identical content; never downgrade a newer core")
-	independent := fs.Bool("require-independent-lifetime", false, "Windows Electron: refuse a daemon spawn that cannot break away from the caller's job")
+	independent := fs.Bool("require-independent-lifetime", false, "Windows Electron: prestart before drain, preferring independent lifetime (explicit job-lifetime retry supported)")
 	_ = fs.Parse(args)
 	if *independent && runtime.GOOS != "windows" {
 		fatal("daemon-start", fmt.Errorf("--require-independent-lifetime is Windows-only"))

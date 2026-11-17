@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>localhost login gate - mockup</title>
+<style>
+/* ===== verbatim: wswhiteboard/assets/page.css (light :root, tokens used here) ===== */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-accent-policy: #b25000;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light;
+}
+/* ===== verbatim: wsdashboard/assets/dashboard.css:15-17 (ok/fail/warn, toast warn) ===== */
+:root { --wb-ok: #1d7348; --wb-fail: #c0262d; --wb-warn: #c27a00; --wb-warn-ink: #a35f00; --wb-toast-warn: #f2c06b; }
+/* ===== verbatim: wswhiteboard/assets/page.css (dark) + dashboard.css dark ok/fail/warn ===== */
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-accent-policy: #e0a36c;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --wb-ok: #6cc39a; --wb-fail: #f0797e; --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c; --wb-toast-warn: #9a5a00;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.lg-card, .mk-lbl, .lede, .notes, .callout, .rpop { word-break: keep-all; overflow-wrap: anywhere; } /* mockup: Korean line breaks at word boundaries */
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ===== verbatim: wswhiteboard/assets/page-items.css:216-217 (.btn) ===== */
+.btn { font-size: 13px; background: var(--wb-muted); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+.btn { display: inline-flex; align-items: center; justify-content: center; }
+/* ===== verbatim: wsdashboard/assets/dashboard.css:103-124 (gear button, settings menu, LAN box) ===== */
+.gear { height: 28px; width: 32px; padding: 0; }
+.gear .i { width: 17px; height: 17px; }
+.gmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: 270px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; display: grid; gap: 3px; }
+.gmenu .gt { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 4px 2px; }
+.gmenu .gt2 { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--wb-muted); }
+.gmenu button { display: flex; align-items: center; gap: 9px; border: 0; background: transparent; border-radius: 8px; padding: 6px 8px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.gmenu button:hover { background: var(--wb-muted); }
+.gmenu button[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); font-weight: 700; }
+.gmenu .gk { font: 800 11px/20px var(--wb-mono); width: 26px; text-align: center; border-radius: 5px; background: var(--wb-muted); flex: none; }
+.gmenu .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
+.gmenu select { width: 100%; box-sizing: border-box; border: 1px solid var(--wb-muted); background: var(--wb-card); color: inherit; font: inherit; font-size: 13px; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+.gmenu .gh { padding: 0 4px; }
+.gmenu .gn { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; white-space: nowrap; }
+.gmenu .gn .settings-version { margin-left: auto; flex: none; }
+.lanbox { min-width: 0; overflow-wrap: anywhere; margin: 0 0 12px; padding: 8px 14px; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); font-size: 13px; line-height: 1.5; }
+.lanbox .lanurl { display: block; margin: 4px 0; font-size: 12px; overflow-wrap: anywhere; user-select: all; }
+.lanbox .lannote { display: block; font-size: 11.5px; color: var(--wb-muted-fg); }
+/* ===== verbatim: wsdashboard/assets/dashboard-drawer.css:49,54 (settings popover) ===== */
+.settings-pop { width: 300px; }
+.gmenu.gcard { position: static; width: auto; box-shadow: none; padding: 0; background: transparent; }
+/* ===== verbatim: wsdashboard/assets/dashboard-rail.css:13,360,367-368,417 (rail, footer, popover) ===== */
+.rail { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
+.rpop { position: fixed; z-index: var(--z-popovers); width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
+  background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
+.rpop .sphd { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; font-weight: 800; }
+/* verbatim: usage.css:27 */
+.usage-close { margin-left: auto; padding: 0 3px; border: 0; background: none; color: var(--wb-muted-fg); font: inherit; cursor: pointer; }
+/* ===== verbatim: wsdashboard/assets/dashboard-menus.css:52-53 (toast) ===== */
+.wstoasts { position: fixed; z-index: 91; right: 16px; bottom: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.wstoast { pointer-events: auto; position: relative; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow-wrap: anywhere; }
+/* ===== verbatim: memo.css:26 (kbd) ===== */
+kbd { font: 600 10.5px var(--wb-mono); border: 1px solid var(--wb-line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+
+/* ===================================================================
+   proposed: gate page (class prefix lg-), new CSS
+   =================================================================== */
+.lg-page { min-height: 100%; display: grid; place-items: center; padding: 28px 16px; }
+.lg-card { width: 100%; max-width: 400px; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); padding: 22px 22px 16px; display: grid; gap: 14px; }
+.lg-brand { display: block; height: 26px; width: auto; color: var(--lg-ink); }
+:root { --lg-ink: #1E2235; } :root[data-theme="dark"] { --lg-ink: #F2EBDD; }
+.lg-hd h1 { margin: 0; font-size: 17px; font-weight: 800; }
+.lg-hd p { margin: 2px 0 0; font-size: 13px; color: var(--wb-muted-fg); }
+.lg-hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; min-height: 76px; padding: 12px; border: 1.5px dashed var(--wb-line); border-radius: 10px; background: var(--wb-wash); font-size: 17px; font-weight: 700; }
+.lg-hint kbd { font-size: 17px; line-height: 1; padding: 6px 10px 5px; border-radius: 7px; border-bottom-width: 3px; background: var(--wb-card); color: var(--wb-fg); }
+.lg-hint .lg-plus { color: var(--wb-muted-fg); font-weight: 600; }
+.lg-hint .lg-do { margin-left: -3px; }
+.lg-hint.busy { font-size: 14px; font-weight: 600; color: var(--wb-muted-fg); gap: 10px; }
+.lg-spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--wb-line); border-top-color: var(--wb-primary); animation: lg-spin .8s linear infinite; flex: none; }
+@keyframes lg-spin { to { transform: rotate(360deg); } }
+.lg-row { display: flex; gap: 6px; min-width: 0; }
+.lg-in { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; height: 34px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); font-family: var(--wb-mono); }
+.lg-in::placeholder { font-family: var(--wb-sans); color: var(--wb-muted-fg); }
+.lg-in.focus { border-color: var(--wb-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 22%, transparent); outline: 0; }
+.lg-in.bad { border-color: var(--wb-fail); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-fail) 18%, transparent); }
+.lg-in:disabled { color: var(--wb-muted-fg); background: var(--wb-wash); }
+.lg-in.sel { color: var(--wb-fg); }
+.lg-in.sel { background: linear-gradient(color-mix(in srgb, var(--wb-primary) 26%, var(--wb-card)), color-mix(in srgb, var(--wb-primary) 26%, var(--wb-card))) 10px 50% / calc(100% - 20px) 18px no-repeat, var(--wb-card); }
+.lg-go { flex: none; height: 34px; padding: 0 14px; border: 0; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 700; background: var(--wb-now); color: var(--wb-on-now); cursor: pointer; }
+.lg-go:disabled { opacity: .45; cursor: default; }
+.lg-clip { gap: 7px; height: 32px; padding: 0 14px; font-weight: 600; color: var(--wb-fg); justify-self: start; }
+.lg-clip:disabled { opacity: .45; cursor: default; }
+.lg-msg { margin: -6px 0 0; font-size: 12.5px; display: flex; gap: 6px; align-items: flex-start; }
+.lg-msg.bad { color: var(--wb-fail); }
+.lg-msg.warn { color: var(--wb-warn-ink); }
+.lg-msg .i { margin-top: 2px; }
+.lg-where { margin: 0; padding-top: 10px; border-top: 1px solid var(--wb-muted); font-size: 12px; color: var(--wb-muted-fg); line-height: 1.55; }
+.lg-where b { color: var(--wb-fg); font-weight: 600; }
+.lg-done { display: grid; justify-items: center; gap: 6px; padding: 18px 0 8px; text-align: center; }
+.lg-ok { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--wb-ok) 16%, transparent); color: var(--wb-ok); }
+.lg-ok .i { width: 22px; height: 22px; stroke-width: 2.2; }
+.lg-done b { font-size: 17px; }
+.lg-done span { font-size: 12.5px; color: var(--wb-muted-fg); }
+.lg-bar { width: 120px; height: 3px; border-radius: 3px; background: var(--wb-muted); overflow: hidden; margin-top: 4px; }
+.lg-bar::after { content: ""; display: block; width: 60%; height: 100%; background: var(--wb-ok); border-radius: 3px; }
+/* proposed: daemon clipboard copy (primary path on loopback), new CSS */
+.lg-copy { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 42px; padding: 0 16px; border: 0; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 700; background: var(--wb-now); color: var(--wb-on-now); cursor: pointer; }
+.lg-copy .i { width: 16px; height: 16px; }
+.lg-copy:disabled { opacity: .45; cursor: default; }
+.lg-sub { margin: -8px 0 0; font-size: 12px; color: var(--wb-muted-fg); text-align: center; }
+.lg-or { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--wb-muted-fg); white-space: nowrap; }
+.lg-or::before, .lg-or::after { content: ""; flex: 1; border-top: 1px solid var(--wb-muted); }
+.lg-hint.go { border-style: solid; border-color: color-mix(in srgb, var(--wb-primary) 55%, transparent); background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-card)); }
+.lg-hint .lg-copied { flex-basis: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--wb-ok); }
+.lg-msg.note { color: var(--wb-muted-fg); }
+
+/* proposed: the settings popover's login block (E), new CSS */
+.loginbox { display: grid; gap: 3px; padding-top: 8px; border-top: 1px solid var(--wb-muted); }
+.loginbox .gt { padding-top: 0; }
+.loginbox button { color: var(--wb-fg); }
+.loginbox .gk { display: grid; place-items: center; height: 20px; }
+.loginbox .gk .i { width: 13px; height: 13px; }
+
+/* proposed: Electron menu (F) - native look stand-in only */
+.nm-bar { display: flex; align-items: center; gap: 14px; height: 26px; padding: 0 12px; font-size: 13px; background: color-mix(in srgb, var(--wb-card) 80%, var(--wb-bg)); border-bottom: 1px solid var(--wb-line); white-space: nowrap; overflow: hidden; }
+.nm-bar b { font-weight: 700; }
+.nm-bar .on { background: color-mix(in srgb, var(--wb-fg) 12%, transparent); border-radius: 4px; padding: 1px 7px; margin: 0 -7px; }
+.nm-pop { position: absolute; top: 28px; width: 270px; max-width: calc(100% - 16px); padding: 5px; border-radius: 8px; background: var(--wb-card); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 13px; }
+.nm-pop div { display: flex; gap: 12px; padding: 3px 10px; border-radius: 4px; white-space: nowrap; }
+.nm-pop div span { margin-left: auto; color: var(--wb-muted-fg); }
+.nm-pop hr { border: 0; border-top: 1px solid var(--wb-line); margin: 4px 6px; }
+.nm-pop .hl { background: var(--wb-primary); color: var(--wb-primary-fg); }
+
+/* ===================================================================
+   mockup chrome only (not product CSS)
+   =================================================================== */
+.mk{max-width:1180px;margin:0 auto;padding:20px 16px 36px}
+.mk-top{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;margin-bottom:4px}
+.mk-top h1{font-size:19px;margin:0}
+.mk-top .sub{color:var(--wb-muted-fg);font-size:12.5px}
+.mk-top button{margin-left:auto;border:1px solid var(--wb-line);background:var(--wb-card);color:var(--wb-fg);border-radius:8px;padding:4px 10px;cursor:pointer}
+.mk h2{font-size:15px;margin:24px 0 4px}
+.mk .lede{color:var(--wb-muted-fg);font-size:12.5px;margin:0 0 10px;line-height:1.6}
+.mk .lede b{color:var(--wb-fg)}
+.mk-lbl{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:11.5px;font-weight:800;color:var(--wb-muted-fg);margin:12px 0 5px}
+.mk-lbl .pill{padding:1px 8px;border-radius:999px;background:var(--wb-technical);color:var(--wb-on-technical)}
+.mk-lbl .hint{font-weight:500}
+.frags{display:grid;gap:6px}
+.frags .lg-card{max-width:none!important}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:18px;align-items:start}
+.vp{border-radius:10px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--wb-line);background:var(--wb-bg);position:relative}
+.vp-bar{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;background:color-mix(in srgb,var(--wb-muted) 70%,var(--wb-bg));font:11.5px var(--wb-mono);color:var(--wb-muted-fg);white-space:nowrap;overflow:hidden}
+.vp-bar i{width:8px;height:8px;border-radius:50%;background:var(--wb-line);flex:none}
+.vp-bar span{margin-left:6px;overflow:hidden;text-overflow:ellipsis}
+.vp-body{position:relative;min-height:440px}
+.vp-body.e{min-height:600px}
+.vp-body.f{min-height:170px}
+.notes{font-size:12.5px;line-height:1.65;margin:4px 0 0;padding-left:18px}
+.notes li{margin-bottom:4px}
+.notes code{font-size:11.5px;background:var(--wb-wash);padding:0 4px;border-radius:4px;overflow-wrap:anywhere}
+.callout{border-left:3px solid var(--wb-primary);padding:6px 10px;background:color-mix(in srgb,var(--wb-primary) 8%,transparent);font-size:12.5px;border-radius:0 8px 8px 0;margin-top:10px;line-height:1.6}
+.callout code{font-size:11.5px;overflow-wrap:anywhere}
+.mac-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:var(--wb-fg)}
+.mac-chip kbd{font-size:12px}
+/* E frame: a static stand-in for the dashboard behind the popover */
+.e-wrap{position:absolute;inset:12px;display:flex;gap:12px}
+.e-wrap .rail{width:220px;flex:none}
+.e-wrap .rail .rlist{flex:1;padding:10px 12px;display:grid;align-content:start;gap:9px}
+.sk{height:9px;border-radius:5px;background:var(--wb-muted)}
+.e-main{flex:1;min-width:0;display:grid;align-content:start;gap:12px}
+.e-main .blk{background:var(--wb-card);border-radius:var(--wb-radius);box-shadow:var(--wb-shadow);padding:14px;display:grid;gap:9px}
+.e-wrap .rpop{position:absolute;left:8px;bottom:46px;z-index:5;max-height:none}
+.e-wrap .gear.on{background:color-mix(in srgb,var(--wb-primary) 14%,var(--wb-card))}
+.vp .wstoasts{position:absolute;right:14px;bottom:14px;z-index:6}
+.wstoast .wst-body::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--wb-ok);margin-right:7px;vertical-align:1px}
+.f-wrap .nm-pop{left:254px}
+@media (max-width:560px){
+  .e-wrap .rail{width:100%}
+  .e-main{display:none}
+  .e-wrap .rpop{left:4px;right:4px;width:auto}
+  .f-wrap .nm-pop{left:8px}
+  .nm-bar .hide-n{display:none}
+  .vp-body.e{min-height:680px}
+  .vp-body:not(.e):not(.f){min-height:0}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.1"/><circle cx="8" cy="8" r="4.6"/><path d="M8 1.5v1.9M8 12.6v1.9M1.5 8h1.9M12.6 8h1.9M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24"><path d="M11 14h10"/><path d="M16 4h2a2 2 0 0 1 2 2v1.344"/><path d="m17 18 4-4-4-4"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 1.793-1.113"/><rect x="8" y="2" width="8" height="4" rx="1"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M16 4h2a2 2 0 0 1 2 2v4"/><path d="M21 14H11"/><path d="m15 10-4 4 4 4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-alert"viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
+  <symbol id="lg-lockup" viewBox="40 56 1300 272"><g transform="translate(56 72) scale(0.46875)"><rect width="512" height="512" rx="96" fill="#1E2235"/><g transform="translate(8 0)" fill="none" stroke-width="46" stroke-linejoin="miter" stroke-miterlimit="2"><path d="M120 362 L176 200" stroke="#F2EBDD"/><path d="M232 362 L288 150" stroke="#F2EBDD"/><path d="M64 150 L112.3 333" stroke="#E4572E"/><path d="M185.1 226.5 L222.9 335.5" stroke="#E4572E"/><path d="M428.3 180 A50 50 0 1 0 339.7 226.1" stroke="#F2EBDD"/><path d="M360 238.9 L408 269.2" stroke="#E4572E"/><path d="M428.3 282 A50 50 0 1 1 339.7 328.1" stroke="#F2EBDD"/></g></g><g transform="translate(400 142)" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="square" stroke-linejoin="miter" stroke-miterlimit="2"><path d="M0 0 L22 100 L48 30 L74 100 L96 0"/><path transform="translate(126 0)" d="M56 0 H0 V100 H56 M0 50 H48"/><g transform="translate(212 0)"><path d="M0 100 V0 H22 A25 25 0 0 1 22 50 H0"/><path d="M27 64 L42 100" stroke="#E4572E" stroke-linecap="butt"/></g><g transform="translate(290 0)"><path d="M0 0 V100 M58 0 L4 54"/><path d="M32.7 44 L56 100" stroke="#E4572E" stroke-linecap="butt"/></g><path transform="translate(380 0)" d="M48.5 10.7 A25 25 0 1 0 28 50 A25 25 0 1 1 7.5 89.3" stroke-linecap="butt"/><path transform="translate(450 0)" d="M81 19 A44 44 0 1 0 81 81" stroke-linecap="butt"/><path transform="translate(570 0)" d="M0 0 V100 M60 0 V100 M0 50 H60"/><g transform="translate(660 0)"><path d="M0 100 L41 0 L63.1 54 M19.7 48 H60.7"/><path d="M67 64 L82 100" stroke="#E4572E" stroke-linecap="butt"/></g><path transform="translate(772 0)" d="M0 100 V0 H54 M0 48 H46"/><path transform="translate(856 0)" d="M0 0 H64 M32 0 V100"/></g></symbol>
+</svg>
+
+<div class="mk">
+  <div class="mk-top"><h1>localhost 로그인 게이트 — 목업</h1><span class="sub">쿠키 없는 브라우저의 게이트 페이지 · 링크 복사 위치 · <span id="thm"></span></span><button type="button" onclick="flip()">테마 전환</button></div>
+  <p class="lede">쿠키가 없는 localhost 브라우저는 어느 대시보드 주소로 가도 이 게이트 페이지를 받습니다. 게이트는 <b>세션, 워크스페이스, 버전, 사용량 등 아무것도 보여주지 않습니다</b>(브랜드 로고만). 로그인 링크·코드는 1회용, 10분 만료이고, 한 번 교환되면 400일 HttpOnly·SameSite=Strict 쿠키가 남습니다.</p>
+  <p class="lede">기본 경로는 게이트의 <b>「로그인 링크를 클립보드에 복사」</b> 버튼입니다. 누르면 페이지가 아니라 <b>이 컴퓨터의 대시보드 데몬</b>이 새 1회용 로그인 링크를 OS 클립보드에 넣고, 게이트는 "이제 <kbd>Ctrl</kbd>+<kbd>V</kbd>(macOS <kbd>⌘</kbd>+<kbd>V</kbd>)"로 안내합니다. 사용자가 페이지에 붙여넣으면 그대로 제출되어 로그인됩니다. 페이지는 열릴 때 클립보드를 읽지도 쓰지도 않고, 클립보드를 건드리는 동작은 누르기 전에 라벨에 그렇게 적혀 있습니다. 붙여넣기 칸과 「클립보드에서 붙여넣기」 버튼은 다른 곳(에이전트, 다른 브라우저, 데스크톱 앱)에서 받은 링크를 위한 보조 경로로 남습니다.</p>
+
+  <h2>게이트 페이지</h2>
+  <div class="grid2">
+
+    <!-- A -->
+    <div>
+      <div class="mk-lbl"><span class="pill">A</span>게이트 초기<span class="hint">데몬 복사 버튼이 주 동작(포커스) · 붙여넣기는 보조 · 루프백 접속에서만</span></div>
+      <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
+        <div class="lg-page"><main class="lg-card">
+          <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
+          <button class="lg-copy" type="button"><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+          <p class="lg-sub">지금 클립보드 내용이 새 1회용 링크로 바뀝니다.</p>
+          <div class="lg-or">또는 다른 곳에서 받은 링크 붙여넣기</div>
+          <div class="lg-row"><input class="lg-in" placeholder="링크 또는 코드" aria-label="로그인 링크 또는 코드"><button class="lg-go" disabled>확인</button></div>
+          <button class="btn lg-clip" type="button"><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+        </main></div>
+      </div></div>
+    </div>
+
+    <!-- A2 -->
+    <div>
+      <div class="mk-lbl"><span class="pill">A2</span>클립보드에 복사됨<span class="hint">데몬이 OS 클립보드를 교체 · 버튼 자리가 붙여넣기 안내로 · macOS는 <span class="mac-chip"><kbd>⌘</kbd>+<kbd>V</kbd></span></span></div>
+      <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
+        <div class="lg-page"><main class="lg-card">
+          <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
+          <div class="lg-hint go" role="status"><span class="lg-copied"><svg class="i"><use href="#i-check"/></svg>복사했습니다</span><span class="lg-do">이제</span><kbd>Ctrl</kbd><span class="lg-plus">+</span><kbd>V</kbd></div>
+          <div class="lg-row"><input class="lg-in focus" placeholder="링크 또는 코드" aria-label="로그인 링크 또는 코드"><button class="lg-go" disabled>확인</button></div>
+          <button class="btn lg-clip" type="button"><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+        </main></div>
+      </div></div>
+    </div>
+
+    <!-- B -->
+    <div>
+      <div class="mk-lbl"><span class="pill">B</span>확인 중<span class="hint">붙여넣는 즉시 제출 · 입력과 버튼 잠금</span></div>
+      <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
+        <div class="lg-page"><main class="lg-card">
+          <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
+          <div class="lg-hint busy" role="status"><span class="lg-spin"></span>확인 중…</div>
+          <div class="lg-row"><input class="lg-in" disabled value="…/login?code=••••••••"><button class="lg-go" disabled>확인</button></div>
+          <button class="btn lg-clip" type="button" disabled><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+        </main></div>
+      </div></div>
+    </div>
+
+    <!-- C -->
+    <div>
+      <div class="mk-lbl"><span class="pill">C</span>코드가 틀렸거나 만료됨<span class="hint">페이지에 그대로 · 복사 버튼이 다시 주 동작 · 값은 선택된 채로 남아 다음 붙여넣기가 덮어씀</span></div>
+      <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
+        <div class="lg-page"><main class="lg-card">
+          <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
+          <div class="lg-hd"><h1>브라우저 로그인</h1><p>로그인 링크를 클립보드로 받아 붙여넣으세요.</p></div>
+          <button class="lg-copy" type="button"><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+          <p class="lg-sub">지금 클립보드 내용이 새 1회용 링크로 바뀝니다.</p>
+          <div class="lg-or">또는 다른 곳에서 받은 링크 붙여넣기</div>
+          <div class="lg-row"><input class="lg-in bad sel" value="…/login?code=••••••••" aria-invalid="true"><button class="lg-go">확인</button></div>
+          <p class="lg-msg bad" role="alert"><svg class="i"><use href="#i-alert"/></svg>맞지 않거나 만료된 코드입니다. 위 버튼으로 새 링크를 받으세요.</p>
+          <button class="btn lg-clip" type="button"><svg class="i"><use href="#i-paste"/></svg>클립보드에서 붙여넣기</button>
+          <p class="lg-where">링크 받는 곳: 위의 <b>클립보드에 복사</b> 버튼, 로그인된 대시보드의 <b>설정 ⚙</b>, 또는 데스크톱 앱의 <b>연결</b> 메뉴</p>
+        </main></div>
+      </div></div>
+    </div>
+
+    <!-- D -->
+    <div>
+      <div class="mk-lbl"><span class="pill">D</span>성공<span class="hint">"연결됨" 약 0.8초 → 요청했던 주소로 이동</span></div>
+      <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/s/…</span></div><div class="vp-body">
+        <div class="lg-page"><main class="lg-card">
+          <svg class="lg-brand" viewBox="40 56 1300 272" role="img" aria-label="Werkschaft"><use href="#lg-lockup"/></svg>
+          <div class="lg-done" role="status"><span class="lg-ok"><svg class="i"><use href="#i-check"/></svg></span><b>연결됨</b><span>요청한 페이지로 이동합니다…</span><span class="lg-bar"></span></div>
+        </main></div>
+      </div></div>
+    </div>
+
+    <div class="frags">
+    <!-- A3 -->
+    <div>
+      <div class="mk-lbl"><span class="pill">A3</span>데몬이 클립보드를 못 씀<span class="hint">헤드리스·SSH 세션 · 버튼 아래 한 줄, 버튼은 잠김 (빨강 아님)</span></div>
+      <div class="lg-card" style="max-width:400px;padding:12px 16px">
+        <button class="lg-copy" type="button" disabled><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+        <p class="lg-msg note"><svg class="i"><use href="#i-info"/></svg>이 세션에서는 클립보드를 쓸 수 없습니다. 아래 받는 곳에서 링크를 받아 붙여넣으세요.</p>
+      </div>
+    </div>
+    <!-- A4 -->
+    <div>
+      <div class="mk-lbl"><span class="pill">A4</span>너무 자주 누름<span class="hint">짧은 시간에 반복 · 클립보드는 그대로 · 버튼 아래 한 줄</span></div>
+      <div class="lg-card" style="max-width:400px;padding:12px 16px">
+        <button class="lg-copy" type="button"><svg class="i"><use href="#i-copy"/></svg>로그인 링크를 클립보드에 복사</button>
+        <p class="lg-msg warn"><svg class="i"><use href="#i-alert"/></svg>잠시 후 다시 시도하세요.</p>
+      </div>
+    </div>
+    <!-- C′ -->
+    <div>
+      <div class="mk-lbl"><span class="pill">C′</span>「클립보드에서 붙여넣기」가 거부됨<span class="hint">권한 거부·빈 클립보드일 때 C 자리의 한 줄만 바뀜 (빨강 아님)</span></div>
+      <div class="lg-card" style="max-width:400px;padding:12px 16px">
+        <p class="lg-msg warn" style="margin:0"><svg class="i"><use href="#i-alert"/></svg>클립보드를 읽지 못했습니다. Ctrl+V로 붙여넣으세요.</p>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="callout"><b>루프백 전용.</b> 「로그인 링크를 클립보드에 복사」 버튼은 루프백(<code>127.0.0.1</code>, <code>::1</code>) 접속에서만 게이트에 나타나고, LAN 접속에는 절대 나타나지 않습니다. 데몬이 쓰는 클립보드는 데몬이 도는 컴퓨터의 것이라, 같은 컴퓨터의 브라우저일 때만 의미가 있습니다.</div>
+
+  <h2>링크 받는 곳</h2>
+  <div class="grid2">
+    <!-- E -->
+    <div>
+      <div class="mk-lbl"><span class="pill">E</span>로그인된 대시보드 · 설정 팝오버<span class="hint">LAN 안내 바로 위에 새 블록 · 누르면 토스트</span></div>
+      <div class="vp"><div class="vp-bar"><i></i><i></i><i></i><span>127.0.0.1:&lt;포트&gt;/</span></div><div class="vp-body e">
+        <div class="e-wrap">
+          <aside class="rail">
+            <div class="rlist"><div class="sk" style="width:40%"></div><div class="sk" style="width:80%"></div><div class="sk" style="width:65%"></div><div class="sk" style="width:72%"></div><div class="sk" style="width:50%"></div></div>
+            <div class="rfoot"><button type="button" class="btn gear on" aria-expanded="true" aria-label="설정"><svg class="i"><use href="#i-gear"/></svg></button><button type="button" class="btn gear" aria-label="홈"><svg class="i"><use href="#i-house"/></svg></button></div>
+          </aside>
+          <div class="e-main"><div class="blk"><div class="sk" style="width:30%"></div><div class="sk" style="width:90%"></div><div class="sk" style="width:70%"></div></div><div class="blk"><div class="sk" style="width:45%"></div><div class="sk" style="width:85%"></div></div></div>
+
+          <div class="rpop settings-pop" role="dialog" aria-label="설정">
+            <div class="sphd">설정<button type="button" class="usage-close" aria-label="닫기">×</button></div>
+            <div class="gmenu gcard">
+              <span class="gt">테마</span>
+              <button aria-pressed="true"><span class="gk">&#9680;</span><span>시스템 설정 따르기<span class="gs">시스템의 라이트·다크 설정을 따릅니다</span></span></button>
+              <button aria-pressed="false"><span class="gk">&#9675;</span><span>라이트</span></button>
+              <button aria-pressed="false"><span class="gk">&#9679;</span><span>다크</span></button>
+              <span class="gn">이 브라우저에 저장됩니다.<span class="settings-version">v0.50.1</span></span>
+            </div>
+            <div class="gmenu gcard loginbox">
+              <span class="gt">브라우저 로그인</span>
+              <button type="button"><span class="gk"><svg class="i"><use href="#i-link"/></svg></span><span>브라우저 로그인 링크 복사<span class="gs">다른 브라우저에서 열면 로그인됩니다. 10분 안에 한 번.</span></span></button>
+            </div>
+            <div class="lanbox"><b>LAN 접근이 켜져 있습니다.</b> 같은 네트워크의 다른 기기에서 접근 토큰이 포함된 주소로 이 대시보드를 열 수 있습니다:<code class="lanurl">http://192.168.x.x:&lt;포트&gt;/?token=••••••••</code><span class="lannote">이 토큰은 이 컴퓨터에서만 보입니다. 새 토큰을 발급하려면 lan-token 파일을 삭제하세요.</span></div>
+          </div>
+        </div>
+        <div class="wstoasts"><div class="wstoast"><span class="wst-body">로그인 링크를 복사했습니다. 10분 안에 한 번 쓸 수 있습니다.</span></div></div>
+      </div></div>
+    </div>
+
+    <!-- F -->
+    <div>
+      <div class="mk-lbl"><span class="pill">F</span>데스크톱 앱 메뉴<span class="hint">기존 Connection 메뉴 끝에 구분선 + 항목</span></div>
+      <div class="vp"><div class="vp-body f f-wrap">
+        <div class="nm-bar"><b>Werkschaft</b><span>File</span><span>Edit</span><span class="hide-n">View</span><span class="hide-n">Window</span><span class="hide-n">Help</span><span class="on">Connection</span></div>
+        <div class="nm-pop">
+          <div>Retry<span>⌘R</span></div>
+          <div>Replace daemon (same core)</div>
+          <hr>
+          <div class="hl">브라우저 로그인 링크 복사</div>
+        </div>
+      </div></div>
+      <ul class="notes">
+        <li>메뉴 틀(<code>Connection</code>, <code>Retry</code>, <code>Replace daemon (same core)</code>)은 <code>desktop-electron/main.js:332-335</code> 그대로입니다. 이 메뉴는 지금 영어 전용이라 실제 라벨은 다른 항목과 같은 언어로 맞출지 정해야 합니다(아래 질문).</li>
+        <li>누른 뒤 피드백은 대시보드 창에 E와 같은 토스트를 띄우는 안(IPC)을 가정했습니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout"><b>E 위치 근거.</b> LAN 공유는 설정 팝오버 안에서만 보입니다: <code>dashboard.tmpl:126</code>의 <code>{{define "settings"}}</code>가 <code>.gmenu.gcard</code> 뒤에 <code>{{with .LAN}}&lt;div class="lanbox"&gt;</code>를 그리고, 그 팝오버는 세션 레일 하단 톱니(<code>dashboard.tmpl:429</code>, <code>#gear</code>)가 엽니다. LAN 토큰 없는 요청이 받는 401 안내도 "Settings (the gear in the session rail footer)"를 가리킵니다(<code>access.go:126</code>). 새 블록은 같은 팝오버의 <code>.lanbox</code> 바로 앞에 두고, LAN 블록과 달리 LAN 모드와 무관하게 이 컴퓨터의 로그인된 브라우저에서 항상 보입니다.</div>
+
+  <ul class="notes" style="margin-top:12px">
+    <li>A→A2: 「로그인 링크를 클립보드에 복사」는 페이지가 데몬에 요청만 보내고, 새 1회용 링크를 OS 클립보드에 넣는 것은 데몬 프로세스입니다. 페이지는 <code>navigator.clipboard.writeText()</code>를 쓰지 않습니다. 성공하면 A2, 데몬이 클립보드에 접근하지 못하면 A3, 짧은 시간에 반복하면 A4입니다.</li>
+    <li>A·A2: 페이지 어디서든 <kbd>Ctrl</kbd>+<kbd>V</kbd>(macOS는 <kbd>⌘</kbd>+<kbd>V</kbd>)는 paste 이벤트로 즉시 제출합니다. 입력칸은 손으로 코드를 칠 때만 쓰고, 그때는 Enter나 확인으로 제출합니다.</li>
+    <li>「클립보드에서 붙여넣기」 버튼(보조 경로)은 <code>navigator.clipboard.readText()</code>: Chrome은 첫 번째에만 권한을 묻고, Safari·Firefox는 붙여넣기 말풍선을 띄웁니다.</li>
+    <li>링크 전체를 붙여넣어도, 코드만 붙여넣어도 받습니다. 받은 값은 B·C에서 코드 부분을 가려 보여줍니다.</li>
+    <li>D의 이동 대상은 게이트가 처음 가로챈 주소입니다. 게이트 자체는 그 주소를 화면에 쓰지 않습니다.</li>
+  </ul>
+</div>
+<script>
+function themeLabel(){ document.getElementById("thm").textContent = document.documentElement.getAttribute("data-theme") + " theme"; }
+function flip(){ var r=document.documentElement; r.setAttribute("data-theme", r.getAttribute("data-theme")==="dark"?"light":"dark"); themeLabel(); }
+themeLabel();
+</script>
+</body>
+</html>

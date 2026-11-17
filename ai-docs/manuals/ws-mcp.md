@@ -17,7 +17,7 @@ coupling is the code itself:
 
 For live tool schemas and current inventory, ask the runtime: use MCP
 `tools/list`, `ws/runtime.read`, `ws-mcp runtime capabilities`, or the source
-registry in `agents-plugin-tool/internal/mcp/server.go`.
+registry in `agents-plugin-tool/internal/mcp/server_schemas.go:11`.
 
 ## Tool Output Convention
 
@@ -27,7 +27,7 @@ caller needs stable machine parsing, protocol metadata, or a
 compatibility-preserving shape, and put it behind an explicit opt-in (a
 `format: "json"` argument) rather than making it the default. Nothing enforces
 this - `toolTextResponse` and `toolJSONResponse` are equally available at every
-dispatch site in `agents-plugin-tool/internal/mcp/server.go` - so it has to be
+dispatch site in `agents-plugin-tool/internal/mcp/server_dispatch.go:21` - so it has to be
 applied when the tool is written.
 
 ## Process Model
@@ -103,13 +103,20 @@ session's pages exist follows `dashboard.enabled` per session; the daemon
 runs either way, and the MCP tools never depend on its pages. Its state lives
 under `<cache root>/dashboard/`:
 
+- `hosted-plugin-roots.json` - manifest-validated roots for hosted workflow
+  packages (`ws`, `wsflow`), retained across daemon replacement. Equal/newer
+  hello versions replace the remembered root; older hellos cannot downgrade a
+  still-valid stored install. This daemon-owned registry is independent of
+  session records and the global config overrides.
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
   pid, version, and the shutdown token; `launcher-start.lock` - the persistent
   advisory lock updated Python launchers hold across a necessary daemon start;
   `dashboard.log` - the running daemon's
   log, including one line per session added to or removed from its index;
   `lan-token` - the LAN access token (LAN mode only), kept across daemon
-  restarts; deleting it issues a new one at once. `last-port` - the port the
+  restarts; deleting it issues a new one at once. `localhost-secret` - the
+  separate owner-only persisted key for the localhost browser cookie; deleting
+  it invalidates existing cookies without a restart. `last-port` - the port the
   last daemon bound: when `dashboard.port` is taken by another program, the
   daemon binds this port before an OS-assigned one, so a restart keeps its
   origin (page localStorage, LAN bookmark); a free `dashboard.port` always
@@ -273,18 +280,23 @@ moves the copy's `updatedAt`. A session whose directory the daemon does not
 serve stays on the file-and-nudge path. The daemon runs full registry
 safety discovery every five minutes, with targeted 30-second legacy
 liveness/recovery checks between scans. An ended session already applied
-is not re-read unless a nudge, resume, or retry requires it. A re-read
-compares a fingerprint taken from metadata (the
-session record, live-store and mailbox-history entry names, the ticket
-directories' file names, sizes, and modification times, the unread count,
-the contacts, the listening marker) and builds no panel; the board renders
-only when a page reads the changed session. Ring, drained-inbox, and
+is not re-read unless a nudge, resume, or retry requires it. Scheduled per-session re-reads are coalesced to at most one per second,
+with a trailing read. A runner write refreshes only the live-store fingerprint
+(snapshot and live directory entry names), retaining the last full read's
+record, board, tickets, mailbox history and contacts. A nudge, periodic safety
+refresh or board poke reads both parts. Known inbox-only changes on boardless
+sessions list only the inbox stores; unknown runner writes still list every
+live store. A re-read builds no panel; the board renders only when a page
+reads the changed session. Ring, drained-inbox, and
 mailbox-history entry files are parsed once per daemon and kept by name for
 the window the page shows. The small files every read and render re-reads
 (session snapshots, the session record's part files, the reply registry,
-the named scopes' mailbox stores) are kept parsed while a stat shows the
-same size and modification time; a file modified within the last 2 seconds
-is not kept, and a session's entries drop when it leaves the index. A
+the named scopes' mailbox stores) share parsed values and stat validation
+for up to one second per path. Recent files are reread at validation until
+outside the two-second timestamp ambiguity window. Explicit session change
+signals expire the targeted source and snapshot validation before the index
+reads, and write admission/capability checks read current evidence rather than
+the presentation cache. A session's entries drop when it leaves the index. A
 page's refresh stamp and the board memo stamp a ticket status directory by
 its listing rather than each ticket file, and key the board on the
 session's own reply-registry contacts and unread count rather than the
@@ -396,8 +408,15 @@ folder) and worktree. It is one shared render (region `rail`, keyed by
 language and theme, no reply-id) that each session stream sends beside its
 page with a broker subscription of its own, so a session's change renders
 the rail at most once for all open pages and no other session's page;
-unchanged visible rail inputs reuse the render
-(`internal/wsdashboard/rail.go:104-130`). Streams opt into row deltas
+unchanged visible rail inputs reuse the render. The daemon retains each
+session's snapshot, repository and last message in memory, refreshing only
+sessions whose index revision or named session/snapshot/ring generation moved.
+Explicit current-state queries such as the hiring roster still read through.
+Clock-derived liveness is recomputed from those retained inputs. A transient
+snapshot or ring read failure retains last-good presentation and keeps only
+that session eligible for retry on refresh, even without another wake.
+Rail passes are capped at one per second per shared language/theme view, with
+a trailing pass so the last wake is not lost (`internal/wsdashboard/rail.go`). Streams opt into row deltas
 with `railrows=1`: the first send on each connection is a full `region`
 (`name: "rail"`), even when `h` holds the current hash. Later `rail-rows`
 SSE events carry `{hash, order, rows: [{key, hash, html}]}`: the full row
@@ -562,9 +581,11 @@ of at the turn end. `POST /s/<reply-id>/interrupt` (body ignored) takes back
 every held message, steered or not, and writes an interrupt entry in one step
 under the inbox lock, answering `{held: [{id, text, chips, topics, images, nums}]}`
 in queue order (steered first, then the rest), each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
-and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `full:` line names
-`http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
-answered, and the page path otherwise.
+and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s
+`full:` line names the session's dashboard URL once its last nudge was answered,
+and the page path otherwise. A daemon-hosted server adds a single-use login code
+with a ten-minute expiry through an in-process hook; a server without that hook
+keeps the plain URL.
 
 The daemon creates one tracker host (`wstrackerhost.New`) before it starts
 serving, shared by the tracker's background poll and the tracker routes, and
@@ -647,11 +668,20 @@ machine) or the daemon's own, so no other web page can drive an agent. After
 a daemon restart the runner re-registers each conversation with no process
 and starts one at its next send. An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
-and no mailbox identity. Its command is Python plus the starting plugin's
+and no mailbox identity. Its command is Python plus the selected hosted plugin's
 `bin/ws-mcp-launcher.py serve --stdio`, never the daemon's staged executable.
-The plugin is resolved beside `WS_RSRC_ROOT`; a missing launcher refuses the
-start. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused when
-known, else `python3` on PATH (Windows: `py -3` fallback). The conversation's
+The built-in global-only `hosted.plugin_package` key (`config.tune`, values
+`ws` or `wsflow`, fixed default `wsflow`, visible with no-agent) selects the
+whole package for hosted Claude/Pi leads and this attached MCP. Each process
+start reads the setting; running and holder-reattached processes stay unchanged.
+The daemon prefers its own package beside `WS_RSRC_ROOT` when that is the
+selection; otherwise it resolves roots learned from hellos, revalidating their
+manifest name and requiring its own major.minor. Missing or version-skewed roots
+fall back to its own package with a visible `plugin_warning` (including both
+versions on skew). An invalid hand-edited selection warns and uses `wsflow`.
+A missing fallback launcher still refuses the start. Non-hosted connections keep
+their own package. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused
+when known, else `python3` on PATH (Windows: `py -3` fallback). The conversation's
 root overrides `WS_MCP_PROJECT_ROOT` in that command's environment, keeping
 proxy mode's exact arguments and preventing the daemon's lead root leaking
 into the worker. A proxy-hosted worker still uses its capability token for
@@ -946,7 +976,7 @@ conversation:
   explicit selection cannot be raised to `full` through the native-only
   URL, which carries no full acknowledgement
   (`internal/wsagent/http.go:202-207,273-284`,
-  `internal/wsagent/runner.go:1000-1022`,
+  `internal/wsagent/runner.go:1004-1020`,
   `internal/wsagent/permission.go:214-242`).
 - **Common permissions.** `POST /agents/leads/permission {root, harness,
   permission_level, permission_full_ack?, model?, effort?, plugin_isolation?}`
@@ -970,8 +1000,7 @@ conversation:
   otherwise. Worker state omits these fields. Without an explicit
   selection, Claude `plan` derives `read-only`, `bypassPermissions` derives
   `full`, its other admitted modes derive `workdir-write`, and Pi derives
-  `workdir-write` (`internal/wsagent/permission.go:10-75,98-134`,
-  `internal/wsagent/runner.go:1173-1181`).
+  `workdir-write` (`internal/wsagent/permission.go:53-75,98-109`).
 - **Recovery and failures.** A Claude lead's init line lists its MCP
   servers. A server reported `failed`, a failed `mcp__*` tool call, or the
   lead's call of a `*__request_mcp_reconnect` tool makes the runner ask the
@@ -995,8 +1024,11 @@ conversation:
   is in the state and `host.backgroundTasks`; a subagent the lead's Agent
   call started takes its effort from an `effort-<level>` subagent type and
   its model and context size from its own assistant lines. Idle stop is
-  the profile's `idle_timeout_seconds` (600 by default for both lead backends;
-  0 disables it) and waits for the reported background task count to be zero.
+  the profile's `idle_timeout_seconds`: absent defaults to 0 (off) for leads
+  and 600 seconds for workers; an explicit 0 disables it. Idle stop waits for
+  no running turn or pending input, a zero reported background task count,
+  and no active spawned child (including a child's background work or held
+  report).
 - **Streaming.** A hosted Claude lead starts with
   `--include-partial-messages`. The `stream_event` mapper accumulates text
   deltas into the reply so far, emitting at most once per 100 ms within a
@@ -1131,19 +1163,33 @@ its height, which covers a frame swapped in after the switch), and redraws
 drawn mermaid diagrams, in the page and in the frames, in the new palette.
 
 By default the daemon binds loopback and every route requires a loopback
-Host. LAN mode (`dashboard.lan_enabled`, read from the global config layer
-only and passed as `dashboard --lan`) binds every interface: a request whose
-peer address and Host are both loopback still passes with no token, and every
-other request, on every route, needs the LAN access token, which is separate
-from the endpoint file's shutdown token, with one exception: GET and HEAD of
-the shared mermaid script (`/s/<content-hash>.js`, the vendored library under
-a hash name, so it reveals nothing of any session) pass without it, because
-a topic body's sandboxed frame, an opaque origin, loads it with no cookie. The token arrives as `?token=` on the
-address the index page shows to a viewer on this machine only; that answer
-sets an HttpOnly cookie, which the page's links, SSE stream, images, and posts
-then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,
-and the daemon re-reads the global value when a session connects: a value
-that differs from its own mode replaces it through the drain path below.
+Host. Browser-facing routes additionally require the localhost HttpOnly,
+SameSite=Strict cookie, derived from `localhost-secret` and kept for up to 400
+days. Cookieless navigations show the self-contained login gate; fetches and
+WebSocket handshakes answer `401 {"error":"login_required"}`. Explicit gate
+copying asks the daemon to place a fresh single-use ten-minute link in the OS
+clipboard, then the user pastes it back. This route accepts only a loopback peer
+and Host with its own Origin and same-origin fetch metadata when present; it is
+rate-limited and returns no credential. Unavailable native writers hide the
+action, while runtime write failures allow retry. Nothing reads or writes the
+clipboard on page load. Agent links, Settings and the desktop Connection menu
+provide additional explicit login-link paths. Electron sets its native cookie
+before navigation. A same-origin status probe recovers a Strict-cookie browser
+that followed a cross-site link, retaining the requested fragment.
+
+LAN mode (`dashboard.lan_enabled`, global-only, passed as `dashboard --lan`)
+binds every interface. Local peer plus Host still requires the localhost cookie;
+a non-local browser needs the separate LAN token. Neither credential grants
+access through the other branch, and a LAN token never grants trusted writes.
+The LAN token arrives as `?token=` on the Settings addresses shown only to a
+local viewer and becomes its existing HttpOnly cookie. Machine routes retain
+their own checks without requiring the browser cookie: `/health`, `/mcp`,
+`/shutdown`, `/nudge`, `/session-hire/roster`, and `/agents/by-token/<op>`.
+Nudge and roster clients now send the endpoint bearer, but enforcement is deferred
+to preserve older clients. GET/HEAD public frame assets, path-capability routes
+and `/pwa/*` also remain cookieless. Every other route is gated by default.
+`/health` reports the mode as `lan`, and the daemon re-reads the global value
+when a session connects: a changed mode replaces it through the drain path below.
 
 At an equal numeric core, ordinary connection keeps the healthy daemon
 regardless of version suffix, build time or content hash. `/health` retains
@@ -1321,11 +1367,15 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    `test_cache_root_and_staged_name_follow_the_go_rules` pins the parity.
 2. `endpoint.json` names the port and token; `GET /health` answers the
    daemon's version, `build_time`, and `content_hash` (the sha256 of the
-   daemon's executable). An unreachable endpoint gets a 20-second swap grace
-   before absence-based startup. A live or unqueryable recorded PID refuses
-   that startup; a connected port that never answers is diagnosed as hung.
-   TCP handshake failure alone establishes only unreachability. A missing
-   health route or version field falls back to the existing `/mcp` hello's
+   daemon's executable). For an unreachable endpoint, the launcher probes
+   Go's `dashboard.lock` non-blockingly to prove absence; it does not consult
+   the recorded PID. Only a held or unqueryable lock gets the 20-second swap
+   grace. A cold cache or a stale endpoint with a free lock starts without
+   that wait. After starter coordination and a health recheck, a lock still
+   held or unqueryable refuses absence-based startup; a connected port that
+   never answers is diagnosed as hung. TCP handshake failure alone establishes
+   only unreachability. A missing health route or version field falls back to
+   the existing `/mcp` hello's
    returned version, not to executable inspection.
 3. Ordinary startup starts an absent daemon or replaces an older numeric
    core using the selected runtime. Equal cores keep the healthy daemon,
@@ -1399,9 +1449,11 @@ Codex Stop retains its fail-open exit 0.
 
 Reconnect: when the connection ends while the client is still attached (the
 daemon was replaced or died), the session MCP proxy connects again (giving a
-successor the swap grace before coordinated absence startup), re-sends the client's captured `initialize`
-request under an id of its own (`ws-mcp-launcher-replay-<n>`, so a late
-answer from the old daemon can never be mistaken for it) and drops its
+successor the swap grace only when the unreachable endpoint's singleton lock
+is held or unqueryable, before coordinated absence startup), re-sends the
+client's captured `initialize` request under an id of its own
+(`ws-mcp-launcher-replay-<n>`, so a late answer from the old daemon can never
+be mistaken for it) and drops its
 answer, re-sends `notifications/initialized`, and answers every request that
 was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
 replaced"); the client never sees the server go away. Reconnecting is
@@ -1511,7 +1563,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.1`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.2`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
@@ -1570,7 +1622,7 @@ The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, selected
 documentation references, and the `agents-plugin-pi/` mirrors (`runtime.json`,
 `bin/ws-mcp-launcher.py`, `rsrc/`, resynced byte-for-byte from `agents-plugin/`,
-plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.1-dev` satisfy the
+plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.2-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases
@@ -1744,7 +1796,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.50.1-dev
+scripts/build-release-assets.sh 0.50.2-dev
 python3 ../agents-plugin/bin/ws-mcp-launcher.py version
 cd dist
 shasum -a 256 -c SHA256SUMS

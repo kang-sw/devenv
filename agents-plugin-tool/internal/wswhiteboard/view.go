@@ -77,7 +77,8 @@ type View struct {
 	// RenderRegions' fragments in ImageSrc's place. That body renders in a
 	// sandboxed frame whose requests carry no cookie, so a served page that
 	// needs one to reach its image route returns the image inline, as a
-	// data: URL. An empty result falls back to ImageSrc.
+	// data: URL. An empty result falls back to ImageSrc, with a daemon-path
+	// URL relayed through the same-origin host instead of loaded by the frame.
 	DocImageSrc func(path string) string
 	// FileActions, when set on a page with FileText, turns a file target
 	// into an action link, the element a served page's link menu takes: a
@@ -177,9 +178,11 @@ type TopicView struct {
 	RecapMs    int64
 	RecapClock string
 	RecapStamp string
-	// LatestAgent supplies the current-state summary, never a system event.
-	// Recap remains a read-only fallback for unconverted legacy views.
+	// LatestAgent remains log-only for latest-log arrival highlighting.
 	LatestAgent *Entry
+	// Head supplies the newest agent log or panel recap for every summary.
+	// Recap remains a read-only fallback for unconverted legacy views.
+	Head *Entry
 	// Stream/Older retain the complete, internally chunked entry projection
 	// (Older nearest first). Timeline selects anchors across these chunks;
 	// PanelRecaps lists latest distinct panels for the embed.
@@ -220,9 +223,6 @@ type TopicView struct {
 	StateDiagnostic *StateDiagnostic
 	// Closed marks a topic the lead closed.
 	Closed bool
-	// Result is the closed topic's close result, empty while the topic is
-	// open or when its close gave none (a store written before results).
-	Result string
 	// UpdatedAt is the topic's latest change, the newest change time among
 	// its items, body, recap, and stream entries (logs, panels, and the
 	// system events of closes, reopens, item and content changes) (RFC 3339,
@@ -324,18 +324,17 @@ func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string
 }
 
 // HeadSummary reports whether the topic's head carries its summary line: an
-// open topic with a latest agent line, or with checks on the embed. The line
-// holds the agent line (never a legacy recap or a system event) and, on the
+// topic with a latest agent line or panel recap, or open checks on the embed.
+// The line holds that summary (never a legacy recap or system event) and, on the
 // embed only, the check pill heading its in-flow check list; the full page
 // stacks open checks at the bottom and carries no pill.
 func (t TopicView) HeadSummary() bool {
-	return !t.Closed && (t.LatestAgent != nil || (len(t.Checks) > 0 && !t.fullHistory))
+	return t.Head != nil || (!t.Closed && len(t.Checks) > 0 && !t.fullHistory)
 }
 
 // LegacyRecapOpen reports whether an open topic shows an unconverted legacy
-// recap, as a card under the head: it has no agent line to stand in the
-// head.
-func (t TopicView) LegacyRecapOpen() bool { return t.RecapOpen() && t.LatestAgent == nil }
+// recap, as a card under the head: it has no log or panel summary in the head.
+func (t TopicView) LegacyRecapOpen() bool { return t.RecapOpen() && t.Head == nil }
 
 // DocOpen reports whether the topic's body renders open.
 func (t TopicView) DocOpen(embed bool) bool {
@@ -349,17 +348,17 @@ func (t TopicView) DocOpen(embed bool) bool {
 // one and is open.
 func (t TopicView) RecapOpen() bool { return t.Summary() != "" && !t.Closed }
 
-// Summary is the latest agent line, or a legacy recap when not converted.
+// Summary is the latest log or panel recap, or an unconverted legacy recap.
 func (t TopicView) Summary() string {
-	if t.LatestAgent != nil {
-		return t.LatestAgent.Text
+	if t.Head != nil {
+		return t.Head.Summary()
 	}
 	return t.Recap
 }
 
 // RecapFolded reports whether the recap folds with the body: it has one and
 // is closed.
-func (t TopicView) RecapFolded() bool { return t.Summary() != "" && t.Closed }
+func (t TopicView) RecapFolded() bool { return t.Head == nil && t.Recap != "" && t.Closed }
 
 // HasFold reports whether the topic renders the body's fold: it has a body,
 // or a recap folded into it.
@@ -689,6 +688,7 @@ func BuildView(state *State, in ViewInput) View {
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap
+		block.Head = doc.LatestSummary()
 		if latest, ok := doc.LatestAgent(); ok {
 			block.LatestAgent = &latest
 		}
@@ -714,11 +714,6 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 	stampUpdated(state, blocks, in.Location)
-	for _, block := range blocks {
-		if block.Closed {
-			block.Result = state.CloseResults[block.Name]
-		}
-	}
 
 	settledOrder := map[int]int{}
 	for _, item := range state.Items {
@@ -877,7 +872,7 @@ func bumpRank(state *State, activity map[string]int) map[string]int {
 
 // stampUpdated sets each block's latest change from the change times of its
 // items, body, recap, and stream entries, and its recap's own update time
-// (the latest agent log, else the legacy recap); a time that does
+// (the latest agent log or panel recap, else the legacy recap); a time that does
 // not parse (a store written before change times) counts as none.
 func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location) {
 	if loc == nil {
@@ -896,11 +891,13 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 		touch(doc.Name, doc.ChangedAt)
 		touch(doc.Name, doc.RecapAt)
 		for _, entry := range doc.Entries {
-			touch(doc.Name, entry.At)
+			if !staleReceipt(entry) && !internalRevisionMarker(entry) {
+				touch(doc.Name, entry.At)
+			}
 		}
 		at, summary := doc.RecapAt, doc.Recap
-		if agent, ok := doc.LatestAgent(); ok {
-			at, summary = agent.At, agent.Text
+		if head := doc.LatestSummary(); head != nil {
+			at, summary = head.At, head.Summary()
 		}
 		if t, err := time.Parse(time.RFC3339Nano, at); err == nil && summary != "" {
 			block := blocks[doc.Name]

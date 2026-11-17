@@ -240,6 +240,19 @@ func resolveHarnessBucketed(resolver *wsconfig.Resolver, sessionKey, key, harnes
 // point by promptKnobEntry at catalog-build time (see buildTuningCatalog).
 var configRegistry = []configKeyEntry{
 	{
+		Key:        wsconfig.HostedPluginPackageKey,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Plugin package for daemon-launched processes: ws or wsflow. Omit when reset is true.",
+			Enum:        []string{"ws", "wsflow"},
+		}},
+		NoAgentVisible:        true,
+		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.HostedPluginPackageKey),
+		ResolverBacked:        true,
+	},
+	{
 		Key:        wsconfig.ItemWorkflowPreferSubagent,
 		WriterTool: "config.tune",
 		ResetTool:  "config.tune",

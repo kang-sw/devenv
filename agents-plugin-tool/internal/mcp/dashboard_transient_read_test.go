@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -18,7 +19,8 @@ func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="Plan"><wb:body>intact committed content</wb:body></wb:topic>`)
 	src := dashboardPageSource(t, nil)
-	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	now := time.Now().UTC()
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root, HeartbeatAt: now.Format(time.RFC3339)}
 	dir := t.TempDir()
 	if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
 		t.Fatal(err)
@@ -27,11 +29,12 @@ func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
 	if err != nil || !ok || !page.HasBoard {
 		t.Fatalf("initial page: %v %v", ok, err)
 	}
-	idx := wsdashboard.NewIndex(wsdashboard.IndexOptions{Dir: dir, Source: src})
+	// Folder lock timeouts must not age the registration while testing recovery.
+	idx := wsdashboard.NewIndex(wsdashboard.IndexOptions{Dir: dir, Source: src, Now: func() time.Time { return now }})
 	idx.Refresh()
 	good, ok := idx.Session(reg.ReplyID)
-	if !ok {
-		t.Fatal("initial session missing")
+	if !ok || !good.Live || good.Lifecycle != wsdashboard.SessionActiveOn {
+		t.Fatalf("initial live session missing: %+v %v", good, ok)
 	}
 	before := src.prints[reg.ReplyID]
 	boards := len(src.boards.entries)
@@ -65,8 +68,15 @@ func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	idx.Refresh()
-	if got, ok := idx.Session(reg.ReplyID); !ok || got != good {
-		t.Fatalf("recovery changed identity: %+v %v", got, ok)
+	got, ok := idx.Session(reg.ReplyID)
+	// Contention invalidates the folder cache. Recovery gets a fresh immutable
+	// read revision, so the fingerprint advances even for unchanged content.
+	if !ok || got.Rev != good.Rev+1 {
+		t.Fatalf("recovery missing fresh read revision: %+v %v", got, ok)
+	}
+	got.Rev = good.Rev
+	if got != good {
+		t.Fatalf("recovery changed session identity/state: %+v", got)
 	}
 	if recovered, ok, err := src.ReadPage(reg); !ok || err != nil || recovered.Seq != page.Seq || recovered.Board.Board != page.Board.Board {
 		t.Fatalf("recovery lost page content: found=%v err=%v", ok, err)

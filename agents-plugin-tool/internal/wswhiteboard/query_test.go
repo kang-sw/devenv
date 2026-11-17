@@ -67,9 +67,11 @@ func TestQueryLegacyItemsDefault(t *testing.T) {
   (01) [open] [policy] pick one
 topic "b" [open] items: open 1; body: 10 chars; ` + changedAt + `
   state: discussing; entry: e6
+current e7 2026-11-04T09:00:00Z: Current content
   (04) [open] [technical] open b
 topic "d" [open] items: none; body: 8 chars; ` + changedAt + `
   state: discussing; entry: e13
+current e11 2026-11-04T09:00:00Z: Current content
 omitted: 2 items not open (answered 1, assumed 1), shown by status, topic, or ids; 1 closed topic with 1 item, listed by closed: true or topic
 `
 	if text != want {
@@ -146,18 +148,18 @@ func TestQueryIDs(t *testing.T) {
 }
 
 // Explicit summary/body selectors retrieve items and content; topic alone
-// is metadata discovery. A named closed topic is listed with its result.
+// is metadata discovery. A named closed topic is listed without a close result.
 func TestQueryTopic(t *testing.T) {
 	st := queryBoard(t)
 	text := queryText(t, st, `{"topic":"b","depth":"summary","body":true}`)
-	if !strings.HasPrefix(text, `topic "b" [open] items: open 1; body: 10 chars; `+changedAt+"\n  state: discussing; entry: e6\ntopic body:\n<<<\nnotes on b\n>>>\n  (04) [open] [technical] open b\n") {
+	if !strings.HasPrefix(text, `topic "b" [open] items: open 1; body: 10 chars; `+changedAt+"\n  state: discussing; entry: e6\ncurrent e7 2026-11-04T09:00:00Z: Current content\ntopic body:\n<<<\nnotes on b\n>>>\n  (04) [open] [technical] open b\n") {
 		t.Fatalf("topic query:\n%s", text)
 	}
 	text = queryText(t, st, `{"topic":["a","c"],"depth":"summary"}`)
 	wantText(t, "topic list", text,
-		[]string{"(01) [open]", "    a) optx first", "(02) [answered]", "(03) [assumed]", `topic "c" [closed] items: withdrawn 1; ` + changedAt + "; result: done c\n  (05) [withdrawn] [technical] close me"},
+		[]string{"(01) [open]", "    a) optx first", "(02) [answered]", "(03) [assumed]", `topic "c" [closed] items: withdrawn 1; ` + changedAt + "\ncurrent e17 2026-11-04T09:00:00Z: done c\n  (05) [withdrawn] [technical] close me"},
 		[]string{`topic "b"`, "omitted:"})
-	if text := queryText(t, st, `{"topic":"d","body":true}`); text != `topic "d" [open] items: none; body: 8 chars; `+changedAt+"\n  state: discussing; entry: e13\ntopic body:\n<<<\n배경 notes\n>>>\n" {
+	if text := queryText(t, st, `{"topic":"d","body":true}`); text != `topic "d" [open] items: none; body: 8 chars; `+changedAt+"\n  state: discussing; entry: e13\ncurrent e11 2026-11-04T09:00:00Z: Current content\ntopic body:\n<<<\n배경 notes\n>>>\n" {
 		t.Fatalf("body-only topic: %q", text)
 	}
 	if text := queryText(t, st, `{"topic":"nothing","depth":"items"}`); text != "no matching items\n" {
@@ -209,7 +211,7 @@ func TestQueryStatus(t *testing.T) {
 func TestQueryClosedAndOverrides(t *testing.T) {
 	st := queryBoard(t)
 	text := queryText(t, st, `{"closed":true,"depth":"items"}`)
-	wantText(t, "closed true", text, []string{`topic "c" [closed] items: withdrawn 1; ` + changedAt + "; result: done c\n"}, []string{"(05)", "closed topic with"})
+	wantText(t, "closed true", text, []string{`topic "c" [closed] items: withdrawn 1; ` + changedAt + "\n"}, []string{"(05)", "closed topic with", "result: done c"})
 	if lastLine(text) != "omitted: 3 items not open (answered 1, assumed 1, withdrawn 1), shown by status, topic, or ids" {
 		t.Fatalf("closed true omission line: %q", lastLine(text))
 	}
@@ -291,6 +293,7 @@ func TestQuerySummary(t *testing.T) {
 	text := queryText(t, st, `{"topic":"s","depth":"summary","body":true}`)
 	want := `topic "s" [open] items: open 1, answered 5, assumed 1, withdrawn 1; body: 35 chars; ` + changedAt + `
   state: discussing; entry: e3
+current e1 2026-11-04T09:00:00Z: Current content
 topic body:
 <<<
 body <code>kept</code> <b>as is</b>

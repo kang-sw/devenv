@@ -101,7 +101,7 @@ func postFrom(d *Daemon, v viewer, path, origin string) *httptest.ResponseRecord
 		req.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: v.cookie})
 	}
 	rec := httptest.NewRecorder()
-	d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(nil, d).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -125,7 +125,7 @@ func TestHoldersRouteListsHoldersAndStartFailures(t *testing.T) {
 	holders := newFakeHolders()
 	holders.listing = holderFixtureListing()
 	f := startPageFixture(t, withHolders(holders))
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port), localCookie: true}
 
 	rec := serve(f.d, local, http.MethodGet, "/holders", "")
 	list := decodeHolderList(t, rec)
@@ -148,7 +148,7 @@ func TestHoldersRouteListsHoldersAndStartFailures(t *testing.T) {
 
 	// Without a holder host the daemon serves neither route.
 	bare := startPageFixture(t)
-	bareLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(bare.d.Endpoint().Port)}
+	bareLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(bare.d.Endpoint().Port), localCookie: true}
 	if rec := serve(bare.d, bareLocal, http.MethodGet, "/holders", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("GET /holders without a holder host = %d, want 404", rec.Code)
 	}
@@ -165,7 +165,7 @@ func TestHolderStopRouteEndsAHolder(t *testing.T) {
 	holders.listing = holderFixtureListing()
 	holders.stopErr["hjob"] = wsholder.ErrStartTimeMismatch
 	f := startPageFixture(t, withHolders(holders))
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port), localCookie: true}
 
 	if rec := serve(f.d, local, http.MethodPost, "/holders/hlost/stop", ""); rec.Code != http.StatusNoContent {
 		t.Fatalf("POST stop = %d (%s), want 204", rec.Code, strings.TrimSpace(rec.Body.String()))
@@ -203,7 +203,7 @@ func TestHolderStopIsForALocalSameOriginViewerOnly(t *testing.T) {
 	f := startPageFixture(t, lanMode, withHolders(holders))
 	token := readLANToken(t, f.dir)
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lanHost := "192.168.7.20:" + port
 	remote := []viewer{
 		{name: "foreign peer with the token", peer: "192.168.7.30:50000", host: lanHost, cookie: token},

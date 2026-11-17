@@ -79,13 +79,12 @@ test('idle CSS bounds animation rates and contains without paint or size contain
   assert.match(conversation, /dash-spin \.8s steps\(12\) infinite/);
   assert.match(base, /:root\[data-animation-paused\][^{]+\{\s*animation-play-state: paused/);
   assert.match(conversation, /\.composer \{ contain: layout style;/);
-  assert.match(layout, /#bcol \{ contain: layout style;/);
-  // Files is portaled to body, but its toolbar controls must remain above
-  // the body-level scrim: the toolbar's data-files state releases containment.
-  const exception = layout.match(/#bcol:has\(([^\n]+)\) \{ contain: style; \}/);
-  assert.ok(exception);
-  for (const state of ['[data-max]', '.board-toolbar[data-files]', '.board-state-pop:not([hidden])']) assert.ok(exception[1].includes(state));
-  assert.match(read(dashboard, 'cards.js'), /toolbar\.setAttribute\("data-files", ""\)/);
+  // The board column takes no containment: the descendant :has() that
+  // released it re-matched the whole board on every DOM change. Uncontained,
+  // fixed sheets and popovers use the viewport, and Files, portaled to body,
+  // keeps its toolbar controls above the body-level scrim.
+  assert.doesNotMatch(layout, /#bcol[^{]*\{[^}]*contain/);
+  assert.doesNotMatch(layout, /#bcol:has\(/);
   const board = read(dashboard, 'dashboard-board.js');
   assert.match(board, /sheet\.id = "toolbar-files"/);
   assert.match(board, /doc\.body\.appendChild\(sheet\)/);

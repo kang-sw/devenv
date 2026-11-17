@@ -107,19 +107,45 @@ func TestFSLocalBrowseAnchorGuardsAndReads(t *testing.T) {
 		if !symlinks && strings.HasPrefix(dir, "outlink") {
 			continue
 		}
-		if rec := serve(f.d, local, http.MethodGet, base+"list?"+root+"&dir="+url.QueryEscape(dir), ""); rec.Code != http.StatusNotFound {
-			t.Errorf("anchor list %q = %d, want 404", dir, rec.Code)
+		if rec := serve(f.d, local, http.MethodGet, base+"list?"+root+"&dir="+url.QueryEscape(dir), ""); rec.Code != http.StatusOK {
+			t.Errorf("anchor list %q = %d, want 200", dir, rec.Code)
 		}
 	}
-	paths := []string{"../outside/secret.txt", filepath.Join(outside, "secret.txt")}
-	if symlinks {
-		paths = append(paths, "alias.txt", "escape.txt", "outlink/secret.txt", "escape.png")
+	// The explicit root is a navigation base, not a local read boundary.
+	paths := map[string]string{
+		filepath.Join(outside, "secret.txt"): "TEXT-OUTSIDE",
+		filepath.Join(outside, "secret.png"): "PNG-OUTSIDE",
 	}
-	for _, path := range paths {
-		for _, route := range []string{"preview", "raw"} {
-			if rec := serve(f.d, local, http.MethodGet, base+route+"?"+root+"&path="+url.QueryEscape(path), ""); rec.Code != http.StatusNotFound {
-				t.Errorf("anchor %s %q = %d, want 404", route, path, rec.Code)
+	for _, name := range []string{"secret.txt", "secret.png"} {
+		rel, err := filepath.Rel(f.project, filepath.Join(outside, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths[rel] = paths[filepath.Join(outside, name)]
+	}
+	if symlinks {
+		paths["alias.txt"] = "TEXT-INSIDE"
+		paths["escape.txt"] = "TEXT-OUTSIDE"
+		paths["outlink/secret.txt"] = "TEXT-OUTSIDE"
+		paths["escape.png"] = "PNG-OUTSIDE"
+		paths["outlink/secret.png"] = "PNG-OUTSIDE"
+	}
+	for path, body := range paths {
+		var preview fsPreviewAnswer
+		rec := serve(f.d, local, http.MethodGet, base+"preview?"+root+"&path="+url.QueryEscape(path), "")
+		image := strings.HasSuffix(path, ".png")
+		if err := json.Unmarshal(rec.Body.Bytes(), &preview); err != nil || rec.Code != http.StatusOK ||
+			(image && preview.Kind != "image") || (!image && (preview.Kind != "text" || preview.Text != body)) {
+			t.Errorf("anchor preview %q = %d %+v (%v)", path, rec.Code, preview, err)
+		}
+		// Widened reads do not widen the raw route's media extensions.
+		rec = serve(f.d, local, http.MethodGet, base+"raw?"+root+"&path="+url.QueryEscape(path), "")
+		if image {
+			if rec.Code != http.StatusOK || rec.Body.String() != body {
+				t.Errorf("anchor raw %q = %d %q, want image bytes", path, rec.Code, rec.Body.String())
 			}
+		} else if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), body) {
+			t.Errorf("anchor raw %q = %d %q, want 404", path, rec.Code, rec.Body.String())
 		}
 	}
 	// No index is needed; the anchor cannot become session-capable even

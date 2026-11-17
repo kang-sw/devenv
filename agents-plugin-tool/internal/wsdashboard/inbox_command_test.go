@@ -48,6 +48,50 @@ func TestCommandSendNeedsAnAdapterThatReportsCommands(t *testing.T) {
 	}
 }
 
+func TestCommandSendRechecksAWarmCommandList(t *testing.T) {
+	for _, change := range []string{"removed list", "removed command", "hosted list"} {
+		t.Run(change, func(t *testing.T) {
+			f := startPageFixture(t)
+			f.withCommands(t, wslive.SlashCommand{Name: "compact"})
+			// Warm a permissive presentation entry and freeze its clock. A
+			// command refusal must not depend on expiry or an index refresh.
+			clock := time.Now()
+			f.d.snapshots.files.mu.Lock()
+			f.d.snapshots.files.now = func() time.Time { return clock }
+			f.d.snapshots.files.mu.Unlock()
+			f.d.snapshots.Forget(f.dir, "livesession")
+			warm := f.d.snapshots.Snapshot(f.dir, "livesession")
+			if warm == nil || len(warm.Commands) != 1 || warm.Commands[0].Name != "compact" {
+				t.Fatal("command-list presentation cache was not warmed")
+			}
+			want := http.StatusConflict
+			switch change {
+			case "removed list":
+				f.withCommands(t)
+			case "removed command":
+				f.withCommands(t, wslive.SlashCommand{Name: "other"})
+				want = http.StatusBadRequest
+			case "hosted list":
+				// Disk still permits compact, but authoritative hosted RAM does not.
+				hosted := *warm
+				hosted.Commands = nil
+				f.d.snapshots.SetLive(f.dir, "livesession", hosted)
+			}
+			if change != "hosted list" {
+				if cached := f.d.snapshots.Snapshot(f.dir, "livesession"); cached == nil || len(cached.Commands) != 1 || cached.Commands[0].Name != "compact" {
+					t.Fatal("test lost its warm permissive presentation entry")
+				}
+			}
+			if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"command":"compact"}`); code != want {
+				t.Fatalf("removed command admitted: %d %s, want %d", code, raw, want)
+			}
+			if held := f.held(t); len(held) != 0 {
+				t.Fatalf("removed command was held: %+v", held)
+			}
+		})
+	}
+}
+
 func TestCommandEntryStandsAloneAndSteersAsText(t *testing.T) {
 	f := startPageFixture(t)
 	f.withCommands(t, wslive.SlashCommand{Name: "compact"})
@@ -163,6 +207,11 @@ func TestCommandIsHeldOnlyFromThisMachineAndOnlyWhenListed(t *testing.T) {
 		t.Fatalf("local /compact text not held: %+v", held)
 	}
 
+	// Page capabilities are presentation evidence: expire its startup snapshot.
+	clock := time.Now().Add(fileCacheValidationInterval)
+	f.d.snapshots.files.mu.Lock()
+	f.d.snapshots.files.now = func() time.Time { return clock }
+	f.d.snapshots.files.mu.Unlock()
 	if page := serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); !strings.Contains(page, `<i data-name="compact" data-src="builtin"></i>`) {
 		t.Error("the local page does not carry the command list")
 	}

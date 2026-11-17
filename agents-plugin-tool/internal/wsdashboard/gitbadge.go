@@ -170,7 +170,9 @@ type gitBadgeRunner struct {
 // spawn. Its timeout ends git's whole process tree (gitbatch.Bound), so a
 // timed-out read returns at its bound on Windows too.
 func badgeGitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root}, args...)...)
+	// Local browsing can ask git about an untrusted outside repository.
+	// Never execute its configured filesystem monitor during a read.
+	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root, "-c", "core.fsmonitor=false"}, args...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	gitbatch.Bound(cmd)
 	return cmd

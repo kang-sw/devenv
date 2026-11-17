@@ -261,7 +261,8 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
 	keys := mcp.NewAgentKeyStore()
 	return wsagent.NewRunner(wsagent.Options{
-		Dir: dir,
+		Dir:           dir,
+		DaemonVersion: version,
 		Backends: map[string]wsagent.BackendRegistration{
 			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels()},
 			wsagent.BackendPi:     {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
@@ -273,8 +274,10 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		LeadKeys: keys,
 		// The daemon, not the session's own mailbox wait, delivers a lead
 		// session's mail.
-		Mail:           mcp.NewLeadMailbox(dir),
-		WSMCP:          agentMCPCommand,
+		Mail: mcp.NewLeadMailbox(dir),
+		WSMCP: func(root string) (wsagent.MCPCommand, error) {
+			return agentMCPCommand(root, version)
+		},
 		Log:            logw,
 		TrackerChanged: trackerChanged,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.

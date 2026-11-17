@@ -221,6 +221,11 @@
         }
       });
     });
+    // The current body's last block once the hidden deletions are in
+    // (pdg-end, page-panel-diff.css).
+    var end = body.lastElementChild;
+    while (end && end.classList.contains('pdg-gone')) end = end.previousElementSibling;
+    if (end) end.classList.add('pdg-end');
     body.classList.toggle('pdg-diffview', d.documentElement.getAttribute('data-pdg-compare') === 'true');
     if (window.ResizeObserver) {
       state.observer = new ResizeObserver(function () { if (body.isConnected) layout(state); });

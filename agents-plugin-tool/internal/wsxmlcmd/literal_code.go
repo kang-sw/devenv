@@ -180,12 +180,13 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 }
 
 // A panel-level quote may contain whole wrapper examples or a quoted opener,
-// but it must not end halfway through a structural operand. Otherwise the raw
-// payload can silently replace a patch instead of leaving a visible refusal.
-// Walk only the candidate's bytes, skipping operand bodies by their own raw
-// close (and CDATA), just as structural reading does.
-func literalOperandCrossing(s string, at, end int, wrapper *bodyWrapper) string {
-	inside := false
+// but it must not end halfway through a structural operand or wrapper. Otherwise
+// the raw payload can silently replace a patch instead of leaving a refusal.
+// Skip operand bodies by their own raw close (and CDATA), just as structural
+// reading does. A bare quoted opener stays legal without a structural tail.
+func (t *tokenizer) literalOperandCrossing(at, end, lineStart int, wrapper *bodyWrapper, closing string, tail *literalWrapperTail) (field string, structural bool) {
+	s, start, tailStart := t.s, at, end
+	inside, fieldsStart := false, 0
 	for at < end {
 		next := strings.IndexByte(s[at:end], '<')
 		if next < 0 {
@@ -196,6 +197,13 @@ func literalOperandCrossing(s string, at, end int, wrapper *bodyWrapper) string 
 		if strings.HasPrefix(rest, "<![CDATA[") {
 			close := strings.Index(rest[9:], "]]>")
 			if close < 0 {
+				// CDATA still owns the bytes after the literal ends. Only
+				// content after its real close can continue this wrapper.
+				close = strings.Index(s[at+9:], "]]>")
+				if close < 0 {
+					return "", false
+				}
+				tailStart = at + 9 + close + 3
 				break
 			}
 			at += 9 + close + 3
@@ -224,19 +232,159 @@ func literalOperandCrossing(s string, at, end int, wrapper *bodyWrapper) string 
 		}
 		at = probe.i
 		if !inside {
-			inside = !tag.selfClosing
+			inside, fieldsStart = !tag.selfClosing, at
 			continue
 		}
 		if !tag.selfClosing {
 			closing := "</" + tag.name + ">"
 			close := firstBodyClose(s, at, end, closing)
 			if close < 0 {
-				return tag.name
+				return tag.name, true
 			}
 			at = close + len(closing)
 		}
 	}
-	return ""
+	if inside {
+		if newline := strings.LastIndexByte(s[start:tailStart], '\n'); newline >= 0 {
+			lineStart = start + newline + 1
+		}
+		if refuse, structural := tail.continues(t, tailStart, fieldsStart, lineStart, wrapper, closing); refuse {
+			return wrapper.tag, structural
+		}
+	}
+	return "", false
+}
+
+// Cache the next wrapper boundary (or command close) and the bounded trial
+// read there. A fresh opener owns its operands, but preceding raw fields must
+// not silently become prose. Only a successful trial permits structural fallback;
+// a malformed prose example gets guidance without consuming sibling commands.
+// Candidates arrive in source order, so each suffix is walked/trial-read once.
+type literalWrapperTail struct {
+	at, lastField int
+	commandClose  int
+	refuse        bool
+	structural    bool
+	fieldCloses   map[string]int
+}
+
+func (tail *literalWrapperTail) continues(t *tokenizer, at, fieldsStart, lineStart int, wrapper *bodyWrapper, closing string) (bool, bool) {
+	if at <= tail.at {
+		return tail.refuse || at <= tail.lastField, tail.structural
+	}
+	s, bodyStart, limit := t.s, at, len(t.s)
+	if tail.commandClose < at {
+		// A quote must never gain ownership of a later command's fields.
+		// Cache this raw boundary too: fresh wrappers may precede it many times.
+		tail.commandClose = firstBodyClose(s, at, len(s), closing)
+		if tail.commandClose < 0 {
+			tail.commandClose = len(s)
+		}
+		tail.fieldCloses = nil
+	}
+	// Lookahead shares the delimiter index, but not diagnostic/crossing state.
+	probe := tokenizer{s: s, literals: t.literals}
+	defer func() { t.literals = probe.literals }()
+	advance := func(end int) {
+		if newline := strings.LastIndexByte(s[at:end], '\n'); newline >= 0 {
+			lineStart = at + newline + 1
+		}
+		at = end
+	}
+	for at < len(s) {
+		next := strings.IndexAny(s[at:], "<`~\n")
+		if next < 0 {
+			break
+		}
+		at += next
+		if s[at] != '<' {
+			end := probe.codeLiteralEnd(at, bodyStart, lineStart, closing, &limit)
+			// Body parsing unwraps CDATA even within a code literal. If
+			// that literal ends inside CDATA, resume after its real close.
+			for pos := at; pos < end; {
+				next := strings.Index(s[pos:end], "<![CDATA[")
+				if next < 0 {
+					break
+				}
+				pos += next + 9
+				close := strings.Index(s[pos:], "]]>")
+				if close < 0 {
+					end = len(s)
+					break
+				}
+				pos += close + 3
+				end = max(end, pos)
+			}
+			advance(max(at+1, end))
+			continue
+		}
+		rest := s[at:]
+		if strings.HasPrefix(rest, closing) {
+			tail.at, tail.refuse, tail.structural = at, false, false
+			tail.lastField = 0
+			return false, false
+		}
+		if strings.HasPrefix(rest, "<![CDATA[") {
+			close := strings.Index(rest[9:], "]]>")
+			if close < 0 {
+				break
+			}
+			advance(at + 9 + close + 3)
+			continue
+		}
+		if openingTagPrefix(rest, wrapper.tag) {
+			tail.at, tail.refuse, tail.structural = at, false, false
+			return bodyStart <= tail.lastField, false
+		}
+		if strings.HasPrefix(rest, "</"+wrapper.tag+">") {
+			end := at + len(wrapper.tag) + 3
+			trial := tokenizer{s: s[fieldsStart:end], p: &Problems{}, literalCode: t.literalCode, ordered: t.ordered}
+			child := Command{Tag: wrapper.tag}
+			structural := trial.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, "")
+			tail.at, tail.refuse, tail.structural = at, true, structural
+			return true, structural
+		}
+		skipped := false
+		for _, field := range wrapper.fields {
+			if !openingTagPrefix(rest, field) {
+				continue
+			}
+			fieldProbe := tokenizer{s: s[:tail.commandClose], i: at, p: &Problems{}}
+			tag, ok := fieldProbe.readOpen()
+			if !ok {
+				break
+			}
+			end := fieldProbe.i
+			if !tag.selfClosing {
+				if tail.fieldCloses == nil {
+					tail.fieldCloses = map[string]int{}
+				}
+				close, cached := tail.fieldCloses[field]
+				if !cached || close >= 0 && close < end {
+					close = firstBodyClose(s, end, tail.commandClose, "</"+field+">")
+					tail.fieldCloses[field] = close
+				}
+				if close < 0 {
+					// No raw close: keep looking for a boundary, but do not
+					// license structural fallback without the trial read.
+					advance(end)
+					skipped = true
+					break
+				}
+				end = close + len(field) + 3
+			}
+			tail.lastField = at
+			advance(end)
+			skipped = true
+			break
+		}
+		if !skipped {
+			at++
+		}
+	}
+	tail.at, tail.refuse, tail.structural = len(s), false, false
+	tail.lastField = 0
+	return false, false
 }
 
 // Matching indexes positions only; no fallback grammar walk licenses crossings.

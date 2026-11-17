@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
@@ -169,12 +170,13 @@ func startPageFixture(t *testing.T, options ...func(*DaemonOptions)) *pageFixtur
 	options = append([]func(*DaemonOptions){func(o *DaemonOptions) { o.noGitBadge = true }}, options...)
 	f.d = startIndexedDaemon(t, f.dir, f.src, time.Hour, options...)
 	f.base = endpointURL(f.d.Endpoint(), "")
-	// The daemon's first index refresh runs beside its start; a page asked
-	// for before it lands is an unknown session.
-	waitFor(t, "the fixture sessions to be indexed", func() bool {
+	// Session insertion precedes its OnChange hook. Wait for the completed
+	// refresh too, or a startup wake can invalidate the first shared render
+	// after both sessions are already visible.
+	waitFor(t, "the fixture sessions' initial refresh to finish", func() bool {
 		_, live := f.d.Index().Session("livesession")
 		_, board := f.d.Index().Session("boardsession")
-		return live && board
+		return f.d.Index().Loaded() && live && board
 	})
 	return f
 }
@@ -264,6 +266,7 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	f := startPageFixture(t)
 	code, live := get(t, f.base+"/s/livesession?frame=1")
+	live = frameDependencies(t, live)
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession = %d: %s", code, live)
 	}
@@ -299,6 +302,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		t.Errorf("the conversation wrapper does not hold the entries region without a splitter")
 	}
 	_, board := get(t, f.base+"/s/boardsession?frame=1")
+	board = frameDependencies(t, board)
 	if !strings.Contains(board, `<div id="bcol" class="bcol"><div id="r-board"`) {
 		t.Errorf("board-first page lacks the board column")
 	}
@@ -353,7 +357,11 @@ func dashboardPageScript(t *testing.T, base, page string, external bool) (int, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	matches := regexp.MustCompile(`<script src="(/s/dashboard-[0-9a-f]{24}\.js)"></script>`).FindAllStringSubmatchIndex(page, -1)
+	a, err := loadDashboardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches := regexp.MustCompile(`<script src="(/s/`+regexp.QuoteMeta(a.data.ScriptFile)+`)"></script>`).FindAllStringSubmatchIndex(page, -1)
 	inline := "<script>" + string(want) + "</script>"
 	if !external {
 		if len(matches) != 0 || strings.Count(page, inline) != 1 {
@@ -388,6 +396,7 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("GET %s = %d", path, code)
 		}
+		page = frameDependencies(t, page)
 		css, trackerCSS := strings.Index(page, ".dwrap {"), strings.Index(page, ".tk.tk-drawer {")
 		if css < 0 || trackerCSS < css {
 			t.Errorf("%s page: the tracker stylesheet is missing or ahead of the dashboard's", name)
@@ -520,7 +529,7 @@ func TestUnknownPagesAreNotFound(t *testing.T) {
 		t.Errorf("unreadable page = %d, want 404", code)
 	}
 	// The page has one URL, since it loads its assets by relative path.
-	noFollow := &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{Proxy: nil},
+	noFollow := &http.Client{Timeout: 500 * time.Millisecond, Transport: localhostTestHTTPTransport(),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if resp, err := noFollow.Get(f.base + "/s/livesession/"); err != nil {
 		t.Fatal(err)
@@ -566,7 +575,7 @@ func TestMermaidAssetIsServedBesideThePages(t *testing.T) {
 	}
 	// The page names it by relative path.
 	_, page := get(t, f.base+"/s/livesession?frame=1")
-	if !strings.Contains(page, `window.wbMermaidFile = "`+name+`"`) {
+	if !strings.Contains(frameDependencies(t, page), `window.wbMermaidFile = "`+name+`"`) {
 		t.Errorf("page does not name the mermaid file %s relatively", name)
 	}
 }
@@ -574,8 +583,8 @@ func TestMermaidAssetIsServedBesideThePages(t *testing.T) {
 // TestFrameAssetsAreServedBesideThePages pins the shared topic-body frame
 // assets (wswhiteboard.FrameAsset): a frame's document links its stylesheet
 // and script by relative, content-hashed names instead of inlining them,
-// with the copy button's string table still inline ahead of the script; the
-// daemon serves both beside the page as immutable, and in LAN mode to a
+// with the copy/relative-age subset in its own hashed script ahead of the
+// frame script; the daemon serves all three as immutable, and in LAN mode to a
 // viewer without the token, since a frame's opaque origin sends no cookie.
 func TestFrameAssetsAreServedBesideThePages(t *testing.T) {
 	f := startPageFixture(t)
@@ -586,18 +595,24 @@ func TestFrameAssetsAreServedBesideThePages(t *testing.T) {
 	}
 	doc := html.UnescapeString(m[1])
 	css := regexp.MustCompile(`<link rel="stylesheet" href="(wb-frame-[0-9a-f]{12}\.css)">`).FindStringSubmatch(doc)
-	js := regexp.MustCompile(`</script><script src="(wb-frame-[0-9a-f]{12}\.js)"></script>`).FindStringSubmatch(doc)
-	if css == nil || js == nil {
+	scripts := regexp.MustCompile(`<script src="(wb-frame-[0-9a-f]{12}\.js)"></script>`).FindAllStringSubmatch(doc, -1)
+	if css == nil || len(scripts) != 2 {
 		t.Fatalf("frame document does not link the shared assets by hashed name:\n%.600s", doc)
 	}
+	subset, js := scripts[0], scripts[1]
 	if strings.Contains(doc, "<style>") || strings.Contains(doc, "wbDocMermaid = function") {
 		t.Errorf("frame document still inlines the stylesheet or the frame script")
 	}
-	if !strings.Contains(doc, "window.wsI18n") || strings.Index(doc, "window.wsI18n") > strings.Index(doc, js[1]) {
-		t.Errorf("frame document lacks its string table ahead of the frame script")
+	if strings.Contains(doc, "window.wsI18n") || strings.Index(doc, subset[1]) >= strings.Index(doc, js[1]) {
+		t.Errorf("frame document must reference its subset ahead of the frame script")
+	}
+	data, _, ok := wswhiteboard.FrameAsset(subset[1])
+	if !ok || string(data) != string(wsi18n.SubsetScript("en", "js.wb.")) {
+		t.Fatal("frame subset changed its translation bytes")
 	}
 	for _, c := range []struct{ name, ctype, holds string }{
 		{css[1], "text/css", "background: transparent"},
+		{subset[1], "text/javascript", "window.wsI18n"},
 		{js[1], "text/javascript", "wbDocMermaid"},
 	} {
 		data, ctype, ok := wswhiteboard.FrameAsset(c.name)
@@ -626,7 +641,7 @@ func TestFrameAssetsAreServedBesideThePages(t *testing.T) {
 
 	lan := startPageFixture(t, lanMode)
 	stranger := viewer{name: "foreign peer, no token", peer: "192.168.7.30:50000", host: "192.168.7.20:" + strconv.Itoa(lan.d.Endpoint().Port)}
-	for _, name := range []string{css[1], js[1]} {
+	for _, name := range []string{css[1], subset[1], js[1]} {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			if rec := serve(lan.d, stranger, method, "/s/"+name, ""); rec.Code != http.StatusOK || len(rec.Result().Cookies()) != 0 {
 				t.Errorf("LAN %s %s without the token = %d", method, name, rec.Code)
@@ -733,7 +748,7 @@ func TestStreamSendsOnlyChangedRegions(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/boardsession?frame=1")
 	modeHash := newRegion(modeBoard).Hash
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/boardsession/events?frame=1&h=" + heldOf(page) + ",mode." + modeHash)
 	if err != nil {
 		t.Fatal(err)
@@ -783,7 +798,7 @@ func TestStreamSendsOnlyChangedRegions(t *testing.T) {
 func TestStreamSendsTheModeWhenTheAdapterAppears(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/boardsession?frame=1")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/boardsession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeBoard).Hash)
 	if err != nil {
 		t.Fatal(err)

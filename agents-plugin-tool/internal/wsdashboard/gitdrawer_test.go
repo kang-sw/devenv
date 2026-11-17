@@ -305,7 +305,7 @@ func TestGitDrawerRoutes(t *testing.T) {
 	gitRun(t, base, "clone", "-q", origin, other)
 	// The status, fetch and pull handlers run git, which outlasts
 	// testClient's 500 ms on a loaded Windows runner (seen on CI).
-	gitClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	gitClient := &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}
 	status := func() GitChanges {
 		t.Helper()
 		resp, err := gitClient.Get(f.base + "/s/livesession/git/status")

@@ -181,7 +181,7 @@ func TestArchivedLeadManualUnhideSleepsAndPageInputWakes(t *testing.T) {
 		t.Fatalf("hide did not stop: %+v", st)
 	}
 	h.send(id, "own page") // held first, as the dashboard composer writes it
-	if err := h.runner.PageInput(id); err != nil {
+	if err := h.runner.PageInput(id, func() bool { return true }); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "own-page wake", func() bool { st := h.state(id); return !st.Hidden && st.Process })

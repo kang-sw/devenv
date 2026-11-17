@@ -20,10 +20,10 @@ func TestTerminalCardScriptRidesOnlyAPageThatOffersTerminals(t *testing.T) {
 	manager := wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
 	f := startPageFixture(t, lanMode, withHolders(manager))
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	const kind = "window.WsTerm = {"
-	page := serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String()
+	page := frameDependencies(t, serve(f.d, local, "GET", "/s/livesession?frame=1", "").Body.String())
 	at, cardsAt, mountAt := strings.Index(page, kind), strings.Index(page, "window.WsCards = {"), strings.Index(page, `<script src="/s/dashboard-`)
 	if at < 0 || cardsAt < 0 || mountAt < 0 || !(cardsAt < at && at < mountAt) {
 		t.Errorf("a local viewer's page lacks the terminal kind between the card framework and the page script (kind %d, framework %d, mount %d)", at, cardsAt, mountAt)
@@ -31,12 +31,12 @@ func TestTerminalCardScriptRidesOnlyAPageThatOffersTerminals(t *testing.T) {
 	if !strings.Contains(page, `<symbol id="l-square-terminal" viewBox="0 0 24 24">`) {
 		t.Error("the session page lacks the terminal card's icons")
 	}
-	if page := serve(f.d, lan, "GET", "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, kind) || !strings.Contains(page, "window.WsCards = {") {
+	if page := frameDependencies(t, serve(f.d, lan, "GET", "/s/livesession?frame=1", "").Body.String()); strings.Contains(page, kind) || !strings.Contains(page, "window.WsCards = {") {
 		t.Error("a LAN viewer's page carries the terminal kind")
 	}
 	plain := startPageFixture(t, withHolders(newFakeHolders()))
-	plainLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(plain.d.Endpoint().Port)}
-	if page := serve(plain.d, plainLocal, "GET", "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, kind) {
+	plainLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(plain.d.Endpoint().Port), localCookie: true}
+	if page := frameDependencies(t, serve(plain.d, plainLocal, "GET", "/s/livesession?frame=1", "").Body.String()); strings.Contains(page, kind) {
 		t.Error("a daemon that runs no terminals serves the terminal kind")
 	}
 }

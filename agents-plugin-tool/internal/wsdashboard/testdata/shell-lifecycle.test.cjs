@@ -80,8 +80,11 @@ function runBase() {
   assert.deepEqual(plain(c.bad), [], 'URL, message-shape, color and retired-cache helper contracts');
   assert.equal(s.current(), first);
   assert.deepEqual(plain(first.got), ['sync', 'settings']);
+  const beforeHead = c.renameChecks;
   c.from(first.contentWindow, { wsShell: 'head', html: '<b>a</b>', qs: '', pad: 0, top: 40 });
   assert.deepEqual(plain(c.log), ['swap:head:<b>a</b>']);
+  const renameChecks = c.renameChecks;
+  assert.equal(renameChecks, beforeHead + 1, 'a mirrored header retries the pending post-create rename');
   c.log.length = 0;
   for (const [source, origin, data] of [
     [first.contentWindow, 'http://evil:1', { wsShell: 'nav', href: '/s/evil' }],
@@ -91,6 +94,7 @@ function runBase() {
   assert.equal(s.count(), 1);
   assert.deepEqual(plain(c.pushed), []);
   assert.deepEqual(plain(c.log), []);
+  assert.equal(c.renameChecks, renameChecks, 'untrusted or malformed headers cannot trigger rename');
 
   // The actual native confirmation is deliberately not mocked into production:
   // location.replace requests leave; no load means cancellation, a blank load
@@ -123,11 +127,12 @@ function runBase() {
   assert.equal(c.attrs['data-rid'], 'b');
 
   // No old Window may navigate or change the header, including a delayed load.
-  const head = c.log.length;
+  const head = c.log.length, renames = c.renameChecks;
   c.from(first.contentWindow, { wsShell: 'nav', href: '/s/stray' });
   c.from(first.contentWindow, { wsShell: 'head', html: '<b>stale</b>', qs: '', pad: 0, top: 40 });
   first.load();
   assert.equal(c.log.length, head);
+  assert.equal(c.renameChecks, renames, 'a removed frame cannot trigger rename');
   assert.equal(s.current(), b);
 
   // A burst while leave is pending loads only its latest target.

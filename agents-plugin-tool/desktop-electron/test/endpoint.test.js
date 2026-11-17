@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
-const { cacheRoot, readEndpoint, checkHealth, discover, inspect, shutdown, MAX_JSON } = require('../endpoint');
+const { cacheRoot, readEndpoint, checkHealth, discover, inspect, shutdown, browserCookie, browserLoginLink, MAX_JSON } = require('../endpoint');
 
 async function fixture(t, handle) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-endpoint-'));
@@ -70,7 +70,7 @@ test('health deadline is total, including a slow streaming body', async t => {
   await assert.rejects(checkHealth(f.ep, 40), /health check failed/);
   assert(Date.now() - before < 1000);
 });
-test('REST inspection returns validated health without bearer; shutdown alone uses endpoint credential', async t => {
+test('REST inspection returns validated health without bearer; shutdown uses endpoint credential', async t => {
   let requests = [], accepted = false;
   const f = await fixture(t, (req, res) => {
     requests.push({ method: req.method, path: req.url, auth: req.headers.authorization });
@@ -129,4 +129,81 @@ test('endpoint change during health is rejected, missing then retry succeeds', a
   change = false;
   f.write(f.ep);
   assert.equal(await discover(f.root), `http://127.0.0.1:${f.ep.port}/`);
+});
+test('browser credentials use checked bearer POSTs only, with no Origin or cookie', async t => {
+  const requests = [];
+  const f = await fixture(t, (req, res) => {
+    if (req.url === '/health') return res.end(JSON.stringify({ service: 'ws-dashboard', pid: process.pid }));
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      requests.push({ route: req.url, method: req.method, headers: req.headers, body });
+      res.end(JSON.stringify(req.url === '/auth/cookie'
+        ? { name: 'ws_local', value: 'browser-cookie', maxAge: 34560000 }
+        : { url: `http://127.0.0.1:${f.ep.port}/s/test?login=once` }));
+    });
+  });
+  const observed = await inspect(f.root);
+  assert(!JSON.stringify(observed).includes('a'.repeat(64)));
+  assert.equal(typeof await discover(f.root), 'string');
+  assert.deepEqual(await browserCookie(f.root, observed), { name: 'ws_local', value: 'browser-cookie', maxAge: 34560000 });
+  assert.equal(await browserLoginLink(f.root, observed, '/s/test'), `${observed.url}s/test?login=once`);
+  assert.deepEqual(requests.map(r => r.route), ['/auth/cookie', '/auth/link']);
+  assert.equal(requests[1].body, JSON.stringify({ path: '/s/test' }));
+  for (const request of requests) {
+    assert.equal(request.method, 'POST');
+    assert.equal(request.headers.authorization, `Bearer ${'a'.repeat(64)}`);
+    assert.equal(request.headers.origin, undefined);
+    assert.equal(request.headers.cookie, undefined);
+  }
+});
+test('browser auth refuses replaced observations before sending any bearer', async t => {
+  let auth = 0, rotateOnHealth = false;
+  const f = await fixture(t, (req, res) => {
+    if (req.url !== '/health') auth++;
+    if (rotateOnHealth) f.write({ ...f.ep, token: 'b'.repeat(64) });
+    res.end(JSON.stringify({ service: 'ws-dashboard', pid: process.pid }));
+  });
+  for (const mutate of ['port', 'pid', 'token', 'during-health', 'unobserved']) {
+    f.write({ ...f.ep, token: 'a'.repeat(64) });
+    rotateOnHealth = false;
+    const observed = await inspect(f.root);
+    if (mutate === 'during-health') rotateOnHealth = true;
+    else if (mutate !== 'unobserved') f.write({ ...f.ep, token: 'a'.repeat(64),
+      [mutate]: mutate === 'token' ? 'b'.repeat(64) : f.ep[mutate] + 1 });
+    const target = mutate === 'unobserved' ? { ...observed, endpoint: { ...observed.endpoint } } : observed;
+    for (const request of [() => browserCookie(f.root, target), () => browserLoginLink(f.root, target)]) {
+      await assert.rejects(request, error => /changed/.test(error.message) && !error.message.includes('b'.repeat(64)));
+    }
+  }
+  assert.equal(auth, 0);
+});
+test('browser auth rejects redirects, bad JSON, oversized bodies and unsafe response fields; 404 is compatible', async t => {
+  let status = 200, body;
+  const f = await fixture(t, (req, res) => {
+    if (req.url === '/health') return res.end(JSON.stringify({ service: 'ws-dashboard', pid: process.pid }));
+    res.writeHead(status, { Location: 'http://example.com/' }); res.end(body);
+  });
+  const observed = await inspect(f.root);
+  for (const value of [null, {}, { name: 'bad;name', value: 'x', maxAge: 20 },
+    { name: 'local', value: 'bad;value', maxAge: 20 }, { name: 'local', value: 'x', maxAge: 0 },
+    { name: 'local', value: 'x', maxAge: 34560001 }]) {
+    body = JSON.stringify(value);
+    await assert.rejects(browserCookie(f.root, observed), /Invalid/);
+  }
+  for (const value of ['{', 'x'.repeat(MAX_JSON + 1)]) {
+    body = value;
+    await assert.rejects(browserCookie(f.root, observed), /failed/);
+  }
+  for (const url of ['http://example.com/?login=x', `http://user:pass@127.0.0.1:${f.ep.port}/?login=x`, observed.url]) {
+    body = JSON.stringify({ url });
+    await assert.rejects(browserLoginLink(f.root, observed), /Invalid/);
+  }
+  for (const code of [302, 401, 500]) {
+    status = code; body = '{}';
+    await assert.rejects(browserCookie(f.root, observed), /failed/);
+  }
+  status = 404;
+  assert.equal(await browserCookie(f.root, observed), null);
+  await assert.rejects(browserLoginLink(f.root, observed), /Invalid/);
 });

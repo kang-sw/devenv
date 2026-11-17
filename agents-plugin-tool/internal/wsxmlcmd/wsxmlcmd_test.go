@@ -129,6 +129,12 @@ func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
 	for _, body := range []string{
 		"` <x:change><x:old>alpha ` x</x:old><x:new>z</x:new></x:change>",
 		"` <x:change><x:old>alpha</x:old><x:new>z ` x</x:new></x:change>",
+		"` <x:change><x:old>alpha</x:old> ` <x:new>z</x:new></x:change>",
+		"` <x:change> ` <x:old>alpha</x:old><x:new>z</x:new></x:change>",
+		"` <x:change><x:old>alpha</x:old><x:new>z</x:new> ` </x:change>",
+		"` <x:change> ` </x:change>",
+		"` <x:change> ` `<x:old>quoted</x:old>` <x:new>z</x:new></x:change>",
+		"```\n<x:change><x:old>alpha</x:old>\n```\n<x:new>z</x:new></x:change>",
 		"```\n<x:change><x:old>alpha\n```\nx</x:old><x:new>z</x:new></x:change>",
 	} {
 		input := "<x:payload>" + body + "</x:payload><x:text>keep</x:text>"
@@ -153,6 +159,11 @@ func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
 	for _, body := range []string{
 		"`<x:change><x:old>a</x:old><x:new>b</x:new></x:change>`",
 		"`<x:change>`",
+		"`<x:change>` <![CDATA[<x:old>a</x:old></x:change>]]>",
+		"`<x:change>` `<x:old>a</x:old>`",
+		"`<x:change>`\n~~~\n<x:old>a</x:old></x:change>\n~~~",
+		"`<x:change><![CDATA[` <x:old>a</x:old>]]>",
+		"`<x:change>` `<![CDATA[` <x:old>a</x:old>]]>",
 		"`<![CDATA[<x:change><x:old>a]]>`",
 		"`<x:change><x:old><![CDATA[</x:old>]]>a</x:old></x:change>`",
 	} {
@@ -160,6 +171,131 @@ func TestLiteralCodeCannotEndInsideWrappedOperand(t *testing.T) {
 		if len(p) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 0 {
 			t.Fatalf("legal literal %q: %+v %v", body, cmds, p)
 		}
+	}
+	cmds, p := parse(g, "<x:payload>`<x:change>`</x:payload><x:text><x:old>a</x:old></x:change></x:text>")
+	if len(p) != 0 || len(cmds) != 2 || len(cmds[0].Children) != 0 {
+		t.Fatalf("continuation must not cross a command close: %+v %v", cmds, p)
+	}
+}
+
+func TestLiteralCodeQuotedWrapperAllowsIndependentTail(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{
+		"payload": {Kind: Leaf, Wrapper: "change", Fields: []string{"old", "new"}},
+		"text":    {Kind: Leaf},
+	}}
+	for _, tc := range []struct {
+		body     string
+		children int
+	}{
+		{"`<x:change>` then <x:change><x:old>a</x:old><x:new>b</x:new></x:change>", 1},
+		{"`<x:change>` then `x` <x:old>raw</x:old>", 0},
+		{"`<x:change>` then <x:new>raw", 0},
+	} {
+		for _, ordered := range []bool{false, true} {
+			input := "<x:payload>" + tc.body + "</x:payload><x:text>keep</x:text>"
+			p := &Problems{}
+			var cmds []Command
+			complete := true
+			if ordered {
+				cmds, complete = ParseOrdered(p, g, input)
+			} else {
+				cmds = Parse(p, g, input)
+			}
+			if !complete || len(p.List) != 0 || len(cmds) != 2 || len(cmds[0].Children) != tc.children || cmds[1].Body != "keep" {
+				t.Fatalf("ordered=%v body=%q: commands=%+v complete=%v problems=%v", ordered, tc.body, cmds, complete, p.List)
+			}
+			want := tc.body
+			if tc.children != 0 {
+				want = "`<x:change>` then "
+			}
+			if cmds[0].Body != want {
+				t.Fatalf("ordered=%v body=%q: got body %q, want %q", ordered, tc.body, cmds[0].Body, want)
+			}
+		}
+	}
+}
+
+func TestLiteralCodeQuotedWrapperDoesNotBorrowSiblingFields(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{
+		"payload": {Kind: Leaf, Wrapper: "change", Fields: []string{"old", "new"}},
+		"text":    {Kind: Leaf},
+	}}
+	body := "`<x:change>`<x:old>missing"
+	sibling := "keep</x:old><x:new>b</x:new></x:change>"
+	input := "<x:payload>" + body + "</x:payload><x:text>" + sibling + "</x:text>"
+	for _, ordered := range []bool{false, true} {
+		p := &Problems{}
+		var cmds []Command
+		complete := true
+		if ordered {
+			cmds, complete = ParseOrdered(p, g, input)
+		} else {
+			cmds = Parse(p, g, input)
+		}
+		if !complete || len(p.List) != 0 || len(cmds) != 2 || len(cmds[0].Children) != 0 || cmds[0].Body != body || cmds[1].Body != sibling {
+			t.Fatalf("ordered=%v: commands=%+v complete=%v problems=%v", ordered, cmds, complete, p.List)
+		}
+	}
+}
+
+func TestLiteralCodeQuotedWrapperTailRawFields(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{
+		"payload": {Kind: Leaf, Wrapper: "change", Fields: []string{"old", "new"}},
+		"text":    {Kind: Leaf},
+	}}
+	for _, tc := range []struct {
+		name, body, wantBody, old, new string
+		children                       int
+	}{
+		{
+			name:     "opener inside raw field",
+			body:     "`<x:change>`<x:old>use <x:change> tag</x:old><x:new>b</x:new></x:change>",
+			wantBody: "`", old: "use <x:change> tag", new: "b", children: 1,
+		},
+		{
+			name:     "orphan fields before fresh wrapper",
+			body:     "`<x:change>`<x:old>a</x:old><x:new>b</x:new> <x:change><x:old>c</x:old><x:new>d</x:new></x:change>",
+			wantBody: "`<x:change>`<x:old>a</x:old><x:new>b</x:new> ", old: "c", new: "d", children: 1,
+		},
+		{
+			name:     "unclosed unknown field inside quote",
+			body:     "`<x:change><x:unknown>` ending in </x:change>.",
+			wantBody: "`<x:change><x:unknown>` ending in </x:change>.",
+		},
+		{
+			name:     "bare prose close with unclosed fields",
+			body:     "Use `<x:change>` with <x:old> and <x:new> fields, ending in </x:change>.",
+			wantBody: "Use `<x:change>` with <x:old> and <x:new> fields, ending in </x:change>.",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, ordered := range []bool{false, true} {
+				p := &Problems{}
+				input := "<x:payload>" + tc.body + "</x:payload><x:text>keep</x:text>"
+				var cmds []Command
+				complete := true
+				if ordered {
+					cmds, complete = ParseOrdered(p, g, input)
+				} else {
+					cmds = Parse(p, g, input)
+				}
+				if !complete || len(cmds) != 2 || cmds[1].Body != "keep" || !strings.Contains(strings.Join(p.List, " "), "use <![CDATA[...]]>") {
+					t.Fatalf("ordered=%v: commands=%+v complete=%v problems=%v", ordered, cmds, complete, p.List)
+				}
+				if ordered && (len(cmds[0].Problems) == 0 || len(cmds[1].Problems) != 0) {
+					t.Fatalf("refusal was not command-local: %+v", cmds)
+				}
+				if cmds[0].Body != tc.wantBody || len(cmds[0].Children) != tc.children {
+					t.Fatalf("ordered=%v: payload=%+v problems=%v", ordered, cmds[0], p.List)
+				}
+				if tc.children != 0 {
+					child := cmds[0].Children[0]
+					if !reflect.DeepEqual(child.FieldsOf("x:old"), []string{tc.old}) || !reflect.DeepEqual(child.FieldsOf("x:new"), []string{tc.new}) {
+						t.Fatalf("raw fields changed: %+v", child)
+					}
+				}
+			}
+		})
 	}
 }
 

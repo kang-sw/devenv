@@ -70,6 +70,8 @@ type Spec struct {
 	// Attrs are the attribute names the command takes, in the order a
 	// problem lists them.
 	Attrs []string
+	// HiddenAttrs are accepted compatibility attributes omitted from hints.
+	HiddenAttrs []string
 	// Fields are a Container's field tag names without the prefix, in the
 	// order a problem lists them.
 	Fields []string
@@ -407,7 +409,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 			p.Add("%s: goes at the root, outside %s", cmd.Label(), scope.Label())
 		}
 	}
-	checkAttrs(p, cmd.Label(), tag.attrs, spec.Attrs)
+	checkAttrs(p, cmd.Label(), tag.attrs, spec.Attrs, spec.HiddenAttrs...)
 	if !tag.selfClosing {
 		switch spec.Kind {
 		case Leaf:
@@ -760,6 +762,7 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
 	bodyStart, lineStart := t.i, t.i
 	literalUntil, literalLimit := t.i, len(t.s)
+	var wrapperTail literalWrapperTail
 	closing := "</" + name + ">"
 	before, crossings := len(t.p.List), t.crossings
 	defer func() {
@@ -790,13 +793,15 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 		if t.literalCode && t.i >= literalUntil {
 			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, &literalLimit)
 			if wrapper != nil && literalUntil > t.i {
-				if field := literalOperandCrossing(t.s, t.i, literalUntil, wrapper); field != "" {
+				if field, structural := t.literalOperandCrossing(t.i, literalUntil, lineStart, wrapper, closing, &wrapperTail); field != "" {
 					owner := wrapper.parent.Label()
 					if wrapper.label != "" {
 						owner = wrapper.label
 					}
 					t.problem(t.i, "%s: code span/fence starting at line %d ends inside <%s> of <%s>; use <![CDATA[...]]> for a literal wrapper example", owner, t.lineAt(t.i), field, wrapper.tag)
-					literalUntil = t.i // keep the wrapper and its operands structural
+					if structural {
+						literalUntil = t.i // keep a readable wrapper and its operands structural
+					}
 				}
 			}
 			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
@@ -1111,7 +1116,7 @@ func (t *tokenizer) skipText(where string) {
 	t.problem(start, "line %d: text %s: %q", t.lineAt(start), where, excerpt(t.s[start:t.i]))
 }
 
-func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
+func checkAttrs(p *Problems, label string, attrs []Attr, known []string, hidden ...string) {
 	seen := map[string]bool{}
 	for _, a := range attrs {
 		if seen[a.Name] {
@@ -1124,6 +1129,14 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
 			if k == a.Name {
 				found = true
 				break
+			}
+		}
+		if !found {
+			for _, k := range hidden {
+				if k == a.Name {
+					found = true
+					break
+				}
 			}
 		}
 		if !found {

@@ -100,6 +100,7 @@ type pageAssets struct {
 	// stylesheet plus frameCSS, and docFrame, each under a name that carries
 	// a hash of its bytes.
 	frameCSSFile, frameJSFile frameFile
+	frameI18nFiles            map[string]frameFile
 	// viewer is the image viewer, a self-contained script.
 	viewer string
 	sprite template.HTML
@@ -213,6 +214,10 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 	}
 	a.frameCSSFile = newFrameFile("css", string(a.css)+"\n"+frameCSS)
 	a.frameJSFile = newFrameFile("js", a.docFrame)
+	a.frameI18nFiles = map[string]frameFile{}
+	for _, lang := range wsi18n.Languages() {
+		a.frameI18nFiles[lang.Code] = newFrameFile("js", string(wsi18n.SubsetScript(lang.Code, frameKeyPrefix)))
+	}
 	source := get("page.tmpl")
 	if err != nil {
 		return nil, err
@@ -681,6 +686,11 @@ func FrameAsset(name string) (data []byte, contentType string, ok bool) {
 	case a.frameJSFile.name:
 		return a.frameJSFile.data, "text/javascript; charset=utf-8", true
 	}
+	for _, file := range a.frameI18nFiles {
+		if name == file.name {
+			return file.data, "text/javascript; charset=utf-8", true
+		}
+	}
 	return nil, "", false
 }
 
@@ -705,9 +715,9 @@ func FrameAsset(name string) (data []byte, contentType string, ok bool) {
 // blocks. An image reaches the frame as whatever src ImageSrc (or
 // DocImageSrc) gave it: the frame's requests carry no cookie, so a served
 // page inlines body images rather than pointing at a route that needs one.
-// An image outside the session root is the one exception: inlining it would
-// hand its bytes to every viewer, so the body keeps its path text marked
-// data-relay (relayImage), and the frame lists those URLs as its own
+// An image too large to inline, or outside the session root (whose bytes
+// must not be handed to every viewer), keeps its path text marked
+// data-relay, and the frame lists those URLs as its own
 // data-relay, space-separated. The host fetches a URL its frame asks for only
 // when it is on that list, which the body's own markup cannot extend, and
 // hands the frame the image (doc-frame.js and the dashboard script).
@@ -735,9 +745,13 @@ func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mer
 	}
 	doc.WriteString(`</head><body class="doc-frame"><div class="doc-body md` + staleClass(stale) + `">`)
 	doc.WriteString(string(body))
-	// The frame cannot reach the host page's wsT: copy and relative body age
-	// use its own whiteboard subset, ahead of the shared frame script.
-	doc.WriteString(`</div><script>` + string(wsi18n.SubsetScript(p.Lang, frameKeyPrefix)) + `</script><script src="` + a.frameJSFile.name + `"></script>`)
+	// This opaque-origin frame cannot reach the host's wsT or cookie-gated
+	// assets. Its fixed public subset uses the same exemption as frameJSFile.
+	lang := p.Lang
+	if !wsi18n.Supported(lang) {
+		lang = wsi18n.Default
+	}
+	doc.WriteString(`</div><script src="` + a.frameI18nFiles[lang].name + `"></script><script src="` + a.frameJSFile.name + `"></script>`)
 	if mermaid {
 		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbDocMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
 	}
@@ -893,8 +907,8 @@ func (p *pageData) renderTopicHTML(t TopicView) (template.HTML, error) {
 // RecapHTML renders the topic's recap through itemField, as an item's block
 // fields render, salted with the topic's key.
 func (p *pageData) RecapHTML(t TopicView) template.HTML {
-	if t.LatestAgent != nil {
-		return p.Inline(t.LatestAgent.Text)
+	if t.Head != nil {
+		return p.Inline(t.Head.Summary())
 	}
 	return p.itemField(t.Recap, "topic/"+t.Name+"/recap")
 }

@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -107,10 +109,12 @@ type pageSource struct {
 	// render renders the page; live is nil for a full render (every read
 	// afresh).
 	render func(live *liveRender) pageRender
-	// compareReads offers the previous render even on a full read. Such a
-	// source must freshly read all inputs before comparing; unlike a session
-	// live render it may not reuse stale store reads (the rail does this).
+	// compareReads offers the previous render even on a full read, so a
+	// source can skip templates when its current view is unchanged.
 	compareReads bool
+	// minInterval overrides the default page cadence (the shared rail uses
+	// one second). Waiting under the page lock preserves a trailing pass.
+	minInterval time.Duration
 	// stamp hashes, at call time, what in may have changed with no wake;
 	// ok false means the page has inputs the stamp cannot cover, so every
 	// refresh tick re-renders it.
@@ -121,13 +125,16 @@ type pageSource struct {
 type pageCache struct {
 	broker *broker
 	stats  *streamStats
+	// Clock/wait seams keep burst and in-flight render tests deterministic.
+	now  func() time.Time
+	wait func(time.Duration)
 
 	mu    sync.Mutex
 	pages map[pageKey]*sharedPage
 }
 
 func newPageCache(b *broker, stats *streamStats) *pageCache {
-	return &pageCache{broker: b, stats: stats, pages: map[pageKey]*sharedPage{}}
+	return &pageCache{broker: b, stats: stats, now: time.Now, wait: time.Sleep, pages: map[pageKey]*sharedPage{}}
 }
 
 // sharedPage is one page's latest render.
@@ -139,10 +146,14 @@ type sharedPage struct {
 	// refs counts the streams holding the page; pageCache.mu guards it.
 	refs int
 
-	// mu serializes the page's renders: a stream that finds the render
-	// stale renders while the page's other streams wait, then share it.
-	mu       sync.Mutex
-	rendered bool
+	// mu serializes the page's renders. Callers that arrived during a
+	// render share its result even if a wake made it stale; follow re-arms
+	// their subscriptions for the one pending update instead of allowing
+	// every waiting subscriber to start another render.
+	mu         sync.Mutex
+	generation atomic.Uint64
+	completed  time.Time
+	rendered   bool
 	// at is the broker sequence taken before the render read anything, so a
 	// wake that lands during the render leaves it stale.
 	at uint64
@@ -195,12 +206,34 @@ func (c *pageCache) release(key pageKey, p *sharedPage) {
 // changed under them. A refresh tick that finds the stamp changed renders
 // in full.
 func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender, uint64) {
+	return c.getSince(p, src, refresh, p.generation.Load())
+}
+
+// getSince samples the completed render generation before waiting for the
+// page lock. A caller queued behind a render joins that render, not a new one.
+func (c *pageCache) getSince(p *sharedPage, src pageSource, refresh bool, generation uint64) (pageRender, uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	current := p.rendered && p.r.err == nil && c.broker.unchangedSince(p.r.deps, p.at)
-	if current && (!refresh || (!p.checked.IsZero() && time.Since(p.checked) < pageStampInterval)) {
+	if p.rendered && p.generation.Load() != generation {
 		c.stats.Shared.Add(1)
 		return p.r, p.at
+	}
+	current := p.rendered && p.r.err == nil && c.broker.unchangedSince(p.r.deps, p.at)
+	if current && (!refresh || (!p.checked.IsZero() && c.now().Sub(p.checked) < pageStampInterval)) {
+		c.stats.Shared.Add(1)
+		return p.r, p.at
+	}
+	if p.rendered && (!current || src.minInterval > 0) {
+		// Keep one pending render under the page lock, not one timer/job per
+		// subscriber. Take its sequence and read inputs only after the wait,
+		// folding all intervening changes into that render.
+		interval := src.minInterval
+		if interval <= 0 {
+			interval = sseMinInterval
+		}
+		if delay := interval - c.now().Sub(p.completed); delay > 0 {
+			c.wait(delay)
+		}
 	}
 	liveOnly := !current && p.rendered && p.r.err == nil && p.r.ok && p.r.reads != nil && c.broker.liveOnlySince(p.r.deps, p.at)
 	if liveOnly && !refresh {
@@ -214,7 +247,7 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 		stamp, stampOK = src.stamp(p.r.inputs)
 		unchanged := stampOK && p.stampOK && stamp == p.stamp
 		if current && unchanged {
-			p.checked = time.Now()
+			p.checked = c.now()
 			c.stats.RefreshSkips.Add(1)
 			return p.r, p.at
 		}
@@ -228,7 +261,9 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 	if src.compareReads && p.rendered && p.r.err == nil {
 		previous = &liveRender{prev: p.r}
 	}
+	defer p.generation.Add(1)
 	r := src.render(previous)
+	p.completed = c.now()
 	if r.err != nil && p.rendered && p.r.ok {
 		// Keep the shared last-good reads and regions for the lifetime of
 		// its open streams; no stale content survives confirmed invalidity.
@@ -243,7 +278,7 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 	// failed render (no regions) keeps none, so the next tick retries it.
 	p.stamp, p.stampOK = stamp, r.err == nil && stampOK && r.inputs.equal(prev) && (r.regions != nil || !r.ok)
 	if p.stampOK {
-		p.checked = time.Now()
+		p.checked = c.now()
 	}
 	return r, at
 }
@@ -251,12 +286,14 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 // renderLive runs a live render of p (get); p.mu is held. The previous
 // stamp stays, valid while the inputs it was taken from did not change.
 func (c *pageCache) renderLive(p *sharedPage, src pageSource) (pageRender, uint64) {
+	defer p.generation.Add(1)
 	since := p.at
 	at := c.broker.current()
 	prev := p.r
 	r := src.render(&liveRender{prev: prev, changed: func(token string) bool {
 		return !c.broker.unchangedSince([]string{token}, since)
 	}})
+	p.completed = c.now()
 	p.r, p.at = r, at
 	p.checked = time.Time{}
 	p.stampOK = p.stampOK && r.err == nil && r.inputs.equal(prev.inputs) && (r.regions != nil || !r.ok)
@@ -267,7 +304,11 @@ func (c *pageCache) renderLive(p *sharedPage, src pageSource) (pageRender, uint6
 // modification time, and its size. An in-place edit moves the file's own
 // time; a file added or removed moves its directory's.
 func statStamp(h io.Writer, path string) {
-	info, err := os.Stat(path)
+	watchedStamps.write(h, path, false)
+}
+
+func rawStatStamp(h io.Writer, path string, stat func(string) (os.FileInfo, error)) {
+	info, err := stat(path)
 	if err != nil {
 		fmt.Fprintf(h, "%s\x00-\x01", path)
 		return
@@ -283,8 +324,13 @@ func statStamp(h io.Writer, path string) {
 // a stat per file; every other path folds its own stat (statStamp). An
 // in-place edit of a covered file moves its listed size or time, as its
 // own stat would. A path is matched to its directory as named, so a watch
-// list naming the same directory two ways stats each path itself.
+// list naming the same directory two ways stats each path itself. Validation
+// is shared across renders for one second per path (including missing paths).
 func StampWatched(h io.Writer, watch []string) {
+	watchedStamps.writeWatched(h, watch)
+}
+
+func (c *watchedStampCache) writeWatched(h io.Writer, watch []string) {
 	watched := make(map[string]bool, len(watch))
 	for _, path := range watch {
 		watched[path] = true
@@ -300,11 +346,11 @@ func StampWatched(h io.Writer, watch []string) {
 		case listed[path]:
 			// Listed even when its own directory is listed too: that listing
 			// shows this directory's time, which an edit inside it keeps.
-			listStamp(h, path)
+			c.write(h, path, true)
 		case listed[filepath.Dir(path)] && filepath.Dir(path) != path:
 			// Covered by its directory's listing.
 		default:
-			statStamp(h, path)
+			c.write(h, path, false)
 		}
 	}
 }
@@ -314,7 +360,11 @@ func StampWatched(h io.Writer, watch []string) {
 // Linux, none on Windows), or that it does not list. A symbolic link is
 // followed (a stat), as a covered file's own stat would follow it.
 func listStamp(h io.Writer, dir string) {
-	entries, err := os.ReadDir(dir)
+	watchedStamps.write(h, dir, true)
+}
+
+func rawListStamp(h io.Writer, dir string, readDir func(string) ([]os.DirEntry, error), stat func(string) (os.FileInfo, error)) {
+	entries, err := readDir(dir)
 	if err != nil {
 		fmt.Fprintf(h, "%s\x00list\x00-\x01", dir)
 		return
@@ -323,7 +373,7 @@ func listStamp(h io.Writer, dir string) {
 	for _, e := range entries {
 		info, err := e.Info()
 		if err == nil && e.Type()&fs.ModeSymlink != 0 {
-			info, err = os.Stat(filepath.Join(dir, e.Name()))
+			info, err = stat(filepath.Join(dir, e.Name()))
 		}
 		if err == nil {
 			fmt.Fprintf(h, "%s\x00%d\x00%d\x00%t\x02", e.Name(), info.ModTime().UnixNano(), info.Size(), e.IsDir())
@@ -331,6 +381,72 @@ func listStamp(h io.Writer, dir string) {
 			fmt.Fprintf(h, "%s\x00-\x02", e.Name())
 		}
 	}
+}
+
+// watchedStampCache shares filesystem validation across pages, not just the
+// streams of one page. Both successful and missing paths are checked at most
+// once per second. A slot lock coalesces concurrent callers without holding the
+// map lock across filesystem IO. These are derived stamps, never persisted.
+var watchedStamps watchedStampCache
+
+const watchedStampInterval = time.Second
+
+type watchedStampKey struct {
+	path string
+	list bool
+}
+
+type watchedStampSlot struct {
+	mu      sync.Mutex
+	checked time.Time
+	stamp   string
+}
+
+type watchedStampCache struct {
+	mu      sync.Mutex
+	entries map[watchedStampKey]*watchedStampSlot
+	// Instance-local test seams, set before use.
+	now     func() time.Time
+	stat    func(string) (os.FileInfo, error)
+	readDir func(string) ([]os.DirEntry, error)
+}
+
+func (c *watchedStampCache) write(h io.Writer, path string, list bool) {
+	key := watchedStampKey{path, list}
+	c.mu.Lock()
+	slot := c.entries[key]
+	if slot == nil {
+		if c.entries == nil || len(c.entries) >= 8192 {
+			c.entries = make(map[watchedStampKey]*watchedStampSlot)
+		}
+		slot = new(watchedStampSlot)
+		c.entries[key] = slot
+	}
+	c.mu.Unlock()
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	clock, stat, readDir := c.now, c.stat, c.readDir
+	if clock == nil {
+		clock = time.Now
+	}
+	if stat == nil {
+		stat = os.Stat
+	}
+	if readDir == nil {
+		readDir = os.ReadDir
+	}
+	now := clock()
+	age := now.Sub(slot.checked)
+	if slot.checked.IsZero() || age < 0 || age >= watchedStampInterval {
+		var stamp strings.Builder
+		if list {
+			rawListStamp(&stamp, path, readDir, stat)
+		} else {
+			rawStatStamp(&stamp, path, stat)
+		}
+		slot.stamp, slot.checked = stamp.String(), now
+	}
+	io.WriteString(h, slot.stamp)
 }
 
 // processAlive reports whether a watched process runs (a test seam).

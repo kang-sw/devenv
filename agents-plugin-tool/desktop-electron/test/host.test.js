@@ -7,6 +7,7 @@ const path = require('node:path');
 const { build, archive, SUMS } = require('../scripts/build.cjs');
 const { builtPaths, processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
 const pkg = require('../package.json');
+const { fixture } = require('./daemon-fixture.cjs');
 
 test('built smoke paths select Windows exe/daemon and retain the macOS app', () => {
   assert.deepEqual(builtPaths('/fixture', 'win32', 'arm64'), {
@@ -90,7 +91,9 @@ test('cleanup revalidates each PID/creation identity immediately before its sign
   assert.deepEqual(signals, [[100, 'SIGTERM']]);
   assert.equal(signalIfCurrent(child, () => [child], () => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); }), false);
 });
-test('Windows packaging consumes only the pinned cached x64 zip and ships the approved brand icons', async () => {
+test('Windows packaging consumes only the pinned cached x64 zip and ships the approved brand icons', async t => {
+  const { bundled } = fixture(t);
+  const daemonInput = bundled.root;
   const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-test-'));
   let staged;
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-out-test-'));
@@ -100,15 +103,16 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
     const nested = path.join(cache, 'checksum');
     fs.mkdirSync(nested);
     fs.writeFileSync(path.join(nested, `electron-v${pkg.devDependencies.electron}-win32-x64.zip`), 'test double');
-    await build({ platform: 'win32', arch: 'arm64', cache, out, run, packageApp: async options => {
+    await build({ platform: 'win32', arch: 'arm64', daemonInput, cache, out, run, packageApp: async options => {
       assert.equal(options.platform, 'win32');
       assert.equal(options.arch, 'x64');
       assert.equal(options.electronVersion, pkg.devDependencies.electron);
       assert.equal(options.electronZipDir, nested);
+      assert.deepEqual(options.asar, { unpackDir: 'daemon' }, 'the complete daemon input must be outside app.asar');
       assert.equal(options.icon, path.join(options.dir, 'icons/icon.ico'));
       assert.equal(options.appBundleId, 'dev.werkschaft.desktop');
       staged = options.dir;
-      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'dashboard-preload.js', 'endpoint.js', 'icons', 'main.js', 'package.json', 'policy.js', 'titlebar-preload.js', 'titlebar-renderer.js', 'titlebar.html', 'titlebar.js', 'update.js']);
+      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'connection.js', 'daemon', 'daemon-controller.js', 'daemon-selection.js', 'daemon-stage.js', 'daemon-version.js', 'dashboard-preload.js', 'endpoint.js', 'icons', 'main.js', 'package.json', 'policy.js', 'python-missing.html', 'python.js', 'titlebar-preload.js', 'titlebar-renderer.js', 'titlebar.html', 'titlebar.js', 'update.js']);
       assert.deepEqual(fs.readdirSync(path.join(staged, 'icons')).sort(), ['icon.ico', 'icon.png']);
       for (const file of ['icon.png', 'icon.ico']) {
         assert.deepEqual(fs.readFileSync(path.join(staged, 'icons', file)), fs.readFileSync(path.resolve(__dirname, '../icons', file)));
@@ -116,7 +120,9 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
       assert.match(fs.readFileSync(path.join(staged, 'titlebar.html'), 'utf8'), /src="icons\/icon.png"/);
       assert.match(fs.readFileSync(path.join(staged, 'main.js'), 'utf8'), /icon: path.join\(__dirname, 'icons\/icon.ico'\)/);
       const stagedPackage = JSON.parse(fs.readFileSync(path.join(staged, 'package.json')));
-      assert.equal(stagedPackage.version, pkg.version);
+      assert.equal(stagedPackage.version, bundled.contract.plugin_version);
+      assert.equal(options.appVersion, bundled.contract.plugin_version);
+      assert.equal(options.buildVersion, bundled.contract.plugin_version);
       assert.equal(stagedPackage.author, 'kang-sw');
       return ['test-only packager output'];
     } });
@@ -126,7 +132,7 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
     assert.deepEqual(runs[0][1].slice(0, 4), process.platform === 'win32' ? ['-a', '-c', '-f', zip] : ['-c', '-k', '--keepParent', path.join(out, 'Werkschaft-win32-x64')]);
     assert.equal(fs.readFileSync(path.join(out, SUMS), 'utf8'),
       `${require('node:crypto').createHash('sha256').update('zip bytes').digest('hex')}  Werkschaft-win32-x64.zip\n`);
-    await assert.rejects(build({ platform: 'win32', cache: path.join(cache, 'absent'), packageApp: () => assert.fail('must never package/download') }), /Offline prerequisite missing.*win32-x64.zip; no download attempted/);
+    await assert.rejects(build({ platform: 'win32', daemonInput, cache: path.join(cache, 'absent'), packageApp: () => assert.fail('must never package/download') }), /Offline prerequisite missing.*win32-x64.zip; no download attempted/);
     await assert.rejects(build({ platform: 'linux', cache }), /darwin and win32 only/);
   } finally { fs.rmSync(cache, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true }); }
 });

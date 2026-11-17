@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/tracker-*.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
 var dashboardFS embed.FS
 
 // These are ordered source fragments, not independently loaded scripts or
@@ -68,6 +68,18 @@ var dashboardStyleFiles = []string{
 	"dashboard-shell.css",
 }
 
+var trackerScriptFiles = []string{
+	"tracker.js",
+	"tracker-panel.js",
+	"tracker-wiki.js",
+	"tracker-window.js",
+	"tracker-forms.js",
+	"tracker-menu.js",
+	"tracker-writes.js",
+	"tracker-render.js",
+	"tracker-mount.js",
+}
+
 func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte, error) {
 	var files []string
 	switch name {
@@ -75,6 +87,8 @@ func readDashboardSource(read func(string) ([]byte, error), name string) ([]byte
 		files = dashboardScriptFiles
 	case "dashboard.css":
 		files = dashboardStyleFiles
+	case "tracker.js":
+		files = trackerScriptFiles
 	default:
 		return read(name)
 	}
@@ -134,6 +148,12 @@ type dashboardAssets struct {
 	tmpl  *template.Template
 	tmpls map[string]*template.Template
 	data  pageAssetsData
+	files map[string]dashboardFile
+}
+
+type dashboardFile struct {
+	body  string
+	ctype string
 }
 
 // templateFor is the template set that renders in lang; an unsupported or
@@ -147,17 +167,25 @@ func (a *dashboardAssets) templateFor(lang string) *template.Template {
 
 // pageAssetsData is what a page template inlines.
 type pageAssetsData struct {
-	CSS              template.CSS
-	Script           template.JS
-	ScriptFile       string // Content-addressed page script for fresh session frames.
-	Sprite           template.HTML
-	WhiteboardCSS    template.CSS
-	WhiteboardSprite template.HTML
-	FormScript       template.JS
-	AnswersScript    template.JS
-	MermaidInit      template.JS
-	MermaidFile      string
-	ViewerScript     template.JS
+	CSS                 template.CSS
+	Script              template.JS
+	ScriptFile          string // Content-addressed page script for fresh session frames.
+	FrameWhiteboardFile string
+	FrameCSSFile        string
+	FrameScriptFile     string
+	FrameXtermFile      string
+	FrameTermFile       string
+	FrameWebFile        string
+	FrameSelectFile     string
+	FrameI18nFiles      map[string]string
+	Sprite              template.HTML
+	WhiteboardCSS       template.CSS
+	WhiteboardSprite    template.HTML
+	FormScript          template.JS
+	AnswersScript       template.JS
+	MermaidInit         template.JS
+	MermaidFile         string
+	ViewerScript        template.JS
 	// SelectAllScript is shared with standalone whiteboards, separate from
 	// the assembled dashboard script and loaded once in every page kind.
 	SelectAllScript template.JS
@@ -313,8 +341,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 			icons[m[1]] = true
 		}
 	}
-	scriptHash := sha256.Sum256([]byte(a.data.Script))
-	a.data.ScriptFile = "dashboard-" + hex.EncodeToString(scriptHash[:12]) + ".js"
+	a.buildFrameFiles()
 	a.data.ID = assetID(a.data, source)
 	a.tmpls = map[string]*template.Template{}
 	for _, l := range wsi18n.Languages() {
@@ -712,6 +739,11 @@ type shellPageData struct {
 
 func (p shellPageData) regionByName(name string) renderedRegion { return p.regions[name] }
 
+// LoginLocal keeps the Settings action outside shared regions and LAN pages.
+func (p shellPageData) LoginLocal() bool   { return p.SysOpen }
+func (p sessionPageData) LoginLocal() bool { return p.SysOpen }
+func (p indexPageData) LoginLocal() bool   { return p.Local }
+
 type indexPageData struct {
 	IndexView
 	Assets pageAssetsData
@@ -879,6 +911,9 @@ type pageReader struct {
 	entries *entryFiles
 	// snapshots holds the snapshots already parsed (nil reads each time).
 	snapshots *SnapshotCache
+	// Initial document/control reads must observe a preceding write immediately.
+	// Stream renders leave this false and share the presentation validation TTL.
+	freshSnapshots bool
 }
 
 func (r pageReader) clock() time.Time {
@@ -892,6 +927,9 @@ func (r pageReader) clock() time.Time {
 // snapshot may be shared with other readers (SnapshotCache): the caller
 // only reads it.
 func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
+	if r.freshSnapshots {
+		r.snapshots.Invalidate(r.dir, replyID)
+	}
 	return r.snapshots.Snapshot(r.dir, replyID)
 }
 
@@ -900,11 +938,16 @@ func (r pageReader) readSnapshotWithoutObserved(replyID string) *wslive.Snapshot
 	return r.snapshots.snapshotWithoutObserved(r.dir, replyID)
 }
 
+// readFreshSnapshot bypasses presentation TTLs for decisions that write to a
+// session. Hosted RAM remains authoritative when the daemon owns the session.
+func (r pageReader) readFreshSnapshot(replyID string) *wslive.Snapshot {
+	return r.snapshots.FreshSnapshot(r.dir, replyID)
+}
+
 // Write-route admission keeps its read-through check. Refresh stamps use
 // adapterStamp instead, so bounded presentation evidence is not authority.
 func (r pageReader) adapterPresent(replyID string, now time.Time) bool {
-	p, err := r.snapshots.read(wslive.SnapshotPath(SessionDir(r.dir, replyID)))
-	return err == nil && adapterPresent(&p.snap, now)
+	return adapterPresent(r.readFreshSnapshot(replyID), now)
 }
 
 // adapterStamp ages already-read evidence without probing disk. Include the
@@ -1285,20 +1328,21 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	if !readMethod(w, r) {
 		return
 	}
-	if strings.HasPrefix(rest, "dashboard-") && strings.HasSuffix(rest, ".js") {
+	if strings.HasPrefix(rest, "dashboard-") && (strings.HasSuffix(rest, ".js") || strings.HasSuffix(rest, ".css")) {
 		a, err := loadDashboardAssets()
 		if err != nil {
 			http.Error(w, "assets unavailable", http.StatusInternalServerError)
 			return
 		}
-		if rest != a.data.ScriptFile {
+		file, ok := a.files[rest]
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Content-Type", file.ctype)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_, _ = w.Write([]byte(a.data.Script))
+		_, _ = w.Write([]byte(file.body))
 		return
 	}
 	if name, _ := wswhiteboard.MermaidAsset(); rest == name {
@@ -1371,7 +1415,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
 	frame := framedRequest(r)
 	lang, pref := requestLang(r)
-	view, _, _, ok, readErr := d.pagesIn(lang).readSessionWith(replyID, nil, true, true)
+	reader := d.pagesIn(lang)
+	reader.freshSnapshots = true
+	view, _, _, ok, readErr := reader.readSessionWith(replyID, nil, true, true)
 	if readErr != nil {
 		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
 		return

@@ -242,11 +242,14 @@ test('helper and extraction commands for both platforms', () => {
   assert.deepEqual(psArgs, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', 'C:\\s\\apply.ps1',
     '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1', '-Log', path.join(path.dirname(opts.staging), 'update-apply.log')]);
   const ps1 = u.helperScript('win32');
-  assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch, \[string\]\$Log, \[string\]\$RelaunchArgs = '-'\)/);
-  assert.match(ps1, /\ntry \{\n  Add-Content -LiteralPath \$Log -Value "helper started pid=\$PID app=\$AppPid"\n/);
+  assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch, \[string\]\$Log, \[string\]\$RelaunchArgs = '-', \[string\]\$Result = ''\)/);
+  assert.match(ps1, /\ntry \{\n  Add-Content -LiteralPath \$Log -Encoding UTF8 -Value "helper started pid=\$PID app=\$AppPid"\n/);
   assert.ok(ps1.indexOf('helper started') < ps1.indexOf('Wait-Process'));
-  assert.ok(ps1.includes('Add-Content -LiteralPath $Log -Value "updated $Target"'));
-  assert.match(ps1, /\} catch \{\n  Add-Content -LiteralPath \$Log -Value "helper failed: \$_"\n  exit 1\n\}\n$/);
+  assert.ok(ps1.includes('$message = "updated $Target"'));
+  assert.ok(ps1.includes('rollback failed; previous app backup is at $Backup'));
+  assert.ok(ps1.indexOf('Start-Process -FilePath $exe') < ps1.lastIndexOf('Remove-Item -LiteralPath $Backup'));
+  for (const line of ps1.split('\n').filter(line => line.includes('Add-Content'))) assert.ok(line.includes('-Encoding UTF8'));
+  assert.match(ps1, /\} catch \{\n  Finish 'error' "helper failed: \$_"\n  exit 1\n\}\n$/);
   for (const needle of ['Wait-Process -Id $AppPid', 'Move-Item -LiteralPath $Target -Destination $Backup',
     'Move-Item -LiteralPath $Staged -Destination $Target', 'Move-Item -LiteralPath $Backup -Destination $Target',
     "Join-Path $Target 'Werkschaft.exe'"]) assert.ok(ps1.includes(needle), needle);
@@ -319,7 +322,7 @@ test('an unwritable install keeps the stage and reports; a launch apply runs onc
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('Windows announces a new version with the download page and never stages or spawns the swap helper', async () => {
+test('Windows downloads, verifies, stages and applies on quit with relaunch and durable outcome paths', async () => {
   const root = tmp('win');
   const zip = Buffer.from('zip bytes');
   const files = { 'Werkschaft-win32-x64.zip': zip, [u.SUMS]: `${sha(zip)}  Werkschaft-win32-x64.zip\n` };
@@ -329,36 +332,63 @@ test('Windows announces a new version with the download page and never stages or
   try {
     const install = path.join(root, 'Werkschaft-win32-x64'), userData = path.join(root, 'userData');
     fs.mkdirSync(install, { recursive: true });
-    // A stage left behind (an older shell staged it): never applied on Windows.
-    const stage = path.join(userData, 'update', 'extract', 'Werkschaft-win32-x64');
-    fs.mkdirSync(stage, { recursive: true });
-    fs.writeFileSync(path.join(stage, 'Werkschaft.exe'), 'new');
-    fs.writeFileSync(path.join(userData, 'update', 'staged.json'), JSON.stringify({ version: '0.51.0', app: stage }));
-    const sent = [], detached = [];
+    const sent = [], detached = [], extracted = [];
+    const staging = install + '-update-staging';
+    const stage = path.join(staging, 'extract', 'Werkschaft-win32-x64');
     const updater = u.createUpdater({ version: '0.50.0', userData, packaged: true, platform: 'win32', arch: 'x64',
-      execPath: path.join(install, 'Werkschaft.exe'), argv: [], pid: 999999, feed: server.base,
+      execPath: path.join(install, 'Werkschaft.exe'), argv: ORIGINAL, pid: 999999, feed: server.base,
+      run: async (command, args) => {
+        extracted.push({ command, args });
+        fs.mkdirSync(stage, { recursive: true });
+        fs.writeFileSync(path.join(stage, 'Werkschaft.exe'), 'new');
+      },
       send: s => sent.push(s), log: () => {}, detach: (command, args) => detached.push({ command, args }) });
     assert.equal(u.DOWNLOAD_PAGE, `https://github.com/${u.REPO}/releases/latest`);
-    // The new-version notice is unchanged except that it carries the download page.
     assert.equal(await updater.check(false), 'available');
-    assert.deepEqual(sent.pop(), { state: 'available', version: '0.51.0', current: '0.50.0', skipped: false, manual: false,
-      downloadPage: u.DOWNLOAD_PAGE, phase: { phase: 'available', version: '0.51.0', skipped: false } });
-    // Every apply path is refused, and the swap helper is never spawned.
-    assert.equal(updater.canRestart(), false);
-    assert.equal(updater.applyOnQuit(true), false);
-    assert.equal(updater.applyOnQuit(false), false);
-    assert.equal(updater.applyOnLaunch(), false);
-    assert.equal(fs.existsSync(path.join(userData, 'update')), false, 'a leftover stage is discarded at launch');
-    // An older dashboard's [Update] gets an error pointing at the page; nothing is downloaded.
-    const hits = server.hits.length;
-    assert.equal(await updater.download(), 'download-error');
-    assert.equal(sent.at(-1).state, 'download-error');
+    assert.equal('downloadPage' in sent.at(-1), false, '[Update] is enabled on Windows');
+    const blockedData = path.join(root, 'blocked-userData');
+    const denied = { ...fs, mkdtempSync: () => { throw new Error('EACCES: ACL denies write'); } };
+    const blocked = u.createUpdater({ version: '0.50.0', userData: blockedData, packaged: true, platform: 'win32', arch: 'x64',
+      execPath: path.join(install, 'Werkschaft.exe'), feed: server.base, send: s => sent.push(s), log: () => {},
+      locationProblem: (platform, target, staging) => u.applyProblem(platform, target, staging, denied),
+      detach: () => assert.fail('ACL denial must never launch a helper') });
+    assert.equal(await blocked.check(), 'available');
+    assert.equal(sent.at(-1).state, 'apply-error');
     assert.equal(sent.at(-1).downloadPage, u.DOWNLOAD_PAGE);
-    assert.ok(sent.at(-1).message.includes(u.DOWNLOAD_PAGE));
-    assert.equal(server.hits.length, hits);
-    assert.equal(fs.existsSync(path.join(userData, 'update')), false);
-    assert.equal(updater.phase().phase, 'available');
-    assert.deepEqual(detached, []);
+    assert.match(sent.at(-1).message, /ACL denies write/);
+    const hits = server.hits.length;
+    assert.equal(await blocked.download(), 'apply-error', 'an older dashboard cannot bypass the preflight');
+    assert.equal(server.hits.length, hits, 'no download occurs for a protected existing folder');
+    assert.equal(fs.existsSync(staging), false);
+    assert.equal(updater.canRestart(), false);
+    files[u.SUMS] = `${'0'.repeat(64)}  Werkschaft-win32-x64.zip\n`;
+    await updater.check();
+    assert.equal(await updater.download(), 'download-error');
+    assert.match(sent.at(-1).message, /checksum mismatch/);
+    assert.equal(extracted.length, 0);
+    assert.equal(updater.applyOnQuit(), false);
+    files[u.SUMS] = `${sha(zip)}  Werkschaft-win32-x64.zip\n`;
+    await updater.check();
+    assert.equal(await updater.download(), 'ready');
+    assert.equal(updater.canRestart(), true);
+    assert.deepEqual(extracted[0].args.slice(0, 2), ['-x', '-f']);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(staging, 'staged.json'))).app, stage);
+    assert.equal(updater.applyOnQuit(true), true);
+    const { command, args } = detached.pop();
+    assert.match(command, /powershell.exe$/);
+    assert.equal(args[args.indexOf('-Relaunch') + 1], '1');
+    assert.equal(args[args.indexOf('-Result') + 1], path.join(userData, 'update-apply-result.json'));
+    assert.deepEqual(splitWindows(Buffer.from(args[args.indexOf('-RelaunchArgs') + 1], 'base64').toString('utf8')), ORIGINAL);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(userData, 'update-state.json'))).applyAttempt.version, '0.51.0');
+    assert.equal(updater.applyOnQuit(false), true);
+    assert.equal(detached.at(-1).args[detached.at(-1).args.indexOf('-Relaunch') + 1], '0');
+    const badLocation = u.createUpdater({ version: '0.50.0', userData, packaged: true, platform: 'win32', arch: 'x64',
+      execPath: path.join(root, 'missing-install', 'Werkschaft.exe'), feed: server.base,
+      send: s => sent.push(s), log: () => {} });
+    assert.equal(await badLocation.check(), 'available');
+    assert.equal(sent.at(-1).state, 'apply-error', 'existing toast shows the location reason, not just the download button');
+    assert.equal(sent.at(-1).downloadPage, u.DOWNLOAD_PAGE);
+    assert.match(sent.at(-1).message, /not writable/);
   } finally { await server.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -425,7 +455,7 @@ test('both helper kinds receive the original arguments for a relaunch', () => {
     assert.deepEqual(none.slice(-4), ['-Relaunch', relaunch ? '1' : '0', '-Log', path.join(path.dirname(opts.staging), 'update-apply.log')]);
   }
   const ps1 = u.helperScript('win32');
-  assert.ok(ps1.includes("[string]$RelaunchArgs = '-')"));
+  assert.ok(ps1.includes("[string]$RelaunchArgs = '-', [string]$Result = '')"));
   assert.ok(ps1.includes('[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))'));
   assert.ok(ps1.includes('Start-Process -FilePath $exe -ArgumentList $argLine'));
   const [, sh] = u.helperCommand('darwin', '/s/apply.sh', { ...opts, target: '/A/W.app' });

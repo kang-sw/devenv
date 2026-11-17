@@ -105,7 +105,7 @@ func agendaSizeNote(agenda map[string]json.RawMessage) string {
 
 // renderSessionState builds the ## Session State section from a session record.
 // It renders agenda blobs (keyed alphabetically), open whiteboard topics'
-// latest-agent topic summaries, then the todo summary.
+// latest agent-line or panel-recap topic summaries, then the todo summary.
 // Only scaffolding strings are handler-owned here; no manual prose.
 func renderSessionState(rec sessionRecord) string {
 	var sb strings.Builder
@@ -153,9 +153,9 @@ func renderSessionState(rec sessionRecord) string {
 	return sb.String()
 }
 
-// renderWhiteboardSummaries lists each open topic's latest agent log line.
-// Panels and system events never replace the current-state summary. Legacy
-// recaps reach this path only through first-open conversion into agent entries.
+// renderWhiteboardSummaries lists each open topic's latest agent line or panel
+// recap. System events never replace the summary. Legacy recaps reach this
+// path only through first-open conversion into agent entries.
 func renderWhiteboardSummaries(board *wswhiteboard.State) string {
 	res, problems := wswhiteboard.Query(board, nil)
 	if len(problems) > 0 {
@@ -163,7 +163,7 @@ func renderWhiteboardSummaries(board *wswhiteboard.State) string {
 	}
 	var lines strings.Builder
 	for _, t := range res.Topics {
-		if t.Closed || t.LatestAgent == nil {
+		if t.Closed || t.LatestSummary == nil {
 			continue
 		}
 		name := t.Stem
@@ -172,7 +172,7 @@ func renderWhiteboardSummaries(board *wswhiteboard.State) string {
 		}
 		// Imported lines may be multi-line; keep continuations indented.
 		// Item references read as the page shows them, (nn).
-		lines.WriteString("- " + name + ": " + strings.ReplaceAll(board.TextRefs(t.LatestAgent.Text), "\n", "\n  ") + "\n")
+		lines.WriteString("- " + name + ": " + strings.ReplaceAll(board.TextRefs(t.LatestSummary.Summary()), "\n", "\n  ") + "\n")
 	}
 	if lines.Len() == 0 {
 		return ""

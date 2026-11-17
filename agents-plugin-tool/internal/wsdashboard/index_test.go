@@ -442,6 +442,7 @@ func startIndexedDaemon(t *testing.T, dir string, src SessionSource, poll time.D
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
+	registerLocalhostTestDaemon(t, d)
 	return d
 }
 
@@ -496,6 +497,7 @@ func TestNudgeRoute(t *testing.T) {
 	post := func(host, body string) int {
 		req := httptest.NewRequest(http.MethodPost, "/nudge", bytes.NewBufferString(body))
 		req.Host = host
+		req.RemoteAddr = "127.0.0.1:50000"
 		rec := httptest.NewRecorder()
 		d.Handler().ServeHTTP(rec, req)
 		return rec.Code
@@ -511,11 +513,12 @@ func TestNudgeRoute(t *testing.T) {
 		t.Fatalf("non-loopback Host nudge = %d, want 403", code)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/nudge", nil)
+	req.RemoteAddr = "127.0.0.1:50000"
 	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 	d.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET /nudge = %d, want 405", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("cookieless GET /nudge = %d, want 401 (only POST is machine-exempt)", rec.Code)
 	}
 
 	// A daemon without a session source has no index: every nudge is 404.
@@ -668,6 +671,7 @@ func TestNudgeWakesMailWaitsBeforeTheRegistrationCheck(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "/nudge", bytes.NewBufferString(`{not json`))
 	req.Host = "127.0.0.1"
+	req.RemoteAddr = "127.0.0.1:50000"
 	d.Handler().ServeHTTP(httptest.NewRecorder(), req)
 	if wakes, nudges := wake.counts(); nudges != 2 || wakes != 0 {
 		t.Fatalf("after a registered and a malformed nudge: %d wakes, %d nudges; want 0, 2", wakes, nudges)

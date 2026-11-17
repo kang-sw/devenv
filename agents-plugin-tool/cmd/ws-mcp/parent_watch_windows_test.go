@@ -17,8 +17,9 @@ import (
 
 // Env keys that turn a re-executed test binary into the wait's helper parent.
 const (
-	waitParentHelperBinEnv = "WS_MCP_TEST_WAIT_PARENT_BIN"
-	waitParentHelperKeyEnv = "WS_MCP_TEST_WAIT_PARENT_SESSION_KEY"
+	waitParentHelperBinEnv   = "WS_MCP_TEST_WAIT_PARENT_BIN"
+	waitParentHelperKeyEnv   = "WS_MCP_TEST_WAIT_PARENT_SESSION_KEY"
+	waitParentHelperCacheEnv = "WS_MCP_TEST_WAIT_PARENT_CACHE_HOME"
 )
 
 // TestMailboxWaitParentHelperProcess is not a test on its own: it skips unless
@@ -32,6 +33,9 @@ func TestMailboxWaitParentHelperProcess(t *testing.T) {
 		t.Skip("helper parent for TestMailboxWait_EndsWhenParentExits")
 	}
 	child := exec.Command(bin, "mailbox", "wait", "--session-key", os.Getenv(waitParentHelperKeyEnv), "--timeout", "60s")
+	// TestMain gives this re-executed test binary its own cache. The wait
+	// must still write its marker to the original test's mailbox cache.
+	child.Env = append(os.Environ(), "WS_CACHE_HOME="+os.Getenv(waitParentHelperCacheEnv))
 	if err := child.Start(); err != nil {
 		os.Exit(2)
 	}
@@ -57,7 +61,8 @@ func TestMailboxWait_EndsWhenParentExits(t *testing.T) {
 	lifecycleLog := filepath.Join(filepath.Dir(filepath.Dir(markerPath)), "crash", "mcp-lifecycle.log")
 
 	helper := exec.Command(os.Args[0], "-test.run=^TestMailboxWaitParentHelperProcess$")
-	helper.Env = append(env, waitParentHelperBinEnv+"="+bin, waitParentHelperKeyEnv+"="+sessionKey)
+	helper.Env = append(env, waitParentHelperBinEnv+"="+bin, waitParentHelperKeyEnv+"="+sessionKey,
+		waitParentHelperCacheEnv+"="+cacheHomeFromEnv(t, env))
 	if err := helper.Start(); err != nil {
 		t.Fatalf("start helper parent: %v", err)
 	}

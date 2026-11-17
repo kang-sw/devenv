@@ -4,8 +4,8 @@ Ships the `ws` / `wsflow` plugin packages as a cut-point release: a
 `release/<version>` branch cut at the review frontier head carries the version
 bump, `main` fast-forwards to it, and a `v<version>` tag on it triggers the
 `ws-mcp release` GitHub Actions workflow (`.github/workflows/ws-mcp-release.yml`)
-to build cross-platform `ws-mcp` assets and publish a GitHub release. `develop`
-keeps taking merges for the whole release; the release branch is merged back
+to build cross-platform `ws-mcp` assets plus macOS/Windows desktop archives and
+publish them to the same GitHub release. `develop` keeps taking merges for the whole release; the release branch is merged back
 into it afterwards, which keeps `main` an ancestor of `develop`.
 
 ## Version Strategy
@@ -67,8 +67,13 @@ the rest of Pre-flight in the worktree the lead hands it.
      checkout. Then, from the main checkout, `ws/git.merge(branch:
      "release/<version>", target: "develop")` and `git push origin develop`.
 - Conflicts (Merge release target and Merge back) resolve in the release
-  worktree. On a line `bump-ws-version.sh` writes, take the higher version;
-  hand any other conflict **(lead)** to `ws:lead-delegate` with the worktree
+  worktree. On a line `bump-ws-version.sh` writes, take the higher version.
+  On a generated Pi archive or payload file (`agents-plugin-pi/workflow-bundles/`,
+  `agents-plugin*/native-pi/first-party*`), take either side, then rerun
+  `python3 agents-plugin-pi/scripts/prepare-workflow-bundles.py` and
+  `python3 agents-plugin-pi/scripts/prepare-native-payload.py --first-party-only`
+  after the text conflicts are resolved and stage their output. Hand any other
+  conflict **(lead)** to `ws:lead-delegate` with the worktree
   path. Commit the merge, then rerun Pre-flight's release-contract check on
   the release branch head. A conflict is never a stop: a restart cuts at the
   same point and meets the same conflict.
@@ -159,6 +164,54 @@ fetched state.
   validates the plugin release contract, builds release assets
   (`agents-plugin-tool/scripts/build-release-assets.sh`), and runs the Windows
   executable smoke.
+- Desktop assets now come from that same CI run (owner (1224)=a), not a manual
+  package build. The macOS (`darwin-arm64`) and Windows (`win32-x64`) jobs
+  download the existing `ws-mcp-assets` workflow artifact, so the daemon binary
+  and adjacent metadata are exactly the native release build's bytes. Each
+  installs the lockfile-pinned desktop dependencies and pinned Electron zip,
+  assembles a `wsflow` daemon input with
+  `agents-plugin-tool/desktop-electron/scripts/assemble-daemon-input.cjs`, then
+  runs `desktop-electron/scripts/build.cjs` without launching Electron. The
+  packaged app version comes from the validated plugin runtime contract.
+- A final job waits for both desktop platforms, verifies each archive against
+  its platform checksum, and writes one combined
+  `Werkschaft-desktop-SHA256SUMS` (SHA256, two spaces, asset filename per line).
+  It uploads exactly `Werkschaft-darwin-arm64.zip`,
+  `Werkschaft-win32-x64.zip`, and that combined SUMS file to the native assets'
+  tag release. These are the updater's existing asset names. The same three
+  files are retained as the `werkschaft-desktop-assets` workflow artifact.
+- **Unsigned / unnotarized:** no signing secrets are configured. Gatekeeper may
+  block the downloaded macOS app until the user explicitly approves it;
+  Windows may show SmartScreen warnings. A green packaging job is not proof of
+  installed-app launch, updater swap, daemon lifetime, or platform acceptance.
+- The native release can appear before desktop packaging finishes. Treat the
+  release workflow as incomplete until **all** jobs, including
+  `desktop-release`, succeed; do not infer desktop availability from the native
+  assets alone.
+
+### Desktop dry run before shipping
+
+After the workflow changes are on `develop`, the lead can build both platforms
+without creating or uploading to any GitHub release:
+
+```sh
+gh workflow run ws-mcp-release.yml --ref develop -f desktop_dry_run=true
+gh run list --workflow ws-mcp-release.yml --branch develop --event workflow_dispatch
+gh run watch <run-id> --exit-status
+gh run download <run-id> -n werkschaft-desktop-assets -D desktop-dry-run
+(cd desktop-dry-run && shasum -a 256 -c Werkschaft-desktop-SHA256SUMS)
+```
+
+Confirm the selected run's head SHA is the intended `develop` commit before
+using its result. The existing native build and Windows executable smoke also
+run; desktop packaging never launches the app. `desktop_dry_run=true` vetoes
+**both** native and desktop release-publishing steps, even if dispatched on a
+tag. Ordinary branch dispatches without this flag retain native-only behavior.
+The optional `version` input defaults to the bump-maintained development
+version; an override (`-f version=X.Y.Z-dev`) must match the plugin/runtime
+numeric core or desktop assembly fails closed. Keep this verification before
+the release tag push; it is not a substitute for Publish's native CI gate or
+real packaged-app acceptance.
 
 ## Tag
 
@@ -228,7 +281,8 @@ independent of the release.
 ## Post-ship
 
 - **Automatically** watch the `ws-mcp release` workflow run for `v<version>` to
-  green (build + publish GitHub release assets, windows-smoke). This is an
+  green (native build/publish, windows-smoke, both desktop builds, and combined
+  desktop asset verification/publish). This is an
   unprompted post-ship step: attach to the run without asking the user for
   approval, and report only the terminal result — green, or the failure with
   its failing job/step. Monitoring is read-only and pushes nothing, so it never

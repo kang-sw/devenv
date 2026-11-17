@@ -15,7 +15,7 @@ import (
 // more when it lands instead of being dropped, without the reads re-running
 // each other forever. The cases execute under node when it is installed.
 func TestTrackerWikiReadsFollowStoreAndChanges(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ process.stdout.write(bad.join("\n"));
 // editor, a pick of the shown wiki, and the reopen after a save do not ask.
 // The cases execute under node when it is installed.
 func TestTrackerWikiNavigationAsksBeforeDroppingAnEdit(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ process.stdout.write(bad.join("\n"));
 // frame (an HTML wiki page's frame must reach no host action) and builds no
 // sandbox attribute of its own: the host's markup is inserted as given.
 func TestTrackerNoFrameMessages(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

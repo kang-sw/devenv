@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -137,6 +138,54 @@ func TestQueryStreamFiltersBeforeLastAndChronological(t *testing.T) {
 	}
 }
 
+func TestQueryFilteredEntriesKeepLatestPanelSummaryWithoutPayload(t *testing.T) {
+	st := queryEntryBoard()
+	const at = "2026-11-13T13:00:00Z"
+	st.EntrySeq = 19
+	st.Topics[0].Entries = append(st.Topics[0].Entries, Entry{
+		ID: "e19", Kind: EntryPanel, PanelID: "p1", At: at,
+		Recap: "newest recap\ncontinued recap", Text: "newest private panel payload",
+	})
+	for _, tc := range []struct {
+		raw string
+		ids []string
+	}{
+		{`{"topic":"a","entries":"log","kind":"agent","last":1}`, []string{"e15"}},
+		// A historical payload match must retain its exact locator while the
+		// current summary stays independent of the selected entry window.
+		{`{"topic":"a","entries":"panel","text":"old payload token","last":1}`, []string{"e2"}},
+		{`{"topic":"a","entries":"all","since":"e19"}`, nil},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			r := queryResult(t, st, tc.raw)
+			if r.Mode != "stream" || len(r.Topics) != 1 {
+				t.Fatalf("unexpected stream: %+v", r)
+			}
+			q := r.Topics[0]
+			if !reflect.DeepEqual(queryEntryIDs(q.Entries), tc.ids) {
+				t.Fatalf("selected entries changed: %+v", q.Entries)
+			}
+			summary := q.LatestSummary
+			if summary == nil || summary.ID != "e19" || summary.Kind != EntryPanel || summary.PanelID != "p1" || summary.At != at || summary.Recap != "newest recap\ncontinued recap" || summary.Text != "" {
+				t.Fatalf("latest panel metadata: %+v", summary)
+			}
+			text := FormatQuery(r)
+			if !strings.Contains(text, "current e19 "+at+": newest recap\n  continued recap\n") {
+				t.Fatalf("latest panel current line missing:\n%s", text)
+			}
+			encoded, err := json.Marshal(q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, payload := range []string{"newest private panel payload", "old payload token", "latest payload secret"} {
+				if strings.Contains(text, payload) || strings.Contains(string(encoded), payload) {
+					t.Fatalf("panel payload %q leaked: %s\n%s", payload, text, encoded)
+				}
+			}
+		})
+	}
+}
+
 func TestQueryDiscoveryTextSearchesAllStoredTextWithoutBodies(t *testing.T) {
 	st := queryEntryBoard()
 	for _, token := range []string{"CURRENT CONTENT", "title-marker", "option-marker", "recommend-marker", "why-marker", "answer-marker", "quoted owner words", "link-marker", "old recap token", "old payload token", "latest payload secret", "system event"} {
@@ -241,7 +290,7 @@ func TestQueryDurableLocatorsAcrossRestartAndRepost(t *testing.T) {
 	}
 	if err := (FolderStore{Dir: dir}).Update(nil, func(s *State) error {
 		s.EntrySeq++
-		s.Topics[0].Entries = append(s.Topics[0].Entries, Entry{ID: "e20", Kind: EntryPanel, PanelID: "p1", Recap: "repost", Text: "new full payload", At: queryEntryTime})
+		s.Topics[0].Entries = append(s.Topics[0].Entries, Entry{ID: "e21", Kind: EntryPanel, PanelID: "p1", Recap: "repost", Text: "new full payload", At: queryEntryTime})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -253,13 +302,13 @@ func TestQueryDurableLocatorsAcrossRestartAndRepost(t *testing.T) {
 	if got := queryResult(t, after, `{"panel":"e2"}`).Direct.Entry; !reflect.DeepEqual(got, before.Topics[0].Entries[1]) {
 		t.Fatal("old panel mention redirected after repost/restart")
 	}
-	if got := queryResult(t, after, `{"panel":"p1"}`).Direct.Entry; got.ID != "e20" || got.Text != "new full payload" {
+	if got := queryResult(t, after, `{"panel":"p1"}`).Direct.Entry; got.ID != "e21" || got.Text != "new full payload" {
 		t.Fatal("stable panel target did not resolve latest")
 	}
 	if got := queryResult(t, after, `{"entry":"e3"}`).Direct.Entry; !reflect.DeepEqual(got, before.Topics[0].Entries[2]) {
 		t.Fatal("log locator changed at equal timestamps")
 	}
-	if got := queryResult(t, after, `{"topic":"a","entries":"all","since":"e16"}`).Topics[0].Entries; len(got) != 2 || got[0].ID != "e19" || got[1].ID != "e20" {
+	if got := queryResult(t, after, `{"topic":"a","entries":"all","since":"e16"}`).Topics[0].Entries; len(got) != 2 || got[0].ID != "e19" || got[1].ID != "e21" {
 		t.Fatalf("since boundary changed after restart: %+v", got)
 	}
 }

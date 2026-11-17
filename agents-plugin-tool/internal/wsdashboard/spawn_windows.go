@@ -3,6 +3,9 @@
 package wsdashboard
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 
@@ -25,7 +28,31 @@ func startDetached(exe string, args []string, dir string) (*exec.Cmd, error) {
 }
 
 func startDetachedStrict(exe string, args []string, dir string) (*exec.Cmd, error) {
-	return startWindowsDetached(exe, args, dir, true)
+	// Electron retries only after the numeric breakaway-denied marker below.
+	// Keep the same Ensure prestart ordering; only process creation mode changes.
+	jobLifetime := os.Getenv("WS_MCP_DAEMON_JOB_LIFETIME") == "1"
+	return startElectronDetachedWith(jobLifetime, func(flags uint32) (*exec.Cmd, error) {
+		cmd := exec.Command(exe, args...)
+		cmd.Dir = dir
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags, HideWindow: true}
+		return cmd, cmd.Start()
+	}, func(message string) { fmt.Fprintln(os.Stderr, message) })
+}
+
+func startElectronDetachedWith(jobLifetime bool, start func(uint32) (*exec.Cmd, error), log func(string)) (*exec.Cmd, error) {
+	flags := uint32(windows.CREATE_NO_WINDOW | syscall.CREATE_NEW_PROCESS_GROUP)
+	if jobLifetime {
+		log("daemon spawn mode=job-lifetime (daemon may end when the containing job closes)")
+	} else {
+		flags |= windows.CREATE_BREAKAWAY_FROM_JOB
+		log("daemon spawn mode=breakaway")
+	}
+	cmd, err := start(flags)
+	if !jobLifetime && errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		// Numeric, locale-independent signal: do not retry arbitrary spawn errors.
+		log("WS_DAEMON_BREAKAWAY_DENIED=5")
+	}
+	return cmd, err
 }
 
 func startWindowsDetached(exe string, args []string, dir string, strict bool) (*exec.Cmd, error) {

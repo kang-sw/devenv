@@ -147,6 +147,9 @@ func TestRailRowsSourceRechecksClockAndHover(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A production evidence change reaches the broker after its index lane
+	// expires snapshot/observed validation. This test injects that edge directly.
+	f.d.snapshots.Invalidate(f.dir, "livesession")
 	f.d.broker.wake("livesession")
 	after, _ := f.d.cache.get(page, src, false)
 	if before.rail == after.rail || !strings.Contains(string(after.regions[regionRail].HTML), "first → second") {

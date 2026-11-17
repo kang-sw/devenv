@@ -1046,11 +1046,129 @@
     rdel = rdel || rdelMake();
     rdel.open(btn);
   }
+  // --- rail: put the idle sessions to sleep -----------------------------------
+  // The header's moon reads the runner's idle list (GET /agents/idle), shows
+  // it in a modal beside the delete modal's look, and on confirm posts the
+  // listed ids (POST /agents/sleep-idle): the runner checks each is still
+  // idle and stops it as the session menu's Stop does, skipping one that
+  // became busy. The stream redraws the rows. Replies to an earlier open
+  // are dropped by the sequence number.
+  var rsleep = null;
+  function rsleepMake() {
+    var D = { seq: 0, ids: [], busy: false, btn: null };
+    var dl = D.el = mk("dialog", "rdeldlg rsleepdlg");
+    var hd = dl.appendChild(mk("h2", "rdhd"));
+    hd.id = rpId();
+    dl.setAttribute("aria-labelledby", hd.id);
+    hd.appendChild(gIcon("moon"));
+    var title = hd.appendChild(mk("span"));
+    var lead = dl.appendChild(mk("p", "rdlead"));
+    wsT("js.rail.sleep.body", "\u0001").split("\u0001").forEach(function (part, i) {
+      if (i) lead.appendChild(mk("b", null, wsT("js.rail.sleep.body.em")));
+      if (part) lead.appendChild(doc.createTextNode(part));
+    });
+    var list = dl.appendChild(mk("ul", "rdsleeplist"));
+    var note = dl.appendChild(mk("p", "rdnote"));
+    var msg = dl.appendChild(mk("p", "rdmsg err"));
+    msg.setAttribute("aria-live", "polite");
+    msg.hidden = true;
+    var row = dl.appendChild(mk("div", "rdrow"));
+    var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var go = row.appendChild(rpBtn("pbtn go"));
+    go.appendChild(gIcon("moon"));
+    go.appendChild(doc.createTextNode(wsT("js.rail.sleep.submit")));
+    // rowOf is the rail row of session id: it names the workspace and the
+    // branch, and carries the last activity.
+    function rowOf(id) {
+      var found = null;
+      q(".rs[data-rid]", region("rail") || railEl).forEach(function (r) { if (!found && r.getAttribute("data-rid") === id) found = r; });
+      return found;
+    }
+    function text(el) { return el ? el.textContent : ""; }
+    function entry(s) {
+      var id = String(s.id || ""), r = rowOf(id), li = mk("li");
+      var cls = s.backend === "claude" || s.backend === "pi" || s.backend === "codex" ? s.backend : "unk";
+      li.appendChild(mk("span", "hi " + cls, { claude: "C", pi: "P", codex: "X" }[cls] || "?"));
+      var who = li.appendChild(mk("span", "who"));
+      who.appendChild(mk("span", "nm", text(r && r.querySelector(".rid")) || String(s.label || id)));
+      var ws = r && r.closest(".rws"), wt = r && r.closest(".rwt");
+      var pj = [text(ws && ws.querySelector(".wsbar .nm")), text(wt && wt.querySelector(".wthd .br"))].filter(Boolean).join(" · ");
+      if (pj) who.appendChild(mk("span", "pj", pj));
+      var when = r && r.querySelector("time.when[data-ms]");
+      if (when) {
+        var t = li.appendChild(mk("time", "ago"));
+        t.setAttribute("data-ms", when.getAttribute("data-ms"));
+        t.setAttribute("data-f", "rel");
+      }
+      return li;
+    }
+    cancel.addEventListener("click", function () { D.close(); });
+    // The native Escape (cancel) closes through close too.
+    dl.addEventListener("cancel", function (e) { e.preventDefault(); D.close(); });
+    dl.addEventListener("close", function () {
+      D.seq++;
+      D.busy = go.disabled = false;
+      var b = D.btn;
+      if (!b || !b.isConnected) b = q("#railsleep", region("rail") || railEl)[0];
+      if (b && !b.disabled) b.focus();
+    });
+    go.addEventListener("click", function () {
+      if (D.busy) return;
+      var n = D.seq;
+      D.busy = go.disabled = true;
+      msg.hidden = true;
+      railPost("/agents/sleep-idle", { ids: D.ids }, function (st, v, s) {
+        if (st === 200) {
+          if (n === D.seq) D.close();
+          var slept = Array.isArray(v.slept) ? v.slept.length : 0, skipped = Array.isArray(v.skipped) ? v.skipped.length : 0;
+          var line = wsTn("js.rail.sleep.done", slept) + (skipped ? " " + wsT("js.rail.sleep.skipped", skipped) : "");
+          if (window.WsToast) window.WsToast.show(line, { kind: "summary" });
+          return;
+        }
+        if (n !== D.seq) { toast(railErr(st, s)); return; }
+        D.busy = go.disabled = false;
+        msg.textContent = railErr(st, s);
+        msg.hidden = false;
+      });
+    });
+    D.open = function (btn) {
+      var n = ++D.seq;
+      D.btn = btn;
+      btn.classList.add("busy");
+      tkFetch("/agents/idle", undefined, function (st, v) {
+        btn.classList.remove("busy");
+        if (n !== D.seq) return;
+        if (st !== 200) { toast(railErr(st, "")); return; }
+        var sessions = Array.isArray(v.sessions) ? v.sessions : [];
+        if (!sessions.length) { toast(wsT("js.rail.sleep.empty")); return; }
+        D.ids = sessions.map(function (s) { return String(s.id); });
+        D.busy = go.disabled = false;
+        title.textContent = wsTn("js.rail.sleep.title", sessions.length);
+        list.textContent = "";
+        sessions.forEach(function (s) { list.appendChild(entry(s)); });
+        var kept = +v.kept || 0, out = +v.uncontrollable || 0;
+        note.textContent = [kept ? wsTn("js.rail.sleep.kept", kept) : "", out ? wsTn("js.rail.sleep.excluded", out) : ""].filter(Boolean).join(" ");
+        note.hidden = !note.textContent;
+        msg.hidden = true;
+        if (!dl.parentNode) doc.body.appendChild(dl);
+        if (!dl.open) dl.showModal();
+        cancel.focus();
+      });
+    };
+    D.close = function () { if (dl.open) dl.close(); };
+    return D;
+  }
+  function railSleep(btn) {
+    if (btn.disabled || btn.classList.contains("busy") || !root.hasAttribute("data-sysopen")) return;
+    railPopClose(false);
+    rsleep = rsleep || rsleepMake();
+    rsleep.open(btn);
+  }
   if (railEl && WsRail) {
     // Escape closes the delete modal before anything else hears it (the
     // rail overlay would close on it too).
     window.addEventListener("keydown", function (e) {
-      var modal = rgit && rgit.el.open ? rgit : rdel && rdel.el.open ? rdel : null;
+      var modal = rgit && rgit.el.open ? rgit : rdel && rdel.el.open ? rdel : rsleep && rsleep.el.open ? rsleep : null;
       if (e.key === "Escape" && modal) { e.preventDefault(); e.stopPropagation(); modal.close(); }
     }, true);
   }

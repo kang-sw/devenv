@@ -19,7 +19,7 @@ import (
 // that the header's counts and the clear control dispatch through data-act.
 // The cases execute under node when it is installed.
 func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -671,7 +671,7 @@
   // the scroll, and hash routes go up as they change, and the shell's
   // messages come down.
   function shFrameInit() {
-    var sent = {}, queued = null;
+    var sent = {}, queued = null, head = null, headDirty = true;
     function send(kind, m) {
       var k = JSON.stringify(m);
       if (sent[kind] === k) return;
@@ -708,12 +708,17 @@
     function post() {
       queued = null;
       if (shHidden) return;
-      var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
-      var head = top ? {
-        html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
-        pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
-        top: top.offsetHeight
-      } : null;
+      // Board/root mutations only need the open-overlay state. Re-measure
+      // the mirrored header when it changes or resizes, not on every post.
+      if (headDirty) {
+        headDirty = false;
+        var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
+        head = top ? {
+          html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
+          pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
+          top: top.offsetHeight
+        } : null;
+      }
       // A link menu's local z-index cannot outrank the shell header either;
       // lift its frame through the same layer as the other popovers. The
       // read-only hover card (rail.js, .shp) is a tooltip and never lifts.
@@ -722,16 +727,20 @@
       // stay visible under the raised frame instead of going blank.
       var popover = q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; });
       var layout = { pincol: root.hasAttribute("data-pincol"), dim: dim(), popover: popover };
-      if (popover) root.setAttribute("data-lifted", ""); else root.removeAttribute("data-lifted");
+      if (root.hasAttribute("data-lifted") !== popover) {
+        if (popover) root.setAttribute("data-lifted", ""); else root.removeAttribute("data-lifted");
+      }
       if (head) send("head", head);
       send("layout", layout);
     }
     function queue() { if (!shHidden && !queued) queued = requestAnimationFrame(post); }
+    function queueHead() { headDirty = true; queue(); }
     doc.addEventListener("ws-overview", queue);
     var top = doc.querySelector(".dwrap > .top");
+    if (window.ResizeObserver && top) new ResizeObserver(queueHead).observe(top);
     if (window.MutationObserver) {
       var mo = new MutationObserver(queue);
-      if (top) mo.observe(top, { subtree: true, childList: true, attributes: true, characterData: true });
+      if (top) new MutationObserver(queueHead).observe(top, { subtree: true, childList: true, attributes: true, characterData: true });
       mo.observe(root, { attributes: true, attributeFilter: ["style", "data-pincol"] });
       mo.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["open", "hidden"] });
       // A second observe() of the same node on one observer replaces its
@@ -739,7 +748,7 @@
       // shown) need their own observer.
       new MutationObserver(queue).observe(doc.body, { childList: true });
     }
-    window.addEventListener("resize", queue);
+    window.addEventListener("resize", queueHead);
     window.addEventListener("scroll", function () { send("scroll", { y: Math.round(window.scrollY) }); });
     // A hash route moves by hashchange or by the page's own history calls
     // (tracker.js's store pages), which fire none: either way the shell's
@@ -792,7 +801,7 @@
         if (chip && WsRail) railPopOpen("sess", chip);
       } else if (m.wsShell === "settings") { setLayout(m.layout); setInput(m.input); }
       else if (m.wsShell === "theme") setTheme(m.theme, true);
-      else if (m.wsShell === "sync") { sent = {}; queue(); shPost("title", { title: doc.title }); }
+      else if (m.wsShell === "sync") { sent = {}; queueHead(); shPost("title", { title: doc.title }); }
     });
     queue();
     shPost("title", { title: doc.title });

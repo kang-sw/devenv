@@ -296,6 +296,11 @@ type State struct {
 	// nudge (RFC 3339); empty, as on a store written before the field, is
 	// never.
 	LastNudgeAt string `json:"last_nudge_at,omitempty"`
+	// MetadataRevision distinguishes successive quiet metadata changes,
+	// including a change followed by a revert. It is not a topic entry.
+	MetadataRevision uint64 `json:"metadata_revision,omitempty"`
+	// StaleNudgeRevision is a receipt, not authored topic history.
+	StaleNudgeRevision string `json:"stale_nudge_revision,omitempty"`
 }
 
 // Env carries the side effects Apply needs, so the store stays testable.
@@ -833,20 +838,21 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
+	work.markMetadataRevision(out.Effects)
 	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
 	return work, out, updates
 }
 
-// applyClose closes a topic with its result. Closing a closed topic again
-// replaces its result and keeps its place in the close order. Every item of
+// applyClose closes a topic, keeping its place in the close order if already
+// closed. Every item of
 // the topic still open is withdrawn, as a patch to withdrawn would (settled
 // now, answer fields kept as history); a later reopen of the topic does not
 // restore them. Assumed and commented items keep their status and history.
 // It returns the withdrawn IDs.
 func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, mark int, now time.Time) []int {
 	topic, topicOK := topicOf(cmd)
-	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
-	if !topicOK || !resultOK {
+	result, _ := cmd.Attr("result")
+	if !topicOK {
 		return nil
 	}
 	if !work.topicKnown(topic) {
@@ -855,14 +861,13 @@ func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, ma
 	}
 	closed := work.topicClosed(topic)
 	result = strings.TrimSpace(result)
-	resultChanged := work.CloseResults[topic] != result
 	if !closed {
 		work.ClosedTopics = append(work.ClosedTopics, topic)
 	}
 	if work.CloseResults == nil {
 		work.CloseResults = map[string]string{}
 	}
-	work.CloseResults[topic] = result
+	work.CloseResults[topic] = ""
 	var withdrawn []int
 	for i := range work.Items {
 		item := &work.Items[i]
@@ -875,10 +880,11 @@ func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, ma
 		withdrawn = append(withdrawn, item.ID)
 		work.eventItem(topic, item.ID, now, "Item {{%d}} withdrawn [%s] by topic close: %s", item.ID, item.Class, item.Title)
 	}
+	if result != "" {
+		work.appendEntry(topic, Entry{Kind: EntryAgent, Text: result}, now)
+	}
 	if !closed {
-		work.closeStateEvent(topic, result, now)
-	} else if resultChanged {
-		work.event(topic, now, "Topic close result updated: %s", result)
+		work.closeStateEvent(topic, now)
 	}
 	return withdrawn
 }

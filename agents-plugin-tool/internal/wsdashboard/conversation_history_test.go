@@ -369,7 +369,7 @@ func TestSessionLeavingTheIndexDropsItsCachedEntries(t *testing.T) {
 func TestStreamSendsOnlyTheLiveRegionForAStreamingTick(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/livesession?frame=1")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
@@ -384,6 +384,9 @@ func TestStreamSendsOnlyTheLiveRegionForAStreamingTick(t *testing.T) {
 	snap := &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
 		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: "streamed <partial> reply, grown"}}}
 	writeSnapshot(t, f.dir, "livesession", snap)
+	// This test drives the broker directly; model the index lane's signal
+	// invalidation as well, rather than waiting for presentation validation.
+	f.d.snapshots.Invalidate(f.dir, "livesession")
 	f.d.broker.wake("livesession")
 	var got []string
 	for {

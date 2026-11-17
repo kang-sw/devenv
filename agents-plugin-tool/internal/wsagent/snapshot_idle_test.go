@@ -13,8 +13,8 @@ import (
 type idleSnapshotSlot struct{ snapshot wslive.Snapshot }
 
 func (s *idleSnapshotSlot) Publish(snapshot wslive.Snapshot) { s.snapshot = snapshot }
-func (*idleSnapshotSlot) RingAppended()                     {}
-func (*idleSnapshotSlot) Close()                            {}
+func (*idleSnapshotSlot) RingAppended()                      {}
+func (*idleSnapshotSlot) Close()                             {}
 
 func TestHostedSnapshotDedupAndDiskHeartbeat(t *testing.T) {
 	dir := t.TempDir()
@@ -54,7 +54,7 @@ func TestHostedSnapshotDedupAndDiskHeartbeat(t *testing.T) {
 	}
 }
 
-func TestSnapshotDedupRequiresSlotAndSuccessfulWrite(t *testing.T) {
+func TestSnapshotDedupRequiresSuccessfulWrite(t *testing.T) {
 	base := t.TempDir()
 	blocker := filepath.Join(base, "blocker")
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
@@ -79,7 +79,12 @@ func TestSnapshotDedupRequiresSlotAndSuccessfulWrite(t *testing.T) {
 	now = now.Add(time.Second)
 	w.writeSnapshot()
 	s, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir))
-	if err != nil || s.UpdatedAt != now.UnixMilli() {
-		t.Fatalf("non-hosted writer must write: %+v, %v", s, err)
+	if err != nil || s.UpdatedAt != now.Add(-time.Second).UnixMilli() {
+		t.Fatalf("file-only writer did not deduplicate: %+v, %v", s, err)
+	}
+	w.heartbeatSnapshot()
+	s, err = wslive.ReadSnapshot(wslive.SnapshotPath(dir))
+	if err != nil || s.UpdatedAt != now.UnixMilli() || s.Stale(now) {
+		t.Fatalf("file-only heartbeat missing: %+v, %v", s, err)
 	}
 }

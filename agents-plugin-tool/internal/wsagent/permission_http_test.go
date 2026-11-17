@@ -113,7 +113,9 @@ func permissionHTTPFiles(t *testing.T, root string) map[string]string {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
+		// Lock sidecars are synchronization, not persisted request data.
+		// Windows may deny even a read while another goroutine holds one.
+		if d.IsDir() || strings.HasSuffix(d.Name(), ".lock") {
 			return nil
 		}
 		b, err := os.ReadFile(path)
@@ -126,6 +128,37 @@ func permissionHTTPFiles(t *testing.T, root string) map[string]string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+func TestPermissionHTTPFilesZeroWritesIgnoresOnlyLockSidecars(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "sessions", "test-session")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := filepath.Join(dir, "registration.json")
+	lock := data + ".lock"
+	for path, contents := range map[string]string{data: "original", lock: "lock bookkeeping"} {
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := permissionHTTPFiles(t, root)
+	if !reflect.DeepEqual(before, map[string]string{data: "original"}) {
+		t.Fatalf("snapshot must contain data only: %v", before)
+	}
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, permissionHTTPFiles(t, root)) {
+		t.Fatal("lock removal changed the data snapshot")
+	}
+	if err := os.WriteFile(data, []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reflect.DeepEqual(before, permissionHTTPFiles(t, root)) {
+		t.Fatal("data write was hidden from the snapshot")
+	}
 }
 
 func TestPermissionHTTPRegistryAbsentAndLegacy(t *testing.T) {

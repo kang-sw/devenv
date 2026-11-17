@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	defaultCacheDirName = "ws@kang-sw-devenv"
+	// DefaultCacheDirName names the cache directory under the user's .cache.
+	DefaultCacheDirName = "ws@kang-sw-devenv"
 	// EnvCacheHome names the cache root override a caller process carries.
 	EnvCacheHome  = "WS_CACHE_HOME"
 	schemaVersion = 1
@@ -98,7 +99,7 @@ func CacheRoot(opts Options) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, ".cache", defaultCacheDirName), nil
+	return filepath.Join(home, ".cache", DefaultCacheDirName), nil
 }
 
 func (m Manager) Resolve(repoPath string) (Layout, ProjectMetadata, WorktreeMetadata, error) {

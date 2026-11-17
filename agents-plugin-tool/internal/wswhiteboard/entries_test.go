@@ -323,13 +323,13 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassPolicy, "t", "pick", "x", "y")+addXML(ClassCheck, "t", "look")+addXML(ClassTechnical, "t", "withdraw later"))
 	mustApply(t, st, `<wb:answer ids="1 2" value="a" assumed="true">seems good</wb:answer><wb:answer ids="1 2" value="a">yes, ship</wb:answer>`)
-	mustApply(t, st, `<wb:patch id="3"><wb:why>correction</wb:why></wb:patch><wb:patch id="3" status="withdrawn"/>`+topicXML("t", "alpha")+`<wb:topic name="t"><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit><wb:close result="Shipped."/></wb:topic>`)
+	mustApply(t, st, `<wb:patch id="3"><wb:why>correction</wb:why></wb:patch><wb:patch id="3" status="withdrawn"/>`+topicXML("t", "alpha")+`<wb:topic name="t"><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit><wb:close/></wb:topic>`)
 	want := []string{
 		"Item {{1}} added [policy]: pick", "Topic state: discussing", "Items added: check {{2}}, technical {{3}}.",
 		`Item {{1}} assumed [policy]: a; owner quote: "seems good"`, `Item {{2}} assumed [check]: a; owner quote: "seems good"`,
 		`Item {{1}} answered [policy]: a; owner quote: "yes, ship"`, `Item {{2}} answered [check]: a; owner quote: "yes, ship"`,
 		"Item {{3}} patched [technical] (open -> open): withdraw later", "Item {{3}} patched [technical] (open -> withdrawn): withdraw later",
-		"Content updated.", "Content edited.", "Topic closed: Shipped.",
+		"Content updated.", "Content edited.", "Topic closed.",
 	}
 	if got := eventTexts(t, st, "t"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %q, want %q", got, want)
@@ -399,9 +399,9 @@ func TestSystemEventsNoopsWithdrawalsReasksAndReopen(t *testing.T) {
 	if st.EntrySeq != before.EntrySeq || !reflect.DeepEqual(st.Items, before.Items) {
 		t.Fatalf("no-op changed item marks/settle time or emitted an event: %+v", st)
 	}
-	mustApply(t, st, `<wb:patch id="1" status="open"/><wb:topic name="t"><wb:close result="done"/></wb:topic>`)
+	mustApply(t, st, `<wb:patch id="1" status="open"/><wb:topic name="t"><wb:close/></wb:topic>`)
 	got := eventTexts(t, st, "t")
-	wantTail := []string{"Item {{1}} patched [technical] (answered -> open): x", "Item {{1}} withdrawn [technical] by topic close: x", "Topic closed: done"}
+	wantTail := []string{"Item {{1}} patched [technical] (answered -> open): x", "Item {{1}} withdrawn [technical] by topic close: x", "Topic closed."}
 	if !reflect.DeepEqual(got[len(got)-3:], wantTail) {
 		t.Fatalf("withdraw/re-ask events: %q", got)
 	}
@@ -410,7 +410,7 @@ func TestSystemEventsNoopsWithdrawalsReasksAndReopen(t *testing.T) {
 		t.Fatalf("withdrawal attribution must be server-owned: %+v", stream)
 	}
 	seq := st.EntrySeq
-	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`+topicXML("t", "alpha"))
+	mustApply(t, st, `<wb:topic name="t"><wb:close/></wb:topic>`+topicXML("t", "alpha"))
 	if st.EntrySeq != seq || !st.topicClosed("t") {
 		t.Fatal("unchanged close/body must not emit or reopen")
 	}
@@ -439,7 +439,7 @@ func TestContentClearAndRevertKeepHistory(t *testing.T) {
 	if got.Changed != before.Changed || got.ChangedAt != before.ChangedAt || len(got.Entries) != 7 {
 		t.Fatalf("revert must preserve body marks but record both real transitions: %+v", got)
 	}
-	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/><wb:body/></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:close/><wb:body/></wb:topic>`)
 	got = topicEntry(t, st, "t")
 	if got.Body != "" || got.Changed != 0 || got.ChangedAt != "" || !st.topicClosed("t") || len(got.Entries) != 10 {
 		t.Fatalf("clearing content must keep history without reopening: %+v", got)

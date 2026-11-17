@@ -94,6 +94,7 @@ func (s *Server) readSessionRoster(replyID string) ([]wsdashboard.SessionRosterR
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Authorization", "Bearer "+ep.Token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

@@ -208,6 +208,7 @@
     var b = region("board");
     if (b) {
       boardRendered = boardInputFull(b.innerHTML);
+      boardLatest = { hash: b.getAttribute("data-h"), html: boardRendered };
       Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = topicSeen(n); });
     }
   })();
@@ -1345,7 +1346,10 @@
         boardHomeWrites.delete(s);
         if (s.scrollTop <= 4) return;
       }
-      if (s && s.scrollTop <= 4 && (s === $('bcol') || s === doc.scrollingElement)) {
+      // Read scrollTop only while changes are staged: the read forces a
+      // layout on every scroll event, and with nothing staged the home
+      // branch has nothing to keep (pill.js redraws on its own scroll).
+      if (s && (s === $('bcol') || s === doc.scrollingElement) && Object.keys(boardPending).length && s.scrollTop <= 4) {
         // Raw scrolls include owner corrections and ongoing user gestures;
         // do not take over their scroll owner with an explicit home jump.
         // Nothing is applied here, so every staged change keeps its signal.

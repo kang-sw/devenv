@@ -12,7 +12,7 @@ const legacy = [
 ];
 
 function fixture(harness, choices = legacy, delayed = false) {
-  const nodes = [], events = [], requests = [];
+  const nodes = [], events = [], requests = [], storage = {};
   function mk(tag, cls, text) {
     const n = { tag, cls, textContent: text || '', value: '', hidden: false, disabled: false,
       attrs: {}, children: [], listeners: {},
@@ -40,7 +40,9 @@ function fixture(harness, choices = legacy, delayed = false) {
     supChoices: delayed ? null : { harnesses: choices },
     rpId: () => 'row-' + ++seq,
     tkFetch: (route, options, done) => { assert.equal(route, '/support/choices'); answerChoices = () => done(200, { harnesses: choices }); },
-    window: {},
+    window: {}, Date: { now: () => 12345 }, RENAME_NEW: 'ws.dashboard.renameNew',
+    sessionStorage: { setItem(key, value) { storage[key] = value; events.push('rename-intent'); } },
+    railOpen(open) { assert.equal(open, false); events.push('rail-close'); },
     railPopPlace() {}, notifAsk() {}, gIcon: () => mk('svg'),
     rpLive: (p, gen) => active === p && p.gen === gen,
     railPopClose(refocus) { assert.equal(refocus, false); active.el.hidden = true; active = null; events.push('close'); },
@@ -62,7 +64,7 @@ function fixture(harness, choices = legacy, delayed = false) {
   }
   if (harness) pick(harness);
   const selects = nodes.filter(n => n.tag === 'select');
-  return { p, nodes, events, requests, pick, harnessGroup,
+  return { p, nodes, events, requests, storage, pick, harnessGroup,
     choicesReady() { answerChoices(); },
     model: selects[0], mode: selects[1], effort: selects[2],
     newRows(key, values) { const rows = ctx.leadRows(mk('div'), () => {}); rows.set(key, values); return rows; },
@@ -89,7 +91,9 @@ for (const harness of ['claude', 'pi']) {
   assert.equal(f.p.busy, false);
   assert.equal(f.start.disabled, false);
   assert.equal(f.status.textContent, '');
-  assert.deepEqual(f.events, ['close', 'draft', ['navigate', '/s/new%2Fsession']]);
+  assert.deepEqual(f.events, ['close', 'rail-close', 'draft', 'rename-intent', ['navigate', '/s/new%2Fsession']]);
+  assert.deepEqual(JSON.parse(f.storage['ws.dashboard.renameNew']), { id: 'new/session', at: 12345 },
+    'successful creation hands the raw session ID and timestamp to post-navigation rename');
 
   for (const status of [400, 500, 0]) {
     const e = fixture(harness);
@@ -101,6 +105,7 @@ for (const harness of ['claude', 'pi']) {
     assert.equal(e.status.textContent, '');
     assert.equal(e.error.textContent, 'launch failed');
     assert.deepEqual(e.events, []);
+    assert.deepEqual(e.storage, {}, 'failed creation must not schedule rename');
     e.start.listeners.click();
     assert.equal(e.requests.length, 2, 'failure permits retry');
     assert.equal(e.error.textContent, '');
@@ -110,7 +115,8 @@ for (const harness of ['claude', 'pi']) {
   dismissed.start.listeners.click();
   dismissed.dismiss();
   dismissed.requests[0].done(201, { id: 'created' }, '');
-  assert.deepEqual(dismissed.events, ['draft', ['navigate', '/s/created']], 'late success still opens the created session without closing another popover');
+  assert.deepEqual(dismissed.events, ['rail-close', 'draft', 'rename-intent', ['navigate', '/s/created']], 'late success still opens the created session without closing another popover');
+  assert.deepEqual(JSON.parse(dismissed.storage['ws.dashboard.renameNew']), { id: 'created', at: 12345 });
 }
 // Lead-marked descriptors replace, rather than extend, the fixed buttons.
 const custom = { harness: 'custom', profile: '', lead: true, available: true,

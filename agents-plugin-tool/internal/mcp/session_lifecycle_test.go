@@ -168,6 +168,7 @@ func (f *lifecycleFixture) post(path, body, origin string) *httptest.ResponseRec
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1"+path, strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(dashboardCookieForTest(f.t, f.daemon))
 	if origin != "" {
 		req.Header.Set("Origin", origin)
 	}

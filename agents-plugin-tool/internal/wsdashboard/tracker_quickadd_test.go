@@ -384,7 +384,7 @@ func TestTrackerRowTitleEdit(t *testing.T) {
 	if !strings.Contains(trackerFn(t, `function editRowHtml\(o\)`, false), "nrowChips(n)") {
 		t.Error("the edit row does not reuse the new row's chips")
 	}
-	js, err := dashboardFS.ReadFile("assets/tracker.js")
+	js, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

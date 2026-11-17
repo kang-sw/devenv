@@ -26,7 +26,7 @@ func TestFreshSessionScriptAsset(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := startPageFixture(t)
-	res, err := http.Get(f.base + "/s/" + a.data.ScriptFile)
+	res, err := testClient().Get(f.base + "/s/" + a.data.ScriptFile)
 	if err != nil {
 		t.Fatal(err)
 	}

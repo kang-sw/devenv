@@ -28,7 +28,7 @@ func openStreamWith(t *testing.T, url, cookie string) <-chan sseEvent {
 	if cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Transport: localhostTestHTTPTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -185,8 +185,8 @@ func TestGitWakeReachesThePagesUnderItsRoot(t *testing.T) {
 	f.addSession(t, "lonersession", other, "alone")
 	live := openStream(t, f.base+"/s/livesession/events")
 	loner := openStream(t, f.base+"/s/lonersession/events")
-	expectRead(t, git, f.project)
-	expectRead(t, git, other)
+	// Each stream's initial render starts its git read independently.
+	expectReads(t, git, f.project, other)
 	quiet(t, live)
 	quiet(t, loner)
 

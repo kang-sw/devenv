@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -115,6 +116,20 @@ func (c *conv) seedSpawnRows() {
 	if !c.spawnDirty {
 		return
 	}
+	now := c.r.opts.Now()
+	if now.Before(c.spawnNext) {
+		// Keep the invalidation until the trailing refresh: no further child
+		// event or 30-second heartbeat is required to publish the latest rows.
+		if c.spawnTimer == nil {
+			c.spawnTimer = time.NewTimer(c.spawnNext.Sub(now))
+		}
+		return
+	}
+	if c.spawnTimer != nil {
+		c.spawnTimer.Stop()
+		c.spawnTimer = nil
+	}
+	c.spawnNext = now.Add(time.Second)
 	c.spawnDirty = false
 	kind := ParentConversation
 	if c.rec.Lead {
@@ -124,8 +139,8 @@ func (c *conv) seedSpawnRows() {
 	for _, a := range c.live.st.Snapshot(c.r.opts.Now().UnixMilli()).Agents {
 		known[a.ID] = true
 	}
-	// One global listing per invalidation, not one filesystem-backed List
-	// per descendant, and never discovery on ordinary streaming snapshots.
+	// One global listing per second at most, not one filesystem-backed List
+	// per descendant or per burst event. Each open state reads its inbox.
 	if c.r.opts.spawnListed != nil {
 		c.r.opts.spawnListed(c.rec.ReplyID)
 	}

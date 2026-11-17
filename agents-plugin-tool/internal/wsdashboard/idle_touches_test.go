@@ -58,6 +58,8 @@ func TestIdleTouchesAdapterStampUsesLastKnownSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	cache := &SnapshotCache{}
+	clock := now
+	cache.files.now = func() time.Time { return clock }
 	r := pageReader{dir: dir, snapshots: cache}
 	present := func(id string, at time.Time) bool { ok, _ := r.adapterStamp(id, at); return ok }
 	register(t, dir, "alpha", dir, now)
@@ -94,6 +96,7 @@ func TestIdleTouchesAdapterStampUsesLastKnownSnapshot(t *testing.T) {
 	// An external writer is discovered by the existing index read/backstop.
 	fresh := now.Add(2 * time.Minute)
 	writeSnapshot(t, dir, "alpha", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: fresh.UnixMilli(), HeartbeatMs: 30000})
+	clock = clock.Add(fileCacheValidationInterval)
 	cache.Snapshot(dir, "alpha")
 	if !present("alpha", fresh) {
 		t.Fatal("backstop evidence was not used")

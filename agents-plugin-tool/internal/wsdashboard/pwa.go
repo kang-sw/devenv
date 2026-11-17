@@ -38,9 +38,9 @@ const (
 	themeColorDark  = "#141518"
 )
 
-// handlePWA serves the manifest and its icons. They hold nothing about any
-// session, but stay behind the access guard like every other route: the page
-// links the manifest with credentials, so a LAN viewer's cookie travels.
+// handlePWA serves the manifest and its icons. Local reads are cookie-exempt
+// for browser manifest requests that omit credentials. LAN viewers still need
+// the LAN token; the page links the manifest with credentials for that mode.
 func handlePWA(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, pwaPrefix)
 	ctype, ok := pwaTypes[name]

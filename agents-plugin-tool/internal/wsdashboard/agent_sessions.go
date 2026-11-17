@@ -33,9 +33,11 @@ type AgentHost interface {
 }
 
 // AgentPageInputHost distinguishes an explicit composer send from passive
-// inbox notifications. Archive restoration must not be inferred from a nudge.
+// inbox notifications. PageInput admits write against the conversation's
+// in-memory lifetime, then asynchronously restores a hidden session only if
+// write committed. Archive restoration must not be inferred from a nudge.
 type AgentPageInputHost interface {
-	PageInput(replyID string) error
+	PageInput(replyID string, write func() bool) error
 }
 
 // AgentEndpointHost is an AgentHost whose conversations call back on the
@@ -69,7 +71,13 @@ type agentSessions struct {
 }
 
 func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) {
+	// This is an authoritative index read, already coalesced under its lane,
+	// not a presentation read. Refresh the daemon's snapshot owner even for
+	// leads whose fingerprint uses the inner source's separate cache: one
+	// nudge must not disappear behind either owner's presentation TTL.
+	s.snaps.Invalidate(s.dir, reg.ReplyID)
 	if !reg.Agent {
+		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
 		return s.inner.ReadSession(reg)
 	}
 	if _, err := os.Stat(SessionDir(s.dir, reg.ReplyID)); err != nil {
@@ -79,8 +87,25 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 		return SessionData{}, false, err
 	}
 	h := sha256.New()
-	updatedAt, staleAt := s.snaps.HashLiveStoresClock(h, s.dir, reg.ReplyID, s.now())
-	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), SnapshotUpdatedAt: updatedAt, SnapshotStaleAt: staleAt}, true, nil
+	stores, updatedAt, staleAt := s.snaps.ReadLiveStoresClock(h, s.dir, reg.ReplyID, s.now(), LiveStoreFingerprint{}, AllLiveStores)
+	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), LiveStores: stores, SnapshotUpdatedAt: updatedAt, SnapshotStaleAt: staleAt}, true, nil
+}
+
+// ReadLiveSession bypasses the inner source's non-live stores for runner
+// writes. Legacy/custom sources retain their ordinary read-through behavior.
+func (s agentSessions) ReadLiveSession(reg Registration, previous SessionData, stores LiveStores) (SessionData, bool, error) {
+	s.snaps.Invalidate(s.dir, reg.ReplyID)
+	if !reg.Agent {
+		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
+		if live, ok := s.inner.(LiveSessionSource); ok {
+			return live.ReadLiveSession(reg, previous, stores)
+		}
+		return s.inner.ReadSession(reg)
+	}
+	h := sha256.New()
+	previous.LiveStores, previous.SnapshotUpdatedAt, previous.SnapshotStaleAt = s.snaps.ReadLiveStoresClock(h, s.dir, reg.ReplyID, s.now(), previous.LiveStores, stores)
+	previous.Fingerprint = hex.EncodeToString(h.Sum(nil)[:16])
+	return previous, true, nil
 }
 
 func (s agentSessions) ReadPage(reg Registration) (PageContent, bool, error) {
@@ -110,6 +135,17 @@ func (s agentSessions) ReadContacts(reg Registration) ([]Contact, bool) {
 		return cs.ReadContacts(reg)
 	}
 	return nil, false
+}
+
+// RecordDashboardAnswer forwards board-answer arrivals for lead sessions.
+func (s agentSessions) RecordDashboardAnswer(reg Registration, id string, now time.Time) error {
+	if reg.Agent {
+		return nil
+	}
+	if source, ok := s.inner.(DashboardAnswerSource); ok {
+		return source.RecordDashboardAnswer(reg, id, now)
+	}
+	return nil
 }
 
 // BoardItems forwards to the configured source (BoardItemsSource); an agent
@@ -213,9 +249,40 @@ func (c *SnapshotCache) HashLiveStores(h io.Writer, stateDir, replyID string, no
 	return updatedAt
 }
 
+// LiveStores names the directories a write can change. Snapshot evidence is
+// always refreshed; it needs no directory listing. Unknown writes name all.
+type LiveStores uint8
+
+const (
+	LiveRing LiveStores = 1 << iota
+	LiveInbox
+	LiveObserved
+	AllLiveStores = LiveRing | LiveInbox | LiveObserved
+)
+
+// LiveStoreFingerprint retains directory-name prints, not entry contents.
+// It belongs to one indexed session and is copied with its last full read.
+type LiveStoreFingerprint struct {
+	known LiveStores
+	parts [4]string
+}
+
 // HashLiveStoresClock returns clock evidence from the same immutable snapshot
 // used by the fingerprint, so a concurrent publish cannot mix generations.
 func (c *SnapshotCache) HashLiveStoresClock(h io.Writer, stateDir, replyID string, now time.Time) (updatedAt, staleAt time.Time) {
+	_, updatedAt, staleAt = c.ReadLiveStoresClock(h, stateDir, replyID, now, LiveStoreFingerprint{}, AllLiveStores)
+	return updatedAt, staleAt
+}
+
+// ReadLiveStoresClock refreshes only named directories once initialized, folding
+// retained prints for the rest. A cold read still initializes every directory.
+func (c *SnapshotCache) ReadLiveStoresClock(h io.Writer, stateDir, replyID string, now time.Time, previous LiveStoreFingerprint, stores LiveStores) (LiveStoreFingerprint, time.Time, time.Time) {
+	return c.readLiveStoresClock(h, stateDir, replyID, now, previous, stores, nil)
+}
+
+// list is an instance-local counting seam; nil performs the ordinary listing.
+func (c *SnapshotCache) readLiveStoresClock(h io.Writer, stateDir, replyID string, now time.Time, previous LiveStoreFingerprint, stores LiveStores, list func(string, func() ([]string, error)) ([]string, error)) (LiveStoreFingerprint, time.Time, time.Time) {
+	var updatedAt, staleAt time.Time
 	sessionDir := SessionDir(stateDir, replyID)
 	if p, err := c.read(wslive.SnapshotPath(sessionDir)); err == nil && p.docOK {
 		staleAt = snapshotStaleAt(&p.snap)
@@ -224,11 +291,12 @@ func (c *SnapshotCache) HashLiveStoresClock(h io.Writer, stateDir, replyID strin
 			updatedAt = time.UnixMilli(p.snap.UpdatedAt)
 		}
 	}
-	for _, list := range []struct {
+	for i, store := range []struct {
 		tag   string
+		kind  LiveStores
 		names func() ([]string, error)
 	}{
-		{"model-evidence", func() ([]string, error) {
+		{"model-evidence", LiveObserved, func() ([]string, error) {
 			entries, err := os.ReadDir(filepath.Join(sessionDir, wslive.ObservedDirName))
 			var names []string
 			for _, e := range entries {
@@ -238,16 +306,27 @@ func (c *SnapshotCache) HashLiveStoresClock(h io.Writer, stateDir, replyID strin
 			}
 			return names, err
 		}},
-		{"ring", func() ([]string, error) { return wslive.RingNames(wslive.RingDir(sessionDir)) }},
-		{"inbox", func() ([]string, error) { return wsinbox.Names(wsinbox.Dir(sessionDir)) }},
-		{"inbox-drained", func() ([]string, error) { return wsinbox.DrainedNames(wsinbox.Dir(sessionDir)) }},
+		{"ring", LiveRing, func() ([]string, error) { return wslive.RingNames(wslive.RingDir(sessionDir)) }},
+		{"inbox", LiveInbox, func() ([]string, error) { return wsinbox.Names(wsinbox.Dir(sessionDir)) }},
+		{"inbox-drained", LiveInbox, func() ([]string, error) { return wsinbox.DrainedNames(wsinbox.Dir(sessionDir)) }},
 	} {
-		if names, err := list.names(); err == nil {
-			io.WriteString(h, "\x00"+list.tag)
-			for _, name := range names {
-				io.WriteString(h, "\x00"+name)
+		if stores&store.kind != 0 || previous.known&store.kind == 0 {
+			namesFn := store.names
+			if list != nil {
+				namesFn = func() ([]string, error) { return list(store.tag, store.names) }
+			}
+			previous.parts[i] = ""
+			if names, err := namesFn(); err == nil {
+				var print strings.Builder
+				print.WriteString("\x00" + store.tag)
+				for _, name := range names {
+					print.WriteString("\x00" + name)
+				}
+				previous.parts[i] = print.String()
 			}
 		}
+		io.WriteString(h, previous.parts[i])
 	}
-	return updatedAt, staleAt
+	previous.known = AllLiveStores
+	return previous, updatedAt, staleAt
 }

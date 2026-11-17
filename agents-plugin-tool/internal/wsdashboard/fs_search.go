@@ -120,6 +120,10 @@ func matchLines(re *regexp.Regexp, text string, room int) (out []fsMatch, full b
 
 // searchFiles runs a content search over the listed files of root.
 func searchFiles(ctx context.Context, root string, list []fileCandidate, re *regexp.Regexp) fsSearchAnswer {
+	return searchFilesRead(ctx, list, re, func(path string) (string, bool) { return searchText(root, path) })
+}
+
+func searchFilesRead(ctx context.Context, list []fileCandidate, re *regexp.Regexp, read func(path string) (string, bool)) fsSearchAnswer {
 	a := fsSearchAnswer{Files: []fsSearchFile{}}
 	total := 0
 	for _, c := range list {
@@ -130,7 +134,7 @@ func searchFiles(ctx context.Context, root string, list []fileCandidate, re *reg
 			a.More = true
 			break
 		}
-		text, ok := searchText(root, c.path)
+		text, ok := read(c.path)
 		if !ok {
 			continue
 		}
@@ -170,6 +174,15 @@ func searchText(root, rel string) (string, bool) {
 	return string(data), true
 }
 
+// Outside roots use the bounded filesystem fallback, never Git, even for
+// candidate discovery. Choosing a browsing root does not trust its config.
+func (d *Daemon) browseCandidates(root string) []fileCandidate {
+	if !d.listingGitAllowed(root) {
+		return fileCandidates(walkFiles(root, filesWalkDepth, filesWalkMax))
+	}
+	return d.files.get(root)
+}
+
 // handleFSFind serves the name search.
 func (d *Daemon) handleFSFind(w http.ResponseWriter, r *http.Request, replyID string) {
 	root, session, ok := d.browseRoot(r, replyID)
@@ -178,7 +191,7 @@ func (d *Daemon) handleFSFind(w http.ResponseWriter, r *http.Request, replyID st
 		fsNotFound(w)
 		return
 	}
-	items := rankRoot(d.files.get(root), q)
+	items := rankRoot(viewerCandidates(r, root, d.browseCandidates(root)), q)
 	if items == nil {
 		items = []fileItem{}
 	}
@@ -206,5 +219,19 @@ func (d *Daemon) handleFSSearch(w http.ResponseWriter, r *http.Request, replyID 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), fsSearchTimeout)
 	defer cancel()
-	writeFSJSON(w, !session, searchFiles(ctx, root, d.files.get(root), re))
+	list := viewerCandidates(r, root, d.browseCandidates(root))
+	if localViewer(r) {
+		a := searchFilesRead(ctx, list, re, func(path string) (string, bool) {
+			f, _, info, ok := openLocalContained(root, path)
+			if !ok {
+				return "", false
+			}
+			defer f.Close()
+			data, ok := readViewable(f, info)
+			return string(data), ok
+		})
+		writeFSJSON(w, !session, a)
+		return
+	}
+	writeFSJSON(w, !session, searchFiles(ctx, root, list, re))
 }

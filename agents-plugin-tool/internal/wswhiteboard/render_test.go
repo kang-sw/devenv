@@ -249,7 +249,8 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
+	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
+		`</span><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
 		`<details class="entry-panel`, `data-key="entry:e1" id="p1" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tdoc"`)
 	wantNone(t, out, `class="tbody"`)
@@ -258,10 +259,11 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic closed" id="`+topicAnchor("notes")+`" data-topic="notes" title="closed"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic closed" id="`+topicAnchor("notes")+`" data-topic="notes" title="closed"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
+		`class="trecap" data-entry="e4" data-kind="agent"`,
 		`<div class="topic-stream">`,
 		`<details class="entry-panel`, `data-key="entry:e1" id="p1"><summary`, "<h1>Plan</h1>")
-	wantNone(t, out, `class="tdoc"`, `data-key="entry:e1" id="p1" open>`)
+	wantNone(t, out, `data-key="doc:notes" open>`, `data-key="entry:e1" id="p1" open>`)
 }
 
 // TestRenderPageTopicKeyAttribute: every topic section carries its name as
@@ -1112,7 +1114,8 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	for _, want := range []string{
 		`function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }`,
 		`var pre = motion() && !fresh && member !== moved ? before(s) : null;`,
-		"if (pre) after(pre);\n    drawn = !!s;",
+		"if (pre) {\n      pendingMotion = pre;\n      motionRaf = requestAnimationFrame(function () {",
+		"if (pending) after(pending);\n      });\n    }\n    drawn = !!s;",
 		`if (!drawn || !s) return p;`,
 		`if (bnear && !s.down.some(function (i) { return topics[i] === bnear; })) p.bot = capGhost(slots.bot.near);`,
 		`else if (next && btns("bot").map(shown).indexOf(next) < 0) p.bot = barGhost(next, true);`,

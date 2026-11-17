@@ -12,7 +12,7 @@ import (
 // and the roles-event dialog no longer offers them, names each type it does
 // offer by a table key, and shows only the selected type's fields.
 func TestTrackerStoreSettingsLeaveTheRolesDialog(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestTrackerStoreSettingsLeaveTheRolesDialog(t *testing.T) {
 // and the item window's edit mode picks labels and writes them only when
 // they changed.
 func TestTrackerLabelsInTheDashboard(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

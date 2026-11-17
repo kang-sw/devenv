@@ -149,7 +149,7 @@ func TestStreamsServesSeamCounters(t *testing.T) {
 	})
 	waitFor(t, "first poll", func() bool { _, ok := d.Index().Session("alpha"); return ok })
 	port := strconv.Itoa(d.Endpoint().Port)
-	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}
 	projectJSON, _ := json.Marshal(project)
 	for i := 0; i < 2; i++ {
 		if rec := serve(d, local, http.MethodPost, "/nudge", `{"reply_id": "alpha", "project": `+string(projectJSON)+`}`); rec.Code != http.StatusNoContent {

@@ -303,6 +303,7 @@ func TestPagesCarryTheToastStackAndTitleHost(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("GET %s = %d", path, code)
 		}
+		page = frameDependencies(t, page)
 		i18n, toast, tracker := strings.Index(page, "window.wsT = function"), strings.Index(page, "window.WsToast = { show: show }"), strings.Index(page, "window.WsTracker = { mount: mount }")
 		if i18n < 0 || toast < i18n || tracker < toast {
 			t.Errorf("%s page: the toast stack is missing or not between the string table and the tracker script", name)

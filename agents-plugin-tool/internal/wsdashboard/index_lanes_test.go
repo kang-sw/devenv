@@ -232,6 +232,7 @@ func TestDaemonAnswersPastABlockedRead(t *testing.T) {
 		body, _ := json.Marshal(NudgeBody{ReplyID: id, Project: project})
 		req := httptest.NewRequest(http.MethodPost, "/nudge", bytes.NewReader(body))
 		req.Host = "127.0.0.1"
+		req.RemoteAddr = "127.0.0.1:50000"
 		rec := httptest.NewRecorder()
 		d.Handler().ServeHTTP(rec, req)
 		return rec.Code

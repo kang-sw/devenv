@@ -58,6 +58,10 @@ func startOutsideFixture(t *testing.T) *outsideFixture {
 	}
 	t.Setenv("HOME", o.home)
 	t.Setenv("USERPROFILE", o.home)
+	// Relocated credentials in the developer's environment are not fixtures.
+	for _, key := range []string{"GH_CONFIG_DIR", "XDG_CONFIG_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "KUBECONFIG", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "APPDATA"} {
+		t.Setenv(key, "")
+	}
 	o.pageFixture = startPageFixture(t, lanMode)
 	o.local, o.lan = fsViewers(t, o.pageFixture)
 	o.bare = viewer{name: "LAN peer, no token", peer: "192.168.7.31:50000", host: "192.168.7.20:" + strconv.Itoa(o.d.Endpoint().Port)}
@@ -116,14 +120,9 @@ func (o *outsideFixture) read(target string) *httptest.ResponseRecorder {
 // under is the URL of name under the capability prefix of a document URL.
 func under(doc, name string) string { return doc[:strings.LastIndex(doc, "/")+1] + name }
 
-// TestFSOutsideMintsOnlyForALinkTheSessionShows pins the mint route's
-// gate: a loopback, same-origin POST naming a path the session's board, a
-// lead reply in its live ring, or its streaming reply links outside the
-// root gets the card's answer; a path nothing links, a path a reply only
-// carries inside a code span (no link on the page), a path the root
-// holds, a path another session links, a GET, a LAN viewer with the token,
-// and another origin's POST get none.
-func TestFSOutsideMintsOnlyForALinkTheSessionShows(t *testing.T) {
+// Local same-origin requests need no board/live-ring provenance. LAN
+// token holders still cannot mint, even for a path the board links.
+func TestFSOutsideMintsForLocalViewerWithoutProvenance(t *testing.T) {
 	o := startOutsideFixture(t)
 	board := o.write(t, o.away, "board.txt", "TEXT-BOARD")
 	reply := o.write(t, o.away, "reply.txt", "TEXT-REPLY")
@@ -145,37 +144,37 @@ func TestFSOutsideMintsOnlyForALinkTheSessionShows(t *testing.T) {
 	writeSnapshot(t, o.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
 		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: "still writing [this](" + filepath.ToSlash(streamed) + ")"}}})
 
-	for path, want := range map[string]string{board: "TEXT-BOARD", reply: "TEXT-REPLY", streamed: "TEXT-STREAMED"} {
+	for path, want := range map[string]string{board: "TEXT-BOARD", reply: "TEXT-REPLY", streamed: "TEXT-STREAMED", unlinked: "TEXT-UNLINKED", mentioned: "TEXT-MENTIONED", other: "TEXT-OTHER", inside: "TEXT-INSIDE"} {
 		code, a := o.open(t, o.local, path)
-		if code != http.StatusOK || a.Kind != "text" || a.Text != want || a.Abs != path || a.Frame != "" || a.Src != "" || a.View != "" {
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code != http.StatusOK || a.Kind != "text" || a.Text != want || a.Abs != real || a.Frame != "" || a.Src != "" || a.View != "" {
 			t.Errorf("mint %s = %d %+v, want its text", path, code, a)
 		}
 	}
 	for why, path := range map[string]string{
-		"a path nothing links":         unlinked,
-		"a path a reply only mentions": mentioned,
-		"a path another session links": other,
-		"a path inside the root":       inside,
-		"a relative path":              "board.txt",
-		"an empty path":                "",
-		"a path that does not exist":   filepath.Join(o.away, "missing.txt"),
-		"the linked file's folder":     o.away,
-		"a path past the linked one":   board + string(filepath.Separator) + "x",
-		"a network path":               "//server/share/board.txt",
+		"a relative path":            "board.txt",
+		"an empty path":              "",
+		"a path that does not exist": filepath.Join(o.away, "missing.txt"),
+		"the linked file's folder":   o.away,
+		"a path past the linked one": board + string(filepath.Separator) + "x",
+		"a network path":             "//server/share/board.txt",
 	} {
 		if code, a := o.open(t, o.local, path); code != http.StatusNotFound {
 			t.Errorf("%s: mint %q = %d %+v, want 404", why, path, code, a)
 		}
 	}
 	// The posted path is cleaned before it is matched: the linked file
-	// spelled through a dot step and a doubled separator still opens, and
-	// the same spelling of an unlinked file does not.
+	// spelled through a dot step and a doubled separator still opens,
+	// whether or not a page links it.
 	sep := string(filepath.Separator)
 	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"board.txt"); code != http.StatusOK {
 		t.Errorf("mint of the linked path spelled through a dot step = %d, want 200", code)
 	}
-	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"unlinked.txt"); code != http.StatusNotFound {
-		t.Errorf("mint of an unlinked path spelled through a dot step = %d, want 404", code)
+	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"unlinked.txt"); code != http.StatusOK {
+		t.Errorf("mint of an unlinked path spelled through a dot step = %d, want 200", code)
 	}
 
 	// A LAN viewer holding the token is refused as if the route did not
@@ -195,7 +194,7 @@ func TestFSOutsideMintsOnlyForALinkTheSessionShows(t *testing.T) {
 			req.Header.Set("Origin", origin)
 		}
 		rec := httptest.NewRecorder()
-		o.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, o.d).ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "TEXT-BOARD") {
 			t.Errorf("mint with Origin %q = %d, want 403", origin, rec.Code)
 		}
@@ -221,6 +220,7 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 	page := o.write(t, o.away, "page.html", `<link rel="stylesheet" href="style.css"><img src="img/a.png"><h1>HTML-AWAY</h1>`)
 	o.write(t, o.away, "style.css", "body{color:red}/*CSS-AWAY*/")
 	o.write(t, o.away, "img/a.png", "PNG-AWAY")
+	o.write(t, o.away, "app.mjs", "export default 'MODULE-AWAY'")
 	o.write(t, o.away, "other.html", "<h1>OTHER-AWAY</h1>")
 	secret := o.write(t, filepath.Dir(o.away), "secret.txt", "SECRET-PARENT")
 	escape := os.Symlink(secret, filepath.Join(o.away, "escape.txt")) == nil &&
@@ -232,7 +232,11 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 		t.Fatalf("mint of an HTML file = %+v", a)
 	}
 	for _, doc := range []string{a.Frame, a.View} {
-		rec := o.read(doc)
+		dest := "iframe"
+		if doc == a.View {
+			dest = "document"
+		}
+		rec := capFetch(o.pageFixture, o.local, doc, capShape{"", "same-origin", "navigate", dest})
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "HTML-AWAY") || rec.Header().Get("Content-Type") != "text/html; charset=utf-8" {
 			t.Fatalf("GET %s = %d %q", doc, rec.Code, rec.Body.String())
 		}
@@ -257,6 +261,24 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 		for _, name := range refused {
 			if rec := o.read(under(doc, name)); rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "SECRET") {
 				t.Errorf("GET %s = %d %q, want a refusal", under(doc, name), rec.Code, rec.Body.String())
+			}
+		}
+		// Opaque-origin subresources cannot send the Strict localhost cookie.
+		for _, c := range []struct {
+			path, want string
+			shape      capShape
+		}{
+			{"style.css", "CSS-AWAY", capShape{"", "cross-site", "no-cors", "style"}},
+			{"img/a.png", "PNG-AWAY", capShape{"", "cross-site", "no-cors", "image"}},
+			{"app.mjs", "MODULE-AWAY", capShape{"", "cross-site", "no-cors", "script"}},
+			{"app.mjs", "MODULE-AWAY", capShape{"null", "cross-site", "cors", "script"}},
+		} {
+			rec := capFetch(o.pageFixture, o.local, under(doc, c.path), c.shape)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), c.want) || len(rec.Result().Cookies()) != 0 {
+				t.Errorf("cookieless %s %+v = %d %q", c.path, c.shape, rec.Code, rec.Body.String())
+			}
+			if c.shape.origin == "null" && rec.Header().Get("Access-Control-Allow-Origin") != "null" {
+				t.Errorf("opaque module lacks CORS grant: %v", rec.Header())
 			}
 		}
 		// A fetch reads nothing, as on the in-root routes.
@@ -417,15 +439,15 @@ func TestFSOutsideNeverOpensAnAlwaysDeniedPath(t *testing.T) {
 	folder := filepath.Join(o.away, "keys")
 	if os.Symlink(filepath.Join(o.home, ".ssh", "id.txt"), into) == nil && os.Symlink(filepath.Join(o.home, ".ssh"), folder) == nil {
 		o.refused(t, "a symlink into a denied folder", into)
-		// A denied path as written stays closed under the name it resolves
-		// to, which nothing else links.
+		// The ordinary target is readable independently of the denied alias;
+		// provenance no longer determines whether a local user may read it.
 		plain := o.write(t, o.away, "plain.txt", "SECRET-PLAIN")
 		if err := os.Symlink(plain, filepath.Join(o.home, ".ssh", "plain.txt")); err != nil {
 			t.Fatal(err)
 		}
 		o.src.link("livesession", filepath.Join(o.home, ".ssh", "plain.txt"))
-		if code, a := o.open(t, o.local, plain); code != http.StatusNotFound {
-			t.Errorf("mint of the path a denied link resolves to = %d %+v, want 404", code, a)
+		if code, a := o.open(t, o.local, plain); code != http.StatusOK {
+			t.Errorf("mint of the ordinary target of a denied alias = %d %+v, want 200", code, a)
 		}
 		// The link itself is refused by the path as written alone: the
 		// file it resolves to is under no denied folder.
@@ -554,8 +576,8 @@ func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 
 // TestFSOutsideIsLoopbackOnly pins that a capability that left this
 // machine reads nothing: a LAN viewer holding the token and a valid
-// outside capability gets 404 from both serving routes, a peer without the
-// token meets the guard, and a loopback peer that addressed a foreign Host
+// outside capability gets 404 from both serving routes, even without the
+// LAN token, and a loopback peer that addressed a foreign Host
 // gets 404, for the document, a relative file, and an image alike.
 func TestFSOutsideIsLoopbackOnly(t *testing.T) {
 	o := startOutsideFixture(t)
@@ -567,13 +589,10 @@ func TestFSOutsideIsLoopbackOnly(t *testing.T) {
 		if rec := o.read(target); rec.Code != http.StatusOK {
 			t.Fatalf("GET %s as the local viewer = %d, want 200", target, rec.Code)
 		}
-		for _, v := range []viewer{o.lan, rebound} {
+		for _, v := range []viewer{o.lan, o.bare, rebound} {
 			if rec := serve(o.d, v, http.MethodGet, target, ""); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "AWAY") {
 				t.Errorf("GET %s as %s = %d, want 404", target, v.name, rec.Code)
 			}
-		}
-		if rec := serve(o.d, o.bare, http.MethodGet, target, ""); !refusedByGuard(rec) {
-			t.Errorf("GET %s as a LAN peer without the token = %d, want the guard's 401", target, rec.Code)
 		}
 	}
 	// An expired page's navigation gets a LAN viewer no re-mint page.
@@ -670,8 +689,8 @@ func TestFSOutsideCapabilityVerifiesOnItsOwnRouteOnly(t *testing.T) {
 }
 
 // TestFSOutsideExpiredPageRemintsByPostOnly pins what a tab on an outside
-// HTML file gets once its capability expired: its navigation is answered
-// with the re-mint page, which carries the linked path and the mint route
+// HTML file gets once its capability expired: after localhost login its
+// navigation gets the re-mint page, which carries the linked path and mint route
 // for its script to post and no file content, and neither that GET nor any
 // other mints a capability or redirects; the page's post then yields a
 // fresh URL that serves the file. A request that is no document navigation
@@ -685,11 +704,32 @@ func TestFSOutsideExpiredPageRemintsByPostOnly(t *testing.T) {
 	a := o.linked(t, page)
 	clock.advance(fsCapabilityTTL + time.Second)
 
-	navigate := func(target string) *httptest.ResponseRecorder {
-		return capFetch(o.pageFixture, o.local, target, capShape{"", "none", "navigate", "document"})
+	navigateWithCookie := func(target string, cookie bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.RemoteAddr, r.Host = o.local.peer, o.local.host
+		r.Header.Set("Sec-Fetch-Site", "none")
+		r.Header.Set("Sec-Fetch-Mode", "navigate")
+		r.Header.Set("Sec-Fetch-Dest", "document")
+		if cookie {
+			r.AddCookie(authCookie(t, o.d))
+		}
+		return authServe(o.d, r)
 	}
+	navigate := func(target string) *httptest.ResponseRecorder { return navigateWithCookie(target, true) }
 	next := under(a.View, "sub/next%20page.html")
 	for _, target := range []string{a.View, next} {
+		// Expired capabilities no longer authorize a page that auto-posts
+		// the absolute path from their unverified payload.
+		gate := navigateWithCookie(target, false)
+		if gate.Code != http.StatusUnauthorized || !strings.Contains(gate.Body.String(), "data-login-gate") ||
+			strings.Contains(gate.Body.String(), "data-mint=") || strings.Contains(gate.Body.String(), page) {
+			t.Fatalf("cookieless expired navigation = %d %s, want login gate", gate.Code, gate.Body.String())
+		}
+		link, _ := authLink(t, o.d, target)
+		loggedIn := navigateWithCookie(link, false)
+		if loggedIn.Code != http.StatusSeeOther || loggedIn.Header().Get("Location") != target || len(loggedIn.Result().Cookies()) != 1 {
+			t.Fatalf("login did not continue to expired URL: %d %v", loggedIn.Code, loggedIn.Header())
+		}
 		rec := navigate(target)
 		body := rec.Body.String()
 		if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" || strings.Contains(body, "AWAY") {
@@ -737,14 +777,14 @@ func TestFSOutsideExpiredPageRemintsByPostOnly(t *testing.T) {
 	if code != http.StatusOK || fresh.View == a.View {
 		t.Fatalf("the re-mint = %d %+v, want a fresh URL", code, fresh)
 	}
-	if rec := navigate(under(fresh.View, "sub/next%20page.html")); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "NEXT-AWAY") {
+	if rec := navigateWithCookie(under(fresh.View, "sub/next%20page.html"), false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "NEXT-AWAY") {
 		t.Errorf("the fresh URL = %d, want the file", rec.Code)
 	}
-	// Once the board no longer links the file, the re-mint is refused.
+	// Re-mint remains available after a link leaves the board/live history.
 	o.src.mu.Lock()
 	o.src.outside = nil
 	o.src.mu.Unlock()
-	if code, _ := o.open(t, o.local, page); code != http.StatusNotFound {
-		t.Errorf("the re-mint of a link the board dropped = %d, want 404", code)
+	if code, _ := o.open(t, o.local, page); code != http.StatusOK {
+		t.Errorf("the re-mint of a link the board dropped = %d, want 200", code)
 	}
 }

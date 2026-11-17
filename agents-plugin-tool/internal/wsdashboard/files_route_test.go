@@ -29,7 +29,7 @@ func filesAs(d *Daemon, peer, host, cookie, fetchSite, q string) *httptest.Respo
 		req.Header.Set("Sec-Fetch-Site", fetchSite)
 	}
 	rec := httptest.NewRecorder()
-	d.Handler().ServeHTTP(rec, req)
+	localhostTestHandler(nil, d).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -365,7 +365,7 @@ func TestFilesRouteRefusesUnknownSessionsAndBadQueries(t *testing.T) {
 		req := httptest.NewRequest(method, target, nil)
 		req.RemoteAddr, req.Host = "127.0.0.1:50000", local
 		rec := httptest.NewRecorder()
-		f.d.Handler().ServeHTTP(rec, req)
+		localhostTestHandler(t, f.d).ServeHTTP(rec, req)
 		return rec
 	}
 	for name, target := range map[string]string{

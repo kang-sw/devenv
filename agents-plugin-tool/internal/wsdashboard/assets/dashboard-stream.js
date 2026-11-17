@@ -171,6 +171,7 @@
       over = true;
       cleanup();
       try { ws.close(); } catch (x) {}
+      if (window.wsDashboardLoginProbe) window.wsDashboardLoginProbe();
       if (on.drop) on.drop();
     }
     ws.onopen = function () { if (!over) { visibility(); if (on.open) on.open(); } };
@@ -380,7 +381,11 @@
       if (mainRetry !== null) clearTimeout(mainRetry);
       mainRetry = setTimeout(function () { mainRetry = null; if (current()) fn(); }, delay);
     }
-    var boardInput = null, railInput = null, treeInput = null, entryInput = null, panelInput = null;
+    // held() advertises a hidden update first, otherwise the applied region.
+    // Use its immutable canonical input, never the mounted/staged/pinned DOM.
+    var boardHeld = hiddenRegions.board || boardLatest;
+    var boardInput = withoutBoard || !boardHeld ? null : (typeof boardHeld.html === "string" ? boardInputFull(boardHeld.html) : boardHeld.html);
+    var railInput = null, treeInput = null, entryInput = null, panelInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" || worktree ? "/events" : "/s/" + rid + "/events";

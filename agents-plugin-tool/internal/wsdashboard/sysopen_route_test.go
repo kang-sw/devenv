@@ -53,7 +53,7 @@ func openRequestAs(d *Daemon, method, peer, host, origin, cookie, body string) *
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 	rec := httptest.NewRecorder()
-	d.Handler().ServeHTTP(rec, req.WithContext(ctx))
+	localhostTestHandler(nil, d).ServeHTTP(rec, req.WithContext(ctx))
 	return rec
 }
 
@@ -132,7 +132,7 @@ func TestSystemOpenRoute(t *testing.T) {
 	req.RemoteAddr, req.Host = peer, local
 	req.Header.Set("Origin", "http://"+local)
 	unknown := httptest.NewRecorder()
-	f.d.Handler().ServeHTTP(unknown, req)
+	localhostTestHandler(t, f.d).ServeHTTP(unknown, req)
 	if unknown.Code != http.StatusNotFound {
 		t.Errorf("open on an unknown session = %d, want 404", unknown.Code)
 	}
@@ -236,7 +236,7 @@ func TestSessionPageOffersSystemOpenToLocalViewersOnly(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	token := readLANToken(t, f.dir)
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	localPage := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}, http.MethodGet, "/s/livesession", "")
+	localPage := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port, localCookie: true}, http.MethodGet, "/s/livesession", "")
 	if localPage.Code != http.StatusOK || !strings.Contains(localPage.Body.String(), `data-sysopen="1"`) {
 		t.Errorf("local session page = %d, lacks the system-open flag", localPage.Code)
 	}

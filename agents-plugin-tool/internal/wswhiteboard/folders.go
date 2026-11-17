@@ -95,6 +95,51 @@ type folderReceipt struct {
 	Generation    int `json:"generation"`
 }
 
+// Stored in two alternating panel slots under a reserved directory outside
+// the topic allocation range. Exact bytes travel in the existing intent.Panels
+// array, including during an older daemon's replay.
+type folderRevisionReceipt struct {
+	MetadataRevision   uint64 `json:"metadata_revision"`
+	StaleNudgeRevision string `json:"stale_nudge_revision,omitempty"`
+}
+
+type folderRevisionFile struct {
+	SchemaVersion int                   `json:"schema_version"`
+	Generation    int                   `json:"generation"`
+	Revision      folderRevisionReceipt `json:"board_revision_receipt"`
+}
+
+// This valid legacy topic directory is reserved for bookkeeping, never a
+// live topic. Its numeric value is representable even on 32-bit systems.
+const folderRevisionDir = "t2147483647"
+const folderRevisionDirNumber = 2147483647
+
+func (f FolderStore) revisionReceipt(meta *folderSession) (int, folderRevisionReceipt, error) {
+	var receipt folderRevisionReceipt
+	if meta != nil && (meta.NextTopic >= folderRevisionDirNumber || slices.ContainsFunc(meta.Topics, func(ref folderTopicRef) bool { return ref.Dir == folderRevisionDir })) {
+		return 0, receipt, fmt.Errorf("whiteboard: reserved revision directory conflicts with topic allocation")
+	}
+	latest, slot := 0, 0
+	for i := 1; i <= 2; i++ {
+		path := filepath.Join(f.Dir, folderRevisionDir, "panels", fmt.Sprintf("e%d.json", i))
+		var record folderRevisionFile
+		exists, err := folderDecode(path, &record)
+		if err != nil {
+			return 0, receipt, err
+		}
+		if !exists {
+			continue
+		}
+		if record.SchemaVersion != FolderSchemaVersion || record.Generation <= 0 {
+			return 0, receipt, fmt.Errorf("whiteboard: invalid revision receipt %s", path)
+		}
+		if record.Generation > latest && (meta == nil || record.Generation <= meta.Generation) {
+			latest, slot, receipt = record.Generation, i, record.Revision
+		}
+	}
+	return slot, receipt, nil
+}
+
 // Open loads the one authority, recovering and converting under the same lock
 // used by writers. An absent board with no legacy snapshot has no side effects.
 // Legacy is copied, never modified or written back.
@@ -199,7 +244,11 @@ func (f FolderStore) withGuard(create bool, guard func() error, fn func() error)
 		}
 	}
 	lock := flock.New(filepath.Join(f.Dir, ".lock"))
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// This is a queue budget, not a single transaction's I/O budget. The
+	// holder syncs several files and may retry Windows sharing violations
+	// for two seconds per file; concurrent writers must outwait that work.
+	// Keep the wait finite if a holder stalls, including during publication.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	ok, err := lock.TryLockContext(ctx, 10*time.Millisecond)
 	if err != nil {
@@ -322,8 +371,18 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		_, revision, err := f.revisionReceipt(&meta)
+		if err != nil {
+			return nil, nil, err
+		}
+		state.MetadataRevision = max(state.MetadataRevision, revision.MetadataRevision)
+		if revision.StaleNudgeRevision != "" {
+			state.StaleNudgeRevision = revision.StaleNudgeRevision
+		}
 		work := state.clone()
-		if work.migrateLegacyContent() {
+		contentChanged := work.migrateLegacyContent()
+		closeChanged := work.migrateCloseResults()
+		if contentChanged || closeChanged {
 			intent, err := f.plan(&meta, state, work)
 			if err != nil {
 				return nil, nil, err
@@ -362,6 +421,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		d.Recap, d.RecapAt, d.RecapChanged = "", "", 0
 	}
 	work.migrateLegacyContent()
+	work.migrateCloseResults()
 	if err := f.hit("conversion"); err != nil {
 		return nil, nil, err
 	}
@@ -373,6 +433,56 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		return nil, nil, err
 	}
 	return work, &intent.Session, nil
+}
+
+// migrateCloseResults moves historical close text into the append-only stream.
+// The enclosing folder intent commits the appended log and cleared metadata as
+// one recoverable operation, including on an interrupted first conversion.
+func (s *State) migrateCloseResults() bool {
+	changed := false
+	for _, topic := range s.ClosedTopics {
+		result := s.CloseResults[topic]
+		if result == "" {
+			continue
+		}
+		doc := s.topicDoc(topic)
+		at := ""
+		for i := len(doc.Entries) - 1; i >= 0; i-- {
+			e := doc.Entries[i]
+			if e.Kind == EntrySystem && e.ItemID == 0 && !e.Imported && (strings.HasPrefix(e.Text, "Topic closed: ") || strings.HasPrefix(e.Text, "Topic close result updated: ")) {
+				if _, err := time.Parse(time.RFC3339Nano, e.At); err == nil {
+					at = e.At
+					break
+				}
+			}
+		}
+		if at == "" {
+			// Older snapshots may have no close event. The latest recorded
+			// topic time is the best available bound, not an invented clock.
+			var latest time.Time
+			consider := func(value string) {
+				if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil && (at == "" || parsed.After(latest)) {
+					latest, at = parsed, value
+				}
+			}
+			consider(doc.ChangedAt)
+			consider(doc.RecapAt)
+			for _, e := range doc.Entries {
+				consider(e.At)
+			}
+			for _, item := range s.Items {
+				if item.Topic == topic {
+					consider(item.ChangedAt)
+					consider(item.AnsweredAt)
+				}
+			}
+		}
+		s.EntrySeq++
+		doc.Entries = append(doc.Entries, Entry{ID: fmt.Sprintf("e%d", s.EntrySeq), Kind: EntryAgent, Text: result, At: at})
+		s.CloseResults[topic] = ""
+		changed = true
+	}
+	return changed
 }
 
 func folderNumber(id, prefix string) int {
@@ -725,6 +835,27 @@ func (f FolderStore) plan(meta *folderSession, before, after *State) (*folderInt
 			}
 		}
 	}
+	if after.MetadataRevision != 0 || after.StaleNudgeRevision != "" {
+		slot, prior, err := f.revisionReceipt(meta)
+		if err != nil {
+			return nil, err
+		}
+		if intent.Session.NextTopic >= folderRevisionDirNumber {
+			return nil, fmt.Errorf("whiteboard: reserved revision directory conflicts with topic allocation")
+		}
+		next := folderRevisionReceipt{MetadataRevision: max(prior.MetadataRevision, after.MetadataRevision), StaleNudgeRevision: after.StaleNudgeRevision}
+		if next.StaleNudgeRevision == "" {
+			next.StaleNudgeRevision = prior.StaleNudgeRevision
+		}
+		if next != prior {
+			target := 1
+			if slot == 1 {
+				target = 2
+			}
+			path := fmt.Sprintf("%s/panels/e%d.json", folderRevisionDir, target)
+			intent.Panels = append(intent.Panels, folderWrite{Path: path, Data: folderJSON(folderRevisionFile{FolderSchemaVersion, intent.Session.Generation, next})})
+		}
+	}
 	return intent, nil
 }
 
@@ -740,6 +871,40 @@ func (f FolderStore) commit(intent *folderIntent) error {
 }
 
 func (f FolderStore) commitObserved(intent *folderIntent, committed func()) error {
+	// Before deciding the new intent, remove only its inactive slot. The
+	// current slot remains durable if this process dies before the intent;
+	// after the intent, even an old daemon can replay the exact panel bytes.
+	for _, w := range intent.Panels {
+		if w.Path != folderRevisionDir+"/panels/e1.json" && w.Path != folderRevisionDir+"/panels/e2.json" {
+			continue
+		}
+		var current folderSession
+		exists, err := folderDecode(filepath.Join(f.Dir, "meta.json"), &current)
+		if err != nil {
+			return err
+		}
+		var meta *folderSession
+		if exists {
+			meta = &current
+		}
+		slot, _, err := f.revisionReceipt(meta)
+		if err != nil {
+			return err
+		}
+		if w.Path == fmt.Sprintf("%s/panels/e%d.json", folderRevisionDir, slot) {
+			return fmt.Errorf("whiteboard: revision intent overwrites active slot")
+		}
+		path := filepath.Join(f.Dir, filepath.FromSlash(w.Path))
+		if err := wsstate.RemoveFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := folderSyncDir(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := f.hit("revision-slot-cleared"); err != nil {
+			return err
+		}
+	}
 	if err := f.atomic("pending.json", folderJSON(intent), "intent-staged"); err != nil {
 		return err
 	}

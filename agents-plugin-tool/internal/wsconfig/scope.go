@@ -29,6 +29,10 @@ const (
 // Well-known item key constants for registered config items. Use these instead of
 // raw string literals to ensure consistent naming across packages.
 const (
+	// HostedPluginPackageKey selects the plugin package for daemon-launched
+	// processes. Values: ws or wsflow (builtin default). Global-only.
+	HostedPluginPackageKey = "hosted.plugin_package"
+
 	// ItemWorkflowPreferSubagent is the global preference for default
 	// delegation of eligible general work through lead-delegate. Builtin default: off.
 	ItemWorkflowPreferSubagent = "workflow.prefer_subagent"
@@ -184,6 +188,7 @@ const (
 )
 
 func init() {
+	RegisterGlobalOnly(HostedPluginPackageKey)
 	RegisterGlobalOnly(ItemWorkflowPreferSubagent)
 	// workflow.whiteboard_enabled is a cross-project viewing habit, so a write
 	// naming no scope lands in global; it still resolves through every scope.

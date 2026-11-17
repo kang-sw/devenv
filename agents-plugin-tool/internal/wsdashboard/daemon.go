@@ -143,6 +143,11 @@ type DaemonOptions struct {
 	ackDelay time.Duration
 	// hireNow is a fixture clock for proposal expiry.
 	hireNow func() time.Time
+	// authNow is a fixture clock for login codes and failed exchanges.
+	authNow func() time.Time
+	// clipboard replaces the native login-link clipboard writer in tests.
+	// Nil selects the platform writer; it never disables authentication.
+	clipboard clipboardWriter
 }
 
 // MailWaker receives the daemon's mailbox wake signals (DaemonOptions.MailWake).
@@ -207,13 +212,17 @@ type Daemon struct {
 	live hostedSlots
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
 	// and the answer check's record and nudge).
-	inboxMu sync.Mutex
+	inboxMu      sync.Mutex
+	answerReplay sync.Map // reply-id -> one active replay/retry loop
 	// acks runs the answer checks (ack_check.go), nil without a session
 	// index.
 	acks *ackChecker
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
-	lan       bool
-	tokenMu   sync.Mutex
+	lan     bool
+	tokenMu sync.Mutex
+	// auth holds bounded, ephemeral login codes and the exchange rate window.
+	auth      localhostAuth
+	clipboard clipboardWriter
 	memoMu    sync.Mutex      // serializes daemon-local memo read/modify/write
 	planUsage *planUsageStore // daemon-private account usage, never credentials
 	// pprof serves the pprof routes (pprofHandler).
@@ -246,8 +255,9 @@ type Daemon struct {
 	// rail reads the session rail's worktree lists while a page shows the
 	// rail (railworktrees.go); railMsgs holds each session's last message
 	// for it (railmessages.go).
-	rail     *railLister
-	railMsgs *railMessages
+	rail       *railLister
+	railMsgs   *railMessages
+	railInputs railInputCache
 	// workspaces holds the stored workspaces, nil without them
 	// (workspaces.go); pathHost is the machine whose rules read a pasted
 	// folder path (workspacepath.go).
@@ -393,6 +403,8 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		support:         opts.Support,
 		holders:         opts.Holders,
 		hireNow:         opts.hireNow,
+		auth:            localhostAuth{now: opts.authNow},
+		clipboard:       opts.clipboard,
 		hireWake:        make(chan struct{}, 1),
 		hireDone:        make(chan struct{}),
 		stop:            make(chan struct{}),
@@ -405,6 +417,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			Token:         token,
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
+	}
+	if d.clipboard == nil {
+		d.clipboard = newNativeClipboardWriter()
 	}
 	home, getenv := opts.Home, os.Getenv
 	if home == "" {
@@ -581,6 +596,7 @@ func newToken() (string, error) {
 func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
 		if session, ok := d.index.Session(replyID); ok {
+			d.scheduleAnswerReplay(session.Registration)
 			if session.Harness == "claude" {
 				d.planUsage.pushClaude(d.snapshots.snapshotWithoutObserved(d.dir, replyID))
 			}
@@ -609,7 +625,8 @@ func (d *Daemon) sessionChanged(replyID string) {
 // any, wakes it again when it lands.
 func (d *Daemon) agentChanged(replyID, _ string) {
 	if d.index != nil {
-		d.index.Reread(replyID)
+		// The runner changes live stores, not ws-mcp's record/board/mailbox.
+		d.index.RereadLive(replyID)
 	}
 	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)
@@ -703,8 +720,9 @@ func (d *Daemon) Close() {
 }
 
 // Handler is the daemon's HTTP surface. Every route first passes the access
-// guard (the loopback Host guard, or in LAN mode the guard that also admits
-// the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
+// guard (localhost cookie, or the separate token for a non-local LAN viewer,
+// with explicit machine and frame exemptions; access.go). Loopback mode also
+// checks the Host against DNS rebinding; the daemon sends no CORS headers. The pages (/,
 // /s/<reply-id>, served as the iframe shell or, with ?frame=1, as the page
 // it frames; their SSE or WebSocket streams, the shell's rail stream
 // /rail/events, and a session's image, file view, and
@@ -730,6 +748,11 @@ func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
 	mux.HandleFunc("/shutdown", d.handleShutdown)
+	mux.HandleFunc("/auth/status", d.handleAuthStatus)
+	mux.HandleFunc("/auth/exchange", d.handleAuthExchange)
+	mux.HandleFunc("/auth/link", d.handleAuthLink)
+	mux.HandleFunc("/auth/cookie", d.handleAuthCookie)
+	mux.HandleFunc("/auth/clipboard", d.handleAuthClipboard)
 	if d.proxy != nil {
 		mux.HandleFunc(ProxyPath, d.handleProxy)
 	}
@@ -769,10 +792,11 @@ func (d *Daemon) Handler() http.Handler {
 		mux.Handle(pprofPrefix, pprofHandler(d.serveStreams))
 	}
 	mux.HandleFunc("/", d.handleIndex)
+	guarded := d.accessGuard(mux)
 	if d.lan {
-		return d.lanGuard(mux)
+		return guarded
 	}
-	return hostGuard(mux)
+	return hostGuard(guarded)
 }
 
 // hostGuard refuses a request whose Host header is not a loopback name. A
@@ -781,7 +805,13 @@ func (d *Daemon) Handler() http.Handler {
 func hostGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !loopbackHost(r.Host) {
-			http.Error(w, "forbidden host", http.StatusForbidden)
+			// The native clipboard route is deliberately undiscoverable to
+			// a non-local Host, in both serving modes. It remains refused.
+			if r.URL.Path == "/auth/clipboard" {
+				http.NotFound(w, r)
+			} else {
+				http.Error(w, "forbidden host", http.StatusForbidden)
+			}
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -840,11 +870,16 @@ func (d *Daemon) handleShutdown(w http.ResponseWriter, r *http.Request) {
 
 // handleNudge schedules a re-read of the one session the body names
 // (Index.Nudge) and answers without waiting for it. It needs no credential:
-// all it can cause is a re-read of disk. A malformed body is 400, an unknown
+// non-browser callers omit Origin and fetch metadata. Browser requests must
+// be same-origin. A malformed body is 400, an unknown
 // session 404, and a scheduled re-read 204; the sender ignores the answer.
 func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if (len(r.Header.Values("Origin")) > 0 && !sameOrigin(r)) || crossSiteFetch(r) {
+		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return
 	}
 	d.stats.Nudges.Add(1)
@@ -867,6 +902,7 @@ func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }

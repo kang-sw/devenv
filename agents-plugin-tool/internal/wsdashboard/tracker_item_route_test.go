@@ -15,7 +15,7 @@ import (
 // hold opens nothing, and an unknown store is the store route's toast. The
 // cases execute under node when it is installed.
 func TestTrackerItemLinkOpensTheItemOnItsStorePage(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	data, err := dashboardTestAsset("assets/tracker.js")
 	if err != nil {
 		t.Fatal(err)
 	}

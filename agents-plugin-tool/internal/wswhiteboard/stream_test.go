@@ -45,12 +45,85 @@ func pageEntries(page EntryPage) []EntryView {
 	return out
 }
 
+func TestLegacyCloseEventDisplayPreservesHistory(t *testing.T) {
+	const original = "Topic closed: private old conclusion"
+	st := &State{EntrySeq: 3, ClosedTopics: []string{"t"}, Topics: []TopicDoc{{Name: "t", Entries: []Entry{
+		{ID: "e1", Kind: EntryAgent, Text: "Current recap"},
+		{ID: "e2", Kind: EntrySystem, Text: original},
+		{ID: "e3", Kind: EntrySystem, Imported: true, Text: "Topic closed: imported text"},
+	}}}}
+	before := mustMarshal(t, st)
+	for _, layout := range layouts() {
+		view := BuildView(st, ViewInput{Layout: layout, ReplyID: "r"})
+		out := render(t, view)
+		wantAll(t, out, "Current recap")
+		wantNone(t, out, original)
+	}
+	_, page, _ := streamView(st.Topics[0], true, time.UTC, nil)
+	entries := pageEntries(page)
+	if len(entries) != 3 || entries[1].Text != "Topic closed." || entries[2].Text != "Topic closed: imported text" {
+		t.Fatalf("unexpected projected events: %+v", entries)
+	}
+	if !reflect.DeepEqual(before, mustMarshal(t, st)) {
+		t.Fatal("rendering modified immutable history")
+	}
+}
+
+func TestHistoricalCloseProjectionKeepsRunAndChronologicalCurrent(t *testing.T) {
+	st := stateBoard(t)
+	stateApply(t, st, `<wb:topic name="Work"><wb:state value="implementing" owner="worker" eta_minutes="10"/></wb:topic>`, stateNow)
+	stateApply(t, st, `<wb:topic name="Work"><wb:close/></wb:topic>`, stateNow.Add(time.Minute))
+	doc := st.topicDoc("Work")
+	closeEntry := &doc.Entries[len(doc.Entries)-1]
+	closeEntry.Text = "Topic closed: legacy secret; overwritten transition"
+	doc.Entries = append(doc.Entries,
+		Entry{ID: "e90", Kind: EntrySystem, Text: "Topic close result updated: replacement secret"},
+		Entry{ID: "e91", Kind: EntryAgent, Text: "newer line", At: stateNow.Add(2 * time.Minute).Format(time.RFC3339Nano)},
+		Entry{ID: "e92", Kind: EntryAgent, Text: "migrated older line", At: stateNow.Format(time.RFC3339Nano)},
+	)
+	before := mustMarshal(t, st)
+	_, page, _ := streamView(*doc, true, time.UTC, nil)
+	entries := pageEntries(page)
+	var closeText, recloseText string
+	var newerCurrent, olderCurrent bool
+	for _, e := range entries {
+		switch e.ID {
+		case closeEntry.ID:
+			closeText = e.Text
+		case "e90":
+			recloseText = e.Text
+		case "e91":
+			newerCurrent = e.Current
+		case "e92":
+			olderCurrent = e.Current
+		}
+	}
+	for _, want := range []string{"Topic closed.", "implementing -> cleared", "owner worker", "estimate 10 minutes", "actual 60000 ms"} {
+		if !strings.Contains(closeText, want) {
+			t.Errorf("close text %q missing %q", closeText, want)
+		}
+	}
+	if strings.Contains(closeText, "legacy secret") || recloseText != "Topic closed." || !newerCurrent || olderCurrent {
+		t.Fatalf("close=%q reclose=%q newerCurrent=%v olderCurrent=%v", closeText, recloseText, newerCurrent, olderCurrent)
+	}
+	for _, layout := range layouts() {
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		wantNone(t, out, "legacy secret", "replacement secret")
+	}
+	if !reflect.DeepEqual(before, mustMarshal(t, st)) {
+		t.Fatal("projection modified history")
+	}
+}
+
 func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 	st := streamFixture()
 	before := mustMarshal(t, st)
 	tv := topicView(t, st, LayoutFull, "t")
-	if tv.LatestAgent == nil || tv.LatestAgent.ID != "e5" || tv.Summary() != "agent state" {
-		t.Fatalf("summary replaced by non-agent entry: %+v", tv.LatestAgent)
+	if tv.LatestAgent == nil || tv.LatestAgent.ID != "e5" {
+		t.Fatalf("latest-log identity changed: %+v", tv.LatestAgent)
+	}
+	if tv.Head == nil || tv.Head.ID != "e9" || tv.Summary() != "recap e9" {
+		t.Fatalf("latest panel did not replace head summary: %+v", tv.Head)
 	}
 	if tv.Stream.Count != 10 || len(tv.Stream.Runs[0].Systems) != 2 || tv.Stream.Runs[1].Entry.ID != "e3" || len(tv.Stream.Runs[2].Systems) != 1 {
 		t.Fatalf("system folding swallowed/reordered a panel: %+v", tv.Stream)
@@ -91,8 +164,8 @@ func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 // Every panel post appends a version at its own write position. An earlier
 // version stays folded in place, links to the newest version and keeps its
 // exact eN link, while the latest keeps the pN target. Panel post events are
-// left out of the view but stay in the store; the header remains the latest
-// agent log line.
+// left out of the view but stay in the store; a later agent log replaces
+// the panel recap in the header.
 func TestPanelVersionsKeepWriteOrderAndLinks(t *testing.T) {
 	st := &State{}
 	at := func(minutes int, commands string) {
@@ -342,8 +415,8 @@ func TestStreamEmbedOnlyLatestLineAndPanelRecaps(t *testing.T) {
 	}
 	view := BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r", FullBoardLink: "file:///board/index.html"})
 	out := render(t, view)
-	wantAll(t, out, `data-entry="e5" data-kind="agent"`, "agent state", `href="file:///board/index.html">Open full board</a>`, `href="file:///board/index.html#p1"`, "recap e9")
-	wantNone(t, markup(out), "CURRENT-CONTENT-PAYLOAD", "PANEL-PAYLOAD", "first system", "last system", "recap e3", `class="wb-history"`, "srcdoc=", `class="doc-body`)
+	wantAll(t, out, `class="trecap" data-entry="e9" data-kind="panel"`, `class="evi wb-evi-panel"`, `href="file:///board/index.html">Open full board</a>`, `href="file:///board/index.html#p1"`, "recap e9")
+	wantNone(t, markup(out), "CURRENT-CONTENT-PAYLOAD", "PANEL-PAYLOAD", "first system", "last system", "agent state", "recap e3", `class="wb-history"`, "srcdoc=", `class="doc-body`)
 	if len(out) > (2<<20)*44/100 {
 		t.Fatalf("compact embed exceeds 44%% of the 2 MiB budget: %d bytes", len(out))
 	}

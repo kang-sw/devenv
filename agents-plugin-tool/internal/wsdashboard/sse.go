@@ -42,7 +42,7 @@ import (
 
 const (
 	// sseMinInterval coalesces bursts (a streamed reply nudges about ten times
-	// a second) into at most one render per stream per interval.
+	// a second) into at most one render per shared page per interval.
 	sseMinInterval = 250 * time.Millisecond
 	// sseRefreshInterval is the refresh tick: liveness (a peer or session
 	// reaching its live window's end) follows the clock, and a page source
@@ -74,17 +74,30 @@ type broker struct {
 	seq              uint64
 	changed          map[string]uint64
 	anyWake, allWake uint64
+	// waking holds the first sequence in each token's short notification
+	// window. Every wake still invalidates reads; repeated notifications are
+	// folded into one trailing signal, so a last change is never dropped.
+	waking map[string]uint64
+	after  func(time.Duration, func())
 }
 
 // subscription is one stream's wake channel and the tokens it hears.
 type subscription struct {
 	ch chan struct{}
+	// notified is the sequence of its last notification (including one
+	// already pending). A subscriber joining an open wake window must hear
+	// its first subsequent change immediately, not wait for its trailing edge.
+	notified uint64
 	// deps are the tokens its page depends on; nil hears every wake.
 	deps map[string]bool
 }
 
 func newBroker(stats *streamStats) *broker {
-	return &broker{subs: map[*subscription]struct{}{}, stats: stats, changed: map[string]uint64{}}
+	return &broker{
+		subs: map[*subscription]struct{}{}, stats: stats, changed: map[string]uint64{},
+		waking: map[string]uint64{},
+		after:  func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
+	}
 }
 
 // subscribe returns a subscription that hears every wake until follow
@@ -101,8 +114,9 @@ func (b *broker) subscribe() (*subscription, func()) {
 	}
 }
 
-// wake records a change of token and signals, without blocking, every
-// stream that hears it; a stream already signalled keeps one pending wake.
+// wake records every change immediately. Notifications have a leading and
+// (only if repeated) trailing edge per token per sseMinInterval. In particular,
+// an agent write and its index re-read share a session's notification window.
 func (b *broker) wake(token string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -113,6 +127,39 @@ func (b *broker) wake(token string) {
 		b.changed[token] = b.seq
 	}
 	b.anyWake = b.seq
+	if first, pending := b.waking[token]; pending {
+		for sub := range b.subs {
+			if sub.notified < first && (token == "" || sub.deps == nil || sub.deps[token]) {
+				b.signal(sub)
+			}
+		}
+		return
+	}
+	b.waking[token] = b.seq
+	b.signalTokenLocked(token)
+	b.after(sseMinInterval, func() { b.flushWake(token) })
+}
+
+// flushWake closes one notification window. The trailing signal is needed
+// even when a subscriber consumed the leading edge during a render.
+func (b *broker) flushWake(token string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	first, pending := b.waking[token]
+	if !pending {
+		return
+	}
+	delete(b.waking, token)
+	latest := b.changed[token]
+	if token == "" {
+		latest = b.allWake
+	}
+	if latest > first {
+		b.signalTokenLocked(token)
+	}
+}
+
+func (b *broker) signalTokenLocked(token string) {
 	for sub := range b.subs {
 		if token == "" || sub.deps == nil || sub.deps[token] {
 			b.signal(sub)
@@ -132,6 +179,7 @@ func (b *broker) signalAll() {
 }
 
 func (b *broker) signal(sub *subscription) {
+	sub.notified = b.seq
 	select {
 	case sub.ch <- struct{}{}:
 		b.stats.Signals.Add(1)
@@ -682,7 +730,10 @@ func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string
 				break
 			}
 		}
-		if held[name] == region.Hash && !(isBoard && topics.previous == nil) && !(row.state != nil && !row.state.initialized) {
+		if held[name] == region.Hash && !(row.state != nil && !row.state.initialized) {
+			if isBoard {
+				topics.previous = board
+			}
 			continue
 		}
 		event, data := "region", any(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})

@@ -3,8 +3,13 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { connectDaemon } = require('./daemon-controller');
+const { selectDaemon } = require('./daemon-selection');
+const { cacheRoot, inspect, browserCookie, browserLoginLink } = require('./endpoint');
+const LOGIN_COPIED = 'werkschaft:login-copied';
 const { pythonAvailable } = require('./python');
 const { nextZoom, destination } = require('./policy');
+const { createRecovery, safeURL } = require('./recovery');
+const { createShellLog } = require('./shell-log');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 const { createUpdater } = require('./update');
 const UPDATE = Object.freeze({ check: 'werkschaft:update-check', download: 'werkschaft:update-download',
@@ -28,9 +33,25 @@ function failStartup({ app, dialog }, error) {
   } finally { app.exit(1); }
 }
 
-function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session }, platform = process.platform) {
+function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session, clipboard, crashReporter }, platform = process.platform) {
   app.setName('Werkschaft');
   if (!app.requestSingleInstanceLock()) { app.quit(); return; }
+  const userData = app.getPath('userData');
+  const logShell = createShellLog(userData);
+  app.on('child-process-gone', (_event, details) => {
+    logShell('child-process-gone', { type: details.type, reason: details.reason,
+      exitCode: details.exitCode, name: details.name });
+  });
+  if (crashReporter) {
+    try {
+      const dumps = path.join(userData, 'Crashpad');
+      fs.mkdirSync(dumps, { recursive: true });
+      app.setPath('crashDumps', dumps);
+      crashReporter.start({ uploadToServer: false });
+    } catch (error) {
+      logShell('crash-reporter-error', { error: error.message });
+    }
+  }
   let window, pin = null, connecting = false, title = 'Werkschaft — Connecting…';
   let zoom = 1;
   const focus = () => {
@@ -47,8 +68,15 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     // The update status waits here until the attached dashboard subscribes.
     let updatePending = null, updateTarget = null;
     const sendUpdate = status => {
-      updatePending = status;
-      if (updateTarget && !updateTarget.isDestroyed()) { updateTarget.send(UPDATE.status, status); updatePending = null; }
+      if (updateTarget && !updateTarget.isDestroyed()) {
+        updateTarget.send(UPDATE.status, status);
+        updatePending = null;
+        updater.statusDelivered?.(status);
+      } else if (updatePending?.state !== 'apply-error' || status.state === 'apply-error') {
+        // Keep a failed apply visible to a late subscriber without stopping
+        // automatic feed checks or their standing phase updates.
+        updatePending = status;
+      }
     };
     const updater = createUpdater({ version: app.getVersion(), packaged: app.isPackaged,
       userData: app.getPath('userData'), platform, send: sendUpdate });
@@ -62,8 +90,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     app.on('will-quit', () => {
       try { updater.applyOnQuit(relaunch); } catch (error) { console.error(`Update apply at quit failed: ${error.message}`); }
     });
-    // The dashboard's only preload is the update bridge (dashboard-preload.js);
-    // its IPC is accepted from the pinned dashboard origin only. No permissions.
+    // The dashboard preload exposes update controls and a payload-free login
+    // copy notification. Renderer IPC is pinned to the dashboard main frame.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     const Window = platform === 'win32' ? BaseWindow : BrowserWindow;
@@ -82,6 +110,27 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
     const wc = dashboardContents();
     let bar, applicationMenu, menuOpen = false, dialogOpen = false;
+    function toggleDashboardDevTools() {
+      if (!dashboardView) return wc.toggleDevTools();
+      if (wc.isDevToolsOpened()) wc.closeDevTools();
+      else wc.openDevTools({ mode: 'detach' });
+    }
+    function registerDevToolsShortcut(contents) {
+      contents.on('before-input-event', (event, input) => {
+        const f12 = input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta;
+        const inspect = input.key.toLowerCase() === 'i' && (platform === 'darwin'
+          ? input.meta && input.alt && !input.control && !input.shift
+          : input.control && input.shift && !input.alt && !input.meta);
+        if (input.type === 'keyDown' && (f12 || inspect)) {
+          event.preventDefault();
+          if (!input.isAutoRepeat) {
+            console.log(`DevTools shortcut ${input.key}: source webContents=${contents.id}, dashboard webContents=${wc.id}`);
+            toggleDashboardDevTools();
+          }
+        }
+      });
+    }
+    registerDevToolsShortcut(wc);
     function focusDashboard(afterInteraction = false) {
       if (!dashboardView || window.isDestroyed() || wc.isDestroyed() || !window.isFocused()) return;
       if (menuOpen || dialogOpen || (!afterInteraction && bar?.view.webContents.isFocused())) return;
@@ -112,6 +161,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       wc.once('did-finish-load', () => focusDashboard());
       window.on('closed', () => { if (!wc.isDestroyed()) wc.close(); });
       window.setMenuBarVisibility(false);
+      registerDevToolsShortcut(bar.view.webContents);
       // Bare Alt opens the same menu as the hamburger, from either view.
       for (const contents of [wc, bar.view.webContents]) {
         let altOnly = false;
@@ -119,9 +169,6 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           if (input.type === 'keyDown') {
             altOnly = input.key === 'Alt' && !input.control && !input.shift && !input.meta;
             if (altOnly) event.preventDefault();
-            if (input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta) {
-              event.preventDefault(); wc.toggleDevTools();
-            }
           }
           if (input.key === 'Alt' && input.type === 'keyUp' && altOnly) {
             event.preventDefault(); altOnly = false; openMenu();
@@ -131,6 +178,44 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       trackDashboardTheme(wc, color => bar.setTheme(color));
     }
     let navigation, closing = false, retained = { pin, title };
+    const recovery = createRecovery({ retry: () => {
+      if (window.isDestroyed() || wc.isDestroyed()) return;
+      if (connecting) recovery.schedule();
+      else connect();
+    } });
+    window.on('closed', () => recovery.dispose());
+    wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      logShell('did-fail-load', { errorCode: code, errorDescription: description, url: safeURL(url), isMainFrame });
+      console.error(`Dashboard did-fail-load: code=${code} url=${safeURL(url)} mainFrame=${isMainFrame}`);
+      if (!isMainFrame || code === -3 || !pin || destination(url, pin) !== 'dashboard') return;
+      recovery.failure(true, code);
+      if (navigation?.loading) navigation.failureCode = code;
+      // Explicit loads already have a rejection handler. Page-initiated loads do not.
+      if (!navigation?.loading) {
+        const attempt = beginNavigation();
+        navigationFailed(attempt, `Load failed (${code}): ${description}`).finally(() => {
+          if (navigation === attempt) navigation = null;
+        });
+      }
+    });
+    wc.on('render-process-gone', (_event, details) => {
+      logShell('render-process-gone', { reason: details.reason, exitCode: details.exitCode, url: safeURL(wc.getURL()), isMainFrame: true });
+      console.error(`Dashboard render-process-gone: reason=${details.reason} url=${safeURL(wc.getURL())}`);
+      recovery.gone(details.reason);
+    });
+    wc.on('unresponsive', () => {
+      logShell('unresponsive', { url: safeURL(wc.getURL()), isMainFrame: true });
+      console.error(`Dashboard unresponsive: url=${safeURL(wc.getURL())}`);
+      recovery.unresponsive();
+    });
+    wc.on('responsive', () => {
+      logShell('responsive', { url: safeURL(wc.getURL()), isMainFrame: true });
+      console.log(`Dashboard responsive: url=${safeURL(wc.getURL())}`);
+      recovery.responsive();
+    });
+    wc.on('did-finish-load', () => {
+      if (pin && destination(wc.mainFrame.url, pin) === 'dashboard') recovery.success();
+    });
     window.on('close', event => {
       closing = true;
       if (dashboardView && !wc.isDestroyed()) {
@@ -164,15 +249,19 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     // Initial iframe src loads do not reliably emit will-frame-navigate.
     // Enforce the pin at the network boundary too, including redirect hops.
     const localPages = ['connection.html', 'python-missing.html'].map(file => pathToFileURL(path.join(__dirname, file)).href);
+    // Only the connection page accepts diagnostics in its query; no new file authority.
+    const isLocalPage = url => localPages.includes(url) || url.split('?')[0] === localPages[0];
     wc.on('did-navigate', (_event, url) => {
       const target = navigation?.commitTarget;
       // Rollback belongs to the committed document, never another attempt's
       // provisional pin/title. A late promise settlement cannot advance it.
-      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : localPages.includes(url))) retained = target;
+      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : isLocalPage(url))) retained = target;
     });
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      // The DevTools frontend can load before its webContents identity is available.
+      if (/^(?:devtools|chrome-devtools):/i.test(details.url)) return callback({});
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
-      if (details.resourceType === 'mainFrame' && localPages.includes(details.url)) return callback({});
+      if (details.resourceType === 'mainFrame' && isLocalPage(details.url)) return callback({});
       const action = destination(details.url, pin, details.resourceType === 'mainFrame');
       if (action === 'dashboard' || action === 'frame') return callback({});
       callback({ cancel: true });
@@ -216,12 +305,12 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       title = value;
       if (!window.isDestroyed()) { window.setTitle(title); bar?.setTitle(title); }
     }
-    function navigationFailed(attempt) {
+    function navigationFailed(attempt, reason) {
       pin = null;
       const failureTitle = 'Werkschaft — Navigation failed — ⌘R to retry';
       setTitle(failureTitle);
       attempt.commitTarget = { pin: null, title: failureTitle };
-      return wc.loadFile(path.join(__dirname, 'connection.html')).catch(() => {});
+      return wc.loadFile(path.join(__dirname, 'connection.html'), reason ? { query: { reason } } : undefined).catch(() => {});
     }
     async function navigate(url, attempt = beginNavigation()) {
       if (!isCurrent(attempt)) return;
@@ -238,19 +327,31 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (attempt.stayed && (error.code === 'ERR_ABORTED' || error.errno === -3)) {
           pin = retained.pin;
           setTitle(retained.title);
-        } else await navigationFailed(attempt);
+          recovery.success();
+        } else {
+          const code = attempt.failureCode ?? error.errno;
+          await navigationFailed(attempt, Number.isInteger(code) ? `Load failed (${code})` : 'Load failed');
+        }
       } finally {
         attempt.loading = false;
         if (navigation === attempt) navigation = null;
       }
     }
-    async function connect(replace = false) {
+    async function observeConnection(url) {
+      const root = cacheRoot();
+      const observed = await inspect(root);
+      if (observed.url !== `${new URL(url).origin}/`) throw new Error('Dashboard connection changed; retry');
+      return { root, observed };
+    }
+    async function connect(replace = false, attachRunning = false) {
       if (connecting || window.isDestroyed()) return;
       const attempt = beginNavigation();
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
-        const available = await pythonAvailable();
+        // Windows starts the bundled native daemon directly. Python is only
+        // needed by optional holder features, never to start or attach here.
+        const available = platform === 'win32' || await pythonAvailable();
         if (!isCurrent(attempt)) return;
         if (!available) {
           pin = null;
@@ -261,7 +362,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           return;
         }
         let url;
-        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace }, {
+        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: app.isPackaged, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
           onNotice: message => {
             if (window.isDestroyed()) return;
             dialogOpen = true;
@@ -276,9 +377,27 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           const failureTitle = `Werkschaft — ${error.message} — ⌘R to retry`;
           setTitle(failureTitle);
           attempt.commitTarget = { pin: null, title: failureTitle };
-          await wc.loadFile(path.join(__dirname, 'connection.html'));
+          const logPath = path.join(app.getPath('userData'), 'daemon-start.log');
+          let log = `Error log: ${logPath}`;
+          try {
+            fs.mkdirSync(path.dirname(logPath), { recursive: true });
+            fs.appendFileSync(logPath, `${new Date().toISOString()} ${error.stack || error}\n`, { mode: 0o600 });
+          } catch (logError) { log = `Could not write ${logPath}: ${logError.message}`; }
+          await loadDocument(attempt, () => wc.loadFile(path.join(__dirname, 'connection.html'), {
+            query: { reason: error.message, log },
+          }));
           return;
         }
+        if (!isCurrent(attempt)) return;
+        try {
+          const { root, observed } = await observeConnection(url);
+          const cookie = await browserCookie(root, observed);
+          if (!isCurrent(attempt)) return;
+          if (cookie) await session.defaultSession.cookies.set({
+            url: observed.url, name: cookie.name, value: cookie.value, path: '/',
+            httpOnly: true, sameSite: 'strict', expirationDate: Date.now() / 1000 + cookie.maxAge,
+          });
+        } catch { /* Missing auth route or any failure still navigates to the daemon's gate. */ }
         if (!isCurrent(attempt)) return;
         pin = url;
         setTitle('Werkschaft');
@@ -287,12 +406,41 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       finally {
         connecting = false;
         if (navigation === attempt) navigation = null;
+        recovery.retryIfActive();
       }
     }
+    const fromConnectionPage = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
+      !pin && isLocalPage(event.senderFrame.url);
+    ipcMain.handle('werkschaft:daemon-availability', event => {
+      if (!fromConnectionPage(event)) return { available: false };
+      if (!['darwin', 'win32'].includes(platform)) return { available: false, reason: 'Daemon start is unavailable on this platform.' };
+      if (!app.isPackaged) {
+        try { selectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: false }); }
+        catch (error) { return { available: false, reason: error.message }; }
+      }
+      return { available: true };
+    });
+    ipcMain.handle('werkschaft:daemon-start', async event => {
+      if (!fromConnectionPage(event) || connecting) return;
+      await connect(false, true);
+    });
     const fromDashboard = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
       !!pin && destination(event.senderFrame.url, pin) === 'dashboard';
-    wc.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
+    wc.on('did-start-navigation', (_event, url, inPlace, isMainFrame) => {
+      if (isMainFrame && !(connecting && navigation?.loading)) {
+        logShell('did-start-navigation', { url: safeURL(url), isMainFrame, inPlace });
+      }
       if (isMainFrame && !inPlace) updateTarget = null;
+    });
+    wc.on('console-message', (event, level, message, line, sourceId) => {
+      // Electron's current event carries details on the event; older releases
+      // deliver the same data as positional arguments.
+      const severity = event.level ?? level;
+      if (severity !== 'error' && severity !== 3) return;
+      const isMainFrame = event.frame ? event.frame === wc.mainFrame : null;
+      logShell('console-message', { level: 'error',
+        message: isMainFrame === false ? '[subframe message omitted]' : event.message ?? message,
+        line: event.lineNumber ?? line, url: safeURL(event.sourceId ?? sourceId), isMainFrame });
     });
     ipcMain.on(UPDATE.subscribe, event => {
       if (!fromDashboard(event)) return;
@@ -315,13 +463,30 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       zoom = nextZoom(zoom, step);
       wc.setZoomFactor(zoom);
     }
+    let copyingLogin = false;
+    async function copyBrowserLoginLink() {
+      if (!pin || connecting || copyingLogin || window.isDestroyed()) return;
+      copyingLogin = true;
+      const origin = pin;
+      try {
+        const { root, observed } = await observeConnection(origin);
+        const current = wc.mainFrame.url;
+        const target = destination(current, origin) === 'dashboard' ? new URL(current) : new URL(origin);
+        const url = await browserLoginLink(root, observed, target.pathname + target.search + target.hash);
+        if (pin !== origin || connecting || window.isDestroyed() || wc.isDestroyed()) return;
+        clipboard.writeText(url);
+        // Neither the link nor any credential crosses the preload bridge.
+        if (destination(wc.mainFrame.url, pin) === 'dashboard') wc.send(LOGIN_COPIED);
+      } catch { /* Leave the clipboard untouched when minting fails. */ }
+      finally { copyingLogin = false; }
+    }
     const menu = [
       { role: 'appMenu' },
       { label: 'File', submenu: [{ role: 'close' }] },
       { role: 'editMenu' },
       { label: 'View', submenu: [
         { role: 'togglefullscreen' },
-        { id: 'devtools', label: 'Toggle Developer Tools', accelerator: platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: () => dashboardContents().toggleDevTools() },
+        { id: 'devtools', label: 'Toggle Developer Tools', accelerator: platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: toggleDashboardDevTools },
         { type: 'separator' },
         { id: 'zoom_reset', label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoomBy('reset') },
         { id: 'zoom_in', label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoomBy('in') },
@@ -332,6 +497,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       { label: 'Connection', submenu: [
         { id: 'retry', label: 'Retry', accelerator: 'CmdOrCtrl+R', click: () => connect() },
         { id: 'replace_daemon', label: 'Replace daemon (same core)', click: () => connect(true) },
+        { type: 'separator' },
+        { id: 'copy_browser_login', label: 'Copy Browser Login Link to Clipboard', click: copyBrowserLoginLink },
       ] },
     ];
     applicationMenu = Menu.buildFromTemplate(menu);

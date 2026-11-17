@@ -2,12 +2,13 @@ package wsxmlcmd
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
 )
 
-var literalContextShapes = []string{"wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog", "panel-foo-desync", "rejected-group-html-fence", "rejected-group-html-inline"}
+var literalContextShapes = []string{"quoted-wrapper-openers", "quoted-wrapper-prose-fields", "wrapper-old-tilde", "wrapper-new-tilde", "rejected-group-fence", "rejected-group-tilde", "rejected-group-fence-nolog", "panel-foo-desync", "rejected-group-html-fence", "rejected-group-html-inline"}
 
 func literalContextGrammar() Grammar {
 	g := literalPerformanceGrammar()
@@ -16,6 +17,15 @@ func literalContextGrammar() Grammar {
 }
 
 func literalContextInput(kind string, size int) (string, int) {
+	if kind == "quoted-wrapper-prose-fields" {
+		unit := "Use `<wb:change>` with <wb:old> and <wb:new> fields. "
+		n := max(1, size/len(unit))
+		return `<wb:topic name="t"><wb:panel name="p" recap="r">` + strings.Repeat(unit, n) + `End in </wb:change>.</wb:panel></wb:topic>`, n
+	}
+	if kind == "quoted-wrapper-openers" {
+		body := strings.Repeat("`<wb:change>` ", max(1, size/13))
+		return `<wb:topic name="t"><wb:panel name="p" recap="r">` + body + `</wb:panel></wb:topic>`, 1
+	}
 	if kind == "panel-foo-desync" {
 		unit := "<wb:panel name=\"p\" recap=\"r\">`<wb:change><wb:old>x</wb:panel><wb:foo>y</wb:old><wb:new>z</wb:new></wb:change></wb:panel>"
 		n := max(1, size/len(unit))
@@ -68,6 +78,24 @@ func checkLiteralContext(t *testing.T, kind, input string, count int, ordered bo
 	}
 	if !complete {
 		t.Fatalf("incomplete: %v", p.List)
+	}
+	if kind == "quoted-wrapper-prose-fields" {
+		if ordered {
+			cmds = cmds[1:]
+		}
+		if len(p.List) != count || len(cmds) != 1 || len(cmds[0].Children) != 0 || !strings.HasSuffix(cmds[0].Body, "End in </wb:change>.") {
+			t.Fatalf("prose fields: commands=%d problems=%d want=%d", len(cmds), len(p.List), count)
+		}
+		return
+	}
+	if kind == "quoted-wrapper-openers" {
+		if ordered {
+			cmds = cmds[1:]
+		}
+		if len(p.List) != 0 || len(cmds) != 1 || len(cmds[0].Children) != 0 || !strings.HasPrefix(cmds[0].Body, "`<wb:change>` ") {
+			t.Fatalf("quoted openers: commands=%+v problems=%v", cmds, p.List)
+		}
+		return
 	}
 	if kind == "panel-foo-desync" {
 		if ordered {
@@ -159,13 +187,81 @@ func TestLiteralContextPerformanceBoundaries(t *testing.T) {
 	}
 }
 
+var literalContextSizes = []int{50000, 100000, 200000, 400000, 800000}
+
+const maxLiteralContextExponent = 1.5
+
+// Fit time = constant * bytes^exponent in log space. Five sizes spanning 16x
+// distinguish repeated suffix scans (exponent ~2) from linear/indexed walks
+// (~1, or slightly higher for binary lookups and GC). The old 50/100/200KB
+// adjacent-ratio gate failed on shared CI at 2.67/9.07/22.30ms despite local
+// 50..800KB benchmarks fitting ~1.04. Batching alone did not remove that noise.
+// Allow exponent <=1.5, halfway between linear and quadratic, while retaining
+// the separate 100ms budget at 200KB. A sustained quadratic path grows 256x
+// over this range, far beyond the allowed 64x, even if it fits the time budget.
+func literalParseGrowthExponent(inputBytes []int, times []time.Duration) float64 {
+	var meanX, meanY float64
+	for i, size := range inputBytes {
+		meanX += math.Log(float64(size))
+		meanY += math.Log(float64(times[i]))
+	}
+	meanX /= float64(len(inputBytes))
+	meanY /= float64(len(times))
+	var covariance, variance float64
+	for i, size := range inputBytes {
+		x := math.Log(float64(size)) - meanX
+		y := math.Log(float64(times[i])) - meanY
+		covariance += x * y
+		variance += x * x
+	}
+	return covariance / variance
+}
+
+func TestLiteralParseGrowthExponent(t *testing.T) {
+	for _, exponent := range []float64{1, 1.25, 1.75, 2} {
+		t.Run(fmt.Sprint(exponent), func(t *testing.T) {
+			var times []time.Duration
+			for _, size := range literalContextSizes {
+				times = append(times, time.Duration(float64(time.Millisecond)*math.Pow(float64(size)/50000, exponent)))
+			}
+			if got := literalParseGrowthExponent(literalContextSizes, times); math.Abs(got-exponent) > 0.000001 {
+				t.Fatalf("exponent=%f want=%f", got, exponent)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name   string
+		micros []int
+		accept bool
+	}{
+		// Actual CI failures followed by linear doubling: a transient slow
+		// size transition must not condemn an otherwise linear larger walk.
+		{"ci-tilde-linear-tail", []int{2666, 9073, 22304, 44608, 89216}, true},
+		{"ci-fence-linear-tail", []int{3036, 6940, 26682, 53364, 106728}, true},
+		{"quadratic-under-budget", []int{250, 1000, 4000, 16000, 64000}, false},
+		{"linear-plus-quadratic", []int{1000, 3000, 10000, 36000, 136000}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var times []time.Duration
+			for _, micros := range tc.micros {
+				times = append(times, time.Duration(micros)*time.Microsecond)
+			}
+			exponent := literalParseGrowthExponent(literalContextSizes, times)
+			if (exponent <= maxLiteralContextExponent) != tc.accept {
+				t.Fatalf("exponent=%.3f accept=%v want=%v", exponent, exponent <= maxLiteralContextExponent, tc.accept)
+			}
+		})
+	}
+}
+
 func TestLiteralContextNearLinearGrowth(t *testing.T) {
 	g := literalContextGrammar()
 	for _, kind := range literalContextShapes {
 		for _, ordered := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/ordered=%v", kind, ordered), func(t *testing.T) {
 				var bests []time.Duration
-				for _, size := range []int{50000, 100000, 200000} {
+				var inputBytes []int
+				for _, size := range literalContextSizes {
 					input, count := literalContextInput(kind, size)
 					checkLiteralContext(t, kind, input, count, ordered)
 					best := bestLiteralParseTime(t, len(input), func() {
@@ -176,10 +272,16 @@ func TestLiteralContextNearLinearGrowth(t *testing.T) {
 							Parse(p, g, input)
 						}
 					})
+					inputBytes = append(inputBytes, len(input))
 					bests = append(bests, best)
 				}
-				if bests[2] >= 100*time.Millisecond || bests[2] > 6*bests[0]+5*time.Millisecond || bests[1] > 3*bests[0]+5*time.Millisecond || bests[2] > 3*bests[1]+5*time.Millisecond {
-					t.Fatalf("superlinear or over 100ms at 200KB: %v", bests)
+				exponent := literalParseGrowthExponent(inputBytes, bests)
+				t.Logf("50..800KB growth exponent=%.3f", exponent)
+				if exponent > maxLiteralContextExponent {
+					t.Errorf("superlinear growth: exponent=%.3f > %.1f: %v", exponent, maxLiteralContextExponent, bests)
+				}
+				if bests[2] >= 100*time.Millisecond {
+					t.Errorf("200KB absolute bound: %s >= 100ms", bests[2])
 				}
 			})
 		}
@@ -189,7 +291,7 @@ func TestLiteralContextNearLinearGrowth(t *testing.T) {
 func benchmarkLiteralWrapperAndRejectedGroups(b *testing.B) {
 	g := literalContextGrammar()
 	for _, kind := range literalContextShapes {
-		for _, size := range []int{50000, 100000, 200000} {
+		for _, size := range literalContextSizes {
 			input, _ := literalContextInput(kind, size)
 			for _, ordered := range []bool{false, true} {
 				b.Run(fmt.Sprintf("%s/%d/ordered=%v", kind, size, ordered), func(b *testing.B) {

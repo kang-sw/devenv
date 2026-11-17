@@ -52,6 +52,11 @@
 /* A click on the framed main panel dismisses Settings in its owning shell. */
 :root[data-shell]:has(.settings-pop:not([hidden])) .frames { pointer-events: none; }
 .gmenu.gcard { position: static; width: auto; box-shadow: none; padding: 0; background: transparent; }
+.gmenu.loginbox { display: grid; gap: 3px; padding-top: 8px; border-top: 1px solid var(--wb-muted); }
+.loginbox .gt { padding-top: 0; }
+.loginbox button { color: var(--wb-fg); }
+.loginbox .gk { display: grid; place-items: center; height: 20px; }
+.loginbox .gk .i { width: 13px; height: 13px; }
 /* the pooled-worktree card: leased rows first, then idle ones by profile */
 #wtcount[hidden] { display: none; }
 .wtcard .body { display: flex; flex-direction: column; gap: 8px; }
