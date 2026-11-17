@@ -131,6 +131,9 @@
         // takes the mark too, and its frame takes it once mounted.
         q(".doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
+      // The morph retains unchanged topic nodes, including hydrated closed
+      // pages. Their image frames still follow the board's external-file stamp.
+      if (window.wbHistory && window.wbHistory.refreshImages) window.wbHistory.refreshImages(doc);
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
         startMotion(moves.concat(slideBoard(el, before, boardTop)));
