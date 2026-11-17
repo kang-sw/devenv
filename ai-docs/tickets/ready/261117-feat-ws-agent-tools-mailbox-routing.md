@@ -688,6 +688,139 @@ and no write beyond the store's one ring append per send for daemon-owned
 addresses, `pi.*` absent from `tools/list` but still callable,
 with no shipped text referencing `pi.*`.
 
+### Result (b83e59c78) - 2026-11-18
+
+Commits fddd07e4d (runner routing, steer, relation), 768af2113 (`pi.*`
+hiding, follow-up text, playbook terms), de759639d (Pi guide and bridge
+text, regenerated bundle and payloads), a410737cb (manual), b83e59c78
+(lite-review fixes).
+
+Design record:
+
+- Routing. The runner watches the mailbox of every spawned child
+  (`Record.Parent` set), awake or asleep, as it watched a lead's
+  (`wsagent/runner.go` startConv). A child's address `id:<reply-id>` is
+  its key's reply-id queue, so `mailbox.send` needed no change.
+  `LeadMail.Drain` returns `ClaimedMail{Text, Sender}`. `Sender` is the
+  sender's reply-id: from a `ReplyTo`/`From` `id:` handle, or the owner of a
+  named address (`mcp/lead_mail.go` mailSenderReplyID).
+- Delivery (Decision 4). `steersMail` needs a running turn and a live
+  process: not replaying, not wrap-held, not closed or hidden. Where the
+  conversation has catalog caps they must not grade steer `unsupported`;
+  where it has none (Pi), the handle alone decides. A lead steers through
+  its steer control, a child through its report steerer. A child's steered
+  mail is recorded as a steered report, so its turn's report covers it
+  (Decision 5 unchanged). Anything else waits in `Record.Mail` for the
+  next turn. After one steer of a batch fails, the rest of the batch waits
+  too, which keeps the order.
+- Relation (Decisions 3 and 18). `Runner.mailRelation` returns `parent`
+  when the sender is the receiver's `Record.Parent`, `child` when the
+  sender's record names the receiver as parent, `peer` otherwise, and
+  nothing for system mail. The relation is delivered as a `[relation: ...]`
+  line opening the body. It is not a head suffix, so that an older
+  binary's parse keeps the sender (verdict below). `agent.list` shows no
+  relation: it lists only the caller's own children.
+- Wake and clock (Decisions 14 and 16). Held mail sets a child's
+  `LastActiveAt` and counts as input for awake/open-child accounting,
+  unless the wake is refused. `kick` wakes the child through Phase 1's
+  seam, so the width cap is not consulted. A refused wake keeps the mail
+  in `Record.Mail` across restarts and calls `WakeRefused` once per
+  distinct sender of each claim.
+- Store (Decision 2). There is no store of its own. A send is one line in
+  the memory-first store's restore ring.
+- `pi.*` (Decision 10). `filteredTools` skips them, and dispatch and the
+  per-call gate are unchanged. `piWorkerTool`, `piWorkerDescriptions` and
+  the `piListed` cache lost their only reader and are deleted.
+- Text moved to `agent.*`:
+  - `agent.spawn`'s answer and description send follow-ups through
+    `mailbox.send` to the address.
+  - Completion mail is labelled `agent:<id>` and opens "Reply with
+    mailbox.send(to: "id:<id>")".
+  - The report head reads `[subagent id:<id> ...]`.
+  - The playbook terms for an MCP-only Pi caller name `agent.spawn` (tier,
+    authority) and `mailbox.send`. They apply only when the caller lists
+    `agent.*` and is allowed `agent.spawn` and `mailbox.send`.
+  - In the Pi package: the lead guide, the compatibility section, the
+    tier advisory, the gateway descriptions, and the retirement
+    notices/errors.
+
+Compatibility verdicts against main 6bd0f51bf (0.50.5):
+
+- `pi.*` hiding: T0.
+  - Main lists the tools when `piListed` holds
+    (`main:agents-plugin-tool/internal/mcp/server_inventory.go:81-87`).
+    It dispatches a call whether or not the tool is listed
+    (`main:.../mcp/server_dispatch.go:1646-1647`), gated per call by
+    `piUnavailable` (`main:.../mcp/pi_tools.go:170`).
+  - This branch never lists them
+    (`agents-plugin-tool/internal/mcp/server_inventory.go:81`) and keeps
+    the same dispatch (`server_dispatch.go:1656-1657`) and call gate
+    (`pi_tools.go:159`). No data is written or read differently, so a call
+    by name answers as before.
+  - A client that lists the tools again after a daemon replacement no
+    longer shows `pi.*` to its model, and does show `agent.*`. This is the
+    (54)=b outcome: hidden now, handlers deleted next minor.
+- Relation: T0.
+  - `wsmailbox.Envelope` is unchanged
+    (`agents-plugin-tool/internal/wsmailbox/store.go:83`, field-for-field
+    `main:.../wsmailbox/store.go:90`). The relation exists only in claimed
+    text: text steered into a process, held in `Record.Mail`, or kept as a
+    steered report. `Record.Mail` and `Record.Steered` are the same
+    members on main (`main:.../wsagent/record.go:95,144`), and the old
+    binary delivers them verbatim.
+  - When an old binary Returns a held text, its `parseMailText`
+    (`main:.../mcp/lead_mail.go:235-267`) splits the head at the first
+    ":\n". It keeps `From` and `SentAt` and leaves the relation line in
+    `Content`, so it delivers what the new binary shows.
+  - The one display-only effect: on an upgrade after such a Return, the
+    line shows twice.
+
+Verification:
+
+- `go test ./...` in `agents-plugin-tool/` on macOS.
+  - Pass: `wsagent` (full package), `cmd/ws-mcp` (after updating
+    TestHostedCLIWorkerTokenRouting for hidden `pi.*`), and the
+    routing/pi/agent/playbook tests of `internal/mcp`.
+  - `internal/mcp` hit the 10-minute package timeout under the concurrent
+    full run, with TestTrackerUpdateWritesEveryEventCommand running at
+    11 s. Rerun alone with `-timeout 30m`, it fails only
+    TestDashboardNotesUsesHostedCallerStoreIdentity.
+  - Remaining failures are the known pre-existing ones:
+    TestDashboardNotesUsesHostedCallerStoreIdentity,
+    TestBoardStateFilterAsks, TestSearchPalette*,
+    TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode, and
+    TestLateReloadSignalsOnlyAChangedView.
+- Coverage of the verification list:
+  - `wsagent/mail_routing_test.go`: steer per relation; next-turn fallback
+    for a catalog-unsupported steer and for a missing handle; wake past the
+    width cap; refused wake across a restart with one notice per sender;
+    clock reset; relation per lineage.
+  - `mcp/agent_mail_routing_test.go`: one ring line and no other file per
+    send, no `mailbox.json` while running; a graceful restart with Sender,
+    relation, recv and sent history, and reply-id parity; a named sender.
+  - `mcp/lead_mail_test.go`: relation-line round trip.
+  - `mcp/pi_tools_test.go` and `pi_forward_test.go`: `pi.*` absent from
+    `tools/list` but callable.
+  - Pi `daemon-agent-compat.test.ts` and `execute-gateway.test.ts`: no
+    `pi.*` in the guide, the compatibility section, or the gateway
+    descriptions.
+- Pi package `npm test`: 2665 of 2688 pass. All 19 failures also fail at
+  base a36476ba0, where the same files fail 25 (integration flakes).
+- `agents-plugin-wsflow` unittest: OK. No live hosted delegation was run.
+
+Open, for the lead:
+
+- Phase 3 not started.
+- The `pi-worker` and `pi-mini-lead` profiles keep their `pi.*` ws_tools.
+  They are reached only through the hidden `pi.spawn`; such a child gets
+  its harness's generic playbook terms.
+- `callPiWithExploreFallback` stays for a `pi.spawn` call against a daemon
+  that still lists it.
+- Accepted minors: a body from an unresolved sender that starts with a
+  relation line reads as a label; a batch split by a failed steer leaves
+  the "N message(s)" head on the steered part only. Phase 1's carried
+  minors are unchanged.
+
 ### Phase 3: Native subagent removal in hosted Claude leads and `ws/agent.spawn` workers
 
 Launch hosted Claude leads and `ws/agent.spawn` Claude workers with `--disallowedTools
