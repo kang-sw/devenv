@@ -117,9 +117,19 @@ func (r *ring) open(dir string, persistent bool, wait time.Duration, st *state) 
 		locked, err = r.lock.TryLockContext(ctx, 20*time.Millisecond)
 		cancel()
 	}
-	if err != nil || !locked {
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		r.lock = nil
+		return fmt.Errorf("lock mailbox ring %s: %w", dir, err)
+	}
+	if !locked {
 		r.lock = nil
 		return fmt.Errorf("%w: %s is held by another process (the ws daemon); mailbox writes from a directly run ws-mcp binary are unsupported while the daemon runs", errRingHeld, dir)
+	}
+	// A snapshot temp file a crash left mid-rotation is never read.
+	if stale, _ := filepath.Glob(filepath.Join(dir, ".segment-*")); len(stale) > 0 {
+		for _, p := range stale {
+			_ = os.Remove(p)
+		}
 	}
 	seqs, err := r.segments()
 	if err != nil {
@@ -340,6 +350,9 @@ func (r *ring) rotate(st *state) error {
 	if r.persistent {
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
+			// Appends stay on the current segment, so the new one must not
+			// be the newest a restore reads.
+			_ = os.Remove(path)
 			return fmt.Errorf("open mailbox ring segment: %w", err)
 		}
 		if r.file != nil {

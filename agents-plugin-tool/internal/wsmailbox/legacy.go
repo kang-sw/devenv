@@ -514,9 +514,20 @@ func (in *instance) export() error {
 	root := filepath.Join(in.cacheRoot, HistoryDirName)
 	for _, key := range slices.Sorted(maps.Keys(in.st.History)) {
 		window := in.st.History[key]
+		dir := filepath.Join(root, key)
+		// Trust the baseline only for names still on disk: a prune may
+		// have removed a directory the store last wrote long ago.
+		onDisk := map[string]bool{}
+		if names, err := legacyHistoryNames(dir); err == nil {
+			for _, name := range names {
+				onDisk[name] = true
+			}
+		}
 		known := map[string]bool{}
 		for _, name := range in.st.Baseline.History[key] {
-			known[name] = true
+			if onDisk[name] {
+				known[name] = true
+			}
 		}
 		var missing []HistoryEntry
 		for _, e := range window {
@@ -527,7 +538,6 @@ func (in *instance) export() error {
 		if len(missing) == 0 {
 			continue
 		}
-		dir := filepath.Join(root, key)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			errs = append(errs, err)
 			continue

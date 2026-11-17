@@ -99,10 +99,25 @@ var (
 	// transientMu serializes this process's transient calls per ring before
 	// the cross-process ring lock, so they queue instead of polling it.
 	transientMu = map[string]*sync.Mutex{}
+	// openings holds each cache root's persistent open in flight, or its
+	// failure for persistentRetryAfter, so the ring lock wait runs outside
+	// registryMu and a held ring costs each later call no wait of its own.
+	openings = map[string]*opening{}
 	// persistentMode makes Paths.Store open persistent instances for any
 	// cache root (EnablePersistent).
 	persistentMode atomic.Bool
 )
+
+// persistentRetryAfter is how long a failed persistent open answers later
+// calls with its error before one of them tries again.
+const persistentRetryAfter = 5 * time.Second
+
+type opening struct {
+	done     chan struct{}
+	in       *instance
+	err      error
+	failedAt time.Time
+}
 
 // EnablePersistent makes every later store call in this process hold a
 // persistent instance for its cache root, opened on first use. The
@@ -117,7 +132,7 @@ func OpenPersistent(p Paths) (*Persistent, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	in, err := registeredInstance(s)
+	in, err := registeredInstance(s, true)
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +145,10 @@ func OpenPersistent(p Paths) (*Persistent, error) {
 // shutdown takes the ring lock for itself, and fails once a successor
 // holds it.
 func ClosePersistent() error {
-	persistentMode.Store(false)
 	registryMu.Lock()
+	// Under registryMu: an open in flight sees the mode off when it
+	// finishes and closes its instance instead of registering it.
+	persistentMode.Store(false)
 	list := make([]*instance, 0, len(registry))
 	for _, in := range registry {
 		list = append(list, in)
@@ -168,19 +185,59 @@ func (p *Persistent) Close() error {
 }
 
 // registeredInstance returns s's registered instance, opening a persistent
-// one when none is registered.
-func registeredInstance(s Store) (*instance, error) {
+// one when none is registered. One open per cache root runs at a time, its
+// ring lock wait outside registryMu; concurrent callers wait for its
+// outcome, and a failure answers later callers until persistentRetryAfter
+// (explicit, an OpenPersistent, always tries). An open that finishes after
+// ClosePersistent ended persistent mode is closed again, not registered:
+// the returned instance is then closed, and the caller goes transient.
+func registeredInstance(s Store, explicit bool) (*instance, error) {
 	registryMu.Lock()
-	defer registryMu.Unlock()
 	if in := registry[s.ringDir]; in != nil {
+		registryMu.Unlock()
 		return in, nil
 	}
-	in, err := openInstance(s.paths, s.ringDir, true, false)
-	if err != nil {
-		return nil, err
+	if op := openings[s.ringDir]; op != nil {
+		select {
+		case <-op.done:
+			if !explicit && storeNow().Sub(op.failedAt) < persistentRetryAfter {
+				registryMu.Unlock()
+				return nil, op.err
+			}
+		default:
+			registryMu.Unlock()
+			<-op.done
+			if op.err != nil {
+				return nil, op.err
+			}
+			return op.in, nil
+		}
 	}
-	registry[s.ringDir] = in
-	return in, nil
+	op := &opening{done: make(chan struct{})}
+	openings[s.ringDir] = op
+	registryMu.Unlock()
+
+	in, err := openInstance(s.paths, s.ringDir, true, false)
+
+	registryMu.Lock()
+	op.in, op.err = in, err
+	discard := false
+	if err != nil {
+		op.failedAt = storeNow()
+	} else {
+		delete(openings, s.ringDir)
+		if explicit || persistentMode.Load() {
+			registry[s.ringDir] = in
+		} else {
+			discard = true
+		}
+	}
+	close(op.done)
+	registryMu.Unlock()
+	if discard {
+		_ = (&Persistent{in: in}).Close()
+	}
+	return in, err
 }
 
 // with runs fn against s's instance under its lock: the registered
@@ -203,7 +260,7 @@ func (s Store) run(readOnly bool, fn func(*instance) error) error {
 		registryMu.Unlock()
 		if in == nil && persistentMode.Load() {
 			var err error
-			if in, err = registeredInstance(s); err != nil {
+			if in, err = registeredInstance(s, false); err != nil {
 				return err
 			}
 		}

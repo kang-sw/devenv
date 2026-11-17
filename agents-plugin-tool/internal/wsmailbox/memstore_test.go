@@ -417,12 +417,41 @@ func TestMemStoreExportsForADowngradeAndReimportsWhatTheOldDaemonDid(t *testing.
 		t.Fatal(err)
 	}
 
+	// It also drains the reply queue, queues a new reply, and registers a
+	// presence.
+	replyFile.ExportMark = ""
+	replyFile.Queues["amber"] = []Envelope{{Content: "old reply"}}
+	rewritten, _ = json.Marshal(replyFile)
+	if err := os.WriteFile(f.reply, rewritten, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithFileLock(f.named, func(s *StoreFile) error {
+		s.Presence["newcomer"] = Presence{Name: "newcomer", Scope: ScopeWorktree, LastSeen: "2026-11-17T00:00:00Z"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	f.open()
 	if got := contents(f.queue("lead")); got != "two,three" {
 		t.Fatalf("queue after the downgrade round = %q, want two,three", got)
 	}
-	if q, _ := store.ReplyQueue("amber"); contents(q) != "report" {
-		t.Fatalf("the untouched reply queue after the round = %+v", q)
+	if q, _ := store.ReplyQueue("amber"); contents(q) != "old reply" {
+		t.Fatalf("reply queue after the round = %+v, want the old daemon's reply alone", q)
+	}
+	if _, ok, _, _ := store.NamedQueue(f.named, "newcomer"); !ok {
+		t.Fatal("the old daemon's presence was not imported")
+	}
+	// A second round stays consistent: export, reopen, nothing doubles.
+	if err := ClosePersistent(); err != nil {
+		t.Fatal(err)
+	}
+	f.open()
+	if got := contents(f.queue("lead")); got != "two,three" {
+		t.Fatalf("queue after a second round = %q", got)
+	}
+	if q, _ := store.ReplyQueue("amber"); contents(q) != "old reply" {
+		t.Fatalf("reply queue after a second round = %+v", q)
 	}
 }
 
@@ -562,5 +591,75 @@ func TestMemStoreReadersSeeMemoryOnlyMailAndNeverTheStaleFiles(t *testing.T) {
 	notify, unread, err := f.paths.ShouldNotifyNamedInboxUnread("lead@machine", "")
 	if err != nil || !notify || unread != 1 {
 		t.Fatalf("hook peek = %v %d %v, want the one live message", notify, unread, err)
+	}
+}
+
+// TestMemStoreHeldRingDoesNotStallOtherRootsOrRepeatTheWait pins that a
+// persistent open waiting on a held ring blocks neither another cache
+// root's calls nor, once it failed, later calls for its own root.
+func TestMemStoreHeldRingDoesNotStallOtherRootsOrRepeatTheWait(t *testing.T) {
+	held := newMemFixture(t)
+	other := newMemFixture(t)
+	prev := persistentLockWait
+	persistentLockWait = time.Second
+	t.Cleanup(func() { persistentLockWait = prev })
+	other.open()
+	if err := os.MkdirAll(held.ring, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	holder := flock.New(filepath.Join(held.ring, ringLockName))
+	if locked, err := holder.TryLock(); err != nil || !locked {
+		t.Fatalf("hold the ring: %v %v", locked, err)
+	}
+	defer holder.Unlock() //nolint:errcheck
+	EnablePersistent()
+
+	failed := make(chan error, 1)
+	go func() {
+		_, err := held.paths.Store().LoadReply()
+		failed <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // the open is waiting on the ring
+	start := time.Now()
+	other.send("lead", "not stalled")
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("another root's call took %v behind the held ring's open", d)
+	}
+	if err := <-failed; err == nil || !strings.Contains(err.Error(), "held by another process") {
+		t.Fatalf("the held ring's open: %v", err)
+	}
+	start = time.Now()
+	if _, err := held.paths.Store().LoadReply(); err == nil {
+		t.Fatal("a call inside the retry window succeeded on a held ring")
+	}
+	if d := time.Since(start); d > 200*time.Millisecond {
+		t.Fatalf("a call inside the retry window waited %v again", d)
+	}
+}
+
+// TestMemStoreExportRewritesHistoryAPruneRemoved pins that the export
+// trusts its baseline only for history files still on disk.
+func TestMemStoreExportRewritesHistoryAPruneRemoved(t *testing.T) {
+	f := newMemFixture(t)
+	f.open()
+	if err := f.paths.Store().Update("history", func(tx *Tx) error {
+		_, err := tx.AppendHistory("amber-tide-fox", storeNow(), HistoryEntry{Direction: HistorySent, Body: "one"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClosePersistent(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(f.cache, HistoryDirName, "amber-tide-fox")
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	f.open()
+	if err := ClosePersistent(); err != nil {
+		t.Fatal(err)
+	}
+	if names, err := legacyHistoryNames(dir); err != nil || len(names) != 1 {
+		t.Fatalf("history after a prune and an export = %v %v, want the entry rewritten", names, err)
 	}
 }
