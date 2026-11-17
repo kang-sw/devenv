@@ -21,6 +21,11 @@ func TestPokedIdentityCollisionSuppressesBothTargets(t *testing.T) {
 			t.Fatalf("colliding %s target remained eligible", key)
 		}
 	}
+	calls := 0
+	counts := nudgeAssociationCounts(known, func(string) string { calls++; return "collision" })
+	if counts["collision"] != 2 || calls != len(known) {
+		t.Fatalf("association pass: counts=%v hashes=%d, want one hash per identity", counts, calls)
+	}
 	delete(known, "new")
 	if !nudgeIdentityUnique("old", known, replyID) {
 		t.Fatal("recovered unique target remained suppressed")

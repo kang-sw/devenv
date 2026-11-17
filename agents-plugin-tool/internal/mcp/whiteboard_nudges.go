@@ -291,9 +291,20 @@ func (n *WhiteboardNudges) uniqueTarget(t nudgeTarget) bool {
 	return nudgeIdentityUnique(t.key, n.known, wsmailbox.ReplyID)
 }
 
+func nudgeAssociationCounts(known map[string]nudgeKeyIdentity, replyID func(string) string) map[string]int {
+	counts := map[string]int{}
+	for key, identity := range known {
+		if identity.Scope == string(roleLead) && identity.Parent == "" {
+			counts[replyID(key)]++
+		}
+	}
+	return counts
+}
+
 func nudgeIdentityUnique(target string, known map[string]nudgeKeyIdentity, replyID func(string) string) bool {
+	targetID := replyID(target)
 	for key, other := range known {
-		if key != target && other.Scope == string(roleLead) && other.Parent == "" && replyID(key) == replyID(target) {
+		if key != target && other.Scope == string(roleLead) && other.Parent == "" && replyID(key) == targetID {
 			return false
 		}
 	}
@@ -430,11 +441,13 @@ func (n *WhiteboardNudges) run() {
 				delete(stamps, t)
 			}
 		}
+		// Hash each known identity once, not once for every scheduled board.
+		associations := nudgeAssociationCounts(n.known, wsmailbox.ReplyID)
 		targets := make([]nudgeTarget, 0, len(boards))
 		for t, due := range boards {
 			// Discovering a conflicting key suppresses the existing target
 			// too, not just the newly poked one. Uniqueness is RAM-only.
-			if !n.uniqueTarget(t) {
+			if associations[wsmailbox.ReplyID(t.key)] > 1 {
 				delete(boards, t)
 				delete(stamps, t)
 				continue
