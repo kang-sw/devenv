@@ -353,14 +353,18 @@
         },
         close: function () {
           if (!current) return null;
-          var previous = current;
+          var previous = current, hadFocus = el.contains(doc.activeElement);
+          // A surface transfer must revalidate the file and mint fresh sandbox
+          // capabilities, not reuse an arbitrarily old explorer preflight.
+          previous = { path: previous.path, options: Object.assign({}, previous.options) };
+          delete previous.options.answer;
           current = null;
           // Increment, never reset: an old answer must not match a later open.
           view.turn = (view.turn || 0) + 1;
           view.mediaError = null;
           body.textContent = "";
           el.hidden = true;
-          if (closed) closed();
+          if (closed) closed(hadFocus);
           return previous;
         },
         current: function () { return current; }

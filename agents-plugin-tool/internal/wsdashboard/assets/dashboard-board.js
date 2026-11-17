@@ -353,9 +353,10 @@
       previewPane.className = "file-preview-pane";
       previewPane.setAttribute("aria-label", fpane.getAttribute("aria-label"));
       grid.appendChild(previewPane);
-      filePreview = window.WsPreview.createPane(previewPane, function () {
+      filePreview = window.WsPreview.createPane(previewPane, function (hadFocus) {
         root.removeAttribute("data-file-preview");
-        if (previewPane.contains(doc.activeElement) && filePreviewBack && filePreviewBack.isConnected) filePreviewBack.focus({ preventScroll: true });
+        if (filesTab) filesTab.cancelPreview();
+        if (hadFocus && filePreviewBack && filePreviewBack.isConnected) filePreviewBack.focus({ preventScroll: true });
       });
       filePreview.el = previewPane;
       if (window.ResizeObserver) {

@@ -1657,6 +1657,8 @@
       if (query().trim() && !searchResult) search(true);
       refresh();
     },
+    // A dismissed preview surface also retires this owner's pending preflight.
+    cancelPreview: function () { previewAttempt++; },
     // Leaving a window pauses only its own search; returning restarts any
     // unfinished query. Other visible explorers keep their requests.
     hidden: function () {
