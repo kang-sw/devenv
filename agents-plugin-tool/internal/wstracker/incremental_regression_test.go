@@ -1,0 +1,102 @@
+package wstracker
+
+import (
+	"encoding/json"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsledger"
+)
+
+func TestIncrementalCheckpointSamplingIsBoundedAndTailDense(t *testing.T) {
+	for _, total := range []int{0, 1500, 10_000, 1_000_000} {
+		count, last := 0, 0
+		for pos := 1; pos <= total; pos++ {
+			if checkpointAt(pos, total) {
+				count++
+				last = pos
+			}
+		}
+		if total > 0 && last != total {
+			count++ // the terminal save
+		}
+		if count > foldCheckpointLimit+2 {
+			t.Fatalf("cold fold creates %d deep copies for %d events", count, total)
+		}
+		if total > foldCheckpointStride && total-last > foldCheckpointStride {
+			t.Fatalf("tail is not densely checkpointed: total=%d last=%d", total, last)
+		}
+	}
+}
+
+func incrementalEvent(member string, seq int, typ, payload string, second int64, seen map[string]int) wsledger.Event {
+	return wsledger.Event{ID: wsledger.EventID{Member: member, Clone: "pc", Seq: seq}, TS: time.Unix(second, 0), Type: typ,
+		Payload: json.RawMessage(payload), Seen: seen, Verdict: wsledger.Valid}
+}
+
+// The final fold can reject a concurrent claim that passed its causal check.
+// A later descendant of the losing claim sees that claim, but not its winner:
+// resuming at a terminal checkpoint must judge it exactly as a zero replay.
+func TestIncrementalFoldCausalVerdictSurvivesFinalFlag(t *testing.T) {
+	g := json.RawMessage(`{"admins":["a"],"members":[{"id":"a","keys":["a"]},{"id":"b","keys":["b"]},{"id":"c","keys":["c"]}]}`)
+	create := incrementalEvent("a", 1, TypeItemCreate, `{"kind":"task","title":"open work"}`, 1, nil)
+	open := incrementalEvent("a", 2, TypeItemOpen, `{"item":"a.pc#1","scope":"store"}`, 2, nil)
+	winner := incrementalEvent("b", 1, TypeItemClaim, `{"item":"a.pc#1"}`, 3, map[string]int{"a.pc": 2})
+	loser := incrementalEvent("c", 1, TypeItemClaim, `{"item":"a.pc#1"}`, 4, map[string]int{"a.pc": 2})
+	src := newMemSource(g, "a.pc", []wsledger.Event{create, open, winner, loser})
+	tr := New(src, src.stream)
+	claim := tr.r.byID[loser.ID.String()]
+	if claim.status != "flagged" || claim.causalStatus != "applied" || !strings.Contains(claim.reason, concurrently) {
+		t.Fatalf("fixture needs a final-fold-only flag: %+v", claim)
+	}
+	status := incrementalEvent("c", 2, TypeItemStatus, `{"item":"a.pc#1","status":"doing"}`, 5, map[string]int{"a.pc": 2})
+	src.add(status)
+	assertIncrementalFold(t, tr, src)
+	if tr.r.memo.replayedFrom != 4 {
+		t.Fatalf("did not exercise terminal-checkpoint resume: %d", tr.r.memo.replayedFrom)
+	}
+	if n := tr.r.byID[status.ID.String()]; n.status != "applied" {
+		t.Fatalf("causal descendant lost its claim: %s %s", n.status, n.reason)
+	}
+	if claim.status != "flagged" {
+		t.Fatal("causal checks erased the prefix's final-fold flag")
+	}
+}
+
+// wsledger.closeBatch can update an existing pending event's Seen once a
+// remote event enables its signing key. Timestamp priority must not let that
+// old event run before its NEW dependency; the old reverse edge must also be
+// removed if an existing source event is replaced again without that edge.
+func TestIncrementalFoldReindexesReplacementSeen(t *testing.T) {
+	g := json.RawMessage(`{"admins":["a","b"],"members":[{"id":"a","keys":["old-key"]},{"id":"b","keys":["b-key"]}]}`)
+	pending := incrementalEvent("a", 1, TypeItemCreate, `{"kind":"task","title":"pending key"}`, 1, nil)
+	pending.Verdict, pending.Reason = wsledger.Flagged, "key not live in causal past"
+	child := incrementalEvent("a", 2, TypeCommentAdd, `{"item":"a.pc#1","body":"dependent"}`, 2, nil)
+	key := incrementalEvent("b", 1, wsledger.TypeAddKey, `{"member":"a","key":"new-key"}`, 10, nil)
+	src := newMemSource(g, "a.pc", []wsledger.Event{pending, child, key})
+	tr := New(src, src.stream)
+	pending.Verdict, pending.Reason, pending.Seen = wsledger.Valid, "", map[string]int{"b.pc": 1}
+	src.add(pending)
+	assertIncrementalFold(t, tr, src)
+	ids := func() []string {
+		out := []string{}
+		for _, n := range tr.r.order {
+			out = append(out, n.id)
+		}
+		return out
+	}
+	if !slices.Equal(ids(), []string{"b.pc#1", "a.pc#1", "a.pc#2"}) {
+		t.Fatalf("new Seen dependency ignored: %v", ids())
+	}
+	if tr.r.byID[child.ID.String()].status != "applied" {
+		t.Fatal("replacement failed to rejudge existing descendants")
+	}
+	pending.Seen = nil
+	src.add(pending)
+	assertIncrementalFold(t, tr, src)
+	if !slices.Equal(ids(), []string{"a.pc#1", "a.pc#2", "b.pc#1"}) || tr.r.memo.succ[key.ID.String()][pending.ID.String()] {
+		t.Fatalf("removed Seen dependency retained: order=%v successors=%v", ids(), tr.r.memo.succ[key.ID.String()])
+	}
+}

@@ -23,8 +23,8 @@ import (
 // replay() zero-fold oracle, not a reset that also builds new checkpoints.
 //
 // Checkpoints are bounded in NUMBER, not bytes: state copies retain item,
-// register, assignment and history slices. Building them every stride can be
-// expensive even with only 16 retained. Neither setup cost nor peak retained
+// register, assignment and history slices. Even adaptively sampled copies can
+// be expensive with 16 retained. Neither setup cost nor peak retained
 // memory is represented by changed-case ns/op/B/op; cold-fold rows include
 // checkpoint construction, and replayed-events/op exposes suffix length.
 func BenchmarkTrackerIncrementalMillion(b *testing.B) {

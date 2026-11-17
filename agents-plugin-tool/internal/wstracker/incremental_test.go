@@ -49,21 +49,33 @@ func TestIncrementalFoldRandomArrivals(t *testing.T) {
 	for seed := int64(0); seed < 8; seed++ {
 		t.Run(itoa(int(seed)), func(t *testing.T) {
 			rng := rand.New(rand.NewSource(seed))
+			sample := slices.Clone(events)
+			for i := range sample {
+				// Vary the event set's clock skew and protocol verdicts as
+				// well as arrival order; causal priority need not match ts.
+				sample[i].TS = sample[i].TS.Add(time.Duration(rng.Intn(3600)-1800) * time.Second)
+				switch rng.Intn(20) {
+				case 0:
+					sample[i].Verdict, sample[i].Reason = wsledger.Waiting, "generated gap"
+				case 1:
+					sample[i].Verdict, sample[i].Reason = wsledger.Ignored, "generated revocation"
+				}
+			}
 			src := newMemSource(genesis, "root.pc", nil)
 			tr := New(src, src.stream)
-			perm := rng.Perm(len(events))
+			perm := rng.Perm(len(sample))
 			for len(perm) > 0 {
 				n := min(len(perm), 5+rng.Intn(60))
 				batch := make([]wsledger.Event, n)
 				for i, idx := range perm[:n] {
-					batch[i] = events[idx]
+					batch[i] = sample[idx]
 				}
 				src.add(batch...)
 				assertIncrementalFold(t, tr, src)
 				perm = perm[n:]
 			}
 			for i := 0; i < 30; i++ {
-				e := events[rng.Intn(len(events))]
+				e := sample[rng.Intn(len(sample))]
 				verdict := []wsledger.Verdict{wsledger.Valid, wsledger.Waiting, wsledger.Ignored}[rng.Intn(3)]
 				src.setVerdict(e.ID, verdict, "changed protocol reason")
 				assertIncrementalFold(t, tr, src)

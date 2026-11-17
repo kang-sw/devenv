@@ -1,6 +1,7 @@
 package wstracker
 
 import (
+	"bytes"
 	"container/heap"
 	"slices"
 	"sort"
@@ -74,6 +75,16 @@ func newFoldMemo(r *replayed) *foldMemo {
 
 func (m *foldMemo) add(n *node) {
 	m.all = append(m.all, n)
+	m.reindex(n)
+}
+
+func (m *foldMemo) reindex(n *node) {
+	for _, id := range m.deps[n.id] {
+		delete(m.succ[id], n.id)
+		if len(m.succ[id]) == 0 {
+			delete(m.succ, id)
+		}
+	}
 	m.deps[n.id] = dependencies(n)
 	for _, id := range m.deps[n.id] {
 		if m.succ[id] == nil {
@@ -100,11 +111,20 @@ func (r *replayed) update(events []wsledger.Event) {
 			r.byID[id] = n
 			m.add(n)
 		} else {
-			// Source changes existing events only for protocol verdict/reason.
 			if n.pos >= 0 {
 				earliest = min(earliest, n.pos)
 			}
-			n.ev = ev
+			// Closing an unsignable pending ledger batch can replace Seen
+			// after a remote key-enabling event arrives. Reconcile both edge
+			// indexes, not just the verdict, before splicing its descendants.
+			if !bytes.Equal(n.ev.Payload, ev.Payload) {
+				n.p = parsePayload(ev.Payload)
+			}
+			n.ev, n.ts, n.typ, n.origin = ev, ev.TS, ev.Type, ev.Origin
+			if n.origin == "" {
+				n.origin = OriginHuman
+			}
+			m.reindex(n)
 		}
 		if !affected[id] {
 			affected[id] = true
@@ -245,13 +265,26 @@ func (r *replayed) foldFrom(start int, s *state) {
 		if n := r.order[i]; n.status == "applied" {
 			s.apply(n)
 		}
-		if (i+1)%foldCheckpointStride == 0 {
+		if checkpointAt(i+1, len(r.order)) {
 			r.saveCheckpoint(i + 1)
 		}
 	}
-	if len(r.order) > 0 && len(r.order)%foldCheckpointStride != 0 {
+	if len(r.order) > 0 {
 		r.saveCheckpoint(len(r.order))
 	}
+}
+
+// A cold or far-back fold knows its final length. Sample its old prefix at
+// a coarse stride and its last half-budget at a dense stride: creating then
+// throwing away a deep copy every 1024 events would itself be quadratic in
+// history size. Small suffix folds still save their terminal state.
+func checkpointAt(pos, total int) bool {
+	denseFrom := max(0, total-(foldCheckpointLimit/2)*foldCheckpointStride)
+	if pos >= denseFrom {
+		return pos%foldCheckpointStride == 0
+	}
+	coarse := max(foldCheckpointStride, total/(foldCheckpointLimit/2))
+	return pos%coarse == 0
 }
 
 func (r *replayed) saveCheckpoint(pos int) {

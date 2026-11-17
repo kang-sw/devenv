@@ -27,6 +27,7 @@ type node struct {
 	succs                 []*node
 
 	status, reason       string // applied | flagged | waiting
+	causalStatus         string // verdict before final-fold concurrency flags
 	ignored              bool
 	clash                bool // flagged only by the fold-order label-name clash; still in later causal-past checks
 	markers              []marker
@@ -287,21 +288,21 @@ func (r *replayed) verdictsFrom(all []*node, start int) {
 	// never holds a name twice.
 	lf := newState(r.g, r.hb, false)
 	for _, n := range r.order[:start] {
-		if n.status == "applied" && isLabelList(n.typ) {
+		if n.causalStatus == "applied" && isLabelList(n.typ) {
 			lf.apply(n)
 		}
 	}
 	for _, n := range r.order[start:] {
 		n.status, n.reason, n.ignored, n.clash = "", "", false, false
 		if r.rolesOnly && !isRoles(n.typ) {
-			n.status = "skipped"
+			n.status, n.causalStatus = "skipped", "skipped"
 			continue
 		}
 		switch n.ev.Verdict {
 		case wsledger.Valid:
 			n.status = "applied"
 			if !isIdentity(n.typ) {
-				if rej := r.stateBefore(n).check(n); rej != "" {
+				if rej := r.stateBeforeMode(n, true).check(n); rej != "" {
 					n.status, n.reason = "flagged", string(rej)
 				} else if isLabelList(n.typ) {
 					if rej := lf.labelClash(n); rej != "" {
@@ -316,6 +317,7 @@ func (r *replayed) verdictsFrom(all []*node, start int) {
 		default:
 			n.status, n.reason = "flagged", n.ev.Reason
 		}
+		n.causalStatus = n.status
 	}
 	for _, n := range all {
 		if n.pos >= 0 {
@@ -332,6 +334,7 @@ func (r *replayed) verdictsFrom(all []*node, start int) {
 			n.status, n.reason = "flagged", n.ev.Reason
 			n.ignored = n.ev.Verdict == wsledger.Ignored
 		}
+		n.causalStatus = n.status
 	}
 }
 
@@ -344,6 +347,14 @@ func (r *replayed) verdictsFrom(all []*node, start int) {
 // flagged only by the fold-order name clash folds here too: n's writer saw
 // it, and only the list drops it.
 func (r *replayed) stateBefore(n *node) *state {
+	return r.stateBeforeMode(n, false)
+}
+
+// Causal checks run before the final fold in a zero replay. A resumed
+// check must likewise see the prefix's causal verdicts, not foldFlag's
+// later rejections of concurrent claims, approvals, openings or moves.
+// Other callers retain stateBefore's existing final-verdict semantics.
+func (r *replayed) stateBeforeMode(n *node, causal bool) *state {
 	rel := map[string]bool{}
 	var lists [][]int
 	lists = append(lists, r.rolesPos, r.assignPos)
@@ -387,7 +398,11 @@ func (r *replayed) stateBefore(n *node) *state {
 		}
 		last = pos
 		x := r.order[pos]
-		if x.status != "applied" && !x.clash {
+		status := x.status
+		if causal {
+			status = x.causalStatus
+		}
+		if status != "applied" && !x.clash {
 			continue
 		}
 		if x.typ == TypeItemAssign && !rel[x.p.str("item")] {
