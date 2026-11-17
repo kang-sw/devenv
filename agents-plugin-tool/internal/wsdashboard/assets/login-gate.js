@@ -9,7 +9,7 @@
   var native = document.getElementById("lg-native"), copy = document.getElementById("lg-copy"), again = document.getElementById("lg-again"), divider = document.getElementById("lg-or");
   var busy = false, copyBusy = false, raw = "", shown = "";
   document.getElementById("lg-mod").textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
-  var copiedHint = hint.innerHTML;
+  var copiedHint = hint.innerHTML, loginLink = /[?&]login=/;
   function destination(next) {
     // Defense in depth: the server has already validated this local path.
     if (typeof next !== "string" || next[0] !== "/" || next[1] === "/" || /[\\\r\n]/.test(next)) next = "/";
@@ -57,7 +57,7 @@
     if (busy || copyBusy || !text.trim()) return;
     raw = text.trim();
     // Never leave a usable credential visible while checking or after refusal.
-    shown = /[?&]login=/.test(raw) ? "…/?login=••••••••" : "••••••••";
+    shown = loginLink.test(raw) ? "…/?login=••••••••" : "••••••••";
     input.value = shown;
     document.getElementById("lg-msg").hidden = true;
     checking(true);
@@ -91,6 +91,7 @@
       hint.hidden = false;
       document.getElementById("lg-msg").hidden = true;
       input.focus();
+      return true;
     }).catch(function (err) {
       nativeVisible(true); hint.hidden = true;
       document.getElementById("lg-sub").hidden = true;
@@ -102,7 +103,17 @@
       copyBusy = false; copy.disabled = false;
       var retry = document.getElementById("lg-again");
       if (retry) retry.disabled = false;
+    }).then(function (copied) {
+      // A success means the daemon just wrote the link to the OS clipboard, so
+      // read it back once and log in. Any refusal leaves the visible copied
+      // hint as the quiet fallback: no warning, no retry, no second copy.
+      if (copied) readClipboard(function (s) { return loginLink.test(s); }, function () {});
     });
+  }
+  // Shared by the paste button and the post-copy read; accept vets the text.
+  // The executor turns a missing API or a synchronous throw into fail().
+  function readClipboard(accept, fail) {
+    new Promise(function (ok) { ok(navigator.clipboard.readText()); }).then(function (s) { if (s.trim() && accept(s)) submit(s); else fail(); }, fail);
   }
   if (copy) copy.addEventListener("click", copyNative);
   // Recreated with the copied hint after checking: delegation keeps retry live.
@@ -115,8 +126,7 @@
   document.getElementById("lg-row").addEventListener("submit", function (e) { e.preventDefault(); submit(raw && input.value === shown ? raw : input.value); });
   clip.addEventListener("click", function () {
     if (busy || copyBusy) return;
-    if (!navigator.clipboard) { message(cfg.clipfail, true); return; }
-    navigator.clipboard.readText().then(function (s) { if (s.trim()) submit(s); else message(cfg.clipfail, true); }, function () { message(cfg.clipfail, true); });
+    readClipboard(function () { return true; }, function () { message(cfg.clipfail, true); });
   });
   // A cross-site navigation omits Strict cookies; this same-origin probe carries
   // them. No clipboard access occurs without an explicit button or paste gesture.
