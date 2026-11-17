@@ -376,7 +376,11 @@
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
         files: worktree ? null : filesSheet
       },
-      reveal: function () { if (live && !tabShown("board")) setTab("board"); },
+      reveal: function () {
+        // Linked cards must not remain behind the explorer's reading pane.
+        if (filePreview) filePreview.close();
+        if (live && !tabShown("board")) setTab("board");
+      },
       column: bpcol, shows: pinColumnFits, split: grid && grid.classList.contains("live") ? grid : null,
       leading: function (c) { return worktree && c.preview && !(PIN_WIDE && PIN_WIDE.matches); },
       layout: function (on) {
