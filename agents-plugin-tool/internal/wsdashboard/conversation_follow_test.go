@@ -34,7 +34,7 @@ func TestConversationSendRearmsBottomFollow(t *testing.T) {
 		oneLineDashboardFunc(t, src, "pinConvo"),
 		oneLineDashboardFunc(t, src, "followConvo"),
 		composerFunc(t, src, "sendCommand"),
-		composerFunc(t, src, "sendMessage"),
+		composerSendSource(t, src),
 	}, "\n")
 	runNode(t, "conversation send follow", selectionCodecSource(t)+composerToastPrelude+`var sending = false;
 function noteWarn(t) { toasts.push([t, "warn"]); }

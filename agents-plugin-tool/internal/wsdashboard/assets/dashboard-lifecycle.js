@@ -123,8 +123,10 @@
     if (ctext && d.text) d.sel = [ctext.selectionStart + prefix.length, ctext.selectionEnd + prefix.length];
     return d;
   }
+  // While a send is unanswered the saved draft stays the one from before
+  // it, so a page lost meanwhile restores the message rather than drop it.
   function saveDraft() {
-    if (!draftStore || restoring) return;
+    if (!draftStore || restoring || outboxUnsent()) return;
     clearTimeout(draftTimer);
     draftTimer = null;
     var d = readDraft();
@@ -237,7 +239,7 @@
     doc.addEventListener("visibilitychange", function () { if (doc.hidden) saveDraft(); });
     window.addEventListener("beforeunload", WsRail.leaveGuard(function () {
       saveDraft();
-      var unsaved = imgs.some(function (p) { return !p.ref; }) || draftUnsaved;
+      var unsaved = imgs.some(function (p) { return !p.ref; }) || draftUnsaved || outboxUnsent();
       if (unsaved && framed && typeof window.wsShellLeave === "number") {
         var attempt = window.wsShellLeave;
         // Survival suggests cancellation, but is not proof: an accepted
@@ -253,7 +255,7 @@
       saveDraft();
       // Arbitrary web/tool runtimes cannot be frozen by ordinary page code.
       // Keep their existing guarded fresh navigation instead of caching them.
-      return !!rid && !draftUnsaved && !imgs.some(function (p) { return !p.ref; }) &&
+      return !!rid && !draftUnsaved && !outboxUnsent() && !imgs.some(function (p) { return !p.ref; }) &&
         !q('iframe:not(.doc-frame), .bcard, .fpane[data-max]').length && !visible(fpane) && !tkBusy &&
         (!window.WsTerm || (window.WsTerm.cacheSafe && window.WsTerm.cacheSafe())) && !Object.keys(supChats).length;
     };
