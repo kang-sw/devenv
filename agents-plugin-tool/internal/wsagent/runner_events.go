@@ -103,7 +103,7 @@ func (c *conv) handle(ev Event) {
 		if ev.PermissionMode != c.activeMode {
 			c.setStatus(func() { c.activeMode = ev.PermissionMode })
 			if c.rec.Lead && !quiet {
-				if level, _, err := c.r.leadPermission(c.rec, c.dir); err == nil {
+				if level, _, err := c.r.leadPermission(c.record(), c.dir); err == nil {
 					c.permissionNudge(level, false, ev.PermissionMode)
 				}
 			}
