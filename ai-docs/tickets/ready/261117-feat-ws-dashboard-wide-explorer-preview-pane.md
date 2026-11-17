@@ -167,3 +167,50 @@ unchanged.
 | # | Title | Severity |
 |---|-------|----------|
 | 1 | Pane behavior during durable-card creation | important |
+
+## Blocked: LOOK capture gate (2026-11-17)
+
+Implementation checkpoint: `6a9226e76` on `impl/develop/chump-gravy-both`
+(base `c79cdf133`). Phase 1 has **no Result** because visual verification is
+still outstanding; do not close this ticket until the screenshot gate passes.
+
+Landed: split toolbar activation of the existing left Files tab, a memory-only
+pane sharing the existing preview renderers across the board/pin area, durable
+promotion and tabs fallback, unchanged binary/default explorer routing, and
+localized keep labels. Board/pin geometry is retained while their paint is
+hidden; no stored or protocol surface changes.
+
+Verification:
+
+- Local `node D:/Temp/wide-explorer/run-contracts.cjs --exclude-forward`:
+  22 suites passed, 110 node:test cases plus legacy assertions; one additional
+  workspace-picker fixture runs bundled with files-explorer.
+- Remote w5090, using the owner's exact sys_lock sync recipe:
+  `go test ./internal/wsdashboard/...` passed after the R1 fixes (272.552s).
+  No Go tests ran locally.
+- Independent R1 found three Important issues: pending preflight reopening a
+  dismissed pane, expired sandbox answers reused on surface transfer, and
+  content removal preceding focus restoration. All fixed in `6a9226e76`, with
+  regression tests in `2860bee02`. Fixes-only R2: clean.
+- `git diff --check c79cdf1..HEAD`: clean. All 11 locale tables contain a valid
+  keep label.
+- Forward (one grouped baseline exclusion): four untouched Node fixtures also
+  fail against base production assets `c79cdf1`: search-palette
+  (`paletteHistory`), stream-gone (`hiddenRegions`), task_badges (`$`), and
+  visibility-stream (`window`). No unrelated investigation or changes.
+
+LOOK setup exhausted the owner's pass-plus-environmental-retry budget before
+any capture was produced. The existing `scripts/board-headless.mjs` isolated
+server fails on Windows because its executable path lacks `.exe`. A temporary
+copy adapted that suffix and reused an existing binary (no package installs),
+but `serve --shared-actions` then failed because its existing fixture gives
+policy options to a `technical` item; the current binary rejects that command.
+No further capture attempt was made. No PNGs or side-by-side comparison exist.
+Temporary artifacts under `D:/Temp/wide-explorer/` were removed at handoff.
+
+Proposed resolution: lead authorizes another bounded capture pass using the
+existing harness with Windows executable adaptation and without the obsolete
+`--shared-actions` fixture (seed only the needed Markdown/image in the isolated
+temporary project). Capture both required split viewports plus tabs, compare
+against the approved mockup `#a`, then record Phase 1 Result and close. No merge
+performed.
