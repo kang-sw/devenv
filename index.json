@@ -564,6 +564,9 @@
     "261117-bug-pi-ticket-worker-profile-tools": {
       "registered_at": "2026-11-17T05:39:55Z"
     },
+    "261117-feat-role-scoped-workflow-context": {
+      "registered_at": "2026-11-17T05:54:39Z"
+    },
     "261117-research-werkschaft-tauri-shell-revisit": {
       "registered_at": "2026-11-17T01:03:40Z"
     },
