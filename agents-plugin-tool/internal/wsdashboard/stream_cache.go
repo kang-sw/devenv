@@ -89,6 +89,9 @@ type pageRender struct {
 	// reads are the store reads the render made, which a live render of
 	// the same page may reuse (liveRender); nil offers none.
 	reads any
+	// view is the session view the render read, for the page request that
+	// renders through the cache (renderFresh); nil elsewhere. Read-only.
+	view *SessionView
 }
 
 // liveRender is what a render may reuse when every wake since the
@@ -281,6 +284,46 @@ func (c *pageCache) getSince(p *sharedPage, src pageSource, refresh bool, genera
 		p.checked = c.now()
 	}
 	return r, at
+}
+
+// pageHandoffHold is how long a page request keeps the render it made
+// (renderFresh) for the stream its page opens next.
+const pageHandoffHold = 10 * time.Second
+
+// renderFresh renders p in full now, whatever its state, and keeps the
+// render as the page's current one, so the stream the page opens next
+// sends its first frame from this read instead of reading again: a wake
+// after the render still re-renders, as for any render (get). A failed or
+// missing-session render is returned without replacing the page's render.
+// It takes the refresh stamp as get does.
+func (c *pageCache) renderFresh(p *sharedPage, src pageSource) pageRender {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var stamp string
+	var stampOK bool
+	if p.rendered {
+		stamp, stampOK = src.stamp(p.r.inputs)
+	}
+	at := c.broker.current()
+	prev := p.r.inputs
+	r := src.render(nil)
+	if r.err != nil || !r.ok {
+		return r
+	}
+	p.completed = c.now()
+	p.r, p.at, p.rendered = r, at, true
+	p.checked = time.Time{}
+	p.stamp, p.stampOK = stamp, stampOK && r.inputs.equal(prev) && r.regions != nil
+	if p.stampOK {
+		p.checked = c.now()
+	}
+	p.generation.Add(1)
+	return r
+}
+
+// holdFor keeps the caller's hold on p for d, then drops it (release).
+func (c *pageCache) holdFor(key pageKey, p *sharedPage, d time.Duration) {
+	time.AfterFunc(d, func() { c.release(key, p) })
 }
 
 // renderLive runs a live render of p (get); p.mu is held. The previous
