@@ -20,6 +20,27 @@ test('bundled and explicit dev roots bind matching binary, contract, resources a
   assert.equal(selected.env.WS_SKILLS_ROOT, path.join(f.dev.root, 'skills'));
   assert.equal(fs.existsSync(path.join(f.userData, 'update-state.json')), false);
 });
+test('checkout fallback is unpackaged only, preserves bundle and explicit selection precedence', t => {
+  for (const platform of ['win32', 'darwin']) {
+    const f = fixture(t, platform);
+    const appRoot = path.join(f.base, 'agents-plugin-tool', 'desktop-electron');
+    fs.mkdirSync(path.dirname(appRoot), { recursive: true });
+    fs.renameSync(f.appRoot, appRoot);
+    const repoRoot = path.join(f.base, 'agents-plugin-wsflow');
+    fs.renameSync(f.dev.root, repoRoot);
+    const select = packaged => selectDaemon({ appRoot, userData: f.userData, platform, packaged });
+    assert.equal(select(false).root, path.join(appRoot, 'daemon'));
+    fs.rmSync(path.join(appRoot, 'daemon'), { recursive: true });
+    assert.equal(select(false).root, repoRoot);
+    assert.equal(select(false).source, 'development');
+    assert.throws(() => select(true), /Cannot use bundled daemon/);
+    f.choose({ schema_version: 1, root: path.join(f.base, 'missing') });
+    assert.throws(() => select(false), /Cannot use development daemon/);
+    fs.rmSync(path.join(f.userData, SETTING));
+    fs.rmSync(path.join(repoRoot, path.basename(f.dev.binary)));
+    assert.throws(() => select(false), /ws-mcp.*assemble-daemon-input/s);
+  }
+});
 test('validation hashes binary bytes and normalized text through path reads, never a direct fd open', t => {
   const f = fixture(t);
   const bytes = Buffer.alloc(1024 * 1024 + 7, 0xff);

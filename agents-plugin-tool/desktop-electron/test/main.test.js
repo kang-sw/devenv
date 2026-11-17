@@ -156,12 +156,32 @@ test('manual start failure reloads the page with its reason for another attempt'
   assert.equal(calls, 2);
   assert.equal(content.fileOptions.query.reason, 'startup timeout');
 });
-test('dev mode without a bundled daemon disables start with a reason', async () => {
-  const f = await fixture(async () => { throw new Error('missing bundle'); }, 'win32');
-  const wc = f.views[0].webContents;
-  const result = await f.ipcMain.handlers['werkschaft:daemon-availability']({ sender: wc, senderFrame: wc.mainFrame });
+test('dev mode uses the checkout candidate for autostart and the start button', async t => {
+  const source = daemonFixture(t, 'win32');
+  const appRoot = path.join(source.base, 'agents-plugin-tool', 'desktop-electron');
+  fs.mkdirSync(path.dirname(appRoot), { recursive: true });
+  fs.renameSync(source.appRoot, appRoot);
+  fs.rmSync(path.join(appRoot, 'daemon'), { recursive: true });
+  const repoRoot = path.join(source.base, 'agents-plugin-wsflow');
+  fs.renameSync(source.dev.root, repoRoot);
+  let launches = 0, running = false;
+  const deps = { env: { WS_CACHE_HOME: path.join(source.base, 'cache') },
+    discover: async () => { if (!running) throw Error('missing'); return 'http://127.0.0.1:39418/'; },
+    launch: async () => { if (++launches === 1) throw Error('first start failed'); running = true; } };
+  const f = await fixture(options => realConnectDaemon(options, deps), 'win32', { ...source, appRoot });
+  const wc = f.views[0].webContents, event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal(launches, 1, 'autostart used the candidate');
+  assert.deepEqual(await f.ipcMain.handlers['werkschaft:daemon-availability'](event), { available: true });
+  await f.ipcMain.handlers['werkschaft:daemon-start'](event);
+  assert.equal(launches, 2);
+  assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
+  fs.rmSync(repoRoot, { recursive: true });
+  const g = await fixture(async () => { throw new Error('missing'); }, 'win32', { ...source, appRoot });
+  const gwc = g.views[0].webContents;
+  const result = await g.ipcMain.handlers['werkschaft:daemon-availability']({ sender: gwc, senderFrame: gwc.mainFrame });
   assert.equal(result.available, false);
-  assert.match(result.reason, /development run/);
+  assert(result.reason.includes(repoRoot));
+  assert.match(result.reason, /assemble-daemon-input\.cjs/);
 });
 test('unsupported platform disables standalone start', async () => {
   const f = await fixture(async () => { throw new Error('no daemon'); }, 'linux', { packaged: true });
