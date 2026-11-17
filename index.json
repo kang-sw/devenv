@@ -498,7 +498,10 @@
         "clone_id": "9091c57d68d03c76",
         "track": "track/playbook",
         "phase": "active",
-        "touched_at": "2026-11-17T02:39:22Z"
+        "touched_at": "2026-11-17T02:43:21Z",
+        "impl": {
+          "branch": "impl/track/playbook/brick-user-swell"
+        }
       }
     },
     "261116-bug-ws-native-pi-release-payload-staleness": {
