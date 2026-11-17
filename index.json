@@ -459,7 +459,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-17T17:15:15Z",
+        "touched_at": "2026-11-17T18:23:43Z",
         "impl": {
           "branch": "impl/track/agent-v2/wrath-crepe-croak"
         }
