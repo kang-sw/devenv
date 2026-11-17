@@ -84,6 +84,11 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
     const wc = dashboardContents();
     let bar, applicationMenu, menuOpen = false, dialogOpen = false;
+    function toggleDashboardDevTools() {
+      if (!dashboardView) return wc.toggleDevTools();
+      if (wc.isDevToolsOpened()) wc.closeDevTools();
+      else wc.openDevTools({ mode: 'detach' });
+    }
     function registerDevToolsShortcut(contents) {
       contents.on('before-input-event', (event, input) => {
         const f12 = input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta;
@@ -92,7 +97,10 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           : input.control && input.shift && !input.alt && !input.meta);
         if (input.type === 'keyDown' && (f12 || inspect)) {
           event.preventDefault();
-          if (!input.isAutoRepeat) wc.toggleDevTools();
+          if (!input.isAutoRepeat) {
+            console.log(`DevTools shortcut ${input.key}: source webContents=${contents.id}, dashboard webContents=${wc.id}`);
+            toggleDashboardDevTools();
+          }
         }
       });
     }
@@ -367,7 +375,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       { role: 'editMenu' },
       { label: 'View', submenu: [
         { role: 'togglefullscreen' },
-        { id: 'devtools', label: 'Toggle Developer Tools', accelerator: platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: () => dashboardContents().toggleDevTools() },
+        { id: 'devtools', label: 'Toggle Developer Tools', accelerator: platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: toggleDashboardDevTools },
         { type: 'separator' },
         { id: 'zoom_reset', label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoomBy('reset') },
         { id: 'zoom_in', label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoomBy('in') },
