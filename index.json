@@ -265,7 +265,14 @@
       "registered_at": "2026-11-14T12:34:19Z"
     },
     "261114-feat-ws-selection-bundle-comment": {
-      "registered_at": "2026-11-14T13:48:14Z"
+      "registered_at": "2026-11-14T13:48:14Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-17T12:29:47Z"
+      }
     },
     "261114-feat-ws-whiteboard-center-reference-scroll": {
       "registered_at": "2026-11-14T11:48:51Z"
