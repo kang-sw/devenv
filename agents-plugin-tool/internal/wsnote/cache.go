@@ -16,20 +16,19 @@ import (
 // ReadPaths resolves note stores without Ensure's directory/metadata writes.
 // Callers retain these paths rather than resolve the Git identity on each open.
 func ReadPaths(root string, config wsconfig.Options, state wsstate.Options) (map[Layer]string, error) {
+	paths := map[Layer]string{LayerRepo: RepoDir(root)}
 	machine, err := MachinePath(config)
 	if err != nil {
-		return nil, err
+		return paths, err
 	}
+	paths[LayerMachine] = machine
 	layout, _, _, err := wsstate.NewManager(state).Resolve(root)
 	if err != nil {
-		return nil, err
+		return paths, err
 	}
-	return map[Layer]string{
-		LayerMachine:  machine,
-		LayerClone:    filepath.Join(layout.SharedDir, "notes.json"),
-		LayerRepo:     RepoDir(root),
-		LayerWorktree: filepath.Join(layout.WorktreeDir, "notes.json"),
-	}, nil
+	paths[LayerClone] = filepath.Join(layout.SharedDir, "notes.json")
+	paths[LayerWorktree] = filepath.Join(layout.WorktreeDir, "notes.json")
+	return paths, nil
 }
 
 // Cache is the daemon's memory-only presentation store. There is no timer:
@@ -37,11 +36,67 @@ func ReadPaths(root string, config wsconfig.Options, state wsstate.Options) (map
 // directory-entry fingerprints. Writers publish their already-read committed
 // records under the same entry lock, never by rereading the note files.
 type Cache struct {
-	mu      sync.Mutex
-	entries map[string]*cacheEntry
+	mu       sync.Mutex
+	entries  map[string]*cacheEntry
+	contexts map[string]readContext
+	paths    map[string]map[Layer]string
 	// Test seams count actual layer reads independently from metadata checks.
 	loadFile func(string) (map[string]Record, error)
 	loadRepo func(string) (map[string]Record, error)
+}
+
+type readContext struct {
+	Root   string
+	Config wsconfig.Options
+	State  wsstate.Options
+}
+
+// Bind retains an authenticated session's caller environment in memory. The
+// dashboard must not substitute the daemon's stores for a hosted caller's.
+func (c *Cache) Bind(id, root string, config wsconfig.Options, state wsstate.Options) {
+	if c == nil {
+		return
+	}
+	context := readContext{root, config, state}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.contexts == nil {
+		c.contexts = map[string]readContext{}
+	}
+	if old, ok := c.contexts[id]; ok && reflect.DeepEqual(old, context) {
+		return
+	}
+	c.contexts[id] = context
+	delete(c.paths, id)
+}
+
+// Paths resolves once per session store identity, outside the cache lock.
+func (c *Cache) Paths(id, root string, refresh bool) (map[Layer]string, error) {
+	c.mu.Lock()
+	context, bound := c.contexts[id]
+	if !bound || context.Root != root {
+		context = readContext{Root: root}
+		if c.contexts == nil {
+			c.contexts = map[string]readContext{}
+		}
+		c.contexts[id] = context
+		delete(c.paths, id)
+	}
+	if paths := c.paths[id]; paths != nil && !refresh {
+		c.mu.Unlock()
+		return paths, nil
+	}
+	c.mu.Unlock()
+	paths, err := ReadPaths(root, context.Config, context.State)
+	c.mu.Lock()
+	if reflect.DeepEqual(c.contexts[id], context) {
+		if c.paths == nil {
+			c.paths = map[string]map[Layer]string{}
+		}
+		c.paths[id] = paths
+	}
+	c.mu.Unlock()
+	return paths, err
 }
 
 type noteStamp struct {

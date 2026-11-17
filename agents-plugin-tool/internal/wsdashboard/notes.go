@@ -17,6 +17,7 @@ type NotesSource interface {
 type NotesLayer struct {
 	Layer wsnote.Layer    `json:"layer"`
 	Notes []wsnote.Record `json:"notes"`
+	Error bool            `json:"error,omitempty"`
 }
 
 type notesView struct {
@@ -88,7 +89,7 @@ func (d *Daemon) handleNotes(w http.ResponseWriter, r *http.Request, replyID str
 		http.NotFound(w, r)
 		return
 	}
-	loaded, _ := d.notes.LoadOrStore(session.Registration.Project, &notesView{})
+	loaded, _ := d.notes.LoadOrStore(replyID, &notesView{})
 	view := loaded.(*notesView)
 	if r.Method == http.MethodPost || r.URL.Query().Get("wait") != "1" {
 		view.start(src, session.Registration, r.Method == http.MethodPost)

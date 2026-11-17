@@ -24,6 +24,7 @@ type Server struct {
 	whiteboardChanged func(cacheHome, root, key string)
 	loginLink         func(string) (string, error)
 	notes             *wsnote.Cache
+	noteBindings      sync.Map // session keys already bound on this connection
 	rootMu            sync.RWMutex
 	sessionHarness    string
 	piDaemonAgents    bool // initialize experimental capability, protected by rootMu

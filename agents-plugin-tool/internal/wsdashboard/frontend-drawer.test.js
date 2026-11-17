@@ -37,6 +37,8 @@ test('only an uncustomized wide panels drawer defaults to 60vh', () => {
 
 class El {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.className = ''; this.attrs = {}; this.textContent = ''; this.listeners = {}; }
+  get textContent() { return this._textContent; }
+  set textContent(value) { this._textContent = value; this.children = []; }
   appendChild(el) { el.parent = this; this.children.push(el); return el; }
   setAttribute(k, v) { this.attrs[k] = v; }
   getAttribute(k) { return this.attrs[k]; }
@@ -115,6 +117,9 @@ test('notes load cached snapshot then wait, refresh by POST, and render server l
   assert.equal(value.textContent, '<value>'); value.listeners.click(); assert.equal(value.getAttribute('aria-expanded'), 'true');
   assert.ok(list.children.some(el => el.textContent === 'js.notes.local'));
   assert.equal(button.disabled, false);
+  c.notesRender({ layers: [{ layer: 'machine', error: true, notes: [] }, { layer: 'repo', notes: [] }] });
+  assert.equal(list.children[0].children[1].textContent, 'js.notes.error', 'a broken layer is not shown as empty');
+  assert.equal(list.children[1].children[1].textContent, 'js.notes.empty', 'an unrelated valid layer still renders');
   button.listeners.click({ preventDefault() {} });
   assert.equal(requests[2][1].method, 'POST');
   pending.shift().reject(new Error('offline')); await tick();

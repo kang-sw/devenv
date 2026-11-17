@@ -3,10 +3,8 @@ package mcp
 import (
 	"fmt"
 
-	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsnote"
-	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // ReadNotes is called only by the drawer's background read, not by a page
@@ -15,22 +13,23 @@ func (src *DashboardSessionSource) ReadNotes(reg wsdashboard.Registration, refre
 	if src.Notes == nil {
 		return nil, fmt.Errorf("notes unavailable")
 	}
-	cached, ok := src.notePaths.Load(reg.Project)
-	if !ok {
-		paths, err := wsnote.ReadPaths(reg.Project, wsconfig.Options{}, wsstate.Options{})
-		if err != nil {
-			return nil, err
-		}
-		cached, _ = src.notePaths.LoadOrStore(reg.Project, paths)
-	}
-	paths := cached.(map[wsnote.Layer]string)
+	// Resolution may fail for local stores (for example a caller with no Git
+	// on PATH). The repo path remains usable, and never depends on them.
+	paths, _ := src.Notes.Paths(reg.ReplyID, reg.Project, refresh)
 	layers := make([]wsdashboard.NotesLayer, 0, 4)
 	for _, layer := range []wsnote.Layer{wsnote.LayerMachine, wsnote.LayerClone, wsnote.LayerRepo, wsnote.LayerWorktree} {
-		notes, err := src.Notes.Read(paths[layer], layer == wsnote.LayerRepo, refresh)
-		if err != nil {
-			return nil, err
+		out := wsdashboard.NotesLayer{Layer: layer, Notes: []wsnote.Record{}}
+		if paths[layer] == "" {
+			out.Error = true
+		} else {
+			notes, err := src.Notes.Read(paths[layer], layer == wsnote.LayerRepo, refresh)
+			if err != nil {
+				out.Error = true
+			} else {
+				out.Notes = notes
+			}
 		}
-		layers = append(layers, wsdashboard.NotesLayer{Layer: layer, Notes: notes})
+		layers = append(layers, out)
 	}
 	return layers, nil
 }

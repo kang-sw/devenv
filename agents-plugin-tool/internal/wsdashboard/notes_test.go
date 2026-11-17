@@ -80,7 +80,7 @@ func TestNotesRouteMemoryResponseLANFilterAndRefresh(t *testing.T) {
 		t.Fatalf("refresh = %d", rec.Code)
 	}
 	close(src.gate)
-	notesDone(t, f.d, f.project)
+	notesDone(t, f.d, "livesession")
 	select {
 	case refresh := <-src.calls:
 		if !refresh {
@@ -107,6 +107,12 @@ func TestNotesRouteMemoryResponseLANFilterAndRefresh(t *testing.T) {
 	}
 	if len(src.calls) != 0 {
 		t.Fatal("wait requests scheduled extra reads")
+	}
+	// Two sessions at the same root may have different caller store homes.
+	// A wait-only request for the unopened one must not reuse the first view.
+	other := serve(f.d, local, http.MethodGet, "/s/boardsession/notes?wait=1", "")
+	if json.Unmarshal(other.Body.Bytes(), &got) != nil || len(got.Layers) != 0 {
+		t.Fatalf("same-root sessions shared a notes view: %s", other.Body.String())
 	}
 	for _, tc := range []struct {
 		method, path string

@@ -326,6 +326,11 @@ func (s *Server) dashboardReconnect() {
 // off, the session's registration is removed. force re-resolves the key at
 // once (after a config.tune).
 func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
+	if s.notes != nil {
+		if _, bound := s.noteBindings.LoadOrStore(sessionKey, struct{}{}); !bound {
+			s.notes.Bind(keyReplyID(sessionKey), root, s.configOptions(), s.stateOptions())
+		}
+	}
 	if !s.dashboardDeclared() {
 		return // no dashboard manifest loaded: the dashboard is off
 	}
@@ -766,8 +771,7 @@ func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
 type DashboardSessionSource struct {
 	store *sessionStore
 	// Notes is shared with every daemon-hosted MCP/CLI writer.
-	Notes     *wsnote.Cache
-	notePaths sync.Map // root -> read-only resolved layer paths
+	Notes *wsnote.Cache
 	// stateDir resolves the daemon state directory; nil uses
 	// wsdashboard.Dir("").
 	stateDir func() (string, error)

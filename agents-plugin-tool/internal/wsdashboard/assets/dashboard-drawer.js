@@ -216,7 +216,8 @@
       var section = doc.createElement("section"); section.className = "notes-layer"; list.appendChild(section);
       var rows = layer.notes || [];
       line((names[layer.layer] || layer.layer) + " · " + rows.length, "notes-heading", section);
-      if (!rows.length) line(wsT("js.notes.empty"), "notes-hint", section);
+      if (layer.error) line(wsT("js.notes.error"), "notes-hint", section);
+      else if (!rows.length) line(wsT("js.notes.empty"), "notes-hint", section);
       rows.forEach(function (note) {
         var row = doc.createElement("div"); row.className = "notes-row" + (note.visible === false ? " notes-dim" : ""); section.appendChild(row);
         line(String(note.priority), "notes-priority" + (note.priority === 0 ? " zero" : ""), row);
