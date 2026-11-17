@@ -497,7 +497,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "9091c57d68d03c76",
         "track": "track/playbook",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-17T02:43:21Z",
         "impl": {
           "branch": "impl/track/playbook/brick-user-swell"
