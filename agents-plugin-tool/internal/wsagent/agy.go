@@ -344,15 +344,15 @@ func (p *agyProcess) SetModel(model string) error {
 }
 
 // SetEffort sets the session's thought level. Only some models offer one
-// (agy drops the option for the others), and the level of a model without
-// it is kept for the next model that has it rather than refused, so a
-// start or a switch never fails on it.
+// (agy drops the option for the others), and a level the current model
+// does not take is kept for the next model that does rather than refused,
+// so a start or a switch never fails on it.
 func (p *agyProcess) SetEffort(effort string) error {
 	if effort == "" {
 		return ErrUnsupported
 	}
 	p.effort.Store(&effort)
-	if !p.m.offers("thought_level") {
+	if !p.m.offersValue("thought_level", effort) {
 		return nil
 	}
 	return p.setConfig("thought_level", effort)
@@ -437,8 +437,9 @@ type agyMapper struct {
 	sessionID string
 	curMode   string
 	version   string
-	// options are the config option ids the session offers now.
-	options map[string]bool
+	// options are the config options the session offers now, by id, with
+	// the values each takes.
+	options map[string][]string
 	// initDemoted and sessionDemoted are the items the initialize answer
 	// and the session's own reports show a mismatched shape for.
 	initDemoted    []CapabilityItem
@@ -482,7 +483,16 @@ func (m *agyMapper) session() string {
 func (m *agyMapper) offers(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.options == nil || m.options[id]
+	_, ok := m.options[id]
+	return m.options == nil || ok
+}
+
+// offersValue reports whether option id takes value now; before a session
+// reported its options, it does.
+func (m *agyMapper) offersValue(id, value string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.options == nil || slices.Contains(m.options[id], value)
 }
 
 func (m *agyMapper) mode() string {
@@ -708,7 +718,7 @@ func (m *agyMapper) opened(result json.RawMessage) []Event {
 	m.sessionDemoted = slices.DeleteFunc(m.sessionDemoted, func(item CapabilityItem) bool {
 		return item == ItemModelEffort || item == ItemApproval
 	})
-	if !m.options["model"] {
+	if _, ok := m.options["model"]; !ok {
 		m.sessionDemoted = append(m.sessionDemoted, ItemModelEffort)
 	}
 	if r.Modes == nil || len(r.Modes.AvailableModes) == 0 {
@@ -729,9 +739,13 @@ func (m *agyMapper) configOptions(body json.RawMessage) {
 	if json.Unmarshal(body, &r) != nil || r.ConfigOptions == nil {
 		return
 	}
-	m.options = map[string]bool{}
+	m.options = map[string][]string{}
 	for _, o := range r.ConfigOptions {
-		m.options[o.ID] = true
+		values := []string{}
+		for _, v := range o.Options {
+			values = append(values, v.Value)
+		}
+		m.options[o.ID] = values
 	}
 	var models []ModelChoice
 	var efforts []string

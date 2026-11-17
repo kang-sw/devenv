@@ -477,6 +477,11 @@ func TestAgyMapperShapeDemotes(t *testing.T) {
 	if !slices.Equal(rep.Demoted, []CapabilityItem{ItemResume, ItemModelEffort, ItemApproval}) {
 		t.Fatalf("no model option, no modes: %+v", rep)
 	}
+	// An effort applies only where the option takes it (SetEffort keeps
+	// the rest for a later model).
+	if !m.offersValue("thought_level", "high") || m.offersValue("thought_level", "low") {
+		t.Fatalf("offered thought levels: %v", m.options)
+	}
 	rep = last(m.mapLine([]byte(`{"jsonrpc":"2.0","result":{"sessionId":"s","modes":{"currentModeId":"default","availableModes":[{"id":"default"}]},"configOptions":[{"id":"model","currentValue":"m","options":[{"value":"m"}]}]},"id":"ws-resume-e-3"}`), rr))
 	if !slices.Equal(rep.Demoted, []CapabilityItem{ItemResume}) {
 		t.Fatalf("a model without a thought level: %+v", rep)

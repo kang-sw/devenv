@@ -339,6 +339,13 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		// (restartIfDue).
 		fmt.Fprintf(c.r.opts.Log, "agent %s: the process's ws-mcp route %s is not this daemon's; it restarts at its first idle point\n", rec.ReplyID, rec.MCPURL)
 		c.mcpStale = true
+	case attach && rec.MCPToken == "" && rec.Backend == BackendAgy:
+		// An agy start the last daemon did not finish: Spawned named the
+		// process before its token was recorded. agy has no stdio
+		// fallback, so its ws tools are gone; it restarts before it takes
+		// input, as for a stale route.
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the agy process's start did not finish; it restarts at its first idle point\n", rec.ReplyID)
+		c.mcpStale = true
 	case attach && rec.MCPToken != "":
 		// The recorded token and hello, as the process was started with.
 		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
@@ -349,7 +356,11 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		// no stdio fallback: its backend refuses a start without a session.
 		cmd, err := spec.Lead.WSMCP()
 		if err != nil {
-			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp over HTTP unavailable, the bundle's stdio server serves: %v\n", rec.ReplyID, err)
+			fallback := "the bundle's stdio server serves"
+			if rec.Backend == BackendAgy {
+				fallback = "the agy start is refused"
+			}
+			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp over HTTP unavailable, %s: %v\n", rec.ReplyID, fallback, err)
 		} else if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
 			if rec.Backend == BackendClaude {
 				spec.Lead.Plugin, spec.Lead.PluginNote = cmd.Plugin, cmd.PluginWarning

@@ -26,6 +26,9 @@ type agyFake struct {
 	// reads; rowPIDs are the host_pid it named at each one.
 	replyID string
 	rowPIDs []int
+	// model is the session's model: a Claude model offers no thought
+	// level, as in agy.
+	model string
 }
 
 func newAgyLeadHarness(t *testing.T) (*leadHarness, *agyFake) {
@@ -40,8 +43,28 @@ func newAgyLeadHarness(t *testing.T) (*leadHarness, *agyFake) {
 	return h, f
 }
 
-const agyFakeConfig = `[{"id":"model","currentValue":"gemini-3.8-flash","options":[{"value":"gemini-3.8-flash"},{"value":"claude-sonnet-4-6"}]},` +
-	`{"id":"thought_level","currentValue":"high","options":[{"value":"low"},{"value":"medium"},{"value":"high"}]}]`
+// config is the session's configOptions for its model, with option id's
+// current value set to value.
+func (f *agyFake) config(id, value string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id == "model" {
+		f.model = value
+	}
+	if f.model == "" {
+		f.model = "gemini-3.8-flash"
+	}
+	opts := []map[string]any{{"id": "model", "currentValue": f.model, "options": []map[string]string{{"value": "gemini-3.8-flash"}, {"value": "claude-sonnet-4-6"}}}}
+	if !strings.HasPrefix(f.model, "claude-") {
+		level := "medium"
+		if id == "thought_level" {
+			level = value
+		}
+		opts = append(opts, map[string]any{"id": "thought_level", "currentValue": level, "options": []map[string]string{{"value": "low"}, {"value": "medium"}, {"value": "high"}}})
+	}
+	raw, _ := json.Marshal(opts)
+	return string(raw)
+}
 
 func (f *agyFake) answer(_, method string, params json.RawMessage) (string, string, bool) {
 	switch method {
@@ -74,22 +97,14 @@ func (f *agyFake) answer(_, method string, params json.RawMessage) (string, stri
 		if sid == "" {
 			sid = "agy-s1"
 		}
-		return `{"sessionId":"` + sid + `","modes":{"currentModeId":"default","availableModes":[{"id":"default"},{"id":"accept-edits"},{"id":"auto"},{"id":"plan"}]},"configOptions":` + agyFakeConfig + `}`, "", true
+		return `{"sessionId":"` + sid + `","modes":{"currentModeId":"default","availableModes":[{"id":"default"},{"id":"accept-edits"},{"id":"auto"},{"id":"plan"}]},"configOptions":` + f.config("", "") + `}`, "", true
 	case "session/set_config_option":
 		var p struct {
 			ConfigID string `json:"configId"`
 			Value    string `json:"value"`
 		}
 		_ = json.Unmarshal(params, &p)
-		var opts []map[string]any
-		_ = json.Unmarshal([]byte(agyFakeConfig), &opts)
-		for _, o := range opts {
-			if o["id"] == p.ConfigID {
-				o["currentValue"] = p.Value
-			}
-		}
-		raw, _ := json.Marshal(map[string]any{"configOptions": opts})
-		return string(raw), "", true
+		return `{"configOptions":` + f.config(p.ConfigID, p.Value) + `}`, "", true
 	case "session/set_mode":
 		return `{}`, "", true
 	}
@@ -175,7 +190,9 @@ func TestAgyLeadOverACP(t *testing.T) {
 	for _, p := range h.holders.acpInputs(holder, "session/set_mode") {
 		settings = append(settings, "mode="+acpField(t, p, "modeId").(string))
 	}
-	if !slices.Equal(settings, []string{"model=claude-sonnet-4-6", "thought_level=low", "mode=auto"}) {
+	// A Claude model offers no thought level: the effort waits for one
+	// that does.
+	if !slices.Equal(settings, []string{"model=claude-sonnet-4-6", "mode=auto"}) {
 		t.Fatalf("settings applied at start: %v", settings)
 	}
 	prompt := h.holders.acpInputs(holder, "session/prompt")[0]
@@ -193,13 +210,16 @@ func TestAgyLeadOverACP(t *testing.T) {
 	if hello, _, ok := h.runner.ResolveMCPToken(token); !ok || !sameDir(hello.ProjectRoot, h.root) || hello.Env[EnvHostedSessionKey] != rec.WSKey {
 		t.Fatalf("the token resolves to the lead's ws-mcp context: %+v %v", hello, ok)
 	}
-	if len(f.tokens) != 1 || f.tokens[0] != token {
-		t.Fatalf("agy got the recorded token: %v", f.tokens)
+	f.mu.Lock()
+	tokens, rowPIDs := slices.Clone(f.tokens), slices.Clone(f.rowPIDs)
+	f.mu.Unlock()
+	if len(tokens) != 1 || tokens[0] != token {
+		t.Fatalf("agy got the recorded token: %v", tokens)
 	}
 	// ws-mcp confirms the hosted session by the row's host_pid while agy
 	// connects inside its session request.
-	if len(f.rowPIDs) != 1 || f.rowPIDs[0] != rec.HostPID || rec.HostPID == 0 {
-		t.Fatalf("the row named %v at the session request; the process is %d", f.rowPIDs, rec.HostPID)
+	if len(rowPIDs) != 1 || rowPIDs[0] != rec.HostPID || rec.HostPID == 0 {
+		t.Fatalf("the row named %v at the session request; the process is %d", rowPIDs, rec.HostPID)
 	}
 
 	// An approval, keyed by its tool call, answered by option kind with
@@ -230,6 +250,22 @@ func TestAgyLeadOverACP(t *testing.T) {
 		t.Fatalf("after the turn: %+v", st)
 	}
 
+	// Back on a model with a thought level, the effort is applied again,
+	// in place.
+	gemini := "gemini-3.8-flash"
+	if _, err := h.runner.SetSettings(id, &gemini, nil); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the switch", func() bool { return len(h.holders.acpInputs(holder, "session/set_config_option")) == 3 })
+	var switched []string
+	for _, p := range h.holders.acpInputs(holder, "session/set_config_option")[1:] {
+		switched = append(switched, acpField(t, p, "configId").(string)+"="+acpField(t, p, "value").(string))
+	}
+	if !slices.Equal(switched, []string{"model=gemini-3.8-flash", "thought_level=low"}) || h.holders.opCount("spawn") != 1 {
+		t.Fatalf("the model switch: %v %v", switched, h.holders.opList())
+	}
+	eventually(t, "the switch settled", func() bool { st := h.state(id); return st.Model == gemini && st.Error == "" })
+
 	// The next daemon rejoins: no new process, no new handshake, the token
 	// restored, the next turn on the same session.
 	h.runner.Close()
@@ -253,6 +289,44 @@ func TestAgyLeadOverACP(t *testing.T) {
 	}
 	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+ids[1]+`"}`)
 	h.idle(id)
+}
+
+// TestAgyLeadRejoinOfAnUnfinishedStartRestarts: a daemon that died between
+// Spawned naming the process and the start's end left a holder in the
+// record with no token. agy has no stdio fallback, so a later daemon does
+// not run that process on without ws tools: it restarts it with a new
+// token before it takes input.
+func TestAgyLeadRejoinOfAnUnfinishedStartRestarts(t *testing.T) {
+	h, f := newAgyLeadHarness(t)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "hello")
+	holder := h.holder(id)
+	eventually(t, "the first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[0]+`"}`)
+	h.idle(id)
+	token := h.record(id).MCPToken
+
+	h.runner.Close()
+	h.holders.restart()
+	h.editRecord(id, func(m map[string]any) {
+		for _, k := range []string{"mcp_token_secret", "mcp_url", "mcp_env", "mcp_holder_id"} {
+			delete(m, k)
+		}
+	})
+	h.startAt(endpoint)
+	eventually(t, "the restart", func() bool { return h.holders.opCount("stop "+holder) == 1 && h.holders.opCount("spawn") == 2 })
+	eventually(t, "the new process", func() bool { st := h.state(id); return st.Process && h.holder(id) != holder })
+	fresh := h.holder(id)
+	eventually(t, "the new session request", func() bool { return len(h.holders.acpInputs(fresh, "session/resume")) == 1 })
+	if tok := h.record(id).MCPToken; tok == "" || tok == token {
+		t.Fatalf("the new process has a new token: %q", tok)
+	}
+	if _, _, ok := h.runner.ResolveMCPToken(token); ok {
+		t.Fatal("the unrecorded token is not restored")
+	}
 }
 
 // TestAgyLeadRefusesAStartWithoutWSTools: a start with no HTTP MCP route,
