@@ -9,6 +9,7 @@ related:
   261115-feat-ws-permission-profile: "common permission intent; tool-whitelist based spawn depends on it"
   261117-research-ws-daemon-file-touch-map: "release-gate file-touch constraint; not edited from here"
   261112-epic-ws-mcp-pi-subagents: "done; pi.* is the prior art"
+  261115-feat-ws-dashboard-session-four-state-followups: "the fifth state's dashboard display"
   261117-feat-ws-hosted-prompt-assembly: "delivers the playbooks' Never-use {{NativeToolScheme}} steer that complements native subagent removal (Decision 6)"
 ---
 
@@ -32,14 +33,23 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
 1. **Surface (06)=a, (09)=a.**
    - `agent.spawn(prompt, tier, system_prompt_path? | system_prompt?,
      authority?, cwd? | worktree?, label?) -> {address, status}`.
-   - `agent.stop(address)` closes deepest-first (existing behavior kept).
+   - `agent.interrupt(address)` interrupts the child's current turn; the
+     session stays ((55)=a).
    - `agent.list()` returns child states plus the last report summary (a
      superset of `pi.list`).
    - `agent.tiers()` (new) lists the valid `tier` values (Decision 11).
+   - The agent surface is spawn, interrupt, list, tiers. No `agent.stop`
+     ((60)=a): a runaway child is interrupted and then sleeps by TTL
+     (Decision 14); permanent close is only by a human in the dashboard,
+     cascading deepest-first. Rewind is human-only (dashboard), not an agent
+     tool ((55)=a).
    - No `wait` and no `transcript`: completion arrives by push (a system mail
      starts a new turn); humans read transcripts in the dashboard.
    - No `agent.send`: a single `mailbox.send(to: <address>)` serves children,
      peers and other leads.
+   - Rejected: (55)b a caller-chosen `delivery?: steer|next_turn` on
+     `mailbox.send`; (55)c no interrupt tool; (60)b keeping `agent.stop` as
+     "sleep now".
 2. **In-memory routing for daemon-owned addresses (12).** The daemon Runner
    routes daemon-owned agent addresses in memory, not through mailbox files;
    persist only what restore needs. The mailbox file path stays only for
@@ -48,11 +58,15 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
 3. **Relation is computed, not stored (11).** Parent/child/peer is derived from
    lineage at delivery. Rejected: a stored Envelope relation field, because of
    whole-file loss of a new Envelope field on an old binary (11).
-4. **Delivery timing by relation.** Parent to child: steer if the catalog
-   supports mid-turn steer for that harness@version, else next turn. Child to
-   parent: report as today's Pi worker report. Peer: next turn.
+4. **Delivery timing ((61)=a, owner 19:25 "mailbox keeps steer only").** Every
+   `mailbox.send` delivery, for every relation (parent to child, child to
+   parent, peer), is a steer when the catalog grades mid-turn steer supported
+   for the target harness@version, else next turn. The child's final report
+   stays the automatic system mail of Decision 5. Rejected: per-relation
+   timing with peers at next turn ((61)b), and a caller-chosen delivery option
+   ((55)b).
 5. **Report-hold rule kept.** A child's final report is an automatic system mail
-   to its parent, held while the child's own children are open.
+   to its parent, held while the child's own children are awake.
 6. **Native subagent removal in hosted leads and hosted workers (06)=a, (11),
    (29)=ok.** Hosted Claude leads launch with `--disallowedTools Agent` and
    `Task` (init reports Agent as `Task`); the removal extends to hosted workers
@@ -66,9 +80,11 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
    stage 3) are still steered to `ws/agent.*`.
 7. **No depth cap (10)=c.** Remove `MaxSpawnDepth` (`wsagent/children.go`, the
    constant and its enforcement). Runaway is bounded by a per-root-tree
-   concurrent-agent cap exposed as a config key. The default is chosen by
-   measurement in this ticket (a guess of about 8 was floated and is uncertain)
-   (12).
+   concurrent-agent cap exposed as a config key; the cap counts awake agents
+   only ((59)=ok). Rejected: counting sleeping agents, because without explicit
+   deletion sleeping agents accumulate and would pin the cap. The default is
+   chosen by measurement in this ticket (a guess of about 8 was floated and is
+   uncertain) (12).
 8. **Hire stays separate (11).** `session.request_hire` (peer, no lineage) is not
    merged into `agent.spawn` (child, lineage); the hire ticket rejected lineage
    authority (768=c, 775=a).
@@ -133,10 +149,40 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
     pi-mini-lead = full. Rejected: renaming to `authority_profile` with today's
     contents (conflicts with (38)=d because a profile fixes backend/model, and
     duplicates the system prompt source); keeping `profile`.
+14. **Lifecycle: sleep, not close ((57)=ok).** Drop the immediate auto-close of
+    finished children (commit 539c94d6a,
+    `agents-plugin-tool/internal/wsagent/runner_events.go`
+    `autoCloseDue`/`finished`, about lines 768-785). Every agent sleeps through
+    the existing idle timer (`idle_timeout_seconds`, `DefaultIdleTimeout` =
+    600 s, `wsagent/profile.go:46`; today 600 s for workers, 0 for leads). A
+    sleeping agent keeps its record and wakes on `mailbox.send` to its address,
+    generalizing the `resumePiChild` path that reopens a closed Pi child on the
+    same id and session (commit e796705ce, `wsagent/runner.go` around 1022). A
+    running turn, a live exec job or an awake descendant prevents sleep
+    (existing `idleNow`, `runner_events.go:605`); a sleeping child does not
+    keep its parent awake.
+15. **Control key ((58)=ok).** The control key is the mailbox address
+    `agent.spawn` returns; labels are display-only and may repeat.
+    `agent.interrupt`/`agent.list` (and any agent.* control) on an agent the
+    caller did not spawn directly returns an error, the same rule as today's
+    `piOwned` (`agents-plugin-tool/internal/mcp/pi_tools.go:266`,
+    `*st.Parent == parent`). `mailbox.send` to any address stays allowed.
+16. **Child agent waiting state ((62)=ok, (63)=ok).** A fifth session state
+    "child agent waiting" beside on | off | archived | ended: a sleeping child
+    that still receives mail (mail wakes it) and is deleted 15 days after its
+    last activity (config key, default 15 days; owner answer to (57),
+    2026-11-17 19:31). Rejected: the earlier 7-day proposal, too short per the
+    owner. Expiry is checked on the existing periodic sweep and at daemon
+    start, not by per-event timers or file rewrites; any mail or turn resets
+    the 15-day clock; deleting a waiting child deletes its descendants
+    deepest-first. Rejected: per-agent timers, because of the release-gate
+    file-touch rule (no per-event file touches). The dashboard display of the
+    fifth state is tracked in
+    `261115-feat-ws-dashboard-session-four-state-followups`.
 
 ## Open Decision Queue
 
-Last ID: (54)
+Last ID: (63)
 
 (53) [open] [policy] Whether `agent.spawn` gets a named `preset?` (config-defined {tier, authority, system_prompt_path} bundle).
 - Context: explicit args would override the preset; the three agent-facing builtins (pi-worker, explore, pi-mini-lead) would ship as default presets and be listed with `agent.tiers`.
@@ -146,6 +192,8 @@ Last ID: (54)
 - Lead reading of the owner's 19:16 reply: a (no presets; with pi.* removed no old-name resolution remains) - awaiting confirmation.
 
 (54) settled as b by the owner at 19:18; moved to Decision 10.
+
+(62) and (63) settled as ok by the owner at 19:33 ("62,63=ok"); moved to Decision 16.
 
 ## Constraints
 
@@ -165,7 +213,8 @@ Last ID: (54)
   through generic hooks.
 - Removing `MaxSpawnDepth` and blocking native tools in hosted sessions
   (leads and workers) are observable behavior changes, already owner-confirmed
-  by (06), (10), (18), (29).
+  by (06), (10), (18), (29). Dropping child auto-close in favor of sleep
+  (Decision 14) and removing `agent.stop` are owner-confirmed by (57), (60).
 - `pi.*` spawn tools are hidden now and deleted next minor (Decision 10); the Claude CLI tier is frozen and keeps
   its native spawn.
 
@@ -186,27 +235,33 @@ behavior changes owner-confirmed as above.
 
 ## Phases
 
-### Phase 1: agent.spawn/stop/list, mailbox routing and relation delivery
+### Phase 1: agent.spawn/interrupt/list/tiers, sleep and wake on mail, mailbox routing
 
-Add `agent.spawn`, `agent.stop`, `agent.list`, `agent.tiers` over the existing
+Add `agent.spawn`, `agent.interrupt`, `agent.list`, `agent.tiers` over the existing
 Runner spawn path generalized to harness-selected backends with server-side tier
 namespace resolution (bare, `<harness>.<tier>`, user alias via the new
 user-scope alias config key and per-harness tier tables), `authority` mapped to
 daemon tool sets, and system prompt delivery through the harness's
 append-system-prompt (path read once, text kept in memory for re-injection); route
 daemon-owned addresses in memory via the Runner; accept `mailbox.send` to a
-daemon-owned address; compute relation from lineage at delivery with the timing
-rules and the report-hold rule; apply tier-rank and authority caps; hide the `pi.*` spawn tools from `tools/list` (handlers deleted next minor,
+daemon-owned address; deliver every `mailbox.send` as a steer when the catalog
+supports it, else next turn, with the report-hold rule; drop child auto-close so
+every agent sleeps after the idle timer and wakes on `mailbox.send` to its
+address; return an ownership error for agent.* control on an address the caller
+did not spawn directly; apply tier-rank and authority caps; hide the `pi.*` spawn tools from `tools/list` (handlers deleted next minor,
 (54)=b) and move shipped playbook/skill `pi.*` references to `agent.*`; remove `MaxSpawnDepth` and add the per-root-tree concurrent-agent cap
-config key with a default chosen by measurement (record the measurement).
+config key (counting awake agents only) with a default chosen by measurement
+(record the measurement).
 
 Deferred: exec tools, single holder, any stage-3 harness backend.
 
-Verification: Go tests on remote w5090 covering spawn/stop deepest-first/list,
+Verification: Go tests on remote w5090 covering spawn/list, interrupt keeping
+the session, no auto-close on finish, sleep after the idle timeout, wake on mail
+to a sleeping child, ownership error on a non-own address, the cap counting
+awake agents only, steer delivery for each relation with next-turn fallback,
 tier resolution (bare, `harness.tier`, alias, unknown/unusable failing with the
 valid list), `agent.tiers` output, system prompt delivery via append-system-prompt
-and re-injection from memory on a new segment, mail between parent, child and
-peer with each timing, the report-hold rule, tier-rank and authority cap
+and re-injection from memory on a new segment, the report-hold rule, tier-rank and authority cap
 enforcement and caps inheritance, `pi.*` absent from `tools/list` but still callable, with no shipped text referencing `pi.*`, and no mailbox file write
 for daemon-owned addresses; the recorded cap-default measurement.
 

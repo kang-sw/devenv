@@ -18,6 +18,14 @@ Owner decisions (17)=a and (19)=a make exec a prerequisite-ordered follow-on:
 `261117-feat-ws-exec-tools` needs a holder that owns many children, including
 exec jobs, and that outlives the daemon.
 
+Facts about today's holder (verified 2026-11-17): the holder listens on loopback
+`127.0.0.1:0` (`agents-plugin-tool/internal/wsholder/holder.py:849`) and records
+its port and token in `holders/<id>/descriptor.json`; the daemon dials it
+(`wsholder/client.go:139`) and re-attaches after a daemon replacement by
+scanning the holders dir (`wsholder/manager.go:264-316`); the hello carries
+`protocol` and both sides accept N and N-1 (`wsholder/holder.go:55-64`); holder
+scripts are staged by hash (`wsholder/holder.go:139`).
+
 ## Decisions
 
 1. **One PC-wide Python holder process, one daemon connection, many children
@@ -31,12 +39,22 @@ exec jobs, and that outlives the daemon.
 3. **Per-job output ring with a cap.** On overflow keep a head slice plus the
    tail. The size (head and tail) is decided in this ticket (record the
    reasoning in the phase Result).
-4. **Mitigations are constraints, not options** (see Constraints).
+4. **Version coexistence ((56)=ok, owner 2026-11-17 19:25).** A new-version
+   holder is started for new children while an old-version holder keeps serving
+   its existing children over the N-1 protocol and exits when its child count
+   reaches zero. "One PC-wide holder" therefore means one per holder protocol
+   version. The connection direction stays: the holder listens, the daemon
+   dials. Rejected: replace only at zero children (forces closing every
+   conversation to update the holder); reversing the direction so the holder
+   dials the daemon (the listening holder already outlives the daemon
+   naturally).
+5. **Mitigations are constraints, not options** (see Constraints).
 
 ## Risks (named once)
 
 - One holder death kills all lead conversations and exec jobs on the PC.
-- Holder code updates require all children to be closed.
+- Two holder versions may run side by side during a transition; the daemon must
+  keep N-1 protocol support until the old holder drains.
 
 ## Constraints
 
@@ -49,7 +67,8 @@ exec jobs, and that outlives the daemon.
     multiplexed connection only;
   - the holder protocol is versioned, and the new daemon speaks the old holder
     protocol;
-  - a holder is replaced only when it has zero children (or on reboot).
+  - an old-version holder is never force-replaced; it drains under version
+    coexistence (Decision 4).
 - Release-gate file-touch rule (owner, 2026-11-17): minimize daemon file touches
   at the root; files for backup/restore only; deltas (append) not rewrites; no
   heartbeat rewrites; interactive paths never wait on file I/O. Exec output
@@ -72,15 +91,17 @@ approval; T4 is never shipped.
 
 Move from one holder per child to one PC-wide holder with a single daemon
 connection and many children (conversations and exec jobs); version the holder
-protocol with the new daemon speaking the old protocol; enforce
-replace-only-at-zero-children; add the per-job output ring with head+tail
+protocol with the new daemon speaking the old protocol; run an old-version and a
+new-version holder side by side, placing new children on the new holder and
+letting the old holder exit at zero children; add the per-job output ring with head+tail
 overflow handling (size decided here and recorded); expose the output read over
 the connection for later `exec.tail` and completion reports.
 
 Deferred: the `exec.*` tool surface (`261117-feat-ws-exec-tools`).
 
 Verification: Go tests on remote w5090 covering multiplexing of several children,
-new-daemon-with-old-holder protocol compatibility, refusal to replace a holder
-with live children, ring overflow behavior (head+tail kept), and a daemon
+new-daemon-with-old-holder protocol compatibility, coexistence of an old-version
+and a new-version holder with new children placed on the new holder and the old
+holder exiting at zero children, ring overflow behavior (head+tail kept), and a daemon
 replacement with the holder surviving and the output still readable; syscall/s
 measurement showing no per-job file writes.

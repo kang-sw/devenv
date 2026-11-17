@@ -8,7 +8,7 @@ related:
   261114-feat-ws-conversation-audit-event-store: "future consumer of daemon-visible exec I/O"
   261115-feat-ws-permission-profile: "permission-profile caps are enforced here"
   261117-feat-ws-harness-capability-catalog: "default tool removal range and native subagent removability items"
-  261117-feat-ws-agent-tools-mailbox-routing: "shares the never-auto-terminate and cascading-close rules for child agents"
+  261117-feat-ws-agent-tools-mailbox-routing: "shares the sleep-not-close and cascading-close rules for child agents"
   261117-research-ws-daemon-file-touch-map: "release-gate file-touch constraint; not edited from here"
 ---
 
@@ -67,13 +67,15 @@ tools; this ticket generalizes them. Prerequisite: the single session holder
    with `--disallowedTools` only, keeping the rest of the user's settings (today
    the Claude lead profile loads user settings unchanged, so Bash cannot be
    removed).
-7. **Never auto-terminate (18).** A session with any live child agent or exec job
-   (monitors included) is never idle-terminated, sleep-parked or
-   child-auto-closed. Feed daemon-tracked jobs into `idleNow`
-   (`wsagent/runner_events.go`, search `idleNow`), which today counts turn,
-   `bgTasks` and children but not daemon exec jobs.
-8. **Explicit close cascades (18).** A user or parent closing a session ends its
-   jobs and children deepest-first.
+7. **Never auto-terminate (18).** Child auto-close no longer exists ((57) in
+   `261117-feat-ws-agent-tools-mailbox-routing`). A session with a running turn,
+   a live exec job (monitors included) or an awake child never sleeps; a
+   sleeping child does not keep its parent awake. Feed daemon-tracked jobs into
+   `idleNow` (`wsagent/runner_events.go`, search `idleNow`), which today counts
+   turn, `bgTasks` and children but not daemon exec jobs.
+8. **Explicit close cascades (18).** A human closing a session in the dashboard
+   ends its jobs and children deepest-first; agents have no stop tool ((60)=a in
+   the agent-tools ticket). `exec.stop` for jobs stays.
 9. **Tool I/O.** The daemon sees exec I/O directly (a future source for the audit
    store); storage follows the release-gate rules (memory ring, restore-only
    deltas).
@@ -126,9 +128,10 @@ showing no per-job files.
 
 Block Bash, PowerShell, Agent/Task and harness background shell/monitor tools in
 hosted leads with `--disallowedTools` only; feed daemon exec jobs into `idleNow`
-so live jobs or children prevent idle termination, sleep-parking and child
-auto-close; cascade explicit close deepest-first.
+so a live job or an awake child prevents sleep (a sleeping child does not keep
+its parent awake); cascade a human's dashboard close deepest-first.
 
 Verification: Go tests on remote w5090 for the flag set and the preserved tools,
-idle behavior with a live job and with a live child, and cascading close order; a
+sleep behavior with a live job, with an awake child and with a sleeping child,
+and cascading close order; a
 recorded hosted-lead init stream showing the tool set.
