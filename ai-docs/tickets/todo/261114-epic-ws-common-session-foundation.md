@@ -102,7 +102,12 @@ Stage 2 (hosted-first migration, reference implementation Claude):
   2 ((28)=a): enter any `ws/agent.spawn` child's hosted session from the
   dashboard, every harness. Prerequisite: `261117-feat-ws-agent-tools-mailbox-routing`.
 - Candidates, no ticket yet: E, usage/budget per agent tree (late stage 2); D,
-  tool-result size budget/paging (stage-2 candidate, unplaced by (28)).
+  tool-result size budget/paging (stage-2 candidate, unplaced by (28)); R,
+  split the oversized `agents-plugin-tool/internal/wsagent` sources this epic
+  grew past the 1000-line size guard (`agent_tools_test.go`, `runner_conv.go`,
+  with the earlier `runner.go`, `claude.go`, `pi.go`, `children.go`,
+  `lead_claude_test.go`, `lead_fake_test.go`). Owner (94)=a: defer to this
+  follow-up and do not raise the `.gitattributes` threshold.
 - Planned (not yet cut): the remaining plugin/extension moves into the daemon
   (playbooks instead of skills, `prompts/list` slash commands); open questions
   are in `261116-research-ws-hosted-session-first-tier`.
