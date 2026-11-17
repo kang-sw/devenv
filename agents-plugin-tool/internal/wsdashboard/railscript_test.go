@@ -476,6 +476,7 @@ var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
 var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [], closeRequests = [], wpicks = [], wconsoles = [];
 var ccmd = {}, cmdSel = null, bselections = [];
+function outboxUnsent() { return false; }
 function marker(n) { return "[Image #" + n + "]"; }
 function setCommand(name, args) { cmdSel = { name: name, args: typeof args === "string" ? args : null }; }
 function validMentions(l) { return Array.isArray(l) ? l.filter(function (m) { return m && m.topic && m.text; }) : []; }
@@ -505,7 +506,8 @@ function wsT(k, n) { return k + ":" + n; }
 // composer text, mentions, selection, the reference images, the board
 // answers, the chips, the board mentions, the open details, and the board tab; a pasted image is
 // not kept, its marker is stripped, and the restore says so; the leave
-// guard asks only while a pasted image is held; a send clears the draft.
+// guard asks only while a pasted image is held; a send clears the draft
+// once the daemon holds it.
 func TestRailDraftRestore(t *testing.T) {
 	rail, err := dashboardFS.ReadFile("assets/rail.js")
 	if err != nil {
@@ -521,8 +523,11 @@ func TestRailDraftRestore(t *testing.T) {
 		t.Fatal("dashboard.js holds no per-session drafts block ending before the iframe shell block")
 	}
 	block = strings.TrimSuffix(block, "// --- iframe shell")
-	if !regexp.MustCompile(`(?s)\n  function sendMessage\(\) \{.*?post\("message", body, function \(ok, res\) \{\n[^\n]*\n      if \(!ok\) \{[^\n]*return; \}\n.*?\n      clearDraft\(\);\n    \}\);\n  \}\n`).MatchString(src) {
-		t.Error("a successful send no longer clears the draft")
+	if !regexp.MustCompile(`(?s)\n  function outboxAcked\(m, id\) \{\n.*?\n    if \(!outboxUnsent\(\)\) clearDraft\(\);\n.*?\n  \}\n`).MatchString(src) {
+		t.Error("the daemon's OK for the last queued send no longer clears the draft")
+	}
+	if !strings.Contains(src, "\n  function saveDraft() {\n    if (!draftStore || restoring || outboxUnsent()) return;\n") {
+		t.Error("an unanswered send no longer keeps the saved draft from before it")
 	}
 	runNode(t, "draft restore", selectionCodecSource(t)+railJSHarness+string(rail)+railDraftPrelude+composerFunc(t, src, "validCloseRequests")+boardBoxSrc(t, src)+block+`
 // type, pick, open, and switch tab; the debounce saves it

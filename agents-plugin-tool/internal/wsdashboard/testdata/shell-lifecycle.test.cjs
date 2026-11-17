@@ -266,7 +266,7 @@ function draftFixture(failure) {
   const loadSave = dashboard.match(/  function load\(k\)[\s\S]*?\n  function save\(k, v\) \{[\s\S]*?\n  \}/)[0];
   const data = {}, handlers = {}, timers = [], posts = [];
   let fail = failure;
-  const context = vm.createContext({ console, rid: 'a', shell: false, framed: true, mode: 'session', imgs: [],
+  const context = vm.createContext({ console, rid: 'a', shell: false, framed: true, mode: 'session', imgs: [], outboxUnsent: () => false,
     doc: { addEventListener() {} }, fpane: null, tkBusy: false, visible() { return false; }, clearTimeout() {}, setTimeout(fn) { timers.push(fn); },
     shPost(kind, value) { posts.push({kind, ...value}); },
     store: failure === 'denied' ? null : {
@@ -402,6 +402,10 @@ function testUnsafeCacheFallback() {
   f.context.supChats = {}; f.context.WsTerm = {cacheSafe: () => false};
   assert.equal(f.context.wsCanCacheSession(), false, 'pending terminal list/create never enters cache');
   f.context.WsTerm.cacheSafe = () => true; assert.equal(f.context.wsCanCacheSession(), true);
+  f.context.outboxUnsent = () => true;
+  assert.equal(f.context.wsCanCacheSession(), false, 'an unanswered send never enters cache');
+  f.context.draft = {text: ''}; assert.equal(f.leave(), true, 'an unanswered send guards leave');
+  f.context.outboxUnsent = () => false;
 }
 function testCacheAdmissionExpiry() {
   for (const cancel of [false, true]) {

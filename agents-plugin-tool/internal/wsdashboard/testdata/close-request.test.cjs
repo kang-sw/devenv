@@ -10,6 +10,9 @@ function fn(src, name) {
   const m = src.match(new RegExp('\\n  function ' + name + '\\([^]*?\\n  \\}\\n'));
   assert.ok(m, name); return m[0];
 }
+// The outbox section a message send hands its message to, through outboxSync.
+const outbox = dash.match(/\n  \/\/ --- outbox:[^]*?\n  function outboxSync\([^]*?\n  \}\n/);
+assert.ok(outbox, 'outbox section');
 class El {
   constructor(tag = 'div', cls = '') { this.tagName = tag.toUpperCase(); this.nodeType = 1; this.className = cls; this.children = []; this.attrs = {}; this.value = ''; this.listeners = {}; }
   get classList() { return { contains: c => this.className.split(' ').includes(c) }; }
@@ -32,12 +35,13 @@ class El {
   setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; }
 }
 const ctext = new El('textarea'), cchips = new El(), board = new El(), pins = new El();
-const doc = { activeElement: null, createElement: t => new El(t), createTextNode: s => { const n = new El(); n.textContent = s; return n; }, getElementById: id => id === 'ctext' ? ctext : null, addEventListener: (_, f) => { context.click = f; } };
+const doc = { activeElement: null, querySelector: () => null, createElement: t => new El(t), createTextNode: s => { const n = new El(); n.textContent = s; return n; }, getElementById: id => id === 'ctext' ? ctext : null, addEventListener: (_, f) => { context.click = f; } };
 const context = vm.createContext({ console, doc, document: doc, ctext, cchips, board, pins, colOn: true, topics: {}, maxed: null, window: {}, closeRequests: [], bmentions: [], bselections: [], mpend: null, cimgs: null, wpicks: [], wconsoles: [], sending: false, cmdSel: null, imgs: [], boardOwn: {}, posted: [], warns: [], draftSaves: 0 });
 const noop = () => {};
 Object.assign(context, {
   wsT: (k, topic) => topic === undefined ? k : `${k}:${topic}`,
-  q: (s, n) => n.querySelectorAll(s), child: (n, cls) => n.children.find(c => c.classList.contains(cls)) || null,
+  q: (s, n) => n ? n.querySelectorAll(s) : [], dropImg: noop, release: noop, imgTrash: {},
+  setTimeout: (f, ms) => setTimeout(f, ms).unref(), clearTimeout, child: (n, cls) => n.children.find(c => c.classList.contains(cls)) || null,
   countTopics: noop, chipList: () => [], topicNotes: () => [], queueDraft: () => context.draftSaves++,
   sendText: () => ctext.value, followConvo: noop, boardFlushViewed: noop, clearTrash: noop, clearMentions: noop,
   grow: noop, renderImgs: noop, closeTopicNotes: noop, clearDraft: noop,
@@ -48,7 +52,7 @@ Object.assign(context, {
   holdSync: false, syncMarkers: noop, MARKER: '\\[Image #([1-9][0-9]{0,5})\\]'
 });
 vm.runInContext(fs.readFileSync(path.join(root, 'dashboard-bundles.js'), 'utf8'), context);
-vm.runInContext(['mk', 'licon', 'ibtn', 'decorate'].map(n => fn(cards, n)).join('\n') + ['validCloseRequests', 'focusCloseRequest', 'addCloseRequest', 'removeCloseRequest', 'renderChips', 'renderSelectionChips', 'sendMessage', 'restoreHeld', 'restoreHeldNow'].map(n => fn(dash, n)).join('\n'), context);
+vm.runInContext(['mk', 'licon', 'ibtn', 'decorate'].map(n => fn(cards, n)).join('\n') + ['validCloseRequests', 'focusCloseRequest', 'addCloseRequest', 'removeCloseRequest', 'renderChips', 'renderSelectionChips', 'sendMessage', 'restoreHeld', 'restoreHeldNow'].map(n => fn(dash, n)).join('\n') + outbox[0], context);
 // Only the production delegated click block: the rest owns unrelated menus.
 vm.runInContext(dash.slice(dash.indexOf('  doc.addEventListener("click", function (e) {', dash.indexOf('// --- clicks:')), dash.indexOf('  // --- link actions:')), context);
 function topic(key, closed, host = board) {
@@ -84,12 +88,10 @@ press(cchips.querySelectorAll('[data-unclose-request]')[0]); assert.equal(contex
 a.sec.className += ' closed'; context.decorate(); assert.equal(close(a), undefined);
 // A disappearing/closed topic does not discard its already attached request.
 b.sec.remove(); context.sendMessage(); assert.equal(context.posted.at(-1).body.closeRequests[0].topic, 'b'); assert.equal(context.posted.at(-1).body.text, '');
-context.done(false, 'offline'); assert.equal(context.closeRequests.length, 1, 'failed send retains requests');
+assert.equal(context.closeRequests.length, 0, 'a send takes its requests out of the composer at once');
+context.done(false, 'offline'); assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['b'], 'failed send gives its requests back');
 context.sendMessage(); context.addCloseRequest('new');
-const pending = context.closeRequests[0]; pending.reason = 'changed in flight';
-context.done(true, {}); assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['b', 'new']);
-context.sendMessage(); context.removeCloseRequest('b'); context.addCloseRequest('b'); context.done(true, {});
-assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['b'], 'remove/re-add is a new intent, not a sent reference');
+context.done(true, {}); assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['new'], 'a request attached while a send is unanswered belongs to the next send');
 context.sendMessage(); context.done(true, {}); assert.equal(context.closeRequests.length, 0);
 // Restoring an unrelated held message during a send must not change capsule identity.
 context.addCloseRequest('in-flight'); context.sendMessage();
@@ -97,16 +99,14 @@ context.restoreHeld([{ text: 'unrelated held message' }]);
 context.done(true, {});
 assert.equal(context.closeRequests.length, 0, 'unrelated restore must not retain a successfully sent request');
 ctext.value = '';
-// Restored requests stay; current requests dedupe by stem without being cloned.
-context.addCloseRequest('sent'); context.addCloseRequest('edited'); context.addCloseRequest('readded');
+// A restore during a send brings back only the requests it holds.
+context.addCloseRequest('sent'); context.addCloseRequest('other');
 context.sendMessage();
 context.restoreHeld([{ closeRequests: [{ topic: 'restored', reason: 'held' }, { topic: 'sent', reason: 'older' }] }]);
-context.closeRequests.find(r => r.topic === 'edited').reason = 'changed during restore';
-context.removeCloseRequest('readded'); context.addCloseRequest('readded');
 context.done(true, {});
-assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['restored', 'edited', 'readded'], 'restore retains only restored, edited and remove/re-added requests');
+assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['restored', 'sent'], 'restore during a send retains only the restored requests');
 context.sendMessage();
-assert.deepEqual(Array.from(context.posted.at(-1).body.closeRequests, r => r.topic), ['restored', 'edited', 'readded'], 'the next send must not repeat the successful request');
+assert.deepEqual(Array.from(context.posted.at(-1).body.closeRequests, r => r.topic), ['restored', 'sent'], 'the next send carries the restored requests once');
 context.done(true, {});
 assert.equal(context.closeRequests.length, 0);
 // Cancel/interrupt restore dedupes held topics, newest held reason wins, draft wins over held.

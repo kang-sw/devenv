@@ -21,7 +21,7 @@ func TestComposerCarriesWebPicks(t *testing.T) {
 	if notes == "" || caps == "" {
 		t.Fatal("dashboard.js holds no noteWarn / noteOk pair, or no web pick caps at the inbox's 50 picks and 10 console blocks")
 	}
-	fns := composerFunc(t, src, "sendMessage") + composerFunc(t, src, "addWebPick") + composerFunc(t, src, "addWebConsole")
+	fns := composerSendSource(t, src) + composerFunc(t, src, "addWebPick") + composerFunc(t, src, "addWebConsole")
 	runNode(t, "web picks", selectionCodecSource(t)+composerToastPrelude+notes+caps+"var sending = false, drafts = 0;\nfunction queueDraft() { drafts++; }\n"+fns+`
 var bodies = [];
 post = function (route, body, done) { bodies.push([route, JSON.parse(JSON.stringify(body))]); done(answer[0], answer[1]); };
@@ -36,8 +36,10 @@ sendMessage();
 check("a console block rides with the text", bodies, [["message", { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: "see", chips: [], topics: [], mentions: [], consoles: [c1] }]]);
 check("the sent console block is dropped", wconsoles, []);
 bodies = []; toasts = [];
+var restored = [];
+restoreHeld = function (list) { restored = restored.concat(list); };
 answer = [false, "busy"]; addWebPick(p1); sendMessage();
-check("a refused send keeps the pick", wpicks, [p1]);
+check("a refused send gives the pick back", restored.map(function (m) { return m.picks; }), [[p1]]);
 answer = [true, {}]; wpicks = []; toasts = [];
 for (var i = 0; i < 50; i++) addWebPick({ url: "u", selector: "#p" + i, text: "" });
 for (var j = 0; j < 10; j++) addWebConsole({ url: "u", lines: ["e"] });
