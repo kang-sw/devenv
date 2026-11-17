@@ -38,9 +38,10 @@ const (
 // Validation trusts the directory's own stat while it is unchanged and its
 // mtime is older than the racy window (observedRacyWindow) of the stat that
 // recorded it. Otherwise it lists the directory, reuses each known name
-// without a stat, and stats and reads only new names; a vanished name drops.
-// A full sweep, which stats every record (following symlinks) and re-reads
-// one whose identity metadata, size, mode or mtime moved, runs every
+// without a stat, and reads only new names; a vanished name drops.
+// A full sweep, which checks every record's listed metadata (stat'ing only a
+// non-regular entry, following symlinks) and re-reads one whose identity
+// metadata, size, mode or mtime moved, runs every
 // observedResweep and whenever the directory stat is unusable: it bounds the
 // staleness of an in-place child edit, a same-name replacement, or a
 // coarse-mtime collision. The prior per-load full sweep cost one stat per
@@ -51,11 +52,12 @@ type ObservedCache struct {
 	sessions map[string]*observedSlot
 	tick     uint64 // Load counter for least-recently-used eviction; under mu
 	opens    atomic.Int64
-	// open, stat and now are instance-local test seams; set before the first
-	// Load.
-	open func(string) (*os.File, error)
-	stat func(string) (os.FileInfo, error)
-	now  func() time.Time
+	// open, stat, readDir and now are instance-local test seams; set before
+	// the first Load.
+	open    func(string) (*os.File, error)
+	stat    func(string) (os.FileInfo, error)
+	readDir func(string) ([]os.DirEntry, error)
+	now     func() time.Time
 }
 
 type observedSlot struct {
@@ -208,7 +210,11 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 	if dirErr == nil && slot.trusted(dirInfo, now) {
 		return slot.evidence
 	}
-	entries, err := wsstate.ReadDir(evidenceDir)
+	readDir := c.readDir
+	if readDir == nil {
+		readDir = wsstate.ReadDir
+	}
+	entries, err := readDir(evidenceDir)
 	if err != nil {
 		slot.files = nil
 		slot.evidence = nil
@@ -239,7 +245,7 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 			continue
 		}
 		path := filepath.Join(evidenceDir, entry.Name())
-		info, err := stat(path)
+		info, err := observedEntryInfo(entry, path, stat)
 		if err != nil {
 			changed = true
 			appendOnly = false
@@ -304,6 +310,21 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 		slot.files = files
 	}
 	return slot.evidence
+}
+
+// observedEntryInfo is a record's metadata for intake and sweeps. A regular
+// entry's listing already carries it: free on Windows (the directory query
+// returns size, times and attributes), one uncounted lstat elsewhere, never a
+// path open. Under on-access antivirus a per-record path stat cost every full
+// sweep one scanned open per record (the 5-minute resweep wave). The listing
+// precedes the read just as the stat did, so a write landing in between is
+// kept under the older metadata and reread at the next sweep. Any other entry
+// (a symlink) is stat'ed, following it as before.
+func observedEntryInfo(entry os.DirEntry, path string, stat func(string) (os.FileInfo, error)) (os.FileInfo, error) {
+	if entry.Type().IsRegular() {
+		return entry.Info()
+	}
+	return stat(path)
 }
 
 // extend handles the ordinary append path without revalidating or sorting the

@@ -38,7 +38,8 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 		now: func() time.Time { return clock },
 	}
 	first := cache.Load(dir)
-	if opens != 1 || stats != 1 {
+	// A regular record's metadata comes from the listing, never a path stat.
+	if opens != 1 || stats != 0 {
 		t.Fatalf("cold opens=%d stats=%d", opens, stats)
 	}
 	for i := 0; i < 20; i++ {
@@ -46,8 +47,8 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 			t.Fatal("unchanged projection rebuilt")
 		}
 	}
-	if opens != 1 || stats != 1 || dirStats != 1 {
-		t.Fatalf("unchanged opens=%d record stats=%d directory stats=%d, want 1 each", opens, stats, dirStats)
+	if opens != 1 || stats != 0 || dirStats != 1 {
+		t.Fatalf("unchanged opens=%d record stats=%d directory stats=%d, want 1, 0, 1", opens, stats, dirStats)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, ObservedDirName, "*.json"))
 	path := files[0]
@@ -70,8 +71,8 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	}
 	clock = clock.Add(observedResweep)
 	changed := cache.Load(dir)
-	if opens != 2 || changed == first || changed.models[""].Current.Model != "second-longer" {
-		t.Fatalf("child edit missed by the forced re-sweep: opens=%d", opens)
+	if opens != 2 || stats != 0 || changed == first || changed.models[""].Current.Model != "second-longer" {
+		t.Fatalf("child edit missed by the forced re-sweep: opens=%d record stats=%d", opens, stats)
 	}
 	// Atomic replacement with identical size, mode and timestamp is no
 	// legitimate write either: a listing reuses the known name, and the
@@ -171,21 +172,22 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 		},
 		now: func() time.Time { return clock },
 	}
+	sweptAt := func() time.Time { return cache.sessions[dir].read.sweptAt }
 	// A directory mtime inside the racy window of its stat costs a listing
-	// once per validation interval, never a known record stat.
+	// once per validation interval, never a record stat: a regular record's
+	// metadata comes from the listing.
 	cache.Load(dir)
 	cache.Load(dir)
-	if stats != 1 || opens != 1 || dirStats != 1 {
+	if stats != 0 || opens != 1 || dirStats != 1 {
 		t.Fatalf("racy listing: record stats=%d opens=%d directory stats=%d", stats, opens, dirStats)
 	}
 	// Once the mtime is old enough, an unchanged directory is trusted.
 	clock = clock.Add(time.Second * 3)
 	first := cache.Load(dir)
-	if cache.Load(dir) != first || stats != 1 {
+	if cache.Load(dir) != first || stats != 0 {
 		t.Fatalf("unchanged directory re-stat'ed its records: stats=%d", stats)
 	}
-	// An added record moves the directory: only the new name is stat'ed
-	// and read.
+	// An added record moves the directory: only the new name is read.
 	r := observedCacheRecord("two", "second")
 	r.At = 2000
 	if err := AppendObserved(dir, []ObservedRecord{r}); err != nil {
@@ -197,8 +199,8 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 	if got == first || got.models[""].Current.Model != "second" {
 		t.Fatal("added record missed")
 	}
-	if stats != 2 || opens != 2 {
-		t.Fatalf("listing stat'ed known records: stats=%d opens=%d", stats, opens)
+	if stats != 0 || opens != 2 {
+		t.Fatalf("listing stat'ed or read known records: stats=%d opens=%d", stats, opens)
 	}
 	want := Snapshot{}
 	retained, err := ReadObserved(dir)
@@ -227,23 +229,22 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 	clock = clock.Add(time.Second)
 	stamp(clock.Add(-time.Second))
 	dropped := cache.Load(dir)
-	if dropped.models[""].Current.Model != "first" || len(dropped.models[""].History) != 1 || stats != 2 {
+	if dropped.models[""].Current.Model != "first" || len(dropped.models[""].History) != 1 || stats != 0 {
 		t.Fatalf("vanished record kept: stats=%d", stats)
 	}
-	// The forced re-sweep stats every record even when nothing moved, and
-	// rebuilds nothing.
+	// The forced re-sweep checks every record's listed metadata even when
+	// nothing moved, stat'ing and rebuilding nothing.
 	clock = clock.Add(time.Second * 3)
 	trusted := cache.Load(dir)
-	before := stats
 	clock = clock.Add(observedResweep)
-	if cache.Load(dir) != trusted || stats != before+1 {
-		t.Fatalf("forced re-sweep: stats=%d rebuilt=%t", stats-before, cache.Load(dir) != trusted)
+	if cache.Load(dir) != trusted || stats != 0 || opens != 2 || !sweptAt().Equal(clock) {
+		t.Fatalf("forced re-sweep: stats=%d opens=%d swept=%t rebuilt=%t", stats, opens, sweptAt().Equal(clock), cache.Load(dir) != trusted)
 	}
 	// A clock that steps backwards forces a sweep too.
 	clock = clock.Add(-time.Hour)
 	cache.Load(dir)
-	if stats != before+2 {
-		t.Fatalf("backward clock trusted the directory: %d", stats-before)
+	if !sweptAt().Equal(clock) || stats != 0 {
+		t.Fatalf("backward clock trusted the directory: swept=%t stats=%d", sweptAt().Equal(clock), stats)
 	}
 }
 
@@ -338,7 +339,7 @@ func TestObservedCacheMissingDirectoryValidation(t *testing.T) {
 	}
 	burst() // Creation shares the previous missing result until validation.
 	cache.Forget(dir)
-	if got := cache.Load(dir); got == nil || got.models[""].Current.Model != "new" || stats.Load() != 4 {
+	if got := cache.Load(dir); got == nil || got.models[""].Current.Model != "new" || stats.Load() != 3 {
 		t.Fatalf("Forget did not expose new evidence: stats=%d", stats.Load())
 	}
 }
@@ -391,24 +392,24 @@ func TestObservedCacheValidationSharedAcrossReaders(t *testing.T) {
 	first := cache.Load(dir)
 	clock = clock.Add(observedValidationInterval - time.Nanosecond)
 	burst("first")
-	if dirStats.Load() != 1 || recordStats.Load() != 1 || cache.Opens() != 1 {
+	if dirStats.Load() != 1 || recordStats.Load() != 0 || cache.Opens() != 1 {
 		t.Fatalf("within interval: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
 	}
 	clock = clock.Add(time.Nanosecond)
 	burst("first")
-	if dirStats.Load() != 2 || recordStats.Load() != 1 {
+	if dirStats.Load() != 2 || recordStats.Load() != 0 {
 		t.Fatalf("boundary: directory=%d record=%d", dirStats.Load(), recordStats.Load())
 	}
 	appendRecord("two", "second", 2000)
 	burst("first") // External appends wait for the next shared validation.
 	clock = clock.Add(observedValidationInterval)
 	burst("second")
-	if dirStats.Load() != 3 || recordStats.Load() != 2 || cache.Opens() != 2 {
+	if dirStats.Load() != 3 || recordStats.Load() != 0 || cache.Opens() != 2 {
 		t.Fatalf("append: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
 	}
 	second := cache.Load(dir)
 	cache.Invalidate(dir)
-	if cache.Load(dir) != second || dirStats.Load() != 4 || recordStats.Load() != 2 || cache.Opens() != 2 {
+	if cache.Load(dir) != second || dirStats.Load() != 4 || recordStats.Load() != 0 || cache.Opens() != 2 {
 		t.Fatalf("unchanged invalidation discarded decoded evidence: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
 	}
 	appendRecord("three", "third", 3000)
@@ -418,7 +419,7 @@ func TestObservedCacheValidationSharedAcrossReaders(t *testing.T) {
 	}
 	cache.Invalidate(dir)
 	burst("third") // Explicit invalidation bypasses the interval, retaining reads.
-	if dirStats.Load() != 5 || recordStats.Load() != 3 || cache.Opens() != 3 {
+	if dirStats.Load() != 5 || recordStats.Load() != 0 || cache.Opens() != 3 {
 		t.Fatalf("Invalidate: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
 	}
 	if first.models[""].Current.Model != "first" {
