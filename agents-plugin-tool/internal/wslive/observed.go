@@ -177,17 +177,58 @@ func (st *State) SeedLastTurn(prev Snapshot) {
 	st.lastTurnOutput = st.cleanObservation(prev.Lead.LastTurnOutput)
 }
 
-func (st *State) addObserved(r ObservedRecord) bool {
+// addObserved accepts r unless its identity is already known, and returns the
+// records the evidence directory now needs. Per agent, that directory has to
+// hold only the records that define the fold: the first, each model change and
+// the latest (observed_prune.go). A record that defines none of them, such as a
+// replayed response a prune deleted, changes no reader's fold and stays in
+// memory alone: writing it would only re-create a file for a later prune.
+// Each writer seeds its state from the directory, so while no other writer
+// adds to it the records returned here keep its fold equal to this state's.
+// Another writer's records can at worst re-date a return transition, the
+// limitation observed_prune.go already states.
+func (st *State) addObserved(r ObservedRecord) (accepted bool, persist []ObservedRecord) {
 	if st.observations == nil {
 		st.observations = map[string]ObservedRecord{}
 	}
 	key := observationKey(r)
 	if _, exists := st.observations[key]; exists {
-		return false
+		return false, nil
+	}
+	// r's neighbours in the agent's fold order, before r joins it.
+	var prev, next ObservedRecord
+	hasPrev, hasNext := false, false
+	for _, o := range st.observations {
+		switch {
+		case o.AgentID != r.AgentID:
+		case observedBefore(o, r):
+			if !hasPrev || observedBefore(prev, o) {
+				prev, hasPrev = o, true
+			}
+		case !hasNext || observedBefore(o, next):
+			next, hasNext = o, true
+		}
 	}
 	st.observations[key] = r
 	st.observed = summarizeObserved(st.observations)
-	return true
+	// r is the first, the latest or a model change.
+	if !hasPrev || !hasNext || prev.Model != r.Model {
+		persist = append(persist, r)
+	}
+	// A late record of another model makes its successor a change point back;
+	// that successor may have been a repeat no file kept.
+	if hasPrev && hasNext && next.Model != r.Model && next.Model == prev.Model {
+		persist = append(persist, next)
+	}
+	return true, persist
+}
+
+// observedBefore is the fold order: observation time, then identity.
+func observedBefore(a, b ObservedRecord) bool {
+	if a.At != b.At {
+		return a.At < b.At
+	}
+	return observationKey(a) < observationKey(b)
 }
 
 func summarizeObserved(records map[string]ObservedRecord) map[string]*ObservedModel {
@@ -197,12 +238,7 @@ func summarizeObserved(records map[string]ObservedRecord) map[string]*ObservedMo
 	}
 	out := map[string]*ObservedModel{}
 	for id, list := range grouped {
-		sort.Slice(list, func(i, j int) bool {
-			if list[i].At != list[j].At {
-				return list[i].At < list[j].At
-			}
-			return observationKey(list[i]) < observationKey(list[j])
-		})
+		sort.Slice(list, func(i, j int) bool { return observedBefore(list[i], list[j]) })
 		model := &ObservedModel{}
 		for _, r := range list {
 			if model.Current.Model != r.Model {
