@@ -102,12 +102,12 @@ test('only left session explorer receives preview override; lazy sheet and regis
   const worktree = fixture({ worktree: '/tree' });
   assert.equal(worktree.owners[1].hooks.preview, undefined);
 });
-test('split toolbar activates left Files and search; tabs leaves independent sheet to framework', () => {
+test('toolbar folder opens its own sheet in every layout; split never redirects it to the left Files tab', () => {
   const { context: c, events } = fixture();
-  assert.equal(c.filesSheet.activate(), true);
-  assert.deepEqual(events, ['dismiss-sheet', 'tab:files', 'focus-search']);
-  events.length = 0; c.layoutMode = 'tabs';
-  assert.equal(c.filesSheet.activate(), false); assert.deepEqual(events, []);
+  assert.equal(c.filesSheet.activate, undefined);
+  c.syncFilePreview();
+  assert.equal(events.includes('dismiss-sheet'), false);
+  assert.equal(events.includes('tab:files'), false);
 });
 test('left single click opens pane across board and pin column; durable intent closes before card reveal', () => {
   const { context: c, pane, root, events, search } = fixture();
@@ -222,7 +222,7 @@ test('split resize follows viewport and gutter, not capped grid, without opening
   const { context: c, pane, root, events } = fixture();
   c.previewLeftFile('a.txt', {}); events.length = 0;
   root.clientWidth = 2560; c.syncFilePreview();
-  assert.equal(pane.el.style.width, '1944px'); assert.deepEqual(events, ['dismiss-sheet']);
+  assert.equal(pane.el.style.width, '1944px'); assert.deepEqual(events, []);
   root.clientWidth = 1920;
   c.window.getComputedStyle = () => ({ paddingRight: '24.5px' }); c.syncFilePreview();
   assert.equal(pane.el.style.width, '1295.5px', 'resize rereads computed gutter');
@@ -242,7 +242,7 @@ test('revealPanes applies layout fallback before lifecycle callbacks and retains
   Object.assign(c, { PANES: [], PANE: {}, paneVisible: {}, paneScroll: {}, filesSeen: false,
     convo: {}, pinConvo() {}, nearTop() {}, visible: n => n === c.fpane && c.layoutMode !== 'tabs', ctabDot: () => null });
   vm.runInContext(func('revealPanes'), c);
-  c.revealPanes(); assert.deepEqual(events, ['dismiss-sheet', 'shown']);
+  c.revealPanes(); assert.deepEqual(events, ['shown']);
   events.length = 0; pane.open('a.txt', {}); events.length = 0; c.layoutMode = 'tabs';
   c.revealPanes();
   assert.deepEqual(plain(events), ['close', ['card', 'a.txt', { keep: false }], 'hidden']);

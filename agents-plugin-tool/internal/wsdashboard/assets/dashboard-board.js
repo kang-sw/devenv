@@ -263,7 +263,6 @@
   }
   function syncFilePreview() {
     if (splitFiles()) {
-      if (window.WsCards) window.WsCards.dismissFiles();
       sizeFilePreview();
     } else if (filePreview && filePreview.current()) {
       var previous = filePreview.close();
@@ -318,14 +317,6 @@
     var sheetInstance = null;
     filesSheet = {
       el: sheet,
-      activate: function () {
-        if (!splitFiles()) return false;
-        window.WsCards.dismissFiles();
-        setCtab("files");
-        var search = fpane.querySelector(".fq");
-        if (search) search.focus();
-        return true;
-      },
       shown: function () {
         if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
         sheetInstance.shown();
