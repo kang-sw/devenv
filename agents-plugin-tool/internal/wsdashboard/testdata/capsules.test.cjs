@@ -195,7 +195,7 @@ context.sendText = () => f.value; context.followConvo = () => {}; context.noteWa
 context.post = (route, body, done) => { context.posted.push(plain(body)); done(true, {}); };
 context.chipList = () => []; context.topicNotes = () => []; context.boardOwn = {}; context.boardFlushViewed = () => {}; context.clearTrash = () => {}; context.closeTopicNotes = () => {}; context.renderChips = () => {}; context.renderImgs = () => {};
 // A message send goes through the outbox section; this fixture has no conversation.
-Object.assign(context, { doc: { createElement: n => new El(n), querySelector: () => null }, q: () => [], dropImg: () => {}, release: () => {}, imgTrash: {}, imgSeq: 0, queueDraft: () => {}, restoreHeld: () => {}, marker: n => '[Image #' + n + ']' });
+Object.assign(context, { doc: { createElement: n => new El(n), querySelector: () => null }, q: () => [], dropImg: () => {}, release: () => {}, imgTrash: {}, imgSeq: 0, queueDraft: () => {}, saveDraft: () => {}, restoreHeld: () => {}, marker: n => '[Image #' + n + ']' });
 const dashSrc = readAssetSource('wsdashboard', 'dashboard.js'), outbox = dashSrc.match(/\n  \/\/ --- outbox:[^]*?\n  function outboxSync\([^]*?\n  \}\n/);
 assert.ok(outbox, 'outbox section');
 vm.runInContext(fn('sendInlineCommand') + '\n' + fn('sendMessage') + outbox[0], context);
