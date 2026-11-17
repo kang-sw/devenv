@@ -32,6 +32,14 @@ test('REST-only attach to a healthy daemon does not select, stage or launch; no 
       launch() { assert.fail('healthy attach must not execute anything'); } }), `http://127.0.0.1:${server.address().port}/`);
   }
 });
+test('manual start attaches a healthy older daemon without selecting or spawning', async t => {
+  const f = fixture(t);
+  assert.equal(await connectDaemon({ ...config(f), attachRunning: true }, {
+    env: env(f), inspect: async () => ({ url: URL, health: { version: '0.1.0' } }),
+    select: () => assert.fail('must attach without selecting'),
+    launch: () => assert.fail('must not launch'),
+  }), URL);
+});
 test('numeric REST core precedence, explicit one-shot equal swap, and cross-boundary refusal', async t => {
   const f = fixture(t, 'darwin');
   let live = { pid: 120, version: '0.50.1', lan: true, started_at: 'old', content_hash: 'old' };

@@ -3,6 +3,10 @@
 // after an explicit native menu copy. No login URL, cookie or bearer is exposed.
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('werkschaftDesktop', Object.freeze({
+  daemon: Object.freeze({
+    availability() { return ipcRenderer.invoke('werkschaft:daemon-availability'); },
+    start() { return ipcRenderer.invoke('werkschaft:daemon-start'); },
+  }),
   login: Object.freeze({
     onCopied(callback) {
       if (typeof callback !== 'function') return;

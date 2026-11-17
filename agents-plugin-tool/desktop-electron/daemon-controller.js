@@ -65,7 +65,7 @@ function launchEnv(inherited, staged, root) {
       path.join(staged.root, 'dashboard-config-manifest.json')].join(';'),
     WS_MCP_RUNTIME_BINARY: staged.binary, WS_MCP_RUNTIME_DIR: staged.root, CLAUDE_PLUGIN_ROOT: staged.root };
 }
-async function connectDaemon({ appRoot, userData, platform = process.platform, replace = false }, deps = {}) {
+async function connectDaemon({ appRoot, userData, platform = process.platform, replace = false, attachRunning = false }, deps = {}) {
   const env = deps.env || process.env;
   const root = cacheRoot(env);
   // Injected discovery in older tests supplies a URL only, never a fabricated
@@ -78,6 +78,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
   try { running = await find(root); }
   catch { /* An absent or uncertain endpoint is never evidence a process died. */ }
   if (running?.health) {
+    if (attachRunning) return running.url;
     let selected;
     try { selected = select({ appRoot, userData, platform }); }
     catch (error) {

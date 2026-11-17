@@ -8,11 +8,14 @@
   :root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
   body { max-width: 36rem; margin: 18vh auto; padding: 2rem; line-height: 1.6; }
   h1 { font-size: 1.6rem; }
+  button { padding: .65rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer; }
   kbd { border: 1px solid #888; border-radius: .25rem; padding: .1rem .35rem; }
 </style>
 <h1>Connect to your dashboard</h1>
 <p>Werkschaft connects to a healthy local dashboard or starts its bundled daemon
 automatically on Windows and macOS.</p>
+<button id="start-daemon" disabled>Start daemon</button>
+<p id="start-status" role="status"></p>
 <p id="reason" role="alert"></p>
 <p id="log"></p>
 <p>Choose <strong>Connection → Retry</strong> (<kbd>Ctrl+R</kbd> on Windows,

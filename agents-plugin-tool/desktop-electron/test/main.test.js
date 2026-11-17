@@ -72,6 +72,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
           this.loads.push(file); this.currentURL = file; this.fileOptions = options;
           const url = pathToFileURL(file);
           url.search = new URLSearchParams(options?.query).toString();
+          this.webContents.mainFrame.url = url.href;
           loaded(url.href);
         },
         setZoomFactor: zoom => { this.zoom = zoom; },
@@ -105,6 +106,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     setBounds(bounds) { this.bounds = bounds; }
   }
   const ipcMain = new EventEmitter(), nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: false });
+  ipcMain.handlers = {};
+  ipcMain.handle = (channel, handler) => { ipcMain.handlers[channel] = handler; };
   let template, response = 0, popups = 0, menuCallback, onDialog;
   const opened = [], copied = [];
   start({ clipboard: { writeText: value => copied.push(value) }, app, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
@@ -124,6 +127,49 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     onDialog: fn => { onDialog = fn; },
     menus, template, session: session.defaultSession, opened, copied, choose: n => { response = n; } };
 }
+test('connection page start uses the shared path, serializes requests and restricts IPC', async () => {
+  let calls = 0, release;
+  const f = await fixture(async options => {
+    calls++;
+    if (calls === 1) throw new Error('missing bundle');
+    assert.equal(options.attachRunning, true);
+    return new Promise(resolve => { release = resolve; });
+  }, 'win32', { packaged: true });
+  const wc = f.views[0].webContents;
+  const event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal((await f.ipcMain.handlers['werkschaft:daemon-availability'](event)).available, true);
+  const start = f.ipcMain.handlers['werkschaft:daemon-start'];
+  const pending = start(event);
+  await tick();
+  await start(event);
+  assert.equal(calls, 2);
+  release('http://127.0.0.1:39418/');
+  await pending;
+  await start({ sender: {}, senderFrame: wc.mainFrame });
+  assert.equal(calls, 2);
+});
+test('manual start failure reloads the page with its reason for another attempt', async () => {
+  let calls = 0;
+  const f = await fixture(async () => { calls++; throw new Error('startup timeout'); }, 'win32', { packaged: true });
+  const content = f.views[0], wc = content.webContents;
+  await f.ipcMain.handlers['werkschaft:daemon-start']({ sender: wc, senderFrame: wc.mainFrame });
+  assert.equal(calls, 2);
+  assert.equal(content.fileOptions.query.reason, 'startup timeout');
+});
+test('dev mode without a bundled daemon disables start with a reason', async () => {
+  const f = await fixture(async () => { throw new Error('missing bundle'); }, 'win32');
+  const wc = f.views[0].webContents;
+  const result = await f.ipcMain.handlers['werkschaft:daemon-availability']({ sender: wc, senderFrame: wc.mainFrame });
+  assert.equal(result.available, false);
+  assert.match(result.reason, /development run/);
+});
+test('unsupported platform disables standalone start', async () => {
+  const f = await fixture(async () => { throw new Error('no daemon'); }, 'linux', { packaged: true });
+  const wc = f.window.webContents;
+  const result = await f.ipcMain.handlers['werkschaft:daemon-availability']({ sender: wc, senderFrame: wc.mainFrame });
+  assert.equal(result.available, false);
+  assert.match(result.reason, /platform/);
+});
 test('startup readiness, updater and BaseWindow failures report stack and log, show an error box and exit', async t => {
   const update = require('../update'), original = update.createUpdater;
   const stderr = [];
@@ -458,12 +504,15 @@ test('Windows attaches without Python even when no bundled candidate can be read
   assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
 });
 test('connection diagnostics render as text, never executable markup', () => {
-  const nodes = { reason: {}, log: {} }, reason = '<script>alert(1)</script>', log = 'Error log: C:\\Users\\name\\daemon-start.log';
+  const nodes = { reason: {}, log: {}, 'start-daemon': { addEventListener() {} }, 'start-status': {} };
+  const reason = '<script>alert(1)</script>', log = 'Error log: C:\\Users\\name\\daemon-start.log';
   require('node:vm').runInNewContext(fs.readFileSync(path.resolve(__dirname, '../connection.js'), 'utf8'), {
-    URLSearchParams, location: { search: '?' + new URLSearchParams({ reason, log }) },
+    URLSearchParams, location: { search: '?' + new URLSearchParams({ reason, log }) }, navigator: { language: 'en' },
+    window: { werkschaftDesktop: { daemon: { availability: () => new Promise(() => {}) } } },
     document: { getElementById: id => nodes[id] },
   });
-  assert.deepEqual(nodes, { reason: { textContent: reason }, log: { textContent: log } });
+  assert.equal(nodes.reason.textContent, reason);
+  assert.equal(nodes.log.textContent, log);
 });
 test('discovery and immediate navigation failure show the bundled connection page', async () => {
   const f = await fixture(async () => { throw new Error('No readable dashboard endpoint'); });
