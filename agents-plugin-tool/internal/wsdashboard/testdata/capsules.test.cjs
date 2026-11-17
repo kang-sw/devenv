@@ -194,7 +194,11 @@ context.allNums = () => ({}); // Ordinary sends here have no image markers; imag
 context.sendText = () => f.value; context.followConvo = () => {}; context.noteWarn = s => context.warns.push(s); context.clearDraft = () => {}; context.grow = () => {}; context.clearMentions = () => {};
 context.post = (route, body, done) => { context.posted.push(plain(body)); done(true, {}); };
 context.chipList = () => []; context.topicNotes = () => []; context.boardOwn = {}; context.boardFlushViewed = () => {}; context.clearTrash = () => {}; context.closeTopicNotes = () => {}; context.renderChips = () => {}; context.renderImgs = () => {};
-vm.runInContext(fn('sendInlineCommand') + '\n' + fn('sendMessage'), context);
+// A message send goes through the outbox section; this fixture has no conversation.
+Object.assign(context, { doc: { createElement: n => new El(n), querySelector: () => null }, q: () => [], dropImg: () => {}, release: () => {}, imgTrash: {}, imgSeq: 0, queueDraft: () => {}, restoreHeld: () => {}, marker: n => '[Image #' + n + ']' });
+const dashSrc = readAssetSource('wsdashboard', 'dashboard.js'), outbox = dashSrc.match(/\n  \/\/ --- outbox:[^]*?\n  function outboxSync\([^]*?\n  \}\n/);
+assert.ok(outbox, 'outbox section');
+vm.runInContext(fn('sendInlineCommand') + '\n' + fn('sendMessage') + outbox[0], context);
 f.value = '/lrv'; f.wsc.insert('skill', 'lead-review', 'lead-review', { start: 0, end: 4 }); f.setRangeText('check [composer-ux]', f.value.length, f.value.length);
 context.sendMessage(); assert.deepEqual(context.posted, [{ command: 'lead-review', args: 'check [composer-ux]' }]);
 f.value = 'Please /lrv'; f.wsc.insert('skill', 'lead-review', 'lead-review', { start: 7, end: 11 });

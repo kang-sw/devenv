@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // repoConfigDirName is the committed, version-tracked project config directory
@@ -73,7 +75,7 @@ func loadRepoConfig(opts Options) (Config, error) {
 	if !ok {
 		return Config{}, nil
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := wsstate.ReadFileCached(path) // stat-revalidated, as loadConfigFile
 	if os.IsNotExist(err) {
 		return Config{}, nil // absent committed file — empty repo layer, not an error
 	}

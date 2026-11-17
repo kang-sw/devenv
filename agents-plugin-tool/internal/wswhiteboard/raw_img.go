@@ -95,7 +95,7 @@ func (p *pageData) rawImages(b []byte) []byte {
 // rawImageTag is the current <img> tag of z rewritten when its src is a
 // destination resolveTarget accepts for an image (a file path; never an
 // http(s), data:, or other URL): src becomes the src a markdown image of
-// that path gets (DocImageSrc's inlined data, ImageSrc), or, for an image
+// that path gets (DocImageSrc's, ImageSrc's), or, for an image
 // the frame takes only through its host (relayImage), is dropped for a
 // data-relay the frame script fills (doc-frame.js). Its other attributes
 // stay. false leaves the tag as typed.

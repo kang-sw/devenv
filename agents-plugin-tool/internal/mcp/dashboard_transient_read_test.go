@@ -50,6 +50,12 @@ func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
 	t.Cleanup(func() { _ = lock.Unlock() })
 	// The fixture holds only the authoritative folder lock. No partial write
 	// and no daemon process, let alone a daemon replacement, is involved.
+	// Unchanged roots serve the committed board without the lock; a changed
+	// root, as left by a writer still publishing under it, must wait.
+	if held, ok, err := src.ReadPage(reg); !ok || err != nil || held.Board.Board != page.Board.Board {
+		t.Fatalf("unchanged board under a held lock: found=%v err=%v", ok, err)
+	}
+	replaceBoardRootForTest(t, filepath.Dir(meta))
 	idx.Refresh()
 	if got, ok := idx.Session(reg.ReplyID); !ok || got != good {
 		t.Fatalf("lock contention removed/changed index: %+v %v", got, ok)
@@ -170,5 +176,33 @@ func TestDashboardTransientRecordClassification(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// replaceBoardRootForTest replaces committed.json with its own bytes: a new
+// file identity, as every commit leaves, with no content change.
+func replaceBoardRootForTest(t *testing.T, dir string) {
+	t.Helper()
+	path := filepath.Join(dir, "committed.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := path + ".replacement"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Windows identity is metadata only, and name tunneling can carry the
+	// creation time over: move mtime so the identity change is deterministic.
+	later := info.ModTime().Add(time.Second)
+	if err := os.Chtimes(tmp, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
 	}
 }

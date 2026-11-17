@@ -22,16 +22,21 @@ func homePath(path string) string {
 // directory. Network/device paths and sensitive home paths stay closed even
 // when reached through a symlink or a .. step.
 func localPath(root, path string) (full, real string, ok bool) {
+	return newDenySet().localPath(root, path)
+}
+
+func (s *denySet) localPath(root, path string) (full, real string, ok bool) {
 	if len(path) > openTargetMax || strings.ContainsRune(path, 0) || networkPath(path) {
 		return "", "", false
 	}
 	full = resolveAgainst(root, filepath.FromSlash(homePath(path)))
-	homes := homeDirs()
-	if !filepath.IsAbs(full) || !driveOrRootPath(full) || networkPath(full) || deviceElement(full) || alwaysDenied(full, homes) {
+	if !filepath.IsAbs(full) || !driveOrRootPath(full) || networkPath(full) || deviceElement(full) || s.lexical(full) {
 		return "", "", false
 	}
 	real, err := filepath.EvalSymlinks(full)
-	if err != nil || networkPath(real) || !driveOrRootPath(real) || deviceElement(real) || alwaysDenied(real, homes) {
+	// The identity of real and its ancestors also stands for full's, which
+	// resolves to it.
+	if err != nil || networkPath(real) || !driveOrRootPath(real) || deviceElement(real) || s.lexical(real) || s.identityAtOrAbove(real) {
 		return "", "", false
 	}
 	return full, real, true
@@ -39,14 +44,14 @@ func localPath(root, path string) (full, real string, ok bool) {
 
 // openViewerFile preserves the confined open for LAN/token viewers. A local
 // read opens the resolved regular file using the same identity check.
-func openViewerFile(r *http.Request, root, path string) (*os.File, string, os.FileInfo, bool) {
+func openViewerFile(r *http.Request, deny *denySet, root, path string) (*os.File, string, os.FileInfo, bool) {
 	if !localViewer(r) {
 		return openContained(root, path)
 	}
 	if path == "" || crossSiteFetch(r) {
 		return nil, "", nil, false
 	}
-	full, real, ok := localPath(root, path)
+	full, real, ok := deny.localPath(root, path)
 	if !ok {
 		return nil, "", nil, false
 	}
@@ -55,16 +60,23 @@ func openViewerFile(r *http.Request, root, path string) (*os.File, string, os.Fi
 		// Windows paths on another drive cannot be relative to this root.
 		rel = full
 	}
-	f, _, info, ok := openLocalContained(filepath.Dir(real), filepath.Base(real))
+	f, _, info, ok := deny.openLocal(filepath.Dir(real), filepath.Base(real))
 	return f, rel, info, ok
 }
 
 func openLocalContained(root, path string) (*os.File, string, os.FileInfo, bool) {
-	return openContainedChecked(root, path, func(full, resolved string) bool {
-		homes := homeDirs()
+	return newDenySet().openLocal(root, path)
+}
+
+// openLocal opens a file for a local viewer. Before the open it checks both
+// spellings by string and the resolved file's ancestors by identity; the file
+// itself is checked by identity on the opened handle, which needs no path
+// syscall and sees the file actually read.
+func (s *denySet) openLocal(root, path string) (*os.File, string, os.FileInfo, bool) {
+	return openContainedVia(root, path, func(full, resolved string) bool {
 		return !networkPath(resolved) && driveOrRootPath(resolved) && !deviceElement(resolved) &&
-			!alwaysDenied(full, homes) && !alwaysDenied(resolved, homes)
-	})
+			!s.lexical(full) && !s.lexical(resolved) && !s.identityAtOrAbove(filepath.Dir(resolved))
+	}, s.opened)
 }
 
 // ownRootFile prevents local symlink escapes from gaining an in-root HTML
@@ -80,6 +92,10 @@ func ownRootFile(root, path string) bool {
 // readViewerDir reads through the checked handle, not a pathname that could
 // have been redirected after viewerDir approved it.
 func readViewerDir(r *http.Request, full string) ([]os.DirEntry, error) {
+	return newDenySet().readViewerDir(r, full)
+}
+
+func (s *denySet) readViewerDir(r *http.Request, full string) ([]os.DirEntry, error) {
 	if !localViewer(r) {
 		return os.ReadDir(full)
 	}
@@ -89,10 +105,10 @@ func readViewerDir(r *http.Request, full string) ([]os.DirEntry, error) {
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.IsDir() || deniedOpenedFile(info) {
+	if err != nil || !info.IsDir() || s.opened(info) {
 		return nil, os.ErrPermission
 	}
-	_, real, ok := localPath(full, ".")
+	_, real, ok := s.localPath(full, ".")
 	if !ok {
 		return nil, os.ErrPermission
 	}
@@ -103,29 +119,58 @@ func readViewerDir(r *http.Request, full string) ([]os.DirEntry, error) {
 	return f.ReadDir(-1)
 }
 
-func viewerCandidates(r *http.Request, root string, candidates []fileCandidate) []fileCandidate {
+// viewerCandidates are the name-search candidates a local viewer may see.
+// They come from the root's file list (git's, or a walk that follows no
+// symlinked directory), so below the root no name resolves elsewhere: each
+// one is checked by string, with no syscall per candidate, under the root as
+// written and as resolved, against the denied bases plus their spellings
+// under a root that aliases one of their ancestors (aliasRoots). A symlink or
+// hardlink among them shows by its own name only; reading it runs the full
+// identity check (openLocal).
+func viewerCandidates(r *http.Request, deny *denySet, root string, candidates []fileCandidate) []fileCandidate {
 	if !localViewer(r) {
 		return candidates
 	}
+	if crossSiteFetch(r) {
+		return nil
+	}
+	roots := []string{filepath.Clean(root)}
+	if real, err := filepath.EvalSymlinks(root); err == nil && real != roots[0] {
+		roots = append(roots, real)
+	}
+	deny.aliasRoots(roots)
 	var allowed []fileCandidate
-	if !crossSiteFetch(r) {
-		for _, c := range candidates {
-			if _, _, ok := localPath(root, c.path); ok {
-				allowed = append(allowed, c)
-			}
+	for _, c := range candidates {
+		if deny.listedName(roots, c.path) {
+			allowed = append(allowed, c)
 		}
 	}
 	return allowed
 }
 
-func viewerDir(r *http.Request, root, path string) (full, rel string, ok bool) {
+// listedName is localPath's string checks of path under each of roots.
+func (s *denySet) listedName(roots []string, path string) bool {
+	if len(path) > openTargetMax || strings.ContainsRune(path, 0) || networkPath(path) {
+		return false
+	}
+	native := filepath.FromSlash(homePath(path))
+	for _, root := range roots {
+		full := resolveAgainst(root, native)
+		if !filepath.IsAbs(full) || !driveOrRootPath(full) || networkPath(full) || deviceElement(full) || s.lexical(full) {
+			return false
+		}
+	}
+	return true
+}
+
+func viewerDir(r *http.Request, deny *denySet, root, path string) (full, rel string, ok bool) {
 	if !localViewer(r) {
 		return containedDir(root, path)
 	}
 	if crossSiteFetch(r) {
 		return "", "", false
 	}
-	full, real, ok := localPath(root, path)
+	full, real, ok := deny.localPath(root, path)
 	if !ok {
 		return "", "", false
 	}

@@ -173,7 +173,7 @@ func framedFile(name string) bool {
 // on a plain volume, both as written and once resolved through its
 // symlinks, under the files route's rules for an absolute directory
 // (listAbsDir). It returns the path cleaned.
-func browseRootParam(raw string) (string, bool) {
+func browseRootParam(deny *denySet, raw string) (string, bool) {
 	if raw == "" || len(raw) > filesQueryMax || strings.ContainsRune(raw, 0) || networkPath(raw) {
 		return "", false
 	}
@@ -182,11 +182,11 @@ func browseRootParam(raw string) (string, bool) {
 		return "", false
 	}
 	clean := filepath.Clean(native)
-	if deviceElement(clean) || alwaysDenied(clean, homeDirs()) {
+	if deviceElement(clean) || deny.lexical(clean) {
 		return "", false
 	}
 	real, err := filepath.EvalSymlinks(clean)
-	if err != nil || networkPath(real) || !driveOrRootPath(real) || deviceElement(real) || alwaysDenied(real, homeDirs()) {
+	if err != nil || networkPath(real) || !driveOrRootPath(real) || deviceElement(real) || deny.lexical(real) || deny.identityAtOrAbove(real) {
 		return "", false
 	}
 	if info, err := os.Stat(real); err != nil || !info.IsDir() {
@@ -200,11 +200,17 @@ func browseRootParam(raw string) (string, bool) {
 // machine. session reports the session's own root, the only one an HTML
 // preview capability is minted for.
 func (d *Daemon) browseRoot(r *http.Request, replyID string) (root string, session, ok bool) {
+	return d.browseRootWith(r, replyID, newDenySet())
+}
+
+// browseRootWith is browseRoot checking a root parameter under the
+// request's deny set.
+func (d *Daemon) browseRootWith(r *http.Request, replyID string, deny *denySet) (root string, session, ok bool) {
 	if replyID == LocalBrowseAnchor {
 		if !localBrowseViewer(r) {
 			return "", false, false
 		}
-		root, ok = browseRootParam(homePath(r.URL.Query().Get("root")))
+		root, ok = browseRootParam(deny, homePath(r.URL.Query().Get("root")))
 		return root, false, ok
 	}
 	if d.index == nil || !ValidReplyID(replyID) {
@@ -221,7 +227,7 @@ func (d *Daemon) browseRoot(r *http.Request, replyID string) (root string, sessi
 	if !localViewer(r) || crossSiteFetch(r) {
 		return "", false, false
 	}
-	root, ok = browseRootParam(homePath(raw))
+	root, ok = browseRootParam(deny, homePath(raw))
 	if !ok {
 		return "", false, false
 	}
@@ -527,7 +533,8 @@ func (d *Daemon) listingGitAllowed(full string) bool {
 
 // handleFSList serves the listing route.
 func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID string) {
-	root, session, ok := d.browseRoot(r, replyID)
+	deny := newDenySet()
+	root, session, ok := d.browseRootWith(r, replyID, deny)
 	if !ok {
 		fsNotFound(w)
 		return
@@ -537,12 +544,12 @@ func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID st
 		fsNotFound(w)
 		return
 	}
-	full, rel, ok := viewerDir(r, root, dir)
+	full, rel, ok := viewerDir(r, deny, root, dir)
 	if !ok {
 		fsNotFound(w)
 		return
 	}
-	read, err := readViewerDir(r, full)
+	read, err := deny.readViewerDir(r, full)
 	if err != nil {
 		fsNotFound(w)
 		return
@@ -560,7 +567,7 @@ func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID st
 			if !e.Link {
 				continue
 			}
-			if _, real, ok := localPath(full, e.Name); ok {
+			if _, real, ok := deny.localPath(full, e.Name); ok {
 				if info, err := os.Stat(real); err == nil && (info.IsDir() || info.Mode().IsRegular()) {
 					e.Link, e.Dir = false, info.IsDir()
 				}
@@ -677,13 +684,14 @@ func patchSide(s string) string {
 
 // handleFSPreview serves the preview route.
 func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID string) {
-	root, session, ok := d.browseRoot(r, replyID)
+	deny := newDenySet()
+	root, session, ok := d.browseRootWith(r, replyID, deny)
 	if !ok {
 		fsNotFound(w)
 		return
 	}
 	path := r.URL.Query().Get("path")
-	f, rel, info, ok := openViewerFile(r, root, path)
+	f, rel, info, ok := openViewerFile(r, deny, root, path)
 	if !ok {
 		fsNotFound(w)
 		return
@@ -792,7 +800,8 @@ const pdfContentSecurityPolicy = "default-src 'none'; object-src 'self'; frame-s
 // is served as the image route serves one, so an SVG opened on its own runs
 // no script in the daemon's origin.
 func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID string) {
-	root, _, ok := d.browseRoot(r, replyID)
+	deny := newDenySet()
+	root, _, ok := d.browseRootWith(r, replyID, deny)
 	if !ok {
 		fsNotFound(w)
 		return
@@ -810,7 +819,7 @@ func (d *Daemon) handleFSRaw(w http.ResponseWriter, r *http.Request, replyID str
 			}
 		}
 	}
-	f, _, info, ok := openViewerFile(r, root, path)
+	f, _, info, ok := openViewerFile(r, deny, root, path)
 	if !ok {
 		fsNotFound(w)
 		return

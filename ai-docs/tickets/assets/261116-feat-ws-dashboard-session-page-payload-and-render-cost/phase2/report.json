@@ -1,0 +1,626 @@
+{
+  "measures": {
+    "after-u": [
+      {
+        "bytes": 47400,
+        "handlerMs": 152.977
+      },
+      {
+        "bytes": 47400,
+        "handlerMs": 5.229
+      },
+      {
+        "bytes": 47400,
+        "handlerMs": 0.985
+      },
+      {
+        "bytes": 47400,
+        "handlerMs": 0.893
+      },
+      {
+        "bytes": 47400,
+        "handlerMs": 1.089
+      }
+    ],
+    "before-u": [
+      {
+        "bytes": 114898,
+        "handlerMs": 143.197
+      },
+      {
+        "bytes": 114898,
+        "handlerMs": 14.803
+      },
+      {
+        "bytes": 114898,
+        "handlerMs": 0.932
+      },
+      {
+        "bytes": 114898,
+        "handlerMs": 1.197
+      },
+      {
+        "bytes": 114898,
+        "handlerMs": 1.261
+      }
+    ],
+    "after-b": [
+      {
+        "bytes": 123631,
+        "handlerMs": 154.891
+      },
+      {
+        "bytes": 123631,
+        "handlerMs": 15.13
+      },
+      {
+        "bytes": 123631,
+        "handlerMs": 1.669
+      },
+      {
+        "bytes": 123631,
+        "handlerMs": 2.794
+      },
+      {
+        "bytes": 123631,
+        "handlerMs": 2.78
+      }
+    ],
+    "before-b": [
+      {
+        "bytes": 256781,
+        "handlerMs": 181.422
+      },
+      {
+        "bytes": 256781,
+        "handlerMs": 33.895
+      },
+      {
+        "bytes": 256781,
+        "handlerMs": 2.622
+      },
+      {
+        "bytes": 256781,
+        "handlerMs": 2.54
+      },
+      {
+        "bytes": 256781,
+        "handlerMs": 2.99
+      }
+    ],
+    "after-a": [
+      {
+        "bytes": 113121,
+        "handlerMs": 161.087
+      },
+      {
+        "bytes": 113121,
+        "handlerMs": 28.426
+      },
+      {
+        "bytes": 113121,
+        "handlerMs": 2.915
+      },
+      {
+        "bytes": 113121,
+        "handlerMs": 2.502
+      },
+      {
+        "bytes": 113121,
+        "handlerMs": 2.392
+      }
+    ],
+    "before-a": [
+      {
+        "bytes": 985572,
+        "handlerMs": 284.71
+      },
+      {
+        "bytes": 985572,
+        "handlerMs": 131.963
+      },
+      {
+        "bytes": 985572,
+        "handlerMs": 4.852
+      },
+      {
+        "bytes": 985572,
+        "handlerMs": 4.81
+      },
+      {
+        "bytes": 985572,
+        "handlerMs": 5.243
+      }
+    ],
+    "after-c": [
+      {
+        "bytes": 138268,
+        "handlerMs": 159.325
+      },
+      {
+        "bytes": 138268,
+        "handlerMs": 28.537
+      },
+      {
+        "bytes": 138268,
+        "handlerMs": 4.096
+      },
+      {
+        "bytes": 138268,
+        "handlerMs": 3.29
+      },
+      {
+        "bytes": 138268,
+        "handlerMs": 3.35
+      }
+    ],
+    "before-c": [
+      {
+        "bytes": 711576,
+        "handlerMs": 254.783
+      },
+      {
+        "bytes": 711576,
+        "handlerMs": 87.901
+      },
+      {
+        "bytes": 711576,
+        "handlerMs": 5.358
+      },
+      {
+        "bytes": 711576,
+        "handlerMs": 4.546
+      },
+      {
+        "bytes": 711576,
+        "handlerMs": 3.884
+      }
+    ],
+    "after-g": [
+      {
+        "bytes": 113092,
+        "handlerMs": 207.009
+      },
+      {
+        "bytes": 113092,
+        "handlerMs": 34
+      },
+      {
+        "bytes": 113092,
+        "handlerMs": 4.995
+      },
+      {
+        "bytes": 113092,
+        "handlerMs": 4.425
+      },
+      {
+        "bytes": 113092,
+        "handlerMs": 4.486
+      }
+    ],
+    "before-g": [
+      {
+        "bytes": 985587,
+        "handlerMs": 322.46
+      },
+      {
+        "bytes": 985587,
+        "handlerMs": 153.555
+      },
+      {
+        "bytes": 985587,
+        "handlerMs": 9.303
+      },
+      {
+        "bytes": 985587,
+        "handlerMs": 5.723
+      },
+      {
+        "bytes": 985587,
+        "handlerMs": 4.986
+      }
+    ]
+  },
+  "configs": {
+    "before-a": {
+      "htmlBytes": 985614,
+      "nodes": 4954,
+      "topics": 14,
+      "closedShown": 6,
+      "gaps": 21,
+      "lazyGaps": 0,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 26,
+      "framesMounted": 12,
+      "rows": 296,
+      "domContentLoadedMs": 537,
+      "loadMs": 653,
+      "topicFetches": [],
+      "errors": []
+    },
+    "after-a": {
+      "htmlBytes": 113163,
+      "nodes": 2602,
+      "topics": 14,
+      "closedShown": 6,
+      "gaps": 21,
+      "lazyGaps": 16,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 14,
+      "framesMounted": 12,
+      "rows": 38,
+      "domContentLoadedMs": 426,
+      "loadMs": 515,
+      "topicFetches": [
+        {
+          "status": 200,
+          "bytes": 104450
+        },
+        {
+          "status": 200,
+          "bytes": 104450
+        },
+        {
+          "status": 200,
+          "bytes": 110202
+        }
+      ],
+      "errors": []
+    },
+    "before-b": {
+      "htmlBytes": 256823,
+      "nodes": 4239,
+      "topics": 32,
+      "closedShown": 8,
+      "gaps": 0,
+      "lazyGaps": 0,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 32,
+      "framesMounted": 9,
+      "rows": 104,
+      "domContentLoadedMs": 486,
+      "loadMs": 623,
+      "topicFetches": [],
+      "errors": []
+    },
+    "after-b": {
+      "htmlBytes": 123673,
+      "nodes": 3639,
+      "topics": 32,
+      "closedShown": 8,
+      "gaps": 23,
+      "lazyGaps": 23,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 9,
+      "framesMounted": 9,
+      "rows": 58,
+      "domContentLoadedMs": 649,
+      "loadMs": 649,
+      "topicFetches": [
+        {
+          "status": 200,
+          "bytes": 14712
+        },
+        {
+          "status": 200,
+          "bytes": 9655
+        },
+        {
+          "status": 200,
+          "bytes": 9678
+        },
+        {
+          "status": 200,
+          "bytes": 9678
+        },
+        {
+          "status": 200,
+          "bytes": 9661
+        },
+        {
+          "status": 200,
+          "bytes": 9678
+        },
+        {
+          "status": 200,
+          "bytes": 9655
+        },
+        {
+          "status": 200,
+          "bytes": 9655
+        },
+        {
+          "status": 200,
+          "bytes": 9655
+        }
+      ],
+      "errors": []
+    },
+    "before-g": {
+      "htmlBytes": 985629,
+      "nodes": 4954,
+      "topics": 14,
+      "closedShown": 6,
+      "gaps": 21,
+      "lazyGaps": 0,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 26,
+      "framesMounted": 12,
+      "rows": 296,
+      "domContentLoadedMs": 888,
+      "loadMs": 1003,
+      "topicFetches": [],
+      "errors": []
+    },
+    "after-g": {
+      "htmlBytes": 113134,
+      "nodes": 2602,
+      "topics": 14,
+      "closedShown": 6,
+      "gaps": 21,
+      "lazyGaps": 16,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 14,
+      "framesMounted": 12,
+      "rows": 38,
+      "domContentLoadedMs": 595,
+      "loadMs": 751,
+      "topicFetches": [
+        {
+          "status": 200,
+          "bytes": 110202
+        },
+        {
+          "status": 200,
+          "bytes": 104450
+        },
+        {
+          "status": 200,
+          "bytes": 104450
+        }
+      ],
+      "errors": []
+    },
+    "before-c": {
+      "htmlBytes": 711618,
+      "nodes": 7269,
+      "topics": 32,
+      "closedShown": 30,
+      "gaps": 0,
+      "lazyGaps": 0,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 4,
+      "framePlaceholders": 100,
+      "framesMounted": 6,
+      "rows": 321,
+      "domContentLoadedMs": 588,
+      "loadMs": 710,
+      "topicFetches": [],
+      "errors": []
+    },
+    "after-c": {
+      "htmlBytes": 138310,
+      "nodes": 4413,
+      "topics": 32,
+      "closedShown": 30,
+      "gaps": 24,
+      "lazyGaps": 24,
+      "lazyBodies": 0,
+      "lazyDeferred": 4,
+      "deferred": 4,
+      "framePlaceholders": 28,
+      "framesMounted": 6,
+      "rows": 129,
+      "domContentLoadedMs": 475,
+      "loadMs": 624,
+      "topicFetches": [
+        {
+          "status": 200,
+          "bytes": 25751
+        },
+        {
+          "status": 200,
+          "bytes": 25751
+        },
+        {
+          "status": 200,
+          "bytes": 25751
+        },
+        {
+          "status": 200,
+          "bytes": 25751
+        },
+        {
+          "status": 200,
+          "bytes": 25751
+        },
+        {
+          "status": 200,
+          "bytes": 25751
+        },
+        {
+          "status": 200,
+          "bytes": 37445
+        },
+        {
+          "status": 200,
+          "bytes": 42876
+        }
+      ],
+      "errors": []
+    },
+    "before-u": {
+      "htmlBytes": 117880,
+      "nodes": 1653,
+      "topics": 2,
+      "closedShown": 0,
+      "gaps": 2,
+      "lazyGaps": 0,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 4,
+      "framesMounted": 4,
+      "rows": 44,
+      "domContentLoadedMs": 439,
+      "loadMs": 533,
+      "topicFetches": [],
+      "errors": []
+    },
+    "after-u": {
+      "htmlBytes": 42324,
+      "nodes": 1501,
+      "topics": 2,
+      "closedShown": 0,
+      "gaps": 2,
+      "lazyGaps": 0,
+      "lazyBodies": 0,
+      "lazyDeferred": 0,
+      "deferred": 0,
+      "framePlaceholders": 4,
+      "framesMounted": 4,
+      "rows": 25,
+      "domContentLoadedMs": 306,
+      "loadMs": 407,
+      "topicFetches": [
+        {
+          "status": 200,
+          "bytes": 66256
+        },
+        {
+          "status": 200,
+          "bytes": 56919
+        }
+      ],
+      "errors": []
+    }
+  },
+  "acceptance": {
+    "before gap-load": {
+      "topic": "C05",
+      "lazyGap": false,
+      "rowsBefore": 45,
+      "rowsAfter": 68,
+      "errors": [],
+      "pass": true
+    },
+    "before panel-history": {
+      "entry": "e997",
+      "bodyHeight": 220,
+      "errors": [],
+      "pass": true
+    },
+    "before diff-gutter": {
+      "entry": "e1065",
+      "pressed": "true",
+      "pass": true,
+      "errors": []
+    },
+    "after gap-load": {
+      "topic": "C05",
+      "lazyGap": true,
+      "rowsBefore": 2,
+      "rowsAfter": 68,
+      "errors": [],
+      "pass": true
+    },
+    "after panel-history": {
+      "entry": "e997",
+      "bodyHeight": 220,
+      "errors": [],
+      "pass": true
+    },
+    "after diff-gutter": {
+      "entry": "e1065",
+      "pressed": "true",
+      "pass": true,
+      "errors": []
+    },
+    "before deep-link-old-version": {
+      "target": "e997",
+      "top": 198,
+      "height": 279,
+      "inView": true,
+      "bodyLazy": false,
+      "frame": true,
+      "pass": true,
+      "errors": []
+    },
+    "before deep-link-capped-closed": {
+      "target": "e51",
+      "topic": "C30",
+      "top": 865,
+      "inView": true,
+      "pass": true,
+      "errors": []
+    },
+    "before closed-expand": {
+      "closedBefore": 30,
+      "closedAfter": 34,
+      "errors": [],
+      "pass": true
+    },
+    "after deep-link-old-version": {
+      "target": "e997",
+      "top": 198,
+      "height": 279,
+      "inView": true,
+      "bodyLazy": false,
+      "frame": true,
+      "pass": true,
+      "errors": []
+    },
+    "after deep-link-capped-closed": {
+      "target": "e51",
+      "topic": "C30",
+      "top": 865,
+      "inView": true,
+      "pass": true,
+      "errors": []
+    },
+    "after closed-expand": {
+      "closedBefore": 30,
+      "closedAfter": 34,
+      "errors": [],
+      "pass": true
+    },
+    "before loaded-rows-survive-updates": {
+      "loaded": 31,
+      "lost": [],
+      "harness": true,
+      "pass": true,
+      "errors": []
+    },
+    "after loaded-rows-survive-updates": {
+      "loaded": 33,
+      "lost": [],
+      "harness": true,
+      "pass": true,
+      "errors": []
+    }
+  },
+  "targets": {
+    "gapTopic": "T00",
+    "oldVersion": "e997",
+    "capped": [
+      "C30",
+      "C31",
+      "C32",
+      "C33"
+    ],
+    "cappedEntry": "e51"
+  }
+}

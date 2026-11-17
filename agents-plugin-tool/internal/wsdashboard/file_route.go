@@ -142,6 +142,16 @@ func openContained(root, path string) (*os.File, string, os.FileInfo, bool) {
 // swapped to a sensitive symlink after the caller's initial path check.
 // A non-nil check also enables the local post-open credential identity check.
 func openContainedChecked(root, path string, check func(full, real string) bool) (*os.File, string, os.FileInfo, bool) {
+	var opened func(os.FileInfo) bool
+	if check != nil {
+		opened = deniedOpenedFile
+	}
+	return openContainedVia(root, path, check, opened)
+}
+
+// openContainedVia is openContainedChecked with the post-open identity check
+// given: opened refuses the file the handle actually opened.
+func openContainedVia(root, path string, check func(full, real string) bool, opened func(os.FileInfo) bool) (*os.File, string, os.FileInfo, bool) {
 	rel, ok := relativeInside(root, path)
 	if !ok {
 		return nil, "", nil, false
@@ -174,7 +184,7 @@ func openContainedChecked(root, path string, check func(full, real string) bool)
 	}
 	// The file opened must be the one Lstat saw, not one swapped in since.
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linfo, info) || (check != nil && deniedOpenedFile(info)) {
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linfo, info) || (opened != nil && opened(info)) {
 		_ = f.Close()
 		return nil, "", nil, false
 	}
@@ -231,7 +241,7 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		return
 	}
 	path := r.URL.Query().Get("path")
-	f, rel, info, ok := openViewerFile(r, s.Project, path)
+	f, rel, info, ok := openViewerFile(r, newDenySet(), s.Project, path)
 	if !ok {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return

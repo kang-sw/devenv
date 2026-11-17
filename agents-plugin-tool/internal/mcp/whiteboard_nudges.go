@@ -22,10 +22,6 @@ import (
 
 const whiteboardReconcileInterval = 30 * time.Second
 
-// Board transactions can poke faster than discovery can enumerate all keys.
-// Retain their targets and share one discovery per second, including startup.
-const whiteboardNudgeDiscoveryInterval = time.Second
-
 // Ticket status and external or interrupted writes are not fully represented by
 // the session metadata stamp. Periodically revisit even unchanged boards.
 const whiteboardNudgeRecoveryInterval = 5 * time.Minute
@@ -52,6 +48,7 @@ type WhiteboardNudges struct {
 	mu           sync.Mutex
 	pending      map[nudgeTarget]bool
 	// Discovery is serialized by run; deliveryGate deliberately never uses it.
+	known       map[string]nudgeKeyIdentity // collision evidence retained between recovery scans
 	identities  map[string]nudgeIdentity
 	boardStamps map[nudgeTarget]os.FileInfo
 	stat        func(string) (os.FileInfo, error)
@@ -119,7 +116,7 @@ func (n *WhiteboardNudges) identity(t nudgeTarget) (sessionRecord, bool) {
 func (n *WhiteboardNudges) discoveryIdentity(d sessionDirs, key string) (string, os.FileInfo, error) {
 	stat := n.stat
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	path := d.partPath(key, partKey)
 	info, err := stat(path)
@@ -130,12 +127,38 @@ func (n *WhiteboardNudges) discoveryIdentity(d sessionDirs, key string) (string,
 	return path, info, err
 }
 
+// nudgeListing is what discovery's two listings already say about a key.
+type nudgeListing struct {
+	split  bool        // sessions/ listed an entry named key, of any type
+	legacy os.DirEntry // keys/ entry of key's legacy file; nil when unlisted
+}
+
+// listedIdentity is discoveryIdentity from the listings when they settle it:
+// with no split entry listed, a regular legacy entry is the effective file and
+// its listed metadata is its stamp (free on Windows, one uncounted lstat
+// elsewhere). A recovery pass over a large key store otherwise made two path
+// stats per legacy-only key, a failed split stat and the legacy stat: under
+// on-access antivirus most of the pass's cost. Anything else, including a
+// split entry of any type and a non-regular legacy entry, takes the stat path.
+// A split file created after the listing is caught by the after-read check
+// when the key is reread; a key whose listed stamp still matches keeps its
+// legacy identity until the next poke (discoverTarget always stats) or pass.
+// That window is the pass's length, not the stat-to-use gap it was, and stays
+// within the recovery bound.
+func (n *WhiteboardNudges) listedIdentity(d sessionDirs, key string, l *nudgeListing) (string, os.FileInfo, error) {
+	if l != nil && !l.split && l.legacy != nil && l.legacy.Type().IsRegular() {
+		info, err := l.legacy.Info()
+		return d.legacyPath(key), info, err
+	}
+	return n.discoveryIdentity(d, key)
+}
+
 func nudgeSameIdentity(a, b os.FileInfo) bool {
 	return wsstate.SameFileMetadata(a, b)
 }
 
-func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudgeIdentity) (nudgeKeyIdentity, *nudgeIdentity, bool) {
-	path, info, err := n.discoveryIdentity(d, key)
+func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudgeIdentity, listed *nudgeListing) (nudgeKeyIdentity, *nudgeIdentity, bool) {
+	path, info, err := n.listedIdentity(d, key, listed)
 	if err != nil || !info.Mode().IsRegular() {
 		return nudgeKeyIdentity{}, nil, false
 	}
@@ -147,6 +170,18 @@ func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudge
 	read := n.read
 	if read == nil {
 		read = readRecordFile
+	}
+	if split := d.partPath(key, partKey); path != split {
+		// The identity already found no split file: read the legacy file
+		// directly rather than first failing a split read. A split file that
+		// appears meanwhile fails the after-read path check below.
+		base := read
+		read = func(p string, newValue func() any) ([]byte, any, error) {
+			if p == split {
+				return nil, nil, fs.ErrNotExist
+			}
+			return base(p, newValue)
+		}
 	}
 	r, _, err := loadRecordWith(d, key, partKey, nil, read)
 	if err != nil {
@@ -171,12 +206,19 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 	d := n.dirs()
 	stat := n.stat
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	n.boardStamps = map[nudgeTarget]os.FileInfo{}
-	keys := map[string]bool{}
+	keys := map[string]*nudgeListing{}
+	splitOther := map[string]bool{}
+	listing := func(key string) *nudgeListing {
+		if keys[key] == nil {
+			keys[key] = &nudgeListing{}
+		}
+		return keys[key]
+	}
 	for i, dir := range []string{d.sessions, d.legacy} {
-		entries, err := os.ReadDir(dir)
+		entries, err := wsstate.ReadDir(dir)
 		if err != nil {
 			if !os.IsNotExist(err) {
 				fmt.Fprintf(n.log, "whiteboard nudges: discovery: %v\n", err)
@@ -189,6 +231,11 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 		}
 		for _, e := range entries {
 			key := e.Name()
+			if i == 0 && !e.IsDir() {
+				// Not a key source, but its stat (it may be a symlink to a
+				// key directory) still decides the identity.
+				splitOther[key] = true
+			}
 			if i == 0 && !e.IsDir() || i == 1 && e.IsDir() {
 				continue
 			}
@@ -200,21 +247,32 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 				}
 			}
 			if sessionKeyFilenamePattern.MatchString(key) {
-				keys[key] = true
+				if i == 0 {
+					listing(key).split = true
+				} else {
+					listing(key).legacy = e
+				}
 			}
+		}
+	}
+	for key := range splitOther {
+		if l := keys[key]; l != nil {
+			l.split = true
 		}
 	}
 	// Keep only currently discoverable, validated identities. Corrupt records
 	// and files whose metadata/read races never gain cached authority.
 	prior := n.identities
 	n.identities = map[string]nudgeIdentity{}
+	n.known = map[string]nudgeKeyIdentity{}
 	out := map[nudgeTarget]time.Time{}
 	associations := map[string]int{}
-	for key := range keys {
-		r, stamp, ok := n.discoverRecord(d, key, prior[key])
+	for key, listed := range keys {
+		r, stamp, ok := n.discoverRecord(d, key, prior[key], listed)
 		if !ok {
 			continue
 		}
+		n.known[key] = r
 		// Cache valid nonlead/delegate identities too: they dominate a
 		// representative key store, and may become leads on a later write.
 		if stamp != nil {
@@ -248,6 +306,68 @@ func nudgeSuppressCollisions(out map[nudgeTarget]time.Time, associations map[str
 			delete(out, t)
 		}
 	}
+}
+
+// discoverTarget checks only a poked identity and board. Collision checks use
+// the in-memory discovery evidence, never an enumeration of unrelated keys.
+func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) (os.FileInfo, bool) {
+	r, stamp, ok := n.discoverRecord(n.dirs(), t.key, n.identities[t.key], nil)
+	if !ok {
+		delete(n.identities, t.key)
+		delete(n.known, t.key)
+		return nil, false
+	}
+	if n.known == nil {
+		n.known = map[string]nudgeKeyIdentity{}
+	}
+	n.known[t.key] = r
+	if stamp != nil {
+		n.identities[t.key] = *stamp
+	} else {
+		delete(n.identities, t.key)
+	}
+	if r.Scope != string(roleLead) || r.Parent != "" || r.Root != t.root {
+		return nil, false
+	}
+	if !n.uniqueTarget(t) {
+		return nil, false
+	}
+	stat := n.stat
+	if stat == nil {
+		stat = wsstate.Stat
+	}
+	for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
+		if info, err := stat(filepath.Join(whiteboardFolder(t.root, t.key).Dir, name)); err == nil {
+			return info, true
+		} else if !os.IsNotExist(err) {
+			return nil, false
+		}
+	}
+	return nil, false
+}
+
+func (n *WhiteboardNudges) uniqueTarget(t nudgeTarget) bool {
+	return nudgeIdentityUnique(t.key, n.known, wsmailbox.ReplyID)
+}
+
+func nudgeAssociationCounts(known map[string]nudgeKeyIdentity, replyID func(string) string) map[string]int {
+	counts := map[string]int{}
+	for key, identity := range known {
+		if identity.Scope == string(roleLead) && identity.Parent == "" {
+			counts[replyID(key)]++
+		}
+	}
+	return counts
+}
+
+func nudgeIdentityUnique(target string, known map[string]nudgeKeyIdentity, replyID func(string) string) bool {
+	targetID := replyID(target)
+	for key, other := range known {
+		if key != target && other.Scope == string(roleLead) && other.Parent == "" && replyID(key) == targetID {
+			return false
+		}
+	}
+	return true
 }
 
 func (n *WhiteboardNudges) deliveryGate(t nudgeTarget) func() bool {
@@ -337,7 +457,6 @@ func nudgeReconcile(boards map[nudgeTarget]time.Time, stamps map[nudgeTarget]os.
 func (n *WhiteboardNudges) run() {
 	defer close(n.exited)
 	scan := n.now()
-	var discoverAfter time.Time
 	boards := map[nudgeTarget]time.Time{}
 	stamps := map[nudgeTarget]os.FileInfo{}
 	timer := time.NewTimer(0)
@@ -362,33 +481,36 @@ func (n *WhiteboardNudges) run() {
 		n.pending = map[nudgeTarget]bool{}
 		n.mu.Unlock()
 		recovery := !now.Before(scan)
-		var pendingDiscovery time.Time
-		if recovery || len(pending) > 0 {
-			if now.Before(discoverAfter) {
-				n.mu.Lock()
-				for t := range pending {
-					n.pending[t] = true
+		if recovery {
+			found := n.discover()
+			boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, true)
+			scan = now.Add(whiteboardNudgeRecoveryInterval)
+		}
+		for t := range pending {
+			if recovery {
+				if _, ok := boards[t]; ok {
+					boards[t] = time.Time{}
 				}
-				n.mu.Unlock()
-				pendingDiscovery = discoverAfter
+				continue
+			}
+			if stamp, ok := n.discoverTarget(t); ok {
+				boards[t], stamps[t] = time.Time{}, stamp
 			} else {
-				found := n.discover()
-				discoverAfter = now.Add(whiteboardNudgeDiscoveryInterval)
-				// Safety recovery and explicit pokes share the same discovery
-				// deadline; a postponed recovery still performs full reconciliation.
-				boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, recovery)
-				if recovery {
-					scan = now.Add(whiteboardNudgeRecoveryInterval)
-				}
-				for t := range pending {
-					if _, ok := found[t]; ok {
-						boards[t] = time.Time{}
-					}
-				}
+				delete(boards, t)
+				delete(stamps, t)
 			}
 		}
+		// Hash each known identity once, not once for every scheduled board.
+		associations := nudgeAssociationCounts(n.known, wsmailbox.ReplyID)
 		targets := make([]nudgeTarget, 0, len(boards))
 		for t, due := range boards {
+			// Discovering a conflicting key suppresses the existing target
+			// too, not just the newly poked one. Uniqueness is RAM-only.
+			if associations[wsmailbox.ReplyID(t.key)] > 1 {
+				delete(boards, t)
+				delete(stamps, t)
+				continue
+			}
 			if due.IsZero() || !now.Before(due) {
 				targets = append(targets, t)
 			}
@@ -413,12 +535,6 @@ func (n *WhiteboardNudges) run() {
 			boards[t] = due
 		}
 		next := scan
-		if next.Before(discoverAfter) {
-			next = discoverAfter
-		}
-		if !pendingDiscovery.IsZero() && pendingDiscovery.Before(next) {
-			next = pendingDiscovery
-		}
 		for _, due := range boards {
 			if !due.IsZero() && due.Before(next) {
 				next = due

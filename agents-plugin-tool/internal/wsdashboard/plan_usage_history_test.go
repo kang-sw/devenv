@@ -260,3 +260,174 @@ func TestPlanUsageHistoryGPTAcquisitionAndOptionalAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanUsageHistoryMemoStatValidated(t *testing.T) {
+	s := usageTestStore(t)
+	var stats, reads int
+	s.statFile = func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) }
+	s.readFile = func(path string) ([]byte, error) { reads++; return os.ReadFile(path) }
+	now := time.Now().UnixMilli()
+	first := historySample(now-2, 10)
+	s.appendHistoryLocked([]planUsageSample{first}, now)
+	// The write itself becomes the memo: an unchanged file costs one stat and
+	// no read per request.
+	stats, reads = 0, 0
+	for i := 0; i < 3; i++ {
+		if got := s.history(now); len(got.Samples) != 1 {
+			t.Fatalf("history: %+v", got)
+		}
+	}
+	if stats != 3 || reads != 0 {
+		t.Fatalf("unchanged file: stats=%d reads=%d, want 3 and 0", stats, reads)
+	}
+	// Another writer replaces the file. The next append reloads it and keeps
+	// that writer's sample instead of overwriting it from the memo.
+	external := historySample(now-1, 20)
+	external.Source = "via Codex CLI"
+	raw := fmt.Sprintf(`{"schema_version":1,"samples":[{"harness":"codex","kind":"seven_day","source":"via Pi","resetsAt":%d,"asOf":%d,"percent":10},{"harness":"codex","kind":"seven_day","source":"via Codex CLI","resetsAt":%d,"asOf":%d,"percent":20}]}`, first.ResetsAt, first.AsOf, external.ResetsAt, external.AsOf)
+	path := filepath.Join(s.dir, planUsageHistoryCache)
+	usageWrite(t, path, raw)
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	reads = 0
+	s.appendHistoryLocked([]planUsageSample{historySample(now, 30)}, now)
+	if reads != 1 {
+		t.Fatalf("changed stat: reads=%d, want 1", reads)
+	}
+	reads = 0
+	got := s.history(now)
+	if reads != 0 || len(got.Samples) != 3 || got.Samples[1] != external {
+		t.Fatalf("write after a changed stat lost the other writer's sample: %+v (reads %d)", got, reads)
+	}
+	if fresh := newPlanUsageStore(s.dir, s.home, s.getenv).history(now); !reflect.DeepEqual(fresh, got) {
+		t.Fatalf("memo differs from disk: %+v vs %+v", got, fresh)
+	}
+	// A transient read failure is not memoized as "unavailable".
+	if err := os.Chtimes(path, later.Add(time.Hour), later.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	s.readFile = func(string) ([]byte, error) { return nil, os.ErrPermission }
+	if p := s.history(now); p.Status != "unavailable" {
+		t.Fatalf("read failure: %+v", p)
+	}
+	s.readFile = nil
+	if p := s.history(now); p.Status != "ok" || len(p.Samples) != 3 {
+		t.Fatalf("read failure stuck: %+v", p)
+	}
+}
+
+func TestPlanUsageHistoryIdenticalSampleWritesNothing(t *testing.T) {
+	s := usageTestStore(t)
+	now := time.Now().UnixMilli()
+	v := historySample(now, 10)
+	s.appendHistoryLocked([]planUsageSample{v}, now)
+	path := filepath.Join(s.dir, planUsageHistoryCache)
+	old := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	s.appendHistoryLocked([]planUsageSample{v}, now)
+	if info, err := os.Stat(path); err != nil || !info.ModTime().Equal(old) {
+		t.Fatal("identical observation rewrote the history file")
+	}
+	v.Percent = 11
+	s.appendHistoryLocked([]planUsageSample{v}, now)
+	if got := s.history(now); len(got.Samples) != 1 || got.Samples[0].Percent != 11 {
+		t.Fatalf("changed value at the same identity not upserted: %+v", got)
+	}
+}
+
+func TestPlanUsageHistoryViewKeepsDrawableSamples(t *testing.T) {
+	s := usageTestStore(t)
+	now := time.Now().UnixMilli()
+	reset, stale := now+3600000, now-60000
+	claude := func(at, r int64, p float64) planUsageSample {
+		return planUsageSample{Harness: "claude", Kind: "five_hour", Source: "Claude push", ResetsAt: r, AsOf: at, Percent: p}
+	}
+	base := now - 600000
+	var (
+		staleOld   = claude(base, stale, 90)   // not drawn, not a neighbor: dropped
+		stalePrev  = claude(base+1, stale, 91) // neighbor of the first current sample
+		cur1       = claude(base+2, reset, 10) // drawn
+		staleMid   = claude(base+3, stale, 92) // separates cur1 and cur2
+		cur2       = claude(base+4, reset, 11) // drawn
+		cur3       = claude(base+5, reset, 12) // drawn
+		staleTail  = claude(base+6, stale, 93) // neighbor of the entry observation
+		weeklyOld  = planUsageSample{Harness: "claude", Kind: "seven_day", Source: "Claude push", ResetsAt: now + 86400000, AsOf: base, Percent: 5}
+		codexOther = historySample(base, 50) // no codex entry window: not drawn
+	)
+	all := []planUsageSample{staleOld, stalePrev, cur1, staleMid, cur2, cur3, staleTail, weeklyOld, codexOther}
+	s.appendHistoryLocked(all, now)
+	// The entry observation is newer than every stored sample.
+	entries := []planUsageEntry{{Harness: "claude", Source: "Claude push", AsOf: base + 7, Windows: []planUsageWindow{{Kind: "five_hour", Percent: 13, ResetsAt: reset, AsOf: base + 7}}}}
+	raw := s.historyView(entries, now)
+	var got planUsageHistoryProjection
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []planUsageSample{stalePrev, cur1, staleMid, cur2, cur3, staleTail}
+	if got.SchemaVersion != 1 || got.Status != "ok" || !reflect.DeepEqual(got.Samples, want) {
+		t.Fatalf("projection: %+v\nwant %+v", got, want)
+	}
+	// Memoized by revision and entries; a new sample or new entries recompute.
+	if again := s.historyView(entries, now); &again[0] != &raw[0] {
+		t.Fatal("unchanged history and entries re-encoded the projection")
+	}
+	cur4 := claude(base+8, reset, 14)
+	s.appendHistoryLocked([]planUsageSample{cur4}, now)
+	entries[0].AsOf, entries[0].Windows[0].AsOf, entries[0].Windows[0].Percent = base+8, base+8, 14
+	_ = json.Unmarshal(s.historyView(entries, now), &got)
+	if want = append(want, cur4); !reflect.DeepEqual(got.Samples, want) {
+		t.Fatalf("projection after append: %+v", got.Samples)
+	}
+	// No entry window: no samples, but the status still reflects the file.
+	_ = json.Unmarshal(s.historyView(nil, now), &got)
+	if got.Status != "ok" || len(got.Samples) != 0 {
+		t.Fatalf("projection without windows: %+v", got)
+	}
+	// The handler serves the projection under the unchanged member name.
+	d := &Daemon{planUsage: s}
+	w := httptest.NewRecorder()
+	d.handlePlanUsage(w, httptest.NewRequest("GET", "/rail/usage?history=1", nil))
+	var body struct {
+		History planUsageHistoryProjection `json:"history"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.History.SchemaVersion != 1 || body.History.Status != "ok" {
+		t.Fatalf("handler history member: %s", w.Body.String())
+	}
+}
+
+func TestPlanUsageHistoryViewTwoWindowsTiesAndLateSamples(t *testing.T) {
+	t0 := time.Now().UnixMilli() - 600000
+	ra, rb, rx := t0+7*86400000, t0+8*86400000, t0-1
+	v := func(at, reset int64, source string) planUsageSample {
+		return planUsageSample{Harness: "codex", Kind: "seven_day", Source: source, ResetsAt: reset, AsOf: at, Percent: 20}
+	}
+	cli, pi := codexUsageSource, "via Pi"
+	var (
+		d    = v(t0, rx, pi)    // no drawn successor: dropped
+		o    = v(t0+1, rx, pi)  // neighbor of a1
+		a1   = v(t0+2, ra, cli) // window A
+		b1   = v(t0+3, rb, cli) // window B
+		a2   = v(t0+4, ra, cli) // sorts before y: same asOf, "via Codex CLI" < "via Pi"
+		y    = v(t0+4, rx, pi)  // after a2 in trend()'s order: dropped
+		z    = v(t0+5, rx, pi)  // dropped
+		w    = v(t0+6, rx, pi)  // neighbor of both entry observations and of late
+		late = v(t0+8, ra, cli) // newer than the entry observation: trend() filters it
+	)
+	var records []planUsageHistoryRecord
+	for _, s := range []planUsageSample{late, y, d, w, a2, o, z, b1, a1} {
+		records = append(records, historyRecord(s))
+	}
+	records = prunePlanUsageHistory(records, t0+9)
+	entries := []planUsageEntry{{Harness: "codex", Source: cli, AsOf: t0 + 7, Windows: []planUsageWindow{
+		{Kind: "seven_day", Percent: 30, ResetsAt: ra, AsOf: t0 + 7}, {Kind: "seven_day", Percent: 40, ResetsAt: rb, AsOf: t0 + 7},
+	}}}
+	got := projectPlanUsageHistory(records, entries)
+	want := []planUsageSample{o, a1, b1, a2, w, late}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("projection: %+v\nwant %+v", got, want)
+	}
+}

@@ -29,8 +29,10 @@ type pageFake struct {
 	pages map[string]PageContent
 	// boards are the whiteboards ReadClosedTopics renders from.
 	boards map[string]*wswhiteboard.State
-	// pageReads counts ReadPage calls per reply-id.
-	pageReads map[string]int
+	// pageReads counts ReadPage calls per reply-id; contactReads counts
+	// ReadContacts calls.
+	pageReads    map[string]int
+	contactReads int
 	// outside are the files outside the root each board links
 	// (ReadOutsideLinks).
 	outside map[string][]string
@@ -52,6 +54,7 @@ func (p *pageFake) ReadPage(reg Registration) (PageContent, bool, error) {
 func (p *pageFake) ReadContacts(reg Registration) ([]Contact, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.contactReads++
 	return p.pages[reg.ReplyID].Contacts, true
 }
 

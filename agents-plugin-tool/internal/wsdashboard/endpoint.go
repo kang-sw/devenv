@@ -71,7 +71,9 @@ func Dir(cacheHome string) (string, error) {
 
 // ReadEndpoint reads dir's endpoint file. Unknown fields are ignored.
 func ReadEndpoint(dir string) (Endpoint, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, endpointFileName))
+	// Stat-revalidated: forwarded pi.* calls read it per call and per pi.wait
+	// retry, and a daemon replacement rewrites it by temp and rename.
+	raw, err := wsstate.ReadFileCached(filepath.Join(dir, endpointFileName))
 	if err != nil {
 		return Endpoint{}, err
 	}

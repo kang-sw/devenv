@@ -292,7 +292,7 @@ func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("embed layout")+`" data-topic="embed layout"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="embed layout">embed layout</span></span>`,
+		wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("embed layout")+`" data-topic="embed layout" data-open-asks="true"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="embed layout">embed layout</span></span>`,
 			`.topic.has-doc > .tophead > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
 		start := strings.Index(out, `<span class="tname" title="embed retention">embed retention</span>`)
 		if start < 0 {

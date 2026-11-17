@@ -18,15 +18,45 @@ var errPlanUsage = errors.New("usage unavailable")
 // with no subprocess. Keep this wire/history identifier readable by old writers.
 const codexUsageSource = "via Codex CLI"
 
+// Coalesce simultaneous popover opens as well as ordinary page polls.
+func usageQueryInterval(force bool) time.Duration {
+	if force {
+		return 5 * time.Second
+	}
+	return 5 * time.Minute
+}
+
+// refresh answers viewers from the cached value: a due probe runs in the
+// background, one at a time, so no viewer waits on the upstream round trip or
+// queues behind queryMu. Only a store with nothing to show (no cached and no
+// persisted GPT entry) probes inline, so a first page still gets a value.
+func (s *planUsageStore) refresh(ctx context.Context, force bool) {
+	s.mu.Lock()
+	if s.gpt.AsOf == 0 && s.gpt.Status == "" && len(s.gpt.Windows) == 0 {
+		s.mu.Unlock()
+		s.query(ctx, force)
+		return
+	}
+	if s.probing || time.Since(s.lastQuery) < usageQueryInterval(force) {
+		s.mu.Unlock()
+		return
+	}
+	s.probing = true
+	s.probes.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.probes.Done()
+		s.query(context.Background(), force)
+		s.mu.Lock()
+		s.probing = false
+		s.mu.Unlock()
+	}()
+}
+
 func (s *planUsageStore) query(ctx context.Context, force bool) {
 	s.queryMu.Lock()
 	defer s.queryMu.Unlock()
-	// Coalesce simultaneous popover opens as well as ordinary page polls.
-	interval := 5 * time.Minute
-	if force {
-		interval = 5 * time.Second
-	}
-	if time.Since(s.lastQuery) < interval {
+	if time.Since(s.lastQuery) < usageQueryInterval(force) {
 		return
 	}
 	_, codex, pi := s.detect()

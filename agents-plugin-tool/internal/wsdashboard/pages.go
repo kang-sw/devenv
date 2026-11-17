@@ -6,8 +6,10 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"regexp"
 	"slices"
@@ -914,6 +916,9 @@ type pageReader struct {
 	// Initial document/control reads must observe a preceding write immediately.
 	// Stream renders leave this false and share the presentation validation TTL.
 	freshSnapshots bool
+	// foreign is the daemon's shared look at the inputs refresh stamps cannot
+	// learn of from a wake (foreign_schedule.go); nil looks every time.
+	foreign *foreignSchedule
 }
 
 func (r pageReader) clock() time.Time {
@@ -1130,12 +1135,15 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 }
 
 // sessionStamp is the refresh stamp of replyID's session page over the
-// inputs of its last read (stream_cache.go): for each session it looked up,
-// whether the index holds it, its revision, its liveness, and whether its
-// snapshot names a present adapter, all at call time; the state of the
-// watched paths (StampWatched); the liveness of each watched process; the
-// session's mail print (MailPrintSource); and the contacts as re-read now.
-// ok is false when the page shows contacts the source cannot re-read.
+// inputs of its last read (stream_cache.go). Each call folds, from memory:
+// for each session it looked up, whether the index holds it, its revision,
+// its liveness, and whether its snapshot names a present adapter, all at
+// call time; the liveness of each watched process; and each contact's
+// liveness at call time (Contact.liveAt) over the contacts last read. The
+// foreign inputs come from the shared foreign look (foreign_schedule.go):
+// the state of the watched paths (StampWatched) and the session's mailbox
+// stamp (mailStamp). ok is false when the page shows contacts the source
+// cannot re-read.
 func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool) {
 	if r.index == nil {
 		return "", false
@@ -1147,35 +1155,59 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 		present, evidence := r.adapterStamp(id, now)
 		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x00%s\x01", id, ok, s.Rev, ok && s.Registration.Live(now), ok && present, evidence)
 	}
-	StampWatched(h, in.watch)
 	for _, pid := range in.pids {
 		fmt.Fprintf(h, "pid\x00%d\x00%t\x01", pid, processAlive(pid))
 	}
+	stampWatchedSince(h, in.watch, r.foreign.filesSince())
+	key := replyID
+	if in.contacts {
+		key += "\x00contacts"
+	}
+	mail, contacts, ok := r.foreign.mailStamp(key, func() (string, []Contact, bool) { return r.mailStamp(replyID, in.contacts) })
+	if !ok {
+		return "", false
+	}
+	io.WriteString(h, mail)
+	// A contact's lapse follows the clock and its process, so it is folded
+	// every tick; a recovery needs a store read, at the next mailbox look.
+	for _, c := range contacts {
+		fmt.Fprintf(h, "live\x00%t\x01", c.liveAt(now))
+	}
+	return sumHex(h), true
+}
+
+// mailStamp reads the mailbox side of replyID's refresh stamp: the session's
+// mail print (MailPrintSource), since mail to a reply-id sends no wake, and,
+// when the page shows contacts, the contacts as re-read now, which it also
+// returns. ok is false when the page shows contacts the source cannot
+// re-read.
+func (r pageReader) mailStamp(replyID string, contacts bool) (string, []Contact, bool) {
+	var b strings.Builder
+	var list []Contact
 	if src, ok := r.source.(MailPrintSource); ok {
 		if s, ok := r.index.Session(replyID); ok {
 			if print, ok := src.MailPrint(s.Registration); ok {
-				fmt.Fprintf(h, "mail\x00%s\x01", print)
+				fmt.Fprintf(&b, "mail\x00%s\x01", print)
 			}
 		}
 	}
-	if in.contacts {
+	if contacts {
 		src, ok := r.source.(ContactSource)
 		if !ok {
-			return "", false
+			return "", nil, false
 		}
 		s, ok := r.index.Session(replyID)
 		if !ok {
-			return "", false
+			return "", nil, false
 		}
-		contacts, ok := src.ReadContacts(s.Registration)
-		if !ok {
-			return "", false
+		if list, ok = src.ReadContacts(s.Registration); !ok {
+			return "", nil, false
 		}
-		for _, c := range contacts {
-			fmt.Fprintf(h, "%s\x00%s\x00%t\x00%s\x00%d\x01", c.Address, c.ReplyID, c.PresenceLive, c.Cwd, c.LastExchange.UnixNano())
+		for _, c := range list {
+			fmt.Fprintf(&b, "%s\x00%s\x00%t\x00%s\x00%d\x01", c.Address, c.ReplyID, c.PresenceLive, c.Cwd, c.LastExchange.UnixNano())
 		}
 	}
-	return sumHex(h), true
+	return b.String(), list, true
 }
 
 // indexStamp is the refresh stamp of the sessions index: for each listed
@@ -1238,7 +1270,7 @@ func (r pageReader) indexView() IndexView {
 }
 
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign}
 }
 
 // pagesIn is pages reading in the viewer's language.
@@ -1276,7 +1308,8 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, its image, file view, files, history, entry text, closed-topic, worktree pool,
+// stream, its image, file view, files, history, entry text, closed-topic,
+// topic-history, worktree pool,
 // git status, log, and commit, attachment, and file browser routes, its
 // message, cancel, steer, interrupt, system-open, file browser host,
 // outside-link mint, git
@@ -1293,6 +1326,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
 		d.handleInboxWrite(w, r, replyID, sub)
+		return
+	} else if sub == "notes" {
+		d.handleNotes(w, r, replyID)
 		return
 	} else if sub == "open" {
 		d.handleSystemOpen(w, r, replyID)
@@ -1387,6 +1423,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleEntryText(w, r, replyID)
 	case sub == "closed":
 		d.handleClosedTopics(w, r, replyID)
+	case sub == "topic":
+		d.handleTopicHistory(w, r, replyID)
+	case sub == "tickets/idea":
+		d.handleTicketIdeas(w, r, replyID)
 	case sub == "worktrees":
 		d.handleWorktrees(w, r, replyID)
 	case sub == "git/status":
@@ -1415,9 +1455,29 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
 	frame := framedRequest(r)
 	lang, pref := requestLang(r)
-	reader := d.pagesIn(lang)
-	reader.freshSnapshots = true
-	view, _, _, ok, readErr := reader.readSessionWith(replyID, nil, true, true)
+	var view SessionView
+	var regions regionSet
+	var ok bool
+	var readErr error
+	if frame {
+		// The frame's read is also its stream's first frame: it renders
+		// through the shared page, held for the stream the frame opens next,
+		// so a page open costs one read pass instead of two.
+		src := d.sessionPageSourceWith(replyID, lang, requestTheme(r), true)
+		page := d.cache.acquire(src.key)
+		pr := d.cache.renderFresh(page, src)
+		readErr, ok = pr.err, pr.ok && pr.view != nil
+		if readErr == nil && ok {
+			view, regions = *pr.view, pr.regions
+			d.cache.holdFor(src.key, page, pageHandoffHold)
+		} else {
+			d.cache.release(src.key, page)
+		}
+	} else {
+		reader := d.pagesIn(lang)
+		reader.freshSnapshots = true
+		view, _, _, ok, readErr = reader.readSessionWith(replyID, nil, true, true)
+	}
 	if readErr != nil {
 		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
 		return
@@ -1435,11 +1495,12 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 		d.serveShell(w, r, &view, "/s/"+replyID+"?frame=1")
 		return
 	}
-	view.Git = d.git.badge(view.Project)
+	// The shared render already set Git and rendered the regions, which
+	// depend on neither Worktrees, Holders nor LangPref.
 	view.Worktrees = d.worktrees != nil
 	view.Holders = d.holders != nil
-	regions, err := renderSessionRegions(view, d.entries)
-	if err == nil {
+	err := errors.New("session regions failed to render")
+	if regions != nil {
 		var html string
 		page := sessionPageData{SessionView: view, SysOpen: localViewer(r), Frame: true, regions: regions}
 		if d.offersTerminals(r) {

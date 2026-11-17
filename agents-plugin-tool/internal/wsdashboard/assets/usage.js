@@ -93,7 +93,7 @@
   }
   var chartSerial = 0;
   window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, weeklyAxis: weeklyAxis, mount: function (doc, rail) {
-    var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, popover = null, shown = false, place = function () {};
+    var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, popover = null, shown = false, place = function () {}, followUps = [];
     function el(tag, cls, text) {
       var n = doc.createElement(tag); n.className = cls || "";
       if (text !== undefined) n.textContent = text;
@@ -301,12 +301,22 @@
         return r.json();
       }).then(function (next) {
         data = next; drawFooter(); drawPopover();
+        if (force) followUp();
       }).catch(function () {
         data.entries.forEach(function (entry) { entry.status = "usage unavailable"; });
         drawPopover();
         if (popover && shown && !data.entries.length) popover.querySelector(".usage-details").textContent = t("unavailable");
       }).then(function () { pending = null; });
       return pending;
+    }
+    // A forced refresh answers from the daemon's cache while its probe runs in
+    // the background (upstream timeout 10 s), so refetch while the popover is
+    // open to show the probe's result instead of waiting for the next poll.
+    function followUp() {
+      followUps.forEach(function (id) { window.clearTimeout(id); });
+      followUps = [2000, 11000].map(function (ms) {
+        return window.setTimeout(function () { if (shown && !doc.hidden) refresh(false); }, ms);
+      });
     }
     function makePopover(onPlace, onClose) {
       place = onPlace;

@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -47,7 +48,8 @@ const (
 	// sseRefreshInterval is the refresh tick: liveness (a peer or session
 	// reaching its live window's end) follows the clock, and a page source
 	// reads files no wake reports, so each tick re-renders unless the page's
-	// refresh stamp shows nothing changed (stream_cache.go).
+	// refresh stamp shows nothing changed (stream_cache.go). The stamp looks
+	// at those files only once per foreign look (foreign_schedule.go).
 	sseRefreshInterval = 15 * time.Second
 	// sseKeepAlive is the idle-frame period: the SSE comment line that keeps
 	// an idle stream open through proxies and lets the server notice a closed
@@ -354,7 +356,14 @@ func (d *Daemon) handleRailEvents(w http.ResponseWriter, r *http.Request) {
 // sessionPageSource renders replyID's session page in lang and theme for
 // the streams that share it.
 func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
+	return d.sessionPageSourceWith(replyID, lang, theme, false)
+}
+
+// sessionPageSourceWith is sessionPageSource; fresh reads snapshots as an
+// initial document read does (pageReader.freshSnapshots).
+func (d *Daemon) sessionPageSourceWith(replyID, lang, theme string, fresh bool) pageSource {
 	pages := d.pagesIn(lang)
+	pages.freshSnapshots = fresh
 	return pageSource{
 		key: pageKey{replyID: replyID, lang: lang, theme: theme},
 		render: func(live *liveRender) pageRender {
@@ -387,6 +396,7 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 			pr := pageRender{ok: true, deps: deps, inputs: inputs, reads: reads}
 			view.Lang, view.Theme = lang, theme
 			view.Git = d.git.badge(view.Project)
+			pr.view = &view
 			// The snapshot's repo figures come from the session's ws-mcp;
 			// the handle reads again when they changed (follow).
 			if view.Band.Repo != nil {
@@ -702,10 +712,17 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
+	sink := &sseSink{w: w, rc: http.NewResponseController(w), flusher: flusher, timeout: wsWriteTimeout, done: r.Context().Done()}
+	// A deadline left on the connection would cut the next response of a
+	// reused keep-alive connection: the server sets none of its own.
+	defer func() { _ = sink.rc.SetWriteDeadline(time.Time{}) }()
+	sink.arm()
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "retry: 3000\n\n")
-	flusher.Flush()
-	run(&sseSink{w: w, flusher: flusher, done: r.Context().Done()})
+	if sink.flush() != nil {
+		return
+	}
+	run(sink)
 }
 
 // sidePart is one side page of a stream (see stream): its source, its
@@ -773,24 +790,41 @@ type streamSink interface {
 	gone() <-chan struct{}
 }
 
-// sseSink frames events as SSE ("event: name\ndata: json\n\n").
+// sseSink frames events as SSE ("event: name\ndata: json\n\n"). Every write
+// and flush runs under a fresh write deadline of timeout, as the WebSocket
+// sink's frames do (wsWriteTimeout): a peer that stopped reading fills the
+// socket buffer, the blocked write fails at the deadline, and the stream ends
+// instead of holding its goroutine and subscriptions forever.
 type sseSink struct {
 	w       http.ResponseWriter
+	rc      *http.ResponseController
 	flusher http.Flusher
+	timeout time.Duration
 	done    <-chan struct{}
 }
 
+// arm sets the write deadline for the next write. A writer without deadline
+// support keeps the former unbounded write.
+func (s *sseSink) arm() { _ = s.rc.SetWriteDeadline(time.Now().Add(s.timeout)) }
+
 func (s *sseSink) event(name string, data []byte) error {
+	s.arm()
 	_, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", name, data)
 	return err
 }
 
 func (s *sseSink) flush() error {
-	s.flusher.Flush()
-	return nil
+	s.arm()
+	err := s.rc.Flush()
+	if errors.Is(err, http.ErrNotSupported) {
+		s.flusher.Flush()
+		return nil
+	}
+	return err
 }
 
 func (s *sseSink) keepAlive() error {
+	s.arm()
 	if _, err := fmt.Fprint(s.w, ": keep-alive\n\n"); err != nil {
 		return err
 	}

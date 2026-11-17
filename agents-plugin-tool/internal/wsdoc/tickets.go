@@ -254,18 +254,6 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 
 	out := []TicketInfo{}
 	for _, ticket := range tickets {
-		// A hidden ticket has no file to read; its body comes from the index
-		// blob the scan already batched. Skipping it here instead would hide
-		// it from every body-matching filter below, which is exactly what a
-		// resolution query must not do.
-		text, ok := bodies[ticket.Path]
-		if !ok {
-			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ticket.Path)))
-			if err != nil {
-				return nil, err
-			}
-			text = string(raw)
-		}
 		if ticketStem != "" && ticket.Stem != ticketStem {
 			continue
 		}
@@ -277,6 +265,25 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 		}
 		if opts.Exclude != nil && opts.Exclude(ticket) {
 			continue
+		}
+		// The body is read only for the body-matching filters below, and only
+		// for a ticket the metadata filters above kept, so a stem query or a
+		// plain listing reads no ticket text beyond the scan's. A hidden
+		// ticket has no file to read; its body comes from the index blob the
+		// scan already batched. Skipping it here instead would hide it from
+		// every body-matching filter below, which is exactly what a
+		// resolution query must not do.
+		text := ""
+		if mentions != "" || query != "" {
+			var ok bool
+			text, ok = bodies[ticket.Path]
+			if !ok {
+				raw, err := readTicketFile(filepath.Join(root, filepath.FromSlash(ticket.Path)))
+				if err != nil {
+					return nil, err
+				}
+				text = string(raw)
+			}
 		}
 		if mentions != "" && !strings.Contains(text, mentions) {
 			continue
@@ -415,17 +422,11 @@ func scanTicketsWithBodies(root string, opts ticketScanOptions) ([]TicketInfo, m
 			if !isDir(statusDir) {
 				continue
 			}
-			for _, entry := range sortedEntries(statusDir) {
-				if entry.IsDir() || filepath.Ext(entry.Name()) != ticketFileSuffix {
-					continue
-				}
-				path := filepath.Join(statusDir, entry.Name())
-				info, err := readTicket(root, path, status)
-				if err != nil {
-					return nil, nil, err
-				}
-				out = append(out, info)
+			infos, err := scanStatusDir(root, statusDir, status)
+			if err != nil {
+				return nil, nil, err
 			}
+			out = append(out, infos...)
 		}
 	}
 
@@ -607,7 +608,7 @@ func ticketStatusRank(status string) int {
 }
 
 func readTicket(root, path, status string) (TicketInfo, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readTicketFile(path)
 	if err != nil {
 		return TicketInfo{}, err
 	}

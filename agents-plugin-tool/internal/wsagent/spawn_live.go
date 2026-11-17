@@ -64,6 +64,19 @@ func SpawnAgentEvents(st State, key string) []wslive.Event {
 	return out
 }
 
+// Lineage is SpawnLead's lookup: id's state from its record alone, open or
+// closed, so only its identity and spawn edge (ID, Parent) are meaningful.
+// Unlike Get it reads no file: Get relists the conversation's inbox for its
+// held count, and a watcher walking the chain on every descendant event made
+// that the daemon's hottest directory listing.
+func (r *Runner) Lineage(id string) (State, error) {
+	rec, ok := r.recordOf(id)
+	if !ok {
+		return State{}, errUnknown
+	}
+	return closedState(rec), nil
+}
+
 // SpawnLead traces a spawned conversation to its owning lead, failing closed
 // for an unknown or malformed parent chain. get must be a read-only lookup.
 func SpawnLead(st State, get func(string) (State, error)) string {
@@ -139,18 +152,12 @@ func (c *conv) seedSpawnRows() {
 	for _, a := range c.live.st.Snapshot(c.r.opts.Now().UnixMilli()).Agents {
 		known[a.ID] = true
 	}
-	// One global listing per second at most, not one filesystem-backed List
-	// per descendant or per burst event. Each open state reads its inbox.
+	// Walk only the indexed descendants; child events never list all
+	// conversations or read every conversation's inbox.
 	if c.r.opts.spawnListed != nil {
 		c.r.opts.spawnListed(c.rec.ReplyID)
 	}
-	byParent := map[ParentRef][]State{}
-	for _, st := range c.r.List() {
-		if st.Parent != nil {
-			byParent[*st.Parent] = append(byParent[*st.Parent], st)
-		}
-	}
-	for _, st := range SpawnTree(ParentRef{Kind: kind, ReplyID: c.rec.ReplyID}, func(p ParentRef) []State { return byParent[p] }) {
+	for _, st := range SpawnTree(ParentRef{Kind: kind, ReplyID: c.rec.ReplyID}, c.r.Children) {
 		if st.Status == StatusClosed && !known["pi:"+st.ID] {
 			continue
 		}
@@ -182,10 +189,10 @@ func (r *Runner) wakeSpawnParents(st State) {
 		if p.Kind != ParentConversation {
 			return
 		}
-		next, err := r.Get(p.ReplyID)
-		if err != nil {
+		next, ok := r.recordOf(p.ReplyID)
+		if !ok {
 			return
 		}
-		st = next
+		st = closedState(next) // only the immutable parent edge is needed
 	}
 }

@@ -9,7 +9,7 @@ func TestBoardStateFilter(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	runNode(t, "board state filter", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
 var store = {}, A, B, C, D, R, legacy, closed, tail;
-var filterOrder = ["all", "researching", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed", "cards"];
+var filterOrder = ["all", "asks", "researching", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed", "cards"];
 var filterLabels = ["all", "researching", "discuss", "wait", "implement", "confirm", "closed", "cards"].map(function (key) { return "js.board.filter." + key; });
 function stateTopic(name, state, isClosed) {
   var t = topic(name, 100, isClosed);
@@ -28,10 +28,11 @@ boot(store, served, { wide: true });
 function radio(value, pop) { return page.W.toolbar().querySelector((pop ? ".board-state-pop" : ".board-state-inline") + ' [data-filter="' + value + '"]'); }
 [".board-state-inline", ".board-state-pop"].forEach(function (group) {
   var radios = page.W.toolbar().querySelectorAll(group + ' [role="radio"]');
-  check(group + " exact lifecycle order and label keys", radios.map(function (n) { return [n.getAttribute("data-filter"), n.querySelector(".board-state-label").textContent]; }), filterOrder.map(function (value, i) { return [value, filterLabels[i]]; }));
+  check(group + " exact lifecycle order and label keys", radios.map(function (n) { return n.getAttribute("data-filter"); }), filterOrder);
+  check(group + " existing labels", radios.filter(function(n) { return n.getAttribute("data-filter") !== "asks"; }).map(function(n) { return n.querySelector(".board-state-label").textContent; }), filterLabels);
   check(group + " uses existing hammer sprite", radio("cards", group === ".board-state-pop").querySelector(".board-state-icon").html, '<svg class="li" aria-hidden="true"><use href="#i-hammer"/></svg>');
 });
-function counts() { return page.W.toolbar().querySelectorAll('.board-state-inline [role="radio"]').map(function (n) { return n.querySelector(".board-state-count").textContent; }); }
+function counts() { return page.W.toolbar().querySelectorAll('.board-state-inline [role="radio"]').filter(function (n) { return n.getAttribute("data-filter") !== "asks"; }).map(function (n) { return n.querySelector(".board-state-count").textContent; }); }
 function choose(value) { radio(value).fire("click", {}); }
 function shown() { return [A, B, C, D, R, legacy, closed].filter(function (n) { return !n.hasAttribute("data-state-filtered"); }).map(function (n) { return n.getAttribute("data-topic"); }); }
 check("all includes legacy and loaded closed; count includes unloaded closed", [shown(), counts()], [["a", "b", "c", "d", "r", "legacy", "old"], ["14", "1", "1", "1", "1", "1", "8", "0"]]);
@@ -86,7 +87,7 @@ boot(store, served, { kinds: ["preview", "terminal", "web", "explorer"] });
 check("reload restores Cards selection and retained framework records", [radio("cards").getAttribute("aria-checked"), shown(), counts()[7]], ["true", [], "3"]);
 [false, true].forEach(function (pop) {
   choose("researching");
-  [["ArrowRight", "discussing"], ["ArrowDown", "waiting"], ["ArrowLeft", "discussing"], ["ArrowUp", "researching"], ["Home", "all"], ["ArrowLeft", "cards"], ["ArrowRight", "all"], ["End", "cards"], ["ArrowDown", "all"], ["ArrowUp", "cards"]].forEach(function (step) {
+  [["ArrowRight", "discussing"], ["ArrowDown", "waiting"], ["ArrowLeft", "discussing"], ["ArrowUp", "researching"], ["ArrowLeft", "asks"], ["ArrowLeft", "all"], ["ArrowRight", "asks"], ["Home", "all"], ["ArrowLeft", "cards"], ["ArrowRight", "all"], ["End", "cards"], ["ArrowDown", "all"], ["ArrowUp", "cards"]].forEach(function (step) {
     var selected = filterOrder.filter(function (value) { return radio(value, pop).getAttribute("aria-checked") === "true"; })[0], prevented = false;
     radio(selected, pop).fire("keydown", { key: step[0], preventDefault: function(){prevented=true;}, stopPropagation: function(){} });
     check("keyboard lifecycle " + pop + " " + step[0] + " to " + step[1], [radio(step[1]).getAttribute("aria-checked"), radio(step[1], true).getAttribute("aria-checked"), store["cards.state-filter"], prevented], ["true", "true", step[1], true]);
@@ -103,6 +104,36 @@ choose("cards");
 check("filter waits for overview restoration callback", [shown(), held.el.hasAttribute("data-state-filtered"), radio("all").getAttribute("aria-checked"), page.store["cards.state-filter"]], [["a","b","c","d","r","legacy","old"], false, "true", undefined]);
 deferred();
 check("overview callback applies and persists selection", [shown(), held.el.hasAttribute("data-state-filtered"), radio("cards").getAttribute("aria-checked"), page.store["cards.state-filter"]], [[], false, "true", "cards"]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+func TestBoardStateFilterAsks(t *testing.T) {
+	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
+	runNode(t, "board ask filter", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
+var open, ack, no, closed, tail;
+function served() {
+  open = topic("open", 100, false); open.setAttribute("data-open-asks", "true");
+  ack = topic("ack", 100, false); ack.setAttribute("data-open-asks", "true");
+  no = topic("no", 100, false); no.setAttribute("data-open-asks", "false");
+  closed = topic("closed", 100, true); closed.setAttribute("data-open-asks", "false");
+  tail = more(1, 3); return [open, ack, no, closed, tail];
+}
+var store = {};
+boot(store, served, {wide: true});
+function radio(pop) { return page.W.toolbar().querySelector((pop ? ".board-state-pop" : ".board-state-inline") + ' [data-filter="asks"]'); }
+function count(pop) { return radio(pop).querySelector(".board-state-count").textContent; }
+function visible(n) { return !n.hasAttribute("data-state-filtered"); }
+var card = page.W.open("preview", {path:"ask-fixture"});
+check("ask count is topics, excluding unloaded history", [count(false), count(true)], ["2", "2"]);
+radio(false).fire("click", {});
+check("asks shows only open ask topics, not cards or paging", [visible(open), visible(ack), visible(no), visible(closed), visible(tail), visible(card.el)], [true, true, false, false, false, false]);
+check("ask selection synchronized and persisted", [radio(false).getAttribute("aria-checked"), radio(true).getAttribute("aria-checked"), store["cards.state-filter"]], ["true", "true", "asks"]);
+open.setAttribute("data-open-asks", "false"); no.setAttribute("data-open-asks", "true");
+swap([open, ack, no, closed, tail]);
+check("refresh reevaluates asks without moving nodes", [visible(open), visible(no), count(false)], [false, true, "2"]);
+boot(store, served);
+check("reload restores asks", [radio(false).getAttribute("aria-checked"), visible(open), visible(no)], ["true", true, false]);
 process.stdout.write(bad.join("\n"));
 `)
 }

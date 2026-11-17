@@ -3,11 +3,13 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"regexp"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
@@ -191,6 +193,10 @@ type sessionStore struct {
 	intake   intakeCache
 	now      func() time.Time
 	readFile recordFileReader
+
+	// sessionsMade is the split root dirs last created (a string), so a
+	// keyed call does not stat it again.
+	sessionsMade atomic.Value
 }
 
 func newSessionStore() *sessionStore {
@@ -208,6 +214,10 @@ func (s *sessionStore) mint(root string, scope toolRole, parent string) (string,
 	d, err := s.dirs()
 	if err != nil {
 		return "", err
+	}
+	// dirs creates the split root once per store; the claim needs it now.
+	if err := os.MkdirAll(d.sessions, 0o755); err != nil {
+		return "", fmt.Errorf("create session keys dir: %w", err)
 	}
 	payload, err := json.Marshal(sessionKeyRecord{
 		SchemaVersion: sessionRecordSchemaVersion,
@@ -270,7 +280,7 @@ func (s *sessionStore) inspect(key string) (entry sessionEntry, found, transient
 	if err != nil {
 		return sessionEntry{}, false, true
 	}
-	record, _, err := s.loadRecord(d, key, partKey, nil)
+	record, _, err := loadRecordWith(d, key, partKey, nil, s.readOnlyReader())
 	if errors.Is(err, errSessionUnreadable) {
 		return sessionEntry{}, false, true
 	}

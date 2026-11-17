@@ -116,3 +116,18 @@ func TestLoginGateBrowser(t *testing.T) {
 		t.Fatalf("login gate Chromium acceptance: %v", err)
 	}
 }
+
+// The node-vm fixture runs the real login-gate.js against a fake DOM: a copy
+// success reads the clipboard once and exchanges a login link, while a refused,
+// throwing, missing, or non-link read falls back quietly to the paste hint.
+func TestLoginGateCopyAutoPaste(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; run testdata/login-gate.test.cjs locally")
+	}
+	out, err := exec.Command(node, "testdata/login-gate.test.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("login gate copy auto-paste cases: %v\n%s", err, out)
+	}
+	t.Log(string(out))
+}

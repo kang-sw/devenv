@@ -167,6 +167,11 @@ type sessionDirs struct {
 // seam every other ws cache artifact uses, so all server instances agree on
 // the location. The legacy root is never created: only an older ws-mcp
 // writes there.
+//
+// The split root is created once per store and root, not on every keyed
+// call: ws never removes it (prune removes key directories), and mint, the
+// only writer that creates a key directory directly in it, creates it again
+// itself.
 func (s *sessionStore) dirs() (sessionDirs, error) {
 	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: s.cacheHome})
 	if err != nil {
@@ -176,9 +181,13 @@ func (s *sessionStore) dirs() (sessionDirs, error) {
 		sessions: filepath.Join(cacheRoot, sessionsDirName),
 		legacy:   filepath.Join(cacheRoot, legacyKeysDirName),
 	}
+	if made, _ := s.sessionsMade.Load().(string); made == d.sessions {
+		return d, nil
+	}
 	if err := os.MkdirAll(d.sessions, 0o755); err != nil {
 		return sessionDirs{}, fmt.Errorf("create session keys dir: %w", err)
 	}
+	s.sessionsMade.Store(d.sessions)
 	return d, nil
 }
 
@@ -213,7 +222,7 @@ type recordFileReader func(path string, newValue func() any) (data []byte, value
 
 // readRecordFile is the recordFileReader that reads the file afresh.
 func readRecordFile(path string, newValue func() any) ([]byte, any, error) {
-	data, err := os.ReadFile(path)
+	data, err := wsstate.ReadFileOnce(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -222,6 +231,32 @@ func readRecordFile(path string, newValue func() any) ([]byte, any, error) {
 		return nil, nil, err
 	}
 	return data, v, nil
+}
+
+// readRecordFileCached is readRecordFile through wsstate.ReadFileCached: one
+// stat per call while the file is unchanged, a read once it changed (another
+// process's write included). Each call decodes afresh, so no decoded value
+// is shared. Only read-only loads use it (readOnlyReader); a
+// read-modify-write reads afresh under the record lock.
+func readRecordFileCached(path string, newValue func() any) ([]byte, any, error) {
+	data, err := wsstate.ReadFileCached(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	v := newValue()
+	if err := json.Unmarshal(data, v); err != nil {
+		return nil, nil, err
+	}
+	return data, v, nil
+}
+
+// readOnlyReader is the reader of read-only loads: the store's readFile seam
+// when a test set one, otherwise readRecordFileCached.
+func (s *sessionStore) readOnlyReader() recordFileReader {
+	if s.readFile != nil {
+		return s.readFile
+	}
+	return readRecordFileCached
 }
 
 // loadRecordWith is loadRecord reading each file through read. A reader may
@@ -301,7 +336,7 @@ func writeRawPart(raw io.Writer, part recordPart, data []byte) {
 // readRecord is loadRecord for a read-only caller: ok is false for any
 // unreadable record.
 func (s *sessionStore) readRecord(d sessionDirs, key string, parts recordPart) (sessionRecord, bool) {
-	record, _, err := s.loadRecord(d, key, parts, nil)
+	record, _, err := loadRecordWith(d, key, parts, nil, s.readOnlyReader())
 	return record, err == nil
 }
 
@@ -342,7 +377,7 @@ func (s *sessionStore) migrateRecord(d sessionDirs, key string, record *sessionR
 	}
 	// Copy the original board bytes, never the authoritative converted board.
 	// Preserve the inline representation too, so rollback keeps its snapshot.
-	data, err := os.ReadFile(d.legacyPath(key))
+	data, err := wsstate.ReadFileOnce(d.legacyPath(key))
 	if err != nil {
 		return err
 	}
@@ -366,7 +401,7 @@ func (s *sessionStore) migrateRecord(d sessionDirs, key string, record *sessionR
 // removeLegacyRecord deletes a boardless legacy record once the split record
 // is in place; board-bearing representations are preserved for rollback.
 func removeLegacyRecord(d sessionDirs, key string) {
-	data, err := os.ReadFile(d.legacyPath(key))
+	data, err := wsstate.ReadFileOnce(d.legacyPath(key))
 	if err != nil {
 		return
 	}
@@ -388,7 +423,7 @@ func removeLegacyRecord(d sessionDirs, key string) {
 // under the record lock, taken only after the claim: a lock file created first
 // would make the candidate look taken.
 func (s *sessionStore) claimKey(d sessionDirs, key string, payload []byte) (bool, error) {
-	if _, err := os.Lstat(d.legacyPath(key)); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := wsstate.Lstat(d.legacyPath(key)); !errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	dir := d.keyDir(key)
@@ -412,7 +447,7 @@ func (s *sessionStore) claimKey(d sessionDirs, key string, payload []byte) (bool
 
 // writeClaimFile creates a newly claimed key's key.json exclusively.
 func writeClaimFile(path string, payload []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := wsstate.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("create session key file: %w", err)
 	}
@@ -457,8 +492,8 @@ func (s *sessionStore) lockExistingRecord(d sessionDirs, key string) (func(), er
 	if !sessionKeyFilenamePattern.MatchString(key) {
 		return nil, errSessionNotFound
 	}
-	if _, err := os.Stat(d.partPath(key, partKey)); errors.Is(err, fs.ErrNotExist) {
-		if _, err := os.Stat(d.legacyPath(key)); err != nil {
+	if _, err := wsstate.Stat(d.partPath(key, partKey)); errors.Is(err, fs.ErrNotExist) {
+		if _, err := wsstate.Stat(d.legacyPath(key)); err != nil {
 			return nil, errSessionNotFound
 		}
 		if err := os.MkdirAll(d.keyDir(key), 0o755); err != nil {
@@ -475,7 +510,7 @@ func (s *sessionStore) lockExistingRecord(d sessionDirs, key string) (func(), er
 // before trusting the key. A missing legacy root is empty; an unreadable root
 // is an error.
 func (s *sessionStore) listKeys(d sessionDirs) ([]string, error) {
-	entries, err := os.ReadDir(d.sessions)
+	entries, err := wsstate.ReadDir(d.sessions)
 	if err != nil {
 		return nil, fmt.Errorf("read session keys dir: %w", err)
 	}
@@ -485,7 +520,7 @@ func (s *sessionStore) listKeys(d sessionDirs) ([]string, error) {
 			seen[entry.Name()] = true
 		}
 	}
-	legacy, err := os.ReadDir(d.legacy)
+	legacy, err := wsstate.ReadDir(d.legacy)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read legacy session keys dir: %w", err)
 	}
@@ -507,10 +542,10 @@ func (s *sessionStore) listKeys(d sessionDirs) ([]string, error) {
 // the legacy record file of a key not yet migrated.
 func activityMark(d sessionDirs, key string) (string, os.FileInfo, bool) {
 	path := d.partPath(key, partKey)
-	info, err := os.Stat(path)
+	info, err := wsstate.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		path = d.legacyPath(key)
-		info, err = os.Stat(path)
+		info, err = wsstate.Stat(path)
 	}
 	if err != nil {
 		return "", nil, false
@@ -545,7 +580,7 @@ func (s *sessionStore) writeFileAtomic(path string, payload []byte) error {
 	if replace == nil {
 		replace = wsstate.AtomicReplaceFile
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
+	tmp, err := wsstate.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return err
 	}

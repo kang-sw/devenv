@@ -223,8 +223,8 @@ if (bad.length) console.log(bad.join("\n"));
 // rendering. Owner (627)=a dropped content-visibility on whole topics; the
 // owner's 2026-11-17 visible-only directive brings it back on topic parts
 // only: a topic's head (sticky, carries the stuck shadow) and a card's head
-// never skip, nor does a maximized topic or one holding a focused editor,
-// and overview renders everything.
+// never skip, nor does a maximized topic or a card holding focus, and
+// overview renders everything.
 func TestBoardTopicSkipKeepsHeadsAndSheets(t *testing.T) {
 	css, err := dashboardTestAsset("assets/dashboard.css")
 	if err != nil {
@@ -241,8 +241,15 @@ func TestBoardTopicSkipKeepsHeadsAndSheets(t *testing.T) {
 	for _, r := range rules {
 		for _, sel := range strings.Split(r[1], ",") {
 			sel = strings.TrimSpace(sel)
-			if !strings.Contains(sel, ":not([data-max])") || !strings.Contains(sel, ":not(:focus-within)") {
-				t.Errorf("%q skips a maximized or focused topic", sel)
+			if !strings.Contains(sel, ":not([data-max])") {
+				t.Errorf("%q skips a maximized topic or card", sel)
+			}
+			// A topic part takes no focus guard: a focused part is relevant to
+			// the user and renders anyway, and the guard on the topic flipped
+			// every part at once as focus entered it (a suspected Edge renderer crash).
+			card := strings.HasSuffix(sel, "> .bc-body")
+			if card != strings.Contains(sel, ":not(:focus-within)") {
+				t.Errorf("%q: only a card body takes the focus guard", sel)
 			}
 			if !strings.Contains(sel, ":not(.tophead)") && !strings.HasSuffix(sel, "> .bc-body") {
 				t.Errorf("%q may skip a head", sel)

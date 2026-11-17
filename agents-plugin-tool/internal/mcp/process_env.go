@@ -18,6 +18,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsnote"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -66,6 +67,8 @@ type ServerOptions struct {
 	// spawn the session's Pi subagents (pi_tools.go); nil on the direct
 	// path, where they refuse.
 	Agents PiAgents
+	// Notes is the daemon's shared presentation cache; nil on standalone servers.
+	Notes *wsnote.Cache
 	// WhiteboardChanged invalidates daemon timers after a successful board write,
 	// even when this session has no dashboard page. It must not block.
 	WhiteboardChanged func(cacheHome, root, key string)
@@ -131,6 +134,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	s := &Server{root: filepath.Clean(opts.Root), version: opts.Version, sourceCommit: commit, ownerPID: opts.OwnerPID, diag: diag, dispatchBlock: wsdoc.DispatchBlockForEnv}
 	s.live.host = opts.Live
 	s.loginLink = opts.LoginLink
+	s.notes = opts.Notes
 	if opts.Env != nil {
 		s.env = newProcEnv(opts.Env)
 		logPath := strings.TrimSpace(s.env.get(envDebugLog))

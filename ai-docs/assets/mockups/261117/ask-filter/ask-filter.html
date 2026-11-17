@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>ask-filter mockup</title>
+<style>
+:root{color-scheme:dark;--wb-bg:#141518;--wb-card:#1e2024;--wb-fg:#e7e7e4;--wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);--wb-muted-fg:#a2a6ad;--wb-muted:#2b2d32;--wb-primary:#7aa2ff;--wb-policy:#5b3a1c;--wb-on-policy:#f6d9bd;--wb-technical:#26385e;--wb-on-technical:#d2dcf6;--wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR","Malgun Gothic",sans-serif;--ask:#e8a45a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--wb-bg);color:var(--wb-fg);font:13px var(--wb-sans)}
+.sw{position:fixed;right:10px;bottom:10px;z-index:50;display:flex;gap:4px;background:#000a;padding:4px;border-radius:8px;font-size:11px}
+.sw a{color:var(--wb-muted-fg);padding:3px 8px;border-radius:5px;text-decoration:none}.sw a.on{background:var(--wb-primary);color:#111}
+.wrap{padding:14px 18px}
+body.narrow .wrap{width:520px;padding:10px}
+.board-toolbar{margin-bottom:10px}
+.board-toolbar-face{container:board-toolbar/inline-size;border:1px solid var(--wb-line);border-radius:12px;background:var(--wb-card)}
+.board-tools{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:7px 8px}
+.board-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 11px;border:1px solid transparent;border-radius:8px;background:var(--wb-muted);color:var(--wb-fg);font:600 12.5px var(--wb-sans);white-space:nowrap}
+.li{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.board-state-filter{margin-left:auto;position:relative;display:flex;flex:none;--state-color:var(--wb-fg)}
+[data-filter=discussing]{--state-color:#e0a36c}[data-filter=researching]{--state-color:#c6a5f7}[data-filter=implementing]{--state-color:#7aa2ff}[data-filter=awaiting-confirmation]{--state-color:#6cc39a}[data-filter=waiting],[data-filter=closed]{--state-color:var(--wb-muted-fg)}
+[data-filter=ask]{--state-color:var(--ask)}
+.board-state-inline{display:inline-flex;align-items:center;gap:2px;height:30px;padding:2px;border-radius:8px;background:var(--wb-muted)}
+.board-state-inline>.li{width:13px;height:13px;margin-inline:5px 3px;color:var(--wb-muted-fg)}
+.board-state-radio{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--wb-muted-fg);font:600 12.5px var(--wb-sans);white-space:nowrap}
+.board-state-radio.sel{background:color-mix(in srgb,var(--state-color) 15%,var(--wb-card));color:color-mix(in srgb,var(--state-color) 78%,var(--wb-fg));border-color:color-mix(in srgb,var(--state-color) 38%,transparent);box-shadow:0 1px 2px rgb(0 0 0/.12)}
+.board-state-radio[data-filter=all].sel{background:var(--wb-card);color:var(--wb-fg);border-color:var(--wb-line)}
+.board-state-radio[data-filter=ask].sel{background:var(--wb-policy);color:var(--wb-on-policy);border-color:color-mix(in srgb,var(--ask) 45%,transparent)}
+.board-state-dot{width:7px;height:7px;border-radius:50%;background:var(--state-color);flex:none}
+[data-filter=waiting]>.board-state-dot{background:transparent;box-shadow:inset 0 0 0 1.5px var(--state-color)}
+[data-filter=closed]>.board-state-dot{border-radius:2px;background:transparent;box-shadow:inset 0 0 0 1.5px var(--state-color)}
+[data-filter=all]>.board-state-dot{display:none}
+.board-state-icon{display:inline-flex;color:var(--state-color)}.board-state-icon .li{width:13px;height:13px}
+.board-state-glyph{display:inline-block;flex:none;font:900 15px/1 var(--wb-sans);color:var(--state-color);width:9px;position:relative;top:-.5px;text-align:center}
+.board-state-option .board-state-glyph{width:14px}
+.board-state-radio[data-filter=ask]{gap:4px}
+.board-state-radio[data-filter=ask] .board-state-count{opacity:.9;color:var(--ask)}
+.board-state-radio[data-filter=ask].sel .board-state-icon,.board-state-radio[data-filter=ask].sel .board-state-glyph,.board-state-radio[data-filter=ask].sel .board-state-count{color:var(--wb-on-policy)}
+.board-state-count{font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;opacity:.72}.sel .board-state-count{opacity:.9}
+.tpop{position:absolute;top:calc(100% + 8px);right:0;z-index:20;width:232px;background:var(--wb-card);border-radius:10px;box-shadow:0 8px 28px #000a,0 0 0 1px var(--wb-line);padding:8px}
+.tpop .lb{font-size:11px;font-weight:800;color:var(--wb-muted-fg);margin:2px 4px 6px}
+.board-state-options{display:grid;gap:2px}
+.board-state-option{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;font-size:13px;color:var(--wb-fg)}
+.board-state-option:hover{background:var(--wb-muted)}
+.board-state-option .board-state-label{flex:1;font-weight:700}
+.board-state-option .board-state-dot{margin-inline:3.5px}.board-state-option .board-state-icon{width:14px;justify-content:center}
+.board-state-ring{width:14px;height:14px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1.5px var(--wb-muted-fg)}
+.sel>.board-state-ring{box-shadow:inset 0 0 0 1.5px var(--wb-primary),inset 0 0 0 4px var(--wb-card),inset 0 0 0 8px var(--wb-primary)}
+@container board-toolbar (max-width:1000px){.board-state-radio:not(.sel):not([data-filter=all]) .board-state-label{display:none}.board-state-radio{padding-inline:7px;gap:4px}}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:12px;align-items:start}
+body.narrow .board{grid-template-columns:1fr}
+.topic{background:var(--wb-card);border:1px solid var(--wb-line);border-radius:12px;overflow:hidden}
+.topic.hide{display:none}
+.tbar{display:flex;align-items:center;gap:7px;padding:9px 12px;flex-wrap:wrap}
+.tbar .nm{font-weight:800;font-size:13.5px;margin-right:auto}
+.tbar .st{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--state-color)}
+.chip{display:inline-flex;align-items:center;gap:3px;height:20px;font-size:12px;font-weight:700;line-height:1;padding:0 9px;border-radius:999px;background:var(--wb-muted);color:var(--wb-muted-fg);white-space:nowrap}
+.chip.policy{background:var(--wb-policy);color:var(--wb-on-policy)}.chip.ok{background:var(--wb-technical);color:var(--wb-on-technical)}
+.tbody{padding:0 12px 11px;color:var(--wb-muted-fg);font-size:12.5px;line-height:1.5}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 6h18M7 12h10M10 18h4"/></symbol>
+<symbol id="i-q" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M9.2 9.3a2.9 2.9 0 1 1 4.1 2.6c-.8.4-1.3 1-1.3 1.9M12 17h.01"/></symbol>
+<symbol id="i-hammer" viewBox="0 0 24 24"><path d="m15 12-8.4 8.4a2.1 2.1 0 0 1-3-3L12 9M17.6 15 22 10.6M20.9 11.7l-1.2-1.2c-.4-.4-.6-.9-.6-1.4V7.9L15.2 4c-1.3-1.3-3.6-1.7-5.7-1l1.7 1.6a1.6 1.6 0 0 1 0 2.2l-1.4 1.4 2.1 2.1 1.4-1.4a1.6 1.6 0 0 1 2.2 0l.4.4"/></symbol></defs></svg>
+<div class="wrap"><div class="board-toolbar"><div class="board-toolbar-face"><div class="board-tools" id="tools"></div></div></div><div class="board" id="board"></div></div>
+<div class="sw" id="sw"></div>
+<script>
+var F=[["all","전체"],["ask","미결사항 있는 토픽"],["researching","Researching"],["discussing","Discussing"],["waiting","Waiting"],["implementing","Implementing"],["awaiting-confirmation","Awaiting confirmation"],["closed","Closed"],["cards","Cards"]];
+var T=[["board-filter","implementing",[["policy","질문 2"],["ok","확인 1"]],"툴바 상태 필터에 미결사항 항목을 추가하는 안을 정리 중입니다."],
+["release-gate","awaiting-confirmation",[["ok","확인 1"]],"릴리스 게이트 결과를 확인해 주세요."],
+["perf-hot-stat","researching",[],"핫 경로 stat 호출 빈도를 측정하는 중입니다."],
+["ask-routing","discussing",[["policy","질문 1"]],"질문 라우팅 정책에 대한 결정을 기다립니다."],
+["session-switch","waiting",[],"다른 토픽의 병합을 기다립니다."],
+["observed-fold","implementing",[],"fold 변경 증거만 기록하도록 구현 중입니다."]];
+var C={all:6,ask:3,researching:1,discussing:1,waiting:1,implementing:2,"awaiting-confirmation":1,closed:0,cards:0};
+var h=(location.hash||"#after").slice(1),narrow=h==="narrow",ver=h==="before"?0:1,on=h==="after-on",alt=h==="after-alt",sel=on?"ask":"all";
+if(narrow)document.body.classList.add("narrow");
+var li=function(i){return'<svg class="li"><use href="#i-'+i+'"/></svg>'};
+function mark(v){return v==="cards"?'<span class="board-state-icon">'+li("hammer")+'</span>':v==="ask"?(alt?'<span class="board-state-icon">'+li("q")+'</span>':'<span class="board-state-glyph">?</span>'):'<span class="board-state-dot"></span>'}
+var fl=F.filter(function(f){return ver||f[0]!=="ask"});
+var inline='<div class="board-state-inline">'+li("filter")+fl.map(function(f){var s=f[0]===sel;
+ return'<button class="board-state-radio'+(s?" sel":"")+'" data-filter="'+f[0]+'" title="'+f[1]+' '+C[f[0]]+'">'+mark(f[0])+(f[0]==="ask"?"":'<span class="board-state-label">'+f[1]+'</span>')+'<span class="board-state-count">'+C[f[0]]+'</span></button>'}).join("")+'</div>';
+var pop='<div class="tpop"><div class="lb">토픽 상태</div><div class="board-state-options">'+fl.map(function(f){var s=f[0]===sel;
+ return'<div class="board-state-option'+(s?" sel":"")+'" data-filter="'+f[0]+'"><span class="board-state-ring"></span>'+mark(f[0])+'<span class="board-state-label">'+f[1]+'</span><span class="board-state-count">'+C[f[0]]+'</span></div>'}).join("")+'</div></div>';
+var trig='<button class="board-action" data-filter="all">'+li("filter")+'<span>전체</span><span class="board-state-count">6</span></button>';
+document.getElementById("tools").innerHTML='<button class="board-action">+ 새 토픽</button><button class="board-action">터미널</button><div class="board-state-filter">'+(narrow?trig+pop:inline)+'</div>';
+document.getElementById("board").innerHTML=T.map(function(t){var hide=on&&!t[2].length;
+ return'<section class="topic'+(hide?" hide":"")+'" data-filter="'+t[1]+'"><div class="tbar"><span class="nm">'+t[0]+'</span>'+t[2].map(function(c){return'<span class="chip '+c[0]+'">'+c[1]+'</span>'}).join("")+'<span class="st">'+mark(t[1])+t[1]+'</span></div><div class="tbody">'+t[3]+'</div></section>'}).join("");
+document.getElementById("sw").innerHTML=["before","after","after-on","after-alt","narrow"].map(function(k){return'<a href="#'+k+'" class="'+((location.hash||"#after")==="#"+k?"on":"")+'">'+k+'</a>'}).join("");
+window.addEventListener("hashchange",function(){location.reload()});
+</script></body></html>

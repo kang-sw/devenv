@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -15,7 +14,7 @@ func (src *DashboardSessionSource) RecordDashboardAnswer(reg wsdashboard.Registr
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("dashboard answer: session identity unavailable")
+		return wsdashboard.ErrDashboardAnswerIdentity
 	}
 	return whiteboardFolder(record.Root, key).RecordDashboardAnswer(id, at)
 }

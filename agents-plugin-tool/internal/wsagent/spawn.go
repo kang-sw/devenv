@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -392,20 +393,58 @@ func (r *Runner) emit(st State) {
 // Children lists the conversations, open or closed, that parent spawned,
 // oldest first.
 func (r *Runner) Children(parent ParentRef) []State {
-	var out []State
-	for _, st := range r.List() {
-		if st.Parent != nil && *st.Parent == parent {
-			out = append(out, st)
+	r.mu.Lock()
+	if r.childrenIndex == nil {
+		r.childrenIndex = map[ParentRef]map[string]bool{}
+		for _, c := range r.convs {
+			r.indexChildLocked(c.record())
+		}
+		for _, rec := range r.closed {
+			r.indexChildLocked(rec)
 		}
 	}
+	var out []State
+	var open []*conv
+	for id := range r.childrenIndex[parent] {
+		if c := r.convs[id]; c != nil {
+			open = append(open, c)
+		} else if rec, ok := r.closed[id]; ok {
+			out = append(out, r.memoryClosedState(rec))
+		}
+	}
+	r.mu.Unlock()
+	for _, c := range open {
+		out = append(out, c.memoryState())
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt < out[j].CreatedAt
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
+}
+
+// indexChildLocked maintains immutable parent edges; closed children stay in
+// the index so an already displayed running row can settle after close.
+func (r *Runner) indexChildLocked(rec Record) {
+	if r.childrenIndex == nil || rec.Parent == nil {
+		return
+	}
+	ids := r.childrenIndex[*rec.Parent]
+	if ids == nil {
+		ids = map[string]bool{}
+		r.childrenIndex[*rec.Parent] = ids
+	}
+	ids[rec.ReplyID] = true
 }
 
 // Wait blocks until a turn of conversation id that took every message
 // Runner.Send had sent it when Wait was called settles, and returns how it
 // settled; a turn that settled so before the call is returned at once. It
 // returns TurnRunning when timeout passes or ctx ends first, and TurnClosed
-// for a closed conversation. A turn the conversation's harness began on its
+// for a closed conversation whose last turn does not answer it
+// (closedTurn). A turn the conversation's harness began on its
 // own holds no new message, so it never answers a wait for a sent one.
 func (r *Runner) Wait(ctx context.Context, id string, timeout time.Duration) (TurnResult, error) {
 	return r.wait(ctx, id, timeout, false)

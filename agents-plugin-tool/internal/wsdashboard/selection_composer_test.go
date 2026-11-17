@@ -321,14 +321,13 @@ check("attachment alone has no network action",sent,0);
 sendMessage();
 check("explicit send excludes popup-only image", [bodies[0].images.map(function(p){return p.n;}),splitSelectionText(bodies[0].text).groups], [[1],[first]]);
 await respond(false,"refused");
-check("failure retains group and every local image", [bselections[0]===first,imgs.length], [true,2]);
+check("failure gives back the group and every local image", [bselections.map(function(s){return [s.mentions,s.comment,s.images];}),imgs.map(function(p){return p.n;})], [[[first.mentions,first.comment,first.images]],[1,2]]);
 sendMessage();
-editSelection(0); mnote.value = "edited while sending"; addMention();
-var edited = bselections[0];
-placeMention({ms:[{topic:"plan",entry:"e9",text:"new push"}],x:1,y:1});
+check("a send leaves the composer before the daemon answers; the popup keeps its image", [bselections.length,imgs.map(function(p){return p.n;})], [0,[2]]);
+hideMention(); placeMention({ms:[{topic:"plan",entry:"e9",text:"new push"}],x:1,y:1});
 mnote.value = "later"; addFiles([file("later")],mnote); addMention();
 await respond(true,{});
-check("success retains replacement edit and concurrent push", [bselections[0]===edited,bselections.map(function(s){return s.comment;}),imgs.map(function(p){return p.n;})], [true,["edited while sending","later"],[1,3]]);
+check("a push added while sending stays for the next send", bselections.map(function(s){return [s.comment,s.images];}), [["later",[3]]]);
 sendMessage(); await respond(true,{});
 check("next explicit send clears only its snapshot", [bselections.length,imgs.length], [0,0]);
 

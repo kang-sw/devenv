@@ -64,15 +64,20 @@ async function mint(next = '/s/livesession') {
     });
     const page = await context.newPage(); active = page;
     const nativeResponses = [];
+    // osClipboard makes the file-backed native writer act like the OS one,
+    // whose text Chromium's readText then sees. Off, Chromium's clipboard
+    // stays whatever the test seeded, so the post-copy read falls back.
+    const f = { context, page, calls, nativeResponses, osClipboard: false };
     await page.route('**/auth/clipboard', async route => {
       // The gate checks only r.ok; inspect the real server body here rather
       // than waiting for Chromium to consume an intentionally unread fetch.
       const response = await route.fetch();
       nativeResponses.push({ status: response.status(), body: await response.json() });
+      if (f.osClipboard && response.status() === 200) await seed(page, nativeClipboardContents());
       await route.fulfill({ response });
     });
     page.on('pageerror', e => errors.push(stage + ': ' + e.message));
-    return { context, page, calls, nativeResponses };
+    return f;
   }
   async function idleClipboard(f, expected = { readText: 0, writeText: 0, execCommand: 0 }) {
     await f.page.evaluate(() => Promise.resolve());
@@ -85,6 +90,12 @@ async function mint(next = '/s/livesession') {
     assert.equal(r.headers()['cache-control'], 'no-store');
     await page.locator('html[data-login-gate]').waitFor();
     await page.waitForFunction(() => !!window.wsLogin);
+  }
+  // The post-copy read starts after the copy response; await it before the
+  // next clipboard seed so it cannot observe text meant for a later step.
+  async function reads(f, n, why) {
+    for (let i = 0; f.calls.readText < n && i < 100; i++) await f.page.waitForTimeout(20);
+    assert.equal(f.calls.readText, n, why);
   }
   async function seed(page, text) { await page.evaluate(text => window.__seedClipboard(text), text); }
   async function paste(page, text) {
@@ -165,6 +176,9 @@ async function mint(next = '/s/livesession') {
 
       progress(theme + ': A2 real native route returns no credential; real Ctrl+V; B ignores second paste; D');
       advance(61);
+      // osClipboard is off: the post-copy read sees this empty text and falls
+      // back quietly to the paste hint, leaving the paste flow below intact.
+      await seed(page, '');
       const copied = page.waitForResponse(r => r.url() === cfg.base + '/auth/clipboard');
       await page.locator('#lg-copy').click();
       const copiedResponse = await copied;
@@ -172,6 +186,11 @@ async function mint(next = '/s/livesession') {
       assert.deepEqual(f.nativeResponses.at(-1), { status: 200, body: { ok: true } }, 'native route must not return the link/code');
       await page.locator('#lg-hint.go').waitFor({ state: 'visible' });
       await page.locator('#lg-again').waitFor({ state: 'visible' });
+      await reads(f, 2, 'copy success reads the clipboard once');
+      await page.waitForTimeout(100);
+      assert.equal(await page.locator('#lg-hint.go').isVisible(), true, 'non-link read keeps the paste hint');
+      assert.equal(await page.locator('#lg-msg').isVisible(), false, 'non-link read stays quiet');
+      assert.equal(await page.locator('#lg-input').isDisabled(), false, 'non-link read never starts an exchange');
       const firstLink = fs.readFileSync(cfg.clipboard, 'utf8');
       assert.ok(new URL(firstLink).searchParams.get('login'));
       await capture(page, theme, 'A2');
@@ -180,6 +199,7 @@ async function mint(next = '/s/livesession') {
       const recopied = page.waitForResponse(r => r.url() === cfg.base + '/auth/clipboard');
       await page.locator('#lg-again').click();
       assert.equal((await recopied).status(), 200);
+      await reads(f, 3, 'recopy reads the clipboard once more');
       const link = fs.readFileSync(cfg.clipboard, 'utf8');
       assert.notEqual(link, firstLink, 'recopy mints a new one-use code');
       const responseReady = deferred(), release = deferred();
@@ -213,7 +233,7 @@ async function mint(next = '/s/livesession') {
       await loggedIn(page, next);
       assert.equal(nativeClipboardContents(), link, 'login and dashboard load never invoke native writer');
       await page.unroute('**/auth/exchange');
-      await idleClipboard(f, { readText: 1, writeText: 0, execCommand: 0 });
+      await idleClipboard(f, { readText: 3, writeText: 0, execCommand: 0 });
       const cookie = (await context.cookies()).find(c => c.name === 'ws_dashboard_localhost');
       assert.ok(cookie?.httpOnly);
       assert.equal(cookie.sameSite, 'Strict');
@@ -225,11 +245,11 @@ async function mint(next = '/s/livesession') {
       await page.locator('#gear').click();
       await page.locator('#login-copy').waitFor({ state: 'visible' });
       assert.match(await page.locator('.loginbox .gs').textContent(), /클립보드/);
-      await idleClipboard(f, { readText: 1, writeText: 0, execCommand: 0 });
+      await idleClipboard(f, { readText: 3, writeText: 0, execCommand: 0 });
       await page.locator('#login-copy').click();
       await page.locator('.wstoast').filter({ hasText: '로그인 링크' }).waitFor({ state: 'visible' });
       await capture(page, theme, 'E', '#gmenu');
-      await idleClipboard(f, { readText: 1, writeText: 1, execCommand: 0 });
+      await idleClipboard(f, { readText: 3, writeText: 1, execCommand: 0 });
       const settingsLink = await page.evaluate(() => navigator.clipboard.readText());
       assert.ok(new URL(settingsLink).searchParams.get('login'));
       const second = await fixture(theme);
@@ -246,6 +266,18 @@ async function mint(next = '/s/livesession') {
       assert.equal((await used.context.cookies()).some(c => c.name === 'ws_dashboard_localhost'), false);
       await used.context.close();
       await second.context.close();
+
+      progress(theme + ': F native copy reads the link back and logs in without a paste');
+      advance(61);
+      const auto = await fixture(theme);
+      auto.osClipboard = true;
+      await gate(auto.page, '/s/livesession#/auto-paste');
+      await idleClipboard(auto);
+      await auto.page.locator('#lg-copy').click();
+      await loggedIn(auto.page, '/s/livesession#/auto-paste');
+      await idleClipboard(auto, { readText: 1, writeText: 0, execCommand: 0 });
+      assert.deepEqual(auto.nativeResponses.map(r => r.status), [200], 'one copy, never retried automatically');
+      await auto.context.close();
 
       progress(theme + ': C injected expiry with real exchange; fallback manual code; exchange rate limit');
       const expiredLink = await mint();
@@ -372,7 +404,7 @@ async function mint(next = '/s/livesession') {
       const filename = path.join(cfg.shots, stale);
       if (fs.existsSync(filename)) fs.unlinkSync(filename);
     }
-    fs.writeFileSync(path.join(cfg.shots, 'acceptance.json'), JSON.stringify({ shortcut: pasteShortcut, fixtureVersion: '0.50.2-test', states: captures.map(({ theme, state }) => `${theme}-${state}`), errors, checks: 'real Ctrl+V, clipboard button, native round trip, one-use, expiry, throttles, checking ignores paste, Settings explicit copy/toast, Strict reentry, fragment retention, secret rotation POST and real WebSocket-drop recovery; no implicit clipboard access' }, null, 2));
+    fs.writeFileSync(path.join(cfg.shots, 'acceptance.json'), JSON.stringify({ shortcut: pasteShortcut, fixtureVersion: '0.50.2-test', states: captures.map(({ theme, state }) => `${theme}-${state}`), errors, checks: 'real Ctrl+V, clipboard button, native round trip, post-copy read login and quiet fallback, one-use, expiry, throttles, checking ignores paste, Settings explicit copy/toast, Strict reentry, fragment retention, secret rotation POST and real WebSocket-drop recovery; no implicit clipboard access' }, null, 2));
     console.log('PASS: login gate acceptance and side-by-side captures: ' + cfg.shots);
   } catch (e) {
     console.error('FAILED STAGE: ' + stage);

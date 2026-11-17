@@ -210,7 +210,7 @@ func (d *Daemon) handleFSAct(w http.ResponseWriter, r *http.Request, replyID str
 	}
 	if req.Root != "" || replyID == LocalBrowseAnchor {
 		var ok bool
-		if root, ok = browseRootParam(req.Root); !ok {
+		if root, ok = browseRootParam(newDenySet(), req.Root); !ok {
 			http.Error(w, "root must be an absolute folder", http.StatusBadRequest)
 			return
 		}

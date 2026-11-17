@@ -408,6 +408,7 @@
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
   function ctabDot() { return doc.querySelector('#ctabs [data-ctab="convo"] .tdot'); }
   function revealPanes() {
+    syncFilePreview();
     PANES.forEach(function (id) {
       var el = $(id);
       var shown = visible(el);

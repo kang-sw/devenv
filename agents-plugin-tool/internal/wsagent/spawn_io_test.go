@@ -1,13 +1,42 @@
 package wsagent
 
 import (
+	"fmt"
 	"io"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
+
+func TestChildEventWith200ConversationsDoesNoFileIO(t *testing.T) {
+	r := NewRunner(Options{})
+	dir := t.TempDir()
+	parent := &conv{r: r, dir: dir, rec: Record{ReplyID: "parent"}, spawnDirty: true, spawnC: make(chan struct{}, 1),
+		live: newLiveWriter(dir, "parent-key", "pi", r.opts.Now, io.Discard)}
+	r.convs["parent"] = parent
+	var child *conv
+	for i := 0; i < 200; i++ {
+		id := fmt.Sprintf("child-%d", i)
+		c := &conv{r: r, rec: Record{ReplyID: id}, inbox: filepath.Join(dir, id, "inbox")}
+		if i == 0 {
+			c.rec.Parent = &ParentRef{Kind: ParentConversation, ReplyID: "parent"}
+			child = c
+		}
+		r.convs[id] = c
+	}
+	before := wsstate.FileIOCounters()["file_io_total"]
+	r.wakeSpawnParents(child.memoryState())
+	parent.seedSpawnRows()
+	if got := len(r.List()); got != 201 {
+		t.Fatalf("List returned %d rows", got)
+	}
+	if got := wsstate.FileIOCounters()["file_io_total"] - before; got != 0 {
+		t.Fatalf("child event/list made %d file operations with 200 conversations, want 0", got)
+	}
+}
 
 func TestSpawnBurstInboxScanCountsAndTrailingUpdate(t *testing.T) {
 	now := time.Unix(1000, 0)
@@ -28,20 +57,19 @@ func TestSpawnBurstInboxScanCountsAndTrailingUpdate(t *testing.T) {
 			parent.spawnTimer.Stop()
 		}
 	}()
-	// Replay the old per-invalidation listing policy as a control, using
-	// the same real List -> state -> Held -> Names -> ReadDir production path.
+	// Even forced reseeds now use memory-only indexed descendants.
 	for range 20 {
 		parent.spawnDirty, parent.spawnNext = true, time.Time{}
 		parent.seedSpawnRows()
 	}
 	control := scans
-	if control != 40 || lists != 20 {
+	if control != 0 || lists != 20 {
 		t.Fatalf("control: inbox scans=%d listings=%d", control, lists)
 	}
 	scans, lists = 0, 0
 	parent.spawnDirty, parent.spawnNext = true, time.Time{}
 	parent.seedSpawnRows()
-	if scans != 2 || lists != 1 {
+	if scans != 0 || lists != 1 {
 		t.Fatalf("initial tree: inbox scans=%d listings=%d", scans, lists)
 	}
 	before := scans
@@ -55,16 +83,44 @@ func TestSpawnBurstInboxScanCountsAndTrailingUpdate(t *testing.T) {
 	if scans != before || lists != 1 || !parent.spawnDirty || parent.spawnTimer == nil {
 		t.Fatalf("burst: scans=%d listings=%d dirty=%v timer=%v", scans-before, lists, parent.spawnDirty, parent.spawnTimer != nil)
 	}
-	t.Logf("20 invalidations, 2 conversations: control=%d inbox ReadDir calls, after=%d in burst + 2 trailing", control, scans-before)
+	t.Logf("20 invalidations, 2 conversations: forced=%d inbox ReadDir calls, burst=%d", control, scans-before)
 	// No later child event is needed: the retained dirty bit and trailing
 	// deadline refresh the latest state, rather than the first queued event.
 	now = time.Unix(1001, 0)
 	parent.seedSpawnRows()
-	if scans != 4 || lists != 2 || parent.spawnDirty || parent.spawnTimer != nil {
+	if scans != 0 || lists != 2 || parent.spawnDirty || parent.spawnTimer != nil {
 		t.Fatalf("trailing update: scans=%d listings=%d dirty=%v", scans, lists, parent.spawnDirty)
 	}
 	rows := parent.live.st.Snapshot(now.UnixMilli()).Agents
 	if len(rows) != 1 || rows[0].Label != "latest" || rows[0].Status != wslive.StatusFailed {
 		t.Fatalf("trailing projection lost latest child state: %+v", rows)
+	}
+}
+
+// A watcher traces every descendant event to its lead (mcp's piChanged).
+// Through Get each step relisted the parent's inbox; Lineage reads records.
+func TestSpawnLeadLineageReadsNoInbox(t *testing.T) {
+	scans := 0
+	r := NewRunner(Options{stateInboxRead: func(string) { scans++ }})
+	dir := t.TempDir()
+	r.convs["worker"] = &conv{r: r, rec: Record{ReplyID: "worker", Parent: &ParentRef{Kind: ParentLead, ReplyID: "lead"}},
+		inbox: filepath.Join(dir, "worker", "inbox")}
+	r.closed["mid"] = Record{ReplyID: "mid", Parent: &ParentRef{Kind: ParentConversation, ReplyID: "worker"}}
+	leaf := State{ID: "leaf", Parent: &ParentRef{Kind: ParentConversation, ReplyID: "mid"}}
+	if got := SpawnLead(leaf, r.Get); got != "lead" || scans == 0 {
+		t.Fatalf("control: Get walk = %q with %d inbox scans", got, scans)
+	}
+	scans = 0
+	before := wsstate.FileIOCounters()["file_io_total"]
+	for range 20 {
+		if got := SpawnLead(leaf, r.Lineage); got != "lead" {
+			t.Fatalf("Lineage walk = %q, want lead", got)
+		}
+	}
+	if got := wsstate.FileIOCounters()["file_io_total"] - before; scans != 0 || got != 0 {
+		t.Fatalf("20 Lineage walks: %d inbox scans, %d file operations, want 0", scans, got)
+	}
+	if _, err := r.Lineage("missing"); err == nil {
+		t.Fatal("Lineage of an unknown conversation succeeded")
 	}
 }

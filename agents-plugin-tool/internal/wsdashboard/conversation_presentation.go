@@ -135,6 +135,11 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			index = len(card.Topics) - 1
 		}
 		topic := &card.Topics[index]
+		// The stamped label is the committed display label; a label-change
+		// effect below still overrides it with the newer value.
+		if effect.Label != "" {
+			topic.Label = effect.Label
+		}
 		switch effect.Kind {
 		case "log":
 			target := ""

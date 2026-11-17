@@ -147,7 +147,7 @@ func (f FolderStore) Open(legacy *State) (*State, error) {
 	if legacy == nil {
 		present := false
 		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-			_, err := os.Stat(filepath.Join(f.Dir, name))
+			_, err := wsstate.Stat(filepath.Join(f.Dir, name))
 			if err == nil {
 				present = true
 				break
@@ -229,6 +229,10 @@ func (f FolderStore) withLock(create bool, fn func() error) error {
 	return f.withGuard(create, f.guard, fn)
 }
 
+// folderLockAttempt is a test seam: it observes each withGuard that goes on to
+// MkdirAll and the flock, which the file I/O counters do not see.
+var folderLockAttempt = func(dir string) {}
+
 func (f FolderStore) withGuard(create bool, guard func() error, fn func() error) error {
 	if f.Dir == "" {
 		return fmt.Errorf("whiteboard folder: empty directory")
@@ -238,6 +242,7 @@ func (f FolderStore) withGuard(create bool, guard func() error, fn func() error)
 	if err := guard(); err != nil {
 		return err
 	}
+	folderLockAttempt(f.Dir)
 	if create {
 		if err := os.MkdirAll(f.Dir, 0o755); err != nil {
 			return err
@@ -271,25 +276,50 @@ var folderReadFile = wsstate.ReadFile
 // reads while another process's locked commit replaces or removes the same
 // file, which on Windows fails an open for a moment.
 func folderDecode(path string, out any) (bool, error) {
-	data, err := folderReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
+	data, exists, err := folderReadOptional(path)
+	if err != nil || !exists {
 		return false, err
 	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return false, fmt.Errorf("read whiteboard %s: %w", path, err)
+	return true, folderUnmarshal(path, data, out)
+}
+
+// folderReadOptional reads path, reporting an absent file as exists=false.
+func folderReadOptional(path string) ([]byte, bool, error) {
+	data, err := folderReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
 	}
-	return true, nil
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+func folderUnmarshal(path string, data []byte, out any) error {
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("read whiteboard %s: %w", path, err)
+	}
+	return nil
 }
 
 func folderCheckSchema(path string) error {
+	data, exists, err := folderReadOptional(path)
+	if err != nil {
+		return err
+	}
+	return folderSchemaOf(path, data, exists)
+}
+
+// folderSchemaOf is folderCheckSchema on bytes already read, so a guard that
+// also decodes the file reads it once.
+func folderSchemaOf(path string, data []byte, exists bool) error {
+	if !exists {
+		return nil
+	}
 	var h struct {
 		SchemaVersion int `json:"schema_version"`
 	}
-	exists, err := folderDecode(path, &h)
-	if err != nil || !exists {
+	if err := folderUnmarshal(path, data, &h); err != nil {
 		return err
 	}
 	if h.SchemaVersion > FolderSchemaVersion {
@@ -301,21 +331,38 @@ func folderCheckSchema(path string) error {
 	return nil
 }
 
+// guard reads each root file once: the schema checks run in the original
+// meta, pending, committed order, then meta and pending decode from the same
+// bytes. Topic metadata comes through folderReadMemo, which rereads any file
+// whose stat identity moved.
 func (f FolderStore) guard() error {
+	roots := map[string][]byte{}
+	present := map[string]bool{}
 	for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-		if err := folderCheckSchema(filepath.Join(f.Dir, name)); err != nil {
+		path := filepath.Join(f.Dir, name)
+		data, exists, err := folderReadOptional(path)
+		if err != nil {
+			return err
+		}
+		if err := folderSchemaOf(path, data, exists); err != nil {
+			return err
+		}
+		roots[name], present[name] = data, exists
+	}
+	var current folderSession
+	if present["meta.json"] {
+		if err := folderUnmarshal(filepath.Join(f.Dir, "meta.json"), roots["meta.json"], &current); err != nil {
 			return err
 		}
 	}
-	var current folderSession
-	if _, err := folderDecode(filepath.Join(f.Dir, "meta.json"), &current); err != nil {
-		return err
-	}
 	var pending folderIntent
-	if exists, err := folderDecode(filepath.Join(f.Dir, "pending.json"), &pending); err != nil {
-		return err
-	} else if exists && pending.Session.SchemaVersion != FolderSchemaVersion {
-		return fmt.Errorf("whiteboard pending session: unsupported schema_version %d", pending.Session.SchemaVersion)
+	if present["pending.json"] {
+		if err := folderUnmarshal(filepath.Join(f.Dir, "pending.json"), roots["pending.json"], &pending); err != nil {
+			return err
+		}
+		if pending.Session.SchemaVersion != FolderSchemaVersion {
+			return fmt.Errorf("whiteboard pending session: unsupported schema_version %d", pending.Session.SchemaVersion)
+		}
 	}
 	// Refuse every newer nested schema before replay can publish even its
 	// first panel or log byte, not merely when metadata is reached.
@@ -345,7 +392,16 @@ func (f FolderStore) guard() error {
 		if !folderDirID(ref.Dir) {
 			return fmt.Errorf("whiteboard: invalid topic directory %q", ref.Dir)
 		}
-		if err := folderCheckSchema(filepath.Join(f.Dir, ref.Dir, "meta.json")); err != nil {
+		path := filepath.Join(f.Dir, ref.Dir, "meta.json")
+		data, err := folderReadMemo(path)
+		exists := err == nil
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := folderSchemaOf(path, data, exists); err != nil {
 			return err
 		}
 	}
@@ -394,7 +450,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		}
 		return state, &meta, nil
 	}
-	if _, err := os.Stat(filepath.Join(f.Dir, "committed.json")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := wsstate.Stat(filepath.Join(f.Dir, "committed.json")); !errors.Is(err, os.ErrNotExist) {
 		if err != nil {
 			return nil, nil, err
 		}
@@ -517,10 +573,13 @@ func (f FolderStore) readState(meta *folderSession) (*State, error) {
 		}
 		heldDirs[ref.Dir], heldKeys[ref.Key] = true, true
 		var topic folderTopic
-		if exists, err := folderDecode(filepath.Join(f.Dir, ref.Dir, "meta.json"), &topic); err != nil {
-			return nil, err
-		} else if !exists {
+		metaPath := filepath.Join(f.Dir, ref.Dir, "meta.json")
+		if data, err := folderReadMemo(metaPath); errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("whiteboard topic %s: metadata missing", ref.Dir)
+		} else if err != nil {
+			return nil, err
+		} else if err := folderUnmarshal(metaPath, data, &topic); err != nil {
+			return nil, err
 		}
 		if (topic.Doc != nil) != ref.HasDoc {
 			return nil, fmt.Errorf("whiteboard topic %s: content mapping mismatch", ref.Dir)
@@ -549,49 +608,27 @@ func (f FolderStore) readState(meta *folderSession) (*State, error) {
 		if topic.Closed != slices.Contains(out.ClosedTopics, ref.Key) {
 			return nil, fmt.Errorf("whiteboard topic %s: close state mismatch", ref.Dir)
 		}
-		log, err := folderReadFile(filepath.Join(f.Dir, ref.Dir, "log.jsonl"))
+		log, err := folderReadMemo(filepath.Join(f.Dir, ref.Dir, "log.jsonl"))
 		if err != nil {
 			return nil, err
 		}
 		if int64(len(log)) != ref.LogBytes {
 			return nil, fmt.Errorf("whiteboard topic %s: committed log length mismatch", ref.Dir)
 		}
-		var entries []Entry
+		entries, err := f.logEntries(ref.Dir, log)
+		if err != nil {
+			return nil, err
+		}
 		last := 0
-		for _, line := range bytes.Split(log, []byte{'\n'}) {
-			if len(line) == 0 {
-				continue
-			}
-			var e Entry
-			if err := json.Unmarshal(line, &e); err != nil {
-				return nil, fmt.Errorf("whiteboard topic %s log: %w", ref.Dir, err)
-			}
+		for _, e := range entries {
 			n := folderNumber(e.ID, "e")
 			if n <= last || n > out.EntrySeq || heldEntries[e.ID] {
 				return nil, fmt.Errorf("whiteboard: invalid entry sequence %q", e.ID)
 			}
 			last, heldEntries[e.ID] = n, true
-			if e.Kind == "panel" {
-				if e.Text != "" {
-					return nil, fmt.Errorf("whiteboard: panel payload in log")
-				}
-				var panel Entry
-				if exists, err := folderDecode(filepath.Join(f.Dir, ref.Dir, "panels", e.ID+".json"), &panel); err != nil {
-					return nil, err
-				} else if !exists {
-					return nil, fmt.Errorf("whiteboard panel %s missing", e.ID)
-				}
-				body := panel.Text
-				panel.Text = ""
-				if !reflect.DeepEqual(e, panel) {
-					return nil, fmt.Errorf("whiteboard panel %s metadata mismatch", e.ID)
-				}
-				e.Text = body
-			}
 			if err := folderValidEntry(e, out.PanelCounter); err != nil {
 				return nil, err
 			}
-			entries = append(entries, e)
 		}
 		if len(entries) != 0 && topic.Doc == nil {
 			return nil, fmt.Errorf("whiteboard topic %s: entries without content mapping", ref.Dir)
@@ -816,7 +853,7 @@ func (f FolderStore) plan(meta *folderSession, before, after *State) (*folderInt
 			// reconstruction that may normalize metadata. New/remapped topics
 			// always publish. Omitted files already hold replay's target bytes.
 			var err error
-			previous, err = wsstate.ReadFile(filepath.Join(f.Dir, filepath.FromSlash(path)))
+			previous, err = folderReadMemo(filepath.Join(f.Dir, filepath.FromSlash(path)))
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return nil, err
 			}
@@ -936,7 +973,7 @@ func (f FolderStore) replay(intent *folderIntent) error {
 			return fmt.Errorf("whiteboard: invalid pending panel path")
 		}
 		path := filepath.Join(f.Dir, filepath.FromSlash(w.Path))
-		if data, err := os.ReadFile(path); err == nil {
+		if data, err := wsstate.ReadFileOnce(path); err == nil {
 			if !bytes.Equal(data, w.Data) {
 				return fmt.Errorf("whiteboard: immutable panel %s conflicts with intent", w.Path)
 			}
@@ -1022,7 +1059,7 @@ func (f FolderStore) append(a folderAppend) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	file, err := wsstate.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
@@ -1085,7 +1122,7 @@ func (f FolderStore) atomic(relative string, data []byte, stage string) error {
 			break
 		}
 	}
-	file, err := os.CreateTemp(dir, ".whiteboard-*.tmp")
+	file, err := wsstate.CreateTemp(dir, ".whiteboard-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -1115,7 +1152,7 @@ func folderSyncDir(path string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	dir, err := os.Open(path)
+	dir, err := wsstate.Open(path)
 	if err != nil {
 		return err
 	}

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -161,130 +163,180 @@ func TestImageSrcMapsBoardImagesToTheRoute(t *testing.T) {
 	}
 }
 
-// TestImageDataURLInlinesContainedImages pins a topic-body frame's image source:
-// an image the route would serve comes back as a data: URL of its bytes with
-// the route's content type; one the route refuses (outside the root, not an
-// image, a symlink escaping the root) or one above imageDataMax comes back
-// empty, so the page falls back to the route's URL.
-func TestImageDataURLInlinesContainedImages(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	writeFile(t, filepath.Join(root, "shots", "a.png"), "ABC")
-	writeFile(t, filepath.Join(root, "d.svg"), "<svg/>")
-	writeFile(t, filepath.Join(root, "notes.txt"), "TEXT")
-	writeFile(t, filepath.Join(outside, "secret.png"), "SECRET")
-	writeFile(t, filepath.Join(root, "big.png"), strings.Repeat("x", imageDataMax+1))
-	escape := os.Symlink(filepath.Join(outside, "secret.png"), filepath.Join(root, "escape.png")) == nil
-	for in, want := range map[string]string{
-		"shots/a.png": "data:image/png;base64,QUJD",
-		filepath.ToSlash(filepath.Join(root, "d.svg")): "data:image/svg+xml;base64,PHN2Zy8+",
-		"notes.txt":   "",
-		"big.png":     "",
-		"missing.png": "",
-		filepath.ToSlash(filepath.Join(outside, "secret.png")): "",
-		"../" + filepath.Base(outside) + "/secret.png":         "",
+// TestImageRouteAccessRule pins who the image route serves which image: a
+// LAN viewer only an image inside the session root, never one outside it
+// (by absolute or relative path) nor an attachment by its path; a loopback
+// viewer an image inside or outside the root and a session's attachment
+// image by its absolute path; and neither a credential location, under an
+// image name too.
+func TestImageRouteAccessRule(t *testing.T) {
+	o := startOutsideFixture(t)
+	writeFile(t, filepath.Join(o.project, "shots", "in.png"), "PNG-INSIDE")
+	out := o.write(t, o.away, "out.png", "PNG-OUTSIDE")
+	key := o.write(t, o.home, ".ssh/key.png", "PNG-CREDENTIAL")
+	attach := filepath.Join(wsinbox.AttachmentsDir(sessionInbox(o.dir, "livesession")), "0123456789abcdef-1.png")
+	writeFile(t, attach, "PNG-ATTACHMENT")
+	rel, err := filepath.Rel(o.project, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, path, want string
+		v                viewer
+	}{
+		{"LAN in-root", "shots/in.png", "PNG-INSIDE", o.lan},
+		{"LAN in-root, absolute", filepath.ToSlash(filepath.Join(o.project, "shots", "in.png")), "PNG-INSIDE", o.lan},
+		{"LAN out-of-root", filepath.ToSlash(out), "", o.lan},
+		{"LAN out-of-root, relative", filepath.ToSlash(rel), "", o.lan},
+		{"LAN attachment", filepath.ToSlash(attach), "", o.lan},
+		{"LAN credential", filepath.ToSlash(key), "", o.lan},
+		{"LAN home path", "~/.ssh/key.png", "", o.lan},
+		{"LAN without the token", "shots/in.png", "", o.bare},
+		{"loopback in-root", "shots/in.png", "PNG-INSIDE", o.local},
+		{"loopback out-of-root", filepath.ToSlash(out), "PNG-OUTSIDE", o.local},
+		{"loopback out-of-root, relative", filepath.ToSlash(rel), "PNG-OUTSIDE", o.local},
+		{"loopback attachment", filepath.ToSlash(attach), "PNG-ATTACHMENT", o.local},
+		{"loopback attachment, native", attach, "PNG-ATTACHMENT", o.local},
+		{"loopback credential", filepath.ToSlash(key), "", o.local},
+		{"loopback credential, home path", "~/.ssh/key.png", "", o.local},
 	} {
-		if got := ImageDataURL(root, in); got != want {
-			t.Errorf("ImageDataURL(%q) = %.60q, want %q", in, got, want)
-		}
-	}
-	if escape {
-		if got := ImageDataURL(root, "escape.png"); got != "" {
-			t.Errorf("ImageDataURL through a symlink leaving the root = %.60q", got)
-		}
-	}
-}
-
-// TestImageDataURLCachesByResolvedFile pins the inlined-image cache: an
-// unchanged image is read once whatever path spells it (a symlink inside the
-// root shares the real file's entry), an over-cap image's empty answer is
-// cached too, an edit (size or time) reads again, and the containment check
-// still runs on every lookup, so a symlink retargeted outside the root is
-// refused although its old target is cached.
-func TestImageDataURLCachesByResolvedFile(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	writeFile(t, filepath.Join(root, "shots", "a.png"), "ABC")
-	writeFile(t, filepath.Join(root, "big.png"), strings.Repeat("x", imageDataMax+1))
-	writeFile(t, filepath.Join(outside, "secret.png"), "SECRET")
-	link := os.Symlink(filepath.Join(root, "shots", "a.png"), filepath.Join(root, "alias.png")) == nil
-	reads := func() int64 { return imageDataReads.Load() }
-
-	start := reads()
-	for range 3 {
-		if got := ImageDataURL(root, "shots/a.png"); got != "data:image/png;base64,QUJD" {
-			t.Fatalf("ImageDataURL = %.60q", got)
-		}
-		if link {
-			if got := ImageDataURL(root, "alias.png"); got != "data:image/png;base64,QUJD" {
-				t.Fatalf("ImageDataURL through the alias = %.60q", got)
+		rec := serve(o.d, c.v, http.MethodGet, "/s/livesession/image?path="+url.QueryEscape(c.path), "")
+		if c.want != "" {
+			if rec.Code != http.StatusOK || rec.Body.String() != c.want || rec.Header().Get("Content-Type") != "image/png" {
+				t.Errorf("%s: %d %q %v, want 200 %q", c.name, rec.Code, rec.Body.String(), rec.Header(), c.want)
 			}
+			continue
 		}
-		if got := ImageDataURL(root, "big.png"); got != "" {
-			t.Fatalf("over-cap ImageDataURL = %.60q", got)
-		}
-	}
-	if got := reads() - start; got != 2 {
-		t.Fatalf("three rounds read %d files, want 2 (a.png and big.png once each)", got)
-	}
-
-	writeFile(t, filepath.Join(root, "shots", "a.png"), "ABCD")
-	if got := ImageDataURL(root, "shots/a.png"); got != "data:image/png;base64,QUJDRA==" {
-		t.Fatalf("after an edit ImageDataURL = %.60q", got)
-	}
-	if got := reads() - start; got != 3 {
-		t.Fatalf("the edit read %d files in all, want 3", got)
-	}
-
-	// Another image extension naming the same file is another content type:
-	// it gets its own entry, never the png's data URL.
-	if os.Symlink(filepath.Join(root, "shots", "a.png"), filepath.Join(root, "alias.jpg")) == nil {
-		if got := ImageDataURL(root, "alias.jpg"); got != "data:image/jpeg;base64,QUJDRA==" {
-			t.Fatalf("ImageDataURL through a .jpg name = %.60q", got)
-		}
-		if got := ImageDataURL(root, "shots/a.png"); got != "data:image/png;base64,QUJDRA==" {
-			t.Fatalf("ImageDataURL after the .jpg name = %.60q", got)
-		}
-	}
-
-	if link {
-		if err := os.Remove(filepath.Join(root, "alias.png")); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(filepath.Join(outside, "secret.png"), filepath.Join(root, "alias.png")); err != nil {
-			t.Fatal(err)
-		}
-		if got := ImageDataURL(root, "alias.png"); got != "" {
-			t.Fatalf("a symlink retargeted outside the root = %.60q", got)
+		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "PNG-") {
+			t.Errorf("%s: %d %q, want a refusal", c.name, rec.Code, rec.Body.String())
 		}
 	}
 }
 
-// TestImageDataCacheStaysBounded: past its byte cap the cache drops the
-// least recently used entries, and a newer state of a file replaces its
-// older one.
-func TestImageDataCacheStaysBounded(t *testing.T) {
-	c := newImageDataCache(10)
-	c.put(imageDataKey{file: "a", size: 1}, "aaaa")
-	c.put(imageDataKey{file: "b", size: 1}, "bbbb")
-	c.get(imageDataKey{file: "a", size: 1}) // a is now the most recent
-	c.put(imageDataKey{file: "c", size: 1}, "cccc")
-	if _, ok := c.get(imageDataKey{file: "b", size: 1}); ok {
-		t.Error("the least recently used entry survived past the cap")
+// TestImageRouteAttachmentCarveOutKeepsTheStateDirDenied pins the attachment
+// exception against the real deny set, with the daemon's state directory at
+// its default place under the home, which outsideDenied refuses whole: an
+// attachment there opens for a loopback viewer, while another file of the
+// state directory does not, whatever image name or path spelling reaches it,
+// and a symlink with an attachment's name is refused.
+func TestImageRouteAttachmentCarveOutKeepsTheStateDirDenied(t *testing.T) {
+	o := startOutsideFixture(t)
+	d := &Daemon{dir: filepath.Join(o.home, ".cache", wsstate.DefaultCacheDirName, "dashboard")}
+	attachDir := wsinbox.AttachmentsDir(sessionInbox(d.dir, "livesession"))
+	attach := o.write(t, attachDir, "0123456789abcdef-1.png", "PNG-ATTACHMENT")
+	o.write(t, d.dir, "secret.png", "PNG-STATE")
+	o.write(t, attachDir, "secret.png", "PNG-STATE")
+	f, ctype, _, ok := d.openImage(o.project, filepath.ToSlash(attach), true)
+	if !ok || ctype != "image/png" {
+		t.Fatalf("attachment = %v %q", ok, ctype)
 	}
-	if _, ok := c.get(imageDataKey{file: "a", size: 1}); !ok {
-		t.Error("a recently used entry was dropped")
+	f.Close()
+	if f, _, _, ok := d.openImage(o.project, filepath.ToSlash(attach), false); ok {
+		f.Close()
+		t.Error("an attachment opened for a LAN viewer")
 	}
-	c.put(imageDataKey{file: "a", size: 2}, "AA")
-	if _, ok := c.get(imageDataKey{file: "a", size: 1}); ok {
-		t.Error("an older state of a file stayed beside its newer one")
+	refused := []string{
+		filepath.Join(d.dir, "secret.png"),
+		filepath.Join(attachDir, "secret.png"),
 	}
-	if c.bytes > 10 {
-		t.Errorf("cache holds %d bytes, cap 10", c.bytes)
+	// Unjoined, so the route gets the dot-dot steps uncleaned.
+	paths := []string{filepath.ToSlash(attach) + "/../../../../../secret.png", filepath.ToSlash(attachDir) + "/../attachments/secret.png"}
+	if os.Symlink(filepath.Join(d.dir, "secret.png"), filepath.Join(attachDir, "fedcba9876543210-1.png")) == nil {
+		refused = append(refused, filepath.Join(attachDir, "fedcba9876543210-1.png"))
 	}
-	c.put(imageDataKey{file: "huge"}, strings.Repeat("x", 11))
-	if _, ok := c.get(imageDataKey{file: "huge"}); ok {
-		t.Error("a URL over the whole cap was kept")
+	for _, path := range refused {
+		paths = append(paths, filepath.ToSlash(path))
+	}
+	for _, path := range paths {
+		if f, _, _, ok := d.openImage(o.project, path, true); ok {
+			f.Close()
+			t.Errorf("state-directory file %q opened", path)
+		}
+	}
+}
+
+// TestImageRouteCachesByVersion pins the route's cache headers: the ETag is
+// the file's ImageVersion; a URL whose &v= is that version is cached as
+// immutable, any other is revalidated; a matching If-None-Match answers 304;
+// an edit changes the version.
+func TestImageRouteCachesByVersion(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	local, lan := fsViewers(t, f)
+	file := filepath.Join(f.project, "a.png")
+	writeFile(t, file, "PNG-A")
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := ImageVersion(info)
+	for _, v := range []viewer{local, lan} {
+		target := "/s/livesession/image?path=a.png"
+		rec := serve(f.d, v, http.MethodGet, target, "")
+		if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"`+version+`"` || rec.Header().Get("Cache-Control") != "no-cache" {
+			t.Errorf("%s unversioned: %d %v", v.name, rec.Code, rec.Header())
+		}
+		rec = serve(f.d, v, http.MethodGet, target+"&v="+version, "")
+		if rec.Code != http.StatusOK || rec.Body.String() != "PNG-A" || rec.Header().Get("Cache-Control") != imageCacheImmutable {
+			t.Errorf("%s current version: %d %v", v.name, rec.Code, rec.Header())
+		}
+		rec = serve(f.d, v, http.MethodGet, target+"&v=stale.1", "")
+		if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-cache" {
+			t.Errorf("%s stale version: %d %v", v.name, rec.Code, rec.Header())
+		}
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr, req.Host = v.peer, v.host
+		req.Header.Set("If-None-Match", `"`+version+`"`)
+		if v.cookie != "" {
+			req.AddCookie(&http.Cookie{Name: lanTokenCookie, Value: v.cookie})
+		}
+		if v.localCookie {
+			addLocalhostTestCookie(t, f.d, req)
+		}
+		rec = httptest.NewRecorder()
+		f.d.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
+			t.Errorf("%s If-None-Match: %d %q", v.name, rec.Code, rec.Body.String())
+		}
+	}
+	writeFile(t, file, "PNG-AB")
+	if info, err := os.Stat(file); err != nil || ImageVersion(info) == version {
+		t.Fatalf("an edit kept the version %q (%v)", version, err)
+	}
+}
+
+// TestImageRouteMissBuildsNoDenySet pins a miss's cost: a loopback viewer's
+// missing image, in the root or outside it, and an attachment, found or
+// missing, build no deny set; an outside image that exists still does.
+func TestImageRouteMissBuildsNoDenySet(t *testing.T) {
+	o := startOutsideFixture(t)
+	out := o.write(t, o.away, "out.png", "PNG-OUTSIDE")
+	attachDir := wsinbox.AttachmentsDir(sessionInbox(o.dir, "livesession"))
+	attach := o.write(t, attachDir, "0123456789abcdef-1.png", "PNG-ATTACHMENT")
+	builds := func(path string, want int) int64 {
+		t.Helper()
+		before := deniedBasePathBuilds.Load()
+		rec := serve(o.d, o.local, http.MethodGet, "/s/livesession/image?path="+url.QueryEscape(path), "")
+		if rec.Code != want {
+			t.Errorf("image %q = %d, want %d", path, rec.Code, want)
+		}
+		return deniedBasePathBuilds.Load() - before
+	}
+	for _, c := range []struct {
+		path string
+		want int
+	}{
+		{"missing.png", http.StatusNotFound},
+		{filepath.ToSlash(filepath.Join(o.away, "missing.png")), http.StatusNotFound},
+		{"~/missing.png", http.StatusNotFound},
+		{filepath.ToSlash(attach), http.StatusOK},
+		{filepath.ToSlash(filepath.Join(attachDir, "fedcba9876543210-1.png")), http.StatusNotFound},
+	} {
+		if got := builds(c.path, c.want); got != 0 {
+			t.Errorf("image %q built %d deny sets, want 0", c.path, got)
+		}
+	}
+	if got := builds(filepath.ToSlash(out), http.StatusOK); got != 1 {
+		t.Errorf("an existing outside image built %d deny sets, want 1", got)
 	}
 }
 

@@ -268,8 +268,12 @@ func regionNames(events []regionEvent) []string {
 	return names
 }
 
-// withRefresh runs the fixture's streams on a short refresh tick.
-func withRefresh(o *DaemonOptions) { o.refreshInterval = 300 * time.Millisecond }
+// withRefresh runs the fixture's streams on a short refresh tick, with a
+// foreign look as short, so a no-wake change shows within a few ticks.
+func withRefresh(o *DaemonOptions) {
+	o.refreshInterval = 300 * time.Millisecond
+	o.foreignInterval = 300 * time.Millisecond
+}
 
 // waitSkipping waits until the refresh tick has skipped at least twice
 // more, so the page's refresh stamp is known and the tick skips.

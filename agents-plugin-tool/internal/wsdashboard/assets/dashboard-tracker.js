@@ -8,7 +8,8 @@
   // stores and keeps the reason for hostError, 200 mounts and then reads
   // every store's view. The adapter's reads are synchronous over the cache
   // below; the stream's "tracker" event reloads it, one reload in flight
-  // and at most one queued. Seen marks are only ever added, so a read unites
+  // and at most one queued, each read revalidating the answer held (ETag,
+  // see tkAnswers). Seen marks are only ever added, so a read unites
   // the daemon's marks with the local copy, which may hold marks still being
   // posted. A store hidden on this machine is left out of tkOrder (the
   // handles) and its view is not read; tkHidden lists it for the "+ store"
@@ -17,19 +18,23 @@
   var tkSupport = false, tkBusy = false, tkQueued = false, tkNext = [], tkLastRev = null, tkNudgedRev = null;
   function tkUrl(id, op) { return "/tracker/stores/" + encodeURIComponent(id) + "/" + op; }
   // tkFetch calls a tracker route, a POST when body is given; done(status,
-  // answer) gets the HTTP status (0: the daemon was not reached) and the
-  // parsed JSON answer ({} when there is none).
+  // answer, etag, text) gets the HTTP status (0: the daemon was not
+  // reached), the parsed JSON answer ({} when there is none), the answer's
+  // ETag ("" when none), and its raw text.
   // signal, when given, aborts the request (done then gets status 0).
-  function tkFetch(path, body, done, keepalive, signal) {
+  // tag, when given, is the ETag of the answer the page holds: a GET sends
+  // it as If-None-Match, and the daemon answers 304 while it still stands.
+  function tkFetch(path, body, done, keepalive, signal, tag) {
     var o = { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store" };
     if (body !== undefined) { o.headers = { "Content-Type": "application/json" }; o.body = JSON.stringify(body); }
+    else if (tag) o.headers = { "If-None-Match": tag };
     if (keepalive) o.keepalive = true;
     if (signal) o.signal = signal;
     fetch(path, o).then(function (r) {
       return r.text().then(function (s) {
         var v = null;
         try { v = s ? JSON.parse(s) : null; } catch (e) { v = null; }
-        done(r.status, v && typeof v === "object" ? v : {});
+        done(r.status, v && typeof v === "object" ? v : {}, r.headers.get("ETag") || "", s);
       });
     }, function () { done(0, {}); });
   }
@@ -44,19 +49,56 @@
   // more of which lands shortly (see tkReadAll), which the renderer may hold
   // back briefly to draw together with the rest.
   function tkNotify(more) { tkSubs.forEach(function (fn) { fn(!!more); }); }
-  // tkLoadView reads store id's view and seen marks into the cache.
-  function tkLoadView(id, done) {
-    tkFetch(tkUrl(id, "view"), undefined, function (status, v) {
-      if (status === 200 && v.view) {
-        tkViews[id] = v.view;
-        tkErrs[id] = null;
-        tkAddMarks(id, v.seen && v.seen.badge, v.seen && v.seen.read);
-      } else {
+  // The page revalidates what it holds: tkAnswers keeps each store's last
+  // view answer ({tag, text}: its ETag and raw text) and tkList the store
+  // list's ({tag, v}: its ETag and parsed answer), so a reload of an
+  // unchanged store is a 304 with no body. tkDirty records that a reload
+  // changed the cache (tkReload tells the renderer only then).
+  var tkAnswers = {}, tkList = null, tkDirty = false;
+  // tkLent is another session frame's answer for store id, so a frame the
+  // shell just opened revalidates it rather than reading the whole view
+  // again; null when there is none (or no shell).
+  function tkLent(id) {
+    try {
+      if (window.parent === window) return null;
+      var fr = window.parent.frames;
+      for (var i = 0; i < fr.length; i++) {
+        try {
+          var f = fr[i] !== window && fr[i].wsTrackerAnswer, a = typeof f === "function" ? f(id) : null;
+          if (a && typeof a.tag === "string" && a.tag && typeof a.text === "string") return { tag: a.tag, text: a.text };
+        } catch (e) { /* another origin's frame */ }
+      }
+    } catch (e) { /* no window */ }
+    return null;
+  }
+  // tkLoadView reads store id's view and seen marks into the cache; done
+  // gets whether the cache changed (a 304 for the view held changes nothing).
+  // noLend reads without a sibling frame's answer.
+  function tkLoadView(id, done, noLend) {
+    var own = tkViews[id] && tkAnswers[id] ? tkAnswers[id] : null, held = own || (noLend ? null : tkLent(id));
+    function take(v, answer) {
+      tkViews[id] = v.view;
+      tkErrs[id] = null;
+      tkAddMarks(id, v.seen && v.seen.badge, v.seen && v.seen.read);
+      if (answer) tkAnswers[id] = answer; else delete tkAnswers[id];
+    }
+    tkFetch(tkUrl(id, "view"), undefined, function (status, v, tag, text) {
+      if (status === 304 && own) { done(false); return; }
+      if (status === 304 && held) {
+        var lent = null;
+        try { lent = JSON.parse(held.text); } catch (e) { lent = null; }
+        if (lent && lent.view) { take(lent, held); done(true); return; }
+        tkLoadView(id, done, true); // an unreadable lent answer: read the view itself
+        return;
+      }
+      if (status === 200 && v.view) take(v, tag ? { tag: tag, text: text } : null);
+      else {
         tkViews[id] = null;
         tkErrs[id] = tkErrText(status, v);
+        delete tkAnswers[id];
       }
-      done();
-    });
+      done(true);
+    }, false, null, held ? held.tag : "");
   }
   // tkReadAll reads the store list, calls listed(status), and with a list
   // reads every store's view in parallel before done(). The renderer, once
@@ -64,8 +106,18 @@
   // to come), so a slow store holds back only its own rows (it keeps its
   // previous view, or the loading state, meanwhile); the last view is left to
   // done's caller to announce.
+  // A 304 for the list held reads as that list's 200.
   function tkReadAll(listed, done) {
-    tkFetch("/tracker/stores", undefined, function (status, v) {
+    var held = tkList;
+    function sig(v) { return JSON.stringify([v.stores, !!v.support]); }
+    tkFetch("/tracker/stores", undefined, function (status, v, tag) {
+      if (status === 304 && held) { status = 200; v = held.v; }
+      else {
+        // The list's ETag moves with every revision (the answer carries
+        // it); only another list, or none, changes what the renderer shows.
+        if (status !== 200 || !held || sig(v) !== sig(held.v)) tkDirty = true;
+        tkList = status === 200 && tag ? { tag: tag, v: v } : null;
+      }
       if (status === 503) { tkHostErr = tkErrText(status, v); tkOrder = []; tkHidden = []; tkInfo = {}; }
       if (status === 200) {
         tkHostErr = null;
@@ -79,18 +131,19 @@
         });
         var keep = {};
         tkOrder.forEach(function (id) { keep[id] = true; });
-        [tkViews, tkErrs, tkSeen].forEach(function (m) { Object.keys(m).forEach(function (id) { if (!keep[id]) delete m[id]; }); });
+        [tkViews, tkErrs, tkSeen, tkAnswers].forEach(function (m) { Object.keys(m).forEach(function (id) { if (!keep[id]) delete m[id]; }); });
       }
       listed(status);
       var left = status === 200 ? tkOrder.length : 0;
       if (!left) { done(); return; }
       tkOrder.forEach(function (id) {
-        tkLoadView(id, function () {
+        tkLoadView(id, function (changed) {
+          if (changed) tkDirty = true;
           if (--left === 0) done();
-          else if (tkApi) tkNotify(true);
+          else if (tkApi && changed) tkNotify(true);
         });
       });
-    });
+    }, false, null, held ? held.tag : "");
   }
   // tkReload re-reads everything, then tells the renderer and runs then;
   // a call while a reload runs queues one more, which runs the thens given
@@ -101,8 +154,9 @@
     if (tkBusy) { tkQueued = true; return; }
     tkBusy = true;
     tkQueued = false;
-    var thens = tkNext;
+    var thens = tkNext, first = !tkApi;
     tkNext = [];
+    tkDirty = false;
     tkReadAll(function (status) {
       if (!tkApi) tkMount(); // the palette still works when no tracker route is available
     }, function () {
@@ -111,7 +165,8 @@
         if (tkNudgedRev !== tkLastRev) tkQueued = true;
         tkNudgedRev = null;
       }
-      if (tkApi) tkNotify();
+      // A reload that read nothing new (every answer a 304) redraws nothing.
+      if (tkApi && (tkDirty || first)) tkNotify();
       thens.forEach(function (fn) { fn(); });
       if (tkQueued) tkReload();
     });
@@ -293,7 +348,7 @@
   function paletteRows(update) {
     // The board caps its initially rendered closed topics. Reuse its existing
     // show-more path so older hits are searchable and already mounted to jump to.
-    if (update) paletteClosed(update);
+    if (update) { paletteClosed(update); paletteHistory(update); }
     var rows = [];
     q("#rail .rs[data-rid]", framed ? shParentDoc() : doc).forEach(function (el) {
       var label = el.querySelector(".rid"), link = el.querySelector("a.rl");
@@ -372,12 +427,20 @@
     }
     capsuleTopicLoad.then(done);
   }
+  // Lazy board history leaves older entries out of the page; fetch them so
+  // the entry search stays complete.
+  function paletteHistory(update) {
+    var w = window.wbHistory;
+    if (!w || !w.hydrateAll) return;
+    w.hydrateAll(doc).then(function (n) { if (n) update(paletteRows()); });
+  }
   function paletteClosed(update) {
     var more = boardQ("button.closed-more[data-closed-next]")[0];
     if (!more || more.disabled) return;
     loadClosed(more).then(function (loaded) {
       if (!loaded) return;
       update(paletteRows());
+      paletteHistory(update);
       paletteClosed(update);
     });
   }
@@ -396,6 +459,7 @@
       if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
       if (live && !tabShown("board")) setTab("board");
     }
+    var waited = false;
     function entryPick() {
       if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(entryPick)) return;
       // Overview releases held board swaps before after callbacks; look up
@@ -408,6 +472,10 @@
         prepared = true;
         prepare(owner);
       });
+      // An entry in history the page has not fetched yet: pick again once
+      // its topic arrives.
+      var waiting = !entry && !waited && window.wbHistory && window.wbHistory.loading && window.wbHistory.loading(row.entry);
+      if (waiting) { waited = true; waiting.then(entryPick); return; }
       if (!entry) { palettePick({ kind: "board-topic", topic: row.topic }, o); return; }
       // History owns disclosure, flash and viewport landing. In particular,
       // scrollIntoView would scroll its clipped box and break bottom anchoring.
@@ -508,6 +576,8 @@
   function trackerStart() {
     window.wsCapsuleTopics = capsuleTopics;
     if (!window.WsTracker || !window.fetch) return;
+    // A frame the shell opens later revalidates this frame's answers (tkLent).
+    window.wsTrackerAnswer = function (id) { return tkAnswers[id] || null; };
     // Until mount installs the palette's own key listener, the shortcut
     // still counts (the same target rule), as a pending open.
     doc.addEventListener("keydown", function (e) {
@@ -522,7 +592,9 @@
   // the stream's first event usually meets), the revision waits for its end
   // and reloads again only when the store list it read brought another one,
   // so a page loads once. trackerLost forgets the revision when the stream
-  // drops, since a restarted daemon counts from 0 again.
+  // drops, since a restarted daemon counts from 0 again; the reload that
+  // follows (a frame shown again, a reconnect) revalidates what the page
+  // holds, so an unchanged store answers it with 304s.
   function trackerNudge(rev) {
     if (!window.WsTracker || !window.fetch) return;
     if (tkBusy) { tkNudgedRev = rev; return; }

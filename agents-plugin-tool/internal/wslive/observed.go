@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // ModelObservation is response evidence, never launch settings or RPC state.
@@ -175,17 +177,58 @@ func (st *State) SeedLastTurn(prev Snapshot) {
 	st.lastTurnOutput = st.cleanObservation(prev.Lead.LastTurnOutput)
 }
 
-func (st *State) addObserved(r ObservedRecord) bool {
+// addObserved accepts r unless its identity is already known, and returns the
+// records the evidence directory now needs. Per agent, that directory has to
+// hold only the records that define the fold: the first, each model change and
+// the latest (observed_prune.go). A record that defines none of them, such as a
+// replayed response a prune deleted, changes no reader's fold and stays in
+// memory alone: writing it would only re-create a file for a later prune.
+// Each writer seeds its state from the directory, so while no other writer
+// adds to it the records returned here keep its fold equal to this state's.
+// Another writer's records can at worst re-date a return transition, the
+// limitation observed_prune.go already states.
+func (st *State) addObserved(r ObservedRecord) (accepted bool, persist []ObservedRecord) {
 	if st.observations == nil {
 		st.observations = map[string]ObservedRecord{}
 	}
 	key := observationKey(r)
 	if _, exists := st.observations[key]; exists {
-		return false
+		return false, nil
+	}
+	// r's neighbours in the agent's fold order, before r joins it.
+	var prev, next ObservedRecord
+	hasPrev, hasNext := false, false
+	for _, o := range st.observations {
+		switch {
+		case o.AgentID != r.AgentID:
+		case observedBefore(o, r):
+			if !hasPrev || observedBefore(prev, o) {
+				prev, hasPrev = o, true
+			}
+		case !hasNext || observedBefore(o, next):
+			next, hasNext = o, true
+		}
 	}
 	st.observations[key] = r
 	st.observed = summarizeObserved(st.observations)
-	return true
+	// r is the first, the latest or a model change.
+	if !hasPrev || !hasNext || prev.Model != r.Model {
+		persist = append(persist, r)
+	}
+	// A late record of another model makes its successor a change point back;
+	// that successor may have been a repeat no file kept.
+	if hasPrev && hasNext && next.Model != r.Model && next.Model == prev.Model {
+		persist = append(persist, next)
+	}
+	return true, persist
+}
+
+// observedBefore is the fold order: observation time, then identity.
+func observedBefore(a, b ObservedRecord) bool {
+	if a.At != b.At {
+		return a.At < b.At
+	}
+	return observationKey(a) < observationKey(b)
 }
 
 func summarizeObserved(records map[string]ObservedRecord) map[string]*ObservedModel {
@@ -195,12 +238,7 @@ func summarizeObserved(records map[string]ObservedRecord) map[string]*ObservedMo
 	}
 	out := map[string]*ObservedModel{}
 	for id, list := range grouped {
-		sort.Slice(list, func(i, j int) bool {
-			if list[i].At != list[j].At {
-				return list[i].At < list[j].At
-			}
-			return observationKey(list[i]) < observationKey(list[j])
-		})
+		sort.Slice(list, func(i, j int) bool { return observedBefore(list[i], list[j]) })
 		model := &ObservedModel{}
 		for _, r := range list {
 			if model.Current.Model != r.Model {
@@ -271,14 +309,14 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 	for _, r := range records {
 		sum := sha256.Sum256([]byte(observationKey(r)))
 		path := filepath.Join(dir, hex.EncodeToString(sum[:])+".json")
-		if _, err := os.Stat(path); err == nil {
+		if _, err := wsstate.Stat(path); err == nil {
 			continue
 		}
 		data, err := json.Marshal(r)
 		if err != nil {
 			return err
 		}
-		tmp, err := os.CreateTemp(dir, ".observation-*.tmp")
+		tmp, err := wsstate.CreateTemp(dir, ".observation-*.tmp")
 		if err != nil {
 			return err
 		}
@@ -312,22 +350,34 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 // ReadObserved reads only bounded metadata records, tolerating missing files,
 // unknown JSON members, incomplete writes, and unsupported future sources.
 func ReadObserved(dir string) ([]ObservedRecord, error) {
-	entries, err := os.ReadDir(filepath.Join(dir, ObservedDirName))
+	records, _, err := ReadObservedFold(dir)
+	return records, err
+}
+
+// ReadObservedFold is ReadObserved that also reports whether the records are
+// the directory's whole fold: false when a listed record could not be opened
+// or read for any reason but its removal (a prune), a record ObservedCache
+// retries at each validation until it reads. An invalid record is skipped by
+// every reader alike and does not count.
+func ReadObservedFold(dir string) (records []ObservedRecord, complete bool, err error) {
+	entries, err := wsstate.ReadDir(filepath.Join(dir, ObservedDirName))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, true, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	st := NewState("")
-	var records []ObservedRecord
+	complete = true
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		r, valid, err := readObservedRecord(filepath.Join(dir, ObservedDirName, entry.Name()), os.Open)
+		r, valid, err := readObservedRecord(filepath.Join(dir, ObservedDirName, entry.Name()), wsstate.Open)
 		if err == nil && valid {
 			records = append(records, r)
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			complete = false
 		}
 	}
 	st.SeedObserved(records)
@@ -336,7 +386,7 @@ func ReadObserved(dir string) ([]ObservedRecord, error) {
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return observationKey(out[i]) < observationKey(out[j]) })
-	return out, nil
+	return out, complete, nil
 }
 
 func readObservedRecord(path string, open func(string) (*os.File, error)) (ObservedRecord, bool, error) {

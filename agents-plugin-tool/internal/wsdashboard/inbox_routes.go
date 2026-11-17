@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // The browser write routes: POST /s/<reply-id>/message holds a message the
@@ -287,26 +289,71 @@ type DashboardAnswerSource interface {
 	RecordDashboardAnswer(Registration, string, time.Time) error
 }
 
-// Replay is also kicked by the index on startup. A failed board write leaves
-// its journal copy intact and is retried; the stable original ID makes a
+// ErrDashboardAnswerIdentity marks a journal entry whose registered identity
+// no longer exists or matches. Retrying cannot restore that identity.
+var ErrDashboardAnswerIdentity = errors.New("dashboard answer: session identity unavailable")
+
+// Board-lock timeouts are worth a few retries. Other failures cannot be
+// repaired by replaying the same send; dropping a marker never drops the input.
+func retryDashboardAnswer(err error, attempts int) bool {
+	return attempts < 5 && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out locking whiteboard folder"))
+}
+
+// Replay is also kicked by the index on startup. Stable original IDs make a
 // crash after the board write but before unlinking safe.
 func (d *Daemon) scheduleAnswerReplay(reg Registration) {
 	source, ok := d.source.(DashboardAnswerSource)
 	if !ok {
 		return
 	}
+	d.inboxMu.Lock()
+	pending, known := d.answerPending[reg.ReplyID]
+	if !known {
+		// Discover recovery journals once, not on every session event.
+		files, err := wsstate.ReadDir(filepath.Join(sessionInbox(d.dir, reg.ReplyID), "answer-pending"))
+		pending = len(files) != 0 || (err != nil && !os.IsNotExist(err))
+		if d.answerPending == nil {
+			d.answerPending = make(map[string]bool)
+		}
+		d.answerPending[reg.ReplyID] = pending
+	}
+	d.inboxMu.Unlock()
+	if !pending {
+		return
+	}
 	if _, loaded := d.answerReplay.LoadOrStore(reg.ReplyID, struct{}{}); loaded {
 		return
 	}
 	go func() {
+		attempts := map[string]int{}
 		for {
 			d.inboxMu.Lock()
 			err := wsinbox.ReplayAnswerJournal(sessionInbox(d.dir, reg.ReplyID), func(id string, entry wsinbox.Entry) error {
-				return source.RecordDashboardAnswer(reg, id, time.UnixMilli(entry.SentAt))
+				// Replay owns the journal scan/unlink lock, never a board lock.
+				d.inboxMu.Unlock()
+				defer d.inboxMu.Lock()
+				err := source.RecordDashboardAnswer(reg, id, time.UnixMilli(entry.SentAt))
+				if err != nil {
+					attempts[id]++
+					if retryDashboardAnswer(err, attempts[id]) {
+						return err
+					}
+					fmt.Fprintf(d.log, "dashboard: discard board answer %s after %d attempts: %v\n", id, attempts[id], err)
+				}
+				delete(attempts, id)
+				return nil
 			})
 			if err == nil {
 				// Delete under the send lock: a send either precedes this scan or
 				// schedules a fresh one after the old loop is removed.
+				// A send may have committed while the board lock was held.
+				// Re-scan under inboxMu before declaring the journal empty.
+				files, scanErr := wsstate.ReadDir(filepath.Join(sessionInbox(d.dir, reg.ReplyID), "answer-pending"))
+				if len(files) != 0 || (scanErr != nil && !os.IsNotExist(scanErr)) {
+					d.inboxMu.Unlock()
+					continue
+				}
+				d.answerPending[reg.ReplyID] = false
 				d.answerReplay.Delete(reg.ReplyID)
 				d.inboxMu.Unlock()
 				return
@@ -374,7 +421,14 @@ func (d *Daemon) messageWrite(dir, replyID string, raw []byte, local bool, now t
 	}
 	d.inboxMu.Lock()
 	defer d.inboxMu.Unlock()
-	return d.sendMessage(dir, req, images, now)
+	status, answer := d.sendMessage(dir, req, images, now)
+	if status == http.StatusOK && hasBoardAnswer(req) {
+		if d.answerPending == nil {
+			d.answerPending = make(map[string]bool)
+		}
+		d.answerPending[replyID] = true
+	}
+	return status, answer
 }
 
 // sendCommand holds one slash command in the inbox at dir as its own entry.
@@ -513,7 +567,7 @@ func writeAttachments(attachDir string, images []decodedImage) ([]string, error)
 	var written []string
 	for i, img := range images {
 		path := filepath.Join(attachDir, fmt.Sprintf("%s-%d.%s", uploadID, i+1, img.ext))
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		f, err := wsstate.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			removeFiles(written)
 			return nil, err

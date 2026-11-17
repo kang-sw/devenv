@@ -15,7 +15,15 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
+
+func (s agentSessions) ReadNotes(reg Registration, refresh bool) ([]NotesLayer, error) {
+	if src, ok := s.inner.(NotesSource); ok {
+		return src.ReadNotes(reg, refresh)
+	}
+	return nil, fmt.Errorf("notes unavailable")
+}
 
 // AgentHost is the daemon's agent runner (internal/wsagent), which hosts
 // headless agent conversations as dashboard sessions. The daemon mounts its
@@ -209,6 +217,15 @@ func (s agentSessions) ClearLiveSnapshot(stateDir, replyID string) {
 	}
 }
 
+// ReadTicketIdeas forwards to the configured source; an agent conversation
+// has no ticket panel.
+func (s agentSessions) ReadTicketIdeas(reg Registration) ([]IdeaTicket, bool, error) {
+	if src, ok := s.inner.(TicketIdeasSource); ok && !reg.Agent {
+		return src.ReadTicketIdeas(reg)
+	}
+	return nil, false, nil
+}
+
 // ReadClosedTopics forwards to the configured source; an agent conversation
 // has no board.
 func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n int) (template.HTML, bool) {
@@ -216,6 +233,15 @@ func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n i
 		return cs.ReadClosedTopics(reg, lang, from, n)
 	}
 	return "", false
+}
+
+// ReadTopicHistory forwards to the configured source; an agent conversation
+// has no board.
+func (s agentSessions) ReadTopicHistory(reg Registration, lang string, names []string, target string) ([]wswhiteboard.TopicFragment, bool) {
+	if hs, ok := s.inner.(TopicHistorySource); ok && !reg.Agent {
+		return hs.ReadTopicHistory(reg, lang, names, target)
+	}
+	return nil, false
 }
 
 // ReadOutsideLinks forwards to the configured source; an agent conversation

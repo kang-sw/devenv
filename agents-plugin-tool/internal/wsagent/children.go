@@ -47,7 +47,9 @@ import (
 //     closes. A failed or interrupted turn is never held.
 //   - Close. Closing a conversation closes its open descendants first,
 //     deepest first. A process stop (idle, settings, the stop route) does
-//     not: a child's report resumes the stopped parent.
+//     not: a child's report resumes the stopped parent. A spawned Pi child
+//     closes on its own once its turn settled done, its report reached
+//     its parent, and nothing waits (closeWhenDone); Send reopens it.
 
 // Env names the runner sets on the ws-mcp it attaches to a spawned
 // conversation that may spawn (children.go).
@@ -463,6 +465,11 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 		writeAnswer(w, http.StatusOK, st, err)
 	case "stop":
 		st, err := r.CloseConversation(body.ID)
+		if err == errClosed {
+			// A finished child closes on its own (closeWhenDone): a stop
+			// after that finds it as asked.
+			st, err = r.Get(body.ID)
+		}
 		writeAnswer(w, http.StatusOK, st, err)
 	case "transcript":
 		records, err := r.Transcript(body.ID)
@@ -525,11 +532,11 @@ func (r *Runner) deliver(id string) {
 	if parent == nil {
 		return
 	}
+	var taken []PendingReport
 	parent.do(func() {
 		if parent.closed {
 			return
 		}
-		var taken []PendingReport
 		child.update(func(rec *Record) {
 			if !child.closed {
 				taken, rec.PendingReports = rec.PendingReports, nil
@@ -543,6 +550,11 @@ func (r *Runner) deliver(id string) {
 			parent.takeReport(ReportText(TurnReport{Parent: *rec.Parent, Child: st, Result: rep.Result}))
 		}
 	})
+	if len(taken) > 0 {
+		// A step of the child's loop, which then finds it finished
+		// (closeWhenDone) now that its report is delivered.
+		child.do(func() {})
+	}
 }
 
 // deliverPending hands every open conversation's pending reports to its
@@ -588,6 +600,7 @@ func (c *conv) steerWorker() {
 	// the drain and its coverage against Send, as kick does for prompts.
 	c.mu.Lock()
 	recs, _ := wsinbox.DrainSteer(c.inbox)
+	c.held = max(0, c.held-len(recs))
 	covered := c.sends
 	c.mu.Unlock()
 	var parts []string
@@ -792,15 +805,16 @@ func (r *Runner) releaseLater(id string) {
 }
 
 // descendants are conversation id's open descendants through
-// conversation parents, deepest first.
+// conversation parents, and through a lead's mailbox reply-id (its
+// conversation id) for the Pi children it spawned, deepest first.
 func (r *Runner) descendants(id string) []string {
 	r.mu.Lock()
 	byParent := map[string][]string{}
 	for cid, c := range r.convs {
 		c.mu.Lock()
-		p := c.rec.Parent
+		p, backend := c.rec.Parent, c.rec.Backend
 		c.mu.Unlock()
-		if p != nil && p.Kind == ParentConversation {
+		if p != nil && (p.Kind == ParentConversation || p.Kind == ParentLead && backend == BackendPi) {
 			byParent[p.ReplyID] = append(byParent[p.ReplyID], cid)
 		}
 	}
@@ -835,11 +849,11 @@ var waitChecked func()
 func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asParent bool) (TurnResult, error) {
 	r.mu.Lock()
 	c, open := r.convs[id]
-	_, closed := r.closed[id]
+	rec, closed := r.closed[id]
 	r.mu.Unlock()
 	switch {
 	case closed:
-		return TurnResult{ID: id, Status: TurnClosed}, nil
+		return closedTurn(rec, asParent), nil
 	case !open:
 		return TurnResult{}, errUnknown
 	}
@@ -885,6 +899,10 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 			})
 			if handed {
 				last.Message, last.Error, last.Delivered = "", "", true
+			} else {
+				// A step of the child's loop, which then finds it finished
+				// (closeWhenDone) now that its report is delivered.
+				c.do(func() {})
 			}
 		}
 		return last, true, nil, false
@@ -919,6 +937,28 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 			return end(TurnRunning)
 		}
 	}
+}
+
+// closedTurn answers a wait on closed conversation rec: its last reported
+// turn when that turn took every message sent it, since a finished Pi
+// child closes on its own (closeWhenDone) before its parent may ask, else
+// TurnClosed. As for an open child, a conversation parent's wait gets the
+// turn marked Delivered when the runner handed its report over, and in
+// full when a wait of its own took it; a report still pending stays there
+// for a reopened child to deliver.
+func closedTurn(rec Record, asParent bool) TurnResult {
+	last := rec.LastTurn
+	if last == nil || last.Mark < rec.Sends {
+		return TurnResult{ID: rec.ReplyID, Status: TurnClosed}
+	}
+	res := last.Result
+	if asParent && last.ID != "" {
+		if slices.ContainsFunc(rec.PendingReports, func(p PendingReport) bool { return p.ID == last.ID }) {
+			return TurnResult{ID: rec.ReplyID, Status: TurnClosed}
+		}
+		res.Message, res.Error, res.Delivered = "", "", true
+	}
+	return res
 }
 
 // unwait ends a conversation parent's wait for target. Under mu, once per

@@ -74,12 +74,14 @@ func RepoLoad(dir string) (map[string]Record, error) {
 // sibling "<hex>.json.lock" would be picked up by the caller's ordinary
 // `git status`/`git add ai-docs/ws-notes/` and committed as orphaned litter,
 // defeating the layer's clean-tracking contract.
-func RepoWrite(dir string, records []Record) error {
+func RepoWrite(dir string, records []Record, caches ...*Cache) error {
+	entry, unlockCache := lockCache(caches, dir)
+	defer unlockCache()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create repo note dir: %w", err)
 	}
 	for _, rec := range records {
-		if err := writeRepoRecordFile(dir, rec); err != nil {
+		if err := writeRepoRecordFile(dir, rec, entry); err != nil {
 			return err
 		}
 	}
@@ -179,7 +181,7 @@ func atomicWriteRepoRecordFileLocked(dir, path string, rec Record) error {
 // preserve-on-overwrite / default-true-on-new-key contract is enforced
 // race-free at the same serialization point as the write itself — never as a
 // separate Load-then-Write pair.
-func writeRepoRecordFile(dir string, rec Record) error {
+func writeRepoRecordFile(dir string, rec Record, entry *cacheEntry) error {
 	path := filepath.Join(dir, repoKeyFilename(rec.Key))
 
 	unlock, err := lockRepoRecordFile(path)
@@ -196,7 +198,11 @@ func writeRepoRecordFile(dir string, rec Record) error {
 		rec.Visible = true
 	}
 
-	return atomicWriteRepoRecordFileLocked(dir, path, rec)
+	if err := atomicWriteRepoRecordFileLocked(dir, path, rec); err != nil {
+		return err
+	}
+	entry.putRepo(dir, rec)
+	return nil
 }
 
 // RepoSetVisible sets Visible to visible for each listed key's tracked file
@@ -207,16 +213,18 @@ func writeRepoRecordFile(dir string, rec Record) error {
 // touches any other field — WrittenAt in particular stays byte-identical
 // across a mute/unmute call. A missing key is silently skipped, matching
 // RepoErase's missing-key no-op precedent.
-func RepoSetVisible(dir string, keys []string, visible bool) error {
+func RepoSetVisible(dir string, keys []string, visible bool, caches ...*Cache) error {
+	entry, unlockCache := lockCache(caches, dir)
+	defer unlockCache()
 	for _, key := range keys {
-		if err := setRepoRecordVisible(dir, key, visible); err != nil {
+		if err := setRepoRecordVisible(dir, key, visible, entry); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func setRepoRecordVisible(dir, key string, visible bool) error {
+func setRepoRecordVisible(dir, key string, visible bool, entry *cacheEntry) error {
 	path := filepath.Join(dir, repoKeyFilename(key))
 
 	unlock, err := lockRepoRecordFile(path)
@@ -234,17 +242,24 @@ func setRepoRecordVisible(dir, key string, visible bool) error {
 	}
 	rec.Visible = visible
 
-	return atomicWriteRepoRecordFileLocked(dir, path, rec)
+	if err := atomicWriteRepoRecordFileLocked(dir, path, rec); err != nil {
+		return err
+	}
+	entry.putRepo(dir, rec)
+	return nil
 }
 
 // RepoErase removes each listed key's tracked file from dir. A missing key
 // is a no-op, matching Erase's contract.
-func RepoErase(dir string, keys []string) error {
+func RepoErase(dir string, keys []string, caches ...*Cache) error {
+	entry, unlockCache := lockCache(caches, dir)
+	defer unlockCache()
 	for _, key := range keys {
 		path := filepath.Join(dir, repoKeyFilename(key))
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove repo note file %s: %w", path, err)
 		}
+		entry.eraseRepo(key)
 	}
 	return nil
 }

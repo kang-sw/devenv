@@ -73,6 +73,12 @@ func TestTopicBodyImageRelayStaysNarrow(t *testing.T) {
 		{"/s/rid1/file?path=%2Fa.png", "/s/rid1/file?path=%2Fa.png", false},     // another route
 		{"/s/rid1/image?path=%2Fa.txt", "/s/rid1/image?path=%2Fa.txt", false},   // not an image name
 		{"/s/rid1/image?path=%2Fa.png&x=1", "/s/rid1/image?path=%2Fa.png&x=1", false},
+		{ok + "&v=k3x9.1a", ok + "&v=k3x9.1a", true}, // the served page's version
+		{ok + "&v=", ok + "&v=", false},
+		{ok + "&v=K", ok + "&v=K", false},
+		{ok + "&v=1&v=2", ok + "&v=1&v=2", false},
+		{ok + "&x=1&v=2", ok + "&x=1&v=2", false},
+		{"/s/rid1/image?path=%2Fa.txt&v=1", "/s/rid1/image?path=%2Fa.txt&v=1", false},
 		{"/s/rid1/image?path=%2Fa.png#f", "/s/rid1/image?path=%2Fa.png#f", false},
 		{"/s/rid1/image?path=%E0%A4%A.png", "/s/rid1/image?path=%E0%A4%A.png", false}, // malformed escape
 		{"http://evil.example/s/rid1/image?path=a.png", "http://evil.example/s/rid1/image?path=a.png", false},

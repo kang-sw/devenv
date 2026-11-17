@@ -523,21 +523,24 @@ copy-only path link in its place, and its link offers the copies only; for
 a viewer on this machine its menu offers open in new tab and open in native
 app, not open in system browser. On a served page each topic body on the board
 renders in its own sandboxed `srcdoc` frame (`allow-scripts allow-popups
-allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
-its images are inlined as `data:` URLs up to 2 MiB under the same containment
-(`wsdashboard.ImageDataURL`); a larger image falls back to the image route,
-which a LAN viewer's frame cannot load. An absolute image path outside the
-root is never inlined (the frame's content is the same for every viewer):
-it stays path text marked `data-relay` with its image route URL, and the
-frame element lists those URLs as its own `data-relay`. The frame cannot load
+allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie). No
+server response inlines an image as a `data:` URL: each file image in a
+topic body, inside the root or outside it, stays path text marked
+`data-relay` with its image route URL, and the frame element lists those
+URLs as its own `data-relay`. The frame cannot load
 that route itself (its opaque origin's requests are `Sec-Fetch-Site:
 cross-site`, which the route 404s), so it asks the page by `postMessage`;
 the page's relay handler accepts the request only from one of its own body
 frames and only for a URL on that frame's list that is this session's image
 route for an image name, fetches it same-origin (served only to a loopback
-viewer), and posts the frame an image `Blob`, which the frame shows in the
-path text's place once it decodes. A LAN viewer's fetch 404s and the path
-text stays. The served board renders the 30 most
+viewer when outside the root), and posts the frame an image `Blob`, which
+the frame shows in the path text's place once it decodes. A LAN viewer's
+fetch of an outside image 404s and the path text stays. The route streams
+the file as is with an ETag of its size and modification time, and caches
+a URL whose `&v=` matches that version as immutable. A loopback viewer is
+also served a message attachment by its absolute path in a session's inbox
+attachments directory, which the credential deny set otherwise refuses with
+the rest of the daemon's state directory. The served board renders the 30 most
 recently closed topics (with nothing waiting on the user) and a show-more
 control; `GET /s/<reply-id>/closed?from=<index>&n=<count>` (from at least 1,
 n default 30, at most 300) answers `{html}` with the next closed topics in
@@ -723,9 +726,11 @@ Pi steer at the next tool boundary; with no turn running, a new turn at once;
 a closed child resumes on the same session file, keeping its id, cwd, model,
 effort, and label; a missing session file is refused), `pi.list` (the caller's
 own children), `pi.stop` (ends the process and closes its descendants; the
-record stays resumable by `pi.send`), `pi.transcript`, and
+record stays resumable by `pi.send`; a child already closed answers as
+stopped), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
-send). The daemon mails each settled turn to the parent lead's reply-id
+send; on a closed child, its last reported turn when that turn took every
+message sent). The daemon mails each settled turn to the parent lead's reply-id
 queue with the display-only label `pi:<subagent id>` (no reply address) and
 wakes the mailbox waits; the first body line directs replies through `pi.send`,
 not `mailbox.send`. For other senderless system mail without a label,
@@ -831,7 +836,17 @@ owns the whole tree:
   settles before the restart sends the input the record kept for the next
   turn, so that next turn stays open.
 - **Close.** Closing a conversation closes its open descendants first,
-  deepest first. `pi.send` can reopen a closed Pi child alone on its
+  deepest first; closing a hosted lead also closes the Pi children it
+  spawned. A Pi child closes on its own once a turn settled done, its
+  report reached its parent, and nothing waits (no turn, background task,
+  or open descendant; no held, queued, or claimed input; no held turn):
+  checked after each step of its loop, including report delivery and the
+  idle timeout. A failed or interrupted child stays open, since a closed
+  row shows no failure. A daemon start closes an open record that already meets this
+  (unless a holder may still run its process), or whose conversation parent
+  is closed or gone, instead of serving it. A closed Pi child's directory
+  ages out after the registry retention, counted from its last row write.
+  `pi.send` can reopen a closed Pi child alone on its
   existing session file; descendants stay closed until sent to themselves. A process stop (the stop route, an idle stop, a settings
   change) does not cascade, and a child's report resumes the stopped
   parent. A report to a closed parent stays in the child's record.
@@ -1250,6 +1265,16 @@ fingerprint did or did not change), `tracker_reloads`,
 cache's `<kind>_cache_hits` and `<kind>_cache_misses` (a miss reads the
 file): `snapshot` (the daemon's pages), `source_snapshot` (session
 re-reads), `record`, `reply_registry`, and `scope_store`.
+
+The same route includes `file_io_total`, per-operation `file_io_<operation>`,
+and `file_io_site:<package>/<file>:<line>:<operation>` counters for instrumented
+hot identity, inbox, permission, evidence, snapshot and folder-store paths.
+These count attempted OS API operations, including failures and retries, not
+estimated costs or every kernel syscall. `read_file` includes its internal
+open/read; `create_temp` includes temp creation, and `atomic_replace` counts
+actual replacement attempts. Third-party flock and directory-entry `Info`
+operations are not included. Counts are process-lifetime and never reset by
+reading the route; compare two samples over the same observation interval.
 
 Session holders: a holder is a small Python process (standard library only,
 3.10 or newer) that owns one child process, over pipes or a PTY (ConPTY on

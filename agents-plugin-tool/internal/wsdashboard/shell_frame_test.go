@@ -1,7 +1,9 @@
 package wsdashboard
 
 import (
+	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,4 +330,28 @@ check("/ in an input types", fire({ key: "/" }, "input"), 0);
 process.stdout.write(bad.join("\n"));
 })();
 `)
+}
+
+// TestFramePageAndItsStreamShareOneRead pins the session-switch hand-off: a
+// frame page request renders through the shared page and keeps it, so the
+// stream the frame opens next sends its first frame from that read instead
+// of reading the session again; a change after the page still re-renders.
+func TestFramePageAndItsStreamShareOneRead(t *testing.T) {
+	f := startPageFixture(t)
+	reads, renders := f.src.readCount("livesession"), f.d.stats.SessionRenders.Load()
+	if code, body := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusOK || !strings.Contains(body, "live board text") {
+		t.Fatalf("frame page = %d", code)
+	}
+	events := openStream(t, f.base+"/s/livesession/events?frame=1")
+	if got := quiet(t, events); len(got) == 0 {
+		t.Fatal("the stream sent no first frame")
+	}
+	if got := f.src.readCount("livesession") - reads; got != 1 {
+		t.Errorf("page open plus stream subscribe read the session %d times, want 1", got)
+	}
+	if got := f.d.stats.SessionRenders.Load() - renders; got != 1 {
+		t.Errorf("page open plus stream subscribe rendered %d times, want 1", got)
+	}
+	f.change(t, "livesession", f.project, "changed after the page", 4)
+	waitRegionHolding(t, events, regionBoard, "changed after the page")
 }

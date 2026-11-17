@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -19,13 +19,14 @@ func whiteboardFolder(root, key string) wswhiteboard.FolderStore {
 	return wswhiteboard.FolderStore{Dir: filepath.Join(root, filepath.FromSlash(whiteboardDirRel), wsmailbox.ReplyID(key))}
 }
 
+// watchWhiteboardFiles names the board folder's two commit roots, not its
+// leaves: every commit (load-time recovery included) replaces meta.json and
+// committed.json after its panel, log, and topic writes, and the takeover edit
+// replaces meta.json. Their stats therefore cover every authoritative file
+// without a folder walk or a stat per topic file.
 func watchWhiteboardFiles(dir string, watch func(string)) {
-	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err == nil && !entry.IsDir() && (filepath.Ext(path) == ".json" || filepath.Ext(path) == ".jsonl") {
-			watch(path)
-		}
-		return nil
-	})
+	watch(filepath.Join(dir, "meta.json"))
+	watch(filepath.Join(dir, "committed.json"))
 }
 
 func (s *sessionStore) readWhiteboard(key string) (sessionRecord, error) {
@@ -43,17 +44,17 @@ func (s *sessionStore) readWhiteboard(key string) (sessionRecord, error) {
 }
 
 func openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
-	return openWhiteboardCached(record, key, raw, nil)
+	return openWhiteboardCached(record, key, raw, &wswhiteboard.SharedFolderCache)
 }
 
 func (src *DashboardSessionSource) openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
-	return openWhiteboardCached(record, key, raw, &src.folders)
+	return openWhiteboard(record, key, raw)
 }
 
 func openWhiteboardCached(record *sessionRecord, key string, raw io.Writer, cache *wswhiteboard.FolderCache) error {
 	folder := whiteboardFolder(record.Root, key)
 	if record.Whiteboard != nil {
-		if _, err := os.Stat(filepath.Join(folder.Dir, "meta.json")); os.IsNotExist(err) {
+		if _, err := wsstate.Stat(filepath.Join(folder.Dir, "meta.json")); os.IsNotExist(err) {
 			if err := registerWhiteboardExclude(wsgit.ExecRunner{}, record.Root, filepath.Dir(folder.Dir)); err != nil {
 				return err
 			}

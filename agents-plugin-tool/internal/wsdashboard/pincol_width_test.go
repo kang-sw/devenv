@@ -14,8 +14,7 @@ import (
 // remaining width to the window's right edge, 280px at least. From 1600px both drawers (the session drawer's
 // .dr-in, the tracker's through --tkmaxw and --tkml) span the window, so
 // their handles stand at its right edge whether or not anything is pinned,
-// while the session drawer's sheet stays 960px at most (its git sheet
-// 1280px), anchored right under them, clear of the session rail.
+// while both sheets stay 1280px at most, anchored right under them.
 func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
@@ -25,8 +24,7 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 		`@media (min-width: 1600px) {
   .dr-in { max-width: none; }
   .dash:not(.index) { --tkmaxw: none; }
-  .dr-clip { left: auto; width: min(960px, calc(100% - 2 * var(--dpad))); }
-  .dr-clip:has(> .dr-sheet > .gbody:not([hidden])) { width: min(1280px, calc(100% - 2 * var(--dpad))); }
+  .dr-clip { left: auto; width: min(1280px, calc(100% - 2 * var(--dpad))); }
 }`,
 		"@media (min-width: 1600px) { .dgrid.board { margin: 0; } }",
 		".dash { --tkml: 0px; }",

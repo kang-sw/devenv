@@ -36,6 +36,8 @@ type PiAgents interface {
 	Spawn(wsagent.SpawnSpec) (wsagent.State, error)
 	Send(id, text string) (wsagent.State, error)
 	Get(id string) (wsagent.State, error)
+	// Lineage reads a conversation's spawn edge without Get's file reads.
+	Lineage(id string) (wsagent.State, error)
 	Children(parent wsagent.ParentRef) []wsagent.State
 	CloseConversation(id string) (wsagent.State, error)
 	Wait(ctx context.Context, id string, timeout time.Duration) (wsagent.TurnResult, error)
@@ -208,6 +210,13 @@ func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool stri
 		return toolTextResponse(id, fmt.Sprintf("sent to Pi subagent %s: starts a turn if idle, otherwise steers its running turn at the next tool boundary. That turn's completion mail covers the message.\n", child), nil)
 	case "pi.stop":
 		st, err := s.pi.agents.CloseConversation(child)
+		if err != nil {
+			// A finished child closes on its own: a stop after that finds
+			// it as asked.
+			if cur, gerr := s.pi.agents.Get(child); gerr == nil && cur.Status == wsagent.StatusClosed {
+				st, err = cur, nil
+			}
+		}
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}

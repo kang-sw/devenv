@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"os"
@@ -39,10 +40,44 @@ type planUsageStore struct {
 	getenv      func(string) string
 	claude, gpt planUsageEntry
 	lastQuery   time.Time
+	// probing marks the one background probe in flight; probes lets tests
+	// wait for it. Both are guarded by mu.
+	probing bool
+	probes  sync.WaitGroup
+	hist    planUsageHistoryMemo
 	// Request dependencies are private test seams, not configuration knobs.
 	// Production always uses the fixed HTTPS origin below for both readers.
 	usageURL string
 	client   *http.Client
+	// File-system seams for the history memo; nil means os.Stat/os.ReadFile.
+	statFile func(string) (os.FileInfo, error)
+	readFile func(string) ([]byte, error)
+	// Write seam for both usage files; nil means writePrivateFile.
+	writeFile func(dir, name string, data []byte) error
+	// detected memoizes detect() by the credential files' stats. Guarded by mu.
+	detected usageDetectMemo
+}
+
+// usageCredStat identifies one credential file version. Only the detected
+// plan/mode/presence is memoized, never file contents.
+type usageCredStat struct {
+	path    string
+	missing bool
+	size    int64
+	modTime int64
+}
+type usageDetectMemo struct {
+	ok        bool
+	stats     [3]usageCredStat
+	plan      string
+	codex, pi bool
+}
+
+func (s *planUsageStore) write(name string, data []byte) error {
+	if s.writeFile != nil {
+		return s.writeFile(s.dir, name, data)
+	}
+	return writePrivateFile(s.dir, name, data)
 }
 
 func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageStore {
@@ -62,7 +97,7 @@ func (s *planUsageStore) saveLocked() {
 		GPT    planUsageEntry `json:"gpt"`
 	}{s.claude, s.gpt})
 	if err == nil {
-		_ = writePrivateFile(s.dir, planUsageCache, raw)
+		_ = s.write(planUsageCache, raw)
 	}
 }
 func validUsage(percent float64) bool {
@@ -88,6 +123,14 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	if snap.UpdatedAt < s.claude.AsOf {
 		return
 	}
+	// Sessions disagree near a window boundary: a stale one still reports the
+	// expired five-hour window while a fresh one reports none. Taking either
+	// as-is made the window flap on every refresh, and each flap rewrote the
+	// whole history file. So an expired reported window is ignored, and a
+	// report without a kind ends only a window that has already expired. Live
+	// matches currentUsage: an unknown (zero) reset never expires.
+	now := time.Now().UnixMilli()
+	live := func(reset int64) bool { return reset == 0 || reset > now }
 	changed := false
 	present := make(map[string]bool, len(snap.Usage.Limits))
 	for _, v := range snap.Usage.Limits {
@@ -95,7 +138,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	}
 	kept := s.claude.Windows[:0]
 	for _, old := range s.claude.Windows {
-		if present[old.Kind] {
+		if present[old.Kind] || live(old.ResetsAt) {
 			kept = append(kept, old)
 		} else {
 			changed = true
@@ -108,7 +151,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 			continue
 		}
 		next := planUsageWindow{Kind: v.Kind, Percent: v.Percent, ResetsAt: v.ResetsAt, AsOf: snap.UpdatedAt}
-		if next.AsOf <= 0 {
+		if next.AsOf <= 0 || !live(next.ResetsAt) {
 			continue
 		}
 		i := 0
@@ -142,7 +185,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		s.claude.Harness = "claude"
 		s.claude.Source = "Claude push"
 		s.saveLocked()
-		s.appendHistoryLocked(samples, time.Now().UnixMilli())
+		s.appendHistoryLocked(samples, now)
 	}
 }
 
@@ -170,29 +213,62 @@ func (s *planUsageStore) configHome(key, fallback string) string {
 	return filepath.Join(s.home, fallback)
 }
 
-// Detection decodes only plan/mode/presence, never credential values.
+// Detection decodes only plan/mode/presence, never credential values. Every
+// usage request detects, so the result is memoized by the three files' stats
+// (path, size, mtime): an unchanged set costs three stats and no reads. A
+// rewrite keeping both size and mtime goes unnoticed until the next change.
 func (s *planUsageStore) detect() (claudePlan string, codexLogin, piLogin bool) {
+	paths := [3]string{
+		filepath.Join(s.configHome("CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json"),
+		filepath.Join(s.configHome("CODEX_HOME", ".codex"), "auth.json"),
+		filepath.Join(s.home, ".pi", "agent", "auth.json"),
+	}
+	var stats [3]usageCredStat
+	cacheable := true
+	for i, path := range paths {
+		stats[i].path = path
+		info, err := os.Stat(path)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			stats[i].missing = true
+		case err != nil:
+			cacheable = false
+		default:
+			stats[i].size, stats[i].modTime = info.Size(), info.ModTime().UnixNano()
+		}
+	}
+	s.mu.Lock()
+	m := s.detected
+	s.mu.Unlock()
+	if cacheable && m.ok && m.stats == stats {
+		return m.plan, m.codex, m.pi
+	}
 	var claude struct {
 		OAuth struct {
 			Plan string `json:"subscriptionType"`
 		} `json:"claudeAiOauth"`
 	}
-	if readUsageJSON(filepath.Join(s.configHome("CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json"), &claude) {
+	if readUsageJSON(paths[0], &claude) {
 		claudePlan = claude.OAuth.Plan
 	}
 	var codex struct {
 		Mode   string    `json:"auth_mode"`
 		Tokens *struct{} `json:"tokens"`
 	}
-	if readUsageJSON(filepath.Join(s.configHome("CODEX_HOME", ".codex"), "auth.json"), &codex) {
+	if readUsageJSON(paths[1], &codex) {
 		codexLogin = codex.Mode == "chatgpt" || (codex.Mode == "" && codex.Tokens != nil)
 	}
 	var pi struct {
 		Codex *struct{} `json:"openai-codex"`
 	}
-	if readUsageJSON(filepath.Join(s.home, ".pi", "agent", "auth.json"), &pi) {
+	if readUsageJSON(paths[2], &pi) {
 		piLogin = pi.Codex != nil
 	}
+	// Stat precedes read, so a replace in between memoizes newer content under
+	// an older stat and costs only one extra read next time.
+	s.mu.Lock()
+	s.detected = usageDetectMemo{ok: cacheable, stats: stats, plan: claudePlan, codex: codexLogin, pi: piLogin}
+	s.mu.Unlock()
 	return
 }
 func currentUsage(e planUsageEntry, now int64) planUsageEntry {
@@ -255,10 +331,11 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cross-origin pages cannot set the custom header without a CORS preflight, which the daemon does not grant.
 	refresh := r.URL.Query().Get("refresh") == "1" && (r.Header.Get("Sec-Fetch-Site") == "same-origin" || sameOrigin(r) || r.Header.Get("X-WS-Usage-Refresh") == "1")
-	d.planUsage.query(r.Context(), refresh)
-	body := map[string]any{"entries": d.planUsage.entries(), "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
+	d.planUsage.refresh(r.Context(), refresh)
+	entries := d.planUsage.entries()
+	body := map[string]any{"entries": entries, "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
 	if r.URL.Query().Get("history") == "1" {
-		body["history"] = d.planUsage.history(time.Now().UnixMilli())
+		body["history"] = d.planUsage.historyView(entries, time.Now().UnixMilli())
 	}
 	_ = json.NewEncoder(w).Encode(body)
 }

@@ -25,7 +25,7 @@ const trackerSecretRemote = "https://user:secret-token@example.invalid/x.git"
 
 // isolateGit points git at an empty global config, so a developer's
 // signing defaults, hooks, or url rewrites do not reach the test's stores.
-func isolateGit(t *testing.T) {
+func isolateGit(t testing.TB) {
 	t.Helper()
 	global := filepath.Join(t.TempDir(), "gitconfig")
 	if err := os.WriteFile(global, []byte("[init]\n\tdefaultBranch = main\n"), 0o644); err != nil {

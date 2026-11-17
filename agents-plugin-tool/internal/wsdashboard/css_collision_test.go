@@ -33,6 +33,12 @@ var cssModules = []struct {
 // those modules may both define it. A new module joining the class is a new
 // collision and fails.
 var allowedCSSOverlaps = map[string]string{
+	"cat dashboard,whiteboard":          "wide drawer restyles existing ticket atoms only under #p-tickets",
+	"csub dashboard,whiteboard":         "wide drawer restyles existing ticket atoms only under #p-tickets",
+	"ctitle dashboard,whiteboard":       "wide drawer restyles existing ticket atoms only under #p-tickets",
+	"kcard dashboard,whiteboard":        "wide drawer restyles existing ticket atoms only under #p-tickets",
+	"lane dashboard,whiteboard":         "wide drawer restyles existing ticket atoms only under #p-tickets",
+	"lanes dashboard,whiteboard":        "wide drawer restyles existing ticket atoms only under #p-tickets",
 	"wsc-backing dashboard,memo":        "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
 	"wsc-capsule dashboard,memo":        "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",
 	"wsc-editor dashboard,memo":         "both pages mount the shared capsules.js editor; memo.css scopes its copy under .memo-pad",

@@ -38,6 +38,7 @@ type conv struct {
 	turn          bool
 	lastErr       string
 	closed        bool
+	held          int // inbox messages, maintained at inbox changes/drains under mu
 	hidden        bool
 	contextTokens *float64
 	outputTps     *float64
@@ -59,6 +60,9 @@ type conv struct {
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
 	failure   *wslive.Notice
 	mcpBroken []string
+	// heldKinds memoizes refreshHeld's reads under mu: held entry name ->
+	// whether it is a message (not an interrupt entry).
+	heldKinds map[string]bool
 
 	// loop-owned.
 	events      <-chan Event
@@ -150,6 +154,9 @@ type conv struct {
 	// retry (kick) and cleared by the next send that succeeds; a send that
 	// fails again meanwhile waits for the next inbox or mail signal.
 	sendRetried bool
+	// autoClosing is set while a close of this finished Pi child is
+	// dispatched (closeWhenDone) and not yet run; loop-owned.
+	autoClosing bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
@@ -255,6 +262,7 @@ func (c *conv) mailChanged() {
 // inboxChanged takes the inbox's interrupt requests and submits the held
 // messages, starting the process when needed (kick). It runs in the loop.
 func (c *conv) inboxChanged() {
+	c.refreshHeld()
 	c.checkInterrupt()
 	c.steer()
 	c.kick()
@@ -278,7 +286,10 @@ func (c *conv) steer() {
 	if st == nil {
 		return
 	}
+	c.mu.Lock()
 	recs, _ := wsinbox.DrainSteer(c.inbox)
+	c.held = max(0, c.held-len(recs))
+	c.mu.Unlock()
 	var parts []string
 	for _, rec := range recs {
 		if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
@@ -410,6 +421,7 @@ func (c *conv) loop() {
 		if c.settle() {
 			return
 		}
+		c.closeWhenDone()
 	}
 }
 
@@ -429,11 +441,46 @@ func (c *conv) settle() bool {
 	return true
 }
 
-func (c *conv) state() State {
+// refreshHeld reads only this conversation's inbox, never a global listing.
+// It lists the inbox on every call, since another process may add or claim
+// an entry, but opens only names it has not read yet: a held entry file is
+// never rewritten (wsinbox.ReadHeld), so a known name's kind stays valid.
+// The count is what wsinbox.Held would return: readable non-interrupt
+// entries. An unreadable entry is not remembered and is retried next time.
+func (c *conv) refreshHeld() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.r.opts.stateInboxRead != nil {
 		c.r.opts.stateInboxRead(c.rec.ReplyID)
 	}
-	held, _ := wsinbox.Held(c.inbox)
+	names, err := wsinbox.Names(c.inbox)
+	if err != nil {
+		return
+	}
+	kinds := make(map[string]bool, len(names))
+	held := 0
+	for _, name := range names {
+		message, known := c.heldKinds[name]
+		if !known {
+			entry, err := wsinbox.ReadHeld(c.inbox, name)
+			if err != nil {
+				continue
+			}
+			message = !entry.Interrupt
+		}
+		kinds[name] = message
+		if message {
+			held++
+		}
+	}
+	c.heldKinds, c.held = kinds, held
+}
+
+func (c *conv) state() State { return c.stateWithKeyCheck(true) }
+
+func (c *conv) memoryState() State { return c.stateWithKeyCheck(false) }
+
+func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	st := closedState(c.rec)
@@ -461,9 +508,9 @@ func (c *conv) state() State {
 			st.Lifecycle = wsdashboard.SessionActiveOn
 		}
 	}
-	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
+	st.Held = c.held + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
-	if c.rejoinKeyPending {
+	if c.rejoinKeyPending && checkKey {
 		if err := c.r.opts.LeadKeys.EnsureLead(c.rec.Root, c.rec.WSKey); err != nil {
 			st.Error = appendDiagnostic(st.Error, "rejoin ws session key (advisory): "+err.Error())
 		} else {
@@ -644,11 +691,16 @@ func (c *conv) release() {
 	c.dropHeld()
 	c.live.setAdapter("")
 	rec := c.record()
+	st := c.memoryState()
 	c.r.mu.Lock()
 	if c.r.convs[rec.ReplyID] == c {
 		delete(c.r.convs, rec.ReplyID)
 	}
 	c.r.closed[rec.ReplyID] = rec
+	if c.r.closedRows == nil {
+		c.r.closedRows = map[string]State{}
+	}
+	c.r.closedRows[rec.ReplyID] = st
 	c.r.mu.Unlock()
 	fmt.Fprintf(c.r.opts.Log, "agent %s: handed to a terminal session\n", rec.ReplyID)
 	c.r.notify(rec.ReplyID, rec.Root)
@@ -667,6 +719,7 @@ func (c *conv) dropHeld() {
 		}
 	}
 	_, _ = wsinbox.DrainInterrupt(c.inbox)
+	c.setStatus(func() { c.held = 0 })
 }
 
 // apply applies a wslive event and tells the daemon when it wrote. quiet
@@ -745,7 +798,12 @@ func (c *conv) kick() {
 	if c.closed || c.hidden || c.turn || c.replaying || len(c.steered) > 0 || c.leverC != nil || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
 		return
 	}
+	c.mu.Lock()
 	held, err := wsinbox.Held(c.inbox)
+	if err == nil {
+		c.held = len(held)
+	}
+	c.mu.Unlock()
 	mail := c.rec.Mail
 	// A child's reports (children.go) go with the next message turn, as
 	// mail does.
@@ -774,6 +832,7 @@ func (c *conv) kick() {
 	// (Wait's turn marks).
 	c.mu.Lock()
 	recs, _ := wsinbox.Drain(c.inbox)
+	c.held = max(0, c.held-len(recs))
 	covered := c.sends
 	c.mu.Unlock()
 	from := c.drained

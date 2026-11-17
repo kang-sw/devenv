@@ -26,7 +26,7 @@ func (s *Server) startPiFeed() {
 // piChanged applies one descendant's change to its owning lead's live sessions
 // in this server. It runs on the child's conversation loop.
 func (s *Server) piChanged(st wsagent.State) {
-	lead := wsagent.SpawnLead(st, s.pi.agents.Get)
+	lead := wsagent.SpawnLead(st, s.pi.agents.Lineage)
 	if lead == "" {
 		return
 	}

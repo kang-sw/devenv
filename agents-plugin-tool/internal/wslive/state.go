@@ -156,7 +156,10 @@ type Result struct {
 	Urgent  bool
 	// Ring holds the conversation entries the event finished.
 	Ring []RingEntry
-	// Observed contains newly accepted response evidence for durable storage.
+	// Observed holds the response evidence durable storage now needs to keep
+	// its fold equal to this state's (State.addObserved): a newly accepted
+	// record that is its agent's first, latest or a model change, and the
+	// record after it when a late record makes that one a change point.
 	Observed []ObservedRecord
 }
 
@@ -469,8 +472,8 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	if (ev.Kind == KindStatus || (ev.Kind == KindAgent && ev.AgentID != "")) && ev.Observed != nil {
 		if o := st.cleanObservation(ev.Observed); o != nil {
 			r := ObservedRecord{AgentID: ev.AgentID, ModelObservation: *o}
-			if st.addObserved(r) {
-				res.Observed = append(res.Observed, r)
+			if accepted, persist := st.addObserved(r); accepted {
+				res.Observed = append(res.Observed, persist...)
 				res.Changed = true
 			}
 		}

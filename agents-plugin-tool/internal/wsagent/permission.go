@@ -96,7 +96,11 @@ func (r *Runner) supportsLeadPermission(backend string, level PermissionLevel) b
 }
 
 func (r *Runner) leadPermission(rec Record, dir string) (PermissionLevel, string, error) {
-	level, explicit, err := readPermissionSelection(dir)
+	level, explicit, err := refreshPermissionSelection(dir)
+	return r.resolveLeadPermission(rec, level, explicit, err)
+}
+
+func (r *Runner) resolveLeadPermission(rec Record, level PermissionLevel, explicit bool, err error) (PermissionLevel, string, error) {
 	if err != nil {
 		return "", "", err
 	}
@@ -110,12 +114,14 @@ func (r *Runner) leadPermission(rec Record, dir string) (PermissionLevel, string
 }
 
 // permissionState is computed even for closed rows; cached records must not
-// cache a selection or old enforcement evidence. Workers deliberately omit it.
+// cache old enforcement evidence. Selection is cached separately and invalidated
+// by permission writes; workers deliberately omit it.
 func (r *Runner) permissionState(st State, rec Record, dir string) State {
 	if !rec.Lead {
 		return st
 	}
-	level, source, err := r.leadPermission(rec, dir)
+	selected, explicit, readErr := cachedPermissionSelection(dir)
+	level, source, err := r.resolveLeadPermission(rec, selected, explicit, readErr)
 	if err != nil {
 		st.Error = appendDiagnostic(st.Error, err.Error())
 		return st

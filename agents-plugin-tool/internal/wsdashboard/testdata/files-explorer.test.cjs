@@ -45,6 +45,66 @@ function explorer(rid, local = true, options = {}) {
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
 function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-root').click(); x.at('.froot-pop .fpin').value = path; x.at('.fgo .pr').click(); }
+async function previewHookChecks() {
+  var dispatched = [], x = explorer('preview-hook', true, { location: { root: '/picked', dir: '' }, preview: (path, o) => dispatched.push([path, o]) });
+  x.instance.shown();
+  await answer(take('preview-hook', 'list'), listing('/picked', [{ name: 'a.txt' }, { name: 'b.txt' }, { name: 'file.bin' }, { name: 'folder', dir: true }]));
+  x.at('.fdirectory').getBoundingClientRect = () => ({ left: 10, right: 510, top: 10, bottom: 600 });
+  x.all('.fentry').forEach(row => row.getBoundingClientRect = () => ({ left: 20, right: 490, top: 30, bottom: 50 }));
+  function click(path, type = 'click') { event(x.at('[data-entry="' + path + '"]'), type); }
+  click('a.txt'); var first = take('preview-hook', 'preview');
+  check('owner preview waits for guarded preflight and carries active root', [dispatched.length, x.previews.length, first.url.searchParams.get('root')], [0, 0, '/picked']);
+  var content = { kind: 'text', text: 'owner' };
+  await answer(first, content);
+  check('owner receives one-shot preflight and media fallback without default card open', [dispatched[0][0], dispatched[0][1].root, dispatched[0][1].answer === content, typeof dispatched[0][1].mediaError, x.previews.length], ['a.txt', '/picked', true, 'function', 0]);
+  click('a.txt', 'dblclick'); await answer(take('preview-hook', 'preview'), content);
+  key(x.at('[data-entry="b.txt"]'), 'Enter'); await answer(take('preview-hook', 'preview'), content);
+  check('double-click and Enter retain durable intent through owner hook', dispatched.slice(1).map(([p, o]) => [p, o.keep]), [['a.txt', true], ['b.txt', true]]);
+  click('file.bin'); await answer(take('preview-hook', 'preview'), { kind: 'none', reason_code: 'binary' });
+  check('binary preflight uses visible row actions before owner dispatch', [dispatched.length, x.previews.length, !!doc.querySelector('.fmenu')], [3, 0, true]);
+  key(doc.querySelector('.fmenu'), 'Escape');
+  click('a.txt'); await answer(take('preview-hook', 'preview'), { kind: 'none', reason: 'size limit' });
+  check('non-binary none answer still reaches owner', dispatched.at(-1)[1].answer.reason, 'size limit');
+  click('a.txt'); await refuse(take('preview-hook', 'preview'));
+  check('preflight refusal delegates existing renderer fallback to owner', [dispatched.length, dispatched.at(-1)[0], 'answer' in dispatched.at(-1)[1], x.previews.length], [5, 'a.txt', false, 0]);
+  click('a.txt'); var stale = take('preview-hook', 'preview');
+  click('b.txt'); await answer(take('preview-hook', 'preview'), content);
+  await answer(stale, content);
+  check('superseded preflight cannot dispatch to owner', [dispatched.length, dispatched.at(-1)[0]], [6, 'b.txt']);
+  click('a.txt'); var navigated = take('preview-hook', 'preview');
+  x.instance.navigate('folder'); await answer(take('preview-hook', 'list', 'folder'), listing('/picked/folder', []));
+  await refuse(navigated);
+  check('late preflight failure after navigation cannot dispatch fallback', dispatched.length, 6);
+  x.instance.navigate('');
+  x.all('.fseg button')[1].click(); x.q.value = 'needle'; event(x.q, 'input'); await timers();
+  await answer(take('preview-hook', 'search'), { files: [{ path: 'deep/match.txt', matches: [{ line: 17, hit: 'needle' }] }] });
+  var hit = x.at('[data-line="17"]'); event(x.hits, 'click', { target: hit });
+  var searchPreview = take('preview-hook', 'preview');
+  check('search hook preflight requests source for line navigation', searchPreview.url.searchParams.get('text'), '1');
+  await answer(searchPreview, content);
+  check('search hook preserves hit line root and answer', [dispatched.at(-1)[0], dispatched.at(-1)[1].line, dispatched.at(-1)[1].root, dispatched.at(-1)[1].answer === content], ['deep/match.txt', 17, '/picked', true]);
+  key(x.q, 'Escape');
+  for (var result of ['text', 'binary', 'refused']) {
+    click('b.txt'); var cancelled = take('preview-hook', 'preview');
+    x.instance.cancelPreview();
+    if (result === 'refused') await refuse(cancelled);
+    else await answer(cancelled, result === 'binary' ? { kind: 'none', reason_code: 'binary' } : content);
+    check('dismissal retires pending ' + result + ' preflight without reopening owner or row menu', [dispatched.length, !!doc.querySelector('.fmenu'), x.instance.selection().path], [7, false, 'b.txt']);
+  }
+  click('a.txt'); await answer(take('preview-hook', 'preview'), content);
+  check('cancelPreview does not block a later intentional file click', [dispatched.length, dispatched.at(-1)[0]], [8, 'a.txt']);
+  click('a.txt'); var destroyed = take('preview-hook', 'preview'); x.instance.destroy();
+  await answer(destroyed, content);
+  check('destroyed owner cannot receive late dispatch', dispatched.length, 8);
+
+  // No hook on toolbar/card/default explorers: all still use WsPreview.open.
+  var fallback = explorer('preview-default'); fallback.instance.shown();
+  await answer(take('preview-default', 'list'), listing('/default', [{ name: 'ordinary.txt' }], true));
+  fallback.at('[data-entry="ordinary.txt"]').click(); await answer(take('preview-default', 'preview'), content);
+  key(fallback.at('[data-entry="ordinary.txt"]'), 'Enter'); await answer(take('preview-default', 'preview'), content);
+  check('unconfigured explorers retain transient and durable board previews', fallback.previews, [['ordinary.txt', {}], ['ordinary.txt', { keep: true }]]);
+  fallback.instance.destroy();
+}
 async function rootFilterChecks() {
   var x = explorer('root-filter'), peer = explorer('root-filter-peer');
   x.instance.shown(); peer.instance.shown();
@@ -361,6 +421,7 @@ async function multiSelectChecks() {
   check('marquee document listeners are retired', ['pointermove', 'pointerup', 'pointercancel'].map(k => doc.listeners[k].length), [0, 0, 0]);
 }
 (async function () {
+  await previewHookChecks();
   await multiSelectChecks();
   // Candidate-root refusal must not cancel legitimate active-root work.
   var race = explorer('race'); race.instance.shown();

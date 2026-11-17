@@ -146,6 +146,14 @@ type Ledger struct {
 	marks         map[EventID]mark
 	received      int // events new to this view during the current call
 
+	// Stamps (stamp.go): refsAt and journalAt are the refs and journal
+	// stamps the last successful refresh read at, "" when it could not
+	// vouch; refLists are the ref listings git gave at the refs stamp
+	// refListsAt, by prefix.
+	refsAt, journalAt string
+	refLists          map[string]map[string]string
+	refListsAt        string
+
 	// Remote state (remote.go).
 	remote        string // remote URL; "" when the store has none
 	remoteChecked bool
@@ -343,7 +351,7 @@ func (l *Ledger) afterOpen(ctx context.Context) error {
 	if !l.hasRemote(ctx) {
 		return nil
 	}
-	if err := l.loadKnownOwn(ctx); err != nil {
+	if err := l.loadKnownOwn(ctx, ""); err != nil {
 		return err
 	}
 	if l.pendingLocked().Count > 0 {
@@ -540,7 +548,7 @@ func (l *Ledger) Exclusive(ctx context.Context, wait time.Duration, fn func(Unpu
 	}
 	u := Unpushed{}
 	if l.hasRemote(ctx) {
-		if err := l.loadKnownOwn(ctx); err != nil {
+		if err := l.loadKnownOwn(ctx, ""); err != nil {
 			return err
 		}
 		local, _, known, err := l.wikiRefs(ctx)
@@ -594,6 +602,7 @@ func (l *Ledger) initClone() error {
 	// One journal per stream, so a store directory reused under another
 	// member id or after MoveToFreshClone never mixes streams.
 	l.journal = newJournal(filepath.Join(l.opts.Dir, "journal."+l.stream+".jsonl"))
+	l.journalAt = "" // the new journal is unread: the next refresh reads it
 	return nil
 }
 
@@ -764,12 +773,21 @@ func (l *Ledger) writeEventCommit(ctx context.Context, parent string, seen map[s
 }
 
 // refresh re-reads the journal and every local ledger ref, parses what
-// moved, checks new signatures, and rebuilds the view.
+// moved, checks new signatures, and rebuilds the view. What did not move
+// since the last refresh is not read again (stamp.go).
 func (l *Ledger) refresh(ctx context.Context) error {
+	now := time.Now()
+	refsAt, journalAt := refsStamp(l.git.dir, now), fileStamp(l.journal.path, now)
+	if refsAt != "" && journalAt != "" && refsAt == l.refsAt && journalAt == l.journalAt {
+		// Nothing a refresh reads moved since the last one, so the state
+		// is what that one left.
+		return nil
+	}
+	l.refsAt, l.journalAt = "", ""
 	if err := l.journal.reload(); err != nil {
 		return err
 	}
-	refs, err := l.git.listRefs(ctx, refPrefix)
+	refs, err := l.listRefsAt(ctx, refsAt, refPrefix)
 	if err != nil {
 		return err
 	}
@@ -848,7 +866,7 @@ func (l *Ledger) refresh(ctx context.Context) error {
 			delete(l.claims, member)
 		}
 	}
-	if err := l.loadAttachRefs(ctx); err != nil {
+	if err := l.loadAttachRefs(ctx, refsAt); err != nil {
 		return err
 	}
 	if err := l.checkSignatures(ctx); err != nil {
@@ -857,6 +875,7 @@ func (l *Ledger) refresh(ctx context.Context) error {
 	l.committedMax = l.ownSeqThrough("")
 	l.rebuild()
 	l.evalAttach()
+	l.refsAt, l.journalAt = refsAt, journalAt
 	return nil
 }
 
@@ -1382,8 +1401,9 @@ func (l *Ledger) Reload(ctx context.Context) (SyncReport, error) {
 			return err
 		}
 		if l.hasRemote(ctx) {
-			// Another process may have pushed this clone's ref.
-			if err := l.loadKnownOwn(ctx); err != nil {
+			// Another process may have pushed this clone's ref; the refresh
+			// just took the refs stamp, under the same lock.
+			if err := l.loadKnownOwn(ctx, l.refsAt); err != nil {
 				return err
 			}
 		}

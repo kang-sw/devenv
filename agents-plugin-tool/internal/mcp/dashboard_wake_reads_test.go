@@ -107,7 +107,10 @@ func TestDashboardFolderSharedReadsDuringUpdateAndRender(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("MCP transaction mutated a cached dashboard generation")
 	}
-	if !strings.Contains(string(readPageOK(t, src, reg).Board.Board), "committed update") {
+	// The latest batch's log line is live on the board; the body version
+	// committed earlier sits in lazy history the page fetches on expand.
+	frags, _ := src.ReadTopicHistory(reg, "", []string{"topic"}, "")
+	if !strings.Contains(string(readPageOK(t, src, reg).Board.Board), "update history") || len(frags) != 1 || !strings.Contains(string(frags[0].HTML), "committed update") {
 		t.Fatal("dashboard missed committed mutation")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsindex"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsnote"
 )
 
 type Server struct {
@@ -22,6 +23,8 @@ type Server struct {
 	sourceCommit      string
 	whiteboardChanged func(cacheHome, root, key string)
 	loginLink         func(string) (string, error)
+	notes             *wsnote.Cache
+	noteBindings      sync.Map // session keys already bound on this connection
 	rootMu            sync.RWMutex
 	sessionHarness    string
 	piDaemonAgents    bool // initialize experimental capability, protected by rootMu

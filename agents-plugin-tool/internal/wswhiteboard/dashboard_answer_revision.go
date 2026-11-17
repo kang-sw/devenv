@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // dashboardAnswerRevisionPrefix distinguishes an owner answer arrival from
@@ -22,7 +24,7 @@ func (f FolderStore) RecordDashboardAnswer(inboxID string, now time.Time) error 
 	}
 	present := false
 	for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-		if _, err := os.Stat(filepath.Join(f.Dir, name)); err == nil {
+		if _, err := wsstate.Stat(filepath.Join(f.Dir, name)); err == nil {
 			present = true
 			break
 		} else if !os.IsNotExist(err) {

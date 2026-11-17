@@ -18,6 +18,30 @@ func composerFunc(t *testing.T, src, name string) string {
 	return block
 }
 
+// outboxDefaults stands in for the page parts the outbox reads that a send
+// harness may not stub: no conversation, no composer row, no draft store. A
+// harness's own declaration, before or after, wins.
+const outboxDefaults = `
+var doc = typeof doc !== "undefined" ? doc : { querySelector: function () { return null; }, createElement: function () { return { appendChild: function () {}, setAttribute: function () {} }; } };
+var q = typeof q !== "undefined" ? q : function () { return []; };
+var marker = typeof marker !== "undefined" ? marker : function (n) { return "[Image #" + n + "]"; };
+var queueDraft = typeof queueDraft !== "undefined" ? queueDraft : function () {};
+var restoreHeld = typeof restoreHeld !== "undefined" ? restoreHeld : function () {};
+var boardOwn = typeof boardOwn !== "undefined" ? boardOwn : {};
+var imgTrash = typeof imgTrash !== "undefined" ? imgTrash : {};
+`
+
+// composerSendSource is sendMessage with the outbox section it hands each
+// message send to, behind outboxDefaults.
+func composerSendSource(t *testing.T, src string) string {
+	t.Helper()
+	outbox := regexp.MustCompile(`(?s)\n  // --- outbox:.*?\n  function outboxSync\(\) \{.*?\n  \}\n`).FindString(src)
+	if outbox == "" {
+		t.Fatal("dashboard.js holds no outbox section ending in outboxSync")
+	}
+	return outboxDefaults + composerFunc(t, src, "sendMessage") + outbox
+}
+
 // composerToastPrelude stubs what the composer's send, cancel, steer and
 // interrupt paths read: a recording toast stack, a post whose answer each
 // case sets, and no-op composer helpers.
@@ -57,7 +81,8 @@ func TestComposerOutcomesToast(t *testing.T) {
 		t.Fatal("dashboard.js holds no noteWarn / noteOk pair")
 	}
 	var fns strings.Builder
-	for _, name := range []string{"sendMessage", "cancelHeld", "steerHeld", "interruptTurn"} {
+	fns.WriteString(composerSendSource(t, src))
+	for _, name := range []string{"cancelHeld", "steerHeld", "interruptTurn"} {
 		fns.WriteString(composerFunc(t, src, name))
 	}
 	runNode(t, "composer toasts", selectionCodecSource(t)+composerToastPrelude+notes+"var sending = false;\n"+fns.String()+`
@@ -65,7 +90,7 @@ sendMessage();
 check("an empty send warns", toasts, [["js.send.empty", "warn"]]);
 toasts = []; ctext.value = "hi"; answer = [false, "busy"]; sendMessage();
 check("a refused send warns", toasts, [["js.send.fail:busy", "warn"]]);
-toasts = []; answer = [true, {}]; sendMessage();
+toasts = []; ctext.value = "hi"; answer = [true, {}]; sendMessage();
 check("a successful send shows no toast", toasts, []);
 toasts = []; answer = [false, "gone"]; cancelHeld(btn()); steerHeld(btn()); interruptTurn();
 check("cancel, steer and interrupt failures warn", toasts, [["js.cancel.fail:gone", "warn"], ["js.steer.fail:gone", "warn"], ["js.interrupt.fail:gone", "warn"]]);

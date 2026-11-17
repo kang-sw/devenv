@@ -544,7 +544,11 @@ func (p *pageData) MermaidFile() string {
 // body inside a sandboxed frame (framedDoc).
 func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	p := pageDataBase(view, a, framed)
-	for _, t := range append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...) {
+	topics := view.Topics
+	if !view.LazyHistory {
+		topics = append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...)
+	}
+	for _, t := range topics {
 		p.prepareTopic(t, a)
 	}
 	return p
@@ -604,11 +608,14 @@ func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
 // prepareTopic runs only after board-wide reference targets are complete.
 func (p *pageData) prepareTopic(t TopicView, a *pageAssets) {
 	if p.Full {
+		// A lazy render emits only the current bodies of live rows; gap rows
+		// and earlier versions come with the complete topic on demand.
+		live := lazyLiveEntries(t, p.LazyHistory)
 		pages := append([]EntryPage{t.Stream}, t.Older...)
 		for _, page := range pages {
 			for _, run := range page.Runs {
 				e := run.Entry
-				if e.Kind == EntryPanel && e.HasBody() {
+				if e.Kind == EntryPanel && e.HasBody() && (live == nil || live[e.ID] && !e.Historical) {
 					p.entries[e.ID] = p.panelHTML(t.Name, e, p.DocFramed, a)
 				}
 			}
@@ -713,11 +720,11 @@ func FrameAsset(name string) (data []byte, contentType string, ok bool) {
 // frames parse them once and every document stays small. mermaid tells the
 // frame to load the shared mermaid script beside the page for its own
 // blocks. An image reaches the frame as whatever src ImageSrc (or
-// DocImageSrc) gave it: the frame's requests carry no cookie, so a served
-// page inlines body images rather than pointing at a route that needs one.
-// An image too large to inline, or outside the session root (whose bytes
-// must not be handed to every viewer), keeps its path text marked
-// data-relay, and the frame lists those URLs as its own
+// DocImageSrc) gave it, except that the frame's requests carry no cookie, so
+// an image a served page points at its cookie-gated image route for, inside
+// the session root or outside it (whose bytes must not be handed to every
+// viewer), keeps its path text marked data-relay instead, and the frame
+// lists those URLs as its own
 // data-relay, space-separated. The host fetches a URL its frame asks for only
 // when it is on that list, which the body's own markup cannot extend, and
 // hands the frame the image (doc-frame.js and the dashboard script).

@@ -237,7 +237,7 @@ func ReadRegistration(dir, replyID string) (Registration, error) {
 	if !ValidReplyID(replyID) {
 		return Registration{}, fmt.Errorf("invalid reply-id %q", replyID)
 	}
-	raw, err := os.ReadFile(filepath.Join(SessionDir(dir, replyID), registrationFileName))
+	raw, err := wsstate.ReadFileOnce(filepath.Join(SessionDir(dir, replyID), registrationFileName))
 	if err != nil {
 		return Registration{}, err
 	}
@@ -264,7 +264,7 @@ func ReadRegistrations(dir string) ([]Registration, error) {
 // failed reports uncertainty without changing the public best-effort listing.
 // Consumers needing admission authority must not treat unreadable as absent.
 func readRegistrations(dir string, failed func(string, error)) ([]Registration, error) {
-	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
+	entries, err := wsstate.ReadDir(filepath.Join(dir, sessionsDirName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -302,7 +302,7 @@ func WriteRegistration(dir string, reg Registration) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(sessionDir, registrationFileName+".*.tmp")
+	tmp, err := wsstate.CreateTemp(sessionDir, registrationFileName+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -347,13 +347,14 @@ func RemoveRegistration(dir, replyID string) error {
 // retention would otherwise lose its record, held sends, and backend
 // session before the runner re-registers it. The exception is a lead
 // session the runner no longer serves (its record is closed, or handed to
-// a terminal): its row is no longer the runner's to refresh, so it ages
-// as any ended session's, measured from the row. A handed-off session
+// a terminal), or a closed spawned Pi child: its row is no longer the
+// runner's to refresh, so it ages as any ended session's, measured from the
+// row the close wrote last. A handed-off session
 // whose harness conversation lives in the directory itself is kept all the
 // same (agentRecordEnd.terminalConversation). Every other agent record
 // (the tracker's support agent among them) keeps the runner's lifetime.
 func PruneRegistrations(dir string, now time.Time, retention time.Duration) int {
-	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
+	entries, err := wsstate.ReadDir(filepath.Join(dir, sessionsDirName))
 	if err != nil {
 		return 0
 	}
@@ -369,7 +370,7 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		}
 		last := time.Time{}
 		if reg, err := ReadRegistration(dir, entry.Name()); err == nil {
-			if reg.Agent {
+			if reg.Agent && !hosted {
 				continue
 			}
 			last = reg.LastSeen()
@@ -404,6 +405,9 @@ type agentRecordEnd struct {
 	HandedOffAt string `json:"handed_off_at"`
 	Backend     string `json:"backend"`
 	SessionFile string `json:"session_file"`
+	Parent      *struct {
+		Kind string `json:"kind"`
+	} `json:"parent"`
 }
 
 // terminalConversation reports a session handed to a terminal whose
@@ -421,17 +425,18 @@ func (r agentRecordEnd) terminalConversation(sessionDir string) bool {
 	return r.SessionFile == "" || strings.HasPrefix(filepath.Clean(r.SessionFile), filepath.Clean(sessionDir)+string(filepath.Separator))
 }
 
-// retired reports a lead session the runner serves no more: closed, or
-// handed to a terminal.
+// retired reports a lead session the runner serves no more (closed, or
+// handed to a terminal), or a closed spawned Pi child, which only a Send
+// reopens on the session file this directory holds.
 func (r agentRecordEnd) retired() bool {
-	return r.Lead && (r.ClosedAt != "" || r.HandedOffAt != "")
+	return (r.Lead || r.Parent != nil && r.Backend == "pi") && (r.ClosedAt != "" || r.HandedOffAt != "")
 }
 
 // readAgentRecordEnd reads sessionDir's agent record; hosted is false when
 // the directory holds none. An unreadable record is hosted and not
 // retired, so it is never pruned.
 func readAgentRecordEnd(sessionDir string) (record agentRecordEnd, hosted bool) {
-	raw, err := os.ReadFile(filepath.Join(sessionDir, AgentRecordFileName))
+	raw, err := wsstate.ReadFileOnce(filepath.Join(sessionDir, AgentRecordFileName))
 	if errors.Is(err, os.ErrNotExist) {
 		return agentRecordEnd{}, false
 	}

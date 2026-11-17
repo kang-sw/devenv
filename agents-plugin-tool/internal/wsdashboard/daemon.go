@@ -135,6 +135,9 @@ type DaemonOptions struct {
 	// refreshInterval replaces sseRefreshInterval, so a test drives the
 	// refresh tick; zero is sseRefreshInterval.
 	refreshInterval time.Duration
+	// foreignInterval replaces foreignSafetyInterval, so a test sees a
+	// no-wake change within a few refresh ticks; zero is foreignSafetyInterval.
+	foreignInterval time.Duration
 	// keepAlive replaces sseKeepAlive, so a test drives the streams' idle
 	// frame and the WebSocket read window; zero is sseKeepAlive.
 	keepAlive time.Duration
@@ -197,10 +200,18 @@ type Daemon struct {
 	cache           *pageCache
 	refreshInterval time.Duration
 	keepAlive       time.Duration
+	// foreign is the refresh stamps' shared look at inputs no wake reports
+	// (foreign_schedule.go).
+	foreign *foreignSchedule
 	// tracker is the tracker host, nil without one; trackerRev is the
-	// revision TrackerChanged bumps and the streams send.
-	tracker    TrackerHost
-	trackerRev atomic.Int64
+	// revision TrackerChanged bumps and the streams send. trackerData is
+	// the data revision the cached page reads are keyed by (trackerAnswers,
+	// tracker_answers.go): TrackerChanged bumps it too, a change the daemon
+	// applies to those answers itself (the seen marks) does not.
+	tracker        TrackerHost
+	trackerRev     atomic.Int64
+	trackerData    atomic.Int64
+	trackerAnswers trackerAnswers
 	// entries caches rendered conversation entries per session.
 	entries *entryCache
 	// entryFiles caches the parsed ring and drained entries per session.
@@ -212,12 +223,14 @@ type Daemon struct {
 	live hostedSlots
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
 	// and the answer check's record and nudge).
-	inboxMu      sync.Mutex
-	answerReplay sync.Map // reply-id -> one active replay/retry loop
+	inboxMu       sync.Mutex
+	answerReplay  sync.Map        // reply-id -> one active replay/retry loop
+	answerPending map[string]bool // inboxMu; absent means not yet checked at startup
 	// acks runs the answer checks (ack_check.go), nil without a session
 	// index.
 	acks *ackChecker
-	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
+	// lan is LAN mode; tokenMu serializes minting the LAN token and the
+	// localhost secret (persistedSecret).
 	lan     bool
 	tokenMu sync.Mutex
 	// auth holds bounded, ephemeral login codes and the exchange rate window.
@@ -252,6 +265,7 @@ type Daemon struct {
 	// measures their worktrees' disk use (worktrees.go).
 	worktrees WorktreeSource
 	sizes     *sizeCache
+	notes     sync.Map // project root -> *notesView, no background timer
 	// rail reads the session rail's worktree lists while a page shows the
 	// rail (railworktrees.go); railMsgs holds each session's last message
 	// for it (railmessages.go).
@@ -431,6 +445,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	d.planUsage = newPlanUsageStore(opts.Dir, home, getenv)
 	d.cache = newPageCache(d.broker, stats)
+	d.foreign = newForeignSchedule(opts.foreignInterval, opts.MailWake)
 	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)
 	if d.refreshInterval <= 0 {
 		d.refreshInterval = sseRefreshInterval
@@ -712,6 +727,7 @@ func (d *Daemon) Close() {
 		if d.holders != nil {
 			d.holders.Close()
 		}
+		d.foreign.close()
 		removeEndpointIfOwned(d.dir, d.endpoint.Token)
 		_ = d.lock.Unlock()
 		fmt.Fprintf(d.log, "dashboard: stopped (pid %d)\n", d.endpoint.PID)
@@ -893,11 +909,26 @@ func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 	if d.mailWake != nil {
 		d.mailWake.Nudge()
 	}
+	d.foreign.mailChanged()
+	d.foreignWriter(body.ReplyID)
 	if d.index == nil || !d.index.Nudge(body.ReplyID, body.Project) {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// foreignWriter handles an HTTP nudge naming session replyID. Only another
+// process nudges over HTTP (a hosted server notifies in process,
+// NotifySessionChange), so for a session this daemon hosts it is a second
+// writer whose evidence the hosted copy lacks: the copy stops standing for
+// the evidence directory, before the nudge's re-read wakes any page.
+func (d *Daemon) foreignWriter(replyID string) {
+	d.live.mu.Lock()
+	defer d.live.mu.Unlock()
+	if _, held := d.live.owners[replyID]; held {
+		d.snapshots.shareObserved(d.dir, replyID)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The tracker routes serve the tracker drawer of the dashboard pages. The
@@ -60,6 +61,10 @@ import (
 //
 // "support" reports that the daemon serves the store chats
 // (SupportRoutePrefix), so the drawer shows each store's chat tab.
+//
+// The store list and the view carry an ETag and answer a matching
+// If-None-Match 304 with no body; while nothing changed they answer from
+// memory without reading the host (trackerAnswers, tracker_answers.go).
 //
 // The store list holds every registered store, a hidden one marked
 // "hidden": hiding is the page's to apply (it leaves the store out of its
@@ -393,6 +398,13 @@ type TrackerSeen struct {
 type TrackerView struct {
 	View json.RawMessage `json:"view"`
 	Seen TrackerSeen     `json:"seen"`
+	// Tag, when set, identifies View's content apart from the time of day
+	// (two views with one Tag differ at most in their now, within the
+	// hour, see cmd/ws-mcp dashboardViewTag): the
+	// view route's ETag is made from it and the seen marks, so a view read
+	// again unchanged answers a revalidating page 304. Empty, the ETag is
+	// the answer's bytes.
+	Tag string `json:"-"`
 }
 
 // TrackerEvent is one event the page dispatches; Payload is the event's
@@ -529,8 +541,18 @@ func validWikiName(name string) bool {
 
 // TrackerChanged bumps the tracker revision and wakes every stream, which
 // then sends the new revision. Safe from any goroutine, also before the
-// first request.
+// first request. It drops the cached page reads (trackerAnswers) too: the
+// data revision moves before the revision the streams send, so a page that
+// reads after the new revision never gets an answer cached before it.
 func (d *Daemon) TrackerChanged() {
+	d.trackerData.Add(1)
+	d.trackerSignal()
+}
+
+// trackerSignal bumps the revision the streams send and wakes them,
+// keeping the cached page reads: for a change the daemon applied to those
+// answers itself, or one no answer shows.
+func (d *Daemon) trackerSignal() {
 	d.trackerRev.Add(1)
 	d.stats.WakeTracker.Add(1)
 	d.broker.signalAll()
@@ -628,10 +650,28 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		trackerError(w, http.StatusForbidden, "cross-origin request refused")
 		return
 	}
-	stores, err := d.tracker.Stores()
-	if err != nil {
-		trackerError(w, http.StatusServiceUnavailable, err.Error())
-		return
+	// The revision is read before the data revision, and both before any
+	// read of the host: an answer is never newer than the revision it names
+	// (see TrackerChanged). The page's two reads (the store list and a
+	// view) answer from trackerAnswers while the data revision stands.
+	rev := d.trackerRev.Load()
+	data := d.trackerData.Load()
+	now := time.Now()
+	page := method == http.MethodGet && (rest == "stores" || op == "view")
+	var stores []TrackerStore
+	cached := false
+	if page {
+		stores, cached = d.trackerAnswers.storeList(data, now)
+	}
+	if !cached {
+		var err error
+		if stores, err = d.tracker.Stores(); err != nil {
+			trackerError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		if page {
+			d.trackerAnswers.putStoreList(stores, trackerStamp{data: data, at: now})
+		}
 	}
 	if storeID != "" && !hasTrackerStore(stores, storeID) {
 		trackerError(w, http.StatusNotFound, "unknown store")
@@ -643,7 +683,13 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
 	switch {
 	case rest == "stores":
-		writeJSON(w, http.StatusOK, map[string]any{"stores": nonNil(stores), "rev": d.trackerRev.Load(), "support": d.support != nil})
+		body, err := json.Marshal(map[string]any{"stores": nonNil(stores), "rev": rev, "support": d.support != nil})
+		if err != nil {
+			trackerError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		body = append(body, '\n')
+		writeTrackerAnswer(w, r, body, trackerETag(body))
 	case rest == "profiles" && method == http.MethodGet:
 		d.trackerProfiles(w)
 	case rest == "profiles":
@@ -655,7 +701,8 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 			trackerError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		d.TrackerChanged()
+		// No store list or view shows a profile.
+		d.trackerSignal()
 		d.trackerProfiles(w)
 	case rest == "register":
 		var req TrackerRegisterRequest
@@ -670,13 +717,24 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		d.TrackerChanged()
 		writeJSON(w, http.StatusOK, res)
 	case op == "view":
+		if a, ok := d.trackerAnswers.view(storeID, data, now); ok {
+			writeTrackerAnswer(w, r, a.body, a.etag)
+			return
+		}
+		gen := d.trackerAnswers.seenGeneration()
 		v, err := d.tracker.View(r.Context(), storeID)
 		if err != nil {
 			trackerError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		v.Seen = TrackerSeen{Badge: nonNil(v.Seen.Badge), Read: nonNil(v.Seen.Read)}
-		writeJSON(w, http.StatusOK, v)
+		a := trackerViewAnswer{stamp: trackerStamp{data: data, at: now}, view: v}
+		if err := a.encode(); err != nil {
+			trackerError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		d.trackerAnswers.putView(storeID, a, gen)
+		writeTrackerAnswer(w, r, a.body, a.etag)
 	case op == "search":
 		// A read: nothing changed, so the revision stays.
 		query := r.URL.Query()
@@ -734,7 +792,10 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 			trackerError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		d.TrackerChanged()
+		// Only this daemon writes the marks, so the cached view takes them
+		// as the file did, and no view is read again for them.
+		d.trackerAnswers.addSeen(storeID, add)
+		d.trackerSignal()
 		w.WriteHeader(http.StatusNoContent)
 	case op == "render":
 		// A read: nothing changed, so the revision stays.

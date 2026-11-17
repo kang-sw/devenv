@@ -162,6 +162,9 @@ type Options struct {
 	ChildCheck func() error
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
+	// keepFinished keeps finished Pi children open (closeWhenDone and
+	// closeAtStart off), for tests that drive a child past its first turn.
+	keepFinished bool
 	// spawnListed observes global spawn-projection listings in tests.
 	spawnListed func(string)
 	// stateInboxRead observes state-held inbox scans in tests.
@@ -179,12 +182,13 @@ type Runner struct {
 	// and process start. Ordinary conversations still resolve on every start.
 	fixedProfile *ResolvedProfile
 
-	mu     sync.Mutex
-	convs  map[string]*conv
-	closed map[string]Record
-	quit   chan struct{}
-	wg     sync.WaitGroup
-	once   sync.Once
+	mu            sync.Mutex
+	convs         map[string]*conv
+	closed        map[string]Record
+	childrenIndex map[ParentRef]map[string]bool // mu; parent identity is immutable
+	quit          chan struct{}
+	wg            sync.WaitGroup
+	once          sync.Once
 	// Separate from mu: held through summary mutation/write fencing without
 	// blocking the runner's ordinary List/Get or spawn snapshot reads.
 	summaryMu     sync.Mutex
@@ -263,7 +267,8 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	if notify != nil {
 		r.notify = notify
 	}
-	entries, _ := os.ReadDir(filepath.Join(r.opts.Dir, "sessions"))
+	entries, _ := wsstate.ReadDir(filepath.Join(r.opts.Dir, "sessions"))
+	var open []Record
 	for _, e := range entries {
 		if !e.IsDir() || !wsdashboard.ValidReplyID(e.Name()) {
 			continue
@@ -279,15 +284,23 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		if rec.ClosedAt != "" || rec.HandedOffAt != "" {
 			// A handed-off session is a terminal harness's: nothing here
 			// writes its row, watches its mail, or starts a process for it.
-			r.mu.Lock()
-			r.closed[rec.ReplyID] = rec
-			r.mu.Unlock()
+			r.loadClosed(rec)
 		} else {
-			// A lead whose process may still run under its holder rejoins
-			// it there, before the scan below replays the holder's records.
-			// A turn the last daemon's exit cut off settles there too.
-			r.startConv(rec, nil)
+			open = append(open, rec)
 		}
+	}
+	var done map[string]bool
+	if !r.opts.keepFinished {
+		done = finishedAtStart(r.opts.Dir, open)
+	}
+	for _, rec := range open {
+		if done[rec.ReplyID] && r.closeAtStart(rec) {
+			continue
+		}
+		// A lead whose process may still run under its holder rejoins
+		// it there, before the scan below replays the holder's records.
+		// A turn the last daemon's exit cut off settles there too.
+		r.startConv(rec, nil)
 	}
 	// All records are loaded now, including children sorted after their lead.
 	for _, st := range r.List() {
@@ -314,6 +327,87 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		r.holdersScanned()
 		r.rejoinOnce.Do(func() { close(r.rejoined) })
 	}()
+}
+
+// loadClosed lists closed (or handed-off) record rec at Start.
+func (r *Runner) loadClosed(rec Record) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed[rec.ReplyID] = rec
+	r.indexChildLocked(rec)
+	st := r.closedState(rec) // prime immutable presentation once at startup
+	if r.closedRows == nil {
+		r.closedRows = map[string]State{}
+	}
+	r.closedRows[rec.ReplyID] = st
+}
+
+// closeAtStart closes open record rec at Start, as closeWhenDone would
+// have, with no loop started, and reports whether it did.
+func (r *Runner) closeAtStart(rec Record) bool {
+	now := r.opts.Now()
+	rec.ClosedAt = now.UTC().Format(time.RFC3339)
+	// An orphan's cut-off turn ends here, as close ends a running one.
+	finishActiveTurn(&rec, now.UnixMilli())
+	rec.TurnOpen = false
+	if err := writeRecord(wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID), rec); err != nil {
+		fmt.Fprintf(r.opts.Log, "agent %s: record write: %v\n", rec.ReplyID, err)
+		return false
+	}
+	if err := wsdashboard.WriteRegistration(r.opts.Dir, registration(rec, now)); err != nil {
+		fmt.Fprintf(r.opts.Log, "agent %s: registration write: %v\n", rec.ReplyID, err)
+	}
+	r.notify(rec.ReplyID, rec.Root)
+	r.loadClosed(rec)
+	return true
+}
+
+// finishedAtStart picks the open spawned Pi children a daemon start closes
+// instead of serving (closeAtStart), as far as their records tell: one
+// whose last turn settled done and left nothing (no turn open or held, no
+// report its parent has not taken, no sent, held, queued, or claimed
+// input) and no open child of its own that stays, or one whose
+// conversation parent is closed or gone, so no report of it reaches one.
+// A finished one whose process may still run under its holder is served
+// instead: its loop rejoins that process, then closes (closeWhenDone) and
+// ends the holder with its record's holder fence cleared.
+func finishedAtStart(dir string, open []Record) map[string]bool {
+	isOpen := map[string]bool{}
+	kids := map[string][]string{}
+	for _, rec := range open {
+		isOpen[rec.ReplyID] = true
+		if rec.Parent != nil && rec.Parent.Kind == ParentConversation {
+			kids[rec.Parent.ReplyID] = append(kids[rec.Parent.ReplyID], rec.ReplyID)
+		}
+	}
+	idle := map[string]bool{}
+	for _, rec := range open {
+		last := rec.LastTurn
+		if rec.Lead || rec.Parent == nil || rec.Backend != BackendPi || last == nil || last.Result.Status != TurnDone || rec.HolderID != "" || rec.TurnOpen || rec.HeldTurn != nil ||
+			rec.Sends > max(last.Mark, rec.Voided) ||
+			len(rec.PendingReports)+len(rec.Queued)+len(rec.Mail)+len(rec.Reports)+len(rec.Steered) > 0 {
+			continue
+		}
+		held, err := wsinbox.Held(wsinbox.Dir(wsdashboard.SessionDir(dir, rec.ReplyID)))
+		idle[rec.ReplyID] = err == nil && len(held) == 0
+	}
+	done := map[string]bool{}
+	stays := func(id string) bool { return isOpen[id] && !done[id] }
+	for changed := true; changed; {
+		changed = false
+		for _, rec := range open {
+			id := rec.ReplyID
+			if done[id] || rec.Lead || rec.Parent == nil || rec.Backend != BackendPi {
+				continue
+			}
+			orphan := rec.Parent.Kind == ParentConversation && !stays(rec.Parent.ReplyID)
+			finished := idle[id] && !slices.ContainsFunc(kids[id], stays)
+			if orphan || finished {
+				done[id], changed = true, true
+			}
+		}
+	}
+	return done
 }
 
 // markScanned closes scanned, once however often it is called.
@@ -438,7 +532,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		done:       make(chan struct{}),
 		settleC:    make(chan struct{}),
 	}
+	c.refreshHeld()
 	if rec.Lead {
+		_, _, _ = refreshPermissionSelection(dir)
 		r.summaryMu.Lock()
 		if r.summaryOwners == nil {
 			r.summaryOwners = map[string]*conv{}
@@ -501,6 +597,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		if rec.Lead && r.opts.LiveHost != nil {
 			if slot, ok := r.opts.LiveHost.OpenHostedSlot(dir); ok {
 				c.live.slot = slot
+				if folder, ok := slot.(wsdashboard.ObservedFoldSlot); ok && c.live.observedSeeded {
+					folder.FoldsObserved()
+				}
 			}
 		}
 		c.live.writeSnapshot()
@@ -517,6 +616,7 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	}
 	r.mu.Lock()
 	r.convs[rec.ReplyID] = c
+	r.indexChildLocked(rec)
 	delete(r.closed, rec.ReplyID)
 	delete(r.closedRows, rec.ReplyID)
 	r.wg.Add(1)
@@ -629,7 +729,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		return State{}, badRequest("root must be an absolute path; got %q", root)
 	}
 	root = filepath.Clean(root)
-	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+	if info, err := wsstate.Stat(root); err != nil || !info.IsDir() {
 		return State{}, badRequest("root %s is not a directory", root)
 	}
 	rp, err := r.resolve(profile, root)
@@ -805,7 +905,7 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 		return ResolvedProfile{}, err
 	}
 	if path := rp.Definition.InstructionsPath(root); path != "" {
-		info, err := os.Stat(path)
+		info, err := wsstate.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
 			return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q: instruction file %s does not exist", rp.Name, path))
 		}
@@ -850,6 +950,10 @@ func (r *Runner) Get(id string) (State, error) {
 	r.mu.Unlock()
 	switch {
 	case open:
+		c.refreshHeld() // explicit API reads retain authoritative held counts
+		if c.record().Lead {
+			revalidatePermissionSelection(c.dir)
+		}
 		return c.state(), nil
 	case closed:
 		return st, nil
@@ -866,11 +970,11 @@ func (r *Runner) List() []State {
 		convs = append(convs, c)
 	}
 	for _, rec := range r.closed {
-		out = append(out, r.closedState(rec))
+		out = append(out, r.memoryClosedState(rec))
 	}
 	r.mu.Unlock()
 	for _, c := range convs {
-		out = append(out, c.state())
+		out = append(out, c.memoryState())
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt != out[j].CreatedAt {
@@ -900,6 +1004,22 @@ func (r *Runner) Send(id, text string) (State, error) {
 	if strings.TrimSpace(text) == "" {
 		return State{}, badRequest("text is empty")
 	}
+	st, err := r.send(id, text)
+	if err != errClosed {
+		return st, err
+	}
+	if rec, ok := r.recordOf(id); ok && !rec.Lead && rec.Parent != nil && rec.Backend == BackendPi {
+		// A finished Pi child closes on its own (closeWhenDone), maybe
+		// between the open check and the inbox write. Once that close is
+		// done (resumeMu), a second try reopens it as any closed Pi child.
+		r.resumeMu.Lock()
+		r.resumeMu.Unlock()
+		st, err = r.send(id, text)
+	}
+	return st, err
+}
+
+func (r *Runner) send(id, text string) (State, error) {
 	c, err := r.resumePiChild(id)
 	if err != nil {
 		return State{}, err
@@ -918,6 +1038,7 @@ func (r *Runner) Send(id, text string) (State, error) {
 		// After the write, under the lock kick drains with: a turn whose
 		// drain counted this send holds its message (Wait).
 		c.sends++
+		c.held++
 		c.rec.Sends = c.sends
 	}
 	rec := c.rec
@@ -940,7 +1061,12 @@ func (r *Runner) Send(id, text string) (State, error) {
 func (r *Runner) Interrupt(id string) (State, []string, error) {
 	var returned []string
 	st, err := r.act(id, func(c *conv) error {
+		c.mu.Lock()
 		held, _, err := wsinbox.Interrupt(c.inbox, r.opts.Now())
+		if err == nil {
+			c.held = 0
+		}
+		c.mu.Unlock()
 		if err != nil {
 			return err
 		}
@@ -1097,8 +1223,8 @@ func (r *Runner) setPermissionMode(id, mode string, user bool) (State, error) {
 // CloseConversation ends the conversation: its process stops, held
 // messages are dropped, and its session directory stays readable. A spawned
 // Pi child can be reopened by Send; other closed conversations refuse it.
-// Its open descendants through conversation parents (children.go) close
-// first, deepest first. A conversation parent
+// Its open descendants through conversation parents, and a lead's Pi
+// children (children.go), close first, deepest first. A conversation parent
 // whose done turn waited for this child's report is released.
 func (r *Runner) CloseConversation(id string) (State, error) {
 	r.resumeMu.Lock()
@@ -1113,30 +1239,86 @@ func (r *Runner) CloseConversation(id string) (State, error) {
 	if err != nil {
 		return st, err
 	}
+	r.releaseParent(id)
+	return st, nil
+}
+
+// releaseParent releases the done turn conversation id's conversation
+// parent held for it (releaseHeld), once id closed.
+func (r *Runner) releaseParent(id string) {
 	if rec, ok := r.recordOf(id); ok && rec.Parent != nil && rec.Parent.Kind == ParentConversation {
 		if parent := r.conv(rec.Parent.ReplyID); parent != nil {
 			parent.do(parent.releaseHeld)
 		}
 	}
-	return st, nil
+}
+
+// autoCloseLater closes conversation id off the caller's goroutine, which
+// is its own loop (closeWhenDone), if it is still a finished Pi child.
+func (r *Runner) autoCloseLater(id string) {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.resumeMu.Lock()
+		defer r.resumeMu.Unlock()
+		if _, closed, err := r.closeOneIf(id, true); err != nil || !closed {
+			return
+		}
+		// Idle by autoCloseDue; they close with it, as in CloseConversation.
+		for _, d := range r.descendants(id) {
+			_, _ = r.closeOne(d)
+		}
+		r.releaseParent(id)
+	}()
 }
 
 // closeOne closes conversation id alone.
 func (r *Runner) closeOne(id string) (State, error) {
-	st, err := r.act(id, func(c *conv) error {
-		c.close()
+	st, _, err := r.closeOneIf(id, false)
+	return st, err
+}
+
+// closeOneIf is closeOne; finished limits it to a Pi child that is
+// finished (autoCloseDue) when its loop checks again, in the step that
+// closes it, and closed reports whether it closed.
+func (r *Runner) closeOneIf(id string, finished bool) (st State, closed bool, err error) {
+	st, err = r.act(id, func(c *conv) error {
+		if !finished {
+			c.close()
+			closed = true
+			return nil
+		}
+		// The inbox is read again under mu: a message the page wrote whose
+		// signal the loop has not taken yet keeps the child open.
+		unread := false
+		closed = c.autoCloseDue() && c.closeIf(func() bool {
+			held, err := wsinbox.Held(c.inbox)
+			if err != nil {
+				unread = true
+				return false
+			}
+			c.held = len(held)
+			return c.finished()
+		})
+		// An unreadable inbox is not asked again at every loop step; the
+		// next daemon start checks the child again (Start).
+		c.autoClosing = unread
 		return nil
 	})
-	if err != nil {
-		return st, err
+	if err != nil || !closed {
+		return st, closed, err
 	}
 	r.mu.Lock()
 	if c, ok := r.convs[id]; ok {
 		delete(r.convs, id)
 		r.closed[id] = c.record()
+		if r.closedRows == nil {
+			r.closedRows = map[string]State{}
+		}
+		r.closedRows[id] = st
 	}
 	r.mu.Unlock()
-	return st, nil
+	return st, true, nil
 }
 
 // SetSettings changes the conversation's model or effort (nil leaves one
@@ -1297,6 +1479,15 @@ type State struct {
 	// ActiveMs excludes the current turn; TurnStartedAt is set only while it runs.
 	ActiveMs      int64 `json:"active_ms,omitempty"`
 	TurnStartedAt int64 `json:"turn_started_at,omitempty"`
+}
+
+// memoryClosedState is a presentation-only read under r.mu. Explicit Get can
+// still refresh a handed-off terminal's evidence through closedState.
+func (r *Runner) memoryClosedState(rec Record) State {
+	if st, ok := r.closedRows[rec.ReplyID]; ok {
+		return st
+	}
+	return closedState(rec)
 }
 
 // closedState is the state of a record no loop serves: closed, or handed

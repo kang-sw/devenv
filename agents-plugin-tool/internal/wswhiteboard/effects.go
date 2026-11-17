@@ -19,6 +19,22 @@ type Effect struct {
 	Field   string `json:"field"`
 	Before  string `json:"before,omitempty"`
 	After   string `json:"after,omitempty"`
+	// Label is the topic's display label when it differs from Topic (the
+	// stem), stamped on every topic-scoped effect so a renderer needs no
+	// board lookup. Additive: carriers without it render the stem.
+	Label string `json:"label,omitempty"`
+}
+
+// stampEffectLabels fills Effect.Label from the committed state. A stemless
+// topic's label is its own name and stays empty.
+func stampEffectLabels(effects []Effect, s *State) {
+	for i := range effects {
+		if t := effects[i].Topic; t != "" {
+			if l := s.TopicLabel(t); l != t {
+				effects[i].Label = l
+			}
+		}
+	}
 }
 
 // EffectFields is the supported display contract, not a command grammar.

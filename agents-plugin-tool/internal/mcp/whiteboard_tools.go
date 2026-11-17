@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -504,6 +505,8 @@ func markdownSection(body, heading string) string {
 // whiteboardProviders), once the session's board exists.
 // The gate is board existence, not the knob: a session that never rendered
 // writes no file, and an ad hoc board stays current.
+// A refresh that would publish the same page writes nothing (see
+// renderWhiteboardPages).
 func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 	if responseIsError(resp) {
 		return
@@ -517,8 +520,7 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 		return
 	}
 	err := s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
-		rec.Whiteboard.BeginRender()
-		_, err := s.renderWhiteboard(rec, key, false)
+		_, err := s.renderWhiteboardPages(rec, key, false, true)
 		return err
 	})
 	if err != nil && !errors.Is(err, errNoWhiteboard) {
@@ -542,6 +544,15 @@ func responseIsError(resp response) bool {
 // transaction publishes them only after its durable commit, with the stamp
 // last. The returned paths are relative to the root (a host embed is bare).
 func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (whiteboardRender, error) {
+	return s.renderWhiteboardPages(rec, sessionKey, withEmbed, false)
+}
+
+// renderWhiteboardPages is renderWhiteboard; refresh additionally begins the
+// render. When the full page rendered at the current sequence is already the
+// published page and stamp, byte for byte, a viewer has nothing new to see:
+// it returns errRecordUnchanged, so neither the stamp-only store commit nor
+// the outputs are rewritten, and open pages are not told to reload.
+func (s *Server) renderWhiteboardPages(rec *sessionRecord, sessionKey string, withEmbed, refresh bool) (whiteboardRender, error) {
 	var out whiteboardRender
 	st := rec.Whiteboard
 	replyID := wsmailbox.ReplyID(sessionKey)
@@ -599,16 +610,81 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 
 	view := wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutFull))
 	view.StampFile = "index.stamp.js"
+	if refresh {
+		// The view depends on the sequence only through view.Seq, so one
+		// build serves both renders and the panels are read once.
+		if html, err := wswhiteboard.RenderPage(view); err == nil && whiteboardPublished(pageDir, html, st.Seq) {
+			return out, errRecordUnchanged
+		}
+		st.BeginRender()
+		view.Seq = st.Seq
+	}
 	html, err := wswhiteboard.RenderPage(view)
 	if err != nil {
 		return out, fmt.Errorf("render full page: %w", err)
 	}
 	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.html"), html, "full page"})
-	stamp := fmt.Sprintf("wbStamp(%q);\n", fmt.Sprint(st.Seq))
+	stamp := whiteboardStamp(st.Seq)
 	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.stamp.js"), stamp, "stamp"})
 	out.full = whiteboardDirRel + "/" + replyID + "/index.html"
 	rec.boardOutput = &out
 	return out, nil
+}
+
+func whiteboardStamp(seq int) string {
+	return fmt.Sprintf("wbStamp(%q);\n", fmt.Sprint(seq))
+}
+
+// whiteboardPublished reports whether pageDir already holds exactly this full
+// page and the stamp for seq. It compares against the files on disk: the page
+// by a remembered hash while its stat identity is unchanged, since another
+// process that published since replaces the file and so moves that identity.
+func whiteboardPublished(pageDir, html string, seq int) bool {
+	if !whiteboardPageMatches(filepath.Join(pageDir, "index.html"), html) {
+		return false
+	}
+	stamp, err := os.ReadFile(filepath.Join(pageDir, "index.stamp.js"))
+	return err == nil && string(stamp) == whiteboardStamp(seq)
+}
+
+// whiteboardPages remembers, per full page path, the stat and content hash of
+// the page this process last wrote or read back, so an unchanged refresh does
+// not read the multi-megabyte page again.
+var whiteboardPages sync.Map // path -> whiteboardPageMemo
+
+type whiteboardPageMemo struct {
+	info os.FileInfo
+	sum  [sha256.Size]byte
+}
+
+func whiteboardPageMatches(path, html string) bool {
+	info, err := wsstate.Stat(path)
+	if err != nil {
+		whiteboardPages.Delete(path)
+		return false
+	}
+	if v, ok := whiteboardPages.Load(path); ok {
+		if memo := v.(whiteboardPageMemo); wsstate.SameFileMetadata(memo.info, info) {
+			return int64(len(html)) == info.Size() && memo.sum == sha256.Sum256([]byte(html))
+		}
+	}
+	page, err := wsstate.ReadFileOnce(path)
+	if err != nil {
+		return false
+	}
+	// Remember only bytes the stats on both sides of the read vouch for.
+	if after, err := wsstate.Stat(path); err == nil && wsstate.SameFileMetadata(info, after) {
+		whiteboardPages.Store(path, whiteboardPageMemo{info: after, sum: sha256.Sum256(page)})
+	}
+	return string(page) == html
+}
+
+// rememberWhiteboardPage records a page this process just published. The
+// caller holds the board flock, so no other writer replaces it in between.
+func rememberWhiteboardPage(path, html string) {
+	if info, err := wsstate.Stat(path); err == nil {
+		whiteboardPages.Store(path, whiteboardPageMemo{info: info, sum: sha256.Sum256([]byte(html))})
+	}
 }
 
 // ensureWhiteboardMermaid writes the shared mermaid script into dir, before
@@ -664,6 +740,9 @@ func (r whiteboardRender) publish() (err error) {
 		}
 		if err := writeWhiteboardFile(file.path, []byte(file.text)); err != nil {
 			return fmt.Errorf("write %s: %w", file.label, err)
+		}
+		if file.label == "full page" {
+			rememberWhiteboardPage(file.path, file.text)
 		}
 	}
 	for _, path := range r.evicted {
@@ -764,12 +843,26 @@ func renameSharingViolation(err error) bool {
 // local exclude file in the common git dir, so every worktree is covered and
 // nothing is committed. A root outside git has nothing to exclude.
 func registerWhiteboardExclude(runner wsgit.Runner, root, dir string) error {
+	if common, ok := whiteboardCommonDirs.Load(root); ok {
+		// A removed or moved repository must not get a stray exclude file.
+		if _, err := wsstate.Stat(common.(string)); err == nil {
+			return registerPoolExclude(common.(string), root, dir)
+		}
+		whiteboardCommonDirs.Delete(root)
+	}
 	out, err := runner.RunGit(context.Background(), root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return nil
 	}
-	return registerPoolExclude(strings.TrimSpace(string(out)), root, dir)
+	common := strings.TrimSpace(string(out))
+	whiteboardCommonDirs.Store(root, common)
+	return registerPoolExclude(common, root, dir)
 }
+
+// whiteboardCommonDirs memoizes each root's git common dir, which a
+// repository keeps for its lifetime, so a render runs a stat instead of a git
+// subprocess. A root outside git is not remembered and is asked again.
+var whiteboardCommonDirs sync.Map // root -> common dir
 
 // maybeCollectWhiteboards deletes, at most once a day per whiteboard folder
 // and only when the folder exists, every whiteboard file whose reply id

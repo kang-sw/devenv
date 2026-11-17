@@ -88,11 +88,14 @@ section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-rig
    the fallback, which only a part never laid out takes. A card's body has a
    set height. Rendered in full: a maximized topic or card, and a part
    holding a maximized panel (fixed to the window, which containment would
-   break), and a topic holding focus (a note being typed). A topic's
+   break), and a card holding focus. A topic's parts take no focus guard:
+   a focused part is already relevant to the user, so content-visibility
+   renders it, and a guard on the topic flipped every part at once when
+   focus entered it (a suspected Edge renderer crash). A topic's
    popovers open from its head, in the top layer. */
 section.topic[data-topic] > :not(.tophead) { contain-intrinsic-block-size: auto 480px; }
 section.topic:not([data-max]) > :not(.tophead):not(:has(details.entry-panel[data-max])) { contain: layout style paint; }
-section.topic:not([data-max]):not(:focus-within) > [data-wbcv]:not(.tophead):not(:has(details.entry-panel[data-max])),
+section.topic:not([data-max]) > [data-wbcv]:not(.tophead):not(:has(details.entry-panel[data-max])),
 .bcard:not([data-max]):not(:focus-within) > .bc-in > .bc-body { content-visibility: auto; }
 /* a frame in the body would take the pointer mid-drag */
 .bcard.drag .bc-body { pointer-events: none; }
@@ -239,6 +242,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 /* Visibility is view state only: topics, framework cards, frames and pin order stay intact. */
 [data-state-filtered] { display: none !important; }
 .board-state-filter { margin-left: auto; position: relative; display: flex; flex: none; --state-color: var(--wb-fg); }
+.board-state-filter [data-filter="asks"] { --state-color: light-dark(#b25000, #e8a45a); }
 .board-state-filter [data-filter="awaiting-confirmation"] { --state-color: light-dark(#1d7348, #6cc39a); }
 .board-state-filter [data-filter="discussing"] { --state-color: light-dark(#b25000, #e0a36c); }
 .board-state-filter [data-filter="researching"] { --state-color: light-dark(#7544ac, #c6a5f7); }
@@ -249,8 +253,15 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .board-state-radio { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font: 600 12.5px var(--wb-sans); white-space: nowrap; cursor: pointer; }
 .board-state-radio:hover { color: var(--wb-fg); }
 .board-state-radio[aria-checked="true"], .board-state-trigger:not([data-filter="all"]) { background: color-mix(in srgb, var(--state-color) 15%, var(--wb-card)); color: color-mix(in srgb, var(--state-color) 78%, var(--wb-fg)); border-color: color-mix(in srgb, var(--state-color) 38%, transparent); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.board-state-radio[data-filter="asks"][aria-checked="true"], .board-state-trigger[data-filter="asks"] { background: var(--wb-policy); color: var(--wb-on-policy); border-color: color-mix(in srgb, var(--state-color) 45%, transparent); }
 .board-state-radio[data-filter="all"][aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); border-color: var(--wb-line); }
 .board-state-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--state-color); flex: none; }
+.board-state-glyph { display: inline-block; flex: none; width: 9px; position: relative; top: -.5px; text-align: center; color: var(--state-color); font: 900 15px/1 var(--wb-sans); }
+.board-state-option .board-state-glyph { width: 14px; }
+.board-state-radio[data-filter="asks"] { gap: 4px; }
+.board-state-radio[data-filter="asks"] .board-state-count { color: var(--state-color); opacity: .9; }
+.board-state-radio[data-filter="asks"][aria-checked="true"] .board-state-glyph, .board-state-radio[data-filter="asks"][aria-checked="true"] .board-state-count, .board-state-trigger[data-filter="asks"] .board-state-glyph { color: var(--wb-on-policy); }
+.board-state-radio[data-filter="asks"] .board-state-label { display: none; }
 .board-state-icon { display: inline-flex; flex: none; color: var(--state-color); }
 .board-state-icon .li { width: 13px; height: 13px; }
 [data-filter="waiting"] > .board-state-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--state-color); }
@@ -274,7 +285,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
   .board-action kbd { display: none; }
   .board-tools { gap: 5px; }
 }
-/* The eight-filter row needs compact actions at 800px outer width (798px
+/* The filter row needs compact actions at 800px outer width (798px
    container); the default 1440px split has 804px and keeps its labels. */
 @container board-toolbar (max-width: 800px) {
   .board-action .board-label { display: none; }

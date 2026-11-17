@@ -42,6 +42,16 @@ type ClosedTopicsSource interface {
 	ReadClosedTopics(reg Registration, lang string, from, n int) (html template.HTML, ok bool)
 }
 
+// TopicHistorySource is a PageSource that also renders board topics with
+// the complete history the served board leaves out (View.LazyHistory): the
+// topics named, or, when target is set, the one topic that holds that eN,
+// pN, or item-N target, shown or capped closed. Lang is a wsi18n code, as
+// for LangPageSource; ok is false when the session no longer exists or has
+// no board. A name or target no topic matches yields no fragment.
+type TopicHistorySource interface {
+	ReadTopicHistory(reg Registration, lang string, names []string, target string) (topics []wswhiteboard.TopicFragment, ok bool)
+}
+
 // PageContent is what a PageSource reads for one session.
 type PageContent struct {
 	// HasBoard reports whether the session has a whiteboard; Board is empty
@@ -74,10 +84,10 @@ type PageContent struct {
 	// Watch names every file and directory the read took page content from
 	// that a writer may change without a nudge, so no session fingerprint
 	// catches it within a stream's refresh interval: the ticket directories
-	// and ticket files the panels list, and each image a topic body inlines
-	// (a missing one included, since its appearance changes the page), and
-	// the mailbox stores, history directory, and listening marker the
-	// mailbox panel reads. A
+	// and ticket files the panels list, and each image a topic body shows,
+	// whose version its URL carries (a missing one included, since its
+	// appearance changes the page), and the mailbox stores, history
+	// directory, and listening marker the mailbox panel reads. A
 	// stream's refresh tick skips its re-read only while every one of them
 	// stats the same (stream_cache.go), so a source that reads such a file
 	// and leaves it out shows a stale page until the session's next change.
@@ -151,4 +161,21 @@ type Contact struct {
 	// or presence record's, else the contact record's as known at the last
 	// exchange. Empty when neither records one.
 	Cwd string
+	// PresenceUntil is when a live PresenceLive lapses with the clock alone
+	// (the seen time plus the liveness window); zero when the source gives
+	// none. PresencePID is the process a live named presence also needs
+	// running; zero for none. Both are memory-only: the refresh stamp folds
+	// the lapse they imply each tick without re-reading a store (liveAt).
+	PresenceUntil time.Time
+	PresencePID   int
+}
+
+// liveAt is the contact's liveness at now as far as its last read can tell:
+// a live presence lapses at PresenceUntil or when PresencePID exits. A
+// recovery needs a store read, so a contact read as not live stays so.
+func (c Contact) liveAt(now time.Time) bool {
+	if !c.PresenceLive || !c.PresenceUntil.IsZero() && !now.Before(c.PresenceUntil) {
+		return false
+	}
+	return c.PresencePID <= 0 || processAlive(c.PresencePID)
 }

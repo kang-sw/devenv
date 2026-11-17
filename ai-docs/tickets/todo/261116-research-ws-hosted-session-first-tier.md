@@ -1,5 +1,6 @@
 ---
 title: "Hosted sessions as the first tier: move features out of the plugin/extension path, retire the Pi extension, keep a limited Claude CLI compatibility tier"
+parent: 261114-epic-ws-common-session-foundation
 related:
   261110-epic-ws-dashboard-agent-host: "the existing first-tier agent host epic; this research asks which harness-side features the daemon should own once hosted sessions are the reference tier"
   261114-epic-ws-common-session-foundation: "CLI-plugin entry vs MCP-only hosted entry kept distinct (its Cross-Child Decisions); this research may change the weight between those two entries and must be reconciled with that epic before any child is cut"
@@ -13,6 +14,12 @@ related:
   261115-feat-ws-hosted-codex-adapter-contract: "a further hosted harness; a common harness interface spec would apply to it"
   261114-feat-ws-conversation-audit-event-store: "daemon-side capture of every harness stream event; subagent tracking from the daemon feeds the same store"
   261116-feat-ws-daemon-plugin-package-select: "sibling draft (in progress) on which plugin package the daemon loads into hosted sessions"
+  261117-feat-ws-harness-capability-catalog: "implements decision (07): the catalog as the common harness interface"
+  261117-feat-ws-agent-tools-mailbox-routing: "implements the ws/agent.* delegation decisions (06), (09), (10)"
+  261117-feat-ws-single-session-holder: "stage-2 child, prerequisite of exec"
+  261117-feat-ws-exec-tools: "stage-2 child implementing ws/exec"
+  261117-feat-ws-mailbox-memory-first-store: "independent child of the epic"
+  261117-feat-ws-hosted-antigravity-adapter: "stage-3 child, revived by (02)/(05)"
 ---
 
 # Hosted sessions as the first tier
@@ -224,6 +231,65 @@ spec" means formalising that existing boundary or something wider is open.
   requirement is an MCP connection plus daemon-side automatic injection where
   needed (e.g. the workflow manual) (owner, 2026-11-17).
 
+Confirmed in the lead-discuss session of 2026-11-17 (board items (01)-(25);
+epic `261114-epic-ws-common-session-foundation` carries the full set). The
+resolved Open Questions are mapped by content.
+
+- (01)=a Hosted-first: the daemon-hosted session is the reference tier. Common
+  interface work targets hosted sessions (MCP, daemon injection, playbooks,
+  daemon `agent.spawn`). Removal work (Pi extension, CLI-tier features) is
+  approved per item, never bundled. Resolves former OQ8 (reconcile with the
+  epic): the epic is revised in place (05) and its CLI-plugin versus MCP-only
+  hosted distinction now reads as hosted-first with the CLI tier frozen.
+- (02) Codex and Antigravity will both be supported as tier-1 hosted harnesses
+  after hosted common-ization; Antigravity is not dropped (new ticket
+  `261117-feat-ws-hosted-antigravity-adapter`, since the earlier ticket in
+  `.dropped/` is immutable).
+- (03) The Codex adapter decision (799)=a is not confirmed; the Codex
+  version/protocol choice is asked when stage 3 starts.
+- (04)=a Non-hosted tiers: the Claude CLI plugin is frozen (keep current
+  features, add none); the Pi extension is retired after hosted parity, each
+  concrete removal still needing per-item approval; Pi remains only as a hosted
+  lead/worker harness. Resolves former OQ1 (Pi stays a hosted lead harness) and
+  OQ2 (the Claude CLI tier is a frozen set, not a shrinking one).
+- (05) Epic `261114-epic-ws-common-session-foundation` is revised in place; this
+  research is its evidence child; Antigravity returns as a stage-3 child.
+- (06)=a, (09)=a, (10)=c, (11), (12) Delegation is always `ws/agent.*`
+  regardless of harness: `agent.spawn`, `agent.stop`, `agent.list`, with no
+  `wait`, no `transcript` and no `agent.send` (a single `mailbox.send(to:
+  <address>)` serves children, peers and leads). It is a new family and `pi.*`
+  stays as a behavior-preserving alias (T0). Native subagents are removed in
+  hosted leads (`--disallowedTools Agent` and `Task` for Claude). Hiring
+  (`session.request_hire`, peer, no lineage) stays separate; worker-profile caps
+  apply to `agent.spawn`. No depth cap: `MaxSpawnDepth` is removed and a
+  per-root-tree concurrent-agent cap config key bounds runaway (default by
+  measurement). Resolves former OQ3 (tool name and shape), the whitelist half of
+  former OQ4 (native spawn removed by `--disallowedTools`, not left alongside)
+  and former OQ7 (interaction with hiring, worker profiles and the depth cap).
+  Implemented by `261117-feat-ws-agent-tools-mailbox-routing`.
+- (29)=ok (2026-11-17): native subagent removal extends to hosted workers;
+  playbooks also state 'Never use {{NativeToolScheme}}' per harness
+  (261117-feat-ws-hosted-prompt-assembly).
+- Owner 2026-11-17 19:16: pi.* spawn tools are removed rather than kept as
+  aliases; supersedes the alias part of (11); hidden now, handlers removed next
+  minor ((54)=b).
+- (07) ok, (08)=c, (20)-(22), (24) The common harness interface is a
+  declarative capability catalog promoting the existing `wsagent` optional
+  controls into an explicit table (items declared `native` / `ws-substitute` /
+  `unsupported` plus a range, per `harness@version` with `since` / `until`),
+  not a wider external spec. Admission conditions are headless JSON event
+  streaming and HTTP MCP injection (direct JSON-RPC, per-session token). Out-of-
+  range versions run loudly with the nearest profile. Harnesses whose native
+  subagents cannot be removed are decided per harness at stage 3. Resolves
+  former OQ5. Implemented by `261117-feat-ws-harness-capability-catalog`.
+- (25) Implementation and verification order is Claude, Codex, Antigravity, then
+  Pi; Pi is driven only with GPT models, so the Pi hosted backend is a port of
+  the Codex adapter, not a Pi-first design.
+- (16)-(19) `ws/exec.*` and the single PC-wide session holder are stage-2
+  features (`261117-feat-ws-exec-tools`, `261117-feat-ws-single-session-holder`);
+  the mailbox memory-first store is an independent child
+  (`261117-feat-ws-mailbox-memory-first-store`, (13)=c, (15)).
+
 ### Proposals
 
 Non-authoritative candidates from the survey.
@@ -267,39 +333,31 @@ Non-authoritative candidates from the survey.
 
 ### Open Questions
 
-1. Does Pi remain a hosted lead harness after the extension is removed
-   (MCP-only, losing `ws-execute`, ws-owned compaction summary, bootstrap,
-   goal loop, web tools), or only a daemon worker backend?
-2. Which features does the Claude CLI tier keep, and is "limited" a frozen
-   feature set (no new mod features) or a shrinking one? Each drop is an
-   "Always ask" item.
-3. Tool name and shape: `agent.spawn` as a new family, an extension of `pi.*`,
-   or a rename with alias? Compatibility tier of each option (an additive tool
-   is likely T0; removing `pi.*` would not be).
-4. In hosted leads, is the native spawn tool removed by whitelist
-   (`--disallowedTools Agent`) or left available alongside `agent.spawn`? How
-   do playbooks' `SpawnIdiom` / native-spawn bindings route per tier without
-   naming this repository (shipped-surface boundary)?
-5. Does "common harness interface spec" mean formalising the existing
-   `wsagent` backend controls and the common session interface, or a wider
-   external spec that other harnesses (Codex, future ones) implement?
+Former OQ1, OQ2, OQ3, OQ5, OQ7 and OQ8 are resolved (see Confirmed Decisions);
+numbering of the remainder is kept stable.
+
+4. (Residual) How do playbooks' `SpawnIdiom` / native-spawn bindings route per
+   tier without naming this repository (shipped-surface boundary)? The
+   whitelist half of the question is resolved: hosted leads remove the native
+   spawn tool.
 6. Should hosted leads keep loading the Claude mod at all once its features
-   move, or load a reduced hosted profile? Interacts with
-   `261116-feat-ws-daemon-plugin-package-select`.
-7. How does daemon-owned spawn interact with owner-approved hiring and worker
-   profiles (`261115-feat-ws-session-hire-approval`,
-   `261115-feat-ws-worker-profile-session-spawn`) and with spawn depth/tier
-   caps (`MaxSpawnDepth = 2`)?
-8. Reconcile with `261114-epic-ws-common-session-foundation`'s decision that
-   CLI-plugin and MCP-only hosted entry stay distinct and that common access
-   does not substitute for harness-native integration.
+   move, or load a reduced hosted profile? This is about the Claude mod in
+   hosted sessions, not the Pi extension's fate, so decision (04) does not
+   settle it. Interacts with `261116-feat-ws-daemon-plugin-package-select`.
 9. Does Claude Code expand MCP prompts (`prompts/list`) as slash commands in
    `-p` stream-json input? If so the CLI tier could get the same command list
-   via MCP prompts (the ws MCP server implements no `prompts/*` today).
+   via MCP prompts (the ws MCP server implements no `prompts/*` today). Needs a
+   probe.
 10. What exactly goes into the injected routing table, and what is its size
     budget in MCP instructions versus the workflow manual?
 11. Which `lead-*` commands are curated for the slash list, and are their
     arguments free text?
+12. Pi extension retirement parity criteria: the concrete list of what must hold
+    before the Pi extension is retired (feature disposition for the `ws-execute`
+    gateway, ws-owned compaction summary, bootstrap, goal loop, web tools, display
+    summaries, footer and hosted-agent-row channel; the outcome of the Pi HTTP
+    MCP probe in `261117-feat-ws-harness-capability-catalog` Phase 1). Each
+    removal still needs per-item owner approval (04).
 
 ### Rejected Alternatives
 

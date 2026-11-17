@@ -40,6 +40,27 @@ func TestAnswerJournalSurvivesCancelAndRetry(t *testing.T) {
 	}
 }
 
+func TestAnswerJournalSkipsMalformedRemnant(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := SendJournaled(dir, Entry{Parts: []string{"committed answer"}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(dir, "answer-pending", "000-invalid")
+	if err := os.WriteFile(bad, []byte("bad"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	if err := ReplayAnswerJournal(dir, func(string, Entry) error { calls++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("malformed remnant starved committed answer: calls=%d", calls)
+	}
+	if _, err := os.Stat(bad); !os.IsNotExist(err) {
+		t.Fatalf("malformed remnant remains: %v", err)
+	}
+}
+
 func TestAnswerJournalSurvivesSteer(t *testing.T) {
 	dir := t.TempDir()
 	name, _, err := SendJournaled(dir, Entry{Chips: []Chip{{ID: "03", Answer: "a"}}}, time.Now())

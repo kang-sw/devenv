@@ -247,6 +247,49 @@ func TestPruneRegistrationsAgesRetiredLeadsByTheirRow(t *testing.T) {
 	}
 }
 
+// A closed spawned Pi child ages from the row its close wrote last, as a
+// retired lead does, though its row is an agent's; an open one, and a
+// closed agent conversation that is no Pi child, keep the runner's
+// lifetime.
+func TestPruneRegistrationsAgesClosedPiChildrenByTheirRow(t *testing.T) {
+	dir := t.TempDir()
+	old := testNow.Add(-RegistryRetention - time.Hour)
+	recent := testNow.Add(-time.Hour)
+	session := func(id, raw string, at time.Time, ended bool) {
+		t.Helper()
+		sessionDir := SessionDir(dir, id)
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sessionDir, AgentRecordFileName), []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		reg := Registration{ReplyID: id, Project: "/p", Harness: "pi", RegisteredAt: stampFor(old), HeartbeatAt: stampFor(at), Agent: true, Unlisted: true}
+		if ended {
+			reg.EndedAt = stampFor(at)
+		}
+		if err := WriteRegistration(dir, reg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const child = `"backend":"pi","parent":{"kind":"lead","reply_id":"someleadid"}`
+	session("childold", `{`+child+`,"closed_at":"2026-10-01T00:00:00Z"}`, old, true)
+	session("childrecent", `{`+child+`,"closed_at":"2026-11-06T11:00:00Z"}`, recent, true)
+	session("childopen", `{`+child+`}`, old, false)
+	session("claudechild", `{"backend":"claude","parent":{"kind":"lead","reply_id":"someleadid"},"closed_at":"2026-10-01T00:00:00Z"}`, old, true)
+	session("pinoparent", `{"backend":"pi","closed_at":"2026-10-01T00:00:00Z"}`, old, true)
+
+	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 1 {
+		t.Errorf("pruned %d, want 1", n)
+	}
+	for id, want := range map[string]bool{"childold": false, "childrecent": true, "childopen": true, "claudechild": true, "pinoparent": true} {
+		_, err := os.Stat(SessionDir(dir, id))
+		if exists := err == nil; exists != want {
+			t.Errorf("%s exists = %v, want %v", id, exists, want)
+		}
+	}
+}
+
 // An agent conversation outlives the prune window while the daemon is down:
 // its directory (agent.json, held sends, the backend session) belongs to the
 // runner, so prune spares it by registration flag or by its record file.

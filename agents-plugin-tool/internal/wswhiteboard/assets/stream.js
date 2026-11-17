@@ -168,6 +168,7 @@
   // Clone the small control shell, never the potentially huge payload.
   function shell(gap) {
     var copy = gap.cloneNode(false);
+    copy.removeAttribute('data-lazy');
     Array.from(gap.children).forEach(function (n) { copy.appendChild(n.cloneNode(!n.matches('template[data-history-gap]'))); });
     return copy;
   }
@@ -181,6 +182,144 @@
     refresh(gap);
     return before.children.length ? prefix : null;
   }
+  // Lazy history. The served dashboard board leaves gap payloads, earlier
+  // panel bodies and capped closed topics out, each marked data-lazy: an
+  // empty gap template, an empty .entry-body, an empty deferred topic
+  // template. Its host defines window.wbHistoryFetch(query), which resolves
+  // to the complete sections [{name, html}] of the topics a "name=..." or
+  // "target=..." query names. hydrateWith fills the marked parts in place
+  // from them, so every synchronous path here runs unchanged on the result;
+  // a section rendered from another revision fills only what still matches.
+  function lazy(n) { return !!(n && n.hasAttribute && n.hasAttribute('data-lazy')); }
+  function lazyIn(root) { return lazy(root) || !!(root.querySelector && root.querySelector('[data-lazy]')); }
+  var fetching = new Map();
+  function fetchTopics(query) {
+    if (typeof window.wbHistoryFetch !== 'function') return Promise.resolve([]);
+    if (!fetching.has(query)) {
+      fetching.set(query, Promise.resolve().then(function () { return window.wbHistoryFetch(query); }).then(function (topics) {
+        fetching.delete(query);
+        return Array.isArray(topics) ? topics : [];
+      }, function () { fetching.delete(query); return []; }));
+    }
+    return fetching.get(query);
+  }
+  function named(list, attr, name) { return Array.from(list).filter(function (n) { return n.getAttribute(attr) === name; }); }
+  function fillTopic(section, full) {
+    var filled = 0;
+    var lazyGaps = Array.from(section.querySelectorAll('.history-gap[data-lazy]')), fullGaps = Array.from(full.querySelectorAll('.history-gap'));
+    var same = lazyGaps.length === fullGaps.length && lazyGaps.every(function (g, i) {
+      return ['data-count', 'data-from', 'data-to'].every(function (a) { return g.getAttribute(a) === fullGaps[i].getAttribute(a); });
+    });
+    if (same) lazyGaps.forEach(function (g, i) {
+      var held = payload(g), rows = payload(fullGaps[i]);
+      while (rows.firstChild) held.appendChild(rows.firstChild);
+      g.removeAttribute('data-lazy');
+      filled++;
+    });
+    var entries = Array.from(full.querySelectorAll('.wb-entry[data-entry]'));
+    section.querySelectorAll('.entry-body[data-lazy]').forEach(function (body) {
+      var entry = body.closest('.wb-entry'), id = entry && entry.getAttribute('data-entry');
+      var match = id && named(entries, 'data-entry', id)[0], src = match && match.querySelector('.entry-panel > .entry-body');
+      if (!src || lazy(src)) return;
+      while (src.firstChild) body.appendChild(src.firstChild);
+      body.removeAttribute('data-lazy');
+      filled++;
+    });
+    return filled;
+  }
+  function hydrateWith(root, topics) {
+    var filled = 0;
+    topics.forEach(function (t) {
+      if (!t || typeof t.name !== 'string' || typeof t.html !== 'string') return;
+      var parsed = document.createElement('template');
+      parsed.innerHTML = t.html;
+      var full = parsed.content.querySelector('section.topic');
+      if (!full) return;
+      var sections = named(root.querySelectorAll('section.topic[data-topic]'), 'data-topic', t.name);
+      if (root.matches && root.matches('section.topic') && root.getAttribute('data-topic') === t.name) sections.unshift(root);
+      sections.forEach(function (section) {
+        if (!lazyIn(section)) return;
+        var n = fillTopic(section, full);
+        if (!n) return;
+        histories(section).forEach(admitted);
+        filled += n;
+      });
+      named(root.querySelectorAll('template[data-history-topic][data-lazy]'), 'data-history-topic', t.name).forEach(function (deferred) {
+        deferred.content.appendChild(document.importNode(full, true));
+        deferred.removeAttribute('data-lazy');
+        filled++;
+      });
+    });
+    return filled;
+  }
+  function hydrateTopic(section) {
+    if (!section || !lazyIn(section)) return Promise.resolve(0);
+    return fetchTopics('name=' + encodeURIComponent(section.getAttribute('data-topic') || '')).then(function (topics) {
+      return section.isConnected === false ? 0 : hydrateWith(section, topics);
+    });
+  }
+  // targets holds the lazy loadTarget misses in flight by id, one per root
+  // asked (a jump tries every board box). loading(id), asked right after
+  // loadTarget returned null, is the promise of those loads (true once the
+  // target's topic arrived in some root, null otherwise) and hands the
+  // landing to the caller, which then runs its own jump again; unasked, a
+  // load lands by itself.
+  var targets = new Map();
+  function loading(id) {
+    var list = targets.get(id);
+    if (!list) return null;
+    list.forEach(function (t) { t.claimed = true; });
+    return Promise.all(list.map(function (t) { return t.promise; })).then(function (r) { return r.some(Boolean) || null; });
+  }
+  function hydrateTarget(root, id) {
+    return fetchTopics('target=' + encodeURIComponent(id)).then(function (topics) {
+      return root.isConnected === false ? 0 : hydrateWith(root, topics);
+    });
+  }
+  // hydrateAll fills every lazy topic under root in one fetch (the command
+  // palette's complete entry search).
+  function hydrateAll(root) {
+    root = root || document;
+    var names = new Set();
+    Array.from(root.querySelectorAll('section.topic[data-topic]')).forEach(function (t) { if (lazyIn(t)) names.add(t.getAttribute('data-topic')); });
+    Array.from(root.querySelectorAll('template[data-history-topic][data-lazy]')).forEach(function (t) { names.add(t.getAttribute('data-history-topic')); });
+    if (!names.size) return Promise.resolve(0);
+    // The route answers at most 512 names a request.
+    var list = Array.from(names), queries = [];
+    for (var i = 0; i < list.length; i += 256) queries.push(list.slice(i, i + 256).map(function (n) { return 'name=' + encodeURIComponent(n); }).join('&'));
+    return Promise.all(queries.map(fetchTopics)).then(function (all) { return hydrateWith(root, [].concat.apply([], all)); });
+  }
+  // unfilled holds, by history key, the snapshot a rehydrate is still
+  // fetching for: a capture taken meanwhile (another update) merges it, so
+  // rows the reader had loaded survive a second swap before the fill.
+  var unfilled = new Map();
+  function rehydrate(root, saved) {
+    var scope = root || document;
+    unfilled.set(saved.key, saved);
+    fetchTopics('name=' + encodeURIComponent(saved.key)).then(function (topics) {
+      if (unfilled.get(saved.key) === saved) unfilled.delete(saved.key);
+      if (scope.isConnected === false) return;
+      // The first restore already ran this snapshot's pending loads.
+      if (hydrateWith(scope, topics)) restore(scope, [Object.assign({}, saved, { pending: [] })]);
+    });
+  }
+  function carried(record, h) {
+    var prev = unfilled.get(record.key);
+    if (!prev || !h.querySelector('.history-gap[data-lazy]')) return record;
+    var union = function (a, b) { return Array.from(new Set((a || []).concat(b || []))); };
+    var folds = new Map(prev.folds || []);
+    (record.folds || []).forEach(function (f) { folds.set(f[0], f[1]); });
+    return Object.assign({}, record, { shown: record.shown || prev.shown, rows: union(prev.rows, record.rows), entries: union(prev.entries, record.entries),
+      loaded: union(prev.loaded, record.loaded), folds: Array.from(folds) });
+  }
+  // An earlier panel version's body arrives with its topic when its fold
+  // opens, by the reader or a restored fold; its frame mounts on arrival
+  // (admitted's wbhistoryload).
+  document.addEventListener('toggle', function (e) {
+    var d = e.target;
+    if (!d || d.tagName !== 'DETAILS' || !d.open || !d.querySelector(':scope > .entry-body[data-lazy]')) return;
+    hydrateTopic(d.closest('section.topic'));
+  }, true);
   function materialize(root, id, beforeGeometry) {
     var node = find(root, id);
     if (node) { if (beforeGeometry) beforeGeometry(node); return node; }
@@ -222,10 +361,25 @@
       if (panel) panel.open = true;
     }
   }
-  function loadTarget(root, id, beforeGeometry) {
+  function loadTarget(root, id, beforeGeometry, fetched) {
     if (!valid(id)) return null;
     var node = materialize(root || document, id, beforeGeometry);
-    if (!node) return null;
+    if (!node) {
+      // A target in history the page has not fetched yet resolves once its
+      // topic arrives; this call returns null, as for an unknown target.
+      var list = targets.get(id) || [], scope = root || document;
+      if (!fetched && lazyIn(scope) && !list.some(function (t) { return t.root === scope; })) {
+        var t = { root: scope };
+        t.promise = hydrateTarget(scope, id).then(function (n) {
+          var rest = (targets.get(id) || []).filter(function (x) { return x !== t; });
+          if (rest.length) targets.set(id, rest); else targets.delete(id);
+          if (!n) return null;
+          return t.claimed ? true : loadTarget(root, id, beforeGeometry, true);
+        });
+        targets.set(id, list.concat([t]));
+      }
+      return null;
+    }
     openTarget(node);
     var panel = node.matches('.wb-entry.panel') ? node.querySelector('.entry-panel') : node.matches('.entry-panel') ? node : null;
     if (panel) { panel.open = true; if (panelState) panelState.opened(panel); }
@@ -250,7 +404,8 @@
   }
   function capture(root) {
     return histories(root).map(function (h) {
-      return { key: h.getAttribute('data-history'),
+      var seen = kit.seen(h.closest('.topic') || h);
+      return carried({ key: h.getAttribute('data-history'), shown: !!(seen && seen.visible),
         panels: panelState ? panelState.capture(h) : [],
         rows: Array.from(h.querySelectorAll('.timeline-row')).map(function (n) { return n.getAttribute('data-row'); }),
         entries: Array.from(h.querySelectorAll('.wb-entry')).map(function (n) { return n.id; }),
@@ -261,7 +416,7 @@
           var before = p.fallback && payload(p.fallback).children, edge = before && before[before.length - 1];
           return { row: p.row && p.row.getAttribute('data-row'), next: next && next.getAttribute('data-row'), before: edge && edge.getAttribute('data-row'), direction: p.direction, height: p.height, loaded: !!p.loaded };
         }),
-        folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }) };
+        folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }) }, h);
     });
   }
   // Restore membership before a host's DOM morph, without binding, mounting
@@ -292,6 +447,7 @@
       var h = histories(root).find(function (n) { return n.getAttribute('data-history') === saved.key; });
       if (!h) {
         var deferred = Array.from((root || document).querySelectorAll('template[data-history-topic]')).find(function (t) { return t.getAttribute('data-history-topic') === saved.key; });
+        if (deferred && lazy(deferred)) { rehydrate(root, saved); return; }
         if (deferred) {
           var fragment = deferred.content.cloneNode(true), topic = fragment.querySelector('.topic');
           deferred.parentElement.insertBefore(fragment, deferred); deferred.remove(); init(topic); admitted(topic);
@@ -301,6 +457,11 @@
       if (!h) return;
       if (panelState) panelState.snapshot(h, saved);
       var kept = kit.keep(h), changed = restoreRows(h, saved);
+      // Rows a new lazy render left out come back with the topic's complete
+      // history when the reader had loaded them, or saw the topic: a new
+      // batch must not fold away the rows just read.
+      var present = new Set(Array.from(h.querySelectorAll('.timeline-row')).map(function (n) { return n.getAttribute('data-row'); }));
+      if (h.querySelector('.history-gap[data-lazy]') && (saved.shown ? saved.rows || [] : saved.loaded || []).some(function (k) { return !present.has(k); })) rehydrate(root, saved);
       var folds = new Map(saved.folds || []);
       h.querySelectorAll('details[data-key]').forEach(function (d) {
         if (folds.has(d.getAttribute('data-key'))) d.open = folds.get(d.getAttribute('data-key'));
@@ -345,6 +506,9 @@
       var n = kids[i];
       if (n.matches('.history-gap')) {
         if (acc >= WINDOW_PX) break;
+        // The window resumes past lazy history once its topic, near the
+        // view, has fetched it.
+        if (lazy(n)) { fillLater(h); break; }
         var op = { gap: n, direction: 'up', fallback: null, height: acc, row: null };
         h._wbHistoryPending.push(op);
         progress(h, op);
@@ -359,6 +523,26 @@
       }
     }
     h._wbHistoryFilling = false;
+  }
+  // fillLater fetches the history of h's topic when the topic comes within
+  // 800px of the view, then lets fill() take the rest of its window, so a
+  // topic shows the rows an eager page would while a page far from the
+  // view fetches nothing.
+  function fillLater(h) {
+    if (h._wbFillWatch) return;
+    var topic = h.closest('section.topic') || h;
+    h._wbFillWatch = kit.watch(topic, { margin: '800px', onChange: function (r) {
+      if (!r.visible || !h._wbFillWatch) return;
+      kit.unwatch(h._wbFillWatch);
+      hydrateTopic(topic).then(function () {
+        h._wbFillWatch = null;
+        // Another path may have fetched the topic first; fill once no gap
+        // is still lazy.
+        if (h.isConnected === false || h._wbHistoryPending.length || h.querySelector('.history-gap[data-lazy]')) return;
+        h._wbHistoryFilling = true;
+        fill(h);
+      });
+    } });
   }
   function init(root) {
     if (window.wbAgo) window.wbAgo(root || document);
@@ -404,7 +588,12 @@
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('[data-load]');
         if (!button || button.hidden || button.closest('.wb-history') !== h) return;
-        load(h, button.closest('.history-gap'), button.getAttribute('data-load'), null, true);
+        var gap = button.closest('.history-gap'), direction = button.getAttribute('data-load');
+        if (lazy(gap)) {
+          hydrateTopic(h.closest('.topic')).then(function () { if (!lazy(gap) && gap.isConnected) load(h, gap, direction, null, true); });
+          return;
+        }
+        load(h, gap, direction, null, true);
       });
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
@@ -1088,7 +1277,7 @@
   }
   var kit = viewKit(window);
   var panelState = panelStateKit(window);
-  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget,
+  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget, loading: loading, hydrateAll: hydrateAll,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
     watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, pinning: kit.pinning, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot, rendered: kit.rendered };

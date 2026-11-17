@@ -20,6 +20,19 @@ func TestFreshSessionLoadClient(t *testing.T) {
 	t.Log(string(out))
 }
 
+// TestSessionViewBoardAnchorClient pins the session-switch save of the board
+// anchor: one forced layout, no read inside a content-visibility-skipped part.
+func TestSessionViewBoardAnchorClient(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; run node --test testdata/session-view-anchors.test.cjs locally")
+	}
+	out, err := exec.Command(node, "--test", "testdata/session-view-anchors.test.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("session view board anchor: %v\n%s", err, out)
+	}
+}
+
 func TestFreshSessionScriptAsset(t *testing.T) {
 	a, err := loadDashboardAssets()
 	if err != nil {
