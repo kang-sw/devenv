@@ -155,6 +155,59 @@ column, a Markdown file and an image open in the pane) are compared side by
 side with mockup state `#a`, and a tabs-layout capture shows the toolbar sheet
 unchanged.
 
+### Result (2c02115ff) - 2026-11-17
+
+Implemented Decisions 1-10 in `2c02115ff`, with R1 corrections in `6a9226e76`.
+The split toolbar selects/focuses the existing left explorer; its previewable
+single-clicks open a memory-only reading pane across the board and pin area.
+Existing renderers, binary row actions, independent explorer state and normal
+card links remain intact. Keep/double-click/Enter close the pane before durable
+card reveal; closing cancels pending preflight, preserves focus ownership, and
+surface transfers fetch fresh sandbox capabilities. Tabs fallback restores the
+normal preview path. All 11 locales have the keep label.
+
+Verification:
+
+- Local Node contracts: 22 suites passed, 110 node:test cases plus legacy
+  assertions; workspace-picker runs bundled with files-explorer.
+- Remote w5090: owner's sys_lock recipe, `go test ./internal/wsdashboard/...`,
+  passed after the R1 fixes (272.552s). No local Go tests.
+- Independent R1: three Important issues fixed (pending preflight, stale
+  capabilities, content-focused closure); fixes-only R2 clean.
+- Real harness corrections in `4f2bfd09e`: Windows executable suffix,
+  authenticated session readiness and daemon failure-log tail. Its four Node
+  tests pass; focused independent review of this additional delta is clean.
+- Chrome LOOK: left Files tab/search activation, Markdown/image rendering,
+  hidden board/pins, tabs fallback and unchanged toolbar sheet confirmed.
+  At 2560px the pane extends from x=919.66 to x=2544 across the hidden pin
+  column; neither viewport has horizontal overflow. No real visual gaps found.
+- Side-by-side comparisons below: **match of the approved layout contract**.
+  Existing production rail/composer/explorer chrome and widths remain; the
+  stipulated existing image renderer preserves aspect ratio with checkerboard
+  letterboxing rather than stretching the mockup's illustrative gradient.
+
+All capture paths below are under `D:/Temp/wide-explorer/`; references are
+renders of `ai-docs/assets/mockups/261117/wide-explorer/explorer-wide.html#a`
+at exactly the same viewport and selected file:
+
+| Result capture | Reference capture | Verdict |
+|---|---|---|
+| `result-1920x1080-markdown.png` | `mockup-1920x1080-markdown.png` | match |
+| `result-1920x1080-image.png` | `mockup-1920x1080-image.png` | match |
+| `result-2560x1440-markdown.png` | `mockup-2560x1440-markdown.png` | match |
+| `result-2560x1440-image.png` | `mockup-2560x1440-image.png` | match |
+
+Tabs capture: `D:/Temp/wide-explorer/result-1920x1080-tabs-sheet.png`.
+Four inspected `comparison-<viewport>-<kind>.png` files retain the side-by-side
+views. Only these 13 final PNGs remain; isolated daemons and other temporary
+artifacts were removed. Captures used current frontend assets and source locale
+tables with an existing isolated daemon binary; no shared daemon was replaced.
+
+Forward (one grouped baseline exclusion): four untouched Node fixtures also
+fail against base production assets `c79cdf1`: search-palette
+(`paletteHistory`), stream-gone (`hiddenRegions`), task_badges (`$`), and
+visibility-stream (`window`). No unrelated investigation or fixes.
+
 ## Sage Review Round 1 (2026-11-17)
 
 ### Design Reviewer — pass
@@ -168,11 +221,12 @@ unchanged.
 |---|-------|----------|
 | 1 | Pane behavior during durable-card creation | important |
 
-## Blocked: LOOK capture gate (2026-11-17)
+## LOOK capture gate recovery (2026-11-17)
 
-Implementation checkpoint: `6a9226e76` on `impl/develop/chump-gravy-both`
-(base `c79cdf133`). Phase 1 has **no Result** because visual verification is
-still outstanding; do not close this ticket until the screenshot gate passes.
+Earlier checkpoint `07168d170` left Phase 1 pending LOOK. The lead authorized
+bounded continuation without changing the ticket contract. The gate is now
+resolved by the Phase 1 Result above; the remaining text records the earlier
+handoff and its diagnosis.
 
 Landed: split toolbar activation of the existing left Files tab, a memory-only
 pane sharing the existing preview renderers across the board/pin area, durable
@@ -205,12 +259,13 @@ server fails on Windows because its executable path lacks `.exe`. A temporary
 copy adapted that suffix and reused an existing binary (no package installs),
 but `serve --shared-actions` then failed because its existing fixture gives
 policy options to a `technical` item; the current binary rejects that command.
-No further capture attempt was made. No PNGs or side-by-side comparison exist.
-Temporary artifacts under `D:/Temp/wide-explorer/` were removed at handoff.
+No further capture attempt was made at that handoff; no PNGs or side-by-side
+comparison had yet been produced. Those temporary artifacts were removed.
 
-Proposed resolution: lead authorizes another bounded capture pass using the
-existing harness with Windows executable adaptation and without the obsolete
-`--shared-actions` fixture (seed only the needed Markdown/image in the isolated
-temporary project). Capture both required split viewports plus tabs, compare
-against the approved mockup `#a`, then record Phase 1 Result and close. No merge
-performed.
+The first authorized retry still timed out. The next bounded diagnosis, with
+180-second waits and visible daemon output, showed HTTP 401
+`{"error":"login_required"}` on frame readiness: `/health` and `/nudge` are
+machine exemptions, but session pages require the localhost cookie. The
+minimal tracked-script fix uses the isolated endpoint's existing native cookie
+route, then supplies that cookie on readiness requests. Serving and all
+required captures subsequently succeeded. No merge performed.
