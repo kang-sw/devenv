@@ -25,7 +25,8 @@ Object.defineProperties(E.prototype, {
   id: {get:function(){return this.attrs.id || '';}},
   tagName: {get:function(){return this.tag.toUpperCase();}},
   nodeType: {get:function(){return this.tag === '#fragment' ? 11 : 1;}},
-  parentElement: {get:function(){return this.parent;}},
+  parentElement: {get:function(){return this.parent && this.parent.nodeType===1 ? this.parent : null;}},
+  parentNode: {get:function(){return this.parent;}},
   firstChild: {get:function(){return this.children[0] || null;}},
   nextElementSibling: {get:function(){return this.parent && this.parent.children[this.parent.children.indexOf(this)+1] || null;}},
   isConnected: {get:function(){return root.contains(this);}},
@@ -61,6 +62,57 @@ process.on('beforeExit',function(){if(!scriptDone){console.error('async history 
 ` + cases
 	if out, err := nodeScript(node, script).CombinedOutput(); err != nil {
 		t.Fatalf("lazy history: %v\n%s", err, out)
+	}
+}
+
+func TestHistoryImageRefreshInsideRetainedTemplatesUnderNode(t *testing.T) {
+	for _, mode := range []string{"gap", "deferred", "deferred-gap"} {
+		t.Run(mode, func(t *testing.T) {
+			runLazyHistoryScript(t, `var mode='`+mode+`';(async function(){
+  function imageRow(version){return '<div class="timeline-row" data-row="e1"><article class="wb-entry agent" data-entry="e1" id="e1"><div class="doc-frame" data-doc-key="entry:e1" data-relay="/s/r/image?path=a.png&amp;v='+version+'" data-srcdoc="image-version-'+version+'"></div><img src="/s/r/image?path=b.png&amp;v='+version+'"></article></div>';}
+  var html=mode==='deferred'?'<section class="topic" data-topic="t">'+imageRow('one')+'</section>':topic(mode==='gap',mode==='gap'?'':imageRow('one'));
+  if(mode!=='gap')html='<template data-history-topic="t">'+html+'</template>';
+  root=templates(parse(html+'<template data-history-images="one"></template>'));
+  if(mode==='gap'){
+    // Hydration leaves the historical image inert in an initialized gap.
+    window.wbHistory.init(root);
+    var hydration=window.wbHistory.hydrateAll(root);await drain();
+    requests[0].resolve([{name:'t',html:topic(false,imageRow('one'))}]);await hydration;
+    requests=[];
+  }
+  var deferred=root.querySelector('template[data-history-topic]');
+  var section=(deferred?deferred.content:root).querySelector('section.topic');
+  var held=section.querySelector('template[data-history-gap]');
+  var scope=held?held.content:section;
+  var oldFrame=scope.querySelector('.doc-frame'), inline=scope.querySelector('img');
+  oldFrame.style.height='240px';
+  await window.wbHistory.refreshImages(document);
+  check('initial stamp does not fetch',requests.length,0);
+  root.querySelector('template[data-history-images]').setAttribute('data-history-images','two');
+  var pending=window.wbHistory.refreshImages(document);await drain();
+  check('retained-only images trigger topic refresh',requests.map(r=>r.query),['name=t']);
+  if(!requests.length)throw Error(bad.join('\n'));
+  requests[0].resolve([{name:'t',html:topic(false,imageRow('two'))}]);await pending;
+  var fresh=scope.querySelector('.doc-frame');
+  check('held frame gets current relay',fresh.getAttribute('data-relay'),'/s/r/image?path=a.png&v=two');
+  check('held frame gets current document',fresh.getAttribute('data-srcdoc'),'image-version-two');
+  check('held frame retains height',fresh.style.height,'240px');
+  check('held frame replaced',fresh===oldFrame,false);
+  check('held inline image retains identity',scope.querySelector('img')===inline,true);
+  check('held inline image gets current URL',inline.getAttribute('src'),'/s/r/image?path=b.png&v=two');
+  check('refresh leaves gap inert',!!root.querySelector('[id="e1"]'),false);
+  check('deferred template retained',root.querySelector('template[data-history-topic]')===deferred,true);
+  await window.wbHistory.refreshImages(document);
+  check('completed stamp does not fetch again',requests.length,1);
+  var target=window.wbHistory.loadTarget(root,'e1');
+  check('expansion finds refreshed row',target && target.id,'e1');
+  check('expansion uses refreshed frame',root.querySelector('.doc-frame').getAttribute('data-relay'),'/s/r/image?path=a.png&v=two');
+  check('expansion uses refreshed inline image',root.querySelector('img').getAttribute('src'),'/s/r/image?path=b.png&v=two');
+  check('expansion needs no further fetch',requests.length,1);
+  scriptDone=true;
+  if(bad.length)throw Error(bad.join('\n'));
+})().catch(e=>{console.error(e);process.exitCode=1;});`)
+		})
 	}
 }
 

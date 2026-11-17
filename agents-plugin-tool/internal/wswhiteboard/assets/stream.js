@@ -297,8 +297,18 @@
   // retained topic sections do not. Refresh only hydrated image frames, not
   // history membership or disclosures; unchanged frames keep their identity.
   var imageStamp = null, imageRefreshing = null, imageRefreshed = null, imageRetry = 0;
+  // querySelectorAll does not enter template.content. Retained gaps and
+  // hydrated deferred topics (including their gaps) need the same refresh
+  // as live rows, without materializing or binding their inert contents.
+  function retainedImageNodes(root, selector) {
+    var nodes = Array.from(root.querySelectorAll(selector));
+    root.querySelectorAll('template[data-history-gap], template[data-history-topic]').forEach(function (t) {
+      nodes = nodes.concat(retainedImageNodes(t.content, selector));
+    });
+    return nodes;
+  }
   function refreshImageTopics(root) {
-    var sections = Array.from(root.querySelectorAll('section.topic[data-topic]')).filter(function (s) { return !!s.querySelector('.doc-frame[data-relay], img[src]'); });
+    var sections = retainedImageNodes(root, 'section.topic[data-topic]').filter(function (s) { return retainedImageNodes(s, '.doc-frame[data-relay], img[src]').length > 0; });
     var names = Array.from(new Set(sections.map(function (s) { return s.getAttribute('data-topic'); })));
     var queries = [];
     for (var i = 0; i < names.length; i += 256) queries.push(names.slice(i, i + 256).map(function (n) { return 'name=' + encodeURIComponent(n); }).join('&'));
@@ -308,33 +318,32 @@
         var parsed = document.createElement('template'); parsed.innerHTML = t.html;
         var full = parsed.content.querySelector('section.topic');
         if (!full) return;
-        var scopes = [full].concat(Array.from(full.querySelectorAll('template[data-history-gap]')).map(function (gap) { return gap.content; }));
-        var frames = [], images = new Map();
+        var frames = retainedImageNodes(full, '.doc-frame[data-doc-key]'), images = new Map();
         function imagePath(src) { return /^\/s\/[^/?]+\/image\?path=/.test(src || '') ? src.replace(/&v=[0-9a-z.]+$/, '') : ''; }
-        scopes.forEach(function (scope) {
-          frames = frames.concat(Array.from(scope.querySelectorAll('.doc-frame[data-doc-key]')));
-          scope.querySelectorAll('img[src]').forEach(function (img) {
-            var src = img.getAttribute('src'), path = imagePath(src);
-            if (path) images.set(path, src);
-          });
+        retainedImageNodes(full, 'img[src]').forEach(function (img) {
+          var src = img.getAttribute('src'), path = imagePath(src);
+          if (path) images.set(path, src);
         });
-        sections.filter(function (s) { return s.getAttribute('data-topic') === t.name && s.isConnected !== false; }).forEach(function (s) {
-          var changed = false, kept = kit.keep(s);
-          s.querySelectorAll('.doc-frame[data-relay]').forEach(function (old) {
+        // Resolve destinations again: a deferred topic may have materialized
+        // (or disappeared) while the fetch was in flight. Its inert section
+        // has isConnected=false even while its owning template is retained.
+        retainedImageNodes(root, 'section.topic[data-topic]').filter(function (s) { return s.getAttribute('data-topic') === t.name; }).forEach(function (s) {
+          var changed = false, kept = s.isConnected !== false ? kit.keep(s) : null;
+          retainedImageNodes(s, '.doc-frame[data-relay]').forEach(function (old) {
             var fresh = frames.find(function (f) { return f.getAttribute('data-doc-key') === old.getAttribute('data-doc-key'); });
             if (!fresh || fresh.getAttribute('data-srcdoc') === old.getAttribute('data-srcdoc') && fresh.getAttribute('data-relay') === old.getAttribute('data-relay')) return;
             var copy = fresh.cloneNode(true);
             copy.style.height = old.style.height; copy.wbKeep = true;
-            old.parentElement.insertBefore(copy, old); old.remove(); changed = true;
+            old.parentNode.insertBefore(copy, old); old.remove(); changed = true;
           });
           // Item/history images outside body frames keep their node and
           // disclosures; only their file-version URL changes.
-          s.querySelectorAll('img[src]').forEach(function (img) {
+          retainedImageNodes(s, 'img[src]').forEach(function (img) {
             var src = img.getAttribute('src'), fresh = images.get(imagePath(src));
             if (fresh && fresh !== src) { img.setAttribute('src', fresh); changed = true; }
           });
-          if (changed) admitted(s);
-          kept.apply();
+          if (changed && kept) admitted(s);
+          if (kept) kept.apply();
         });
       });
     });
