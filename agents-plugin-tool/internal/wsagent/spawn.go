@@ -199,6 +199,21 @@ func (r *Runner) spawned(c *conv, prompt string) (State, error) {
 		_, _ = r.CloseConversation(c.rec.ReplyID)
 		return State{}, err
 	}
+	rec := c.record()
+	if p := rec.Parent; rec.Backend == BackendPi && p != nil && p.Kind == ParentLead {
+		// A hosted lead's close may have snapshotted descendants before
+		// this spawn registered. Re-check under its cascade fence: either
+		// that close sees this child, or we see the completed parent close.
+		// External mailbox leads have no runner record and remain valid.
+		r.resumeMu.Lock()
+		parent, known := r.recordOf(p.ReplyID)
+		parentClosed := known && parent.Lead && parent.ClosedAt != ""
+		r.resumeMu.Unlock()
+		if parentClosed {
+			_, _ = r.CloseConversation(rec.ReplyID)
+			return State{}, errClosed
+		}
+	}
 	c.watched()
 	return st, nil
 }

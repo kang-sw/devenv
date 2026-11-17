@@ -103,6 +103,67 @@ func TestFinishedPiWorkerClosesAfterItsReportAndSendReopensIt(t *testing.T) {
 	}
 }
 
+// Startup sees the previous done turn before Send admits the new message.
+// Fence the auto-close task just before resumeMu, then let it win admission
+// whenever Send does not hold that fence. This forces the old failure on both
+// Send attempts, rather than depending on goroutine or mutex scheduling.
+func TestPiRevivalFencesMessageAdmissionAgainstAutoClose(t *testing.T) {
+	h, _ := autoCloseHarness(t)
+	w, p := finishableWorker(t, h)
+	p.reply("done")
+	eventuallyClosed(t, h, w.ID)
+	h.runner.Close()
+
+	closing := make(chan chan struct{}, 1)
+	h.config.autoCloseLocking = func(id string) {
+		if id != w.ID {
+			return
+		}
+		release := make(chan struct{})
+		closing <- release
+		<-release
+	}
+	admissions := 0
+	h.config.sendAdmitting = func(id string) {
+		if id != w.ID {
+			return
+		}
+		admissions++
+		var release chan struct{}
+		select {
+		case release = <-closing:
+		case <-time.After(5 * time.Second):
+			t.Fatal("revived child did not schedule startup auto-close")
+		}
+		c := h.runner.conv(id)
+		if h.runner.resumeMu.TryLock() {
+			// No admission fence: let startup close before the inbox write.
+			h.runner.resumeMu.Unlock()
+			close(release)
+			select {
+			case <-c.done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("unfenced startup auto-close did not finish")
+			}
+		} else {
+			// The close can proceed only after this Send admits its message.
+			close(release)
+		}
+	}
+	h.start()
+	starts := h.backend.startCount()
+	st, err := h.runner.Send(w.ID, "follow-up")
+	if err != nil || st.Status == StatusClosed {
+		t.Fatalf("Send after revival = %+v, %v (admissions %d)", st, err, admissions)
+	}
+	if admissions != 1 {
+		t.Fatalf("revival needed %d admission attempts, want 1", admissions)
+	}
+	if text := h.backend.waitProc(t, starts).nextSent(t); text != h.envelope("follow-up") {
+		t.Fatalf("revived turn = %q", text)
+	}
+}
+
 // A child whose report its parent has not taken yet stays open, however
 // long the parent's loop is busy, and closes once the parent takes it.
 func TestPiChildStaysOpenUntilItsParentTakesItsReport(t *testing.T) {
@@ -299,6 +360,46 @@ func TestClosingALeadClosesItsPiChildren(t *testing.T) {
 	eventually(t, "the child's holder stopped", func() bool { return h.holders.opCount("stop "+holder) == 1 })
 	if st := h.state(other.ID); st.Status == StatusClosed {
 		t.Fatalf("another lead's Pi child closed: %+v", st)
+	}
+}
+
+// A lead close can finish its descendant snapshot while a ParentLead
+// spawn is still minting its key. Releasing that spawn only after the close
+// forces registration past the snapshot, without timing-dependent sleeps.
+func TestLeadCloseFencesConcurrentPiSpawn(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	lead := h.lead(BackendPi, LeadOptions{})
+	parent := ParentRef{Kind: ParentLead, ReplyID: lead.ID}
+	mint := h.opts.Keys.(*fakeKeys).gateMint(t, h.root)
+	type result struct {
+		st  State
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		st, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "small", Parent: &parent})
+		done <- result{st, err}
+	}()
+	mint.awaitEntered(t)
+	if _, err := h.runner.CloseConversation(lead.ID); err != nil {
+		t.Fatal(err)
+	}
+	mint.release()
+	select {
+	case got := <-done:
+		if got.err != errClosed {
+			t.Fatalf("spawn registered after lead close = %+v, %v; want errClosed", got.st, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("spawn did not finish after lead close")
+	}
+	for _, child := range h.runner.Children(parent) {
+		if child.Status != StatusClosed {
+			t.Fatalf("closed lead left a live Pi child: %+v", child)
+		}
+		if c := h.runner.conv(child.ID); c != nil {
+			t.Fatalf("closed lead left a child loop registered: %s", child.ID)
+		}
 	}
 }
 
