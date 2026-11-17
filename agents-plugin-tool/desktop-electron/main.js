@@ -84,6 +84,19 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
     const wc = dashboardContents();
     let bar, applicationMenu, menuOpen = false, dialogOpen = false;
+    function registerDevToolsShortcut(contents) {
+      contents.on('before-input-event', (event, input) => {
+        const f12 = input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta;
+        const inspect = input.key.toLowerCase() === 'i' && (platform === 'darwin'
+          ? input.meta && input.alt && !input.control && !input.shift
+          : input.control && input.shift && !input.alt && !input.meta);
+        if (input.type === 'keyDown' && (f12 || inspect)) {
+          event.preventDefault();
+          if (!input.isAutoRepeat) wc.toggleDevTools();
+        }
+      });
+    }
+    registerDevToolsShortcut(wc);
     function focusDashboard(afterInteraction = false) {
       if (!dashboardView || window.isDestroyed() || wc.isDestroyed() || !window.isFocused()) return;
       if (menuOpen || dialogOpen || (!afterInteraction && bar?.view.webContents.isFocused())) return;
@@ -114,6 +127,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       wc.once('did-finish-load', () => focusDashboard());
       window.on('closed', () => { if (!wc.isDestroyed()) wc.close(); });
       window.setMenuBarVisibility(false);
+      registerDevToolsShortcut(bar.view.webContents);
       // Bare Alt opens the same menu as the hamburger, from either view.
       for (const contents of [wc, bar.view.webContents]) {
         let altOnly = false;
@@ -121,9 +135,6 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           if (input.type === 'keyDown') {
             altOnly = input.key === 'Alt' && !input.control && !input.shift && !input.meta;
             if (altOnly) event.preventDefault();
-            if (input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta) {
-              event.preventDefault(); wc.toggleDevTools();
-            }
           }
           if (input.key === 'Alt' && input.type === 'keyUp' && altOnly) {
             event.preventDefault(); altOnly = false; openMenu();
