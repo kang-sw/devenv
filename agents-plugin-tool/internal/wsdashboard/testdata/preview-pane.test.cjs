@@ -17,6 +17,8 @@ var window = { navigator: { pdfViewerEnabled: true }, WsCards: {
     cards.push(card); kinds[kind].open(card); return card;
   }
 } };
+// Model containment by the live tree, including detached rendered content.
+El.prototype.contains = function (node) { return node === this || this.children.some(child => child.contains(node)); };
 eval(PREVIEW);
 async function settle() { for (var i = 0; i < 12; i++) await Promise.resolve(); }
 async function answer(r, body) { r.resolve({ ok: true, json: () => body }); await settle(); }
@@ -28,7 +30,8 @@ async function answer(r, body) { r.resolve({ ok: true, json: () => body }); awai
   await settle();
   var data = cards.map(c => c.data), bodies = cards.map(c => c.body.firstChild);
   effects = [];
-  var el = new El('section'), pane = api.createPane(el, () => { closed++; effects.push('closed'); });
+  var focusAtClose = [];
+  var el = new El('section'), pane = api.createPane(el, hadFocus => { closed++; effects.push('closed'); focusAtClose.push(hadFocus); });
   var header = el.children[0], body = el.children[1], keep = header.children[2], exit = header.children[3];
   check('pane starts memory-only and hidden without registering another kind', [pane.current(), pane.close(), el.hidden, closed, registrations], [null, null, true, 0, 1]);
   var options = { root: '/other', line: 3, answer: { kind: 'text', text: 'one\ntwo\nthree' } };
@@ -50,7 +53,8 @@ async function answer(r, body) { r.resolve({ ok: true, json: () => body }); awai
   await answer(old, { kind: 'text', text: 'old' });
   check('late replaced answer cannot repaint pane', [find(body, 'PRE').textContent, pane.current().path], ['new', 'new.txt']);
   pane.open('late-close.txt'); var lateClose = requests.at(-1);
-  var previous = pane.close();
+  var pendingOptions = pane.current().options, previous = pane.close();
+  check('close clones options even without a preflight answer', previous.options === pendingOptions, false);
   await answer(lateClose, { kind: 'image', src: '/stale.png' });
   check('close returns path/options once and invalidates pending answer', [previous.path, previous.options, pane.current(), pane.close(), body.children.length, el.hidden, closed], ['late-close.txt', {}, null, null, 0, true, 1]);
   pane.open('before-reopen.txt'); var beforeReopen = requests.at(-1); pane.close();
@@ -79,12 +83,24 @@ async function answer(r, body) { r.resolve({ ok: true, json: () => body }); awai
   pane.open('button.txt', { answer: { kind: 'text', text: 'close' } }); await settle(); exit.on.click();
   check('close button dismisses pane', [pane.current(), el.hidden], [null, true]);
 
-  var nativeOpen = api.open, promotion = [], promoteOptions = { root: '/other', line: 9, answer: { kind: 'text', text: 'kept' } };
+  pane.open('content-focus.txt', { answer: { kind: 'text', text: 'focused content' } }); await settle();
+  document.activeElement = find(body, 'PRE');
+  el.on.keydown({ key: 'Escape', target: document.activeElement, preventDefault() {}, stopPropagation() {} });
+  check('Escape snapshots focus before removing rendered content', [focusAtClose.at(-1), el.contains(document.activeElement), body.children.length], [true, false, 0]);
+  var expired = { kind: 'frame', frame: '/cap/expired' }, transferOptions = { root: '/other', line: 4, answer: expired };
+  pane.open('transfer.html', transferOptions); await settle();
+  var transfer = pane.close();
+  check('surface transfer drops stale answer from cloned options, preserving source', [transfer, transfer.options === transferOptions, transferOptions.answer === expired], [{ path: 'transfer.html', options: { root: '/other', line: 4 } }, false, true]);
+
+  var nativeOpen = api.open, promotion = [], promoteOptions = { root: '/other', line: 9, answer: { kind: 'frame', frame: '/cap/old-keep' } };
   api.open = function (path, o) { promotion.push([path, o.keep, o.root, o.line, pane.current(), el.hidden]); return nativeOpen(path, o); };
   effects = [];
-  pane.open('keep.txt', promoteOptions); await settle(); keep.on.click(); await settle();
-  check('keep closes first then uses existing durable card path', [promotion, effects[0], cards.at(-1).preview, cards.at(-1).data, find(cards.at(-1).body, 'PRE').textContent], [[['keep.txt', true, '/other', 9, null, true]], 'closed', false, { path: 'keep.txt', root: '/other', line: 9 }, 'kept']);
-  check('keep does not mutate original options or persist preflight state', [promoteOptions.keep, cards.at(-1).data.answer, cards.at(-1).data.mediaError], [undefined, undefined, undefined]);
+  pane.open('keep.html', promoteOptions); await settle();
+  var beforeKeepRequests = requests.length; keep.on.click(); await settle();
+  check('keep makes fresh guarded request instead of reusing old sandbox capability', [requests.length - beforeKeepRequests, requests.at(-1).url, find(cards.at(-1).body, 'IFRAME')], [1, '/s/rid1/fs/preview?path=keep.html&root=%2Fother&text=1', null]);
+  await answer(requests.at(-1), { kind: 'frame', frame: '/cap/fresh-keep' });
+  check('keep closes first then uses existing durable card path with fresh reply', [promotion, effects[0], cards.at(-1).preview, cards.at(-1).data, find(cards.at(-1).body, 'IFRAME').src], [[['keep.html', true, '/other', 9, null, true]], 'closed', false, { path: 'keep.html', root: '/other', line: 9 }, '/cap/fresh-keep']);
+  check('keep does not mutate original options or persist preflight state', [promoteOptions.keep, promoteOptions.answer.frame, cards.at(-1).data.answer, cards.at(-1).data.mediaError], [undefined, '/cap/old-keep', undefined, undefined]);
   keep.on.click(); check('keep on a closed pane is inert', promotion.length, 1);
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });

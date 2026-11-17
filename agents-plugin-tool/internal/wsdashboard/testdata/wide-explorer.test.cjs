@@ -14,34 +14,62 @@ function func(name) {
   assert.ok(match, 'missing production function: ' + name); return match[0];
 }
 const plain = value => JSON.parse(JSON.stringify(value));
-function fixture({ layout = 'auto', width = 1920, live = true, worktree = '' } = {}) {
+async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
+function descendant(el, tag) {
+  for (const child of el.children) { if (child.tagName === tag) return child; const found = descendant(child, tag); if (found) return found; }
+  return null;
+}
+function fixture({ layout = 'auto', width = 1920, live = true, worktree = '', constructPane = false } = {}) {
   const events = [], owners = [], nodes = {};
-  function node() {
-    return { style: {}, hidden: false, attrs: {},
+  let context;
+  function node(tag = 'div') {
+    return { tagName: tag.toUpperCase(), style: {}, hidden: false, attrs: {}, children: [], listeners: {}, isConnected: true,
       setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k] || null; },
-      removeAttribute(k) { delete this.attrs[k]; }, appendChild(n) { return n; },
+      hasAttribute(k) { return k in this.attrs; }, removeAttribute(k) { delete this.attrs[k]; },
+      appendChild(n) { this.children.push(n); return n; },
+      contains(n) { return this === n || this.children.some(child => child.contains(n)); },
+      get textContent() { return this.text || this.children.map(child => child.textContent).join(''); },
+      set textContent(value) {
+        // Browser focus falls back to body when rendered focused content is removed.
+        if (context && this.children.some(child => child.contains(context.doc.activeElement))) context.doc.activeElement = context.doc.body;
+        this.children = []; this.text = value;
+      },
+      addEventListener(type, listener) { this.listeners[type] = listener; },
+      fire(type, event = {}) { if (this.listeners[type]) this.listeners[type](event); },
       getBoundingClientRect: () => ({ left: 600, right: 1800 }),
-      focus() { events.push('focus-search'); } };
+      focus() { events.push('focus-search'); context.doc.activeElement = this; } };
   }
   const root = node(), search = node(), fpane = node(), grid = node(), area = node();
   area.getBoundingClientRect = () => ({ right: 2400 }); grid.closest = () => area;
   fpane.querySelector = selector => selector === '.fq' ? search : null;
   nodes.bcol = node();
-  const context = vm.createContext({ live, worktree, layoutMode: layout, root, fpane, grid, chead: null,
-    cardIdentity: 'session', doc: { body: node(), createElement: node, activeElement: search },
+  context = vm.createContext({ live, worktree, layoutMode: layout, root, fpane, grid, dbody: area, chead: null,
+    cardIdentity: 'session', doc: { documentElement: root, body: node(), createElement: node, activeElement: search },
     post() {}, browsePost() {}, toast() {}, copyText() {}, attachExplorerPath() {}, load() {}, save() {},
     setCtab(tab) { events.push('tab:' + tab); }, $: id => nodes[id],
     window: {
       matchMedia(query) { return { matches: width >= Number(query.match(/\d+/)[0]) }; },
-      WsCards: { dismissFiles() { events.push('dismiss-sheet'); } },
+      WsCards: { dismissFiles() { events.push('dismiss-sheet'); }, register() {}, icon: name => name },
       WsPreview: { open(path, options) { events.push(['card', path, options]); } },
       WsFiles: { setup(hooks) { owners.push({ setup: hooks }); }, create(el, hooks) {
-        const owner = { el, hooks, shown() { events.push('shown'); }, hidden() { events.push('hidden'); } };
+        const owner = { el, hooks, shown() { events.push('shown'); }, hidden() { events.push('hidden'); }, cancelPreview() { events.push('cancel-preview'); } };
         owners.push(owner); return owner;
       } }
     }
   });
   vm.runInContext('var filesTab, filesSheet;\n' + block('  var filePreview = null, filePreviewBack = null;', '  var cardBoard ='), context);
+  if (constructPane) {
+    context.document = context.doc; context.wsT = key => key;
+    context.fetch = () => { throw new Error('unexpected preview request'); };
+    vm.runInContext(readAssetSource('wsdashboard', 'preview.js'), context);
+    context.window.WsPreview.open = (path, options) => events.push(['card', path, options]);
+    // Execute the production constructor and its closed callback, not a source assertion.
+    vm.runInContext(block('    if (live && !worktree && window.WsPreview) {', '    window.WsCards.mount(cardBoard,'), context);
+    const pane = context.filePreview, open = pane.open, close = pane.close;
+    pane.open = (path, options) => { events.push(['pane', path, options]); return open(path, options); };
+    pane.close = () => { if (pane.current()) events.push('close'); return close(); };
+    return { context, pane, root, owners, events, search };
+  }
   let current = null;
   const pane = { el: node(), current: () => current,
     open(path, options) { current = { path, options }; events.push(['pane', path, options]); },
@@ -100,13 +128,38 @@ test('narrow left clicks retain board preview; absent pane is safe fallback', ()
   const { context: c, events } = fixture(); c.filePreview = null;
   c.previewLeftFile('a.txt', {}); assert.deepEqual(events, [['card', 'a.txt', {}]]);
 });
-test('leaving split transfers same file/options into transient card once, without mutating source options', () => {
-  const { context: c, pane, events } = fixture();
-  const options = { root: '/chosen', line: 5, keep: true, answer: { kind: 'text', text: 'cached' } };
-  pane.open('same.txt', options); events.length = 0; c.layoutMode = 'tabs';
-  c.syncFilePreview(); c.syncFilePreview();
-  assert.deepEqual(plain(events), ['close', ['card', 'same.txt', { ...options, keep: false }]]);
+test('leaving split uses actual sanitized pane close and transfers once without cached sandbox answer', async () => {
+  const { context: c, pane, events } = fixture({ constructPane: true });
+  const answer = { kind: 'frame', frame: '/cap/expired-tabs' };
+  const options = { root: '/chosen', line: 5, keep: true, answer };
+  pane.open('same.html', options); await settle();
+  assert.equal(descendant(pane.el, 'IFRAME').src, answer.frame);
+  events.length = 0; c.layoutMode = 'tabs'; c.syncFilePreview(); c.syncFilePreview();
+  assert.deepEqual(plain(events), ['close', 'cancel-preview', ['card', 'same.html', { root: '/chosen', line: 5, keep: false }]]);
+  const transferred = events.at(-1)[2];
+  assert.equal('answer' in transferred, false, 'tabs fallback must revalidate instead of reusing expired capability');
+  assert.notEqual(transferred, options); assert.equal(options.answer, answer);
   assert.equal(options.keep, true); assert.equal(pane.current(), null);
+});
+test('production pane closed callback cancels pending left preflight and restores focus captured before content removal', async () => {
+  const { context: c, pane, root, events, search } = fixture({ constructPane: true });
+  c.previewLeftFile('focus.txt', { answer: { kind: 'text', text: 'focused' } }); await settle();
+  const content = descendant(pane.el, 'PRE'); c.doc.activeElement = content; events.length = 0;
+  pane.el.fire('keydown', { key: 'Escape', target: content, preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(events, ['close', 'cancel-preview', 'focus-search']);
+  assert.equal(pane.el.contains(content), false, 'focused rendered node really was removed before callback');
+  assert.equal(c.doc.activeElement, search); assert.equal(root.hasAttribute('data-file-preview'), false);
+  assert.equal(pane.current(), null);
+});
+test('production closed callback cancels without stealing outside focus or focusing a detached origin', async () => {
+  for (const detached of [false, true]) {
+    const { context: c, pane, events, search } = fixture({ constructPane: true });
+    c.previewLeftFile('a.txt', { answer: { kind: 'text', text: 'a' } }); await settle();
+    c.doc.activeElement = detached ? descendant(pane.el, 'PRE') : c.doc.body;
+    search.isConnected = !detached; events.length = 0; pane.close();
+    assert.deepEqual(events, ['close', 'cancel-preview']);
+    assert.equal(c.doc.activeElement, c.doc.body);
+  }
 });
 test('split resize dismisses obsolete sheet and resizes current pane without opening cards', () => {
   const { context: c, pane, events } = fixture();

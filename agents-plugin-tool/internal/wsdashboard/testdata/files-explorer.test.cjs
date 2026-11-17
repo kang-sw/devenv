@@ -83,9 +83,19 @@ async function previewHookChecks() {
   check('search hook preflight requests source for line navigation', searchPreview.url.searchParams.get('text'), '1');
   await answer(searchPreview, content);
   check('search hook preserves hit line root and answer', [dispatched.at(-1)[0], dispatched.at(-1)[1].line, dispatched.at(-1)[1].root, dispatched.at(-1)[1].answer === content], ['deep/match.txt', 17, '/picked', true]);
-  key(x.q, 'Escape'); click('a.txt'); var destroyed = take('preview-hook', 'preview'); x.instance.destroy();
+  key(x.q, 'Escape');
+  for (var result of ['text', 'binary', 'refused']) {
+    click('b.txt'); var cancelled = take('preview-hook', 'preview');
+    x.instance.cancelPreview();
+    if (result === 'refused') await refuse(cancelled);
+    else await answer(cancelled, result === 'binary' ? { kind: 'none', reason_code: 'binary' } : content);
+    check('dismissal retires pending ' + result + ' preflight without reopening owner or row menu', [dispatched.length, !!doc.querySelector('.fmenu'), x.instance.selection().path], [7, false, 'b.txt']);
+  }
+  click('a.txt'); await answer(take('preview-hook', 'preview'), content);
+  check('cancelPreview does not block a later intentional file click', [dispatched.length, dispatched.at(-1)[0]], [8, 'a.txt']);
+  click('a.txt'); var destroyed = take('preview-hook', 'preview'); x.instance.destroy();
   await answer(destroyed, content);
-  check('destroyed owner cannot receive late dispatch', dispatched.length, 7);
+  check('destroyed owner cannot receive late dispatch', dispatched.length, 8);
 
   // No hook on toolbar/card/default explorers: all still use WsPreview.open.
   var fallback = explorer('preview-default'); fallback.instance.shown();
