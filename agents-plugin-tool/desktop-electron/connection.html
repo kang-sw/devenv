@@ -17,7 +17,8 @@ automatically on Windows and macOS.</p>
 <p id="log"></p>
 <p>Choose <strong>Connection → Retry</strong> (<kbd>Ctrl+R</kbd> on Windows,
 <kbd>⌘R</kbd> on macOS) to try connecting and starting the daemon again.</p>
-<p>Closing the window does not shut down the independent daemon.
+<p>Closing the window does not explicitly shut down the daemon. If Windows
+refuses job breakaway, the daemon may end when its containing launcher or terminal job closes.
 Replacement is available through <strong>Connection → Replace daemon (same core)</strong>.</p>
 <script src="connection.js"></script>
 </html>

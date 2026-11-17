@@ -82,9 +82,15 @@ async function closeApp() {
     const bundled = path.join(path.dirname(executablePath), 'resources/app.asar.unpacked/daemon/ws-mcp.exe');
     assert.equal(hash(daemonExe), hash(bundled), 'running daemon must be the bundled binary, not a global plugin');
     checks.push('empty isolated cache + missing Python: app started bundled daemon and reached dashboard');
+    const startLog = fs.readFileSync(path.join(profile, 'daemon-start.log'), 'utf8');
+    assert.match(startLog, /daemon spawn mode=breakaway/);
+    if (startLog.includes('WS_DAEMON_BREAKAWAY_DENIED=5')) {
+      assert.match(startLog, /daemon spawn mode=job-lifetime/);
+      checks.push('numeric breakaway denial retried successfully with explicit job lifetime');
+    }
     await closeApp();
     assert.equal((await inspect(cache)).endpoint.pid, first.endpoint.pid);
-    checks.push('daemon survives app exit under existing independent-lifetime contract');
+    checks.push('daemon survives app exit; job-lifetime mode may still end when the containing job closes');
     await launch();
     assert.equal(observed.endpoint.pid, first.endpoint.pid);
     assert.equal(observed.health.started_at, first.health.started_at);

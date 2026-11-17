@@ -12,7 +12,8 @@ const env = f => ({ WS_CACHE_HOME: path.join(f.base, 'isolated-cache'), WS_CONFI
   WS_RSRC_ROOT: '/unrelated/resources', WS_SKILLS_ROOT: '/unrelated/skills',
   WS_MCP_CONFIG_MANIFESTS: '/unrelated/config', WS_MCP_RUNTIME_BINARY: '/unrelated/binary',
   WS_MCP_PROJECT_ROOT: '/unrelated/project', WS_MCP_DASHBOARD_DEV_SOURCE: '/unrelated/assets',
-  WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'private', WS_HOSTED_SESSION_ROW: '/session/row', WS_MCP_HARNESS_PID: '22' });
+  WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'private', WS_HOSTED_SESSION_ROW: '/session/row', WS_MCP_HARNESS_PID: '22',
+  WS_MCP_DAEMON_JOB_LIFETIME: '1' });
 test('REST-only attach to a healthy daemon does not select, stage or launch; no executable inspection', async t => {
   const f = fixture(t);
   const root = path.join(f.base, 'isolated-cache');
@@ -279,6 +280,7 @@ test('missing macOS daemon starts only staged dashboard, preserves config/cache,
     assert.equal(fs.readFileSync(binary, 'utf8'), 'fixture bytes, not an executable');
     assert.equal(opts.env.WS_CACHE_HOME, options.env.WS_CACHE_HOME);
     assert.equal(opts.env.WS_CONFIG_HOME, options.env.WS_CONFIG_HOME);
+    assert.equal(opts.env.WS_MCP_DAEMON_JOB_LIFETIME, '0', 'inherited fallback permission must not skip the breakaway attempt');
     for (const name of ['WS_HOSTED_SESSION', 'WS_HOSTED_SESSION_KEY', 'WS_HOSTED_SESSION_ROW', 'WS_MCP_HARNESS_PID',
       'WS_MCP_PROJECT_ROOT', 'WS_MCP_DASHBOARD_DEV_SOURCE']) assert.equal(opts.env[name], undefined, name);
     for (const name of ['WS_RSRC_ROOT', 'WS_SKILLS_ROOT', 'CLAUDE_PLUGIN_ROOT', 'WS_MCP_RUNTIME_DIR']) {

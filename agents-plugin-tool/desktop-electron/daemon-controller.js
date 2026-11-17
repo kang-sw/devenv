@@ -1,6 +1,7 @@
 'use strict';
 // macOS prestarts a detached dashboard successor before authenticated drain.
-// Windows daemon-start strictly breaks away and performs that ordering in Ensure.
+// Windows daemon-start prefers breakaway and performs that ordering in Ensure.
+// Access-denied jobs may use an explicit job-lifetime retry, never an arbitrary-error fallback.
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -40,6 +41,14 @@ function launch(binary, options, args = ['dashboard'], waitForExit = false) {
           } catch { /* Exit status remains useful if the log is unreadable. */ }
           finally { if (log !== undefined) fs.closeSync(log); }
         }
+        if (args[0] === 'daemon-start' && args.includes('--require-independent-lifetime') &&
+            spawnOptions.env?.WS_MCP_DAEMON_JOB_LIFETIME !== '1' &&
+            detail.split(/\r?\n/).includes('WS_DAEMON_BREAKAWAY_DENIED=5')) {
+          // Retry the same Ensure mode, not a plain daemon-start that would
+          // change preflight/drain ordering during explicit replacement.
+          resolve(launch(binary, { ...options, env: { ...spawnOptions.env, WS_MCP_DAEMON_JOB_LIFETIME: '1' } }, args, waitForExit));
+          return;
+        }
         reject(new Error(`daemon-start exited with status ${code}${detail ? `: ${detail}` : ''}`));
       }
     });
@@ -51,7 +60,7 @@ function launchEnv(inherited, staged, root) {
   // cache and config selection intact; replace only package-bound paths.
   for (const key of ['WS_HOSTED_SESSION', 'WS_HOSTED_SESSION_KEY', 'WS_HOSTED_SESSION_ROW', 'WS_MCP_HARNESS_PID',
     'WS_MCP_PROJECT_ROOT', 'WS_MCP_DASHBOARD_DEV_SOURCE']) delete env[key];
-  return { ...env, WS_CACHE_HOME: root, ...staged.env,
+  return { ...env, WS_CACHE_HOME: root, ...staged.env, WS_MCP_DAEMON_JOB_LIFETIME: '0',
     WS_MCP_CONFIG_MANIFESTS: [path.join(staged.root, 'config-manifest.json'),
       path.join(staged.root, 'dashboard-config-manifest.json')].join(';'),
     WS_MCP_RUNTIME_BINARY: staged.binary, WS_MCP_RUNTIME_DIR: staged.root, CLAUDE_PLUGIN_ROOT: staged.root };
@@ -110,7 +119,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
     if (refreshed < 0) return latest.url;
     const options = { cwd: staged.root, env: launchEnv(env, staged, root), logPath: path.join(userData, 'daemon-start.log') };
     if (platform === 'win32') {
-      // Go strict Ensure holds launcher-start.lock and repeats the LAN,
+      // Go prestart Ensure holds launcher-start.lock and repeats the LAN,
       // compatibility and numeric-core guards at its fresh REST observation.
       try {
         await (deps.launch || launch)(staged.binary, options,

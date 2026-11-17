@@ -36,8 +36,9 @@ func SpawnDetached(exe string, args []string, dir string) error {
 	return nil
 }
 
-// SpawnDetachedStrict reports OS breakaway refusal rather than retrying inside
-// the caller's job. Used only by the Windows Electron daemon-start opt-in.
+// SpawnDetachedStrict reports OS breakaway refusal for the Windows Electron
+// prestart path. Electron may explicitly retry with job lifetime after a numeric
+// access-denied signal; the retry keeps the same drain/compatibility ordering.
 func SpawnDetachedStrict(exe string, args []string, dir string) error {
 	cmd, err := startDetachedStrict(exe, args, dir)
 	if err != nil {
