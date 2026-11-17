@@ -719,6 +719,37 @@ test('Developer Tools menu targets dashboard contents in packaged and unpackaged
     }
   } finally { update.createUpdater = original; }
 });
+test('DevTools shortcuts target dashboard from every view in packaged and unpackaged startup', async () => {
+  const update = require('../update'), original = update.createUpdater;
+  update.createUpdater = () => ({ applyOnLaunch: () => false, schedule() {} });
+  try {
+    for (const platform of ['win32', 'linux', 'darwin']) for (const packaged of [false, true]) {
+      const f = await fixture(undefined, platform, { packaged });
+      const dashboard = f.views[0] || f.window;
+      for (const view of f.views.length ? f.views : [f.window]) {
+        const input = (key, type, modifiers = {}) => {
+          let prevented = false;
+          view.webContents.emit('before-input-event', { preventDefault() { prevented = true; } }, { key, type, ...modifiers });
+          return prevented;
+        };
+        const modifiers = platform === 'darwin' ? { meta: true, alt: true } : { control: true, shift: true };
+        const before = dashboard.devtoolsToggles || 0;
+        assert(input('F12', 'keyDown'));
+        assert(input('I', 'keyDown', modifiers));
+        assert(input('i', 'keyDown', modifiers));
+        assert(input('F12', 'keyDown', { isAutoRepeat: true }));
+        assert(input('I', 'keyDown', { ...modifiers, isAutoRepeat: true }));
+        assert.equal(input('F12', 'keyUp'), false);
+        assert.equal(input('I', 'keyUp', modifiers), false);
+        assert.equal(input('F12', 'keyDown', { shift: true }), false);
+        assert.equal(input('I', 'keyDown', { ...modifiers, control: platform === 'darwin' }), false);
+        assert.equal(input('X', 'keyDown', modifiers), false);
+        assert.equal(dashboard.devtoolsToggles, before + 3);
+      }
+      if (platform === 'win32') assert.equal(f.views[1].devtoolsToggles, undefined);
+    }
+  } finally { update.createUpdater = original; }
+});
 test('Windows F12 targets dashboard from either view without breaking bare Alt', async () => {
   const f = await fixture(undefined, 'win32'), [dashboard, bar] = f.views;
   for (const [index, view] of [dashboard, bar].entries()) {
