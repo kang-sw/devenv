@@ -138,6 +138,315 @@ recorded fixtures go under `agents-plugin-tool/internal/wsagent/testdata/`.
 Verification: a recorded matrix where every claimed capability carries a version
 and a source; a fixture plan distinguishing planned fixtures from ones run.
 
+### Result (25e34507c) - 2026-11-17
+
+Probed the installed `agy 1.5.9` (macOS arm64, the owner's Google login)
+by driving `agy acp` from a stdlib Python client, with a loopback
+streamable-HTTP MCP server standing in for the daemon. No login, logout,
+account switch or credential write. Every probe after the first passed
+`--gemini-dir <scratch>`: conversations, `brain/` transcripts, logs and the
+MCP schema cache landed in a scratch home, and auth still came from the
+system keychain. The first handshake probe ran without that flag and left
+one empty conversation (a `session/new` with no prompt) in the user's agy
+home, which was left in place rather than deleted. One headless attempt
+under a scratch `HOME` printed a login URL and exited (stdin was
+`/dev/null`; no login happened), so `HOME` isolation is not usable. Probe
+threads ran in a scratch git repo outside any project, and the probe
+client removed `WS_*`/`CLAUDE*`/`ORCA_*`/`CODEX_*`/`PI_*` from the child
+environment. `agy changelog` lists 1.5.10 as available; nothing was
+updated.
+
+**Evidence sources.**
+- Exact-version behaviour: the installed binary's `initialize` reply,
+  `agy --help`, `agy help acp` and `agy changelog` (release notes through
+  1.5.10).
+- Official prose, fetched 2026-11-17: `antigravity.google/docs/cli/acp/`,
+  `.../docs/ide/extensions/acp/`, `.../docs/cli/headless/`,
+  `.../docs/subagents?tab=cli`, `.../docs/permissions?tab=cli`.
+- Recorded fixtures: `agents-plugin-tool/internal/wsagent/testdata/agy-1.5.9-*.jsonl`
+  (eleven files), cut with the codex `>> ` client-line convention.
+  `agy_fixture_test.go` pins the protocol facts cited below.
+- Probe-side observations that are not in the fixtures carry the label
+  *(probe log)*: the probe MCP server's request log, greps of the scratch
+  home, and runs not committed as fixtures.
+
+**Fixture index (recorded).**
+- `handshake`: `session/new` before `initialize` succeeds (no init gate). `initialize` reports `agentInfo.version` `1.5.9`, `sessionCapabilities` `resume`/`load`/`close`/`list`, `_meta.antigravity.systemPrompt.append: true`, and no `mcpCapabilities`. A second `initialize` succeeds; an unknown method gets `-32601`.
+- `http-mcp`: `session/new` with an HTTP MCP server (bearer token in `headers`) and a system-prompt append; the model answers the marker and runs `mcp_ws_probe_echo` after an approval.
+- `lead-session`: tool self-report, MCP tool denied, command denied, `session/cancel` during `sleep 30`, steer by a second prompt during `sleep 12`, `session/set_config_option` (thought_level, model), `session/set_mode` twice, `session/set_model`, then a marker turn.
+- `resume`: resume of a missing id fails; resume of the lead session in a new process (MCP re-passed with a new token) continues it; `/compact`; `session/close`; `session/new` with an HTTP MCP server refusing the token.
+- `load-replay`: `session/load` of the lead session in a fresh process.
+- `stale-approval`: string request ids; a held permission request, `session/cancel`, a late answer, then a normal turn.
+- `resume-marker`: resume of the `stale-approval` session in a new process with no append re-sent.
+- `subagent-baseline`: default agent spawns the built-in `research` subagent; `ask_question` with no client elicitation.
+- `subagent-removed`: the same prompts under `--agent ws-nosub` (a scratch-workspace agent whose `tools` list leaves out the subagent tools). The flag is a CLI argument and not in the transcript.
+- `custom-agent-bad-tool`: the first `ws-nosub` draft naming `list_resources`/`read_resource`, which are not registry tools.
+- `custom-agent-mcp`: a custom agent with `mcpServers: [{name: ws}]` in its frontmatter.
+
+**Control path (returned to the lead): ACP, not headless.**
+- `agy acp` (documented since 1.5.0, changelog) is sustained,
+  bidirectional JSON-RPC over stdio with permission requests, cancel,
+  steer, resume/load and in-session model and mode changes.
+- Headless `-p --input-format stream-json --output-format stream-json`
+  (since 1.1.15) keeps one conversation open, but the headless doc states
+  approvals that cannot be obtained are soft-denied. It has no cancel other
+  than killing the process and no steer, so it cannot carry approval,
+  interrupt or steer. Rejected.
+- The SDK and the IDE app are separate products and were not probed.
+
+**Admission conditions (catalog Decision 2): both pass at 1.5.9, with one
+gap.**
+- (0) Headless JSON event streaming: ACP over stdio, newline-delimited
+  JSON-RPC 2.0 with the `jsonrpc` member present (all fixtures). Sustained
+  and bidirectional: client requests and notifications (`session/cancel`),
+  agent notifications (`session/update`) and agent requests
+  (`session/request_permission`).
+- (3) HTTP MCP injection: `session/new` / `session/resume` `mcpServers:
+  [{type: "http", name, url, headers: [{name: "Authorization", value:
+  "Bearer <token>"}]}]` (`http-mcp`, `resume`). The probe server saw the
+  bearer on every POST *(probe log)*.
+  - `initialize` advertises no `mcpCapabilities.http`, yet HTTP servers
+    work. The ACP doc says `--process-per-session` is "required for HTTP
+    MCP servers the editor configures". At 1.5.9 the server worked both
+    with and without the flag *(probe log: identical runs)*.
+  - The token travels in the stdio request, not the environment, and
+    nothing persists it. After four probe tokens, a grep of the scratch
+    home found 0 hits for the tokens and the MCP URLs *(probe log)*. MCP
+    servers are therefore re-passed on every resume.
+  - **Gap: auth failure is silent.** A server refusing the token does not
+    fail `session/new`; its tools are just absent and the model answers
+    `NO-WS-TOOL` (`resume`). There is no `required` flag in ACP.
+  - The MCP client first POSTs `server/discover` (protocol `2026-07-28`),
+    then `initialize`, and GETs `/.well-known/oauth-protected-resource[/mcp]`
+    even after a successful handshake. The probe answered method-not-found
+    and 405, and agy proceeded *(probe log)*. The daemon's HTTP MCP route
+    must answer them cleanly.
+
+**Capability matrix: catalog values for the Phase 2 agy profile.**
+- Shape: the `catalog.go` schema on `impl/track/agent-v2/rust-stank-cedar`
+  at `4ebcf2ed2` (last catalog change `92b4c835b`; read only).
+- Profile range: `Oldest: "1.5.9", Newest: "1.5.9"`, the only version with
+  fixtures. Entries carry no `Since`/`Until`, like `ClaudeCatalog`.
+  `Resolve` pins any other version to 1.5.9, marked unverified.
+- Version source: `initialize` `agentInfo.version` (`"1.5.9"`, a bare
+  dotted version that `parseHarnessVersion` reads; `agy --version` prints
+  the same).
+- Roles: every entry is `Role: RoleLead`. Worker stays undeclared and
+  resolves `unsupported` under the role recommendation below (C2).
+- Grades follow catalog Decision 10 (what the ws adapter will deliver once
+  Phase 2 wires it).
+
+| Item | Grade (lead) | Values | Evidence (1.5.9) | Fixture |
+|---|---|---|---|---|
+| `skill_list` | unsupported | - | `available_commands_update` lists agy's commands and skills (`goal`, `compact`, `learn`, ...). No ws wiring. | `lead-session` (no ws reader) |
+| `skill_injection` | native | - | agy's own skills, invoked by a `/name` prompt and listed in `available_commands_update`. ws's skills are **not** present: `agy plugin list --json` is `[]` on this machine, so ws workflow skills reach an agy lead only after a delivery choice (decision 4 below). | planned: Phase 2 lead with the chosen delivery |
+| `compaction` | native | - | The dashboard's `/compact` maps to a `session/prompt` with text `/compact` (listed as a command). The turn ends `end_turn` and carries only a `usage_update`: there is no compaction event, and the next turn's `used` drops (18682 -> 10508). | `resume` |
+| `rewind` | unsupported | - | No ACP method. | none |
+| `tool_removal` | unsupported | - | The lead keeps the user's tool setup, as `ClaudeCatalog` does. For a later worker row, a custom main agent's `tools` allowlist removes built-in tools (`subagent-removed`). | recorded (worker mechanism) |
+| `subagent_removal` | unsupported (recommended; see verdict) | `invoke_subagent`, `define_subagent`, `manage_subagents`; `swarm`, `run_workflow` also fan out subagents | Removal exists only through a custom main agent, with costs that argue against it for the lead (verdict below). | `subagent-baseline` vs `subagent-removed` |
+| `model_effort` | native | choices from `configOptions` (`model`, `thought_level`) via ChoiceLister | `session/set_config_option {configId, value}` answers with the updated `configOptions` and applies in-session with no restart. Two model vocabularies exist: `configOptions` model values (`gemini-3.8-flash`) and `models.availableModels` ids (`gemini-3.8-flash-high`, via the unstable `session/set_model`); use `configOptions`. | `lead-session` |
+| `approval` | native | modes stay in `BackendRegistration.PermissionModes`: `default`, `accept-edits`, `auto`, `plan` (`session/set_mode` -> `current_mode_update`) | `session/request_permission {toolCall, options}` offers exactly `allow` (`allow_once`) and `deny` (`reject_once`) for MCP tools and commands. The answer is `{outcome: {outcome: "selected", optionId}}`. A denied call ends `failed`. Binary, so it fits `AnswerApproval(allow bool)`. | `lead-session`, `http-mcp`, `stale-approval` |
+| `steer` | native | - | A `session/prompt` sent while a turn runs steers it. The earlier prompt answers `end_turn` immediately, and the rest of the run belongs to the later prompt: the tool's completion and the reply that uses the steer. | `lead-session` |
+| `interrupt` | native | - | `session/cancel` (notification) -> open tool calls `failed` -> prompt answers `stopReason: "cancelled"`. No item outlives the turn (unlike Codex). | `lead-session`, `stale-approval` |
+| `follow_up` | ws-substitute | - | The runner holds the message and sends it at turn end (`Runner.Send`). A mid-turn prompt would steer instead, so holding it is required, not optional. | n/a (runner) |
+| `resume` | native | - | `session/resume {sessionId, cwd, mcpServers}` continues without replay. A missing id gets `-32603 Failed to read session ...`. The system-prompt append persists across a process restart without being re-sent (`resume-marker`). `session/load` replays instead (below). | `resume`, `resume-marker`; planned: across agy versions |
+| `reasoning_stream` | unsupported | - | agy streams `agent_thought_chunk`. No ws wiring; owned by the reasoning-summary line. | `lead-session` (no ws reader) |
+| `usage_query` | native | - | Pushed: `usage_update {used, size}` at session start and after each model call, plus `usage` on every `session/prompt` response. Nothing is asked (same as Codex schema gap G2). | `lead-session` |
+
+**Non-catalog event and recovery contract (for the Phase 2 mapper).**
+- Id spaces: the client's request ids and the agent's request ids both start
+  at 1 (`custom-agent-mcp`: permission request ids 1 and 2 beside client
+  ids 1-3). A line with a method is a request, and one without is a
+  response; match responses by direction.
+- Turn end: a `session/prompt` response ends the turn only when no later
+  prompt is outstanding (steer). Stop reasons seen are `end_turn` and
+  `cancelled`.
+  - Updates do not arrive after the prompt's response (changelog 1.5.1), and
+    the recordings agree.
+  - A background task or subagent finishing after a turn wakes the agent,
+    which then streams with no prompt outstanding (changelog 1.5.10, not in
+    1.5.9's notes; unrecorded).
+- Updates (`session/update.update.sessionUpdate`):
+  - `agent_message_chunk`, `agent_thought_chunk`, `user_message_chunk`
+    (echoed in some live turns and in replay).
+  - `tool_call` / `tool_call_update`: `toolCallId`, `status` `in_progress` ->
+    `pending` (awaiting approval) -> `in_progress` -> `completed` | `failed`,
+    with `kind`, `title`, plus non-standard `name` and `args` carrying the
+    agy tool name and input. MCP tools appear as `mcp_<server>_<tool>`.
+  - `usage_update`, `available_commands_update`, `current_mode_update`,
+    `config_option_update` and `session_info_update` (title).
+  - Ignore unknown kinds.
+- Approvals: the correlation is the agent's JSON-RPC request id, which maps
+  to `ApprovalRequest.ID`. Pick the option by `kind` (`allow_once` /
+  `reject_once`), never by a fixed id. On cancel, nothing withdraws a
+  pending request: the call goes `failed`, the prompt answers `cancelled`,
+  and a late answer gets no reply and has no effect (no file was created,
+  *(probe log)*). The process must synthesize `ApprovalDone` at prompt end.
+- Unhandled agent requests: with `fs`/`terminal` client capabilities false,
+  none arrived. Any request the adapter does not handle still gets a
+  JSON-RPC error reply.
+- `ask_question` (the user-question tool) without a client elicitation
+  capability renders as agent text and the turn ends with the call left
+  `pending`, so the next prompt is the answer (`subagent-baseline`). This
+  fits `Send` with no interface extension. The elicitation path (client
+  advertising it) was not probed.
+- Subagent telemetry, if not removed: the parent's `invoke_subagent` /
+  `manage_subagents` tool calls only (`args`: `TypeName`, `Role`,
+  `Prompt`). No update names another session, and the subagent's result
+  arrives inside the same prompt.
+- Holder reattach: the holder keeps `agy acp`'s stdio, as for Claude and Pi.
+  Client ids are client-chosen, and string ids are accepted
+  (`stale-approval`: `attach1-1`), so a per-attach prefix avoids reuse.
+  - On a ring gap, `session/load` replays the history before its response:
+    user, thought and agent text plus `tool_call` lines with final status
+    only, and no `tool_call_update` (`load-replay`).
+  - Whether `session/load` is safe on a session already open in the same
+    process was not probed.
+- Instructions / workflow access: `session/new`
+  `_meta.antigravity.systemPrompt.append` is additive and persists across
+  resume. Project rules and agy skills load natively.
+- Config / account home: default `--gemini-dir` (`~/.gemini`) holds
+  `antigravity-cli/settings.json` (permission rules, mode), `conversations/<id>.db`,
+  `brain/<id>/` transcripts, `log/` and the MCP schema cache. Auth comes from
+  the system keychain.
+  - A hosted lead keeps the user's home and settings, matching Claude and
+    Codex parity.
+  - A worker could run under an isolated `--gemini-dir` and keep auth (probe
+    evidence).
+- Process: `agy acp` is the harness PID. It can serve many sessions, and
+  the adapter opens one; `--process-per-session` adds a worker process per
+  session.
+
+**Removability verdict (08)=c: removable, but not recommended for the lead.**
+At 1.5.9 the only removal found is a custom main agent: `agy acp --agent
+<name>`, with the file in the workspace's `.agents/agents/` or under
+`<gemini-dir>/config/agents/`. Its `tools` allowlist omits the subagent
+tools. Evidence: the removed run answers `NO-SUBAGENT-TOOL` and makes no
+`invoke_subagent` call, while the same prompt spawns one on the baseline.
+Costs:
+- The agent's markdown body replaces agy's default system prompt. The first
+  prompt's input dropped from 9135 to 3748 tokens (baseline vs removed).
+- Session-injected MCP tools vanish under a `tools` allowlist
+  (`subagent-removed` lists no `mcp_ws_*`). Naming `mcp_ws_probe_echo` or
+  `mcp(ws/*)` in `tools` fails, the same way `custom-agent-bad-tool` does
+  *(probe log)*. `mcpServers: [{name: ws}]` restores them only through the
+  lazy `call_mcp_tool` gateway, with an extra read approval of the schema
+  cache file (`custom-agent-mcp`). `eager: true` changed nothing
+  *(probe log)*.
+- A bad `tools` entry fails every turn as agent text, not as an error
+  (`custom-agent-bad-tool`). A malformed `mcpServers: [ws]` silently fell
+  back to the default agent, with all subagent tools back *(probe log)*.
+- The agent file must be written into the user's workspace or agy home.
+- No flag or setting removes a tool. The permission rules have no subagent
+  action (doc); `--settings` was not probed for this.
+
+Recommendation: the lead keeps the subagent tools (`unsupported`), and the
+per-harness "Never use {{NativeToolScheme}}" playbook line (epic (29))
+covers it. A worker profile, where ws owns the whole tool set, can use the
+custom agent.
+
+**Role recommendation for the first Phase 2 slice: hosted lead only.**
+- Lead: every lead control is native over ACP and recorded: approval,
+  steer, interrupt, resume, model/effort, compaction and usage. It keeps the
+  user's home, like the Claude and Codex leads.
+- Worker (`agent.spawn agy.<tier>`): technically feasible (an isolated
+  `--gemini-dir` keeps auth; a custom agent removes tools), but it needs
+  three things first:
+  - a ws-written agent file, with its location and the system-prompt
+    replacement cost decided;
+  - a worker permission posture (no Claude `dontAsk` equivalent seen; the
+    candidates are `auto` mode plus rules, or
+    `--dangerously-skip-permissions`);
+  - the tier-listing rule in `261117-feat-ws-agent-tools-mailbox-routing`
+    (C2).
+
+  Leave the worker out until those are settled, so `agy.<tier>` is not
+  advertised as spawnable.
+
+**Compatibility verdict.**
+- Phase 1 surfaces are T0: test-only fixtures and a `_test.go` file, with
+  no shipped, stored or protocol change.
+- Phase 2 surfaces, as verdicts to confirm at implementation:
+  - The agy catalog profile is in-code daemon data, so T0.
+  - The ACP session id is stored in the existing `Record.SessionID`. Phase 2
+    must add no new `Record` field: the old binary's `readRecord` +
+    `writeRecord` round trip (`agents-plugin-tool/internal/wsagent/record.go:281-305`)
+    drops unknown fields, which would make any such field at best T2.
+  - The old-daemon scenario is **T1**, by the same chain as Codex,
+    re-checked on this branch:
+    - The old binary reads a hosted Record whose `backend` it does not know
+      (the Phase 2 name; `agy` recommended, matching the `agy.<tier>`
+      strings of 261117-feat-ws-exec-tools) without validating it
+      (`record.go:281-294`).
+    - `Runner.Start` -> `startConv` -> `reattach` (`runner.go:266-304`,
+      `runner.go:607-616`) reaches `Runner.backend`, which returns
+      `ErrBackendUnavailable` (`runner.go:924-929`).
+    - `reattach` only logs it and keeps `HolderID` (`runner_process.go:372-381`).
+    - So the row is listed, the old daemon cannot drive the session, and
+      the record does not change. Reopening with the new daemon reattaches
+      the same holder.
+  - Any agy launcher config key Phase 2 adds is an additive manifest entry,
+    so T0.
+  - The HTTP MCP endpoint and token verdict belongs to catalog Phase 2.
+
+**Interface fit (no common-interface change needed or made).**
+- The mapping onto the existing shape:
+  - `Start` -> spawn `agy acp`, `initialize`, `session/new` or
+    `session/resume` with `mcpServers` and the append
+  - `Send` -> `session/prompt`
+  - `Steer` -> a `session/prompt` while running (the process tracks
+    outstanding prompts)
+  - `Interrupt` -> `session/cancel`
+  - `SetModel` / `SetEffort` -> `session/set_config_option`
+  - permission requests -> `Event.Approval`; the prompt response or the
+    call's terminal status -> `ApprovalDone`
+- The approval decision set is binary at 1.5.9, so Codex gap E1 does not
+  arise. The user question is text, so Codex gap E2 does not arise.
+
+**Schema gaps (catalog `92b4c835b`).**
+- G1 (Codex) does not apply: `agentInfo.version` parses.
+- G2: `ItemUsageQuery` reads "ws asks the harness". agy pushes usage; it is
+  graded native on delivery, as for Codex.
+- G3: `ItemCompaction` has no slot for "compaction leaves no event". The
+  mapper sees only the usage drop.
+
+**Decisions returned to the lead (product/API choices).**
+1. Control path: ACP (`agy acp`). Headless stream-json is rejected (no
+   approval channel, cancel or steer).
+2. Role scope: lead only for the first slice (above).
+3. Lead subagent removal: keep the tools (recommended) or use a ws-owned
+   custom main agent (above).
+4. ws skill delivery into an agy lead: none exists today. The options are
+   catalog prompt assembly, or `agy plugin import claude`, which writes the
+   user's agy home. Recommended: wait for prompt assembly.
+5. `--process-per-session`: the doc calls it required for HTTP MCP, and the
+   probe works without it. Technical recommendation: pass it (documented
+   contract), and confirm the process tree in Phase 2.
+6. Silent MCP auth failure: Phase 2 needs a ws-side check, for example the
+   daemon expecting the hosted session's MCP handshake within a deadline and
+   alerting otherwise.
+
+**Fixture plan: planned, not run.**
+- Holder reattach mid-turn.
+- Reattach with a permission request pending.
+- Ring gap rebuilt through `session/load`.
+- Resume across agy versions (needs a second installed version).
+- Model switch across model families.
+- The elicitation path for `ask_question`.
+- A worker profile (custom agent plus isolated `--gemini-dir`), if the
+  worker role comes into scope.
+- Phase 2 acceptance on the owner's login.
+
+**Unknowns (explicit).**
+- Behaviour below 1.5.9 and at 1.5.10.
+- Resume across versions.
+- `session/load` on an already-open session.
+- Whether `auto` mode still asks for MCP tools.
+- `allow_always` options, never offered in `default` mode at 1.5.9.
+- `thought_level` values beyond low/medium/high on other models (the doc
+  names Extra and Max).
+- `--settings`-based tool removal.
+
 ### Phase 2: Implement the backend under the settled contract
 
 Before this phase is dispatched, the lead settles the role scope from Phase 1's
