@@ -1463,6 +1463,11 @@ type State struct {
 	// MCPBroken names the harness's MCP servers whose connection broke and
 	// did not come back in-stream; a restart (Restart) is the way back.
 	MCPBroken []string `json:"mcp_broken,omitempty"`
+	// Capabilities is the catalog profile the process's harness version
+	// resolved to, demoted by its init shape; Unverified in it is the
+	// dashboard's "unverified version" warning. Absent for a backend
+	// without a profile and before a process reported. Never persisted.
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
 	// CanControl reports whether the asking viewer may use the lead control
 	// routes (a browser on this machine); the routes set it per request.
 	CanControl bool `json:"can_control,omitempty"`

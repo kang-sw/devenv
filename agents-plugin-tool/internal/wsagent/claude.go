@@ -267,6 +267,61 @@ type claudeInit struct {
 	// terminal_slash_commands are left out: they need a terminal, and a
 	// headless session has none.
 	SlashCommands *[]string `json:"slash_commands"`
+	// Version is the harness's version (claude_code_version).
+	Version string `json:"claude_code_version"`
+}
+
+// claudeInitShape is the light init check of the capability catalog: the
+// items whose init field does not show what their grade relies on, to be
+// demoted to unsupported. It never refuses a launch (checkClaudeInit stays
+// a worker's fatal check). The mapping:
+//
+//	tools          -> tool removal, subagent removal: the field is absent,
+//	                  or a tool of the profile is missing under its name and
+//	                  its older init name (claudeInitToolNames)
+//	permissionMode -> approval: the field is absent
+//	slash_commands -> compaction: a list without "compact"; an absent field
+//	                  (an older harness) changes nothing
+//	model          -> model/effort: the field is absent
+//	mcp_servers    -> none: MCP injection is an admission condition, and a
+//	                  worker's init check refuses a missing ws server
+//	plugins        -> none
+//
+// Steer, interrupt, follow-up, resume, usage query and the other items have
+// no init field: their grade follows the version alone.
+func claudeInitShape(init claudeInit, spec StartSpec) []CapabilityItem {
+	var out []CapabilityItem
+	tools := init.Tools != nil
+	if tools {
+		listed := map[string]bool{}
+		for _, name := range init.Tools {
+			listed[name] = true
+		}
+		for _, entry := range spec.Profile.Tools {
+			base := ToolBase(entry)
+			if !listed[base] && !listed[claudeInitToolNames[base]] {
+				tools = false
+			}
+		}
+	}
+	if !tools {
+		out = append(out, ItemToolRemoval, ItemSubagentRemoval)
+	}
+	if init.PermissionMode == "" {
+		out = append(out, ItemApproval)
+	}
+	if init.SlashCommands != nil && !slices.Contains(*init.SlashCommands, "compact") {
+		out = append(out, ItemCompaction)
+	}
+	if init.Model == "" {
+		out = append(out, ItemModelEffort)
+	}
+	return out
+}
+
+// harnessReport is the catalog report of a process's init.
+func (m *claudeMapper) harnessReport(init claudeInit) Event {
+	return Event{Harness: &HarnessReport{Version: init.Version, Demoted: claudeInitShape(init, m.spec)}}
 }
 
 // claudeInitToolNames maps a built-in tool name to the older name Claude's
@@ -860,9 +915,11 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			if err := checkClaudeInit(init, m.spec); err != nil {
 				return []Event{{Fatal: err}}
 			}
+			out := []Event{m.harnessReport(init)}
 			if init.SessionID != "" {
-				return []Event{{SessionID: init.SessionID}}
+				out = append(out, Event{SessionID: init.SessionID})
 			}
+			return out
 		case "session_state_changed":
 			// running opens a turn whether or not a send began it (a
 			// background task's result, a pushed message), and again after
@@ -1086,7 +1143,8 @@ func (m *claudeMapper) closeTurn(now int64) []Event {
 func (m *claudeMapper) leadInit(init claudeInit, replies lineReplies) []Event {
 	m.model = init.Model
 	m.askContextUsage(replies)
-	var out []Event
+	// The report goes first: the command list below is offered by it.
+	out := []Event{m.harnessReport(init)}
 	if init.SessionID != "" {
 		out = append(out, Event{SessionID: init.SessionID})
 	}

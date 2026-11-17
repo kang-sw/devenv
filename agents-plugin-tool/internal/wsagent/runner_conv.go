@@ -60,6 +60,13 @@ type conv struct {
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
 	failure   *wslive.Notice
 	mcpBroken []string
+	// caps is the catalog profile resolved for the process's harness
+	// version and demoted by its init shape (harnessReported); nil for a
+	// backend without a profile or before the first report. commands is
+	// the harness's last command list before allowedCommands took the
+	// commands of unsupported items out of it.
+	caps     *Capabilities
+	commands []wslive.SlashCommand
 	// heldKinds memoizes refreshHeld's reads under mu: held entry name ->
 	// whether it is a message (not an interrupt entry).
 	heldKinds map[string]bool
@@ -539,6 +546,10 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 			st.Failure = &f
 		}
 		st.MCPBroken = slices.Clone(c.mcpBroken)
+	}
+	if c.caps != nil {
+		caps := c.caps.clone()
+		st.Capabilities = &caps
 	}
 	return c.r.permissionState(st, c.rec, c.dir)
 }

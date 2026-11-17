@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"time"
 
@@ -36,7 +37,17 @@ func (c *conv) handle(ev Event) {
 		}
 	case ev.ReasoningSummary != nil:
 		c.summaryProjection(ev, quiet)
+	case ev.Harness != nil:
+		c.harnessReported(*ev.Harness, quiet)
 	case ev.Live != nil:
+		if ev.Live.Kind == wslive.KindCommands {
+			// The list is offered without the commands of unsupported items;
+			// the dashboard runs only a command the list holds.
+			live := *ev.Live
+			c.commands = slices.Clone(live.Commands)
+			live.Commands = allowedCommands(live.Commands, c.caps)
+			ev.Live = &live
+		}
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactStart {
 			// The requested compaction started: its own turn holds kick
 			// until it ends.
@@ -827,4 +838,36 @@ func (c *conv) finishClose() {
 	}
 	c.signalSettled()
 	c.watched()
+}
+
+// harnessReported resolves the backend's catalog profile at the version
+// the process reported, demotes the items its init shape does not support,
+// and offers the command list again under the result. A backend with no
+// profile stays handle-only: no grades, no demotion, no warning.
+func (c *conv) harnessReported(report HarnessReport, quiet bool) {
+	profile := c.r.opts.Backends[c.rec.Backend].Catalog
+	if profile == nil {
+		return
+	}
+	role := RoleWorker
+	if c.rec.Lead {
+		role = RoleLead
+	}
+	caps := profile.Resolve(role, report.Version)
+	caps.demote(report.Demoted)
+	if c.caps != nil && reflect.DeepEqual(*c.caps, caps) {
+		return
+	}
+	if !quiet && (caps.Unverified || len(caps.Demoted) > 0) {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: harness version %q (verified %s..%s) runs on %s's capabilities; demoted by its init: %v\n",
+			c.rec.ReplyID, report.Version, caps.Oldest, caps.Newest, caps.ProfileVersion, caps.Demoted)
+	}
+	before := allowedCommands(c.commands, c.caps)
+	c.setStatus(func() { c.caps = &caps })
+	if c.commands != nil {
+		if after := allowedCommands(c.commands, c.caps); !slices.Equal(after, before) {
+			c.apply(wslive.Event{Kind: wslive.KindCommands, Commands: after}, quiet)
+		}
+	}
+	c.changed(quiet)
 }

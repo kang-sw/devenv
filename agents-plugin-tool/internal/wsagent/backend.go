@@ -336,6 +336,9 @@ type Event struct {
 	// retrying is over (a response came, or the turn ended).
 	Retry    *wslive.Retry
 	RetryEnd bool
+	// Harness is the catalog report of a process's start: its harness
+	// version and the items its init shape demotes (catalog.go).
+	Harness *HarnessReport
 	// MCPServers is the MCP server list the harness reported with each
 	// server's status (an init line).
 	MCPServers []MCPServer

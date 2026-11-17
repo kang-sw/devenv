@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -309,32 +310,40 @@ func TestClaudeCatalogValues(t *testing.T) {
 			}
 		}
 	}
-	// Each bound of the guaranteed range is a recorded fixture's version.
+	// Each bound of the guaranteed range is the version of a recorded
+	// fixture of each role.
 	recorded := claudeFixtureVersions(t)
 	for _, bound := range []string{p.Oldest, p.Newest} {
-		if !recorded[bound] {
-			t.Errorf("bound %s has no recorded fixture; recorded %v", bound, recorded)
+		for _, role := range []CatalogRole{RoleLead, RoleWorker} {
+			if !recorded[role][bound] {
+				t.Errorf("bound %s has no recorded %s fixture; recorded %v", bound, role, recorded)
+			}
 		}
 	}
 }
 
 // claudeFixtureVersions collects the claude_code_version values of the
-// recorded Claude stream fixtures.
-func claudeFixtureVersions(t *testing.T) map[string]bool {
+// recorded Claude stream fixtures by role: a claude-lead-* fixture is a
+// lead's, any other a worker's.
+func claudeFixtureVersions(t *testing.T) map[CatalogRole]map[string]bool {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join("testdata", "claude-*.jsonl"))
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("no Claude fixtures: %v", err)
 	}
 	re := regexp.MustCompile(`"claude_code_version":"([^"]+)"`)
-	out := map[string]bool{}
+	out := map[CatalogRole]map[string]bool{RoleLead: {}, RoleWorker: {}}
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
+		role := RoleWorker
+		if strings.HasPrefix(filepath.Base(path), "claude-lead-") {
+			role = RoleLead
+		}
 		for _, m := range re.FindAllSubmatch(data, -1) {
-			out[string(m[1])] = true
+			out[role][string(m[1])] = true
 		}
 	}
 	return out

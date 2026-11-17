@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // catalog.go is the harness capability catalog: the declarative common
@@ -17,6 +19,14 @@ import (
 // signal of the required Process controls. A backend registered without a
 // profile (BackendRegistration.Catalog nil) stays handle-only: its readers
 // hide nothing, demote nothing, and warn of no version.
+//
+// At each process start the backend reports the harness version and the
+// items its init event shows a mismatched shape for (HarnessReport); the
+// runner resolves the profile at that version, demotes those items to
+// unsupported, and shows the result as State.Capabilities, in memory only.
+// A version outside the guaranteed range runs on the nearest bound's
+// grades, marked unverified. The init-field to item mapping that gates the
+// demotion is the backend's (claudeInitShape for Claude).
 //
 // Admission conditions are not items: a harness without headless JSON event
 // streaming or MCP server injection is not usable at all, so nothing is
@@ -150,9 +160,62 @@ type Capabilities struct {
 	// (Version inside the guaranteed range, else the nearest bound).
 	Version        string `json:"version,omitempty"`
 	ProfileVersion string `json:"profile_version"`
+	// Oldest and Newest are the profile's guaranteed range.
+	Oldest string `json:"oldest"`
+	Newest string `json:"newest"`
 	// Unverified marks a version outside the guaranteed range, or none.
-	Unverified bool                          `json:"unverified,omitempty"`
-	Items      map[CapabilityItem]Capability `json:"items"`
+	Unverified bool `json:"unverified,omitempty"`
+	// Demoted are the items the session's init shape demoted to
+	// unsupported from a better grade (demote).
+	Demoted []CapabilityItem              `json:"demoted,omitempty"`
+	Items   map[CapabilityItem]Capability `json:"items"`
+}
+
+// HarnessReport is what a backend reads from a process's start: the
+// harness version (empty when the harness reports none) and the items
+// whose init shape does not match what their grade relies on.
+type HarnessReport struct {
+	Version string
+	Demoted []CapabilityItem
+}
+
+// demote grades items unsupported, listing in Demoted those it took a
+// better grade from.
+func (c *Capabilities) demote(items []CapabilityItem) {
+	for _, item := range items {
+		if c.Grade(item) == GradeUnsupported {
+			continue
+		}
+		c.Items[item] = Capability{Grade: GradeUnsupported}
+		c.Demoted = append(c.Demoted, item)
+	}
+}
+
+// clone is a copy that shares no slice or map with c.
+func (c Capabilities) clone() Capabilities {
+	out := c
+	out.Demoted = slices.Clone(c.Demoted)
+	out.Items = make(map[CapabilityItem]Capability, len(c.Items))
+	for item, got := range c.Items {
+		out.Items[item] = Capability{Grade: got.Grade, Values: slices.Clone(got.Values)}
+	}
+	return out
+}
+
+// commandItems are the dashboard commands that deliver a catalog item: a
+// command is offered only while its item is not unsupported.
+var commandItems = map[string]CapabilityItem{"compact": ItemCompaction}
+
+// allowedCommands is list without the commands whose item caps grade
+// unsupported; nil caps (no profile, or no report yet) keeps every one.
+func allowedCommands(list []wslive.SlashCommand, caps *Capabilities) []wslive.SlashCommand {
+	if caps == nil {
+		return list
+	}
+	return slices.DeleteFunc(slices.Clone(list), func(c wslive.SlashCommand) bool {
+		item, ok := commandItems[c.Name]
+		return ok && !caps.Allows(item)
+	})
 }
 
 // Grade is item's grade; an item the profile does not declare is
@@ -187,7 +250,7 @@ func (p HarnessProfile) Resolve(role CatalogRole, version string) Capabilities {
 			at, unverified = version, false
 		}
 	}
-	caps := Capabilities{Role: role, Version: version, ProfileVersion: at, Unverified: unverified, Items: map[CapabilityItem]Capability{}}
+	caps := Capabilities{Role: role, Version: version, ProfileVersion: at, Oldest: p.Oldest, Newest: p.Newest, Unverified: unverified, Items: map[CapabilityItem]Capability{}}
 	for _, item := range CatalogItems {
 		caps.Items[item] = Capability{Grade: GradeUnsupported}
 	}
@@ -282,12 +345,13 @@ func compareHarnessVersions(a, b []int) int {
 const claudeSubagentTool = "Agent"
 
 // ClaudeCatalog is the reference profile: what the ws adapter delivers for
-// Claude Code today. The guaranteed range is seeded from the recorded
-// stream fixtures (testdata, claude_code_version).
+// Claude Code today. The guaranteed range runs from the oldest to the
+// newest version with a recorded stream fixture of both a lead and a
+// worker (testdata, claude_code_version).
 func ClaudeCatalog() *HarnessProfile {
 	return &HarnessProfile{
-		Oldest: "2.1.319",
-		Newest: "2.1.323",
+		Oldest: "2.1.322",
+		Newest: "2.1.326",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Grade: GradeUnsupported,
 				Source: "the init's skills field is not parsed (claudeInit)"},
