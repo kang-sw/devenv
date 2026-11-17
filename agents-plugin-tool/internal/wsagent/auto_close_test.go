@@ -71,9 +71,9 @@ func TestFinishedPiWorkerClosesAfterItsReportAndSendReopensIt(t *testing.T) {
 		t.Fatalf("a wait made before the finish = %+v", res)
 	}
 	eventuallyClosed(t, h, w.ID)
-	if !p.isClosed() {
-		t.Fatal("the closed worker's process still runs")
-	}
+	// closeIf shows the row closed before finishClose stops the process,
+	// so a Send sees the close or lands first; wait for the stop itself.
+	eventually(t, "the closed worker's process to stop", p.isClosed)
 	if rec := h.record(w.ID); rec.ClosedAt == "" || rec.TurnOpen {
 		t.Fatalf("closed record = %+v", rec)
 	}
