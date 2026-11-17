@@ -156,7 +156,14 @@
       "registered_at": "2026-11-11T10:28:07Z"
     },
     "261112-feat-pi-subagent-long-shell-auto-background": {
-      "registered_at": "2026-11-12T07:07:20Z"
+      "registered_at": "2026-11-12T07:07:20Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "tickets/app-layer",
+        "phase": "closed",
+        "touched_at": "2026-11-17T10:17:16Z"
+      }
     },
     "261112-feat-ws-dashboard-session-rewind": {
       "registered_at": "2026-11-12T08:40:41Z"
