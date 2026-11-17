@@ -35,8 +35,8 @@ process.stdout.write(bad.join("\n"));
 
 // TestDrawersShareOneHeight pins the one drawer height (dashboard.js drH,
 // drSetH, the drawer drag; tracker.js drHeight, fitDrawer, the store
-// handle drag): a height never set is DR_DEF (320px) for the session
-// drawer and every tracker store, the content's height playing no part;
+// handle drag): the shared baseline is DR_DEF (320px), with the wide
+// panels sheet's untouched 60vh default covered by frontend-drawer.test.js;
 // dragging the git handle opens the git sheet in the panels' place and
 // sets the one height; a store handle's drag sets the height the panels
 // drawer and every other store open at, through the host's drawerHeight
@@ -228,6 +228,7 @@ function ghandle() { return ghandleEl; }
 function drMeasure() {}
 function drMax() { return 600; }
 function drClamp(h) { return h; }
+function drHeight() { return drH; }
 function drSetH(h) { drH = h; }
 function ghSync() {} function drTitle() {} function drFill() {} function wtLoad() {} function hdLoad() {} function gitOpened() {} function drDot() {} function drAnnounce() {}
 var stored = {};

@@ -210,6 +210,15 @@ func (s agentSessions) ClearLiveSnapshot(stateDir, replyID string) {
 	}
 }
 
+// ReadTicketIdeas forwards to the configured source; an agent conversation
+// has no ticket panel.
+func (s agentSessions) ReadTicketIdeas(reg Registration) ([]IdeaTicket, bool, error) {
+	if src, ok := s.inner.(TicketIdeasSource); ok && !reg.Agent {
+		return src.ReadTicketIdeas(reg)
+	}
+	return nil, false, nil
+}
+
 // ReadClosedTopics forwards to the configured source; an agent conversation
 // has no board.
 func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n int) (template.HTML, bool) {

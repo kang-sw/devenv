@@ -30,10 +30,10 @@
   var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h", DR_SEARCH = "ws.dashboard.drawer.search";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
-  var drMode = "panels", drShown = "", drfold = null, drFoldW = -1, drFoldGw = -1;
+  var drMode = "panels", drShown = "", drfold = null, drFoldW = -1, drFoldGw = -1, drHSet = false;
   // The stored height is read with or without the frame: a page with no
   // session drawer still shares it with the tracker's store drawers.
-  (function () { var h = parseFloat(load(DR_H)); if (isFinite(h) && h > 0) drH = h; })();
+  (function () { var h = parseFloat(load(DR_H)); if (isFinite(h) && h > 0) { drH = h; drHSet = true; } })();
   var sbody = null, shandle = null;
   if (drawer) {
     sbody = doc.createElement("div"); sbody.id = "sbody"; sbody.className = "dr-search"; sbody.hidden = true;
@@ -123,7 +123,60 @@
         drApply(false);
       }
     }
+    ticketIdeaSync();
     drFill(true);
+  }
+  // Ideas belong to this page's demand state, not the live panels region.
+  // Reattach after a panels swap without fetching again or replacing focus
+  // in an unchanged card. A failed read leaves a retry control.
+  var ideaRows = null, ideaLoading = false, ideaError = false;
+  function ticketIdeaSync() {
+    var p = $("p-tickets"), lanes = p && p.querySelector(".lanes");
+    if (!lanes || lanes.querySelector(".d-ticket-ideas")) return;
+    var section = doc.createElement("section"); section.className = "lane d-ticket-ideas";
+    var h = doc.createElement("h4"); h.textContent = wsT("js.drawer.idea");
+    if (ideaRows !== null) {
+      var count = doc.createElement("span"); count.className = "chip"; count.textContent = String(ideaRows.length); h.appendChild(count);
+    }
+    section.appendChild(h);
+    if (ideaRows !== null) {
+      var list = doc.createElement("ul"); list.className = "kcards";
+      ideaRows.forEach(function (t) {
+        var row = doc.createElement("li"); row.className = "kcard";
+        var title = doc.createElement("span"); title.className = "ctitle";
+        var cat = doc.createElement("span"); cat.className = "chip cat"; cat.textContent = t.category;
+        var link = doc.createElement("a"); link.textContent = t.title || t.stem;
+        link.href = "/s/" + rid + "/file?path=" + encodeURIComponent(t.path); link.title = t.path; link.setAttribute("data-wl", "file"); link.setAttribute("data-rel", t.path);
+        if (t.abs) link.setAttribute("data-abs", t.abs);
+        title.appendChild(cat); title.appendChild(link); row.appendChild(title);
+        var stem = doc.createElement("span"); stem.className = "csub"; stem.textContent = t.stem; stem.title = t.stem; row.appendChild(stem);
+        list.appendChild(row);
+      });
+      if (!ideaRows.length) { var empty = doc.createElement("li"); empty.className = "none"; empty.textContent = wsT("js.drawer.idea.empty"); list.appendChild(empty); }
+      section.appendChild(list);
+    } else {
+      var button = doc.createElement("button"); button.type = "button"; button.className = "btn d-ticket-more";
+      button.disabled = ideaLoading;
+      button.textContent = wsT(ideaLoading ? "js.drawer.idea.loading" : ideaError ? "js.drawer.idea.retry" : "js.drawer.idea.more");
+      button.addEventListener("click", ticketIdeaLoad); section.appendChild(button);
+    }
+    lanes.appendChild(section);
+  }
+  function ticketIdeaLoad() {
+    if (ideaLoading || ideaRows !== null) return;
+    ideaLoading = true; ideaError = false;
+    ticketIdeaRedraw();
+    fetch("/s/" + rid + "/tickets/idea", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("idea tickets");
+      return r.json();
+    }).then(function (data) {
+      ideaRows = data.tickets || []; ideaLoading = false; ticketIdeaRedraw();
+    }).catch(function () { ideaLoading = false; ideaError = true; ticketIdeaRedraw(); });
+  }
+  function ticketIdeaRedraw() {
+    var p = $("p-tickets"), old = p && p.querySelector(".d-ticket-ideas");
+    if (old) old.remove();
+    ticketIdeaSync();
   }
   // drFill stretches cards into the empty cells of the panels grid's last
   // row: the card directly above each empty cell spans two rows. Cards keep
@@ -239,13 +292,16 @@
   function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
   // drSetH sets the one drawer height (a drag's release, here or on a
   // tracker store's handle) and keeps it.
-  function drSetH(h) { drH = h; save(DR_H, String(h)); }
+  function drSetH(h) { drH = h; drHSet = true; save(DR_H, String(h)); }
+  // Only an untouched wide panels sheet gets the taller default. Narrow,
+  // git/search and tracker drawers keep 320px; every dragged height wins.
+  function drHeight() { return !drHSet && drMode === "panels" && window.innerWidth >= 760 ? Math.round(window.innerHeight * 0.6) : drH; }
   // drApply lays the drawer out for its state; anim animates a click's
   // toggle only.
   function drApply(anim) {
     if (!drawer) return;
     drTop = drHeaderBottom();
-    var h = drClamp(drH), git = drMode === "git", search = drMode === "search";
+    var h = drClamp(drHeight()), git = drMode === "git", search = drMode === "search";
     drawer.style.setProperty("--drtop", drTop + "px");
     drawer.classList.toggle("anim", !!anim);
     drawer.classList.toggle("open", drOpen);

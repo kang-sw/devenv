@@ -3,6 +3,7 @@ package mcp
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,9 +20,6 @@ import (
 // A change made outside a dirtying tool call (mail from another session, a
 // ticket file edited by hand) shows on the next render.
 
-// whiteboardLatestTodo is how many todo/ tickets the full page lists.
-const whiteboardLatestTodo = 10
-
 // whiteboardMailbox resolves, once per render, whether sessionKey holds this
 // process's named inbox. A store that cannot be read reads as not the owner:
 // the panel is descriptive and never fails a render.
@@ -30,10 +28,9 @@ func (s *Server) whiteboardMailbox(sessionKey, root string) whiteboardMailbox {
 	return whiteboardMailbox{owner: owner && err == nil, identity: identity}
 }
 
-// ticketPanel shows the tickets as kanban lanes: every ready/ ticket and, on
-// the full page only, the latest whiteboardLatestTodo todo/ tickets. Each
-// card links to its file, or on a served page carries its repo-relative path
-// (which the page makes the file action link, titled with that path). idea/ tickets are never listed.
+// ticketPanel lists ready/ and, on the full page, all todo/ tickets. Each
+// card links to its file, or on a served page carries its repo-relative path.
+// idea/ is read only by the dashboard's on-demand route, never this live panel.
 func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	statuses := []string{"ready", "todo"}
 	if in.watch != nil {
@@ -44,7 +41,7 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		}
 	}
 	tickets, err := whiteboardTicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses, Env: in.env})
-	if err != nil {
+	if err != nil && !(in.served && os.IsNotExist(err)) {
 		return wswhiteboard.Panel{}, false
 	}
 	if in.watch != nil {
@@ -86,18 +83,14 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	lanes := []wswhiteboard.PanelLane{lane(wsi18n.T(in.lang, "panel.lane.ready"), ready, "")}
 	count := wsi18n.T(in.lang, "panel.tickets.count", len(ready))
 	if in.layout == wswhiteboard.LayoutFull {
-		// The chip counts the whole todo/ backlog, not the cards listed.
 		count = wsi18n.T(in.lang, "panel.tickets.count.full", len(ready), len(todo))
-		if len(todo) > 0 {
-			latest := latestTodoTickets(todo, whiteboardLatestTodo)
-			note := ""
-			if len(latest) < len(todo) {
-				note = wsi18n.T(in.lang, "panel.lane.latest", len(latest), len(todo))
-			}
-			lanes = append(lanes, lane(wsi18n.T(in.lang, "panel.lane.todo"), latest, note))
+		if len(todo) > 0 || in.served {
+			lanes = append(lanes, lane(wsi18n.T(in.lang, "panel.lane.todo"), latestTodoTickets(todo, len(todo)), ""))
 		}
 	}
-	if len(ready) == 0 && (in.layout != wswhiteboard.LayoutFull || len(todo) == 0) {
+	// Keep a served card even with no ready/todo, so idea-only boards have
+	// their demand control without scanning idea/ to discover them.
+	if !in.served && len(ready) == 0 && (in.layout != wswhiteboard.LayoutFull || len(todo) == 0) {
 		return wswhiteboard.Panel{}, false
 	}
 	return wswhiteboard.Panel{ID: "tickets", Title: wsi18n.T(in.lang, "panel.tickets"), Icon: "board", Count: count, Lanes: lanes}, true

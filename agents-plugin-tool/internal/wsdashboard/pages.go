@@ -1422,6 +1422,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleClosedTopics(w, r, replyID)
 	case sub == "topic":
 		d.handleTopicHistory(w, r, replyID)
+	case sub == "tickets/idea":
+		d.handleTicketIdeas(w, r, replyID)
 	case sub == "worktrees":
 		d.handleWorktrees(w, r, replyID)
 	case sub == "git/status":
