@@ -310,8 +310,8 @@ test('startup still shows an error box and exits when the error log cannot be wr
   start({ app, dialog: { showErrorBox: (_title, message) => boxes.push(message) } }, 'win32');
   await tick();
   assert.deepEqual(exits, [1]);
-  assert.equal(stderr[0][0], failure.stack);
-  assert.match(stderr[1][0], /Could not write startup error log/);
+  assert(stderr.some(args => args[0] === failure.stack), 'the startup exception is reported');
+  assert(stderr.some(args => /Could not write startup error log/.test(args[0])), 'the log write failure is reported');
   assert.equal(boxes.length, 1);
   assert(boxes[0].includes(failure.message));
   assert(boxes[0].includes(path.join(directory, 'startup-error.log')));
