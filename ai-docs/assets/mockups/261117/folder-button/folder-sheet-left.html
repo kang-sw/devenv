@@ -1,0 +1,113 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>folder sheet left mockup</title>
+<style>
+:root{--wb-bg:#141518;--wb-fg:#e7e7e4;--wb-card:#1e2024;--wb-muted:#2b2d32;--wb-muted-fg:#a2a6ad;--wb-primary:#7aa2ff;--wb-now:#243457;--wb-on-now:#d3defb;--wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);--wb-wash:color-mix(in srgb,var(--wb-fg) 6%,transparent);--wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;--wb-shadow:0 1px 2px rgb(0 0 0/.5),0 2px 8px rgb(0 0 0/.3);--wb-radius:12px;--hl-k:#c792ea;--hl-s:#b5d88a;--hl-c:#7f8590;--hl-nf:#82aaff;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--wb-bg);color:var(--wb-fg);font:14px/1.45 var(--wb-sans);display:flex;flex-direction:column;overflow:hidden}
+button{font:inherit;color:inherit;background:var(--wb-muted);border:1px solid var(--wb-line);border-radius:8px;padding:3px 10px;cursor:pointer}
+button:hover{background:var(--wb-wash)}
+.sw{flex:none;display:flex;gap:8px;align-items:center;padding:6px 12px;background:#0c0d0f;border-bottom:1px solid var(--wb-line);font-size:12.5px}
+.sw button.on{background:var(--wb-now);color:var(--wb-on-now);border-color:var(--wb-primary)}
+.sw .note{color:var(--wb-muted-fg);margin-left:10px}
+.dwrap{flex:1;min-height:0;display:flex;flex-direction:column;padding:10px 14px;gap:10px;position:relative}
+.top{flex:none;display:flex;align-items:center;gap:10px;padding:8px 14px}
+.top b{font-size:15px}.top .sub{color:var(--wb-muted-fg);font-family:var(--wb-mono);font-size:12px}.top .sp{flex:1}
+.dgrid{flex:1;min-height:0;display:grid;gap:16px;grid-template-columns:minmax(320px,5fr) minmax(0,7fr) 300px;grid-template-rows:minmax(0,1fr)}
+.col{min-height:0;min-width:0;display:flex;flex-direction:column}
+.card{background:var(--wb-card);border-radius:var(--wb-radius);box-shadow:var(--wb-shadow);min-width:0}
+.tabbar{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--wb-line)}
+.tab{padding:6px 14px;border:0;border-radius:8px 8px 0 0;background:none;color:var(--wb-muted-fg)}
+.tab.on{background:var(--wb-now);color:var(--wb-on-now)}
+.convo{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.msg{background:var(--wb-muted);padding:8px 12px;border-radius:10px;max-width:92%}.msg.me{align-self:flex-end;background:var(--wb-now);color:var(--wb-on-now)}
+.composer{flex:none;margin:8px;padding:10px;border:1px solid var(--wb-line);border-radius:10px;color:var(--wb-muted-fg)}
+.fpane{display:flex;flex-direction:column;min-height:0;flex:1}
+.fsearch{margin:8px;padding:6px 10px;border:1px solid var(--wb-primary);border-radius:8px;background:var(--wb-bg);color:var(--wb-muted-fg);font-size:13px}
+.ftree{overflow:auto;padding:0 6px 8px;font-size:13px}
+.fr{display:flex;gap:6px;align-items:center;padding:2.5px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.fr:hover{background:var(--wb-wash)}.fr.sel{background:var(--wb-now);color:var(--wb-on-now)}
+.fr .ic{width:14px;color:var(--wb-muted-fg);text-align:center}.fr .meta{margin-left:auto;color:var(--wb-muted-fg);font-size:11.5px}
+.d1{padding-left:24px}.d2{padding-left:40px}
+.board{overflow:auto;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
+.bcard{padding:12px 14px}.bcard h4{margin:0 0 6px;font-size:13.5px}.bcard p{margin:0;color:var(--wb-muted-fg);font-size:13px}
+.bar{height:6px;border-radius:3px;background:var(--wb-muted);margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--wb-primary)}
+.pins{border:1.5px dashed var(--wb-line);border-radius:var(--wb-radius);color:var(--wb-muted-fg);align-items:center;justify-content:center;font-size:12.5px;text-align:center;padding:12px}
+.pv{display:flex;flex-direction:column;min-height:0}
+.pvh{flex:none;display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--wb-line)}
+.pvh .n{font-weight:600}.pvh .p{font-family:var(--wb-mono);font-size:11.5px;color:var(--wb-muted-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.pvb{flex:1;min-height:0;overflow:auto;padding:16px 22px}
+.pvb.code{font:12.5px/1.6 var(--wb-mono);white-space:pre;padding:12px 0}
+.ln{display:inline-block;width:42px;text-align:right;color:var(--wb-muted-fg);margin-right:14px;user-select:none}
+.k{color:var(--hl-k)}.s{color:var(--hl-s)}.c{color:var(--hl-c)}.f{color:var(--hl-nf)}
+.md h1{font-size:22px;margin:0 0 8px}.md h2{font-size:16px;margin:16px 0 6px}.md code{font-family:var(--wb-mono);background:var(--wb-muted);padding:1px 5px;border-radius:4px}
+.md{max-width:760px}
+.img{height:100%;min-height:200px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;background:linear-gradient(135deg,#2b62d9,#6a4fc4 50%,#b0245a)}
+.tag{font-size:11px;padding:1px 7px;border-radius:9px;background:var(--wb-muted);color:var(--wb-muted-fg)}
+.annot{position:absolute;right:20px;bottom:14px;font-size:12px;color:var(--wb-muted-fg);max-width:50ch;text-align:right}
+.col.left{position:relative}
+.sheet{position:absolute;inset:0;z-index:5;border:1px solid var(--wb-primary);display:none;flex-direction:column;overflow:hidden}
+#folder.pressed{background:var(--wb-now);color:var(--wb-on-now);border-color:var(--wb-primary)}
+.cap{flex:none;display:none;text-align:center;font-size:12.5px;color:var(--wb-muted-fg)}
+.pvA,.pvB{display:none}
+[data-v=b] .sheet,[data-v=c] .sheet{display:flex}
+[data-v=b] .cap,[data-v=c] .cap{display:block}
+[data-v=c] .pvA{display:flex;flex:1}
+[data-v=c] .board,[data-v=c] .pins{display:none}
+[data-v=c] .rcol{grid-column:2/4}
+</style></head><body data-v="a">
+<div class="sw"><b>상태</b>
+<button data-s="a">a 닫힘</button><button data-s="b">b 시트 왼쪽 도킹</button><button data-s="c">c 시트 + 미리보기</button>
+<span class="note" id="note"></span></div>
+<div class="dwrap">
+<div class="top card"><b>partedcherisheruncountedsibling</b><span class="sub">devenv · develop</span><span class="sp"></span>
+<button id="folder" title="파일 탐색기">📁</button><button>⎇</button><button>⚙</button></div>
+<div class="dgrid">
+ <div class="col card left">
+  <div class="card sheet"><div class="fpane"><div class="fsearch">파일 검색…</div><div class="ftree" data-tree></div></div></div>
+  <div class="tabbar"><button class="tab on">대화</button></div>
+  <div class="fpane" id="convoTab"><div class="convo">
+   <div class="msg me">탐색기 위치를 왼쪽 컬럼으로 옮겨줘</div>
+   <div class="msg">레이아웃 확인 중입니다. 와이드에서는 파일 탭으로 전환하고 검색창에 포커스를 둡니다.</div>
+   <div class="msg">미리보기는 오른쪽 빈 영역에 열립니다.</div></div>
+   <div class="composer">메시지 입력…</div></div>
+ </div>
+ <div class="col rcol">
+  <div class="pvA card pv" data-pv="a"></div>
+    <div class="board">
+   <div class="card bcard"><h4>티켓 261117-wide-explorer</h4><p>Phase 1 진행 중 · 워커 1</p><div class="bar"><i style="width:40%"></i></div></div>
+   <div class="card bcard"><h4>변경 사항</h4><p>dashboard-board.js · files.js · 3개 파일</p></div>
+   <div class="card bcard"><h4>검증</h4><p>go test ./... 통과</p></div>
+  </div>
+ </div>
+ <div class="col pins"><span>고정된 카드 열<br>(#bpcol, 비어 있음)</span></div>
+</div>
+<div class="cap">빈 곳 클릭 또는 Esc → 시트와 미리보기 닫힘, 일반 보드로 복귀</div>
+</div>
+<script>
+const FILES=[['d','agents-plugin-tool/internal/wsdashboard/assets',0],['f','dashboard-board.js',1,'code','12 KB'],['f','files.js',1,'code','9 KB'],['f','preview.js',1,'code','21 KB'],['d','ai-docs/assets/mockups',0],['f','sketch-2.png',1,'img','184 KB'],['d','ai-docs',0],['f','WORKFLOW.md',1,'md','6 KB'],['f','README.md',0,'md','3 KB']];
+const CODE=`<span class="c">// folder button: wide view switches to the files tab</span>
+<span class="k">function</span> <span class="f">openExplorer</span>(){
+  <span class="k">if</span>(<span class="f">isWide</span>()){
+    <span class="f">showLeftTab</span>(<span class="s">'files'</span>);
+    <span class="f">filesSearch</span>.<span class="f">focus</span>();
+    <span class="k">return</span>;
+  }
+  <span class="f">toggleToolbarSheet</span>();
+}`.split('\n').map((l,i)=>`<span class="ln">${i+1}</span>${l}`).join('\n');
+const MD=`<div class="md"><h1>WORKFLOW</h1><p>워크플로 개요와 plugin-less 유지보수 가이드입니다.</p><h2>흐름</h2><p><code>discuss</code> → <code>ticket</code> → <code>run</code> → <code>review</code></p><h2>원칙</h2><p>사용자가 각 핸드오프에서 다음 단계를 결정합니다. 이 문서는 설명용이며 런타임 동작을 덮어쓰지 않습니다.</p></div>`;
+let cur=['preview.js','code','agents-plugin-tool/internal/wsdashboard/assets/preview.js'];
+function body(){const t=cur[1];return t=='code'?`<div class="pvb code">${CODE}</div>`:t=='md'?`<div class="pvb">${MD}</div>`:`<div class="pvb"><div class="img">image preview · ${cur[0]} · 1280×720</div></div>`}
+function pv(v){return `<div class="pvh"><span class="n">${cur[0]}</span><span class="p">${cur[2]}</span>${v=='b'?'<span class="tag">임시 카드</span><button>고정</button>':'<button>카드로 고정</button>'}<button>✕</button></div>`+body()}
+function render(){document.querySelectorAll('[data-pv]').forEach(e=>e.innerHTML=pv(e.dataset.pv));
+ document.querySelectorAll('[data-tree]').forEach(t=>{t.innerHTML=FILES.map(f=>`<div class="fr d${f[2]} ${f[0]=='f'&&f[1]==cur[0]?'sel':''}" ${f[0]=='f'?`data-f="${f[1]}" data-t="${f[3]}" data-p="${f[1]}"`:''}><span class="ic">${f[0]=='d'?'▾':f[3]=='img'?'▣':f[3]=='md'?'¶':'‹›'}</span>${f[1]}<span class="meta">${f[4]||''}</span></div>`).join('')});
+ document.querySelectorAll('[data-f]').forEach(r=>r.onclick=()=>{cur=[r.dataset.f,r.dataset.t,r.dataset.p];render()})}
+const NOTE={a:'닫힘: 일반 분할 페이지, 폴더 버튼 눌리지 않음.',b:'시트가 왼쪽 대화 컬럼 위에 같은 위치·폭으로 도킹, 보드는 그대로.',c:'시트 유지 + 파일 선택, 읽기 패널이 보드·핀 열을 덮음.'};
+function set(v){if(!NOTE[v])v='a';document.body.dataset.v=v;document.getElementById('note').textContent=NOTE[v];
+ document.querySelectorAll('.sw button').forEach(b=>b.classList.toggle('on',b.dataset.s==v));
+ document.getElementById('folder').classList.toggle('pressed',v!='a');}
+document.querySelectorAll('.sw button').forEach(b=>b.onclick=()=>{location.hash=b.dataset.s});
+window.onhashchange=()=>set(location.hash.slice(1));
+document.getElementById('folder').onclick=()=>{location.hash=document.body.dataset.v=='a'?'b':'a'};
+render();
+const _r=render;render=function(){_r();document.querySelectorAll('[data-f]').forEach(r=>{const o=r.onclick;r.onclick=()=>{o();location.hash='c'}})};
+render();set(location.hash.slice(1)||'a');
+</script></body></html>
