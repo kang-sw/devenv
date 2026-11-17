@@ -61,8 +61,7 @@
     }
     if (!box) {
       box = span("topic-state dw");
-      var lead = bar.querySelector(".tlead");
-      bar.insertBefore(box, lead ? lead.nextSibling : bar.firstChild);
+      bar.insertBefore(box, bar.firstChild);
     }
     var owner = topic.getAttribute("data-state-owner") || "", run = topic.getAttribute("data-state-run") || "";
     var own = owner.trim() && (state === "researching" || state === "implementing" && run.trim()) ? owner : "";
