@@ -1,10 +1,10 @@
 {
   "ws": {
-    "archive_sha256": "c02187217233e0e2cb064be6b81ec8ec1ba61df57aa6f03cce05e431ea41d46b",
+    "archive_sha256": "60ef68b422015d37f31355482c622fd05d6b9bbc798bc11b19b6d710edc4d8e1",
     "files": {
-      ".claude-plugin/plugin.json": "bd59d48c4f120f7370b7dd817a95eec8f2c4dec89d4417c536aa76fd2dc2884d",
+      ".claude-plugin/plugin.json": "0c506ef4b08d4d5a20397e473a690d9d13e4124486c6acb71d64be2bbce018e0",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
-      ".codex-plugin/plugin.json": "bf813aba64c12afc52da3c0b04686fb77759259c97664c1069f4a4b98d8376f8",
+      ".codex-plugin/plugin.json": "e41d6b223c61c2ebdf5c3c9c2c68aef43aef43cadba16ac73c302d4a9f864c33",
       ".mcp.json": "0c539c6ffda88a73160b899fee0ca7c78da29393fdf030f25afda86b2fa99c47",
       "bin/ws-cli": "64969b4f3f810a6628e43876c0ee67856c9e0abf9bb19d7dd31540c156dd7fcc",
       "bin/ws-cli.cmd": "747815bea96b806398e052dfb790318cb4f370d59f6ac3519a417ae56bf38917",
@@ -84,7 +84,7 @@
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
       "rsrc/whiteboard/whiteboard.md": "e32657ea47d1ebafaf10c3e8247d61a603c200f30cae80af796b968c249d7d2e",
       "rsrc/worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3",
-      "runtime.json": "375a88f6732bc778d10b1b79af318330f0e6a228c12524688f0066f50fbe9572",
+      "runtime.json": "7fe0ac946335ce77c4a04b0020ddd1acb7ed4ede4fe9b498d944add0884161f8",
       "skills/lead-audit-doc/SKILL.md": "910af43a6f9921271580584d590e14c76effba51350a502197c6fa307971df67",
       "skills/lead-bootstrap/AGENTS.template.md": "77205a45cb8e699fc92a58154c42851b82507890e6d9d0668e5fa58c337ffb55",
       "skills/lead-bootstrap/SKILL.md": "4348b34724245c3d7de35c4cae2ee0a447c81131551932e388cfcf973149ddc2",
@@ -104,10 +104,10 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "a4db4f928d703e87bdc8aeb12095741656224c9a40e82cab4aac15e4d710c80b",
+    "archive_sha256": "393c87ce4592918829bc1c12174cc9a1191f520f90ab4fdc5e0fc9068910694c",
     "files": {
-      ".claude-plugin/plugin.json": "eb20bc62419d25dd031cd54e80368522fa4a98ce7420fad1cbb041e160a1ac3f",
-      ".codex-plugin/plugin.json": "33a14c1b9bad354dcfecdc1746963d3a5da66b53b5afba3e89a1a661a123948f",
+      ".claude-plugin/plugin.json": "1be5f463825b0029322c9f589f98fcfb2fb2a32f5c2757bb7ff7bd649ecb5f26",
+      ".codex-plugin/plugin.json": "1d1f0658439604735f03dd3770b05acee77a48932ed77f9be0aaa8781bcd47d5",
       ".mcp.json": "371c883b87a4b8eaeab3e1b329fa2074dfd5343572bd8a6782d7add3169a8eb4",
       "bin/ws-mcp-launcher.py": "caf49e0da0067b60ddf9b23438757e2e6f7b5c715730b59df74af6b4b4b9f0c7",
       "bin/ws-pi-payload.py": "b92624cbdc40b83aa4b5d5333cff5c36754023fbf1b21c1deb9bf8f26c292d05",
@@ -187,7 +187,7 @@
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
       "rsrc/whiteboard/whiteboard.md": "e32657ea47d1ebafaf10c3e8247d61a603c200f30cae80af796b968c249d7d2e",
       "rsrc/worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3",
-      "runtime.json": "00488150315d563030298f38e55ea8469a102a3af40fac3504f5e7f26e4e95fb",
+      "runtime.json": "f53471cc87d8216c48bd025d26033ff0744d3f81ebbdd0b9e469846f36244b92",
       "skills/lead-audit-doc/SKILL.md": "a42494d1687900d3cd18bdccda893182b4f8a323338f4d913ed4e0fe9469b715",
       "skills/lead-bootstrap/AGENTS.template.md": "5a91d0f62a443d071e41b29eee1ba78d9b62f7708e585b1759c4911b7a6e48c5",
       "skills/lead-bootstrap/SKILL.md": "04719ed8a7f27d73cc5a7fa82461930060f66918870e92662406aed9fb1176fe",
