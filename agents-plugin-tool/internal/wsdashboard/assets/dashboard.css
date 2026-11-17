@@ -139,6 +139,9 @@
 .handed .hdcopy:hover { background: var(--wb-muted); }
 .handed .hdcopy:focus-visible { outline: 1.5px solid var(--wb-primary); }
 .handed .hdcopy .i { width: 14px; height: 14px; }
+.harnessnote { display: flex; align-items: flex-start; gap: 9px; flex: none; margin: 0 0 10px; padding: 7px 12px; border-radius: 10px; background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); color: var(--wb-fg); font-size: 12.5px; }
+.harnessnote > .li { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--wb-perm-ink); }
+.harnessnote .hnbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
 
 /* ===== chips, phases, spinners ===== */
 .chip .i, .pghead .i { width: 12px; height: 12px; stroke-width: 2; }
