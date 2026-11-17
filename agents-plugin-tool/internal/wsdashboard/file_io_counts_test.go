@@ -32,7 +32,7 @@ func TestFileIOCountersMeasureRealAttempts(t *testing.T) {
 		t.Fatalf("failed real operations counted %d times, want 6", attempts)
 	}
 	out := httptest.NewRecorder()
-	new(Daemon).serveStreams(out, httptest.NewRequest("GET", "/debug/pprof/streams", nil))
+	(&Daemon{stats: new(streamStats)}).serveStreams(out, httptest.NewRequest("GET", "/debug/pprof/streams", nil))
 	var counts map[string]int64
 	if err := json.Unmarshal(out.Body.Bytes(), &counts); err != nil {
 		t.Fatal(err)
