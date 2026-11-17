@@ -471,3 +471,36 @@ Claude and Codex backends, and an account-backed smoke on the owner's login
 (authorized, Decision 5). The smoke passes when every capability Phase 1 graded
 `native` or `ws-substitute` for the settled roles works end to end on the
 installed version, and every `unsupported` one is refused cleanly.
+
+#### Edition (5a0cd8500) - 2026-11-18
+
+Role scope and control-path decisions settled before dispatch (owner board
+answers 2026-11-18: (89)=a, (87), (88), (90), (91) ok):
+
+- (87) **Control path is ACP (`agy acp`).** Phase 1 evidence: stream-json
+  soft-denies approvals and has no cancel or steer, while ACP carries every
+  lead control natively (25e34507c).
+- (88) **First slice is the hosted lead role only.** The worker role needs a
+  ws-written agent file (location and system-prompt replacement cost), a
+  worker permission posture, and the tier-listing rule first. `agy.<tier>`
+  is therefore not spawnable: agy registers with no `agent-worker-agy`
+  profile, so `agent.tiers` lists no agy tier and a bare agy tier is refused
+  (the worker-role rule of `261117-feat-ws-agent-tools-mailbox-routing`,
+  Phase 1 Result).
+- (89)=a **The lead keeps agy's built-in subagent tools.** The catalog grades
+  `subagent_removal` `unsupported` for the agy lead; the per-harness "Never
+  use {{NativeToolScheme}}" playbook line (`261117-feat-ws-hosted-prompt-assembly`)
+  is the steer. Rejected: a custom main agent (`--agent`), which replaces the
+  default system prompt and hides session-injected MCP tools behind the lazy
+  `call_mcp_tool` gateway with an extra approval. Whether to allow
+  system-prompt replacement is decided again for the worker slice.
+- (90) **ws skills reach an agy lead only through the common prompt
+  assembly.** Do not run `agy plugin import claude`: it writes into the
+  user's agy home.
+- (91) **Always pass `--process-per-session`, and detect HTTP MCP auth
+  failure on the ws side.** The doc requires the flag for HTTP MCP (the probe
+  worked without it). An auth failure only drops the tools, with no error, so
+  ws detects it on its own side (for example, the session's token never
+  reaching the daemon's HTTP route with an `initialize`) and reports the
+  start as failed loudly rather than running a lead without ws tools; the
+  worker picks the exact signal from the probe evidence.
