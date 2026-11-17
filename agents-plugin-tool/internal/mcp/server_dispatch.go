@@ -535,6 +535,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				if value == "" {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
 				}
+				if entry.Normalize != nil {
+					normalized, err := entry.Normalize(value)
+					if err != nil {
+						return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+					}
+					value = normalized
+				}
 			} else {
 				value = strings.ToLower(strings.TrimSpace(value))
 				if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
