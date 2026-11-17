@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>wide drawer mockup</title>
+<style>
+:root{--wb-bg:#141518;--wb-fg:#e7e7e4;--wb-card:#1e2024;--wb-muted:#2b2d32;--wb-muted-fg:#a2a6ad;--wb-primary:#7aa2ff;--wb-now:#243457;--wb-on-now:#d3defb;
+--wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);--wb-ok:#6cc39a;--wb-fail:#f0797e;--wb-warn:#e0a36c;
+--wb-shadow-hi:0 2px 4px rgb(0 0 0/.16),0 6px 18px rgb(0 0 0/.10);--wb-radius:12px;
+--wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0e10;color:var(--wb-fg);font:13px/1.4 var(--wb-sans);height:100vh;overflow:hidden}
+.page{padding:60px 24px;color:var(--wb-muted-fg)}
+.hdr{position:fixed;top:0;left:0;right:0;height:48px;background:var(--wb-bg);border-bottom:1px solid var(--wb-muted);display:flex;align-items:center;padding:0 16px;gap:14px;z-index:5}
+.sw{display:flex;gap:6px}.sw a{padding:3px 12px;border-radius:99px;background:var(--wb-card);color:var(--wb-muted-fg);text-decoration:none;font-weight:700;font-size:12px}
+.sw a.on{background:var(--wb-now);color:var(--wb-on-now)}
+.why{font-size:12px;color:var(--wb-muted-fg)}
+.clip{position:fixed;top:48px;right:16px;width:min(1280px,calc(100% - 32px));height:calc(100vh - 48px - 96px);z-index:4;border-radius:0 0 var(--wb-radius) var(--wb-radius);box-shadow:var(--wb-shadow-hi);overflow:hidden}
+.sheet{height:100%;background:var(--wb-bg);border-top:1px solid var(--wb-muted);padding:10px;display:grid;gap:10px;overflow:auto}
+.handle{position:fixed;right:16px;top:calc(100vh - 96px);height:34px;width:34px;background:var(--wb-card);border-radius:0 0 8px 8px;display:grid;place-items:center;z-index:4;color:var(--wb-fg)}
+.panel{background:var(--wb-card);border-radius:var(--wb-radius);min-width:0;min-height:0;overflow:auto;display:flex;flex-direction:column;box-shadow:0 1px 2px rgb(0 0 0/.14)}
+.panel>summary{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:8px;padding:9px 12px;font-weight:800;font-size:13px;background:var(--wb-card);flex:none;list-style:none}
+.ct{margin-left:auto;background:var(--wb-muted);color:var(--wb-muted-fg);border-radius:99px;padding:1px 9px;font-size:11.5px;font-weight:700}
+.body{padding:2px 10px 10px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.chip{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:99px;background:var(--wb-muted);color:var(--wb-muted-fg);font-size:11px;font-weight:600}
+.mono{font-family:var(--wb-mono)}
+.ag{background:var(--wb-bg);border-radius:8px;padding:8px 10px;font-size:12px}
+.ag b{color:var(--wb-primary);font-family:var(--wb-mono)}.ag .k{font-family:var(--wb-mono);font-weight:700;margin-right:6px}.ag div{padding:1px 0 1px 14px}
+.row{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:3px 6px;border-radius:6px;font-size:12.5px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--wb-muted-fg);opacity:.5}
+.on{background:color-mix(in srgb,var(--wb-ok) 10%,var(--wb-card))}.on .dot{background:var(--wb-ok);opacity:1}
+.sub{font-size:11.5px;color:var(--wb-muted-fg)}
+.empty{font-size:12.5px;color:var(--wb-muted-fg);padding:6px 2px;border:1px dashed var(--wb-line);border-radius:8px;text-align:center}
+.lanes{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:2px 10px 10px;min-height:0;flex:1}
+.lane{background:var(--wb-bg);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:0;overflow:auto}
+.lh{font-size:12px;font-weight:800;color:var(--wb-muted-fg);display:flex;gap:6px;padding:2px 2px 0;position:sticky;top:-8px;background:var(--wb-bg)}
+.tc{background:var(--wb-card);border-radius:8px;padding:7px 9px;box-shadow:0 1px 2px rgb(0 0 0/.2);flex:none}
+.tc .t{font-weight:800;font-size:13px;cursor:pointer}.tc .t:hover{text-decoration:underline}
+.tc .s{font-family:var(--wb-mono);font-size:11px;color:var(--wb-muted-fg);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tabs{display:flex;gap:4px;padding:0 10px 6px;flex:none;flex-wrap:wrap}
+.tab{padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;background:var(--wb-bg);color:var(--wb-muted-fg);cursor:pointer;border:0;font-family:inherit}
+.tab.on{background:var(--wb-now);color:var(--wb-on-now)}.tab small{opacity:.7;margin-left:4px}
+.note{background:var(--wb-bg);border-radius:8px;padding:6px 9px;cursor:pointer;display:grid;grid-template-columns:auto 1fr auto;gap:2px 8px;align-items:baseline;flex:none}
+.note .pr{font:700 10.5px var(--wb-mono);padding:0 6px;border-radius:99px;background:color-mix(in srgb,var(--wb-primary) 22%,var(--wb-card));color:var(--wb-on-now);min-width:26px;text-align:center}
+.note .pr.z{background:var(--wb-muted);color:var(--wb-muted-fg)}
+.note .key{font:700 12px var(--wb-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note .tm{font-size:11px;color:var(--wb-muted-fg)}
+.note .val{grid-column:1/-1;font-size:12px;color:var(--wb-muted-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note.open .val{white-space:pre-wrap;color:var(--wb-fg)}
+.note.mute{opacity:.5}.note.mute .key{text-decoration:line-through;text-decoration-color:var(--wb-muted-fg)}
+.mu{font-size:10.5px;color:var(--wb-warn);margin-left:6px;font-family:var(--wb-sans);font-weight:600;display:inline-block}
+.lay{font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--wb-muted-fg)}
+.ncols{display:none;grid-template-columns:repeat(4,1fr);gap:10px;padding:2px 10px 10px;flex:1;min-height:0}
+.ncol{background:var(--wb-bg);padding:8px;border-radius:10px;display:flex;flex-direction:column;gap:6px;min-height:0;overflow:auto}
+.ncol .note{background:var(--wb-card)}
+.btn{margin-left:auto;height:26px;padding:0 12px;border-radius:99px;border:0;background:var(--wb-muted);color:var(--wb-fg);font:600 12px var(--wb-sans)}
+.A{grid-template-columns:270px minmax(0,1fr) minmax(0,1fr) 340px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+.A .ag-p{grid-column:1;grid-row:1}.A .hd-p{grid-column:1;grid-row:2}.A .tk-p{grid-column:2/4;grid-row:1/3}.A .wt-p{grid-column:4;grid-row:1}.A .nt-p{grid-column:4;grid-row:2}
+.B{grid-template-columns:270px minmax(0,1fr) minmax(0,1fr) 300px;grid-template-rows:minmax(0,1.5fr) minmax(0,1fr)}
+.B .ag-p{grid-column:1;grid-row:1}.B .hd-p{display:none}.B .tk-p{grid-column:2/4;grid-row:1}.B .wt-p{grid-column:4;grid-row:1}.B .nt-p{grid-column:1/-1;grid-row:2}
+.B .ntab{display:none}.B .ncols{display:grid}
+
+.C{--h:440px;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(280px,1fr);grid-auto-flow:dense;overflow:auto}
+.C .ag-p{order:1}.C .tk-p{order:2;grid-column:span 2}.C .hd-p{order:3}.C .wt-p{order:4}.C .nt-p{order:5;grid-column:span 2}
+.clip.c{height:var(--ch)}
+.tkc,.nstack{display:none;padding:2px 10px 10px;flex-direction:column;gap:6px}
+.C .tkc,.C .nstack{display:flex}.C .lanes,.C .ntab,.C .ncols{display:none}
+.sec{font-size:12px;font-weight:800;color:var(--wb-muted-fg);display:flex;gap:6px;align-items:center;padding:6px 2px 0;position:sticky;top:0;background:var(--wb-card);z-index:1}
+.sec .sub{font-weight:600}
+.tr{display:flex;align-items:center;gap:8px;background:var(--wb-bg);border-radius:8px;padding:5px 9px;flex:none;min-width:0}
+.tr .t{font-weight:800;font-size:13px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}.tr .t:hover{text-decoration:underline}
+.tr .s{font-family:var(--wb-mono);font-size:11px;color:var(--wb-muted-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:0;text-align:right}
+.more{border:0;border-radius:8px;background:var(--wb-muted);color:var(--wb-fg);font:700 12px var(--wb-sans);padding:6px;cursor:pointer;flex:none}
+.load{font-size:12px;color:var(--wb-muted-fg);padding:6px 9px;background:var(--wb-bg);border-radius:8px;flex:none}
+.hint{font-size:11.5px;color:var(--wb-warn);background:color-mix(in srgb,var(--wb-warn) 10%,var(--wb-card));border-radius:8px;padding:5px 9px;flex:none}
+.nstack .note{flex:none}
+</style></head><body>
+<div class="hdr"><b>wsflow</b><div class="sw"><a href="#c" id="lc">C</a><a href="#c-idea">idea</a><a href="#c-lan">lan</a><a href="#c-tall">tall</a><a href="#a" id="la">A</a><a href="#b" id="lb">B</a></div><span class="why" id="why"></span></div>
+<div class="page">(session page behind the drawer; viewport 1920x1080; sheet 1280px right-anchored like the Git sheet)</div>
+<div class="handle">&#9776;</div>
+<div class="clip c" id="clip"><div class="sheet" id="sheet">
+ <details open class="panel ag-p"><summary>&#9873; 아젠다 <span class="ct">1</span></summary><div class="body"><div class="ag"><b>ui-fixes</b>
+  <div><span class="k">board_topic</span>ui-fixes; open ask (04) fix list delivery</div><div><span class="k">branching</span>one impl/develop/&lt;name&gt;</div><div><span class="k">concurrency</span>another lead (parent e...</div><div><span class="k">mode</span>small UI/UX fixes batch</div><div><span class="k">tiers</span>pi medium, large</div></div></div></details>
+ <details open class="panel hd-p"><summary>&#9832; 세션 홀더</summary><div class="body"><div class="empty">연결되지 않은 홀더 없음</div></div></details>
+ <details open class="panel tk-p"><summary>&#9707; 티켓 <span class="ct" id="tkct"></span></summary><div class="lanes" id="lanes"></div><div class="tkc" id="tkc"></div></details>
+ <details open class="panel wt-p"><summary>&#5833; 워크트리 <span class="ct">3</span></summary><div class="body" id="wt"></div></details>
+ <details open class="panel nt-p"><summary>&#9998; 노트 <span class="ct" id="ntct"></span></summary>
+  <div class="tabs ntab" id="tabs"></div><div class="body ntab" id="nlist"></div><div class="ncols" id="ncols"></div><div class="nstack" id="nstack"></div></details>
+</div></div>
+<script>
+const T=[["bug","Dashboard daemon holds about 15% of a core while idle on...","261111-bug-ws-dashboard-daemon-idle-cpu"],
+["feat","ws dashboard frontend performance - profile and optimize","261113-feat-ws-dashboard-frontend-perf"],
+["feat","Latest body update time in topic header and change gutter","261114-feat-ws-content-change-relative-time"],
+["feat","Dashboard: write an inline note beside a selected-text mention","261114-feat-ws-dashboard-selection-mention-note"],
+["feat","Show provider-exposed reasoning summaries in live...","261114-feat-ws-live-reasoning-summary"],
+["feat","Selection bundles: keep each push's mentions and memo together","261114-feat-ws-selection-bundle-comment"],
+["feat","Electron standalone daemon start and replacement without...","261115-feat-werkschaft-electron-daemon"],
+["feat","Migrate the Werkschaft desktop shell from Tauri to Electron","261115-feat-werkschaft-electron-shell"],
+["feat","Show public Claude reasoning summaries through interactive...","261115-feat-ws-claude-reasoning-summary"],
+["feat","Dashboard board: hold what the user reads when the server...","261115-feat-ws-dashboard-board-reorder"]];
+const TODO=[["research","Evaluate session-drawer information density","261116-research-ws-drawer-density"],["bug","Rail popover clips on narrow zoom","261116-bug-ws-rail-popover-clip"],["feat","Ticket search from the drawer","261112-feat-ws-drawer-ticket-search"],["feat","Holder restart-safe marker tooltip","261110-feat-ws-holder-safe-tooltip"],["bug","Toast stack overlaps composer","261109-bug-ws-toast-composer-overlap"],["feat","Worktree pool size hint","261108-feat-ws-worktree-pool-hint"],["research","Notes layer ownership audit","261107-research-ws-notes-layer-audit"],["feat","Agenda key reorder","261105-feat-ws-agenda-key-reorder"],["bug","Stale empty state after drain","261104-bug-ws-empty-state-stale"],["feat","Rail group collapse memory","261103-feat-ws-rail-collapse-memory"],["feat","Board history anchor","261102-feat-ws-board-history-anchor"],["bug","Mention chip wraps oddly","261101-bug-ws-mention-chip-wrap"]];
+const card=t=>`<div class="tc"><span class="chip">${t[0]}</span> <span class="t">${t[1]}</span><div class="s">${t[2]}</div></div>`;
+lanes.innerHTML=`<div class="lane"><div class="lh">준비됨 <span class="sub">19</span></div>${T.map(card).join("")}</div><div class="lane"><div class="lh">할 일 <span class="sub">43 - 스크롤, 상한 없음</span></div>${TODO.concat(TODO).map(card).join("")}</div>`;
+tkct.textContent="준비됨 19, 할 일 43";
+wt.innerHTML=`<div class="row on"><span class="dot"></span><span class="mono">wt-pool-1</span><span class="sub">1.2 GB</span></div><div class="sub" style="padding-left:21px;margin-top:-6px">impl/develop/ui-fixes · lead-a · 12m</div><div class="row"><span class="dot"></span><span class="mono">wt-pool-2</span><span class="sub">900 MB</span></div><div class="row"><span class="dot"></span><span class="mono">wt-pool-3</span><span class="sub">900 MB</span></div><div style="display:flex"><button class="btn">정리 요청</button></div>`;
+const L={worktree:"워크트리",clone:"클론",machine:"머신",repo:"리포"};
+const N={worktree:[["handoff",20,"2분","Resume at the second phase; the first phase result is committed. Remaining: wire the empty state, then run the headless scenario. Do not touch the shared stylesheet until the owner confirms.\nOpen question: whether todo is capped.",1],["scratch-plan",5,"1시간","Rough ordering of the remaining fixes.",1],["old-hypothesis",0,"3일","Idle CPU was thought to be the poller; disproved.",0]],
+clone:[["remote-build-host",10,"5시간","build-box-01 (generic example host); use it for the long compile jobs only.",1],["temp-artifacts-location",10,"2일","Throwaway renders go under the clone-local temp folder, never inside the repo tree.",1]],
+machine:[["preferred-terminal",3,"9일","Uses a tabbed terminal; avoid commands that need a TTY prompt.",1]],repo:[]};
+let cur="worktree";const open=new Set();
+const nt=(l,n)=>`<div class="note ${n[4]?"":"mute"} ${open.has(l+n[0])?"open":""}" onclick="tg('${l+n[0]}')"><span class="pr ${n[1]?"":"z"}">${n[1]}</span><span class="key">${n[0]}${n[4]?"":'<span class="mu">muted</span>'}</span><span class="tm">${n[2]} 전</span><div class="val">${n[3]}</div></div>`;
+const emp=`<div class="empty">이 레이어에 노트 없음</div>`;
+function tg(k){open.has(k)?open.delete(k):open.add(k);rn();rs()}
+function rn(){let tot=0;for(const l in N)tot+=N[l].length;ntct.textContent=tot;
+ tabs.innerHTML=Object.keys(L).map(l=>`<button class="tab ${l==cur?"on":""}" onclick="cur='${l}';rn()">${L[l]}<small>${N[l].length}</small></button>`).join("");
+ nlist.innerHTML=N[cur].length?N[cur].map(n=>nt(cur,n)).join(""):emp;
+ ncols.innerHTML=Object.keys(L).map(l=>`<div class="ncol"><div class="lh" style="background:var(--wb-bg)"><span class="lay">${l}</span> ${L[l]} <span class="sub">${N[l].length}</span></div>${N[l].length?N[l].map(n=>nt(l,n)).join(""):emp}</div>`).join("")}
+
+const IDEA=[["idea","Drawer panel drag memory per session","261117-idea-ws-drawer-height-memory"],["idea","Show holder PID in rail tooltip","261116-idea-ws-holder-pid-tooltip"],["idea","Note value diff view on rewrite","261115-idea-ws-note-diff"],["idea","Ticket card hover preview","261113-idea-ws-ticket-hover"]];
+const row=t=>`<div class="tr"><span class="chip">${t[0]}</span><span class="t">${t[1]}</span><span class="s">${t[2]}</span></div>`;
+let ideaState="closed";
+function rt(){const idea=ideaState=="closed"?`<button class="more" onclick="ideaState='loading';rt();setTimeout(()=>{ideaState='open';rt()},700)">더보기</button>`:ideaState=="loading"?`<div class="load">아이디어 불러오는 중...</div>`:IDEA.map(row).join("");
+ tkc.innerHTML=`<div class="sec">준비됨 <span class="sub">19</span></div>${T.map(row).join("")}<div class="sec">할 일 <span class="sub">43 - 전체 표시</span></div>${TODO.map(row).join("")}<div class="sec">아이디어 <span class="sub">${ideaState=="open"?IDEA.length:"?"}</span></div>${idea}`}
+let lan=false;
+function rs(){const ls=lan?["repo"]:["machine","clone","repo","worktree"];
+ nstack.innerHTML=(lan?`<div class="hint">LAN 뷰어: 리포 레이어만 표시됩니다. 나머지 레이어(머신, 클론, 워크트리)는 로컬 전용입니다.</div>`:"")+ls.map(l=>`<div class="sec"><span class="lay">${l}</span> ${L[l]} <span class="sub">${N[l].length}</span></div>${N[l].length?N[l].map(n=>nt(l,n)).join(""):emp}`).join("")}
+const W={a:"A: 티켓이 중앙 2열(준비됨|할 일)로 전체 높이를 쓰고 노트는 우측 열의 레이어 탭(한 번에 한 레이어) - 티켓 가독성 최대, 노트 폭은 좁음.",
+c:"C: 4열 균일 그리드, 티켓/노트는 2열 span(한 장의 넓은 카드), 나머지 1열, dense 배치. 티켓은 준비됨 → 할 일 → 아이디어(더보기) 위→아래, 노트는 머신 → 클론 → 리포 → 워크트리 위→아래.",
+b:"B: 상단 티켓 2열 + 하단 전폭 노트 4레이어 동시 표시 - 레이어 비교 쉬움, 티켓 높이가 줄고 세션 홀더를 아젠다 아래/다른 곳으로 합쳐야 함."};
+function v(){const hs=location.hash.slice(1)||"c";const h=hs[0];sheet.className="sheet "+h.toUpperCase();
+ la.className=h=="a"?"on":"";lb.className=h=="b"?"on":"";lc.className=h=="c"?"on":"";why.textContent=W[h];
+ ideaState=hs.includes("idea")?"open":"closed";lan=hs.includes("lan");
+ clip.style.setProperty("--ch",hs.includes("tall")?"70vh":"440px");clip.className="clip "+(h=="c"?"c":"");rt();rs()}
+addEventListener("hashchange",v);open.add("worktreehandoff");rn();v();
+</script></body></html>
