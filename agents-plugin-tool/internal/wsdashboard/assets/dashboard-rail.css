@@ -170,7 +170,10 @@
 .rail .rgit:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
-.rail .rwt.empty { border-color: transparent; }
+/* a branch with no sessions carries .empty, which the global .empty placeholder
+   (dashboard.css: 8px margin, 1px dashed border) also matches; drop both so its
+   gaps equal a branch with sessions */
+.rail .rwt.empty { margin: 0; border: 0; }
 .rail .rwt.empty .wthd { opacity: .6; }
 .rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
 .rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }
