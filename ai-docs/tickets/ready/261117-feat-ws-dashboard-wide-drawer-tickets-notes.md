@@ -171,6 +171,29 @@ pass on w5090; LOOK captures at 1920x1080 compared side by side with mockup
 states `#c` (without the Notes card) and `#c-idea`; a <=759px capture shows
 the narrow stack unchanged.
 
+#### Verification checkpoint - 2026-11-17
+
+Phase 1 code is in `6b2963ee5`; it is not phase-complete. Fixed wrapped
+missing-ticket-directory detection in both the live panel and idea demand
+source with `errors.Is(err, os.ErrNotExist)`, and added an absent-board demand
+regression test. Full remote MCP package passed (463.724s); after R1's
+Important finding in the idea source, the targeted
+`^TestDashboard(TicketIdeas|ReadPageServesTheBoard)` check passed (0.257s).
+The earlier remote full wsdashboard and wsi18n checks passed (273.208s,
+1.878s). R1's Important is fixed; fixes-only R2 is clean.
+
+LOOK is blocked: the first capture attempt failed on a Windows Playwright
+import URL; the one environmental retry launched Chrome but timed out waiting
+30 seconds for visible `#drhandle`. No PNGs or geometry measurements were
+produced, so no visual comparison is claimed. The isolated daemon/browser
+were stopped and temporary artifacts removed from `D:/Temp/wide-drawer/`.
+The owner must authorize further capture work before the screenshot gate can
+close. Phase 2 has not started.
+
+Forward: eight Node failures reproduced at base `c79cdf133` (lifecycle
+`headDirty`, history `kit.seen`, six usage-chart assertions); the exact-name
+exclusion check passed 48/48. Repair those baseline contracts separately.
+
 ### Phase 2: Notes panel
 
 Depends on Phase 1's grid. Implement Decisions 6-8, 12-13: the daemon notes cache

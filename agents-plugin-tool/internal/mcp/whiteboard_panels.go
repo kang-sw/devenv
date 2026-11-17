@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -41,7 +42,7 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		}
 	}
 	tickets, err := whiteboardTicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses, Env: in.env})
-	if err != nil && !(in.served && os.IsNotExist(err)) {
+	if err != nil && !(in.served && errors.Is(err, os.ErrNotExist)) {
 		return wswhiteboard.Panel{}, false
 	}
 	if in.watch != nil {

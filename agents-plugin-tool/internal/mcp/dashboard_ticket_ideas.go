@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -18,7 +19,7 @@ func (src *DashboardSessionSource) ReadTicketIdeas(reg wsdashboard.Registration)
 		return nil, false, err
 	}
 	tickets, err := whiteboardTicketsList(record.Root, wsdoc.TicketListOptions{Statuses: []string{"idea"}})
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, true, err
 	}
 	out := make([]wsdashboard.IdeaTicket, 0, len(tickets))

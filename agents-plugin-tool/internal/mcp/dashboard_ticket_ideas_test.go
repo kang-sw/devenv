@@ -10,6 +10,15 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
+func TestDashboardTicketIdeasAbsentBoardIsEmpty(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	rows, ok, err := src.ReadTicketIdeas(wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root})
+	if !ok || err != nil || len(rows) != 0 {
+		t.Fatalf("absent board demand = %+v %v %v", rows, ok, err)
+	}
+}
+
 func TestDashboardTicketIdeasOnlyOnDemand(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	writeTicket(t, f.root, "idea", "261117-feat-idea", "Idea <one>")
