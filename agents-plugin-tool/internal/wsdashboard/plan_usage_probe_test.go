@@ -295,17 +295,103 @@ func TestPlanUsageRefreshSameOrigin(t *testing.T) {
 			r.Header.Set("X-WS-Usage-Refresh", tc.refreshHeader)
 			w := httptest.NewRecorder()
 			d.handlePlanUsage(w, r)
+			s.probes.Wait()
 			if w.Code != http.StatusOK || calls.Load() != tc.wantCalls {
 				t.Fatalf("refresh calls = %d, want %d; status %d", calls.Load(), tc.wantCalls, w.Code)
 			}
+			// Either way the request itself answers from the cached value.
+			if !strings.Contains(w.Body.String(), `"percent":37`) {
+				t.Fatal("refresh did not serve the cached result")
+			}
 			if tc.wantCalls == 0 {
-				if !s.lastQuery.Equal(previous) || !strings.Contains(w.Body.String(), `"percent":37`) {
-					t.Fatal("untrusted refresh did not serve cached result")
+				if !s.lastQuery.Equal(previous) {
+					t.Fatal("untrusted refresh probed")
 				}
-			} else if !strings.Contains(w.Body.String(), `"percent":23`) {
-				t.Fatal("same-origin refresh did not serve new result")
+				return
+			}
+			w = httptest.NewRecorder()
+			d.handlePlanUsage(w, httptest.NewRequest("GET", "http://dashboard.example/rail/usage", nil))
+			if calls.Load() != 1 || !strings.Contains(w.Body.String(), `"percent":23`) {
+				t.Fatal("same-origin refresh did not deliver the new result to the next request")
 			}
 		})
+	}
+}
+
+func TestPlanUsageStaleCacheAnswersWhileOneProbeRuns(t *testing.T) {
+	s := usageTestStore(t)
+	setCodexUsageAuth(t, s, `{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access"}}`)
+	var calls atomic.Int32
+	started, release := make(chan struct{}), make(chan struct{})
+	s.client.Transport = usageRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(weeklyUsageBody))}, nil
+	})
+	s.gpt = planUsageEntry{Harness: "codex", Source: codexUsageSource, AsOf: 123, Windows: []planUsageWindow{{Kind: "seven_day", Percent: 37, ResetsAt: 2100000000000, AsOf: 123}}}
+	s.lastQuery = time.Now().Add(-6 * time.Minute)
+	d := &Daemon{planUsage: s}
+	get := func(url string) string {
+		t.Helper()
+		done := make(chan string, 1)
+		go func() {
+			r := httptest.NewRequest("GET", "http://dashboard.example"+url, nil)
+			r.Header.Set("X-WS-Usage-Refresh", "1")
+			w := httptest.NewRecorder()
+			d.handlePlanUsage(w, r)
+			done <- w.Body.String()
+		}()
+		select {
+		case body := <-done:
+			return body
+		case <-time.After(5 * time.Second):
+			t.Fatal("viewer waited on the upstream probe")
+			return ""
+		}
+	}
+	if body := get("/rail/usage"); !strings.Contains(body, `"percent":37`) {
+		t.Fatalf("stale request did not answer from cache: %s", body)
+	}
+	<-started
+	// While the probe is in flight, ordinary and forced viewers neither wait
+	// nor start a second probe.
+	for _, url := range []string{"/rail/usage", "/rail/usage?refresh=1", "/rail/usage?history=1&refresh=1"} {
+		if body := get(url); !strings.Contains(body, `"percent":37`) {
+			t.Fatalf("in-flight probe blocked or changed the cached answer: %s", body)
+		}
+	}
+	close(release)
+	s.probes.Wait()
+	if calls.Load() != 1 {
+		t.Fatalf("probes = %d, want one", calls.Load())
+	}
+	if body := get("/rail/usage"); !strings.Contains(body, `"percent":41`) || calls.Load() != 1 {
+		t.Fatalf("background result not served next: %s", body)
+	}
+}
+
+func TestPlanUsageNoValueBlocksOnProbe(t *testing.T) {
+	s := usageTestStore(t)
+	setCodexUsageAuth(t, s, `{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access"}}`)
+	var calls atomic.Int32
+	s.client.Transport = usageRoundTrip(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(weeklyUsageBody))}, nil
+	})
+	d := &Daemon{planUsage: s}
+	w := httptest.NewRecorder()
+	d.handlePlanUsage(w, httptest.NewRequest("GET", "/rail/usage", nil))
+	if calls.Load() != 1 || !strings.Contains(w.Body.String(), `"percent":41`) {
+		t.Fatalf("first request without any value did not wait for the probe: %s (calls %d)", w.Body.String(), calls.Load())
+	}
+	s.mu.Lock()
+	probing := s.probing
+	s.mu.Unlock()
+	if probing {
+		t.Fatal("inline probe left a background marker")
 	}
 }
 

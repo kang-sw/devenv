@@ -39,10 +39,18 @@ type planUsageStore struct {
 	getenv      func(string) string
 	claude, gpt planUsageEntry
 	lastQuery   time.Time
+	// probing marks the one background probe in flight; probes lets tests
+	// wait for it. Both are guarded by mu.
+	probing bool
+	probes  sync.WaitGroup
+	hist    planUsageHistoryMemo
 	// Request dependencies are private test seams, not configuration knobs.
 	// Production always uses the fixed HTTPS origin below for both readers.
 	usageURL string
 	client   *http.Client
+	// File-system seams for the history memo; nil means os.Stat/os.ReadFile.
+	statFile func(string) (os.FileInfo, error)
+	readFile func(string) ([]byte, error)
 }
 
 func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageStore {
@@ -255,10 +263,11 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cross-origin pages cannot set the custom header without a CORS preflight, which the daemon does not grant.
 	refresh := r.URL.Query().Get("refresh") == "1" && (r.Header.Get("Sec-Fetch-Site") == "same-origin" || sameOrigin(r) || r.Header.Get("X-WS-Usage-Refresh") == "1")
-	d.planUsage.query(r.Context(), refresh)
-	body := map[string]any{"entries": d.planUsage.entries(), "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
+	d.planUsage.refresh(r.Context(), refresh)
+	entries := d.planUsage.entries()
+	body := map[string]any{"entries": entries, "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
 	if r.URL.Query().Get("history") == "1" {
-		body["history"] = d.planUsage.history(time.Now().UnixMilli())
+		body["history"] = d.planUsage.historyView(entries, time.Now().UnixMilli())
 	}
 	_ = json.NewEncoder(w).Encode(body)
 }
