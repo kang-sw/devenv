@@ -295,17 +295,7 @@
       "registered_at": "2026-11-14T12:34:19Z"
     },
     "261114-feat-ws-selection-bundle-comment": {
-      "registered_at": "2026-11-14T13:48:14Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-11-15T07:32:10Z",
-        "impl": {
-          "branch": "impl/develop/scoff-cone-frays"
-        }
-      }
+      "registered_at": "2026-11-14T13:48:14Z"
     },
     "261114-feat-ws-whiteboard-center-reference-scroll": {
       "registered_at": "2026-11-14T11:48:51Z"
@@ -543,19 +533,6 @@
     },
     "261117-feat-ws-agent-tools-mailbox-routing": {
       "registered_at": "2026-11-17T08:20:59Z"
-    },
-    "261117-feat-ws-dashboard-wide-drawer-tickets-notes": {
-      "registered_at": "2026-11-17T07:28:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-17T08:20:09Z",
-        "impl": {
-          "branch": "impl/develop/flip-cozy-cable"
-        }
-      }
     },
     "261117-feat-ws-exec-mux-terminal": {
       "registered_at": "2026-11-17T10:17:08Z"
