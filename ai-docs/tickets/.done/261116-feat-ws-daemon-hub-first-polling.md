@@ -5,6 +5,7 @@ related:
   261116-bug-ws-dashboard-daemon-idle-file-touches: "Landed metadata identity, board reconciliation and memory-only adapter stamps"
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-11-17
 ---
 
 # Move daemon readers to hub-first notification with five-minute safety recovery
