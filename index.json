@@ -256,17 +256,7 @@
       "registered_at": "2026-11-14T08:45:52Z"
     },
     "261114-feat-ws-live-reasoning-summary": {
-      "registered_at": "2026-11-14T11:47:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "feat/live-reasoning-summary-675",
-        "phase": "active",
-        "touched_at": "2026-11-14T13:47:10Z",
-        "impl": {
-          "branch": "impl/feat/live-reasoning-summary-675/fruit-annex-hunk"
-        }
-      }
+      "registered_at": "2026-11-14T11:47:01Z"
     },
     "261114-feat-ws-mailbox-multi-recipient": {
       "registered_at": "2026-11-14T14:30:48Z"
