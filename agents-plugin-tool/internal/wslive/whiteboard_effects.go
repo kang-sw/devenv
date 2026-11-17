@@ -47,6 +47,7 @@ func NewWhiteboardEffects(effects []wswhiteboard.Effect) (RingEntry, bool) {
 		effect.Topic = crop(effect.Topic, whiteboardTopicMax)
 		effect.EntryID = crop(effect.EntryID, whiteboardIdentityMax)
 		effect.PanelID = crop(effect.PanelID, whiteboardIdentityMax)
+		effect.Label = crop(effect.Label, whiteboardValueMax)
 		effect.Before = crop(effect.Before, whiteboardValueMax)
 		effect.After = crop(effect.After, whiteboardValueMax)
 		// These per-string caps put even the first effect's worst-case JSON
@@ -127,7 +128,7 @@ func whiteboardJSON(raw []byte, out any) bool {
 				}
 				allowed := []string{"v", "effects"}
 				if depth == 3 {
-					allowed = []string{"kind", "topic", "id", "entryId", "panelId", "field", "before", "after"}
+					allowed = []string{"kind", "topic", "id", "entryId", "panelId", "field", "before", "after", "label"}
 				}
 				if !slices.Contains(allowed, k) {
 					return false
@@ -162,7 +163,7 @@ func whiteboardJSON(raw []byte, out any) bool {
 }
 
 func validWhiteboardEffect(e wswhiteboard.Effect) bool {
-	if !slices.Contains(wswhiteboard.EffectFields(e.Kind), e.Field) || len(e.Topic) > whiteboardTopicMax || len(e.Before) > whiteboardValueMax || len(e.After) > whiteboardValueMax {
+	if !slices.Contains(wswhiteboard.EffectFields(e.Kind), e.Field) || len(e.Topic) > whiteboardTopicMax || len(e.Label) > whiteboardValueMax || len(e.Before) > whiteboardValueMax || len(e.After) > whiteboardValueMax {
 		return false
 	}
 	if e.Field == "presence" && (e.Kind == "item" || e.Kind == "topic") {

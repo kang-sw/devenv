@@ -826,6 +826,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	// Capture command/coalescing changes before archive maintenance: eviction
 	// still changes the authoritative board, but is not a user-command effect.
 	out.Effects = append(out.Effects, semanticEffects(previous, work)...)
+	stampEffectLabels(out.Effects, work)
 	work.evictArchive()
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
