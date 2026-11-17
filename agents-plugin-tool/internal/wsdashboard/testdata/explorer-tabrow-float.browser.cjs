@@ -77,7 +77,7 @@ function multiTab(m, name, count) {
       res.card520 = await bar(card); multiTab(res.card520, 'explorer card 520', 2);
       if (shots && theme === 'dark') await card.screenshot({ path: path.join(shots, 'narrow-520-twotabs-dark.png') });
 
-      // 3. Session page: the Files tab and the floating toolbar explorer.
+      // 3. Session page: the Files tab and the docked-left toolbar explorer.
       await sessionTab.goto(base + '/s/livesession');
       const session = sessionTab.frameLocator('iframe.sframe.on');
       await session.locator('#convo').waitFor();
@@ -94,26 +94,27 @@ function multiTab(m, name, count) {
         await sheet.locator('.fbar .ftab-new').waitFor();
         await sessionTab.waitForTimeout(200);
         const m = await sheet.evaluate(el => {
-          const col = document.getElementById('bcol').getBoundingClientRect(), s = el.getBoundingClientRect();
-          return { sheet: s.width, column: col.width, sheetLeft: s.left, columnLeft: col.left, height: s.height };
+          const col = document.getElementById('chead').getBoundingClientRect(), grid = document.getElementById('grid').getBoundingClientRect(), s = el.getBoundingClientRect();
+          return { docked: el.hasAttribute('data-docked'), sheet: s.width, column: col.width, sheetLeft: s.left, columnLeft: col.left, top: s.top, columnTop: grid.top, height: s.height, columnHeight: grid.height };
         });
         res.float[vw] = m;
-        assert(Math.abs(m.sheet - m.column) <= 1, `${vw}px: floating explorer ${m.sheet} vs main column ${m.column}`);
-        assert(Math.abs(m.sheetLeft - m.columnLeft) <= 1, `${vw}px: floating explorer sits over the column (${m.sheetLeft} vs ${m.columnLeft})`);
+        assert(m.docked, `${vw}px: toolbar explorer is docked`);
+        assert(Math.abs(m.sheet - m.column) <= 1, `${vw}px: docked explorer ${m.sheet} vs left column ${m.column}`);
+        assert(Math.abs(m.sheetLeft - m.columnLeft) <= 1, `${vw}px: docked explorer sits over the left column (${m.sheetLeft} vs ${m.columnLeft})`);
+        assert(Math.abs(m.top - m.columnTop) <= 1 && Math.abs(m.height - m.columnHeight) <= 1, `${vw}px: docked explorer covers the complete left column`);
         if (vw === 1440) oneTab(await bar(sheet), 'floating explorer');
         if (shots && (vw === 1440 ? theme === 'dark' : theme === 'light')) await sessionTab.screenshot({ path: path.join(shots, `float-${vw}-${theme}.png`) });
       }
-      // The width toggle still extends to the viewport and returns to the column.
-      const widthBtn = session.locator('.board-toolbar .sheet-width');
-      await widthBtn.click();
-      const extended = await session.locator('.fpane[data-max]').evaluate(el => el.getBoundingClientRect().width);
-      assert(Math.abs(extended - (1100 - 32)) <= 1, `extended width ${extended}`);
-      await widthBtn.click();
-      // Opening at 1100 measures the column there, not a stale snapshot.
+      // Docking fixes the sheet to the left column; only non-docked sheets extend.
+      assert.equal(await session.locator('.board-toolbar .sheet-width').isVisible(), false, 'docked explorer hides the width toggle');
+      // Opening at 1100 measures the left column there, not a stale snapshot.
       await session.locator('.board-files').click();
       await session.locator('.board-files').click();
-      const reopened = await session.locator('.fpane[data-max]').evaluate(el => [el.getBoundingClientRect().width, document.getElementById('bcol').getBoundingClientRect().width]);
-      assert(Math.abs(reopened[0] - reopened[1]) <= 1, `reopened at 1100: ${reopened}`);
+      const reopened = await session.locator('.fpane[data-max]').evaluate(el => {
+        const sheet = el.getBoundingClientRect(), column = document.getElementById('chead').getBoundingClientRect();
+        return { docked: el.hasAttribute('data-docked'), width: sheet.width, columnWidth: column.width, left: sheet.left, columnLeft: column.left };
+      });
+      assert(reopened.docked && Math.abs(reopened.width - reopened.columnWidth) <= 1 && Math.abs(reopened.left - reopened.columnLeft) <= 1, `reopened at 1100: ${JSON.stringify(reopened)}`);
 
       assert.deepEqual(errors, []);
       await context.close();
@@ -121,6 +122,6 @@ function multiTab(m, name, count) {
     const json = JSON.stringify(results, null, 2);
     if (shots) fs.writeFileSync(path.join(shots, 'metrics.json'), json + '\n');
     console.log(json);
-    console.log('PASS: one tab leads with +, two tabs own a row above the address row, floating explorer matches the main column.');
+    console.log('PASS: one tab leads with +, two tabs own a row above the address row, toolbar explorer docks over the complete left column.');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
