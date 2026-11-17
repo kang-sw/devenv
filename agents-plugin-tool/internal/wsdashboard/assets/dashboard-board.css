@@ -88,11 +88,14 @@ section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-rig
    the fallback, which only a part never laid out takes. A card's body has a
    set height. Rendered in full: a maximized topic or card, and a part
    holding a maximized panel (fixed to the window, which containment would
-   break), and a topic holding focus (a note being typed). A topic's
+   break), and a card holding focus. A topic's parts take no focus guard:
+   a focused part is already relevant to the user, so content-visibility
+   renders it, and a guard on the topic flipped every part at once when
+   focus entered it (a suspected Edge renderer crash). A topic's
    popovers open from its head, in the top layer. */
 section.topic[data-topic] > :not(.tophead) { contain-intrinsic-block-size: auto 480px; }
 section.topic:not([data-max]) > :not(.tophead):not(:has(details.entry-panel[data-max])) { contain: layout style paint; }
-section.topic:not([data-max]):not(:focus-within) > [data-wbcv]:not(.tophead):not(:has(details.entry-panel[data-max])),
+section.topic:not([data-max]) > [data-wbcv]:not(.tophead):not(:has(details.entry-panel[data-max])),
 .bcard:not([data-max]):not(:focus-within) > .bc-in > .bc-body { content-visibility: auto; }
 /* a frame in the body would take the pointer mid-drag */
 .bcard.drag .bc-body { pointer-events: none; }
