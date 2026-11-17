@@ -813,7 +813,12 @@ func (r *Runner) expire(id string) bool {
 		c.do(func() { c.expiring = false })
 		return false
 	}
-	if _, err := r.CloseConversation(id); err != nil && !errors.Is(err, errClosed) {
+	if _, err := r.CloseConversation(id); err != nil {
+		if errors.Is(err, errClosed) {
+			// Someone closed it meanwhile (a dashboard close): what they
+			// closed is theirs to delete, not the expiry's.
+			return false
+		}
 		fmt.Fprintf(r.opts.Log, "agent %s: expire: %v\n", id, err)
 		// A later heartbeat tries again.
 		c.do(func() { c.expiring = false })

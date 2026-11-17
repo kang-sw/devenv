@@ -27,6 +27,9 @@ type AgentRunner interface {
 	AgentInterrupt(wsagent.AgentCaller, string) (wsagent.AgentInterruptResult, error)
 	AgentList(wsagent.AgentCaller) []wsagent.AgentChild
 	AgentTiers(wsagent.AgentCaller) (wsagent.AgentTiers, error)
+	// Deliver is the wake seam: Send, plus the sender's notice when a
+	// sleeping child's start admission refuses.
+	Deliver(id string, d wsagent.Delivery) (wsagent.State, error)
 }
 
 func isAgentTool(name string) bool {

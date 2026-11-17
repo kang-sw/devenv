@@ -140,6 +140,11 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 	if p := spec.Parent; p != nil && (strings.TrimSpace(p.Kind) == "" || !wsdashboard.ValidReplyID(p.ReplyID)) {
 		return State{}, badRequest("parent must name a kind and a valid reply-id")
 	}
+	if isAgentWorkerProfile(strings.TrimSpace(spec.Profile)) && (spec.Parent == nil || spec.Authority.rank() == 0) {
+		// Its ceiling is its authority (agent_tools.go): a spawn without
+		// one would run the common loadout unchecked.
+		return State{}, badRequest("profile %q is agent.spawn's internal profile: it needs a parent and an authority", spec.Profile)
+	}
 	if spec.Tier != "" && tierRank(spec.Tier) == 0 {
 		return State{}, badRequest("tier must be small, medium, large, or xlarge; got %q", spec.Tier)
 	}

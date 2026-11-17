@@ -1130,3 +1130,56 @@ func TestRefusedWakeUnderAHostedLead(t *testing.T) {
 		t.Fatalf("an admitted wake told the sender: %v", got)
 	}
 }
+
+// A child whose wake was refused sleeps: its kept input holds no done turn
+// of its parent's, and a send over the parent's token route tells the
+// parent (the sender) of the refusal as Deliver does.
+func TestRefusedChildHoldsNoReportAndTheTokenSendTellsTheSender(t *testing.T) {
+	refusals := &wakeRefusals{}
+	h, _ := agentHarness(t, func(o *Options) { o.WakeRefused = refusals.add })
+	a, b := settledPair(t, h)
+	if err := writePermissionSelection(wsdashboard.SessionDir(h.dir, a), PermissionReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	starts := h.backend.startCount()
+	if _, err := h.runner.Deliver(a, Delivery{Text: "go on"}); err != nil {
+		t.Fatal(err)
+	}
+	ap := h.backend.waitProc(t, starts)
+	ap.nextSent(t)
+	code, body := h.tokenCall(h.token(starts), "send", map[string]any{"id": b, "message": "held for b"})
+	if code != http.StatusOK {
+		t.Fatalf("a's send to b = %d %s", code, body)
+	}
+	eventually(t, "b's refused start", func() bool {
+		return strings.Contains(h.state(b).Error, "above the parent's current level read-only")
+	})
+	if got := refusals.list(); len(got) != 1 || got[0][0] != a || got[0][1] != b {
+		t.Fatalf("the sender's notices = %v", got)
+	}
+	ap.reply("a again")
+	eventually(t, "a's turn settled unheld", func() bool {
+		rec := h.record(a)
+		return rec.LastTurn != nil && rec.LastTurn.Result.Message == "a again" && rec.HeldTurn == nil && !rec.TurnOpen
+	})
+	if st := h.state(b); st.Held == 0 || st.Process {
+		t.Fatalf("b lost its held mail or woke: %+v", st)
+	}
+}
+
+// agent-worker profiles run only through agent.spawn, with an authority:
+// the pi.spawn token route and a bare Runner.Spawn refuse them.
+func TestAgentWorkerProfilesNeedAgentSpawn(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "parent", Tier: "medium", Authority: "read-only"})
+	token := h.token(0)
+	for _, profile := range []string{AgentWorkerProfile(BackendClaude), AgentWorkerProfile(BackendPi)} {
+		code, body := h.tokenCall(token, "spawn", map[string]any{"prompt": "escape", "tier": "small", "profile": profile})
+		if code != http.StatusBadRequest || !strings.Contains(body, "agent.spawn's internal profile") {
+			t.Fatalf("pi spawn of %s = %d %s", profile, code, body)
+		}
+		parent := leadParent
+		_, err := h.runner.Spawn(SpawnSpec{Profile: profile, Root: h.root, Prompt: "x", Tier: "small", Parent: &parent})
+		agentRefused(t, err, http.StatusBadRequest, "needs a parent and an authority")
+	}
+}

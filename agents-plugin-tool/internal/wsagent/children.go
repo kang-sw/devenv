@@ -274,6 +274,9 @@ type ChildSpawn struct {
 func (r *Runner) spawnFor(caller *conv, req ChildSpawn) (State, error) {
 	const tool = "pi.spawn"
 	rec := caller.record()
+	if isAgentWorkerProfile(strings.TrimSpace(req.Profile)) {
+		return State{}, badRequest("%s: profile %q is agent.spawn's internal profile; spawn it with agent.spawn and an authority", tool, req.Profile)
+	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return State{}, badRequest("%s: prompt is required", tool)
 	}
@@ -470,7 +473,7 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 			writeAnswer(w, 0, nil, badRequest("%s: message is required", tool))
 			return
 		}
-		st, err := r.Send(body.ID, body.Message)
+		st, err := r.Deliver(body.ID, Delivery{From: parent.ReplyID, Text: body.Message})
 		writeAnswer(w, http.StatusOK, st, err)
 	case "stop":
 		st, err := r.CloseConversation(body.ID)
@@ -779,7 +782,10 @@ func (c *conv) openChildOf(parent ParentRef) bool {
 	if c.closed || c.rec.Parent == nil || *c.rec.Parent != parent {
 		return false
 	}
-	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || len(c.rec.Queued) > 0 || c.holding || c.sends > max(c.settled.mark, c.voided)
+	// Input a refused wake keeps (wakeRefused) is asleep: it holds no
+	// report of the parent's.
+	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || c.holding ||
+		!c.wakeRefused && (len(c.rec.Queued) > 0 || c.sends > max(c.settled.mark, c.voided))
 }
 
 // releaseHeld reports the done turn held for the children (settleTurn)

@@ -57,6 +57,10 @@ func (f *fakePiAgents) Spawn(spec wsagent.SpawnSpec) (wsagent.State, error) {
 	return st, nil
 }
 
+func (f *fakePiAgents) Deliver(id string, d wsagent.Delivery) (wsagent.State, error) {
+	return f.Send(id, d.Text)
+}
+
 func (f *fakePiAgents) Send(id, text string) (wsagent.State, error) {
 	f.mu.Lock()
 	f.sent[id] = append(f.sent[id], text)

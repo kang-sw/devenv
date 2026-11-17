@@ -202,7 +202,7 @@ func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool stri
 		if err != nil {
 			return toolTextResponse(id, "", err)
 		}
-		st, err := s.pi.agents.Send(child, message)
+		st, err := s.pi.agents.Deliver(child, wsagent.Delivery{From: parent.ReplyID, Text: message})
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
