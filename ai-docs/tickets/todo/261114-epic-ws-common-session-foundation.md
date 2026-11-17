@@ -49,7 +49,9 @@ Antigravity -> single session holder -> exec, with Pi last; (70)=b moves the
 stage-3 Codex and Antigravity adapters ahead of the stage-2 single session
 holder and exec.
 
-Independent, not stage-bound: the mailbox in-memory-first store.
+Independent, not stage-bound: the mailbox in-memory-first store. It gates the
+agent-tools ticket's Phase 2 (mail routing to daemon-owned addresses), per the
+mailbox ticket's Decision 6.
 
 ## Non-Scope
 
@@ -135,7 +137,9 @@ Stage 4 (extensions):
 Independent:
 
 - `261117-feat-ws-mailbox-memory-first-store` - daemon-internal storage change
-  shipped as a patch; T1/T2 downgrade judgment in its Phase 1.
+  shipped as a patch; T1/T2 downgrade judgment in its Phase 1. Its store (Phase
+  2) lands before `261117-feat-ws-agent-tools-mailbox-routing` Phase 2 (mail
+  routing), per its Decision 6.
 
 Evidence child:
 
@@ -204,8 +208,14 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   `agent.send`; a single `mailbox.send`. Daemon-owned agent addresses route in
   memory. Relation is computed from lineage at delivery, not stored. Hire stays
   separate; worker-profile caps apply; `pi.*` alias wording superseded: hidden now, handlers removed next minor (owner 19:16, (54)=b). Spawn tree
-  bounds ((72), owner 22:27, reversing (10)=c): depth cap 4, per-agent width
-  cap 99, no concurrent-agent cap; detail in the agent-tools ticket. Native subagents are removed in hosted sessions (leads and
+  bounds ((72), owner 22:27, reversing (10)=c; (77)-(79)): depth cap 4 (lead =
+  depth 0), per-agent width cap 99 counting awake direct children, no
+  concurrent-agent cap, both caps code constants; detail in the agent-tools
+  ticket. `authority` (read-only | workdir-write | full) is required on
+  `agent.spawn` and capped at the parent's current level, `full` included
+  without a user warning ((74)=b, (76)); the authority parent is the
+  Runner spawn record ((84)=a), and every child gets one worker-role ws tool
+  loadout whose mutating tools the daemon refuses for read-only ((85)=c). Native subagents are removed in hosted sessions (leads and
   workers) (29)=ok.
 - **Single holder and exec (16), (17)=a, (18), (19)=a.** One PC-wide holder with
   one daemon connection serves conversations and exec jobs; exec output lives in

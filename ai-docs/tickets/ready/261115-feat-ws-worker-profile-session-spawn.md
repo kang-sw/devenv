@@ -383,3 +383,7 @@ T0 contracts, existing keys/lineage and single input/mail owner.
   current permission. The existing worker key format stays unchanged. This
   needs its own design-and-compatibility ticket first (T0 candidate) before
   implementation. Option b (snapshot at spawn only) was rejected.
+  Owner (84)=a (2026-11-17) settles this record for the `ws/agent.spawn` path
+  only: it is the Runner-written `Record.Parent`, implemented by
+  `261117-feat-ws-agent-tools-mailbox-routing` Decision 13. This ticket's
+  sessions and every other worker path still need the design ticket above.

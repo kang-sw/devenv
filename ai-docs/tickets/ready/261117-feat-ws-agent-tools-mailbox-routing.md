@@ -9,13 +9,15 @@ related:
   261115-feat-ws-whiteboard-agent-card: "card sessions have a key parent but no ParentRef; never owned, held or cascaded here (Decision 18)"
   261115-feat-ws-session-hire-approval: "hire stays a separate peer-creation path; lineage authority was rejected there"
   261115-feat-ws-permission-profile: "common permission intent; its Phase 2 admission machinery (Decision 3: recomputed on every launch, including wake-on-mail revives) is a prerequisite of Decision 13's implementation"
-  261117-feat-ws-mailbox-memory-first-store: "prerequisite of daemon-owned routing (Phase 2): daemon-owned mail persists through its restore entries with the same history and reply-id semantics (its Decision 6)"
+  261117-feat-ws-mailbox-memory-first-store: "prerequisite of daemon-owned routing (Phase 2): daemon-owned mail persists through its restore ring with the same history and reply-id semantics (its Decision 6)"
   261117-research-ws-daemon-file-touch-map: "release-gate file-touch constraint; not edited from here"
   261112-epic-ws-mcp-pi-subagents: "done; pi.* is the prior art"
   261115-feat-ws-dashboard-session-four-state-followups: "the fifth state's dashboard display"
   261117-feat-ws-hosted-prompt-assembly: "delivers the playbooks' Never-use {{NativeToolScheme}} steer that complements native subagent removal (Decision 6)"
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 10051ec5d388ebe3
+sage-review-completeness-reviewed: 10051ec5d388ebe3
 ---
 
 # ws/agent.* tools with unified mailbox routing
@@ -46,8 +48,8 @@ earlier captures.
 1. **Surface (06)=a, (09)=a (delegation is always `ws/agent.*`, with this
    tool family).**
    - `agent.spawn(prompt, tier, system_prompt_path? | system_prompt?,
-     authority?, cwd? | worktree?, label?) -> {address, status}`. `tier`
-     follows Decision 11, `authority` Decision 13, the system prompt source
+     authority, cwd? | worktree?, label?) -> {address, status}`. `tier`
+     follows Decision 11, `authority` (required) Decision 13, the system prompt source
      Decision 12; `label` is display-only (Decision 15); `address` is the
      child's mailbox address and the control key (Decision 15). At most one
      of `cwd` / `worktree`; the `worktree?` value form and acquisition, and
@@ -80,12 +82,15 @@ earlier captures.
    routes daemon-owned agent addresses in memory, not through mailbox files.
    Daemon-owned mail (including mail held for a sleeping child up to Decision
    16's 15 days) persists through `261117-feat-ws-mailbox-memory-first-store`'s
-   per-file restore entries, with the same history and reply-id semantics as
-   external mail (that ticket's Decision 6, batch-review coherence C1); that
-   store lands before Phase 2's routing. Rejected: a separate agent-tools mail
-   store with its own restore files and history behavior. The mailbox file
-   path stays only for external sessions and CLI leads. Reason: the release
-   gate on daemon file touches.
+   restore ring (one segmented JSONL ring per daemon, that ticket's Decision
+   1), with the same history and reply-id semantics as external mail (that
+   ticket's Decision 6, batch-review coherence C1); that store lands before
+   Phase 2's routing. Rejected: a separate agent-tools mail store with its own
+   restore files and history behavior. External sessions and CLI leads keep
+   using the same daemon mailbox store by address; once that store lands, no
+   sender's mail goes through `mailbox.json`. Daemon-owned addresses differ
+   only in that the Runner routes them in memory to the agent it owns.
+   Reason: the release gate on daemon file touches.
 3. **Relation is computed, not stored (11).** Parent/child/peer is derived from
    lineage (Decision 18) at delivery. Its only uses ((73)=a, owner 22:27) are
    the receiver-visible mail label (whether the sender is its parent, child or
@@ -143,12 +148,32 @@ earlier captures.
    requested. The catalog grades default tool removal for leads `unsupported`
    today (catalog Decision 10: no ws wiring yet); Phase 3 here updates the
    grade it wires.
-7. **Spawn tree bounds: reopened by (72) (owner 22:27).** The earlier text
-   (no depth cap per (10)=c, a per-root-tree concurrent-agent cap counting
-   awake agents, its default chosen by measurement) is superseded: there is
-   no concurrent-agent cap; the depth cap is 4 and the per-agent width cap is
-   99. This Decision, Phase 1 and the Route Facts are rewritten once the
-   knock-ons (77)-(79) in the Open Decision Queue settle.
+7. **Spawn tree bounds ((72), owner 22:27, "only as deep as the new workflow
+   needs"; (77)=ok, (78)=ok, (79)=ok, 2026-11-17).**
+   - No concurrent-agent cap.
+   - Depth cap 4 (77). Depth counts as today: a lead is depth 0, and a spawn
+     whose child would exceed depth 4 fails with an error. `MaxSpawnDepth`
+     is kept and only its value moves from 2 to 4
+     (`agents-plugin-tool/internal/wsagent/children.go:65-67`, enforced at
+     the `d+1 > MaxSpawnDepth` check in the same file; its error text, which
+     spells out today's depth-2 chain, follows the new value).
+   - Per-agent width cap 99 (effectively unlimited) (78). It counts the
+     caller's awake direct children only; a spawn at the cap fails with an
+     error naming the cap; mail that wakes a sleeping child ignores the cap.
+   - Both values are code constants, not config keys (79): no new config
+     manifest field, so T0.
+   - `MaxSpawnDepth` is shared with the still-callable `pi.spawn` path
+     (`children.go:280-281`), so `pi.spawn`'s depth follows the new value and
+     its error text ("lead -> Pi worker -> Pi subagent") is updated with it;
+     the width cap applies to `agent.spawn` only, since `pi.*` is hidden and
+     its handlers are deleted next minor (Decision 10) (design review
+     2026-11-17, auto-confirmed technical).
+   Rejected: no depth cap ((10)=c, reversed by (72)); a per-root-tree
+   concurrent-agent cap counting awake agents, with its default chosen by
+   measurement (reversed by (72)); a config key for either bound ((79): the
+   owner fixed the values); counting sleeping children toward the width cap
+   (sleeping and waiting children linger up to 15 days, Decision 16, and
+   would pin the cap, the same reason (59) gave for the concurrent cap).
 8. **Hire stays separate (11).** `session.request_hire` (peer, no lineage) is not
    merged into `agent.spawn` (child, lineage); the hire ticket rejected lineage
    authority (768=c, 775=a).
@@ -209,22 +234,119 @@ earlier captures.
     for re-injection when a new harness segment opens (ws/compact) (44).
     Rejected: re-reading the path per segment (render outputs are temporary;
     file-touch rule).
-13. **`authority` replaces `profile` (52)=a.** `authority?: read-only |
-    workdir-write | full`; default workdir-write; capped by the parent's
-    authority. The enum is the common permission intent of
-    `261115-feat-ws-permission-profile` (reused; that ticket unchanged).
-    Harness/model come only from tier, instructions only from the system
-    prompt. Each level maps to a daemon-defined ws tool set; per-harness native
-    tool lists derive through the catalog's tool-removal value range. Existing
-    `agent.profile.<name>` profiles stay internal: hosted leads (lead-claude/pi),
-    dashboard features (search-answer-*, tracker-support-*). Agent-facing builtins are expressible: pi-worker = `pi.<tier>` +
-    workdir-write; explore = read-only + explore.md as system prompt;
-    pi-mini-lead = full. Rejected: renaming to `authority_profile` with today's
-    contents (conflicts with (38)=d because a profile fixes backend/model, and
-    duplicates the system prompt source); keeping `profile`.
-    Pending (74)-(76): the level semantics relative to
-    `261115-feat-ws-permission-profile` are reopened; do not implement
-    Decision 13 until they settle.
+13. **`authority` replaces `profile` (52)=a; (74)=b, (75)=a, (76)=c, (84)=a, (86),
+    (85)=c (2026-11-17).**
+    - `authority: read-only | workdir-write | full` is a required argument of
+      `agent.spawn` (76)=c, owner "make it required": omitting it is an
+      error; there is no default.
+    - Cap (74)=b, owner "just 'authority at or below the parent'; only block
+      the inversion of a read-only spawning a full": a child may be created
+      at any level up to its parent's current level, `full` included, with
+      no user warning; a child above its parent is refused. This amends
+      `261115-feat-ws-permission-profile` Decision 3 (`full` requires the
+      user's choice after a warning) for `ws/agent.spawn` children only;
+      that ticket records the exception. Admission is recomputed against the
+      parent's current level at create and on every wake (Decision 14), using
+      that ticket's Phase 2 admission machinery. The parent's current level is
+      its computed level whatever its source, so a legacy-derived parent
+      (`permission.go` `legacyLeadPermission`: `auto` derives workdir-write,
+      `bypassPermissions` derives full) caps its children at that derived
+      level. A spawn-supplied level is stored as the child's explicit
+      selection (permission-profile Decision 8 sidecar), always lower than or
+      equal to the parent's, never a raise. The landed user selection path
+      (`authorizePermission`, which requires the user and an acknowledgement
+      for `full`, and `setPermissionLevel`, which refuses workers) is not
+      reused for this: Phase 1 adds a create-time admission for
+      `agent.spawn` children and the worker-side persistence of the explicit
+      level (design review 2026-11-17, auto-confirmed technical).
+    - Intent only (75)=a: `authority` sets only the common `permission_level`
+      intent of `261115-feat-ws-permission-profile` (reused enum). Spawned
+      workers use a common tool loadout; the level is enforced through
+      per-harness permission translation, graded enforced, partial or
+      advisory (for example Pi read-only is advisory). It does not map to ws
+      tool sets or native tool lists.
+    - Authority parent (84)=a: for an `agent.spawn` child, the authority
+      parent is the spawning session named by the daemon-written Runner
+      spawn record (`Record.Parent`, a `ParentRef` the Runner sets at spawn
+      and persists, `wsagent/record.go:106,234-238`). This is the (1177)=a
+      authority-parent record, narrowed to the `agent.spawn` path: the
+      authenticated parent writes it at spawn, the ceiling is recomputed
+      from that parent's current level after a restart, and the worker key
+      format is unchanged. It narrows the CSI rule that a conversation
+      `ParentRef` never participates in selection
+      (`internal/mcp/session_context.go:9-11`) for this one admission, and
+      only for the Runner-written record, never a display or conversation
+      grouping. Other worker paths (`pi.spawn`, hire, worker-profile
+      sessions) stay pending (1177) in `261115-feat-ws-permission-profile`.
+      A top-level spawn records a lead parent as a mailbox reply-id
+      (`ParentRef{Kind: lead, ReplyID}`, `internal/mcp/pi_tools.go:157-158`),
+      not a record id: admission resolves that reply-id to the hosted lead's
+      Runner record (`Record.ReplyID`) and its session dir, then reads the
+      sidecar selection or the legacy derivation from them. A nested spawn
+      records the spawning child's Runner record. A recorded child parent
+      whose Runner record no longer exists follows that ticket's Decision 3
+      unresolved-parent rule (admission error, no guessed ceiling).
+    - Parent with no computable level (86), lead decision 2026-11-17 while
+      the owner was away, shown on the board as assumed for veto: a lead
+      parent with no Runner record (an external CLI lead such as an MCP-only
+      Codex CLI lead, which delegates through `pi.spawn` today), or one whose
+      backend has no common level yet (hosted Codex and Antigravity leads
+      until `261115-feat-ws-permission-profile` Phases 3 and 4 land;
+      `legacyLeadPermission` returns "" for them, `permission.go:53-68`),
+      caps its children at `workdir-write`. This extends the existing legacy
+      derivation, which already maps a Pi lead, a harness with no permission
+      model, to `workdir-write`; it is today's ceiling for a `pi.spawn`
+      worker of such a lead, so neither a regression nor an escalation. The
+      parent's level becomes computed, and this fallback stops applying, once
+      its backend gains a common level. A lead reply-id is judged by what it
+      resolves to now: a hosted lead whose Runner record was pruned while its
+      children slept takes this fallback too, not the unresolved-parent
+      error, because the reply-id alone cannot tell it from an external lead
+      and no new state is stored to tell them apart; the fallback still
+      bounds it at `workdir-write` (design review 2026-11-17, auto-confirmed
+      technical). Rejected: (a) treating such a parent
+      as `full` (an escalation over today's worker posture, which (74)=b
+      exists to bound); (c) refusing the spawn and narrowing (06)=a
+      "delegation is always `ws/agent.*` regardless of harness" (a
+      regression for Codex CLI leads, and it contradicts Decision 1).
+    - Common ws tool loadout (85)=c: every spawned child receives one
+      worker-role ws tool set: today's `PiMiniLeadWSTools`
+      (`wsagent/builtin.go:108-113`) with `agent.*` in place of `pi.*`, plus
+      `mailbox.send` (Decision 1: one `mailbox.send` serves children, peers
+      and other leads; `PiMiniLeadWSTools` carries no `mailbox.*` tool), and
+      no lead-only tools. `mailbox.send` is not a workdir mutation, so a
+      read-only child keeps it. The capability-token check that keys on a
+      `pi.` prefix in `WSTools` (`wsagent/children.go:98-108`, `mayHoldToken`)
+      moves to the `agent.` prefix with the swap, so `agent.spawn` children
+      still receive a token. The level does not select tools; it is enforced on
+      them: for a read-only child the daemon refuses the mutating ws tools
+      in that set (`git.commit`, `tickets.create_empty`, `tickets.acquire`,
+      `tickets.release`, `tickets.close`, `tickets.move`) with a permission
+      error, so read-only holds for ws tools on every harness, Pi included.
+      workdir-write and full children may call all of them. A read-only
+      child may still spawn read-only children (the (74)=b cap). Native
+      tools keep the per-harness translation grades above.
+    - Harness/model come only from tier, instructions only from the system
+      prompt. Existing `agent.profile.<name>` profiles stay internal: hosted
+      leads (lead-claude/pi), dashboard features (search-answer-*,
+      tracker-support-*). Agent-facing builtins are expressible through the
+      common loadout: pi-worker = `pi.<tier>` + workdir-write; explore =
+      read-only + explore.md as system prompt; pi-mini-lead = `pi.<tier>` +
+      workdir-write or full (the loadout already carries its ticket tools;
+      `full` is allowed when the parent is `full`, (74)=b).
+    Rejected: renaming to `authority_profile` with today's contents
+    (conflicts with (38)=d because a profile fixes backend/model, and
+    duplicates the system prompt source); keeping `profile`; (74)a `full`
+    staying a user-only choice after a warning; (75)b per-level ws tool sets
+    and native tool lists (would merge the permission and capability
+    dimensions, against permission-profile Decisions 1 and 5); (76)a a
+    workdir-write default; (76)b a legacy-derived default (permission-profile
+    Decision 4); (84)b a separate (1177) authority-parent ticket blocking this
+    one first (serializes a new ticket for a record the Runner already
+    writes); (85)a the pi-worker set for every child (ticket-worker playbooks
+    need playbook.render, route.resolve_implement and tickets.query to spawn
+    reviewers); (85)b the superset with read-only left to harness
+    translation (advisory on Pi, so a read-only child could commit).
 14. **Lifecycle: sleep, not close ((57)=ok).** Drop the immediate auto-close of
     finished children (commit 539c94d6a,
     `agents-plugin-tool/internal/wsagent/runner_events.go`
@@ -240,7 +362,15 @@ earlier captures.
     (`261115-feat-ws-permission-profile` Decision 3, current-parent admission
     on every launch) is recomputed on wake as on every launch, using that
     ticket's Phase 2 machinery, a prerequisite of Decision 13's
-    implementation.
+    implementation. A refused wake (the parent's current level dropped below
+    the child's) does not lose mail: the `mailbox.send` succeeds and the mail
+    stays queued for the sleeping child, the child stays asleep, and the
+    sender receives one system mail saying the wake was refused and why. The
+    next mail retries admission; held mail is delivered once a wake is
+    admitted, or deleted with the child at Decision 16's expiry (design
+    review 2026-11-17, auto-confirmed technical). Rejected: failing the send
+    (the sender cannot tell a refused wake from a bad address) and silently
+    holding the mail (it could sit unseen for 15 days).
 15. **Control key ((58)=ok).** The control key is the mailbox address
     `agent.spawn` returns; labels are display-only and may repeat.
     `agent.interrupt`/`agent.list` (and any agent.* control) on an agent the
@@ -280,59 +410,6 @@ earlier captures.
     cascaded by these rules. Rejected: the key parent as lineage (it would
     cascade card sessions).
 
-## Open Decision Queue
-
-Last ID: (83)
-
-(72) [confirmed] [policy] Spawn tree bounds (owner 22:27, reversing (10)=c
-  and the awake concurrent cap): no concurrent-agent cap; depth cap 4 ("only as
-  deep as the new workflow needs"); per-agent width cap 99 (effectively
-  unlimited). Stays here until (77)-(79) settle.
-
-(77) [open] [announced] Depth counts as today: a lead is depth 0, and a spawn
-  whose child would exceed depth 4 fails with an error. - (72) plus the
-  existing rule (`wsagent/children.go:65-67`, lead = depth 0,
-  `MaxSpawnDepth = 2`); only the constant moves from 2 to 4.
-
-(78) [open] [technical] The width cap of 99 counts awake direct children
-  only; a spawn at the cap fails with an error naming the cap; mail that wakes
-  a sleeping child ignores the cap, over counting sleeping children too -
-  sleeping or waiting children linger up to 15 days (Decision 16) and would
-  pin the cap, the same reason (59) gave for the concurrent cap.
-
-(79) [open] [technical] Depth 4 and width 99 are code constants, not config
-  keys, over a config key - no new config manifest field, so T0; the owner
-  fixed the values.
-
-(74) [open] [policy] May an agent grant `full` to a child it spawns?
-  - context: Decision 13 lets `authority` be `full` capped by the parent;
-    `261115-feat-ws-permission-profile` Decision 3 says `full` requires the
-    user's choice after a warning.
-  - alternatives: a) no: agents choose read-only or workdir-write up to the
-    parent's level; `full` stays a user choice after a warning
-    (permission-profile Decision 3 unchanged); b) yes up to the parent's
-    level, amending permission-profile Decision 3 for `agent.spawn` children.
-  - recommendation: a.
-
-(75) [open] [policy] Does `authority` select capabilities (tool sets)?
-  - context: Decision 13 maps each level to a daemon-defined ws tool set;
-    permission-profile Decisions 1 and 5 keep permission and capability
-    dimensions independent.
-  - alternatives: a) no: `authority` sets only `permission_level` (intent);
-    spawned workers use a common tool loadout and the level is enforced
-    through per-harness permission translation (enforced/partial/advisory);
-    b) yes: each level maps to ws tool sets and native tool lists, amending
-    permission-profile Decisions 1 and 5.
-  - recommendation: a.
-
-(76) [open] [policy] Default when `authority` is omitted on `agent.spawn`.
-  - context: Decision 13 defaults to workdir-write; permission-profile
-    Decision 4 preserves legacy defaults for omitted selections.
-  - alternatives: a) explicit workdir-write; b) legacy-derived as
-    permission-profile Decision 4.
-  - recommendation: a (`agent.spawn` is a new surface with no legacy behavior
-    to preserve).
-
 ## Constraints
 
 - Go test location (owner (68), 2026-11-17 22:10): run Go tests locally on the macOS home machine. The earlier "remote w5090 only" rule belonged to the owner's company Windows setup and does not apply here.
@@ -349,10 +426,14 @@ Last ID: (83)
 - Shipped playbooks must not name this repository's specifics
   (`ai-docs/manuals/shipped-surface-boundary.md`); route per-tier spawn idiom
   through generic hooks.
-- Removing `MaxSpawnDepth` and blocking native tools in hosted sessions
-  (leads and workers) are observable behavior changes, already owner-confirmed
-  by (06), (10), (18), (29). Dropping child auto-close in favor of sleep
-  (Decision 14) and removing `agent.stop` are owner-confirmed by (57), (60).
+- Raising the spawn depth cap from 2 to 4 and adding the width cap of 99
+  (Decision 7) and blocking native tools in hosted sessions (leads and
+  workers) are observable behavior changes, already owner-confirmed by (72),
+  (77), (78), (06), (18), (29). Letting an agent create a child up to its own
+  level, `full` included, without a user warning, and requiring `authority`
+  on every spawn (Decision 13) are owner-confirmed by (74), (76). Dropping
+  child auto-close in favor of sleep (Decision 14) and removing `agent.stop`
+  are owner-confirmed by (57), (60).
 - `pi.*` spawn tools are hidden now and deleted next minor (Decision 10); the Claude CLI tier is frozen and keeps
   its native spawn.
 
@@ -366,7 +447,14 @@ Last ID: (83)
 
 New `agent.*` tools are additive (T0), including `agent.tiers` (T0). The alias
 map is a new user-scope config key (T0 expected: the old binary ignores the
-unknown key; verdict with source lines in Phase 1's Result (48)). Hiding
+unknown key; verdict with source lines in Phase 1's Result (48)). The
+child-waiting expiry (Decision 16) is likewise a new config key (T0
+expected for the same reason; verdict with source lines in Phase 1's Result,
+the phase that lands the expiry). The authority parent ((84)=a) reuses the
+existing persisted `Record.Parent` with no new Record field, and the child's
+explicit level goes into permission-profile's Decision 8 sidecar
+(`<SessionDir>/permission.json`, unknown members retained): T0 expected,
+verdict with source lines in Phase 1's Result. Hiding
 `pi.*` from `tools/list` is T0 for this release ((54)=b: handlers still answer,
 so old sessions keep working); the handler deletion next minor is judged in that
 release. The source-line verdict is recorded in Phase 2's Result (the hiding
@@ -377,8 +465,9 @@ downgrade judgment rather than adding a store of its own (Decision 2). The
 concrete verdicts cite source lines for which version writes and reads what,
 per `ai-docs/manuals/release-compatibility.md`, recorded in the Result of the
 phase that lands each surface (alias key: Phase 1; `pi.*` hiding and relation:
-Phase 2). Removal
-of the depth cap and native-tool blocking in hosted sessions (leads and workers) are observable
+Phase 2). The depth and width caps are code constants with no config
+manifest field (T0, Decision 7). Raising the depth cap, the width cap and
+native-tool blocking in hosted sessions (leads and workers) are observable
 behavior changes owner-confirmed as above.
 
 ## Prior Decisions
@@ -396,16 +485,16 @@ behavior changes owner-confirmed as above.
 | fact | value | evidence |
 |---|---|---|
 | scope.span | multi-file | agents-plugin-tool/internal/wsagent/children.go, runner.go, runner_events.go, profile.go, claude.go, agents-plugin-tool/internal/mcp/pi_tools.go, agents-plugin-tool/internal/wsconfig/config.go, shipped playbooks and skills |
-| scope.surface | cross-module | new agent.* MCP tools, new alias and cap config keys, wsagent runner lifecycle, wsconfig tier resolution, shipped playbook text |
-| scope.new_public_symbol | yes | agent.spawn, agent.interrupt, agent.list, agent.tiers tools and the alias and concurrent-agent cap config keys |
-| scope.new_type_contract | yes | agent.spawn argument contract (tier, authority, system_prompt_path or system_prompt) and the tier namespace resolution |
+| scope.surface | cross-module | new agent.* MCP tools, new alias and child-waiting expiry config keys, wsagent runner lifecycle, wsconfig tier resolution, shipped playbook text |
+| scope.new_public_symbol | yes | agent.spawn, agent.interrupt, agent.list, agent.tiers tools and the alias and child-waiting expiry config keys |
+| scope.new_type_contract | yes | agent.spawn argument contract (tier, required authority, system_prompt_path or system_prompt) and the tier namespace resolution |
 | scope.test_surface | new-files | existing children_test.go, idle_children_test.go, pi_tools_test.go cover the pi.* path only; no agent.* handler tests exist (search for "agent.spawn" in agents-plugin-tool/internal Go found none) |
 | complexity.reuse_points | confirmed | Runner spawn path, tierRank and piOwned, resumePiChild, idleNow, ResolveAgentTierForHarness read; the steer lookup reuses the catalog (pending 261117-feat-ws-harness-capability-catalog) |
-| complexity.side_effect_risk | high | removes the depth cap, replaces child auto-close with sleep and wake, hides pi.* tools and changes mailbox delivery for every relation |
-| risk.correctness | high | sleep and wake races, awake-only cap counting, ownership and caps inheritance, report-hold under steer |
-| risk.fit | high | steer and tier availability read a catalog that has no code yet; Pi has no catalog profile (catalog Decision 13), so the lookup rule for it is unsettled |
-| risk.test | high | needs runner concurrency tests, a measured cap default and a live hosted delegation end to end |
-| risk.security_or_contract | high | authority caps, ownership errors, pi.* tools hidden while handlers still answer, T0 verdicts to be recorded in the Phase 1 (alias key) and Phase 2 (pi.* hiding, relation) Results |
+| complexity.side_effect_risk | high | raises the depth cap from 2 to 4 and adds a width cap, replaces child auto-close with sleep and wake, hides pi.* tools and changes mailbox delivery for every relation |
+| risk.correctness | high | sleep and wake races, awake-only width-cap counting with wake exempt, ownership and caps inheritance, report-hold under steer |
+| risk.fit | high | steer and tier availability read a catalog that has no code yet; Pi has no catalog profile (catalog Decision 13), so its steer lookup follows Decision 4 (the handle alone decides) |
+| risk.test | high | needs runner concurrency tests and a live hosted delegation end to end |
+| risk.security_or_contract | high | authority caps (Runner-record authority parent, daemon refusal of mutating ws tools for read-only), ownership errors, pi.* tools hidden while handlers still answer, T0 verdicts to be recorded in the Phase 1 (alias key) and Phase 2 (pi.* hiding, relation) Results |
 
 ## Phases
 
@@ -416,7 +505,7 @@ Decision 1) over the existing Runner spawn path generalized to harness-selected
 backends with server-side tier namespace resolution (bare, `<harness>.<tier>`,
 user alias via the new user-scope alias config key and per-harness tier tables;
 only worker-role backends are spawnable, Decision 11), `authority` per Decision
-13 once (74)-(76) settle, and system prompt delivery through the harness's
+13 (required, intent only, capped at the parent's current level), and system prompt delivery through the harness's
 append-system-prompt (path read once, text kept in memory for re-injection).
 `agent.spawn` returns the child's address as the control key (Decision 15);
 mail to that address is Phase 2. Drop child auto-close so every agent sleeps
@@ -428,13 +517,20 @@ at daemon start, any turn resetting the clock, and deletion cascading
 deepest-first. Keep the report-hold rule under sleep. Ownership, report-hold,
 expiry and cascades walk the Runner spawn lineage (Decision 18). Return an
 ownership error for agent.* control on an address the caller did not spawn
-directly; apply tier-rank and authority caps. Remove `MaxSpawnDepth` and add
-the per-root-tree concurrent-agent cap config key (counting awake agents only).
-The Phase 1 design record states the cap-default measurement method before
-measuring: the metric (for example daemon syscalls/s, memory and turn latency
-as awake agents rise), the machine (macOS home machine, (68)) and the rule that
-turns the measurement into the default; then record the measurement. Cap
-behavior at the limit follows (72).
+directly; apply tier-rank and authority caps, with authority admission
+recomputed against the parent's current level at create and on wake through
+a create-time admission and worker-side persistence of the explicit level
+(Decision 13; the authority parent is the Runner spawn record, (84)=a, a
+lead parent's reply-id resolved to its Runner record; a parent with no
+computable level caps at workdir-write, (86); a refused wake keeps the mail
+and notifies the sender, Decision 14). Give every child the common ws tool
+loadout including `mailbox.send`, move `mayHoldToken` to the `agent.`
+prefix, and refuse the loadout's mutating ws tools for a read-only child
+(Decision 13, (85)=c). Apply
+Decision 7's spawn tree bounds as code constants: `MaxSpawnDepth` moves from 2
+to 4 (kept, not removed), and a per-agent width cap of 99 counts awake direct
+children only; a spawn over either bound fails with an error naming the cap,
+and a wake through the delivery seam ignores the width cap.
 
 Deferred: mailbox routing, steer delivery and `pi.*` hiding (Phase 2; until
 then `pi.*` stays visible as the only follow-up path); exec tools, single
@@ -447,12 +543,28 @@ admission recomputed, the child agent waiting state, deletion 15 days after
 last activity on the periodic sweep and at daemon start with a turn resetting
 the clock and descendants deleted deepest-first, a whiteboard card session
 (key parent, no `ParentRef`) never cascaded, ownership error on a non-own
-address, the cap counting awake agents only, tier resolution (bare,
+address, a spawn that would exceed depth 4 failing with an error, a spawn
+at 99 awake direct children failing with an error naming the cap while
+sleeping children do not count, a wake through the delivery seam succeeding
+with the parent at the width cap, tier resolution (bare,
 `harness.tier`, alias, unknown/unusable and lead-role-only backends failing
 with the valid list), `agent.tiers` output, system prompt delivery via
 append-system-prompt and re-injection from memory on a new segment, the
 report-hold rule, tier-rank and authority cap enforcement and caps
-inheritance; the recorded cap-default measurement method and result.
+inheritance (`authority` omitted is an error; a child at the parent's level,
+`full` included, is admitted without a warning; a child above it is
+refused; a legacy-derived parent capping at its derived level; the child's
+explicit level surviving a daemon restart; a wake refused after the parent
+lowered its level keeping the mail queued, leaving the child asleep and
+sending the sender one system mail; the ceiling recomputed from the
+Runner-recorded parent's current level after a daemon restart, a hosted
+lead parent's reply-id resolving to its Runner record's level, a lead parent
+with no Runner record and a hosted Codex lead parent each capping at
+workdir-write (a `full` child refused), and a recorded child parent whose
+record is gone failing admission); a read-only child refused each mutating ws
+tool of the loadout while workdir-write and full children may call them, and
+every child, read-only included, able to call `mailbox.send`; an
+`agent.spawn` child receiving a capability token; `pi.spawn` refusing past depth 4 with the updated error text.
 
 ### Phase 2: Mailbox routing to daemon-owned addresses, steer delivery, `pi.*` hiding
 
@@ -460,19 +572,23 @@ Depends on Phase 1, on `261117-feat-ws-mailbox-memory-first-store` Phase 2
 (the persistence vehicle, Decision 2) and on the catalog's steer item
 (`261117-feat-ws-harness-capability-catalog` Phase 1). Route daemon-owned
 addresses in memory via the Runner, persisting daemon-owned mail through the
-memory-first store's restore entries (same history and reply-id semantics);
+mailbox store's restore ring (same history and reply-id semantics);
 accept `mailbox.send` to a daemon-owned address; deliver every `mailbox.send`
 as a steer when the catalog and the instance handle support it, else next turn
-(Decision 4), with the report-hold rule; mail to a sleeping child wakes it
+(Decision 4), with the report-hold rule, and label each delivered mail with
+the relation (parent/child/peer) computed from lineage at delivery (Decision
+3); mail to a sleeping child wakes it
 through Phase 1's seam and resets its 15-day clock. Hide the `pi.*` spawn tools
 from `tools/list` (handlers deleted next minor, (54)=b) and move shipped
 playbook/skill `pi.*` references to `agent.*`.
 
-Verification: Go tests covering wake on `mailbox.send` to a sleeping child,
-mail resetting the 15-day clock, steer delivery for each relation with
-next-turn fallback, daemon-owned mail surviving a daemon restart through the
-memory-first store with recv/history/reply-id parity, no mailbox file write for
-daemon-owned addresses, `pi.*` absent from `tools/list` but still callable,
+Verification: Go tests covering wake on `mailbox.send` to a sleeping child
+(ignoring the width cap), mail resetting the 15-day clock, steer delivery for each relation with
+next-turn fallback, the relation label on delivered mail for each relation
+(computed at delivery, no new Envelope field), daemon-owned mail surviving a daemon restart through the
+memory-first store with recv/history/reply-id parity, no `mailbox.json` write
+and no write beyond the store's one ring append per send for daemon-owned
+addresses, `pi.*` absent from `tools/list` but still callable,
 with no shipped text referencing `pi.*`.
 
 ### Phase 3: Native subagent removal in hosted Claude leads and `ws/agent.spawn` workers
