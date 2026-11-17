@@ -22,7 +22,12 @@ func ReplayAnswerJournal(dir string, record func(id string, entry Entry) error) 
 	for _, file := range files {
 		name, temp, ok := strings.Cut(file.Name(), "--")
 		if !ok || !entryNamePattern.MatchString(name) || !strings.HasPrefix(temp, ".tmp-") || filepath.Base(temp) != temp {
-			return fmt.Errorf("invalid answer journal name %q", file.Name())
+			// A malformed remnant must not starve later committed answers.
+			if err := os.Remove(filepath.Join(journal, file.Name())); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "inbox: discarded invalid answer journal name %q\n", file.Name())
+			continue
 		}
 		path := filepath.Join(journal, file.Name())
 		stage := filepath.Join(dir, temp)
@@ -44,7 +49,11 @@ func ReplayAnswerJournal(dir string, record func(id string, entry Entry) error) 
 		}
 		entry, err := readEntry(path)
 		if err != nil {
-			return err
+			if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+				return removeErr
+			}
+			fmt.Fprintf(os.Stderr, "inbox: discarded unreadable answer journal %q: %v\n", file.Name(), err)
+			continue
 		}
 		if err := record(Record{Name: name}.ID(), entry); err != nil {
 			return err
