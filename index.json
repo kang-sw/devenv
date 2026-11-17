@@ -357,7 +357,14 @@
       "registered_at": "2026-11-15T02:02:38Z"
     },
     "261115-feat-ws-hosted-codex-adapter-contract": {
-      "registered_at": "2026-11-14T15:20:26Z"
+      "registered_at": "2026-11-14T15:20:26Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "track/agent-v2",
+        "phase": "active",
+        "touched_at": "2026-11-17T13:27:08Z"
+      }
     },
     "261115-feat-ws-permission-profile": {
       "registered_at": "2026-11-15T07:40:45Z"
