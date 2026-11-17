@@ -82,7 +82,7 @@ func TestDashboardBoardMemoFolderRevision(t *testing.T) {
 		})
 	}
 	// A forgotten or independent cache read cannot collide with a held memo.
-	src.folders.Forget(folder.Dir)
+	wswhiteboard.SharedFolderCache.Forget(folder.Dir)
 	reopened := read()
 	if base(reopened) == base(previous) {
 		t.Fatal("Forget reused a held memo identity")

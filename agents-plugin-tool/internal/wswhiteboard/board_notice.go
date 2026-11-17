@@ -258,10 +258,9 @@ func (f FolderStore) Notify(reply string, now time.Time, eligible func() bool, e
 	if !present {
 		return next, nil
 	}
-	err = f.withLock(false, func() error {
-		before, meta, err := f.load(nil)
-		if err != nil || before == nil {
-			return err
+	_, _, err = SharedFolderCache.openRevision(f, nil, func(before *State, meta *folderSession) error {
+		if before == nil || meta == nil {
+			return nil
 		}
 		dirs := map[string]string{}
 		for _, ref := range meta.Topics {

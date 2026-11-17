@@ -44,11 +44,11 @@ func (s *sessionStore) readWhiteboard(key string) (sessionRecord, error) {
 }
 
 func openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
-	return openWhiteboardCached(record, key, raw, nil)
+	return openWhiteboardCached(record, key, raw, &wswhiteboard.SharedFolderCache)
 }
 
 func (src *DashboardSessionSource) openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
-	return openWhiteboardCached(record, key, raw, &src.folders)
+	return openWhiteboard(record, key, raw)
 }
 
 func openWhiteboardCached(record *sessionRecord, key string, raw io.Writer, cache *wswhiteboard.FolderCache) error {
