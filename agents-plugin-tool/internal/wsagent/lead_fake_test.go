@@ -743,8 +743,6 @@ func newLeadHarness(t *testing.T) *leadHarness {
 		LeadKeys:      h.keys,
 		Mail:          h.mail,
 		heartbeat:     50 * time.Millisecond,
-		// Auto-closing finished Pi children is tested on its own
-		// (auto_close_test.go).
 	}
 	// Every harness PID a test writes (4002, 9001, ...) is dead unless the
 	// test marks it alive: the real process table of a CI runner can hold

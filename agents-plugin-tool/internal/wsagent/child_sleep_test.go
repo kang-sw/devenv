@@ -15,18 +15,47 @@ import (
 	"github.com/kang-sw/devenv/internal/wsinbox"
 )
 
-// autoCloseHarness is childHarness with finished Pi children closing on
-// their own, as in production.
-func autoCloseHarness(t *testing.T) (*harness, *reports) {
-	t.Helper()
-	h, got := childHarness(t)
-	h.runner.Close()
-	h.start()
-	return h, got
+// A finished spawned child does not close: it stays open after its report
+// reached its parent, its process ends on its idle timer (sleep), and the
+// next message starts it again on the same id (agent_tools.go).
+
+// shortIdle gives the builtin profiles named a one-second idle timeout
+// through the working root's project config, keeping what that file
+// already holds.
+func (h *harness) shortIdle(names ...string) {
+	h.t.Helper()
+	path := filepath.Join(h.root, ".ws-workflow", "config.json")
+	var file struct {
+		Overrides map[string]json.RawMessage `json:"structured_overrides"`
+	}
+	if raw, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(raw, &file); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	values := map[string]string{}
+	for k, v := range file.Overrides {
+		values[k] = string(v)
+	}
+	builtins := BuiltinProfiles()
+	for _, name := range names {
+		var p Profile
+		if err := json.Unmarshal(builtins[ProfilePrefix+name], &p); err != nil {
+			h.t.Fatalf("builtin profile %s: %v", name, err)
+		}
+		secs := 1
+		p.IdleTimeoutSeconds = &secs
+		raw, err := json.Marshal(p)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		values[ProfilePrefix+name] = string(raw)
+	}
+	writeStructured(h.t, path, values)
 }
 
 // finishableWorker spawns a lead's Pi worker with a session file a Send
-// can reopen it on, and returns it with its process, first turn sent.
+// can resume it on, and returns it with its process, first turn sent.
 func finishableWorker(t *testing.T, h *harness) (State, *fakeProc) {
 	t.Helper()
 	n := h.backend.startCount()
@@ -43,11 +72,7 @@ func finishableWorker(t *testing.T, h *harness) (State, *fakeProc) {
 	return w, p
 }
 
-func eventuallyClosed(t *testing.T, h *harness, id string) {
-	t.Helper()
-	eventually(t, id+" closed on its own", func() bool { return h.state(id).Status == StatusClosed })
-}
-
+// stillOpen fails when id closed within a short while.
 func stillOpen(t *testing.T, h *harness, id, why string) {
 	t.Helper()
 	time.Sleep(100 * time.Millisecond)
@@ -56,8 +81,19 @@ func stillOpen(t *testing.T, h *harness, id, why string) {
 	}
 }
 
-func TestFinishedPiWorkerClosesAfterItsReportAndSendReopensIt(t *testing.T) {
-	h, got := autoCloseHarness(t)
+// eventuallyAsleep waits for id's process to end with id still open and
+// waiting (SessionChildWaiting).
+func eventuallyAsleep(t *testing.T, h *harness, id string) {
+	t.Helper()
+	eventually(t, id+" asleep", func() bool {
+		st := h.state(id)
+		return !st.Process && st.Status == StatusIdle && st.Lifecycle == wsdashboard.SessionChildWaiting
+	})
+}
+
+func TestFinishedPiWorkerSleepsAfterItsReportAndSendWakesIt(t *testing.T) {
+	h, got := childHarness(t)
+	h.shortIdle(PiWorkerProfile)
 	w, p := finishableWorker(t, h)
 	waited := make(chan TurnResult, 1)
 	go func() {
@@ -69,43 +105,45 @@ func TestFinishedPiWorkerClosesAfterItsReportAndSendReopensIt(t *testing.T) {
 	if res := <-waited; res.Status != TurnDone || res.Message != "result" {
 		t.Fatalf("a wait made before the finish = %+v", res)
 	}
-	eventuallyClosed(t, h, w.ID)
-	// closeIf shows the row closed before finishClose stops the process,
-	// so a Send sees the close or lands first; wait for the stop itself.
-	eventually(t, "the closed worker's process to stop", p.isClosed)
-	if rec := h.record(w.ID); rec.ClosedAt == "" || rec.TurnOpen {
-		t.Fatalf("closed record = %+v", rec)
+	eventually(t, "the lead's report", func() bool { return len(got.lead()) == 1 })
+	stillOpen(t, h, w.ID, "a finished worker whose report reached its parent")
+	// The idle timer ends the process; the conversation stays open.
+	eventually(t, "the idle process to stop", p.isClosed)
+	eventuallyAsleep(t, h, w.ID)
+	if rec := h.record(w.ID); rec.ClosedAt != "" || rec.TurnOpen {
+		t.Fatalf("the sleeping worker's record = %+v", rec)
 	}
 	if reps := got.lead(); len(reps) != 1 || reps[0].Result.Message != "result" {
 		t.Fatalf("the lead's report = %+v", reps)
 	}
-	// A wait after the close still answers with the reported turn.
+	// A wait while it sleeps still answers with the reported turn.
 	if res, err := h.runner.Wait(context.Background(), w.ID, time.Second); err != nil || res.Status != TurnDone || res.Message != "result" {
-		t.Fatalf("a wait made after the close = %+v, %v", res, err)
+		t.Fatalf("a wait made while it sleeps = %+v, %v", res, err)
 	}
 
 	st, err := h.runner.Send(w.ID, "more")
-	if err != nil || st.Status == StatusClosed {
-		t.Fatalf("Send to the closed worker = %+v, %v", st, err)
+	if err != nil || st.Status == StatusClosed || st.ID != w.ID {
+		t.Fatalf("Send to the sleeping worker = %+v, %v", st, err)
 	}
 	p2 := h.backend.waitProc(t, 1)
 	if text := p2.nextSent(t); text != h.envelope("more") {
-		t.Fatalf("reopened turn = %q", text)
+		t.Fatalf("the woken turn = %q", text)
 	}
 	if res, _ := h.runner.Wait(context.Background(), w.ID, 50*time.Millisecond); res.Status != TurnRunning {
 		t.Fatalf("a wait for the new message while it runs = %+v", res)
 	}
 	p2.reply("second")
-	eventuallyClosed(t, h, w.ID)
-	if reps := got.lead(); len(reps) != 2 || reps[1].Result.Message != "second" {
+	eventually(t, "the second report", func() bool { return len(got.lead()) == 2 })
+	if reps := got.lead(); reps[1].Result.Message != "second" || reps[1].Result.ID != w.ID {
 		t.Fatalf("the lead's reports = %+v", reps)
 	}
+	eventuallyAsleep(t, h, w.ID)
 }
 
-// A child whose report its parent has not taken yet stays open, however
-// long the parent's loop is busy, and closes once the parent takes it.
-func TestPiChildStaysOpenUntilItsParentTakesItsReport(t *testing.T) {
-	h, _ := autoCloseHarness(t)
+// A child whose report its parent has not taken yet keeps it, however long
+// the parent's loop is busy; once the parent takes it, the child stays open.
+func TestPiChildReportReachesItsBusyParentAndTheChildStaysOpen(t *testing.T) {
+	h, _ := childHarness(t)
 	w, wp, token, gc, gp := workerWithChild(t, h)
 	parent := h.runner.conv(w.ID)
 	block, entered := make(chan struct{}), make(chan struct{})
@@ -121,30 +159,27 @@ func TestPiChildStaysOpenUntilItsParentTakesItsReport(t *testing.T) {
 	eventually(t, "the pending report", func() bool { return len(h.record(gc.ID).PendingReports) == 1 })
 	stillOpen(t, h, gc.ID, "a child whose report waits for its parent")
 	release()
-	eventuallyClosed(t, h, gc.ID)
-	if rec := h.record(gc.ID); len(rec.PendingReports) != 0 {
-		t.Fatalf("the closed child's report was never taken: %+v", rec.PendingReports)
-	}
+	eventually(t, "the report taken", func() bool { return len(h.record(gc.ID).PendingReports) == 0 })
 	eventually(t, "the report steered into the worker's turn", func() bool {
 		steered, _ := wp.steered()
 		return len(steered) == 1 && strings.Contains(steered[0], "child result")
 	})
+	stillOpen(t, h, gc.ID, "a finished child whose report was taken")
 	if h.state(w.ID).Status == StatusClosed {
 		t.Fatal("a worker whose turn runs closed")
 	}
-	// A wait after the close says the report reached the worker, as for
-	// an open child.
+	// A wait after the handover says the report reached the worker.
 	code, body := h.tokenCall(token, "wait", map[string]any{"id": gc.ID, "timeout_s": 1})
 	var res TurnResult
 	if code != http.StatusOK || json.Unmarshal([]byte(body), &res) != nil || res.Status != TurnDone || !res.Delivered || res.Message != "" {
-		t.Fatalf("a wait after the close = %d %s", code, body)
+		t.Fatalf("a wait after the handover = %d %s", code, body)
 	}
 }
 
 // A failed turn leaves its worker open: its failure stays on its row, and
 // its parent may send it on.
 func TestFailedPiWorkerStaysOpen(t *testing.T) {
-	h, got := autoCloseHarness(t)
+	h, got := childHarness(t)
 	w, p := finishableWorker(t, h)
 	p.events <- Event{TurnEnd: true, TurnError: "boom"}
 	eventually(t, "the failure report", func() bool { return len(got.lead()) == 1 })
@@ -154,58 +189,61 @@ func TestFailedPiWorkerStaysOpen(t *testing.T) {
 	}
 }
 
-// A message in the inbox keeps a finished worker open, even one the page
-// wrote whose signal the loop has not taken; it closes after that turn.
-func TestHeldMessageKeepsAFinishedWorkerOpen(t *testing.T) {
-	h, got := autoCloseHarness(t)
+// A message in the inbox, even one the page wrote whose signal the loop
+// has not taken, starts a finished worker's next turn.
+func TestHeldMessageStartsAFinishedWorkersNextTurn(t *testing.T) {
+	h, got := childHarness(t)
 	w, p := finishableWorker(t, h)
 	c := h.runner.conv(w.ID)
 	if _, _, err := wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{"page message"}}, h.config.Now()); err != nil {
 		t.Fatal(err)
 	}
 	p.reply("first")
-	stillOpen(t, h, w.ID, "a worker with a held message")
 	h.runner.InboxChanged(w.ID)
 	if text := p.nextSent(t); !strings.Contains(text, "page message") {
 		t.Fatalf("the held message's turn = %q", text)
 	}
 	p.reply("second")
-	eventuallyClosed(t, h, w.ID)
-	if reps := got.lead(); len(reps) != 2 || reps[1].Result.Message != "second" {
+	eventually(t, "both reports", func() bool { return len(got.lead()) == 2 })
+	if reps := got.lead(); reps[1].Result.Message != "second" {
 		t.Fatalf("the lead's reports = %+v", reps)
 	}
+	stillOpen(t, h, w.ID, "a finished worker")
 }
 
-// A worker whose done turn is held for its open child stays open; the
-// child closes once its report reached the worker, and the worker after
-// the turn that report starts.
-func TestHeldTurnKeepsAWorkerOpenUntilItsChildReports(t *testing.T) {
-	h, got := autoCloseHarness(t)
+// Report-hold under sleep: a worker whose done turn is held for its open
+// child stays awake past its idle timeout and reports nothing; the child's
+// report starts the worker's next turn, and only that turn is reported.
+// Both then sleep, open.
+func TestHeldTurnKeepsAWorkerAwakeUntilItsChildReports(t *testing.T) {
+	h, got := childHarness(t)
+	h.shortIdle(PiWorkerProfile)
 	w, wp, _, gc, gp := workerWithChild(t, h)
 	wp.reply("interim")
 	eventually(t, "the held turn", func() bool { return h.record(w.ID).HeldTurn != nil })
-	stillOpen(t, h, w.ID, "a worker whose turn is held for its child")
+	// Past the one-second idle timeout: the held worker keeps its process.
+	time.Sleep(1500 * time.Millisecond)
+	if wp.isClosed() || !h.state(w.ID).Process {
+		t.Fatal("a worker whose turn is held for its child slept")
+	}
+	noLeadReport(t, got, "a worker whose turn is held for its child")
 	gp.reply("child result")
-	eventuallyClosed(t, h, gc.ID)
 	if text := wp.nextSent(t); !strings.Contains(text, "child result") {
 		t.Fatalf("the report's turn = %q", text)
 	}
-	if h.state(w.ID).Status == StatusClosed {
-		t.Fatal("a worker whose turn runs closed")
-	}
 	wp.reply("final")
-	eventuallyClosed(t, h, w.ID)
-	eventually(t, "the worker's report", func() bool {
-		reps := got.lead()
-		return len(reps) > 0 && reps[len(reps)-1].Result.Message == "final"
-	})
+	eventually(t, "the worker's report", func() bool { return len(got.lead()) == 1 })
+	if rep := got.lead()[0]; rep.Result.Message != "final" {
+		t.Fatalf("the reported turn = %+v", rep.Result)
+	}
+	eventuallyAsleep(t, h, gc.ID)
+	eventuallyAsleep(t, h, w.ID)
 }
 
 // A parent's pi.wait made before the child finishes takes the result; one
-// made after the child closed answers with it again, as for an open child
-// whose report a wait took.
-func TestParentWaitAcrossAutoClose(t *testing.T) {
-	h, _ := autoCloseHarness(t)
+// made after the child fell asleep answers with it again.
+func TestParentWaitAcrossTheChildsSleep(t *testing.T) {
+	h, _ := childHarness(t)
 	_, _, token, gc, gp := workerWithChild(t, h)
 	type answer struct {
 		code int
@@ -228,25 +266,27 @@ func TestParentWaitAcrossAutoClose(t *testing.T) {
 	if a.code != http.StatusOK || json.Unmarshal([]byte(a.body), &res) != nil || res.Status != TurnDone || res.Message != "child result" {
 		t.Fatalf("the wait = %d %s", a.code, a.body)
 	}
-	eventuallyClosed(t, h, gc.ID)
+	if _, err := h.runner.Stop(gc.ID); err != nil {
+		t.Fatal(err)
+	}
+	eventuallyAsleep(t, h, gc.ID)
 	code, body := h.tokenCall(token, "wait", map[string]any{"id": gc.ID, "timeout_s": 1})
 	res = TurnResult{}
 	if code != http.StatusOK || json.Unmarshal([]byte(body), &res) != nil || res.Status != TurnDone || res.Delivered || res.Message != "child result" {
-		t.Fatalf("a wait after the close = %d %s", code, body)
+		t.Fatalf("a wait made while the child sleeps = %d %s", code, body)
 	}
 }
 
-// A message sent as the worker finishes is never lost: it lands before
-// the close and keeps the worker open, or the close came first and the
-// send reopens it. No path deadlocks.
-func TestSendRacingAnAutoCloseIsNeverLost(t *testing.T) {
-	h, _ := autoCloseHarness(t)
+// A message sent as the worker finishes is never lost: it reaches the
+// worker's process, and no path deadlocks.
+func TestSendRacingAFinishIsNeverLost(t *testing.T) {
+	h, _ := childHarness(t)
 	for i := range 10 {
 		w, p := finishableWorker(t, h)
 		n := h.backend.startCount()
 		p.reply("done")
 		// Sent mid-turn it would be steered, which this fake leaves
-		// unanswered; the race is with the close the turn's end starts.
+		// unanswered; the race is with the turn's end.
 		eventually(t, "the turn's end", func() bool { return h.state(w.ID).Status != StatusRunning })
 		if _, err := h.runner.Send(w.ID, "follow-up"); err != nil {
 			t.Fatalf("round %d: Send = %v", i, err)
@@ -301,47 +341,50 @@ func TestClosingALeadClosesItsPiChildren(t *testing.T) {
 	}
 }
 
-// A daemon start closes the Pi children an older daemon left open that
-// are finished or whose conversation parent is gone, and starts no loop
-// for them; any other restores as before.
-func TestStartClosesFinishedAndOrphanedPiChildren(t *testing.T) {
-	h, got := autoCloseHarness(t)
+// A daemon start closes the Pi children an older daemon left open whose
+// conversation parent is gone, and starts no loop for them; a finished
+// child restores open and asleep, and a running one as before.
+func TestStartClosesOrphanedPiChildrenButNotFinishedOnes(t *testing.T) {
+	h, got := childHarness(t)
 	fin, p := finishableWorker(t, h)
 	p.reply("done")
-	eventuallyClosed(t, h, fin.ID)
+	eventually(t, "the finished worker's report", func() bool { return len(got.lead()) == 1 })
 	orphan := h.spawnWorker("medium")
 	h.backend.waitProc(t, 1).nextSent(t)
 	running := h.spawnWorker("medium")
 	h.backend.waitProc(t, 2).nextSent(t)
 	h.runner.Close()
 
-	rewrite := func(id string, edit func(rec *Record)) {
-		t.Helper()
-		rec := h.record(id)
-		edit(&rec)
-		if err := writeRecord(wsdashboard.SessionDir(h.dir, id), rec); err != nil {
-			t.Fatal(err)
-		}
+	rec := h.record(orphan.ID)
+	rec.Parent = &ParentRef{Kind: ParentConversation, ReplyID: "nosuchparent"}
+	if err := writeRecord(wsdashboard.SessionDir(h.dir, orphan.ID), rec); err != nil {
+		t.Fatal(err)
 	}
-	rewrite(fin.ID, func(rec *Record) { rec.ClosedAt = "" })
-	rewrite(orphan.ID, func(rec *Record) { rec.Parent = &ParentRef{Kind: ParentConversation, ReplyID: "nosuchparent"} })
 	reported := len(got.lead())
 	starts := h.backend.startCount()
 	h.start()
 
-	for _, id := range []string{fin.ID, orphan.ID} {
-		if h.runner.conv(id) != nil {
-			t.Fatalf("%s got a loop", id)
-		}
-		if st := h.state(id); st.Status != StatusClosed {
-			t.Fatalf("%s restored as %+v", id, st)
-		}
-		if rec := h.record(id); rec.ClosedAt == "" || rec.TurnOpen {
-			t.Fatalf("%s record = %+v", id, rec)
-		}
-		if row, err := wsdashboard.ReadRegistration(h.dir, id); err != nil || row.EndedAt == "" {
-			t.Fatalf("%s row = %+v, %v", id, row, err)
-		}
+	if h.runner.conv(orphan.ID) != nil {
+		t.Fatal("the orphan got a loop")
+	}
+	if st := h.state(orphan.ID); st.Status != StatusClosed {
+		t.Fatalf("the orphan restored as %+v", st)
+	}
+	if rec := h.record(orphan.ID); rec.ClosedAt == "" || rec.TurnOpen {
+		t.Fatalf("the orphan's record = %+v", rec)
+	}
+	if row, err := wsdashboard.ReadRegistration(h.dir, orphan.ID); err != nil || row.EndedAt == "" {
+		t.Fatalf("the orphan's row = %+v, %v", row, err)
+	}
+	// The finished one restores open, with a loop and no process.
+	if h.runner.conv(fin.ID) == nil {
+		t.Fatal("the finished worker got no loop")
+	}
+	if st := h.state(fin.ID); st.Status != StatusIdle || st.Process || st.Lifecycle != wsdashboard.SessionChildWaiting {
+		t.Fatalf("the finished worker restored as %+v", st)
+	}
+	if rec := h.record(fin.ID); rec.ClosedAt != "" {
+		t.Fatalf("the finished worker's record = %+v", rec)
 	}
 	// The running one restored with a loop: it reports its cut-off turn.
 	eventually(t, "the cut-off turn's report", func() bool {
@@ -354,7 +397,7 @@ func TestStartClosesFinishedAndOrphanedPiChildren(t *testing.T) {
 	})
 	for _, rep := range got.lead()[reported:] {
 		if rep.Result.ID != running.ID {
-			t.Fatalf("a closed child reported after the start: %+v", rep)
+			t.Fatalf("another child reported after the start: %+v", rep)
 		}
 	}
 	if n := h.backend.startCount(); n != starts {

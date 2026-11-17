@@ -403,8 +403,6 @@ func newHarness(t *testing.T, profiles map[string]string) *harness {
 			return MCPCommand{Command: "/bin/ws-mcp", Args: []string{"serve", "--stdio", "--root", root}}, nil
 		},
 		heartbeat: 50 * time.Millisecond,
-		// Auto-closing finished Pi children is tested on its own
-		// (auto_close_test.go).
 	}
 	h.start()
 	return h

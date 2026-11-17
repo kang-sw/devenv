@@ -316,17 +316,20 @@ func TestTokenSpawnCapsDepthAndTier(t *testing.T) {
 	if code, body := h.tokenCall(token, "spawn", map[string]any{"prompt": "x", "tier": "huge"}); code != http.StatusBadRequest {
 		t.Fatalf("an unknown tier = %d %s", code, body)
 	}
-	gc := h.spawnChild(token, "medium", "depth two")
-	// The depth-2 child keeps its token and gets the cap message.
-	gcToken := h.token(1)
-	if gcToken == "" {
-		t.Fatalf("a depth-2 child holds a token")
+	// A chain down to depth 4: each child keeps its token, and the one at
+	// the cap gets the cap message.
+	var last State
+	for depth := 2; depth <= MaxSpawnDepth; depth++ {
+		last = h.spawnChild(token, "medium", "deeper")
+		if token = h.token(depth - 1); token == "" {
+			t.Fatalf("a depth-%d child holds a token", depth)
+		}
 	}
-	code, body = h.tokenCall(gcToken, "spawn", map[string]any{"prompt": "x", "tier": "small"})
-	if code != http.StatusForbidden || !strings.Contains(body, "spawn depth cap is 2") || !strings.Contains(body, "depth 2") {
-		t.Fatalf("a depth-3 spawn = %d %s", code, body)
+	code, body = h.tokenCall(token, "spawn", map[string]any{"prompt": "x", "tier": "small"})
+	if code != http.StatusForbidden || !strings.Contains(body, "pi.spawn: the spawn depth cap is 4") || !strings.Contains(body, "at depth 4") {
+		t.Fatalf("a depth-5 spawn = %d %s", code, body)
 	}
-	if n := len(h.runner.Children(ParentRef{Kind: ParentConversation, ReplyID: gc.ID})); n != 0 {
+	if n := len(h.runner.Children(ParentRef{Kind: ParentConversation, ReplyID: last.ID})); n != 0 {
 		t.Fatalf("a refused spawn spawns nothing: %d", n)
 	}
 
