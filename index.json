@@ -475,7 +475,14 @@
       }
     },
     "261117-feat-ws-hosted-antigravity-adapter": {
-      "registered_at": "2026-11-17T08:21:47Z"
+      "registered_at": "2026-11-17T08:21:47Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "track/agent-v2",
+        "phase": "active",
+        "touched_at": "2026-11-17T14:00:37Z"
+      }
     },
     "261117-feat-ws-hosted-child-session-entry": {
       "registered_at": "2026-11-17T09:49:58Z"
