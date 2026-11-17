@@ -249,7 +249,8 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
+	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
+		`</span><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
 		`<details class="entry-panel`, `data-key="entry:e1" id="p1" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tdoc"`)
 	wantNone(t, out, `class="tbody"`)

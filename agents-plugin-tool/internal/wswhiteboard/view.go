@@ -891,7 +891,9 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 		touch(doc.Name, doc.ChangedAt)
 		touch(doc.Name, doc.RecapAt)
 		for _, entry := range doc.Entries {
-			touch(doc.Name, entry.At)
+			if !staleReceipt(entry) && !internalRevisionMarker(entry) {
+				touch(doc.Name, entry.At)
+			}
 		}
 		at, summary := doc.RecapAt, doc.Recap
 		if head := doc.LatestSummary(); head != nil {

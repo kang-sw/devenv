@@ -65,7 +65,7 @@ function launchEnv(inherited, staged, root) {
       path.join(staged.root, 'dashboard-config-manifest.json')].join(';'),
     WS_MCP_RUNTIME_BINARY: staged.binary, WS_MCP_RUNTIME_DIR: staged.root, CLAUDE_PLUGIN_ROOT: staged.root };
 }
-async function connectDaemon({ appRoot, userData, platform = process.platform, replace = false }, deps = {}) {
+async function connectDaemon({ appRoot, userData, platform = process.platform, packaged = true, replace = false, attachRunning = false }, deps = {}) {
   const env = deps.env || process.env;
   const root = cacheRoot(env);
   // Injected discovery in older tests supplies a URL only, never a fabricated
@@ -78,8 +78,9 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
   try { running = await find(root); }
   catch { /* An absent or uncertain endpoint is never evidence a process died. */ }
   if (running?.health) {
+    if (attachRunning) return running.url;
     let selected;
-    try { selected = select({ appRoot, userData, platform }); }
+    try { selected = select({ appRoot, userData, platform, packaged }); }
     catch (error) {
       if (replace) notify(`Cannot replace daemon: ${error.message}`);
       return running.url; // Candidate failure never breaks a healthy attachment.
@@ -167,7 +168,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
     try { return (await find(root)).url; } catch { /* A concurrent winner may still attach. */ }
     throw new Error('Standalone dashboard start is unavailable on this platform; connect to a running daemon');
   }
-  const selected = select({ appRoot, userData, platform });
+  const selected = select({ appRoot, userData, platform, packaged });
   const staged = stage(selected, userData, platform, appRoot);
   try { return (await find(root)).url; } catch { /* Only a new dashboard may start. */ }
   try { await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root), logPath: path.join(userData, 'daemon-start.log') },

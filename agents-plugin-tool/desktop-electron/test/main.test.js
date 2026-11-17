@@ -72,6 +72,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
           this.loads.push(file); this.currentURL = file; this.fileOptions = options;
           const url = pathToFileURL(file);
           url.search = new URLSearchParams(options?.query).toString();
+          this.webContents.mainFrame.url = url.href;
           loaded(url.href);
         },
         setZoomFactor: zoom => { this.zoom = zoom; },
@@ -105,6 +106,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     setBounds(bounds) { this.bounds = bounds; }
   }
   const ipcMain = new EventEmitter(), nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: false });
+  ipcMain.handlers = {};
+  ipcMain.handle = (channel, handler) => { ipcMain.handlers[channel] = handler; };
   let template, response = 0, popups = 0, menuCallback, onDialog;
   const opened = [], copied = [];
   start({ clipboard: { writeText: value => copied.push(value) }, app, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
@@ -124,6 +127,69 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     onDialog: fn => { onDialog = fn; },
     menus, template, session: session.defaultSession, opened, copied, choose: n => { response = n; } };
 }
+test('connection page start uses the shared path, serializes requests and restricts IPC', async () => {
+  let calls = 0, release;
+  const f = await fixture(async options => {
+    calls++;
+    if (calls === 1) throw new Error('missing bundle');
+    assert.equal(options.attachRunning, true);
+    return new Promise(resolve => { release = resolve; });
+  }, 'win32', { packaged: true });
+  const wc = f.views[0].webContents;
+  const event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal((await f.ipcMain.handlers['werkschaft:daemon-availability'](event)).available, true);
+  const start = f.ipcMain.handlers['werkschaft:daemon-start'];
+  const pending = start(event);
+  await tick();
+  await start(event);
+  assert.equal(calls, 2);
+  release('http://127.0.0.1:39418/');
+  await pending;
+  await start({ sender: {}, senderFrame: wc.mainFrame });
+  assert.equal(calls, 2);
+});
+test('manual start failure reloads the page with its reason for another attempt', async () => {
+  let calls = 0;
+  const f = await fixture(async () => { calls++; throw new Error('startup timeout'); }, 'win32', { packaged: true });
+  const content = f.views[0], wc = content.webContents;
+  await f.ipcMain.handlers['werkschaft:daemon-start']({ sender: wc, senderFrame: wc.mainFrame });
+  assert.equal(calls, 2);
+  assert.equal(content.fileOptions.query.reason, 'startup timeout');
+});
+test('dev mode uses the checkout candidate for autostart and the start button', async t => {
+  const source = daemonFixture(t, 'win32');
+  const appRoot = path.join(source.base, 'agents-plugin-tool', 'desktop-electron');
+  fs.mkdirSync(path.dirname(appRoot), { recursive: true });
+  fs.renameSync(source.appRoot, appRoot);
+  fs.rmSync(path.join(appRoot, 'daemon'), { recursive: true });
+  const repoRoot = path.join(source.base, 'agents-plugin-wsflow');
+  fs.renameSync(source.dev.root, repoRoot);
+  let launches = 0, running = false;
+  const deps = { env: { WS_CACHE_HOME: path.join(source.base, 'cache') },
+    discover: async () => { if (!running) throw Error('missing'); return 'http://127.0.0.1:39418/'; },
+    launch: async () => { if (++launches === 1) throw Error('first start failed'); running = true; } };
+  const f = await fixture(options => realConnectDaemon(options, deps), 'win32', { ...source, appRoot });
+  const wc = f.views[0].webContents, event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal(launches, 1, 'autostart used the candidate');
+  assert.deepEqual(await f.ipcMain.handlers['werkschaft:daemon-availability'](event), { available: true });
+  await f.ipcMain.handlers['werkschaft:daemon-start'](event);
+  assert.equal(launches, 2);
+  assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
+  fs.rmSync(repoRoot, { recursive: true });
+  const g = await fixture(async () => { throw new Error('missing'); }, 'win32', { ...source, appRoot });
+  const gwc = g.views[0].webContents;
+  const result = await g.ipcMain.handlers['werkschaft:daemon-availability']({ sender: gwc, senderFrame: gwc.mainFrame });
+  assert.equal(result.available, false);
+  assert(result.reason.includes(repoRoot));
+  assert.match(result.reason, /assemble-daemon-input\.cjs/);
+});
+test('unsupported platform disables standalone start', async () => {
+  const f = await fixture(async () => { throw new Error('no daemon'); }, 'linux', { packaged: true });
+  const wc = f.window.webContents;
+  const result = await f.ipcMain.handlers['werkschaft:daemon-availability']({ sender: wc, senderFrame: wc.mainFrame });
+  assert.equal(result.available, false);
+  assert.match(result.reason, /platform/);
+});
 test('startup readiness, updater and BaseWindow failures report stack and log, show an error box and exit', async t => {
   const update = require('../update'), original = update.createUpdater;
   const stderr = [];
@@ -458,12 +524,15 @@ test('Windows attaches without Python even when no bundled candidate can be read
   assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
 });
 test('connection diagnostics render as text, never executable markup', () => {
-  const nodes = { reason: {}, log: {} }, reason = '<script>alert(1)</script>', log = 'Error log: C:\\Users\\name\\daemon-start.log';
+  const nodes = { reason: {}, log: {}, 'start-daemon': { addEventListener() {} }, 'start-status': {} };
+  const reason = '<script>alert(1)</script>', log = 'Error log: C:\\Users\\name\\daemon-start.log';
   require('node:vm').runInNewContext(fs.readFileSync(path.resolve(__dirname, '../connection.js'), 'utf8'), {
-    URLSearchParams, location: { search: '?' + new URLSearchParams({ reason, log }) },
+    URLSearchParams, location: { search: '?' + new URLSearchParams({ reason, log }) }, navigator: { language: 'en' },
+    window: { werkschaftDesktop: { daemon: { availability: () => new Promise(() => {}) } } },
     document: { getElementById: id => nodes[id] },
   });
-  assert.deepEqual(nodes, { reason: { textContent: reason }, log: { textContent: log } });
+  assert.equal(nodes.reason.textContent, reason);
+  assert.equal(nodes.log.textContent, log);
 });
 test('discovery and immediate navigation failure show the bundled connection page', async () => {
   const f = await fixture(async () => { throw new Error('No readable dashboard endpoint'); });
@@ -1025,12 +1094,13 @@ test('dashboard theme maps to both bar and overlay, with native fallback and res
 });
 test('update bridge: IPC only from the pinned dashboard main frame, status replay, apply on launch and quit', async () => {
   const update = require('../update'), original = update.createUpdater;
-  const calls = [];
+  const calls = [], delivered = [];
   let options, ready = false;
   update.createUpdater = opts => {
     options = opts;
     return { applyOnLaunch: () => false, applyOnQuit: relaunch => calls.push(`quit:${relaunch}`), schedule: () => calls.push('schedule'),
       phase: () => ({ phase: 'none', version: null, skipped: false }), canRestart: () => ready,
+      statusDelivered: status => delivered.push(status),
       check: manual => calls.push(`check:${manual}`), download: () => calls.push('download'), skip: v => calls.push(`skip:${v}`) };
   };
   let f;
@@ -1068,6 +1138,18 @@ test('update bridge: IPC only from the pinned dashboard main frame, status repla
   f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
   f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
   assert.deepEqual(sent.at(-1), ['werkschaft:update-status', { state: 'phase', phase: { phase: 'none', version: null, skipped: false } }]);
+  // A failure stays pending while automatic checks continue, then is
+  // acknowledged exactly when delivered to a subscribed dashboard.
+  wc.emit('did-start-navigation', {}, 'http://127.0.0.1:39418/', false, true);
+  const failure = { state: 'apply-error', version: '9.0.0', message: 'swap failed' };
+  options.send(failure);
+  options.send({ state: 'available', version: '10.0.0' });
+  assert.equal(delivered.includes(failure), false);
+  f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
+  assert.deepEqual(sent.at(-1), ['werkschaft:update-status', failure]);
+  assert.equal(delivered.filter(status => status === failure).length, 1);
+  options.send({ state: 'available', version: '10.0.0' });
+  assert.equal(sent.at(-1)[1].version, '10.0.0');
   // A plain full quit applies without relaunch.
   f.app.emit('will-quit');
   assert.equal(calls.at(-1), 'quit:false');

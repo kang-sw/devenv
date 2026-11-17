@@ -554,6 +554,12 @@
         railDelete(del);
         return;
       }
+      var sleep = t.closest && t.closest("#railsleep");
+      if (sleep) {
+        e.preventDefault();
+        railSleep(sleep);
+        return;
+      }
       var fold = t.closest && t.closest(".rfh");
       if (fold) {
         e.preventDefault();

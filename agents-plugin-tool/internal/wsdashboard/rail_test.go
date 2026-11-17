@@ -1008,6 +1008,53 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	}
 }
 
+// TestRailSleepButton pins the header's sleep (moon) button: it follows the
+// refresh-side chips on a daemon that hosts sessions, is enabled with its
+// tooltip while a hosted session looks idle and disabled with the other
+// tooltip when none does, and is absent without a hosting daemon. The count
+// counts live hosted rows that neither work, wait on an approval, nor sit
+// stopped.
+func TestRailSleepButton(t *testing.T) {
+	head := func(view RailView) string {
+		region, err := renderRailRegion(view, "en")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, _, _ := strings.Cut(string(region.HTML), `<div class="rlist"`)
+		return h
+	}
+	on := head(RailView{CanSpawn: true, CountSleep: 2})
+	if want := `<button type="button" class="rref rsleep" id="railsleep" title="Put all idle sessions to sleep" aria-label="Put all idle sessions to sleep" aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-moon"/></svg></button><button type="button" class="rref" id="railref"`; !strings.Contains(on, want) {
+		t.Errorf("the header lacks the enabled sleep button before refresh:\n%s", on)
+	}
+	off := head(RailView{CanSpawn: true})
+	if !strings.Contains(off, `id="railsleep" disabled title="No idle sessions"`) {
+		t.Errorf("no idle session: the sleep button is not disabled with its reason:\n%s", off)
+	}
+	if none := head(RailView{CountSleep: 2}); strings.Contains(none, "rsleep") {
+		t.Errorf("a daemon that hosts no sessions shows the sleep button:\n%s", none)
+	}
+
+	now := time.Now()
+	host := func(id string) Session {
+		s := railSession(id, "/q", now, time.Time{})
+		s.Hosted = true
+		return s
+	}
+	working := &wslive.Snapshot{Adapter: "claude", UpdatedAt: now.UnixMilli(), HeartbeatMs: 30000, Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseTool}}}
+	stopped := host("stopped")
+	stopped.HostStopped = true
+	view := buildRailView([]railInput{
+		{Session: host("idle")},
+		{Session: host("busy"), Snapshot: working},
+		{Session: stopped},
+		{Session: railSession("terminal", "/q", now, time.Time{})},
+	}, nil, nil, now)
+	if view.CountSleep != 1 {
+		t.Errorf("CountSleep = %d, want 1 (only the idle hosted row)", view.CountSleep)
+	}
+}
+
 // TestRailMarkupRevive pins an ended row's revive entry: a button after
 // the row's link (never inside it) carrying its move, worded "Take over" or
 // "Reopen"; a blocked takeover shown but not operable, its reason its

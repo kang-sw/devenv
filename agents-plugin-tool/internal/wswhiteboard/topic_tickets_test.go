@@ -194,8 +194,8 @@ func TestTopicTicketIcon(t *testing.T) {
 
 	glow := regexp.MustCompile(`<section class="topic[^"]*\blive\b`)
 	// The icon block closes, then the lead closes, then the bar's own
-	// elements follow (state badge, time, chips, or the note button).
-	tail := regexp.MustCompile(`<span class="dw wbtk">.*?</span></span></span></span>(?:<span class="topic-state dw">|<time class="tago"|<span class="chip|<button)`)
+	// elements follow (time, chips, or the note button).
+	tail := regexp.MustCompile(`<span class="dw wbtk">.*?</span></span></span></span>(?:<time class="tago"|<span class="chip|<button)`)
 	type row struct{ stem, status, group, text string }
 	check := func(t *testing.T, page string, rows []row, body bool) {
 		t.Helper()
@@ -284,10 +284,15 @@ func TestTopicTicketIcon(t *testing.T) {
 	topic := TopicView{Name: "work", Label: "Work", Anchor: "topic-work", UpdatedAt: "2026-11-15T00:00:00Z", UpdatedClock: "00:00", State: &TopicState{Value: StateWaiting}, Dependencies: []DependencyView{{Token: "owner", Label: "owner"}}, Tickets: want[:1]}
 	for _, layout := range layouts() {
 		for _, out := range stateViewOutputs(t, View{Layout: layout, ReplyID: "r", Topics: []TopicView{topic}}) {
-			bar := out[strings.Index(out, `<span class="tlead">`):]
-			clock, icon := strings.Index(bar, `href="#i-clock"`), strings.Index(bar, `<span class="dw wbtk">`)
-			state, tago := strings.Index(bar, `<span class="topic-state dw">`), strings.Index(bar, `<time class="tago"`)
-			if clock < 0 || icon < clock || strings.Count(bar[:icon], `<span class="dw">`) != 1 || state < icon || tago < state {
+			bar := out[strings.Index(out, `<div class="tbar">`):]
+			state, lead := strings.Index(bar, `<span class="topic-state dw">`), strings.Index(bar, `<span class="tlead">`)
+			lead2 := bar[lead:]
+			clock, icon := strings.Index(lead2, `href="#i-clock"`), strings.Index(lead2, `<span class="dw wbtk">`)
+			tago := strings.Index(lead2, `<time class="tago"`)
+			if state != len(`<div class="tbar">`) || lead < state {
+				t.Errorf("state badge is not the bar's first child: %.600s", bar)
+			}
+			if clock < 0 || icon < clock || strings.Count(lead2[:icon], `<span class="dw">`) != 1 || tago < icon {
 				t.Errorf("ticket icon not right after the waiting clock: %.600s", bar)
 			}
 		}
