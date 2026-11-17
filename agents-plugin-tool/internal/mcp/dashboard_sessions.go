@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsnote"
 	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -325,6 +326,11 @@ func (s *Server) dashboardReconnect() {
 // off, the session's registration is removed. force re-resolves the key at
 // once (after a config.tune).
 func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
+	if s.notes != nil {
+		if _, bound := s.noteBindings.LoadOrStore(sessionKey, struct{}{}); !bound {
+			s.notes.Bind(keyReplyID(sessionKey), root, s.configOptions(), s.stateOptions())
+		}
+	}
 	if !s.dashboardDeclared() {
 		return // no dashboard manifest loaded: the dashboard is off
 	}
@@ -764,6 +770,8 @@ func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
 // never reaches a page. Its reads never migrate a legacy record.
 type DashboardSessionSource struct {
 	store *sessionStore
+	// Notes is shared with every daemon-hosted MCP/CLI writer.
+	Notes *wsnote.Cache
 	// stateDir resolves the daemon state directory; nil uses
 	// wsdashboard.Dir("").
 	stateDir func() (string, error)
@@ -897,7 +905,7 @@ func (src *DashboardSessionSource) ClearLiveSnapshot(stateDir, replyID string) {
 
 // NewDashboardSessionSource returns a source over this machine's key store.
 func NewDashboardSessionSource() *DashboardSessionSource {
-	return &DashboardSessionSource{store: newSessionStore()}
+	return &DashboardSessionSource{store: newSessionStore(), Notes: wsnote.NewCache()}
 }
 
 // dashboardRescanAfter bounds how stale the reply-id map may be before a

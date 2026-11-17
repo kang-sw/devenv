@@ -97,8 +97,15 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	if !strings.Contains(static, wswhiteboard.StaticCountChips(string(page.Board.Board))) {
 		t.Errorf("the static page does not hold the served board:\n%.600s", page.Board.Board)
 	}
-	if !strings.Contains(static, string(page.Board.Panels)) {
-		t.Errorf("the static page does not hold the served panels:\n%.600s", page.Board.Panels)
+	// The served drawer keeps an empty ticket card for the idea demand
+	// control; the standalone file still omits empty ticket panels.
+	servedPanels := string(page.Board.Panels)
+	emptyTickets := panelHTML(servedPanels, "tickets")
+	if emptyTickets == "" {
+		t.Fatal("served page lacks the idea-only ticket entry point")
+	}
+	if !strings.Contains(static, strings.Replace(servedPanels, emptyTickets, "", 1)) {
+		t.Errorf("the static page does not hold the other served panels:\n%.600s", page.Board.Panels)
 	}
 
 	// File targets and ticket rows are action links under the served rule.

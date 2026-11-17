@@ -113,7 +113,7 @@ func linkTexts(links []panelLink) []string {
 }
 
 // TestWhiteboardTicketPanel pins the ticket panel: the full page lists every
-// ready/ ticket and the latest ten todo/ tickets, never idea/; the embed lists
+// ready/ and todo/ ticket, never idea/; the embed lists
 // ready/ only; and every link resolves from where its page is written (the
 // whiteboard folder, an embed_dir inside the repository, or one outside it,
 // where it is a file: URL).
@@ -133,7 +133,7 @@ func TestWhiteboardTicketPanel(t *testing.T) {
 		t.Fatalf("full page has no ticket panel")
 	}
 	links := panelLinks(full)
-	want := []string{"261020-bug-ready-b", "Ready A", "Todo 11", "Todo 11 bug", "Todo 10", "Todo 09", "Todo 08", "Todo 07", "Todo 06", "Todo 05", "Todo 04", "Todo 03"}
+	want := []string{"261020-bug-ready-b", "Ready A", "Todo 11", "Todo 11 bug", "Todo 10", "Todo 09", "Todo 08", "Todo 07", "Todo 06", "Todo 05", "Todo 04", "Todo 03", "Todo 02", "Todo 01"}
 	if got := linkTexts(links); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("full ticket rows = %q, want %q", got, want)
 	}
@@ -142,7 +142,7 @@ func TestWhiteboardTicketPanel(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<span class="lname">ready</span><span class="chip">2</span>`,
-		`<span class="lname">todo</span><span class="chip">10</span><span class="lnote">latest 10 of 12</span>`,
+		`<span class="lname">todo</span><span class="chip">12</span>`,
 		`<span class="chip cat bug">bug</span>`,
 		`<span class="csub" title="261101-feat-ready-a">261101-feat-ready-a</span>`,
 	} {

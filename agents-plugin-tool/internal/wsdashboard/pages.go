@@ -1327,6 +1327,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
 		d.handleInboxWrite(w, r, replyID, sub)
 		return
+	} else if sub == "notes" {
+		d.handleNotes(w, r, replyID)
+		return
 	} else if sub == "open" {
 		d.handleSystemOpen(w, r, replyID)
 		return
@@ -1422,6 +1425,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleClosedTopics(w, r, replyID)
 	case sub == "topic":
 		d.handleTopicHistory(w, r, replyID)
+	case sub == "tickets/idea":
+		d.handleTicketIdeas(w, r, replyID)
 	case sub == "worktrees":
 		d.handleWorktrees(w, r, replyID)
 	case sub == "git/status":
