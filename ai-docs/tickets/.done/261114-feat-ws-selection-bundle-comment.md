@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1ba1f8224ef30ee9
 sage-review-completeness-reviewed: 1ba1f8224ef30ee9
+completed: 2026-11-17
 ---
 
 # Selection bundles with one associated comment
@@ -164,3 +165,8 @@ Depends on Phases 1–3. Complete focused regression across parser/transport, co
 Verification: focused Go and JavaScript checks plus full `wsi18n`, covering single/cross-entry/multiple pushes, selection-owned images, legacy transcripts, no loose memo, correct user/source distinction, and session/draft/send/independent-queue/cancel/resend association. Reuse the landed strict parser rather than creating another grammar. The dated queue-model clarification supersedes historical server merge/remap assumptions. Preserve exact source/served pins, commands, output, limitations and process quiescence, with isolated fixtures. Retain route-allocated lite review for logic/state risk under MAIN's 2026-11-15 07:41:03Z correction; do not add screenshot-proof or visual/browser matrices under this grant. After eventual develop integration, mail MAIN the merge hash immediately; MAIN alone owns subsequent daemon replacement, swap smoke and profiling under the corrected (778) directive.
 
 Fold the two related cardinality cases into these focused regressions without claiming a shared diagnosed cause. Pin the exact selected range, copied excerpts and ordered immutable entry IDs. Record distinct before-push, initial-push and repeated-action counts; one push creates one group with exactly one comment, including an empty comment, while repeat actions without a new push add nothing. Assert per-push source/comment/image ownership through session, draft, send and history transitions. The older expected-five/actual-six report crosses the following Plan heading; the newer supplied package is inconsistent and fails its initial-count assertion before its repeat assertion. Preserve those evidence limitations, do not silently change five to six, and do not close either idea or C670 solely because this successor adds tests.
+
+
+## Resolution (2026-11-17)
+
+Owner closed the ticket as done on 2026-11-17: selection bundles are in daily use and work as intended. Only Phase 1 (grouped parser and transport, d070ffd09) carries a Result. Phases 2-4 have no Result; the shipped whiteboard playbook already documents the wb:selection/wb:comment form, so the Phase 3 goal is met in practice. The Phase 4 full-lifecycle and mixed-version compatibility verification was not run as a recorded pass.

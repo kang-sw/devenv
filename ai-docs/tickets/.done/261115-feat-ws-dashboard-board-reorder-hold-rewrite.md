@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 816c23434fdfae98
 sage-review-completeness-reviewed: 816c23434fdfae98
+completed: 2026-11-17
 ---
 
 # Dashboard board: hold what the user reads when the server reorders it (fresh re-implementation)
@@ -491,7 +492,7 @@ Verification from the repository root:
   fixture server requires a Go-built test. Owner prohibits Go, test binaries and
   launcher execution on this PC. No daemon, merge or push; no dogfood surprise.
 
-#### Edition (arrow visibility) - 2026-11-16
+#### Edition (cbf0bf9e1) - 2026-11-16
 
 Owner (1300): the top capsule's up-arrow may disappear when there is no pending
 board update and the board is already at the top. `wswhiteboard/assets/pill.js`
@@ -526,3 +527,8 @@ Verification: node regression delivering ResizeObserver callbacks in native shap
 `(entries, observer)`; headless `keep` cancellation case on adapter and document scrollers, recording
 setter stacks and write counts (the branch failure: user scroll then 4025 -> 4004, script writes 8 -> 9);
 no write during continuous scrolling; WebKit not run unless stated.
+
+
+## Resolution (2026-11-17)
+
+Owner closed the ticket as done on 2026-11-17, judging the landed Phase 0-1 behavior (top-center "Board updated · N" badge as the single pending/apply surface, with its editions) sufficient. Phases 2 (rise hold gaps), 3 (closing hold) and 4 (momentum guard, one-writer audit, matrix) were not implemented and have no Result; reopen them as a new ticket if a held card is seen to move.
