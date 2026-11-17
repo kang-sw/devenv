@@ -404,6 +404,7 @@
       if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
       if (live && !tabShown("board")) setTab("board");
     }
+    var waited = false;
     function entryPick() {
       if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(entryPick)) return;
       // Overview releases held board swaps before after callbacks; look up
@@ -416,6 +417,10 @@
         prepared = true;
         prepare(owner);
       });
+      // An entry in history the page has not fetched yet: pick again once
+      // its topic arrives.
+      var waiting = !entry && !waited && window.wbHistory.loading && window.wbHistory.loading(row.entry);
+      if (waiting) { waited = true; waiting.then(entryPick); return; }
       if (!entry) { palettePick({ kind: "board-topic", topic: row.topic }, o); return; }
       // History owns disclosure, flash and viewport landing. In particular,
       // scrollIntoView would scroll its clipped box and break bottom anchoring.

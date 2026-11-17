@@ -279,6 +279,10 @@
     var isTopic = id.indexOf("topic-") === 0;
     var target = null, unfoldTopic = window.WsCards && window.WsCards.unfoldTopic;
     if (!isTopic && window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
+    // A target in history the page has not fetched yet jumps once its topic
+    // arrives (a second miss starts no further wait: its fetch fills nothing).
+    var waiting = !target && !isTopic && window.wbHistory && window.wbHistory.loading && window.wbHistory.loading(id);
+    if (waiting) { waiting.then(function (ok) { if (ok) boardJump(id); }); return true; }
     if (!target) target = $(id);
     if (!target || target.id !== id || !inBoard(target)) return;
     if (isTopic && (target.tagName !== "SECTION" || !target.hasAttribute("data-topic"))) return;

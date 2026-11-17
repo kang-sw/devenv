@@ -205,6 +205,7 @@
   }
   function named(list, attr, name) { return Array.from(list).filter(function (n) { return n.getAttribute(attr) === name; }); }
   function fillTopic(section, full) {
+    var filled = 0;
     var lazyGaps = Array.from(section.querySelectorAll('.history-gap[data-lazy]')), fullGaps = Array.from(full.querySelectorAll('.history-gap'));
     var same = lazyGaps.length === fullGaps.length && lazyGaps.every(function (g, i) {
       return ['data-count', 'data-from', 'data-to'].every(function (a) { return g.getAttribute(a) === fullGaps[i].getAttribute(a); });
@@ -213,6 +214,7 @@
       var held = payload(g), rows = payload(fullGaps[i]);
       while (rows.firstChild) held.appendChild(rows.firstChild);
       g.removeAttribute('data-lazy');
+      filled++;
     });
     var entries = Array.from(full.querySelectorAll('.wb-entry[data-entry]'));
     section.querySelectorAll('.entry-body[data-lazy]').forEach(function (body) {
@@ -221,7 +223,9 @@
       if (!src || lazy(src)) return;
       while (src.firstChild) body.appendChild(src.firstChild);
       body.removeAttribute('data-lazy');
+      filled++;
     });
+    return filled;
   }
   function hydrateWith(root, topics) {
     var filled = 0;
@@ -235,9 +239,10 @@
       if (root.matches && root.matches('section.topic') && root.getAttribute('data-topic') === t.name) sections.unshift(root);
       sections.forEach(function (section) {
         if (!lazyIn(section)) return;
-        fillTopic(section, full);
+        var n = fillTopic(section, full);
+        if (!n) return;
         histories(section).forEach(admitted);
-        filled++;
+        filled += n;
       });
       named(root.querySelectorAll('template[data-history-topic][data-lazy]'), 'data-history-topic', t.name).forEach(function (deferred) {
         deferred.content.appendChild(document.importNode(full, true));
@@ -252,6 +257,18 @@
     return fetchTopics('name=' + encodeURIComponent(section.getAttribute('data-topic') || '')).then(function (topics) {
       return section.isConnected === false ? 0 : hydrateWith(section, topics);
     });
+  }
+  // targets holds the lazy loadTarget misses in flight by id. loading(id),
+  // asked right after loadTarget returned null, is the promise of that load
+  // (true once the target's topic arrived, null otherwise) and hands the
+  // landing to the caller, which then runs its own jump again; unasked, the
+  // load lands by itself.
+  var targets = new Map();
+  function loading(id) {
+    var t = targets.get(id);
+    if (!t) return null;
+    t.claimed = true;
+    return t.promise;
   }
   function hydrateTarget(root, id) {
     return fetchTopics('target=' + encodeURIComponent(id)).then(function (topics) {
@@ -269,11 +286,28 @@
     var query = Array.from(names).map(function (n) { return 'name=' + encodeURIComponent(n); }).join('&');
     return fetchTopics(query).then(function (topics) { return hydrateWith(root, topics); });
   }
+  // unfilled holds, by history key, the snapshot a rehydrate is still
+  // fetching for: a capture taken meanwhile (another update) merges it, so
+  // rows the reader had loaded survive a second swap before the fill.
+  var unfilled = new Map();
   function rehydrate(root, saved) {
     var scope = root || document;
+    unfilled.set(saved.key, saved);
     fetchTopics('name=' + encodeURIComponent(saved.key)).then(function (topics) {
-      if (scope.isConnected !== false && hydrateWith(scope, topics)) restore(scope, [saved]);
+      if (scope.isConnected === false) return;
+      if (unfilled.get(saved.key) === saved) unfilled.delete(saved.key);
+      // The first restore already ran this snapshot's pending loads.
+      if (hydrateWith(scope, topics)) restore(scope, [Object.assign({}, saved, { pending: [] })]);
     });
+  }
+  function carried(record, h) {
+    var prev = unfilled.get(record.key);
+    if (!prev || !h.querySelector('.history-gap[data-lazy]')) return record;
+    var union = function (a, b) { return Array.from(new Set((a || []).concat(b || []))); };
+    var folds = new Map(prev.folds || []);
+    (record.folds || []).forEach(function (f) { folds.set(f[0], f[1]); });
+    return Object.assign({}, record, { shown: record.shown || prev.shown, rows: union(prev.rows, record.rows), entries: union(prev.entries, record.entries),
+      loaded: union(prev.loaded, record.loaded), folds: Array.from(folds) });
   }
   // An earlier panel version's body arrives with its topic when its fold
   // opens, by the reader or a restored fold; its frame mounts on arrival
@@ -330,7 +364,15 @@
     if (!node) {
       // A target in history the page has not fetched yet resolves once its
       // topic arrives; this call returns null, as for an unknown target.
-      if (!fetched && lazyIn(root || document)) hydrateTarget(root || document, id).then(function (n) { if (n) loadTarget(root, id, beforeGeometry, true); });
+      if (!fetched && lazyIn(root || document) && !targets.has(id)) {
+        var t = {};
+        t.promise = hydrateTarget(root || document, id).then(function (n) {
+          targets.delete(id);
+          if (!n) return null;
+          return t.claimed ? true : loadTarget(root, id, beforeGeometry, true);
+        });
+        targets.set(id, t);
+      }
       return null;
     }
     openTarget(node);
@@ -358,7 +400,7 @@
   function capture(root) {
     return histories(root).map(function (h) {
       var seen = kit.seen(h.closest('.topic') || h);
-      return { key: h.getAttribute('data-history'), shown: !!(seen && seen.visible),
+      return carried({ key: h.getAttribute('data-history'), shown: !!(seen && seen.visible),
         panels: panelState ? panelState.capture(h) : [],
         rows: Array.from(h.querySelectorAll('.timeline-row')).map(function (n) { return n.getAttribute('data-row'); }),
         entries: Array.from(h.querySelectorAll('.wb-entry')).map(function (n) { return n.id; }),
@@ -369,7 +411,7 @@
           var before = p.fallback && payload(p.fallback).children, edge = before && before[before.length - 1];
           return { row: p.row && p.row.getAttribute('data-row'), next: next && next.getAttribute('data-row'), before: edge && edge.getAttribute('data-row'), direction: p.direction, height: p.height, loaded: !!p.loaded };
         }),
-        folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }) };
+        folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }) }, h);
     });
   }
   // Restore membership before a host's DOM morph, without binding, mounting
@@ -1208,7 +1250,7 @@
   }
   var kit = viewKit(window);
   var panelState = panelStateKit(window);
-  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget, hydrateAll: hydrateAll,
+  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget, loading: loading, hydrateAll: hydrateAll,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
     watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, pinning: kit.pinning, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot, rendered: kit.rendered };
