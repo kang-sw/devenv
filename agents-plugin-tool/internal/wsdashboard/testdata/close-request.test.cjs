@@ -44,7 +44,7 @@ Object.assign(context, {
   setTimeout: (f, ms) => setTimeout(f, ms).unref(), clearTimeout, child: (n, cls) => n.children.find(c => c.classList.contains(cls)) || null,
   countTopics: noop, chipList: () => [], topicNotes: () => [], queueDraft: () => context.draftSaves++,
   sendText: () => ctext.value, followConvo: noop, boardFlushViewed: noop, clearTrash: noop, clearMentions: noop,
-  grow: noop, renderImgs: noop, closeTopicNotes: noop, clearDraft: noop,
+  grow: noop, renderImgs: noop, closeTopicNotes: noop, clearDraft: noop, saveDraft: noop,
   noteWarn: s => context.warns.push(s), post: (route, body, done) => { context.posted.push({ route, body }); context.done = done; },
   inBoard: n => { for (; n; n = n.parentNode) if (n === board || n === pins) return true; return false; },
   syncChips: () => context.renderChips(),

@@ -123,6 +123,49 @@ test('left single click opens pane across board and pin column; durable intent c
   assert.deepEqual(events, ['close', ['card', 'a.txt', { ...options, keep: true }]]);
   assert.equal(pane.current(), null); assert.equal(root.attrs['data-file-preview'], undefined);
 });
+test('linked file cards reveal the board instead of remaining behind explorer preview A', async () => {
+  const { context: c, pane, root, events } = fixture({ constructPane: true });
+  const cards = [], kinds = {};
+  c.doc.dispatchEvent = () => {};
+  c.Event = function () {};
+  let boardTab = false;
+  c.tabShown = () => boardTab;
+  c.setTab = tab => { assert.equal(tab, 'board'); boardTab = true; };
+  // Use the exact hook passed to the production card framework.
+  const mount = block('    window.WsCards.mount(cardBoard,', '    if (worktree) {');
+  const reveal = mount.match(/reveal: (function \(\) \{[\s\S]*?\}),\n      column:/);
+  assert.ok(reveal);
+  const revealBoard = vm.runInContext('(' + reveal[1] + ')', c);
+  Object.assign(c.window.WsCards, {
+    register(name, kind) { kinds[name] = kind; }, list: () => cards, relayout() {},
+    open(kind, data) {
+      const card = { data, el: c.doc.createElement('section'), body: c.doc.createElement('div'),
+        fileState: {}, title() {}, actions() {}, paint() {}, save() {}, bump() {}, fold() {},
+        show() { revealBoard(); } };
+      cards.push(card); kinds[kind].open(card); return card;
+    }
+  });
+  vm.runInContext(readAssetSource('wsdashboard', 'preview.js'), c);
+  for (const options of [{ line: 12 }, { out: true }, { keep: true }]) {
+    c.previewLeftFile('A.txt', { answer: { kind: 'text', text: 'explorer A' } }); await settle();
+    assert.equal(root.hasAttribute('data-file-preview'), true);
+    assert.equal(pane.current().path, 'A.txt');
+    const card = c.window.WsPreview.open('B.md', { ...options, answer: { kind: 'markdown', html: '<p>linked B</p>' } });
+    await settle();
+    assert.equal(root.hasAttribute('data-file-preview'), false, 'card B must not be masked by A');
+    assert.equal(pane.current(), null);
+    assert.equal(pane.el.hidden, true);
+    assert.equal(boardTab, true);
+    assert.equal(card.data.path, 'B.md');
+    assert.equal(card.el.getAttribute('data-preview-kind'), 'markdown');
+    assert.equal(events.at(-1), 'cancel-preview', 'retire pending explorer intent too');
+  }
+  assert.equal(cards.length, 2, 'outside link remains distinct from the root-relative card');
+  assert.equal(cards.find(card => !card.data.out).preview, false, 'keep opens a durable root-relative card');
+  assert.equal(cards.find(card => card.data.out).preview, true, 'outside link keeps its preview slot');
+  revealBoard(); // Already closed is harmless, including when the board tab was already active.
+  assert.equal(events.filter(e => e === 'cancel-preview').length, 3);
+});
 test('narrow left clicks retain board preview; absent pane is safe fallback', () => {
   for (const options of [{ layout: 'tabs' }, { layout: 'auto', width: 1099 }, { layout: 'split', width: 759 }]) {
     const { context: c, events } = fixture(options);

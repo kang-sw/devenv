@@ -49,7 +49,8 @@ type planUsageStore struct {
 	// Production always uses the fixed HTTPS origin below for both readers.
 	usageURL string
 	client   *http.Client
-	// File-system seams for the history memo; nil means os.Stat/os.ReadFile.
+	// File-system seams for the history memo and detection reads; nil means
+	// os.Stat/os.ReadFile.
 	statFile func(string) (os.FileInfo, error)
 	readFile func(string) ([]byte, error)
 	// Write seam for both usage files; nil means writePrivateFile.
@@ -217,6 +218,8 @@ func (s *planUsageStore) configHome(key, fallback string) string {
 // usage request detects, so the result is memoized by the three files' stats
 // (path, size, mtime): an unchanged set costs three stats and no reads. A
 // rewrite keeping both size and mtime goes unnoticed until the next change.
+// Stat-confirmed absence is cacheable; a read failure is not, so transient
+// credential access failures remain retryable even without metadata changes.
 func (s *planUsageStore) detect() (claudePlan string, codexLogin, piLogin bool) {
 	paths := [3]string{
 		filepath.Join(s.configHome("CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json"),
@@ -243,25 +246,40 @@ func (s *planUsageStore) detect() (claudePlan string, codexLogin, piLogin bool) 
 	if cacheable && m.ok && m.stats == stats {
 		return m.plan, m.codex, m.pi
 	}
+	readJSON := func(index int, out any) bool {
+		if stats[index].missing {
+			return false
+		}
+		read := s.readFile
+		if read == nil {
+			read = os.ReadFile
+		}
+		raw, err := read(paths[index])
+		if err != nil {
+			cacheable = false
+			return false
+		}
+		return json.Unmarshal(raw, out) == nil
+	}
 	var claude struct {
 		OAuth struct {
 			Plan string `json:"subscriptionType"`
 		} `json:"claudeAiOauth"`
 	}
-	if readUsageJSON(paths[0], &claude) {
+	if readJSON(0, &claude) {
 		claudePlan = claude.OAuth.Plan
 	}
 	var codex struct {
 		Mode   string    `json:"auth_mode"`
 		Tokens *struct{} `json:"tokens"`
 	}
-	if readUsageJSON(paths[1], &codex) {
+	if readJSON(1, &codex) {
 		codexLogin = codex.Mode == "chatgpt" || (codex.Mode == "" && codex.Tokens != nil)
 	}
 	var pi struct {
 		Codex *struct{} `json:"openai-codex"`
 	}
-	if readUsageJSON(paths[2], &pi) {
+	if readJSON(2, &pi) {
 		piLogin = pi.Codex != nil
 	}
 	// Stat precedes read, so a replace in between memoizes newer content under

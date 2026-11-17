@@ -377,11 +377,34 @@ test('history composes into the single coalesced viewer request', async () => {
   assert.equal(env.calls.length, 1); // mount request is still pending
   assert.equal(env.calls[0].url, '/rail/usage?history=1');
   await flush();
-  pop.open(); pop.open();
-  assert.equal(env.calls.length, 2);
+  assert.equal(env.calls.length, 2); // the open queues one forced request after the poll
   assert.equal(env.calls[1].url, '/rail/usage?history=1&refresh=1');
   assert.equal(env.calls[1].options.cache, 'no-store');
+  pop.open(); pop.open();
+  assert.equal(env.calls.length, 3); // repeated opens join this forced request
   await flush();
+  assert.equal(env.calls.length, 3);
+});
+
+test('opening during an ordinary pending request queues one forced refresh and its follow-ups', async () => {
+  const env = environment();
+  let finish;
+  env.window.fetch = (url, options) => {
+    env.calls.push({ url, options });
+    return new Promise(resolve => { finish = () => resolve({ ok: true, json: () => Promise.resolve({ entries: [] }) }); });
+  };
+  const mounted = env.window.WsUsage.mount(env.doc, env.rail);
+  const pop = mounted.makePopover(() => {}, () => {});
+  pop.open(); pop.open();
+  assert.equal(env.calls.length, 1);
+  finish(); await flush();
+  assert.equal(env.calls.length, 2);
+  assert.equal(env.calls[1].url, '/rail/usage?history=1&refresh=1');
+  assert.equal(env.calls[1].options.headers['X-WS-Usage-Refresh'], '1');
+  pop.open(); // already-forced request must not queue another probe
+  finish(); await flush();
+  assert.equal(env.calls.length, 2);
+  assert.deepEqual(env.timers.filter(t => t.live).map(t => t.ms), [2000, 11000]);
 });
 
 test('a forced refresh refetches while the popover is open, so the background probe result shows', async () => {
