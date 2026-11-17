@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -358,17 +359,17 @@ func TestWhiteboardFolderChangeInvalidatesDashboardWithoutSeqChange(t *testing.T
 	if boardRenders(src) != beforeRenders {
 		t.Fatal("unchanged authoritative inputs did not reuse the board memo")
 	}
-	watched := map[string]bool{}
+	// Every commit replaces both roots, so the board folder is stamped by
+	// them alone, never by a walk over its topic files.
+	var watched []string
 	for _, path := range first.Watch {
 		rel, err := filepath.Rel(f.pageDir(), path)
-		if err == nil {
-			watched[filepath.ToSlash(rel)] = true
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			watched = append(watched, filepath.ToSlash(rel))
 		}
 	}
-	for rel := range whiteboardTreeForTest(t, f.pageDir()) {
-		if (strings.HasSuffix(rel, ".json") || strings.HasSuffix(rel, ".jsonl")) && !watched[rel] {
-			t.Fatalf("dashboard is not watching authoritative file %s", rel)
-		}
+	if !slices.Equal(watched, []string{"meta.json", "committed.json"}) {
+		t.Fatalf("dashboard watches board files %v, want only the commit roots", watched)
 	}
 	// A separate folder writer changes authoritative content without touching
 	// the cached session parts or render sequence. Both fingerprint and memo
@@ -385,6 +386,17 @@ func TestWhiteboardFolderChangeInvalidatesDashboardWithoutSeqChange(t *testing.T
 	next := readPageOK(t, src, reg)
 	if next.Seq != first.Seq || !strings.Contains(string(next.Board.Board), "after-marker") || !strings.Contains(string(next.Board.Board), "before-marker") || boardRenders(src) != beforeRenders+1 {
 		t.Fatalf("equal-sequence folder change did not invalidate the dashboard memo: seq %d, renders %d", next.Seq, boardRenders(src))
+	}
+}
+
+// The board watch list comes from the folder path alone: a render lists no
+// directory and stats no topic file, whatever the folder holds (here nothing).
+func TestWhiteboardBoardWatchListsNoDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "never-created")
+	var got []string
+	watchWhiteboardFiles(dir, func(path string) { got = append(got, path) })
+	if want := []string{filepath.Join(dir, "meta.json"), filepath.Join(dir, "committed.json")}; !slices.Equal(got, want) {
+		t.Fatalf("watch list = %v, want %v", got, want)
 	}
 }
 

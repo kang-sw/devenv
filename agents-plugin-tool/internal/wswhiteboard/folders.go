@@ -229,6 +229,10 @@ func (f FolderStore) withLock(create bool, fn func() error) error {
 	return f.withGuard(create, f.guard, fn)
 }
 
+// folderLockAttempt is a test seam: it observes each withGuard that goes on to
+// MkdirAll and the flock, which the file I/O counters do not see.
+var folderLockAttempt = func(dir string) {}
+
 func (f FolderStore) withGuard(create bool, guard func() error, fn func() error) error {
 	if f.Dir == "" {
 		return fmt.Errorf("whiteboard folder: empty directory")
@@ -238,6 +242,7 @@ func (f FolderStore) withGuard(create bool, guard func() error, fn func() error)
 	if err := guard(); err != nil {
 		return err
 	}
+	folderLockAttempt(f.Dir)
 	if create {
 		if err := os.MkdirAll(f.Dir, 0o755); err != nil {
 			return err

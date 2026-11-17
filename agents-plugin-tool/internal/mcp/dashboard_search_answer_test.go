@@ -66,13 +66,18 @@ func TestDashboardSearchAnswerSnapshotRetainedHistory(t *testing.T) {
 	if err != nil || !strings.Contains(string(fresh), "later log") {
 		t.Fatalf("fresh board missing log: %s %v", fresh, err)
 	}
-	// The authoritative lock is respected, rather than reading raw folders
-	// around recovery or serving a stale cached board on a busy lock.
+	// A busy lock over unchanged roots serves the last committed board; a
+	// changed root waits for the lock, rather than reading raw folders around
+	// recovery or serving a board the roots no longer vouch for.
 	lock := flock.New(filepath.Join(whiteboardFolder(f.root, f.key).Dir, ".lock"))
 	if err := lock.Lock(); err != nil {
 		t.Fatal(err)
 	}
 	defer lock.Unlock()
+	if _, held, err := src.SearchAnswerSnapshot(reg); err != nil || string(held) != string(fresh) {
+		t.Fatalf("unchanged board under a busy lock: %v", err)
+	}
+	replaceBoardRootForTest(t, whiteboardFolder(f.root, f.key).Dir)
 	if _, _, err := src.SearchAnswerSnapshot(reg); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("snapshot bypassed folder lock: %v", err)
 	}

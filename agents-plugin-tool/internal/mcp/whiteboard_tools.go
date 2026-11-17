@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -590,15 +591,55 @@ func whiteboardStamp(seq int) string {
 }
 
 // whiteboardPublished reports whether pageDir already holds exactly this full
-// page and the stamp for seq. It compares against the files on disk, never a
-// remembered write, since another process may have published since.
+// page and the stamp for seq. It compares against the files on disk: the page
+// by a remembered hash while its stat identity is unchanged, since another
+// process that published since replaces the file and so moves that identity.
 func whiteboardPublished(pageDir, html string, seq int) bool {
-	page, err := os.ReadFile(filepath.Join(pageDir, "index.html"))
-	if err != nil || string(page) != html {
+	if !whiteboardPageMatches(filepath.Join(pageDir, "index.html"), html) {
 		return false
 	}
 	stamp, err := os.ReadFile(filepath.Join(pageDir, "index.stamp.js"))
 	return err == nil && string(stamp) == whiteboardStamp(seq)
+}
+
+// whiteboardPages remembers, per full page path, the stat and content hash of
+// the page this process last wrote or read back, so an unchanged refresh does
+// not read the multi-megabyte page again.
+var whiteboardPages sync.Map // path -> whiteboardPageMemo
+
+type whiteboardPageMemo struct {
+	info os.FileInfo
+	sum  [sha256.Size]byte
+}
+
+func whiteboardPageMatches(path, html string) bool {
+	info, err := wsstate.Stat(path)
+	if err != nil {
+		whiteboardPages.Delete(path)
+		return false
+	}
+	if v, ok := whiteboardPages.Load(path); ok {
+		if memo := v.(whiteboardPageMemo); wsstate.SameFileMetadata(memo.info, info) {
+			return int64(len(html)) == info.Size() && memo.sum == sha256.Sum256([]byte(html))
+		}
+	}
+	page, err := wsstate.ReadFileOnce(path)
+	if err != nil {
+		return false
+	}
+	// Remember only bytes the stats on both sides of the read vouch for.
+	if after, err := wsstate.Stat(path); err == nil && wsstate.SameFileMetadata(info, after) {
+		whiteboardPages.Store(path, whiteboardPageMemo{info: after, sum: sha256.Sum256(page)})
+	}
+	return string(page) == html
+}
+
+// rememberWhiteboardPage records a page this process just published. The
+// caller holds the board flock, so no other writer replaces it in between.
+func rememberWhiteboardPage(path, html string) {
+	if info, err := wsstate.Stat(path); err == nil {
+		whiteboardPages.Store(path, whiteboardPageMemo{info: info, sum: sha256.Sum256([]byte(html))})
+	}
 }
 
 // ensureWhiteboardMermaid writes the shared mermaid script into dir, before
@@ -654,6 +695,9 @@ func (r whiteboardRender) publish() (err error) {
 		}
 		if err := writeWhiteboardFile(file.path, []byte(file.text)); err != nil {
 			return fmt.Errorf("write %s: %w", file.label, err)
+		}
+		if file.label == "full page" {
+			rememberWhiteboardPage(file.path, file.text)
 		}
 	}
 	for _, path := range r.evicted {
@@ -754,12 +798,26 @@ func renameSharingViolation(err error) bool {
 // local exclude file in the common git dir, so every worktree is covered and
 // nothing is committed. A root outside git has nothing to exclude.
 func registerWhiteboardExclude(runner wsgit.Runner, root, dir string) error {
+	if common, ok := whiteboardCommonDirs.Load(root); ok {
+		// A removed or moved repository must not get a stray exclude file.
+		if _, err := wsstate.Stat(common.(string)); err == nil {
+			return registerPoolExclude(common.(string), root, dir)
+		}
+		whiteboardCommonDirs.Delete(root)
+	}
 	out, err := runner.RunGit(context.Background(), root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return nil
 	}
-	return registerPoolExclude(strings.TrimSpace(string(out)), root, dir)
+	common := strings.TrimSpace(string(out))
+	whiteboardCommonDirs.Store(root, common)
+	return registerPoolExclude(common, root, dir)
 }
+
+// whiteboardCommonDirs memoizes each root's git common dir, which a
+// repository keeps for its lifetime, so a render runs a stat instead of a git
+// subprocess. A root outside git is not remembered and is asked again.
+var whiteboardCommonDirs sync.Map // root -> common dir
 
 // maybeCollectWhiteboards deletes, at most once a day per whiteboard folder
 // and only when the folder exists, every whiteboard file whose reply id

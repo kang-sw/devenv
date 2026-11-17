@@ -9,12 +9,15 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-// FolderCache keeps read-only opens in process. Each hit still acquires the
-// writer's flock and checks only the root meta/committed file stamps and pending
-// presence. Every store commit replaces both roots before removing pending; root
-// metadata also catches the external board-takeover edit without a new generation.
-// A pending intent always misses, so recovery and schema guards run under the same
-// lock as an uncached Open. The zero value is ready for use.
+// FolderCache keeps read-only opens in process. A hit takes no flock and
+// creates nothing: it checks only pending absence and the root meta/committed
+// file stamps, then returns an immutable snapshot that was loaded under the
+// flock. Every store commit installs pending before it replaces any file and
+// replaces both roots before removing pending, so a hit racing a writer
+// returns the last committed state; root metadata also catches the external
+// board-takeover edit without a new generation. A pending intent or changed
+// root always misses, and a miss runs recovery and schema guards under the
+// same lock as an uncached Open. The zero value is ready for use.
 // Leaf-only edits bypass the commit protocol: callers making them must Forget
 // the cached board (or use an uncached Open); they cannot invalidate a root stamp.
 // No writer uses this cache. Opens share read-only backing data; each caller
@@ -29,9 +32,27 @@ type FolderCache struct {
 // remain uncached; commit root stamps preserve read-your-writes across callers.
 var SharedFolderCache FolderCache
 
+// mu guards read only; it is never held across a flock wait or file I/O, so
+// readers of a still-valid revision never queue behind a locked miss. miss
+// serializes the locked paths, so readers that all find the same stale
+// revision after a commit reload it once, not once each.
 type folderCacheSlot struct {
 	mu   sync.Mutex
 	read folderCachedRead
+	miss sync.Mutex
+}
+
+func (s *folderCacheSlot) load() folderCachedRead {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.read
+}
+
+// store runs only under miss, so it never replaces a newer reload.
+func (s *folderCacheSlot) store(read folderCachedRead) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.read = read
 }
 
 type folderCachedRead struct {
@@ -90,15 +111,15 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 
 // OpenRevision returns Open's state and a process-local read identity. A cache
 // hit shares its immutable read's revision; every miss or uncached nonnil result
-// receives a fresh revision. The state header and revision are captured together
-// under the cache slot lock, without additional filesystem probes.
+// receives a fresh revision. The state header and revision come from one slot
+// read, so they always belong together.
 func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64, error) {
 	return c.openRevision(f, legacy, nil)
 }
 
-// visit runs under the board lock, after the same root validation as reads.
-// Keeping slot -> board lock ordering lets Notify reuse decoded authority
-// without opening the board again or holding the cache map lock during I/O.
+// visit runs under the board lock, after the same root validation as reads,
+// so Notify can reuse decoded authority and commit without opening the board
+// again. Plain reads never take the lock on a hit.
 func (c *FolderCache) openRevision(f FolderStore, legacy *State, visit func(*State, *folderSession) error) (*State, uint64, error) {
 	uncached := func() (*State, uint64, error) {
 		if visit != nil {
@@ -130,18 +151,33 @@ func (c *FolderCache) openRevision(f FolderStore, legacy *State, visit func(*Sta
 		c.entries[f.Dir] = slot
 	}
 	c.mu.Unlock()
-	// A blocked board must not hold up reads of another session.
-	slot.mu.Lock()
-	defer slot.mu.Unlock()
 	stat := c.stat
 	if stat == nil {
 		stat = wsstate.Stat
 	}
+	entry := slot.load()
+	// The snapshot was loaded under the flock and is never reread here. If
+	// pending is absent and neither root moved, no commit finished replacing
+	// meta.json before its stat (installing pending precedes that, removing it
+	// follows both roots), so the snapshot is still the committed state; a
+	// later commit is ordered after this read.
+	if visit == nil && entry.unchanged(f.Dir, stat) {
+		return entry.state.sharedRead(), entry.revision, nil
+	}
+	slot.miss.Lock()
+	defer slot.miss.Unlock()
+	// Another miss may have reloaded the board while this one queued; an
+	// unchanged slot already failed validation, so skip its stats.
+	if queued := slot.load(); queued.revision != entry.revision {
+		entry = queued
+		if visit == nil && entry.unchanged(f.Dir, stat) {
+			return entry.state.sharedRead(), entry.revision, nil
+		}
+	}
 	if _, err := stat(filepath.Join(f.Dir, "meta.json")); err != nil {
-		slot.read = folderCachedRead{}
+		slot.store(folderCachedRead{})
 		return uncached()
 	}
-	entry := slot.read
 	var hit bool
 	guard := func() error {
 		hit = entry.unchanged(f.Dir, stat)
@@ -161,7 +197,7 @@ func (c *FolderCache) openRevision(f FolderStore, legacy *State, visit func(*Sta
 			}
 			return nil
 		}
-		slot.read = folderCachedRead{}
+		slot.store(folderCachedRead{})
 		// Capture before reading: an out-of-band edit during load must not
 		// be cached under the stamp of its later bytes. Pending replay changes
 		// this stamp and is cached only on a subsequent clean open.
@@ -174,7 +210,7 @@ func (c *FolderCache) openRevision(f FolderStore, legacy *State, visit func(*Sta
 			next := folderCachedRead{state: out, meta: meta, stamp: stamp, revision: revision}
 			if next.unchanged(f.Dir, stat) {
 				out.shared = true
-				slot.read = next
+				slot.store(next)
 				out = out.sharedRead()
 			}
 		}
@@ -184,7 +220,7 @@ func (c *FolderCache) openRevision(f FolderStore, legacy *State, visit func(*Sta
 		return err
 	})
 	if err != nil {
-		slot.read = folderCachedRead{}
+		slot.store(folderCachedRead{})
 	}
 	return out, revision, err
 }
