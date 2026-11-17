@@ -1,0 +1,7 @@
+>> {"id":1,"method":"model/list","params":{}}
+{"error":{"code":-32600,"message":"Not initialized"},"id":1}
+>> {"id":2,"method":"initialize","params":{"clientInfo":{"name":"ws-probe","title":null,"version":"0.0.0"},"capabilities":{"experimentalApi":false,"requestAttestation":false}}}
+{"id":2,"result":{"userAgent":"ws-probe/0.160.0 (Mac OS 26.6.2; arm64) unknown (ws-probe; 0.0.0)","codexHome":"/home/user/.codex","platformFamily":"unix","platformOs":"macos"}}
+>> {"method":"initialized"}
+>> {"id":3,"method":"initialize","params":{"clientInfo":{"name":"x","title":null,"version":"0"},"capabilities":{"experimentalApi":false,"requestAttestation":false}}}
+{"error":{"code":-32600,"message":"Already initialized"},"id":3}
