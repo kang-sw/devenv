@@ -532,6 +532,33 @@ func HarnessTiers(opts Options, harness string) (map[string]AgentTier, error) {
 	return tiers, nil
 }
 
+// ParseTierAliases reads an agent.tier_aliases value: whitespace-separated
+// name=<harness>.<tier> pairs. The result maps each lower-cased name to its
+// "<harness>.<tier>" target with the harness lower-cased and the tier folded
+// through NormalizedTier. A pair without "=", without a "." in its target,
+// naming an unknown tier, a name that itself contains ".", or a name that
+// is a tier spelling (a bare tier would shadow it) is an error.
+func ParseTierAliases(raw string) (map[string]string, error) {
+	aliases := map[string]string{}
+	for _, pair := range strings.Fields(raw) {
+		name, target, ok := strings.Cut(pair, "=")
+		name = strings.ToLower(strings.TrimSpace(name))
+		harness, tier, dotted := strings.Cut(strings.TrimSpace(target), ".")
+		harness = strings.ToLower(strings.TrimSpace(harness))
+		tier = NormalizedTier(tier)
+		switch {
+		case !ok || name == "" || strings.Contains(name, "."):
+			return nil, fmt.Errorf("%s: %q is not name=<harness>.<tier>", ItemAgentTierAliases, pair)
+		case NormalizedTier(name) != "":
+			return nil, fmt.Errorf("%s: alias %q is a tier name, which a bare tier would shadow; pick another name", ItemAgentTierAliases, name)
+		case !dotted || harness == "" || tier == "":
+			return nil, fmt.Errorf("%s: %q target must be <harness>.<tier> with tier small, medium, large or xlarge", ItemAgentTierAliases, pair)
+		}
+		aliases[name] = harness + "." + tier
+	}
+	return aliases, nil
+}
+
 func ModelAlias(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "small", "light":

@@ -18,6 +18,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 10051ec5d388ebe3
 sage-review-completeness-reviewed: 10051ec5d388ebe3
+completed: 2026-11-18
 ---
 
 # ws/agent.* tools with unified mailbox routing
@@ -566,6 +567,103 @@ tool of the loadout while workdir-write and full children may call them, and
 every child, read-only included, able to call `mailbox.send`; an
 `agent.spawn` child receiving a capability token; `pi.spawn` refusing past depth 4 with the updated error text.
 
+### Result (c307dd2f6) - 2026-11-18
+
+Commits ec81e84cf (runner core), 0c1889705 and 7f23e563a (wsagent tests),
+632cd9325, d991a20bd (config keys), d108b39d0 (read-only gate), e82eaeb90
+(agent.* tools), ac3660770 (refused-wake wiring), 689b38561, 30f04469d
+(lite-review fixes), c307dd2f6.
+
+Design record (the items Decision 1 left to Phase 1):
+
+- `agent.spawn` returns `{address, status}`; `address` is `id:<reply-id>`
+  and every agent.* control accepts it. `status` (and `agent.list`'s
+  `state`) is one of `running` (a turn runs), `starting` (first input waits
+  for the process), `idle` (process alive, no turn), `waiting` (asleep: no
+  process, no turn; includes a refused wake) and `closed`.
+- `worktree` is the path (absolute, or relative to the caller's working
+  directory) of an existing Git worktree root (a `.git` entry); the child's
+  root and cwd become it. Acquisition stays with the caller. At most one of
+  `cwd` / `worktree`, and of `system_prompt` / `system_prompt_path`.
+- `agent.interrupt` returns `{address, status, returned[]}` (the messages it
+  had not taken yet). `agent.list` entries carry `address, label, tier
+  (<harness>.<tier>), authority, state, last_report (status: first line),
+  model, effort, cwd, held, error, created_at`. `agent.tiers` returns
+  `{harness, native, ext, aliases, unavailable}`.
+- Worker role = a builtin `agent-worker-<backend>` profile exists (claude,
+  pi); a registered backend without one (a lead-only Codex or Antigravity
+  registration) has no spawnable tiers. Availability: the harness is
+  registered, installed (`supportBackendAvailability`) and, for Pi, passes
+  the daemon's Pi check.
+- Lifecycle: finished children no longer auto-close; they sleep on the
+  idle timer. Expiry runs on the conv heartbeat (no file reads;
+  `Record.LastActiveAt` rides the record writes send and settle already
+  make) and at daemon start; deletion closes the subtree deepest first and
+  removes the session directories. A refused wake keeps its input
+  (`kick` does not settle), marks the child asleep (`wakeRefused`: it does
+  not keep its parent awake, hold its parent's report, or count toward the
+  width cap) and `Runner.Deliver` tells the sender once per message
+  (`Options.WakeRefused` -> one system mail). `pi.send` goes through
+  `Deliver` for now; Phase 2's mailbox routing calls the same seam.
+- Read-only: the daemon sets `WS_MCP_PERMISSION_LEVEL` on every spawned
+  child's ws-mcp; `callTool` refuses `git.commit`, `tickets.create_empty`,
+  `tickets.acquire`, `tickets.release`, `tickets.close` and `tickets.move`
+  for `read-only`. Native tools stay advisory (Claude worker and Pi).
+- `agent-worker-*` profiles start only through agent.spawn: `Runner.Spawn`
+  refuses them without a parent and an authority, and the pi.spawn token
+  route refuses them by name.
+- `agent.tier_aliases` is editable through `config.tune` (validated by
+  `ParseTierAliases`, which also refuses an alias spelled like a tier). A
+  dashboard editor for it is not built here.
+
+Compatibility verdicts (released 0.50.5 = `main` 6bd0f51bf as the old
+binary):
+
+- `agent.tier_aliases`, `agent.child_waiting_days`: T0. Both are string
+  entries in the global config's `Overrides map[string]string`
+  (`main:agents-plugin-tool/internal/wsconfig/config.go:40`), which the old
+  binary decodes with a plain `json.Unmarshal` (`config.go:117-118`) and
+  never queries; its writer `updateConfigFile` (`config.go:750`) decodes the
+  whole Config, changes one key and writes the full map back, so the keys
+  survive its writes. Old `config.list` only prints them as raw override
+  rows.
+- `Record.SystemPrompt`, `Record.LastActiveAt` (new record members): T0.
+  The old binary keeps unknown top-level members across read-modify-write
+  (`main:agents-plugin-tool/internal/wsagent/record.go:152-159`
+  `UnmarshalJSON`, `:196` `MarshalJSON`, since 184452a15 in 0.50.0).
+- Child authority in `<SessionDir>/permission.json`: T0. The old binary
+  writes it only for leads and preserves unknown members when it does
+  (`main:.../wsagent/permission_store.go:112,142`); its worker path never
+  reads it (`main:.../wsagent/permission.go:119-122` returns early for
+  non-leads). `Record.Parent` is the existing persisted member.
+- Behavior on a downgrade (not a data verdict): an old daemon closes
+  finished open Pi children at start as before
+  (`main:.../wsagent/runner.go:297`); an `agent-worker-claude` child fails to
+  resolve its profile on the old binary and does not launch, changing no
+  data.
+
+Verification: `go test ./...` in `agents-plugin-tool/` on macOS. wsagent,
+wsconfig, cmd/ws-mcp and the agent/pi/permission/config tests of
+internal/mcp pass (wsagent covers the Phase 1 verification list in
+`agent_tools_test.go` and `child_sleep_test.go`; internal/mcp covers tool
+listing, the lead and token-forward paths, the read-only refusals with
+`mailbox.send` still allowed, and the config keys). Remaining failures are
+pre-existing: TestDashboardNotesUsesHostedCallerStoreIdentity,
+TestBoardStateFilterAsks, TestSearchPalette*,
+TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode, and
+TestLateReloadSignalsOnlyAChangedView (wstrackerhost; also fails alone at
+base 85ef24622). The read-only refusal is tested on the MCP server with the
+env set directly; the runner side asserts the env reaches the child's
+ws-mcp. No live hosted delegation was run.
+
+Open, for the lead: `pi.send` is the interim follow-up path and is gated by
+`dashboard.pi_spawn_enabled` and Pi availability, so a lead whose package
+turns that knob off cannot follow up a child until Phase 2 routes
+`mailbox.send`; an agent.spawn child cannot follow up its own children
+until then either (its loadout has no `pi.*`). `PiTurnReporter`'s mail still
+says "Reply with pi.send" (Phase 2). Accepted minors from the lite review
+are listed in 30f04469d's AI Context.
+
 ### Phase 2: Mailbox routing to daemon-owned addresses, steer delivery, `pi.*` hiding
 
 Depends on Phase 1, on `261117-feat-ws-mailbox-memory-first-store` Phase 2
@@ -591,6 +689,139 @@ and no write beyond the store's one ring append per send for daemon-owned
 addresses, `pi.*` absent from `tools/list` but still callable,
 with no shipped text referencing `pi.*`.
 
+### Result (b83e59c78) - 2026-11-18
+
+Commits fddd07e4d (runner routing, steer, relation), 768af2113 (`pi.*`
+hiding, follow-up text, playbook terms), de759639d (Pi guide and bridge
+text, regenerated bundle and payloads), a410737cb (manual), b83e59c78
+(lite-review fixes).
+
+Design record:
+
+- Routing. The runner watches the mailbox of every spawned child
+  (`Record.Parent` set), awake or asleep, as it watched a lead's
+  (`wsagent/runner.go` startConv). A child's address `id:<reply-id>` is
+  its key's reply-id queue, so `mailbox.send` needed no change.
+  `LeadMail.Drain` returns `ClaimedMail{Text, Sender}`. `Sender` is the
+  sender's reply-id: from a `ReplyTo`/`From` `id:` handle, or the owner of a
+  named address (`mcp/lead_mail.go` mailSenderReplyID).
+- Delivery (Decision 4). `steersMail` needs a running turn and a live
+  process: not replaying, not wrap-held, not closed or hidden. Where the
+  conversation has catalog caps they must not grade steer `unsupported`;
+  where it has none (Pi), the handle alone decides. A lead steers through
+  its steer control, a child through its report steerer. A child's steered
+  mail is recorded as a steered report, so its turn's report covers it
+  (Decision 5 unchanged). Anything else waits in `Record.Mail` for the
+  next turn. After one steer of a batch fails, the rest of the batch waits
+  too, which keeps the order.
+- Relation (Decisions 3 and 18). `Runner.mailRelation` returns `parent`
+  when the sender is the receiver's `Record.Parent`, `child` when the
+  sender's record names the receiver as parent, `peer` otherwise, and
+  nothing for system mail. The relation is delivered as a `[relation: ...]`
+  line opening the body. It is not a head suffix, so that an older
+  binary's parse keeps the sender (verdict below). `agent.list` shows no
+  relation: it lists only the caller's own children.
+- Wake and clock (Decisions 14 and 16). Held mail sets a child's
+  `LastActiveAt` and counts as input for awake/open-child accounting,
+  unless the wake is refused. `kick` wakes the child through Phase 1's
+  seam, so the width cap is not consulted. A refused wake keeps the mail
+  in `Record.Mail` across restarts and calls `WakeRefused` once per
+  distinct sender of each claim.
+- Store (Decision 2). There is no store of its own. A send is one line in
+  the memory-first store's restore ring.
+- `pi.*` (Decision 10). `filteredTools` skips them, and dispatch and the
+  per-call gate are unchanged. `piWorkerTool`, `piWorkerDescriptions` and
+  the `piListed` cache lost their only reader and are deleted.
+- Text moved to `agent.*`:
+  - `agent.spawn`'s answer and description send follow-ups through
+    `mailbox.send` to the address.
+  - Completion mail is labelled `agent:<id>` and opens "Reply with
+    mailbox.send(to: "id:<id>")".
+  - The report head reads `[subagent id:<id> ...]`.
+  - The playbook terms for an MCP-only Pi caller name `agent.spawn` (tier,
+    authority) and `mailbox.send`. They apply only when the caller lists
+    `agent.*` and is allowed `agent.spawn` and `mailbox.send`.
+  - In the Pi package: the lead guide, the compatibility section, the
+    tier advisory, the gateway descriptions, and the retirement
+    notices/errors.
+
+Compatibility verdicts against main 6bd0f51bf (0.50.5):
+
+- `pi.*` hiding: T0.
+  - Main lists the tools when `piListed` holds
+    (`main:agents-plugin-tool/internal/mcp/server_inventory.go:81-87`).
+    It dispatches a call whether or not the tool is listed
+    (`main:.../mcp/server_dispatch.go:1646-1647`), gated per call by
+    `piUnavailable` (`main:.../mcp/pi_tools.go:170`).
+  - This branch never lists them
+    (`agents-plugin-tool/internal/mcp/server_inventory.go:81`) and keeps
+    the same dispatch (`server_dispatch.go:1656-1657`) and call gate
+    (`pi_tools.go:159`). No data is written or read differently, so a call
+    by name answers as before.
+  - A client that lists the tools again after a daemon replacement no
+    longer shows `pi.*` to its model, and does show `agent.*`. This is the
+    (54)=b outcome: hidden now, handlers deleted next minor.
+- Relation: T0.
+  - `wsmailbox.Envelope` is unchanged
+    (`agents-plugin-tool/internal/wsmailbox/store.go:83`, field-for-field
+    `main:.../wsmailbox/store.go:90`). The relation exists only in claimed
+    text: text steered into a process, held in `Record.Mail`, or kept as a
+    steered report. `Record.Mail` and `Record.Steered` are the same
+    members on main (`main:.../wsagent/record.go:95,144`), and the old
+    binary delivers them verbatim.
+  - When an old binary Returns a held text, its `parseMailText`
+    (`main:.../mcp/lead_mail.go:235-267`) splits the head at the first
+    ":\n". It keeps `From` and `SentAt` and leaves the relation line in
+    `Content`, so it delivers what the new binary shows.
+  - The one display-only effect: on an upgrade after such a Return, the
+    line shows twice.
+
+Verification:
+
+- `go test ./...` in `agents-plugin-tool/` on macOS.
+  - Pass: `wsagent` (full package), `cmd/ws-mcp` (after updating
+    TestHostedCLIWorkerTokenRouting for hidden `pi.*`), and the
+    routing/pi/agent/playbook tests of `internal/mcp`.
+  - `internal/mcp` hit the 10-minute package timeout under the concurrent
+    full run, with TestTrackerUpdateWritesEveryEventCommand running at
+    11 s. Rerun alone with `-timeout 30m`, it fails only
+    TestDashboardNotesUsesHostedCallerStoreIdentity.
+  - Remaining failures are the known pre-existing ones:
+    TestDashboardNotesUsesHostedCallerStoreIdentity,
+    TestBoardStateFilterAsks, TestSearchPalette*,
+    TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode, and
+    TestLateReloadSignalsOnlyAChangedView.
+- Coverage of the verification list:
+  - `wsagent/mail_routing_test.go`: steer per relation; next-turn fallback
+    for a catalog-unsupported steer and for a missing handle; wake past the
+    width cap; refused wake across a restart with one notice per sender;
+    clock reset; relation per lineage.
+  - `mcp/agent_mail_routing_test.go`: one ring line and no other file per
+    send, no `mailbox.json` while running; a graceful restart with Sender,
+    relation, recv and sent history, and reply-id parity; a named sender.
+  - `mcp/lead_mail_test.go`: relation-line round trip.
+  - `mcp/pi_tools_test.go` and `pi_forward_test.go`: `pi.*` absent from
+    `tools/list` but callable.
+  - Pi `daemon-agent-compat.test.ts` and `execute-gateway.test.ts`: no
+    `pi.*` in the guide, the compatibility section, or the gateway
+    descriptions.
+- Pi package `npm test`: 2665 of 2688 pass. All 19 failures also fail at
+  base a36476ba0, where the same files fail 25 (integration flakes).
+- `agents-plugin-wsflow` unittest: OK. No live hosted delegation was run.
+
+Open, for the lead:
+
+- Phase 3 not started.
+- The `pi-worker` and `pi-mini-lead` profiles keep their `pi.*` ws_tools.
+  They are reached only through the hidden `pi.spawn`; such a child gets
+  its harness's generic playbook terms.
+- `callPiWithExploreFallback` stays for a `pi.spawn` call against a daemon
+  that still lists it.
+- Accepted minors: a body from an unresolved sender that starts with a
+  relation line reads as a label; a batch split by a failed steer leaves
+  the "N message(s)" head on the steered part only. Phase 1's carried
+  minors are unchanged.
+
 ### Phase 3: Native subagent removal in hosted Claude leads and `ws/agent.spawn` workers
 
 Launch hosted Claude leads and `ws/agent.spawn` Claude workers with `--disallowedTools
@@ -611,3 +842,148 @@ requested the removal; a recorded hosted-lead init stream and a recorded
 hosted-worker init stream, each showing the tools removed; a hosted lead
 delegating through `agent.spawn` end to end; `tracker-support-claude` still
 launching with its `Agent` tool.
+
+### Result (ee53a7e5e) - 2026-11-18
+
+Commits f3cdbb7b9 (launch removal, init shape, catalog grades), 6f4da285d
+(agent idioms for subagent-removed Claude callers), 557ec660e (recorded
+streams and fixture test), ee53a7e5e (lite-review fix).
+
+Design record:
+
+- Launch. The runner sets `StartSpec.RemoveSubagents`
+  (`wsagent/backend.go:77`) at every start from `RemovesSubagents(rec)`
+  (`wsagent/agent_tools.go:59`, which is `rec.Lead ||
+  isAgentWorkerProfile(rec.Profile)`), in both `startWorker` and
+  `startLead` (`wsagent/runner_process.go:117,277`). A wake or revive start
+  therefore carries it too.
+  - The Claude backend turns it into `--disallowedTools Agent,Task`
+    (`claudeRemovedTools`, `wsagent/claude.go:144`).
+  - On a lead's command line it goes after `--resume` and before the
+    plugin flags (`claude.go:132`). On a worker's it goes before the
+    trailing `--allowedTools` (`claude.go:205`).
+  - A Claude 2.1.326 probe showed the option is variadic and reads the
+    comma list as one value. It removes exactly the init's `Task` and no
+    other tool, and init `agents` still lists the agent types. Both names
+    are passed because the CLI's alias handling is undocumented.
+  - The two tests' flag lists now name `--disallowedTools`:
+    `TestClaudeLeadArgs` and `TestClaudeLeadPluginArgsModes`.
+- Scope (Decision 6). Every other profile keeps the tool: the tracker
+  support profile (whose only tool is `Agent`), search-answer,
+  `pi-worker`, and `pi-mini-lead`. Owner-created worker-profile sessions
+  do not exist in code yet (`261115-feat-ws-worker-profile-session-spawn`
+  is in `ready/`). They are not agent-worker profiles, so they will keep
+  the tool when they land. Non-Claude backends ignore the flag.
+- Init shape.
+  - `claudeInitShape` (`claude.go:314`) subtracts the requested removals
+    from the expected tool set. A removed name that the init still lists
+    demotes both `tool_removal` and `subagent_removal`.
+  - `checkClaudeInit` (`claude.go:366`) drops removed names from a
+    worker's allowed set. A leak then refuses the launch, even when the
+    profile lists `Agent`.
+- Catalog (catalog Decision 10). Lead `tool_removal` and
+  `subagent_removal` move from `unsupported` to `native`, both with values
+  `[Agent]` (`catalog.go:368-373`). The worker `subagent_removal` source
+  now names the agent.spawn disallow.
+- Playbook terms. This is a worker decision beyond the phase text; veto if
+  unwanted.
+  - The problem: after the removal, the claude row's spawn idiom
+    `Agent({...})` names a tool the launch no longer has. That holds for a
+    hosted lead, and has held for every agent.spawn Claude child since
+    Phase 1.
+  - The caller's daemon record is found through the key's reply-id and
+    must have an equal `WSKey`. When it is a Claude conversation with
+    `RemovesSubagents`, the caller now renders the agent.spawn /
+    mailbox.send row that MCP-only Pi callers already get
+    (`mcp/playbook_tools.go:152-164`).
+  - Its workflow manual also loads without the claude
+    native-spawn-binding overlay (`playbook_tools.go:1007-1014`); the base
+    binding is empty.
+  - Two kinds of Claude caller keep the claude row: a terminal or CLI
+    session, which has no record, and tracker support. So the CLI tier
+    renders exactly what it did before.
+  - The "Never use {{NativeToolScheme}}" steer stays with
+    `261117-feat-ws-hosted-prompt-assembly`.
+- Rejoin caveat. A rejoin builds no argv. A hosted lead started by a
+  pre-removal daemon and rejoined by this one therefore replays an init
+  that lists `Task`. The dashboard shows `tool_removal` and
+  `subagent_removal` demoted until that lead's next fresh start. This is
+  accurate, because the running process still has the tool.
+
+Compatibility verdict: T0.
+
+- Nothing persisted changes.
+  - `RemoveSubagents` lives on the in-memory `StartSpec` and is recomputed
+    at each start from the existing `Record.Lead` and `Record.Profile`
+    (`wsagent/record.go`, untouched).
+  - Capabilities stay in the in-memory `State.Capabilities`.
+  - No MCP tool, argument, hello, store or event shape changes. The
+    playbook change is render output only.
+- An older daemon running after this one builds no `--disallowedTools`
+  and renders the claude row. There is no new data for it to read.
+- This daemon rejoining a lead that an older daemon launched shows the
+  demotion above and changes no data.
+
+Verification:
+
+- `go test` in `agents-plugin-tool/` on macOS, at 557ec660e for every
+  package except `internal/mcp`, which was run alone at ee53a7e5e with
+  `-timeout 30m`.
+  - Every package passes except the known pre-existing failures:
+    TestBoardStateFilterAsks, TestSearchPalette*,
+    TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode,
+    TestLateReloadSignalsOnlyAChangedView, and
+    TestDashboardNotesUsesHostedCallerStoreIdentity.
+  - Phase 3 tests:
+    - `TestClaudeArgsAgentWorkerRemovesSubagents` and
+      `TestClaudeArgsBuiltinSupportProfile` (the support profile has no
+      `--disallowedTools`).
+    - `TestClaudeLeadArgs`, `TestClaudeLeadPluginArgsModes`,
+      `TestLeadSpawnRunsUnderAHolder`, `TestRemovesSubagentsScope`, and
+      `TestAgentSpawnChildStartsWithoutSubagents` (first and waking
+      start).
+    - `TestSupportConversationKeepsSubagents`,
+      `TestClaudeInitShapeSubtractsRemovedTools`, and
+      `TestClaudeCatalogValues`.
+    - `TestClaudeSubagentRemovedFixtures`, which also replays the lead
+      recording.
+    - The `internal/mcp` playbook switch tests in
+      `playbook_subagent_removed_test.go`. Two mutations each failed them:
+      dropping the record check, and keeping the claude overlay.
+- Live run on Claude Code 2.1.326, against an isolated daemon built from
+  this branch at 6f4da285d. It had scratch `WS_CACHE_HOME` and
+  `WS_CONFIG_HOME` and its own port. The shared daemon was not touched.
+  - Hosted lead (isolated plugins, sonnet):
+    - The argv carried `--disallowedTools Agent,Task`.
+    - The init listed 27 native tools and neither `Agent` nor `Task`.
+    - Capabilities showed lead `tool_removal` and `subagent_removal`
+      native `[Agent]`, with nothing demoted.
+    - Its `workflow_manual` rendered "Use a `ws/agent.spawn` subagent at
+      tier small with read-only authority when bounded evidence gathering
+      materially benefits from an independent read."
+  - End to end, run twice with two leads:
+    - The lead called `agent.spawn` (tier small, read-only).
+    - The `agent-worker-claude` child launched with `--tools
+      Bash,Read,Edit,Write,Glob,Grep`, `--disallowedTools Agent,Task` and
+      the ws allowlist. Its init listed those six native tools and the ws
+      tools, and it passed the worker init check.
+    - Its completion mail woke the lead, which answered with the child's
+      reply.
+  - `tracker-support-claude` launched with `--tools Agent --allowedTools
+    Agent` and no `--disallowedTools`; its init tools were `[Task]`.
+  - Recorded: `testdata/claude-lead-subagent-removed-2.1.326.jsonl` (both
+    lead turns) and `testdata/claude-worker-subagent-removed-2.1.326.jsonl`.
+    - Ids, paths, connector servers and user skills were sanitized.
+    - The lead's tool list was shortened.
+    - One assistant text, which the owner's language hook had steered into
+      Korean, was replaced with English.
+
+Open, for the lead:
+
+- Dogfood surprise, not investigated.
+  - In the live probe, the hosted lead had no ws session key in its
+    context, and no manual preload. Its first `agent.spawn` failed with
+    "session_key is required" until the prompt supplied the key.
+  - The probe ran the daemon under `env -i` with a minimal environment,
+    which may explain it. A lead under the real dashboard was not tried.
+- Phase 2's carried minors are unchanged; that code was not touched.

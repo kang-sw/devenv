@@ -88,6 +88,7 @@ const LIVE_TOOL_NAMES = [
   "tracker.query", "tracker.update", "whiteboard.query", "whiteboard.update",
   "wiki.query", "wiki.update",
   "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait",
+  "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers",
 ];
 const RETIRED_TOOL_NAMES = [
   "specs.query", "mental_models.list", "mental_models.query", "mental_models.status",

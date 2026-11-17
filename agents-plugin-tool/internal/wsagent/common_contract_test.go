@@ -80,15 +80,19 @@ func TestCommonContractLifecycle(t *testing.T) {
 			h.holders.out(holder, tc.start...)
 			h.send(id, "held-a")
 			h.send(id, "held-b")
-			h.mail.deliver(key, "From a@x: mail-a")
-			eventually(t, "two held messages and mail", func() bool { return h.state(id).Held == 3 })
-			h.mailSettled(id)
+			eventually(t, "two held messages", func() bool { return h.state(id).Held == 2 })
 			h.send(id, "held-c")
 			if got := tc.inputs(h, holder); !slices.Equal(got, []string{envelope("one"), envelope("two")}) {
 				t.Fatalf("held input reached a running turn: %q", got)
 			}
 
-			h.restart()
+			// Mail that waited while no daemon ran is claimed during the
+			// rejoin's replay, so it waits with the held messages (mail a
+			// live turn takes is steered into it instead).
+			h.runner.Close()
+			h.holders.restart()
+			h.mail.deliver(key, "From a@x: mail-a")
+			h.start()
 			eventually(t, "rejoin", func() bool {
 				st := h.state(id)
 				return st.Process && st.Status == StatusRunning && st.Held == 4

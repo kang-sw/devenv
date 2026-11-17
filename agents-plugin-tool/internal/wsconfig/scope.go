@@ -129,6 +129,18 @@ const (
 	// family is matched by its own longer prefix.
 	ItemAgentGitSearchRoots = "agent.git_search_roots"
 
+	// ItemAgentTierAliases maps user-chosen names to agent.spawn tiers:
+	// whitespace-separated name=<harness>.<tier> pairs, for example
+	// "mockup=pi.large quick=claude.small". Global-only: an alias is the
+	// user's own vocabulary across projects. Builtin default: empty.
+	ItemAgentTierAliases = "agent.tier_aliases"
+
+	// ItemAgentChildWaitingDays is how many days a spawned child agent may
+	// sit in the child-agent-waiting state (asleep, no turn) after its last
+	// activity before the daemon deletes it and its descendants. A positive
+	// integer; global-only. Builtin default: 15.
+	ItemAgentChildWaitingDays = "agent.child_waiting_days"
+
 	// ItemTicketAssigneeAware is the opt-in project gate for ticket assignee
 	// awareness. Values: "on" or "off" (builtin default: off). It is meant to be
 	// a shared, deterministic team decision, so a downstream project sets it in
@@ -198,6 +210,8 @@ func init() {
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)
 	RegisterGlobalOnly(ItemAgentGitSearchRoots)
+	RegisterGlobalOnly(ItemAgentTierAliases)
+	RegisterGlobalOnly(ItemAgentChildWaitingDays)
 	// sage_review* keys default to project scope: they are project-level opt-ins
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)

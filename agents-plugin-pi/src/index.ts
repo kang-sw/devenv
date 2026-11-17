@@ -3,7 +3,7 @@
  *
  * Native child management, explore, fork and question-thread entry points are
  * retired. Only ws-execute/ws-approve uses the live local engine, dashboard
- * projection and recovery; general delegation is daemon pi.*. The ticketed
+ * projection and recovery; general delegation is daemon agent.*. The ticketed
  * architecture notes below describe history, not the current public surface.
  *
  * Bridges ws-mcp (the harness-neutral MCP server backing the ws workflow —
@@ -812,7 +812,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     reasoningSummaryObserver = sessionSummary;
     applySessionStartOwnershipDiagnostics(sessionRole, ctx);
     if (sessionRole === "fork" || sessionRole === "explore") {
-      throw new Error("[ws Pi] native fork/explore execution is retired; session history is retained, not resumed or adopted by daemon pi.*");
+      throw new Error("[ws Pi] native fork/explore execution is retired; session history is retained, not resumed or adopted by daemon agent.*");
     }
     // 260905 Edition: hand the spawner this session's idleness accessor (the
     // same captured-ctx-per-session_start seam wsBlockBaseRef uses), so a

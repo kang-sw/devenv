@@ -31,7 +31,8 @@ import (
 //     the token, not the key, authorizes the token route below, and only
 //     for the holder's own children.
 //   - Route. POST /agents/by-token/<op> (spawn, list, send, stop,
-//     transcript, wait) with the token as a bearer credential, from this
+//     transcript, wait; agent.spawn, agent.interrupt, agent.list,
+//     agent.tiers) with the token as a bearer credential, from this
 //     machine only. A spawn records the holder as the child's parent
 //     (ParentConversation); its depth (the lead is 0) may not pass
 //     MaxSpawnDepth, and its tier may not pass the holder's own.
@@ -47,9 +48,9 @@ import (
 //     closes. A failed or interrupted turn is never held.
 //   - Close. Closing a conversation closes its open descendants first,
 //     deepest first. A process stop (idle, settings, the stop route) does
-//     not: a child's report resumes the stopped parent. A spawned Pi child
-//     closes on its own once its turn settled done, its report reached
-//     its parent, and nothing waits (closeWhenDone); Send reopens it.
+//     not: a child's report resumes the stopped parent. A finished child
+//     does not close: its process sleeps on its idle timer and the next
+//     message starts it again (agent_tools.go).
 
 // Env names the runner sets on the ws-mcp it attaches to a spawned
 // conversation that may spawn (children.go).
@@ -62,9 +63,9 @@ const (
 	EnvPiEndpoint = "WS_MCP_PI_ENDPOINT"
 )
 
-// MaxSpawnDepth caps the spawn tree: a lead is depth 0, a Pi worker it
-// spawns depth 1, and that worker's child depth 2, which spawns none.
-const MaxSpawnDepth = 2
+// MaxSpawnDepth caps the spawn tree: a lead is depth 0, a child it spawns
+// depth 1, and so on; a conversation at the cap spawns none.
+const MaxSpawnDepth = 4
 
 // PiTierHarness is the agents.tier harness bucket a Pi spawn's tier
 // resolves in, alone.
@@ -94,14 +95,15 @@ func (r *Runner) SetEndpoint(baseURL string) {
 }
 
 // mayHoldToken reports whether a conversation's process gets a capability
-// token: a spawned one (a recorded parent and tier) whose profile allows a
-// pi.* tool. A conversation opened through POST /agents has neither.
+// token: a spawned one (a recorded parent and tier) whose profile allows an
+// agent.* tool, or a pi.* tool while pi.spawn's profiles remain. A
+// conversation opened through POST /agents has neither.
 func mayHoldToken(rec Record, def Profile) bool {
 	if rec.Lead || rec.Parent == nil || rec.Tier == "" {
 		return false
 	}
 	for _, name := range def.WSTools {
-		if strings.HasPrefix(name, "pi.") {
+		if strings.HasPrefix(name, "agent.") || strings.HasPrefix(name, "pi.") {
 			return true
 		}
 	}
@@ -272,6 +274,9 @@ type ChildSpawn struct {
 func (r *Runner) spawnFor(caller *conv, req ChildSpawn) (State, error) {
 	const tool = "pi.spawn"
 	rec := caller.record()
+	if isAgentWorkerProfile(strings.TrimSpace(req.Profile)) {
+		return State{}, badRequest("%s: profile %q is agent.spawn's internal profile; spawn it with agent.spawn and an authority", tool, req.Profile)
+	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return State{}, badRequest("%s: prompt is required", tool)
 	}
@@ -280,7 +285,7 @@ func (r *Runner) spawnFor(caller *conv, req ChildSpawn) (State, error) {
 		return State{}, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("%s: this conversation's spawn chain cannot be traced to its lead, so its depth is unknown and it spawns no subagent", tool)}
 	}
 	if d+1 > MaxSpawnDepth {
-		return State{}, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("%s: the spawn depth cap is %d (lead -> Pi worker -> Pi subagent); this conversation is at depth %d, so it spawns no subagent: do the work itself", tool, MaxSpawnDepth, d)}
+		return State{}, depthRefusal(tool, d)
 	}
 	tier := wsconfig.ModelAlias(req.Tier)
 	if tier == "" {
@@ -424,6 +429,11 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 		writeAnswer(w, 0, nil, err)
 		return
 	}
+	if strings.HasPrefix(op, "agent.") {
+		// agent.* checks each harness it spawns on itself (spawnableHarness).
+		r.serveAgentToken(w, req, caller, op)
+		return
+	}
 	if check := r.opts.ChildCheck; check != nil {
 		if err := check(); err != nil {
 			writeAnswer(w, 0, nil, &requestError{status: http.StatusServiceUnavailable, msg: "pi." + op + ": " + err.Error()})
@@ -463,13 +473,12 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 			writeAnswer(w, 0, nil, badRequest("%s: message is required", tool))
 			return
 		}
-		st, err := r.Send(body.ID, body.Message)
+		st, err := r.Deliver(body.ID, Delivery{From: parent.ReplyID, Text: body.Message})
 		writeAnswer(w, http.StatusOK, st, err)
 	case "stop":
 		st, err := r.CloseConversation(body.ID)
 		if err == errClosed {
-			// A finished child closes on its own (closeWhenDone): a stop
-			// after that finds it as asked.
+			// A child already closed (a dashboard close) is as asked.
 			st, err = r.Get(body.ID)
 		}
 		writeAnswer(w, http.StatusOK, st, err)
@@ -552,11 +561,6 @@ func (r *Runner) deliver(id string) {
 			parent.takeReport(ReportText(TurnReport{Parent: *rec.Parent, Child: st, Result: rep.Result}))
 		}
 	})
-	if len(taken) > 0 {
-		// A step of the child's loop, which then finds it finished
-		// (closeWhenDone) now that its report is delivered.
-		child.do(func() {})
-	}
 }
 
 // deliverPending hands every open conversation's pending reports to its
@@ -778,7 +782,10 @@ func (c *conv) openChildOf(parent ParentRef) bool {
 	if c.closed || c.rec.Parent == nil || *c.rec.Parent != parent {
 		return false
 	}
-	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || len(c.rec.Queued) > 0 || c.holding || c.sends > max(c.settled.mark, c.voided)
+	// Input a refused wake keeps (wakeRefused) is asleep: it holds no
+	// report of the parent's.
+	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || c.holding ||
+		!c.wakeRefused && (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0 || c.sends > max(c.settled.mark, c.voided))
 }
 
 // releaseHeld reports the done turn held for the children (settleTurn)
@@ -814,9 +821,9 @@ func (r *Runner) descendants(id string) []string {
 	byParent := map[string][]string{}
 	for cid, c := range r.convs {
 		c.mu.Lock()
-		p, backend := c.rec.Parent, c.rec.Backend
+		p, backend, profile := c.rec.Parent, c.rec.Backend, c.rec.Profile
 		c.mu.Unlock()
-		if p != nil && (p.Kind == ParentConversation || p.Kind == ParentLead && backend == BackendPi) {
+		if p != nil && (p.Kind == ParentConversation || p.Kind == ParentLead && (backend == BackendPi || isAgentWorkerProfile(profile))) {
 			byParent[p.ReplyID] = append(byParent[p.ReplyID], cid)
 		}
 	}
@@ -901,10 +908,6 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 			})
 			if handed {
 				last.Message, last.Error, last.Delivered = "", "", true
-			} else {
-				// A step of the child's loop, which then finds it finished
-				// (closeWhenDone) now that its report is delivered.
-				c.do(func() {})
 			}
 		}
 		return last, true, nil, false
@@ -942,8 +945,8 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 }
 
 // closedTurn answers a wait on closed conversation rec: its last reported
-// turn when that turn took every message sent it, since a finished Pi
-// child closes on its own (closeWhenDone) before its parent may ask, else
+// turn when that turn took every message sent it, since a child may be
+// closed (a dashboard close) before its parent asks, else
 // TurnClosed. As for an open child, a conversation parent's wait gets the
 // turn marked Delivered when the runner handed its report over, and in
 // full when a wait of its own took it; a report still pending stays there
@@ -988,7 +991,7 @@ func (c *conv) parentWaitTakes(mark uint64) bool {
 // the child and how its turn ended, then its final assistant message.
 func ReportText(rep TurnReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[Pi subagent %s", rep.Result.ID)
+	fmt.Fprintf(&b, "[subagent %s", AgentAddress(rep.Result.ID))
 	if label := rep.Child.Label; label != "" {
 		fmt.Fprintf(&b, " %q", label)
 	}

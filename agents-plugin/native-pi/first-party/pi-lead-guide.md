@@ -7,39 +7,38 @@ appended to your system prompt; live session state comes from `workflow_manual`.
 
 Omit `session_key` on `ws__*` calls by default: the bridge fills your own key.
 Pass another key only when deliberately addressing that session.
-`ws/pi.spawn` in prose means the registered `ws__pi_spawn` tool; the same
-namespace mapping applies to the other dotted MCP names.
+`ws/agent.spawn` in prose means the registered `ws__agent_spawn` tool; the
+same namespace mapping applies to the other dotted MCP names.
 
-Use only tools actually listed in this session. Daemon Pi tools require the
-configured availability gate and a usable host; if absent, report delegation
+Use only tools actually listed in this session. The daemon's agent tools
+require the dashboard daemon to host this session; if absent, report delegation
 unavailable, rather than bypassing an explicit disable or inventing native tools.
 
 ## Delegation
 
-Use `ws/pi.spawn` for a persistent child, with a bounded task, pointer inputs
+Use `ws/agent.spawn` for a persistent child, with a bounded task, pointer inputs
 and an evidence/report shape. A rendered playbook's **contents**, not its path,
-are the child's first prompt. Select a capability tier, never a concrete model
-or per-spawn effort. The default `pi-worker` profile supports coding;
-`pi-mini-lead` adds bounded ticket workflow tools. Profiles and tier/depth
-ceilings remain authoritative; a playbook does not grant extra tools.
+are the child's first prompt. Select a capability tier (`ws/agent.tiers` lists
+what is spawnable now), never a concrete model or per-spawn effort, and an
+authority (`read-only`, `workdir-write`, or `full`) no higher than your own.
+Tier and depth ceilings remain authoritative; a playbook does not grant extra
+tools.
 
-For local evidence gathering, use `ws/pi.spawn` with profile `explore` at tier
-`small`. An older daemon may not know that builtin: the bridge uses
-`search-answer-pi` only after an exact unknown-profile refusal and verification
-that its effective profile remains read-only. Neither profile provides the old
-web-search/fetch facade or a filesystem sandbox. No write-scope argument is
+For local evidence gathering, use `ws/agent.spawn` at tier `small` with
+authority `read-only`. Authority caps the child's ws tools; it provides no
+web-search/fetch facade or filesystem sandbox. No write-scope argument is
 supported; do not claim path-limited write enforcement.
 
-Continue or steer the same child with `ws/pi.send`; inspect with `ws/pi.list`
-or `ws/pi.transcript`, and close it with `ws/pi.stop`. Address daemon children
-by their returned **id**. Stopping closes the child and its descendants;
-a later send can resume the child only while its session file remains.
+Follow up with `ws/mailbox.send` to the child's returned **address**
+(`id:<id>`): a running turn takes the mail as a steer where its harness allows
+one, else its next turn does, and a sleeping child wakes for it. Inspect your
+children with `ws/agent.list`, and interrupt a running turn with
+`ws/agent.interrupt`. A child sleeps after its idle timer rather than closing.
 
 After dispatch, do independent work and then **end your turn**. Each settled
 turn returns the child's final answer to its direct parent. Lead delivery is
-system mail labelled `pi:<id>`; reply using `ws/pi.send`, not mailbox.send.
-Use `ws/pi.wait` only when you must obtain a child's current result before
-continuing; a result consumed by wait is not delivered again. Do not poll.
+system mail labelled `agent:<id>`; reply with `ws/mailbox.send` to the child's
+address. Do not poll.
 Completion is not an intermediate progress or approval transport. A child
 records assumptions or blockers in its ordinary answer; resume it with a
 correction when needed. Native execution-worker signals below are separate.
@@ -61,7 +60,8 @@ An execution worker's `ws-agent-approval` carries `agent_id` and `cmd_id`;
 answer with `ws-approve`. A stale or mismatched command id is rejected.
 `ws-agent-report` is intermediate execution progress; `ws-agent-settled` is
 its terminal/idle notification. These internal workers are not daemon children:
-do not send their ids to `pi.*`, and do not treat daemon completion as approval.
+do not address their ids with `ws/agent.*` or `ws/mailbox.send`, and do not
+treat daemon completion as approval.
 Old general-agent/fork sidecars are preserved but not revived; no daemon
 adoption or live-process/history recovery is implied.
 
@@ -70,8 +70,8 @@ adoption or live-process/history recovery is implied.
 - Load workflow skills with `ws-skill`, using the live available-skills list.
 - Arm `/goal`; finish it with `goal-achieved` or `goal-blocked`. Reload the
   named skill each cycle instead of reconstructing it from memory.
-- Follow the preparation guide before `ws-compact`. Keep daemon child ids and
-  outstanding assignments in your summary: native execution snapshots do not
+- Follow the preparation guide before `ws-compact`. Keep daemon child
+  addresses and outstanding assignments in your summary: native execution snapshots do not
   inventory daemon children.
 - For a must-look single file, use `do-i-really-have-to-read-this-myself`;
   delegate wider inspection. For one short inline command, use

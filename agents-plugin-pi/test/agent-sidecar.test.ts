@@ -550,7 +550,7 @@ describe("buildOrphanSummary", () => {
       orphan({ agentId: "a2", state: "idle" }),
       orphan({ agentId: "a3" }),
     ]);
-    assert.equal(summary.split("\n").slice(-2).join("\n"), "2 previously idle agents were also restored.\nUse /audit in the owner TUI to inspect retained execution history; daemon pi.* does not own these workers.", "an orphan with no state field reads as idle");
+    assert.equal(summary.split("\n").slice(-2).join("\n"), "2 previously idle agents were also restored.\nUse /audit in the owner TUI to inspect retained execution history; daemon agent.* does not own these workers.", "an orphan with no state field reads as idle");
     assert.ok(!summary.includes("a2") && !summary.includes("a3"));
   });
 

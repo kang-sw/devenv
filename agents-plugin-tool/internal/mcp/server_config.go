@@ -30,6 +30,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemGitMergeSizeSoftLines:     gitMergeSizeSoftLinesKey.Default,
 		wsconfig.ItemGitMergeSizeHardLines:     gitMergeSizeHardLinesKey.Default,
 		wsconfig.ItemGitMergeSizeExtensions:    gitMergeSizeExtensionsKey.Default,
+		wsconfig.ItemAgentChildWaitingDays:     strconv.Itoa(wsagent.DefaultChildWaitingDays),
 	}
 }
 
@@ -402,6 +403,34 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: gitRootsEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, sessionKey, gitRootsEntry.Key),
+	})
+
+	tierAliasesEntry := registryEntryByKey(wsconfig.ItemAgentTierAliases)
+	appendKnob(tierAliasesEntry, tuningKnob{
+		ID:          tierAliasesEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Your own names for agent.spawn tiers: whitespace-separated name=<harness>.<tier> pairs, for example \"mockup=pi.large quick=claude.small\", with tier small, medium, large, or xlarge. agent.spawn takes an alias as its tier, and agent.tiers lists each alias with the model it resolves to now. A name has no dot; a write that does not parse is refused. Unset (builtin) defines none. Global-only.",
+		Writer:      tuningWriter{Tool: tierAliasesEntry.WriterTool, FixedArguments: map[string]string{"key": tierAliasesEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           tierAliasesEntry.ResetTool,
+			FixedArguments: map[string]string{"key": tierAliasesEntry.Key, "reset": "true"},
+		},
+		ValueFields: tierAliasesEntry.ValueFields,
+		Current:     currentWorkflowPreference(resolver, sessionKey, tierAliasesEntry.Key),
+	})
+
+	childWaitingEntry := registryEntryByKey(wsconfig.ItemAgentChildWaitingDays)
+	appendKnob(childWaitingEntry, tuningKnob{
+		ID:          childWaitingEntry.Key,
+		Kind:        "workflow_preference",
+		Description: fmt.Sprintf("Days a spawned child agent may stay asleep with no turn after its last activity before the dashboard daemon deletes it and its own children. A whole number, at least 1; builtin %d. The daemon reads it once per start. Global-only.", wsagent.DefaultChildWaitingDays),
+		Writer:      tuningWriter{Tool: childWaitingEntry.WriterTool, FixedArguments: map[string]string{"key": childWaitingEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           childWaitingEntry.ResetTool,
+			FixedArguments: map[string]string{"key": childWaitingEntry.Key, "reset": "true"},
+		},
+		ValueFields: childWaitingEntry.ValueFields,
+		Current:     currentWorkflowPreference(resolver, sessionKey, childWaitingEntry.Key),
 	})
 
 	sageReviewEntry := registryEntryByKey(wsconfig.ItemSageReview)

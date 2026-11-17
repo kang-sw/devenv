@@ -46,7 +46,9 @@ import (
 // and, for a spawned Pi worker's attached ws-mcp (children.go):
 //
 //	POST /agents/by-token/<op>    a pi.* call (spawn, list, send, stop,
-//	                              transcript, wait) on the worker's
+//	                              transcript, wait) or an agent.* call
+//	                              (agent.spawn, agent.interrupt,
+//	                              agent.list, agent.tiers) on the worker's
 //	                              capability token (Authorization: Bearer),
 //	                              from this machine only
 //

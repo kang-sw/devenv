@@ -43,6 +43,8 @@ type PiAgents interface {
 	Wait(ctx context.Context, id string, timeout time.Duration) (wsagent.TurnResult, error)
 	Watch(fn func(wsagent.State)) (stop func())
 	Transcript(id string) ([]wslive.RingRecord, error)
+	// The agent.* tools (agent_tools.go) use the same runner.
+	AgentRunner
 }
 
 // DashboardPiSpawnKey lists the pi.* tools (with a daemon handle and a Pi
@@ -102,11 +104,6 @@ type piHost struct {
 	// stopWatch ends the live feed's runner subscription (Server.Close).
 	stopWatch func()
 
-	// listed caches the tools/list gate (piListed) for the server's life:
-	// a knob change applies at the next connection.
-	listOnce sync.Once
-	listErr  error
-
 	// keys caches a child's ws session key by its id, for its agents-popover
 	// row (pi_live.go).
 	keyMu sync.Mutex
@@ -144,13 +141,6 @@ func (s *Server) piKnobOn() bool {
 	}
 	on, _ := got.Value.(bool)
 	return on
-}
-
-// piListed reports whether tools/list shows the pi.* tools: piUnavailable,
-// resolved once per server.
-func (s *Server) piListed() bool {
-	s.pi.listOnce.Do(func() { s.pi.listErr = s.piUnavailable() })
-	return s.pi.listErr == nil
 }
 
 // piParent is the parent reference of the children sessionKey spawns.
@@ -200,7 +190,7 @@ func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool stri
 		if err != nil {
 			return toolTextResponse(id, "", err)
 		}
-		st, err := s.pi.agents.Send(child, message)
+		st, err := s.pi.agents.Deliver(child, wsagent.Delivery{From: parent.ReplyID, Text: message})
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
@@ -504,17 +494,18 @@ func PiReady() error {
 }
 
 // PiTurnReporter is the daemon runner's Options.Report: it posts each
-// settled turn of a lead's Pi subagent to the lead's reply-id queue as a
-// system message and wakes the mailbox waits. The registry is the one the
-// daemon's own environment resolves, as for every session it hosts. A
-// failed post is logged to log.
+// settled turn of a lead's spawned child to the lead's reply-id queue as a
+// system message labelled agent:<id> and wakes the mailbox waits. The
+// registry is the one the daemon's own environment resolves, as for every
+// session it hosts. A failed post is logged to log.
 func PiTurnReporter(log io.Writer) func(wsagent.TurnReport) {
 	return func(rep wsagent.TurnReport) {
 		if rep.Parent.Kind != wsagent.ParentLead {
 			return
 		}
-		content := fmt.Sprintf("Reply with pi.send(id: %s), not mailbox.send.\n%s", rep.Result.ID, wsagent.ReportText(rep))
-		if err := (wsmailbox.Paths{}).Store().PostSystem(rep.Parent.ReplyID, "pi:"+rep.Result.ID, content, time.Now()); err != nil {
+		address := wsagent.AgentAddress(rep.Result.ID)
+		content := fmt.Sprintf("Reply with mailbox.send(to: %q).\n%s", address, wsagent.ReportText(rep))
+		if err := (wsmailbox.Paths{}).Store().PostSystem(rep.Parent.ReplyID, "agent:"+rep.Result.ID, content, time.Now()); err != nil {
 			if log != nil {
 				fmt.Fprintf(log, "agent %s: report to %s: %v\n", rep.Result.ID, rep.Parent.ReplyID, err)
 			}

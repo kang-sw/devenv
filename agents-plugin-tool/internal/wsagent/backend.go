@@ -70,6 +70,11 @@ type StartSpec struct {
 	// PermissionLevel is explicit lead intent for this launch only. Empty keeps
 	// legacy native settings. It does not grant tools or apply worker posture.
 	PermissionLevel PermissionLevel
+	// RemoveSubagents removes the harness's native subagent tool from the
+	// launch whatever the profile or the user's settings allow, so the
+	// conversation delegates through agent.spawn (RemovesSubagents). A
+	// backend whose harness has no such tool ignores it.
+	RemoveSubagents bool
 }
 
 // LeadSpec is what a lead conversation's process starts with.

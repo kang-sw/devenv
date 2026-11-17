@@ -11,13 +11,21 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// fixtureInit is the system/init line of a recorded Claude fixture.
+// fixtureInit is the first system/init line of a recorded Claude fixture.
 func fixtureInit(t *testing.T, name string) map[string]any {
+	t.Helper()
+	return fixtureInits(t, name)[0]
+}
+
+// fixtureInits are every system/init line of a recorded Claude fixture, one
+// per turn.
+func fixtureInits(t *testing.T, name string) []map[string]any {
 	t.Helper()
 	data, err := os.ReadFile("testdata/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var out []map[string]any
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
@@ -26,11 +34,13 @@ func fixtureInit(t *testing.T, name string) map[string]any {
 		}
 		var line map[string]any
 		if json.Unmarshal(sc.Bytes(), &line) == nil && line["type"] == "system" && line["subtype"] == "init" {
-			return line
+			out = append(out, line)
 		}
 	}
-	t.Fatalf("%s has no init line", name)
-	return nil
+	if len(out) == 0 {
+		t.Fatalf("%s has no init line", name)
+	}
+	return out
 }
 
 // reportOf maps init through a mapper for spec and returns the catalog
@@ -144,7 +154,7 @@ func TestClaudeInitShapeDemotes(t *testing.T) {
 		"commands without compact": {func(i map[string]any) { i["slash_commands"] = []string{"review"} }, []CapabilityItem{ItemCompaction}},
 		"no command list":          {func(i map[string]any) { delete(i, "slash_commands") }, nil},
 		"no model":                 {func(i map[string]any) { delete(i, "model") }, []CapabilityItem{ItemModelEffort}},
-		"no tools, lead removal already unsupported": {func(i map[string]any) { delete(i, "tools") }, nil},
+		"no tools":                 {func(i map[string]any) { delete(i, "tools") }, []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval}},
 	} {
 		t.Run("lead "+name, func(t *testing.T) {
 			caps := lead(tc.edit)
@@ -187,6 +197,112 @@ func TestClaudeInitShapeDemotes(t *testing.T) {
 	evs := newClaudeMapper(fixtureWorkerSpec(t)).mapLine(raw, nopReplies{})
 	if len(evs) != 1 || evs[0].Fatal == nil {
 		t.Fatalf("a tool outside the profile still refuses the launch: %+v", evs)
+	}
+}
+
+// TestClaudeInitShapeSubtractsRemovedTools: the tools a launch removed on
+// purpose are subtracted from the expected init tool set, so their absence
+// demotes nothing, while a removed tool the init still lists (the removal
+// did not take, or a process started without it rejoined) demotes tool and
+// subagent removal for a lead and refuses a worker's launch.
+func TestClaudeInitShapeSubtractsRemovedTools(t *testing.T) {
+	removal := []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval}
+	lead := leadSpec()
+	lead.RemoveSubagents = true
+	for name, tc := range map[string]struct {
+		tools []string
+		want  []CapabilityItem
+	}{
+		"removed":           {[]string{"Bash", "Read"}, nil},
+		"still listed":      {[]string{"Task", "Bash", "Read"}, removal},
+		"still listed, new": {[]string{"Agent", "Bash", "Read"}, removal},
+	} {
+		t.Run("lead "+name, func(t *testing.T) {
+			init := fixtureInit(t, "claude-lead-turn-2.1.326.jsonl")
+			init["tools"] = tc.tools
+			if got := resolveFixture(t, lead, init).Demoted; !slices.Equal(got, tc.want) {
+				t.Fatalf("demoted %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// A worker profile that lists the subagent tool: the launch's removal
+	// wins, so the init without it is no mismatch, and with it the leak
+	// refuses the launch.
+	worker := claudeSpec(t, `{"backend":"claude","tools":["Read","Agent"]}`)
+	worker.RemoveSubagents = true
+	init := fixtureInit(t, "claude-worker-turn-2.1.326.jsonl")
+	init["tools"] = []string{"Read"}
+	if got := resolveFixture(t, worker, init).Demoted; len(got) != 0 {
+		t.Fatalf("a removed profile tool missing from init: demoted %v", got)
+	}
+	for _, leaked := range []string{"Agent", "Task"} {
+		init["tools"] = []string{"Read", leaked}
+		raw, _ := json.Marshal(init)
+		evs := newClaudeMapper(worker).mapLine(raw, nopReplies{})
+		if len(evs) != 1 || evs[0].Fatal == nil {
+			t.Fatalf("a removed tool %s the init lists must refuse the worker's launch: %+v", leaked, evs)
+		}
+	}
+}
+
+// TestClaudeSubagentRemovedFixtures: the recorded hosted lead (a turn
+// delegating through agent.spawn, then the turn the child's completion
+// mail woke) and the recorded agent.spawn child, both launched without the
+// native subagent tool, list neither of its names at any init. Under their
+// removal spec nothing is demoted and both removal items stay native. A
+// lead whose init still lists the tool, as one started before the removal
+// and rejoined after it does, demotes both. The lead's tool list is
+// shortened to its native tools and a few ws tools; ids and paths are
+// neutral.
+func TestClaudeSubagentRemovedFixtures(t *testing.T) {
+	lead := leadSpec()
+	lead.RemoveSubagents = true
+	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+AgentWorkerProfile(BackendClaude)])
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"}, RemoveSubagents: true}
+	for _, tc := range []struct {
+		fixture string
+		spec    StartSpec
+		inits   int
+	}{
+		{"claude-lead-subagent-removed-2.1.326.jsonl", lead, 2},
+		{"claude-worker-subagent-removed-2.1.326.jsonl", worker, 1},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			inits := fixtureInits(t, tc.fixture)
+			if len(inits) != tc.inits {
+				t.Fatalf("%d init lines, want %d", len(inits), tc.inits)
+			}
+			for _, init := range inits {
+				tools, _ := init["tools"].([]any)
+				if len(tools) == 0 || slices.Contains(tools, any("Agent")) || slices.Contains(tools, any("Task")) {
+					t.Fatalf("init tools %v", tools)
+				}
+				caps := resolveFixture(t, tc.spec, init)
+				if caps.Version != "2.1.326" || caps.Unverified || len(caps.Demoted) != 0 {
+					t.Fatalf("resolved %+v", caps)
+				}
+				for _, item := range []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval} {
+					if caps.Grade(item) != GradeNative {
+						t.Errorf("%s = %s, want native", item, caps.Grade(item))
+					}
+				}
+			}
+		})
+	}
+	if got := resolveFixture(t, lead, fixtureInit(t, "claude-lead-turn-2.1.326.jsonl")).Demoted; !slices.Equal(got, []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval}) {
+		t.Fatalf("an init listing the removed tool demoted %v", got)
+	}
+
+	// The lead's recording replays as two sent turns, the second answering
+	// with the child's reply.
+	r := newLeadReplay(t)
+	r.all(readLeadFixture(t, "claude-lead-subagent-removed-2.1.326.jsonl"))
+	if got := ringTexts(r.ring, "reply"); r.ends != 2 || !slices.Equal(r.opened, []string{"send", "send"}) || len(got) != 2 || got[1] != "CHILD SAID: `# probe`" {
+		t.Fatalf("replay: ends %d, opened %v, replies %q", r.ends, r.opened, got)
 	}
 }
 

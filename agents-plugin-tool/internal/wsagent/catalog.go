@@ -340,8 +340,9 @@ func compareHarnessVersions(a, b []int) int {
 }
 
 // claudeSubagentTool is the native subagent tool a Claude worker profile
-// removes by leaving it out of --tools (its init may name it "Task",
-// claudeInitToolNames).
+// removes by leaving it out of --tools, and a hosted lead's or agent.spawn
+// child's launch removes with --disallowedTools (claudeRemovedTools); its
+// init may name it "Task" (claudeInitToolNames).
 const claudeSubagentTool = "Agent"
 
 // ClaudeCatalog is the reference profile: what the ws adapter delivers for
@@ -364,12 +365,12 @@ func ClaudeCatalog() *HarnessProfile {
 			{Item: ItemRewind, Grade: GradeUnsupported, Source: "no ws wiring"},
 			{Item: ItemToolRemoval, Role: RoleWorker, Grade: GradeNative, Values: []string{CatalogAnyValue},
 				Source: "--tools allowlist of the profile's built-in tools (claudeArgs)"},
-			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
-				Source: "a lead keeps the user's own tool setup (claudeLeadArgs)"},
+			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeNative, Values: []string{claudeSubagentTool},
+				Source: "--disallowedTools of the subagent tool, the one tool ws removes from a lead; the user's own setup keeps the rest (claudeLeadArgs, claudeRemovedTools)"},
 			{Item: ItemSubagentRemoval, Role: RoleWorker, Grade: GradeNative, Values: []string{claudeSubagentTool},
-				Source: "the subagent tool stays out of --tools unless the profile lists it (claudeArgs)"},
-			{Item: ItemSubagentRemoval, Role: RoleLead, Grade: GradeUnsupported,
-				Source: "a lead keeps the user's own tool setup (claudeLeadArgs)"},
+				Source: "the subagent tool stays out of --tools unless the profile lists it, and an agent.spawn child's launch disallows it as well (claudeArgs, claudeRemovedTools)"},
+			{Item: ItemSubagentRemoval, Role: RoleLead, Grade: GradeNative, Values: []string{claudeSubagentTool},
+				Source: "every hosted lead launches with --disallowedTools of the subagent tool (claudeLeadArgs, RemovesSubagents)"},
 			{Item: ItemModelEffort, Grade: GradeNative,
 				Source: "set_model and apply_flag_settings controls (claudeProcess.SetModel, SetEffort); choices from ClaudeBackend.Choices"},
 			{Item: ItemApproval, Role: RoleLead, Grade: GradeNative,

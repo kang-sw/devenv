@@ -426,10 +426,10 @@ func (r agentRecordEnd) terminalConversation(sessionDir string) bool {
 }
 
 // retired reports a lead session the runner serves no more (closed, or
-// handed to a terminal), or a closed spawned Pi child, which only a Send
-// reopens on the session file this directory holds.
+// handed to a terminal), or a closed spawned child (a closed Pi child only
+// a Send reopens on the session file this directory holds).
 func (r agentRecordEnd) retired() bool {
-	return (r.Lead || r.Parent != nil && r.Backend == "pi") && (r.ClosedAt != "" || r.HandedOffAt != "")
+	return (r.Lead || r.Parent != nil) && (r.ClosedAt != "" || r.HandedOffAt != "")
 }
 
 // readAgentRecordEnd reads sessionDir's agent record; hosted is false when

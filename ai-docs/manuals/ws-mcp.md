@@ -756,9 +756,10 @@ stopped), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send; on a closed child, its last reported turn when that turn took every
 message sent). The daemon mails each settled turn to the parent lead's reply-id
-queue with the display-only label `pi:<subagent id>` (no reply address) and
-wakes the mailbox waits; the first body line directs replies through `pi.send`,
-not `mailbox.send`. For other senderless system mail without a label,
+queue with the display-only label `agent:<subagent id>` (no reply address) and
+wakes the mailbox waits; the first body line directs replies to the child's
+address through `mailbox.send`, and the report head reads `[subagent
+id:<id> ...]`. For other senderless system mail without a label,
 `mailbox.recv` still shows `system`. For Pi completion reports, a steered message belongs to the turn that takes it, whose completion
 mail covers it without an extra turn. A steer refused or not taken before
 the turn ends is cleared from Pi's queue and sent as the next turn instead.
@@ -767,12 +768,31 @@ as usual. A child whose process died, including across a daemon restart,
 already resumes through the ordinary lazy-start path; no second spawn or
 record is needed. The parent's reply-id is derived from its session key,
 so restarting a lead with the same key keeps its children addressable.
-`tools/list` shows the tools only
-when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
-once per server, so a change applies at the next reconnect), the server is
+`tools/list` never shows the tools: `agent.*` and mailbox routing
+replace them, and the handlers stay for sessions started on an older plugin
+until the next minor deletes them. A call answers only when
+`dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off), the server is
 hosted by the daemon (`ServerOptions.Agents` is the daemon's runner; a
 legacy standalone ws-mcp has none and a call is refused naming the daemon), and
-`pi --version`, probed once per process, is 1.0 or later. Each intake-fed
+`pi --version`, probed once per process, is 1.0 or later.
+
+Mail to a spawned child's address (`id:<reply-id>`, as `agent.spawn`
+returns it) is ordinary `mailbox.send` to that reply-id queue in the
+memory-first store: one restore-ring line per send and no `mailbox.json`
+while the daemon runs, with the usual history and reply-id handling. The
+runner watches every spawned child's mailbox (`Options.Mail`, the daemon's
+`LeadMailbox` in `internal/mcp/lead_mail.go`), awake or asleep, and claims
+what arrives. Each claimed message's body opens with a `[relation:
+parent|child|peer]` line, computed at claim time from the `Record.Parent`
+lineage (no Envelope field); system mail carries none. A running turn takes
+the mail as a steer when the harness's catalog profile does not grade steer
+`unsupported` and the process has a steer handle (Pi, with no profile: the
+handle alone); a child's steered mail is held like a steered report, so its
+turn's report covers it. Otherwise the mail waits in `Record.Mail` for the
+next turn. Mail to a sleeping child wakes it, ignoring the width cap, and
+resets its waiting clock (`LastActiveAt`); a refused wake keeps the mail and
+tells each sender once (`Options.WakeRefused`, posted as `agent:<id>`
+system mail). Each intake-fed
 server watches the runner and feeds the owning lead's recursive spawn tree
 (`pi:<id>`, `agentKind: "pi"`, linked to the child's page) into its live state;
 a live session the server creates, or one an adapter resets, gets its open
@@ -805,8 +825,8 @@ owns the whole tree:
   through `POST /agents`, or spawned with no tier, gets none. Its session key
   stays a parent-less delegate key: the token authorizes `pi.*` alone, so
   every other lead-only tool stays refused.
-- **Forwarding.** A ws-mcp with no runner and both variables set lists the
-  `pi.*` tools with the worker's descriptions and forwards each call to
+- **Forwarding.** A ws-mcp with no runner and both variables set forwards
+  each `pi.*` call (the tools are not listed) to
   `POST /agents/by-token/<op>` (`spawn`, `list`, `send`, `stop`,
   `transcript`, `wait`) with the token as a bearer credential; the keyed
   gate lets a delegate key through for `pi.*` there only. The route answers
@@ -972,9 +992,10 @@ conversation:
   inbox and submitted at the turn's end; a steered one is written to the
   running process at once (Claude: a user message mid-turn, Pi: RPC
   `steer`). The daemon watches the lead key's mailbox (`LeadMail`, in
-  `internal/mcp/lead_mail.go`), claims what arrives into the record, and
-  submits it as a turn whose text is what the mailbox wait hands a session;
-  the session arms no wait of its own. A turn no send started (a background
+  `internal/mcp/lead_mail.go`) and claims what arrives: during a turn it is
+  steered into the running process like a composer steer, else it goes into
+  the record and is submitted as a turn whose text is what the mailbox wait
+  hands a session; the session arms no wait of its own. A turn no send started (a background
   task's result) and a compaction's replayed assistant line are handled as
   the stream reports them. A page command entry splits the drain: the
   messages before it go as one turn (with the claimed mail), the command

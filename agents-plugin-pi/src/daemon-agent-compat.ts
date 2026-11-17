@@ -12,15 +12,15 @@ export function daemonAgentInitializeCapabilities(role: string | undefined, hasD
 // This also travels inside rendered files: daemon children need not load this extension.
 export const PI_AGENT_COMPAT_GUIDE = `## Pi delegation compatibility
 
-For Pi delegation, this section supersedes legacy native-agent instructions in the text above or in older playbooks. Use only tools actually listed in this session; if pi.* is unavailable, report delegation unavailable rather than inventing a native tool or bypassing an explicit disable.
+For Pi delegation, this section supersedes legacy native-agent instructions in the text above or in older playbooks. Use only tools actually listed in this session; if agent.* is unavailable, report delegation unavailable rather than inventing a native tool or bypassing an explicit disable.
 
-- Legacy ws-agent-spawn means ws/pi.spawn; read a rendered prompt file and pass its contents as prompt. Choose a capability tier (small, medium, large, xlarge), not a concrete model. Legacy system_prompt_path, model_name, model_effort, alias and write_scopes are not pi.spawn arguments; do not port them. pi-worker is the default coding profile; pi-mini-lead adds bounded ticket workflow tools.
-- Legacy ws-agent-send/list/stop/transcript mean ws/pi.send/list/stop/transcript. Use the returned id, not a native alias or agent_id argument. pi.stop closes a child; pi.send can resume it if its session file remains.
-- The old explore tool/researcher means ws/pi.spawn with profile explore at tier small and a local evidence question. Older daemons may lack that profile; the adapter permits only a verified read-only search-answer-pi fallback. Neither profile promises web access, write scopes, or an OS sandbox.
-- ws-fork is retired, with no context-cloning replacement. Give an ordinary Pi child explicit task inputs instead.
-- Daemon children return their ordinary final answer to their direct parent at turn completion. End your turn while they work; ws/pi.wait is available when you must obtain a result before continuing. Do not poll. Native ws-agent-report/settled/orphan lifecycle instructions do not describe daemon children; ws-report-to-lead remains internal to retained execution workers, not a daemon progress API.
+- Legacy ws-agent-spawn means ws/agent.spawn; read a rendered prompt file and pass its contents as prompt. Choose a capability tier (small, medium, large, xlarge; ws/agent.tiers lists what is spawnable now), not a concrete model, and an authority (read-only, workdir-write, or full) no higher than your own. Legacy model_name, model_effort, alias and write_scopes are not agent.spawn arguments; do not port them.
+- Legacy ws-agent-send means ws/mailbox.send to the child's returned address (id:<id>), and ws-agent-list means ws/agent.list. Use the returned address, not a native alias or agent_id argument. There is no stop or transcript: a child sleeps after its idle timer and wakes on its next mail, and ws/agent.interrupt ends a running turn.
+- The old explore tool/researcher means ws/agent.spawn at tier small with authority read-only and a local evidence question. Authority caps a child's ws tools; it promises no web access, write scopes, or OS sandbox.
+- ws-fork is retired, with no context-cloning replacement. Give an ordinary child explicit task inputs instead.
+- Daemon children return their ordinary final answer to their direct parent at turn completion. End your turn while they work. Do not poll. Native ws-agent-report/settled/orphan lifecycle instructions do not describe daemon children; ws-report-to-lead remains internal to retained execution workers, not a daemon progress API.
 
-The ws/ prefix denotes the installed ws MCP namespace (for example ws__pi_spawn on the Pi bridge); use the registered tool names and schemas in this session.`;
+The ws/ prefix denotes the installed ws MCP namespace (for example ws__agent_spawn on the Pi bridge); use the registered tool names and schemas in this session.`;
 
 const LEGACY_GUIDANCE = /\bws-agent-(?:spawn|send|list|stop|transcript|report|settled|orphaned)\b|\bws-fork\b|\bws-report-to-lead\b|the `explore` researcher/;
 

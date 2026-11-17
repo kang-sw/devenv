@@ -113,6 +113,15 @@ type Record struct {
 	// or xlarge); a conversation it spawns may ask for no higher one.
 	// Empty for a conversation spawned without one, which spawns none.
 	Tier string `json:"tier,omitempty"`
+	// SystemPrompt marks a conversation agent.spawn gave a system prompt:
+	// its text is in the session directory's system_prompt.md, written
+	// once at spawn and appended to the harness's system prompt at every
+	// process start (agent_tools.go).
+	SystemPrompt bool `json:"system_prompt,omitempty"`
+	// LastActiveAt (RFC 3339) is a spawned conversation's last send or
+	// settled turn: the start of its child-agent-waiting expiry
+	// (agent_tools.go). Empty is CreatedAt.
+	LastActiveAt string `json:"last_active_at,omitempty"`
 	// PendingReports are the reported turns of a conversation whose parent
 	// is a conversation (ParentConversation) that the runner has not handed
 	// to that parent yet, oldest first: a report's absence is its

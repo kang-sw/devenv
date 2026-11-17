@@ -191,15 +191,18 @@ func TestLeverHoldNotArmed(t *testing.T) {
 		h, timers := leverHarness(t)
 		id, holder, key := leverTurn(t, h, ll)
 		// The interrupt takes the held message back; mail claimed after it
-		// is what waits for the turn's end.
+		// is steered into the turn before its end.
 		if _, _, err := h.runner.Interrupt(id); err != nil {
 			t.Fatal(err)
 		}
 		h.mail.deliver(key, "From b@x: more")
-		eventually(t, "the mail to be claimed", func() bool { return len(h.record(id).Mail) == 1 })
+		eventually(t, "the steered mail", func() bool { return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), "From b@x: more"}) })
 		// A harness that reports no aborted reason for it.
 		h.holders.out(holder, resultLine())
-		eventually(t, "the mail at the turn end", func() bool { return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), "From b@x: more"}) })
+		h.quiesce(id)
+		if got := h.userInputs(holder); !slices.Equal(got, []string{h.envelope("one"), "From b@x: more"}) {
+			t.Fatalf("nothing waits for the turn end: %q", got)
+		}
 		if started, _ := timers.counts(); started != 0 {
 			t.Fatalf("no cap timer should start: %d", started)
 		}

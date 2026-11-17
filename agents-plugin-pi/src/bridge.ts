@@ -167,8 +167,8 @@ function firstText(result: McpToolCallResult): string | undefined {
  */
 export const MODEL_CATALOG_ADVISORY =
   "> [!note]\n" +
-  "> **Pi's model tier table has no entries.** pi.spawn requires a configured " +
-  "Pi capability tier. Configure `small`, `medium`, `large`, and `xlarge` " +
+  "> **Pi's model tier table has no entries.** agent.spawn on Pi requires a " +
+  "configured Pi capability tier. Configure `small`, `medium`, `large`, and `xlarge` " +
   "for harness `pi` via `config.tune agents.tier harness:pi` (see lead-tune). " +
   "Local exploration normally uses `small`. Tier changes apply immediately; " +
   "tool availability changes may require reconnecting.";

@@ -330,7 +330,7 @@ func TestLeadMailboxReturnsClaimedMailToTheInbox(t *testing.T) {
 
 	mustSend(t, sender, 2, senderKey, wsmailbox.ReplyIDPrefix+leadReply, "claimed first")
 	mustSend(t, sender, 3, senderKey, wsmailbox.ReplyIDPrefix+leadReply, "claimed second")
-	claimed, err := mail.Drain(root, leadKey)
+	claimed, err := drainTexts(mail, root, leadKey)
 	if err != nil || len(claimed) != 2 {
 		t.Fatalf("Drain = %q, %v, want two texts", claimed, err)
 	}
@@ -350,7 +350,7 @@ func TestLeadMailboxReturnsClaimedMailToTheInbox(t *testing.T) {
 	if handle := wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(senderKey); strings.Count(out, handle) < 3 {
 		t.Fatalf("each returned message keeps its sender %s: %s", handle, out)
 	}
-	if again, err := mail.Drain(root, leadKey); err != nil || len(again) != 0 {
+	if again, err := drainTexts(mail, root, leadKey); err != nil || len(again) != 0 {
 		t.Fatalf("nothing is left after the session's claim, got %q, %v", again, err)
 	}
 	if err := mail.Return(root, leadKey, nil); err != nil {

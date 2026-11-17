@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,37 +110,65 @@ func terminologyForHarness(harness, namespace string) map[string]string {
 	return table
 }
 
-// playbookTerminology selects daemon Pi idioms only for a caller whose
-// client and effective tool surface permit them.
-func playbookTerminology(harness string, piAvailable bool, namespace string) map[string]string {
-	if piAvailable {
+// playbookTerminology selects the daemon agent idioms (agent.spawn and
+// mailbox.send) only for a caller that delegates through them (a Pi caller
+// without the native extension, or a Claude caller launched without its
+// native subagent tool) and whose effective tool surface permits them.
+func playbookTerminology(harness string, daemonAgents bool, namespace string) map[string]string {
+	if daemonAgents {
 		return piMCPOnlyTerminology(namespace)
 	}
 	return terminologyForHarness(harness, namespace)
 }
 
-// callerPiMCPOnly reports whether key belongs to a Pi conversation the
-// daemon runs without the native ws Pi extension (wsagent.PiMCPOnly). The
-// proof is the daemon's own conversation record, found through the key's
-// reply-id and naming this exact key, read as tracker support reads it.
-// Such a session connects through Pi's builtin MCP client, whose clientInfo
-// is not the extension's "ws-pi-bridge", so harness detection does not see
-// it as pi. A key with no such record (a terminal harness, a keyless render,
-// a native-subagent child) is not.
-func (s *Server) callerPiMCPOnly(key string) bool {
+// callerRecord is the daemon's own conversation record for key, found
+// through the key's reply-id and naming this exact key, read as tracker
+// support reads it. A key with no such record (a terminal harness, a
+// keyless render, a native-subagent child) has none.
+func (s *Server) callerRecord(key string) (wsagent.Record, bool) {
 	if key == "" {
-		return false
+		return wsagent.Record{}, false
 	}
 	replyID := wsmailbox.ReplyID(key)
 	if !wsdashboard.ValidReplyID(replyID) {
-		return false
+		return wsagent.Record{}, false
 	}
 	dir, err := s.dashboard.stateDir()
 	if err != nil {
-		return false
+		return wsagent.Record{}, false
 	}
 	rec, err := wsagent.ReadRecord(dir, replyID)
-	if err != nil || rec.WSKey != key || rec.Backend != wsagent.BackendPi {
+	if err != nil || rec.WSKey != key {
+		return wsagent.Record{}, false
+	}
+	return rec, true
+}
+
+// callerDaemonAgents reports whether key belongs to a conversation that
+// delegates through the daemon's agent tools, by its callerRecord read
+// once: an MCP-only Pi conversation (piMCPOnlyRecord) or a Claude
+// conversation launched without its native subagent tool
+// (subagentRemovedRecord).
+func (s *Server) callerDaemonAgents(key string) bool {
+	rec, ok := s.callerRecord(key)
+	return ok && (s.piMCPOnlyRecord(rec) || subagentRemovedRecord(rec))
+}
+
+// subagentRemovedRecord reports whether rec is a Claude conversation the
+// daemon launches without the native subagent tool
+// (wsagent.RemovesSubagents: a hosted lead or an agent.spawn child). Its
+// connection is detected as claude, but the claude row's spawn idiom names
+// the tool its launch removed.
+func subagentRemovedRecord(rec wsagent.Record) bool {
+	return rec.Backend == wsagent.BackendClaude && wsagent.RemovesSubagents(rec)
+}
+
+// piMCPOnlyRecord reports whether rec is a Pi conversation the daemon runs
+// without the native ws Pi extension (wsagent.PiMCPOnly). Such a session
+// connects through Pi's builtin MCP client, whose clientInfo is not the
+// extension's "ws-pi-bridge", so harness detection does not see it as pi.
+func (s *Server) piMCPOnlyRecord(rec wsagent.Record) bool {
+	if rec.Backend != wsagent.BackendPi {
 		return false
 	}
 	def := rec.ResolvedDefinition
@@ -159,21 +188,18 @@ func (s *Server) callerPiMCPOnly(key string) bool {
 	if def == nil {
 		return false
 	}
-	hasSpawn, hasSend := false, false
-	for _, tool := range def.WSTools {
-		hasSpawn = hasSpawn || tool == "pi.spawn"
-		hasSend = hasSend || tool == "pi.send"
-	}
-	return hasSpawn && hasSend
+	return slices.Contains(def.WSTools, "agent.spawn") && slices.Contains(def.WSTools, "mailbox.send")
 }
 
-// piMCPOnlyTerminology names daemon Pi tools using the runtime namespace.
-// ContinueIdiom has no backticks because delegationTip wraps it in a code span.
+// piMCPOnlyTerminology names the daemon's agent tools, which a Pi session
+// without the native extension and a Claude session without its native
+// subagent tool delegate through, using the runtime namespace. ContinueIdiom has no backticks because delegationTip wraps it
+// in a code span.
 func piMCPOnlyTerminology(namespace string) map[string]string {
 	return map[string]string{
-		"ExploreAgent":  "a `" + namespace + "/pi.spawn` subagent with profile explore and tier small",
-		"SpawnIdiom":    "`" + namespace + "/pi.spawn` (tier: the resolved capability tier, not a model name)",
-		"ContinueIdiom": namespace + "/pi.send to the same subagent id",
+		"ExploreAgent":  "a `" + namespace + "/agent.spawn` subagent at tier small with read-only authority",
+		"SpawnIdiom":    "`" + namespace + "/agent.spawn` (tier: the resolved capability tier, not a model name; authority: at most your own)",
+		"ContinueIdiom": namespace + "/mailbox.send to the address agent.spawn returned",
 	}
 }
 
@@ -971,13 +997,21 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 // playbookTerminology).
 func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.currentHarness()
-	piClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerPiMCPOnly(callerKey)
-	piAvailable := piClient && s.piListed() && s.toolAllowed("pi.spawn") && s.toolAllowed("pi.send")
-	terminology := playbookTerminology(harness, piAvailable, s.runtimeNamespace())
+	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerDaemonAgents(callerKey)
+	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
+	terminology := playbookTerminology(harness, daemonAgents, s.runtimeNamespace())
+
+	// The workflow manual's harness overlay maps a render onto that
+	// harness's own spawn tool; a caller delegating through agent.spawn reads
+	// the base binding instead. Every other overlay keeps the harness.
+	loadHarness := harness
+	if daemonAgents && name == workflowManualPlaybookName {
+		loadHarness = ""
+	}
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
 	// namespace variables without teaching product-mode semantics to wsrsrc.
-	pb, err := wsrsrc.Load(rsrcRoot, name, harness, nil)
+	pb, err := wsrsrc.Load(rsrcRoot, name, loadHarness, nil)
 	if err != nil {
 		return "", "", err
 	}

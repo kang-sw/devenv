@@ -1175,6 +1175,9 @@ func TestClaudeLeadArgs(t *testing.T) {
 	// command line even when the spec carries it.
 	spec.Instructions = "/sess/instructions.md"
 	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
+	// A hosted lead removes the native subagent tool from the user's setup,
+	// and only that: no allowlist replaces the user's tools.
+	spec.RemoveSubagents = RemovesSubagents(Record{Backend: BackendClaude, Lead: true})
 	args, err := claudeArgs(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -1195,10 +1198,16 @@ func TestClaudeLeadArgs(t *testing.T) {
 		"--permission-prompt-tool": "stdio", "--permission-mode": "plan",
 		"--model": "opus", "--effort": "high", "--resume": "sess-1",
 		"--plugin-dir": bundle, "--settings": `{"enabledPlugins":{}}`,
+		"--disallowedTools": "Agent,Task",
 	} {
 		if got, ok := flagValue(args, flag); !ok || got != want {
 			t.Fatalf("%s = %q (present %v), want %q", flag, got, ok, want)
 		}
+	}
+	// The variadic option's one value is followed by an option, never by
+	// an argument it would swallow.
+	if i := slices.Index(args, "--disallowedTools"); i+2 < len(args) && !strings.HasPrefix(args[i+2], "--") {
+		t.Fatalf("--disallowedTools is followed by a bare argument: %v", args)
 	}
 
 	plainSpec := leadSpec()
@@ -1213,7 +1222,7 @@ func TestClaudeLeadArgs(t *testing.T) {
 	if got, _ := flagValue(plain, "--permission-prompt-tool"); got != "stdio" {
 		t.Fatalf("--permission-prompt-tool = %q", got)
 	}
-	for _, absent := range []string{"--resume", "--model", "--effort"} {
+	for _, absent := range []string{"--resume", "--model", "--effort", "--disallowedTools"} {
 		if slices.Contains(plain, absent) {
 			t.Fatalf("a new lead session with no choices carries no %s: %v", absent, plain)
 		}

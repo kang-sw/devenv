@@ -48,6 +48,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 	}
+	if refusal := s.permissionRefusal(params.Name); refusal != "" {
+		return toolErrorTextResponse(req.ID, refusal)
+	}
 	// Keyed capability gate: when a session_key is present and maps to a known
 	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
 	// are not rejected here; root-aware tools surface the unknown_session error
@@ -78,9 +81,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			lookup = s.intakeSession
 		}
 		if entry, found := lookup(keyStr); found {
-			// pi.* on a Pi subagent's server is authorized by the runner's
-			// capability token, not the key (pi_forward.go).
-			piByToken := isPiTool(params.Name) && s.piForwards()
+			// pi.* and agent.* on a spawned agent's server are authorized
+			// by the runner's capability token, not the key (pi_forward.go).
+			piByToken := (isPiTool(params.Name) || isAgentTool(params.Name)) && s.piForwards()
 			if entry.scope != roleLead && !piByToken && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 			}
@@ -534,6 +537,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				value = strings.TrimSpace(value)
 				if value == "" {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
+				}
+				if entry.Normalize != nil {
+					normalized, err := entry.Normalize(value)
+					if err != nil {
+						return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+					}
+					value = normalized
 				}
 			} else {
 				value = strings.ToLower(strings.TrimSpace(value))
@@ -1645,6 +1655,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 
 	case "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait":
 		return s.handlePiTool(ctx, req.ID, params.Name, params.Arguments)
+	case "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers":
+		return s.handleAgentTool(ctx, req.ID, params.Name, params.Arguments)
 	case "mailbox.send":
 		return s.handleMailboxSend(req.ID, params.Arguments)
 	case "mailbox.recv":

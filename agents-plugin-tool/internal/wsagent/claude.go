@@ -98,7 +98,8 @@ func claudeLeadEnv(spec StartSpec) []string {
 // with stream-json both ways, user/project settings, hooks, memory, and MCP
 // servers. Plugin overrides replace installed ws copies with the configured
 // hosted bundle, or disable all other plugins in isolated mode. Tool permission
-// prompts come to the daemon (--permission-prompt-tool stdio).
+// prompts come to the daemon (--permission-prompt-tool stdio). The user's
+// tools stay, less the native subagent tool (claudeRemovedTools).
 func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	plugins, err := claudeLeadPluginArgs(spec)
 	if err != nil {
@@ -128,7 +129,23 @@ func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	if spec.SessionID != "" {
 		args = append(args, "--resume", spec.SessionID)
 	}
+	if removed := claudeRemovedTools(spec); len(removed) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(removed, ","))
+	}
 	return append(args, plugins...), nil
+}
+
+// claudeRemovedTools are the built-in tools spec's launch removes with
+// --disallowedTools, over a worker's --tools and a lead's own settings
+// alike: the native subagent tool under both of its names
+// (claudeInitToolNames) when spec removes subagents. The option is
+// variadic; its list goes as one comma-separated value, which Claude
+// 2.1.326 reads as the two names.
+func claudeRemovedTools(spec StartSpec) []string {
+	if !spec.RemoveSubagents {
+		return nil
+	}
+	return []string{claudeSubagentTool, claudeInitToolNames[claudeSubagentTool]}
 }
 
 // claudeArgs is the claude command line for spec, without the executable.
@@ -184,6 +201,9 @@ func claudeArgs(spec StartSpec) ([]string, error) {
 	}
 	if spec.SessionID != "" {
 		args = append(args, "--resume", spec.SessionID)
+	}
+	if removed := claudeRemovedTools(spec); len(removed) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(removed, ","))
 	}
 	// The allowlist goes last: the option takes every following argument.
 	if allowed := claudeAllowedRules(spec); len(allowed) > 0 {
@@ -277,8 +297,10 @@ type claudeInit struct {
 // a worker's fatal check). The mapping:
 //
 //	tools          -> tool removal, subagent removal: the field is absent,
-//	                  or a tool of the profile is missing under its name and
-//	                  its older init name (claudeInitToolNames)
+//	                  a tool of the profile the launch did not remove
+//	                  (claudeRemovedTools) is missing under its name and its
+//	                  older init name (claudeInitToolNames), or a tool the
+//	                  launch removed is still listed
 //	permissionMode -> approval: the field is absent
 //	slash_commands -> compaction: a list without "compact"; an absent field
 //	                  (an older harness) changes nothing
@@ -297,9 +319,15 @@ func claudeInitShape(init claudeInit, spec StartSpec) []CapabilityItem {
 		for _, name := range init.Tools {
 			listed[name] = true
 		}
+		removed := claudeRemovedTools(spec)
 		for _, entry := range spec.Profile.Tools {
 			base := ToolBase(entry)
-			if !listed[base] && !listed[claudeInitToolNames[base]] {
+			if !slices.Contains(removed, base) && !listed[base] && !listed[claudeInitToolNames[base]] {
+				tools = false
+			}
+		}
+		for _, name := range removed {
+			if listed[name] {
 				tools = false
 			}
 		}
@@ -330,10 +358,11 @@ func (m *claudeMapper) harnessReport(init claudeInit) Event {
 var claudeInitToolNames = map[string]string{"Agent": "Task"}
 
 // checkClaudeInit verifies that the child sees only what spec permits: its
-// tools are the profile's built-in tools, ws tools, and own servers' tools;
-// its MCP servers are ws (when attached) and the profile's; every plugin
-// is a built-in or one of the profile's plugin directories; and permissions
-// run in dontAsk mode.
+// tools are the profile's built-in tools less the ones the launch removed
+// (claudeRemovedTools), ws tools, and own servers' tools; its MCP servers
+// are ws (when attached) and the profile's; every plugin is a built-in or
+// one of the profile's plugin directories; and permissions run in dontAsk
+// mode.
 func checkClaudeInit(init claudeInit, spec StartSpec) error {
 	allowed := map[string]bool{}
 	for _, entry := range spec.Profile.Tools {
@@ -342,6 +371,9 @@ func checkClaudeInit(init claudeInit, spec StartSpec) error {
 		if legacy, ok := claudeInitToolNames[base]; ok {
 			allowed[legacy] = true
 		}
+	}
+	for _, name := range claudeRemovedTools(spec) {
+		delete(allowed, name)
 	}
 	servers := map[string]bool{}
 	var prefixes []string

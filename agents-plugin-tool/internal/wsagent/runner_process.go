@@ -55,6 +55,15 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			return err
 		}
 	}
+	level := PermissionLevel("")
+	if !attach {
+		// Every launch re-admits a spawned child's authority against its
+		// parent's current level (agent_tools.go).
+		if err := c.r.childAdmission(rec); err != nil {
+			return err
+		}
+		level = childLevel(c.dir)
+	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
 			return errors.New("holder scan is not complete")
@@ -79,8 +88,17 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 				return fmt.Errorf("ws session key: %w", err)
 			}
 		}
+		if rec.SystemPrompt && c.systemPrompt == "" {
+			// Read once per daemon: the text stays in memory for every
+			// later start (a new segment re-injects it from there).
+			raw, err := os.ReadFile(filepath.Join(c.dir, systemPromptFile))
+			if err != nil {
+				return fmt.Errorf("agent.spawn system prompt: %w", err)
+			}
+			c.systemPrompt = string(raw)
+		}
 		var err error
-		instructions, err = composeInstructions(c.dir, rec, def)
+		instructions, err = composeInstructions(c.dir, rec, def, c.systemPrompt)
 		if err != nil {
 			return err
 		}
@@ -95,6 +113,8 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		Cwd:          rec.Cwd,
 		Instructions: instructions,
 		Env:          environ(),
+		// An agent.spawn child delegates through agent.spawn only.
+		RemoveSubagents: RemovesSubagents(rec),
 	}
 	if attach && len(def.WSTools) > 0 {
 		// The mapper needs the original ws tool surface, not a new bridge.
@@ -114,6 +134,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		}
 		env[EnvAllowedTools] = strings.Join(def.WSTools, ",")
 		env[EnvNoDashboard] = "1"
+		env[EnvPermissionLevel] = string(level)
 		// The daemon may inherit a lead's mailbox identity; the agent's
 		// ws-mcp must never claim that inbox's presence. Blank is inert.
 		for _, name := range mailboxIdentityEnv {
@@ -250,6 +271,10 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		SessionFile: rec.SessionFile,
 		Env:         environ(),
 		Holder:      holder,
+		// A hosted lead delegates through agent.spawn only. A rejoin builds
+		// no command line; the replayed init's shape shows whether the
+		// running process was started without the tool.
+		RemoveSubagents: RemovesSubagents(rec),
 		Lead: &LeadSpec{
 			DaemonVersion:   c.r.opts.DaemonVersion,
 			PermissionMode:  rec.PermissionMode,
@@ -659,11 +684,15 @@ func (c *conv) persistSeq() {
 }
 
 // composeInstructions writes the instruction file a process appends to the
-// harness's own system prompt: the profile's instruction file or builtin
-// text and, when the profile allows ws tools, the conversation's ws session
-// key. It returns "" when there is nothing to append.
-func composeInstructions(dir string, rec Record, p Profile) (string, error) {
+// harness's own system prompt: agent.spawn's system prompt, the profile's
+// instruction file or builtin text and, when the profile allows ws tools,
+// the conversation's ws session key. It returns "" when there is nothing
+// to append.
+func composeInstructions(dir string, rec Record, p Profile, system string) (string, error) {
 	var parts []string
+	if text := strings.TrimSpace(system); text != "" {
+		parts = append(parts, text)
+	}
 	if text, ok := p.BuiltinInstructions(); ok {
 		parts = append(parts, strings.TrimSpace(text))
 	} else if path := p.InstructionsPath(rec.Root); path != "" {

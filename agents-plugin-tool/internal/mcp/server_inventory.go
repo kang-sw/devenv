@@ -27,7 +27,7 @@ import (
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return sessionHireTool(name) || isPiTool(name) || name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return sessionHireTool(name) || isPiTool(name) || isAgentTool(name) || name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -78,13 +78,23 @@ func (s *Server) filteredTools() []map[string]any {
 		if permanentlyHiddenTool(name) {
 			continue
 		}
-		if isPiTool(name) && !s.piListed() {
-			// Listed only where they can run (piUnavailable); a call that
-			// comes anyway refuses with the reason.
+		if isPiTool(name) {
+			// Never listed: agent.* and mailbox.send replace them. Their
+			// handlers still answer (piUnavailable gates a call), so a
+			// session started on an older plugin keeps working until they
+			// are deleted.
 			continue
 		}
-		if isPiTool(name) && s.piForwards() {
-			tool = piWorkerTool(tool)
+		if isAgentTool(name) {
+			// Listed where a runner answers them, the daemon's or the token
+			// route's; the agentless product mode keeps them, since
+			// delegation runs through them there too.
+			if !s.agentListed() {
+				continue
+			}
+			if s.piForwards() {
+				tool = agentWorkerTool(tool)
+			}
 		}
 		if s.toolAllowed(name) {
 			filtered = append(filtered, publicToolDefinition(tool, name, namespace))

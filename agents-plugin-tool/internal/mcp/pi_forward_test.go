@@ -119,19 +119,8 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := listedPiTools(s); strings.Join(got, ",") != strings.Join(piToolNames, ",") {
-		t.Fatalf("listed = %v", got)
-	}
-	for _, tool := range s.filteredTools() {
-		if name, _ := tool["name"].(string); name == "pi.spawn" {
-			if desc, _ := tool["description"].(string); !strings.Contains(desc, "Spawn a Pi subagent of your own") || strings.Contains(desc, "mailbox") {
-				t.Fatalf("pi.spawn reads as a worker's: %q", desc)
-			}
-			props, _ := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
-			if cwd := props["cwd"].(map[string]string)["description"]; !strings.Contains(cwd, "relative to your own working directory") || strings.Contains(cwd, "root") {
-				t.Fatalf("pi.spawn's cwd reads as a worker's: %q", cwd)
-			}
-		}
+	if got := listedPiTools(s); len(got) != 0 {
+		t.Fatalf("pi.* is never listed, even to a token's worker: %v", got)
 	}
 
 	out := callToolWithKey(t, s, 3, key, "pi.spawn", map[string]any{"prompt": "sub task", "tier": "small", "cwd": "sub", "label": "sub"})
@@ -731,30 +720,16 @@ func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
 	}
 
 	// send: 200; the wait for the turn it starts is that turn's report. The
-	// finished child closed on its own, so the send reopens it on the
-	// session file Pi would have written.
-	for deadline := time.Now().Add(5 * time.Second); ; {
-		if st, err := runner.Get(kid.ID); err == nil && st.Status == wsagent.StatusClosed {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the finished child did not close")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	sessionFile := filepath.Join(wsdashboard.SessionDir(dir, kid.ID), "pi", "session.jsonl")
-	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(sessionFile, []byte("persisted conversation\n"), 0o600); err != nil {
-		t.Fatal(err)
+	// finished child stays open (it sleeps on its idle timer instead of
+	// closing), so the send reaches its running process.
+	if st, err := runner.Get(kid.ID); err != nil || st.Status == wsagent.StatusClosed {
+		t.Fatalf("the finished child = %+v, %v; want it open", st, err)
 	}
 	var sent piChildOut
 	asJSON(7, "pi.send", map[string]any{"id": kid.ID, "message": "more"}, &sent)
 	if a := log.last(t, "send"); a.code != http.StatusOK || sent.ID != kid.ID {
 		t.Fatalf("send = %d %s (%+v)", a.code, a.body, sent)
 	}
-	_, kp = backend.waitStart(t, 2)
 	if got := kp.nextSent(t); !isUserEnvelopeOf(got, "more") {
 		t.Fatalf("the sent turn = %q", got)
 	}

@@ -585,18 +585,20 @@ func (k *fakeLeadKeys) EnsureLead(_, key string) error {
 	return nil
 }
 
-// fakeMail is a LeadMail a test delivers into.
+// fakeMail is a LeadMail a test delivers into. A drained message whose
+// sender relates to the session (Drain's relation) reads "(<relation>) "
+// before its text.
 type fakeMail struct {
 	mu      sync.Mutex
 	watches map[string]func()
-	queued  map[string][]string
+	queued  map[string][]ClaimedMail
 	stops   int
 	// drains counts Drain calls.
 	drains int
 }
 
 func newFakeMail() *fakeMail {
-	return &fakeMail{watches: map[string]func(){}, queued: map[string][]string{}}
+	return &fakeMail{watches: map[string]func(){}, queued: map[string][]ClaimedMail{}}
 }
 
 func (m *fakeMail) Watch(_, key string, changed func()) func() {
@@ -611,12 +613,20 @@ func (m *fakeMail) Watch(_, key string, changed func()) func() {
 	}
 }
 
-func (m *fakeMail) Drain(_, key string) ([]string, error) {
+func (m *fakeMail) Drain(_, key string, relation func(string) string) ([]ClaimedMail, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.drains++
 	out := m.queued[key]
 	delete(m.queued, key)
+	m.mu.Unlock()
+	for i := range out {
+		if relation == nil {
+			continue
+		}
+		if rel := relation(out[i].Sender); rel != "" {
+			out[i].Text = "(" + rel + ") " + out[i].Text
+		}
+	}
 	return out, nil
 }
 
@@ -624,7 +634,11 @@ func (m *fakeMail) Drain(_, key string) ([]string, error) {
 func (m *fakeMail) Return(_, key string, texts []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.queued[key] = append(slices.Clone(texts), m.queued[key]...)
+	back := make([]ClaimedMail, 0, len(texts))
+	for _, text := range texts {
+		back = append(back, ClaimedMail{Text: text})
+	}
+	m.queued[key] = append(back, m.queued[key]...)
 	return nil
 }
 
@@ -633,7 +647,11 @@ func (m *fakeMail) Return(_, key string, texts []string) error {
 func (m *fakeMail) waiting(key string) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return slices.Clone(m.queued[key])
+	var out []string
+	for _, cm := range m.queued[key] {
+		out = append(out, cm.Text)
+	}
+	return out
 }
 
 func (m *fakeMail) watched(key string) bool {
@@ -648,10 +666,19 @@ func (m *fakeMail) drainCount() int {
 	return m.drains
 }
 
-// deliver puts mail in key's mailbox and tells its watcher, if any.
+// deliver puts mail with no sender in key's mailbox and tells its watcher,
+// if any.
 func (m *fakeMail) deliver(key string, texts ...string) {
+	for _, text := range texts {
+		m.deliverFrom(key, "", text)
+	}
+}
+
+// deliverFrom puts mail from sender (a reply-id) in key's mailbox and
+// tells its watcher, if any.
+func (m *fakeMail) deliverFrom(key, sender, text string) {
 	m.mu.Lock()
-	m.queued[key] = append(m.queued[key], texts...)
+	m.queued[key] = append(m.queued[key], ClaimedMail{Text: text, Sender: sender})
 	changed := m.watches[key]
 	m.mu.Unlock()
 	if changed != nil {
@@ -743,9 +770,6 @@ func newLeadHarness(t *testing.T) *leadHarness {
 		LeadKeys:      h.keys,
 		Mail:          h.mail,
 		heartbeat:     50 * time.Millisecond,
-		// Auto-closing finished Pi children is tested on its own
-		// (auto_close_test.go).
-		keepFinished: true,
 	}
 	// Every harness PID a test writes (4002, 9001, ...) is dead unless the
 	// test marks it alive: the real process table of a CI runner can hold

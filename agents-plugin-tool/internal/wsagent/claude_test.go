@@ -121,19 +121,23 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 // TestClaudeArgsBuiltinSupportProfile: the builtin Claude support profile
 // launches with Agent as its only built-in tool, in --tools and in the
 // dontAsk allowlist beside its ws tools, so a subagent it spawns inherits
-// the same limit.
+// the same limit. Its runs keep the tool: nothing disallows it.
 func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
 	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+SupportProfileClaude])
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"}}
+	spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"},
+		RemoveSubagents: RemovesSubagents(Record{Backend: BackendClaude, Profile: SupportProfileClaude})}
 	args, err := claudeArgs(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := flagValue(args, "--tools"); got != "Agent" {
 		t.Fatalf("--tools = %q, want Agent alone", got)
+	}
+	if slices.Contains(args, "--disallowedTools") {
+		t.Fatalf("the support profile's launch disallows a tool: %v", args)
 	}
 	i := slices.Index(args, "--allowedTools")
 	if i < 0 {
@@ -142,6 +146,38 @@ func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
 	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__tracker_ui", "mcp__ws__wiki_query", "mcp__ws__wiki_update", "mcp__ws__git_search", "mcp__ws__playbook_read"}
 	if allowed := args[i+1:]; !slices.Equal(allowed, want) {
 		t.Fatalf("--allowedTools = %v, want %v", allowed, want)
+	}
+}
+
+// TestClaudeArgsAgentWorkerRemovesSubagents: an agent.spawn child launches
+// with the native subagent tool disallowed under both of its names, as one
+// value ahead of the allowlist that takes every argument after it, whatever
+// its profile lists in --tools.
+func TestClaudeArgsAgentWorkerRemovesSubagents(t *testing.T) {
+	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+AgentWorkerProfile(BackendClaude)])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tools := range map[string][]string{"builtin": p.Tools, "listing Agent": append(slices.Clone(p.Tools), "Agent")} {
+		t.Run(name, func(t *testing.T) {
+			p := p
+			p.Tools = tools
+			spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"},
+				RemoveSubagents: RemovesSubagents(Record{Backend: BackendClaude, Profile: AgentWorkerProfile(BackendClaude)})}
+			args, err := claudeArgs(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := flagValue(args, "--disallowedTools"); !ok || got != "Agent,Task" {
+				t.Fatalf("--disallowedTools = %q (present %v), want Agent,Task: %v", got, ok, args)
+			}
+			if got, _ := flagValue(args, "--tools"); got != strings.Join(tools, ",") {
+				t.Fatalf("--tools = %q, want the profile's %v", got, tools)
+			}
+			if d, a := slices.Index(args, "--disallowedTools"), slices.Index(args, "--allowedTools"); a < 0 || d > a {
+				t.Fatalf("--disallowedTools must precede the allowlist: %v", args)
+			}
+		})
 	}
 }
 

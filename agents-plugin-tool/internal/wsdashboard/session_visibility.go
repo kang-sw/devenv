@@ -23,6 +23,11 @@ const (
 	SessionAsleep          SessionLifecycle = "asleep"
 	SessionArchived        SessionLifecycle = "archived"
 	SessionPendingDeletion SessionLifecycle = "pending_deletion"
+	// SessionChildWaiting is a spawned child agent asleep with no turn: mail
+	// wakes it, and it is deleted after agent.child_waiting_days without
+	// activity (internal/wsagent agent_tools.go). The runner's State
+	// projects it; registrations never derive it.
+	SessionChildWaiting SessionLifecycle = "child_waiting"
 )
 
 // DeriveSessionLifecycle preserves external ownership: a terminal row never

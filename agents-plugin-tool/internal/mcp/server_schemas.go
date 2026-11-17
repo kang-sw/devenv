@@ -1152,7 +1152,8 @@ func tools() []map[string]any {
 		},
 	}
 	toolList = append(toolList, sessionHireTools()...)
-	return withSessionKeyToolSchemas(append(toolList, piToolDefinitions()...))
+	toolList = append(toolList, piToolDefinitions()...)
+	return withSessionKeyToolSchemas(append(toolList, agentToolDefinitions()...))
 }
 
 func withSessionKeyToolSchemas(toolList []map[string]any) []map[string]any {

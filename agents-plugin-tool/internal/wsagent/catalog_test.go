@@ -267,7 +267,7 @@ func TestClaudeCatalogValues(t *testing.T) {
 	want := map[CatalogRole]map[CapabilityItem]CapabilityGrade{
 		RoleLead: {
 			ItemSkillList: GradeUnsupported, ItemSkillInjection: GradeNative, ItemCompaction: GradeNative,
-			ItemRewind: GradeUnsupported, ItemToolRemoval: GradeUnsupported, ItemSubagentRemoval: GradeUnsupported,
+			ItemRewind: GradeUnsupported, ItemToolRemoval: GradeNative, ItemSubagentRemoval: GradeNative,
 			ItemModelEffort: GradeNative, ItemApproval: GradeNative, ItemSteer: GradeNative,
 			ItemInterrupt: GradeNative, ItemFollowUp: GradeSubstitute, ItemResume: GradeNative,
 			ItemReasoningStream: GradeUnsupported, ItemUsageQuery: GradeNative,
@@ -299,6 +299,14 @@ func TestClaudeCatalogValues(t *testing.T) {
 	}
 	if got := worker.Items[ItemToolRemoval].Values; !slices.Equal(got, []string{CatalogAnyValue}) {
 		t.Errorf("worker tool removal values = %v, want [%s]", got, CatalogAnyValue)
+	}
+	// A lead keeps the user's own tools: the subagent tool is the one ws
+	// removes from it.
+	lead := p.Resolve(RoleLead, p.Newest)
+	for _, item := range []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval} {
+		if got := lead.Items[item].Values; !slices.Equal(got, []string{"Agent"}) {
+			t.Errorf("lead %s values = %v, want [Agent]", item, got)
+		}
 	}
 	// Model/effort choices and permission modes stay sourced from the
 	// backend and its registration: the catalog duplicates neither.
