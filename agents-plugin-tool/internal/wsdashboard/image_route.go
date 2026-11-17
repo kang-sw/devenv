@@ -1,17 +1,16 @@
 package wsdashboard
 
 import (
-	"container/list"
-	"encoding/base64"
-	"io"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -44,6 +43,17 @@ import (
 // new tab, a pasted URL), not another site's page, and localViewer still
 // holds the route to this machine.
 // A LAN viewer, token or not, gets the 404 every other refusal gets.
+// Local viewers are also served the images the user attached to messages,
+// by their absolute path in a session's inbox attachments directory
+// (attachmentImage), which the deny set would refuse with the rest of the
+// daemon's state directory; LAN viewers see those only through the
+// attachment route.
+//
+// The route streams the file as it is, never re-encoded: a served page
+// points at it by URL and no response inlines image bytes. The ETag is the
+// file's ImageVersion, and a URL whose &v= matches it is cached as
+// immutable. A missing file costs a stat (imageMissing) before any symlink
+// resolution or deny-set build.
 
 // imageTypes maps the image extensions the route serves to their content type.
 var imageTypes = map[string]string{
@@ -210,134 +220,6 @@ func crossSiteFetch(r *http.Request) bool {
 	return true
 }
 
-// imageDataMax bounds the image ImageDataURL inlines; a larger one falls
-// back to the image route.
-const imageDataMax = 2 << 20
-
-// ImageDataURL is a board image at path (relative to root, or absolute)
-// inlined as a data: URL, under the image route's own containment checks
-// (containedImage), for a topic body's sandboxed frame: the frame's opaque
-// origin sends no cookie, so in LAN mode the image route would refuse it. It
-// is empty when the route would refuse the path or the file is larger than
-// imageDataMax; the page then relays the route's URL (ImageSrc) through
-// the same-origin host so the opaque frame need not load it directly.
-// The containment checks run on every call; the encoded result is cached by
-// the resolved file's path, size, and modification time and the content
-// type (imageDataCache), so an unchanged image is read once while an edited
-// one is read again.
-func ImageDataURL(root, path string) string {
-	file, ctype, info, ok := containedImageInfo(root, path)
-	if !ok {
-		return ""
-	}
-	key := imageDataKey{file: file, ctype: ctype, size: info.Size(), mod: info.ModTime().UnixNano()}
-	if url, ok := imageData.get(key); ok {
-		return url
-	}
-	url, ok := readImageDataURL(file, ctype)
-	if ok {
-		imageData.put(key, url)
-	}
-	return url
-}
-
-// readImageDataURL reads file as a data: URL of type ctype. ok reports a
-// result worth caching: the URL, or "" for a file over imageDataMax; a
-// failed read is not.
-func readImageDataURL(file, ctype string) (url string, ok bool) {
-	imageDataReads.Add(1)
-	f, err := os.Open(file)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, imageDataMax+1))
-	if err != nil {
-		return "", false
-	}
-	if len(data) > imageDataMax {
-		return "", true
-	}
-	return "data:" + ctype + ";base64," + base64.StdEncoding.EncodeToString(data), true
-}
-
-// imageDataReads counts readImageDataURL's file reads (a test probe).
-var imageDataReads atomic.Int64
-
-// imageDataCacheMax bounds the bytes of data: URLs imageData holds; past
-// it the least recently used go first.
-const imageDataCacheMax = 64 << 20
-
-// imageData is the process's inlined-image cache.
-var imageData = newImageDataCache(imageDataCacheMax)
-
-// imageDataKey names one state of a resolved image file: the real path
-// containedImage returns after resolving every symlink, so two spellings of
-// one file share an entry, and its size and modification time, so an edit
-// misses. The content type follows the requested name's extension, so two
-// names of one file with different image extensions keep separate entries.
-type imageDataKey struct {
-	file, ctype string
-	size, mod   int64
-}
-
-// imageDataCache is a bounded LRU of inlined images by imageDataKey.
-type imageDataCache struct {
-	mu    sync.Mutex
-	max   int
-	bytes int
-	order *list.List // of *imageDataEntry, most recent first
-	byKey map[imageDataKey]*list.Element
-}
-
-type imageDataEntry struct {
-	key imageDataKey
-	url string
-}
-
-func newImageDataCache(max int) *imageDataCache {
-	return &imageDataCache{max: max, order: list.New(), byKey: map[imageDataKey]*list.Element{}}
-}
-
-func (c *imageDataCache) get(key imageDataKey) (string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	el, ok := c.byKey[key]
-	if !ok {
-		return "", false
-	}
-	c.order.MoveToFront(el)
-	return el.Value.(*imageDataEntry).url, true
-}
-
-// put stores url under key, dropping any older state of the same file and
-// then the least recently used entries past max. A URL larger than max is
-// not kept.
-func (c *imageDataCache) put(key imageDataKey, url string) {
-	if len(url) > c.max {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for k, el := range c.byKey {
-		if k.file == key.file {
-			c.remove(el)
-		}
-	}
-	c.byKey[key] = c.order.PushFront(&imageDataEntry{key: key, url: url})
-	c.bytes += len(url)
-	for c.bytes > c.max {
-		c.remove(c.order.Back())
-	}
-}
-
-func (c *imageDataCache) remove(el *list.Element) {
-	e := el.Value.(*imageDataEntry)
-	c.order.Remove(el)
-	delete(c.byKey, e.key)
-	c.bytes -= len(e.url)
-}
-
 // relativeInside lexically resolves path against root and returns it
 // relative to root, or false when it leaves root. It reads no file.
 func relativeInside(root, path string) (string, bool) {
@@ -378,40 +260,177 @@ func insideRel(rel string) bool {
 // containedImage resolves path to the regular image file the route may serve
 // for root, with its content type.
 func containedImage(root, path string) (file, ctype string, ok bool) {
-	file, ctype, _, ok = containedImageInfo(root, path)
-	return file, ctype, ok
-}
-
-// containedImageInfo is containedImage with the resolved file's stat.
-func containedImageInfo(root, path string) (file, ctype string, info os.FileInfo, ok bool) {
 	rel, ok := relativeInside(root, path)
 	if !ok {
-		return "", "", nil, false
+		return "", "", false
 	}
 	ctype, ok = imageType(rel)
 	if !ok {
-		return "", "", nil, false
+		return "", "", false
 	}
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", "", nil, false
+		return "", "", false
 	}
 	real, err := filepath.EvalSymlinks(filepath.Join(root, rel))
 	if err != nil {
-		return "", "", nil, false
+		return "", "", false
 	}
 	if realRel, err := filepath.Rel(realRoot, real); err != nil || !insideRel(realRel) {
-		return "", "", nil, false
+		return "", "", false
 	}
 	if _, ok := imageType(real); !ok {
-		return "", "", nil, false
+		return "", "", false
 	}
 	// Stat before opening: opening a FIFO would block the handler.
-	info, err = os.Stat(real)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", "", nil, false
+	if info, err := os.Stat(real); err != nil || !info.Mode().IsRegular() {
+		return "", "", false
 	}
-	return real, ctype, info, true
+	return real, ctype, true
+}
+
+// ImageVersion is an image file's version: its modification time and size.
+// A served page appends it to an image route URL as &v=, which the route
+// otherwise ignores, so an edited image gets a new URL. mcp servedViewInput
+// writes the same format; the two must agree for the immutable cache.
+func ImageVersion(info os.FileInfo) string {
+	return strconv.FormatInt(info.ModTime().UnixNano(), 36) + "." + strconv.FormatInt(info.Size(), 36)
+}
+
+// imageCacheImmutable is the route's cache policy for a URL whose &v= is the
+// served file's current ImageVersion: that URL names this content, so the
+// browser keeps it without asking again. Any other URL is revalidated
+// (no-cache) against the ETag, which is the same version.
+const imageCacheImmutable = "private, max-age=31536000, immutable"
+
+// attachmentImage reports path as an image the user attached to a message
+// from the page: written absolute, directly in a session's inbox attachments
+// directory under the daemon's state directory dir, with an attachment name
+// (wsinbox.AttachmentName). The state directory is otherwise always denied
+// (outsideDenied), since it holds the daemon's credentials; an attachment's
+// name grammar never names one of them. Any session's attachment qualifies,
+// not only the route's own session's: a loopback viewer may open each
+// session's attachment route anyway. It reads no file.
+func attachmentImage(dir, path string) (string, bool) {
+	if dir == "" || path == "" || strings.ContainsRune(path, 0) || networkPath(path) {
+		return "", false
+	}
+	native := filepath.FromSlash(path)
+	if !filepath.IsAbs(native) {
+		return "", false
+	}
+	native = filepath.Clean(native)
+	// <dir>/sessions/<reply-id>/inbox/attachments/<name>
+	replyID := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(native))))
+	if !ValidReplyID(replyID) {
+		return "", false
+	}
+	if _, ok := wsinbox.AttachmentName(wsinbox.AttachmentsDir(sessionInbox(dir, replyID)), native); !ok {
+		return "", false
+	}
+	return native, true
+}
+
+// openAttachment opens the attachment file at path: a regular file, not a
+// symlink, the same file when opened as when it was looked up.
+func openAttachment(path string) (*os.File, os.FileInfo, bool) {
+	// Lstat before opening: a symlink is refused, and opening a FIFO would
+	// block the handler.
+	linfo, err := os.Lstat(path)
+	if err != nil || !linfo.Mode().IsRegular() {
+		return nil, nil, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, false
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linfo, info) {
+		_ = f.Close()
+		return nil, nil, false
+	}
+	return f, info, true
+}
+
+// imageMissing reports a path whose file does not exist, by one stat of each
+// file the route would look up for it, so a miss costs that stat instead of
+// the symlink resolution and deny-set build behind it. For a LAN viewer it
+// stats only what containedImage would resolve next: an image name inside
+// root. For a local viewer it also stats the outside spelling before the
+// deny set's string check, so a denied path's existence (never its content)
+// is looked up; the answer is the same 404 either way, and only a
+// same-origin loopback viewer gets this far. A path that is not a plain
+// absolute one, or names a device, is left to the full checks.
+func imageMissing(root, path string, local bool) bool {
+	if path == "" || strings.ContainsRune(path, 0) || networkPath(path) {
+		return false
+	}
+	if _, ok := imageType(path); !ok {
+		return false
+	}
+	var candidates []string
+	if rel, ok := relativeInside(root, path); ok {
+		candidates = append(candidates, filepath.Join(filepath.Clean(root), rel))
+	}
+	if local {
+		// The spelling a local viewer's outside read resolves (localPath).
+		if c := resolveAgainst(root, filepath.FromSlash(homePath(path))); len(candidates) == 0 || c != candidates[0] {
+			candidates = append(candidates, c)
+		}
+	}
+	if len(candidates) == 0 {
+		return false
+	}
+	for _, c := range candidates {
+		if !filepath.IsAbs(c) || !driveOrRootPath(c) || networkPath(c) || deviceElement(c) {
+			return false
+		}
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); !errors.Is(err, fs.ErrNotExist) {
+			return false
+		}
+	}
+	return true
+}
+
+// openImage opens the image file the image route serves for path in the
+// session whose project root is root, with its content type; false for every
+// refusal. A local viewer is served an attachment image, and an image outside
+// root under the deny set (localPath); a LAN viewer only an image inside root.
+func (d *Daemon) openImage(root, path string, local bool) (*os.File, string, os.FileInfo, bool) {
+	if local {
+		if file, ok := attachmentImage(d.dir, path); ok {
+			ctype, _ := imageType(file)
+			f, info, ok := openAttachment(file)
+			return f, ctype, info, ok
+		}
+	}
+	if imageMissing(root, path, local) {
+		return nil, "", nil, false
+	}
+	file, ctype, ok := containedImage(root, path)
+	deny := newDenySet()
+	if local {
+		_, real, allowed := deny.localPath(root, path)
+		if !allowed {
+			ok = false
+		} else if !ok {
+			ctype, ok = imageType(path)
+			if ok {
+				file, ok = resolvedImage(real)
+			}
+		}
+	}
+	if !ok {
+		return nil, "", nil, false
+	}
+	open := openContained
+	if local {
+		open = deny.openLocal
+	}
+	f, _, info, ok := open(filepath.Dir(file), filepath.Base(file))
+	return f, ctype, info, ok
 }
 
 // handleImage serves the image route of one session.
@@ -429,39 +448,23 @@ func (d *Daemon) handleImage(w http.ResponseWriter, r *http.Request, replyID str
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
-	path := r.URL.Query().Get("path")
-	file, ctype, ok := containedImage(s.Project, path)
-	deny := newDenySet()
-	if localViewer(r) {
-		_, real, allowed := deny.localPath(s.Project, path)
-		if !allowed {
-			ok = false
-		} else if !ok {
-			ctype, ok = imageType(path)
-			if ok {
-				file, ok = resolvedImage(real)
-			}
-		}
-	}
-	if !ok {
-		http.Error(w, "image not found", http.StatusNotFound)
-		return
-	}
-	open := openContained
-	if localViewer(r) {
-		open = deny.openLocal
-	}
-	f, _, info, ok := open(filepath.Dir(file), filepath.Base(file))
+	f, ctype, info, ok := d.openImage(s.Project, r.URL.Query().Get("path"), localViewer(r))
 	if !ok {
 		http.Error(w, "image not found", http.StatusNotFound)
 		return
 	}
 	defer f.Close()
+	version := ImageVersion(info)
 	h := w.Header()
 	h.Set("Content-Type", ctype)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", imageContentSecurityPolicy)
-	h.Set("Cache-Control", "no-cache")
+	h.Set("ETag", `"`+version+`"`)
+	if r.URL.Query().Get("v") == version {
+		h.Set("Cache-Control", imageCacheImmutable)
+	} else {
+		h.Set("Cache-Control", "no-cache")
+	}
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	http.ServeContent(w, r, "", info.ModTime(), f)

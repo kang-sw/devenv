@@ -163,21 +163,22 @@ func TestReadHardeningKeepsSandboxCapabilityImages(t *testing.T) {
 	}
 }
 
-func TestReadHardeningRelaysLargeTopicImages(t *testing.T) {
+// TestReadHardeningRelaysTopicImages pins the served page's topic-body
+// images: none is inlined, whatever its size; each keeps its image route URL
+// as a relay the same-origin host fetches for the opaque frame.
+func TestReadHardeningRelaysTopicImages(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	writeFile(t, filepath.Join(f.project, "small.png"), "SMALL")
-	large := strings.Repeat("x", imageDataMax+1)
+	large := strings.Repeat("x", 3<<20)
 	writeFile(t, filepath.Join(f.project, "large.png"), large)
-	if ImageDataURL(f.project, "large.png") != "" {
-		t.Fatal("large image should exceed inline limit")
-	}
 	st := &wswhiteboard.State{Seq: 1, Topics: []wswhiteboard.TopicDoc{{Name: "Images", Changed: 1,
 		Body: "![small](small.png) ![big](large.png) <img src=\"large.png\" alt=\"raw\">"}}}
+	// DocImageSrc as the served page's (mcp servedViewInput): never inline.
 	view := wswhiteboard.BuildView(st, wswhiteboard.ViewInput{
 		Layout: wswhiteboard.LayoutFull, ReplyID: "livesession",
 		FileText:    func(p string) string { return p },
 		ImageSrc:    func(p string) string { return ImageSrc(f.project, "livesession", p) },
-		DocImageSrc: func(p string) string { return ImageDataURL(f.project, p) },
+		DocImageSrc: func(string) string { return "" },
 		FileActions: FileActions(f.project, "livesession"),
 	})
 	regions, err := wswhiteboard.RenderRegions(view)
@@ -186,13 +187,17 @@ func TestReadHardeningRelaysLargeTopicImages(t *testing.T) {
 	}
 	board := html.UnescapeString(string(regions.Board))
 	src := ImageSrc(f.project, "livesession", "large.png")
-	for _, want := range []string{"data:image/png;base64,U01BTEw=", `data-relay="` + src + `" data-sandbox=`, `<img data-relay="` + src + `" alt="raw">`} {
+	small := ImageSrc(f.project, "livesession", "small.png")
+	for _, want := range []string{`data-relay="` + small + ` ` + src + `" data-sandbox=`, `<img data-relay="` + src + `" alt="raw">`} {
 		if !strings.Contains(board, want) {
 			t.Errorf("render lacks %q", want)
 		}
 	}
-	if strings.Contains(board, `src="`+src+`"`) {
-		t.Fatal("large image must not load directly from the opaque frame")
+	if strings.Contains(board, "data:image") {
+		t.Fatal("a topic image was inlined")
+	}
+	if strings.Contains(board, `src="`+src+`"`) || strings.Contains(board, `src="`+small+`"`) {
+		t.Fatal("an image must not load directly from the opaque frame")
 	}
 	// The host's same-origin fetch, including a LAN host with its cookie,
 	// can still retrieve the image to pass back to the sandbox as data.

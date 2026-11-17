@@ -114,11 +114,8 @@ func TestFSLocalOutsidePathsAndSymlinks(t *testing.T) {
 func TestImageLocalInRootRequiresLoginAndOwnOrigin(t *testing.T) {
 	o := startOutsideFixture(t)
 	const secret = "LARGE-LOCAL-SECRET"
-	data := secret + strings.Repeat("x", imageDataMax+1)
+	data := secret + strings.Repeat("x", 1<<20)
 	o.write(t, o.project, "large.png", data)
-	if src := ImageDataURL(o.project, "large.png"); src != "" {
-		t.Fatal("large image unexpectedly inlined")
-	}
 	for _, c := range []struct {
 		site  string
 		login bool

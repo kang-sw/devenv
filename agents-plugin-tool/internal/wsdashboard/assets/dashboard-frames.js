@@ -356,8 +356,8 @@
   }
   // relayImage answers a topic-body frame's image request: the frame's
   // opaque origin cannot load the protected image route, so this same-origin
-  // page fetches images too large to inline and outside-root images (the
-  // latter served only for a loopback viewer), then posts their bytes as a
+  // page fetches its file images, in-root and outside-root (the latter
+  // served only for a loopback viewer), then posts their bytes as a
   // Blob to the frame. This is a security boundary between
   // a body's scripts and this page's origin, and it stays narrow: only a
   // message from one of this page's own body frames (docFrame), only a URL

@@ -82,10 +82,10 @@ type View struct {
 	ImageSrc func(path string) string
 	// DocImageSrc, when set, serves a file image in a topic body of
 	// RenderRegions' fragments in ImageSrc's place. That body renders in a
-	// sandboxed frame whose requests carry no cookie, so a served page that
-	// needs one to reach its image route returns the image inline, as a
-	// data: URL. An empty result falls back to ImageSrc, with a daemon-path
-	// URL relayed through the same-origin host instead of loaded by the frame.
+	// sandboxed frame whose requests carry no cookie. An empty result falls
+	// back to ImageSrc, with a daemon-path URL relayed through the same-origin
+	// host instead of loaded by the frame; the served page always returns
+	// empty, so it never inlines an image.
 	DocImageSrc func(path string) string
 	// FileActions, when set on a page with FileText, turns a file target
 	// into an action link, the element a served page's link menu takes: a
