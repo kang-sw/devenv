@@ -1,31 +1,40 @@
 ---
-title: Codex hosted adapter exact-version contract and bounded lead plan
+title: Codex hosted adapter range-versioned catalog contract and bounded lead plan
 parent: 261114-epic-ws-common-session-foundation
-blocked-by: 261114-refactor-ws-common-session-interface#phase2
 related:
   261110-epic-ws-dashboard-agent-host: "preserve hosted lead ownership, trusted-origin approval and holder survival"
-  261114-refactor-ws-common-session-interface: "implementation prerequisite: landed Phase 2; static contract preparation can proceed now"
+  261114-refactor-ws-common-session-interface: "done; its Phase 2 prerequisite is satisfied (the earlier blocked-by is removed)"
+  261117-feat-ws-harness-capability-catalog: prerequisite
+  261117-feat-ws-hosted-antigravity-adapter: "next stage-3 harness, ordered after Codex"
+  261116-research-ws-hosted-session-first-tier: "evidence and Confirmed Decisions"
 ---
 
 # Codex hosted adapter contract and first lead slice
+
+> Revised 2026-11-17 under the hosted-first plan (epic `261114-epic-ws-common-session-foundation`, stage 3): the exact-version contract below is replaced by the range-based catalog version policy; Codex is the first stage-3 harness, and the Pi hosted backend will be ported from this adapter (25).
 
 ## Background
 
 Codex already has ws plugin/MCP, configuration and mailbox-hook support, but that is not a daemon-hosted conversation backend. The existing app-server usage probe is a short account/rate-limit query, not a sustained conversation owner. MAIN's harness-readiness investigation found no current Codex `Backend` / `Process` under `agents-plugin-tool/internal/wsagent` at its inspected revision `951af006a`.
 
-MAIN assigned a dedicated idea/todo plan capture on 2026-11-14 under docs/tickets-only direction, describing (799)=a as assumed while the owner was asleep. This records that dispatch provenance, not an independently confirmed owner runtime answer. Prepare an exact-version capability/protocol/fixture contract now; the first later implementation is one hosted lead conversation, after the common interface's landed Phase 2 and separate execution approval.
+MAIN assigned a dedicated idea/todo plan capture on 2026-11-14 under docs/tickets-only direction, describing (799)=a as assumed while the owner was asleep. This records that dispatch provenance, not an independently confirmed owner runtime answer. The foundation prerequisite (the common interface's Phase 2) has since landed. Under the hosted-first plan the capability/protocol/fixture contract is expressed as capability-catalog values per `harness@version` range; the first implementation is one hosted lead conversation, after the catalog ticket and separate execution approval.
+
+(799)=a was "assumed while the owner was asleep" and is **not confirmed** (03). The Codex version and protocol choice is asked of the owner when stage 3 starts; nothing in this ticket pre-selects it.
 
 ## Decisions
 
 1. **Reuse the current execution boundary.** A future adapter attaches at `Backend.Start` / `Process` / normalized events beneath the existing Runner and holder. Do not create a second daemon/runtime, use `execjob` as a conversation owner, or duplicate mailbox/input delivery.
-2. **Pin evidence before choosing the protocol.** Compare sustained app-server control with per-invocation `exec` / `exec resume`. No protocol, library version, method signature or instruction-injection mechanism is selected by this idea. The target binary/library version remains unselected; record exact version/build/platform and matching official documentation for every claimed capability before readiness.
+2. **Pin evidence before choosing the protocol.** Compare sustained app-server control with per-invocation `exec` / `exec resume`. No protocol, library version, method signature or instruction-injection mechanism is selected by this idea; the version/protocol is asked at stage-3 start (03). For every claimed capability record the version range it holds for, the build/platform evidence and matching official documentation before readiness.
 3. **Bound the first implementation to one hosted lead conversation.** The intended first slice is create/resume/send/interrupt, ordered normalized output and holder reattach. Approval handling must preserve supported decisions and stable correlation rather than silently approve or reinterpret a richer choice. Unsupported handoff, permission modes, steer and native-subagent telemetry must remain explicit until their exact support is settled.
-4. **Keep the foundation gate.** `261114-refactor-ws-common-session-interface#phase2` is the implementation prerequisite, not whole-epic completion. Static documentation preparation now does not bypass that gate or authorize ready promotion/adapter execution.
-5. **Compatibility target: T0.** Preserve current Pi/Claude controls, native integrations, identities, readable state and existing API/holder/event semantics. Classify actual new descriptor/config/serialization surfaces before readiness; T2, root-key policy changes and a store/protocol rewrite are not authorized.
+4. **Foundation gate satisfied; catalog gate added.** `261114-refactor-ws-common-session-interface#phase2` has landed. The implementation prerequisite is now `261117-feat-ws-harness-capability-catalog`, and separate execution approval remains.
+5. **Range-based version policy replaces the exact-version contract (20)=a, (21)=a, (22).** Codex values live in the catalog per `harness@version` with `since` / `until` ranges; version branches in adapter code only where data cannot express the difference (protocol translation). At session start read the version and lightly check the init shape, demoting mismatched capabilities to `unsupported`. Verification is per-version recorded stream fixtures run on remote w5090; the guaranteed upper bound is the newest version with a fixture. Out of range, above or below the lower bound, allow loudly with the nearest-version profile, an "unverified version" dashboard warning and an error only on actual failure.
+6. **Stage ordering (25).** Claude is the reference, then Codex (this ticket), then Antigravity, then Pi. The Pi hosted backend is a port of this Codex adapter and catalog profile (Pi is driven only with GPT models), not a separate Pi-first design.
+7. **Delegation is `ws/agent.*` (06).** Whether Codex's native subagents can be removed is decided here at stage 3 (08)=c.
+8. **Compatibility target: T0.** Preserve current Pi/Claude controls, native integrations, identities, readable state and existing API/holder/event semantics. Classify actual new descriptor/config/serialization surfaces before readiness; T2, root-key policy changes and a store/protocol rewrite are not authorized.
 
-## Exact-Version Capability Matrix
+## Capability Matrix (range-based)
 
-Current target version/build/platform: **not selected or verified**. This is the finite contract matrix to complete, not a declaration of API support. Each completed row must carry the exact target version, official contract citation, fixture identity and supported/unsupported/unknown classification. Historical versions below are evidence labels, not the chosen hosted target.
+Current target version range/protocol: **not selected or verified** (asked at stage-3 start, (03)). This is the finite contract matrix to complete, not a declaration of API support. Each completed row maps to a catalog item and carries the version range (`since` / `until`) it holds for, official contract citation, fixture identity and `native` / `ws-substitute` / `unsupported` classification. Historical versions below are evidence labels, not the chosen hosted target.
 
 | Capability | Recorded evidence and version boundary | Required contract / fixture before readiness |
 |---|---|---|
@@ -46,6 +55,8 @@ Current target version/build/platform: **not selected or verified**. This is the
 - Do not use `PostToolUse` to implement mid-turn delivery on the contradicted 0.154.0 assumption, reuse dangerous bypass flags as approval policy, or treat rollout-file events as stdout protocol events.
 - Keep ws identity, parent lineage, single input/mail ownership, approval correlation and holder replay/recovery in their current owners. One lead slice does not authorize daemon-spawned native children or account switching.
 - Implementation manuals later include `ai-docs/manuals/shipped-surface-boundary.md`, `ai-docs/manuals/release-compatibility.md` and `ai-docs/manuals/ws-mcp.md` where applicable; authored/mirrored surfaces retain their matching manuals.
+- Go tests run on remote w5090 only, never local `go test`. Per-version stream fixtures are recorded and run there.
+- Release-gate file-touch rule (owner, 2026-11-17): minimize daemon file touches at the root; files for backup/restore only; deltas (append) not rewrites; no heartbeat rewrites; interactive paths never wait on file I/O.
 - Corrected (778) reserves runtime replacement, swap smoke and profiling to MAIN. Mail eventual develop merge hashes immediately; this capture authorizes no main push/version bump or live delivery.
 
 ## Prior Art
@@ -56,14 +67,14 @@ Current target version/build/platform: **not selected or verified**. This is the
 
 ## Phases
 
-### Phase 1: Settle the exact-version capability and fixture contract
+### Phase 1: Settle the range-based capability catalog values and fixture contract
 
-Complete the finite matrix with selected version/build/platform, official contract evidence and a protocol/fixture plan. Reconcile app-server versus exec, thread create/resume/send/interrupt/optional steer, permissions, normalized event order, holder recovery, config/account home and workflow access. Keep unsupported operations and unresolved telemetry visible. Return choices that change product/permission/compatibility contracts to MAIN rather than selecting an API from a different version or assuming parity.
+Ask the owner for the Codex version/protocol choice (03). Complete the finite matrix with the selected version range, protocol, official contract evidence and a protocol/fixture plan. Reconcile app-server versus exec, thread create/resume/send/interrupt/optional steer, permissions, normalized event order, holder recovery, config/account home and workflow access. Keep unsupported operations and unresolved telemetry visible. Return choices that change product/permission/compatibility contracts to MAIN rather than selecting an API from a different version or assuming parity.
 
-Verification: documentation review that every claimed supported capability has a matching exact-version source and finite fixture expectation, with explicit unknowns and phase boundaries. Distinguish a planned fixture from one actually run. No install/probe/account action or new executable fixture collection is part of the current capture.
+Verification: documentation review that every claimed supported capability has a matching version-ranged source and finite fixture expectation, with explicit unknowns and phase boundaries. Distinguish a planned fixture from one actually run. No install/probe/account action or new executable fixture collection is part of the current capture.
 
 ### Phase 2: Implement one hosted lead conversation after the foundation gate
 
-Depends on this ticket's settled Phase 1 and landed `261114-refactor-ws-common-session-interface#phase2`, plus separate implementation approval. Implement only the agreed hosted-lead slice through the existing Runner/backend/holder boundary and settled admission metadata. Preserve truthful unsupported controls, one input/mail owner, approvals, identity and ordered recovery. No implicit native-child, multi-account or terminal-handoff parity expansion.
+Depends on this ticket's settled Phase 1, the capability catalog ticket (`261117-feat-ws-harness-capability-catalog`) and separate implementation approval (the interface Phase 2 gate has landed). Implement only the agreed hosted-lead slice through the existing Runner/backend/holder boundary, the catalog profile and the startup version/init-shape check. Preserve truthful unsupported controls, one input/mail owner, approvals, identity and ordered recovery. No implicit native-child, multi-account or terminal-handoff parity expansion.
 
 Verification: separately authorized isolated protocol and real-adapter/fake-holder fixtures for create/resume/send/interrupt, ordered content/tools/usage/errors, approvals, unknown events, holder reattach/replay gaps and no duplicate input. Run Pi/Claude regressions against the exact candidate when execution is granted. Real CLI/account acceptance and daemon delivery remain separately authorized and reported; no fixture result is invented by this plan.
