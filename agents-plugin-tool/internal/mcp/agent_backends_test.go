@@ -139,7 +139,7 @@ func TestPlaybookRegisteredAgentBackendProfileFallback(t *testing.T) {
 	if err != nil || rp.Definition.Backend != "fixture" || wsagent.PiMCPOnly(wsagent.Record{Backend: wsagent.BackendPi, Root: f.root}, &rp.Definition) {
 		t.Fatalf("registered fallback profile = %+v, %v", rp, err)
 	}
-	if f.s.callerPiMCPOnly(key) {
+	if f.s.callerDaemonAgents(key) {
 		t.Fatal("playbook fallback failed to resolve the registered profile's native extension")
 	}
 }

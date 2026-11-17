@@ -144,25 +144,31 @@ func (s *Server) callerRecord(key string) (wsagent.Record, bool) {
 	return rec, true
 }
 
-// callerSubagentRemoved reports whether key belongs to a Claude
-// conversation the daemon launches without the native subagent tool
-// (wsagent.RemovesSubagents: a hosted lead or an agent.spawn child). Its
-// connection is detected as claude, but the claude row's spawn idiom names
-// the tool its launch removed, so it delegates through the daemon's agent
-// tools.
-func (s *Server) callerSubagentRemoved(key string) bool {
+// callerDaemonAgents reports whether key belongs to a conversation that
+// delegates through the daemon's agent tools, by its callerRecord read
+// once: an MCP-only Pi conversation (piMCPOnlyRecord) or a Claude
+// conversation launched without its native subagent tool
+// (subagentRemovedRecord).
+func (s *Server) callerDaemonAgents(key string) bool {
 	rec, ok := s.callerRecord(key)
-	return ok && rec.Backend == wsagent.BackendClaude && wsagent.RemovesSubagents(rec)
+	return ok && (s.piMCPOnlyRecord(rec) || subagentRemovedRecord(rec))
 }
 
-// callerPiMCPOnly reports whether key belongs to a Pi conversation the
-// daemon runs without the native ws Pi extension (wsagent.PiMCPOnly), by
-// its callerRecord. Such a session connects through Pi's builtin MCP
-// client, whose clientInfo is not the extension's "ws-pi-bridge", so
-// harness detection does not see it as pi.
-func (s *Server) callerPiMCPOnly(key string) bool {
-	rec, ok := s.callerRecord(key)
-	if !ok || rec.Backend != wsagent.BackendPi {
+// subagentRemovedRecord reports whether rec is a Claude conversation the
+// daemon launches without the native subagent tool
+// (wsagent.RemovesSubagents: a hosted lead or an agent.spawn child). Its
+// connection is detected as claude, but the claude row's spawn idiom names
+// the tool its launch removed.
+func subagentRemovedRecord(rec wsagent.Record) bool {
+	return rec.Backend == wsagent.BackendClaude && wsagent.RemovesSubagents(rec)
+}
+
+// piMCPOnlyRecord reports whether rec is a Pi conversation the daemon runs
+// without the native ws Pi extension (wsagent.PiMCPOnly). Such a session
+// connects through Pi's builtin MCP client, whose clientInfo is not the
+// extension's "ws-pi-bridge", so harness detection does not see it as pi.
+func (s *Server) piMCPOnlyRecord(rec wsagent.Record) bool {
+	if rec.Backend != wsagent.BackendPi {
 		return false
 	}
 	def := rec.ResolvedDefinition
@@ -991,7 +997,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 // playbookTerminology).
 func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.currentHarness()
-	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerPiMCPOnly(callerKey) || s.callerSubagentRemoved(callerKey)
+	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerDaemonAgents(callerKey)
 	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
 	terminology := playbookTerminology(harness, daemonAgents, s.runtimeNamespace())
 
