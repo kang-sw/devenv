@@ -192,14 +192,18 @@
   // a section rendered from another revision fills only what still matches.
   function lazy(n) { return !!(n && n.hasAttribute && n.hasAttribute('data-lazy')); }
   function lazyIn(root) { return lazy(root) || !!(root.querySelector && root.querySelector('[data-lazy]')); }
-  var fetching = new Map();
+  var fetching = new Map(), fetchFailures = 0;
   function fetchTopics(query) {
     if (typeof window.wbHistoryFetch !== 'function') return Promise.resolve([]);
     if (!fetching.has(query)) {
+      var requestedImages = imageStamp;
       fetching.set(query, Promise.resolve().then(function () { return window.wbHistoryFetch(query); }).then(function (topics) {
         fetching.delete(query);
+        // Any query (target=, repeated name=, or prefetch) can straddle an
+        // image edit. Do not let its old response hydrate after that edit.
+        if (requestedImages !== imageStamp) return fetchTopics(query);
         return Array.isArray(topics) ? topics : [];
-      }, function () { fetching.delete(query); return []; }));
+      }, function () { fetching.delete(query); fetchFailures++; return []; }));
     }
     return fetching.get(query);
   }
@@ -289,6 +293,84 @@
     for (var i = 0; i < list.length; i += 256) queries.push(list.slice(i, i + 256).map(function (n) { return 'name=' + encodeURIComponent(n); }).join('&'));
     return Promise.all(queries.map(fetchTopics)).then(function (all) { return hydrateWith(root, [].concat.apply([], all)); });
   }
+  // A lazy board's deterministic file-image stamp changes even when its
+  // retained topic sections do not. Refresh only hydrated image frames, not
+  // history membership or disclosures; unchanged frames keep their identity.
+  var imageStamp = null, imageRefreshing = null, imageRefreshed = null, imageRetry = 0;
+  // querySelectorAll does not enter template.content. Retained gaps and
+  // hydrated deferred topics (including their gaps) need the same refresh
+  // as live rows, without materializing or binding their inert contents.
+  function retainedImageNodes(root, selector) {
+    var nodes = Array.from(root.querySelectorAll(selector));
+    root.querySelectorAll('template[data-history-gap], template[data-history-topic]').forEach(function (t) {
+      nodes = nodes.concat(retainedImageNodes(t.content, selector));
+    });
+    return nodes;
+  }
+  function refreshImageTopics(root) {
+    var sections = retainedImageNodes(root, 'section.topic[data-topic]').filter(function (s) { return retainedImageNodes(s, '.doc-frame[data-relay], img[src]').length > 0; });
+    var names = Array.from(new Set(sections.map(function (s) { return s.getAttribute('data-topic'); })));
+    var queries = [];
+    for (var i = 0; i < names.length; i += 256) queries.push(names.slice(i, i + 256).map(function (n) { return 'name=' + encodeURIComponent(n); }).join('&'));
+    return Promise.all(queries.map(fetchTopics)).then(function (all) {
+      [].concat.apply([], all).forEach(function (t) {
+        if (!t || typeof t.name !== 'string' || typeof t.html !== 'string') return;
+        var parsed = document.createElement('template'); parsed.innerHTML = t.html;
+        var full = parsed.content.querySelector('section.topic');
+        if (!full) return;
+        var frames = retainedImageNodes(full, '.doc-frame[data-doc-key]'), images = new Map();
+        function imagePath(src) { return /^\/s\/[^/?]+\/image\?path=/.test(src || '') ? src.replace(/&v=[0-9a-z.]+$/, '') : ''; }
+        retainedImageNodes(full, 'img[src]').forEach(function (img) {
+          var src = img.getAttribute('src'), path = imagePath(src);
+          if (path) images.set(path, src);
+        });
+        // Resolve destinations again: a deferred topic may have materialized
+        // (or disappeared) while the fetch was in flight. Its inert section
+        // has isConnected=false even while its owning template is retained.
+        retainedImageNodes(root, 'section.topic[data-topic]').filter(function (s) { return s.getAttribute('data-topic') === t.name; }).forEach(function (s) {
+          var changed = false, kept = s.isConnected !== false ? kit.keep(s) : null;
+          retainedImageNodes(s, '.doc-frame[data-relay]').forEach(function (old) {
+            var fresh = frames.find(function (f) { return f.getAttribute('data-doc-key') === old.getAttribute('data-doc-key'); });
+            if (!fresh || fresh.getAttribute('data-srcdoc') === old.getAttribute('data-srcdoc') && fresh.getAttribute('data-relay') === old.getAttribute('data-relay')) return;
+            var copy = fresh.cloneNode(true);
+            copy.style.height = old.style.height; copy.wbKeep = true;
+            old.parentNode.insertBefore(copy, old); old.remove(); changed = true;
+          });
+          // Item/history images outside body frames keep their node and
+          // disclosures; only their file-version URL changes.
+          retainedImageNodes(s, 'img[src]').forEach(function (img) {
+            var src = img.getAttribute('src'), fresh = images.get(imagePath(src));
+            if (fresh && fresh !== src) { img.setAttribute('src', fresh); changed = true; }
+          });
+          if (changed && kept) admitted(s);
+          if (kept) kept.apply();
+        });
+      });
+    });
+  }
+  function refreshImages(root) {
+    root = root || document;
+    var marker = root.querySelector('template[data-history-images]'), stamp = marker && marker.getAttribute('data-history-images');
+    if (stamp === null || stamp === imageRefreshed) return imageRefreshing || Promise.resolve();
+    if (imageStamp === null) { imageStamp = imageRefreshed = stamp; return Promise.resolve(); }
+    imageStamp = stamp;
+    // Serialize refreshes: if another edit arrives during a fetch, run once
+    // more after it settles rather than joining an older name= response.
+    if (imageRefreshing) return imageRefreshing;
+    function update() {
+      var requested = imageStamp, failures = fetchFailures;
+      return refreshImageTopics(root).then(function () {
+        if (fetchFailures !== failures) {
+          if (!imageRetry) imageRetry = window.setTimeout(function () { imageRetry = 0; refreshImages(root); }, 2000);
+          return;
+        }
+        if (imageStamp !== requested) return update();
+        imageRefreshed = requested;
+      });
+    }
+    imageRefreshing = update().then(function () { imageRefreshing = null; });
+    return imageRefreshing;
+  }
   // unfilled holds, by history key, the snapshot a rehydrate is still
   // fetching for: a capture taken meanwhile (another update) merges it, so
   // rows the reader had loaded survive a second swap before the fill.
@@ -370,11 +452,14 @@
       var list = targets.get(id) || [], scope = root || document;
       if (!fetched && lazyIn(scope) && !list.some(function (t) { return t.root === scope; })) {
         var t = { root: scope };
-        t.promise = hydrateTarget(scope, id).then(function (n) {
+        t.promise = hydrateTarget(scope, id).then(function () {
           var rest = (targets.get(id) || []).filter(function (x) { return x !== t; });
           if (rest.length) targets.set(id, rest); else targets.delete(id);
-          if (!n) return null;
-          return t.claimed ? true : loadTarget(root, id, beforeGeometry, true);
+          if (scope.isConnected === false) return null;
+          // A concurrent prefetch may already have filled every placeholder.
+          // Resolve the actual target, not this response's fill count; a fill
+          // of some other content likewise does not prove the target exists.
+          return t.claimed ? (materialize(scope, id, beforeGeometry) ? true : null) : loadTarget(scope, id, beforeGeometry, true);
         });
         targets.set(id, list.concat([t]));
       }
@@ -1277,7 +1362,7 @@
   }
   var kit = viewKit(window);
   var panelState = panelStateKit(window);
-  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget, loading: loading, hydrateAll: hydrateAll,
+  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget, loading: loading, hydrateAll: hydrateAll, refreshImages: refreshImages,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
     watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, pinning: kit.pinning, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot, rendered: kit.rendered };
@@ -1362,6 +1447,7 @@
     window.wbBindBoard.wbHistoryBound = true;
   }
   init(document);
+  refreshImages(document);
   // A fold that focus held back runs once focus leaves (collapse returns at
   // once for cards still in view or with nothing loaded).
   document.addEventListener('focusout', function () {
