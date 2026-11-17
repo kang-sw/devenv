@@ -1368,13 +1368,35 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 				delete(m.levers, b.ToolUseID)
 				m.lever = m.lever || !b.IsError
 			}
-			if tool := resultTool(name, claudeMCPToolName); !b.IsError && tool != "" {
+			if tool := m.resultTool(name); !b.IsError && tool != "" {
 				out = append(out, resultEvents(tool, claudeResultText(b.Content))...)
 			}
 		}
 	}
 	return out
 }
+
+// resultTool is resultTool under the name the attached ws-mcp's server has
+// in this process: a worker's inline server is ReservedMCPServer; a lead's
+// is its hosted bundle's own plugin server, plugin:<package>:<package>,
+// whether that server is the bundle's stdio entry or the HTTP entry a
+// hosted variant of the bundle puts under the same name. A rejoined lead
+// may run either package's bundle, so both names are accepted.
+func (m *claudeMapper) resultTool(name string) string {
+	if !m.lead() {
+		return resultTool(name, claudeMCPToolName)
+	}
+	for _, pkg := range hostedPluginPackages {
+		server := claudePluginServer(pkg, pkg)
+		if tool := resultTool(name, func(_, tool string) string { return claudeMCPToolName(server, tool) }); tool != "" {
+			return tool
+		}
+	}
+	return ""
+}
+
+// claudePluginServer is Claude Code's name for a plugin's MCP server.
+func claudePluginServer(plugin, key string) string { return "plugin:" + plugin + ":" + key }
 
 func (m *claudeMapper) status() Event {
 	ev := wslive.Event{Kind: wslive.KindStatus, Cost: m.cost}
