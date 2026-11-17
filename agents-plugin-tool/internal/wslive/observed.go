@@ -350,15 +350,25 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 // ReadObserved reads only bounded metadata records, tolerating missing files,
 // unknown JSON members, incomplete writes, and unsupported future sources.
 func ReadObserved(dir string) ([]ObservedRecord, error) {
+	records, _, err := ReadObservedFold(dir)
+	return records, err
+}
+
+// ReadObservedFold is ReadObserved that also reports whether the records are
+// the directory's whole fold: false when a listed record could not be opened
+// or read for any reason but its removal (a prune), a record ObservedCache
+// retries at each validation until it reads. An invalid record is skipped by
+// every reader alike and does not count.
+func ReadObservedFold(dir string) (records []ObservedRecord, complete bool, err error) {
 	entries, err := wsstate.ReadDir(filepath.Join(dir, ObservedDirName))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, true, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	st := NewState("")
-	var records []ObservedRecord
+	complete = true
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -366,6 +376,8 @@ func ReadObserved(dir string) ([]ObservedRecord, error) {
 		r, valid, err := readObservedRecord(filepath.Join(dir, ObservedDirName, entry.Name()), wsstate.Open)
 		if err == nil && valid {
 			records = append(records, r)
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			complete = false
 		}
 	}
 	st.SeedObserved(records)
@@ -374,7 +386,7 @@ func ReadObserved(dir string) ([]ObservedRecord, error) {
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return observationKey(out[i]) < observationKey(out[j]) })
-	return out, nil
+	return out, complete, nil
 }
 
 func readObservedRecord(path string, open func(string) (*os.File, error)) (ObservedRecord, bool, error) {

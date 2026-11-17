@@ -47,6 +47,18 @@ type HostedSlot interface {
 	Close()
 }
 
+// ObservedFoldSlot is optional on a HostedSlot. A writer whose state seeded
+// from the session's whole evidence directory (wslive.ReadObservedFold
+// reported it complete) before it opened the slot calls FoldsObserved before
+// its first Publish:
+// it applies every record it writes there, so its copies hold the whole
+// fold, and the daemon serves their evidence with no evidence read
+// (SnapshotCache.snapshotResult). An undeclared slot's copies are overlaid
+// with the directory as a file's are.
+type ObservedFoldSlot interface {
+	FoldsObserved()
+}
+
 // LiveSlotOwner is optional: only a daemon-owned generation can admit summary
 // mutations and ring writes. Publish suppression alone cannot fence disk writes.
 // The release must run before Publish, RingAppended, or Close.
@@ -124,6 +136,12 @@ func (d *Daemon) OpenHostedSlot(sessionDir string) (HostedSlot, bool) {
 	if d.live.owners == nil {
 		d.live.owners = map[string]uint64{}
 	}
+	if _, held := d.live.owners[replyID]; held {
+		// A takeover: the slot it replaces may still write evidence that the
+		// new writer's seed missed, so the copy no longer stands for the
+		// directory (cleared with the copy).
+		d.snapshots.shareObserved(d.dir, replyID)
+	}
 	d.live.next++
 	d.live.owners[replyID] = d.live.next
 	return &daemonLiveSlot{d: d, replyID: replyID, id: d.live.next}, true
@@ -134,7 +152,11 @@ type daemonLiveSlot struct {
 	replyID string
 	id      uint64
 	closed  atomic.Bool
+	folded  atomic.Bool // ObservedFoldSlot
 }
+
+// FoldsObserved implements ObservedFoldSlot.
+func (s *daemonLiveSlot) FoldsObserved() { s.folded.Store(true) }
 
 func (s *daemonLiveSlot) LockOwner() (func(), bool) {
 	s.d.live.mu.Lock()
@@ -152,7 +174,7 @@ func (s *daemonLiveSlot) Publish(snap wslive.Snapshot) {
 		d.live.mu.Unlock()
 		return
 	}
-	changed := d.snapshots.SetLive(d.dir, s.replyID, snap)
+	changed := d.snapshots.setLive(d.dir, s.replyID, snap, s.folded.Load())
 	if h, ok := d.source.(LiveSnapshotHolder); ok {
 		h.SetLiveSnapshot(d.dir, s.replyID, snap)
 	}

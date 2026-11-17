@@ -490,3 +490,160 @@ func TestObservedCacheEvictsLeastRecentlyUsedSession(t *testing.T) {
 		}
 	}
 }
+
+// TestObservedCacheTrustsSettledDirectory pins directory trust by listings,
+// which the open and stat counts cannot see: an unchanged, settled evidence
+// directory costs one stat per validation and no listing, a change that
+// moves its mtime is listed at the next validation, and one its stat cannot
+// show is still bounded by the forced re-sweep.
+func TestObservedCacheTrustsSettledDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
+		t.Fatal(err)
+	}
+	evidenceDir := filepath.Join(dir, ObservedDirName)
+	clock := time.Now()
+	// Older than the racy window of every stat below.
+	settled := clock.Add(-time.Hour)
+	settle := func() {
+		t.Helper()
+		if err := os.Chtimes(evidenceDir, settled, settled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle()
+	lists := 0
+	// pinned, when set, is the directory stat every load sees: a change the
+	// stat cannot show (a coarse-mtime collision) on any filesystem, where a
+	// restored mtime alone still moves a tmpfs or XFS directory's size.
+	var pinned os.FileInfo
+	cache := ObservedCache{
+		stat: func(path string) (os.FileInfo, error) {
+			if pinned != nil && path == evidenceDir {
+				return pinned, nil
+			}
+			return os.Stat(path)
+		},
+		readDir: func(path string) ([]os.DirEntry, error) { lists++; return os.ReadDir(path) },
+		now:     func() time.Time { return clock },
+	}
+	first := cache.Load(dir)
+	if lists != 1 || first.models[""].Current.Model != "first" {
+		t.Fatalf("cold load: lists=%d", lists)
+	}
+	for i := 0; i < 5; i++ {
+		clock = clock.Add(observedValidationInterval)
+		if cache.Load(dir) != first {
+			t.Fatal("unchanged projection rebuilt")
+		}
+	}
+	if lists != 1 {
+		t.Fatalf("a settled, unchanged directory was listed %d times, want once", lists)
+	}
+	// A new record moves the directory mtime: the next validation lists it.
+	second := observedCacheRecord("two", "second")
+	second.At = 2000
+	if err := AppendObserved(dir, []ObservedRecord{second}); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(observedValidationInterval)
+	if got := cache.Load(dir); lists != 2 || got.models[""].Current.Model != "second" {
+		t.Fatalf("changed directory missed: lists=%d", lists)
+	}
+	// Settle the directory again and let that stat age past the racy window.
+	settled = settled.Add(time.Minute)
+	settle()
+	clock = clock.Add(observedValidationInterval)
+	trusted := cache.Load(dir)
+	clock = clock.Add(observedRacyWindow + observedValidationInterval)
+	if cache.Load(dir) != trusted || lists != 3 {
+		t.Fatalf("resettled directory: lists=%d, want 3", lists)
+	}
+	// An entry the directory stat does not show stays hidden until the
+	// forced re-sweep, the bound the trust has always had.
+	info, err := os.Stat(evidenceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned = info
+	third := observedCacheRecord("three", "third")
+	third.At = 3000
+	if err := AppendObserved(dir, []ObservedRecord{third}); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(observedValidationInterval)
+	if cache.Load(dir) != trusted || lists != 3 {
+		t.Fatalf("an add the stat cannot show was listed before the re-sweep: lists=%d", lists)
+	}
+	clock = clock.Add(observedResweep)
+	if got := cache.Load(dir); lists != 4 || got.models[""].Current.Model != "third" {
+		t.Fatalf("the forced re-sweep missed an add the stat cannot show: lists=%d", lists)
+	}
+}
+
+// TestReadObservedFoldReportsUnreadRecords: a record that is listed but cannot
+// be read leaves the seed incomplete (ObservedCache would retry it), while a
+// removed one (a prune between listing and open) does not.
+func TestReadObservedFoldReportsUnreadRecords(t *testing.T) {
+	dir := t.TempDir()
+	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
+		t.Fatal(err)
+	}
+	evidenceDir := filepath.Join(dir, ObservedDirName)
+	if records, complete, err := ReadObservedFold(dir); err != nil || !complete || len(records) != 1 {
+		t.Fatalf("readable directory: %d records, complete=%t, err=%v", len(records), complete, err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "gone"), filepath.Join(evidenceDir, "gone.json")); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	if records, complete, err := ReadObservedFold(dir); err != nil || !complete || len(records) != 1 {
+		t.Fatalf("a removed record: %d records, complete=%t, err=%v", len(records), complete, err)
+	}
+	// A directory behind a .json link opens but cannot be read.
+	if err := os.Symlink(t.TempDir(), filepath.Join(evidenceDir, "unread.json")); err != nil {
+		t.Fatal(err)
+	}
+	if records, complete, err := ReadObservedFold(dir); err != nil || complete || len(records) != 1 {
+		t.Fatalf("an unread record: %d records, complete=%t, err=%v", len(records), complete, err)
+	}
+}
+
+// TestObservedCacheRetriesUnreadRecord: a record that fails to open is read
+// again at the next validation even though the settled directory is
+// otherwise trusted, and the directory is trusted again once it reads.
+func TestObservedCacheRetriesUnreadRecord(t *testing.T) {
+	dir := t.TempDir()
+	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
+		t.Fatal(err)
+	}
+	evidenceDir := filepath.Join(dir, ObservedDirName)
+	clock := time.Now()
+	settled := clock.Add(-time.Hour)
+	if err := os.Chtimes(evidenceDir, settled, settled); err != nil {
+		t.Fatal(err)
+	}
+	failing, lists := true, 0
+	cache := ObservedCache{
+		open: func(path string) (*os.File, error) {
+			if failing {
+				return nil, os.ErrPermission
+			}
+			return os.Open(path)
+		},
+		readDir: func(path string) ([]os.DirEntry, error) { lists++; return os.ReadDir(path) },
+		now:     func() time.Time { return clock },
+	}
+	if got := cache.Load(dir); got != nil && got.models[""] != nil {
+		t.Fatal("an unreadable record was folded")
+	}
+	failing = false
+	clock = clock.Add(observedValidationInterval)
+	got := cache.Load(dir)
+	if got == nil || got.models[""] == nil || got.models[""].Current.Model != "first" || lists != 2 {
+		t.Fatalf("the unread record was not retried at the next validation: lists=%d", lists)
+	}
+	clock = clock.Add(observedValidationInterval)
+	if cache.Load(dir) != got || lists != 2 {
+		t.Fatalf("the directory was not trusted again once read: lists=%d", lists)
+	}
+}

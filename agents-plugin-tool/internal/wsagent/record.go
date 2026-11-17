@@ -357,6 +357,9 @@ type liveWriter struct {
 	// Only an observed holder agent_start supplies this real identity.
 	summarySource     string
 	summaryNaturalEnd bool
+	// observedSeeded reports that st seeded from the whole evidence
+	// directory (wsdashboard.ObservedFoldSlot).
+	observedSeeded bool
 }
 
 // newLiveWriter starts from the finished subagents of the snapshot an
@@ -365,7 +368,8 @@ type liveWriter struct {
 func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer) *liveWriter {
 	st := wslive.NewState(key)
 	st.SetAdapter(adapter)
-	if records, err := wslive.ReadObserved(dir); err == nil {
+	records, folded, err := wslive.ReadObservedFold(dir)
+	if err == nil {
 		st.SeedObserved(records)
 	}
 	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
@@ -381,7 +385,7 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 			_, _ = st.Apply(wslive.Event{Kind: wslive.KindCommands, Commands: prev.Commands}, now().UnixMilli())
 		}
 	}
-	return &liveWriter{dir: dir, st: st, now: now, log: log, writeSnapshotFile: writeFileAtomic}
+	return &liveWriter{dir: dir, st: st, now: now, log: log, writeSnapshotFile: writeFileAtomic, observedSeeded: folded}
 }
 
 // apply applies ev and writes what it changed; it reports whether anything

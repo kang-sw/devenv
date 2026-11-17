@@ -17,6 +17,13 @@ import (
 // session's in-memory copy (SetLive) is served in place of its file, with no
 // stat, until ClearLive. The zero value is
 // ready; a nil cache reads every time.
+//
+// Retained model evidence (observed) overlays every snapshot Snapshot reads,
+// except a hosted copy whose writer folded the evidence directory into its
+// own state (setLive with folded): that copy already holds the fold the
+// overlay would build, so its reads touch no evidence file. Another writer
+// adding evidence beside the copy's (shareObserved) returns the session to
+// the overlay until ClearLive.
 type SnapshotCache struct {
 	files    FileCache[parsedSnapshot]
 	observed wslive.ObservedCache
@@ -25,6 +32,9 @@ type SnapshotCache struct {
 
 	liveMu sync.Mutex
 	live   map[string]parsedSnapshot // by snapshot path
+	// shared names the hosted sessions, by snapshot path, whose evidence
+	// directory another writer may add to; under liveMu, cleared by ClearLive.
+	shared map[string]bool
 }
 
 // parsedSnapshot is one snapshot file read: the snapshot, and the document
@@ -34,6 +44,10 @@ type parsedSnapshot struct {
 	snap      wslive.Snapshot
 	canonical []byte
 	docOK     bool
+	// folded marks a hosted copy whose writer seeded its state from the
+	// evidence directory before its slot opened (ObservedFoldSlot); never set
+	// on a file read.
+	folded bool
 }
 
 // loadSnapshot reads and parses a snapshot file; an error when it does not
@@ -144,6 +158,12 @@ func snapshotStaleAt(snap *wslive.Snapshot) time.Time {
 // copy it replaces beyond updatedAt (a first copy always does). The cache
 // keeps a copy of its own: the caller may reuse snap.
 func (c *SnapshotCache) SetLive(stateDir, replyID string, snap wslive.Snapshot) bool {
+	return c.setLive(stateDir, replyID, snap, false)
+}
+
+// setLive is SetLive; folded reports that snap's writer folded the session's
+// evidence directory into its state, so reads take the fold from snap.
+func (c *SnapshotCache) setLive(stateDir, replyID string, snap wslive.Snapshot, folded bool) bool {
 	if c == nil {
 		return true
 	}
@@ -155,6 +175,7 @@ func (c *SnapshotCache) SetLive(stateDir, replyID string, snap wslive.Snapshot) 
 	if err != nil {
 		return false
 	}
+	p.folded = folded
 	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
 	c.liveMu.Lock()
 	defer c.liveMu.Unlock()
@@ -175,8 +196,25 @@ func (c *SnapshotCache) ClearLive(stateDir, replyID string) {
 	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
 	c.liveMu.Lock()
 	delete(c.live, path)
+	delete(c.shared, path)
 	c.liveMu.Unlock()
 	c.files.forget(path)
+}
+
+// shareObserved records that a writer other than the hosted copy's may add
+// evidence for session replyID under stateDir: until ClearLive, its reads
+// overlay the evidence directory again, as a file-only session's do.
+func (c *SnapshotCache) shareObserved(stateDir, replyID string) {
+	if c == nil {
+		return
+	}
+	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
+	c.liveMu.Lock()
+	if c.shared == nil {
+		c.shared = map[string]bool{}
+	}
+	c.shared[path] = true
+	c.liveMu.Unlock()
 }
 
 // snapshotWithoutObserved reads the shared live snapshot without loading
@@ -199,7 +237,11 @@ func (c *SnapshotCache) Snapshot(stateDir, replyID string) *wslive.Snapshot {
 // snapshotResult preserves read failures for incremental consumers that must
 // retry transient errors rather than cache them as an authoritative absence.
 func (c *SnapshotCache) snapshotResult(stateDir, replyID string) (*wslive.Snapshot, error) {
-	p, err := c.read(wslive.SnapshotPath(SessionDir(stateDir, replyID)))
+	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
+	if p, ok := c.foldedCopy(path); ok {
+		return &p.snap, nil
+	}
+	p, err := c.read(path)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +252,22 @@ func (c *SnapshotCache) snapshotResult(stateDir, replyID string) (*wslive.Snapsh
 	}
 	observed.Load(dir).Overlay(&p.snap)
 	return &p.snap, nil
+}
+
+// foldedCopy is the hosted copy at snapshot path when it stands for its
+// session's evidence directory. Its writer seeded from the directory and
+// applies each record it writes there itself, so the directory holds no
+// record the copy lacks, and the overlay would rebuild the copy's own fold:
+// the same Current and History per producer. No copy, an undeclared one, or a
+// shared one (another writer) is overlaid instead.
+func (c *SnapshotCache) foldedCopy(path string) (parsedSnapshot, bool) {
+	if c == nil {
+		return parsedSnapshot{}, false
+	}
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	p, ok := c.live[path]
+	return p, ok && p.folded && !c.shared[path]
 }
 
 // Invalidate expires disk snapshot and observed-evidence validation after a

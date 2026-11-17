@@ -597,6 +597,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		if rec.Lead && r.opts.LiveHost != nil {
 			if slot, ok := r.opts.LiveHost.OpenHostedSlot(dir); ok {
 				c.live.slot = slot
+				if folder, ok := slot.(wsdashboard.ObservedFoldSlot); ok && c.live.observedSeeded {
+					folder.FoldsObserved()
+				}
 			}
 		}
 		c.live.writeSnapshot()
