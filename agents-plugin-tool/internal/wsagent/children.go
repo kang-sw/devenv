@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -370,7 +369,7 @@ func (r *Runner) resumePiChild(id string) (*conv, error) {
 	}
 	dir := wsdashboard.SessionDir(r.opts.Dir, id)
 	file := piSessionFile(dir)
-	if info, statErr := os.Stat(file); statErr != nil || !info.Mode().IsRegular() {
+	if !PiSessionAvailable(dir) {
 		return nil, conflict("cannot resume Pi subagent %s: its session file is missing, inaccessible, or not a regular file: %s", id, file)
 	}
 	rec.ClosedAt = ""
