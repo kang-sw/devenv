@@ -251,6 +251,38 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 launcher.write_runtime_metadata(binary, dict(stamp, version="0.18.9-dev"))
 
+    def test_runtime_is_hashed_once_per_process(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            binary = root / "ws-mcp"
+            binary.write_bytes(b"runtime bytes")
+            os.utime(binary, ns=(1_000_000_000, 1_000_000_000))  # settled: outside the racy window
+            contract = self.capability_contract()
+            contract_path = root / "runtime.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            os.utime(contract_path, ns=(1_000_000_000, 1_000_000_000))
+            launcher.write_runtime_metadata(binary, {"version": "0.18.9-dev"})
+            launcher.sha256_file(contract_path)
+            hashed = []
+            real_sha256 = hashlib.sha256
+            launcher.hashlib = mock.Mock(sha256=lambda *a: hashed.append(1) or real_sha256(*a))
+            # The start path's gates: metadata, capabilities, stamp write and check.
+            self.assertIsNotNone(launcher.read_runtime_metadata(binary))
+            self.assertTrue(launcher.runtime_fully_compatible(binary, contract, root, allow_same_minor=True))
+            launcher.write_compatibility_stamp(binary, contract, contract_path, root, "source")
+            self.assertTrue(launcher.compatibility_stamp_current(binary, contract, contract_path, root, "source"))
+            self.assertEqual(hashed, [], "a settled file already hashed is not hashed again")
+
+            # A replaced file is a different file: it is hashed again, once.
+            replacement = root / "ws-mcp.new"
+            replacement.write_bytes(b"other bytes!!")
+            os.utime(replacement, ns=(1_000_000_000, 1_000_000_000))
+            os.replace(replacement, binary)
+            self.assertIsNone(launcher.read_runtime_metadata(binary))
+            self.assertIsNone(launcher.read_runtime_metadata(binary))
+            self.assertEqual(len(hashed), 1)
+
     def test_metadata_alone_does_not_assert_desired_version(self):
         launcher = load_launcher()
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -176,6 +176,134 @@ func TestEnsurePreservesCreatedAtAndUpdatesLastSeenAt(t *testing.T) {
 	}
 }
 
+func TestEnsureSkipsALastSeenOnlyRewriteWithinTheWindow(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ensureAt := func(now time.Time) Layout {
+		t.Helper()
+		layout, _, _, err := NewManager(Options{CacheHome: cache, Now: func() time.Time { return now }}).Ensure(repo)
+		if err != nil {
+			t.Fatalf("Ensure at %v: %v", now, err)
+		}
+		return layout
+	}
+	layout := ensureAt(fixedNow)
+	stamps := func() (os.FileInfo, os.FileInfo) {
+		t.Helper()
+		p, err := os.Stat(layout.ProjectMeta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := os.Stat(layout.WorktreeMeta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p, w
+	}
+	p0, w0 := stamps()
+
+	ensureAt(fixedNow.Add(lastSeenRefresh - time.Second))
+	if p1, w1 := stamps(); !SameFileMetadata(p0, p1) || !SameFileMetadata(w0, w1) {
+		t.Fatal("an Ensure inside the window rewrote metadata whose only change was last_seen_at")
+	}
+	var project ProjectMetadata
+	readJSON(t, layout.ProjectMeta, &project)
+	if project.LastSeenAt != fixedNow.Format(time.RFC3339) {
+		t.Fatalf("skipped Ensure changed last_seen_at: %+v", project)
+	}
+
+	// A real change is written at once, inside the window.
+	project.RepoBasename = "stale"
+	if err := os.WriteFile(layout.ProjectMeta, mustMarshalForTest(t, project), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	later := fixedNow.Add(time.Minute)
+	ensureAt(later)
+	readJSON(t, layout.ProjectMeta, &project)
+	if project.RepoBasename != filepath.Base(canonicalForTest(t, repo)) || project.LastSeenAt != later.Format(time.RFC3339) || project.CreatedAt != fixedNow.Format(time.RFC3339) {
+		t.Fatalf("Ensure did not rewrite a changed project.json: %+v", project)
+	}
+
+	// Past the window last_seen_at alone is refreshed.
+	past := later.Add(lastSeenRefresh)
+	ensureAt(past)
+	var worktree WorktreeMetadata
+	readJSON(t, layout.WorktreeMeta, &worktree)
+	if worktree.LastSeenAt != past.Format(time.RFC3339) {
+		t.Fatalf("Ensure past the window did not refresh last_seen_at: %+v", worktree)
+	}
+}
+
+// gitEnvWithoutGit is the process's GIT_* environment (the identity cache
+// key) with a PATH that holds no git, so any git spawn fails.
+func gitEnvWithoutGit(t *testing.T) []string {
+	t.Helper()
+	env := []string{"PATH=" + t.TempDir()}
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(strings.ToUpper(kv), "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
+
+func TestGitIdentityIsRememberedPerTopLevelAndRevalidatedByItsDotGit(t *testing.T) {
+	repo := initRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked")
+	runGit(t, repo, "worktree", "add", "-b", "feature/cache", worktreePath, "HEAD")
+	dotGit := filepath.Join(worktreePath, ".git")
+	backdate := func() {
+		old := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(dotGit, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate()
+	cache := filepath.Join(t.TempDir(), "cache")
+	withGit := NewManager(Options{CacheHome: cache, Now: func() time.Time { return fixedNow }})
+	_, wantProject, wantWorktree, err := withGit.Resolve(worktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No git on PATH: only the remembered identity can answer.
+	noGit := NewManager(Options{CacheHome: cache, Now: func() time.Time { return fixedNow }, Env: gitEnvWithoutGit(t)})
+	_, project, worktree, err := noGit.Resolve(worktreePath)
+	if err != nil {
+		t.Fatalf("Resolve without git did not use the remembered identity: %v", err)
+	}
+	if project != wantProject || worktree != wantWorktree {
+		t.Fatalf("remembered identity = %+v %+v, want %+v %+v", project, worktree, wantProject, wantWorktree)
+	}
+
+	// Rewriting the worktree's .git file invalidates it: git must run again.
+	raw, err := os.ReadFile(dotGit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dotGit, raw, 0o644); err != nil { // same bytes, new mtime
+		t.Fatal(err)
+	}
+	if _, _, _, err := noGit.Resolve(worktreePath); err == nil {
+		t.Fatal("Resolve after a .git change answered without running git")
+	}
+	if _, _, _, err := withGit.Resolve(worktreePath); err != nil {
+		t.Fatal(err)
+	}
+
+	// A subdirectory is never remembered.
+	sub := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := withGit.Resolve(sub); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := noGit.Resolve(sub); err == nil {
+		t.Fatal("Resolve of a subdirectory answered without running git")
+	}
+}
+
 // TestLinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState runs on every
 // platform: the assertions are path-separator neutral (filepath.Join,
 // canonicalForTest) and both the derived keys and the test expectations flow

@@ -102,8 +102,11 @@ func loadProjectConfig(opts Options) (Config, error) {
 	return loadConfigFile(path, "project")
 }
 
+// loadConfigFile reads through the stat-revalidated read cache: a config file
+// is read on every resolution (several per tool call), and a hand edit or
+// another process's replace changes its stat, so the next read sees it.
 func loadConfigFile(path, scope string) (Config, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := wsstate.ReadFileCached(path)
 	if os.IsNotExist(err) {
 		return Config{}, nil
 	}

@@ -167,6 +167,11 @@ type sessionDirs struct {
 // seam every other ws cache artifact uses, so all server instances agree on
 // the location. The legacy root is never created: only an older ws-mcp
 // writes there.
+//
+// The split root is created once per store and root, not on every keyed
+// call: ws never removes it (prune removes key directories), and mint, the
+// only writer that creates a key directory directly in it, creates it again
+// itself.
 func (s *sessionStore) dirs() (sessionDirs, error) {
 	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: s.cacheHome})
 	if err != nil {
@@ -176,9 +181,13 @@ func (s *sessionStore) dirs() (sessionDirs, error) {
 		sessions: filepath.Join(cacheRoot, sessionsDirName),
 		legacy:   filepath.Join(cacheRoot, legacyKeysDirName),
 	}
+	if made, _ := s.sessionsMade.Load().(string); made == d.sessions {
+		return d, nil
+	}
 	if err := os.MkdirAll(d.sessions, 0o755); err != nil {
 		return sessionDirs{}, fmt.Errorf("create session keys dir: %w", err)
 	}
+	s.sessionsMade.Store(d.sessions)
 	return d, nil
 }
 
@@ -222,6 +231,32 @@ func readRecordFile(path string, newValue func() any) ([]byte, any, error) {
 		return nil, nil, err
 	}
 	return data, v, nil
+}
+
+// readRecordFileCached is readRecordFile through wsstate.ReadFileCached: one
+// stat per call while the file is unchanged, a read once it changed (another
+// process's write included). Each call decodes afresh, so no decoded value
+// is shared. Only read-only loads use it (readOnlyReader); a
+// read-modify-write reads afresh under the record lock.
+func readRecordFileCached(path string, newValue func() any) ([]byte, any, error) {
+	data, err := wsstate.ReadFileCached(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	v := newValue()
+	if err := json.Unmarshal(data, v); err != nil {
+		return nil, nil, err
+	}
+	return data, v, nil
+}
+
+// readOnlyReader is the reader of read-only loads: the store's readFile seam
+// when a test set one, otherwise readRecordFileCached.
+func (s *sessionStore) readOnlyReader() recordFileReader {
+	if s.readFile != nil {
+		return s.readFile
+	}
+	return readRecordFileCached
 }
 
 // loadRecordWith is loadRecord reading each file through read. A reader may
@@ -301,7 +336,7 @@ func writeRawPart(raw io.Writer, part recordPart, data []byte) {
 // readRecord is loadRecord for a read-only caller: ok is false for any
 // unreadable record.
 func (s *sessionStore) readRecord(d sessionDirs, key string, parts recordPart) (sessionRecord, bool) {
-	record, _, err := s.loadRecord(d, key, parts, nil)
+	record, _, err := loadRecordWith(d, key, parts, nil, s.readOnlyReader())
 	return record, err == nil
 }
 

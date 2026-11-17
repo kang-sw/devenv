@@ -710,7 +710,7 @@ func (s *sessionStore) readStateWithError(sessionKey string, parts recordPart) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, _, err := s.loadRecord(d, sessionKey, parts, nil)
+	record, _, err := loadRecordWith(d, sessionKey, parts, nil, s.readOnlyReader())
 	if err != nil {
 		return sessionRecord{}, err
 	}
