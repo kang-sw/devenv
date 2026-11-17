@@ -42,6 +42,7 @@ func (d *Daemon) handleFSRoots(w http.ResponseWriter, r *http.Request, replyID s
 		if repo, err := src.ReadRepoWorktrees(s.Project, []Registration{s.Registration}); err == nil {
 			a.Roots[0].Pooled = worktreePooled(repo.Pools, root)
 			seen := map[string]bool{root: true}
+			deny := newDenySet()
 			for _, wt := range repo.Worktrees {
 				path := filepath.Clean(wt.Path)
 				choice := fsRootChoice{Path: filepath.ToSlash(path), Branch: wt.Branch, Detached: wt.Detached, Pooled: worktreePooled(repo.Pools, path)}
@@ -52,7 +53,7 @@ func (d *Daemon) handleFSRoots(w http.ResponseWriter, r *http.Request, replyID s
 				if seen[path] || wt.Prunable {
 					continue
 				}
-				if _, valid := browseRootParam(path); !valid {
+				if _, valid := browseRootParam(deny, path); !valid {
 					continue
 				}
 				seen[path] = true
