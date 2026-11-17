@@ -644,3 +644,35 @@ func TestClaudeLeadTokenVoidOnFailedStartAndClose(t *testing.T) {
 		t.Fatalf("a closed lead leaves %d live tokens", n)
 	}
 }
+
+// TestClaudeLeadStaleRouteFailedRestart: a stale route's restart that
+// cannot start a process leaves the session without one, its error shown;
+// the next message starts one on the new route.
+func TestClaudeLeadStaleRouteFailedRestart(t *testing.T) {
+	shortStartWait(t)
+	bundle := leadBundledFixture(t, "wsflow")
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(bundle, &calls)
+	h.startAt("http://127.0.0.1:1")
+	id, holder := h.runLead("one")
+	h.holders.out(holder, mcpTurn("u1", MCPConnected)...)
+	h.idle(id)
+
+	h.runner.Close()
+	h.holders.restart()
+	h.holders.set(func() { h.holders.spawnErr = errors.New("no room") })
+	const after = "http://127.0.0.1:2"
+	h.startAt(after)
+	eventually(t, "the failed restart", func() bool {
+		st := h.state(id)
+		return h.holders.opCount("stop "+holder) == 1 && !st.Process && st.Error != ""
+	})
+	h.quiesce(id)
+	h.holders.set(func() { h.holders.spawnErr = nil })
+	h.send(id, "two")
+	eventually(t, "the new process", func() bool { st := h.state(id); return st.Process && h.holder(id) != holder })
+	if rec := h.record(id); rec.MCPURL != after+wsdashboard.ProxyHTTPPath || rec.MCPToken == "" {
+		t.Fatalf("the new process is on the new route: %+v", rec)
+	}
+}

@@ -216,6 +216,15 @@ func (d *Daemon) httpSession(token string, hello ProxyHello, void <-chan struct{
 		return nil, http.StatusForbidden, fmt.Errorf("session refused: %v", err)
 	}
 	s := &httpMCPSession{d: d, token: token, hello: hello, pending: map[string]chan []byte{}, ended: make(chan struct{}), readDone: make(chan struct{})}
+	var replayID []byte
+	if replay {
+		// Its answer is dropped. Registered while nothing else can reach
+		// the session: before it is published to this token's other
+		// requests, and before it runs (it may end at once and take its
+		// pending map with it).
+		replayID, _ = json.Marshal("ws-mcp-http-replay-" + strconv.FormatUint(d.httpReplay.Add(1), 10))
+		s.pending[compactID(replayID)] = nil
+	}
 	s.inR, s.inW = io.Pipe()
 	s.outR, s.outW = io.Pipe()
 	s.pc = &proxyConn{stream: httpMCPStream{s}, session: session}
@@ -232,13 +241,6 @@ func (d *Daemon) httpSession(token string, hello ProxyHello, void <-chan struct{
 	d.httpSessions[token] = s
 	d.httpMu.Unlock()
 	fmt.Fprintf(d.log, "dashboard: MCP HTTP session opened (pid %d, root %s)\n", hello.OwnerPID, hello.ProjectRoot)
-	var replayID []byte
-	if replay {
-		// Its answer is dropped. Registered before the session runs, which
-		// may end at once and take its pending map with it.
-		replayID, _ = json.Marshal("ws-mcp-http-replay-" + strconv.FormatUint(d.httpReplay.Add(1), 10))
-		s.pending[compactID(replayID)] = nil
-	}
 	go s.readAnswers()
 	go s.serve()
 	go s.watchVoid(void)

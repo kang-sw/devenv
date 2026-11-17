@@ -497,6 +497,42 @@ func TestProxyHTTPReplaysInitializeForARestoredToken(t *testing.T) {
 	}
 }
 
+// TestProxyHTTPConcurrentFirstRequestsShareOneReplay: a restored token's
+// first requests arriving together open one session with one replayed
+// initialize, and each gets its own answer.
+func TestProxyHTTPConcurrentFirstRequestsShareOneReplay(t *testing.T) {
+	d, h, a := startHTTPProxyDaemon(t)
+	a.issue("tok-a", httpTestHello("claude"))
+	const n = 8
+	replies := make([]string, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, replies[i], _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", `{"jsonrpc":"2.0","id":`+strconv.Itoa(10+i)+`,"method":"ping"}`)
+		}()
+	}
+	wg.Wait()
+	for i, body := range replies {
+		if r := decodeReply(t, body); string(r.ID) != strconv.Itoa(10+i) || r.Result.Method != "ping" {
+			t.Fatalf("request %d answered %s", i, body)
+		}
+	}
+	if h.count() != 1 {
+		t.Fatalf("sessions = %d, want one", h.count())
+	}
+	initializes := 0
+	for _, line := range h.session(t, 0).waitLines(t, n+2) {
+		if strings.Contains(line, `"method":"initialize"`) {
+			initializes++
+		}
+	}
+	if initializes != 1 {
+		t.Fatalf("replayed initializes = %d, want one", initializes)
+	}
+}
+
 func TestProxyHTTPCancelsARequestWhoseClientLeft(t *testing.T) {
 	d, h, a := startHTTPProxyDaemon(t)
 	a.issue("tok-a", httpTestHello("claude"))
