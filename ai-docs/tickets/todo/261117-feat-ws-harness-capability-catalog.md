@@ -76,9 +76,9 @@ ticket.
    intermediary program (the Python adapter) between harness and daemon on the
    hosted path. The CLI tier keeps the stdio launcher (additive, T0). HTTP MCP
    injection is therefore an admission condition, not an optional item.
-6. **Compaction is a common command delivered from outside the harness.** The
-   user pushes it through chat; it is not a harness-internal feature (owner-
-   confirmed, catalog section of the discussion; no separate board ID). A
+6. **Compaction is a common command delivered from outside the harness (07).**
+   The user pushes it through chat; it is not a harness-internal feature (the
+   owner proposed it in the message that (07) confirmed). A
    harness that cannot take it natively uses the `ws-substitute` (summarize and
    continue in a new session).
 7. **The Pi HTTP MCP probe goes first.** Verify whether Pi supports HTTP MCP
