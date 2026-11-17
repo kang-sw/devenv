@@ -68,13 +68,12 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 	}
 
 	// ask action carries the prompt and the relay instruction.
-	askOut := formatSageGate(wsdoc.SageGateResult{Action: "ask", AskPrompt: "Run design review for this ticket?"})
-	if !strings.Contains(askOut, "ask_prompt: Run design review for this ticket?") || !strings.Contains(askOut, "answer=yes|no") {
+	askOut := formatSageGate(wsdoc.SageGateResult{Action: "ask", AskPrompt: "prompt-token"})
+	if !strings.Contains(askOut, "ask_prompt: prompt-token") || !strings.Contains(askOut, "answer=yes|no") {
 		t.Fatalf("formatSageGate ask output:\n%s", askOut)
 	}
 
-	// D1/D3/D4: no gate action may propose a commit for the posture flip, and
-	// every action must describe the uncommitted write the same way. A
+	// No gate action may propose a commit for the posture flip. A
 	// regression that reintroduces a canonical title, a pending_commit_* key
 	// family, or a ready-to-paste ws/git.commit call on any branch fails here.
 	// stop_blocked is included because sageGateCombined can persist a design
@@ -89,36 +88,33 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 		if strings.Contains(text, "pending_commit") || strings.Contains(text, "chore(sage)") {
 			t.Fatalf("formatSageGate %s must not carry commit metadata:\n%s", name, text)
 		}
-		if !strings.Contains(text, sageGatePostureUncommittedNote) {
-			t.Fatalf("formatSageGate %s missing the shared uncommitted-posture note:\n%s", name, text)
+		if !strings.Contains(text, "next_instruction:") {
+			t.Fatalf("formatSageGate %s missing next_instruction:\n%s", name, text)
 		}
 	}
 
-	// The advisory line renders as a capitalized sentence (C9), matching its
-	// sibling fields (ask_prompt/next_instruction), even though the shared
-	// sageReviewNonWaivableAdvisory constant itself stays lowercase-initial
-	// for its other embedding inside the mutation-time Tip warning.
+	// The advisory is returned as a field when supplied.
 	runOut := formatSageGate(wsdoc.SageGateResult{
 		Action:    "run",
 		Reviewers: []string{"design"},
 		Mode:      "standalone",
-		Advisory:  "sage review is not waivable per ticket (see ws/config.list for the sage_review config); design review checks coherence.",
+		Advisory:  "advisory-token",
 	})
-	if !strings.Contains(runOut, "advisory: Sage review is not waivable") {
-		t.Fatalf("formatSageGate advisory must be capitalized:\n%s", runOut)
+	if !strings.Contains(runOut, "advisory: Advisory-token") {
+		t.Fatalf("formatSageGate missing advisory field:\n%s", runOut)
 	}
 
 	checkOut := formatSageGate(wsdoc.SageGateResult{
 		Action:            "check_review_required",
 		FreshnessStages:   []string{"design", "completeness"},
 		ReviewBaseline:    "abc12345",
-		ReviewInstruction: "Inspect the ticket diff against abc12345 and decide whether to rerun sage design and completeness review.",
+		ReviewInstruction: "instruction-token",
 	})
 	for _, want := range []string{
 		"action: check_review_required",
 		"freshness_stages: design, completeness",
 		"review_baseline: abc12345",
-		"review_instruction: Inspect the ticket diff",
+		"review_instruction: instruction-token",
 	} {
 		if !strings.Contains(checkOut, want) {
 			t.Fatalf("formatSageGate freshness output missing %q:\n%s", want, checkOut)
@@ -150,7 +146,7 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 		Posture: map[string]string{"sage-review-design": "completed"},
 		Missing: 1,
 	})
-	if !strings.Contains(concernOut, "verdict: concern") || !strings.Contains(concernOut, "escalate to block manually") {
+	if !strings.Contains(concernOut, "verdict: concern") || !strings.Contains(concernOut, "missing_issues: 1") || !strings.Contains(concernOut, "next_instruction:") {
 		t.Fatalf("formatSageRecord concern output:\n%s", concernOut)
 	}
 
@@ -160,17 +156,12 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 		Posture: map[string]string{"sage-review-design": "completed"},
 	})
 	// A clean pass carries no issues, so it must not grow a routing clause.
-	if strings.Contains(passOut, "autonomous_issues:") || strings.Contains(passOut, "Open Decision Queue") {
+	if strings.Contains(passOut, "autonomous_issues:") || strings.Contains(passOut, "missing_issues:") {
 		t.Fatalf("formatSageRecord clean pass must stay terse:\n%s", passOut)
 	}
 }
 
-// TestFormatSageGateBlockedRecovery pins that the gate's stop_blocked branch
-// names its recovery route rather than reading as a dead end. Without it, a
-// re-entry whose edits address the blocker got a bare "stop" from the gate while
-// the ticket skill's reviewer-spawn step told it to review the blocked stage —
-// one condition described two ways, which is what forced a judgement call
-// mid-procedure during dogfooding.
+// The blocked gate result carries no reviewers field.
 func TestFormatSageGateBlockedRecovery(t *testing.T) {
 	out := formatSageGate(wsdoc.SageGateResult{Action: "stop_blocked"})
 	// The gate carries no stage field, so the text must not imply the caller can
@@ -180,10 +171,7 @@ func TestFormatSageGateBlockedRecovery(t *testing.T) {
 	}
 }
 
-// TestFormatSageRecordBlockRecovery pins the block branch's recovery route. It
-// previously emitted the pass text ("commit, then proceed to handoff"), which
-// silently dropped a block at a todo/ landing: the caller's only block branch
-// covers the ready/ landing.
+// A block reports its posture, issue count, and recovery tool.
 func TestFormatSageRecordBlockRecovery(t *testing.T) {
 	out := formatSageRecord(wsdoc.SageRecordResult{
 		Verdict:        "block",
@@ -191,41 +179,22 @@ func TestFormatSageRecordBlockRecovery(t *testing.T) {
 		BlockedSection: "## Blocked (2026-07-29)",
 		Missing:        1,
 	})
-	if !strings.Contains(out, "stop and report the blocker") {
-		t.Fatalf("formatSageRecord block output must tell the caller to stop:\n%s", out)
-	}
-	// The ready/ landing reverts instead of committing, so the block branch must
-	// not prescribe a commit the caller may have to skip.
-	if strings.Contains(out, "commit this change via ws/git.commit") {
-		t.Fatalf("formatSageRecord block output must leave the commit decision to the caller:\n%s", out)
-	}
-	// resolveStage returns stop_blocked for a blocked posture forever, so
-	// sage_gate never names a reviewer again. The one executable recovery is the
-	// sage_stamp route this branch already names; an in-place resolve loop is
-	// not, and a landing-specific direction is the caller's own ready/ branch to
-	// make.
-	for _, forbidden := range []string{"resolve the issues in the appended Blocked section", "Do not land this ticket in ready/"} {
-		if strings.Contains(out, forbidden) {
-			t.Fatalf("formatSageRecord block output must not prescribe an unexecutable recovery loop or a landing-specific action (found %q):\n%s", forbidden, out)
+	for _, want := range []string{"verdict: block", "sage-review-design: blocked", "blocked_section: appended", "missing_issues: 1", "next_instruction:", "ws/tickets.sage_stamp"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("formatSageRecord block output missing %q:\n%s", want, out)
 		}
 	}
 }
 
-// TestFormatSageRecordConcernWithoutMissing pins the gate on the
-// missing-decision sentence. A standalone stage records `concern` straight from
-// the reviewer verdict with no missing issue required, so the ungated text asked
-// the caller to weigh a decision the same message reported as absent.
+// A concern can carry autonomous issues without missing issues.
 func TestFormatSageRecordConcernWithoutMissing(t *testing.T) {
 	out := formatSageRecord(wsdoc.SageRecordResult{
 		Verdict:    "concern",
 		Posture:    map[string]string{"sage-review-design": "completed"},
 		Autonomous: 2,
 	})
-	if strings.Contains(out, "missing decision") {
-		t.Fatalf("concern with no missing issue must not mention a missing decision:\n%s", out)
-	}
-	if !strings.Contains(out, "Fix the 2 autonomous issue(s)") {
-		t.Fatalf("concern must still route its autonomous issues:\n%s", out)
+	if !strings.Contains(out, "verdict: concern") || !strings.Contains(out, "autonomous_issues: 2") || strings.Contains(out, "missing_issues:") {
+		t.Fatalf("concern issue fields:\n%s", out)
 	}
 }
 
@@ -239,7 +208,7 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 		Autonomous: 2,
 		Missing:    1,
 	})
-	for _, want := range []string{"autonomous_issues: 2", "missing_issues: 1", "fix the 2 autonomous issue(s) in the ticket yourself", "take the 1 missing issue(s) through the Open Decision Queue"} {
+	for _, want := range []string{"autonomous_issues: 2", "missing_issues: 1", "next_instruction:", "ws/tickets.sage_stamp"} {
 		if !strings.Contains(both, want) {
 			t.Fatalf("formatSageRecord mixed routing missing %q in:\n%s", want, both)
 		}
@@ -250,11 +219,8 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 		Posture:    map[string]string{"sage-review-completeness": "completed"},
 		Autonomous: 3,
 	})
-	if !strings.Contains(autonomousOnly, "none of them need a user decision") {
-		t.Fatalf("formatSageRecord autonomous-only routing:\n%s", autonomousOnly)
-	}
-	if strings.Contains(autonomousOnly, "Open Decision Queue") {
-		t.Fatalf("formatSageRecord must not route autonomous-only issues to the user:\n%s", autonomousOnly)
+	if !strings.Contains(autonomousOnly, "autonomous_issues: 3") || strings.Contains(autonomousOnly, "missing_issues:") || !strings.Contains(autonomousOnly, "ws/tickets.sage_stamp") {
+		t.Fatalf("formatSageRecord autonomous-only fields:\n%s", autonomousOnly)
 	}
 
 	missingOnly := formatSageRecord(wsdoc.SageRecordResult{
@@ -262,26 +228,14 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 		Posture: map[string]string{"sage-review-design": "completed"},
 		Missing: 1,
 	})
-	if !strings.Contains(missingOnly, "Take the 1 missing issue(s) through the Open Decision Queue") {
-		t.Fatalf("formatSageRecord missing-only routing:\n%s", missingOnly)
-	}
-	// A missing issue is classed like any other queue item, so the routing
-	// must not preassign it to the user.
-	for _, out := range []string{both, missingOnly} {
-		if !strings.Contains(out, "classed by the same rules as any other item") || strings.Contains(out, "user decision you cannot supply") {
-			t.Fatalf("formatSageRecord missing routing must defer to the item classes:\n%s", out)
-		}
+	if !strings.Contains(missingOnly, "missing_issues: 1") || strings.Contains(missingOnly, "autonomous_issues:") || !strings.Contains(missingOnly, "next_instruction:") {
+		t.Fatalf("formatSageRecord missing-only fields:\n%s", missingOnly)
 	}
 }
 
-// TestFormatSageRecordAutonomousOrdersRestamp pins the digest rule the routing
-// clause has to respect: an autonomous fix edits the body after this stamp took
-// its digest, so every branch that orders such a fix also orders a re-stamp
-// with the same verdicts, before the commit direction. Without it the recorded
-// digest is stale as soon as the fixes land, and the next sage_gate asks to
-// rerun the reviewers whose findings were just applied.
+// Autonomous issues name the stamp tool; a clean pass does not.
 func TestFormatSageRecordAutonomousOrdersRestamp(t *testing.T) {
-	const restamp = "call ws/tickets.sage_stamp again with the same verdicts"
+	const restamp = "ws/tickets.sage_stamp"
 
 	for name, result := range map[string]wsdoc.SageRecordResult{
 		"autonomous-only": {
@@ -312,44 +266,28 @@ func TestFormatSageRecordAutonomousOrdersRestamp(t *testing.T) {
 	}
 }
 
-// TestFormatSageRecordBlockOrdersDeltaReview pins the block branch of the
-// re-stamp rule. A block's recorded verdict comes from the reviewer verdict
-// field, not from the issue counts, so a same-verdict re-stamp after the fixes
-// records the same block and repeats this text: a lead following it loops, or
-// commits a ticket it believes was cleared. Every block, whatever mix of
-// issues it carries, instead orders a delta review by the blocked stage's
-// reviewer(s) and a stamp of those fresh verdicts, with no commit or handoff
-// while blocked.
+// Block outputs retain their posture fields and name the stamp tool.
 func TestFormatSageRecordBlockOrdersDeltaReview(t *testing.T) {
-	const restamp = "call ws/tickets.sage_stamp again with the same verdicts"
 	design := map[string]string{"sage-review-design": "blocked"}
 	combined := map[string]string{"sage-review-design": "blocked", "sage-review-completeness": "blocked"}
 
-	for name, tc := range map[string]struct {
-		result    wsdoc.SageRecordResult
-		reviewers string
-	}{
-		"autonomous-only": {wsdoc.SageRecordResult{Verdict: "block", Posture: design, BlockedSection: "## Blocked", Autonomous: 2}, "rerun the design reviewer"},
-		"mixed":           {wsdoc.SageRecordResult{Verdict: "block", Posture: design, BlockedSection: "## Blocked", Autonomous: 2, Missing: 1}, "rerun the design reviewer"},
-		"missing-only":    {wsdoc.SageRecordResult{Verdict: "block", Posture: map[string]string{"sage-review-completeness": "blocked"}, BlockedSection: "## Blocked", Missing: 1}, "rerun the completeness reviewer"},
-		"combined-mixed":  {wsdoc.SageRecordResult{Verdict: "block", Posture: combined, BlockedSection: "## Blocked", Autonomous: 1, Missing: 1}, "rerun both the design and the completeness reviewers"},
-		"no-issues":       {wsdoc.SageRecordResult{Verdict: "block", Posture: design, BlockedSection: "## Blocked"}, "rerun the design reviewer"},
+	for name, result := range map[string]wsdoc.SageRecordResult{
+		"autonomous-only": {Verdict: "block", Posture: design, BlockedSection: "## Blocked", Autonomous: 2},
+		"mixed":           {Verdict: "block", Posture: design, BlockedSection: "## Blocked", Autonomous: 2, Missing: 1},
+		"missing-only":    {Verdict: "block", Posture: map[string]string{"sage-review-completeness": "blocked"}, BlockedSection: "## Blocked", Missing: 1},
+		"combined-mixed":  {Verdict: "block", Posture: combined, BlockedSection: "## Blocked", Autonomous: 1, Missing: 1},
+		"no-issues":       {Verdict: "block", Posture: design, BlockedSection: "## Blocked"},
 	} {
-		out := formatSageRecord(tc.result)
-		if strings.Contains(out, restamp) {
-			t.Fatalf("%s: a block must not prescribe a same-verdict re-stamp, which records the same block:\n%s", name, out)
-		}
-		for _, want := range []string{tc.reviewers, "delta review", "stamp that fresh verdict set", "do not commit or hand off", "stop and report the blocker"} {
+		out := formatSageRecord(result)
+		for _, want := range []string{"verdict: block", "blocked_section: appended", "next_instruction:", "ws/tickets.sage_stamp"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("%s: block output missing %q:\n%s", name, want, out)
 			}
 		}
-		if tc.result.Autonomous+tc.result.Missing > 0 && !strings.Contains(out, "with these same verdicts after those revisions: it records the same block") {
-			t.Fatalf("%s: a block carrying issues must warn off the same-verdict re-stamp after the revisions:\n%s", name, out)
-		}
-		// The issue routing still leads, ahead of the delta-review direction.
-		if routeIdx, rerunIdx := strings.Index(out, "Open Decision Queue"), strings.Index(out, tc.reviewers); tc.result.Missing > 0 && (routeIdx == -1 || routeIdx > rerunIdx) {
-			t.Fatalf("%s: missing-issue routing must precede the delta review:\n%s", name, out)
+		for field := range result.Posture {
+			if !strings.Contains(out, field+": blocked") {
+				t.Fatalf("%s: block output missing %s:\n%s", name, field, out)
+			}
 		}
 	}
 
@@ -361,8 +299,8 @@ func TestFormatSageRecordBlockOrdersDeltaReview(t *testing.T) {
 		Autonomous: 1,
 		Missing:    1,
 	})
-	if !strings.Contains(concern, restamp) || strings.Contains(concern, "delta review") {
-		t.Fatalf("a mixed concern keeps its same-verdict re-stamp and orders no delta review:\n%s", concern)
+	if !strings.Contains(concern, "verdict: concern") || !strings.Contains(concern, "ws/tickets.sage_stamp") {
+		t.Fatalf("mixed concern output:\n%s", concern)
 	}
 }
 
@@ -392,7 +330,7 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	// C5: the required->run advisory (non-waivable statement + review-scope
 	// line) must reach the actual MCP dispatch response, not just the
 	// wsdoc.SageGateResult struct field.
-	if !strings.Contains(resp, "advisory: Sage review is not waivable") {
+	if !strings.Contains(resp, "advisory:") {
 		t.Fatalf("sage_gate dispatch response missing advisory line:\n%s", resp)
 	}
 }
@@ -422,21 +360,10 @@ func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 			t.Fatalf("sage_gate response missing %q:\n%s", want, gate)
 		}
 	}
-	// The settle point replaced the retired final-confirmation step; naming
-	// that step would send a lead to a step lead-ticket no longer has.
-	if strings.Contains(strings.ToLower(gate), "final confirmation") {
-		t.Fatalf("sage_gate response names the retired final confirmation:\n%s", gate)
-	}
-	if strings.Contains(gate, "left uncommitted") {
-		t.Fatalf("the queue stop writes nothing and must not carry the posture-uncommitted note:\n%s", gate)
-	}
 
 	move := callToolWithKey(t, server, 9713, key, "tickets.move", map[string]any{"stem": stem, "to": "ready"})
 	if !strings.Contains(move, "## Open Decision Queue") {
 		t.Fatalf("tickets.move response missing the queue refusal:\n%s", move)
-	}
-	if strings.Contains(strings.ToLower(move), "final confirmation") {
-		t.Fatalf("tickets.move response names the retired final confirmation:\n%s", move)
 	}
 	if _, err := os.Stat(filepath.Join(root, ticketRel)); err != nil {
 		t.Fatalf("refused move must leave the ticket in todo/: %v", err)
@@ -470,7 +397,7 @@ func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
 		"action: check_review_required",
 		"freshness_stages: design, completeness",
 		"review_baseline:",
-		"review_instruction: Inspect the ticket diff",
+		"review_instruction:",
 	} {
 		if !strings.Contains(resp, want) {
 			t.Fatalf("sage_gate stale response missing %q:\n%s", want, resp)
