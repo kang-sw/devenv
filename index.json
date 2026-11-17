@@ -582,6 +582,12 @@
     "261117-feat-ws-hosted-antigravity-adapter": {
       "registered_at": "2026-11-17T08:21:47Z"
     },
+    "261117-feat-ws-hosted-compaction-lifecycle": {
+      "registered_at": "2026-11-17T09:49:15Z"
+    },
+    "261117-feat-ws-hosted-prompt-assembly": {
+      "registered_at": "2026-11-17T09:48:35Z"
+    },
     "261117-feat-ws-mailbox-memory-first-store": {
       "registered_at": "2026-11-17T08:21:40Z"
     },
