@@ -170,7 +170,10 @@ ticket.
    is reported because the Pi
    extension retirement premise (04) depends on it; it does not itself approve any
    removal (per-item approval stays).
-8. **Fixtures run on remote w5090 (21).** Never run `go test` locally.
+   Owner note 2026-11-17 22:14: Pi has built-in MCP support since 1.0 (the ws
+   extension's own MCP client predates it); the installed Pi is 1.5.2, so the
+   probe's open question is the HTTP transport with a per-session token header.
+8. **Fixtures and test location (21), (68).** Per-version recorded stream fixtures are the verification vehicle (21). Owner (68), 2026-11-17 22:10: Go tests run locally on the macOS home machine; the earlier remote-w5090-only wording belonged to the owner's company Windows setup.
 9. **Catalog placement and consumers.** The catalog is a declared ceiling per
    `harness@version`, with a role dimension (lead/worker) where a harness needs
    one: Claude gives approval/mode/mcp handles only to leads
@@ -206,10 +209,33 @@ ticket.
     `children.go:146-156`): the restore need is shown, and only what restore
     needs is persisted. Rejected: memory-only tokens, which a holder reattach
     would lose. (design review 2026-11-17, auto-confirmed technical)
+12. **Hosted lead keeps the bundled plugin minus its MCP entry (owner (65),
+    2026-11-17 21:42).** Today a hosted lead disables installed `ws`/`wsflow`
+    plugins and loads the daemon-selected bundle through `--plugin-dir`
+    (`claude_lead_plugins.go:41-52`, `hosted_plugins.go` `ResolveHostedPlugin`);
+    that bundle's `.mcp.json` starts the Python stdio launcher. Phase 2 keeps
+    the bundle for its hooks and skills (until
+    `261117-feat-ws-hosted-prompt-assembly` replaces them), blocks only the
+    bundle's stdio ws MCP entry, and injects the HTTP MCP through
+    `--mcp-config`, so a lead never attaches two ws servers. The blocking
+    mechanism (a hosted plugin variant without `mcpServers`, or
+    `--strict-mcp-config` if a probe shows it also suppresses plugin MCP
+    servers) is chosen by a Phase 2 probe and recorded in its Result.
+    Rejected: adding HTTP alongside the plugin's stdio server (two ws servers);
+    dropping the bundle entirely (hooks and skills vanish before prompt
+    assembly replaces them).
+13. **A harness without a catalog profile stays handle-only (owner (69),
+    2026-11-17 22:10).** Until a harness has a profile (Pi until its port of
+    the Codex adapter, (25)), catalog readers do not consult the catalog for
+    it: no dashboard hiding, no startup demotion and no unverified-version
+    warning; runtime support is the instance handle alone, as today. The Pi
+    compaction `native` grade in Decision 6 records today's path as fact; it
+    is not a partial Pi profile. Rejected: a partial Pi profile filled ahead
+    of the port.
 
 ## Constraints
 
-- Go tests run on remote w5090 only, never local `go test`.
+- Go test location (owner (68), 2026-11-17 22:10): run Go tests locally on the macOS home machine. The earlier "remote w5090 only" rule belonged to the owner's company Windows setup and does not apply here.
 - Read before editing `agents-plugin-tool/`: `ai-docs/manuals/shipped-surface-boundary.md`
   and `ai-docs/manuals/release-compatibility.md`; for `agents-plugin-tool/internal/mcp/`
   also `ai-docs/manuals/ws-mcp.md`. If a change reaches `agents-plugin/rsrc/`,
@@ -266,7 +292,7 @@ by (22).
 | complexity.side_effect_risk | high | new authenticated HTTP endpoint on the shared daemon plus startup demotion of capabilities in every hosted launch |
 | risk.correctness | high | version-range resolution, init-shape demotion and token re-issue each fail silently if wrong; fixtures for Claude versions do not exist yet |
 | risk.fit | moderate | catalog is a ceiling over lead-only versus worker handles kept by 9846671b (Decision 9); Phase 1 inventory mapping still to be recorded |
-| risk.test | high | tests run on remote w5090 only, per-version recorded stream fixtures and a live hosted Claude session are required |
+| risk.test | high | per-version recorded stream fixtures and a live hosted Claude session are required |
 | risk.security_or_contract | high | new HTTP MCP endpoint with loopback-only token auth; T0 verdict still unrecorded (pending Phase 2 Result) |
 
 ## Phases
@@ -284,8 +310,7 @@ the Pi port, (25)).
 
 Deferred: Codex, Antigravity and Pi values; the HTTP transport implementation.
 
-Verification: unit tests on catalog lookup and version-range resolution, run on remote
-w5090; the probe outcome recorded in this phase's Result; an inventory showing each existing optional
+Verification: unit tests on catalog lookup and version-range resolution; the probe outcome recorded in this phase's Result; an inventory showing each existing optional
 control in `backend.go` maps to a catalog item or is explicitly left out.
 
 ### Phase 2: HTTP MCP direct JSON-RPC with per-session token (admission condition)
@@ -295,15 +320,17 @@ per-session token, re-issued per process start, loopback only, with no
 intermediary program on the hosted path. The token resolves to the same
 per-connection context `ProxyHello` gives stdio today (mode, tool allowlist,
 identity). Cover both attach paths: workers (inline `--mcp-config`) and hosted
-leads (moved from the bundled plugin's stdio server to HTTP). Persist only what
+leads (moved from the bundled plugin's stdio server to HTTP; the bundle stays
+loaded without its MCP entry, mechanism chosen by probe, Decision 12). Persist only what
 holder reattach needs (Decision 11). The CLI tier keeps stdio. Record the
 compatibility verdict with source citations, including the new-daemon launch /
 older-daemon reattach scenario.
 
-Verification: tests on remote w5090 covering token issue and re-issue,
+Verification: tests covering token issue and re-issue,
 loopback-only binding, rejection of a missing or stale token, a worker over HTTP
 seeing no tool beyond its profile, and token restore on holder reattach; a hosted
-Claude worker and lead session exercising ws MCP tools over HTTP; the stdio path unchanged.
+Claude worker and lead session exercising ws MCP tools over HTTP, with the lead
+attached to exactly one ws server; the stdio path unchanged.
 
 ### Phase 3: Startup version/init-shape check, loud nearest-profile policy, fixtures and compaction command
 
@@ -312,12 +339,14 @@ demotion of mismatched capabilities to `unsupported` (for workers alongside the
 unchanged fatal `checkClaudeInit`, for leads demotion only), the nearest-profile
 "unverified version" warning as a computed State field on the dashboard,
 per-version recorded stream fixtures for the Claude versions in the guaranteed
-range, and compaction: the catalog item (Claude and Pi `native`) plus routing the
+range, and compaction: the catalog item (Claude `native`; Pi keeps its existing
+`/compact` path handle-only until it has a profile, Decision 13) plus routing the
 existing command through it. Document the init-field -> catalog-item mapping that
 gates demotion. Record the chosen lower- and upper-bound fixture versions in this
 phase's Result.
 
-Verification: fixture-driven tests on remote w5090 for in-version-range, above-range and
-below-range versions and for an init-shape mismatch; a dashboard check that the
+Verification: fixture-driven tests for in-version-range, above-range and
+below-range versions and for an init-shape mismatch; a profile-less harness (Pi)
+showing no demotion, hiding or warning (Decision 13); a dashboard check that the
 warning shows; compaction pushed from chat reaches a hosted Claude session and is
 not a harness-internal feature.

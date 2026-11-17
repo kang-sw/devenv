@@ -17,10 +17,12 @@ related:
 Part of owner 18:35's "application layer" on top of the common harness
 interface, placed in stage 2 by (28)=a: (1) a daemon-owned compaction nudge, and
 lead addition A, a daemon session-state restore without the lead-revive ritual.
-This ticket also builds `ws/compact`, the common compaction command the catalog
-ticket (Decision 6) delegates here: the catalog grades Claude and Pi compaction
-`native` through the existing `/compact` path and builds the `ws-substitute`
-"with the first harness that needs it, not here".
+This ticket also builds `ws/compact`, the common compaction command. Per owner
+(31)=a the catalog ticket (Decision 6) names this ticket the owner of
+`ws/compact`, the compaction nudge and the `ws-substitute` (summarize and
+continue in a new session); `ws/compact` is the default compaction method for
+hosted sessions, and the catalog's native compaction grades (Claude and Pi
+through the existing `/compact` path) remain factual inputs for the fallback.
 
 Owner 18:39 goal: the nudge and the state restore apply to child agents too, not
 only leads. Subagent compaction timing, notably for Pi children, was hard; the
@@ -91,7 +93,7 @@ the existing `/compact` command through the catalog; this ticket owns
 
 ## Constraints
 
-- Go tests run on remote w5090 only, never local `go test`.
+- Go test location (owner (68), 2026-11-17 22:10): run Go tests locally on the macOS home machine. The earlier "remote w5090 only" rule belonged to the owner's company Windows setup and does not apply here.
 - Read before editing `agents-plugin-tool/`: `ai-docs/manuals/shipped-surface-boundary.md`
   and `ai-docs/manuals/release-compatibility.md`; for `agents-plugin-tool/internal/mcp/`
   also `ai-docs/manuals/ws-mcp.md`. If playbooks, skills, `agents-plugin/rsrc/`
@@ -135,7 +137,7 @@ sessions only.
 
 Deferred: ws/compact itself; state restore.
 
-Verification: Go tests on remote w5090 for threshold crossing, safe-point-only
+Verification: Go tests for threshold crossing, safe-point-only
 delivery, child sessions nudged, and no nudge mid-turn; no per-event file write
 (measured syscalls/s).
 
@@ -148,7 +150,7 @@ resume/holder reattach to the newest segment. Native compaction is the fallback
 when the session cannot write the summary (36). Applies to leads and
 children. Records the compatibility verdict.
 
-Verification: fixture-driven tests on remote w5090 per harness available at that
+Verification: fixture-driven tests per harness available at that
 time (Claude first): new segment created, ws key inherited, agenda/whiteboard/
 lineage intact, children still reachable, resume after daemon restart lands on
 the newest segment, fallback path on overflow; a recorded end-to-end hosted
@@ -161,6 +163,6 @@ bundle: ws key, agenda, ticket/plan, children, exec jobs. This replaces the
 `lead-revive` ritual for hosted sessions and applies to children as well as
 leads. Depends on Phase 2.
 
-Verification: tests on remote w5090 that a compacted session and a
+Verification: tests that a compacted session and a
 restart-recovered session each receive the bundle with every listed field, with
 no `lead-revive` call; CLI-tier `lead-revive` unchanged.
