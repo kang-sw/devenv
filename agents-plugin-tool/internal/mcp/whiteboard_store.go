@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -20,13 +19,14 @@ func whiteboardFolder(root, key string) wswhiteboard.FolderStore {
 	return wswhiteboard.FolderStore{Dir: filepath.Join(root, filepath.FromSlash(whiteboardDirRel), wsmailbox.ReplyID(key))}
 }
 
+// watchWhiteboardFiles names the board folder's two commit roots, not its
+// leaves: every commit (load-time recovery included) replaces meta.json and
+// committed.json after its panel, log, and topic writes, and the takeover edit
+// replaces meta.json. Their stats therefore cover every authoritative file
+// without a folder walk or a stat per topic file.
 func watchWhiteboardFiles(dir string, watch func(string)) {
-	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err == nil && !entry.IsDir() && (filepath.Ext(path) == ".json" || filepath.Ext(path) == ".jsonl") {
-			watch(path)
-		}
-		return nil
-	})
+	watch(filepath.Join(dir, "meta.json"))
+	watch(filepath.Join(dir, "committed.json"))
 }
 
 func (s *sessionStore) readWhiteboard(key string) (sessionRecord, error) {

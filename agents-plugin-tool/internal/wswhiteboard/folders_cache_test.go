@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -122,10 +124,10 @@ func TestFolderCacheHitStatsIndependentOfBoardSize(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			// One existence check plus (pending + two roots) before and
-			// after flock acquisition; no guard reads or leaf probes.
-			if stats != hits*7 || *reads != 0 {
-				t.Fatalf("hits=%d stats=%d reads=%d; want %d stats, no reads", hits, stats, *reads, hits*7)
+			// Pending plus two roots, with no flock; no guard reads or leaf
+			// probes.
+			if stats != hits*3 || *reads != 0 {
+				t.Fatalf("hits=%d stats=%d reads=%d; want %d stats, no reads", hits, stats, *reads, hits*3)
 			}
 			t.Logf("topics=%d files=%d before=%d stats/hit (legacy replay counted), after=%d stats/hit (counted)", topics, len(files), before, stats/hits)
 		})
@@ -225,28 +227,152 @@ func TestFolderCacheImmediateStoreAndExternalRootChanges(t *testing.T) {
 	}
 }
 
-func TestFolderCacheRechecksRootUnderLock(t *testing.T) {
-	f := folderSizedBoard(t, 1)
+// A hit validates without the flock, so a commit can finish during its root
+// stats. Whichever root stat it lands in, the read returns a whole committed
+// state: the old snapshot if both roots still matched, else a locked reload.
+func TestFolderCacheHitRacingCommitReturnsCommittedState(t *testing.T) {
+	for _, tc := range []struct {
+		root string
+		want int
+	}{{"meta.json", 1}, {"committed.json", 0}} {
+		t.Run(tc.root, func(t *testing.T) {
+			f := folderSizedBoard(t, 1)
+			var cache FolderCache
+			if _, err := cache.Open(f, nil); err != nil {
+				t.Fatal(err)
+			}
+			wrote := false
+			cache.stat = func(path string) (os.FileInfo, error) {
+				info, err := os.Stat(path)
+				if !wrote && filepath.Base(path) == tc.root {
+					// Return this root's pre-commit stamp, after a whole commit.
+					wrote = true
+					if err := f.Update(nil, func(s *State) error { s.Seq++; return nil }); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return info, err
+			}
+			got, err := cache.Open(f, nil)
+			if err != nil || got == nil || got.Seq != tc.want || !wrote {
+				t.Fatalf("racing read: state=%v want seq %d wrote=%t err=%v", got, tc.want, wrote, err)
+			}
+			if got, err := cache.Open(f, nil); err != nil || got == nil || got.Seq != 1 {
+				t.Fatalf("read after the commit missed it: state=%v err=%v", got, err)
+			}
+		})
+	}
+}
+
+func countFolderLocks(tb testing.TB) *atomic.Int64 {
+	tb.Helper()
+	prev := folderLockAttempt
+	count := new(atomic.Int64)
+	folderLockAttempt = func(dir string) {
+		count.Add(1)
+		prev(dir)
+	}
+	tb.Cleanup(func() { folderLockAttempt = prev })
+	return count
+}
+
+func TestFolderCacheHitTakesNoLockAndCommitInvalidates(t *testing.T) {
+	f := folderIdleBoard(t)
+	var cache FolderCache
+	locks := countFolderLocks(t)
+	if _, err := cache.Open(f, nil); err != nil || locks.Load() != 1 {
+		t.Fatalf("first open: locks=%d err=%v", locks.Load(), err)
+	}
+	locks.Store(0)
+	for i := 0; i < 20; i++ {
+		if _, err := cache.Open(f, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if locks.Load() != 0 {
+		t.Fatalf("cache hits attempted MkdirAll/flock %d times", locks.Load())
+	}
+	if err := f.Update(nil, func(s *State) error { s.Seq++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	locks.Store(0)
+	got, err := cache.Open(f, nil)
+	if err != nil || got.Seq != 1 || locks.Load() != 1 {
+		t.Fatalf("commit did not invalidate the hit: seq=%d locks=%d err=%v", got.Seq, locks.Load(), err)
+	}
+	locks.Store(0)
+	if _, err := cache.Open(f, nil); err != nil || locks.Load() != 0 {
+		t.Fatalf("reloaded board not cached: locks=%d err=%v", locks.Load(), err)
+	}
+}
+
+// A writer holds the flock through its callback (and, in the server, through
+// its renders). Readers of the unchanged board return the last committed state
+// at once instead of waiting for it.
+func TestFolderCacheReaderDuringHeldWriterLock(t *testing.T) {
+	f := folderIdleBoard(t)
+	var cache FolderCache
+	want, err := cache.Open(f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- FolderStore{Dir: f.Dir}.Update(nil, func(s *State) error {
+			close(held)
+			<-release
+			s.Seq++
+			return nil
+		})
+	}()
+	<-held
+	locks := countFolderLocks(t)
+	read := make(chan *State, 1)
+	go func() {
+		got, err := cache.Open(f, nil)
+		if err != nil {
+			t.Error(err)
+		}
+		read <- got
+	}()
+	select {
+	case got := <-read:
+		if got == nil || !reflect.DeepEqual(got, want) || locks.Load() != 0 {
+			t.Errorf("reader under a held flock: locks=%d state differs=%t", locks.Load(), !reflect.DeepEqual(got, want))
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("reader waited on the writer's flock")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := cache.Open(f, nil); err != nil || got.Seq != want.Seq+1 {
+		t.Fatalf("writer's commit not observed: %v", err)
+	}
+}
+
+// pending.json leaves both roots untouched until replay, so only its presence
+// sends the read to the locked path that replays it.
+func TestFolderCachePendingForcesLockedPath(t *testing.T) {
+	f := folderIdleBoard(t)
 	var cache FolderCache
 	if _, err := cache.Open(f, nil); err != nil {
 		t.Fatal(err)
 	}
-	wrote := false
-	cache.stat = func(path string) (os.FileInfo, error) {
-		info, err := os.Stat(path)
-		if !wrote && filepath.Base(path) == "committed.json" {
-			// Return the old receipt stamp from the first (unlocked) guard,
-			// but complete another writer before the cache acquires the flock.
-			wrote = true
-			if err := f.Update(nil, func(s *State) error { s.Seq++; return nil }); err != nil {
-				t.Fatal(err)
-			}
+	writer := FolderStore{Dir: f.Dir, Fault: func(stage string) error {
+		if stage == "intent" {
+			return folderCrash
 		}
-		return info, err
+		return nil
+	}}
+	if err := writer.Update(nil, func(s *State) error { s.Seq++; return nil }); !errors.Is(err, folderCrash) {
+		t.Fatal(err)
 	}
+	locks := countFolderLocks(t)
 	got, err := cache.Open(f, nil)
-	if err != nil || got == nil || got.Seq != 1 || !wrote {
-		t.Fatalf("write between guards missed: state=%v wrote=%t err=%v", got, wrote, err)
+	if err != nil || got.Seq != 1 || locks.Load() != 1 {
+		t.Fatalf("pending intent: seq=%d locks=%d err=%v", got.Seq, locks.Load(), err)
 	}
 }
 
@@ -512,8 +638,13 @@ func BenchmarkFolderIdleOpen112(b *testing.B) {
 				}
 			}
 			b.StopTimer()
-			// One read seam call attempts one open; add the flock file.
-			b.ReportMetric(float64(*reads)/float64(b.N)+1, "opens/op")
+			// One read seam call attempts one open; an uncached open adds the
+			// flock file, a cache hit takes no flock.
+			flockOpens := 1.0
+			if cached {
+				flockOpens = 0
+			}
+			b.ReportMetric(float64(*reads)/float64(b.N)+flockOpens, "opens/op")
 			if cache != nil {
 				b.ReportMetric(float64(stats)/float64(b.N), "cache-stats/op")
 			}
