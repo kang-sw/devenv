@@ -2235,9 +2235,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// printPlaybook carries no session key, so the session-resolved
-		// workflow.whiteboard_enabled and ticket_review_auto_ack variants are
-		// applied here.
+		// The remaining manual/discussion knob variants run after rendering;
+		// ticket knob markers resolve in the shared render core.
 		knobResolver := s.sessionResolver(keyStr, builtinConfigDefaults())
 		whiteboardOn, err := s.whiteboardEnabled(&knobResolver, keyStr)
 		if err != nil {
@@ -2262,11 +2261,6 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", err)
 			}
 		}
-		autoAck, err := s.ticketReviewAutoAckEnabled(keyStr)
-		if err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err))
-		}
-		body = applyTicketReviewAutoAckVariant(name, body, autoAck)
 		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", nil)
 
 	case "playbook.render":
@@ -3050,7 +3044,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(autoAckEntry, tuningKnob{
 		ID:          autoAckEntry.Key,
 		Kind:        "workflow_preference",
-		Description: "Open Decision Queue confirmation of review-raised items during ticket settlement (builtin on). on lets the lead confirm, on its own judgment, an announced default or technical decision raised by a fact-populator decision gap or by a reviewer issue marked autonomous, and list it as auto-confirmed in the round's settlement report; policy questions, reversals, and reviewer issues marked missing are still asked. off asks the user to acknowledge every such item, adding one user round trip before ready/ promotion. Takes effect at the next lead-ticket playbook read.",
+		Description: "Open Decision Queue confirmation of review-raised items during ticket settlement (builtin on). on lets the ticket-handler confirm, on its own judgment, an announced default or technical decision raised by a fact-populator decision gap or by a reviewer issue marked autonomous, and list it as auto-confirmed in the round's settlement report; policy questions, reversals, and reviewer issues marked missing are still asked. off asks the caller to confirm every such item, adding one user round trip before ready/ promotion. Takes effect at the next lead-ticket playbook read.",
 		Writer:      tuningWriter{Tool: autoAckEntry.WriterTool, FixedArguments: map[string]string{"key": autoAckEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           autoAckEntry.ResetTool,

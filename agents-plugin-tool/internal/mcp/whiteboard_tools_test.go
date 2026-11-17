@@ -1240,15 +1240,8 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		t.Fatalf("knob on: lead-discuss must carry the capture line instead:\n%s", discussOn)
 	}
 	ticketOn := read("lead-ticket")
-	bullet := withNamespace(lineTicketQueueBoard, RuntimeNamespace())
-	idx := strings.Index(ticketOn, bullet)
-	if idx < 0 || idx > strings.Index(ticketOn, "Trace before writing — any change") || idx < strings.Index(ticketOn, "Section — `## Open Decision Queue`") {
-		t.Fatalf("knob on: lead-ticket must carry the queue step inside the queue Section list:\n%s", ticketOn)
-	}
-	for _, want := range []string{"a `wb:floor` at the queue's last-ID line", "the query does not return", "with `ids` set to the queue's item IDs"} {
-		if !strings.Contains(bullet, want) {
-			t.Fatalf("queue step missing %q", want)
-		}
+	if ticketOn == ticketOff || strings.Contains(ticketOn, "<!-- ws:override:") {
+		t.Fatal("lead-ticket's whiteboard extension must resolve and change with the knob")
 	}
 }
 

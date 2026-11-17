@@ -28,10 +28,7 @@ const (
 	// lead-discuss variant; a test pins the two together.
 	whiteboardCaptureLine = "Confirmed decisions reach a ticket only through `{{ns}}:lead-ticket`, once the user moves to capture. Authoritative topic folders remain after the session key expires; do not treat key expiry as board deletion."
 
-	// lineTicketQueueStateEnd ends lead-ticket's queue `Section —` list; the
-	// knob-on queue step joins that list as its last item.
-	lineTicketQueueStateEnd = "\n\nTrace before writing — any change"
-	lineTicketQueueBoard    = "- When you open or resume a queue, put its open items on the whiteboard:\n" +
+	lineTicketQueueBoard = "- When you open or resume a queue, put its open items on the whiteboard:\n" +
 		"  `{{ns}}/whiteboard.query` with `ids` set to the queue's item IDs, then in one\n" +
 		"  `{{ns}}/whiteboard.update` `wb:add` each open queue item\n" +
 		"  the query does not return, under its ticket ID (`id`), with\n" +
@@ -113,13 +110,6 @@ func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled boo
 		body = strings.TrimRight(body, "\n") + "\n\n" + section
 	case "lead-discuss":
 		body = replaceOrAppend(body, lineDiscussNotPersisted, "No block format and no queue.\n  "+withNamespace(whiteboardCaptureLine, s.runtimeNamespace()))
-	case "lead-ticket":
-		bullet := withNamespace(lineTicketQueueBoard, s.runtimeNamespace())
-		if strings.Contains(body, lineTicketQueueStateEnd) {
-			body = strings.Replace(body, lineTicketQueueStateEnd, "\n"+bullet+lineTicketQueueStateEnd, 1)
-		} else {
-			body = strings.TrimRight(body, "\n") + "\n\n" + bullet
-		}
 	}
 	return body, nil
 }

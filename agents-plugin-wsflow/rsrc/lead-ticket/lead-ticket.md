@@ -23,9 +23,9 @@ becomes a guess at run time.
 ## Write
 
 Persist:
-- Only user-confirmed decisions, plus items the handler auto-confirms and
-  reports. Exception: a research Outcome Ledger may keep entries labeled
-  non-authoritative (Proposals, Open Questions).
+- Only user-confirmed decisions and any items in the handler's
+  `auto_confirmed:` report field. Exception: a research Outcome Ledger may
+  keep entries labeled non-authoritative (Proposals, Open Questions).
 - Anything unconfirmed (mechanism, rejected alternative, future-scope hint,
   cleanup) goes through the Open Decision Queue first. Never put an
   unconfirmed decision into `## Decisions`, even as working state.
@@ -95,6 +95,8 @@ compaction (create the ticket first with
   `## Decisions` if it had moved.
 - Delete the section only at the settle point.
 - Research tickets: no section; the Outcome Ledger holds their entries.
+<!-- ws:override:TicketQueueWhiteboard -->
+<!-- ws:/override:TicketQueueWhiteboard -->
 
 Trace before writing — any change: a user correction or redirect, your own
 proposal, the initial draft. Untraced, contradictions surface one review
@@ -137,8 +139,8 @@ everything else follows the user's language.
 - A policy question's first showing is the full block; later re-asks are one
   line, `(nn) [open] <one-line decision>`.
 - Report items settled this round in one line, e.g.
-  `(01), (02) confirmed · (04) deferred`, plus each handler auto-confirmed
-  item: `(05) auto-confirmed - <one-line decision>`.
+  `(01), (02) confirmed · (04) deferred`, plus any items in the handler's
+  `auto_confirmed:` report field: `(05) auto-confirmed - <one-line decision>`.
 
 ## Derive actionable work from research
 
@@ -167,8 +169,9 @@ Handler loop:
 1. Settle any open queue first; the handler takes tickets with no
    `## Open Decision Queue` section.
 2. `{{.McpNamespace}}/playbook.render(name: "ticket-handler", session_key:
-   <your key>)`; pass the path on without reading it. Spawn at the tier the
-   render returns: `Read <rendered-path> as your system prompt.` plus the task block:
+   <your key>)`; for `revise`, pass `root_override: <worktree>` for the
+   stopped worker's worktree. Pass the path on without reading it. Spawn at
+   the tier the render returns: `Read <rendered-path> as your system prompt.` plus the task block:
    operation (`promote`, `epic-review`, or `revise`), the stems, and the
    branch to commit on (`revise`: the worker's impl branch); `revise` adds the
    worker's `proposed_resolution:` verbatim and the worker's tier.
@@ -198,7 +201,8 @@ Handler loop:
 
 - Persisting discussion output before the user explicitly agreed to persist
   it. Reaching the settle point is that agreement for the queued items.
-- An unsettled queue item, apart from handler auto-confirmed ones.
+- An unsettled queue item, apart from any in the handler's `auto_confirmed:`
+  report field.
 - A handler `blocked` report.
 
 ## Output
@@ -209,9 +213,9 @@ Handler loop:
   checkout moved). The handler commits its own work.
 - Root occupied by a worker (`HEAD` on `impl/*`): no ticket write there.
   Author and commit in the sparse worktree the workflow manual's `### Git`
-  describes, and render the handler in that worktree. Exception: `revise`
-  writes the stopped worker's ticket on its impl branch, which the worker
-  resumes from.
+  describes, and render the handler with `root_override: <worktree>` for that
+  worktree. Exception: `revise` writes the stopped worker's ticket on its impl
+  branch, which the worker resumes from.
 - Suggest the next action: a child ticket for an epic;
   `{{.SkillNamespace}}:lead-run` for a ticket now in `ready/`.
 - End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket written,
