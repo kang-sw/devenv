@@ -18,6 +18,13 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
+func (s agentSessions) ReadNotes(reg Registration, refresh bool) ([]NotesLayer, error) {
+	if src, ok := s.inner.(NotesSource); ok {
+		return src.ReadNotes(reg, refresh)
+	}
+	return nil, fmt.Errorf("notes unavailable")
+}
+
 // AgentHost is the daemon's agent runner (internal/wsagent), which hosts
 // headless agent conversations as dashboard sessions. The daemon mounts its
 // routes, starts it once the daemon holds its lock, tells it when a session

@@ -259,6 +259,7 @@ type Daemon struct {
 	// measures their worktrees' disk use (worktrees.go).
 	worktrees WorktreeSource
 	sizes     *sizeCache
+	notes     sync.Map // project root -> *notesView, no background timer
 	// rail reads the session rail's worktree lists while a page shows the
 	// rail (railworktrees.go); railMsgs holds each session's last message
 	// for it (railmessages.go).

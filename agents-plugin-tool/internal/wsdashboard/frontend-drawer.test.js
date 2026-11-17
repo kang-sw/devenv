@@ -109,6 +109,7 @@ test('notes load cached snapshot then wait, refresh by POST, and render server l
   ] }, { layer: 'clone', notes: [] }] }) }); await tick();
   assert.equal(list.querySelector('.notes-key').textContent, '<unsafe>');
   assert.equal(list.querySelector('.notes-muted').textContent, 'js.notes.muted');
+  assert.ok(list.querySelector('.notes-dim'), 'muted rows use a drawer-scoped state class');
   assert.ok(list.querySelector('.zero'));
   const value = list.querySelector('.notes-value');
   assert.equal(value.textContent, '<value>'); value.listeners.click(); assert.equal(value.getAttribute('aria-expanded'), 'true');

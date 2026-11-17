@@ -218,7 +218,7 @@
       line((names[layer.layer] || layer.layer) + " · " + rows.length, "notes-heading", section);
       if (!rows.length) line(wsT("js.notes.empty"), "notes-hint", section);
       rows.forEach(function (note) {
-        var row = doc.createElement("div"); row.className = "notes-row" + (note.visible === false ? " muted" : ""); section.appendChild(row);
+        var row = doc.createElement("div"); row.className = "notes-row" + (note.visible === false ? " notes-dim" : ""); section.appendChild(row);
         line(String(note.priority), "notes-priority" + (note.priority === 0 ? " zero" : ""), row);
         var content = doc.createElement("div"); content.className = "notes-content"; row.appendChild(content);
         var head = doc.createElement("div"); head.className = "notes-row-head"; content.appendChild(head);

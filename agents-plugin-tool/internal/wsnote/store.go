@@ -145,8 +145,10 @@ func Load(path string) (map[string]Record, error) {
 // preserves that key's current Visible value, and a brand new key always
 // initializes Visible to true — note.write has no wire-level way to accept
 // or mutate visibility (see note.mute/note.unmute/SetVisible instead).
-func Write(path string, records []Record) error {
-	return rmw(path, func(current map[string]Record) map[string]Record {
+func Write(path string, records []Record, caches ...*Cache) error {
+	e, unlock := lockCache(caches, path)
+	defer unlock()
+	return rmw(path, e, func(current map[string]Record) map[string]Record {
 		for _, rec := range records {
 			if existing, ok := current[rec.Key]; ok {
 				rec.Visible = existing.Visible
@@ -162,8 +164,10 @@ func Write(path string, records []Record) error {
 // Erase performs an flock-serialized read-modify-write on the note store at
 // path, removing each listed key. A missing key is a no-op, matching
 // todo.erase's precedent for erase-by-key verbs.
-func Erase(path string, keys []string) error {
-	return rmw(path, func(current map[string]Record) map[string]Record {
+func Erase(path string, keys []string, caches ...*Cache) error {
+	e, unlock := lockCache(caches, path)
+	defer unlock()
+	return rmw(path, e, func(current map[string]Record) map[string]Record {
 		for _, key := range keys {
 			delete(current, key)
 		}
@@ -178,8 +182,10 @@ func Erase(path string, keys []string) error {
 // no-op), and it never touches any other field — WrittenAt in particular
 // stays byte-identical across a mute/unmute call. A missing key is silently
 // skipped, matching Erase's missing-key no-op precedent.
-func SetVisible(path string, keys []string, visible bool) error {
-	return rmw(path, func(current map[string]Record) map[string]Record {
+func SetVisible(path string, keys []string, visible bool, caches ...*Cache) error {
+	e, unlock := lockCache(caches, path)
+	defer unlock()
+	return rmw(path, e, func(current map[string]Record) map[string]Record {
 		for _, key := range keys {
 			rec, ok := current[key]
 			if !ok {
@@ -197,7 +203,7 @@ func SetVisible(path string, keys []string, visible bool) error {
 // store gets its own sibling ".lock" file — it is never shared with the
 // wsconfig config lock, even though both live under the same directory for
 // the machine layer.
-func rmw(path string, transform func(map[string]Record) map[string]Record) error {
+func rmw(path string, entry *cacheEntry, transform func(map[string]Record) map[string]Record) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create note store dir: %w", err)
 	}
@@ -244,6 +250,7 @@ func rmw(path string, transform func(map[string]Record) map[string]Record) error
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename note store: %w", rerr)
 	}
+	entry.replace(current)
 	return nil
 }
 

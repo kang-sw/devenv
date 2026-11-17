@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsnote"
 	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -764,6 +765,9 @@ func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
 // never reaches a page. Its reads never migrate a legacy record.
 type DashboardSessionSource struct {
 	store *sessionStore
+	// Notes is shared with every daemon-hosted MCP/CLI writer.
+	Notes     *wsnote.Cache
+	notePaths sync.Map // root -> read-only resolved layer paths
 	// stateDir resolves the daemon state directory; nil uses
 	// wsdashboard.Dir("").
 	stateDir func() (string, error)
@@ -897,7 +901,7 @@ func (src *DashboardSessionSource) ClearLiveSnapshot(stateDir, replyID string) {
 
 // NewDashboardSessionSource returns a source over this machine's key store.
 func NewDashboardSessionSource() *DashboardSessionSource {
-	return &DashboardSessionSource{store: newSessionStore()}
+	return &DashboardSessionSource{store: newSessionStore(), Notes: wsnote.NewCache()}
 }
 
 // dashboardRescanAfter bounds how stale the reply-id map may be before a

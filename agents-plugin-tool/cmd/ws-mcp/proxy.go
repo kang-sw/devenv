@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsnote"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
@@ -67,6 +68,7 @@ type proxyHost struct {
 	// them refusing.
 	agents mcp.PiAgents
 	nudges *mcp.WhiteboardNudges
+	notes  *wsnote.Cache
 }
 
 // wait blocks until the replacement goroutine, if any, has ended.
@@ -97,6 +99,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		}
 		opts := mcp.ServerOptions{
 			Root:         root,
+			Notes:        h.notes,
 			Version:      version,
 			SourceCommit: sourceCommit,
 			Env:          env,

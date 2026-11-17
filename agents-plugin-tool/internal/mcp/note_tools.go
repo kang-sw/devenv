@@ -28,27 +28,33 @@ type noteStore interface {
 // fileNoteStore implements noteStore over a single whole-layer JSON file, the
 // storage shape shared by the machine, worktree, and clone layers.
 type fileNoteStore struct {
-	path string
+	path  string
+	cache *wsnote.Cache
 }
 
 func (f fileNoteStore) Load() (map[string]wsnote.Record, error) { return wsnote.Load(f.path) }
-func (f fileNoteStore) Write(records []wsnote.Record) error     { return wsnote.Write(f.path, records) }
-func (f fileNoteStore) Erase(keys []string) error               { return wsnote.Erase(f.path, keys) }
+func (f fileNoteStore) Write(records []wsnote.Record) error {
+	return wsnote.Write(f.path, records, f.cache)
+}
+func (f fileNoteStore) Erase(keys []string) error { return wsnote.Erase(f.path, keys, f.cache) }
 func (f fileNoteStore) SetVisible(keys []string, visible bool) error {
-	return wsnote.SetVisible(f.path, keys, visible)
+	return wsnote.SetVisible(f.path, keys, visible, f.cache)
 }
 
 // repoNoteStore implements noteStore over the tracked repo-layer directory,
 // one JSON file per key.
 type repoNoteStore struct {
-	dir string
+	dir   string
+	cache *wsnote.Cache
 }
 
 func (r repoNoteStore) Load() (map[string]wsnote.Record, error) { return wsnote.RepoLoad(r.dir) }
-func (r repoNoteStore) Write(records []wsnote.Record) error     { return wsnote.RepoWrite(r.dir, records) }
-func (r repoNoteStore) Erase(keys []string) error               { return wsnote.RepoErase(r.dir, keys) }
+func (r repoNoteStore) Write(records []wsnote.Record) error {
+	return wsnote.RepoWrite(r.dir, records, r.cache)
+}
+func (r repoNoteStore) Erase(keys []string) error { return wsnote.RepoErase(r.dir, keys, r.cache) }
 func (r repoNoteStore) SetVisible(keys []string, visible bool) error {
-	return wsnote.RepoSetVisible(r.dir, keys, visible)
+	return wsnote.RepoSetVisible(r.dir, keys, visible, r.cache)
 }
 
 // resolveNoteStore resolves the noteStore backend for the "layer" argument,
@@ -92,7 +98,7 @@ func (s *Server) resolveNoteStoreForLayer(toolName string, layer wsnote.Layer, a
 		if err != nil {
 			return nil, err
 		}
-		return fileNoteStore{path: path}, nil
+		return fileNoteStore{path: path, cache: s.notes}, nil
 	case wsnote.LayerWorktree:
 		root, err := s.resolveToolRoot(args, meta)
 		if err != nil {
@@ -102,7 +108,7 @@ func (s *Server) resolveNoteStoreForLayer(toolName string, layer wsnote.Layer, a
 		if err != nil {
 			return nil, err
 		}
-		return fileNoteStore{path: path}, nil
+		return fileNoteStore{path: path, cache: s.notes}, nil
 	case wsnote.LayerClone:
 		root, err := s.resolveToolRoot(args, meta)
 		if err != nil {
@@ -112,13 +118,13 @@ func (s *Server) resolveNoteStoreForLayer(toolName string, layer wsnote.Layer, a
 		if err != nil {
 			return nil, err
 		}
-		return fileNoteStore{path: path}, nil
+		return fileNoteStore{path: path, cache: s.notes}, nil
 	case wsnote.LayerRepo:
 		root, err := s.resolveToolRoot(args, meta)
 		if err != nil {
 			return nil, err
 		}
-		return repoNoteStore{dir: wsnote.RepoDir(root)}, nil
+		return repoNoteStore{dir: wsnote.RepoDir(root), cache: s.notes}, nil
 	default:
 		return nil, fmt.Errorf("%s: invalid layer %q: want \"machine\", \"worktree\", \"clone\", or \"repo\"", toolName, layer)
 	}
