@@ -321,6 +321,64 @@
     // window's file diff renderer), post (a session write route), toast.
     setup: function (h) { hooks = h || {}; },
     takes: takes,
+    // A memory-only surface using the very same loaders and renderers as cards.
+    // It never enters WsCards, so existing durable/pinned cards stay untouched.
+    createPane: function (el, closed) {
+      var header = mk("header", "file-preview-head"), name = mk("strong"), path = mk("span", "file-preview-path");
+      var keep = mk("button", "btn", wsT("js.preview.keep")), exit = mk("button", "ibtn");
+      keep.type = exit.type = "button";
+      exit.innerHTML = cards.icon("x");
+      exit.title = wsT("js.card.close");
+      exit.setAttribute("aria-label", exit.title);
+      header.appendChild(name); header.appendChild(path); header.appendChild(keep); header.appendChild(exit);
+      var body = mk("div", "file-preview-body"), current = null;
+      el.appendChild(header); el.appendChild(body);
+      el.hidden = true;
+      var view = {
+        el: el, body: body, paint: function () {}, actions: function () {},
+        title: function (v) { name.textContent = v.name; path.textContent = v.sub; path.title = v.sub; },
+        close: function () { pane.close(); }
+      };
+      var pane = {
+        open: function (p, o) {
+          current = { path: p, options: o || {} };
+          view.data = { path: p };
+          if (o && o.root) view.data.root = o.root;
+          if (o && o.line) view.data.line = o.line;
+          view.mediaError = o && o.mediaError;
+          if (o && o.answer) answers.set(view.data, o.answer);
+          body.textContent = "";
+          el.hidden = false;
+          load(view);
+        },
+        close: function () {
+          if (!current) return null;
+          var previous = current, hadFocus = el.contains(doc.activeElement);
+          // A surface transfer must revalidate the file and mint fresh sandbox
+          // capabilities, not reuse an arbitrarily old explorer preflight.
+          previous = { path: previous.path, options: Object.assign({}, previous.options) };
+          delete previous.options.answer;
+          current = null;
+          // Increment, never reset: an old answer must not match a later open.
+          view.turn = (view.turn || 0) + 1;
+          view.mediaError = null;
+          body.textContent = "";
+          el.hidden = true;
+          if (closed) closed(hadFocus);
+          return previous;
+        },
+        current: function () { return current; }
+      };
+      keep.addEventListener("click", function () {
+        var previous = pane.close();
+        if (previous) window.WsPreview.open(previous.path, Object.assign({}, previous.options, { keep: true }));
+      });
+      exit.addEventListener("click", function () { pane.close(); });
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); pane.close(); }
+      });
+      return pane;
+    },
     state: function (path, o) {
       var data = { path: path, root: o && o.root, out: o && o.out };
       var card = cards.list(KIND).filter(function (c) { return matches(c, data); })[0];

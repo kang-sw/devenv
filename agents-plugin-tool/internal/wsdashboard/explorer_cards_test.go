@@ -50,7 +50,7 @@ func TestFilesExplorerCards(t *testing.T) {
 		src.WriteString("var " + pair[0] + " = " + string(value) + ";\n")
 	}
 	dashboard := mustAsset(t, "dashboard.js")
-	start := strings.Index(dashboard, "  if ((live || worktree) && fpane && window.WsFiles) {")
+	start := strings.Index(dashboard, "  var filePreview = null, filePreviewBack = null;")
 	end := strings.Index(dashboard, "  var cardBoard =")
 	if start < 0 || end <= start {
 		t.Fatal("page-owned explorer initialization not found")

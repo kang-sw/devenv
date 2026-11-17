@@ -244,6 +244,40 @@
   // conversation's column beside the board (split).
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
+  var filePreview = null, filePreviewBack = null;
+  function splitFiles() {
+    return live && !worktree && layoutMode !== "tabs" && window.matchMedia(
+      layoutMode === "split" ? "(min-width: 760px)" : "(min-width: 1100px)"
+    ).matches;
+  }
+  function sizeFilePreview() {
+    if (!filePreview || !filePreview.current()) return;
+    var board = $("bcol").getBoundingClientRect();
+    // The closed board's .dwrap is capped at 1680px without a pin column.
+    // Reading space reaches the viewport gutter even while that cap remains.
+    var right = doc.documentElement.clientWidth - parseFloat(window.getComputedStyle(grid.closest(".dwrap")).paddingRight);
+    filePreview.el.style.width = Math.max(0, right - board.left) + "px";
+  }
+  function syncFilePreview() {
+    if (splitFiles()) {
+      if (window.WsCards) window.WsCards.dismissFiles();
+      sizeFilePreview();
+    } else if (filePreview && filePreview.current()) {
+      var previous = filePreview.close();
+      window.WsPreview.open(previous.path, Object.assign({}, previous.options, { keep: false }));
+    }
+  }
+  function previewLeftFile(path, options) {
+    if (splitFiles() && filePreview && !options.keep) {
+      filePreviewBack = doc.activeElement;
+      root.setAttribute("data-file-preview", "");
+      filePreview.open(path, options);
+      sizeFilePreview();
+    } else {
+      if (filePreview) filePreview.close();
+      window.WsPreview.open(path, options);
+    }
+  }
   // Two owners, not two views onto one explorer. Keep the tab's existing
   // storage keys; the toolbar uses the same records in its own namespace.
   if ((live || worktree) && fpane && window.WsFiles) {
@@ -266,6 +300,7 @@
     function createFiles(node, rootSlot, toolbar) {
       return window.WsFiles.create(node, Object.assign({}, fileHooks, {
         rootSlot: rootSlot,
+        preview: !toolbar && live && !worktree ? previewLeftFile : undefined,
         load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : fileHooks.load,
         save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : fileHooks.save
       }));
@@ -280,6 +315,14 @@
     var sheetInstance = null;
     filesSheet = {
       el: sheet,
+      activate: function () {
+        if (!splitFiles()) return false;
+        window.WsCards.dismissFiles();
+        setCtab("files");
+        var search = fpane.querySelector(".fq");
+        if (search) search.focus();
+        return true;
+      },
       shown: function () {
         if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
         sheetInstance.shown();
@@ -307,6 +350,23 @@
       bpcol.className = "bpcol";
       bpcol.setAttribute("aria-label", wsT("js.pins.title"));
       dbody.appendChild(bpcol);
+    }
+    if (live && !worktree && window.WsPreview) {
+      var previewPane = doc.createElement("section");
+      previewPane.className = "file-preview-pane";
+      previewPane.setAttribute("aria-label", fpane.getAttribute("aria-label"));
+      grid.appendChild(previewPane);
+      filePreview = window.WsPreview.createPane(previewPane, function (hadFocus) {
+        root.removeAttribute("data-file-preview");
+        if (filesTab) filesTab.cancelPreview();
+        if (hadFocus && filePreviewBack && filePreviewBack.isConnected) filePreviewBack.focus({ preventScroll: true });
+      });
+      filePreview.el = previewPane;
+      if (window.ResizeObserver) {
+        var previewResize = new ResizeObserver(sizeFilePreview);
+        previewResize.observe(grid);
+        if (dbody) previewResize.observe(dbody);
+      }
     }
     window.WsCards.mount(cardBoard, {
       key: "ws.dashboard.cards." + cardIdentity, load: load, save: save,

@@ -156,6 +156,23 @@
   .dwrap { padding: 8px 10px; }
 }
 
+/* The split explorer's memory-only preview covers the board and pin column.
+   Visibility (not removal) preserves their scroll, placement and drop owners. */
+.file-preview-pane { grid-area: board; z-index: 3; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+.file-preview-pane[hidden] { display: none; }
+.file-preview-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--wb-line); flex: none; }
+.file-preview-head > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-head > button { flex: none; }
+.file-preview-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-muted-fg); font: 11.5px var(--wb-mono); }
+.file-preview-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 22px; }
+.file-preview-body > .pv-img { height: 100%; }
+.file-preview-body .pv-img img { max-height: 100%; }
+.file-preview-body > .pv-sand, .file-preview-body > .pv-pdf { height: 100%; }
+:root[data-file-preview] .dgrid.live > .bcol,
+:root[data-file-preview] .dgrid.live > .dcv-edge,
+:root[data-file-preview] .bpcol,
+:root[data-file-preview] .bpzone { visibility: hidden; }
+
 /* the conversation panel's header with its tabs, and its Files pane
    (files.js). The header is the panel's top: the conversation or the Files
    pane below it squares its own top corners. The region's own title bar

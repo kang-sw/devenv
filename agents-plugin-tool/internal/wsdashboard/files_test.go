@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -59,6 +60,17 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Errorf("the stylesheet lacks %q", want)
 		}
+	}
+}
+
+// TestWideExplorerRouting covers page-owned split routing without a browser.
+func TestWideExplorerRouting(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; run testdata/wide-explorer.test.cjs locally")
+	}
+	if out, err := exec.Command(node, "--test", "testdata/wide-explorer.test.cjs").CombinedOutput(); err != nil {
+		t.Fatalf("wide explorer routing: %v\n%s", err, out)
 	}
 }
 

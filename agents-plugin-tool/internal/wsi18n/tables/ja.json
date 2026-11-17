@@ -539,6 +539,7 @@
   "js.preview.none": "このファイルはここでは表示できません: {0}",
   "js.preview.openext": "既定のアプリで開く",
   "js.preview.reload": "再読み込み",
+  "js.preview.keep": "カードとして保持",
   "js.preview.sandbox": "ダッシュボードから隔離されたサンドボックスで実行されます",
   "js.preview.source.note": "ソースとして表示しています。HTML と SVG はセッションルート内でのみレンダリングされます",
   "js.web.kind": "Web",
