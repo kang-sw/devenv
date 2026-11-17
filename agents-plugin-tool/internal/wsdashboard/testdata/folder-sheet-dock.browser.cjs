@@ -50,7 +50,7 @@ function watchBoard(){} function bandBoard(){} function restoreOpen(){} function
 ${initialization}
 // Seed an actual durable pin through the framework, retaining production breakpoints.
 window.WsCards.move($('pinned-topic'),{pin:true,index:0});
-window.folderFixture={setLayout:function(value){layoutMode=value;grid.setAttribute('data-layout',value);window.WsCards.relayout();syncFilePreview();},current:function(){return filePreview.current();}};
+window.folderFixture={setLayout:function(value){layoutMode=value;grid.setAttribute('data-layout',value);window.WsCards.relayout();syncFilePreview();},setFilesTab:function(on){grid.setAttribute('data-ctab',on?'files':'convo');if(on)filesTab.shown();else filesTab.hidden();},current:function(){return filePreview.current();}};
 window.addEventListener('resize',syncFilePreview);
 window.fixtureReady=true;
 })();</script></body></html>`;
@@ -114,6 +114,28 @@ async function closed(page, name) {
     const label=`${size.width}x${size.height}`,folder=page.locator('.board-files'),sheet=page.locator('#toolbar-files');
     check(await sheet.isHidden() && await page.locator('.file-preview-pane').isHidden(),label+' initial state has both surfaces closed');
     await capture(page,size,'a-closed');
+    // Hold a real left-explorer preflight until after docked sheet dismissal.
+    for (const dismissal of ['Escape','empty-space click']) {
+      await page.evaluate(() => folderFixture.setFilesTab(true));
+      const leftFile=page.locator('#files [data-entry="README.md"]'); await leftFile.waitFor();
+      let release, requested;
+      const held=new Promise(resolve=>{release=resolve;}), started=new Promise(resolve=>{requested=resolve;});
+      await page.route('**/fs/preview?**',async route=>{requested();await held;await route.continue();},{times:1});
+      await leftFile.click(); await started;
+      check(await page.locator('.file-preview-pane').isHidden(),label+' left preflight is pending without a pane');
+      await folder.click(); await sheet.locator('[data-entry="README.md"]').waitFor(); await settle(page);
+      if (dismissal === 'Escape') await page.keyboard.press('Escape');
+      else {
+        const bounds=await geometry(page),outside={x:(bounds.sheet.right+bounds.board.left)/2,y:bounds.board.top+100};
+        check(await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.classList.contains('bc-scrim'),outside),label+' pending-preview empty-space click hits scrim');
+        await page.mouse.click(outside.x,outside.y);
+      }
+      await closed(page,label+' '+dismissal+' dismisses sheet before left response');
+      const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/s/fixture/fs/preview');
+      release(); await (await response).finished(); await settle(page);
+      check(await page.evaluate(() => document.getElementById('toolbar-files').hidden && document.querySelector('.file-preview-pane').hidden && !folderFixture.current() && !document.documentElement.hasAttribute('data-file-preview')),label+' '+dismissal+' ignores delayed left preflight: no preview reopens');
+      await page.evaluate(() => folderFixture.setFilesTab(false));
+    }
     await folder.click(); await sheet.locator('[data-entry="README.md"]').waitFor(); await settle(page);
     const docked=await geometry(page);
     for (const [key,expected] of [['left',docked.header.left],['right',docked.header.right],['top',docked.header.top],['bottom',docked.composer.bottom]]) near(docked.sheet[key],expected,label+' sheet '+key);

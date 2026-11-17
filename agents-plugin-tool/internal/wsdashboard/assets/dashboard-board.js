@@ -338,7 +338,11 @@
       },
       hidden: function () {
         if (sheetInstance) { sheetInstance.cancelPreview(); sheetInstance.hidden(); }
-        if (sheet.hasAttribute("data-docked") && filePreview) filePreview.close();
+        if (sheet.hasAttribute("data-docked")) {
+          // A left preflight may still be pending before any pane exists.
+          if (filesTab) filesTab.cancelPreview();
+          if (filePreview) filePreview.close();
+        }
         sheet.removeAttribute("data-docked");
       }
     };
