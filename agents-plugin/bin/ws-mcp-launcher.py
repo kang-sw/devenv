@@ -151,12 +151,30 @@ def version_compatible(version: str, contract: dict, *, allow_same_minor: bool =
     return False
 
 
+# One launcher start verifies the same 49 MB runtime several times (metadata,
+# stamp, capabilities, staging, content hash). Hash each file once per process:
+# a memoized digest is reused only while the file stats as the same file
+# (device, inode/file index, size, mtime), and a file modified within the last
+# 2 s (wider than any timestamp granule) is never memoized, so a same-size
+# rewrite inside one granule is hashed again. Nothing persists across starts.
+_SHA256_MEMO: dict[tuple, str] = {}
+_SHA256_RACY_NS = 2_000_000_000
+
+
 def sha256_file(path: Path) -> str:
+    st = path.stat()
+    key = (os.path.abspath(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    cached = _SHA256_MEMO.get(key)
+    if cached is not None:
+        return cached
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
-    return digest.hexdigest()
+    value = digest.hexdigest()
+    if time.time_ns() - st.st_mtime_ns >= _SHA256_RACY_NS:
+        _SHA256_MEMO[key] = value
+    return value
 
 
 def runtime_binary_name(contract: dict, contract_path: Path, os_name: str) -> str:

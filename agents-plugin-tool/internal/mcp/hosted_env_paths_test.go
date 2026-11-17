@@ -277,10 +277,15 @@ func TestHostedToolsRunGitOnTheConnectionPATH(t *testing.T) {
 		{"tickets.sage_gate", map[string]any{"stem": "260102-epic-beta", "landing": "todo"}, []string{"log --follow"}},
 		{"review.marker", map[string]any{"bootstrap": true}, []string{"rev-parse HEAD"}},
 		{"workflow_manual", nil, []string{"symbolic-ref --short refs/remotes/origin/HEAD", "rev-list --count", "--git-common-dir"}},
-		{"path.generate", map[string]any{"kind": "plan", "stems": []string{"alpha"}}, []string{"--git-common-dir"}},
-		{"note.write", map[string]any{"layer": "worktree", "notes": []any{map[string]any{"key": "hosted.note", "value": "v"}}}, []string{"--git-common-dir"}},
-		{"note.query", map[string]any{"layer": "worktree"}, []string{"--git-common-dir"}},
-		{"exec.spawn", map[string]any{"cmd": "git", "args": []any{"--version"}}, []string{"--git-common-dir"}},
+		// The rest resolve the worktree identity through wsstate.Ensure, which
+		// remembers it per top level after the first resolution above (and
+		// revalidates it by a stat of .git), so they run no further git for
+		// it; the call above already proved that resolution uses the
+		// connection's git.
+		{"path.generate", map[string]any{"kind": "plan", "stems": []string{"alpha"}}, nil},
+		{"note.write", map[string]any{"layer": "worktree", "notes": []any{map[string]any{"key": "hosted.note", "value": "v"}}}, nil},
+		{"note.query", map[string]any{"layer": "worktree"}, nil},
+		{"exec.spawn", map[string]any{"cmd": "git", "args": []any{"--version"}}, nil},
 	} {
 		truncateFile(t, logPath)
 		resp := keyedCall(t, s, 10+i, key, c.tool, c.args)

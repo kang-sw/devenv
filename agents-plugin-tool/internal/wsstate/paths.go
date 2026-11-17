@@ -90,10 +90,10 @@ func NewManager(opts Options) Manager {
 
 func CacheRoot(opts Options) (string, error) {
 	if opts.CacheHome != "" {
-		return canonicalPath(opts.CacheHome)
+		return canonicalCacheHome(opts.CacheHome)
 	}
 	if env := os.Getenv(EnvCacheHome); env != "" {
-		return canonicalPath(env)
+		return canonicalCacheHome(env)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -234,11 +234,82 @@ func validWorktreeKey(value string) bool {
 	return true
 }
 
+// gitIdentityEntry is one remembered gitIdentity answer for a worktree
+// top level, with the stat of its .git entry when the answer was computed.
+type gitIdentityEntry struct {
+	dotGit                   os.FileInfo
+	worktreeRoot, commonRoot string
+}
+
+// gitIdentities remembers gitIdentity per top level, so Ensure (called by
+// note, mailbox, path and playbook tools) does not spawn two git processes per
+// call. An answer is reused only while the top level's .git entry stats as the
+// same entry: for a linked worktree's or submodule's .git file, the same file
+// (mode, size, mtime, identity), so removing and re-adding a worktree at the
+// path invalidates it; for a main checkout's .git directory, the same
+// directory identity (a main checkout is its own common root, so only a
+// symlinked path retargeted elsewhere could change the answer). Only a top
+// level is remembered, never a subdirectory, so a repository later created
+// between a subdirectory and its top level cannot be shadowed. The key carries
+// the GIT_* environment, which can redirect git.
+var gitIdentities sync.Map // gitIdentityKey -> gitIdentityEntry
+
+func gitIdentityKey(env []string, abs string) string {
+	if env == nil {
+		env = os.Environ()
+	}
+	var b strings.Builder
+	b.WriteString(abs)
+	for _, kv := range env {
+		if strings.HasPrefix(strings.ToUpper(kv), "GIT_") {
+			b.WriteByte(0)
+			b.WriteString(kv)
+		}
+	}
+	return b.String()
+}
+
+func sameDotGit(a, b os.FileInfo) bool {
+	if a.IsDir() || b.IsDir() {
+		return a.IsDir() && b.IsDir() && sameFileIdentity(a, b)
+	}
+	return SameFileMetadata(a, b)
+}
+
 func gitIdentity(env []string, repoPath string) (worktreeRoot string, commonRoot string, err error) {
+	var key string
+	var dotGit os.FileInfo
+	if abs, absErr := filepath.Abs(repoPath); absErr == nil && repoPath != "" {
+		abs = filepath.Clean(abs)
+		key = gitIdentityKey(env, abs)
+		// Stat-ed before git runs, so a change racing the spawn is seen by
+		// the next call's stat.
+		dotGit, _ = Stat(filepath.Join(abs, ".git"))
+		if cached, ok := gitIdentities.Load(key); ok {
+			entry := cached.(gitIdentityEntry)
+			if dotGit != nil && sameDotGit(entry.dotGit, dotGit) {
+				return entry.worktreeRoot, entry.commonRoot, nil
+			}
+			gitIdentities.Delete(key)
+		}
+	}
 	abs, err := canonicalPath(repoPath)
 	if err != nil {
 		return "", "", err
 	}
+	worktreeRoot, commonRoot, err = gitIdentityAt(env, abs)
+	if err != nil {
+		return "", "", err
+	}
+	// A .git file modified within the racy window could still be rewritten
+	// inside its timestamp granule, so it is not remembered yet.
+	if dotGit != nil && abs == worktreeRoot && (dotGit.IsDir() || time.Since(dotGit.ModTime()) >= readCacheRacyWindow) {
+		gitIdentities.Store(key, gitIdentityEntry{dotGit: dotGit, worktreeRoot: worktreeRoot, commonRoot: commonRoot})
+	}
+	return worktreeRoot, commonRoot, nil
+}
+
+func gitIdentityAt(env []string, abs string) (worktreeRoot string, commonRoot string, err error) {
 	root, err := git(env, abs, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", "", err
@@ -303,17 +374,46 @@ func git(env []string, dir string, args ...string) (string, error) {
 }
 
 func canonicalPath(path string) (string, error) {
+	canonical, _, err := canonicalPathResolved(path)
+	return canonical, err
+}
+
+// canonicalPathResolved is canonicalPath also reporting whether symlink
+// evaluation succeeded (false when the path does not exist yet).
+func canonicalPathResolved(path string) (string, bool, error) {
 	if path == "" {
-		return "", errors.New("empty path")
+		return "", false, errors.New("empty path")
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
+		return "", false, err
+	}
+	evaluated, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return filepath.Clean(abs), false, nil
+	}
+	return filepath.Clean(evaluated), true, nil
+}
+
+// cacheHomeCanonical memoizes the cache home's symlink resolution for the
+// process: every keyed tool call resolves the cache root several times, and
+// EvalSymlinks costs one lstat per path component. The cache home is a fixed
+// path for the process's lifetime; a resolution is memoized only once the
+// path exists, so a home created later is still evaluated.
+var cacheHomeCanonical sync.Map // input path -> canonical path
+
+func canonicalCacheHome(path string) (string, error) {
+	if cached, ok := cacheHomeCanonical.Load(path); ok {
+		return cached.(string), nil
+	}
+	canonical, resolved, err := canonicalPathResolved(path)
+	if err != nil {
 		return "", err
 	}
-	if evaluated, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = evaluated
+	if resolved && filepath.IsAbs(path) {
+		cacheHomeCanonical.Store(path, canonical)
 	}
-	return filepath.Clean(abs), nil
+	return canonical, nil
 }
 
 func shortHash(value string) string {
@@ -335,11 +435,23 @@ func upsertJSON(path string, next any) error {
 		now = v.LastSeenAt
 		if existing, ok := readProjectMetadata(path); ok && existing.CreatedAt != "" {
 			v.CreatedAt = existing.CreatedAt
+			probe := *v
+			probe.LastSeenAt = existing.LastSeenAt
+			if probe == existing && lastSeenFresh(existing.LastSeenAt, now) {
+				v.LastSeenAt = existing.LastSeenAt
+				return nil
+			}
 		}
 	case *WorktreeMetadata:
 		now = v.LastSeenAt
 		if existing, ok := readWorktreeMetadata(path); ok && existing.CreatedAt != "" {
 			v.CreatedAt = existing.CreatedAt
+			probe := *v
+			probe.LastSeenAt = existing.LastSeenAt
+			if probe == existing && lastSeenFresh(existing.LastSeenAt, now) {
+				v.LastSeenAt = existing.LastSeenAt
+				return nil
+			}
 		}
 	}
 	if now == "" {
@@ -369,6 +481,27 @@ func upsertJSON(path string, next any) error {
 		return fmt.Errorf("replace metadata %s: %w", path, err)
 	}
 	return nil
+}
+
+// lastSeenRefresh is how old a stored last_seen_at may be before an Ensure
+// that changes nothing else rewrites the metadata file. Nothing reads
+// last_seen_at back (upsertJSON reads only created_at), so the coarser value
+// costs no reader, and an Ensure per tool call no longer rewrites two files.
+const lastSeenRefresh = 5 * time.Minute
+
+// lastSeenFresh reports whether stored is a parsable last_seen_at at most
+// lastSeenRefresh older than now (and not after it).
+func lastSeenFresh(stored, now string) bool {
+	s, err := time.Parse(time.RFC3339, stored)
+	if err != nil {
+		return false
+	}
+	n, err := time.Parse(time.RFC3339, now)
+	if err != nil {
+		return false
+	}
+	d := n.Sub(s)
+	return d >= 0 && d < lastSeenRefresh
 }
 
 func replaceFile(tmp, path string) error {
