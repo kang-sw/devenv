@@ -37,7 +37,7 @@ func projectionFixture() *wstrackerhost.StoreView {
 				"c":    {ID: "c", Item: "i", Author: "other", Body: "**comment-secret**", ReplyTo: projectionString("mine"), TS: "2026-11-18T01:00:00Z", Mentions: []string{"me"}, Attachments: att},
 			},
 			Events: []wstracker.EventView{
-				{ID: "e", Type: "item.status", Status: "applied", Member: "other", TS: "2026-11-18T00:00:00Z", Thread: projectionString("i"), Payload: json.RawMessage(`{"item":"i","note":"event-payload-secret","status":"done"}`), Reason: projectionString("verdict-secret")},
+				{ID: "e", Type: "item.status", Status: "applied", Member: "other", TS: "2026-11-18T00:00:00Z", Thread: projectionString("i"), Payload: json.RawMessage(`{"item":"i","assignee":"me","note":"event-payload-secret","status":"done"}`), Reason: projectionString("verdict-secret")},
 				{ID: "c", Type: "comment.add", Status: "applied", Payload: json.RawMessage(`{"item":"i","body":"event-comment-secret"}`)},
 			},
 			Assignments: map[string]wstracker.Assignment{
@@ -430,6 +430,45 @@ func TestTrackerProjectionFeedKeysAndBound(t *testing.T) {
 	}
 	if !projectionHas(p.Keys["i"].Badge, "a:a") {
 		t.Fatal("feed bound lost badge")
+	}
+}
+
+func TestTrackerProjectionStatusEventTargetsAssignment(t *testing.T) {
+	for _, tc := range []struct {
+		name, member, payload, wantEvent string
+	}{
+		{"explicit assignee", "other", `{"item":"i","assignee":"me","status":"done"}`, "e"},
+		{"self author", "me", `{"item":"i","status":"done"}`, "e"},
+		{"different holder", "other", `{"item":"i","status":"done"}`, ""},
+		{"different item", "me", `{"item":"other-item","status":"done"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := projectionFixture()
+			v.Events[0].Member, v.Events[0].Payload = tc.member, json.RawMessage(tc.payload)
+			p := mustProjectTracker(t, v)
+			var feed []trackerFeedEntry
+			if err := json.Unmarshal(p.Feed, &feed); err != nil {
+				t.Fatal(err)
+			}
+			checked := 0
+			for _, e := range feed {
+				switch e.Key {
+				case "w:a:done:now", "c:a:2026-11-18T00:00:00Z":
+					checked++
+					if got := trackerString(e.Event); got != tc.wantEvent {
+						t.Errorf("%s event = %q, want %q", e.Key, got, tc.wantEvent)
+					}
+				case "r:c":
+					checked++
+					if got := trackerString(e.Event); got != "c" {
+						t.Errorf("reply event = %q, want c", got)
+					}
+				}
+			}
+			if checked != 3 {
+				t.Fatalf("checked %d event references, want 3", checked)
+			}
+		})
 	}
 }
 

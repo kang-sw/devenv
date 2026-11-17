@@ -305,6 +305,25 @@ The workflow_manual tool was not exposed in this worker's tool surface;
 AGENTS.md, the ticket, matching manuals, route verdict and bundled ticket
 conventions were read instead.
 
+#### Edition (dff9e8dfb) - 2026-11-18
+
+- **VERIFIED (lead-provided command results at this baseline):** build and
+  scoped vet were clean; wstracker tests, scoped wstracker race tests and
+  wsdashboard Tracker tests passed. cmd/ws-mcp Tracker tests failed in two
+  new feed tests on missing status-event references.
+- **VERIFIED (source diagnosis):** the shared fixture's status event was by
+  `other`, omitted `assignee`, and therefore targeted `other`, while the
+  tested assignment belongs to `me`. Both `state.go`'s status fold and
+  `tracker-panel.js`'s statusEv use explicit assignee or event author. The
+  Feed Decision does not authorize attributing another holder's status to
+  this assignment. Corrected the fixture to carry `assignee:"me"`, retaining
+  all expected event-reference assertions; added explicit-assignee,
+  self-author, different-holder and different-item regression cases. No
+  production behavior change was needed.
+- **UNRUN by this worker:** all Go commands, as instructed. **INFERRED:**
+  the fixture correction resolves the two reported failures; the lead's
+  rerun remains outstanding.
+
 ### Phase 2: Page on summary and deltas
 
 Switch the tracker page, handles and feed to the summary plus deltas with a
