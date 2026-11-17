@@ -290,7 +290,7 @@ func TestQueryDurableLocatorsAcrossRestartAndRepost(t *testing.T) {
 	}
 	if err := (FolderStore{Dir: dir}).Update(nil, func(s *State) error {
 		s.EntrySeq++
-		s.Topics[0].Entries = append(s.Topics[0].Entries, Entry{ID: "e20", Kind: EntryPanel, PanelID: "p1", Recap: "repost", Text: "new full payload", At: queryEntryTime})
+		s.Topics[0].Entries = append(s.Topics[0].Entries, Entry{ID: "e21", Kind: EntryPanel, PanelID: "p1", Recap: "repost", Text: "new full payload", At: queryEntryTime})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -302,13 +302,13 @@ func TestQueryDurableLocatorsAcrossRestartAndRepost(t *testing.T) {
 	if got := queryResult(t, after, `{"panel":"e2"}`).Direct.Entry; !reflect.DeepEqual(got, before.Topics[0].Entries[1]) {
 		t.Fatal("old panel mention redirected after repost/restart")
 	}
-	if got := queryResult(t, after, `{"panel":"p1"}`).Direct.Entry; got.ID != "e20" || got.Text != "new full payload" {
+	if got := queryResult(t, after, `{"panel":"p1"}`).Direct.Entry; got.ID != "e21" || got.Text != "new full payload" {
 		t.Fatal("stable panel target did not resolve latest")
 	}
 	if got := queryResult(t, after, `{"entry":"e3"}`).Direct.Entry; !reflect.DeepEqual(got, before.Topics[0].Entries[2]) {
 		t.Fatal("log locator changed at equal timestamps")
 	}
-	if got := queryResult(t, after, `{"topic":"a","entries":"all","since":"e16"}`).Topics[0].Entries; len(got) != 2 || got[0].ID != "e19" || got[1].ID != "e20" {
+	if got := queryResult(t, after, `{"topic":"a","entries":"all","since":"e16"}`).Topics[0].Entries; len(got) != 2 || got[0].ID != "e19" || got[1].ID != "e21" {
 		t.Fatalf("since boundary changed after restart: %+v", got)
 	}
 }

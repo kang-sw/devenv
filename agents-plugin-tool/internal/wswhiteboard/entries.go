@@ -56,15 +56,22 @@ type Entry struct {
 	unknown      map[string]json.RawMessage
 }
 
-// LatestAgent returns the last agent-authored log entry, never a panel or
-// system event. Stream order, not timestamps, breaks equal-time ties.
+// LatestAgent returns the newest agent-authored log entry, never a panel or
+// system event. Equal timestamps use the larger durable eN ID.
 func (d TopicDoc) LatestAgent() (Entry, bool) {
-	for i := len(d.Entries) - 1; i >= 0; i-- {
-		if d.Entries[i].Kind == EntryAgent {
-			return d.Entries[i], true
+	var latest Entry
+	var latestAt time.Time
+	found := false
+	for _, e := range d.Entries {
+		if e.Kind != EntryAgent {
+			continue
+		}
+		at, _ := time.Parse(time.RFC3339Nano, e.At)
+		if !found || at.After(latestAt) || (at.Equal(latestAt) && folderNumber(e.ID, "e") > folderNumber(latest.ID, "e")) {
+			latest, latestAt, found = e, at, true
 		}
 	}
-	return Entry{}, false
+	return latest, found
 }
 
 // LatestSummary returns the newest agent log or panel version for display.

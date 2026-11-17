@@ -214,7 +214,7 @@ func TestTopicStateLifecycleIdempotenceAndAdoption(t *testing.T) {
 	if _, p := Apply(s, command, Env{Now: stateNow}); len(p) == 0 || !reflect.DeepEqual(before, s) {
 		t.Fatal("state reopened closed topic")
 	}
-	stateApply(t, s, `<wb:topic name="work"><wb:log>Reopened</wb:log></wb:topic>`, stateNow)
+	stateApply(t, s, `<wb:topic name="work"><wb:log>Reopened</wb:log></wb:topic>`, stateNow.Add(5*time.Minute))
 	if s.TopicStates()["work"].State != nil || s.Items[0].Status != StatusWithdrawn {
 		t.Fatal("reopen restored state/ask")
 	}

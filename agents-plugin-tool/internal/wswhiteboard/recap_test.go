@@ -57,7 +57,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 	legacyRecap(st, "open", "**READY** · see ![shot](shot.png) <u>kept</u><script>alert(1)</script>")
 	legacyRecap(st, "shut", "was moving")
 	legacyRecap(st, "lone", "only a recap")
-	mustApply(t, st, `<wb:topic name="shut"><wb:close result="Shipped."/></wb:topic><wb:topic name="lone"><wb:close result="Dropped."/></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="shut"><wb:close/></wb:topic><wb:topic name="lone"><wb:close/></wb:topic>`)
 	// Unconverted snapshots have no panel entry to supersede the old recap.
 	st.topicDoc("open").Body = "the body"
 	st.topicDoc("shut").Body = "closed body"
@@ -79,7 +79,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 		if fold == nil || strings.HasSuffix(shut[fold[0]:fold[1]], " open>") || strings.Index(shut, `<div class="trecap">`) < fold[1] {
 			t.Fatalf("%s: closed legacy recap is not folded: %s", name, shut)
 		}
-		wantAll(t, shut, `<span class="tresult" title="how the topic ended">Shipped.</span>`)
+		wantNone(t, shut, `class="tresult"`)
 		wantAll(t, recapBlock(t, out, "lone"), `<div class="rtext md" title="only a recap">only a recap</div>`)
 	}
 }

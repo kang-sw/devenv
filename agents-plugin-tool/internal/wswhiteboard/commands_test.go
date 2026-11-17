@@ -475,7 +475,7 @@ func TestUnknownTagsAttributesAndStructureAreProblems(t *testing.T) {
 		"unknown command":            {`<wb:nope x="1">body</wb:nope>`, "command 1 <wb:nope> (line 1): unknown command"},
 		"unprefixed command":         {`<add class="policy"/>`, "command 1 <add> (line 1): unknown command"},
 		"unknown self-closing":       {`<wb:nope/>`, "unknown command"},
-		"unknown attribute":          {`<wb:topic name="t"><wb:close force="1"/></wb:topic>`, "unknown attribute force (known: result)"},
+		"unknown attribute":          {`<wb:topic name="t"><wb:close force="1"/></wb:topic>`, "unknown attribute force (it takes none)"},
 		"attribute on a field":       {`<wb:topic name="t"><wb:add class="technical"><wb:title lang="ko">x</wb:title></wb:add></wb:topic>`, "command 1 <wb:add> (line 1) field <wb:title>: unknown attribute lang (it takes none)"},
 		"attribute given twice":      {`<wb:topic name="a"><wb:close result="a" result="b"/></wb:topic>`, "attribute result given twice"},
 		"unknown field":              {`<wb:topic name="t"><wb:add class="technical"><wb:subtitle>x</wb:subtitle></wb:add></wb:topic>`, "unknown field <wb:subtitle> (fields: "},
@@ -524,7 +524,7 @@ func TestTopicGroupScopesItsCommands(t *testing.T) {
 </wb:topic>`)
 	const long = "Rollout and its long prose name"
 	if st.TopicBody(long) != "beta" || item(t, st, 1).Topic != long || item(t, st, 2).Topic != long ||
-		item(t, st, 3).Topic != "Old scope" || !st.topicClosed("Old scope") || st.CloseResults["Old scope"] != "Folded into Rollout." {
+		item(t, st, 3).Topic != "Old scope" || !st.topicClosed("Old scope") || st.CloseResults["Old scope"] != "" || st.Topics[st.topicDocIndex("Old scope")].LatestSummary().Text != "Folded into Rollout." {
 		t.Fatalf("state = %+v", st)
 	}
 }
@@ -544,7 +544,7 @@ func TestTopicGroupRefusesTheOldForms(t *testing.T) {
 		"self-closing wb:topic": {`<wb:topic name="t"/>`, []string{`<wb:topic> (line 1): holds no commands; ` + newForm}},
 		"topic attribute outside a group": {`<wb:close topic="t" result="done"/>`, []string{
 			`command 1 <wb:close> (line 1): goes inside a <wb:topic name="..."> group`,
-			"command 1 <wb:close> (line 1): unknown attribute topic (known: result)",
+			"command 1 <wb:close> (line 1): unknown attribute topic (it takes none)",
 		}},
 		"topic attribute inside a group": {`<wb:topic name="t"><wb:add class="technical" topic="u"><wb:title>x</wb:title></wb:add></wb:topic>`, []string{
 			"command 1 <wb:add> (line 1): unknown attribute topic (known: id, class)",

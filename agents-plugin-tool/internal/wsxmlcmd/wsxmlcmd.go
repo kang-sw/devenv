@@ -70,6 +70,8 @@ type Spec struct {
 	// Attrs are the attribute names the command takes, in the order a
 	// problem lists them.
 	Attrs []string
+	// HiddenAttrs are accepted compatibility attributes omitted from hints.
+	HiddenAttrs []string
 	// Fields are a Container's field tag names without the prefix, in the
 	// order a problem lists them.
 	Fields []string
@@ -407,7 +409,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 			p.Add("%s: goes at the root, outside %s", cmd.Label(), scope.Label())
 		}
 	}
-	checkAttrs(p, cmd.Label(), tag.attrs, spec.Attrs)
+	checkAttrs(p, cmd.Label(), tag.attrs, spec.Attrs, spec.HiddenAttrs...)
 	if !tag.selfClosing {
 		switch spec.Kind {
 		case Leaf:
@@ -1114,7 +1116,7 @@ func (t *tokenizer) skipText(where string) {
 	t.problem(start, "line %d: text %s: %q", t.lineAt(start), where, excerpt(t.s[start:t.i]))
 }
 
-func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
+func checkAttrs(p *Problems, label string, attrs []Attr, known []string, hidden ...string) {
 	seen := map[string]bool{}
 	for _, a := range attrs {
 		if seen[a.Name] {
@@ -1127,6 +1129,14 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
 			if k == a.Name {
 				found = true
 				break
+			}
+		}
+		if !found {
+			for _, k := range hidden {
+				if k == a.Name {
+					found = true
+					break
+				}
 			}
 		}
 		if !found {

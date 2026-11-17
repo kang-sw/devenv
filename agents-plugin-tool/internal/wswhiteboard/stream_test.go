@@ -45,6 +45,76 @@ func pageEntries(page EntryPage) []EntryView {
 	return out
 }
 
+func TestLegacyCloseEventDisplayPreservesHistory(t *testing.T) {
+	const original = "Topic closed: private old conclusion"
+	st := &State{EntrySeq: 3, ClosedTopics: []string{"t"}, Topics: []TopicDoc{{Name: "t", Entries: []Entry{
+		{ID: "e1", Kind: EntryAgent, Text: "Current recap"},
+		{ID: "e2", Kind: EntrySystem, Text: original},
+		{ID: "e3", Kind: EntrySystem, Imported: true, Text: "Topic closed: imported text"},
+	}}}}
+	before := mustMarshal(t, st)
+	for _, layout := range layouts() {
+		view := BuildView(st, ViewInput{Layout: layout, ReplyID: "r"})
+		out := render(t, view)
+		wantAll(t, out, "Current recap")
+		wantNone(t, out, original)
+	}
+	_, page, _ := streamView(st.Topics[0], true, time.UTC, nil)
+	entries := pageEntries(page)
+	if len(entries) != 3 || entries[1].Text != "Topic closed." || entries[2].Text != "Topic closed: imported text" {
+		t.Fatalf("unexpected projected events: %+v", entries)
+	}
+	if !reflect.DeepEqual(before, mustMarshal(t, st)) {
+		t.Fatal("rendering modified immutable history")
+	}
+}
+
+func TestHistoricalCloseProjectionKeepsRunAndChronologicalCurrent(t *testing.T) {
+	st := stateBoard(t)
+	stateApply(t, st, `<wb:topic name="Work"><wb:state value="implementing" owner="worker" eta_minutes="10"/></wb:topic>`, stateNow)
+	stateApply(t, st, `<wb:topic name="Work"><wb:close/></wb:topic>`, stateNow.Add(time.Minute))
+	doc := st.topicDoc("Work")
+	closeEntry := &doc.Entries[len(doc.Entries)-1]
+	closeEntry.Text = "Topic closed: legacy secret; overwritten transition"
+	doc.Entries = append(doc.Entries,
+		Entry{ID: "e90", Kind: EntrySystem, Text: "Topic close result updated: replacement secret"},
+		Entry{ID: "e91", Kind: EntryAgent, Text: "newer line", At: stateNow.Add(2 * time.Minute).Format(time.RFC3339Nano)},
+		Entry{ID: "e92", Kind: EntryAgent, Text: "migrated older line", At: stateNow.Format(time.RFC3339Nano)},
+	)
+	before := mustMarshal(t, st)
+	_, page, _ := streamView(*doc, true, time.UTC, nil)
+	entries := pageEntries(page)
+	var closeText, recloseText string
+	var newerCurrent, olderCurrent bool
+	for _, e := range entries {
+		switch e.ID {
+		case closeEntry.ID:
+			closeText = e.Text
+		case "e90":
+			recloseText = e.Text
+		case "e91":
+			newerCurrent = e.Current
+		case "e92":
+			olderCurrent = e.Current
+		}
+	}
+	for _, want := range []string{"Topic closed.", "implementing -> cleared", "owner worker", "estimate 10 minutes", "actual 60000 ms"} {
+		if !strings.Contains(closeText, want) {
+			t.Errorf("close text %q missing %q", closeText, want)
+		}
+	}
+	if strings.Contains(closeText, "legacy secret") || recloseText != "Topic closed." || !newerCurrent || olderCurrent {
+		t.Fatalf("close=%q reclose=%q newerCurrent=%v olderCurrent=%v", closeText, recloseText, newerCurrent, olderCurrent)
+	}
+	for _, layout := range layouts() {
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		wantNone(t, out, "legacy secret", "replacement secret")
+	}
+	if !reflect.DeepEqual(before, mustMarshal(t, st)) {
+		t.Fatal("projection modified history")
+	}
+}
+
 func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 	st := streamFixture()
 	before := mustMarshal(t, st)

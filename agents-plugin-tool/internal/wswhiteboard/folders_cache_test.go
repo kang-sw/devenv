@@ -152,7 +152,7 @@ func TestFolderCacheRecoveryAfterPartialPublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := folderOpen(t, f.Dir, nil)
-			if !reflect.DeepEqual(got.clone(), want) || got.EntrySeq != 7 {
+			if !reflect.DeepEqual(got.clone(), want) || got.EntrySeq != 9 {
 				t.Fatalf("cached recovery at %s lost or duplicated entries", stage)
 			}
 		})

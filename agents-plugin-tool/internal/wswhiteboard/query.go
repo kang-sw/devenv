@@ -370,9 +370,6 @@ func topicLine(t QueryTopic) string {
 	if t.LastChange != "" {
 		parts = append(parts, "changed: "+t.LastChange)
 	}
-	if t.CloseResult != "" {
-		parts = append(parts, "result: "+Plain(t.CloseResult))
-	}
 	if len(t.Tickets) > 0 {
 		parts = append(parts, "tickets: "+strings.Join(t.Tickets, " "))
 	}

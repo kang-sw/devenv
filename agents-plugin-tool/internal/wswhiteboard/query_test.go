@@ -148,7 +148,7 @@ func TestQueryIDs(t *testing.T) {
 }
 
 // Explicit summary/body selectors retrieve items and content; topic alone
-// is metadata discovery. A named closed topic is listed with its result.
+// is metadata discovery. A named closed topic is listed without a close result.
 func TestQueryTopic(t *testing.T) {
 	st := queryBoard(t)
 	text := queryText(t, st, `{"topic":"b","depth":"summary","body":true}`)
@@ -157,7 +157,7 @@ func TestQueryTopic(t *testing.T) {
 	}
 	text = queryText(t, st, `{"topic":["a","c"],"depth":"summary"}`)
 	wantText(t, "topic list", text,
-		[]string{"(01) [open]", "    a) optx first", "(02) [answered]", "(03) [assumed]", `topic "c" [closed] items: withdrawn 1; ` + changedAt + "; result: done c\n  (05) [withdrawn] [technical] close me"},
+		[]string{"(01) [open]", "    a) optx first", "(02) [answered]", "(03) [assumed]", `topic "c" [closed] items: withdrawn 1; ` + changedAt + "\ncurrent e17 2026-11-04T09:00:00Z: done c\n  (05) [withdrawn] [technical] close me"},
 		[]string{`topic "b"`, "omitted:"})
 	if text := queryText(t, st, `{"topic":"d","body":true}`); text != `topic "d" [open] items: none; body: 8 chars; `+changedAt+"\n  state: discussing; entry: e13\ncurrent e11 2026-11-04T09:00:00Z: Current content\ntopic body:\n<<<\n배경 notes\n>>>\n" {
 		t.Fatalf("body-only topic: %q", text)
@@ -211,7 +211,7 @@ func TestQueryStatus(t *testing.T) {
 func TestQueryClosedAndOverrides(t *testing.T) {
 	st := queryBoard(t)
 	text := queryText(t, st, `{"closed":true,"depth":"items"}`)
-	wantText(t, "closed true", text, []string{`topic "c" [closed] items: withdrawn 1; ` + changedAt + "; result: done c\n"}, []string{"(05)", "closed topic with"})
+	wantText(t, "closed true", text, []string{`topic "c" [closed] items: withdrawn 1; ` + changedAt + "\n"}, []string{"(05)", "closed topic with", "result: done c"})
 	if lastLine(text) != "omitted: 3 items not open (answered 1, assumed 1, withdrawn 1), shown by status, topic, or ids" {
 		t.Fatalf("closed true omission line: %q", lastLine(text))
 	}

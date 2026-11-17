@@ -400,7 +400,7 @@ func (s *State) appendStateEvent(topic string, r topicStateRecord, text string, 
 	s.appendEntry(topic, Entry{Kind: EntrySystem, Text: text, TopicState: data}, now)
 }
 
-func (s *State) closeStateEvent(topic, result string, now time.Time) {
+func (s *State) closeStateEvent(topic string, now time.Time) {
 	r := topicStateRecord{V: 1, Op: "reset"}
 	prior := s.TopicStates()[topic]
 	if prior.State != nil {
@@ -410,7 +410,7 @@ func (s *State) closeStateEvent(topic, result string, now time.Time) {
 			r.ElapsedMS = &elapsed
 		}
 	}
-	text := "Topic closed: " + result
+	text := "Topic closed."
 	if r.Run != nil {
 		text += "; " + stateTransitionText(r)
 	}
