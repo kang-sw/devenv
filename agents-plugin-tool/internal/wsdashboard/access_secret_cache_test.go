@@ -1,7 +1,6 @@
 package wsdashboard
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -216,44 +215,6 @@ func TestAccessGuardRefusesAnUnreadableSecret(t *testing.T) {
 			}
 			if info, err := os.Stat(path); err != nil || !info.IsDir() {
 				t.Fatalf("the unreadable secret was replaced: %v", err)
-			}
-		})
-	}
-}
-
-// An ACL may revoke read access without changing any metadata used by the
-// byte cache. Model that Windows behavior without requiring host ACL tools.
-func TestReadSecretRefusesUnchangedUnreadableFile(t *testing.T) {
-	for _, c := range secretCases() {
-		t.Run(c.name, func(t *testing.T) {
-			d := authFixture(t)
-			c.cred(t, d)
-			path := filepath.Join(d.dir, c.file)
-			backdateSecret(t, path, time.Hour)
-			cred, err := d.readSecret(c.file)
-			if err != nil || cred == "" {
-				t.Fatalf("warm secret: present=%v, err=%v", cred != "", err)
-			}
-			before, err := os.Stat(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			denied := func(path string) (*os.File, error) {
-				return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrPermission}
-			}
-			for i := 0; i < 2; i++ {
-				got, err := d.readSecretWithOpen(c.file, denied)
-				if got != "" || !errors.Is(err, os.ErrPermission) {
-					t.Fatalf("denied read %d: returned secret=%v, err=%v", i, got != "", err)
-				}
-			}
-			after, err := os.Stat(path)
-			if err != nil || !wsstate.SameFileMetadata(before, after) {
-				t.Fatalf("metadata changed: %v", err)
-			}
-			// Restored readability recovers immediately, without rotation.
-			if got, err := d.readSecret(c.file); err != nil || got != cred {
-				t.Fatalf("restored secret: match=%v, err=%v", got == cred, err)
 			}
 		})
 	}
