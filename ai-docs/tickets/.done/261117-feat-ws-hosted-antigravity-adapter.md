@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5adf930d038dd542
 sage-review-completeness-reviewed: 5adf930d038dd542
+completed: 2026-11-18
 ---
 
 # Antigravity hosted adapter
@@ -504,3 +505,138 @@ answers 2026-11-18: (89)=a, (87), (88), (90), (91) ok):
   reaching the daemon's HTTP route with an `initialize`) and reports the
   start as failed loudly rather than running a lead without ws tools; the
   worker picks the exact signal from the probe evidence.
+
+### Result (e83316aeb) - 2026-11-18
+
+Landed `AgyBackend` (`agents-plugin-tool/internal/wsagent/agy.go`), a hosted
+lead backend over ACP, registered lead-only in `cmd/ws-mcp/dashboard.go`
+with `AgyCatalog()` and agy's own permission modes. Commits: `e83316aeb`
+(backend, catalog, registration, tests, fixture), `4fed2913d` (review
+fixes), `684f56a71` (internal/mcp fixture registry).
+
+**What landed.**
+- Process: `agy acp --process-per-session` under a session holder; the
+  holder ring drops `agent_thought_chunk` lines. The live process tree
+  was `agy acp` plus one `agy acp --worker` per session.
+- Session: `initialize` (protocol 1 required), then `session/new`, or
+  `session/resume` of `Record.SessionID`. The request carries the ws HTTP
+  MCP server (bearer in a header, never argv or env) and the instruction
+  file through `_meta.antigravity.systemPrompt.append`. Then model,
+  `thought_level` and mode go through `session/set_config_option` /
+  `session/set_mode`.
+- Controls: prompt, steer (a prompt during a turn), `session/cancel`,
+  approvals answered by option kind with agy's raw request id, in-place
+  model/effort/mode changes. Follow-up is the ws inbox (ws-substitute).
+- Auth-failure check (91): `MCPSession.Connected` closes when the session's
+  token first resolves on the daemon's route. agy connects inside
+  `session/new` (1.5.10), so a start whose token does not resolve within
+  10s of the session request fails with "agy did not reach the ws MCP
+  route ... so the lead was not started without them". A start with no
+  HTTP route is refused before spawning.
+- `LeadSpec.Spawned` writes the row's `host_pid` before `Start` returns.
+  agy reaches ws-mcp before the start ends, and ws-mcp confirms a hosted
+  session by that PID; without it, ws-mcp logged "registration.json named
+  no harness process within 3s; serving an ordinary session". A failed
+  start clears it, and a later daemon restarts the process of a start that
+  never finished instead of running it without ws tools.
+- Role scope (88): `lead-agy` builtin, no `agent-worker-agy`, so no agy tier
+  is spawnable (`TestAgyIsLeadOnly`). No `agy plugin import` (90). The
+  catalog grades `subagent_removal` unsupported (89).
+
+**Verification.**
+- Fixture tests:
+  - `TestAgyMapper*` over the Phase 1 recordings.
+  - `TestAgyMapperHostedLead` over `testdata/agy-1.5.10-hosted-lead.jsonl`,
+    the live smoke's stdio stream. It is sanitized: session id, token,
+    session key, scratch paths and the account tier are replaced, and
+    `TestAgyFixturesScrubbed` passes.
+  - `TestAgyLead*` runner tests over a fake ACP holder: the session
+    request, settings, approval answer, rejoin, an in-place model switch,
+    the half-start rejoin restart, and both refusal paths.
+- Regression:
+  - `go test ./internal/wsagent/ ./cmd/ws-mcp/` ok, covering the Claude
+    and Codex fixture tests.
+  - `./internal/wsdashboard/` fails only on the known
+    `TestBoardStateFilterAsks` and `TestSearchPalette*`.
+  - `./internal/mcp/`, run alone, fails only on the known
+    `TestDashboardNotesUsesHostedCallerStoreIdentity`.
+- Account-backed smoke on the installed agy 1.5.10:
+  - Setup: a scratch daemon on its own cache/config dirs and port. agy ran
+    with `--gemini-dir <scratch>` through a relay that recorded the
+    stream. No login, logout or credential change, and the shared daemon
+    was never touched. Nothing under `~/.gemini` changed after the
+    pre-probe baseline.
+  - Results by capability:
+
+  | capability | grade | live result |
+  |---|---|---|
+  | resume | native | stop, daemon restart, send: `session/resume` restored the context |
+  | approval | native | allow, deny (agy ends the turn, no reply), permission mode `accept-edits` (an edit ran without asking) and back; foreign modes are refused with 400 |
+  | interrupt | native | cancel with an approval pending: turn `aborted`, approval settled |
+  | follow_up | ws-substitute | a send during a turn was held (held=1) and ran as the next turn |
+  | steer | native | inbox steer during a running command: one turn, and the reply carried the steered word |
+  | model_effort | native | in place (same PID): to `claude-sonnet-4-6`, `gpt-oss-120b-medium`, back to `gemini-3.8-flash` with effort low; see Forward on Claude models |
+  | compaction | native | `/compact` as a typed command, then the next turn's usage dropped 38791 -> 28415 |
+  | skill_injection | native | agy's commands and skills are listed in the snapshot; `/antigravity-guide` loaded its SKILL.md |
+  | usage_query | native | `usage_update` -> `contextTokens` |
+  | reasoning_stream | unsupported | thoughts are on the wire but in no ring entry |
+  | rewind, skill_list, tool_removal, subagent_removal | unsupported | no ws route or lead-profile field offers them |
+
+  - Also: 78 `mcp_ws_*` tools were visible, and the ws tool calls kept
+    their dotted names (`mcp_ws_git.status`). A daemon killed mid-turn and
+    restarted rejoined the holder, and the turn's reply and end arrived.
+    A start whose bearer the relay spoiled failed after about 15s with
+    the error above, the row `host_stopped` and no process left.
+
+**Decisions taken.**
+- Approval ids are agy's `toolCallId`. JSON-RPC request ids restart per
+  process (`jetski-acp-front:N`), and `tool_call_update` settles by call id.
+- `thought_level` is per model: agy drops it for non-Gemini models. A
+  missing model option demotes `model_effort`; a missing or non-offered
+  thought level only defers the effort (`SetEffort` stores it), so a
+  switch never demotes or restarts.
+- The model vocabulary is the `model` config option's values, not
+  `availableModels`' variant ids.
+- A lead with no `permission_mode` starts in agy's own default. The
+  profile schema's `permission_mode` enum is the union of the registered
+  backends' modes; `ParseProfile` still checks each backend's own.
+- Catalog `Oldest` 1.5.9 and `Newest` 1.5.10, by the versions the fixtures
+  report (`TestAgyFixtureVersions`).
+
+**Compatibility (T0; old daemon T1).**
+- No `Record` field was added. The session id stays in `Record.SessionID`.
+- The early row write uses the existing `host_pid`, with no added
+  heartbeat.
+- The builtin profile and the catalog are in-code data: T0.
+- The old-daemon reopen of an `agy` Record is T1, by the Phase 1 chain.
+- A user-written profile with `backend: "agy"` (or an agy-only mode), read
+  by an old binary: its `ParseProfile` refuses the value as an invalid
+  profile and writes nothing. That is display-degraded, T1.
+
+**Forward.**
+- Claude models in an agy lead fail every turn while ws tools are
+  attached. agy forwards ws's dotted MCP tool names, and the Anthropic API
+  refuses names outside `^[a-zA-Z0-9_-]{1,128}$`. agy sends this as reply
+  text and ends the turn normally. Gemini and gpt-oss work. Options: hide
+  Claude models from agy's choices, offer dotless aliases on the agy MCP
+  route, or report it upstream.
+- An agy lead learns its ws session key and the workflow only through
+  `261117-feat-ws-hosted-prompt-assembly`. Live, a first ws call failed
+  for want of the key, and the agent recovered by calling `ferrule`.
+- A deny's message does not reach agy: the ACP outcome has no message
+  field.
+- ws tool results carry no content in ACP updates, so tracker writes are
+  detected by tool name only, and there are no result cards.
+- MCP connect ordering at 1.5.9 is unverified (only 1.5.10 is installed).
+  A lazy connect would fail every 1.5.9 start loudly, not silently.
+- Not wired:
+  - agy permission levels (`PermissionLevels`): an agy row reports
+    `permission_source: legacy-derived` and `permission_enforcement:
+    advisory` although agy enforces its own modes;
+  - agy harness detection in internal/mcp;
+  - the compaction lever;
+  - per-model effort availability in `ModelChoice.Thinking`;
+  - turn ends for agent-initiated output with no prompt outstanding;
+  - splitting of a steered turn replayed on a ring rejoin (it becomes two
+    turns);
+  - argsPreview keys for agy's capitalized args (`CommandLine`).
