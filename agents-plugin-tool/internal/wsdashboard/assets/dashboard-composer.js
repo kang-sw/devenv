@@ -1267,6 +1267,9 @@
     // same numbers, so no fresh draft renumbers from 1 while a send is
     // unsent (outboxAcked). Drop every sent chip before clearing any card,
     // since clearing one re-syncs the rest.
+    // Flush the debounced draft while the composer still owns the send.
+    // Once it enters the outbox, saveDraft intentionally leaves it untouched.
+    saveDraft();
     pics.forEach(dropImg);
     ctext.value = ""; grow(); clearMentions();
     list.forEach(function (c) { dropChip(c.id); });

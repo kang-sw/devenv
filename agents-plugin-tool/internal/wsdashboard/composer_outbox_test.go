@@ -129,6 +129,39 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+// TestComposerOutboxPersistsImmediateSend exercises the real draft reader and
+// writer before the input debounce has fired, while the POST remains unanswered.
+func TestComposerOutboxPersistsImmediateSend(t *testing.T) {
+	src := mustAsset(t, "dashboard.js")
+	var draftFns strings.Builder
+	for _, name := range []string{"readDraft", "saveDraft", "queueDraft", "clearDraft"} {
+		draftFns.WriteString(composerFunc(t, src, name))
+	}
+	runNode(t, "composer immediate send draft", selectionCodecSource(t)+composerToastPrelude+"var sending = false;\n"+composerSendSource(t, src)+outboxDOM+draftFns.String()+`
+var rid = "session", restoring = false, draftTimer = null, draftUnsaved = false;
+var openState = {}, mentions = [], live = false, saved = null, cleared = 0;
+var draftStore = {
+  save: function (id, d) { saved = JSON.parse(JSON.stringify(d)); return true; },
+  clear: function () { saved = null; cleared++; }
+};
+function region() { return null; }
+var pendingPost;
+post = function (route, body, done) { pendingPost = done; };
+ctext.value = "typed and sent immediately";
+queueDraft(); // do not let the 400 ms timer run
+sendMessage();
+check("composer cleared immediately", ctext.value, "");
+check("POST still unanswered", outboxUnsent(), true);
+check("draft survives renderer loss before acceptance", saved && saved.text, "typed and sent immediately");
+saveDraft(); // a lifecycle save must not overwrite it with the empty composer
+check("pending send keeps saved draft", saved && saved.text, "typed and sent immediately");
+pendingPost(true, { id: "h1" });
+check("acceptance clears sent draft", cleared, 1);
+clearTimeout(draftTimer);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // outboxActsDOM extends outboxDOM with the composer's heldacts template: a
 // steer and a cancel button prototype whose clones record click listeners
 // (click runs them), and a post whose message answers a case can hold.
