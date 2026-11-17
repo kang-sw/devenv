@@ -97,9 +97,9 @@ import type { InboxCommand, InboxItem } from './dashboard'
  * turn end and go out ahead of what the turn-end drain claims, so a steered
  * message is never lost after its claim; a stop records them instead. The
  * boundary waits on that drain at most STEER_DRAIN_WAIT_MS: past it the
- * boundary claims nothing (the messages stay held for the turn end), no later
- * boundary starts another drain while it is out, and whatever it claims late
- * is carried as a refused row's texts are. A steer row the turn ends without
+ * boundary claims nothing, and no later boundary starts another drain while
+ * it is out. Whatever it claims late is carried to the next boundary, or to
+ * the turn end if there is none. A steer row the turn ends without
  * any model request reading (the person refused or interrupted the call) is
  * submitted again at that turn end, ahead of the carried ones; that submit
  * never falls back to another row, since the first still rides the next
@@ -569,6 +569,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
    * Session-wide like the queue: a rebind keeps them, a stop records them.
    */
   let steerCarry: string[] = []
+  /** A late claim, unlike a refused row, can be retried at a tool boundary. */
+  let steerCarryReady = false
   /** Steered texts whose row was appended since the last main-thread model request started: none has read it yet. */
   let steerUnread: string[] = []
   /**
@@ -809,6 +811,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (!waiting) {
         steerStranded = []
         steerCarry = []
+        steerCarryReady = false
       }
       if (hold && !waiting) {
         await holdSteered(at, stranded, carried)
@@ -901,11 +904,13 @@ export function createWatcher(edges: WatcherEdges): Watcher {
    * turn end), or submit them now when that turn end has passed; a stop since
    * `at` records them instead.
    */
-  function carrySteer(myKey: string, at: number, texts: readonly string[]): void {
+  function carrySteer(myKey: string, at: number, texts: readonly string[], late = false): void {
     if (stops !== at) {
       keepBoard(`the push loop stopped: ${lastStop}`, texts)
       return
     }
+    // A late claim makes the whole carry eligible: older refused texts must go first.
+    steerCarryReady = steerCarryReady || late
     steerCarry.push(...texts)
     // The turn ended while they were pending (an interrupt): its flush has
     // run, so submit the carried messages now, or after a dashboard
@@ -920,17 +925,30 @@ export function createWatcher(edges: WatcherEdges): Watcher {
    * flush (the turn end), so a claimed message is never lost. The drain gets
    * STEER_DRAIN_WAIT_MS: a hung server must not hold every tool result, so
    * past it this boundary claims nothing and what the drain claims late is
-   * carried. Never rejects.
+   * carried to the next boundary or turn end. Never rejects.
    */
   async function steerBoard(): Promise<void> {
     const board = edges.board
     const myKey = key
     if (!board || myKey === undefined || !boardEnabled()) return
+    const at = stops
     if (steerDraining) {
       edges.log(`${edges.label}: an earlier steered dashboard message drain for ${myKey} is still out; this tool boundary claims nothing`)
       return
     }
-    const at = stops
+    // Deliver older late claims before starting another drain; serialize the row too.
+    if (steerCarryReady) {
+      const texts = steerCarry
+      steerCarry = []
+      steerCarryReady = false
+      steerDraining = true
+      try {
+        await appendSteer(board, myKey, at, texts)
+      } finally {
+        steerDraining = false
+      }
+      return
+    }
     steerDraining = true
     const drain = Promise.resolve()
       .then(() => board.drainSteer(myKey))
@@ -949,8 +967,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       void drain.then(
         (texts) => {
           if (texts.length === 0) return
-          edges.log(`${edges.label}: a late steered dashboard message drain claimed ${texts.length} message(s); submitting them at the turn end`)
-          carrySteer(myKey, at, texts)
+          edges.log(`${edges.label}: a late steered dashboard message drain claimed ${texts.length} message(s); carrying them to the next tool boundary or turn end`)
+          carrySteer(myKey, at, texts, true)
         },
         (err) => edges.log(`${edges.label}: late steered dashboard message drain failed for ${myKey}: ${String(err)}; they stay held`),
       )
@@ -960,7 +978,11 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       edges.log(`${edges.label}: steered dashboard message drain failed for ${myKey}: ${String(first.err)}; they stay held`)
       return
     }
-    const texts = first.texts
+    await appendSteer(board, myKey, at, first.texts)
+  }
+
+  /** Append claimed texts or carry them to a later boundary or board flush. */
+  async function appendSteer(board: BoardEdges, myKey: string, at: number, texts: string[]): Promise<void> {
     if (texts.length === 0) return
     // The drain claimed these: from here this is their only holder.
     if (stops !== at) {
@@ -1368,6 +1390,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       const left = takeQueued()
       if (left) lose(left.items, `the push loop stopped: ${reason}`)
       if (steerCarry.length > 0) keepBoard(`the push loop stopped: ${reason}`, steerCarry.splice(0))
+      steerCarryReady = false
       // Claimed behind a dashboard command (its typed line among them): only this holds them.
       if (backlog.length > 0) keepBoard(`the push loop stopped: ${reason}`, backlog.splice(0).map(itemText))
       // Already rows of the conversation the stop ends: nothing to record.
