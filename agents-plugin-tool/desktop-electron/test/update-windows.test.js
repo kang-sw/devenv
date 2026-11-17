@@ -152,6 +152,28 @@ test('successful Windows apply is consumed without an error; a leftover stage ca
   } finally { f.cleanup(); }
 });
 
+test('successful attempts defer only their own install and only once', () => {
+  const f = fixture();
+  try {
+    assert.equal(f.make().applyOnQuit(false), true);
+    const stateFile = path.join(f.userData, 'update-state.json');
+    const resultFile = path.join(f.userData, 'update-apply-result.json');
+    fs.rmSync(f.staging, { recursive: true }); // A successful swap removes its stage.
+    fs.writeFileSync(resultFile, JSON.stringify({ status: 'success' }));
+    const other = path.join(f.root, 'other', 'Werkschaft.exe');
+    assert.equal(f.make({ execPath: other, version: '0.49.0' }).applyOnLaunch(), false);
+    assert.equal(f.detached.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(stateFile)).applyAttempt.target, f.install);
+    assert.equal(f.make().applyOnLaunch(), true);
+    assert.equal(f.make().applyOnLaunch(), false);
+    assert.equal(f.detached.length, 2);
+    // Old state without a target cannot prove ownership of the successful swap.
+    fs.writeFileSync(stateFile, JSON.stringify({ applyAttempt: { version: '0.51.0', startedAt: 0 } }));
+    assert.equal(f.make().applyOnLaunch(), false);
+    assert.equal(f.detached.length, 2);
+  } finally { f.cleanup(); }
+});
+
 test('Windows unavailable location reports the reason and download-page fallback without starting a helper', () => {
   const f = fixture();
   try {
@@ -231,6 +253,22 @@ test('unknown helper ownership gets a bounded grace period before an abandoned a
   } finally { f.cleanup(); }
 });
 
+test('a live legacy targetless attempt leaves its stage and state untouched', () => {
+  for (const running of [true, null]) {
+    const f = fixture();
+    try {
+      const attempt = { version: '0.51.0', startedAt: 1000, helper: { pid: 42, created: '12345' } };
+      const stateFile = path.join(f.userData, 'update-state.json');
+      fs.writeFileSync(stateFile, JSON.stringify({ applyAttempt: attempt }));
+      assert.equal(f.make({ now: () => 2000, isApplying: () => running }).applyOnLaunch(), false);
+      assert.deepEqual(JSON.parse(fs.readFileSync(stateFile)).applyAttempt, attempt);
+      assert.equal(fs.existsSync(f.stage), true);
+      assert.deepEqual(f.detached, []);
+      assert.deepEqual(f.sent, []);
+    } finally { f.cleanup(); }
+  }
+});
+
 test('helper liveness validates PID and creation identity without signalling any process', () => {
   const helper = { pid: 42, created: '12345' };
   let called = false;
@@ -261,6 +299,67 @@ test('Windows write probe catches effective ACL denial in an existing install an
     }
   } finally { f.cleanup(); }
 });
+
+test('Windows helper swaps and rolls back marker-only folders without launching an app',
+  { skip: process.platform !== 'win32' }, () => {
+    const f = fixture();
+    try {
+      const script = path.join(f.userData, 'apply.ps1');
+      const logFile = path.join(f.userData, 'apply.log');
+      const resultFile = path.join(f.userData, 'result.json');
+      fs.writeFileSync(script, u.helperScript('win32'));
+      const opts = { pid: 2147483647, target: f.install, staged: f.stage,
+        backup: f.install + '-update-backup', staging: f.staging, relaunch: false, logFile, resultFile };
+      const run = () => {
+        const [command, args] = u.helperCommand('win32', script, opts);
+        return spawnSync(command, args, { encoding: 'utf8', timeout: 30000, windowsHide: true });
+      };
+      const success = run();
+      assert.equal(success.status, 0, success.stderr || success.error?.message);
+      assert.equal(JSON.parse(fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '')).status, 'success');
+      assert.equal(fs.readFileSync(path.join(f.install, 'marker'), 'utf8'), 'new');
+      assert.equal(fs.existsSync(opts.backup), false);
+      const failed = run(); // The first swap removed the stage; rollback restores the dummy target.
+      assert.equal(failed.status, 1, failed.stderr || failed.error?.message);
+      assert.match(JSON.parse(fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '')).message, /restored the previous app/);
+      assert.equal(fs.readFileSync(path.join(f.install, 'marker'), 'utf8'), 'new');
+    } finally { f.cleanup(); }
+  });
+
+test('Windows bootstrap runs the marker-only reopen continuation',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = fixture();
+    try {
+      const script = path.join(f.userData, 'reopen.ps1');
+      const logFile = path.join(f.userData, 'reopen.log');
+      const marker = 'simulated reopen';
+      const original = u.helperScript('win32', true);
+      const safe = original
+        .replace('Start-Process -FilePath $exe -ArgumentList $argLine', `Add-Content -LiteralPath $Log -Value '${marker} args'`)
+        .replace('Start-Process -FilePath $exe', `Add-Content -LiteralPath $Log -Value '${marker} no args'`);
+      assert.notEqual(safe, original);
+      assert.doesNotMatch(safe, /Start-Process/);
+      fs.writeFileSync(script, safe);
+      const [command, args] = u.helperCommand('win32', script, {
+        pid: 2147483647, target: f.install, staging: f.staging, reopen: true,
+        helper: { pid: 2147483647, created: '0' }, logFile,
+        resultFile: path.join(f.userData, 'result.json'), args: ['--test argument'],
+      });
+      const helper = u.spawnDetached(command, args, logFile, 'win32');
+      let running = true;
+      for (let i = 0; i < 100 && running !== false; i++) {
+        running = u.windowsHelperRunning(helper);
+        if (running !== false) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.equal(running, false, 'marker-only continuation exited');
+      const log = fs.readFileSync(logFile, 'utf8');
+      assert.match(log, /reopen helper started/);
+      assert.match(log, /simulated reopen args/);
+      assert.match(log, /reopened /);
+      assert.equal(fs.readFileSync(path.join(f.install, 'marker'), 'utf8'), 'old');
+      assert.equal(fs.existsSync(f.stage), true);
+    } finally { f.cleanup(); }
+  });
 
 // Explicit opt-in: never launch an app, a daemon, or a real exe. The helper
 // operates on marker files only, and this host's approved dummy root only.

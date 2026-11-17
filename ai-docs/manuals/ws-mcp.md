@@ -17,7 +17,7 @@ coupling is the code itself:
 
 For live tool schemas and current inventory, ask the runtime: use MCP
 `tools/list`, `ws/runtime.read`, `ws-mcp runtime capabilities`, or the source
-registry in `agents-plugin-tool/internal/mcp/server.go`.
+registry in `agents-plugin-tool/internal/mcp/server_schemas.go:11`.
 
 ## Tool Output Convention
 
@@ -27,7 +27,7 @@ caller needs stable machine parsing, protocol metadata, or a
 compatibility-preserving shape, and put it behind an explicit opt-in (a
 `format: "json"` argument) rather than making it the default. Nothing enforces
 this - `toolTextResponse` and `toolJSONResponse` are equally available at every
-dispatch site in `agents-plugin-tool/internal/mcp/server.go` - so it has to be
+dispatch site in `agents-plugin-tool/internal/mcp/server_dispatch.go:21` - so it has to be
 applied when the tool is written.
 
 ## Process Model
@@ -964,7 +964,7 @@ conversation:
   explicit selection cannot be raised to `full` through the native-only
   URL, which carries no full acknowledgement
   (`internal/wsagent/http.go:202-207,273-284`,
-  `internal/wsagent/runner.go:1000-1022`,
+  `internal/wsagent/runner.go:1004-1020`,
   `internal/wsagent/permission.go:214-242`).
 - **Common permissions.** `POST /agents/leads/permission {root, harness,
   permission_level, permission_full_ack?, model?, effort?, plugin_isolation?}`
@@ -988,8 +988,7 @@ conversation:
   otherwise. Worker state omits these fields. Without an explicit
   selection, Claude `plan` derives `read-only`, `bypassPermissions` derives
   `full`, its other admitted modes derive `workdir-write`, and Pi derives
-  `workdir-write` (`internal/wsagent/permission.go:10-75,98-134`,
-  `internal/wsagent/runner.go:1173-1181`).
+  `workdir-write` (`internal/wsagent/permission.go:53-75,98-109`).
 - **Recovery and failures.** A Claude lead's init line lists its MCP
   servers. A server reported `failed`, a failed `mcp__*` tool call, or the
   lead's call of a `*__request_mcp_reconnect` tool makes the runner ask the

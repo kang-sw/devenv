@@ -25,6 +25,17 @@ function fixture(t) {
   return { launch: entry.exports.launch, get child() { return child; }, root, calls,
     call: () => calls.at(-1), unrefs: () => unrefs };
 }
+test('long-running dashboard and replacement preflight do not inherit the log', async t => {
+  const f = fixture(t), logPath = path.join(f.root, 'daemon-start.log');
+  for (const args of [['dashboard'], ['dashboard', '--port', '1234', '--lock-wait', '8s']]) {
+    const result = f.launch('not-executed', { logPath }, args);
+    assert.equal(f.call().options.stdio, 'ignore');
+    assert.equal(f.call().options.logPath, undefined);
+    assert.equal(fs.existsSync(logPath), false);
+    f.child.emit('spawn');
+    await result;
+  }
+});
 test('Windows native starter spawns directly, hidden and detached with file-backed logs; waits for successful exit', async t => {
   const f = fixture(t), logPath = path.join(f.root, 'daemon-start.log');
   const args = ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s'];

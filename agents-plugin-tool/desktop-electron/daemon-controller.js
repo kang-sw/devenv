@@ -15,7 +15,9 @@ function launch(binary, options, args = ['dashboard'], waitForExit = false) {
     const { logPath, ...spawnOptions } = options;
     let fd, child, logStart = 0;
     try {
-      if (logPath) { fd = fs.openSync(logPath, 'a', 0o600); logStart = fs.fstatSync(fd).size; }
+      // Only the short-lived starter may inherit the log; dashboard children
+      // (including replacement preflights) can run indefinitely.
+      if (logPath && waitForExit) { fd = fs.openSync(logPath, 'a', 0o600); logStart = fs.fstatSync(fd).size; }
       child = spawn(binary, args, { ...spawnOptions, detached: true,
         stdio: fd === undefined ? 'ignore' : ['ignore', fd, fd], windowsHide: true });
     } catch (error) { reject(error); return; }

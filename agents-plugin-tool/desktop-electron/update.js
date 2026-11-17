@@ -504,8 +504,8 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     const script = path.join(staging, platform === 'win32' ? 'apply.ps1' : 'apply.sh');
     try {
       if (platform === 'win32') {
-        writeState({ applyAttempt: { version: stage.version, startedAt: now() } });
         fs.rmSync(resultFile, { force: true });
+        writeState({ applyAttempt: { version: stage.version, startedAt: now(), target: install } });
       }
       fs.writeFileSync(script, helperScript(platform));
       const [command, args] = helperCommand(platform, script, {
@@ -514,7 +514,12 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
         ...(platform === 'win32' ? { resultFile } : {}),
       });
       const helper = detach(command, args, logFile);
-      if (platform === 'win32') writeState({ applyAttempt: { version: stage.version, startedAt: now(), helper } });
+      if (platform === 'win32') {
+        const attempt = readState().applyAttempt;
+        if (attempt && attempt.target === install && attempt.version === stage.version) {
+          writeState({ applyAttempt: { ...attempt, helper } });
+        }
+      }
       return true;
     } catch (error) {
       const message = `Update apply failed: ${error.message}`;
@@ -551,7 +556,8 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   function applyOnLaunch() {
     const stage = staged();
     const state = readState();
-    if (platform === 'win32' && state.applyAttempt) {
+    if (platform === 'win32' && state.applyAttempt && (!state.applyAttempt.target ||
+      path.resolve(state.applyAttempt.target).toLowerCase() === path.resolve(installLocation(platform, execPath, packaged) || '').toLowerCase())) {
       const attempt = state.applyAttempt;
       let result = readJSON(resultFile);
       // Reconcile completion after the synchronous liveness query: the helper
@@ -559,8 +565,16 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       const running = result.status ? false : isApplying(attempt.helper);
       result = readJSON(resultFile);
       const active = !result.status && (running === true || running === null && now() - attempt.startedAt < 180000);
-      if (active || result.status === 'success' && isNewer(attempt.version, version)) return deferLaunch(attempt);
+      // Legacy attempts have no target, so do not defer this install or
+      // discard a stage that their still-running helper may be using.
+      if (active) return attempt.target ? deferLaunch(attempt) : false;
+      if (result.status === 'success' && attempt.target && !attempt.deferred && isNewer(attempt.version, version)) {
+        // Persist before launching the continuation, so an older copy cannot loop.
+        writeState({ applyAttempt: { ...attempt, deferred: true } });
+        return deferLaunch(attempt);
+      }
       writeState({ applyAttempt: null });
+      if (result.status === 'success' && attempt.deferred) return false;
       if (result.status !== 'success') {
         const message = result.status === 'error' && typeof result.message === 'string' ? result.message
           : 'the previous update did not complete; see update-apply.log';
