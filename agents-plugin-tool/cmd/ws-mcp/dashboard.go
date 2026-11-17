@@ -286,6 +286,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 			// Pi has no catalog profile until its port of the Codex adapter:
 			// it stays handle-only.
 			wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
+			// agy hosts leads only: no agent-worker profile, so no agy tier
+			// is spawnable. It maps no common permission level yet.
+			wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog()},
 		},
 		Keys: keys,
 		// A lead session's process runs under a session holder with a lead

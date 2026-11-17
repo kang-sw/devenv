@@ -39,6 +39,9 @@ const ProfilePrefix = "agent.profile."
 const (
 	BackendClaude = "claude"
 	BackendPi     = "pi"
+	// BackendAgy is Antigravity's CLI (AgyBackend), lead-only: it has no
+	// agent-worker profile.
+	BackendAgy = "agy"
 )
 
 // DefaultIdleTimeout stops an idle worker after ten minutes when its profile
@@ -488,7 +491,7 @@ func ProfileValueSchema(registries ...map[string]BackendRegistration) map[string
 			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn, input, background work or active child; 0 never ends it. Absent defaults to 0 for leads and 600 for workers."},
 			"list_in_index":        map[string]any{"type": "boolean", "description": "List this profile's conversations in the dashboard session index; hidden by default."},
 			"lead":                 map[string]any{"type": "boolean", "description": "Host the profile's conversations as lead sessions: the harness loads the user's own settings, plugins, hooks, memory, and MCP servers, runs under a session holder with a lead ws session key, and asks the dashboard for tool permission. The capability fields (tools, ws_tools, mcp_servers, plugins, skills, instructions, list_in_index) must be absent. Not allowed in a repo-scope profile."},
-			"permission_mode":      map[string]any{"enum": profilePermissionModes(registries), "description": "A lead conversation's starting permission mode (claude only); absent is auto."},
+			"permission_mode":      map[string]any{"enum": profilePermissionModes(registries), "description": "A lead conversation's starting permission mode, one its backend accepts (claude or agy); absent is auto for claude and the harness's own default for agy."},
 		},
 	}
 }

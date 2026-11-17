@@ -27,8 +27,9 @@ import (
 //     environment, the ws-mcp entry's environment (the tool allowlist, the
 //     hosted package policy), the harness PID and the working directory.
 //   - Credentials. The harness reads the URL and the token from its
-//     environment (EnvMCPSessionURL, EnvMCPSessionToken), never its argv,
-//     so neither shows in a process listing or a config file.
+//     environment (EnvMCPSessionURL, EnvMCPSessionToken), or takes them in
+//     a protocol request (agy's session request), never its argv, so
+//     neither shows in a process listing or a config file.
 
 // Env names the backend sets on a harness attached over HTTP.
 const (
@@ -52,6 +53,10 @@ type MCPSession struct {
 	// the context the stdio launcher would have sent in its hello. A rejoin
 	// calls it too.
 	Started func(env []string, pid int)
+	// Connected is closed once the token first resolves on the route: the
+	// harness reached ws-mcp with it. A harness that drops a refused
+	// server silently is checked against it.
+	Connected <-chan struct{}
 }
 
 // mcpToken is one live token's state, under Runner.mu.
@@ -60,10 +65,12 @@ type mcpToken struct {
 	// env is the ws-mcp entry's environment, laid over the harness's.
 	env map[string]string
 	cwd string
-	// hello is set once ready is closed; void is closed when the token is.
-	hello wsdashboard.ProxyHello
-	ready chan struct{}
-	void  chan struct{}
+	// hello is set once ready is closed; void is closed when the token is;
+	// connected is closed at the token's first resolution.
+	hello     wsdashboard.ProxyHello
+	ready     chan struct{}
+	void      chan struct{}
+	connected chan struct{}
 }
 
 // newMCPToken draws a token, or "" when no random source answers.
@@ -96,15 +103,16 @@ func (r *Runner) attachMCP(id, token string, env map[string]string, cwd string, 
 		return nil
 	}
 	r.voidMCPLocked(id)
-	t := &mcpToken{id: id, env: env, cwd: cwd, ready: make(chan struct{}), void: make(chan struct{})}
+	t := &mcpToken{id: id, env: env, cwd: cwd, ready: make(chan struct{}), void: make(chan struct{}), connected: make(chan struct{})}
 	if r.mcpTokens == nil {
 		r.mcpTokens, r.mcpTokenOf = map[string]*mcpToken{}, map[string]string{}
 	}
 	r.mcpTokens[token], r.mcpTokenOf[id] = t, token
 	version := r.opts.DaemonVersion
 	return &MCPSession{
-		URL:   r.endpoint + wsdashboard.ProxyHTTPPath,
-		Token: token,
+		URL:       r.endpoint + wsdashboard.ProxyHTTPPath,
+		Token:     token,
+		Connected: t.connected,
 		Started: func(harnessEnv []string, pid int) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -168,6 +176,11 @@ func (r *Runner) ResolveMCPToken(token string) (wsdashboard.ProxyHello, <-chan s
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	select {
+	case <-t.connected:
+	default:
+		close(t.connected)
+	}
 	return t.hello, t.void, true
 }
 

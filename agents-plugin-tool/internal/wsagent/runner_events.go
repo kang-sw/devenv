@@ -123,7 +123,7 @@ func (c *conv) handle(ev Event) {
 		// The mode the harness runs in is the session's own: its next
 		// launch resumes in it. A change of the user's that waits to be
 		// applied stands until it is.
-		if c.rec.Lead && !quiet && !c.dirtyMode && ev.PermissionMode != c.rec.PermissionMode && ValidLeadPermissionMode(ev.PermissionMode) {
+		if c.rec.Lead && !quiet && !c.dirtyMode && ev.PermissionMode != c.rec.PermissionMode && slices.Contains(permissionModes(c.rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
 			c.update(func(rec *Record) { rec.PermissionMode = ev.PermissionMode })
 			c.changed(quiet)
 		}

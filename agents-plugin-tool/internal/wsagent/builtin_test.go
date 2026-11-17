@@ -55,8 +55,8 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != 11 {
-		t.Fatalf("ResolveProfiles with no config should list all eleven builtin profiles: %+v, %v", all, err)
+	if err != nil || len(all) != 12 {
+		t.Fatalf("ResolveProfiles with no config should list all twelve builtin profiles: %+v, %v", all, err)
 	}
 }
 

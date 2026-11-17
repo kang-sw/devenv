@@ -713,7 +713,7 @@ func (r *Runner) Create(profile, root string) (State, error) {
 func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, error) {
 	profile := LeadProfileFor(strings.TrimSpace(backend), r.opts.Backends)
 	if profile == "" {
-		return State{}, categorized(ErrInvalidProfile, badRequest("harness must be %q or %q; got %q", BackendClaude, BackendPi, backend))
+		return State{}, categorized(ErrInvalidProfile, badRequest("harness must be one of %s; got %q", strings.Join(r.leadHarnesses(), ", "), backend))
 	}
 	if opts.Model != "" && !modelPattern.MatchString(opts.Model) {
 		return State{}, categorized(ErrInvalidProfile, badRequest("model %q must match %s", opts.Model, modelPattern.String()))

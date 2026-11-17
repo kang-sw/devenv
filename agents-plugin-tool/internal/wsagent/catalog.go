@@ -396,3 +396,45 @@ func ClaudeCatalog() *HarnessProfile {
 		},
 	}
 }
+
+// AgyCatalog is what the ws adapter delivers for an Antigravity (agy) lead:
+// every entry is lead-only, because agy has no agent-worker profile. The
+// guaranteed range runs over the versions the recorded ACP sessions report
+// (testdata/agy-*.jsonl, agentInfo.version: the lead session's is 1.5.10,
+// the handshake's 1.5.9); the mapper's HarnessReport
+// (agyMapper.initialized) demotes what a session's shape lacks.
+func AgyCatalog() *HarnessProfile {
+	return &HarnessProfile{
+		Oldest: "1.5.9",
+		Newest: "1.5.10",
+		Entries: []CapabilityEntry{
+			{Item: ItemSkillList, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "available_commands_update is shown as the command list but not read as a skill list"},
+			{Item: ItemSkillInjection, Role: RoleLead, Grade: GradeNative,
+				Source: "agy's own skills, invoked by a /name prompt and listed in available_commands_update; ws's skills arrive with the common prompt assembly, not agy plugin import"},
+			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
+				Source: "the dashboard's /compact goes out as a session/prompt of that text, a command agy lists (agyMapper.commands demotes a list without it); no compaction event, only the usage drop"},
+			{Item: ItemRewind, Role: RoleLead, Grade: GradeUnsupported, Source: "no ACP method"},
+			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "the lead keeps the user's tool setup; only a custom main agent removes tools"},
+			{Item: ItemSubagentRemoval, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "the lead keeps agy's subagent tools (ticket 261117-feat-ws-hosted-antigravity-adapter, (89)=a); the per-harness playbook line covers it"},
+			{Item: ItemModelEffort, Role: RoleLead, Grade: GradeNative,
+				Source: "session/set_config_option of the model and thought_level options (agyProcess.SetModel, SetEffort); choices from the session's configOptions (AgyBackend.Choices)"},
+			{Item: ItemApproval, Role: RoleLead, Grade: GradeNative,
+				Source: "session/request_permission answered by option kind, and session/set_mode (agyProcess.AnswerApproval, SetPermissionMode)"},
+			{Item: ItemSteer, Role: RoleLead, Grade: GradeNative,
+				Source: "a session/prompt sent while a turn runs carries the run on (agyProcess.Steer)"},
+			{Item: ItemInterrupt, Role: RoleLead, Grade: GradeNative,
+				Source: "session/cancel; the prompt answers cancelled (agyProcess.Interrupt)"},
+			{Item: ItemFollowUp, Role: RoleLead, Grade: GradeSubstitute,
+				Source: "the ws inbox holds the message and the runner sends it when the turn ends (Runner.Send); a mid-turn prompt would steer instead"},
+			{Item: ItemResume, Role: RoleLead, Grade: GradeNative,
+				Source: "session/resume of the recorded session id (agyProcess.open)"},
+			{Item: ItemReasoningStream, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "agent_thought_chunk lines are dropped (agyRingSkip); no summary producer yet"},
+			{Item: ItemUsageQuery, Role: RoleLead, Grade: GradeNative,
+				Source: "agy pushes usage_update after each model call; nothing is asked (agyMapper.update)"},
+		},
+	}
+}

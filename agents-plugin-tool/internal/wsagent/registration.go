@@ -36,6 +36,18 @@ func (r *Runner) BackendRegistrations() map[string]BackendRegistration {
 	return out
 }
 
+// leadHarnesses are the registered backends with a lead profile, sorted.
+func (r *Runner) leadHarnesses() []string {
+	var names []string
+	for name, reg := range r.opts.Backends {
+		if reg.LeadProfile != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // profileBackends defaults only keyless/standalone profile readers to the
 // builtin profile floor. Actual daemon admission always supplies its registry;
 // this is not a second registry of process implementations or descriptors.
@@ -68,16 +80,16 @@ func permissionModes(backend string, registries []map[string]BackendRegistration
 	if len(registries) > 0 {
 		return registries[0][backend].PermissionModes
 	}
-	if backend == BackendClaude {
+	switch backend {
+	case BackendClaude:
 		return LeadPermissionModes
+	case BackendAgy:
+		return AgyPermissionModes
 	}
 	return nil
 }
 
 func profilePermissionModes(registries []map[string]BackendRegistration) []string {
-	if len(registries) == 0 {
-		return LeadPermissionModes
-	}
 	modes := []string{}
 	seen := map[string]bool{}
 	for _, name := range profileBackends(registries) {
