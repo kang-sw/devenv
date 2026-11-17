@@ -104,6 +104,7 @@ type replayed struct {
 	structPos             []int // item.create and item.move: the item tree
 	threadPos, commentPos map[string][]int
 	rolesOnly             bool // judge and fold only roles and identity events
+	memo                  *foldMemo
 }
 
 // replay validates and folds the events one clone holds. conc is the
@@ -119,6 +120,10 @@ func replayRoles(events []wsledger.Event, genesisRaw json.RawMessage, conc func(
 }
 
 func replayWith(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a, b wsledger.EventID) bool, rolesOnly bool) *replayed {
+	return replayBuild(events, genesisRaw, conc, rolesOnly, false)
+}
+
+func replayBuild(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a, b wsledger.EventID) bool, rolesOnly, tracked bool) *replayed {
 	r := &replayed{g: parseGenesis(genesisRaw), byID: map[string]*node{}, heads: map[string]int{},
 		threadPos: map[string][]int{}, commentPos: map[string][]int{}, rolesOnly: rolesOnly}
 	r.hb = func(x, y *node) bool {
@@ -148,10 +153,15 @@ func replayWith(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a
 	}
 	r.linearize(all, streams)
 	r.verdicts(all)
-	r.S = newState(r.g, r.hb, true)
-	for _, n := range r.order {
-		if n.status == "applied" {
-			r.S.apply(n)
+	if tracked {
+		r.memo = newFoldMemo(r)
+		r.foldFrom(0, nil)
+	} else {
+		r.S = newState(r.g, r.hb, true)
+		for _, n := range r.order {
+			if n.status == "applied" {
+				r.S.apply(n)
+			}
 		}
 	}
 	r.threads()
@@ -234,6 +244,12 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 			i++
 		}
 	}
+	r.indexOrder()
+}
+
+func (r *replayed) indexOrder() {
+	r.rolesPos, r.assignPos, r.structPos = nil, nil, nil
+	r.threadPos, r.commentPos = map[string][]int{}, map[string][]int{}
 	for _, n := range r.order {
 		switch {
 		case isRoles(n.typ):
@@ -261,12 +277,22 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 // Valid stands; a protocol-Valid domain event is judged against the state
 // folded from its causal past.
 func (r *replayed) verdicts(all []*node) {
+	r.verdictsFrom(all, 0)
+}
+
+func (r *replayed) verdictsFrom(all []*node, start int) {
 	// lf folds only the applied label-list events, in fold order: a label
 	// name two admins add or rename to concurrently passes both causal
 	// checks, and the later one in fold order is flagged here, so the list
 	// never holds a name twice.
 	lf := newState(r.g, r.hb, false)
-	for _, n := range r.order {
+	for _, n := range r.order[:start] {
+		if n.status == "applied" && isLabelList(n.typ) {
+			lf.apply(n)
+		}
+	}
+	for _, n := range r.order[start:] {
+		n.status, n.reason, n.ignored, n.clash = "", "", false, false
 		if r.rolesOnly && !isRoles(n.typ) {
 			n.status = "skipped"
 			continue
@@ -295,6 +321,7 @@ func (r *replayed) verdicts(all []*node) {
 		if n.pos >= 0 {
 			continue
 		}
+		n.ignored, n.clash = false, false
 		switch n.ev.Verdict {
 		case wsledger.Waiting:
 			n.status, n.reason = "waiting", n.ev.Reason
