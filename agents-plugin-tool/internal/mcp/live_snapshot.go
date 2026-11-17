@@ -218,7 +218,8 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 		ls.stop()
 	}
 	state := wslive.NewState(key)
-	if records, err := wslive.ReadObserved(dir); err == nil {
+	records, folded, err := wslive.ReadObservedFold(dir)
+	if err == nil {
 		state.SeedObserved(records)
 	}
 	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
@@ -228,6 +229,9 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 	if h.host != nil && !h.closed {
 		if slot, ok := h.host.OpenHostedSlot(dir); ok {
 			ls.slot = slot
+			if folder, ok := slot.(wsdashboard.ObservedFoldSlot); ok && folded {
+				folder.FoldsObserved()
+			}
 		}
 	}
 	made := ls

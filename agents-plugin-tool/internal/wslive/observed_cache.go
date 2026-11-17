@@ -99,7 +99,9 @@ func (s *observedRead) trusted(info os.FileInfo, now time.Time) bool {
 	if !info.ModTime().Before(s.dirAt.Add(-observedRacyWindow)) {
 		return false
 	}
-	return wsstate.SameFileMetadata(prev, info)
+	// Not SameFileMetadata: it accepts regular files only, so no directory
+	// was ever trusted and every validation listed.
+	return wsstate.SameDirMetadata(prev, info)
 }
 
 type observedFile struct {
@@ -235,6 +237,9 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 	changed := slot.evidence == nil
 	appendOnly := slot.evidence != nil
 	var added []string
+	// unread is a listed record that could not be stat'ed or read: the
+	// directory is not trusted until a later listing reads it.
+	unread := false
 	cleaner := NewState("")
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
@@ -249,6 +254,7 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 		if err != nil {
 			changed = true
 			appendOnly = false
+			unread = true
 			continue
 		}
 		prev, ok := slot.files[entry.Name()]
@@ -277,7 +283,14 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 				}
 			}
 			files[entry.Name()] = observedFile{info: info, record: r, valid: valid}
+		} else {
+			unread = true
 		}
+	}
+	if unread {
+		// Retried at every validation, as before directory trust worked; an
+		// unchanged directory would otherwise hide it until the re-sweep.
+		slot.dirInfo = nil
 	}
 	if len(files) != len(slot.files) {
 		changed = true

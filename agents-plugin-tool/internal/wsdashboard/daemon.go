@@ -903,11 +903,25 @@ func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 		d.mailWake.Nudge()
 	}
 	d.foreign.mailChanged()
+	d.foreignWriter(body.ReplyID)
 	if d.index == nil || !d.index.Nudge(body.ReplyID, body.Project) {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// foreignWriter handles an HTTP nudge naming session replyID. Only another
+// process nudges over HTTP (a hosted server notifies in process,
+// NotifySessionChange), so for a session this daemon hosts it is a second
+// writer whose evidence the hosted copy lacks: the copy stops standing for
+// the evidence directory, before the nudge's re-read wakes any page.
+func (d *Daemon) foreignWriter(replyID string) {
+	d.live.mu.Lock()
+	defer d.live.mu.Unlock()
+	if _, held := d.live.owners[replyID]; held {
+		d.snapshots.shareObserved(d.dir, replyID)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
