@@ -30,6 +30,7 @@ import (
 // not transient, so a claim that lost still sees ErrGone.
 
 func rename(from, to string) error {
+	defer bumpNames()
 	err := retryTransient(func() error { return renameExclusive(from, to) })
 	if err != nil {
 		return &os.LinkError{Op: "rename", Old: from, New: to, Err: err}
@@ -77,6 +78,7 @@ func renameExclusive(from, to string) error {
 }
 
 func remove(path string) error {
+	defer bumpNames()
 	return retryTransient(func() error { return os.Remove(path) })
 }
 

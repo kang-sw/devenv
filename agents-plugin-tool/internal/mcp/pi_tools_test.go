@@ -73,6 +73,8 @@ func (f *fakePiAgents) Get(id string) (wsagent.State, error) {
 	return st, nil
 }
 
+func (f *fakePiAgents) Lineage(id string) (wsagent.State, error) { return f.Get(id) }
+
 func (f *fakePiAgents) Children(parent wsagent.ParentRef) []wsagent.State {
 	f.mu.Lock()
 	defer f.mu.Unlock()

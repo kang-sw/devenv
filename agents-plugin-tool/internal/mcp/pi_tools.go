@@ -36,6 +36,8 @@ type PiAgents interface {
 	Spawn(wsagent.SpawnSpec) (wsagent.State, error)
 	Send(id, text string) (wsagent.State, error)
 	Get(id string) (wsagent.State, error)
+	// Lineage reads a conversation's spawn edge without Get's file reads.
+	Lineage(id string) (wsagent.State, error)
 	Children(parent wsagent.ParentRef) []wsagent.State
 	CloseConversation(id string) (wsagent.State, error)
 	Wait(ctx context.Context, id string, timeout time.Duration) (wsagent.TurnResult, error)

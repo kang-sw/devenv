@@ -96,3 +96,31 @@ func TestSpawnBurstInboxScanCountsAndTrailingUpdate(t *testing.T) {
 		t.Fatalf("trailing projection lost latest child state: %+v", rows)
 	}
 }
+
+// A watcher traces every descendant event to its lead (mcp's piChanged).
+// Through Get each step relisted the parent's inbox; Lineage reads records.
+func TestSpawnLeadLineageReadsNoInbox(t *testing.T) {
+	scans := 0
+	r := NewRunner(Options{stateInboxRead: func(string) { scans++ }})
+	dir := t.TempDir()
+	r.convs["worker"] = &conv{r: r, rec: Record{ReplyID: "worker", Parent: &ParentRef{Kind: ParentLead, ReplyID: "lead"}},
+		inbox: filepath.Join(dir, "worker", "inbox")}
+	r.closed["mid"] = Record{ReplyID: "mid", Parent: &ParentRef{Kind: ParentConversation, ReplyID: "worker"}}
+	leaf := State{ID: "leaf", Parent: &ParentRef{Kind: ParentConversation, ReplyID: "mid"}}
+	if got := SpawnLead(leaf, r.Get); got != "lead" || scans == 0 {
+		t.Fatalf("control: Get walk = %q with %d inbox scans", got, scans)
+	}
+	scans = 0
+	before := wsstate.FileIOCounters()["file_io_total"]
+	for range 20 {
+		if got := SpawnLead(leaf, r.Lineage); got != "lead" {
+			t.Fatalf("Lineage walk = %q, want lead", got)
+		}
+	}
+	if got := wsstate.FileIOCounters()["file_io_total"] - before; scans != 0 || got != 0 {
+		t.Fatalf("20 Lineage walks: %d inbox scans, %d file operations, want 0", scans, got)
+	}
+	if _, err := r.Lineage("missing"); err == nil {
+		t.Fatal("Lineage of an unknown conversation succeeded")
+	}
+}

@@ -85,10 +85,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -742,7 +744,9 @@ func writeEntryJournaled(dir string, entry Entry, journal bool) (string, error) 
 	if journal {
 		commit = wsstate.AtomicReplaceFile
 	}
-	if err := commit(tmpPath, filepath.Join(dir, name)); err != nil {
+	err = commit(tmpPath, filepath.Join(dir, name))
+	bumpNames()
+	if err != nil {
 		// Keep the stage if removing the journal fails: recovery must still
 		// recognize this as an uncommitted send.
 		if pending == "" {
@@ -1251,12 +1255,78 @@ func entryNames(dir string) ([]string, error) {
 // Names returns the held entry names at dir, interrupt entries included,
 // oldest first; a missing directory holds none. An entry file is never rewritten, so the names alone
 // tell whether the inbox changed.
+//
+// Readers poll unchanged inboxes many times a second, so the last listing of
+// a directory is reused while nothing can have changed it: no inbox write
+// in this process since (namesGen), and a stat showing the directory's
+// modification time unchanged, which catches a writer in another process.
+// A listing is kept only when that time was already namesTrustAge old at the
+// stat: a change in the same timestamp tick could keep the time and hide a
+// message, and later changes stamp a later time.
 func Names(dir string) ([]string, error) {
-	names, err := entryNames(dir)
+	gen := namesGen.Load()
+	now := time.Now()
+	info, err := wsstate.Stat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	return names, err
+	if err == nil {
+		if names, ok := cachedNames(dir, gen, info.ModTime()); ok {
+			return names, nil
+		}
+	}
+	names, listErr := entryNames(dir)
+	if errors.Is(listErr, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if listErr == nil && err == nil && info.ModTime().Before(now.Add(-namesTrustAge)) {
+		storeNames(dir, namesListing{gen: gen, mod: info.ModTime(), names: slices.Clone(names)})
+	}
+	return names, listErr
+}
+
+// namesTrustAge exceeds every local filesystem's directory timestamp
+// granularity, FAT's two seconds included.
+const namesTrustAge = 3 * time.Second
+
+// namesCacheMax bounds the reused listings; past it they are all dropped.
+const namesCacheMax = 4096
+
+// namesGen counts this process's inbox writes. Every entry name change here
+// goes through rename, remove or a commit, each bumping it once done, so a
+// listing taken before a write never passes for one taken after it.
+var namesGen atomic.Uint64
+
+func bumpNames() { namesGen.Add(1) }
+
+type namesListing struct {
+	gen   uint64
+	mod   time.Time
+	names []string
+}
+
+var namesCache struct {
+	sync.Mutex
+	m map[string]namesListing
+}
+
+func cachedNames(dir string, gen uint64, mod time.Time) ([]string, bool) {
+	namesCache.Lock()
+	defer namesCache.Unlock()
+	l, ok := namesCache.m[dir]
+	if !ok || l.gen != gen || !l.mod.Equal(mod) {
+		return nil, false
+	}
+	return slices.Clone(l.names), true
+}
+
+func storeNames(dir string, l namesListing) {
+	namesCache.Lock()
+	defer namesCache.Unlock()
+	if namesCache.m == nil || len(namesCache.m) >= namesCacheMax {
+		namesCache.m = map[string]namesListing{}
+	}
+	namesCache.m[dir] = l
 }
 
 // SteerNames returns the names of the held entries at dir marked for
