@@ -138,11 +138,22 @@ func TestLeadRejoinDoesNotStallBehindALongReplay(t *testing.T) {
 	// This bounded round trip fails if Status holds the conversation loop.
 	h.quiesce(id)
 	c := h.runner.conv(id)
-	eventually(t, "the loop to drain the replay while status waits", func() bool {
+	// These 601 new records change the host snapshot as they replay. On a
+	// loaded machine those writes can exceed eventually's five seconds;
+	// this checks for a stall, not replay throughput. Keep Status gated
+	// throughout, but give the drain its own generous, finite deadline.
+	deadline := time.Now().Add(time.Minute)
+	for {
 		var seq uint64
 		c.do(func() { seq = c.seq })
-		return seq >= target
-	})
+		if seq >= target {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the loop to drain the replay while status waits: sequence %d, want %d", seq, target)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	release()
 	h.send(id, "two")
 	eventually(t, "the rejoin to end and take the message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
