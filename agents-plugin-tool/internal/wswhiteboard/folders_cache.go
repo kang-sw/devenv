@@ -196,9 +196,11 @@ func (s *State) sharedRead() *State {
 	return &out
 }
 
-// Forget drops a board when its session leaves the dashboard's index.
+// Forget drops a board when its session leaves the dashboard's index, along
+// with the process-wide topic memo under its directory (folders_memo.go).
 func (c *FolderCache) Forget(dir string) {
 	c.mu.Lock()
 	delete(c.entries, dir)
 	c.mu.Unlock()
+	forgetFolderMemo(dir)
 }
