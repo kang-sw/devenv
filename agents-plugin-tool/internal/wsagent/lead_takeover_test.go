@@ -312,6 +312,18 @@ func TestHandOffGivesTheSessionToTheTerminal(t *testing.T) {
 	if st.Status != StatusHandedOff || st.Process || st.ResumeCommand != want {
 		t.Fatalf("handed-off state = %+v, want the resume command %q", st, want)
 	}
+	found := false
+	for _, listed := range h.runner.List() {
+		if listed.ID == id {
+			found = true
+			if listed.Status != StatusHandedOff || listed.ResumeCommand != want || listed.PermissionLevel != st.PermissionLevel {
+				t.Fatalf("memory-only List lost handed-off presentation: %+v", listed)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("List lost handed-off session")
+	}
 	if h.holders.opCount("stop "+holder) != 1 {
 		t.Fatalf("the process should be ended: %v", h.holders.opList())
 	}

@@ -661,11 +661,16 @@ func (c *conv) release() {
 	c.dropHeld()
 	c.live.setAdapter("")
 	rec := c.record()
+	st := c.memoryState()
 	c.r.mu.Lock()
 	if c.r.convs[rec.ReplyID] == c {
 		delete(c.r.convs, rec.ReplyID)
 	}
 	c.r.closed[rec.ReplyID] = rec
+	if c.r.closedRows == nil {
+		c.r.closedRows = map[string]State{}
+	}
+	c.r.closedRows[rec.ReplyID] = st
 	c.r.mu.Unlock()
 	fmt.Fprintf(c.r.opts.Log, "agent %s: handed to a terminal session\n", rec.ReplyID)
 	c.r.notify(rec.ReplyID, rec.Root)
