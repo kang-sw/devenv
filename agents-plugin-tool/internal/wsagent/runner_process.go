@@ -517,7 +517,10 @@ func (c *conv) replayDone(lost bool) {
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 	// A message steered during the rejoin goes to the turn that still runs.
 	c.steer()
-	if c.restartIfDue() {
+	// A process whose ws-mcp route this daemon does not serve restarts
+	// before it takes input; any other restart waits for its usual idle
+	// point, as before a rejoin.
+	if c.mcpStale && c.restartIfDue() {
 		return
 	}
 	if !c.turn {

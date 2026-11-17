@@ -408,8 +408,10 @@ per-session token, re-issued per process start, loopback only, with no
 intermediary program on the hosted path. The token resolves to the same
 per-connection context `ProxyHello` gives stdio today (mode, tool allowlist,
 identity). Cover both attach paths: workers (inline `--mcp-config`) and hosted
-leads (moved from the bundled plugin's stdio server to HTTP; the bundle stays
-loaded without its MCP entry, mechanism chosen by probe, Decision 12). Persist only what
+leads (moved from the bundled plugin's stdio server to HTTP; mechanism chosen
+by probe, Decision 12: the lead loads a hosted variant of its bundle whose only
+MCP entry is the ws server over HTTP under the same plugin server name, instead
+of the bundle plus `--mcp-config`). Persist only what
 holder reattach needs (Decision 11). The CLI tier keeps stdio. Record the
 compatibility verdict with source citations, including the new-daemon launch /
 older-daemon reattach scenario.
@@ -419,6 +421,152 @@ loopback-only binding, rejection of a missing or stale token, a worker over HTTP
 seeing no tool beyond its profile, and token restore on holder reattach; a hosted
 Claude worker and lead session exercising ws MCP tools over HTTP, with the lead
 attached to exactly one ws server; the stdio path unchanged.
+
+### Result (4e8add8d3) - 2026-11-17
+
+**Route** (2552686ec, `internal/wsdashboard/proxy_http.go`): `POST
+/mcp/session`, MCP Streamable HTTP with JSON responses only (ws-mcp sends no
+server-to-client request, so no SSE). Loopback peer with no `Origin`; the
+bearer token is resolved per request through
+`AgentMCPTokenHost.ResolveMCPToken` to the hello the stdio launcher would
+send; 401 for a missing, unknown or void token, 405 for GET/DELETE, 403 for a
+refused hello. Voiding a token cancels its calls in flight and ends its
+session; a first message that is not `initialize` gets a replayed one.
+Claude Code 2.1.326 opens with `server/discover` (answered -32601), then
+`initialize`, `notifications/initialized` and a GET (405); all handled.
+
+**Tokens** (`internal/wsagent/mcp_session.go`): 32 random bytes (hex) per
+process start; a new start voids the previous one; process end, close and a
+failed start void it (`revokeToken`). The first resolution waits (up to 10 s)
+for the start report, so the hello carries the harness's real environment and
+PID: `WS_MCP_HARNESS_PID` is the holder's child PID, which is what ws-mcp's
+hosted-session check compares with the registration row's `host_pid`
+(confirmed live). URL and token reach the harness only through
+`WS_MCP_SESSION_URL` / `WS_MCP_SESSION_TOKEN` (the Claude entry's header is
+`Bearer ${WS_MCP_SESSION_TOKEN}`); the daemon unsets both from its own
+environment at start (`DropHarnessSessionEnv`). Worker tokens live in memory
+only. A held lead's token and URL are kept in its `agent.json` (0600,
+`mcp_token_secret`, `mcp_url`), restored on rejoin, and cleared at process
+end and failed recovery. A runner with no endpoint keeps the stdio launcher;
+the CLI tier is untouched.
+
+**Decision 12 mechanism: option (1), a hosted bundle variant.** Probe runs
+p4b..p7 on Claude Code 2.1.326 (artifacts were under `/tmp`, not kept):
+- `--strict-mcp-config` (option 3) drops every plugin, user and claude.ai MCP
+  server, not only the bundle's ws entry (p4b, p4d): rejected.
+- A variant without `mcpServers` plus `--mcp-config` (option 2) names the
+  server `ws`, not `plugin:ws:ws`; the claude-mod connects through
+  `$.mcp.connect($.plugin.name)` (`agents-plugin/hooks/claude-mod/register.ts`
+  907), and its reconnect derives the server name from the bundle manifest's
+  `mcpServers` key and gives up when there is none (1283): rejected.
+- Option (1): the variant's `mcpServers.ws` is `{"type": "http", "url":
+  "${WS_MCP_SESSION_URL}", "headers": {"Authorization": "Bearer
+  ${WS_MCP_SESSION_TOKEN}"}}`. A variant made of symlinks fails: Claude
+  refuses agent and hook paths that resolve outside the plugin directory
+  (p6, `path-traversal` plugin errors for `claude-agents/*.md` and
+  `claude-mod/register.ts`). A variant made of copies works (p7): only
+  `plugin:ws:ws` connected, over HTTP, and the mod's `config_get` call went
+  over HTTP.
+- Implementation (`claude_hosted_variant.go`):
+  `<daemon dir>/hosted-bundles/<name>-<16 hex of a content stamp>`; manifests,
+  hooks, agents and skills are copied (a symlink inside them is copied as its
+  target), `bin` is a symlink (the launcher; no plugin path points into it),
+  dot entries, `tests` and `native-pi` are left out. It is built once per
+  bundle content through a stage directory and a rename, reused, and never
+  removed, since a running lead may still read an older one.
+- Plan deviation: Decision 12 says the HTTP MCP is injected through
+  `--mcp-config`; the lead's ws server instead comes from the variant's
+  manifest, and the lead keeps its own `--mcp-config`-free setup. The Phase 2
+  plan text above was adjusted before this Result.
+
+**Dogfood surprise, fixed (4ebcf2ed2):** the Claude mapper read
+result-carrying ws tools (tracker writes, cards, UI) only as `mcp__ws__*`,
+the worker's inline server. A hosted lead's ws tools are
+`mcp__plugin_<pkg>_<pkg>__*`, so a lead's tracker writes and cards never
+reached its session (the claude-mod's in-process `mcp__ws__request_*` tools
+are not a ws-mcp server). Leads now match either hosted package's plugin
+server name.
+
+**Stale route after a port change, fixed (found live):** a daemon that
+rejoins on another port (configured port 0, the port taken, a changed
+`dashboard.port`) left a held HTTP lead calling a dead URL (ECONNREFUSED).
+Claude still reports an HTTP server `connected`, so the existing MCP recovery
+never fires; the stdio launcher survives this only because it rereads the
+endpoint file. The record now keeps `mcp_url`; a rejoin whose recorded URL is
+not this daemon's restores no token and restarts the process at its first
+idle point with a new token on the new route (`runner_process.go` 295-301,
+`restartIfDue` in `runner_recovery.go`).
+
+**Compatibility verdict** (`ai-docs/manuals/release-compatibility.md`):
+- `/mcp` stdio route, its hello and tool schemas: unchanged, T0.
+- `/mcp/session`: additive, registered only when the agent runner implements
+  the interface (`daemon.go` 781): T0. Worker tokens are memory-only: T0.
+- `agent.json` gains `mcp_token_secret` and `mcp_url` (`record.go` 144-145).
+  A 0.50.2 writer keeps unknown top-level members across read-modify-write
+  (v0.50.2 `record.go` 145-205), so an older daemon does not drop them.
+- New-daemon launch, older-daemon reattach: 0.50.2 registers `/mcp` as an
+  exact path (v0.50.2 `daemon.go` 753) and `/` as the index (790), and
+  `POST /mcp/session` without a dashboard credential gets 401
+  `login_required` (v0.50.2 `localhost_auth.go` 150). The held lead's ws
+  tools fail until its process restarts, and since Claude keeps reporting the
+  HTTP server connected, the old daemon's MCP recovery does not restart it.
+  The old daemon writes no new data and loses none; a process it later starts
+  uses the stdio bundle, and the kept `mcp_*` members then describe a dead
+  token, which the new daemon on rejoin either restores harmlessly (same URL)
+  or answers with one idle-point restart (other URL). Reopening with the new
+  version recovers fully. This is a functional degradation on the downgrade
+  path with no data loss; it is not a display-only T1, and the tier is left
+  for the lead to confirm.
+- Older-daemon launch, new-daemon reattach: the record has no token, so the
+  process keeps its stdio server (`runner_process.go` 302): T0.
+
+**File touches:** one variant directory per bundle content, written once and
+reused; the two `agent.json` members exist for held Claude leads only and are
+written and cleared inside the existing start and end record updates.
+
+**Live verification** (an isolated daemon built from this branch under
+`/tmp`, Claude Code 2.1.326; the shared daemon was not touched): a hosted
+worker with a profile allowlist listed and ran only its profile's ws tools
+over HTTP; a hosted lead had exactly one ws server, `plugin:ws:ws` (80 tools)
+over HTTP, no launcher child process, and its hosted session key honored; the
+token appeared in no argv and no file other than the 0600 `agent.json`; the
+token was restored after a same-port daemon replace; a port-changing replace
+reproduced the stale route fixed above.
+
+**Tests:** route (2552686ec, `proxy_http_test.go`):
+`TestProxyHTTPRouteRefusesAMissingUnknownOrVoidToken`,
+`...RefusesABrowserOriginAndANonLoopbackPeer`, `...RouteAnswersOnlyPost`,
+`...RoutesAnswersByIDAndForwardsNotifications`,
+`...ReissuedTokenEndsTheOldSession`, `...ReplaysInitializeForARestoredToken`,
+`...CancelsARequestWhoseClientLeft`, `...BodyLimitsAndShapes`,
+`...SessionDrainsWithTheDaemon`. Runner (`mcp_session_test.go`,
+`claude_hosted_variant_test.go`, `claude_test.go`):
+`TestMCPTokenIssueReissueAndVoid`, `TestMCPTokenVoidEndsAWaitingResolution`,
+`TestMCPHelloIsTheLaunchersHello`, `TestMCPSessionEnv`,
+`TestClaudeWorkerMCPOverHTTP`, `TestClaudeWorkerRunsOverHTTP` (allowlist,
+token never persisted, exit voids, no endpoint keeps stdio),
+`TestClaudeLeadMCPOverHTTP` (variant `--plugin-dir`, no `--mcp-config`,
+token in env and record only, restore on rejoin, void on exit),
+`TestClaudeLeadMCPRouteMovedRestarts` (fails with the stale-route branch
+disabled), `TestClaudeHTTPVariant`, `TestClaudeHTTPVariantRefusesABadManifest`,
+`TestClaudeMapperReadsResultsUnderTheAttachedServer`. End to end
+(`cmd/ws-mcp/hosted_http_mcp_test.go`):
+`TestHostedWorkerOverHTTPSeesOnlyItsProfile` (a real daemon and ws-mcp: 401
+without or with a wrong token, `server/discover` -32601, `tools/list` is
+exactly the profile's, an outside tool refused, a void token 401). Runs on
+this Mac: `go test ./internal/wsagent/` ok (102.3 s); `./cmd/ws-mcp/` ok
+(201.5 s); `./internal/mcp/` fails only
+`TestDashboardNotesUsesHostedCallerStoreIdentity`, which fails the same way
+on the tree before these commits; `./internal/wsdashboard/` fails only
+`TestSearchPaletteRenderedEntries` and `TestSearchPaletteBehavior`, also
+failing before them. The `./internal/mcp/` suite takes 884 s here, beyond
+`go test`'s default 10 min timeout; run it with `-timeout 30m`.
+
+**Left as is (route leaf notes):** the replayed `initialize` carries a
+synthetic `clientInfo` and empty capabilities, which ws-mcp does not read for
+Claude; a Pi client's experimental capability would be lost there once Pi
+moves to HTTP. Voiding a token cancels its in-flight calls, a `git.commit`
+included; that is the intended end of a process's session.
 
 ### Phase 3: Startup version/init-shape check, loud nearest-profile policy, fixtures and compaction command
 
