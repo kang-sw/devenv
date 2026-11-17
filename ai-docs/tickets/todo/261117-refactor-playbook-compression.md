@@ -40,6 +40,30 @@ board knob is on), `lead-run.md` 1786, `lead-workflow-manual.md` 1631,
   worker drafts or cuts. (78), (80). Rejected: an independent fresh-read audit
   proposing cuts for sentence-level approval; a compressed draft shown as a
   diff first.
+- **Diet style.** Rewrite as short bullets of the form "situation → action",
+  so the reading agent never has to interpret a paragraph to find the rule.
+  Move a judgment the lead would otherwise interpret into the executor's
+  self-describing report (what blocked it, what to tell the user, where
+  follow-ups go), and move rules every spawn site shares into the workflow
+  manual. Owner, lead-delegate session 2026-11-17 (82).
+- **Delegate report.** Every delegate ends with the root-level
+  `delegate-report` block (`status: done | blocked | ask-user`, `result`,
+  `blocker`, `ask`, `tell_user`, `resume`, `omitted`): `delegate-implementer`
+  includes it, and the lead renders it directly for a non-mutating delegate.
+  Its shape follows epic (01) so foundation Phase 2's `sublead-protocol`
+  extends it with `next:`/`on_answer:` rather than defining a second report.
+  (83)=a, (86)=ok. Rejected: rewriting only `delegate-implementer`'s Report;
+  deferring the report move to Phase 2.
+- **Tier rule.** One "Choosing a tier" section in the workflow manual, which
+  every spawn site points at; the bar is stated as task character, never as
+  model names. Calibration from the owner: small ≈ a mid model, medium ≈ a top
+  model at medium effort, large covers most hard work, xlarge is research
+  grade. (84)=ok.
+- **Trivial-ticket hatch.** A ticket whose change is trivial (no open
+  decision, no new structure, files named, one commit) may be proposed for
+  delegation instead of lead-run; the user's yes runs it, and the lead closes
+  the ticket citing the commit. Landed in `lead-delegate`; `lead-run`'s entry
+  gets the matching pointer in its diet. (85)
 - **Placement.** One epic child ticket tracks the pass. (79). Rejected:
   folding it into `261117-feat-role-scoped-workflow-context` - compression
   preserves meaning, modularization changes structure, and this pass touches
@@ -56,6 +80,46 @@ board knob is on), `lead-run.md` 1786, `lead-workflow-manual.md` 1631,
 - Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/)
 - Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/)
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/)
+
+## Session Procedure
+
+How each playbook's diet runs, so a later session resumes it as is:
+
+1. Open a whiteboard topic `diet-<playbook>`; post the playbook's section map
+   (words per section, one line of content each, no verdicts).
+2. Ask the owner for their reading of the skill's core (one policy item).
+3. Answer with what must stay, each with its provenance (`git log --follow`
+   on the playbook: which commit or incident created the rule), what to cut
+   or move, and a full English draft in a panel.
+4. Iterate on the owner's notes; a change of behavior (not just wording)
+   becomes its own item, and a new cross-skill interface is an Approval
+   Protocol ask.
+5. On the owner's ok, author the final text, then regenerate in this order:
+   `WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run
+   TestGenerateRealManifest`; `WS_REGEN_WSFLOW_RSRC=1 ... -run
+   TestRegenerateWsflowRsrcMirror`; `WS_REGEN_COMPOSED_SKILLS=1 ... -run
+   TestRegenerateComposedSkills`; `WS_REGEN_WSFLOW_SKILLS=1 ... -run
+   TestRegenerateWsflowSkillsMirror`; `WSRSRC_REGEN_SKILLS=1 ... -run
+   TestGenerateRealSkillsManifest`; copy changed `agents-plugin/rsrc` files
+   and `manifest.json` into `agents-plugin-pi/rsrc` (hand-synced,
+   `TestPiMirrorUpToDate`); `python3
+   agents-plugin-pi/scripts/prepare-workflow-bundles.py` and
+   `prepare-native-payload.py --first-party-only`.
+6. Run `go test ./internal/wsrsrc`, the targeted `internal/mcp` playbook and
+   render tests, and the wsflow package unittests; fix a test that pinned
+   removed wording to the behavior it guards. On the owner's office Windows
+   PC, Go tests and ws executables run on the remote w5090 host, never
+   locally (antivirus; develop handoff note 2026-11-17).
+7. One commit per playbook with `## Ticket Updates` naming this ticket and
+   the word counts; push; close the board topic.
+
+## Progress
+
+- `lead-delegate`: done (0aca7a448), 852 → 410 words; added
+  `delegate-report.md` (151) and the manual's tier rule.
+- Next: `lead-workflow-manual` (also unify the Explore section's model names
+  onto the tier rule), then `whiteboard`, `lead-run` (add the trivial-ticket
+  pointer), `ticket-handler`, `lead-review`, `lead-ship`.
 
 ## Phases
 

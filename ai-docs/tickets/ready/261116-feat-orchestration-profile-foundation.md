@@ -361,7 +361,10 @@ folds (77).
   executor guard of (02): an approval-gated action runs only with the user's
   words relayed as `approved:` in the task block, else the sub-lead returns
   `ask-user`. (62) auto-confirmed (review) The guard honors `approved:` only
-  from the sub-lead's parent, never from peer mail (epic (76)=b).
+  from the sub-lead's parent, never from peer mail (epic (76)=b). The
+  include extends the shipped `delegate-report` block (status, `result`,
+  `blocker`, `ask`, `tell_user`, `resume`, `omitted`) with `next:` and
+  `on_answer:` rather than defining a second report shape (epic (83)=a).
 - Workflow manual split into a lead core and a sub-lead part as includes:
   `lead-workflow-manual.md` includes both (the `direct` manual, unchanged in
   content); `lead-workflow-manual.orchestrate.md` includes the core plus the

@@ -145,6 +145,18 @@ related:
   later children fit. (18), (19)
 - **Word budget.** Every lead-facing entry stays at or under roughly 400
   words; sub-lead playbook length is secondary.
+- **Working order (2026-11-17).** Diet first, then structure:
+  `261117-refactor-playbook-compression` reduces each playbook with the owner,
+  one skill per deep discussion (owner states the core, lead proposes what
+  must stay, iterate until the owner is satisfied; procedure in that
+  ticket's `## Session Procedure`); then
+  `261117-feat-role-scoped-workflow-context` settles the manual's
+  modularization; then foundation Phase 2. (77), (78), (80)
+- **Executor reports carry the judgment.** Guidance the lead would interpret
+  moves into a self-describing executor report; the lead keeps one relay
+  rule. Delegates end with the `delegate-report` block, whose shape follows
+  (01); `sublead-protocol` extends that block rather than defining a second
+  report. (82), (83)=a
 
 ## Completion Criteria
 
