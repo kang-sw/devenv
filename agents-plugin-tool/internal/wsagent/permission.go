@@ -174,9 +174,10 @@ func legacyWorkerPermission(def Profile) PermissionLevel {
 }
 
 func (c *conv) permissionNudge(level PermissionLevel, worker bool, active string) {
-	quality := permissionQuality(c.rec.Backend, level, active)
+	rec := c.record()
+	quality := permissionQuality(rec.Backend, level, active)
 	limit := "filesystem, network and other tool effects are not proven confined"
-	if active == "" && c.rec.Backend == BackendClaude {
+	if active == "" && rec.Backend == BackendClaude {
 		limit = "native mode observation is pending; confinement is unproved"
 	}
 	if worker {
@@ -186,7 +187,7 @@ func (c *conv) permissionNudge(level PermissionLevel, worker bool, active string
 	if label == "" {
 		label = "unresolved"
 	}
-	fmt.Fprintf(c.r.opts.Log, "agent %s: Permission %s is %s on %s: %s.\n", c.rec.ReplyID, label, quality, c.rec.Backend, limit)
+	fmt.Fprintf(c.r.opts.Log, "agent %s: Permission %s is %s on %s: %s.\n", rec.ReplyID, label, quality, rec.Backend, limit)
 }
 
 // SetPermissionLevel is the authorized agent-lowering seam. It cannot elevate a
@@ -196,13 +197,14 @@ func (r *Runner) SetPermissionLevel(id string, level PermissionLevel) (State, er
 }
 
 func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
-	if !c.rec.Lead {
+	rec := c.record()
+	if !rec.Lead {
 		return badRequest("common worker permission selection is deferred")
 	}
-	if !c.r.supportsLeadPermission(c.rec.Backend, level) {
-		return badRequest("permission_level %q is not supported on %s", level, c.rec.Backend)
+	if !c.r.supportsLeadPermission(rec.Backend, level) {
+		return badRequest("permission_level %q is not supported on %s", level, rec.Backend)
 	}
-	current, _, err := c.r.leadPermission(c.rec, c.dir)
+	current, _, err := c.r.leadPermission(rec, c.dir)
 	if err != nil {
 		return err
 	}
@@ -212,7 +214,7 @@ func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 	if err := writePermissionSelection(c.dir, level); err != nil {
 		return err
 	}
-	if mode := nativePermissionMode(c.rec.Backend, level); mode != "" {
+	if mode := nativePermissionMode(rec.Backend, level); mode != "" {
 		c.update(func(rec *Record) { rec.PermissionMode = mode })
 		c.dirtyMode, c.reconcileMode = true, false
 	}
@@ -224,16 +226,17 @@ func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 }
 
 func (c *conv) setNativePermissionMode(mode string, user bool) error {
-	if !c.rec.Lead || len(c.r.opts.Backends[c.rec.Backend].PermissionModes) == 0 {
+	rec := c.record()
+	if !rec.Lead || len(c.r.opts.Backends[rec.Backend].PermissionModes) == 0 {
 		return categorized(ErrUnsupported, badRequest("the permission mode applies to a claude lead session only"))
 	}
 	// Extension/native-only registrations retain their historical mode contract.
-	if c.r.supportsLeadPermission(c.rec.Backend, PermissionReadOnly) {
-		current, source, err := c.r.leadPermission(c.rec, c.dir)
+	if c.r.supportsLeadPermission(rec.Backend, PermissionReadOnly) {
+		current, source, err := c.r.leadPermission(rec, c.dir)
 		if err != nil {
 			return err
 		}
-		next := legacyLeadPermission(Record{Lead: true, Backend: c.rec.Backend, PermissionMode: mode})
+		next := legacyLeadPermission(Record{Lead: true, Backend: rec.Backend, PermissionMode: mode})
 		if next == "" {
 			return badRequest("native permission mode has no common intent mapping")
 		}
@@ -251,7 +254,7 @@ func (c *conv) setNativePermissionMode(mode string, user bool) error {
 			}
 		}
 	}
-	if mode != c.rec.PermissionMode {
+	if mode != rec.PermissionMode {
 		c.update(func(rec *Record) { rec.PermissionMode = mode })
 		c.dirtyMode, c.reconcileMode = true, false
 		if !c.turn {
@@ -265,10 +268,13 @@ func (c *conv) setNativePermissionMode(mode string, user bool) error {
 // the durable selection/native target instead of trusting a lost dirty flag.
 // Replay observations remain evidence, never an acknowledgement of that target.
 func (c *conv) reconcileLeadPermission() {
-	if !c.rec.Lead || c.rec.Backend != BackendClaude || c.dirtyMode {
+	// The loop owns permission state, but Send updates the shared record
+	// concurrently. Copy it under mu before passing it by value.
+	rec := c.record()
+	if !rec.Lead || rec.Backend != BackendClaude || c.dirtyMode {
 		return
 	}
-	level, source, err := c.r.leadPermission(c.rec, c.dir)
+	level, source, err := c.r.leadPermission(rec, c.dir)
 	if err != nil {
 		// State projects the current selection error without retaining history
 		// in the terminal error slot or letting it suppress a process exit.
@@ -277,14 +283,14 @@ func (c *conv) reconcileLeadPermission() {
 	if source != "explicit" {
 		return
 	}
-	target := c.rec.PermissionMode
-	if legacyLeadPermission(c.rec) != level {
-		target = nativePermissionMode(c.rec.Backend, level)
+	target := rec.PermissionMode
+	if legacyLeadPermission(rec) != level {
+		target = nativePermissionMode(rec.Backend, level)
 	}
 	if target == c.activeMode {
 		return
 	}
-	if target != c.rec.PermissionMode {
+	if target != rec.PermissionMode {
 		c.update(func(rec *Record) { rec.PermissionMode = target })
 	}
 	c.dirtyMode, c.reconcileMode = true, true
