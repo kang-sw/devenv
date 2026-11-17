@@ -149,6 +149,12 @@ State filter frame identity sentinel.</wb:body><wb:panel recap="Panel history">P
 				}
 			}
 		}
+		// Two checks on one topic count once; assumed and answered checks do not.
+		// An open technical item is an acknowledgement.
+		asks := `<wb:topic name="discussing0"><wb:add class="check"><wb:title>Open check</wb:title></wb:add><wb:add class="check"><wb:title>Another check</wb:title></wb:add></wb:topic><wb:topic name="discussing1"><wb:add class="policy"><wb:title>Open policy</wb:title><wb:option>A</wb:option><wb:option>B</wb:option></wb:add></wb:topic><wb:topic name="waiting0"><wb:add class="check"><wb:title>Needs ack</wb:title></wb:add></wb:topic><wb:topic name="implementing0"><wb:add class="check"><wb:title>Answered check</wb:title></wb:add></wb:topic><wb:answer id="4" value="ok" assumed="true">Assumed</wb:answer><wb:answer id="5" value="ok">Answered</wb:answer><wb:topic name="waiting1"><wb:add class="technical"><wb:title>Open acknowledgement</wb:title></wb:add></wb:topic>`
+		if err := apply(st, asks); err != nil {
+			t.Fatal(err)
+		}
 		// 73ef56d52 intentionally defaults newly created topics to discussing;
 		// its AI Context excludes legacy fallback. Seed pre-default data directly
 		// so this fixture still verifies a genuinely metadata-free legacy topic.
@@ -230,6 +236,8 @@ State filter frame identity sentinel.</wb:body><wb:panel recap="Panel history">P
 				return
 			}
 			states[id] = st
+		case "answer-asks":
+			text = `<wb:answer id="1" value="ok">Confirmed</wb:answer><wb:answer id="2" value="ok">Confirmed</wb:answer><wb:answer id="3" value="a">Selected</wb:answer>`
 		case "transition":
 			text = `<wb:topic name="waiting0"><wb:state value="discussing"/></wb:topic><wb:topic name="waiting1"><wb:state value="discussing"/></wb:topic>`
 		case "close":

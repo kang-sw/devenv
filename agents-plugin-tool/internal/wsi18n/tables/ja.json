@@ -456,6 +456,7 @@
   "js.wb.state.extended": "延長 {0}回 · 当初 {1}分",
   "js.wb.state.eta.max": "/{0}m",
   "js.wb.state.estimate.short": "~{0}m",
+  "js.board.filter.asks": "未回答のあるトピック",
   "js.board.filter.label": "トピック状態フィルター",
   "js.board.filter.all": "すべて",
   "js.board.filter.confirm": "確認待ち",

@@ -218,10 +218,10 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		wantAll(t, out,
-			`<section class="topic" id="`+topicAnchor("ship-gate")+`" data-topic="ship-gate" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
+			`<section class="topic" id="`+topicAnchor("ship-gate")+`" data-topic="ship-gate" data-open-asks="true" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
 			`</span><span class="tlead"><span class="tname" title="출시 게이트">출시 게이트</span>`,
 			`<textarea class="note tnote" data-topic="ship-gate"`,
-			`<section class="topic" id="`+topicAnchor("Plain title")+`" data-topic="Plain title" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
+			`<section class="topic" id="`+topicAnchor("Plain title")+`" data-topic="Plain title" data-open-asks="true" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
 			`</span><span class="tlead"><span class="tname" title="Plain title">Plain title</span>`)
 	}
 	// The note line takes the topic from data-topic, not the visible name.

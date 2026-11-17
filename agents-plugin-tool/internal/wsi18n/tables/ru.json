@@ -456,6 +456,7 @@
   "js.wb.state.extended": "Продлено {0} раз · изначально {1} мин",
   "js.wb.state.eta.max": "/{0}m",
   "js.wb.state.estimate.short": "~{0}m",
+  "js.board.filter.asks": "Темы с открытыми запросами",
   "js.board.filter.label": "Фильтр по состоянию темы",
   "js.board.filter.all": "Все",
   "js.board.filter.confirm": "Ожидают подтверждения",

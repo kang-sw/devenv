@@ -456,6 +456,7 @@
   "js.wb.state.extended": "{0}-mal verlängert · anfangs {1} Min.",
   "js.wb.state.eta.max": "/{0}m",
   "js.wb.state.estimate.short": "~{0}m",
+  "js.board.filter.asks": "Themen mit offenen Fragen",
   "js.board.filter.label": "Themenstatus filtern",
   "js.board.filter.all": "Alle",
   "js.board.filter.confirm": "Bestätigung ausstehend",

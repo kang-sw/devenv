@@ -456,6 +456,7 @@
   "js.wb.state.extended": "延長 {0} 次 · 最初 {1} 分鐘",
   "js.wb.state.eta.max": "/{0}m",
   "js.wb.state.estimate.short": "~{0}m",
+  "js.board.filter.asks": "有待處理事項的主題",
   "js.board.filter.label": "話題狀態篩選",
   "js.board.filter.all": "全部",
   "js.board.filter.confirm": "待確認",

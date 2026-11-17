@@ -456,6 +456,7 @@
   "js.wb.state.extended": "Prorogato {0} volte · inizialmente {1} min",
   "js.wb.state.eta.max": "/{0}m",
   "js.wb.state.estimate.short": "~{0}m",
+  "js.board.filter.asks": "Argomenti con richieste aperte",
   "js.board.filter.label": "Filtra per stato dell'argomento",
   "js.board.filter.all": "Tutti",
   "js.board.filter.confirm": "In attesa di conferma",

@@ -73,7 +73,7 @@
   var pins = null, col = null, colOn = false, boardw = 0, convow = 0, zone = null;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
-  var filterValues = ["all", "researching", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed", "cards"];
+  var filterValues = ["all", "asks", "researching", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed", "cards"];
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -191,14 +191,15 @@
     queue();
   }
   function filterMark(value) {
-    var n = mk("span", value === "cards" ? "board-state-icon" : "board-state-dot");
+    var n = mk("span", value === "asks" ? "board-state-glyph" : value === "cards" ? "board-state-icon" : "board-state-dot");
+    if (value === "asks") n.textContent = "?";
     if (value === "cards") n.innerHTML = '<svg class="li" aria-hidden="true"><use href="#i-hammer"/></svg>';
     return n;
   }
   function buildStateFilter() {
     var root = mk("div", "board-state-filter"), inline = mk("div", "board-state-inline");
     var trigger = mk("button", "board-action board-state-trigger"), pop = mk("div", "tpop board-state-pop");
-    var labels = [wsT("js.board.filter.all"), wsT("js.board.filter.researching"), wsT("js.board.filter.discuss"), wsT("js.board.filter.wait"), wsT("js.board.filter.implement"), wsT("js.board.filter.confirm"), wsT("js.board.filter.closed"), wsT("js.board.filter.cards")];
+    var labels = [wsT("js.board.filter.all"), wsT("js.board.filter.asks"), wsT("js.board.filter.researching"), wsT("js.board.filter.discuss"), wsT("js.board.filter.wait"), wsT("js.board.filter.implement"), wsT("js.board.filter.confirm"), wsT("js.board.filter.closed"), wsT("js.board.filter.cards")];
     var label = wsT("js.board.filter.label");
     stateFilter = opt.load(opt.key + ".state-filter");
     if (filterValues.indexOf(stateFilter) < 0) stateFilter = "all";
@@ -309,13 +310,14 @@
     filterValues.forEach(function (v) { totals[v] = 0; });
     [board, pins].forEach(function (box) {
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (n) {
-        var closed = n.classList.contains("closed"), state = n.getAttribute("data-state"), name = n.getAttribute("data-topic");
-        filtered(n, stateFilter === "cards" || stateFilter !== "all" && (closed ? stateFilter !== "closed" : stateFilter === "closed" || stateFilter !== state));
+        var closed = n.classList.contains("closed"), state = n.getAttribute("data-state"), name = n.getAttribute("data-topic"), asks = n.getAttribute("data-open-asks") === "true";
+        filtered(n, stateFilter === "asks" ? !asks : stateFilter === "cards" || stateFilter !== "all" && (closed ? stateFilter !== "closed" : stateFilter === "closed" || stateFilter !== state));
         if (seen.has(name)) return;
         seen.add(name);
         totals.all++;
+        if (asks) totals.asks++;
         if (closed) totals.closed++;
-        else if (filterValues.indexOf(state) > 0 && state !== "closed" && state !== "cards") totals[state]++;
+        else if (filterValues.indexOf(state) > 0 && state !== "closed" && state !== "cards" && state !== "asks") totals[state]++;
       });
     });
     // Registry entries are framework roots, never panels or logs within a topic.
