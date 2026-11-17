@@ -274,7 +274,9 @@ func TestAgySteerFixture(t *testing.T) {
 	}
 }
 
-// Model, thinking level and mode change in-session, with no restart.
+// Thinking level and mode change in-session, with no restart. The model
+// half is not evidenced: the recorded model calls re-set the current
+// model, and session/set_model answered {} with configOptions unchanged.
 func TestAgyConfigFixture(t *testing.T) {
 	msgs := readCodexFixture(t, "agy-1.5.9-lead-session.jsonl")
 	set := firstIn(t, msgs, "session/set_config_option")
@@ -305,8 +307,8 @@ func TestAgyConfigFixture(t *testing.T) {
 
 // resume of a missing id fails; resume of a real one (MCP servers re-passed)
 // continues the conversation without replay; /compact is a plain prompt
-// whose turn carries no compaction event; an HTTP MCP server refusing the
-// token does not fail session/new: its tools are just absent.
+// whose turn carries no compaction event; an HTTP MCP server given a wrong
+// bearer does not fail session/new: its tools are just absent.
 func TestAgyResumeFixture(t *testing.T) {
 	msgs := readCodexFixture(t, "agy-1.5.9-resume.jsonl")
 	if r := responseTo(t, msgs, "2"); r.Error == nil || !strings.Contains(r.Error.Message, "Failed to read session") {
@@ -423,10 +425,20 @@ func TestAgyStaleApprovalFixture(t *testing.T) {
 	if next < late || acpStopReason(msgs[acpResponseAt(t, msgs, next)]) != "end_turn" {
 		t.Fatal("the prompt after the late answer did not run")
 	}
-	for _, m := range msgs[late+1 : next] {
-		if !m.in {
-			t.Fatalf("the late answer drew %s", m.Result)
+	// The late answer draws nothing: no agent line names its id, and no
+	// error arrives, through the end of the recording.
+	for _, m := range msgs[late+1:] {
+		if !m.in && (m.Error != nil || (m.Method == "" && string(m.ID) == string(msgs[late].ID))) {
+			t.Fatalf("the late answer drew %s %+v", m.Result, m.Error)
 		}
+	}
+	// Agent request ids are JSON strings, client ids numbers (or strings:
+	// the probe's initialize used "attach1-1" and was answered under it).
+	if msgs[req].ID[0] != '"' {
+		t.Fatalf("agent request id %s is not a string", msgs[req].ID)
+	}
+	if r := responseTo(t, msgs, `"attach1-1"`); r.Error != nil || jsonAt(r.Result, "protocolVersion") == nil {
+		t.Fatalf("string-id initialize: %+v", r.Error)
 	}
 }
 
@@ -484,6 +496,10 @@ func TestAgySubagentFixture(t *testing.T) {
 	bp, rp := acpPrompts(base), acpPrompts(removed)
 	if !jsonEqual(jsonAt(base[bp[1]].Params, "prompt"), jsonAt(removed[rp[1]].Params, "prompt")) {
 		t.Fatal("baseline and removed spawn prompts differ")
+	}
+	// The subagent's result reaches the parent inside the same prompt.
+	if got := acpText(base, bp[1], acpResponseAt(t, base, bp[1])); !strings.HasSuffix(got, "KIWI") {
+		t.Fatalf("baseline spawn reply: %q", got)
 	}
 	if got := acpText(removed, rp[1], acpResponseAt(t, removed, rp[1])); got != "NO-SUBAGENT-TOOL" {
 		t.Fatalf("removed reply: %q", got)

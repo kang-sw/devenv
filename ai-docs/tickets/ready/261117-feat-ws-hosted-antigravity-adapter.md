@@ -165,7 +165,9 @@ updated.
   `.../docs/subagents?tab=cli`, `.../docs/permissions?tab=cli`.
 - Recorded fixtures: `agents-plugin-tool/internal/wsagent/testdata/agy-1.5.9-*.jsonl`
   (eleven files), cut with the codex `>> ` client-line convention.
-  `agy_fixture_test.go` pins the protocol facts cited below.
+  `agy_fixture_test.go` pins most protocol facts cited below; the
+  compaction usage drop and the permission-option shape outside
+  `lead-session` are visible in the fixtures but not asserted.
 - Probe-side observations that are not in the fixtures carry the label
   *(probe log)*: the probe MCP server's request log, greps of the scratch
   home, and runs not committed as fixtures.
@@ -213,9 +215,10 @@ gap.**
     nothing persists it. After four probe tokens, a grep of the scratch
     home found 0 hits for the tokens and the MCP URLs *(probe log)*. MCP
     servers are therefore re-passed on every resume.
-  - **Gap: auth failure is silent.** A server refusing the token does not
-    fail `session/new`; its tools are just absent and the model answers
-    `NO-WS-TOOL` (`resume`). There is no `required` flag in ACP.
+  - **Gap: auth failure is silent.** A session/new with a wrong bearer
+    succeeds; its tools are just absent and the model answers `NO-WS-TOOL`
+    (`resume`). That the server answered 401 is *(probe log)*. There is no
+    `required` flag in ACP.
   - The MCP client first POSTs `server/discover` (protocol `2026-07-28`),
     then `initialize`, and GETs `/.well-known/oauth-protected-resource[/mcp]`
     even after a successful handshake. The probe answered method-not-found
@@ -230,7 +233,7 @@ gap.**
   `Resolve` pins any other version to 1.5.9, marked unverified.
 - Version source: `initialize` `agentInfo.version` (`"1.5.9"`, a bare
   dotted version that `parseHarnessVersion` reads; `agy --version` prints
-  the same).
+  the same *(probe log)*).
 - Roles: every entry is `Role: RoleLead`. Worker stays undeclared and
   resolves `unsupported` under the role recommendation below (C2).
 - Grades follow catalog Decision 10 (what the ws adapter will deliver once
@@ -239,12 +242,12 @@ gap.**
 | Item | Grade (lead) | Values | Evidence (1.5.9) | Fixture |
 |---|---|---|---|---|
 | `skill_list` | unsupported | - | `available_commands_update` lists agy's commands and skills (`goal`, `compact`, `learn`, ...). No ws wiring. | `lead-session` (no ws reader) |
-| `skill_injection` | native | - | agy's own skills, invoked by a `/name` prompt and listed in `available_commands_update`. ws's skills are **not** present: `agy plugin list --json` is `[]` on this machine, so ws workflow skills reach an agy lead only after a delivery choice (decision 4 below). | planned: Phase 2 lead with the chosen delivery |
+| `skill_injection` | native | - | agy's own skills, invoked by a `/name` prompt and listed in `available_commands_update`. ws's skills are **not** present: `agy plugin list --json` is `[]` on this machine *(probe log)*, so ws workflow skills reach an agy lead only after a delivery choice (decision 4 below). | planned: Phase 2 lead with the chosen delivery |
 | `compaction` | native | - | The dashboard's `/compact` maps to a `session/prompt` with text `/compact` (listed as a command). The turn ends `end_turn` and carries only a `usage_update`: there is no compaction event, and the next turn's `used` drops (18682 -> 10508). | `resume` |
 | `rewind` | unsupported | - | No ACP method. | none |
 | `tool_removal` | unsupported | - | The lead keeps the user's tool setup, as `ClaudeCatalog` does. For a later worker row, a custom main agent's `tools` allowlist removes built-in tools (`subagent-removed`). | recorded (worker mechanism) |
 | `subagent_removal` | unsupported (recommended; see verdict) | `invoke_subagent`, `define_subagent`, `manage_subagents`; `swarm`, `run_workflow` also fan out subagents | Removal exists only through a custom main agent, with costs that argue against it for the lead (verdict below). | `subagent-baseline` vs `subagent-removed` |
-| `model_effort` | native | choices from `configOptions` (`model`, `thought_level`) via ChoiceLister | `session/set_config_option {configId, value}` answers with the updated `configOptions` and applies in-session with no restart. Two model vocabularies exist: `configOptions` model values (`gemini-3.8-flash`) and `models.availableModels` ids (`gemini-3.8-flash-high`, via the unstable `session/set_model`); use `configOptions`. | `lead-session` |
+| `model_effort` | native | choices from `configOptions` (`model`, `thought_level`) via ChoiceLister | Effort is recorded: `session/set_config_option {configId: "thought_level", value: "low"}` answers with the updated `configOptions` in-session, with no restart. A model change is **not** evidenced. The recorded `model` call re-set the current `gemini-3.8-flash`, and the unstable `session/set_model gemini-3.8-flash-low` answered `{}` with `configOptions` unchanged. Two model vocabularies exist: `configOptions` values (`gemini-3.8-flash`) and `models.availableModels` ids (`gemini-3.8-flash-high`). Phase 2 must probe which one switches the model. | `lead-session` (effort); planned: model switch |
 | `approval` | native | modes stay in `BackendRegistration.PermissionModes`: `default`, `accept-edits`, `auto`, `plan` (`session/set_mode` -> `current_mode_update`) | `session/request_permission {toolCall, options}` offers exactly `allow` (`allow_once`) and `deny` (`reject_once`) for MCP tools and commands. The answer is `{outcome: {outcome: "selected", optionId}}`. A denied call ends `failed`. Binary, so it fits `AnswerApproval(allow bool)`. | `lead-session`, `http-mcp`, `stale-approval` |
 | `steer` | native | - | A `session/prompt` sent while a turn runs steers it. The earlier prompt answers `end_turn` immediately, and the rest of the run belongs to the later prompt: the tool's completion and the reply that uses the steer. | `lead-session` |
 | `interrupt` | native | - | `session/cancel` (notification) -> open tool calls `failed` -> prompt answers `stopReason: "cancelled"`. No item outlives the turn (unlike Codex). | `lead-session`, `stale-approval` |
@@ -258,6 +261,9 @@ gap.**
   at 1 (`custom-agent-mcp`: permission request ids 1 and 2 beside client
   ids 1-3). A line with a method is a request, and one without is a
   response; match responses by direction.
+  - Agent request ids are JSON **strings** (`"1"`), while the probe's client
+    ids were numbers. Echo the raw id; never decode it as an integer
+    (pinned in `TestAgyStaleApprovalFixture`).
 - Turn end: a `session/prompt` response ends the turn only when no later
   prompt is outstanding (steer). Stop reasons seen are `end_turn` and
   `cancelled`.
@@ -267,8 +273,10 @@ gap.**
     which then streams with no prompt outstanding (changelog 1.5.10, not in
     1.5.9's notes; unrecorded).
 - Updates (`session/update.update.sessionUpdate`):
-  - `agent_message_chunk`, `agent_thought_chunk`, `user_message_chunk`
-    (echoed in some live turns and in replay).
+  - `agent_message_chunk`, `agent_thought_chunk`, `user_message_chunk`.
+    The last appears in every replay. Live, it was seen once, in a fresh
+    session's first turn *(probe log)*, and in no recorded live turn, so a
+    mapper must not rely on a live echo.
   - `tool_call` / `tool_call_update`: `toolCallId`, `status` `in_progress` ->
     `pending` (awaiting approval) -> `in_progress` -> `completed` | `failed`,
     with `kind`, `title`, plus non-standard `name` and `args` carrying the
@@ -305,7 +313,8 @@ gap.**
 - Instructions / workflow access: `session/new`
   `_meta.antigravity.systemPrompt.append` is additive and persists across
   resume. Project rules and agy skills load natively.
-- Config / account home: default `--gemini-dir` (`~/.gemini`) holds
+- Config / account home *(probe log: directory listing of the default and
+  scratch homes)*: default `--gemini-dir` (`~/.gemini`) holds
   `antigravity-cli/settings.json` (permission rules, mode), `conversations/<id>.db`,
   `brain/<id>/` transcripts, `log/` and the MCP schema cache. Auth comes from
   the system keychain.
@@ -431,7 +440,7 @@ custom agent.
 - Reattach with a permission request pending.
 - Ring gap rebuilt through `session/load`.
 - Resume across agy versions (needs a second installed version).
-- Model switch across model families.
+- Model switch (which vocabulary switches it, and across families).
 - The elicitation path for `ask_question`.
 - A worker profile (custom agent plus isolated `--gemini-dir`), if the
   worker role comes into scope.
