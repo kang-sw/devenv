@@ -135,8 +135,11 @@ under `<cache root>/dashboard/`:
   its heartbeat is under 5 minutes old and it has not ended. The daemon's
   index only reads this registry; ws-mcp prunes entries unseen for 7 days,
   except an agent conversation (an `agent` registration, or a directory
-  holding `agent.json`), whose lifetime is the runner's: it heartbeats only
-  while the daemon runs, so a daemon down for a week must not lose it.
+  holding `agent.json`), whose lifetime is the runner's while it may serve
+  it: it heartbeats only while the daemon runs. A closed or handed-off lead
+  and a closed spawned Pi child age from their last registry row write;
+  pruning removes the session directory and its files. A handed-off Pi lead
+  whose session file lives inside that directory is kept for its terminal.
 - `sessions/<reply-id>/snapshot.json` and `sessions/<reply-id>/ring/` - the
   session's live snapshot (current lead and subagent activity, rewritten
   debounced and on a 30-second heartbeat, stale after 3 missed heartbeats by
@@ -460,10 +463,12 @@ in a repository (shown disabled while its key record names no harness
 conversation), nothing for a plain-folder session. Whether a terminal
 harness has exited is asked when the entry is used (the **Moves** bullet
 of the hosted lead sessions below). `PruneRegistrations` spares an agent runner's directory
-while the runner may serve it; a lead whose record is closed or handed off
-ages by its row like any ended session, and every other agent record (the
-tracker's support agent) keeps the runner's lifetime. One retired lead is
-never pruned: a handed-off pi session whose session file is inside its
+while the runner may serve it; a lead whose record is closed or handed off,
+or a closed spawned Pi child, ages by its last registry row write like any
+ended session. After 7 days unseen, pruning removes its session directory,
+including the Pi child's session file needed to reopen it. Open children and
+other agent records (the tracker's support agent) keep the runner's lifetime.
+One retired lead is never pruned: a handed-off pi session whose session file is inside its
 session directory (the daemon started it), since the terminal's pi runs on
 that file from the hand-off on.
 
@@ -1183,9 +1188,12 @@ SameSite=Strict cookie, derived from `localhost-secret` and kept for up to 400
 days. Cookieless navigations show the self-contained login gate; fetches and
 WebSocket handshakes answer `401 {"error":"login_required"}`. Explicit gate
 copying asks the daemon to place a fresh single-use ten-minute link in the OS
-clipboard, then the user pastes it back. This route accepts only a loopback peer
-and Host with its own Origin and same-origin fetch metadata when present; it is
-rate-limited and returns no credential. Unavailable native writers hide the
+clipboard, then the page reads it once and automatically logs in with the
+link. The browser may prompt for clipboard permission; if the read is unavailable
+or refused, or returns no login link, the copied hint stays visible for manual
+paste. This route accepts only a loopback peer and Host with its own Origin and
+same-origin fetch metadata when present; it is rate-limited and returns no
+credential. Unavailable native writers hide the
 action, while runtime write failures allow retry. Nothing reads or writes the
 clipboard on page load. Agent links, Settings and the desktop Connection menu
 provide additional explicit login-link paths. Electron sets its native cookie
