@@ -93,7 +93,7 @@ function scrollFixture(storage = {}, pathname = '/s/a', hash = '') {
   const c = vm.createContext({ shell: false, framed: true, location: {pathname, hash, search: '?frame=1'}, BOARD_RELOAD: reloadKey,
     PANES: ['convo', 'bcol', 'r-tree', 'bpins', 'drbody'], convo: nodes.convo, entriesBox: () => box,
     atBottom: () => nodes.convo.scrollTop + nodes.convo.clientHeight >= nodes.convo.scrollHeight - 24,
-    boardBoxes: () => [nodes.bcol], boardLivePanels: () => [panel], boardScroller: () => nodes.bcol,
+    boardBoxes: () => [nodes.bcol], boardLivePanels: () => [panel], boardScroller: () => nodes.bcol, boardWithSnap: fn => fn(),
     boardPanelKey: n => n.id, topicKey: n => n.key, q: () => [topic],
     paneScroll: {}, stick: true, doc, $: id => nodes[id], visible: el => !!el?.shown,
     requestAnimationFrame(cb) { frames.push(cb); }, pinConvo() { if (c.stick) nodes.convo.scrollTop = 999; },

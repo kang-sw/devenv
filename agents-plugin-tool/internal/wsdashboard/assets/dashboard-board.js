@@ -1027,11 +1027,12 @@
     q("template", n).forEach(function (t) { if (t.content) nodes = nodes.concat(boardPanelNodes(t.content)); });
     return nodes;
   }
-  // The mounted panels only: inert history pages are never exposed.
-  function boardLivePanels(n) {
+  // The mounted panels only: inert history pages are never exposed. admit,
+  // when given, rejects a panel before any visibility read of it.
+  function boardLivePanels(n, admit) {
     var w = window.wbHistory;
     return q(".entry-panel, .wb-entry:not(.panel), .doc-frame", n).filter(function (p) {
-      return (!w || !w.rendered || w.rendered(p)) && (!p.classList.contains("doc-frame") || !p.closest(".entry-panel"));
+      return (!admit || admit(p)) && (!w || !w.rendered || w.rendered(p)) && (!p.classList.contains("doc-frame") || !p.closest(".entry-panel"));
     });
   }
   function boardPanelKey(n) { return n.id || n.getAttribute("data-key") || n.getAttribute("data-entry") || n.getAttribute("data-doc-key"); }
