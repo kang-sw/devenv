@@ -127,6 +127,48 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     onDialog: fn => { onDialog = fn; },
     menus, template, session: session.defaultSession, opened, copied, choose: n => { response = n; } };
 }
+test('failed page navigation shows the connection page and retries through the pinned guard', async () => {
+  let calls = 0;
+  const f = await fixture(async () => { calls++; return 'http://127.0.0.1:39418/'; });
+  const wc = f.window.webContents;
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://127.0.0.1:39418/?login=secret', true);
+  await tick();
+  assert.match(f.window.currentURL, /connection\.html$/);
+  assert.match(f.window.fileOptions.query.reason, /-105/);
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  assert.equal(calls, 2);
+  assert.equal(f.window.currentURL, 'http://127.0.0.1:39418/');
+  let result;
+  f.session.webRequest.handler({ url: f.window.currentURL, resourceType: 'mainFrame' }, value => { result = value; });
+  assert.deepEqual(result, {});
+  f.window.emit('closed');
+});
+test('automatic recovery respects Stay and cancels its pending retry', async () => {
+  let calls = 0;
+  const f = await fixture(async () => { calls++; return 'http://127.0.0.1:39418/'; });
+  const wc = f.window.webContents;
+  // A failure during an explicit navigation activates recovery without replacing the page.
+  wc.loadURL = async url => {
+    wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', url, true);
+    wc.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must retain the veto'); } });
+    throw Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED', errno: -3 });
+  };
+  await f.menus.retry.click();
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  assert.equal(calls, 2);
+  f.window.emit('closed');
+});
+test('explicit navigation failure shows the failure code', async () => {
+  const f = await fixture();
+  const wc = f.window.webContents;
+  wc.loadURL = async url => {
+    wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', url, true);
+    throw Object.assign(new Error('failed'), { errno: -105 });
+  };
+  await f.menus.retry.click();
+  assert.match(f.window.fileOptions.query.reason, /-105/);
+  f.window.emit('closed');
+});
 test('connection page start uses the shared path, serializes requests and restricts IPC', async () => {
   let calls = 0, release;
   const f = await fixture(async options => {

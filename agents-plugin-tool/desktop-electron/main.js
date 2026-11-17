@@ -8,6 +8,7 @@ const { cacheRoot, inspect, browserCookie, browserLoginLink } = require('./endpo
 const LOGIN_COPIED = 'werkschaft:login-copied';
 const { pythonAvailable } = require('./python');
 const { nextZoom, destination } = require('./policy');
+const { createRecovery, safeURL } = require('./recovery');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 const { createUpdater } = require('./update');
 const UPDATE = Object.freeze({ check: 'werkschaft:update-check', download: 'werkschaft:update-download',
@@ -160,6 +161,40 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       trackDashboardTheme(wc, color => bar.setTheme(color));
     }
     let navigation, closing = false, retained = { pin, title };
+    const recovery = createRecovery({ retry: () => {
+      if (window.isDestroyed() || wc.isDestroyed()) return;
+      if (connecting) recovery.schedule();
+      else connect();
+    } });
+    window.on('closed', () => recovery.dispose());
+    wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      console.error(`Dashboard did-fail-load: code=${code} url=${safeURL(url)} mainFrame=${isMainFrame}`);
+      if (!isMainFrame || code === -3 || !pin || destination(url, pin) !== 'dashboard') return;
+      recovery.failure(true, code);
+      if (navigation?.loading) navigation.failureCode = code;
+      // Explicit loads already have a rejection handler. Page-initiated loads do not.
+      if (!navigation?.loading) {
+        const attempt = beginNavigation();
+        navigationFailed(attempt, `Load failed (${code}): ${description}`).finally(() => {
+          if (navigation === attempt) navigation = null;
+        });
+      }
+    });
+    wc.on('render-process-gone', (_event, details) => {
+      console.error(`Dashboard render-process-gone: reason=${details.reason} url=${safeURL(wc.getURL())}`);
+      recovery.gone(details.reason);
+    });
+    wc.on('unresponsive', () => {
+      console.error(`Dashboard unresponsive: url=${safeURL(wc.getURL())}`);
+      recovery.unresponsive();
+    });
+    wc.on('responsive', () => {
+      console.log(`Dashboard responsive: url=${safeURL(wc.getURL())}`);
+      recovery.responsive();
+    });
+    wc.on('did-finish-load', () => {
+      if (pin && destination(wc.mainFrame.url, pin) === 'dashboard') recovery.success();
+    });
     window.on('close', event => {
       closing = true;
       if (dashboardView && !wc.isDestroyed()) {
@@ -249,12 +284,12 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       title = value;
       if (!window.isDestroyed()) { window.setTitle(title); bar?.setTitle(title); }
     }
-    function navigationFailed(attempt) {
+    function navigationFailed(attempt, reason) {
       pin = null;
       const failureTitle = 'Werkschaft — Navigation failed — ⌘R to retry';
       setTitle(failureTitle);
       attempt.commitTarget = { pin: null, title: failureTitle };
-      return wc.loadFile(path.join(__dirname, 'connection.html')).catch(() => {});
+      return wc.loadFile(path.join(__dirname, 'connection.html'), reason ? { query: { reason } } : undefined).catch(() => {});
     }
     async function navigate(url, attempt = beginNavigation()) {
       if (!isCurrent(attempt)) return;
@@ -271,7 +306,11 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (attempt.stayed && (error.code === 'ERR_ABORTED' || error.errno === -3)) {
           pin = retained.pin;
           setTitle(retained.title);
-        } else await navigationFailed(attempt);
+          recovery.success();
+        } else {
+          const code = attempt.failureCode ?? error.errno;
+          await navigationFailed(attempt, Number.isInteger(code) ? `Load failed (${code})` : 'Load failed');
+        }
       } finally {
         attempt.loading = false;
         if (navigation === attempt) navigation = null;
@@ -346,6 +385,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       finally {
         connecting = false;
         if (navigation === attempt) navigation = null;
+        recovery.retryIfActive();
       }
     }
     const fromConnectionPage = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
