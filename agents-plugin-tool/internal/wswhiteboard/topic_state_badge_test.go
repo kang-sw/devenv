@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 class E {
  constructor(cls='',tag='span') { this.className=cls;this.tag=tag;this.children=[];this.parentNode=null;this.attrs={};this._text='';this.style={};
  this.classList={contains:c=>this.className.split(' ').includes(c),toggle:(c,on)=>{this.className=this.className.split(' ').filter(x=>x!==c).concat(on?[c]:[]).join(' ');}}; }
+ get firstChild(){return this.children[0]||null;}
  get textContent(){return this._text+this.children.map(n=>n.textContent).join('');}
  set textContent(v){this._text=String(v);this.children.forEach(n=>n.parentNode=null);this.children=[];}
  appendChild(n){this.children.push(n);n.parentNode=this;return n;}
@@ -121,7 +122,8 @@ for(const [state,cls] of [['awaiting-confirmation','confirm'],['waiting','wait']
  assert.equal(pill().className,'wb-state-pill '+cls+' solo');assert.equal(pill().querySelector('use').getAttribute('href'),'#i-st-'+cls);
  assert.equal(pill().getAttribute('aria-label'),wsT('js.wb.state.'+state));
 }
-assert.equal(n.querySelector('.dw'),deps,'transitions preserve dependency wrapper');
+assert.equal(n.querySelector('.tlead').querySelector('.dw'),deps,'transitions preserve dependency wrapper');
+assert.equal(n.querySelector('.tbar').children[0].className,'topic-state dw','the badge leads the bar, before the title lead');
 n.setAttribute('data-state','implementing');window.wbAgo(n);
 for(const [key,bad] of [['started-at',''],['started-at','not-a-date'],['started-at','2026-02-30T00:00:00Z'],['deadline-at',''],['deadline-at','bad'],['deadline-at',new Date(now+60000).toISOString()],['eta-minutes','NaN'],['eta-minutes','0'],['eta-minutes','1.5'],['run',''],['owner','']]) {
  const k='data-state-'+key,old=n.getAttribute(k);n.setAttribute(k,bad);window.wbAgo(n);assert.equal(elapsed(),null,'invalid '+key+' '+bad);n.setAttribute(k,old);window.wbAgo(n);assert(elapsed());
