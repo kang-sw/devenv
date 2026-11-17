@@ -267,6 +267,9 @@ resolved Open Questions are mapped by content.
   former OQ4 (native spawn removed by `--disallowedTools`, not left alongside)
   and former OQ7 (interaction with hiring, worker profiles and the depth cap).
   Implemented by `261117-feat-ws-agent-tools-mailbox-routing`.
+- (29)=ok (2026-11-17): native subagent removal extends to hosted workers;
+  playbooks also state 'Never use {{NativeToolScheme}}' per harness
+  (261117-feat-ws-hosted-prompt-assembly).
 - (07) ok, (08)=c, (20)-(22), (24) The common harness interface is a
   declarative capability catalog promoting the existing `wsagent` optional
   controls into an explicit table (items declared `native` / `ws-substitute` /

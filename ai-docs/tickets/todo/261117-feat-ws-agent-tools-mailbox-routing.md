@@ -1,5 +1,5 @@
 ---
-title: "ws/agent.* delegation tools with unified mailbox routing, relation from lineage, and native subagent removal in hosted leads"
+title: "ws/agent.* delegation tools with unified mailbox routing, relation from lineage, and native subagent removal in hosted sessions (leads and workers)"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-harness-capability-catalog: "steer-capability lookup for parent-to-child delivery reads the catalog's mid-turn steer item"
@@ -9,17 +9,18 @@ related:
   261115-feat-ws-permission-profile: "common permission intent; tool-whitelist based spawn depends on it"
   261117-research-ws-daemon-file-touch-map: "release-gate file-touch constraint; not edited from here"
   261112-epic-ws-mcp-pi-subagents: "done; pi.* is the prior art"
+  261117-feat-ws-hosted-prompt-assembly: "delivers the playbooks' Never-use {{NativeToolScheme}} steer that complements native subagent removal (Decision 6)"
 ---
 
 # ws/agent.* tools with unified mailbox routing
 
 ## Background
 
-Delegation is always `ws/agent.*` regardless of harness (06): hosted leads no
+Delegation is always `ws/agent.*` regardless of harness (06): hosted sessions (leads and workers, (29)=ok) no
 longer use the harness's own spawn tool, so subagent tracking comes from the
 daemon. Today `pi.*` is the daemon-owned spawn path (children, depth cap
 `MaxSpawnDepth = 2` in `agents-plugin-tool/internal/wsagent/children.go`), and
-hosted Claude leads are launched without a tool whitelist, so the native Agent
+hosted Claude sessions are launched without a tool whitelist, so the native Agent
 tool is available. This ticket introduces the final `agent.*` surface and
 unifies parent/child/peer communication on a single `mailbox.send`.
 
@@ -51,10 +52,17 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
    parent: report as today's Pi worker report. Peer: next turn.
 5. **Report-hold rule kept.** A child's final report is an automatic system mail
    to its parent, held while the child's own children are open.
-6. **Native subagent removal in hosted leads (06)=a, (11).** Hosted Claude leads
-   launch with `--disallowedTools Agent` and `Task` (init reports Agent as
-   `Task`). Fix the existing tests that assert the flag's absence
-   (`claude_lead_plugins_test.go:90`, `lead_claude_test.go:1182`).
+6. **Native subagent removal in hosted leads and hosted workers (06)=a, (11),
+   (29)=ok.** Hosted Claude leads launch with `--disallowedTools Agent` and
+   `Task` (init reports Agent as `Task`); the removal extends to hosted workers
+   (29)=ok, a consequence of (06) "delegation is always `ws/agent.*` regardless
+   of harness". Fix the existing tests that assert the flag's absence
+   (`claude_lead_plugins_test.go:90`, `lead_claude_test.go:1182`). The
+   complementary measure is the playbooks' per-harness "Never use
+   {{NativeToolScheme}}" steer (owner addition with (29)), delivered by
+   `261117-feat-ws-hosted-prompt-assembly`, so harnesses whose native subagent
+   tools cannot be removed (Codex/Antigravity removability is unprobed, (08)=c,
+   stage 3) are still steered to `ws/agent.*`.
 7. **No depth cap (10)=c.** Remove `MaxSpawnDepth` (`wsagent/children.go`, the
    constant and its enforcement). Runaway is bounded by a per-root-tree
    concurrent-agent cap exposed as a config key. The default is chosen by
@@ -84,8 +92,9 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
 - Shipped playbooks must not name this repository's specifics
   (`ai-docs/manuals/shipped-surface-boundary.md`); route per-tier spawn idiom
   through generic hooks.
-- Removing `MaxSpawnDepth` and blocking native tools in hosted leads are
-  observable behavior changes, already owner-confirmed by (06), (10), (18).
+- Removing `MaxSpawnDepth` and blocking native tools in hosted sessions
+  (leads and workers) are observable behavior changes, already owner-confirmed
+  by (06), (10), (18), (29).
 - `pi.*` and old tools remain as aliases; the Claude CLI tier is frozen and keeps
   its native spawn.
 
@@ -96,7 +105,7 @@ computed at delivery rather than stored is T0 (no new Envelope field, so no
 whole-file loss on an old binary). The concrete verdict cites source lines for
 which version writes and reads what, per
 `ai-docs/manuals/release-compatibility.md`, recorded in Phase 1's Result. Removal
-of the depth cap and native-tool blocking in hosted leads are observable
+of the depth cap and native-tool blocking in hosted sessions (leads and workers) are observable
 behavior changes owner-confirmed as above.
 
 ## Phases
@@ -118,12 +127,13 @@ mail between parent, child and peer with each timing, the report-hold rule, cap
 enforcement and caps inheritance, `pi.*` alias parity, and no mailbox file write
 for daemon-owned addresses; the recorded cap-default measurement.
 
-### Phase 2: Native subagent removal in hosted Claude leads
+### Phase 2: Native subagent removal in hosted Claude leads and workers
 
-Launch hosted Claude leads with `--disallowedTools Agent` and `Task`; fix the
-two tests that assert the flag's absence; confirm via the init event that the
-native tool is absent and that delegation works through `agent.spawn`.
+Launch hosted Claude leads and hosted Claude workers with `--disallowedTools
+Agent` and `Task`; fix the two tests that assert the flag's absence; confirm via
+the init event that the native tool is absent and that delegation works through
+`agent.spawn`.
 
 Verification: updated tests on remote w5090; a recorded hosted-lead init stream
-showing the tools removed; a hosted lead delegating through `agent.spawn` end to
-end.
+and a recorded hosted-worker init stream, each showing the tools removed; a
+hosted lead delegating through `agent.spawn` end to end.

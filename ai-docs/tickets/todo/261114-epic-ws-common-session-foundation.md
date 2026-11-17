@@ -31,7 +31,7 @@ Delivery is four stages:
      fixtures.
    - Compaction becomes a common command delivered from outside the harness.
    - `ws/agent.*` multi-level delegation; native subagents are removed in hosted
-     leads.
+     sessions (leads and workers).
    - Single session holder (prerequisite of `ws/exec`), then `ws/exec`.
    - Move plugin/extension features into the daemon: MCP plus injection,
      playbooks instead of skills, `prompts/list` slash commands.
@@ -72,14 +72,30 @@ Stage 2 (hosted-first migration, reference implementation Claude):
   common command. Phase 1 starts with the Pi HTTP MCP probe.
 - `261117-feat-ws-agent-tools-mailbox-routing` - `ws/agent.*`, single
   `mailbox.send`, in-memory routing for daemon-owned addresses, relation from
-  lineage, native subagent removal in hosted Claude leads.
+  lineage, native subagent removal in hosted Claude sessions (leads and
+  workers).
 - `261117-feat-ws-single-session-holder` - PC-wide holder; prerequisite of exec.
 - `261117-feat-ws-exec-tools` - `ws/exec.*` under the single holder; native
   process-tool removal; never-auto-terminate rule. Prerequisite:
   `261117-feat-ws-single-session-holder`.
-- Planned (not yet cut): moving the remaining plugin/extension features into the
-  daemon (MCP injection, playbooks instead of skills, `prompts/list` slash
-  commands); open questions are in `261116-research-ws-hosted-session-first-tier`.
+- `261117-feat-ws-hosted-prompt-assembly` - application layer 2, 3, B, C
+  ((28)=a): daemon-owned workflow manual and playbook body, per-turn ambient
+  injection replacing plugin hooks, server-side `agent.spawn` playbook
+  rendering with tier-to-model resolution, and the `{{NativeToolScheme}}`
+  render variable. Prerequisite: `261117-feat-ws-harness-capability-catalog`.
+- `261117-feat-ws-hosted-compaction-lifecycle` - application layer 1, A
+  ((28)=a): daemon compaction nudge, session-state restore replacing the
+  lead-revive ritual, and `ws/compact` ((31)=a), for leads and children.
+  Prerequisite: the catalog ticket; compatibility tier (segment chain) settled
+  before ready.
+- `261117-feat-ws-hosted-child-session-entry` - application layer 4, late stage
+  2 ((28)=a): enter any `ws/agent.spawn` child's hosted session from the
+  dashboard, every harness. Prerequisite: `261117-feat-ws-agent-tools-mailbox-routing`.
+- Candidates, no ticket yet: E, usage/budget per agent tree (late stage 2); D,
+  tool-result size budget/paging (stage-2 candidate, unplaced by (28)).
+- Planned (not yet cut): the remaining plugin/extension moves into the daemon
+  (playbooks instead of skills, `prompts/list` slash commands); open questions
+  are in `261116-research-ws-hosted-session-first-tier`.
 - Planned (not yet cut): Pi extension retirement, after hosted parity, with
   per-item approval. Its parity criteria are an open question in the research
   ticket.
@@ -105,6 +121,8 @@ Stage 4 (extensions):
   ticket, after `261114-feat-ws-conversation-audit-event-store#phase2`.
 - Planned (not yet authored): authority/permission UI, voice, live reasoning,
   `ws/agent.*` session lightweighting.
+- Candidates ((28)=a), no ticket yet: F, daemon-owned fork/rewind; G, audit
+  unification (the two audit tickets above).
 
 Independent:
 
@@ -174,7 +192,8 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   memory. Relation is computed from lineage at delivery, not stored. Hire stays
   separate; worker-profile caps apply; `pi.*` stays as an alias. No depth cap
   (`MaxSpawnDepth` removed); a per-root-tree concurrent-agent cap config key
-  bounds runaway. Native subagents are removed in hosted leads.
+  bounds runaway. Native subagents are removed in hosted sessions (leads and
+  workers) (29)=ok.
 - **Single holder and exec (16), (17)=a, (18), (19)=a.** One PC-wide holder with
   one daemon connection serves conversations and exec jobs; exec output lives in
   a holder memory ring, no files. Exec is daemon-approved and replaces native
@@ -197,8 +216,9 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   old `exec.*` tools stay as aliases (T0); relation computed, not stored, is T0.
   The mailbox store ships as a patch with its T1/T2 downgrade judgment in-ticket.
   The holder protocol is versioned and the new daemon speaks the old holder
-  protocol. Removing `MaxSpawnDepth` and blocking native tools in hosted leads
-  are observable behavior changes, owner-confirmed by (06), (10), (18). Any other
+  protocol. Removing `MaxSpawnDepth` and blocking native tools in hosted sessions
+  (leads and workers) are observable behavior changes, owner-confirmed by (06),
+  (10), (18), (29). Any other
   non-additive protocol/store/MCP change requires separate tier settlement; T2 is
   not authorized here, and a T3 boundary requires the owner's explicit approval.
 
