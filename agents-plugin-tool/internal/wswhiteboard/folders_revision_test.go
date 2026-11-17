@@ -106,6 +106,11 @@ func TestFolderCacheRevisionRootStampedChangesAtSameSeq(t *testing.T) {
 			// the completed external change by atomically replacing the root
 			// receipt, without relying on the logical State.Seq or generation.
 			folderReplaceRootReceipt(t, f)
+			if filepath.Base(filepath.Dir(path)) == "panels" {
+				// A committed panel is immutable, so the topic memo keeps its
+				// decoded body; a leaf edit to one must Forget the board.
+				cache.Forget(f.Dir)
+			}
 			state, rev, err := cache.OpenRevision(f, nil)
 			if err != nil || state == nil || rev <= previous || state.Seq != seed.Seq {
 				t.Fatalf("changed authority at unchanged Seq: revision=%d previous=%d err=%v", rev, previous, err)

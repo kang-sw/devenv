@@ -1395,6 +1395,13 @@ func ReadDrained(dir, name string) (Record, error) {
 	return Record{Name: name, Entry: entry}, nil
 }
 
+// ReadHeld reads the one held entry name of the inbox at dir. A held entry
+// file is never rewritten (Steer writes a fresh name), so a reader may keep
+// what it read by its name.
+func ReadHeld(dir, name string) (Entry, error) {
+	return readEntry(filepath.Join(dir, name))
+}
+
 func readAll(dir string) ([]Record, error) {
 	names, err := Names(dir)
 	if err != nil {

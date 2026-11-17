@@ -23,6 +23,10 @@ const (
 	// the sweep that recorded it, and still be distrusted: an entry added on a
 	// filesystem with coarse timestamps can keep the directory mtime equal.
 	observedRacyWindow = 2 * time.Second
+	// observedSessionCap bounds retained session slots. Past it the least
+	// recently loaded session is evicted, so busy sessions stay warm; the
+	// former whole-map wipe forced a cold full evidence read on every one.
+	observedSessionCap = 256
 )
 
 // ObservedCache retains immutable decoded evidence and its derived model
@@ -45,6 +49,7 @@ const (
 type ObservedCache struct {
 	mu       sync.Mutex
 	sessions map[string]*observedSlot
+	tick     uint64 // Load counter for least-recently-used eviction; under mu
 	opens    atomic.Int64
 	// open, stat and now are instance-local test seams; set before the first
 	// Load.
@@ -54,6 +59,7 @@ type ObservedCache struct {
 }
 
 type observedSlot struct {
+	used       uint64 // ObservedCache.tick at the last Load; under ObservedCache.mu
 	mu         sync.Mutex
 	loading    chan struct{} // one private sweep; warm readers never wait for it
 	generation uint64        // invalidations during a sweep must not be lost
@@ -128,12 +134,17 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	c.mu.Lock()
 	slot := c.sessions[dir]
 	if slot == nil {
-		if c.sessions == nil || len(c.sessions) >= 256 {
+		if c.sessions == nil {
 			c.sessions = map[string]*observedSlot{}
+		}
+		if len(c.sessions) >= observedSessionCap {
+			c.evictOldestLocked()
 		}
 		slot = &observedSlot{}
 		c.sessions[dir] = slot
 	}
+	c.tick++
+	slot.used = c.tick
 	c.mu.Unlock()
 	shared := slot
 	clock := time.Now
@@ -361,6 +372,20 @@ func (s *observedRead) extend(files map[string]observedFile, names []string) boo
 	}
 	s.evidence = &ObservedEvidence{models: models}
 	return true
+}
+
+// evictOldestLocked drops the least recently loaded session slot. A reader
+// still holding the evicted slot finishes on it; the next Load starts cold.
+// The scan is linear over at most observedSessionCap slots, which is noise
+// beside the evidence read it saves. Caller holds c.mu.
+func (c *ObservedCache) evictOldestLocked() {
+	oldest, oldestUsed, found := "", uint64(0), false
+	for dir, slot := range c.sessions {
+		if !found || slot.used < oldestUsed {
+			oldest, oldestUsed, found = dir, slot.used, true
+		}
+	}
+	delete(c.sessions, oldest)
 }
 
 // Invalidate expires directory validation after a change signal while retaining

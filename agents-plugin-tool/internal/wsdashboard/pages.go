@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -1418,9 +1419,29 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
 	frame := framedRequest(r)
 	lang, pref := requestLang(r)
-	reader := d.pagesIn(lang)
-	reader.freshSnapshots = true
-	view, _, _, ok, readErr := reader.readSessionWith(replyID, nil, true, true)
+	var view SessionView
+	var regions regionSet
+	var ok bool
+	var readErr error
+	if frame {
+		// The frame's read is also its stream's first frame: it renders
+		// through the shared page, held for the stream the frame opens next,
+		// so a page open costs one read pass instead of two.
+		src := d.sessionPageSourceWith(replyID, lang, requestTheme(r), true)
+		page := d.cache.acquire(src.key)
+		pr := d.cache.renderFresh(page, src)
+		readErr, ok = pr.err, pr.ok && pr.view != nil
+		if readErr == nil && ok {
+			view, regions = *pr.view, pr.regions
+			d.cache.holdFor(src.key, page, pageHandoffHold)
+		} else {
+			d.cache.release(src.key, page)
+		}
+	} else {
+		reader := d.pagesIn(lang)
+		reader.freshSnapshots = true
+		view, _, _, ok, readErr = reader.readSessionWith(replyID, nil, true, true)
+	}
 	if readErr != nil {
 		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
 		return
@@ -1438,11 +1459,12 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 		d.serveShell(w, r, &view, "/s/"+replyID+"?frame=1")
 		return
 	}
-	view.Git = d.git.badge(view.Project)
+	// The shared render already set Git and rendered the regions, which
+	// depend on neither Worktrees, Holders nor LangPref.
 	view.Worktrees = d.worktrees != nil
 	view.Holders = d.holders != nil
-	regions, err := renderSessionRegions(view, d.entries)
-	if err == nil {
+	err := errors.New("session regions failed to render")
+	if regions != nil {
 		var html string
 		page := sessionPageData{SessionView: view, SysOpen: localViewer(r), Frame: true, regions: regions}
 		if d.offersTerminals(r) {

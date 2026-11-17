@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -456,5 +457,35 @@ func TestObservedCacheConcurrentSnapshots(t *testing.T) {
 	}
 	if evidence.models[""].Current.Model != "first" {
 		t.Fatal("published evidence mutated")
+	}
+}
+
+func TestObservedCacheEvictsLeastRecentlyUsedSession(t *testing.T) {
+	base := t.TempDir()
+	dirs := make([]string, observedSessionCap+1)
+	for i := range dirs {
+		dirs[i] = filepath.Join(base, "s"+strconv.Itoa(i))
+	}
+	cache := ObservedCache{}
+	for _, dir := range dirs[:observedSessionCap] {
+		cache.Load(dir)
+	}
+	hot := dirs[0]
+	cache.Load(hot) // most recently used now; dirs[1] is the oldest
+	hotSlot := cache.sessions[hot]
+	cache.Load(dirs[observedSessionCap])
+	if len(cache.sessions) != observedSessionCap {
+		t.Fatalf("slots = %d, want %d", len(cache.sessions), observedSessionCap)
+	}
+	if cache.sessions[hot] != hotSlot {
+		t.Fatal("recently used session was evicted")
+	}
+	if _, ok := cache.sessions[dirs[1]]; ok {
+		t.Fatal("least recently used session survived")
+	}
+	for _, dir := range dirs[2:] {
+		if cache.sessions[dir] == nil {
+			t.Fatalf("session %s evicted out of order", dir)
+		}
 	}
 }

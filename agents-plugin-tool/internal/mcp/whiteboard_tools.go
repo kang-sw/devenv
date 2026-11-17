@@ -459,6 +459,8 @@ func markdownSection(body, heading string) string {
 // whiteboardProviders), once the session's board exists.
 // The gate is board existence, not the knob: a session that never rendered
 // writes no file, and an ad hoc board stays current.
+// A refresh that would publish the same page writes nothing (see
+// renderWhiteboardPages).
 func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 	if responseIsError(resp) {
 		return
@@ -472,8 +474,7 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 		return
 	}
 	err := s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
-		rec.Whiteboard.BeginRender()
-		_, err := s.renderWhiteboard(rec, key, false)
+		_, err := s.renderWhiteboardPages(rec, key, false, true)
 		return err
 	})
 	if err != nil && !errors.Is(err, errNoWhiteboard) {
@@ -497,6 +498,15 @@ func responseIsError(resp response) bool {
 // transaction publishes them only after its durable commit, with the stamp
 // last. The returned paths are relative to the root (a host embed is bare).
 func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (whiteboardRender, error) {
+	return s.renderWhiteboardPages(rec, sessionKey, withEmbed, false)
+}
+
+// renderWhiteboardPages is renderWhiteboard; refresh additionally begins the
+// render. When the full page rendered at the current sequence is already the
+// published page and stamp, byte for byte, a viewer has nothing new to see:
+// it returns errRecordUnchanged, so neither the stamp-only store commit nor
+// the outputs are rewritten, and open pages are not told to reload.
+func (s *Server) renderWhiteboardPages(rec *sessionRecord, sessionKey string, withEmbed, refresh bool) (whiteboardRender, error) {
 	var out whiteboardRender
 	st := rec.Whiteboard
 	replyID := wsmailbox.ReplyID(sessionKey)
@@ -554,16 +564,41 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 
 	view := wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutFull))
 	view.StampFile = "index.stamp.js"
+	if refresh {
+		// The view depends on the sequence only through view.Seq, so one
+		// build serves both renders and the panels are read once.
+		if html, err := wswhiteboard.RenderPage(view); err == nil && whiteboardPublished(pageDir, html, st.Seq) {
+			return out, errRecordUnchanged
+		}
+		st.BeginRender()
+		view.Seq = st.Seq
+	}
 	html, err := wswhiteboard.RenderPage(view)
 	if err != nil {
 		return out, fmt.Errorf("render full page: %w", err)
 	}
 	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.html"), html, "full page"})
-	stamp := fmt.Sprintf("wbStamp(%q);\n", fmt.Sprint(st.Seq))
+	stamp := whiteboardStamp(st.Seq)
 	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.stamp.js"), stamp, "stamp"})
 	out.full = whiteboardDirRel + "/" + replyID + "/index.html"
 	rec.boardOutput = &out
 	return out, nil
+}
+
+func whiteboardStamp(seq int) string {
+	return fmt.Sprintf("wbStamp(%q);\n", fmt.Sprint(seq))
+}
+
+// whiteboardPublished reports whether pageDir already holds exactly this full
+// page and the stamp for seq. It compares against the files on disk, never a
+// remembered write, since another process may have published since.
+func whiteboardPublished(pageDir, html string, seq int) bool {
+	page, err := os.ReadFile(filepath.Join(pageDir, "index.html"))
+	if err != nil || string(page) != html {
+		return false
+	}
+	stamp, err := os.ReadFile(filepath.Join(pageDir, "index.stamp.js"))
+	return err == nil && string(stamp) == whiteboardStamp(seq)
 }
 
 // ensureWhiteboardMermaid writes the shared mermaid script into dir, before
