@@ -566,6 +566,103 @@ tool of the loadout while workdir-write and full children may call them, and
 every child, read-only included, able to call `mailbox.send`; an
 `agent.spawn` child receiving a capability token; `pi.spawn` refusing past depth 4 with the updated error text.
 
+### Result (c307dd2f6) - 2026-11-18
+
+Commits ec81e84cf (runner core), 0c1889705 and 7f23e563a (wsagent tests),
+632cd9325, d991a20bd (config keys), d108b39d0 (read-only gate), e82eaeb90
+(agent.* tools), ac3660770 (refused-wake wiring), 689b38561, 30f04469d
+(lite-review fixes), c307dd2f6.
+
+Design record (the items Decision 1 left to Phase 1):
+
+- `agent.spawn` returns `{address, status}`; `address` is `id:<reply-id>`
+  and every agent.* control accepts it. `status` (and `agent.list`'s
+  `state`) is one of `running` (a turn runs), `starting` (first input waits
+  for the process), `idle` (process alive, no turn), `waiting` (asleep: no
+  process, no turn; includes a refused wake) and `closed`.
+- `worktree` is the path (absolute, or relative to the caller's working
+  directory) of an existing Git worktree root (a `.git` entry); the child's
+  root and cwd become it. Acquisition stays with the caller. At most one of
+  `cwd` / `worktree`, and of `system_prompt` / `system_prompt_path`.
+- `agent.interrupt` returns `{address, status, returned[]}` (the messages it
+  had not taken yet). `agent.list` entries carry `address, label, tier
+  (<harness>.<tier>), authority, state, last_report (status: first line),
+  model, effort, cwd, held, error, created_at`. `agent.tiers` returns
+  `{harness, native, ext, aliases, unavailable}`.
+- Worker role = a builtin `agent-worker-<backend>` profile exists (claude,
+  pi); a registered backend without one (a lead-only Codex or Antigravity
+  registration) has no spawnable tiers. Availability: the harness is
+  registered, installed (`supportBackendAvailability`) and, for Pi, passes
+  the daemon's Pi check.
+- Lifecycle: finished children no longer auto-close; they sleep on the
+  idle timer. Expiry runs on the conv heartbeat (no file reads;
+  `Record.LastActiveAt` rides the record writes send and settle already
+  make) and at daemon start; deletion closes the subtree deepest first and
+  removes the session directories. A refused wake keeps its input
+  (`kick` does not settle), marks the child asleep (`wakeRefused`: it does
+  not keep its parent awake, hold its parent's report, or count toward the
+  width cap) and `Runner.Deliver` tells the sender once per message
+  (`Options.WakeRefused` -> one system mail). `pi.send` goes through
+  `Deliver` for now; Phase 2's mailbox routing calls the same seam.
+- Read-only: the daemon sets `WS_MCP_PERMISSION_LEVEL` on every spawned
+  child's ws-mcp; `callTool` refuses `git.commit`, `tickets.create_empty`,
+  `tickets.acquire`, `tickets.release`, `tickets.close` and `tickets.move`
+  for `read-only`. Native tools stay advisory (Claude worker and Pi).
+- `agent-worker-*` profiles start only through agent.spawn: `Runner.Spawn`
+  refuses them without a parent and an authority, and the pi.spawn token
+  route refuses them by name.
+- `agent.tier_aliases` is editable through `config.tune` (validated by
+  `ParseTierAliases`, which also refuses an alias spelled like a tier). A
+  dashboard editor for it is not built here.
+
+Compatibility verdicts (released 0.50.5 = `main` 6bd0f51bf as the old
+binary):
+
+- `agent.tier_aliases`, `agent.child_waiting_days`: T0. Both are string
+  entries in the global config's `Overrides map[string]string`
+  (`main:agents-plugin-tool/internal/wsconfig/config.go:40`), which the old
+  binary decodes with a plain `json.Unmarshal` (`config.go:117-118`) and
+  never queries; its writer `updateConfigFile` (`config.go:750`) decodes the
+  whole Config, changes one key and writes the full map back, so the keys
+  survive its writes. Old `config.list` only prints them as raw override
+  rows.
+- `Record.SystemPrompt`, `Record.LastActiveAt` (new record members): T0.
+  The old binary keeps unknown top-level members across read-modify-write
+  (`main:agents-plugin-tool/internal/wsagent/record.go:152-159`
+  `UnmarshalJSON`, `:196` `MarshalJSON`, since 184452a15 in 0.50.0).
+- Child authority in `<SessionDir>/permission.json`: T0. The old binary
+  writes it only for leads and preserves unknown members when it does
+  (`main:.../wsagent/permission_store.go:112,142`); its worker path never
+  reads it (`main:.../wsagent/permission.go:119-122` returns early for
+  non-leads). `Record.Parent` is the existing persisted member.
+- Behavior on a downgrade (not a data verdict): an old daemon closes
+  finished open Pi children at start as before
+  (`main:.../wsagent/runner.go:297`); an `agent-worker-claude` child fails to
+  resolve its profile on the old binary and does not launch, changing no
+  data.
+
+Verification: `go test ./...` in `agents-plugin-tool/` on macOS. wsagent,
+wsconfig, cmd/ws-mcp and the agent/pi/permission/config tests of
+internal/mcp pass (wsagent covers the Phase 1 verification list in
+`agent_tools_test.go` and `child_sleep_test.go`; internal/mcp covers tool
+listing, the lead and token-forward paths, the read-only refusals with
+`mailbox.send` still allowed, and the config keys). Remaining failures are
+pre-existing: TestDashboardNotesUsesHostedCallerStoreIdentity,
+TestBoardStateFilterAsks, TestSearchPalette*,
+TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode, and
+TestLateReloadSignalsOnlyAChangedView (wstrackerhost; also fails alone at
+base 85ef24622). The read-only refusal is tested on the MCP server with the
+env set directly; the runner side asserts the env reaches the child's
+ws-mcp. No live hosted delegation was run.
+
+Open, for the lead: `pi.send` is the interim follow-up path and is gated by
+`dashboard.pi_spawn_enabled` and Pi availability, so a lead whose package
+turns that knob off cannot follow up a child until Phase 2 routes
+`mailbox.send`; an agent.spawn child cannot follow up its own children
+until then either (its loadout has no `pi.*`). `PiTurnReporter`'s mail still
+says "Reply with pi.send" (Phase 2). Accepted minors from the lite review
+are listed in 30f04469d's AI Context.
+
 ### Phase 2: Mailbox routing to daemon-owned addresses, steer delivery, `pi.*` hiding
 
 Depends on Phase 1, on `261117-feat-ws-mailbox-memory-first-store` Phase 2
