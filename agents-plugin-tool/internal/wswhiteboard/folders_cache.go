@@ -25,6 +25,10 @@ type FolderCache struct {
 	stat    func(string) (os.FileInfo, error) // optional validation counter seam
 }
 
+// SharedFolderCache serves dashboard, MCP queries and nudge decisions. Writers
+// remain uncached; commit root stamps preserve read-your-writes across callers.
+var SharedFolderCache FolderCache
+
 type folderCacheSlot struct {
 	mu   sync.Mutex
 	read folderCachedRead
@@ -32,6 +36,7 @@ type folderCacheSlot struct {
 
 type folderCachedRead struct {
 	state    *State
+	meta     *folderSession
 	stamp    folderRootStamp
 	revision uint64
 }
@@ -76,7 +81,7 @@ func folderReadStamp(dir string, stat func(string) (os.FileInfo, error)) (folder
 	return folderRootStamp{meta: meta, committed: committed}, err
 }
 
-// Open is FolderStore.Open with an opt-in read cache, bounded to 64 boards.
+// Open is FolderStore.Open with an opt-in read cache, bounded to 512 boards.
 // Absent boards and legacy conversion use Open unchanged and are not cached.
 func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 	state, _, err := c.OpenRevision(f, legacy)
@@ -88,7 +93,27 @@ func (c *FolderCache) Open(f FolderStore, legacy *State) (*State, error) {
 // receives a fresh revision. The state header and revision are captured together
 // under the cache slot lock, without additional filesystem probes.
 func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64, error) {
+	return c.openRevision(f, legacy, nil)
+}
+
+// visit runs under the board lock, after the same root validation as reads.
+// Keeping slot -> board lock ordering lets Notify reuse decoded authority
+// without opening the board again or holding the cache map lock during I/O.
+func (c *FolderCache) openRevision(f FolderStore, legacy *State, visit func(*State, *folderSession) error) (*State, uint64, error) {
 	uncached := func() (*State, uint64, error) {
+		if visit != nil {
+			var state *State
+			err := f.withLock(false, func() error {
+				var meta *folderSession
+				var err error
+				state, meta, err = f.load(legacy)
+				if err != nil {
+					return err
+				}
+				return visit(state, meta)
+			})
+			return state, newFolderReadRevision(state), err
+		}
 		state, err := f.Open(legacy)
 		return state, newFolderReadRevision(state), err
 	}
@@ -98,7 +123,7 @@ func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64
 	c.mu.Lock()
 	slot := c.entries[f.Dir]
 	if slot == nil {
-		if c.entries == nil || len(c.entries) >= 64 {
+		if c.entries == nil || len(c.entries) >= 512 {
 			c.entries = map[string]*folderCacheSlot{}
 		}
 		slot = new(folderCacheSlot)
@@ -110,7 +135,7 @@ func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64
 	defer slot.mu.Unlock()
 	stat := c.stat
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	if _, err := stat(filepath.Join(f.Dir, "meta.json")); err != nil {
 		slot.read = folderCachedRead{}
@@ -131,6 +156,9 @@ func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64
 		if hit {
 			out = entry.state.sharedRead()
 			revision = entry.revision
+			if visit != nil {
+				return visit(out, entry.meta)
+			}
 			return nil
 		}
 		slot.read = folderCachedRead{}
@@ -139,15 +167,19 @@ func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64
 		// this stamp and is cached only on a subsequent clean open.
 		stamp, stampErr := folderReadStamp(f.Dir, stat)
 		var err error
-		out, _, err = f.load(legacy)
+		var meta *folderSession
+		out, meta, err = f.load(legacy)
 		revision = newFolderReadRevision(out)
 		if err == nil && stampErr == nil && out != nil {
-			next := folderCachedRead{state: out, stamp: stamp, revision: revision}
+			next := folderCachedRead{state: out, meta: meta, stamp: stamp, revision: revision}
 			if next.unchanged(f.Dir, stat) {
 				out.shared = true
 				slot.read = next
 				out = out.sharedRead()
 			}
+		}
+		if err == nil && visit != nil {
+			return visit(out, meta)
 		}
 		return err
 	})

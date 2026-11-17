@@ -10,6 +10,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"golang.org/x/sys/windows"
 )
 
@@ -58,6 +59,7 @@ func renameExclusive(from, to string) error {
 	if err != nil {
 		return err
 	}
+	wsstate.CountFileIO("open_file")
 	h, err := windows.CreateFile(src, windows.DELETE|windows.SYNCHRONIZE, 0, nil,
 		windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
@@ -70,6 +72,7 @@ func renameExclusive(from, to string) error {
 	info.ReplaceIfExists = 1 // os.Rename's semantics
 	info.FileNameLength = uint32(nameBytes)
 	copy(unsafe.Slice(&info.FileName[0], len(name)), name)
+	wsstate.CountFileIO("atomic_replace")
 	return windows.SetFileInformationByHandle(h, windows.FileRenameInfo, &buf[0], uint32(len(buf)))
 }
 
@@ -81,7 +84,7 @@ func readFile(path string) ([]byte, error) {
 	var raw []byte
 	err := retryTransient(func() error {
 		var err error
-		raw, err = os.ReadFile(path)
+		raw, err = wsstate.ReadFileOnce(path)
 		return err
 	})
 	return raw, err

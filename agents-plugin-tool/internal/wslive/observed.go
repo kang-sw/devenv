@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // ModelObservation is response evidence, never launch settings or RPC state.
@@ -271,14 +273,14 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 	for _, r := range records {
 		sum := sha256.Sum256([]byte(observationKey(r)))
 		path := filepath.Join(dir, hex.EncodeToString(sum[:])+".json")
-		if _, err := os.Stat(path); err == nil {
+		if _, err := wsstate.Stat(path); err == nil {
 			continue
 		}
 		data, err := json.Marshal(r)
 		if err != nil {
 			return err
 		}
-		tmp, err := os.CreateTemp(dir, ".observation-*.tmp")
+		tmp, err := wsstate.CreateTemp(dir, ".observation-*.tmp")
 		if err != nil {
 			return err
 		}
@@ -312,7 +314,7 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 // ReadObserved reads only bounded metadata records, tolerating missing files,
 // unknown JSON members, incomplete writes, and unsupported future sources.
 func ReadObserved(dir string) ([]ObservedRecord, error) {
-	entries, err := os.ReadDir(filepath.Join(dir, ObservedDirName))
+	entries, err := wsstate.ReadDir(filepath.Join(dir, ObservedDirName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -325,7 +327,7 @@ func ReadObserved(dir string) ([]ObservedRecord, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		r, valid, err := readObservedRecord(filepath.Join(dir, ObservedDirName, entry.Name()), os.Open)
+		r, valid, err := readObservedRecord(filepath.Join(dir, ObservedDirName, entry.Name()), wsstate.Open)
 		if err == nil && valid {
 			records = append(records, r)
 		}

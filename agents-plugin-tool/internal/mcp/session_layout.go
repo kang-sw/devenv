@@ -213,7 +213,7 @@ type recordFileReader func(path string, newValue func() any) (data []byte, value
 
 // readRecordFile is the recordFileReader that reads the file afresh.
 func readRecordFile(path string, newValue func() any) ([]byte, any, error) {
-	data, err := os.ReadFile(path)
+	data, err := wsstate.ReadFileOnce(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -342,7 +342,7 @@ func (s *sessionStore) migrateRecord(d sessionDirs, key string, record *sessionR
 	}
 	// Copy the original board bytes, never the authoritative converted board.
 	// Preserve the inline representation too, so rollback keeps its snapshot.
-	data, err := os.ReadFile(d.legacyPath(key))
+	data, err := wsstate.ReadFileOnce(d.legacyPath(key))
 	if err != nil {
 		return err
 	}
@@ -366,7 +366,7 @@ func (s *sessionStore) migrateRecord(d sessionDirs, key string, record *sessionR
 // removeLegacyRecord deletes a boardless legacy record once the split record
 // is in place; board-bearing representations are preserved for rollback.
 func removeLegacyRecord(d sessionDirs, key string) {
-	data, err := os.ReadFile(d.legacyPath(key))
+	data, err := wsstate.ReadFileOnce(d.legacyPath(key))
 	if err != nil {
 		return
 	}
@@ -388,7 +388,7 @@ func removeLegacyRecord(d sessionDirs, key string) {
 // under the record lock, taken only after the claim: a lock file created first
 // would make the candidate look taken.
 func (s *sessionStore) claimKey(d sessionDirs, key string, payload []byte) (bool, error) {
-	if _, err := os.Lstat(d.legacyPath(key)); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := wsstate.Lstat(d.legacyPath(key)); !errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	dir := d.keyDir(key)
@@ -412,7 +412,7 @@ func (s *sessionStore) claimKey(d sessionDirs, key string, payload []byte) (bool
 
 // writeClaimFile creates a newly claimed key's key.json exclusively.
 func writeClaimFile(path string, payload []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := wsstate.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("create session key file: %w", err)
 	}
@@ -457,8 +457,8 @@ func (s *sessionStore) lockExistingRecord(d sessionDirs, key string) (func(), er
 	if !sessionKeyFilenamePattern.MatchString(key) {
 		return nil, errSessionNotFound
 	}
-	if _, err := os.Stat(d.partPath(key, partKey)); errors.Is(err, fs.ErrNotExist) {
-		if _, err := os.Stat(d.legacyPath(key)); err != nil {
+	if _, err := wsstate.Stat(d.partPath(key, partKey)); errors.Is(err, fs.ErrNotExist) {
+		if _, err := wsstate.Stat(d.legacyPath(key)); err != nil {
 			return nil, errSessionNotFound
 		}
 		if err := os.MkdirAll(d.keyDir(key), 0o755); err != nil {
@@ -475,7 +475,7 @@ func (s *sessionStore) lockExistingRecord(d sessionDirs, key string) (func(), er
 // before trusting the key. A missing legacy root is empty; an unreadable root
 // is an error.
 func (s *sessionStore) listKeys(d sessionDirs) ([]string, error) {
-	entries, err := os.ReadDir(d.sessions)
+	entries, err := wsstate.ReadDir(d.sessions)
 	if err != nil {
 		return nil, fmt.Errorf("read session keys dir: %w", err)
 	}
@@ -485,7 +485,7 @@ func (s *sessionStore) listKeys(d sessionDirs) ([]string, error) {
 			seen[entry.Name()] = true
 		}
 	}
-	legacy, err := os.ReadDir(d.legacy)
+	legacy, err := wsstate.ReadDir(d.legacy)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read legacy session keys dir: %w", err)
 	}
@@ -507,10 +507,10 @@ func (s *sessionStore) listKeys(d sessionDirs) ([]string, error) {
 // the legacy record file of a key not yet migrated.
 func activityMark(d sessionDirs, key string) (string, os.FileInfo, bool) {
 	path := d.partPath(key, partKey)
-	info, err := os.Stat(path)
+	info, err := wsstate.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		path = d.legacyPath(key)
-		info, err = os.Stat(path)
+		info, err = wsstate.Stat(path)
 	}
 	if err != nil {
 		return "", nil, false
@@ -545,7 +545,7 @@ func (s *sessionStore) writeFileAtomic(path string, payload []byte) error {
 	if replace == nil {
 		replace = wsstate.AtomicReplaceFile
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
+	tmp, err := wsstate.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return err
 	}

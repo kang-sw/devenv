@@ -3,6 +3,8 @@ package wsdashboard
 import (
 	"net/http"
 	"sync/atomic"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // streamStats counts the live-update work since the daemon started: the
@@ -69,6 +71,9 @@ func (s *streamStats) snapshot() map[string]int64 {
 // keeps its own (CounterSource).
 func (d *Daemon) serveStreams(w http.ResponseWriter, r *http.Request) {
 	out := d.stats.snapshot()
+	for k, v := range wsstate.FileIOCounters() {
+		out[k] = v
+	}
 	out["snapshot_cache_hits"], out["snapshot_cache_misses"] = d.snapshots.Counts()
 	for _, seam := range []any{d.tracker, d.source} {
 		cs, ok := seam.(CounterSource)

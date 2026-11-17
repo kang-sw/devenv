@@ -28,6 +28,7 @@ func AtomicReplaceFile(tmp, path string) error {
 		return err
 	}
 	return retryTransient(func() error {
+		CountFileIO("atomic_replace")
 		return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 	})
 }
@@ -40,7 +41,7 @@ func ReadFile(path string) ([]byte, error) {
 	var data []byte
 	err := retryTransient(func() error {
 		var err error
-		data, err = os.ReadFile(path)
+		data, err = ReadFileOnce(path)
 		return err
 	})
 	return data, err

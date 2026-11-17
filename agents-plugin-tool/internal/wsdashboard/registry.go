@@ -237,7 +237,7 @@ func ReadRegistration(dir, replyID string) (Registration, error) {
 	if !ValidReplyID(replyID) {
 		return Registration{}, fmt.Errorf("invalid reply-id %q", replyID)
 	}
-	raw, err := os.ReadFile(filepath.Join(SessionDir(dir, replyID), registrationFileName))
+	raw, err := wsstate.ReadFileOnce(filepath.Join(SessionDir(dir, replyID), registrationFileName))
 	if err != nil {
 		return Registration{}, err
 	}
@@ -264,7 +264,7 @@ func ReadRegistrations(dir string) ([]Registration, error) {
 // failed reports uncertainty without changing the public best-effort listing.
 // Consumers needing admission authority must not treat unreadable as absent.
 func readRegistrations(dir string, failed func(string, error)) ([]Registration, error) {
-	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
+	entries, err := wsstate.ReadDir(filepath.Join(dir, sessionsDirName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -302,7 +302,7 @@ func WriteRegistration(dir string, reg Registration) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(sessionDir, registrationFileName+".*.tmp")
+	tmp, err := wsstate.CreateTemp(sessionDir, registrationFileName+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func RemoveRegistration(dir, replyID string) error {
 // same (agentRecordEnd.terminalConversation). Every other agent record
 // (the tracker's support agent among them) keeps the runner's lifetime.
 func PruneRegistrations(dir string, now time.Time, retention time.Duration) int {
-	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
+	entries, err := wsstate.ReadDir(filepath.Join(dir, sessionsDirName))
 	if err != nil {
 		return 0
 	}
@@ -431,7 +431,7 @@ func (r agentRecordEnd) retired() bool {
 // the directory holds none. An unreadable record is hosted and not
 // retired, so it is never pruned.
 func readAgentRecordEnd(sessionDir string) (record agentRecordEnd, hosted bool) {
-	raw, err := os.ReadFile(filepath.Join(sessionDir, AgentRecordFileName))
+	raw, err := wsstate.ReadFileOnce(filepath.Join(sessionDir, AgentRecordFileName))
 	if errors.Is(err, os.ErrNotExist) {
 		return agentRecordEnd{}, false
 	}

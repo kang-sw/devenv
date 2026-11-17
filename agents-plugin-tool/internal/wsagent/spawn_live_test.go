@@ -235,8 +235,8 @@ func TestHostedUsageWakesDoNotRereadClosedSnapshots(t *testing.T) {
 		t.Fatalf("closed usage = %+v", st)
 	}
 	before := reads.Load()
-	if before != 1 {
-		t.Fatalf("initial closed snapshot reads = %d, want 1", before)
+	if before != 0 {
+		t.Fatalf("closed state retained in memory should need no snapshot reads, got %d", before)
 	}
 	for i := range 5 {
 		setUsage(active.ID, int64(2000+i), float64(20+i))
@@ -266,8 +266,8 @@ func TestHostedUsageWakesDoNotRereadClosedSnapshots(t *testing.T) {
 	if st := h.state(finished.ID); st.ContextTokens == nil || *st.ContextTokens != 3400 {
 		t.Fatalf("reclosed usage reused stale cache: %+v", st)
 	}
-	if got := reads.Load(); got != before+1 {
-		t.Fatalf("new closure snapshot reads = %d, want %d", got, before+1)
+	if got := reads.Load(); got != before {
+		t.Fatalf("new closure should reuse live state without snapshot I/O: %d -> %d", before, got)
 	}
 }
 

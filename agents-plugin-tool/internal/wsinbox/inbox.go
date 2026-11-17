@@ -679,7 +679,7 @@ func writeEntryJournaled(dir string, entry Entry, journal bool) (string, error) 
 		return "", err
 	}
 	name := stamp + "-" + suffix + ".json"
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	tmp, err := wsstate.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return "", fmt.Errorf("create inbox temp file: %w", err)
 	}
@@ -717,7 +717,7 @@ func writeEntryJournaled(dir string, entry Entry, journal bool) (string, error) 
 		// identifies the staging file: its disappearance is the atomic commit
 		// point. A partial journal still has its stage and is discarded on replay.
 		pending = filepath.Join(journalDir, name+"--"+filepath.Base(tmpPath))
-		journalFile, err := os.OpenFile(pending, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		journalFile, err := wsstate.OpenFile(pending, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			remove(tmpPath)
 			return "", fmt.Errorf("journal inbox answer: %w", err)
@@ -773,7 +773,7 @@ func syncInboxDir(path string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	dir, err := os.Open(path)
+	dir, err := wsstate.Open(path)
 	if err != nil {
 		return err
 	}
@@ -1173,7 +1173,7 @@ func referencedAttachments(dir string) map[string]bool {
 		}
 	}
 	readHeldSide := func() {
-		des, err := os.ReadDir(dir)
+		des, err := wsstate.ReadDir(dir)
 		if err != nil {
 			return
 		}
@@ -1203,7 +1203,7 @@ func referencedAttachments(dir string) map[string]bool {
 // message write, keeping the attachments that write references.
 func SweepAttachments(dir string, now time.Time, maxAge time.Duration, keep ...string) {
 	attachDir := AttachmentsDir(dir)
-	des, err := os.ReadDir(attachDir)
+	des, err := wsstate.ReadDir(attachDir)
 	if err != nil {
 		return
 	}
@@ -1234,7 +1234,7 @@ func SweepAttachments(dir string, now time.Time, maxAge time.Duration, keep ...s
 
 // entryNames lists dir's entry file names, oldest first.
 func entryNames(dir string) ([]string, error) {
-	des, err := os.ReadDir(dir)
+	des, err := wsstate.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}

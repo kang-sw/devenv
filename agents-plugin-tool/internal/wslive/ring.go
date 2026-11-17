@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // The conversation ring keeps a session's last RingHistoryCap finished
@@ -219,7 +221,7 @@ func PrepareSummaryRing(entries []RingEntry) {
 }
 
 func writeRingRaw(dir, name string, raw []byte) error {
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	tmp, err := wsstate.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create conversation ring temp file: %w", err)
 	}
@@ -235,6 +237,7 @@ func writeRingRaw(dir, name string, raw []byte) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("write conversation ring entry: %w", err)
 	}
+	wsstate.CountFileIO("atomic_replace")
 	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("commit conversation ring entry: %w", err)
@@ -257,7 +260,7 @@ func trimRing(dir string) {
 
 // ringEntryNames lists dir's committed entry names, oldest first.
 func ringEntryNames(dir string) ([]string, error) {
-	dirEntries, err := os.ReadDir(dir)
+	dirEntries, err := wsstate.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +356,7 @@ func readRingEntry(dir, name string) (RingRecord, bool) {
 	if err != nil {
 		return RingRecord{}, false
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, name))
+	raw, err := wsstate.ReadFileOnce(filepath.Join(dir, name))
 	if err != nil {
 		return RingRecord{}, false
 	}

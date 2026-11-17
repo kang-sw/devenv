@@ -212,8 +212,9 @@ type Daemon struct {
 	live hostedSlots
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
 	// and the answer check's record and nudge).
-	inboxMu      sync.Mutex
-	answerReplay sync.Map // reply-id -> one active replay/retry loop
+	inboxMu       sync.Mutex
+	answerReplay  sync.Map        // reply-id -> one active replay/retry loop
+	answerPending map[string]bool // inboxMu; absent means not yet checked at startup
 	// acks runs the answer checks (ack_check.go), nil without a session
 	// index.
 	acks *ackChecker

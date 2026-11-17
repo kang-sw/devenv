@@ -3,11 +3,11 @@ package wsdashboard
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // SnapshotCache holds the parsed live snapshots of sessions (FileCache): a
@@ -39,7 +39,7 @@ type parsedSnapshot struct {
 // loadSnapshot reads and parses a snapshot file; an error when it does not
 // read or its snapshot does not parse.
 func loadSnapshot(path string) (parsedSnapshot, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := wsstate.ReadFileOnce(path)
 	if err != nil {
 		return parsedSnapshot{}, err
 	}

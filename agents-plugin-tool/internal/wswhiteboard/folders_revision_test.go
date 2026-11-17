@@ -51,7 +51,7 @@ func TestFolderCacheRevisionIdentity(t *testing.T) {
 	fresh(&a, nil)
 	// Evicting the slot must not restart an instance-local revision counter.
 	root := t.TempDir()
-	for i := 0; i < 64; i++ {
+	for i := 0; i < 512; i++ {
 		other := FolderStore{Dir: filepath.Join(root, fmt.Sprint(i))}
 		if _, err := other.Open(&State{}); err != nil {
 			t.Fatal(err)
