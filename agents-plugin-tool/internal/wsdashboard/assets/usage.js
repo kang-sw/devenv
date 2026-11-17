@@ -93,7 +93,7 @@
   }
   var chartSerial = 0;
   window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, weeklyAxis: weeklyAxis, mount: function (doc, rail) {
-    var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, popover = null, shown = false, place = function () {}, followUps = [];
+    var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, forceQueued = false, popover = null, shown = false, place = function () {}, followUps = [];
     function el(tag, cls, text) {
       var n = doc.createElement(tag); n.className = cls || "";
       if (text !== undefined) n.textContent = text;
@@ -295,7 +295,11 @@
       place();
     }
     function refresh(force) {
-      if (pending) return pending;
+      if (pending) {
+        if (force) forceQueued = true;
+        return pending;
+      }
+      forceQueued = false;
       pending = window.fetch("/rail/usage?history=1" + (force ? "&refresh=1" : ""), { credentials: "same-origin", cache: "no-store", headers: force ? { "X-WS-Usage-Refresh": "1" } : {} }).then(function (r) {
         if (!r.ok) throw new Error("usage unavailable");
         return r.json();
@@ -306,7 +310,12 @@
         data.entries.forEach(function (entry) { entry.status = "usage unavailable"; });
         drawPopover();
         if (popover && shown && !data.entries.length) popover.querySelector(".usage-details").textContent = t("unavailable");
-      }).then(function () { pending = null; });
+      }).then(function () {
+        pending = null;
+        // Opening during an ordinary poll still needs to start a probe. An
+        // already-forced request satisfies every open that joined it.
+        if (forceQueued && !force) return refresh(true);
+      });
       return pending;
     }
     // A forced refresh answers from the daemon's cache while its probe runs in

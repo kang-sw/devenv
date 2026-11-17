@@ -628,11 +628,15 @@ async function hostCases() {
   paged = false;
 
   let more = {}, updates = 0;
+  const historyUpdates = [];
   const closedCtx = vm.createContext({ boardQ: () => more ? [more] : [], paletteRows: () => ['older rows'],
+    paletteHistory: update => historyUpdates.push(update),
     loadClosed: () => ({ then(done) { more = null; done(true); } }) });
   vm.runInContext(block(dashboard, '  function paletteClosed(', '  function palettePick('), closedCtx);
-  closedCtx.paletteClosed(rows => { assert.deepEqual(plain(rows), ['older rows']); updates++; });
+  const update = rows => { assert.deepEqual(plain(rows), ['older rows']); updates++; };
+  closedCtx.paletteClosed(update);
   assert.equal(updates, 1, 'closed pagination updates the palette and stops at the last page');
+  assert.deepEqual(historyUpdates, [update], 'a loaded closed page hydrates history through the same update callback');
 
   // The file hooks: the session's fs routes with the literal query, list by root, refusals as {status, text}.
   const fetched = [], posts = [];

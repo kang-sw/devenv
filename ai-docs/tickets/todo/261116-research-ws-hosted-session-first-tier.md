@@ -267,6 +267,10 @@ resolved Open Questions are mapped by content.
   former OQ4 (native spawn removed by `--disallowedTools`, not left alongside)
   and former OQ7 (interaction with hiring, worker profiles and the depth cap).
   Implemented by `261117-feat-ws-agent-tools-mailbox-routing`.
+  Superseded by `261117-feat-ws-agent-tools-mailbox-routing` Decision 1
+  ((60)=a): `agent.stop` removed, `agent.interrupt` added; interrupt ends the
+  current turn and the child then sleeps by TTL. Permanent close is human-only
+  in the dashboard, cascading deepest-first.
 - (29)=ok (2026-11-17): native subagent removal extends to hosted workers;
   playbooks also state 'Never use {{NativeToolScheme}}' per harness
   (261117-feat-ws-hosted-prompt-assembly).

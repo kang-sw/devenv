@@ -532,7 +532,7 @@ func TestTopicGroupScopesItsCommands(t *testing.T) {
 // The old forms are refused, and the refusal of a body written straight in
 // wb:topic shows the form that replaced it.
 func TestTopicGroupRefusesTheOldForms(t *testing.T) {
-	newForm := `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`
+	newForm := `topic text goes in a named panel inside the group: <wb:topic name="..."><wb:panel name="state" recap="...">...</wb:panel></wb:topic>`
 	for name, tc := range map[string]struct {
 		in   string
 		want []string

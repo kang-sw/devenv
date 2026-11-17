@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d1800d862382a36f
 sage-review-completeness-reviewed: d1800d862382a36f
+completed: 2026-11-17
 ---
 
 # Preserve the viewed whiteboard panel with one scroll owner
@@ -725,3 +726,8 @@ cached Playwright env), lead-run at load average 7-10:
 of twelve updates (the first update or a panel-frame insert near the view).
 Cold first load is deferred per the owner gate. Phase 1 stays open pending
 the owner's on-screen acceptance.
+
+
+## Resolution (2026-11-17)
+
+Owner accepted Phase 1 on screen on 2026-11-17 and closed the ticket as done. Phase 1 landed on develop in ce6ad8116 and ebf923421. The bottom pending badge this ticket introduced was later replaced by the top-center badge under 261115-feat-ws-dashboard-board-reorder-hold-rewrite Decision (1100)=a. The open single 50-57 ms post-dispatch long task noted in the Phase 1 result is left as a known limit. The local checkpoint branch impl/develop/bling-fog-scorn (56e552f95, d3db25f5f) predates the dashboard.js split and its test files already exist on develop, so it carries no work this ticket still needs.

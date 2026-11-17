@@ -1267,6 +1267,9 @@
     // same numbers, so no fresh draft renumbers from 1 while a send is
     // unsent (outboxAcked). Drop every sent chip before clearing any card,
     // since clearing one re-syncs the rest.
+    // Flush the debounced draft while the composer still owns the send.
+    // Once it enters the outbox, saveDraft intentionally leaves it untouched.
+    saveDraft();
     pics.forEach(dropImg);
     ctext.value = ""; grow(); clearMentions();
     list.forEach(function (c) { dropChip(c.id); });
@@ -1376,6 +1379,36 @@
     if (cancel) mh.appendChild(cancel);
     el.appendChild(mh);
     bub.className = "bub";
+    // Match the server's achips presentation using only escaped DOM text.
+    // Structured-only sends have no free-text paragraph to confirm receipt.
+    var chips = doc.createElement("div"), back = m.back;
+    chips.className = "hchips";
+    function chip(cls, label, value, note, title) {
+      var el = doc.createElement("span"), head = doc.createElement("b");
+      el.className = "achip" + (cls ? " " + cls : "");
+      head.textContent = label;
+      el.appendChild(head);
+      if (value) {
+        var answer = doc.createElement("span");
+        answer.textContent = " " + value;
+        el.appendChild(answer);
+      }
+      if (note) {
+        var detail = doc.createElement("span");
+        detail.className = "anote";
+        detail.textContent = note;
+        el.appendChild(detail);
+      }
+      if (title || note) el.setAttribute("title", title || note);
+      chips.appendChild(el);
+    }
+    (back.chips || []).forEach(function (c) { chip("", "(" + c.id + ")", c.answer || "note", c.note); });
+    (back.topics || []).forEach(function (n) { chip("tchip", "[" + n.topic + "]", "", n.note); });
+    (back.mentions || []).forEach(function (n) { chip("mchip", "[" + n.topic + "]" + (n.id ? " (" + n.id + ")" : ""), "", n.text); });
+    (back.closeRequests || []).forEach(function (r) { chip("close-request-chip", wsT("js.closerequest.label", r.topic), "", r.reason); });
+    (back.picks || []).forEach(function (p) { chip("mchip pchip", p.selector, "", p.text, p.url + "\n" + p.selector + (p.text ? "\n" + p.text : "")); });
+    (back.consoles || []).forEach(function (c) { chip("mchip cchip", "console ×" + c.lines.length, "", c.url, c.url + "\n" + c.lines.join("\n")); });
+    if (chips.firstChild) bub.appendChild(chips);
     if (m.back.text) {
       // The server renders the text as markdown: a paragraph is the
       // nearest plain-text shape.

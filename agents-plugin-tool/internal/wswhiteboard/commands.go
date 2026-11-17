@@ -23,9 +23,9 @@ var grammar = wsxmlcmd.Grammar{
 	Prefix:              "wb:",
 	RefuseFieldOpenings: true,
 	LiteralCode:         true,
-	// wb:topic once took the body itself; the hint shows the form that
-	// replaced it to a caller still writing the old one.
-	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Extras: []string{"label", "tickets"}, Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},
+	// wb:topic once took the body itself; the hint shows the current form
+	// to a caller still writing the old one.
+	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Extras: []string{"label", "tickets"}, Hint: `topic text goes in a named panel inside the group: <wb:topic name="..."><wb:panel name="state" recap="...">...</wb:panel></wb:topic>`},
 	Commands: map[string]wsxmlcmd.Spec{
 		"body":      {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"replace_all"}, Fields: []string{"old", "new"}, Scoped: true},

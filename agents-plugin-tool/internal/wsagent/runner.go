@@ -171,6 +171,9 @@ type Options struct {
 	stateInboxRead func(string)
 	// closedSnapshotRead observes closed/handed-off snapshot reads in tests.
 	closedSnapshotRead func(string)
+	// sendAdmitting and autoCloseLocking fence lifecycle races in tests.
+	sendAdmitting    func(string)
+	autoCloseLocking func(string)
 }
 
 // Runner hosts the agent conversations of one dashboard daemon.
@@ -1020,9 +1023,21 @@ func (r *Runner) Send(id, text string) (State, error) {
 }
 
 func (r *Runner) send(id, text string) (State, error) {
-	c, err := r.resumePiChild(id)
+	c, err := r.open(id)
 	if err != nil {
-		return State{}, err
+		// Keep revival and admission in one close fence: startup sees the
+		// previous done turn and can schedule auto-close before this write.
+		// Open sends do not take resumeMu, so a slow manual close still
+		// refuses them promptly rather than blocking behind its cascade.
+		r.resumeMu.Lock()
+		defer r.resumeMu.Unlock()
+		c, err = r.resumePiChild(id)
+		if err != nil {
+			return State{}, err
+		}
+	}
+	if r.opts.sendAdmitting != nil {
+		r.opts.sendAdmitting(id)
 	}
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
@@ -1259,6 +1274,9 @@ func (r *Runner) autoCloseLater(id string) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
+		if r.opts.autoCloseLocking != nil {
+			r.opts.autoCloseLocking(id)
+		}
 		r.resumeMu.Lock()
 		defer r.resumeMu.Unlock()
 		if _, closed, err := r.closeOneIf(id, true); err != nil || !closed {

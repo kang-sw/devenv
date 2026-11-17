@@ -120,7 +120,7 @@ function served() {
   tail = more(1, 3); return [open, ack, no, closed, tail];
 }
 var store = {};
-boot(store, served, {wide: true});
+boot(store, served, {wide: true, kinds: ["preview"]});
 function radio(pop) { return page.W.toolbar().querySelector((pop ? ".board-state-pop" : ".board-state-inline") + ' [data-filter="asks"]'); }
 function count(pop) { return radio(pop).querySelector(".board-state-count").textContent; }
 function visible(n) { return !n.hasAttribute("data-state-filtered"); }
