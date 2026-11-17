@@ -33,10 +33,15 @@ related:
 
 ## Child Tickets
 
-- `261116-feat-orchestration-profile-foundation` - todo; profile-aware file selection, the `workflow.profile`
+- `261117-refactor-playbook-compression` - todo; the owner-led diet of the
+  lead-side playbooks this epic splits, run before foundation Phase 2. (77)
+- `261116-feat-orchestration-profile-foundation` - ready (Phase 1 done); profile-aware file selection, the `workflow.profile`
   knob with the harness whitelist and its set-time warning, the
   `sublead-protocol` include, the workflow manual core/sub-lead split, the
   sub-lead whiteboard status path, the per-host nested-spawn check.
+- `261117-feat-role-scoped-workflow-context` - todo; role-scoped manual
+  modules and subagent-visible notes and agenda, discussed before foundation
+  Phase 2 (22).
 - Planned: run - `ticket-runner` and `integrator`; `lead-run` direct and
   orchestrate entries; goal-run removal.
 - Planned: review - `review-runner`, reusing `integrator`.
@@ -111,6 +116,18 @@ related:
   `261116-research-ws-hosted-session-first-tier`. Rejected: `ticket-runner`
   absorbing the worker role to keep a three-level chain; leaf-only worker
   children. (68)
+- **Sub-lead peer mail.** Once `ws/agent.*` mailbox routing lands
+  (`261117-feat-ws-agent-tools-mailbox-routing`), a sub-lead may mail another
+  sub-lead only at an address the lead handed it in its task block, and only
+  for facts and technical coordination (for example `review-runner` sending a
+  fix request to the sleeping `ticket-runner` that holds the context, or
+  `integrator` asking a parallel runner about a merge interaction). Peer mail
+  never carries `approved:` or a user ask; `approved:` is honored only from
+  the sub-lead's parent, which the lineage-computed relation makes checkable;
+  the sub-lead summarizes peer exchanges in its `result:`. The run and review
+  children design the channel; foundation Phase 2's `sublead-protocol` states
+  the parent-only `approved:` rule. (76)=b. Rejected: star-only routing
+  through the lead; an open mesh between sub-leads.
 - **Sub-lead whiteboard path.** The foundation child gives a sub-lead key a
   write path for status log lines and panels on its top-level lead's board,
   and none for asks; the board and its nudges are keyed to a top-level lead
@@ -139,5 +156,5 @@ related:
   `ws/agent.spawn` work of `261116-research-ws-hosted-session-first-tier`
   lands, or the user abandons the profile split. (70)
 - Deferred: a `bootstrapper` block for `lead-bootstrap`; a build block for
-  `lead-coauthor-paged-document`; compressing the lead-kept playbooks to the
-  word budget.
+  `lead-coauthor-paged-document`; compressing the lead-kept playbooks outside
+  `261117-refactor-playbook-compression`'s scope to the word budget. (77)

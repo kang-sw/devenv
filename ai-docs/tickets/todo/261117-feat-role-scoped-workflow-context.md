@@ -3,6 +3,7 @@ title: "역할별 workflow manual 모듈과 subagent에게 보이는 note·agend
 parent: 261116-epic-lead-orchestration-profile
 related:
   261116-feat-orchestration-profile-foundation: decision (47) gives every parented key the base manual; this ticket reopens it
+  261117-refactor-playbook-compression: prerequisite - compresses the manual first (77)
   261117-bug-pi-ticket-worker-profile-tools: lets a Pi worker call workflow_manual with its own key, the entry point role-scoped context would use
 ---
 
@@ -39,6 +40,14 @@ Current state (survey, 2026-11-17):
   is not T0; a default of hidden-from-subagents fails closed under that strip.
 - Agenda: per session key; a child key's agenda starts empty and nothing
   passes the lead's agenda to children.
+
+Owner direction (2026-11-17 21:48, (75)), not yet a decision: a role's
+manual could be the core plus usage guides attached per exposed tool - the
+uses a schema cannot express, such as a worktree guide when the worktree
+tools are open. The worktree release rule such a guide carries already
+exists: a non-lead caller releases only as the holder or its lease parent
+(`261116-feat-ws-subagent-worktree-lease` (1191)). This work starts from the
+manual as compressed by `261117-refactor-playbook-compression` (77).
 
 Decisions are settled in discussion before this ticket gains phases.
 

@@ -350,7 +350,9 @@ Verification:
 
 ### Phase 2: Sub-lead protocol and workflow manual split
 
-Written by the lead with the user in session (54).
+Written by the lead with the user in session (54). Starts after
+`261117-refactor-playbook-compression` has compressed the text it splits and
+folds (77).
 
 - `sublead-protocol` include: the report block of epic decision (01) -
   `status: ask-user | done | blocked`, `ask:` items in the workflow manual's
@@ -358,7 +360,8 @@ Written by the lead with the user in session (54).
   approval|none · inputs: <...>` for joints, `result:` / `blocker:` - and the
   executor guard of (02): an approval-gated action runs only with the user's
   words relayed as `approved:` in the task block, else the sub-lead returns
-  `ask-user`. (62) auto-confirmed (review)
+  `ask-user`. (62) auto-confirmed (review) The guard honors `approved:` only
+  from the sub-lead's parent, never from peer mail (epic (76)=b).
 - Workflow manual split into a lead core and a sub-lead part as includes:
   `lead-workflow-manual.md` includes both (the `direct` manual, unchanged in
   content); `lead-workflow-manual.orchestrate.md` includes the core plus the
