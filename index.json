@@ -487,7 +487,14 @@
       "registered_at": "2026-11-17T09:48:35Z"
     },
     "261117-feat-ws-mailbox-memory-first-store": {
-      "registered_at": "2026-11-17T08:21:40Z"
+      "registered_at": "2026-11-17T08:21:40Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "track/agent-v2",
+        "phase": "active",
+        "touched_at": "2026-11-17T13:53:33Z"
+      }
     },
     "261117-feat-ws-single-session-holder": {
       "registered_at": "2026-11-17T08:21:19Z"
