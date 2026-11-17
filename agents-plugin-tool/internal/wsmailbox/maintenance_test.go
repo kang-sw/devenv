@@ -14,10 +14,12 @@ import (
 )
 
 func TestQueueChangesPublishOnlySuccessfulQueueMutations(t *testing.T) {
+	paths := Paths{State: wsstate.Options{CacheHome: t.TempDir()}}
+	ms := paths.Store()
 	path := filepath.Join(t.TempDir(), storeFileName)
 	sub := wswake.Mailbox.SubscribeStores()
 	defer sub.Close()
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := ms.WithLock(path, func(store *StoreFile) error {
 		store.Presence["owner"] = Presence{LastSeen: "heartbeat"}
 		return nil
 	}); err != nil {
@@ -27,7 +29,7 @@ func TestQueueChangesPublishOnlySuccessfulQueueMutations(t *testing.T) {
 		t.Fatalf("presence-only write published queues: %v", got)
 	}
 	message := Envelope{ReplyTo: "id:sender", Content: "message", SentAt: time.Now().Format(time.RFC3339)}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := ms.WithLock(path, func(store *StoreFile) error {
 		store.Queues = AppendQueue(store.Queues, "recipient", message)
 		return nil
 	}); err != nil {
@@ -37,20 +39,23 @@ func TestQueueChangesPublishOnlySuccessfulQueueMutations(t *testing.T) {
 		t.Fatalf("queue change not published: %v", got)
 	}
 	failure := errors.New("abort")
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := ms.WithLock(path, func(store *StoreFile) error {
 		store.Queues["recipient"][0].Content = "not committed"
 		return failure
 	}); !errors.Is(err, failure) {
 		t.Fatal(err)
 	}
-	if err := WithLock(path, func(*StoreFile) error { return nil }); err != nil {
+	if err := ms.WithLock(path, func(*StoreFile) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if got := sub.TakeStores(); len(got) != 0 {
 		t.Fatalf("failed/unchanged write published: %v", got)
 	}
-	reply := filepath.Join(t.TempDir(), replyRegistryName)
-	if err := WithReplyLock(reply, func(store *ReplyStore) error {
+	reply, err := paths.ReplyRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.WithReplyLock(func(store *ReplyStore) error {
 		store.Entries["sender"] = ReplyEntry{LastSeen: "heartbeat"}
 		return nil
 	}); err != nil {
@@ -59,7 +64,7 @@ func TestQueueChangesPublishOnlySuccessfulQueueMutations(t *testing.T) {
 	if len(sub.TakeStores()) != 0 {
 		t.Fatal("reply presence-only write published queues")
 	}
-	if err := PostSystem(reply, "sender", "", "report", time.Now()); err != nil {
+	if err := ms.PostSystem("sender", "", "report", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := sub.TakeStores(); !reflect.DeepEqual(got, []string{reply}) {
@@ -93,7 +98,7 @@ func TestUndeliveredStoreDeadlineAuthorityAndMissingSources(t *testing.T) {
 	if _, _, err := sweep.Sweep(QueueStore{Path: foreign}, now, time.Minute); err == nil {
 		t.Fatal("forged store admitted")
 	}
-	if err := WithReplyLock(sweep.reply, func(store *ReplyStore) error {
+	if err := paths.Store().WithReplyLock(func(store *ReplyStore) error {
 		store.Queues = AppendQueue(store.Queues, "exited", Envelope{ReplyTo: "id:sender", SentAt: now.Format(time.RFC3339), Content: "pending"})
 		return nil
 	}); err != nil {
@@ -113,13 +118,18 @@ func TestUndeliveredStoreDeadlineAuthorityAndMissingSources(t *testing.T) {
 	if posted, _, err := restarted.Sweep(target, now.Add(time.Hour), time.Minute); err != nil || posted != 0 {
 		t.Fatalf("durable receipt replayed: %d %v", posted, err)
 	}
-	store, _ := LoadReplyStore(sweep.reply)
+	store, _ := paths.Store().LoadReply()
 	if len(store.Queues["sender"]) != 1 || !store.Queues["exited"][0].UndeliveredNotified {
 		t.Fatal("notice/receipt missing or original mail consumed")
 	}
 }
 
-func TestUndeliveredFailedNoticeDoesNotDelayAnEarlierFutureDeadline(t *testing.T) {
+// TestUndeliveredNoticeReachesAStoreWhoseFileIsUnwritable pins that a
+// notice lands in the memory store even when its destination's legacy file
+// could not be written (the config home is a file here): the previous
+// version's failed-destination retry has no file write left to fail, and
+// the sweep still reports the earlier future deadline.
+func TestUndeliveredNoticeReachesAStoreWhoseFileIsUnwritable(t *testing.T) {
 	base := t.TempDir()
 	blocked := filepath.Join(base, "blocked")
 	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
@@ -135,9 +145,9 @@ func TestUndeliveredFailedNoticeDoesNotDelayAnEarlierFutureDeadline(t *testing.T
 		t.Fatal("worktree target not admitted")
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	if err := WithLock(target.Path, func(store *StoreFile) error {
+	if err := paths.Store().WithLock(target.Path, func(store *StoreFile) error {
 		store.Queues["recipient"] = []Envelope{
-			{From: "sender@machine", Content: "failed destination", SentAt: now.Add(-4 * time.Minute).Format(time.RFC3339)},
+			{From: "sender@machine", Content: "machine sender", SentAt: now.Add(-4 * time.Minute).Format(time.RFC3339)},
 			{ReplyTo: "id:sender", Content: "next deadline", SentAt: now.Add(-3*time.Minute + 5*time.Second).Format(time.RFC3339)},
 		}
 		return nil
@@ -145,18 +155,18 @@ func TestUndeliveredFailedNoticeDoesNotDelayAnEarlierFutureDeadline(t *testing.T
 		t.Fatal(err)
 	}
 	posted, next, err := sweep.Sweep(target, now, 3*time.Minute)
-	if err == nil || posted != 0 || !next.Equal(now.Add(5*time.Second)) {
-		t.Fatalf("mixed retry/future: posted=%d next=%v err=%v", posted, next, err)
+	if err != nil || posted != 1 || !next.Equal(now.Add(5*time.Second)) {
+		t.Fatalf("first sweep: posted=%d next=%v err=%v", posted, next, err)
 	}
-	posted, _, err = sweep.Sweep(target, next, 3*time.Minute)
-	if err == nil || posted != 1 {
-		t.Fatalf("future notice delayed by other failure: %d %v", posted, err)
+	machine, _, queue, err := paths.Store().NamedQueue(sweep.machine, "sender")
+	if err != nil || len(queue) != 1 {
+		t.Fatalf("machine notice: presence=%v queue=%+v err=%v", machine, queue, err)
 	}
-	if err := os.Remove(blocked); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(sweep.machine); err == nil {
+		t.Fatalf("the notice wrote the machine store file")
 	}
-	posted, next, err = sweep.Sweep(target, now.Add(time.Minute), 3*time.Minute)
+	posted, next, err = sweep.Sweep(target, next, 3*time.Minute)
 	if err != nil || posted != 1 || !next.IsZero() {
-		t.Fatalf("failed destination recovery: %d %v %v", posted, next, err)
+		t.Fatalf("second sweep: posted=%d next=%v err=%v", posted, next, err)
 	}
 }

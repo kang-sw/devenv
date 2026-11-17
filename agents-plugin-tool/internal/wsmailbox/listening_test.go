@@ -14,12 +14,9 @@ func TestListeningMarkerWriteReadClear(t *testing.T) {
 		t.Fatalf("WriteListeningMarker: %v", err)
 	}
 
-	path, err := ListeningMarkerPath(marker.SessionKey)
-	if err != nil {
-		t.Fatalf("ListeningMarkerPath: %v", err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("marker file not written at %s: %v", path, err)
+	// The marker lives in the store: no per-marker file is written.
+	if _, err := os.Stat(filepath.Join(os.Getenv("WS_CACHE_HOME"), "mailbox-listening")); !os.IsNotExist(err) {
+		t.Fatalf("a listening marker file dir was created: err=%v", err)
 	}
 
 	got, ok, err := ReadListeningMarker(marker.SessionKey)
@@ -35,9 +32,6 @@ func TestListeningMarkerWriteReadClear(t *testing.T) {
 
 	if err := ClearListeningMarker(marker.SessionKey, marker.PID); err != nil {
 		t.Fatalf("ClearListeningMarker: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("marker file still present after clear: err=%v", err)
 	}
 	if _, ok, err := ReadListeningMarker(marker.SessionKey); err != nil || ok {
 		t.Fatalf("ReadListeningMarker after clear: ok=%v err=%v, want ok=false err=nil", ok, err)
@@ -68,31 +62,6 @@ func TestClearListeningMarkerLeavesAnotherOwnersMarker(t *testing.T) {
 	}
 }
 
-// TestClearListeningMarkerLeavesUnparseableMarker pins that a marker whose
-// owner cannot be established is not removed: the clear reports the parse
-// error and the file stays for the next WriteListeningMarker to replace.
-func TestClearListeningMarkerLeavesUnparseableMarker(t *testing.T) {
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	path, err := ListeningMarkerPath("amber-tide-fox")
-	if err != nil {
-		t.Fatalf("ListeningMarkerPath: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := ClearListeningMarker("amber-tide-fox", os.Getpid()); err == nil {
-		t.Fatalf("ClearListeningMarker on an unparseable marker succeeded, want the parse error")
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("unparseable marker removed by clear: err=%v", err)
-	}
-}
-
 func TestClearListeningMarkerIsNoOpWhenNeverArmed(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
@@ -101,12 +70,11 @@ func TestClearListeningMarkerIsNoOpWhenNeverArmed(t *testing.T) {
 	}
 }
 
-// TestListeningMarkerPathRejectsPathTraversal pins the path-safety guard a
-// round-1 correctness review flagged Critical: an unvalidated session_key
-// interpolated into a filename lets a caller escape the listening directory
-// (verified live: "../../escaped/pwned" wrote a marker one level above the
-// cache root before this guard existed).
-func TestListeningMarkerPathRejectsPathTraversal(t *testing.T) {
+// TestListeningMarkerRejectsInvalidSessionKey pins the session_key guard,
+// once the marker file name's path-safety check (a round-1 review found
+// "../../escaped/pwned" escaping the listening directory) and kept as the
+// key's validation now that markers live in the store.
+func TestListeningMarkerRejectsInvalidSessionKey(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	for _, bad := range []string{
@@ -117,11 +85,11 @@ func TestListeningMarkerPathRejectsPathTraversal(t *testing.T) {
 		"",
 		"has a space",
 	} {
-		if _, err := ListeningMarkerPath(bad); err == nil {
-			t.Fatalf("ListeningMarkerPath(%q) succeeded, want a path-safety rejection", bad)
+		if _, _, err := ReadListeningMarker(bad); err == nil {
+			t.Fatalf("ReadListeningMarker(%q) succeeded, want a rejection", bad)
 		}
 		if err := WriteListeningMarker(ListeningMarker{SessionKey: bad}); err == nil {
-			t.Fatalf("WriteListeningMarker with session_key %q succeeded, want a path-safety rejection", bad)
+			t.Fatalf("WriteListeningMarker with session_key %q succeeded, want a rejection", bad)
 		}
 	}
 }

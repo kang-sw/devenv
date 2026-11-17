@@ -224,7 +224,7 @@ func TestHostedServersReadOnlyTheirOwnEnvironment(t *testing.T) {
 	if filepath.Dir(path) != alpha.configHome {
 		t.Fatalf("alpha's machine store = %s, want under %s", path, alpha.configHome)
 	}
-	store, err := wsmailbox.Load(path)
+	store, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: alpha.cacheHome}}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestHostedServersReadOnlyTheirOwnEnvironment(t *testing.T) {
 		t.Fatalf("presence PID = %d, want owner PID %d (process %d)", presence.PID, os.Getppid(), os.Getpid())
 	}
 	if procPath, err := wsmailbox.MachinePath(); err == nil {
-		if procStore, err := wsmailbox.Load(procPath); err == nil {
+		if procStore, err := (wsmailbox.Paths{}).Store().Load(procPath); err == nil {
 			if _, leaked := procStore.Presence["alpha"]; leaked {
 				t.Fatalf("alpha's presence landed in the process config home's store %s", procPath)
 			}
@@ -328,7 +328,7 @@ func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		if err := worktreeStoreOf(path).WithLock(path, func(store *wsmailbox.StoreFile) error {
 			if store.Presence == nil {
 				store.Presence = map[string]wsmailbox.Presence{}
 			}
@@ -359,7 +359,7 @@ func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
 		if identity.Name == "stale-stem" {
 			t.Fatal("the stale same-PID auto record was adopted")
 		}
-		if p := loadPresence(t, path, identity.Name); p.Owner != key {
+		if p := loadPresenceIn(t, worktreeStoreOf(path), path, identity.Name); p.Owner != key {
 			t.Fatalf("own record = %+v, want owner %s", p, key)
 		}
 	})
@@ -371,7 +371,7 @@ func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
 		opts, path := seed(t, root, map[string]string{envMailbox: "amber@worktree"}, record("amber", stale, false))
 		s := NewServerWithOptions(opts)
 		key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
-		p := loadPresence(t, path, "amber")
+		p := loadPresenceIn(t, worktreeStoreOf(path), path, "amber")
 		if p.Owner != key || p.StartedAt == stale {
 			t.Fatalf("record after login = %+v, want owner %s and a new start", p, key)
 		}
@@ -396,7 +396,7 @@ func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
 			if got := s.mailboxIdentityResolved().Name; got != "alpha-stem" {
 				t.Fatalf("server %d adopted %q, want alpha-stem", i, got)
 			}
-			store, err := wsmailbox.Load(path)
+			store, err := worktreeStoreOf(path).Load(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -450,7 +450,7 @@ func TestHostedReconnectKeepsMailboxOwnershipAndAutoStem(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			before := loadPresence(t, path, identity.Name)
+			before := loadPresenceIn(t, worktreeStoreOf(path), path, identity.Name)
 			if before.Owner != key || before.PID != os.Getppid() {
 				t.Fatalf("presence after login = %+v, want owner %s pid %d", before, key, os.Getppid())
 			}
@@ -468,7 +468,7 @@ func TestHostedReconnectKeepsMailboxOwnershipAndAutoStem(t *testing.T) {
 			if again.Name != identity.Name || again.Scope != identity.Scope {
 				t.Fatalf("second server identity = %#v, want the first's %#v", again, identity)
 			}
-			after := loadPresence(t, path, identity.Name)
+			after := loadPresenceIn(t, worktreeStoreOf(path), path, identity.Name)
 			if after.Owner != key || after.PID != os.Getppid() || after.StartedAt != before.StartedAt {
 				t.Fatalf("presence after the reconnect = %+v, want owner %s, pid %d, start %s", after, key, os.Getppid(), before.StartedAt)
 			}
@@ -484,7 +484,7 @@ func TestHostedReconnectKeepsMailboxOwnershipAndAutoStem(t *testing.T) {
 			if second.mailboxHasConflict() {
 				t.Fatal("the owner's own record was taken for a conflict")
 			}
-			if store, err := wsmailbox.Load(path); err == nil {
+			if store, err := worktreeStoreOf(path).Load(path); err == nil {
 				for name, p := range store.Presence {
 					if p.PID == os.Getppid() && name != identity.Name {
 						t.Fatalf("a second record %q was minted for the same owner: %+v", name, store.Presence)
@@ -493,4 +493,10 @@ func TestHostedReconnectKeepsMailboxOwnershipAndAutoStem(t *testing.T) {
 			}
 		})
 	}
+}
+
+// worktreeStoreOf is the mailbox store of the cache root a worktree-scope
+// store path lies under (<cache>/proj/<id>/mailbox.json).
+func worktreeStoreOf(path string) wsmailbox.Store {
+	return wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(filepath.Dir(filepath.Dir(path)))}}.Store()
 }

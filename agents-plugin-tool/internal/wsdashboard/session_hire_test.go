@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"encoding/json"
 	"errors"
+	"github.com/gofrs/flock"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -136,11 +137,7 @@ func requestHiring(t *testing.T, d *Daemon, id string) HireProposal {
 }
 func hireMails(t *testing.T, d *Daemon, id string) []wsmailbox.Envelope {
 	t.Helper()
-	path, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(d.dir)}}).ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := wsmailbox.LoadReplyStore(path)
+	store, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(d.dir)}}).Store().LoadReply()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,12 +617,18 @@ func TestHiringOutcomeWriteFailureRetriesFromDisk(t *testing.T) {
 	f := startPageFixture(t, hireRegistryFixture)
 	enableHiring(t, f.d, "livesession")
 	p := requestHiring(t, f.d, "livesession")
-	path, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(f.dir)}}).ReplyRegistry()
+	// The mail write fails while another process holds the mailbox ring.
+	cache, err := wsstate.CacheRoot(wsstate.Options{CacheHome: filepath.Dir(f.dir)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.Mkdir(path, 0700); err != nil {
+	ringDir := filepath.Join(cache, wsmailbox.RingDirName)
+	if err = os.MkdirAll(ringDir, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	holder := flock.New(filepath.Join(ringDir, "lock"))
+	if locked, err := holder.TryLock(); err != nil || !locked {
+		t.Fatalf("hold the mailbox ring: %v %v", locked, err)
 	}
 	res := hirePost(f.d, hireRoute+"/"+p.ID+"/reject", `{"reason":"no longer needed"}`)
 	if res.Code != 500 {
@@ -639,7 +642,7 @@ func TestHiringOutcomeWriteFailureRetriesFromDisk(t *testing.T) {
 	if proposals[0].Status != "rejected" || proposals[0].Notified {
 		t.Fatalf("lost outcome: %+v", proposals)
 	}
-	if err = os.Remove(path); err != nil {
+	if err = holder.Unlock(); err != nil {
 		t.Fatal(err)
 	}
 	d, err := StartDaemon(DaemonOptions{Dir: f.dir, Sessions: f.src, noGitBadge: true, PollInterval: time.Hour})

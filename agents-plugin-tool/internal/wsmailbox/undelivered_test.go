@@ -45,7 +45,7 @@ func TestSweepUndelivered(t *testing.T) {
 				} else {
 					msg.From = sender
 				}
-				writeSweepQueue(t, source, source == reply, "recipient", []Envelope{msg, {Content: "system", SentAt: msg.SentAt}})
+				writeSweepQueue(t, p, source, source == reply, "recipient", []Envelope{msg, {Content: "system", SentAt: msg.SentAt}})
 				for _, age := range []time.Duration{2 * time.Minute, 3 * time.Minute, 20 * time.Minute} {
 					posted, err := p.SweepUndelivered(sent.Add(age), 3*time.Minute)
 					want := 0
@@ -56,11 +56,11 @@ func TestSweepUndelivered(t *testing.T) {
 						t.Fatalf("age %v: posted %d, err %v", age, posted, err)
 					}
 				}
-				queue := readSweepQueue(t, source, source == reply, "recipient")
+				queue := readSweepQueue(t, p, source, source == reply, "recipient")
 				if len(queue) != 2 || !queue[0].UndeliveredNotified || queue[1].UndeliveredNotified {
 					t.Fatalf("original mail changed or system mail marked: %+v", queue)
 				}
-				notices := readSweepQueue(t, destination, destination == reply, destName)
+				notices := readSweepQueue(t, p, destination, destination == reply, destName)
 				if len(notices) != 1 || notices[0].From != "" || notices[0].ReplyTo != "" {
 					t.Fatalf("notices: %+v", notices)
 				}
@@ -74,7 +74,7 @@ func TestSweepUndelivered(t *testing.T) {
 					t.Fatalf("notice contains more than first line: %s", text)
 				}
 				// A late claim removes the original without a follow-up notice.
-				writeSweepQueue(t, source, source == reply, "recipient", nil)
+				writeSweepQueue(t, p, source, source == reply, "recipient", nil)
 				if posted, err := p.SweepUndelivered(sent.Add(time.Hour), 3*time.Minute); err != nil || posted != 0 {
 					t.Fatalf("late read: %d, %v", posted, err)
 				}
@@ -87,18 +87,18 @@ func TestSweepClaimBeforeThreshold(t *testing.T) {
 	p := sweepTestPaths(t)
 	reply, _ := p.ReplyRegistry()
 	sent := time.Now().UTC()
-	writeSweepQueue(t, reply, true, "recipient", []Envelope{{ReplyTo: "id:sender", Content: "read me", SentAt: sent.Format(time.RFC3339)}})
+	writeSweepQueue(t, p, reply, true, "recipient", []Envelope{{ReplyTo: "id:sender", Content: "read me", SentAt: sent.Format(time.RFC3339)}})
 	if posted, err := p.SweepUndelivered(sent.Add(time.Minute), 3*time.Minute); err != nil || posted != 0 {
 		t.Fatalf("early sweep: %d, %v", posted, err)
 	}
 	// A claim's durable unread signal is deletion from the locked queue.
-	if err := WithReplyLock(reply, func(s *ReplyStore) error { delete(s.Queues, "recipient"); return nil }); err != nil {
+	if err := p.Store().WithReplyLock(func(s *ReplyStore) error { delete(s.Queues, "recipient"); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if posted, err := p.SweepUndelivered(sent.Add(5*time.Minute), 3*time.Minute); err != nil || posted != 0 {
 		t.Fatalf("claimed mail: %d, %v", posted, err)
 	}
-	if queue := readSweepQueue(t, reply, true, "sender"); len(queue) != 0 {
+	if queue := readSweepQueue(t, p, reply, true, "sender"); len(queue) != 0 {
 		t.Fatalf("unexpected notice: %+v", queue)
 	}
 }
@@ -112,7 +112,7 @@ func TestSweepSelfMailAtQueueLimit(t *testing.T) {
 		queue[i] = Envelope{Content: "system", SentAt: sent.Format(time.RFC3339)}
 	}
 	queue[0].From = "id:self"
-	writeSweepQueue(t, reply, true, "self", queue)
+	writeSweepQueue(t, p, reply, true, "self", queue)
 	if posted, err := p.SweepUndelivered(time.Now(), 3*time.Minute); err != nil || posted != 1 {
 		t.Fatalf("self mail: %d, %v", posted, err)
 	}
@@ -149,29 +149,29 @@ func TestSweepKeepsSuccessfulNoticeWhenAnotherDestinationFails(t *testing.T) {
 	}
 }
 
-func writeSweepQueue(t *testing.T, path string, reply bool, name string, queue []Envelope) {
+func writeSweepQueue(t *testing.T, p Paths, path string, reply bool, name string, queue []Envelope) {
 	t.Helper()
 	var err error
 	if reply {
-		err = WithReplyLock(path, func(s *ReplyStore) error { s.Queues[name] = queue; return nil })
+		err = p.Store().WithReplyLock(func(s *ReplyStore) error { s.Queues[name] = queue; return nil })
 	} else {
-		err = WithLock(path, func(s *StoreFile) error { s.Queues[name] = queue; return nil })
+		err = p.Store().WithLock(path, func(s *StoreFile) error { s.Queues[name] = queue; return nil })
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func readSweepQueue(t *testing.T, path string, reply bool, name string) []Envelope {
+func readSweepQueue(t *testing.T, p Paths, path string, reply bool, name string) []Envelope {
 	t.Helper()
 	if reply {
-		s, err := LoadReplyStore(path)
+		s, err := p.Store().LoadReply()
 		if err != nil {
 			t.Fatal(err)
 		}
 		return s.Queues[name]
 	}
-	s, err := Load(path)
+	s, err := p.Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}

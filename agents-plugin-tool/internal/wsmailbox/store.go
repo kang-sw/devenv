@@ -9,15 +9,22 @@
 // mailbox store and its note store always co-locate without introducing a
 // new root-resolution path.
 //
+// The live state is the memory-first store (memstore.go, restored from the
+// ring in ring.go); a scope's mailbox.json path stays the key of its named
+// store, and the file itself is the layout a previous version reads, written
+// only by the legacy import and export (legacy.go) through LoadFile and
+// WithFileLock below.
+//
 // This package is a pure storage layer: it knows how to resolve paths and
-// perform locked read-modify-write on the JSON file, but nothing about
-// session keys, ferrule, or MCP tool wiring. internal/mcp's mailbox_*.go
+// run transactions on the store, but nothing about session keys, ferrule,
+// or MCP tool wiring. internal/mcp's mailbox_*.go
 // files own that policy layer, mirroring wsnote/internal-mcp's own split.
 package wsmailbox
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,9 +100,12 @@ type Envelope struct {
 // per-name message queues, both keyed by the bare name (no "@scope"
 // suffix — the file itself is already scope-specific).
 type StoreFile struct {
-	SchemaVersion int                   `json:"schema_version"`
-	Presence      map[string]Presence   `json:"presence,omitempty"`
-	Queues        map[string][]Envelope `json:"queues,omitempty"`
+	SchemaVersion int `json:"schema_version"`
+	// ExportMark is set only on a file the memory store wrote (legacy.go);
+	// a previous version's whole-file rewrite drops it.
+	ExportMark string                `json:"memory_store_export,omitempty"`
+	Presence   map[string]Presence   `json:"presence,omitempty"`
+	Queues     map[string][]Envelope `json:"queues,omitempty"`
 }
 
 // MaxQueueLen bounds a single name's queue: a never-draining name's queue
@@ -183,13 +193,14 @@ func sibling(notesPath string) string {
 	return filepath.Join(filepath.Dir(notesPath), storeFileName)
 }
 
-// Load reads the store file at path. A missing file returns an empty,
-// non-nil StoreFile, mirroring wsnote.Load's "no file yet" contract. Load
-// never locks: writes go through temp+atomic-rename (see WithLock), so a
+// LoadFile reads the legacy store file at path. A missing file returns an
+// empty, non-nil StoreFile. Live reads go through Store; this serves the
+// import, the export, and fixtures. LoadFile never locks: writes go through
+// temp+atomic-rename (see WithFileLock), so a
 // concurrent reader observes either the old or the new whole file, never a
 // partial one. On Windows the read retries a transient sharing violation
 // against an in-flight replace (see readFile).
-func Load(path string) (StoreFile, error) {
+func LoadFile(path string) (StoreFile, error) {
 	raw, err := readFile(path)
 	if os.IsNotExist(err) {
 		return emptyStore(), nil
@@ -218,13 +229,12 @@ func decodeStore(path string, raw []byte) (StoreFile, error) {
 	return store, nil
 }
 
-// WithLock performs an flock-serialized read-modify-write on the store file
-// at path: load the current content, run fn against it, and atomically
-// persist the result via temp-write + rename. This is the sole mutation
-// path for presence self-registration/heartbeat, owner rebind, send
-// (append to a queue), and recv (drain a queue). Mirrors wsnote/store.go's
-// rmw, generalized to the typed StoreFile shape.
-func WithLock(path string, fn func(*StoreFile) error) error {
+// WithFileLock performs an flock-serialized read-modify-write on the legacy
+// store file at path: load the current content, run fn against it, and
+// atomically persist the result via temp-write + rename. The flock is the
+// one a previous ws-mcp version takes, so the import and export interleave
+// safely with its writers. Live writes go through Store.
+func WithFileLock(path string, fn func(*StoreFile) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create mailbox store dir: %w", err)
 	}
@@ -246,12 +256,14 @@ func WithLock(path string, fn func(*StoreFile) error) error {
 	// No cooperating writer can be replacing path while we hold the lock, so
 	// Load's Windows read retry fires here only on an outside holder such as
 	// an AV scanner; that retry can lengthen the lock hold beyond LockTimeout.
-	current, err := Load(path)
+	current, err := LoadFile(path)
 	if err != nil {
 		return err
 	}
-	before := copyQueues(current.Queues)
 	if err := fn(&current); err != nil {
+		if errors.Is(err, errSkipWrite) {
+			return nil
+		}
 		return err
 	}
 
@@ -284,7 +296,6 @@ func WithLock(path string, fn func(*StoreFile) error) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename mailbox store: %w", rerr)
 	}
-	publishQueueChange(path, before, current.Queues)
 	return nil
 }
 

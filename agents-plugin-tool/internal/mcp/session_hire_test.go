@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
-	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
 func hireToolCall(t *testing.T, s *Server, name string, args map[string]any) string {
@@ -148,11 +147,7 @@ func TestHiringMCPRequestOpensReplyAndRosterProxy(t *testing.T) {
 	if !ok || !rec.MailboxReplyOpened {
 		t.Fatal("request did not open reply channel")
 	}
-	path, err := f.server.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := wsmailbox.LoadReplyStore(path)
+	store, err := f.server.mailboxPaths().Store().LoadReply()
 	if err != nil {
 		t.Fatal(err)
 	}

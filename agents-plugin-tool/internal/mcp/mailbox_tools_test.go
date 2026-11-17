@@ -110,11 +110,7 @@ func TestMailboxUniversalSendEnvLessReturnPathAndPiggyback(t *testing.T) {
 		t.Fatalf("published reply-id does not match session derivation: resp=%s want=%s", sendResp, wantReplyID)
 	}
 
-	replyPath, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry, err := wsmailbox.LoadReplyStore(replyPath)
+	registry, err := (wsmailbox.Paths{}).Store().LoadReply()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,11 +331,7 @@ func TestMailboxSelfAddressSurface(t *testing.T) {
 	if got, _ := parsed.Self["reply_id"].(string); got != "id:"+wantReplyID {
 		t.Fatalf("json self.reply_id differs from the session derivation: got=%q want=id:%s", got, wantReplyID)
 	}
-	replyPath, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry, err := wsmailbox.LoadReplyStore(replyPath)
+	registry, err := (wsmailbox.Paths{}).Store().LoadReply()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +425,7 @@ func TestMailboxFerruleRebindPreservesAddressAndQueuedMail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wsmailbox.Load(path)
+	store, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +453,7 @@ func TestMailboxFerruleRebindPreservesAddressAndQueuedMail(t *testing.T) {
 		t.Fatalf("mailbox address changed across a ferrule owner rebind: %#v", identity)
 	}
 
-	store2, err := wsmailbox.Load(path)
+	store2, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +532,7 @@ func TestMailboxTieredSlugDurabilityAcrossScopeAndFerrule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	carolStore, err := wsmailbox.Load(carolPath)
+	carolStore, err := (wsmailbox.Paths{}).Store().Load(carolPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +597,7 @@ func TestMailboxLookupPeersListsOfflinePeersAndSurfacesLiveConflict(t *testing.T
 		t.Fatal(err)
 	}
 	otherLivePID := os.Getppid()
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence["eve"] = wsmailbox.Presence{
 			Name: "eve", Scope: wsmailbox.ScopeWorktree, PID: otherLivePID, LastSeen: mailboxNowString(),
 		}
@@ -618,7 +610,7 @@ func TestMailboxLookupPeersListsOfflinePeersAndSurfacesLiveConflict(t *testing.T
 	serverE := NewServer(root, "test")
 	serverE.ensureMailboxRegistered(root)
 
-	afterConflict, err := wsmailbox.Load(path)
+	afterConflict, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +666,7 @@ func TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder(t *testing.T) {
 	if otherLivePID == os.Getpid() || otherLivePID <= 0 {
 		t.Skipf("cannot obtain a distinct live parent PID (ppid=%d)", otherLivePID)
 	}
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p := store.Presence["frank"]
 		p.PID = otherLivePID
 		p.Owner = ""
@@ -688,7 +680,7 @@ func TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder(t *testing.T) {
 	// Parent-less ferrule login: the only path that ever rebinds ownership.
 	s.rebindMailboxOwnerAtFerrule("intruder-session-key", "", roleLead, root)
 
-	after, err := wsmailbox.Load(path)
+	after, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +714,7 @@ func TestMailboxFerruleRebindRequiresLeadCapability(t *testing.T) {
 	}
 	owner := func() string {
 		t.Helper()
-		store, err := wsmailbox.Load(path)
+		store, err := (wsmailbox.Paths{}).Store().Load(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -769,7 +761,7 @@ func TestRebindMailboxOwnerReclaimsDeadPIDRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := mailboxNow().Add(-(mailboxLivenessThreshold + time.Minute)).Format(time.RFC3339)
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p := store.Presence["heidi"]
 		p.PID = deadPID
 		p.Owner = "departed-child-key"
@@ -782,7 +774,7 @@ func TestRebindMailboxOwnerReclaimsDeadPIDRecord(t *testing.T) {
 
 	s.rebindMailboxOwnerAtFerrule("lead-key", "", roleLead, root)
 
-	after, err := wsmailbox.Load(path)
+	after, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -793,7 +785,7 @@ func TestRebindMailboxOwnerReclaimsDeadPIDRecord(t *testing.T) {
 	later := advanceMailboxClock(t, mailboxHeartbeatThrottle+time.Minute)
 	s.refreshMailboxPresenceHeartbeat(root)
 
-	refreshed, err := wsmailbox.Load(path)
+	refreshed, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,7 +815,7 @@ func TestRebindMailboxOwnerRebuildsReclaimedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := mailboxNow().Add(-(mailboxLivenessThreshold + time.Minute)).Format(time.RFC3339)
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence["ivan"] = wsmailbox.Presence{
 			Name: "ivan", Scope: wsmailbox.ScopeWorktree,
 			Harness: "codex", Cwd: "/elsewhere", StartedAt: stale, LastSeen: stale,
@@ -967,7 +959,7 @@ func TestMailboxLookupPeersExcludesSelfFromPeers(t *testing.T) {
 	// duration, matching the existing conflict fixture's PID choice), with
 	// the conflict marker already set, so the fix cannot suppress a real
 	// peer or its conflict marker along with the self entry.
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence["bob"] = wsmailbox.Presence{
 			Name: "bob", Scope: wsmailbox.ScopeWorktree, PID: os.Getppid(),
 			LastSeen: mailboxNowString(), Conflict: true,
@@ -1017,7 +1009,7 @@ func TestMailboxLookupPeersSurfacesSelfConflict(t *testing.T) {
 	// exactly as ensureMailboxRegistered would when a second live process
 	// contests the same name — no second Presence entry is ever created for
 	// a name-keyed store.
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p := store.Presence["alice"]
 		p.Conflict = true
 		store.Presence["alice"] = p
@@ -1346,7 +1338,7 @@ func TestMailboxReloginRebindsOwnerToExistingKey(t *testing.T) {
 	}
 	owner := func() string {
 		t.Helper()
-		store, err := wsmailbox.Load(path)
+		store, err := (wsmailbox.Paths{}).Store().Load(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1415,7 +1407,7 @@ func TestMailboxReloginRefusesLiveDifferentPIDHolder(t *testing.T) {
 	if otherLivePID == os.Getpid() || otherLivePID <= 0 {
 		t.Skipf("cannot obtain a distinct live parent PID (ppid=%d)", otherLivePID)
 	}
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p := store.Presence["kim"]
 		p.PID = otherLivePID
 		p.Owner = "original-process-key"
@@ -1433,7 +1425,7 @@ func TestMailboxReloginRefusesLiveDifferentPIDHolder(t *testing.T) {
 	if got, _ := parseLoginResponse(t, resp); got != key {
 		t.Fatalf("re-login returned %q, want %q", got, key)
 	}
-	after, err := wsmailbox.Load(path)
+	after, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}

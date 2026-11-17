@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3f0e73c12b2fbcae
 sage-review-completeness-reviewed: 3f0e73c12b2fbcae
+completed: 2026-11-18
 ---
 
 # Mailbox memory-first store
@@ -336,6 +337,128 @@ daemon reopens) asserting no duplicate, no redelivery and no loss; a plain
 restart asserting no duplication; a per-send syscall
 trace of today's store recorded on this macOS machine as the baseline ((71)).
 
+### Result (e973b72b4) - 2026-11-17
+
+Downgrade verdict: T2 in both directions, patch release; no T3 boundary.
+
+- Version gate. The launcher and daemon admit only the same minor
+  (`internal/wsdashboard/proxy.go:250-252`, `SameMinor`), so a patch
+  downgrade replaces the daemon whole: one daemon per cache root, and no
+  old executable runs beside the new one.
+- (i) New -> old. The new daemon keeps mail in memory and the ring, so the
+  legacy files go stale between opens. On graceful shutdown,
+  `ClosePersistent` (`cmd/ws-mcp/dashboard.go`, right after
+  `stopMailboxSweep`) runs `instance.export` (`internal/wsmailbox/legacy.go`).
+  It writes the live presence and queues to each scope's `mailbox.json`, the
+  entries and queues to `mailbox-replyids.json`, and the history windows to
+  `mailbox-history/<key>/`, each through the same flock the old code takes.
+  The old daemon reads exactly these files (base `store.go:192` `Load`,
+  `:227` `WithLock`; `replyid.go:125` `LoadReplyStore`, `:176` `WithReplyLock`).
+  Acked mail is absent from the export, so it is not redelivered.
+  - A killed new daemon exports nothing. The import at open already cleared
+    the files' queues, so an old daemon after a crash sees no mail rather
+    than stale mail.
+  - That mail is still in the ring. The next new open restores it, which is
+    the T2 recovery.
+- (ii) Old -> new. The old daemon's whole-file rewrite drops the unknown
+  `memory_store_export` field (encoding/json). At the next open, the new
+  daemon diffs each file against the baseline it recorded in the ring
+  (`reconcileNamedPaths`, `reconcileReply`, `reconcileHistory`):
+  - mail in the file but not in the baseline is imported;
+  - baseline mail gone from the file is acknowledged;
+  - changed presence and reply entries are taken;
+  - new history entries are imported.
+  A file still carrying the mark is the store's own write, which closes the
+  crash window between the file write and its baseline record. Envelopes
+  match as a multiset, ignoring `UndeliveredNotified`.
+- The ring directory is unknown to the old version and ignored by it. Nothing
+  the old version reads is lost: the new reopen restores it from the ring
+  plus the reconcile.
+
+Store design:
+
+- Records. One JSONL line per committed transaction, `{kind:"tx", op, at,
+  named, reply, history, listening, baseline}`, carrying deltas only:
+  - per named path, presence upserts or deletes and per-queue
+    `{drop:n, add:[...]}`;
+  - reply entries and queues, in the same shape;
+  - appended history entries;
+  - listening set and clear;
+  - baseline updates.
+
+  `op` is one of send, recv, presence, listen, unlisten, history, system,
+  sweep, import, import-clear, or export. Send and ack are not separate
+  kinds: a recv is the drop half of the same delta form.
+
+  `{kind:"snapshot", state}` opens each segment.
+- Ring parameters:
+  - Segments are `<cache>/mailbox-ring/<16-digit seq>.jsonl`. A segment rotates
+    after 1 MiB of deltas, and 10 segments are kept.
+  - The encode buffer is one `bytes.Buffer` per instance, reused. Each
+    record goes out in one `write()` through a descriptor the daemon keeps
+    open.
+  - There is no fsync.
+  - Rotation: reap idle history windows (`HistoryRetention`, 30 days) and
+    expired, empty reply entries (`ReplyRetention`). Then write the whole
+    live state as the next snapshot (temp file plus rename), and delete
+    segments past 10.
+  - Live queues are never dropped. A state larger than a segment grows the
+    segment and logs a warning (soft cap). This is a deviation in form from
+    Decision 1's wording "the ring grows past the cap": every segment
+    opens with a whole snapshot, so extra segments would add nothing. The
+    count stays at 10, and an oversized segment holds the overflow.
+  - Restore reads only the newest segment that has a whole snapshot. A
+    torn last line is cut.
+- Reply-id registry and queues: these are part of the snapshot plus the
+  deltas, rebuilt at open.
+- Parity:
+  - `mailbox.send` and `claimMail` are each one `Store.Update` with the same
+    queue, contact, reply-entry, and history logic as before. History names
+    keep the legacy `<stamp>-<hex>.json` form, with stamps monotonic across
+    opens.
+  - Reply-entry reaping (`ReapReplyEntries`) runs on publish, as before, and
+    at rotation.
+  - Store changes publish `wswake.Mailbox.StoreChanged` for changed queue
+    paths only, as `publishQueueChange` did.
+- Presence and listening markers are ring records (append only, no
+  rewrite). Presence heartbeats are one record each. Listening markers
+  moved from `mailbox-listening/*.json` into the store.
+- `PostSystem` consumers (Pi turn reports, whiteboard nudge notices, the lead
+  mail return, the hire outcome mail): only the mail moves into the ring.
+  Registration, receipt, and hire records stay in their own files, which
+  this ticket does not touch.
+- Decision 5 reader inventory:
+
+  | Reader | Path | Notes |
+  |---|---|---|
+  | `wsmailbox.Wait` peek | `Store.NamedQueue` / `Store.ReplyQueue` | Daemon-hosted, memory. |
+  | Codex stop hook (`ShouldNotifyNamedInboxUnread`, `PeekNamedInboxUnread`) | `Store.NamedQueue` | Daemon-hosted, memory. |
+  | Undelivered sweep | `Store.QueuePaths` plus `Update` | Daemon. |
+  | Dashboard page and panels | `Store.LoadReply`, `Store.Load`, `Store.History`, `Store.NamedQueue` | Daemon. |
+
+  The dashboard look's change signal is now a mail print folded from the
+  store (reply print, history names, listening PID). It is renewed by
+  `StoreChanged`, nudges, or the 5-minute foreign look. The mailbox file
+  watches are gone.
+
+  With no daemon, each call is transient: lock the ring, load, reconcile,
+  run, release. While the daemon runs, a transient read uses a lock-free
+  ring view, and a transient write is refused. Direct-binary mailbox calls
+  (and `serve --stdio`) are unsupported; `ai-docs/manuals/ws-mcp.md` gains
+  a "Mailbox store" section saying so.
+- Baseline trace (macOS, DYLD file-call interposer). `fs_usage` needs sudo,
+  so an interposer stands in. Today's store costs 99.8 file ops per reply-id
+  send and 106 per named send:
+  - the reply registry: 3 opens, 6 reads, and 2 renames;
+  - a history entry file create and rename;
+  - `sessions/<key>/key.json`: 6 opens and 12 reads.
+- Downgrade test methods:
+  - Direction (ii): a fixture rewrites `mailbox.json` the way the old
+    daemon does, then the store reopens.
+  - Direction (i): `LoadFile`/`LoadReplyFile`/legacy history against the
+    export.
+  - The round trip and plain restart are tests in Phase 2.
+
 ### Phase 2: Memory-first store implementation
 
 Implement the in-memory-first mailbox with the segmented JSONL ring as restore
@@ -359,3 +482,69 @@ Windows reader code (Decision 5); a per-send syscall trace on this
 macOS machine showing exactly one append and zero repeated file reads per
 steady-state send, with the rotating send measured separately, compared with
 the Phase 1 baseline ((71)).
+
+### Result (e973b72b4) - 2026-11-17
+
+Implemented as designed. New files:
+
+- `internal/wsmailbox/memstore.go`: the store, `Tx`, the registry,
+  persistent and transient instances, and the lock-free view.
+- `ring.go`
+- `legacy.go`: import, clear, and export.
+- `history.go`
+
+The scope `mailbox.json` path stays each named store's key. Every caller in
+`internal/mcp`, `internal/wsdashboard`, and `cmd/ws-mcp` moved to
+`Paths.Store()`. `dashboard_history_cache.go` was deleted. The daemon calls
+`EnablePersistent` and `OpenPersistent` at start and `ClosePersistent`
+before its linger. A successor waits up to 30 s for the ring lock.
+
+Verification:
+
+- `go test ./...` on macOS passes, except for these tests, which fail
+  identically on base dfcd71832:
+  - `internal/mcp`: `TestDashboardNotesUsesHostedCallerStoreIdentity`,
+    `TestBoardStateFilterAsks`, and `TestLateReloadSignalsOnlyAChangedView`;
+  - the JS `TestSearchPalette*` tests and
+    `TestHistoryScriptWholeItemWindowsAndGapNavigationUnderNode`.
+
+  `internal/wsagent` `TestLeadRejoinDoesNotStallBehindALongReplay` timed
+  out once under the full parallel run. It passes 3/3 in isolation, and
+  this branch does not touch its code.
+- Follow-up fixes:
+  - 10f95a154 (from the lite review) keeps the 30 s successor lock wait
+    outside the registry lock.
+  - 898f0a872: a transaction's reply working copy now deep-copies each
+    entry's `Contacts` map. Before this, a contact written in place
+    changed the committed state behind the diff, so it never reached the
+    ring. The commit adds a regression test. It also points the
+    process-env tests at their server's cache root and drops the removed
+    reply and scope cache counters from the counters test.
+- `GOOS=windows go vet ./...` is clean. Windows CI was not run locally.
+- New tests (`internal/wsmailbox/memstore_test.go`) cover:
+  - a kill right after a send survives;
+  - no redelivery of acked mail after a crash;
+  - a torn record is cut;
+  - rotation: carry-forward at the 10-segment cap, a quiet session's mail
+    survives, the idle history window and the expired reply entry are
+    reaped, and the soft cap grows instead of dropping;
+  - upgrade import of named, reply, and history files, with a bad history
+    file skipped;
+  - an unreadable legacy store is skipped;
+  - the downgrade export (i) and re-import (ii) round trip;
+  - plain restarts, including export then crash, do not duplicate;
+  - history stamps rise across opens;
+  - the lock-free read view versus a refused write;
+  - successor lock wait;
+  - Decision 5 readers see memory-only mail and never stale files.
+- Existing parity tests for send, recv, history, and reply ids pass
+  unchanged in assertion. The dashboard mail print moves on a history entry
+  and a listening marker (`dashboard_page_test`).
+- Per-send trace (persistent mode, the same harness): 51.0 ops per send for
+  both reply-id and named sends. Mailbox files account for exactly one
+  `write` (the ring append) and zero reads. The rest are
+  `sessions/<key>/key.json` (6 opens, 12 reads, 12 stats per send), outside
+  this ticket.
+- A rotating send measured separately costs about 12.6 ring ops: the
+  append, temp snapshot create, write, and close, the rename, opening the
+  new segment, closing the old one, listing the directory, and an unlink.

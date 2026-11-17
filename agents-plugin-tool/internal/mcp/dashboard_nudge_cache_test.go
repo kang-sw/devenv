@@ -40,7 +40,7 @@ func TestDashboardSingleNudgeRefreshesCachedScopeContact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p := store.Presence["alice"]
 		p.Owner, p.Cwd = "rebound-owner", "rebound-cwd"
 		store.Presence["alice"] = p
@@ -56,13 +56,6 @@ func TestDashboardSingleNudgeRefreshesCachedScopeContact(t *testing.T) {
 	contacts, _ = src.ReadContacts(reg)
 	if after.Rev != before.Rev+1 || len(contacts) != 1 || contacts[0].ReplyID != wsmailbox.ReplyID("rebound-owner") || contacts[0].Cwd != "rebound-cwd" {
 		t.Fatalf("single scope nudge: revision %d -> %d, contacts %+v", before.Rev, after.Rev, contacts)
-	}
-	_, misses := src.scopes.Counts()
-	for range 16 {
-		src.ReadContacts(reg)
-	}
-	if _, after := src.scopes.Counts(); after != misses {
-		t.Fatalf("presentation contacts reopened scope %d times", after-misses)
 	}
 }
 

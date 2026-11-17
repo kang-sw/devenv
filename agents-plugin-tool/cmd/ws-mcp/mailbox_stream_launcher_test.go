@@ -21,9 +21,10 @@ func TestLauncherMailboxStreamEndsWhenPOSIXParentIsKilled(t *testing.T) {
 	}
 	bin := buildDashboardTestBin(t, "")
 	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
-	startLauncherTestDaemon(t, bin, env, cache, cwd)
 	const key = "amber-tide-fox"
+	// Seeded before the daemon takes the mailbox ring.
 	seedReplyMail(t, env, key, "one")
+	startLauncherTestDaemon(t, bin, env, cache, cwd)
 	// Like Node/Bun spawn: stdin is ignored, and killing the parent sends no
 	// signal to the launcher. Only its parent watch can end the daemon wait.
 	parentScript := filepath.Join(t.TempDir(), "parent.py")
@@ -101,9 +102,10 @@ func TestLauncherMailboxStreamSurvivesArrivalsAndTimeoutThenSignal(t *testing.T)
 	}
 	bin := buildDashboardTestBin(t, "")
 	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
-	startLauncherTestDaemon(t, bin, env, cache, cwd)
 	const key = "amber-tide-fox"
+	// Seeded before the daemon takes the mailbox ring.
 	seedReplyMail(t, env, key, "one")
+	ep := startLauncherTestDaemon(t, bin, env, cache, cwd)
 	client := startLauncher(t, launcher, cwd, env, "mailbox", "wait", "--session-key", key, "--stream", "--timeout", "50ms")
 	paths := wsmailbox.Paths{State: wsstate.Options{CacheHome: cache}}
 	read := func(want string) string {
@@ -131,10 +133,10 @@ func TestLauncherMailboxStreamSurvivesArrivalsAndTimeoutThenSignal(t *testing.T)
 	}
 	read("one")
 	read("one") // The unchanged pending mail is retried, not a timeout exit.
-	seedReplyMail(t, env, key, "two")
-	// An already-in-flight reminder can precede the newly written mail.
+	sendThroughDaemon(t, ep, env, key, "two")
+	// Reminders of the pending mail keep coming until the send lands.
 	found := false
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 200; i++ {
 		if strings.Contains(read(""), "two") {
 			found = true
 			break

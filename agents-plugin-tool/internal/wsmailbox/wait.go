@@ -155,8 +155,8 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 	// every poll tick would spawn a git process and rewrite metadata every
 	// DefaultWaitPoll for the whole armed-wait lifetime (unbounded with
 	// Timeout == 0), and would also mean one transient resolution failure
-	// hours into an idle wait kills the wake path outright. Only the cheap
-	// Load/LoadReplyStore disk reads repeat per tick below.
+	// hours into an idle wait kills the wake path outright. Only the store reads
+	// (memory in the daemon) repeat per tick below.
 	resolved, err := resolveWaitTarget(target)
 	if err != nil {
 		return WaitResult{}, err
@@ -325,6 +325,7 @@ func wakeLoop(peek func() (WaitResult, error), opts WaitOptions, now func() time
 // resolvedWaitTarget holds the one-time-resolved paths/identity a Wait
 // call's recheck loop needs, computed once by resolveWaitTarget.
 type resolvedWaitTarget struct {
+	store      Store
 	sessionKey string
 	namedPath  string // "" when target.Slug was empty
 	namedName  string
@@ -341,6 +342,7 @@ type resolvedWaitTarget struct {
 // deriving the caller's reply-id + registry path.
 func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
 	r := resolvedWaitTarget{
+		store:      target.Paths.Store(),
 		sessionKey: target.SessionKey,
 		inboxDir:   target.InboxDir,
 		steerOnly:  target.InboxSteerOnly,
@@ -375,20 +377,20 @@ func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
 func (r resolvedWaitTarget) peek() (WaitResult, error) {
 	var named []Envelope
 	if r.namedPath != "" {
-		store, err := Load(r.namedPath)
+		p, ok, queue, err := r.store.NamedQueue(r.namedPath, r.namedName)
 		if err != nil {
 			return WaitResult{}, err
 		}
-		if p, ok := store.Presence[r.namedName]; ok && p.Owner != "" && p.Owner == r.sessionKey {
-			named = store.Queues[r.namedName]
+		if ok && p.Owner != "" && p.Owner == r.sessionKey {
+			named = queue
 		}
 	}
 
-	replyStore, err := LoadReplyStore(r.replyPath)
+	reply, err := r.store.ReplyQueue(r.replyID)
 	if err != nil {
 		return WaitResult{}, err
 	}
-	result := WaitResult{Named: named, Reply: replyStore.Queues[r.replyID]}
+	result := WaitResult{Named: named, Reply: reply}
 	if r.inboxDir != "" && !r.noBoard {
 		names, err := wsinbox.MessageNames(r.inboxDir)
 		if r.steerOnly {
@@ -431,11 +433,10 @@ func NamedInboxStatus(target WaitTarget) (present, owned bool, err error) {
 	if err != nil {
 		return false, false, err
 	}
-	store, err := Load(path)
+	p, ok, _, err := target.Paths.Store().NamedQueue(path, name)
 	if err != nil {
 		return false, false, err
 	}
-	p, ok := store.Presence[name]
 	if !ok {
 		return false, false, nil
 	}

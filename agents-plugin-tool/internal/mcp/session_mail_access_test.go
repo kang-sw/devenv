@@ -31,11 +31,7 @@ func TestSessionAccessMailKeepsOneClaimOwnerAcrossEntryModes(t *testing.T) {
 			defer mail.server.Close()
 			cli := NewServer(t.TempDir(), "test") // caller cwd is not queue authority
 			defer cli.Close()
-			path, err := cli.mailboxPaths().ReplyRegistry()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+			if err := cli.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 				for _, body := range []string{"first", "second"} {
 					store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), wsmailbox.Envelope{Content: body, SentAt: "2026-01-02T03:04:05Z"})
 				}

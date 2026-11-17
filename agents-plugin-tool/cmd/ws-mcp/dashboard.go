@@ -18,6 +18,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wstrackerhook"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 	"github.com/kang-sw/devenv/internal/wswake"
@@ -76,6 +77,11 @@ func dashboardCommand(args []string) {
 		}
 	}
 	sessions := mcp.NewDashboardSessionSource()
+	// The daemon serves the mailbox from memory: every store call opens (or
+	// reuses) the cache root's persistent instance, holding its restore
+	// ring for the daemon's life. A daemon that loses the dashboard lock
+	// makes no store call, so it never takes the ring.
+	wsmailbox.EnablePersistent()
 	// StartDaemon starts the runner before it returns the daemon, so the
 	// runner's tracker-changed callback is bound once the daemon exists.
 	var trackerChanged lateFunc
@@ -131,6 +137,12 @@ func dashboardCommand(args []string) {
 		closeTracker()
 		fatal("dashboard", err)
 	}
+	// Open the store now, so the start's import of the legacy files (and a
+	// wait on a predecessor still releasing the ring) is not on a session's
+	// first mailbox call.
+	if _, err := wsmailbox.OpenPersistent(wsmailbox.Paths{}); err != nil {
+		fmt.Fprintf(logw, "dashboard: mailbox store: %v\n", err)
+	}
 	stopMailboxSweep := startMailboxSweep(logw)
 	wsdashboard.LogDevAssets(logw, devRoot)
 	// Holding the lock, this daemon is the one the staged copies were for;
@@ -160,6 +172,12 @@ func dashboardCommand(args []string) {
 	case <-daemon.Done():
 	}
 	stopMailboxSweep()
+	// Export the mailbox for a previous version and release the ring for
+	// the successor before lingering on hosted calls; one that still runs
+	// goes on transient.
+	if err := wsmailbox.ClosePersistent(); err != nil {
+		fmt.Fprintf(logw, "dashboard: mailbox store close: %v\n", err)
+	}
 	// The lock and endpoint are released (the successor is starting); a
 	// hosted call that outlived the drain budget still runs and ends on its
 	// own, and the replacement goroutine, when one runs, spawns the

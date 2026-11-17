@@ -2,13 +2,16 @@ package mcp
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswake"
 )
 
@@ -69,11 +72,7 @@ func TestPiMailLabelRoundTripsWithoutRecordingAContact(t *testing.T) {
 	if parsed != m {
 		t.Fatalf("returned label mail = %+v, want %+v", parsed, m)
 	}
-	path, err := s.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+	if err := s.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 		store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), parsed)
 		return nil
 	}); err != nil {
@@ -115,20 +114,17 @@ func TestLeadMailboxRetriesFailedClaim(t *testing.T) {
 	defer mail.server.Close()
 	// No external wake may rescue the failed claim: only its retry does.
 	mail.wake = &wswake.Hub{}
-	path, err := mail.server.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+	if err := mail.server.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 		store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), wsmailbox.Envelope{Content: "retry me"})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	original, err := os.ReadFile(path)
+	cacheRoot, err := wsstate.CacheRoot(mail.server.stateOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
+	ringLock := flock.New(filepath.Join(cacheRoot, wsmailbox.RingDirName, "lock"))
 	type claim struct {
 		texts []string
 		err   error
@@ -138,14 +134,15 @@ func TestLeadMailboxRetriesFailedClaim(t *testing.T) {
 	stop := mail.Watch(root, key, func() {
 		attempt++
 		if attempt == 1 {
-			// Peek succeeded, but the subsequent claim cannot read its store.
-			if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+			// Peek succeeded, but the subsequent claim cannot reach its
+			// store: another process holds the ring.
+			if err := ringLock.Lock(); err != nil {
 				claims <- claim{err: err}
 				return
 			}
 			texts, err := mail.Drain(root, key)
-			if restoreErr := os.WriteFile(path, original, 0o600); restoreErr != nil {
-				err = restoreErr
+			if unlockErr := ringLock.Unlock(); unlockErr != nil {
+				err = unlockErr
 			}
 			claims <- claim{texts, err}
 			return
