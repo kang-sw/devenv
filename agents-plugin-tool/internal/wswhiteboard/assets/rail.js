@@ -74,10 +74,16 @@
   // inset is the room the host keeps at the top of its scroll area for a
   // sticky row of its own (--wb-rail-inset on the host, in px; the
   // dashboard's board header row): the top capsules and the current bar
-  // stick below it. It is read on every run, since the row can come after
-  // the rail.
-  var topics = [], found = [], dirty = true, fresh = false, last = "", moved = null, stuck = null, raf = 0, inset = 0;
-  function readInset() { inset = parseFloat(getComputedStyle(host).getPropertyValue("--wb-rail-inset")) || 0; }
+  // stick below it. Cache it between size/input changes; the host can
+  // publish it after the rail has started.
+  var topics = [], found = [], dirty = true, fresh = false, last = "", moved = null, stuck = null, raf = 0, inset = 0, insetDirty = true, motionRaf = 0, pendingMotion = null;
+  function readInset() {
+    if (!insetDirty) return;
+    var cs = getComputedStyle(host);
+    inset = parseFloat(cs.getPropertyValue("--wb-rail-inset")) || 0;
+    padTop = root ? parseFloat((root === host ? cs : getComputedStyle(root)).paddingTop) || 0 : 0;
+    insetDirty = false;
+  }
   // scrollRest is how far the scroller can still scroll down, in px.
   function scrollRest() {
     var e = root || d.scrollingElement || d.documentElement;
@@ -132,6 +138,8 @@
 
   function run() {
     raf = 0;
+    if (motionRaf) cancelAnimationFrame(motionRaf);
+    motionRaf = 0;
     readInset();
     if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; fresh = true; }
     var rects = [];
@@ -175,12 +183,20 @@
   }
 
   function draw(s) {
+    var pending = pendingMotion;
+    pendingMotion = null;
     var key = s ? [inset, s.top, s.upMore, s.downMore, s.replyOff, s.stuck, names(s.up), names(s.down), names([s.cur])].join("|") : "" + inset;
     // A re-queried board can hold heads that never got the offset, and the
     // current head may have changed height (a note opened, a summary line
     // wrapping), which resizes its topic and so re-queries.
     if (key === last) {
-      if (fresh) { if (s && s.bar) vals.h = inset + s.top + s.bar.offsetHeight + "px"; offsets(); }
+      if (fresh && s && s.bar) vals.h = inset + s.top + s.bar.offsetHeight + "px";
+      // A scroll can arrive before the destination frame. Its geometry
+      // reads are done, and this draw still has the same destination: play
+      // the pending motion now, before any offset writes, rather than
+      // starving morphs during continuous scrolling.
+      if (pending) after(pending);
+      if (fresh) offsets();
       return;
     }
     last = key;
@@ -190,16 +206,18 @@
     // changed), whose items moved under the rail rather than by a scroll.
     var member = s ? [inset, s.replyOff, names(s.up), names(s.down), names([s.cur])].join("|") : "";
     var pre = motion() && !fresh && member !== moved ? before(s) : null;
-    moved = member;
     var bar = s && s.bar, shadow = s && s.stuck ? bar : null;
+    // Finish geometry reads before even the shadow class changes. A shadow
+    // or count change alone still has the pending motion's destination;
+    // after() starts animations, so it must follow the height read too.
+    var barH = bar ? bar.offsetHeight : 0;
+    if (pending && member === moved) after(pending);
+    moved = member;
     if (stuck !== shadow) {
       if (stuck) stuck.classList.remove("wb-stuck");
       if (shadow) shadow.classList.add("wb-stuck");
       stuck = shadow;
     }
-    // The head's height is read before the capsule writes below, so the
-    // read restyles only what the shadow toggle touched.
-    var barH = bar ? bar.offsetHeight : 0;
     var up = s ? s.up : [], down = s ? s.down : [];
     fill(slots.top.near, topics[up[0]], 0);
     fill(slots.top.far, topics[up[1]], s ? s.upMore : 0);
@@ -220,7 +238,15 @@
     vals.bot = (down.length ? FADE + down.length * CAP + (down.length - 1) * GAP + PAD : 0) + "px";
     offsets();
     curTopic = s && s.cur >= 0 ? topics[s.cur] : null;
-    if (pre) after(pre);
+    if (pre) {
+      pendingMotion = pre;
+      motionRaf = requestAnimationFrame(function () {
+        motionRaf = 0;
+        var pending = pendingMotion;
+        pendingMotion = null;
+        if (pending) after(pending);
+      });
+    }
     drawn = !!s;
   }
 
@@ -322,9 +348,10 @@
     else if (next && btns("bot").map(shown).indexOf(next) < 0) p.bot = barGhost(next, true);
     return p;
   }
-  // after reads every box the motion needs first (one layout, after the
-  // redraw's writes) and only then starts the animations, so no animation
-  // or copy dirties the layout between two reads.
+  // Destination geometry belongs to the next frame, after the redraw has
+  // been laid out. Read every box/look before starting any animation or
+  // inserting copies. A new run plays it only if its destination is still
+  // current; a size change or teardown discards it.
   function after(p) {
     var slides = [], morphs = [];
     ["top", "bot"].forEach(function (e) {
@@ -419,12 +446,23 @@
   // added above) redraws even when the indices match.
   function names(list) { return list.map(function (i) { return topics[i] ? keyOf(topics[i]) : ""; }).join("\u0000"); }
 
-  function kick() { if (!raf) raf = requestAnimationFrame(run); }
+  function kick() {
+    // Fold pending motion into the next run, so its destination reads
+    // cannot follow that run's writes. Keep its source until draw decides
+    // whether the destination still matches.
+    if (motionRaf) cancelAnimationFrame(motionRaf);
+    motionRaf = 0;
+    if (!raf) raf = requestAnimationFrame(run);
+  }
   // A size change inside the board (a topic swapped, a body or settled list
   // opened, closed topics fetched in) can change the topic list and every
   // position; the box's own size changes when its tab shows or the window
   // resizes.
-  function reflow() { dirty = true; kick(); }
+  function reflow() { dirty = true; insetDirty = true; pendingMotion = null; kick(); }
+  // The dashboard writes --wb-rail-inset on the host as its toolbar changes.
+  // Observe only host inputs, not the capsule/offset writes below it.
+  var mo = window.MutationObserver ? new window.MutationObserver(reflow) : null;
+  if (mo) mo.observe(host, { attributes: true, attributeFilter: ["style", "class"] });
   scroller.addEventListener("scroll", kick, { passive: true });
   window.addEventListener("resize", reflow);
   var ro = window.ResizeObserver ? new ResizeObserver(reflow) : null;
@@ -455,8 +493,11 @@
 
   st.off = function () {
     if (raf) cancelAnimationFrame(raf);
-    raf = 0;
+    if (motionRaf) cancelAnimationFrame(motionRaf);
+    raf = motionRaf = 0;
+    pendingMotion = null;
     if (ro) ro.disconnect();
+    if (mo) mo.disconnect();
     scroller.removeEventListener("scroll", kick);
     window.removeEventListener("resize", reflow);
     wraps.top.removeEventListener("click", jump);

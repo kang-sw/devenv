@@ -127,19 +127,12 @@
   // item of its own state: still open, answered, or answered with a note
   // (noted items are a subset of the answered ones).
   function atTop() { return (root ? root.scrollTop : window.scrollY) <= 4; }
-  function show(edge, list) {
+  function show(edge, list, width, home, goal) {
     var p = pills[edge], pending = edge === "top" && st.pending > 0;
     // The top capsule has nothing to offer at the very top with no board
     // update pending (no item above either); a latched change keeps it.
-    var hide = edge === "top" ? !pending && !list.length && atTop() : !list.length;
-    if (p.hidden !== hide) p.hidden = hide;
-    p.classList.toggle("board-updated", !!pending);
-    if (edge === "top") {
-      var updates = p.querySelector(".oq-updates");
-      if (updates.hidden !== !pending) updates.hidden = !pending;
-      var label = pending ? wsT("js.board.hold.pill") + " " + st.pending : "";
-      if (updates.textContent !== label) updates.textContent = label;
-    }
+    var hide = edge === "top" ? !pending && !list.length && home : !list.length;
+    var label = pending ? wsT("js.board.hold.pill") + " " + st.pending : "";
     var groups = { open: [], ans: [], nt: [] };
     list.forEach(function (el) {
       if (!answered(el)) { groups.open.push(el); return; }
@@ -147,28 +140,58 @@
       if (noted(el)) groups.nt.push(el);
     });
     target[edge] = {};
+    KINDS.forEach(function (k) { var g = groups[k]; if (g.length) target[edge][k] = edge === "top" ? g[g.length - 1] : g[0]; });
+    var shape = [hide, label, groups.open.length, groups.ans.length, groups.nt.length].join("|");
+    if (shape === p.wbShape) {
+      // The invisible copy supplies the new intrinsic width while the real
+      // capsule still presents its old width. Both were read before writes.
+      if (p.wbMeasure) {
+        p.wbMeasure.parentNode.removeChild(p.wbMeasure);
+        p.wbMeasure = null;
+        p.style.width = "";
+        var from = p.wbFrom;
+        if (from && goal && from !== goal) {
+          p.wbGrow = p.animate([{ width: from + "px" }, { width: goal + "px" }], { duration: 420, easing: "cubic-bezier(.34,1.56,.64,1)" });
+          p.wbGrow.onfinish = function () { p.style.overflow = ""; };
+        } else p.style.overflow = "";
+      }
+      return;
+    }
+    if (p.hidden !== hide) p.hidden = hide;
+    p.classList.toggle("board-updated", !!pending);
+    if (edge === "top") {
+      var updates = p.querySelector(".oq-updates");
+      if (updates.hidden !== !pending) updates.hidden = !pending;
+      if (updates.textContent !== label) updates.textContent = label;
+    }
     Array.prototype.forEach.call(p.querySelectorAll(".oq-seg"), function (b) {
       var k = b.getAttribute("data-k"), g = groups[k] || [];
       if (b.hidden !== !g.length) b.hidden = !g.length;
       var count = b.querySelector(".n"), text = String(g.length), label = b.title + " (" + g.length + ")";
       if (count.textContent !== text) count.textContent = text;
       if (b.getAttribute("aria-label") !== label) b.setAttribute("aria-label", label);
-      if (g.length) target[edge][k] = edge === "top" ? g[g.length - 1] : g[0];
     });
-    // Animate the one outer capsule, not a second update capsule. Its final
-    // width remains intrinsic, so locale/count changes cannot clip the label.
-    var shape = [p.hidden, pending ? st.pending : 0, groups.open.length, groups.ans.length, groups.nt.length].join();
-    if (shape !== p.wbShape) {
-      var from = p.wbGrow && p.wbGrow.playState === "running" ? p.offsetWidth : p.wbWidth;
-      if (p.wbGrow) p.wbGrow.cancel();
-      if (p.style.overflow) p.style.overflow = "";
-      var width = p.offsetWidth;
-      if (p.animate && from && width && from !== width && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
-        p.style.overflow = "clip";
-        p.wbGrow = p.animate([{ width: from + "px" }, { width: width + "px" }], { duration: 420, easing: "cubic-bezier(.34,1.56,.64,1)" });
-        p.wbGrow.onfinish = function () { p.style.overflow = ""; };
-      }
-      p.wbWidth = width; p.wbShape = shape;
+    // Measure the destination next frame, without flashing it before the
+    // grow starts. Only the real capsule holds a width; the hidden copy is
+    // intrinsic and cannot receive focus or duplicate accessible controls.
+    if (p.wbGrow) p.wbGrow.cancel();
+    if (p.wbMeasure) p.wbMeasure.parentNode.removeChild(p.wbMeasure);
+    p.wbMeasure = null;
+    p.style.width = "";
+    if (p.style.overflow) p.style.overflow = "";
+    p.wbShape = shape;
+    if (p.animate && width && !hide && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+      var copy = p.cloneNode(true);
+      copy.style.visibility = "hidden";
+      copy.style.animation = "none";
+      copy.style.pointerEvents = "none";
+      copy.setAttribute("aria-hidden", "true");
+      copy.inert = true;
+      wraps[edge].appendChild(copy);
+      p.wbMeasure = copy; p.wbFrom = width;
+      p.style.width = width + "px";
+      p.style.overflow = "clip";
+      redrawSoon();
     }
   }
   // Avoid reading every far item's rect: an item in a topic wholly above
@@ -198,8 +221,11 @@
     // Read reply clearance before either capsule writes.
     var reply = host.querySelector(".reply"), replyHeight = reply ? reply.offsetHeight : 0;
     var bottom = "calc(" + (replyHeight ? replyHeight + 18 : 10) + "px + var(--wb-rail-bot, 0px))";
-    show("top", above);
-    show("bot", below);
+    var topWidth = pills.top.offsetWidth, botWidth = pills.bot.offsetWidth, home = atTop();
+    var topGoal = pills.top.wbMeasure ? pills.top.wbMeasure.offsetWidth : 0;
+    var botGoal = pills.bot.wbMeasure ? pills.bot.wbMeasure.offsetWidth : 0;
+    show("top", above, topWidth, home, topGoal);
+    show("bot", below, botWidth, home, botGoal);
     retitle();
     if (wraps.bot.style.bottom !== bottom) wraps.bot.style.bottom = bottom;
   }
@@ -211,9 +237,8 @@
 
   // A jump scroll can carry an item past the view without a crossing the
   // observer reports, and a hidden board column changes size without one; a
-  // settled-scroll or resize refresh covers both.
-  var timer = 0;
-  function later() { clearTimeout(timer); timer = setTimeout(redrawSoon, 120); }
+  // scroll or resize refresh covers both, coalesced to one pending frame.
+  function later() { redrawSoon(); }
   var scroller = root || window;
   scroller.addEventListener("scroll", later, { passive: true });
   window.addEventListener("resize", later);
@@ -278,8 +303,14 @@
     io.disconnect();
     if (ro) ro.disconnect();
     if (mo) mo.disconnect();
-    clearTimeout(timer);
     if (typed) cancelAnimationFrame(typed);
+    [pills.top, pills.bot].forEach(function (p) {
+      if (p.wbGrow) p.wbGrow.cancel();
+      if (p.wbMeasure) p.wbMeasure.parentNode.removeChild(p.wbMeasure);
+      p.wbMeasure = null;
+      p.style.width = "";
+      if (p.style.overflow) p.style.overflow = "";
+    });
     scroller.removeEventListener("scroll", later);
     window.removeEventListener("resize", later);
     host.removeEventListener("click", redraw);
