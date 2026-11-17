@@ -196,7 +196,7 @@ func TestToolbarPageActionHooks(t *testing.T) {
 		`filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false)`,
 		`var sheetInstance = null`,
 		`if (!sheetInstance) sheetInstance = createFiles(sheet, null, true)`,
-		`hidden: function () { if (sheetInstance) sheetInstance.hidden(); }`,
+		`if (sheetInstance) { sheetInstance.cancelPreview(); sheetInstance.hidden(); }`,
 		`load("ws.dashboard.toolbar." + k)`,
 		`save("ws.dashboard.toolbar." + k, v)`,
 		`if (fs) filesTab.shown()`,
