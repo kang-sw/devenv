@@ -31,7 +31,7 @@ func TestWatchedStampsShareValidationAcrossConcurrentRenders(t *testing.T) {
 	}
 	stamp := func(watch []string) string {
 		h := sha256.New()
-		cache.writeWatched(h, watch)
+		cache.writeWatched(h, watch, time.Time{})
 		return sumHex(h)
 	}
 	fileBefore, listBefore := stamp([]string{path}), stamp([]string{dir, path})
@@ -87,7 +87,7 @@ func TestWatchedStampsMissingPathsAndClockRollback(t *testing.T) {
 	}
 	stamp := func() string {
 		h := sha256.New()
-		cache.writeWatched(h, []string{path})
+		cache.writeWatched(h, []string{path}, time.Time{})
 		return sumHex(h)
 	}
 	missing := stamp()

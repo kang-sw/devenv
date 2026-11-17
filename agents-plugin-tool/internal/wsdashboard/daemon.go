@@ -135,6 +135,9 @@ type DaemonOptions struct {
 	// refreshInterval replaces sseRefreshInterval, so a test drives the
 	// refresh tick; zero is sseRefreshInterval.
 	refreshInterval time.Duration
+	// foreignInterval replaces foreignSafetyInterval, so a test sees a
+	// no-wake change within a few refresh ticks; zero is foreignSafetyInterval.
+	foreignInterval time.Duration
 	// keepAlive replaces sseKeepAlive, so a test drives the streams' idle
 	// frame and the WebSocket read window; zero is sseKeepAlive.
 	keepAlive time.Duration
@@ -197,6 +200,9 @@ type Daemon struct {
 	cache           *pageCache
 	refreshInterval time.Duration
 	keepAlive       time.Duration
+	// foreign is the refresh stamps' shared look at inputs no wake reports
+	// (foreign_schedule.go).
+	foreign *foreignSchedule
 	// tracker is the tracker host, nil without one; trackerRev is the
 	// revision TrackerChanged bumps and the streams send.
 	tracker    TrackerHost
@@ -432,6 +438,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	d.planUsage = newPlanUsageStore(opts.Dir, home, getenv)
 	d.cache = newPageCache(d.broker, stats)
+	d.foreign = newForeignSchedule(opts.foreignInterval, opts.MailWake)
 	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)
 	if d.refreshInterval <= 0 {
 		d.refreshInterval = sseRefreshInterval
@@ -713,6 +720,7 @@ func (d *Daemon) Close() {
 		if d.holders != nil {
 			d.holders.Close()
 		}
+		d.foreign.close()
 		removeEndpointIfOwned(d.dir, d.endpoint.Token)
 		_ = d.lock.Unlock()
 		fmt.Fprintf(d.log, "dashboard: stopped (pid %d)\n", d.endpoint.PID)
@@ -894,6 +902,7 @@ func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 	if d.mailWake != nil {
 		d.mailWake.Nudge()
 	}
+	d.foreign.mailChanged()
 	if d.index == nil || !d.index.Nudge(body.ReplyID, body.Project) {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return

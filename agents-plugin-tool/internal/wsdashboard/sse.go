@@ -48,7 +48,8 @@ const (
 	// sseRefreshInterval is the refresh tick: liveness (a peer or session
 	// reaching its live window's end) follows the clock, and a page source
 	// reads files no wake reports, so each tick re-renders unless the page's
-	// refresh stamp shows nothing changed (stream_cache.go).
+	// refresh stamp shows nothing changed (stream_cache.go). The stamp looks
+	// at those files only once per foreign look (foreign_schedule.go).
 	sseRefreshInterval = 15 * time.Second
 	// sseKeepAlive is the idle-frame period: the SSE comment line that keeps
 	// an idle stream open through proxies and lets the server notice a closed

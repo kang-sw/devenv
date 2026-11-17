@@ -331,6 +331,8 @@ type railLayoutStore struct {
 	mu   sync.Mutex
 	doc  *railLayoutDoc
 	seen railFileStamp
+	// looked is when the file was last statted (generationSince).
+	looked time.Time
 	// gen rises with every change of doc. It starts at the store's opening
 	// time in microseconds, so a newer daemon's generations come after an
 	// older one's, and a browser comparing them across a daemon restart
@@ -353,6 +355,7 @@ func openRailLayoutStore(dir string) *railLayoutStore {
 // read; mu is held. A read that fails keeps the copy in memory.
 func (s *railLayoutStore) refreshLocked() {
 	st := statRailFile(s.file)
+	s.looked = time.Now()
 	if st == s.seen {
 		return
 	}
@@ -374,6 +377,21 @@ func (s *railLayoutStore) current() (*railLayoutDoc, uint64) {
 	defer s.mu.Unlock()
 	s.refreshLocked()
 	return s.doc, s.gen
+}
+
+// generationSince is current's generation for a refresh stamp: the file is
+// statted again only when its last stat came before since (a zero since
+// always stats). This daemon's ops move the generation themselves.
+func (s *railLayoutStore) generationSince(since time.Time) uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if since.IsZero() || s.looked.Before(since) {
+		s.refreshLocked()
+	}
+	return s.gen
 }
 
 // railLayoutAnswer is an op's outcome: Reason empty when it applied,

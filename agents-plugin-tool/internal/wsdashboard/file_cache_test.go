@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // ageFile sets path's modification time to ago before now, outside the
@@ -382,7 +383,7 @@ func TestStampWatchedListsTicketDirectories(t *testing.T) {
 	cache := watchedStampCache{now: func() time.Time { return now }}
 	stamp := func() string {
 		h := sha256.New()
-		cache.writeWatched(h, watch)
+		cache.writeWatched(h, watch, time.Time{})
 		return sumHex(h)
 	}
 	last := stamp()
@@ -480,15 +481,19 @@ func TestSnapshotCacheFollowsTheSession(t *testing.T) {
 type mailFake struct {
 	*pageFake
 	print string
+	reads int
 }
 
-func (m *mailFake) MailPrint(Registration) (string, bool) { return m.print, true }
+func (m *mailFake) MailPrint(Registration) (string, bool) { m.reads++; return m.print, true }
 
 // TestSessionStampFoldsTheMailPrint: the refresh stamp of a page follows
 // its session's mail print, so an unread count or contact change that no
-// watched file reports still re-reads the page.
+// watched file reports still re-reads the page. Idle stamps share one
+// mailbox look; an in-daemon queue change or a nudge renews it at once, and
+// a write neither reports shows at the next foreign look.
 func TestSessionStampFoldsTheMailPrint(t *testing.T) {
-	f := startPageFixture(t)
+	hub := &wswake.Hub{}
+	f := startPageFixture(t, func(o *DaemonOptions) { o.MailWake = hub })
 	src := &mailFake{pageFake: f.src, print: "unread 0"}
 	r := f.d.pages()
 	r.source = agentSessions{inner: src, dir: f.dir, now: time.Now}
@@ -497,11 +502,34 @@ func TestSessionStampFoldsTheMailPrint(t *testing.T) {
 	if !ok {
 		t.Fatal("no stamp")
 	}
-	if again, _ := r.sessionStamp("boardsession", in); again != first {
-		t.Fatal("an unchanged print stamped differently")
+	for range 10 {
+		if again, _ := r.sessionStamp("boardsession", in); again != first {
+			t.Fatal("an unchanged print stamped differently")
+		}
+	}
+	if src.reads != 1 {
+		t.Fatalf("11 idle stamps read the mail print %d times, want one", src.reads)
 	}
 	src.print = "unread 1"
-	if next, _ := r.sessionStamp("boardsession", in); next == first {
-		t.Fatal("a changed mail print kept the stamp")
+	if next, _ := r.sessionStamp("boardsession", in); next != first {
+		t.Fatal("an unreported print change was read before the foreign look")
+	}
+	hub.StoreChanged("queue.json")
+	second, _ := r.sessionStamp("boardsession", in)
+	if second == first {
+		t.Fatal("a queue change hint kept the stamp")
+	}
+	src.print = "unread 2"
+	f.d.foreign.mailChanged() // a nudge
+	third, _ := r.sessionStamp("boardsession", in)
+	if third == second {
+		t.Fatal("a nudge kept the stamp")
+	}
+	src.print = "unread 3"
+	f.d.foreign.mu.Lock()
+	f.d.foreign.mailAt = f.d.foreign.mailAt.Add(-foreignSafetyInterval)
+	f.d.foreign.mu.Unlock()
+	if next, _ := r.sessionStamp("boardsession", in); next == third {
+		t.Fatal("the foreign look kept the stamp")
 	}
 }
