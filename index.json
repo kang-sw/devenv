@@ -523,7 +523,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-17T22:06:24Z"
+        "touched_at": "2026-11-17T22:07:06Z",
+        "impl": {
+          "branch": "impl/develop/ember-bunny-cacti"
+        }
       }
     },
     "261117-refactor-playbook-compression": {
