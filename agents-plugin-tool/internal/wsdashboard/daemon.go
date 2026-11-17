@@ -204,9 +204,14 @@ type Daemon struct {
 	// (foreign_schedule.go).
 	foreign *foreignSchedule
 	// tracker is the tracker host, nil without one; trackerRev is the
-	// revision TrackerChanged bumps and the streams send.
-	tracker    TrackerHost
-	trackerRev atomic.Int64
+	// revision TrackerChanged bumps and the streams send. trackerData is
+	// the data revision the cached page reads are keyed by (trackerAnswers,
+	// tracker_answers.go): TrackerChanged bumps it too, a change the daemon
+	// applies to those answers itself (the seen marks) does not.
+	tracker        TrackerHost
+	trackerRev     atomic.Int64
+	trackerData    atomic.Int64
+	trackerAnswers trackerAnswers
 	// entries caches rendered conversation entries per session.
 	entries *entryCache
 	// entryFiles caches the parsed ring and drained entries per session.
