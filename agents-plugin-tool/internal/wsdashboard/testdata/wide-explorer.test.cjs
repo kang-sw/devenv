@@ -321,8 +321,20 @@ test('docked toolbar clicks replace the memory-only preview; scrim click closes 
   events.length = 0; c.scrim.fire('click');
   assert.equal(c.filesSheet.el.hidden, true); assert.equal(pane.current(), null);
   assert.equal(root.hasAttribute('data-file-preview'), false); assert.equal(c.scrim.hidden, true);
-  assert.equal(events.filter(e => e === 'cancel-preview').length, 3, 'sheet dismissal plus both pane owners');
+  assert.equal(events.filter(e => e === 'cancel-preview').length, 4, 'both dismissal owners plus both pane owners');
 });
+for (const dismissal of ['Escape', 'scrim']) {
+  test('docked ' + dismissal + ' cancels both explorer intents even before a pane exists', () => {
+    const { context: c, pane, events } = fixture({ constructPane: true });
+    mountSheetFramework(c).fire('click');
+    assert.equal(pane.current(), null);
+    events.length = 0;
+    if (dismissal === 'Escape') c.doc.fire('keydown', { key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    else c.scrim.fire('click');
+    assert.equal(c.filesSheet.el.hidden, true);
+    assert.equal(events.filter(e => e === 'cancel-preview').length, 2, 'retire left and toolbar preflights without relying on pane close');
+  });
+}
 test('dashboard capture Escape closes docked sheet with or without preview regardless of focused dashboard element', async () => {
   for (const preview of [false, true]) {
     const { context: c, pane, root } = fixture({ constructPane: true });
