@@ -87,6 +87,14 @@ type SpawnSpec struct {
 	// spawns may ask for (children.go). Empty records none, and such a
 	// conversation spawns nothing.
 	Tier string
+	// Authority is an agent.spawn child's permission level, stored as its
+	// explicit selection (permission.json) and re-admitted against its
+	// parent's level at every process start (agent_tools.go). Empty
+	// stores none.
+	Authority PermissionLevel
+	// SystemPrompt is appended to the harness's system prompt at every
+	// process start; empty is none.
+	SystemPrompt string
 }
 
 // apply sets the spawn's choices on a new conversation's record.
@@ -102,6 +110,7 @@ func (spec *SpawnSpec) apply(rec *Record) {
 	}
 	rec.Label = spec.Label
 	rec.Tier = spec.Tier
+	rec.SystemPrompt = spec.SystemPrompt != ""
 	if spec.Parent != nil {
 		parent := *spec.Parent
 		rec.Parent = &parent
@@ -158,7 +167,9 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 // checkChildProfile enforces the parent's launched capability ceiling at
 // creation and every Pi process start. Lead parents are unrestricted.
 func (r *Runner) checkChildProfile(parent *ParentRef, name string, def Profile) error {
-	if def.Backend != BackendPi || parent == nil || parent.Kind != ParentConversation {
+	if def.Backend != BackendPi || parent == nil || parent.Kind != ParentConversation || isAgentWorkerProfile(name) {
+		// An agent.spawn child's ceiling is its authority (agent_tools.go),
+		// not its parent's tool list.
 		return nil
 	}
 	rec, ok := r.recordOf(parent.ReplyID)
@@ -298,6 +309,8 @@ func (c *conv) publish(res TurnResult) {
 			if parent != nil {
 				rec.ReportID = newReportID()
 				rec.LastTurn = &PendingReport{ID: c.settledReport, Result: res, Mark: res.mark}
+				// A settled turn resets the waiting expiry (agent_tools.go).
+				rec.LastActiveAt = c.r.opts.Now().UTC().Format(time.RFC3339)
 			}
 		})
 	}

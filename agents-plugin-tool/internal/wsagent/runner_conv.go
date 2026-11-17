@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -164,9 +165,16 @@ type conv struct {
 	// retry (kick) and cleared by the next send that succeeds; a send that
 	// fails again meanwhile waits for the next inbox or mail signal.
 	sendRetried bool
-	// autoClosing is set while a close of this finished Pi child is
-	// dispatched (closeWhenDone) and not yet run; loop-owned.
-	autoClosing bool
+	// systemPrompt is agent.spawn's system prompt (Record.SystemPrompt),
+	// read once from the session directory; loop-owned.
+	systemPrompt string
+	// expiring is set while a child-agent-waiting expiry is dispatched
+	// (expireIfDue) and not yet decided; loop-owned.
+	expiring bool
+	// wakeRefused is set while the last process start was refused by
+	// permission admission (childAdmission): the input stays, and the
+	// child counts as asleep. Under mu.
+	wakeRefused bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
@@ -419,6 +427,7 @@ func (c *conv) loop() {
 			} else {
 				c.checkRow()
 			}
+			c.expireIfDue()
 		case <-c.r.quit:
 			c.letGo()
 			// The watch's listening marker names this process: left behind,
@@ -431,7 +440,6 @@ func (c *conv) loop() {
 		if c.settle() {
 			return
 		}
-		c.closeWhenDone()
 	}
 }
 
@@ -517,6 +525,8 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 		} else if c.proc != nil {
 			st.Lifecycle = wsdashboard.SessionActiveOn
 		}
+	} else if c.childWaitingLocked() {
+		st.Lifecycle = wsdashboard.SessionChildWaiting
 	}
 	st.Held = c.held + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
@@ -834,13 +844,21 @@ func (c *conv) kick() {
 			return
 		}
 		if err := c.startProcess(); err != nil {
-			c.setStatus(func() { c.lastErr = err.Error() })
+			var refused *admissionRefusal
+			isRefusal := errors.As(err, &refused)
+			c.setStatus(func() { c.lastErr, c.wakeRefused = err.Error(), isRefusal })
 			fmt.Fprintf(c.r.opts.Log, "agent %s: start: %v\n", c.rec.ReplyID, err)
 			c.live.writeSnapshot()
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
+			if isRefusal {
+				// The input stays for the next admitted start; the child
+				// stays asleep (Deliver told the sender).
+				return
+			}
 			c.settleTurn(TurnFailed, err.Error(), c.sendCount())
 			return
 		}
+		c.setStatus(func() { c.wakeRefused = false })
 	}
 	// Under mu, as Send writes: every send counted here is in the drain
 	// (Wait's turn marks).

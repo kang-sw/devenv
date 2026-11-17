@@ -405,7 +405,6 @@ func newHarness(t *testing.T, profiles map[string]string) *harness {
 		heartbeat: 50 * time.Millisecond,
 		// Auto-closing finished Pi children is tested on its own
 		// (auto_close_test.go).
-		keepFinished: true,
 	}
 	h.start()
 	return h

@@ -20,7 +20,6 @@ import (
 func autoCloseHarness(t *testing.T) (*harness, *reports) {
 	t.Helper()
 	h, got := childHarness(t)
-	h.config.keepFinished = false
 	h.runner.Close()
 	h.start()
 	return h, got

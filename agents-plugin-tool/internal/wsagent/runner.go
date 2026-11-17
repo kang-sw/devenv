@@ -162,9 +162,12 @@ type Options struct {
 	ChildCheck func() error
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
-	// keepFinished keeps finished Pi children open (closeWhenDone and
-	// closeAtStart off), for tests that drive a child past its first turn.
-	keepFinished bool
+	// WakeRefused, when not nil, tells the sender of a message Deliver
+	// queued for a sleeping conversation whose start admission refused
+	// now (from: the sender's reply-id, id: the conversation, reason).
+	WakeRefused func(from, id, reason string)
+	// ChildWaitingDays overrides agent.child_waiting_days; 0 reads it.
+	ChildWaitingDays int
 	// spawnListed observes global spawn-projection listings in tests.
 	spawnListed func(string)
 	// stateInboxRead observes state-held inbox scans in tests.
@@ -186,6 +189,9 @@ type Runner struct {
 	convs         map[string]*conv
 	closed        map[string]Record
 	childrenIndex map[ParentRef]map[string]bool // mu; parent identity is immutable
+	// expiry is childWaitingExpiry's value, read once (expiryOnce).
+	expiryOnce sync.Once
+	expiry     time.Duration
 	quit          chan struct{}
 	wg            sync.WaitGroup
 	once          sync.Once
@@ -293,12 +299,20 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			open = append(open, rec)
 		}
 	}
-	var done map[string]bool
-	if !r.opts.keepFinished {
-		done = finishedAtStart(r.opts.Dir, open)
+	gone := map[string]bool{}
+	for _, id := range r.expiredAtStart(open) {
+		// Deepest first: a child waiting past its expiry is deleted with
+		// its descendants, as the heartbeat would (expire).
+		if err := os.RemoveAll(wsdashboard.SessionDir(r.opts.Dir, id)); err != nil {
+			fmt.Fprintf(r.opts.Log, "agent %s: delete: %v\n", id, err)
+			continue
+		}
+		gone[id] = true
 	}
+	open = slices.DeleteFunc(open, func(rec Record) bool { return gone[rec.ReplyID] })
+	orphans := orphansAtStart(open)
 	for _, rec := range open {
-		if done[rec.ReplyID] && r.closeAtStart(rec) {
+		if orphans[rec.ReplyID] && r.closeAtStart(rec) {
 			continue
 		}
 		// A lead whose process may still run under its holder rejoins
@@ -346,8 +360,8 @@ func (r *Runner) loadClosed(rec Record) {
 	r.closedRows[rec.ReplyID] = st
 }
 
-// closeAtStart closes open record rec at Start, as closeWhenDone would
-// have, with no loop started, and reports whether it did.
+// closeAtStart closes open record rec at Start, with no loop started, and
+// reports whether it did.
 func (r *Runner) closeAtStart(rec Record) bool {
 	now := r.opts.Now()
 	rec.ClosedAt = now.UTC().Format(time.RFC3339)
@@ -366,34 +380,14 @@ func (r *Runner) closeAtStart(rec Record) bool {
 	return true
 }
 
-// finishedAtStart picks the open spawned Pi children a daemon start closes
-// instead of serving (closeAtStart), as far as their records tell: one
-// whose last turn settled done and left nothing (no turn open or held, no
-// report its parent has not taken, no sent, held, queued, or claimed
-// input) and no open child of its own that stays, or one whose
-// conversation parent is closed or gone, so no report of it reaches one.
-// A finished one whose process may still run under its holder is served
-// instead: its loop rejoins that process, then closes (closeWhenDone) and
-// ends the holder with its record's holder fence cleared.
-func finishedAtStart(dir string, open []Record) map[string]bool {
+// orphansAtStart picks the open spawned Pi children a daemon start closes
+// instead of serving (closeAtStart): one whose conversation parent is
+// closed or gone, so no report of it reaches one, or that descends from
+// one. A finished child is not closed: it sleeps (agent_tools.go).
+func orphansAtStart(open []Record) map[string]bool {
 	isOpen := map[string]bool{}
-	kids := map[string][]string{}
 	for _, rec := range open {
 		isOpen[rec.ReplyID] = true
-		if rec.Parent != nil && rec.Parent.Kind == ParentConversation {
-			kids[rec.Parent.ReplyID] = append(kids[rec.Parent.ReplyID], rec.ReplyID)
-		}
-	}
-	idle := map[string]bool{}
-	for _, rec := range open {
-		last := rec.LastTurn
-		if rec.Lead || rec.Parent == nil || rec.Backend != BackendPi || last == nil || last.Result.Status != TurnDone || rec.HolderID != "" || rec.TurnOpen || rec.HeldTurn != nil ||
-			rec.Sends > max(last.Mark, rec.Voided) ||
-			len(rec.PendingReports)+len(rec.Queued)+len(rec.Mail)+len(rec.Reports)+len(rec.Steered) > 0 {
-			continue
-		}
-		held, err := wsinbox.Held(wsinbox.Dir(wsdashboard.SessionDir(dir, rec.ReplyID)))
-		idle[rec.ReplyID] = err == nil && len(held) == 0
 	}
 	done := map[string]bool{}
 	stays := func(id string) bool { return isOpen[id] && !done[id] }
@@ -404,9 +398,7 @@ func finishedAtStart(dir string, open []Record) map[string]bool {
 			if done[id] || rec.Lead || rec.Parent == nil || rec.Backend != BackendPi {
 				continue
 			}
-			orphan := rec.Parent.Kind == ParentConversation && !stays(rec.Parent.ReplyID)
-			finished := idle[id] && !slices.ContainsFunc(kids[id], stays)
-			if orphan || finished {
+			if rec.Parent.Kind == ParentConversation && !stays(rec.Parent.ReplyID) {
 				done[id], changed = true, true
 			}
 		}
@@ -747,7 +739,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
 	}
 	if spawn != nil {
-		if spawn.Tier != "" && rp.Definition.Backend != BackendPi {
+		if spawn.Tier != "" && rp.Definition.Backend != BackendPi && !isAgentWorkerProfile(rp.Name) {
 			return State{}, badRequest("pi.spawn: profile %q must be a non-lead Pi profile", rp.Name)
 		}
 		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
@@ -830,6 +822,16 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		}
 		if mode := nativePermissionMode(rec.Backend, lead.PermissionLevel); mode != "" {
 			rec.PermissionMode = mode
+		}
+	}
+	if spawn != nil && spawn.Authority != "" {
+		if err := writePermissionSelection(dir, spawn.Authority); err != nil {
+			return State{}, err
+		}
+	}
+	if spawn != nil && spawn.SystemPrompt != "" {
+		if err := writeFileAtomic(filepath.Join(dir, systemPromptFile), []byte(spawn.SystemPrompt), 0o600); err != nil {
+			return State{}, err
 		}
 	}
 	if lead != nil && lead.HireRequestID != "" {
@@ -1013,9 +1015,9 @@ func (r *Runner) Send(id, text string) (State, error) {
 		return st, err
 	}
 	if rec, ok := r.recordOf(id); ok && !rec.Lead && rec.Parent != nil && rec.Backend == BackendPi {
-		// A finished Pi child closes on its own (closeWhenDone), maybe
-		// between the open check and the inbox write. Once that close is
-		// done (resumeMu), a second try reopens it as any closed Pi child.
+		// A close may land between the open check and the inbox write.
+		// Once that close is done (resumeMu), a second try reopens it as
+		// any closed Pi child.
 		r.resumeMu.Lock()
 		r.resumeMu.Unlock()
 		st, err = r.send(id, text)
@@ -1044,6 +1046,10 @@ func (r *Runner) send(id, text string) (State, error) {
 		c.sends++
 		c.held++
 		c.rec.Sends = c.sends
+		if c.rec.Parent != nil {
+			// Any message resets a spawned child's waiting expiry.
+			c.rec.LastActiveAt = r.opts.Now().UTC().Format(time.RFC3339)
+		}
 	}
 	rec := c.rec
 	c.mu.Unlock()
@@ -1257,60 +1263,14 @@ func (r *Runner) releaseParent(id string) {
 	}
 }
 
-// autoCloseLater closes conversation id off the caller's goroutine, which
-// is its own loop (closeWhenDone), if it is still a finished Pi child.
-func (r *Runner) autoCloseLater(id string) {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		r.resumeMu.Lock()
-		defer r.resumeMu.Unlock()
-		if _, closed, err := r.closeOneIf(id, true); err != nil || !closed {
-			return
-		}
-		// Idle by autoCloseDue; they close with it, as in CloseConversation.
-		for _, d := range r.descendants(id) {
-			_, _ = r.closeOne(d)
-		}
-		r.releaseParent(id)
-	}()
-}
-
 // closeOne closes conversation id alone.
 func (r *Runner) closeOne(id string) (State, error) {
-	st, _, err := r.closeOneIf(id, false)
-	return st, err
-}
-
-// closeOneIf is closeOne; finished limits it to a Pi child that is
-// finished (autoCloseDue) when its loop checks again, in the step that
-// closes it, and closed reports whether it closed.
-func (r *Runner) closeOneIf(id string, finished bool) (st State, closed bool, err error) {
-	st, err = r.act(id, func(c *conv) error {
-		if !finished {
-			c.close()
-			closed = true
-			return nil
-		}
-		// The inbox is read again under mu: a message the page wrote whose
-		// signal the loop has not taken yet keeps the child open.
-		unread := false
-		closed = c.autoCloseDue() && c.closeIf(func() bool {
-			held, err := wsinbox.Held(c.inbox)
-			if err != nil {
-				unread = true
-				return false
-			}
-			c.held = len(held)
-			return c.finished()
-		})
-		// An unreadable inbox is not asked again at every loop step; the
-		// next daemon start checks the child again (Start).
-		c.autoClosing = unread
+	st, err := r.act(id, func(c *conv) error {
+		c.close()
 		return nil
 	})
-	if err != nil || !closed {
-		return st, closed, err
+	if err != nil {
+		return st, err
 	}
 	r.mu.Lock()
 	if c, ok := r.convs[id]; ok {
@@ -1322,7 +1282,7 @@ func (r *Runner) closeOneIf(id string, finished bool) (st State, closed bool, er
 		r.closedRows[id] = st
 	}
 	r.mu.Unlock()
-	return st, true, nil
+	return st, nil
 }
 
 // SetSettings changes the conversation's model or effort (nil leaves one

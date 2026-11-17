@@ -635,8 +635,9 @@ func (c *conv) idleNow() bool {
 		// Send coverage protects initial queuing, but not input retained
 		// for retry after a settled launch failure. A held result still
 		// waits for the child's own descendants.
-		active := !child.closed && child.rec.Parent != nil && *child.rec.Parent == parent &&
-			(child.turn || child.bgTasks != 0 || child.holding || child.sends > max(child.settled.mark, child.voided))
+		// A child whose start admission refused sleeps (wakeRefused).
+		active := child.rec.Parent != nil && *child.rec.Parent == parent && !child.closed &&
+			(child.turn || child.bgTasks != 0 || child.holding || !child.wakeRefused && child.sends > max(child.settled.mark, child.voided))
 		child.mu.Unlock()
 		if active {
 			return false
@@ -779,43 +780,6 @@ func (c *conv) closeIf(done func() bool) bool {
 	c.wmu.Unlock()
 	c.finishClose()
 	return true
-}
-
-// autoCloseDue reports whether a spawned Pi child has nothing left to do,
-// so it closes on its own: a turn of it settled done, no turn, replay,
-// background task, or descendant of it runs (idleNow, holdsReport), and
-// nothing waits for a next turn or for its parent (finished). Send reopens
-// it on its session file (resumePiChild). It runs in the loop.
-func (c *conv) autoCloseDue() bool {
-	if c.r.opts.keepFinished || c.closed || c.rec.Lead || c.rec.Parent == nil || c.rec.Backend != BackendPi || c.turn || c.wrapHold || c.holding {
-		return false
-	}
-	c.mu.Lock()
-	done := c.finished()
-	c.mu.Unlock()
-	return done && c.idleNow() && !c.holdsReport()
-}
-
-// finished reports that a turn of the conversation settled done and left
-// nothing behind: no turn open or held, no report its parent has not
-// taken, and no sent, held, queued, or claimed input. Under mu. A failed
-// or interrupted child stays open: a closed row shows no failure
-// (SpawnAgentEvent), and its parent may send it on.
-func (c *conv) finished() bool {
-	return c.settled.n > 0 && c.settled.Status == TurnDone && !c.rec.TurnOpen && c.rec.HeldTurn == nil && c.held == 0 &&
-		c.sends <= max(c.settled.mark, c.voided) &&
-		len(c.rec.PendingReports)+len(c.rec.Queued)+len(c.rec.Mail)+len(c.rec.Reports) == 0
-}
-
-// closeWhenDone has the runner close a finished Pi child (autoCloseDue)
-// off the loop: that close takes resumeMu and then runs in this loop
-// (act), so the loop never waits on it. The loop calls it after each step.
-func (c *conv) closeWhenDone() {
-	if c.autoClosing || !c.autoCloseDue() {
-		return
-	}
-	c.autoClosing = true
-	c.r.autoCloseLater(c.rec.ReplyID)
 }
 
 // finishClose is the rest of a close, once the conversation is marked

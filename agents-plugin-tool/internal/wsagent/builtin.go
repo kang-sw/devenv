@@ -113,6 +113,25 @@ var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 	"playbook.read", "playbook.render", "path.generate", "route.resolve_implement",
 )
 
+// AgentWSTools are the common ws tools every agent.spawn child gets, on
+// every harness: PiMiniLeadWSTools with agent.* in place of pi.*, plus
+// mailbox.send. The child's authority does not select among them; a
+// read-only child's ws-mcp refuses the mutating ones (EnvPermissionLevel).
+var AgentWSTools = agentWSTools()
+
+func agentWSTools() []string {
+	out := []string{}
+	for _, name := range PiMiniLeadWSTools {
+		if !strings.HasPrefix(name, "pi.") {
+			out = append(out, name)
+		}
+	}
+	return append(out, "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send")
+}
+
+// AgentClaudeTools are a Claude agent.spawn child's native tools.
+var AgentClaudeTools = []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep"}
+
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
 
@@ -185,6 +204,18 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		panic(err)
 	}
 	out[ProfilePrefix+PiMiniLeadProfile] = raw
+	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools} {
+		raw, err := json.Marshal(Profile{
+			Description: fmt.Sprintf("Agent worker (%s): the internal profile of a child agent.spawn starts on this harness; its tier picks the model, its system prompt the instructions, and its authority the permission level.", backend),
+			Backend:     backend,
+			Tools:       tools,
+			WSTools:     AgentWSTools,
+		})
+		if err != nil {
+			panic(err)
+		}
+		out[ProfilePrefix+AgentWorkerProfile(backend)] = raw
+	}
 	raw, err = json.Marshal(Profile{
 		Description:  "Local read-only Pi researcher reporting evidence from project files.",
 		Backend:      BackendPi,

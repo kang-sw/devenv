@@ -176,7 +176,6 @@ func (h *piRecoveryHarness) start() {
 		},
 		heartbeat: 20 * time.Millisecond,
 		// Replay is observed on a live loop; auto-closing is tested in auto_close_test.go.
-		keepFinished: true,
 	})
 	h.runner.SetEndpoint("http://127.0.0.1:1")
 	h.runner.Start(nil)
