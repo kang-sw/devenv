@@ -119,6 +119,10 @@ type store struct {
 	// lastSweep is when the staged-attachment sweep last ran
 	// (attachments.go).
 	lastSweep time.Time
+	// commits is the store's commit count as last counted, at the ledger
+	// refs version commitsAt (commitCount).
+	commits   int
+	commitsAt string
 
 	// viewMu guards ViewWithin's state, apart from mu so a waiting read
 	// never holds mu: snap is the view the last reload folded, cur the
@@ -925,19 +929,43 @@ func (h *Host) view(ctx context.Context, id string, staleDays int, reading func(
 		if reading != nil {
 			reading()
 		}
-		if _, err := st.ledger.Reload(ctx); err != nil {
+		rep, err := st.ledger.Reload(ctx)
+		if err != nil {
 			return err
 		}
 		v := st.tracker.View(h.now(), staleDays)
-		commits, err := countCommits(ctx, h.runner, st.entry.Dir)
+		commits, err := h.commitCount(ctx, st)
 		if err != nil {
 			return err
 		}
 		evs, _ := st.ledger.Events(wsledger.Cursor{})
-		out = fill(v, st.entry, st.ledger.MemberID()+"."+st.ledger.CloneID(), evs, st.ledger.Pending(), readSyncState(st.entry.Dir), commits)
+		// rep.Pending is the ledger's Pending as the reload left it, which
+		// nothing since changed; asking again would read the push state
+		// file again.
+		out = fill(v, st.entry, st.ledger.MemberID()+"."+st.ledger.CloneID(), evs, rep.Pending, readSyncState(st.entry.Dir), commits)
 		return nil
 	})
 	return out, err
+}
+
+// commitCount is countCommits for st, counted again only when the refs
+// its ledger last loaded moved since the last count (wsledger
+// RefsVersion), so a view of an unchanged store runs no git. Callers hold
+// st.mu.
+func (h *Host) commitCount(ctx context.Context, st *store) (int, error) {
+	at := st.ledger.RefsVersion()
+	if at != "" && at == st.commitsAt {
+		return st.commits, nil
+	}
+	n, err := countCommits(ctx, h.runner, st.entry.Dir)
+	if err != nil {
+		return 0, err
+	}
+	// A ref another process moved since the reload is counted under the
+	// reload's version; the next reload reads a new version and counts
+	// again.
+	st.commits, st.commitsAt = n, at
+	return n, nil
 }
 
 // Check is the immediate check (a receive-only fetch) the drawer runs when

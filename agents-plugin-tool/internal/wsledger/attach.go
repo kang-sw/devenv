@@ -189,9 +189,10 @@ func (l *Ledger) commitAttachments(ctx context.Context, pend []journalEvent) err
 	return l.git.updateRef(ctx, ref, oid, tip)
 }
 
-// loadAttachRefs parses what moved among the local attachment refs.
-func (l *Ledger) loadAttachRefs(ctx context.Context) error {
-	refs, err := l.git.listRefs(ctx, attachPrefix)
+// loadAttachRefs parses what moved among the local attachment refs; at is
+// the refs stamp the caller took (listRefsAt).
+func (l *Ledger) loadAttachRefs(ctx context.Context, at string) error {
+	refs, err := l.listRefsAt(ctx, at, attachPrefix)
 	if err != nil {
 		return err
 	}

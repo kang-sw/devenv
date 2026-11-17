@@ -264,8 +264,10 @@ func (l *Ledger) setKnown(ctx context.Context, ref, oid string) error {
 	return nil
 }
 
-func (l *Ledger) loadKnownOwn(ctx context.Context) error {
-	refs, err := l.git.listRefs(ctx, knownRef(l.ownRef()))
+// loadKnownOwn reads the own ref's known-on-the-remote value; at is the
+// refs stamp the caller took (listRefsAt), "" to run git.
+func (l *Ledger) loadKnownOwn(ctx context.Context, at string) error {
+	refs, err := l.listRefsAt(ctx, at, knownRef(l.ownRef()))
 	if err != nil {
 		return err
 	}
@@ -764,7 +766,7 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}
-		if err := l.loadKnownOwn(ctx); err != nil {
+		if err := l.loadKnownOwn(ctx, ""); err != nil {
 			return err
 		}
 		if err := l.joinLocked(ctx, created); err != nil {
