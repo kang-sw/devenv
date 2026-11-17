@@ -8,6 +8,8 @@ const { cacheRoot, inspect, browserCookie, browserLoginLink } = require('./endpo
 const LOGIN_COPIED = 'werkschaft:login-copied';
 const { pythonAvailable } = require('./python');
 const { nextZoom, destination } = require('./policy');
+const { createRecovery, safeURL } = require('./recovery');
+const { createShellLog } = require('./shell-log');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 const { createUpdater } = require('./update');
 const UPDATE = Object.freeze({ check: 'werkschaft:update-check', download: 'werkschaft:update-download',
@@ -31,9 +33,25 @@ function failStartup({ app, dialog }, error) {
   } finally { app.exit(1); }
 }
 
-function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session, clipboard }, platform = process.platform) {
+function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session, clipboard, crashReporter }, platform = process.platform) {
   app.setName('Werkschaft');
   if (!app.requestSingleInstanceLock()) { app.quit(); return; }
+  const userData = app.getPath('userData');
+  const logShell = createShellLog(userData);
+  app.on('child-process-gone', (_event, details) => {
+    logShell('child-process-gone', { type: details.type, reason: details.reason,
+      exitCode: details.exitCode, name: details.name });
+  });
+  if (crashReporter) {
+    try {
+      const dumps = path.join(userData, 'Crashpad');
+      fs.mkdirSync(dumps, { recursive: true });
+      app.setPath('crashDumps', dumps);
+      crashReporter.start({ uploadToServer: false });
+    } catch (error) {
+      logShell('crash-reporter-error', { error: error.message });
+    }
+  }
   let window, pin = null, connecting = false, title = 'Werkschaft — Connecting…';
   let zoom = 1;
   const focus = () => {
@@ -160,6 +178,44 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       trackDashboardTheme(wc, color => bar.setTheme(color));
     }
     let navigation, closing = false, retained = { pin, title };
+    const recovery = createRecovery({ retry: () => {
+      if (window.isDestroyed() || wc.isDestroyed()) return;
+      if (connecting) recovery.schedule();
+      else connect();
+    } });
+    window.on('closed', () => recovery.dispose());
+    wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      logShell('did-fail-load', { errorCode: code, errorDescription: description, url: safeURL(url), isMainFrame });
+      console.error(`Dashboard did-fail-load: code=${code} url=${safeURL(url)} mainFrame=${isMainFrame}`);
+      if (!isMainFrame || code === -3 || !pin || destination(url, pin) !== 'dashboard') return;
+      recovery.failure(true, code);
+      if (navigation?.loading) navigation.failureCode = code;
+      // Explicit loads already have a rejection handler. Page-initiated loads do not.
+      if (!navigation?.loading) {
+        const attempt = beginNavigation();
+        navigationFailed(attempt, `Load failed (${code}): ${description}`).finally(() => {
+          if (navigation === attempt) navigation = null;
+        });
+      }
+    });
+    wc.on('render-process-gone', (_event, details) => {
+      logShell('render-process-gone', { reason: details.reason, exitCode: details.exitCode, url: safeURL(wc.getURL()), isMainFrame: true });
+      console.error(`Dashboard render-process-gone: reason=${details.reason} url=${safeURL(wc.getURL())}`);
+      recovery.gone(details.reason);
+    });
+    wc.on('unresponsive', () => {
+      logShell('unresponsive', { url: safeURL(wc.getURL()), isMainFrame: true });
+      console.error(`Dashboard unresponsive: url=${safeURL(wc.getURL())}`);
+      recovery.unresponsive();
+    });
+    wc.on('responsive', () => {
+      logShell('responsive', { url: safeURL(wc.getURL()), isMainFrame: true });
+      console.log(`Dashboard responsive: url=${safeURL(wc.getURL())}`);
+      recovery.responsive();
+    });
+    wc.on('did-finish-load', () => {
+      if (pin && destination(wc.mainFrame.url, pin) === 'dashboard') recovery.success();
+    });
     window.on('close', event => {
       closing = true;
       if (dashboardView && !wc.isDestroyed()) {
@@ -249,12 +305,12 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       title = value;
       if (!window.isDestroyed()) { window.setTitle(title); bar?.setTitle(title); }
     }
-    function navigationFailed(attempt) {
+    function navigationFailed(attempt, reason) {
       pin = null;
       const failureTitle = 'Werkschaft — Navigation failed — ⌘R to retry';
       setTitle(failureTitle);
       attempt.commitTarget = { pin: null, title: failureTitle };
-      return wc.loadFile(path.join(__dirname, 'connection.html')).catch(() => {});
+      return wc.loadFile(path.join(__dirname, 'connection.html'), reason ? { query: { reason } } : undefined).catch(() => {});
     }
     async function navigate(url, attempt = beginNavigation()) {
       if (!isCurrent(attempt)) return;
@@ -271,7 +327,11 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (attempt.stayed && (error.code === 'ERR_ABORTED' || error.errno === -3)) {
           pin = retained.pin;
           setTitle(retained.title);
-        } else await navigationFailed(attempt);
+          recovery.success();
+        } else {
+          const code = attempt.failureCode ?? error.errno;
+          await navigationFailed(attempt, Number.isInteger(code) ? `Load failed (${code})` : 'Load failed');
+        }
       } finally {
         attempt.loading = false;
         if (navigation === attempt) navigation = null;
@@ -346,6 +406,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       finally {
         connecting = false;
         if (navigation === attempt) navigation = null;
+        recovery.retryIfActive();
       }
     }
     const fromConnectionPage = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
@@ -365,8 +426,21 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     });
     const fromDashboard = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
       !!pin && destination(event.senderFrame.url, pin) === 'dashboard';
-    wc.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
+    wc.on('did-start-navigation', (_event, url, inPlace, isMainFrame) => {
+      if (isMainFrame && !(connecting && navigation?.loading)) {
+        logShell('did-start-navigation', { url: safeURL(url), isMainFrame, inPlace });
+      }
       if (isMainFrame && !inPlace) updateTarget = null;
+    });
+    wc.on('console-message', (event, level, message, line, sourceId) => {
+      // Electron's current event carries details on the event; older releases
+      // deliver the same data as positional arguments.
+      const severity = event.level ?? level;
+      if (severity !== 'error' && severity !== 3) return;
+      const isMainFrame = event.frame ? event.frame === wc.mainFrame : null;
+      logShell('console-message', { level: 'error',
+        message: isMainFrame === false ? '[subframe message omitted]' : event.message ?? message,
+        line: event.lineNumber ?? line, url: safeURL(event.sourceId ?? sourceId), isMainFrame });
     });
     ipcMain.on(UPDATE.subscribe, event => {
       if (!fromDashboard(event)) return;

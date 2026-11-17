@@ -213,7 +213,13 @@ func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, ans
 // waits, and the agent runner (for a conversation it hosts) that the inbox
 // changed.
 func (d *Daemon) inboxChanged(s Session) {
-	d.index.Reread(s.ReplyID)
+	if s.HasBoard {
+		// Answer replay may also change board metadata asynchronously. Retain
+		// the full board poke without coupling it to the replay worker's lock.
+		d.index.Reread(s.ReplyID)
+	} else {
+		d.index.RereadLive(s.ReplyID, LiveInbox)
+	}
 	d.stats.WakeInbox.Add(1)
 	d.broker.wake(inboxDep(s.ReplyID))
 	if d.mailWake != nil {

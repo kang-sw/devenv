@@ -192,9 +192,16 @@ func (c *SnapshotCache) snapshotWithoutObserved(stateDir, replyID string) *wsliv
 // Snapshot reads the live snapshot of session replyID under stateDir; nil
 // when it has none. The snapshot is shared: the caller only reads it.
 func (c *SnapshotCache) Snapshot(stateDir, replyID string) *wslive.Snapshot {
+	snap, _ := c.snapshotResult(stateDir, replyID)
+	return snap
+}
+
+// snapshotResult preserves read failures for incremental consumers that must
+// retry transient errors rather than cache them as an authoritative absence.
+func (c *SnapshotCache) snapshotResult(stateDir, replyID string) (*wslive.Snapshot, error) {
 	p, err := c.read(wslive.SnapshotPath(SessionDir(stateDir, replyID)))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	dir := SessionDir(stateDir, replyID)
 	var observed *wslive.ObservedCache
@@ -202,7 +209,7 @@ func (c *SnapshotCache) Snapshot(stateDir, replyID string) *wslive.Snapshot {
 		observed = &c.observed
 	}
 	observed.Load(dir).Overlay(&p.snap)
-	return &p.snap
+	return &p.snap, nil
 }
 
 // Invalidate expires disk snapshot and observed-evidence validation after a
