@@ -1,0 +1,33 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { createShellLog } = require('../shell-log');
+
+test('shell log appends sanitized JSON lines and truncates oversized logs at startup', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shell-log-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'logs', 'shell.log');
+  const log = createShellLog(root);
+  assert.equal(fs.existsSync(file), false);
+  log('did-fail-load', { errorCode: -105, errorDescription: 'bad http://localhost/a?login=secret', url: 'http://localhost/?login=secret', isMainFrame: true });
+  log('responsive', { url: 'http://localhost/', message: 'token=secret bearer private {"password":"hidden\\"tail"} Cookie: session=one; csrf=two' });
+  const lines = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].event, 'did-fail-load');
+  assert.equal(lines[0].errorCode, -105);
+  assert.equal(lines[0].isMainFrame, true);
+  assert.ok(!JSON.stringify(lines).includes('secret'));
+  assert.ok(!JSON.stringify(lines).includes('private'));
+  assert.ok(!JSON.stringify(lines).includes('hidden'));
+  assert.ok(!JSON.stringify(lines).includes('tail'));
+  assert.ok(!JSON.stringify(lines).includes('csrf=two'));
+  assert.ok(!Number.isNaN(Date.parse(lines[0].timestamp)));
+  createShellLog(root)('continued');
+  assert.equal(fs.readFileSync(file, 'utf8').trim().split('\n').length, 3);
+  fs.writeFileSync(file, 'x'.repeat(1024 * 1024 + 1));
+  createShellLog(root)('fresh');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).event, 'fresh');
+});

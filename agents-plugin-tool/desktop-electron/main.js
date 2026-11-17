@@ -9,6 +9,7 @@ const LOGIN_COPIED = 'werkschaft:login-copied';
 const { pythonAvailable } = require('./python');
 const { nextZoom, destination } = require('./policy');
 const { createRecovery, safeURL } = require('./recovery');
+const { createShellLog } = require('./shell-log');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 const { createUpdater } = require('./update');
 const UPDATE = Object.freeze({ check: 'werkschaft:update-check', download: 'werkschaft:update-download',
@@ -48,6 +49,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
   app.on('window-all-closed', () => app.quit());
 
   app.whenReady().then(() => {
+    const logShell = createShellLog(app.getPath('userData'));
     // The update status waits here until the attached dashboard subscribes.
     let updatePending = null, updateTarget = null;
     const sendUpdate = status => {
@@ -168,6 +170,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     } });
     window.on('closed', () => recovery.dispose());
     wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      logShell('did-fail-load', { errorCode: code, errorDescription: description, url: safeURL(url), isMainFrame });
       console.error(`Dashboard did-fail-load: code=${code} url=${safeURL(url)} mainFrame=${isMainFrame}`);
       if (!isMainFrame || code === -3 || !pin || destination(url, pin) !== 'dashboard') return;
       recovery.failure(true, code);
@@ -181,14 +184,17 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       }
     });
     wc.on('render-process-gone', (_event, details) => {
+      logShell('render-process-gone', { reason: details.reason, exitCode: details.exitCode, url: safeURL(wc.getURL()), isMainFrame: true });
       console.error(`Dashboard render-process-gone: reason=${details.reason} url=${safeURL(wc.getURL())}`);
       recovery.gone(details.reason);
     });
     wc.on('unresponsive', () => {
+      logShell('unresponsive', { url: safeURL(wc.getURL()), isMainFrame: true });
       console.error(`Dashboard unresponsive: url=${safeURL(wc.getURL())}`);
       recovery.unresponsive();
     });
     wc.on('responsive', () => {
+      logShell('responsive', { url: safeURL(wc.getURL()), isMainFrame: true });
       console.log(`Dashboard responsive: url=${safeURL(wc.getURL())}`);
       recovery.responsive();
     });
@@ -405,8 +411,21 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     });
     const fromDashboard = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
       !!pin && destination(event.senderFrame.url, pin) === 'dashboard';
-    wc.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
+    wc.on('did-start-navigation', (_event, url, inPlace, isMainFrame) => {
+      if (isMainFrame && !(connecting && navigation?.loading)) {
+        logShell('did-start-navigation', { url: safeURL(url), isMainFrame, inPlace });
+      }
       if (isMainFrame && !inPlace) updateTarget = null;
+    });
+    wc.on('console-message', (event, level, message, line, sourceId) => {
+      // Electron's current event carries details on the event; older releases
+      // deliver the same data as positional arguments.
+      const severity = event.level ?? level;
+      if (severity !== 'error' && severity !== 3) return;
+      const isMainFrame = event.frame ? event.frame === wc.mainFrame : null;
+      logShell('console-message', { level: 'error',
+        message: isMainFrame === false ? '[subframe message omitted]' : event.message ?? message,
+        line: event.lineNumber ?? line, url: safeURL(event.sourceId ?? sourceId), isMainFrame });
     });
     ipcMain.on(UPDATE.subscribe, event => {
       if (!fromDashboard(event)) return;

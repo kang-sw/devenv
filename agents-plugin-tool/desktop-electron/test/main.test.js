@@ -169,6 +169,31 @@ test('explicit navigation failure shows the failure code', async () => {
   assert.match(f.window.fileOptions.query.reason, /-105/);
   f.window.emit('closed');
 });
+test('dashboard events persist diagnostic logs without URL queries', async t => {
+  const root = fs.mkdtempSync(path.join(userData, 'logging-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const f = await fixture(undefined, 'darwin', { userData: root });
+  const wc = f.window.webContents;
+  wc.getURL = () => 'http://127.0.0.1:39418/?login=secret';
+  wc.emit('did-start-navigation', {}, wc.getURL(), false, true);
+  wc.emit('did-start-navigation', {}, wc.getURL(), false, false);
+  wc.emit('did-fail-load', {}, -3, 'ERR_ABORTED', wc.getURL(), true);
+  wc.emit('render-process-gone', {}, { reason: 'clean-exit', exitCode: 9 });
+  wc.emit('unresponsive'); wc.emit('responsive');
+  wc.emit('console-message', { level: 'warning', message: 'ignore' });
+  wc.emit('console-message', { level: 'error', message: 'failed http://localhost/?login=secret', sourceId: wc.getURL(), lineNumber: 12 });
+  wc.emit('console-message', { level: 'error', message: 'private form data', sourceId: wc.getURL(), frame: {} });
+  const text = fs.readFileSync(path.join(root, 'logs', 'shell.log'), 'utf8');
+  const lines = text.trim().split('\n').map(JSON.parse);
+  assert.deepEqual(lines.map(line => line.event), ['did-start-navigation', 'did-fail-load', 'render-process-gone', 'unresponsive', 'responsive', 'console-message', 'console-message']);
+  assert.equal(lines[1].errorDescription, 'ERR_ABORTED');
+  assert.equal(lines[2].exitCode, 9);
+  assert.equal(lines[5].line, 12);
+  assert.ok(!text.includes('secret'));
+  assert.ok(!text.includes('private form data'));
+  assert.equal(lines[6].isMainFrame, false);
+  f.window.emit('closed');
+});
 test('connection page start uses the shared path, serializes requests and restricts IPC', async () => {
   let calls = 0, release;
   const f = await fixture(async options => {
