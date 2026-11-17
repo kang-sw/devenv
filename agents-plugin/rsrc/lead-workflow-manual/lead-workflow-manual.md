@@ -126,6 +126,23 @@ tier and bindings reported by the render when spawning.
 When delegating into another worktree, select that worktree at render time so
 the prompt artifact and session context follow the delegate.
 
+### Choosing a tier
+
+Pass the tier to `{{.McpNamespace}}/config.resolve_agent(tier)` rather than
+naming a model.
+
+- A rendered playbook → the tier its render recommends.
+- small: well-specified work with no design calls — mechanical edits,
+  running and reading commands, lookups, straightforward investigation.
+- medium: ordinary engineering with a clear target and approach — a scoped
+  change or investigation, across modules if needed.
+- large: demanding work — ambiguous diagnosis, design-sensitive changes or
+  drafting, broad cross-cutting changes. Most hard tasks belong here.
+- xlarge: research-grade work — an open problem with no known approach, or
+  novel design where a wrong call reshapes the system.
+- Unsure between small, medium, and large → the higher one; xlarge only when
+  the task plainly meets its bar.
+
 ### Artifact paths
 
 Use `{{.McpNamespace}}/path.generate` for large generated workflow artifacts.
