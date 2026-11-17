@@ -246,3 +246,26 @@ func TestConversationPresentationWhiteboardFoldAndTargets(t *testing.T) {
 		}
 	}
 }
+
+func TestConversationPresentationTopicBubbleShowsLabelNotStem(t *testing.T) {
+	state := &wswhiteboard.State{}
+	if _, problems := wswhiteboard.Apply(state, `<wb:topic name="send-latency" label="Send latency label"><wb:log>first</wb:log></wb:topic>`, wswhiteboard.Env{Now: testNow}); len(problems) != 0 {
+		t.Fatal(problems)
+	}
+	// A later update touches the stemmed topic without changing its label.
+	later, problems := wswhiteboard.Apply(state, `<wb:topic name="send-latency"><wb:log>second</wb:log></wb:topic>`, wswhiteboard.Env{Now: testNow})
+	if len(problems) != 0 {
+		t.Fatal(problems)
+	}
+	html := effectHTML(t, later.Effects...)
+	if !strings.Contains(html, "<b>Send latency label</b>") || !strings.Contains(html, `data-wb-topic="topic-73656e642d6c6174656e6379"`) {
+		t.Fatalf("stemmed topic bubble must show the label and keep the stem as its target: %s", html)
+	}
+	stemless, problems := wswhiteboard.Apply(state, `<wb:topic name="Plan"><wb:log>note</wb:log></wb:topic>`, wswhiteboard.Env{Now: testNow})
+	if len(problems) != 0 {
+		t.Fatal(problems)
+	}
+	if html := effectHTML(t, stemless.Effects...); !strings.Contains(html, "<b>Plan</b>") || strings.Contains(html, "wbupdate-key") {
+		t.Fatalf("stemless topic bubble must show its name alone: %s", html)
+	}
+}

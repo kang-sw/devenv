@@ -160,7 +160,7 @@ func TestSemanticEffectsFreshLabelWithoutTicketsPersistsWithFirstContent(t *test
 					t.Fatalf("fresh topic unexpectedly persisted through tickets: %+v", e)
 				}
 			}
-			want := []Effect{{Kind: "topic", Topic: "fresh", Field: "label", Before: "fresh", After: "Fresh topic"}}
+			want := []Effect{{Kind: "topic", Topic: "fresh", Field: "label", Before: "fresh", After: "Fresh topic", Label: "Fresh topic"}}
 			if !reflect.DeepEqual(labels, want) {
 				t.Fatalf("first content lost or duplicated the provisional label: got %+v, want %+v", labels, want)
 			}
@@ -179,10 +179,10 @@ func TestSemanticEffectsConsecutiveGroupMetadataReversions(t *testing.T) {
 	mustApply(t, s, `<wb:topic name="t" label="Original" tickets="261115-feat-first"><wb:body>Keep</wb:body></wb:topic>`)
 	out := mustApply(t, s, `<wb:topic name="t" label="Interim"/><wb:topic name="t" label="Original"/><wb:topic name="t" tickets="261115-feat-second"/><wb:topic name="t" tickets="261115-feat-first"/>`)
 	want := []Effect{
-		{Kind: "topic", Topic: "t", Field: "label", Before: "Original", After: "Interim"},
-		{Kind: "topic", Topic: "t", Field: "label", Before: "Interim", After: "Original"},
-		{Kind: "topic", Topic: "t", Field: "tickets", Before: `["261115-feat-first"]`, After: `["261115-feat-second"]`},
-		{Kind: "topic", Topic: "t", Field: "tickets", Before: `["261115-feat-second"]`, After: `["261115-feat-first"]`},
+		{Kind: "topic", Topic: "t", Field: "label", Before: "Original", After: "Interim", Label: "Original"},
+		{Kind: "topic", Topic: "t", Field: "label", Before: "Interim", After: "Original", Label: "Original"},
+		{Kind: "topic", Topic: "t", Field: "tickets", Before: `["261115-feat-first"]`, After: `["261115-feat-second"]`, Label: "Original"},
+		{Kind: "topic", Topic: "t", Field: "tickets", Before: `["261115-feat-second"]`, After: `["261115-feat-first"]`, Label: "Original"},
 	}
 	if !reflect.DeepEqual(out.Effects, want) {
 		t.Fatalf("group transitions collapsed: got %+v, want %+v", out.Effects, want)
