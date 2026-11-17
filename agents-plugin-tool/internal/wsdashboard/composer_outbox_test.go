@@ -129,6 +129,40 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+// TestComposerOutboxStructuredContent pins acknowledged sends with no free text:
+// their structured content must remain visible until the server bubble arrives.
+func TestComposerOutboxStructuredContent(t *testing.T) {
+	src := mustAsset(t, "dashboard.js")
+	runNode(t, "composer structured outbox", composerToastPrelude+outboxDOM+composerFunc(t, src, "heldAct")+composerFunc(t, src, "outboxBubble")+`
+function find(el, cls) {
+  if (el.className === cls) return el;
+  for (var i = 0; i < el.children.length; i++) { var found = find(el.children[i], cls); if (found) return found; }
+  return null;
+}
+function content(el) { return el.textContent + el.children.map(content).join(""); }
+var cases = [
+  [{ chips: [{ id: "03", answer: "ok", note: "<answer & note>" }] }, "achip", "(03) ok<answer & note>"],
+  [{ chips: [{ id: "04", note: "note only" }] }, "achip", "(04) notenote only"],
+  [{ topics: [{ topic: "<topic>", note: "topic note" }] }, "achip tchip", "[<topic>]topic note"],
+  [{ closeRequests: [{ topic: "ship", reason: "<reason>" }] }, "achip close-request-chip", "js.closerequest.label:ship<reason>"],
+  [{ mentions: [{ topic: "ship", id: "03", text: "quote" }] }, "achip mchip", "[ship] (03)quote"],
+  [{ picks: [{ selector: "#target", text: "picked", url: "https://example.invalid/" }] }, "achip mchip pchip", "#targetpicked"],
+  [{ consoles: [{ url: "https://example.invalid/", lines: ["one", "two"] }] }, "achip mchip cchip", "console ×2https://example.invalid/"]
+];
+cases.forEach(function (row) {
+  var bubble = outboxBubble({ id: "held", back: row[0], pics: [] });
+  var chips = find(bubble, "hchips"), chip = chips && find(chips, row[1]);
+  check("structured send is visible: " + row[1], chip && content(chip), row[2]);
+  check("structured send keeps a bubble", !!find(bubble, "bub"), true);
+});
+var mixed = outboxBubble({ id: "held", back: { text: "words", chips: [{ id: "03", answer: "ok" }], topics: [{ topic: "ship", note: "note" }] }, pics: [] });
+check("mixed message retains text and both chip kinds", content(mixed), "(03) ok[ship]notewords");
+var mixedChips = find(mixed, "hchips");
+check("chip content is escaped DOM text, not HTML", !!mixedChips && mixedChips.children.every(function (c) { return !c.innerHTML; }), true);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // TestComposerOutboxPersistsImmediateSend exercises the real draft reader and
 // writer before the input debounce has fired, while the POST remains unanswered.
 func TestComposerOutboxPersistsImmediateSend(t *testing.T) {
