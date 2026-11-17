@@ -33,9 +33,25 @@ function failStartup({ app, dialog }, error) {
   } finally { app.exit(1); }
 }
 
-function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session, clipboard }, platform = process.platform) {
+function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativeTheme, Menu, shell, dialog, session, clipboard, crashReporter }, platform = process.platform) {
   app.setName('Werkschaft');
   if (!app.requestSingleInstanceLock()) { app.quit(); return; }
+  const userData = app.getPath('userData');
+  const logShell = createShellLog(userData);
+  app.on('child-process-gone', (_event, details) => {
+    logShell('child-process-gone', { type: details.type, reason: details.reason,
+      exitCode: details.exitCode, name: details.name });
+  });
+  if (crashReporter) {
+    try {
+      const dumps = path.join(userData, 'Crashpad');
+      fs.mkdirSync(dumps, { recursive: true });
+      app.setPath('crashDumps', dumps);
+      crashReporter.start({ uploadToServer: false });
+    } catch (error) {
+      logShell('crash-reporter-error', { error: error.message });
+    }
+  }
   let window, pin = null, connecting = false, title = 'Werkschaft — Connecting…';
   let zoom = 1;
   const focus = () => {
@@ -49,7 +65,6 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
   app.on('window-all-closed', () => app.quit());
 
   app.whenReady().then(() => {
-    const logShell = createShellLog(app.getPath('userData'));
     // The update status waits here until the attached dashboard subscribes.
     let updatePending = null, updateTarget = null;
     const sendUpdate = status => {

@@ -29,7 +29,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   python.pythonAvailable = originalPython;
   endpoint.inspect = originalInspect;
   endpoint.cacheRoot = originalRoot;
-  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: !!roots.packaged, getPath: () => roots.userData || userData, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
+  const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: !!roots.packaged, getPath: () => roots.userData || userData, setPath: (key, value) => { app.paths[key] = value; }, paths: {}, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
+  const crashReporter = { start(options) { this.options = options; } };
   let focusedContents = null;
   const renderers = [];
   class Base extends EventEmitter {
@@ -110,7 +111,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   ipcMain.handle = (channel, handler) => { ipcMain.handlers[channel] = handler; };
   let template, response = 0, popups = 0, menuCallback, onDialog;
   const opened = [], copied = [];
-  start({ clipboard: { writeText: value => copied.push(value) }, app, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
+  start({ clipboard: { writeText: value => copied.push(value) }, app, crashReporter, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
     Menu: { buildFromTemplate: t => Object.assign(t, { popup(options) {
       assert.equal(options.window, Base.current);
       popups++; menuCallback = options.callback; focusedContents = null;
@@ -125,7 +126,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     focusedContents: () => focusedContents, clearFocus: () => { focusedContents = null; },
     dismissMenu: () => { const callback = menuCallback; menuCallback = null; callback(); },
     onDialog: fn => { onDialog = fn; },
-    menus, template, session: session.defaultSession, opened, copied, choose: n => { response = n; } };
+    menus, template, session: session.defaultSession, opened, copied, crashReporter, choose: n => { response = n; } };
 }
 test('failed page navigation shows the connection page and retries through the pinned guard', async () => {
   let calls = 0;
@@ -174,6 +175,10 @@ test('dashboard events persist diagnostic logs without URL queries', async t => 
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const f = await fixture(undefined, 'darwin', { userData: root });
   const wc = f.window.webContents;
+  assert.deepEqual(f.crashReporter.options, { uploadToServer: false });
+  assert.equal(f.app.paths.crashDumps, path.join(root, 'Crashpad'));
+  assert.ok(fs.statSync(f.app.paths.crashDumps).isDirectory());
+  f.app.emit('child-process-gone', {}, { type: 'GPU', reason: 'crashed', exitCode: 7, name: 'gpu' });
   wc.getURL = () => 'http://127.0.0.1:39418/?login=secret';
   wc.emit('did-start-navigation', {}, wc.getURL(), false, true);
   wc.emit('did-start-navigation', {}, wc.getURL(), false, false);
@@ -185,13 +190,17 @@ test('dashboard events persist diagnostic logs without URL queries', async t => 
   wc.emit('console-message', { level: 'error', message: 'private form data', sourceId: wc.getURL(), frame: {} });
   const text = fs.readFileSync(path.join(root, 'logs', 'shell.log'), 'utf8');
   const lines = text.trim().split('\n').map(JSON.parse);
-  assert.deepEqual(lines.map(line => line.event), ['did-start-navigation', 'did-fail-load', 'render-process-gone', 'unresponsive', 'responsive', 'console-message', 'console-message']);
-  assert.equal(lines[1].errorDescription, 'ERR_ABORTED');
-  assert.equal(lines[2].exitCode, 9);
-  assert.equal(lines[5].line, 12);
+  assert.deepEqual(lines.map(line => line.event), ['child-process-gone', 'did-start-navigation', 'did-fail-load', 'render-process-gone', 'unresponsive', 'responsive', 'console-message', 'console-message']);
+  assert.equal(lines[0].type, 'GPU');
+  assert.equal(lines[0].reason, 'crashed');
+  assert.equal(lines[0].exitCode, 7);
+  assert.equal(lines[0].name, 'gpu');
+  assert.equal(lines[2].errorDescription, 'ERR_ABORTED');
+  assert.equal(lines[3].exitCode, 9);
+  assert.equal(lines[6].line, 12);
   assert.ok(!text.includes('secret'));
   assert.ok(!text.includes('private form data'));
-  assert.equal(lines[6].isMainFrame, false);
+  assert.equal(lines[7].isMainFrame, false);
   f.window.emit('closed');
 });
 test('connection page start uses the shared path, serializes requests and restricts IPC', async () => {
