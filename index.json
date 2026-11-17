@@ -561,7 +561,10 @@
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-17T08:16:43Z"
+        "touched_at": "2026-11-17T08:20:04Z",
+        "impl": {
+          "branch": "impl/develop/chump-gravy-both"
+        }
       }
     },
     "261117-research-werkschaft-tauri-shell-revisit": {
