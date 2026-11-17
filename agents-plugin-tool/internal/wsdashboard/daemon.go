@@ -212,7 +212,8 @@ type Daemon struct {
 	live hostedSlots
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
 	// and the answer check's record and nudge).
-	inboxMu sync.Mutex
+	inboxMu      sync.Mutex
+	answerReplay sync.Map // reply-id -> one active replay/retry loop
 	// acks runs the answer checks (ack_check.go), nil without a session
 	// index.
 	acks *ackChecker
@@ -594,6 +595,7 @@ func newToken() (string, error) {
 func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
 		if session, ok := d.index.Session(replyID); ok {
+			d.scheduleAnswerReplay(session.Registration)
 			if session.Harness == "claude" {
 				d.planUsage.pushClaude(d.snapshots.snapshotWithoutObserved(d.dir, replyID))
 			}

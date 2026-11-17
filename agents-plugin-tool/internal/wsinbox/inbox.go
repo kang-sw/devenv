@@ -84,11 +84,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 const (
@@ -662,6 +665,10 @@ func randomHex(n int) (string, error) {
 // writeEntry commits entry under a fresh name in dir through temp+rename, so
 // no reader sees a partial entry.
 func writeEntry(dir string, entry Entry) (string, error) {
+	return writeEntryJournaled(dir, entry, false)
+}
+
+func writeEntryJournaled(dir string, entry Entry, journal bool) (string, error) {
 	stamp := nextStamp().Format(stampLayout)
 	raw, err := json.Marshal(entry)
 	if err != nil {
@@ -682,15 +689,94 @@ func writeEntry(dir string, entry Entry) (string, error) {
 		remove(tmpPath)
 		return "", fmt.Errorf("write inbox entry: %w", err)
 	}
+	if journal {
+		if err := tmp.Sync(); err != nil {
+			tmp.Close()
+			remove(tmpPath)
+			return "", fmt.Errorf("sync inbox entry: %w", err)
+		}
+	}
 	if err := tmp.Close(); err != nil {
 		remove(tmpPath)
 		return "", fmt.Errorf("write inbox entry: %w", err)
 	}
-	if err := rename(tmpPath, filepath.Join(dir, name)); err != nil {
-		remove(tmpPath)
+	var pending string
+	if journal {
+		journalDir := filepath.Join(dir, "answer-pending")
+		if err := os.MkdirAll(journalDir, 0o700); err != nil {
+			remove(tmpPath)
+			return "", err
+		}
+		// Persist both the stage name and the journal directory before the
+		// journal can be considered committed by the later rename.
+		if err := syncInboxDir(dir); err != nil {
+			remove(tmpPath)
+			return "", fmt.Errorf("sync inbox directory: %w", err)
+		}
+		// Retain a copy even if the entry is drained or cancelled. The name
+		// identifies the staging file: its disappearance is the atomic commit
+		// point. A partial journal still has its stage and is discarded on replay.
+		pending = filepath.Join(journalDir, name+"--"+filepath.Base(tmpPath))
+		journalFile, err := os.OpenFile(pending, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			remove(tmpPath)
+			return "", fmt.Errorf("journal inbox answer: %w", err)
+		}
+		_, writeErr := journalFile.Write(raw)
+		if writeErr == nil {
+			writeErr = journalFile.Sync()
+		}
+		if closeErr := journalFile.Close(); writeErr == nil {
+			writeErr = closeErr
+		}
+		if writeErr != nil {
+			discardUncommitted(pending, tmpPath)
+			return "", fmt.Errorf("journal inbox answer: %w", writeErr)
+		}
+		if err := syncInboxDir(journalDir); err != nil {
+			discardUncommitted(pending, tmpPath)
+			return "", fmt.Errorf("sync answer journal: %w", err)
+		}
+	}
+	commit := rename
+	if journal {
+		commit = wsstate.AtomicReplaceFile
+	}
+	if err := commit(tmpPath, filepath.Join(dir, name)); err != nil {
+		// Keep the stage if removing the journal fails: recovery must still
+		// recognize this as an uncommitted send.
+		if pending == "" {
+			remove(tmpPath)
+		} else {
+			discardUncommitted(pending, tmpPath)
+		}
 		return "", fmt.Errorf("commit inbox entry: %w", err)
 	}
+	if journal {
+		// The write is already visible; a sync error cannot safely be reported
+		// as a failed send without prompting a duplicate submission.
+		_ = syncInboxDir(dir)
+	}
 	return name, nil
+}
+
+func discardUncommitted(pending, stage string) {
+	if remove(pending) == nil && syncInboxDir(filepath.Dir(pending)) == nil {
+		remove(stage)
+	}
+}
+
+func syncInboxDir(path string) error {
+	// Windows uses a write-through publication; directory Sync is unsupported.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 func readEntry(path string) (Entry, error) {
@@ -728,6 +814,15 @@ func claim(dir, name, op string) (string, error) {
 // keeps its own place in the queue). add is normalized first (Normalize);
 // its SentAt is set from now when zero.
 func Send(dir string, add Entry, now time.Time) (name string, merged bool, err error) {
+	return sendEntry(dir, add, now, false)
+}
+
+// SendJournaled retains an answer until its board revision has been recorded.
+func SendJournaled(dir string, add Entry, now time.Time) (name string, merged bool, err error) {
+	return sendEntry(dir, add, now, true)
+}
+
+func sendEntry(dir string, add Entry, now time.Time, journal bool) (name string, merged bool, err error) {
 	if add.SentAt == 0 {
 		add.SentAt = now.UnixMilli()
 	}
@@ -742,7 +837,12 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, fmt.Errorf("create inbox dir: %w", err)
 	}
-	name, err = writeEntry(dir, add)
+	if journal {
+		if err := syncInboxDir(filepath.Dir(dir)); err != nil {
+			return "", false, fmt.Errorf("sync inbox parent: %w", err)
+		}
+	}
+	name, err = writeEntryJournaled(dir, add, journal)
 	return name, false, err
 }
 

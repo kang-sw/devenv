@@ -137,6 +137,27 @@ func TestBoardNoticePerTopicFullListAndRevision(t *testing.T) {
 	}
 }
 
+func TestBoardNoticeUsesLatestReceiptAfterRevisionReversion(t *testing.T) {
+	s := &State{}
+	noticeTopic(t, s, "A", StateImplementing, 10, stateNow)
+	dirs := map[string]string{"A": "t1"}
+	firstAt := stateNow.Add(time.Hour)
+	first := s.planNotice("lead", dirs, firstAt)
+	noticeReasons(t, first, "overdue", "hourly")
+	noticeStamp(t, s, first, firstAt)
+
+	// Represent a notification on an intervening revision, followed by a
+	// reversion to the original fingerprint. Old matching receipts must not
+	// suppress either kind of notice.
+	other := first
+	other.receipt.Revision = "intervening-revision"
+	otherAt := firstAt.Add(time.Hour)
+	other.receipt.SentAt, _ = stateTimestamp(otherAt)
+	noticeStamp(t, s, other, otherAt)
+	p := s.planNotice("lead", dirs, otherAt.Add(time.Hour))
+	noticeReasons(t, p, "overdue", "hourly")
+}
+
 func TestBoardNoticeAllReasonsWithoutTruncation(t *testing.T) {
 	s := etaBoard(t)
 	stateApply(t, s, etaCommand("60", "dependency expanded"), stateNow.Add(20*time.Minute))

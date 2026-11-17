@@ -11,8 +11,12 @@ func TestStaleReceiptIsInvisibleAndDoesNotRefreshAge(t *testing.T) {
 	s := &State{}
 	applyAt(t, s, bodies("A", "B", "C", "D", "E"), testNow)
 	before := BuildView(s, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	beforeHistory := s.clone()
 	if out := applyAt(t, s, "", testNow.Add(time.Hour)); nudgeOf(out) == "" {
 		t.Fatal("expected initial stale nudge")
+	}
+	if s.EntrySeq != beforeHistory.EntrySeq || !reflect.DeepEqual(s.Topics, beforeHistory.Topics) {
+		t.Fatal("stale receipt modified immutable topic history")
 	}
 	after := BuildView(s, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	if !reflect.DeepEqual(before.Topics, after.Topics) {

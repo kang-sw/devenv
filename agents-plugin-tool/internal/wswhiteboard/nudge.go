@@ -64,15 +64,18 @@ func staleReceipt(e Entry) bool {
 func (s *State) staleNudge(now time.Time) string {
 	revision := s.boardRevision()
 	lastID := 0
-	lastRevision := ""
-	for _, topic := range s.Topics {
-		for _, entry := range topic.Entries {
-			var receipt struct {
-				StaleRevision string `json:"stale_revision"`
-			}
-			id := folderNumber(entry.ID, "e")
-			if id > lastID && json.Unmarshal(entry.BoardNotice, &receipt) == nil && receipt.StaleRevision != "" {
-				lastID, lastRevision = id, receipt.StaleRevision
+	lastRevision := s.StaleNudgeRevision
+	// Migrate receipts written by the earlier entry-based implementation.
+	if lastRevision == "" {
+		for _, topic := range s.Topics {
+			for _, entry := range topic.Entries {
+				var receipt struct {
+					StaleRevision string `json:"stale_revision"`
+				}
+				id := folderNumber(entry.ID, "e")
+				if id > lastID && json.Unmarshal(entry.BoardNotice, &receipt) == nil && receipt.StaleRevision != "" {
+					lastID, lastRevision = id, receipt.StaleRevision
+				}
 			}
 		}
 	}
@@ -131,10 +134,7 @@ func (s *State) staleNudge(now time.Time) string {
 		names += ", ..."
 	}
 	s.LastNudgeAt = now.UTC().Format(time.RFC3339) // older daemons retain their debounce
-	receipt, _ := json.Marshal(struct {
-		StaleRevision string `json:"stale_revision"`
-	}{revision})
-	s.appendEntry(stale[0], Entry{Kind: EntrySystem, Text: "Stale topic nudge sent", BoardNotice: receipt}, now)
+	s.StaleNudgeRevision = revision
 	return fmt.Sprintf("%d of %d open topics unchanged for %d+ min (%s); if finished, close them with wb:close and a one-line result.",
 		len(stale), open, int(staleNudgeAge/time.Minute), names)
 }

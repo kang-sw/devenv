@@ -259,18 +259,7 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		d.inboxMu.Unlock()
 	}
 	if route == "message" && status == http.StatusOK {
-		// The inbox write is already durable. Record only actual board answers,
-		// never ordinary messages, commands, or server-generated activity.
-		var req messageRequest
-		if json.Unmarshal(raw, &req) == nil && req.Command == "" && hasBoardAnswer(req) {
-			if result, ok := answer.(map[string]any); ok {
-				if id, ok := result["id"].(string); ok {
-					if source, ok := d.source.(DashboardAnswerSource); ok {
-						d.recordAnswerRevision(source, s.Registration, id, now, 0)
-					}
-				}
-			}
-		}
+		d.scheduleAnswerReplay(s.Registration)
 	}
 	if route == "message" && status == http.StatusOK && s.Hosted {
 		if host, ok := d.agents.(AgentPageInputHost); ok {
@@ -289,15 +278,40 @@ type DashboardAnswerSource interface {
 	RecordDashboardAnswer(Registration, string, time.Time) error
 }
 
-// The inbox send must not be reported as failed after it has succeeded. Retry
-// transient board failures with the same ID, which makes retries idempotent.
-func (d *Daemon) recordAnswerRevision(source DashboardAnswerSource, reg Registration, id string, at time.Time, attempt int) {
-	if err := source.RecordDashboardAnswer(reg, id, at); err != nil {
-		fmt.Fprintf(d.log, "dashboard: record board answer revision: %v\n", err)
-		if attempt < 4 {
-			time.AfterFunc(time.Second<<attempt, func() { d.recordAnswerRevision(source, reg, id, at, attempt+1) })
-		}
+// Replay is also kicked by the index on startup. A failed board write leaves
+// its journal copy intact and is retried; the stable original ID makes a
+// crash after the board write but before unlinking safe.
+func (d *Daemon) scheduleAnswerReplay(reg Registration) {
+	source, ok := d.source.(DashboardAnswerSource)
+	if !ok {
+		return
 	}
+	if _, loaded := d.answerReplay.LoadOrStore(reg.ReplyID, struct{}{}); loaded {
+		return
+	}
+	go func() {
+		for {
+			d.inboxMu.Lock()
+			err := wsinbox.ReplayAnswerJournal(sessionInbox(d.dir, reg.ReplyID), func(id string, entry wsinbox.Entry) error {
+				return source.RecordDashboardAnswer(reg, id, time.UnixMilli(entry.SentAt))
+			})
+			if err == nil {
+				// Delete under the send lock: a send either precedes this scan or
+				// schedules a fresh one after the old loop is removed.
+				d.answerReplay.Delete(reg.ReplyID)
+				d.inboxMu.Unlock()
+				return
+			}
+			d.inboxMu.Unlock()
+			fmt.Fprintf(d.log, "dashboard: record board answer revision: %v\n", err)
+			select {
+			case <-d.stop:
+				d.answerReplay.Delete(reg.ReplyID)
+				return
+			case <-time.After(30 * time.Second):
+			}
+		}
+	}()
 }
 
 func hasBoardAnswer(req messageRequest) bool {
@@ -452,7 +466,13 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		return http.StatusInternalServerError, "could not store the images"
 	}
 	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, CloseRequests: req.CloseRequests, Picks: req.Picks, Consoles: req.Consoles, Images: append(paths, written...), ImageNums: nums, UTCOffsetMinutes: req.UTCOffsetMinutes}
-	name, merged, err := wsinbox.Send(dir, entry, now)
+	var name string
+	var merged bool
+	if hasBoardAnswer(req) {
+		name, merged, err = wsinbox.SendJournaled(dir, entry, now)
+	} else {
+		name, merged, err = wsinbox.Send(dir, entry, now)
+	}
 	if err != nil {
 		removeFiles(written)
 		if errors.Is(err, wsinbox.ErrEmpty) || errors.Is(err, wsinbox.ErrInvalid) {

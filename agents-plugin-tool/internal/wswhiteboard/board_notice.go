@@ -104,9 +104,17 @@ func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) 
 	}
 	views := s.TopicStates()
 	epoch, activation := s.hourlyEpoch()
-	covered := map[noticeCoverage]bool{}
+	// A matching older receipt is not evidence that the current revision was
+	// notified: authority can return to an earlier fingerprint after a revert.
+	// Retain only the newest receipt for each covered run and hourly epoch.
+	type coveredReceipt struct {
+		id       int
+		revision string
+	}
+	covered := map[noticeCoverage]coveredReceipt{}
 	var hourly time.Time
-	hourlyNotified := false
+	var hourlyID int
+	hourlyRevision := ""
 	future := false
 	for _, event := range s.stateEvents() {
 		n, ok := parseBoardNotice(event.entry, reply)
@@ -118,17 +126,18 @@ func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) 
 			future = true
 		}
 		// Every full overdue section covers its entries, including hourly-only sends.
-		if n.Revision == p.receipt.Revision {
-			for _, c := range n.Covered {
-				covered[c] = true
+		id := folderNumber(event.entry.ID, "e")
+		for _, c := range n.Covered {
+			if id > covered[c].id {
+				covered[c] = coveredReceipt{id, n.Revision}
 			}
 		}
 		if n.HourlyEpoch == epoch && slices.Contains(n.Reasons, "hourly") {
 			if sent.After(hourly) {
 				hourly = sent
 			}
-			if n.Revision == p.receipt.Revision {
-				hourlyNotified = true
+			if id > hourlyID {
+				hourlyID, hourlyRevision = id, n.Revision
 			}
 		}
 	}
@@ -166,7 +175,7 @@ func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) 
 		overdue = append(overdue, topic)
 		c := noticeCoverage{dirs[topic], run.ID, v.State.Entry}
 		p.receipt.Covered = append(p.receipt.Covered, c)
-		if !covered[c] {
+		if covered[c].id == 0 || covered[c].revision != p.receipt.Revision {
 			p.next = sooner(p.next, now)
 			trigger = true
 		}
@@ -174,7 +183,7 @@ func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) 
 	if trigger {
 		p.receipt.Reasons = append(p.receipt.Reasons, "overdue")
 	}
-	if eligible && epoch != "" && !hourlyNotified {
+	if eligible && epoch != "" && (hourlyID == 0 || hourlyRevision != p.receipt.Revision) {
 		due := activation.Add(time.Hour)
 		if !hourly.IsZero() {
 			due = hourly.Add(time.Hour)
