@@ -116,8 +116,17 @@ initialize instructions and/or injection), replacing the plugin's manual
 injection and preload for hosted sessions. The injected routing-table size
 budget (research Open Question 10) is settled in this phase's planning.
 
+Dogfood evidence (2026-11-18, track/agent-v2): a hosted lead starts with no
+session key and no workflow manual. On a scratch daemon a hosted Claude lead's
+`agent.spawn` failed with "session_key is required", and the agy Phase 2 live
+lead recovered only by calling `ferrule` itself
+(`261117-feat-ws-hosted-antigravity-adapter` Phase 2 Result, Forward). The
+delivered manual must carry the lead's session key, so ws tools that require
+one work from the first turn.
+
 Verification: tests on remote w5090 that a hosted session of each available
-harness receives the manual without any plugin hook; size-budget check.
+harness receives the manual without any plugin hook; size-budget check; a
+hosted lead's first-turn `agent.spawn` succeeds without a `ferrule` call.
 
 ### Phase 3: Per-turn ambient injection replacing plugin hooks
 
