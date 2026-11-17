@@ -381,7 +381,7 @@ async function serve(args) {
   process.on("SIGINT", () => stop(0));
   process.on("SIGTERM", () => stop(0));
   try {
-    const bin = path.join(tmp, "ws-mcp");
+    const bin = path.join(tmp, process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
     log(`building ws-mcp from ${TOOL_DIR} ...`);
     run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR, env: childEnv(tmp) });
     log(`seeding two sessions (${n} topics each) ...`);
@@ -400,6 +400,11 @@ async function serve(args) {
     }, 20000, "the daemon's endpoint file");
     const base = `http://127.0.0.1:${ep.port}`;
     await waitFor(async () => (await fetch(base + "/health")).ok, 10000, "/health");
+    // Native readiness requests need the same localhost cookie as a browser.
+    // /health and /nudge are machine exemptions; session pages are not.
+    const auth = await fetch(base + "/auth/cookie", { method: "POST", headers: { Authorization: "Bearer " + ep.token } });
+    if (!auth.ok) throw new Error(`localhost cookie: HTTP ${auth.status}: ${await auth.text()}`);
+    const credential = await auth.json(), cookie = credential.name + "=" + credential.value;
     // The registry row (and, for the adapter session, a live snapshot) is
     // what a serving ws-mcp would write; refreshed on a timer so the
     // session stays inside the registry's liveness window.
@@ -424,7 +429,7 @@ async function serve(args) {
     // Each page must be the kind it is seeded as.
     for (const [s, wantBar] of [[adapter, true], [board, false]]) {
       // /s/<rid> is the iframe shell; the session page is its frame.
-      const html = await waitFor(async () => { const r = await fetch(`${base}/s/${s.rid}?frame=1`); return r.ok ? r.text() : null; }, 10000, `/s/${s.rid}?frame=1`);
+      const html = await waitFor(async () => { const r = await fetch(`${base}/s/${s.rid}?frame=1`, { headers: { Cookie: cookie } }); return r.ok ? r.text() : null; }, 10000, `/s/${s.rid}?frame=1`);
       const hasBar = /id="tabbar"/.test(html);
       if (hasBar !== wantBar) throw new Error(`/s/${s.rid}: #tabbar ${hasBar ? "present" : "absent"}, expected ${wantBar ? "present" : "absent"}`);
     }
@@ -435,6 +440,7 @@ async function serve(args) {
     log("serving; Ctrl-C stops the daemon and removes the temp directory");
   } catch (e) {
     console.error(`board-headless serve: ${e.message}`);
+    try { console.error(fs.readFileSync(path.join(tmp, "daemon.log"), "utf8").trim().split(/\r?\n/).slice(-20).join("\n")); } catch {}
     stop(1);
   }
 }
