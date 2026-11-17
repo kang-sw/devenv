@@ -286,7 +286,7 @@ ai-docs/tickets/.dropped/
   `#### Edition (<short-hash>) - YYYY-MM-DD` for later implementation tweaks.
 - To check ticket completion or prior phase results, use
   `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
-- All AI-authored ticket content must be English.
+- A ticket's frontmatter `title:` uses `workflow.lang` when set, otherwise English; the rest of the ticket is English.
 
 ## Project Orientation
 
@@ -345,7 +345,8 @@ ai-docs/tickets/.dropped/
 ## Project Knowledge
 
 - **Language:** AI-authored docs, plans, commits, tickets, and code comments are
-  English. Human-facing UI strings are exempt.
+  English, except ticket frontmatter `title:` uses `workflow.lang` when set,
+  otherwise English. Human-facing UI strings are exempt.
 - Workflow shape and plugin-less maintenance guidance live in
   `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or
   MCP parser behavior.

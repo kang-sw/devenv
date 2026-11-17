@@ -700,7 +700,8 @@ func TestRepoScopeWorkflowLangReachesPlaybookRead(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 921001, root, nil))
 
 	resp := callToolWithKey(t, server, 921002, key, "playbook.read", map[string]any{"name": "lead-workflow-manual"})
-	if !strings.Contains(resp, "Respond to the user in Klingon.") {
+	langInstruction := resolveWorkflowLangVar("Klingon")
+	if langInstruction == "" || !strings.Contains(resp, langInstruction) {
 		t.Fatalf("playbook.read did not apply the committed repo workflow.lang:\n%s", resp)
 	}
 }

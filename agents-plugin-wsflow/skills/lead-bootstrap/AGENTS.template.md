@@ -114,7 +114,7 @@ Auto-create one commit per logical unit. Include `## AI Context` explaining why 
 - Reference tickets by stem only, never full path; stems survive status moves.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Claude Code compatibility is `CLAUDE.md` containing `@AGENTS.md`.
-- **Language:** AI-authored docs, plans, commits, tickets, and code comments are English. Human-facing UI strings are exempt.
+- **Language:** A ticket's frontmatter `title:` uses `workflow.lang` when set, otherwise English; the rest of the ticket is English. Other AI-authored docs, plans, commits, and code comments are English. Human-facing UI strings are exempt.
 
 <!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
 
@@ -298,6 +298,11 @@ Adapt structure to the project; this is a starting point, not a schema.
   to legacy worksets. Epics remain single-outcome decomposition, the goal loop
   over scoped `ready/` handles mixed-parent execution, and `related:` records
   non-hierarchical relationships. Do not convert worksets into epics.
+- v0051: Update the ticket language rule in `AGENTS.md` and the Manual
+  Fallback language guidance in `ai-docs/WORKFLOW.md`: a ticket's frontmatter
+  `title:` uses `workflow.lang` when set, otherwise English; the rest of the
+  ticket is English. Preserve other project-specific guidance. Do not rewrite
+  existing tickets.
 -->
 
-<!-- Template Version: v0050 -->
+<!-- Template Version: v0051 -->

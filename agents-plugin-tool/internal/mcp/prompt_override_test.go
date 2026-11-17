@@ -544,6 +544,16 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	assertManualStructureIntact(t, "user preference override", ovBody)
 }
 
+func TestResolveWorkflowLangVarWhitespace(t *testing.T) {
+	if got := resolveWorkflowLangVar(" \t\n"); got != "" {
+		t.Fatalf("blank language produced an instruction: %q", got)
+	}
+	plain := resolveWorkflowLangVar("Korean")
+	if plain == "" || resolveWorkflowLangVar("  Korean  ") != plain {
+		t.Fatal("configured language must produce the same instruction after trimming")
+	}
+}
+
 // TestWorkflowLangInjectionIntoUserPreferenceSection verifies that a non-empty
 // workflowLang generates a language-binding instruction in the ### User preferences
 // seed, and that an empty workflowLang leaves the section empty.
@@ -551,12 +561,17 @@ func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
+	langInstruction := resolveWorkflowLangVar("Korean")
+	if langInstruction == "" {
+		t.Fatal("configured language produced no instruction")
+	}
+
 	// Empty workflowLang → section stays empty (no lang instruction).
 	emptyBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (empty lang): %v", err)
 	}
-	if strings.Contains(emptyBody, "Respond to the user in") {
+	if strings.Contains(emptyBody, langInstruction) {
 		t.Errorf("empty workflowLang must not inject lang instruction:\n%s", emptyBody)
 	}
 	assertNoMarkerSyntax(t, "empty lang", emptyBody)
@@ -566,7 +581,7 @@ func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook (Korean): %v", err)
 	}
-	if !strings.Contains(langBody, "Respond to the user in Korean") {
+	if !strings.Contains(langBody, langInstruction) {
 		t.Errorf("workflowLang=Korean must inject lang instruction:\n%s", langBody)
 	}
 	assertNoMarkerSyntax(t, "Korean lang", langBody)

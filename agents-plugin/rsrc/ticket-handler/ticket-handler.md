@@ -5,6 +5,7 @@ role: worker
 tier: medium
 variables:
   - SpawnIdiom
+  - WorkflowLang
 ---
 # Ticket Handler
 
@@ -31,8 +32,10 @@ you resume when the lead replies.
 
 ## Constraints
 
-- Edit only the members, none in `.done/` or `.dropped/`. Ticket text and
-  reports: English.
+- Edit only the members, none in `.done/` or `.dropped/`. Ticket frontmatter
+  `title:` uses `workflow.lang` when set, otherwise English; the rest of the
+  ticket, including the H1, and reports are English. Keep stems ASCII English.
+  {{.WorkflowLang}}
 <!-- ws:override:TicketHandlerPersistConfirmation -->
 - The lead's replies are the confirmation record. Persist only what they
   confirm, or what you auto-confirm below.

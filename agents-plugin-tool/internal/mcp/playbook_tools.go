@@ -307,7 +307,7 @@ func resolveWorkflowLangVar(lang string) string {
 		return ""
 	}
 	return "Respond to the user in " + strings.TrimSpace(lang) +
-		". Keep all internal reasoning, subagent prompts, code comments, and AI-authored artifacts in English."
+		". Write ticket frontmatter titles in that language. Keep all internal reasoning, subagent prompts, code comments, and other AI-authored artifacts in English."
 }
 
 func resolveNamespaceVars(namespace string) map[string]string {

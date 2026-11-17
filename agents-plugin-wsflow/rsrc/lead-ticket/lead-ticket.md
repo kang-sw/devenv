@@ -49,7 +49,8 @@ Rules:
 - Create: `{{.McpNamespace}}/tickets.create_empty`. Move: `tickets.move`,
   `tickets.close`; `git mv` only when the tool errors.
 - `.done/`, `.dropped/`: never edited or moved.
-- Ticket text: English.
+- Ticket frontmatter `title:` uses `workflow.lang` when set, otherwise English;
+  the rest, including the H1, is English. Keep the stem ASCII English.
 
 ## Open Decision Queue
 
