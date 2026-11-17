@@ -161,4 +161,21 @@ type Contact struct {
 	// or presence record's, else the contact record's as known at the last
 	// exchange. Empty when neither records one.
 	Cwd string
+	// PresenceUntil is when a live PresenceLive lapses with the clock alone
+	// (the seen time plus the liveness window); zero when the source gives
+	// none. PresencePID is the process a live named presence also needs
+	// running; zero for none. Both are memory-only: the refresh stamp folds
+	// the lapse they imply each tick without re-reading a store (liveAt).
+	PresenceUntil time.Time
+	PresencePID   int
+}
+
+// liveAt is the contact's liveness at now as far as its last read can tell:
+// a live presence lapses at PresenceUntil or when PresencePID exits. A
+// recovery needs a store read, so a contact read as not live stays so.
+func (c Contact) liveAt(now time.Time) bool {
+	if !c.PresenceLive || !c.PresenceUntil.IsZero() && !now.Before(c.PresenceUntil) {
+		return false
+	}
+	return c.PresencePID <= 0 || processAlive(c.PresencePID)
 }

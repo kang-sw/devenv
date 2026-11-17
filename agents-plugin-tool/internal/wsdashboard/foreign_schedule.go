@@ -9,8 +9,9 @@ import (
 
 // Foreign-input reconciliation for refresh stamps (stream_cache.go). A
 // refresh tick folds a page's in-memory, clock-driven state every tick: the
-// index entries, their liveness, the adapter evidence already read, and the
-// watched processes. Inputs a writer may change without telling the daemon
+// index entries, their liveness, the adapter evidence already read, the
+// watched processes, and the lapse of each contact last read
+// (Contact.liveAt). Inputs a writer may change without telling the daemon
 // are looked at once per foreignSafetyInterval instead, and that look is
 // shared by every page: the files a page names (PageContent.Watch), the rail
 // layout file, and the mailbox stores behind a session's mail print and
@@ -20,7 +21,8 @@ import (
 // Nothing here is persisted: a replacement daemon starts with a fresh look.
 
 // foreignSafetyInterval is the longest a refresh stamp reuses its look at a
-// foreign input, so a change no writer reports reaches open pages within it.
+// foreign input, so a change no writer reports reaches open pages within it
+// plus at most one refresh tick (the look renews on the first tick past it).
 const foreignSafetyInterval = 5 * time.Minute
 
 // storeHinter is a mailbox wake hub that publishes changed queue stores
@@ -47,8 +49,9 @@ type foreignSchedule struct {
 }
 
 type mailLook struct {
-	gen   uint64
-	stamp string
+	gen      uint64
+	stamp    string
+	contacts []Contact
 }
 
 // mailLookMax bounds the kept mailbox stamps; past it the map starts over.
@@ -100,10 +103,11 @@ func (s *foreignSchedule) mailChanged() {
 	s.mu.Unlock()
 }
 
-// mailStamp returns key's mailbox stamp, calling read only when the mailbox
-// look was renewed (a hint, a nudge, or the safety interval) since key's
-// last stamp. A failed read (ok false) is never kept, so it retries.
-func (s *foreignSchedule) mailStamp(key string, read func() (string, bool)) (string, bool) {
+// mailStamp returns key's mailbox stamp and the contacts it read, calling
+// read only when the mailbox look was renewed (a hint, a nudge, or the
+// safety interval) since key's last stamp. A failed read (ok false) is never
+// kept, so it retries. The contacts are shared: callers only read them.
+func (s *foreignSchedule) mailStamp(key string, read func() (string, []Contact, bool)) (string, []Contact, bool) {
 	if s == nil {
 		return read()
 	}
@@ -123,20 +127,20 @@ func (s *foreignSchedule) mailStamp(key string, read func() (string, bool)) (str
 	gen := s.mailGen
 	if look, ok := s.mail[key]; ok && look.gen == gen {
 		s.mu.Unlock()
-		return look.stamp, true
+		return look.stamp, look.contacts, true
 	}
 	s.mu.Unlock()
 	// A hint landing during read raises mailGen past gen, so the next call
 	// reads again.
-	stamp, ok := read()
+	stamp, contacts, ok := read()
 	if !ok {
-		return "", false
+		return "", nil, false
 	}
 	s.mu.Lock()
 	if _, replaces := s.mail[key]; s.mail == nil || !replaces && len(s.mail) >= mailLookMax {
 		s.mail = map[string]mailLook{}
 	}
-	s.mail[key] = mailLook{gen: gen, stamp: stamp}
+	s.mail[key] = mailLook{gen: gen, stamp: stamp, contacts: contacts}
 	s.mu.Unlock()
-	return stamp, true
+	return stamp, contacts, true
 }

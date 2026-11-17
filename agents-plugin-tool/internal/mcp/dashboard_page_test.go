@@ -439,6 +439,11 @@ func TestDashboardReadPageContacts(t *testing.T) {
 	if !idC.PresenceLive || named.PresenceLive != mailboxPresenceLive(presence, now) || !named.PresenceLive {
 		t.Fatalf("liveness at +5m: id %v, named %v", idC.PresenceLive, named.PresenceLive)
 	}
+	// The lapse inputs the daemon's refresh stamp folds from memory.
+	if lapse := t0.Add(mailboxLivenessThreshold); !idC.PresenceUntil.Equal(lapse) || !named.PresenceUntil.Equal(lapse) ||
+		named.PresencePID != presence.PID || idC.PresencePID != 0 {
+		t.Fatalf("lapse inputs at +5m: id until %v pid %d, named until %v pid %d", idC.PresenceUntil, idC.PresencePID, named.PresenceUntil, named.PresencePID)
+	}
 
 	now = t0.Add(11 * time.Minute)
 	contacts = byAddress()

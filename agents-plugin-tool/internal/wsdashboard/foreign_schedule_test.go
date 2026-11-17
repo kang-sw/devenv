@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,9 +23,9 @@ func TestForeignScheduleSharesOneMailboxLook(t *testing.T) {
 	now := time.Now()
 	s.now = func() time.Time { return now }
 	reads, value := 0, "a"
-	read := func() (string, bool) { reads++; return value, true }
+	read := func() (string, []Contact, bool) { reads++; return value, nil, true }
 	stamp := func(key string) string {
-		got, ok := s.mailStamp(key, read)
+		got, _, ok := s.mailStamp(key, read)
 		if !ok {
 			t.Fatal("mail stamp failed")
 		}
@@ -56,9 +57,9 @@ func TestForeignScheduleSharesOneMailboxLook(t *testing.T) {
 	if reads != 6 {
 		t.Fatalf("the safety interval renewed reads=%d, want 6", reads)
 	}
-	fail := func() (string, bool) { reads++; return "", false }
+	fail := func() (string, []Contact, bool) { reads++; return "", nil, false }
 	for range 2 {
-		if _, ok := s.mailStamp("three", fail); ok {
+		if _, _, ok := s.mailStamp("three", fail); ok {
 			t.Fatal("a failed read stamped")
 		}
 	}
@@ -70,6 +71,99 @@ func TestForeignScheduleSharesOneMailboxLook(t *testing.T) {
 	none.mailStamp("one", read)
 	if reads != 10 || !none.filesSince().IsZero() {
 		t.Fatal("a nil schedule must read every time and ask for the one-second window")
+	}
+}
+
+// TestSessionStampFoldsContactLapseFromMemory: a live contact's lapse, by
+// the clock or by its process exiting, moves the refresh stamp on the next
+// tick with no contact re-read; a contact read as not live stays so until
+// the mailbox look renews.
+func TestSessionStampFoldsContactLapseFromMemory(t *testing.T) {
+	var mu sync.Mutex
+	alive := true
+	prev := processAlive
+	processAlive = func(pid int) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return pid == 4242 && alive
+	}
+	t.Cleanup(func() { processAlive = prev })
+	f := startPageFixture(t)
+	now := time.Now()
+	page := f.src.page("livesession")
+	page.Contacts = []Contact{
+		{Address: "id:boardsession", ReplyID: "boardsession", PresenceLive: true, PresenceUntil: now.Add(time.Second)},
+		{Address: "named@worktree", PresenceLive: true, PresencePID: 4242},
+		{Address: "gone@worktree"},
+	}
+	f.src.putPage("livesession", page)
+	r := f.d.pages()
+	clock := now
+	r.now = func() time.Time { return clock }
+	in := refreshInputs{ids: []string{"livesession"}, contacts: true}
+	first, ok := r.sessionStamp("livesession", in)
+	if !ok {
+		t.Fatal("no stamp")
+	}
+	f.src.mu.Lock()
+	reads := f.src.contactReads
+	f.src.mu.Unlock()
+	clock = now.Add(2 * time.Second)
+	lapsed, _ := r.sessionStamp("livesession", in)
+	if lapsed == first {
+		t.Fatal("a contact past its liveness window kept the stamp")
+	}
+	mu.Lock()
+	alive = false
+	mu.Unlock()
+	exited, _ := r.sessionStamp("livesession", in)
+	if exited == lapsed {
+		t.Fatal("a named contact whose process exited kept the stamp")
+	}
+	if again, _ := r.sessionStamp("livesession", in); again != exited {
+		t.Fatal("an unchanged lapse moved the stamp")
+	}
+	f.src.mu.Lock()
+	reads = f.src.contactReads - reads
+	f.src.mu.Unlock()
+	if reads != 0 {
+		t.Fatalf("lapse ticks re-read contacts %d times, want none", reads)
+	}
+}
+
+// TestForeignLookRetriesFailedStats: a stat that fails other than as missing
+// is retried on the one-second window even within a foreign look.
+func TestForeignLookRetriesFailedStats(t *testing.T) {
+	now := time.Now()
+	fail := true
+	stats := 0
+	cache := watchedStampCache{
+		now: func() time.Time { return now },
+		stat: func(path string) (os.FileInfo, error) {
+			stats++
+			if fail {
+				return nil, os.ErrPermission
+			}
+			return nil, os.ErrNotExist
+		},
+	}
+	stamp := func(since time.Time) {
+		cache.writeWatched(sha256.New(), []string{"/watched"}, since)
+	}
+	since := now
+	stamp(since)
+	now = now.Add(watchedStampInterval)
+	stamp(since)
+	if stats != 2 {
+		t.Fatalf("a failed stat was retried %d times within the look, want once", stats-1)
+	}
+	fail = false
+	now = now.Add(watchedStampInterval)
+	stamp(since)
+	now = now.Add(watchedStampInterval)
+	stamp(since)
+	if stats != 3 {
+		t.Fatalf("a missing path was statted %d times within the look, want once after the failure", stats-2)
 	}
 }
 

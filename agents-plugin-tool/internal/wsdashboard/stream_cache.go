@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -353,13 +354,14 @@ func statStamp(h io.Writer, path string) {
 	watchedStamps.write(h, path, false, time.Time{})
 }
 
-func rawStatStamp(h io.Writer, path string, stat func(string) (os.FileInfo, error)) {
+func rawStatStamp(h io.Writer, path string, stat func(string) (os.FileInfo, error)) error {
 	info, err := stat(path)
 	if err != nil {
 		fmt.Fprintf(h, "%s\x00-\x01", path)
-		return
+		return err
 	}
 	fmt.Fprintf(h, "%s\x00%d\x00%d\x01", path, info.ModTime().UnixNano(), info.Size())
+	return nil
 }
 
 // StampWatched folds the state of each watched path into h: a watched
@@ -417,11 +419,11 @@ func listStamp(h io.Writer, dir string) {
 	watchedStamps.write(h, dir, true, time.Time{})
 }
 
-func rawListStamp(h io.Writer, dir string, readDir func(string) ([]os.DirEntry, error), stat func(string) (os.FileInfo, error)) {
+func rawListStamp(h io.Writer, dir string, readDir func(string) ([]os.DirEntry, error), stat func(string) (os.FileInfo, error)) error {
 	entries, err := readDir(dir)
 	if err != nil {
 		fmt.Fprintf(h, "%s\x00list\x00-\x01", dir)
-		return
+		return err
 	}
 	fmt.Fprintf(h, "%s\x00list\x01", dir)
 	for _, e := range entries {
@@ -435,6 +437,7 @@ func rawListStamp(h io.Writer, dir string, readDir func(string) ([]os.DirEntry, 
 			fmt.Fprintf(h, "%s\x00-\x02", e.Name())
 		}
 	}
+	return nil
 }
 
 // watchedStampCache shares filesystem validation across pages, not just the
@@ -455,6 +458,9 @@ type watchedStampSlot struct {
 	mu      sync.Mutex
 	checked time.Time
 	stamp   string
+	// failed marks a stat or listing that failed other than as missing: a
+	// refresh stamp retries it on the one-second window, not the foreign look.
+	failed bool
 }
 
 type watchedStampCache struct {
@@ -493,17 +499,19 @@ func (c *watchedStampCache) write(h io.Writer, path string, list bool, since tim
 	now := clock()
 	age := now.Sub(slot.checked)
 	stale := age >= watchedStampInterval
-	if !since.IsZero() {
+	if !since.IsZero() && !slot.failed {
 		stale = slot.checked.Before(since)
 	}
 	if slot.checked.IsZero() || age < 0 || stale {
 		var stamp strings.Builder
+		var err error
 		if list {
-			rawListStamp(&stamp, path, readDir, stat)
+			err = rawListStamp(&stamp, path, readDir, stat)
 		} else {
-			rawStatStamp(&stamp, path, stat)
+			err = rawStatStamp(&stamp, path, stat)
 		}
 		slot.stamp, slot.checked = stamp.String(), now
+		slot.failed = err != nil && !errors.Is(err, fs.ErrNotExist)
 	}
 	io.WriteString(h, slot.stamp)
 }

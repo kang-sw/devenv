@@ -604,6 +604,7 @@ func (src *DashboardSessionSource) contactsFromRead(reg wsdashboard.Registration
 			if entry, ok := replies.Entries[id]; ok {
 				if seen, err := time.Parse(time.RFC3339, entry.LastSeen); err == nil {
 					c.PresenceLive = now.Sub(seen) < mailboxLivenessThreshold
+					c.PresenceUntil = seen.Add(mailboxLivenessThreshold)
 				}
 				if entry.Cwd != "" {
 					c.Cwd = entry.Cwd
@@ -616,6 +617,10 @@ func (src *DashboardSessionSource) contactsFromRead(reg wsdashboard.Registration
 						c.ReplyID = wsmailbox.ReplyID(p.Owner)
 					}
 					c.PresenceLive = mailboxPresenceLive(p, now)
+					c.PresencePID = p.PID
+					if seen, err := time.Parse(time.RFC3339, p.LastSeen); err == nil {
+						c.PresenceUntil = seen.Add(mailboxLivenessThreshold)
+					}
 					if p.Cwd != "" {
 						c.Cwd = p.Cwd
 					}
