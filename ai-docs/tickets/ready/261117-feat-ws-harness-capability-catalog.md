@@ -313,6 +313,81 @@ Deferred: Codex, Antigravity and Pi values; the HTTP transport implementation.
 Verification: unit tests on catalog lookup and version-range resolution; the probe outcome recorded in this phase's Result; an inventory showing each existing optional
 control in `backend.go` maps to a catalog item or is explicitly left out.
 
+### Result (d20202cd6) - 2026-11-17
+
+**Pi HTTP MCP probe: PASS (Pi 1.5.2), with one exposure caveat.** A stdlib
+Streamable HTTP MCP server on 127.0.0.1 required `Authorization: Bearer
+<token>`; Pi read the server from a project `.pi/mcp.json` entry
+`{"url": "http://127.0.0.1:<port>/mcp", "headers": {"Authorization": "Bearer
+${PROBE_TOKEN}"}, "exposure": "direct"}` and ran
+`PROBE_TOKEN=... pi --approve -ne -e builtin:mcp --no-session -p "Call the MCP
+tool probe_echo ..." </dev/null`. The server log showed `initialize`,
+`notifications/initialized`, `GET /mcp` (405, tolerated), `tools/list` and
+`tools/call`, each with the bearer matched; the model replied with the tool's
+marker text. Evidence details:
+- `-ne -e builtin:mcp` keeps the built-in MCP client; `-ne` also drops
+  `builtin:codemode`, so under the default `codemode` exposure the model had
+  no route to the tool (no `tools/call`). `"exposure": "direct"` in the entry,
+  or also loading `-e builtin:codemode`, makes the tool callable. The hosted
+  Pi port must set one of the two.
+- A project `.pi/mcp.json` is read only for a trusted project; `--approve`
+  grants trust for one process. `pi mcp list` takes no `--approve`.
+- Wrong token: `pi mcp list` reports `failed` / "MCP server requires
+  authentication" (exit 1) after two `initialize` attempts, with no OAuth
+  attempt. Unset token variable: Pi refuses locally ("Failed to resolve MCP
+  server ... header Authorization from environment variable") and never
+  connects, so a missing token fails closed.
+- No user file was modified (`~/.pi/agent/settings.json` and `trust.json`
+  hashes unchanged). This result feeds the Pi extension retirement parity
+  criterion; it approves no removal.
+
+**Catalog** (`agents-plugin-tool/internal/wsagent/catalog.go`):
+`CapabilityGrade` (`native` / `ws-substitute` / `unsupported`),
+`CapabilityItem` (the 14 Decision 3 items: skill list, skill injection,
+compaction, rewind, tool removal, subagent removal, model/effort, approval,
+steer, interrupt, follow-up, resume, reasoning stream, usage query),
+`CapabilityEntry` (item, optional role, `Since` inclusive / `Until`
+exclusive, grade, `Values` value range, cited `Source`), `HarnessProfile`
+(guaranteed range `Oldest`..`Newest` plus entries) and
+`HarnessProfile.Resolve(role, version) Capabilities`. Resolve fills every
+item (undeclared = `unsupported`); a version below/above the range or
+unreadable resolves at the nearest bound (newest for unreadable) and sets
+`Unverified`. `BackendRegistration.Catalog *HarnessProfile` carries it; the
+daemon registers `ClaudeCatalog()` for claude and nil for pi (Decision 13,
+handle-only).
+
+**Claude values** (Decisions 9, 10): lead / worker
+- native both: skill injection, compaction, model/effort, interrupt, resume;
+- ws-substitute both: follow-up;
+- unsupported both: skill list, rewind, reasoning stream;
+- lead native, worker unsupported: approval, steer, usage query
+  (`get_context_usage` is asked only from `leadInit`);
+- worker native, lead unsupported: tool removal (`Values: ["*"]`, the
+  `--tools` allowlist) and subagent removal (`Values: ["Agent"]`).
+Guaranteed range seeded `2.1.319`..`2.1.323` from the existing testdata
+`claude_code_version` values; Phase 3 settles it.
+
+**Inventory of `backend.go` controls:** `approval`, `mode` -> approval;
+`steer`, `reports` -> steer (reports is the worker steer path); `commands` ->
+compaction; required `Interrupt` -> interrupt, `SetModel`/`SetEffort` ->
+model/effort, `Send` -> follow-up. Left out: `mcp` (status/reconnect recover
+the MCP-injection admission condition, never graded), `turns` and `recovery`
+(rejoin and holder-replay internals, not a selectable capability).
+
+**Verification:** `go test ./internal/wsagent/ ./cmd/ws-mcp/ -count=1`: ok
+(104.7 s, 167.4 s). New tests: `TestParseHarnessVersion`,
+`TestVersionInRange`, `TestResolveVersionRanges` (in range, bounds,
+below/above range, unknown and unreadable versions), `TestResolveFillsEveryItem`,
+`TestValidateCatalogRejectsOverlap`, `TestClaudeCatalogValues`,
+`TestAgentRunnerCatalogs`.
+
+**Decisions taken:** the catalog's `Values` stay nil for model/effort and
+approval, whose choices remain sourced from `ChoiceLister` and the
+registration (pinned by a test). Skill injection is `native` for Claude
+(its own skills through the lead bundle or a worker profile's plugin
+directories), since Decision 10 does not list it as unwired. Entry overlap is
+checked by a test-side validator, not at runtime.
+
 ### Phase 2: HTTP MCP direct JSON-RPC with per-session token (admission condition)
 
 Hosted Claude sessions reach the daemon by HTTP direct JSON-RPC with a
