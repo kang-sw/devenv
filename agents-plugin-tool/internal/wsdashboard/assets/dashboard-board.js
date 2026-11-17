@@ -131,6 +131,9 @@
         // takes the mark too, and its frame takes it once mounted.
         q(".doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
+      // The morph retains unchanged topic nodes, including hydrated closed
+      // pages. Their image frames still follow the board's external-file stamp.
+      if (window.wbHistory && window.wbHistory.refreshImages) window.wbHistory.refreshImages(doc);
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
         startMotion(moves.concat(slideBoard(el, before, boardTop)));
@@ -260,7 +263,6 @@
   }
   function syncFilePreview() {
     if (splitFiles()) {
-      if (window.WsCards) window.WsCards.dismissFiles();
       sizeFilePreview();
     } else if (filePreview && filePreview.current()) {
       var previous = filePreview.close();
@@ -315,14 +317,6 @@
     var sheetInstance = null;
     filesSheet = {
       el: sheet,
-      activate: function () {
-        if (!splitFiles()) return false;
-        window.WsCards.dismissFiles();
-        setCtab("files");
-        var search = fpane.querySelector(".fq");
-        if (search) search.focus();
-        return true;
-      },
       shown: function () {
         if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
         sheetInstance.shown();

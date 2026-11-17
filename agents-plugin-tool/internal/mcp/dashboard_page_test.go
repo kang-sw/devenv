@@ -237,7 +237,9 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 		t.Fatalf("pages written to disk = %v, want the full page and an embed", written)
 	}
 	for _, name := range written {
-		if page := readPage(t, filepath.Join(f.dir(), name)); strings.Contains(page, "data-relay") || strings.Contains(page, "/image?path=") {
+		// Shared history code can name the attribute; standalone content
+		// must never carry a relay attribute or a protected image URL.
+		if page := readPage(t, filepath.Join(f.dir(), name)); strings.Contains(page, `data-relay="`) || strings.Contains(page, "/image?path=") {
 			t.Errorf("%s carries a relay or the image route", name)
 		}
 	}

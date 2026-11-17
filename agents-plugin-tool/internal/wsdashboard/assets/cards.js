@@ -123,7 +123,6 @@
     if (actions.files) {
       var files = action("board-files", "folder-open", wsT("js.board.toolbar.files"), function () {
         var owner = actions.files;
-        if (owner.activate && owner.activate()) return;
         if (!owner.el) return;
         maximize(maxed && maxed.files ? null : { files: true, el: owner.el, owner: owner, back: files });
       });
