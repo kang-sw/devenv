@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { connectDaemon } = require('./daemon-controller');
+const { selectDaemon } = require('./daemon-selection');
 const { cacheRoot, inspect, browserCookie, browserLoginLink } = require('./endpoint');
 const LOGIN_COPIED = 'werkschaft:login-copied';
 const { pythonAvailable } = require('./python');
@@ -282,7 +283,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       if (observed.url !== `${new URL(url).origin}/`) throw new Error('Dashboard connection changed; retry');
       return { root, observed };
     }
-    async function connect(replace = false) {
+    async function connect(replace = false, attachRunning = false) {
       if (connecting || window.isDestroyed()) return;
       const attempt = beginNavigation();
       connecting = true;
@@ -301,7 +302,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           return;
         }
         let url;
-        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace }, {
+        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
           onNotice: message => {
             if (window.isDestroyed()) return;
             dialogOpen = true;
@@ -347,6 +348,21 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (navigation === attempt) navigation = null;
       }
     }
+    const fromConnectionPage = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
+      !pin && isLocalPage(event.senderFrame.url);
+    ipcMain.handle('werkschaft:daemon-availability', event => {
+      if (!fromConnectionPage(event)) return { available: false };
+      if (!['darwin', 'win32'].includes(platform)) return { available: false, reason: 'Daemon start is unavailable on this platform.' };
+      if (!app.isPackaged) {
+        try { selectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform }); }
+        catch { return { available: false, reason: 'Daemon start is unavailable in this development run.' }; }
+      }
+      return { available: true };
+    });
+    ipcMain.handle('werkschaft:daemon-start', async event => {
+      if (!fromConnectionPage(event) || connecting) return;
+      await connect(false, true);
+    });
     const fromDashboard = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
       !!pin && destination(event.senderFrame.url, pin) === 'dashboard';
     wc.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
