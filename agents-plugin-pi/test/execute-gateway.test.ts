@@ -95,8 +95,8 @@ test("gateway descriptions and aborted approvals never recommend retired native 
   registerExecuteGateway({ registerTool: (tool: any) => tools.set(tool.name, tool) }, {}, new Map(), {
     cwd: process.cwd(), channel: {}, approvalGate: { waitForDecision: async () => "aborted" },
   });
-  for (const tool of tools.values()) assert.doesNotMatch(tool.description, /ws-agent-(?:spawn|stop|list|transcript)/);
-  assert.match(tools.get(UGLY_READ_TOOL_NAME).description, /pi\.spawn/);
+  for (const tool of tools.values()) assert.doesNotMatch(tool.description, /ws-agent-(?:spawn|stop|list|transcript)|\bpi\.(?:spawn|send|list|stop|transcript|wait)\b/);
+  assert.match(tools.get(UGLY_READ_TOOL_NAME).description, /agent\.spawn/);
   const result = await tools.get(GATED_EXEC_TOOL_NAME).execute("aborted", { command: "never run", rationale: "test" });
   assert.equal(result.content[0].text, "Aborted before the lead responded.");
 });

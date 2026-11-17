@@ -174,3 +174,40 @@ func TestDaemonOwnedMailRidesTheRestoreRing(t *testing.T) {
 		}
 	}
 }
+
+// A sender with a machine-scope name stamps its mail from: that name, not
+// a reply handle; the claim still resolves it to the reply-id of the
+// session that owns the name, so its relation and Sender are computed as
+// for a reply handle.
+func TestDaemonOwnedMailResolvesANamedSender(t *testing.T) {
+	setupMailboxTestEnv(t)
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	initGit(t, root)
+	childKey, err := NewAgentKeyStore().Mint(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envMailbox, "carol@machine")
+	sender := NewServer(root, "test")
+	senderKey := mailboxLogin(t, sender, 1, root)
+	if out := callToolWithKey(t, sender, 2, senderKey, "mailbox.send", map[string]any{"to": wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(childKey), "content": "named hello"}); !strings.Contains(out, "from: carol@machine") {
+		t.Fatalf("the send was not stamped from the name: %s", out)
+	}
+	var asked []string
+	claimed, err := NewLeadMailbox(stateDir).Drain(root, childKey, func(from string) string {
+		asked = append(asked, from)
+		return "peer"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := wsmailbox.ReplyID(senderKey)
+	if len(claimed) != 1 || claimed[0].Sender != want || len(asked) != 1 || asked[0] != want ||
+		!strings.Contains(claimed[0].Text, "mail from carol@machine") || !strings.Contains(claimed[0].Text, "):\n[relation: peer]\n") || !strings.HasSuffix(claimed[0].Text, "named hello") {
+		t.Fatalf("the claimed mail = %+v (relation asked for %q, want %q)", claimed, asked, want)
+	}
+}

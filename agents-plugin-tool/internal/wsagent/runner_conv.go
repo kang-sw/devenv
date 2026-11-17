@@ -281,7 +281,9 @@ func (c *conv) mailChanged() {
 	}
 	var held []string
 	for _, m := range mail {
-		if !c.steerMail(m.Text) {
+		// Once a steer fails, the rest waits too, so the batch keeps its
+		// order.
+		if len(held) > 0 || !c.steerMail(m.Text) {
 			held = append(held, m.Text)
 		}
 	}
