@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"regexp"
 	"slices"
@@ -915,6 +916,9 @@ type pageReader struct {
 	// Initial document/control reads must observe a preceding write immediately.
 	// Stream renders leave this false and share the presentation validation TTL.
 	freshSnapshots bool
+	// foreign is the daemon's shared look at the inputs refresh stamps cannot
+	// learn of from a wake (foreign_schedule.go); nil looks every time.
+	foreign *foreignSchedule
 }
 
 func (r pageReader) clock() time.Time {
@@ -1131,11 +1135,12 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 }
 
 // sessionStamp is the refresh stamp of replyID's session page over the
-// inputs of its last read (stream_cache.go): for each session it looked up,
-// whether the index holds it, its revision, its liveness, and whether its
-// snapshot names a present adapter, all at call time; the state of the
-// watched paths (StampWatched); the liveness of each watched process; the
-// session's mail print (MailPrintSource); and the contacts as re-read now.
+// inputs of its last read (stream_cache.go). Each call folds, from memory:
+// for each session it looked up, whether the index holds it, its revision,
+// its liveness, and whether its snapshot names a present adapter, all at
+// call time; and the liveness of each watched process. The foreign inputs
+// come from the shared foreign look (foreign_schedule.go): the state of the
+// watched paths (StampWatched) and the session's mailbox stamp (mailStamp).
 // ok is false when the page shows contacts the source cannot re-read.
 func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool) {
 	if r.index == nil {
@@ -1148,18 +1153,36 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 		present, evidence := r.adapterStamp(id, now)
 		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x00%s\x01", id, ok, s.Rev, ok && s.Registration.Live(now), ok && present, evidence)
 	}
-	StampWatched(h, in.watch)
 	for _, pid := range in.pids {
 		fmt.Fprintf(h, "pid\x00%d\x00%t\x01", pid, processAlive(pid))
 	}
+	stampWatchedSince(h, in.watch, r.foreign.filesSince())
+	key := replyID
+	if in.contacts {
+		key += "\x00contacts"
+	}
+	mail, ok := r.foreign.mailStamp(key, func() (string, bool) { return r.mailStamp(replyID, in.contacts) })
+	if !ok {
+		return "", false
+	}
+	io.WriteString(h, mail)
+	return sumHex(h), true
+}
+
+// mailStamp reads the mailbox side of replyID's refresh stamp: the session's
+// mail print (MailPrintSource), since mail to a reply-id sends no wake, and,
+// when the page shows contacts, the contacts as re-read now. ok is false
+// when the page shows contacts the source cannot re-read.
+func (r pageReader) mailStamp(replyID string, contacts bool) (string, bool) {
+	var b strings.Builder
 	if src, ok := r.source.(MailPrintSource); ok {
 		if s, ok := r.index.Session(replyID); ok {
 			if print, ok := src.MailPrint(s.Registration); ok {
-				fmt.Fprintf(h, "mail\x00%s\x01", print)
+				fmt.Fprintf(&b, "mail\x00%s\x01", print)
 			}
 		}
 	}
-	if in.contacts {
+	if contacts {
 		src, ok := r.source.(ContactSource)
 		if !ok {
 			return "", false
@@ -1168,15 +1191,15 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 		if !ok {
 			return "", false
 		}
-		contacts, ok := src.ReadContacts(s.Registration)
+		list, ok := src.ReadContacts(s.Registration)
 		if !ok {
 			return "", false
 		}
-		for _, c := range contacts {
-			fmt.Fprintf(h, "%s\x00%s\x00%t\x00%s\x00%d\x01", c.Address, c.ReplyID, c.PresenceLive, c.Cwd, c.LastExchange.UnixNano())
+		for _, c := range list {
+			fmt.Fprintf(&b, "%s\x00%s\x00%t\x00%s\x00%d\x01", c.Address, c.ReplyID, c.PresenceLive, c.Cwd, c.LastExchange.UnixNano())
 		}
 	}
-	return sumHex(h), true
+	return b.String(), true
 }
 
 // indexStamp is the refresh stamp of the sessions index: for each listed
@@ -1239,7 +1262,7 @@ func (r pageReader) indexView() IndexView {
 }
 
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign}
 }
 
 // pagesIn is pages reading in the viewer's language.

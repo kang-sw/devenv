@@ -221,14 +221,16 @@ func (d *Daemon) railSource(pages pageReader, lang, theme string) pageSource {
 		// The index's stamp covers every listed session's revision (its
 		// snapshot and ring among what raises it), liveness, adapter
 		// presence, and window; the lister's changes come by wake. The
-		// layout's generation joins it, so a layout change (another
-		// process's write among them) is never skipped as unchanged.
+		// layout's generation joins it, so a layout change is never skipped
+		// as unchanged: this daemon's ops move it in memory, another
+		// process's write shows at the next foreign look
+		// (foreign_schedule.go).
 		stamp: func(refreshInputs) (string, bool) {
 			if d.railInputs.retryPending() {
 				return "", false // a refresh must retry failed inputs, even at the same revision
 			}
 			stamp, ok := pages.indexStamp()
-			_, gen := d.layout.current()
+			gen := d.layout.generationSince(d.foreign.filesSince())
 			return stamp + "/" + strconv.FormatUint(gen, 10), ok
 		},
 	}

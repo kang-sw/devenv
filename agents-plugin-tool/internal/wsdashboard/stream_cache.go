@@ -30,8 +30,11 @@ import (
 // A render records its dependencies: the wake tokens (brokerDeps) whose
 // change can alter it, and the refresh inputs (refreshInputs) its refresh
 // stamp re-reads. The stamp covers what changes with no wake: liveness,
-// which follows the clock, contact liveness, and the files a page source
-// read that a writer may change without a nudge (PageContent.Watch).
+// which follows the clock and is folded from memory every tick, and the
+// foreign inputs, the files a page source read that a writer may change
+// without a nudge (PageContent.Watch) and the mailbox stores behind the mail
+// print and contacts, which every page shares one look at per
+// foreignSafetyInterval (foreign_schedule.go).
 
 // pageKey names one shared page. replyID is empty for the sessions index
 // and the session rail; kind is empty but for the rail (regionRail), which
@@ -347,7 +350,7 @@ func (c *pageCache) renderLive(p *sharedPage, src pageSource) (pageRender, uint6
 // modification time, and its size. An in-place edit moves the file's own
 // time; a file added or removed moves its directory's.
 func statStamp(h io.Writer, path string) {
-	watchedStamps.write(h, path, false)
+	watchedStamps.write(h, path, false, time.Time{})
 }
 
 func rawStatStamp(h io.Writer, path string, stat func(string) (os.FileInfo, error)) {
@@ -370,10 +373,18 @@ func rawStatStamp(h io.Writer, path string, stat func(string) (os.FileInfo, erro
 // list naming the same directory two ways stats each path itself. Validation
 // is shared across renders for one second per path (including missing paths).
 func StampWatched(h io.Writer, watch []string) {
-	watchedStamps.writeWatched(h, watch)
+	watchedStamps.writeWatched(h, watch, time.Time{})
 }
 
-func (c *watchedStampCache) writeWatched(h io.Writer, watch []string) {
+// stampWatchedSince is StampWatched for a refresh stamp: a path's stamp
+// taken at or after since is reused, whoever took it, so every page shares
+// one look per path per foreign look (foreign_schedule.go). A zero since is
+// StampWatched's one-second window.
+func stampWatchedSince(h io.Writer, watch []string, since time.Time) {
+	watchedStamps.writeWatched(h, watch, since)
+}
+
+func (c *watchedStampCache) writeWatched(h io.Writer, watch []string, since time.Time) {
 	watched := make(map[string]bool, len(watch))
 	for _, path := range watch {
 		watched[path] = true
@@ -389,11 +400,11 @@ func (c *watchedStampCache) writeWatched(h io.Writer, watch []string) {
 		case listed[path]:
 			// Listed even when its own directory is listed too: that listing
 			// shows this directory's time, which an edit inside it keeps.
-			c.write(h, path, true)
+			c.write(h, path, true, since)
 		case listed[filepath.Dir(path)] && filepath.Dir(path) != path:
 			// Covered by its directory's listing.
 		default:
-			c.write(h, path, false)
+			c.write(h, path, false, since)
 		}
 	}
 }
@@ -403,7 +414,7 @@ func (c *watchedStampCache) writeWatched(h io.Writer, watch []string) {
 // Linux, none on Windows), or that it does not list. A symbolic link is
 // followed (a stat), as a covered file's own stat would follow it.
 func listStamp(h io.Writer, dir string) {
-	watchedStamps.write(h, dir, true)
+	watchedStamps.write(h, dir, true, time.Time{})
 }
 
 func rawListStamp(h io.Writer, dir string, readDir func(string) ([]os.DirEntry, error), stat func(string) (os.FileInfo, error)) {
@@ -428,7 +439,8 @@ func rawListStamp(h io.Writer, dir string, readDir func(string) ([]os.DirEntry, 
 
 // watchedStampCache shares filesystem validation across pages, not just the
 // streams of one page. Both successful and missing paths are checked at most
-// once per second. A slot lock coalesces concurrent callers without holding the
+// once per second, and a refresh stamp's look (since) at most once per
+// foreign look. A slot lock coalesces concurrent callers without holding the
 // map lock across filesystem IO. These are derived stamps, never persisted.
 var watchedStamps watchedStampCache
 
@@ -454,7 +466,7 @@ type watchedStampCache struct {
 	readDir func(string) ([]os.DirEntry, error)
 }
 
-func (c *watchedStampCache) write(h io.Writer, path string, list bool) {
+func (c *watchedStampCache) write(h io.Writer, path string, list bool, since time.Time) {
 	key := watchedStampKey{path, list}
 	c.mu.Lock()
 	slot := c.entries[key]
@@ -480,7 +492,11 @@ func (c *watchedStampCache) write(h io.Writer, path string, list bool) {
 	}
 	now := clock()
 	age := now.Sub(slot.checked)
-	if slot.checked.IsZero() || age < 0 || age >= watchedStampInterval {
+	stale := age >= watchedStampInterval
+	if !since.IsZero() {
+		stale = slot.checked.Before(since)
+	}
+	if slot.checked.IsZero() || age < 0 || stale {
 		var stamp strings.Builder
 		if list {
 			rawListStamp(&stamp, path, readDir, stat)

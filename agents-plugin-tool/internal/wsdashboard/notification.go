@@ -24,6 +24,7 @@ func (d *Daemon) NotifySessionChange(stateDir string, body NudgeBody) (int, bool
 	if d.mailWake != nil {
 		d.mailWake.Nudge()
 	}
+	d.foreign.mailChanged()
 	if d.index == nil || !d.index.Nudge(body.ReplyID, body.Project) {
 		return 0, true
 	}
