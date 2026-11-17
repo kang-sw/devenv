@@ -548,7 +548,14 @@
       "registered_at": "2026-11-17T07:28:08Z"
     },
     "261117-feat-ws-dashboard-wide-explorer-preview-pane": {
-      "registered_at": "2026-11-17T07:16:01Z"
+      "registered_at": "2026-11-17T07:16:01Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-17T08:16:43Z"
+      }
     },
     "261117-research-werkschaft-tauri-shell-revisit": {
       "registered_at": "2026-11-17T01:03:40Z"
