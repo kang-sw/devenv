@@ -141,8 +141,11 @@ type conv struct {
 	// restart was for that have not connected since. mcpChecking runs
 	// while a check is off the loop, and mcpAgain asks for one more after
 	// it, for mcpAgainNames.
-	mcpSeen       map[string]bool
-	mcpRestarted  map[string]bool
+	mcpSeen      map[string]bool
+	mcpRestarted map[string]bool
+	// mcpStale is a rejoined process whose ws-mcp route (Record.MCPURL)
+	// this daemon does not serve; it restarts at the first idle point.
+	mcpStale      bool
 	mcpChecking   bool
 	mcpAgain      bool
 	mcpAgainNames []string

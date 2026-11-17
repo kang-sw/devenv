@@ -1567,6 +1567,22 @@ JSON, `-32600` batch), and is compacted to one line; a duplicate in-flight id
 gets `-32600`. A refused hello answers 403 and a draining daemon 503, each
 with a JSON-RPC error body.
 
+Who uses it (`internal/wsagent/mcp_session.go`): a hosted Claude process the
+runner starts while it knows its daemon endpoint. Every start draws a new
+token; the harness gets the URL and token in `WS_MCP_SESSION_URL` and
+`WS_MCP_SESSION_TOKEN`, never in argv or a file. A worker's inline
+`--mcp-config` entry is the HTTP server; a lead loads a hosted variant of its
+bundle (`<daemon dir>/hosted-bundles/<package>-<hash>`, one per bundle
+content, never removed) whose only MCP entry is the same `ws` key over HTTP,
+so the lead still has exactly one ws server named `plugin:<package>:<package>`.
+A held lead's token and URL are kept in its `agent.json` (`mcp_token_secret`,
+`mcp_url`) so a daemon that rejoins the process restores the token; when the
+recorded URL is not the rejoining daemon's (it listens on another port), the
+process restarts at its first idle point with a new token. With no endpoint
+the stdio launcher serves as before. A daemon without this route (an older
+one rejoining an HTTP lead) answers its calls `401 login_required` until the
+process restarts.
+
 In `cli` mode the daemon dispatches the existing command argv in-process.
 An optional `stdin` string carries Codex Stop JSON or `git commit
 --description-file -` input; older hellos omit it. A relative `--root`

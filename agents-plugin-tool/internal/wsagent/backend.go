@@ -55,6 +55,10 @@ type StartSpec struct {
 	// WSMCP is the ws-mcp server to attach, carrying the profile's ws tool
 	// allowlist; nil when the profile allows no ws tool.
 	WSMCP *MCPCommand
+	// MCPSession, when set, attaches the ws-mcp over the daemon's HTTP
+	// route (mcp_session.go) in place of WSMCP's command, or, for a lead,
+	// of its bundled plugin's stdio server.
+	MCPSession *MCPSession
 	// Env is the environment the child starts from; the backend removes the
 	// harness variables an inherited parent session leaves behind.
 	Env []string
@@ -80,6 +84,9 @@ type LeadSpec struct {
 	PluginWarning func(string)
 	// WSMCP resolves the bundled MCP launcher if Pi needs its bridge fallback.
 	WSMCP func() (MCPCommand, error)
+	// VariantDir is where a Claude lead attached over HTTP keeps its
+	// bundle's HTTP variants (claude_hosted_variant.go).
+	VariantDir string
 	// Env is set on the child over the backend's own scrub: the
 	// hosted-session variables.
 	Env map[string]string

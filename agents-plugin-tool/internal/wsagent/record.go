@@ -136,6 +136,14 @@ type Record struct {
 	Drained          uint64 `json:"drained,omitempty"`
 	TurnMark         uint64 `json:"turn_mark,omitempty"`
 	TurnStartedAt    int64  `json:"turn_started_at,omitempty"`
+
+	// MCPToken is a held lead process's ws-mcp session token
+	// (mcp_session.go), kept so a later daemon rejoining the process
+	// accepts the token it still sends; MCPURL is the route the process
+	// sends it to, which that daemon may no longer serve.
+	MCPToken string `json:"mcp_token_secret,omitempty"`
+	MCPURL   string `json:"mcp_url,omitempty"`
+
 	// ActiveMs is the accumulated duration of closed child turns.
 	ActiveMs     int64           `json:"active_ms,omitempty"`
 	TurnStartSeq uint64          `json:"turn_start_seq,omitempty"`

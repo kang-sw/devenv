@@ -478,8 +478,8 @@ func (c *conv) processEnded() {
 		}
 	}
 	c.r.revokeToken(c.rec.ReplyID)
-	if c.rec.Capability != "" {
-		c.update(func(rec *Record) { rec.Capability = "" })
+	if c.rec.Capability != "" || c.rec.MCPToken != "" {
+		c.update(func(rec *Record) { rec.Capability, rec.MCPToken, rec.MCPURL = "", "", "" })
 	}
 	if c.requeueSteered() && !c.closed && !c.quitting {
 		// The steered reports the process took with it go as the next

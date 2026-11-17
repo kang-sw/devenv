@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/execjob"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsdoc"
@@ -344,12 +345,13 @@ func hostedRowPID(path string) int {
 
 // DropHarnessSessionEnv removes from this process's environment the
 // variables that tie a ws-mcp to one harness session: the hosted-session
-// variables and the harness PID. The dashboard daemon calls it at start. Its
-// environment is that of whichever session's launcher started it, and the
-// conversations it spawns, with the ws-mcp each attaches without a
-// launcher, would otherwise read that session's as their own.
+// variables, the harness PID, and a hosted session's ws-mcp credentials.
+// The dashboard daemon calls it at start. Its environment is that of
+// whichever session's launcher started it, and the conversations it spawns,
+// with the ws-mcp each attaches without a launcher, would otherwise read
+// that session's as their own, or reach its server with its token.
 func DropHarnessSessionEnv() {
-	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID} {
+	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID, wsagent.EnvMCPSessionURL, wsagent.EnvMCPSessionToken} {
 		_ = os.Unsetenv(name)
 	}
 }

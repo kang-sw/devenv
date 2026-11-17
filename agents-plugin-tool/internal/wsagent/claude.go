@@ -214,11 +214,26 @@ func claudeMCPConfig(spec StartSpec) (string, error) {
 	for name, raw := range spec.Profile.MCPServers {
 		servers[name] = raw
 	}
-	if spec.WSMCP != nil {
+	switch {
+	case spec.WSMCP != nil && spec.MCPSession != nil:
+		servers[ReservedMCPServer] = claudeHTTPServer(spec.MCPSession.URL)
+	case spec.WSMCP != nil:
 		servers[ReservedMCPServer] = map[string]any{"type": "stdio", "command": spec.WSMCP.Command, "args": spec.WSMCP.Args, "env": spec.WSMCP.Env}
 	}
 	raw, err := json.Marshal(map[string]any{"mcpServers": servers})
 	return string(raw), err
+}
+
+// claudeHTTPServer is the ws-mcp server entry for the daemon's HTTP route
+// at url. Claude Code expands the token from the harness's environment
+// (EnvMCPSessionToken) when it connects, so the token is in no argument
+// and no file.
+func claudeHTTPServer(url string) map[string]any {
+	return map[string]any{
+		"type":    "http",
+		"url":     url,
+		"headers": map[string]any{"Authorization": "Bearer ${" + EnvMCPSessionToken + "}"},
+	}
 }
 
 var claudeNameUnsafe = regexp.MustCompile(`[^A-Za-z0-9_-]`)
@@ -347,9 +362,19 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 			spec.Holder.ringSkip = claudeRingSkip
 		}
 	}
+	cmd.Env = mcpSessionEnv(cmd.Env, spec.MCPSession)
 	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
 		return nil, err
+	}
+	if s := spec.MCPSession; s != nil && s.Started != nil {
+		pid := 0
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+		} else if _, held, ok := p.HolderInfo(); ok {
+			pid = held
+		}
+		s.Started(cmd.Env, pid)
 	}
 	if spec.Lead != nil && !attach {
 		// The command list the dashboard's composer offers: an init, which

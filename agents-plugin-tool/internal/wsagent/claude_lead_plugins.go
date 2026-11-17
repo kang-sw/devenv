@@ -31,6 +31,14 @@ func claudeLeadPluginArgs(spec StartSpec) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude lead: %w", err)
 	}
+	if spec.MCPSession != nil {
+		// The bundle with its stdio server replaced by the HTTP session.
+		variant, err := claudeHTTPVariant(root, spec.Lead.VariantDir)
+		if err != nil {
+			return nil, fmt.Errorf("claude lead: hosted bundle variant: %w", err)
+		}
+		root = variant
+	}
 	if spec.Lead.PluginWarning != nil {
 		spec.Lead.PluginWarning(warning)
 	}

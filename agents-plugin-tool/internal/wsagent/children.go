@@ -161,6 +161,8 @@ func (r *Runner) revokeToken(id string) {
 		delete(r.tokens, old)
 		delete(r.tokenOf, id)
 	}
+	// The hosted ws-mcp session token ends with the same process.
+	r.voidMCPLocked(id)
 	r.mu.Unlock()
 }
 

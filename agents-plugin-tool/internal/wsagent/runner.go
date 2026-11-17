@@ -222,6 +222,10 @@ type Runner struct {
 	endpoint string
 	tokens   map[string]string
 	tokenOf  map[string]string
+	// mcpTokens are the hosted ws-mcp session tokens (mcp_session.go) by
+	// token, and mcpTokenOf by conversation id.
+	mcpTokens  map[string]*mcpToken
+	mcpTokenOf map[string]string
 }
 
 // NewRunner returns a runner; Start loads its conversations.
