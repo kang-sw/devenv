@@ -1085,7 +1085,7 @@ func (f FolderStore) atomic(relative string, data []byte, stage string) error {
 			break
 		}
 	}
-	file, err := os.CreateTemp(dir, ".whiteboard-*.tmp")
+	file, err := wsstate.CreateTemp(dir, ".whiteboard-*.tmp")
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 type noticeCoverage struct {
@@ -248,7 +250,7 @@ func (s *State) planNotice(reply string, dirs map[string]string, now time.Time) 
 func (f FolderStore) Notify(reply string, now time.Time, eligible func() bool, enqueue func(string) error, wake func(), tickets ...TicketResolver) (next time.Time, err error) {
 	present := false
 	for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-		if _, statErr := os.Stat(filepath.Join(f.Dir, name)); statErr == nil {
+		if _, statErr := wsstate.Stat(filepath.Join(f.Dir, name)); statErr == nil {
 			present = true
 			break
 		} else if !os.IsNotExist(statErr) {

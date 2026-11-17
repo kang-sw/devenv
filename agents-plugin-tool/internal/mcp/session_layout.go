@@ -545,7 +545,7 @@ func (s *sessionStore) writeFileAtomic(path string, payload []byte) error {
 	if replace == nil {
 		replace = wsstate.AtomicReplaceFile
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
+	tmp, err := wsstate.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return err
 	}

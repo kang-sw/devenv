@@ -679,7 +679,7 @@ func writeEntryJournaled(dir string, entry Entry, journal bool) (string, error) 
 		return "", err
 	}
 	name := stamp + "-" + suffix + ".json"
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	tmp, err := wsstate.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return "", fmt.Errorf("create inbox temp file: %w", err)
 	}

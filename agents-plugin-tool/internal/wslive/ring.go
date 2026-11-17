@@ -221,7 +221,7 @@ func PrepareSummaryRing(entries []RingEntry) {
 }
 
 func writeRingRaw(dir, name string, raw []byte) error {
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	tmp, err := wsstate.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create conversation ring temp file: %w", err)
 	}
@@ -237,6 +237,7 @@ func writeRingRaw(dir, name string, raw []byte) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("write conversation ring entry: %w", err)
 	}
+	wsstate.CountFileIO("atomic_replace")
 	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("commit conversation ring entry: %w", err)

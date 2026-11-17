@@ -71,6 +71,11 @@ func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	return os.OpenFile(path, flag, perm)
 }
 
+func CreateTemp(dir, pattern string) (*os.File, error) {
+	countFileIO("create_temp")
+	return os.CreateTemp(dir, pattern)
+}
+
 // ReadFileOnce counts one attempt without adding sharing-violation retries.
 func ReadFileOnce(path string) ([]byte, error) {
 	countFileIO("read_file")

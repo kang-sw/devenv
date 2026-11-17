@@ -1251,6 +1251,16 @@ cache's `<kind>_cache_hits` and `<kind>_cache_misses` (a miss reads the
 file): `snapshot` (the daemon's pages), `source_snapshot` (session
 re-reads), `record`, `reply_registry`, and `scope_store`.
 
+The same route includes `file_io_total`, per-operation `file_io_<operation>`,
+and `file_io_site:<package>/<file>:<line>:<operation>` counters for instrumented
+hot identity, inbox, permission, evidence, snapshot and folder-store paths.
+These count attempted OS API operations, including failures and retries, not
+estimated costs or every kernel syscall. `read_file` includes its internal
+open/read; `create_temp` includes temp creation, and `atomic_replace` counts
+actual replacement attempts. Third-party flock and directory-entry `Info`
+operations are not included. Counts are process-lifetime and never reset by
+reading the route; compare two samples over the same observation interval.
+
 Session holders: a holder is a small Python process (standard library only,
 3.10 or newer) that owns one child process, over pipes or a PTY (ConPTY on
 Windows), and outlives the daemon, so the child survives a daemon restart.

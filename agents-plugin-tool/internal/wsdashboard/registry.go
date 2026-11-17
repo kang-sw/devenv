@@ -302,7 +302,7 @@ func WriteRegistration(dir string, reg Registration) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(sessionDir, registrationFileName+".*.tmp")
+	tmp, err := wsstate.CreateTemp(sessionDir, registrationFileName+".*.tmp")
 	if err != nil {
 		return err
 	}
