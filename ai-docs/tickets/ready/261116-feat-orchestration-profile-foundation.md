@@ -5,8 +5,8 @@ related:
   261116-research-ws-hosted-session-first-tier: context - ws/agent.spawn direction for harness-neutral spawn depth (68)
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 539888080e1383b9
-sage-review-completeness-reviewed: 539888080e1383b9
+sage-review-design-reviewed: e7f241db30aba717
+sage-review-completeness-reviewed: e7f241db30aba717
 ---
 
 # Orchestration profile foundation: profile-aware playbooks, sub-lead protocol, sub-lead board status
@@ -136,6 +136,25 @@ since both touch how playbook text varies by knob.
   is written by the lead with the user in session, not dispatched. (54)
 - **Handler report.** `ticket-handler`'s report folds into
   `sublead-protocol` in Phase 2, not in the run child. (55)
+- **Ticket-handler gap handoff.** Per user (09)=c in the session of ticket
+  `261116-bug-ticket-handler-split-gaps`, Phase 2 also owns that ticket's G3:
+  `ticket-handler`'s handling of `tickets.sage_gate` `ask`,
+  `check_review_required`, and `stop_blocked`, and the fold of the `decisions`
+  status (including the ticket-handler `## Lead replies` section that parses
+  lead answers and every lead-run reference to the `decisions` status), all
+  through the `sublead-protocol` report (55). Its input is user split-gaps
+  (07)=b: a handler ask that the lead, not the user, must answer is
+  self-describing (what to check, how to reply), the lead keeps one generic
+  rule for it, and the procedure lives in the handler playbook. A lead-addressed
+  ask (split-gaps (07)=b) has no slot in epic (01)'s `ask-user | done |
+  blocked` set; Phase 2 settles it with the user, e.g. an addressee field on
+  `ask:` items within the generic loop or folding the lead's check into
+  `done`/`next`; adding a fourth status amends epic (01) explicitly. The same
+  session's split-gaps (08)=a replaces (53)'s sentence-substitution and
+  verbatim pin-test implementation with override markers in `ticket-handler.md`
+  (and, via split-gaps' G2 whiteboard marker, at the lead relay point),
+  keeping the knob; (53)'s knob retention stands. Phase 2 edits to
+  `ticket-handler.md` and `lead-ticket.md` keep those marker blocks. (73)
 - **Compatibility.** T0 for the `workflow.profile` key (`Config.Overrides` is
   a string map round-tripped by `updateConfigFile`; the repo file keeps
   members verbatim); T0 for new rsrc files (an old binary opens only files it
@@ -345,7 +364,9 @@ Written by the lead with the user in session (54).
   content); `lead-workflow-manual.orchestrate.md` includes the core plus the
   generic loop over the protocol; sub-leads read the base manual.
 - `ticket-handler` report folded into the protocol (55); `lead-ticket`'s
-  handler loop reads the folded report.
+  handler loop reads the folded report. Also covers the handler gap handoff
+  (73): sage_gate `ask` / `check_review_required` / `stop_blocked` handling and
+  the `decisions` status fold.
 - `whiteboard-status` playbook (59): the status-only subset for sub-leads;
   `sublead-protocol` points a sub-lead that posts status at it. It tells a
   sub-lead that a "no open topic" refusal means keeping the status in its
