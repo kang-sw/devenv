@@ -264,16 +264,6 @@
     "261114-feat-ws-prompt-refusal-conversation-notice": {
       "registered_at": "2026-11-14T12:34:19Z"
     },
-    "261114-feat-ws-selection-bundle-comment": {
-      "registered_at": "2026-11-14T13:48:14Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-17T12:29:47Z"
-      }
-    },
     "261114-feat-ws-whiteboard-center-reference-scroll": {
       "registered_at": "2026-11-14T11:48:51Z"
     },
@@ -360,16 +350,6 @@
     "261115-feat-ws-daemon-release-auto-update": {
       "registered_at": "2026-11-15T01:40:22Z"
     },
-    "261115-feat-ws-dashboard-board-reorder-hold-rewrite": {
-      "registered_at": "2026-11-15T10:16:07Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-17T12:29:41Z"
-      }
-    },
     "261115-feat-ws-dashboard-conversation-rendering-consolidation": {
       "registered_at": "2026-11-14T22:47:31Z"
     },
@@ -393,16 +373,6 @@
     },
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
-    },
-    "261115-feat-ws-whiteboard-viewed-panel-anchor": {
-      "registered_at": "2026-11-14T15:16:05Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-17T12:29:35Z"
-      }
     },
     "261115-feat-ws-worker-profile-session-spawn": {
       "registered_at": "2026-11-15T07:40:58Z"
@@ -504,6 +474,9 @@
     },
     "261117-feat-ws-tracker-view-summary-delta": {
       "registered_at": "2026-11-17T10:04:15Z"
+    },
+    "261117-refactor-playbook-compression": {
+      "registered_at": "2026-11-17T13:13:25Z"
     },
     "261117-research-werkschaft-tauri-shell-revisit": {
       "registered_at": "2026-11-17T01:03:40Z"
