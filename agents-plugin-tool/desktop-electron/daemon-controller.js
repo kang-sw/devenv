@@ -2,6 +2,7 @@
 // macOS prestarts a detached dashboard successor before authenticated drain.
 // Windows daemon-start strictly breaks away and performs that ordering in Ensure.
 const path = require('node:path');
+const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const { cacheRoot, inspect, shutdown, sameDaemon } = require('./endpoint');
 const { version, core } = require('./daemon-version');
@@ -10,7 +11,14 @@ const { stageDaemon } = require('./daemon-stage');
 
 function launch(binary, options, args = ['dashboard'], waitForExit = false) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { ...options, detached: true, stdio: 'ignore', windowsHide: true });
+    const { logPath, ...spawnOptions } = options;
+    let fd, child, logStart = 0;
+    try {
+      if (logPath) { fd = fs.openSync(logPath, 'a', 0o600); logStart = fs.fstatSync(fd).size; }
+      child = spawn(binary, args, { ...spawnOptions, detached: true,
+        stdio: fd === undefined ? 'ignore' : ['ignore', fd, fd], windowsHide: true });
+    } catch (error) { reject(error); return; }
+    finally { if (fd !== undefined) fs.closeSync(fd); }
     child.once('error', reject);
     child.once('spawn', () => {
       child.unref();
@@ -18,7 +26,22 @@ function launch(binary, options, args = ['dashboard'], waitForExit = false) {
     });
     if (waitForExit) child.once('exit', code => {
       if (code === 0) resolve();
-      else reject(new Error(`daemon-start exited with status ${code}`));
+      else {
+        let detail = '';
+        if (logPath) {
+          // Read only a bounded tail, even after many retries. The native
+          // starter writes the actual OS/Ensure refusal here, not just a code.
+          let log;
+          try {
+            log = fs.openSync(logPath, 'r');
+            const size = fs.fstatSync(log).size, bytes = Buffer.alloc(Math.min(Math.max(0, size - logStart), 4096));
+            fs.readSync(log, bytes, 0, bytes.length, Math.max(logStart, size - bytes.length));
+            detail = bytes.toString('utf8').trim();
+          } catch { /* Exit status remains useful if the log is unreadable. */ }
+          finally { if (log !== undefined) fs.closeSync(log); }
+        }
+        reject(new Error(`daemon-start exited with status ${code}${detail ? `: ${detail}` : ''}`));
+      }
     });
   });
 }
@@ -82,7 +105,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
       return latest.url;
     }
     if (refreshed < 0) return latest.url;
-    const options = { cwd: staged.root, env: launchEnv(env, staged, root) };
+    const options = { cwd: staged.root, env: launchEnv(env, staged, root), logPath: path.join(userData, 'daemon-start.log') };
     if (platform === 'win32') {
       // Go strict Ensure holds launcher-start.lock and repeats the LAN,
       // compatibility and numeric-core guards at its fresh REST observation.
@@ -135,7 +158,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
   const selected = select({ appRoot, userData, platform });
   const staged = stage(selected, userData, platform, appRoot);
   try { return (await find(root)).url; } catch { /* Only a new dashboard may start. */ }
-  try { await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root) },
+  try { await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root), logPath: path.join(userData, 'daemon-start.log') },
     platform === 'win32' ? ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s'] : ['dashboard'],
     platform === 'win32'); }
   catch (error) { throw new Error(`Cannot start dashboard daemon: ${error.message}`); }
@@ -183,4 +206,4 @@ async function waitForDaemon(find, root, deps, predecessor, candidateVersion, ca
     ? 'Replacement drain was accepted but no new daemon identity became healthy; predecessor survival is not guaranteed — retry'
     : 'Dashboard did not become healthy (another daemon may hold the lock); no process was stopped — retry');
 }
-module.exports = { connectDaemon, launchEnv };
+module.exports = { connectDaemon, launchEnv, launch };
