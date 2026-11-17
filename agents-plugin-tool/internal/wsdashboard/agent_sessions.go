@@ -112,6 +112,17 @@ func (s agentSessions) ReadContacts(reg Registration) ([]Contact, bool) {
 	return nil, false
 }
 
+// RecordDashboardAnswer forwards board-answer arrivals for lead sessions.
+func (s agentSessions) RecordDashboardAnswer(reg Registration, id string, now time.Time) error {
+	if reg.Agent {
+		return nil
+	}
+	if source, ok := s.inner.(DashboardAnswerSource); ok {
+		return source.RecordDashboardAnswer(reg, id, now)
+	}
+	return nil
+}
+
 // BoardItems forwards to the configured source (BoardItemsSource); an agent
 // conversation has no board.
 func (s agentSessions) BoardItems(reg Registration) (BoardItems, bool) {

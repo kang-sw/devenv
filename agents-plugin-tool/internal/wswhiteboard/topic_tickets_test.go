@@ -84,7 +84,17 @@ func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 	}
 	want := []Entry{{ID: "e1", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)}}
 	mustApply(t, st, `<wb:topic name="links" tickets=""/>`)
-	if !st.topicKnown("links") || topicTickets(st, "links") != nil || st.EntrySeq != 1 || !reflect.DeepEqual(entries(t, st, "links"), want) {
+	var visible []Entry
+	for _, e := range entries(t, st, "links") {
+		if internalRevisionMarker(e) {
+			continue
+		}
+		if boardRevisionMarker(e) {
+			e.BoardNotice = nil
+		}
+		visible = append(visible, e)
+	}
+	if !st.topicKnown("links") || topicTickets(st, "links") != nil || !reflect.DeepEqual(visible, want) {
 		t.Fatalf("clearing tickets lost or changed default history: %+v", st)
 	}
 	if view := st.TopicStates()["links"]; view.State == nil || view.State.Value != StateDiscussing || view.State.Entry != "e1" || view.Diagnostic != nil {
@@ -100,8 +110,8 @@ func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 }
 
 // TestTopicTicketsAreQuietMetadata pins Decision 18: setting or clearing a
-// topic's tickets moves no recency, reopens no closed topic, and records no
-// entry.
+// topic's tickets moves no recency, reopens no closed topic, and adds no
+// visible history entry.
 func TestTopicTicketsAreQuietMetadata(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="old"><wb:log>first</wb:log></wb:topic>`)
@@ -115,6 +125,15 @@ func TestTopicTicketsAreQuietMetadata(t *testing.T) {
 		return names
 	}
 	before, beforeDocs := order(), slices.Clone(st.Topics)
+	visibleCount := func(entries []Entry) int {
+		n := 0
+		for _, e := range entries {
+			if !internalRevisionMarker(e) {
+				n++
+			}
+		}
+		return n
+	}
 	for _, batch := range []string{
 		`<wb:topic name="old" tickets="261112-feat-a"/>`,
 		`<wb:topic name="done" tickets="261112-feat-a"/>`,
@@ -125,7 +144,7 @@ func TestTopicTicketsAreQuietMetadata(t *testing.T) {
 			t.Fatalf("%s moved recency: %v, was %v", batch, got, before)
 		}
 		for i, doc := range st.Topics {
-			if doc.Changed != beforeDocs[i].Changed || doc.ChangedAt != beforeDocs[i].ChangedAt || len(doc.Entries) != len(beforeDocs[i].Entries) {
+			if doc.Changed != beforeDocs[i].Changed || doc.ChangedAt != beforeDocs[i].ChangedAt || visibleCount(doc.Entries) != visibleCount(beforeDocs[i].Entries) {
 				t.Fatalf("%s touched %q: %+v", batch, doc.Name, doc)
 			}
 		}

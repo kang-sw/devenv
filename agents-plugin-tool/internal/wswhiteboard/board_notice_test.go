@@ -89,7 +89,7 @@ func TestBoardNoticeResearchingBodyWithoutTriggerOrOverdue(t *testing.T) {
 	}
 }
 
-func TestBoardNoticePerTopicFullListDebounceAndRevision(t *testing.T) {
+func TestBoardNoticePerTopicFullListAndRevision(t *testing.T) {
 	s := &State{}
 	noticeTopic(t, s, "A", StateImplementing, 10, stateNow)
 	noticeTopic(t, s, "B", StateImplementing, 20, stateNow)
@@ -108,16 +108,14 @@ func TestBoardNoticePerTopicFullListDebounceAndRevision(t *testing.T) {
 	noticeStamp(t, s, p, stateNow.Add(20*time.Minute))
 	p = s.planNotice("lead", dirs, stateNow.Add(40*time.Minute))
 	noticeReasons(t, p)
-	if !p.next.Equal(stateNow.Add(50 * time.Minute)) {
-		t.Fatalf("A was not restamped with full list: %s", p.next)
+	if !p.next.Equal(stateNow.Add(time.Hour)) {
+		t.Fatalf("covered overdue topics must not schedule repeats: %s", p.next)
 	}
 	p = s.planNotice("lead", dirs, stateNow.Add(50*time.Minute))
-	noticeReasons(t, p, "overdue")
-	noticeStamp(t, s, p, stateNow.Add(50*time.Minute))
-	// A future deadline waits; a still-overdue revision triggers independently
-	// of B's recent coverage, retaining original start and both reasons.
+	noticeReasons(t, p)
+	// A future deadline waits; the board change also unmutes still-overdue B.
 	stateApply(t, s, `<wb:topic name="A"><wb:eta minutes="60" reason="scope grew"/></wb:topic>`, stateNow.Add(51*time.Minute))
-	noticeReasons(t, s.planNotice("lead", dirs, stateNow.Add(51*time.Minute)))
+	noticeReasons(t, s.planNotice("lead", dirs, stateNow.Add(51*time.Minute)), "overdue")
 	stateApply(t, s, `<wb:topic name="B"><wb:eta minutes="30" reason="extra work"/></wb:topic>`, stateNow.Add(52*time.Minute))
 	p = s.planNotice("lead", dirs, stateNow.Add(52*time.Minute))
 	noticeReasons(t, p, "overdue")
@@ -182,30 +180,25 @@ func TestBoardNoticeHourlyIndependentAndCombinedCatchup(t *testing.T) {
 	noticeReasons(t, p, "overdue")
 	noticeStamp(t, s, p, stateNow.Add(66*time.Minute))
 	p = s.planNotice("lead", dirs, stateNow.Add(96*time.Minute))
-	noticeReasons(t, p, "overdue")
-	noticeStamp(t, s, p, stateNow.Add(96*time.Minute))
+	noticeReasons(t, p)
 	p = s.planNotice("lead", dirs, stateNow.Add(2*time.Hour))
 	noticeReasons(t, p, "hourly") // overdue-only sends did not move the hourly anchor
 	if !strings.Contains(p.message, "- run;") {
 		t.Fatal("hourly lacks full overdue section")
 	}
 	noticeStamp(t, s, p, stateNow.Add(2*time.Hour))
-	// Hourly-only still includes the overdue section and stamps every included
-	// run/revision. Its overdue coverage must debounce from this send, too.
+	// Hourly-only includes and covers overdue topics for this board revision.
 	p = s.planNotice("lead", dirs, stateNow.Add(126*time.Minute))
 	noticeReasons(t, p)
-	if !p.next.Equal(stateNow.Add(150 * time.Minute)) {
-		t.Fatalf("hourly full-list coverage did not advance overdue debounce: %s", p.next)
+	if !p.next.IsZero() {
+		t.Fatalf("covered board retained a repeat timer: %s", p.next)
 	}
-	// Restart/resume folds committed receipts; missed intervals yield one send.
+	// Restart/resume folds committed receipts without replaying missed intervals.
 	restarted := s.clone()
 	p = restarted.planNotice("lead", dirs, stateNow.Add(8*time.Hour))
-	noticeReasons(t, p, "overdue", "hourly")
-	noticeStamp(t, restarted, p, stateNow.Add(8*time.Hour))
-	p = restarted.planNotice("lead", dirs, stateNow.Add(8*time.Hour))
 	noticeReasons(t, p)
-	if !p.next.Equal(stateNow.Add(8*time.Hour + 30*time.Minute)) {
-		t.Fatalf("catch-up replayed intervals: %s", p.next)
+	if !p.next.IsZero() {
+		t.Fatalf("restart scheduled a repeat on an unchanged board: %s", p.next)
 	}
 	stateApply(t, restarted, `<wb:topic name="wait"><wb:state value="discussing"/></wb:topic><wb:topic name="run"><wb:close result="done"/></wb:topic>`, stateNow.Add(9*time.Hour))
 	p = restarted.planNotice("lead", dirs, stateNow.Add(24*time.Hour))
@@ -280,11 +273,11 @@ func TestBoardNoticeReplyIsolationDiagnosticsAndFutureClocks(t *testing.T) {
 			t.Fatal("unknown state triggered timer or vanished from hourly list")
 		}
 	}
-	// Future coverage delays existing clocks, rather than subtracting time.
+	// A future receipt still suppresses the unchanged board revision.
 	p = s.planNotice("source", dirs, stateNow.Add(90*time.Minute))
 	noticeReasons(t, p)
-	if !p.next.Equal(stateNow.Add(150 * time.Minute)) {
-		t.Fatalf("future receipt did not defer debounce: %s", p.next)
+	if !p.next.IsZero() {
+		t.Fatalf("future receipt retained a repeat timer: %s", p.next)
 	}
 	noticeTopic(t, s, "new", StateImplementing, 1, stateNow.Add(89*time.Minute))
 	p = s.planNotice("source", map[string]string{"Work": "t1", "new": "t2"}, stateNow.Add(90*time.Minute))
@@ -438,7 +431,7 @@ func TestBoardNotifyAbsentFailureEligibilityAndWakeOrdering(t *testing.T) {
 			t.Error("receipt published before wake")
 		}
 	})
-	if err != nil || !reflect.DeepEqual(order, []string{"eligible", "enqueue", "wake"}) || !next.Equal(stateNow.Add(90*time.Minute)) {
+	if err != nil || !reflect.DeepEqual(order, []string{"eligible", "enqueue", "wake"}) || !next.IsZero() {
 		t.Fatal(order, next, err)
 	}
 	s := folderOpen(t, f.Dir, nil)

@@ -258,6 +258,20 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		status, answer = d.inboxWrite(dir, route, raw, now)
 		d.inboxMu.Unlock()
 	}
+	if route == "message" && status == http.StatusOK {
+		// The inbox write is already durable. Record only actual board answers,
+		// never ordinary messages, commands, or server-generated activity.
+		var req messageRequest
+		if json.Unmarshal(raw, &req) == nil && req.Command == "" && hasBoardAnswer(req) {
+			if result, ok := answer.(map[string]any); ok {
+				if id, ok := result["id"].(string); ok {
+					if source, ok := d.source.(DashboardAnswerSource); ok {
+						d.recordAnswerRevision(source, s.Registration, id, now, 0)
+					}
+				}
+			}
+		}
+	}
 	if route == "message" && status == http.StatusOK && s.Hosted {
 		if host, ok := d.agents.(AgentPageInputHost); ok {
 			if err := host.PageInput(replyID); err != nil {
@@ -267,6 +281,32 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		}
 	}
 	d.inboxAnswered(w, s, status, answer)
+}
+
+// DashboardAnswerSource records a durable board revision after a successful
+// dashboard answer send. Implementations must tolerate repeated inbox IDs.
+type DashboardAnswerSource interface {
+	RecordDashboardAnswer(Registration, string, time.Time) error
+}
+
+// The inbox send must not be reported as failed after it has succeeded. Retry
+// transient board failures with the same ID, which makes retries idempotent.
+func (d *Daemon) recordAnswerRevision(source DashboardAnswerSource, reg Registration, id string, at time.Time, attempt int) {
+	if err := source.RecordDashboardAnswer(reg, id, at); err != nil {
+		fmt.Fprintf(d.log, "dashboard: record board answer revision: %v\n", err)
+		if attempt < 4 {
+			time.AfterFunc(time.Second<<attempt, func() { d.recordAnswerRevision(source, reg, id, at, attempt+1) })
+		}
+	}
+}
+
+func hasBoardAnswer(req messageRequest) bool {
+	for _, chip := range req.Chips {
+		if chip.Answer != "" || strings.TrimSpace(chip.Note) != "" {
+			return true
+		}
+	}
+	return len(req.Topics) != 0
 }
 
 // messageWrite performs the message route against the inbox at dir. It

@@ -825,6 +825,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
+	work.markMetadataRevision(state, out.Effects, env.Now)
 	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
 	return work, out, updates
 }
