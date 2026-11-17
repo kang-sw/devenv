@@ -270,10 +270,8 @@ func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) (os.FileInfo, bool) {
 	if r.Scope != string(roleLead) || r.Parent != "" || r.Root != t.root {
 		return nil, false
 	}
-	for key, other := range n.known {
-		if key != t.key && other.Scope == string(roleLead) && other.Parent == "" && wsmailbox.ReplyID(key) == wsmailbox.ReplyID(t.key) {
-			return nil, false
-		}
+	if !n.uniqueTarget(t) {
+		return nil, false
 	}
 	stat := n.stat
 	if stat == nil {
@@ -287,6 +285,19 @@ func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) (os.FileInfo, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (n *WhiteboardNudges) uniqueTarget(t nudgeTarget) bool {
+	return nudgeIdentityUnique(t.key, n.known, wsmailbox.ReplyID)
+}
+
+func nudgeIdentityUnique(target string, known map[string]nudgeKeyIdentity, replyID func(string) string) bool {
+	for key, other := range known {
+		if key != target && other.Scope == string(roleLead) && other.Parent == "" && replyID(key) == replyID(target) {
+			return false
+		}
+	}
+	return true
 }
 
 func (n *WhiteboardNudges) deliveryGate(t nudgeTarget) func() bool {
@@ -421,6 +432,13 @@ func (n *WhiteboardNudges) run() {
 		}
 		targets := make([]nudgeTarget, 0, len(boards))
 		for t, due := range boards {
+			// Discovering a conflicting key suppresses the existing target
+			// too, not just the newly poked one. Uniqueness is RAM-only.
+			if !n.uniqueTarget(t) {
+				delete(boards, t)
+				delete(stamps, t)
+				continue
+			}
 			if due.IsZero() || !now.Before(due) {
 				targets = append(targets, t)
 			}

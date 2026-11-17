@@ -9,6 +9,24 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
+func TestPokedIdentityCollisionSuppressesBothTargets(t *testing.T) {
+	known := map[string]nudgeKeyIdentity{
+		"old": {Scope: string(roleLead)},
+		"new": {Scope: string(roleLead)},
+	}
+	// Synthetic hash collision avoids searching the four-word ReplyID space.
+	replyID := func(string) string { return "collision" }
+	for _, key := range []string{"old", "new"} {
+		if nudgeIdentityUnique(key, known, replyID) {
+			t.Fatalf("colliding %s target remained eligible", key)
+		}
+	}
+	delete(known, "new")
+	if !nudgeIdentityUnique("old", known, replyID) {
+		t.Fatal("recovered unique target remained suppressed")
+	}
+}
+
 func TestWhiteboardPokedDiscoveryIsConstantIO(t *testing.T) {
 	f := newNudgeFixture(t)
 	for i := 0; i < 200; i++ {
