@@ -39,8 +39,11 @@ function fixture({ layout = 'auto', width = 1920, live = true, worktree = '', co
       getBoundingClientRect: () => ({ left: 600, right: 1800 }),
       focus() { events.push('focus-search'); context.doc.activeElement = this; } };
   }
-  const root = node(), search = node(), fpane = node(), grid = node(), area = node();
-  area.getBoundingClientRect = () => ({ right: 2400 }); grid.closest = () => area;
+  const root = node(), search = node(), fpane = node(), grid = node(), area = node(), wrap = node();
+  root.clientWidth = width; wrap.paddingRight = '16px';
+  // Closed layout stays capped even when the open preview must reach farther.
+  area.getBoundingClientRect = grid.getBoundingClientRect = () => ({ right: 1664 });
+  grid.closest = selector => { assert.ok(['.dbody', '.dwrap'].includes(selector)); return selector === '.dwrap' ? wrap : area; };
   fpane.querySelector = selector => selector === '.fq' ? search : null;
   nodes.bcol = node();
   context = vm.createContext({ live, worktree, layoutMode: layout, root, fpane, grid, dbody: area, chead: null,
@@ -48,7 +51,8 @@ function fixture({ layout = 'auto', width = 1920, live = true, worktree = '', co
     post() {}, browsePost() {}, toast() {}, copyText() {}, attachExplorerPath() {}, load() {}, save() {},
     setCtab(tab) { events.push('tab:' + tab); }, $: id => nodes[id],
     window: {
-      matchMedia(query) { return { matches: width >= Number(query.match(/\d+/)[0]) }; },
+      matchMedia(query) { return { matches: root.clientWidth >= Number(query.match(/\d+/)[0]) }; },
+      getComputedStyle(el) { assert.equal(el, wrap); return { paddingRight: wrap.paddingRight }; },
       WsCards: { dismissFiles() { events.push('dismiss-sheet'); }, register() {}, icon: name => name },
       WsPreview: { open(path, options) { events.push(['card', path, options]); } },
       WsFiles: { setup(hooks) { owners.push({ setup: hooks }); }, create(el, hooks) {
@@ -112,7 +116,7 @@ test('left single click opens pane across board and pin column; durable intent c
   assert.equal(c.filePreviewBack, search);
   assert.equal(root.attrs['data-file-preview'], '');
   assert.equal(pane.current().options, options);
-  assert.equal(pane.el.style.width, '1800px', 'includes pin column beyond grid right');
+  assert.equal(pane.el.style.width, '1304px', 'reaches viewport gutter beyond capped board/grid');
   assert.deepEqual(events, [['pane', 'a.txt', options]]);
   events.length = 0;
   c.previewLeftFile('a.txt', { ...options, keep: true });
@@ -161,11 +165,34 @@ test('production closed callback cancels without stealing outside focus or focus
     assert.equal(c.doc.activeElement, c.doc.body);
   }
 });
-test('split resize dismisses obsolete sheet and resizes current pane without opening cards', () => {
-  const { context: c, pane, events } = fixture();
+for (const [width, expectedRight] of [[1920, 1904], [2560, 2544]]) {
+  test('preview reaches right ' + expectedRight + ' at viewport ' + width + ' despite capped body', () => {
+    const { context: c, pane } = fixture({ width });
+    c.window.innerWidth = width + 17; // Use client viewport, not scrollbar-inclusive window width.
+    c.previewLeftFile('a.txt', {});
+    assert.equal(600 + parseFloat(pane.el.style.width), expectedRight);
+    assert.equal(c.dbody.getBoundingClientRect().right, 1664, 'closed body cap remains unchanged');
+    assert.equal(c.grid.getBoundingClientRect().right, 1664, 'closed grid is not expanded');
+  });
+}
+test('split resize follows viewport and gutter, not capped grid, without opening cards', () => {
+  const { context: c, pane, root, events } = fixture();
   c.previewLeftFile('a.txt', {}); events.length = 0;
-  c.grid.getBoundingClientRect = () => ({ right: 2600 }); c.syncFilePreview();
-  assert.equal(pane.el.style.width, '2000px'); assert.deepEqual(events, ['dismiss-sheet']);
+  root.clientWidth = 2560; c.syncFilePreview();
+  assert.equal(pane.el.style.width, '1944px'); assert.deepEqual(events, ['dismiss-sheet']);
+  root.clientWidth = 1920;
+  c.window.getComputedStyle = () => ({ paddingRight: '24.5px' }); c.syncFilePreview();
+  assert.equal(pane.el.style.width, '1295.5px', 'resize rereads computed gutter');
+});
+test('closed or absent preview does not read geometry or write sizing styles', () => {
+  const { context: c, pane, root } = fixture();
+  const unexpected = () => { throw Error('closed pane must not touch geometry or styles'); };
+  Object.defineProperty(root, 'clientWidth', { get: unexpected });
+  c.$('bcol').getBoundingClientRect = unexpected;
+  c.grid.closest = unexpected; c.window.getComputedStyle = unexpected;
+  pane.el.style = new Proxy({}, { set: unexpected });
+  assert.equal(pane.current(), null); c.sizeFilePreview();
+  c.filePreview = null; c.sizeFilePreview();
 });
 test('revealPanes applies layout fallback before lifecycle callbacks and retains shown/hidden semantics', () => {
   const { context: c, pane, events } = fixture();
