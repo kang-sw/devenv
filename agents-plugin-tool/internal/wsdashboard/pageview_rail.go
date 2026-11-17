@@ -45,6 +45,11 @@ type RailView struct {
 	// and check items, and CountApproval counts those waiting on a tool approval
 	// (RailRow.Approval).
 	Live, CountPolicy, CountApproval int
+	// CountSleep counts the live hosted sessions that look idle (no
+	// harness exit, no work, no approval wait): the sleep button is
+	// disabled at zero. It is the rail's own reading; the runner decides
+	// again when the list is asked and when the sleep runs.
+	CountSleep int
 	// CanAdd reports a daemon that keeps stored workspaces: the page then
 	// shows the add-workspace and add-worktree buttons.
 	CanAdd bool
@@ -389,6 +394,9 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			view.CountPolicy += row.CountPolicy
 			if row.Approval != nil {
 				view.CountApproval++
+			}
+			if row.Hosted && !row.Stopped() && !row.Working && row.Approval == nil {
+				view.CountSleep++
 			}
 		}
 	}
