@@ -64,6 +64,19 @@ func SpawnAgentEvents(st State, key string) []wslive.Event {
 	return out
 }
 
+// Lineage is SpawnLead's lookup: id's state from its record alone, open or
+// closed, so only its identity and spawn edge (ID, Parent) are meaningful.
+// Unlike Get it reads no file: Get relists the conversation's inbox for its
+// held count, and a watcher walking the chain on every descendant event made
+// that the daemon's hottest directory listing.
+func (r *Runner) Lineage(id string) (State, error) {
+	rec, ok := r.recordOf(id)
+	if !ok {
+		return State{}, errUnknown
+	}
+	return closedState(rec), nil
+}
+
 // SpawnLead traces a spawned conversation to its owning lead, failing closed
 // for an unknown or malformed parent chain. get must be a read-only lookup.
 func SpawnLead(st State, get func(string) (State, error)) string {
