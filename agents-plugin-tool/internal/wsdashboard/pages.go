@@ -911,6 +911,9 @@ type pageReader struct {
 	entries *entryFiles
 	// snapshots holds the snapshots already parsed (nil reads each time).
 	snapshots *SnapshotCache
+	// Initial document/control reads must observe a preceding write immediately.
+	// Stream renders leave this false and share the presentation validation TTL.
+	freshSnapshots bool
 }
 
 func (r pageReader) clock() time.Time {
@@ -924,6 +927,9 @@ func (r pageReader) clock() time.Time {
 // snapshot may be shared with other readers (SnapshotCache): the caller
 // only reads it.
 func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
+	if r.freshSnapshots {
+		r.snapshots.Invalidate(r.dir, replyID)
+	}
 	return r.snapshots.Snapshot(r.dir, replyID)
 }
 
@@ -932,11 +938,16 @@ func (r pageReader) readSnapshotWithoutObserved(replyID string) *wslive.Snapshot
 	return r.snapshots.snapshotWithoutObserved(r.dir, replyID)
 }
 
+// readFreshSnapshot bypasses presentation TTLs for decisions that write to a
+// session. Hosted RAM remains authoritative when the daemon owns the session.
+func (r pageReader) readFreshSnapshot(replyID string) *wslive.Snapshot {
+	return r.snapshots.FreshSnapshot(r.dir, replyID)
+}
+
 // Write-route admission keeps its read-through check. Refresh stamps use
 // adapterStamp instead, so bounded presentation evidence is not authority.
 func (r pageReader) adapterPresent(replyID string, now time.Time) bool {
-	p, err := r.snapshots.read(wslive.SnapshotPath(SessionDir(r.dir, replyID)))
-	return err == nil && adapterPresent(&p.snap, now)
+	return adapterPresent(r.readFreshSnapshot(replyID), now)
 }
 
 // adapterStamp ages already-read evidence without probing disk. Include the
@@ -1404,7 +1415,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
 	frame := framedRequest(r)
 	lang, pref := requestLang(r)
-	view, _, _, ok, readErr := d.pagesIn(lang).readSessionWith(replyID, nil, true, true)
+	reader := d.pagesIn(lang)
+	reader.freshSnapshots = true
+	view, _, _, ok, readErr := reader.readSessionWith(replyID, nil, true, true)
 	if readErr != nil {
 		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
 		return

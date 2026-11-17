@@ -610,6 +610,9 @@ func TestGitBadgeFollowsTheStreamedSnapshot(t *testing.T) {
 		writeSnapshot(t, f.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
 			Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: reply}},
 			Repo: &wslive.Repo{Folder: "p", Branch: "main", Upstream: "origin/main", Ahead: ahead}})
+		// Direct broker injection also models the real index read's signal
+		// invalidation; no per-render TTL bypass is involved.
+		f.d.snapshots.Invalidate(f.dir, "livesession")
 		f.d.broker.wake("livesession")
 	}
 	snapshot("first reply", 1)

@@ -187,7 +187,7 @@ func TestHostedSpawnProjectionListsOncePerInvalidationNotPerStreamWrite(t *testi
 			<-c.spawnC
 		}
 		before := count(lead.ID)
-		c.spawnDirty = true
+		c.spawnDirty, c.spawnNext = true, time.Time{}
 		c.live.writeSnapshot()
 		refreshDelta = count(lead.ID) - before
 		before = count(lead.ID)

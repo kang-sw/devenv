@@ -11,13 +11,20 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 func folderIdleBoard(tb testing.TB) FolderStore {
 	tb.Helper()
+	return folderSizedBoard(tb, 112)
+}
+
+func folderSizedBoard(tb testing.TB, topics int) FolderStore {
+	tb.Helper()
 	f := FolderStore{Dir: tb.TempDir()}
 	if err := f.Update(nil, func(s *State) error {
-		for i := 0; i < 112; i++ {
+		for i := 0; i < topics; i++ {
 			s.EntrySeq++
 			s.Topics = append(s.Topics, TopicDoc{Name: fmt.Sprintf("topic-%d", i), Body: "unchanged topic body", Entries: []Entry{{ID: fmt.Sprintf("e%d", s.EntrySeq), Kind: EntryAgent, Text: "history", At: "2026-11-15T00:00:00Z"}}})
 		}
@@ -39,6 +46,90 @@ func countFolderReads(tb testing.TB) *int {
 	}
 	tb.Cleanup(func() { folderReadFile = read })
 	return count
+}
+
+// Replacing the root receipt explicitly invalidates a cached committed read.
+// Raw leaf fault injection alone is not a folder-store commit.
+func folderReplaceRootReceipt(t *testing.T, f FolderStore) {
+	t.Helper()
+	if err := f.atomic("committed.json", folderRead(t, filepath.Join(f.Dir, "committed.json")), "receipt-staged"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Replay the old hit's validation probes: one metadata existence check and
+// two guards, each checking pending plus every stamped JSON/JSONL file. Flock
+// acquisition itself adds no os.Stat call in the cache, and is not simulated.
+func folderLegacyCacheHit(dir string, files map[string]os.FileInfo, stat func(string) (os.FileInfo, error)) bool {
+	if _, err := stat(filepath.Join(dir, "meta.json")); err != nil {
+		return false
+	}
+	for guard := 0; guard < 2; guard++ {
+		if _, err := stat(filepath.Join(dir, "pending.json")); !os.IsNotExist(err) {
+			return false
+		}
+		for path, before := range files {
+			after, err := stat(path)
+			if err != nil || !wsstate.SameFileMetadata(before, after) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func TestFolderCacheHitStatsIndependentOfBoardSize(t *testing.T) {
+	for _, topics := range []int{1, 112} {
+		t.Run(fmt.Sprint(topics), func(t *testing.T) {
+			f := folderSizedBoard(t, topics)
+			stats := 0
+			rootsOnly := false
+			stat := func(path string) (os.FileInfo, error) {
+				stats++
+				if rootsOnly && filepath.Dir(path) != f.Dir {
+					t.Errorf("cache probed a leaf: %s", path)
+				}
+				return os.Stat(path)
+			}
+			files := map[string]os.FileInfo{}
+			if err := filepath.WalkDir(f.Dir, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && !entry.IsDir() && (filepath.Ext(path) == ".json" || filepath.Ext(path) == ".jsonl") {
+					files[path], err = os.Stat(path)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			const hits = 20
+			for i := 0; i < hits; i++ {
+				if !folderLegacyCacheHit(f.Dir, files, stat) {
+					t.Fatal("legacy validation missed unchanged fixture")
+				}
+			}
+			before := stats / hits
+			if stats != hits*(1+2*(1+len(files))) {
+				t.Fatalf("legacy validation count=%d files=%d", stats, len(files))
+			}
+			rootsOnly = true
+			cache := FolderCache{stat: stat}
+			if _, err := cache.Open(f, nil); err != nil {
+				t.Fatal(err)
+			}
+			reads := countFolderReads(t)
+			stats = 0
+			for i := 0; i < hits; i++ {
+				if _, err := cache.Open(f, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// One existence check plus (pending + two roots) before and
+			// after flock acquisition; no guard reads or leaf probes.
+			if stats != hits*7 || *reads != 0 {
+				t.Fatalf("hits=%d stats=%d reads=%d; want %d stats, no reads", hits, stats, *reads, hits*7)
+			}
+			t.Logf("topics=%d files=%d before=%d stats/hit (legacy replay counted), after=%d stats/hit (counted)", topics, len(files), before, stats/hits)
+		})
+	}
 }
 
 func TestFolderCacheIdleOpenAndOtherWriter(t *testing.T) {
@@ -88,6 +179,77 @@ func TestFolderCacheIdleOpenAndOtherWriter(t *testing.T) {
 	}
 }
 
+func TestFolderCacheImmediateStoreAndExternalRootChanges(t *testing.T) {
+	for _, kind := range []string{"own-store", "external-committed", "external-meta-only"} {
+		t.Run(kind, func(t *testing.T) {
+			f := folderSizedBoard(t, 1)
+			var cache FolderCache
+			frozen, previous, err := cache.OpenRevision(f, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "own-store" {
+				err = f.Update(nil, func(s *State) error { s.Seq++; return nil })
+			} else {
+				// Model a completed, quiescent external edit, not an in-flight
+				// writer: one replaces both roots, the other only metadata as
+				// the supported board-takeover recipe does at the same generation.
+				var meta folderSession
+				if _, err := folderDecode(filepath.Join(f.Dir, "meta.json"), &meta); err != nil {
+					t.Fatal(err)
+				}
+				meta.State.Seq++
+				if kind == "external-committed" {
+					meta.Generation++
+				}
+				err = f.atomic("meta.json", folderJSON(meta), "session-meta-staged")
+				if err == nil && kind == "external-committed" {
+					err = f.atomic("committed.json", folderJSON(folderReceipt{FolderSchemaVersion, meta.Generation}), "receipt-staged")
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			// No sleeps, notifications or Forget: the very next read sees it.
+			got, revision, err := cache.OpenRevision(f, nil)
+			if err != nil || got == nil || got.Seq != frozen.Seq+1 || revision == previous {
+				t.Fatalf("next read missed %s: state=%v revision=%d previous=%d err=%v", kind, got, revision, previous, err)
+			}
+			if frozen.Seq != 0 {
+				t.Fatal("write mutated the old immutable read")
+			}
+			if _, hit, err := cache.OpenRevision(f, nil); err != nil || hit != revision {
+				t.Fatalf("changed root was not cached: revision=%d want=%d err=%v", hit, revision, err)
+			}
+		})
+	}
+}
+
+func TestFolderCacheRechecksRootUnderLock(t *testing.T) {
+	f := folderSizedBoard(t, 1)
+	var cache FolderCache
+	if _, err := cache.Open(f, nil); err != nil {
+		t.Fatal(err)
+	}
+	wrote := false
+	cache.stat = func(path string) (os.FileInfo, error) {
+		info, err := os.Stat(path)
+		if !wrote && filepath.Base(path) == "committed.json" {
+			// Return the old receipt stamp from the first (unlocked) guard,
+			// but complete another writer before the cache acquires the flock.
+			wrote = true
+			if err := f.Update(nil, func(s *State) error { s.Seq++; return nil }); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return info, err
+	}
+	got, err := cache.Open(f, nil)
+	if err != nil || got == nil || got.Seq != 1 || !wrote {
+		t.Fatalf("write between guards missed: state=%v wrote=%t err=%v", got, wrote, err)
+	}
+}
+
 func TestFolderCachePendingReplayAndSchemaGuard(t *testing.T) {
 	f := folderIdleBoard(t)
 	var cache FolderCache
@@ -116,14 +278,24 @@ func TestFolderCachePendingReplayAndSchemaGuard(t *testing.T) {
 	if _, err := cache.Open(f, nil); err != nil {
 		t.Fatal(err)
 	}
-	// An out-of-band newer topic schema is still refused, even though
-	// the session metadata and generation did not change.
+	// Synthetic leaf-only corruption is not a supported external commit.
+	// The uncached guard must still refuse it without a root change; after
+	// explicitly replacing the root receipt, the cache must also refuse it
+	// despite an unchanged session generation.
 	path := filepath.Join(f.Dir, "t1", "meta.json")
 	if err := os.WriteFile(path, []byte(`{"schema_version":999}`), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.Open(nil); err == nil {
+		t.Fatal("uncached guard hid newer nested schema")
+	}
+	folderReplaceRootReceipt(t, f)
 	if _, err := cache.Open(f, nil); err == nil {
-		t.Fatal("cache hid newer nested schema")
+		t.Fatal("cache hid newer nested schema after root invalidation")
+	}
+	cache.Forget(f.Dir)
+	if _, err := cache.Open(f, nil); err == nil {
+		t.Fatal("cache miss hid newer nested schema")
 	}
 }
 
@@ -185,7 +357,7 @@ func TestFolderCacheDetectsAtomicReplaceWithSameStamp(t *testing.T) {
 	if _, err := cache.Open(f, nil); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(f.Dir, "t1", "meta.json")
+	path := filepath.Join(f.Dir, "committed.json")
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -325,6 +497,13 @@ func BenchmarkFolderIdleOpen112(b *testing.B) {
 			if _, err := cache.Open(f, nil); err != nil {
 				b.Fatal(err)
 			}
+			stats := 0
+			if cache != nil {
+				cache.stat = func(path string) (os.FileInfo, error) {
+					stats++
+					return os.Stat(path)
+				}
+			}
 			reads := countFolderReads(b)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -335,6 +514,9 @@ func BenchmarkFolderIdleOpen112(b *testing.B) {
 			b.StopTimer()
 			// One read seam call attempts one open; add the flock file.
 			b.ReportMetric(float64(*reads)/float64(b.N)+1, "opens/op")
+			if cache != nil {
+				b.ReportMetric(float64(stats)/float64(b.N), "cache-stats/op")
+			}
 		})
 	}
 }

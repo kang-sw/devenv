@@ -164,6 +164,8 @@ type Options struct {
 	heartbeat time.Duration
 	// spawnListed observes global spawn-projection listings in tests.
 	spawnListed func(string)
+	// stateInboxRead observes state-held inbox scans in tests.
+	stateInboxRead func(string)
 	// closedSnapshotRead observes closed/handed-off snapshot reads in tests.
 	closedSnapshotRead func(string)
 }

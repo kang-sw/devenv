@@ -126,6 +126,10 @@ func BenchmarkObservedCacheNewResponse4000(b *testing.B) {
 		if err := os.Rename(path, next); err != nil {
 			b.Fatal(err)
 		}
+		clock = clock.Add(observedValidationInterval)
+		if err := os.Chtimes(filepath.Join(dir, ObservedDirName), clock, clock); err != nil {
+			b.Fatal(err)
+		}
 		b.StartTimer()
 		cache.Load(dir)
 	}

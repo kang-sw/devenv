@@ -384,6 +384,9 @@ func TestStreamSendsOnlyTheLiveRegionForAStreamingTick(t *testing.T) {
 	snap := &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
 		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: "streamed <partial> reply, grown"}}}
 	writeSnapshot(t, f.dir, "livesession", snap)
+	// This test drives the broker directly; model the index lane's signal
+	// invalidation as well, rather than waiting for presentation validation.
+	f.d.snapshots.Invalidate(f.dir, "livesession")
 	f.d.broker.wake("livesession")
 	var got []string
 	for {

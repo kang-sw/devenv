@@ -79,6 +79,8 @@ type conv struct {
 	// spawnC coalesces daemon-owned descendant changes for this writer.
 	spawnC     chan struct{}
 	spawnDirty bool
+	spawnNext  time.Time
+	spawnTimer *time.Timer
 	// spawning is set from the row write that precedes a spawn until the
 	// spawn settled: the row then names no process and is not stopped, so
 	// a terminal login is refused meanwhile (Registration.HostMayRun).
@@ -298,6 +300,11 @@ func (c *conv) loop() {
 	defer c.r.wg.Done()
 	defer close(c.done)
 	defer c.live.closeSlot()
+	defer func() {
+		if c.spawnTimer != nil {
+			c.spawnTimer.Stop()
+		}
+	}()
 	// Before the first scan, Stop can report an existing holder unknown.
 	// Keep its rejoined transport and persisted identity until holdersScanned
 	// can establish absence or stop it; otherwise releaseHolder could forget
@@ -323,8 +330,11 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC <-chan time.Time
+		var idleC, actionC, leverC, spawnC <-chan time.Time
 		leverC = c.leverC
+		if c.spawnTimer != nil {
+			spawnC = c.spawnTimer.C
+		}
 		if c.idle != nil {
 			idleC = c.idle.C
 		}
@@ -354,6 +364,10 @@ func (c *conv) loop() {
 				c.armIdle()
 				c.restartIfDue()
 			}
+		case <-spawnC:
+			c.spawnTimer, c.spawnNext = nil, time.Time{}
+			c.live.writeSnapshot()
+			c.changed(false)
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
@@ -416,6 +430,9 @@ func (c *conv) settle() bool {
 }
 
 func (c *conv) state() State {
+	if c.r.opts.stateInboxRead != nil {
+		c.r.opts.stateInboxRead(c.rec.ReplyID)
+	}
 	held, _ := wsinbox.Held(c.inbox)
 	c.mu.Lock()
 	defer c.mu.Unlock()

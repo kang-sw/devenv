@@ -250,6 +250,9 @@ func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 	if err := os.Rename(from, to); err != nil {
 		t.Fatal(err)
 	}
+	// This external move has no Index signal; watched stamps revalidate
+	// within one second rather than on every direct page read.
+	waitForDashboardValidation(t)
 	page = readPageOK(t, src, reg)
 	if boardRenders(src) == before {
 		t.Fatal("a linked ticket's move reused the memoized board")

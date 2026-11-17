@@ -228,7 +228,9 @@ func (d *Daemon) checkAnswers(replyID string) {
 	if !ok || s.Agent || !s.HasBoard {
 		return
 	}
-	snap := d.pages().readSnapshotWithoutObserved(replyID)
+	// This may send a message: never trust presentation-cached idle/adapter
+	// evidence when the current snapshot could forbid that write.
+	snap := d.pages().readFreshSnapshot(replyID)
 	if !adapterPresent(snap, time.Now()) || !leadIdle(snap.Lead) {
 		return
 	}

@@ -437,8 +437,10 @@ func TestDashboardReadPageContacts(t *testing.T) {
 		t.Fatalf("liveness at +11m: %+v", contacts)
 	}
 
-	// A rebind moves the named address to its new holder on the next read.
+	// A raw rebind without an Index signal moves the named address after
+	// the presentation cache's permitted one-second validation interval.
 	setPresence("rebound-session-key")
+	waitForDashboardValidation(t)
 	if got := byAddress()["alice@worktree"].ReplyID; got != wsmailbox.ReplyID("rebound-session-key") {
 		t.Fatalf("named contact after rebind resolves to %q", got)
 	}
@@ -467,6 +469,8 @@ func TestDashboardReadPageContacts(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		// Both raw store edits bypass normal Index invalidation.
+		waitForDashboardValidation(t)
 	}
 	setCwds("/live/alpha", "/recorded/alpha")
 	contacts = byAddress()
@@ -882,11 +886,14 @@ func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		// No board refresh or Index signal accompanies this direct part write.
+		waitForDashboardValidation(t)
 	})
 	misses("agenda", func() {
 		if err := f.s.sessions.setAgenda(f.key, "plan", json.RawMessage(`{"a":1}`)); err != nil {
 			t.Fatal(err)
 		}
+		waitForDashboardValidation(t) // direct part write, no Index signal
 	})
 	misses("re-ask times", func() {
 		if err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(r *sessionRecord) error {
@@ -901,12 +908,14 @@ func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
 		bump := filepath.Join(f.root, "ai-docs", "tickets", "ready")
 		at := time.Now().Add(time.Second)
 		os.Chtimes(bump, at, at)
+		waitForDashboardValidation(t) // external watched input, no signal
 	})
 	misses("ticket edited in place", func() {
 		path := filepath.Join(f.root, "ai-docs", "tickets", "ready", "261101-feat-ready-one.md")
 		writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one, retitled")
 		at := time.Now().Add(2 * time.Second)
 		os.Chtimes(path, at, at)
+		waitForDashboardValidation(t) // external watched input, no signal
 	})
 	misses("marker present", func() {
 		if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: f.key, PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)}); err != nil {

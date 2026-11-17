@@ -16,6 +16,8 @@ func TestWakeStampAndSnapshotUnchangedFilesAreNotOpened(t *testing.T) {
 	index := NewIndex(IndexOptions{})
 	opens := 0
 	cache := &SnapshotCache{load: func(path string) (parsedSnapshot, error) { opens++; return loadSnapshot(path) }}
+	clock := now
+	cache.files.now = func() time.Time { return clock }
 	ids := []string{"sessiona", "sessionb", "sessionc"}
 	for _, id := range ids {
 		index.sessions[id] = &indexEntry{session: Session{Registration: Registration{ReplyID: id, HeartbeatAt: now.UTC().Format(time.RFC3339)}}}
@@ -103,6 +105,7 @@ func TestWakeStampAndSnapshotUnchangedFilesAreNotOpened(t *testing.T) {
 	if next, _ := reader.sessionStamp(ids[0], in); next != first || opens != len(ids) {
 		t.Fatal("stamp unexpectedly probed the replaced snapshot")
 	}
+	clock = clock.Add(fileCacheValidationInterval)
 	cache.snapshotWithoutObserved(dir, ids[0]) // the existing index/backstop read
 	if next, _ := reader.sessionStamp(ids[0], in); next == first {
 		t.Fatal("refreshed evidence did not move session stamp")
@@ -119,10 +122,11 @@ func TestWakeStampAndSnapshotUnchangedFilesAreNotOpened(t *testing.T) {
 	if opens != len(ids)+2 || cache.observed.Opens() != int64(len(ids)+1) {
 		t.Fatal("Forget kept evidence or snapshot")
 	}
-	// A removed snapshot stops adapter presence and is not served from cache.
+	// A removed snapshot stops adapter presence at the next validation.
 	if err := os.Remove(filepath.Clean(path)); err != nil {
 		t.Fatal(err)
 	}
+	clock = clock.Add(fileCacheValidationInterval)
 	if cache.Snapshot(dir, ids[0]) != nil {
 		t.Fatal("removed snapshot retained")
 	}
