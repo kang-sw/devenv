@@ -1,0 +1,331 @@
+package wsagent
+
+import (
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// catalog.go is the harness capability catalog: the declarative common
+// interface of a hosted harness. A harness joins by filling a profile of
+// graded items per harness version and writing a Backend; shared code reads
+// the grades, never a harness name.
+//
+// The catalog is a ceiling, not a replacement for the instance handles:
+// runtime support of an optional control is the catalog grade AND the
+// process's handle (controlsFor), and ErrUnsupported stays the restart
+// signal of the required Process controls. A backend registered without a
+// profile (BackendRegistration.Catalog nil) stays handle-only: its readers
+// hide nothing, demote nothing, and warn of no version.
+//
+// Admission conditions are not items: a harness without headless JSON event
+// streaming or MCP server injection is not usable at all, so nothing is
+// graded for them.
+//
+// Inventory of the optional process controls (processControls):
+//   - approval, mode    -> ItemApproval
+//   - steer, reports    -> ItemSteer (reports is the worker steer path)
+//   - commands          -> ItemCompaction (the command mapping /compact uses)
+//   - mcp               -> left out: MCP status and reconnect recover the MCP
+//     injection admission condition, which is never graded
+//   - turns, recovery   -> left out: rejoin and holder replay reconciliation,
+//     internal to recovery and not a capability a caller selects
+//
+// and of the required Process controls: Interrupt -> ItemInterrupt;
+// SetModel, SetEffort -> ItemModelEffort; Send -> ItemFollowUp (the runner
+// holds the message and sends it when the turn ends).
+
+// CapabilityGrade is what the ws adapter actually delivers for an item on a
+// harness version: not what the harness could do natively, so an item with
+// no ws wiring is unsupported until it is wired.
+type CapabilityGrade string
+
+const (
+	// GradeNative: the harness's own mechanism delivers the item.
+	GradeNative CapabilityGrade = "native"
+	// GradeSubstitute: ws delivers the item from outside the harness.
+	GradeSubstitute CapabilityGrade = "ws-substitute"
+	// GradeUnsupported: neither delivers it.
+	GradeUnsupported CapabilityGrade = "unsupported"
+)
+
+// CapabilityItem names one catalog item.
+type CapabilityItem string
+
+// The catalog items, each a capability a harness may deliver.
+const (
+	// ItemSkillList: the session's skill list is known to ws.
+	ItemSkillList CapabilityItem = "skill_list"
+	// ItemSkillInjection: a skill's text reaches the session on request.
+	ItemSkillInjection CapabilityItem = "skill_injection"
+	// ItemCompaction: a compaction command pushed from outside the harness
+	// (the dashboard's /compact) compacts the session.
+	ItemCompaction CapabilityItem = "compaction"
+	// ItemRewind: the conversation can be rewound (hidden or rebuilt).
+	ItemRewind CapabilityItem = "rewind"
+	// ItemToolRemoval: default tools can be removed at launch; Values is
+	// the removable tool set (CatalogAnyValue: every built-in tool).
+	ItemToolRemoval CapabilityItem = "tool_removal"
+	// ItemSubagentRemoval: the native subagent tool can be removed, the key
+	// item of tool removal; Values names that tool.
+	ItemSubagentRemoval CapabilityItem = "subagent_removal"
+	// ItemModelEffort: model and effort are selectable. The offered choices
+	// come from the backend's ChoiceLister, not from the catalog.
+	ItemModelEffort CapabilityItem = "model_effort"
+	// ItemApproval: tool approval prompts reach ws and the permission mode
+	// changes. The modes come from BackendRegistration.PermissionModes and
+	// PermissionLevels, not from the catalog.
+	ItemApproval CapabilityItem = "approval"
+	// ItemSteer: a message reaches the running turn.
+	ItemSteer CapabilityItem = "steer"
+	// ItemInterrupt: the running turn stops and the session stays.
+	ItemInterrupt CapabilityItem = "interrupt"
+	// ItemFollowUp: a message is queued for delivery when the turn ends.
+	ItemFollowUp CapabilityItem = "follow_up"
+	// ItemResume: a later process continues the same backend session.
+	ItemResume CapabilityItem = "resume"
+	// ItemReasoningStream: the model's reasoning reaches the conversation.
+	ItemReasoningStream CapabilityItem = "reasoning_stream"
+	// ItemUsageQuery: ws asks the harness for its usage figures.
+	ItemUsageQuery CapabilityItem = "usage_query"
+)
+
+// CatalogItems lists every item, in display order.
+var CatalogItems = []CapabilityItem{
+	ItemSkillList, ItemSkillInjection, ItemCompaction, ItemRewind,
+	ItemToolRemoval, ItemSubagentRemoval, ItemModelEffort, ItemApproval,
+	ItemSteer, ItemInterrupt, ItemFollowUp, ItemResume,
+	ItemReasoningStream, ItemUsageQuery,
+}
+
+// CatalogAnyValue in a value range stands for every value of its kind.
+const CatalogAnyValue = "*"
+
+// CatalogRole is the role dimension of an entry, for a harness whose
+// delivery differs between a lead and a worker conversation.
+type CatalogRole string
+
+const (
+	RoleLead   CatalogRole = "lead"
+	RoleWorker CatalogRole = "worker"
+)
+
+// CapabilityEntry declares one item's grade for a role and harness version
+// range. Since is inclusive and Until exclusive; an empty bound is open. An
+// empty Role applies to every role.
+type CapabilityEntry struct {
+	Item  CapabilityItem
+	Role  CatalogRole
+	Since string
+	Until string
+	Grade CapabilityGrade
+	// Values is the value range: the set or grade the item delivers (the
+	// removable tools, for example). It is not the version range.
+	Values []string
+	// Source cites the wiring that delivers the grade.
+	Source string
+}
+
+// HarnessProfile is one harness's catalog: its guaranteed version range and
+// its entries. Oldest and Newest are the oldest and newest harness versions
+// with a recorded stream fixture; a version outside them runs on the
+// nearest bound's grades, marked unverified.
+type HarnessProfile struct {
+	Oldest  string
+	Newest  string
+	Entries []CapabilityEntry
+}
+
+// Capability is one item as resolved for a session.
+type Capability struct {
+	Grade  CapabilityGrade `json:"grade"`
+	Values []string        `json:"values,omitempty"`
+}
+
+// Capabilities is a profile resolved for one role and harness version.
+type Capabilities struct {
+	Role CatalogRole `json:"role"`
+	// Version is the harness version the session reported, empty when it
+	// is unknown; ProfileVersion is the version the grades were resolved at
+	// (Version inside the guaranteed range, else the nearest bound).
+	Version        string `json:"version,omitempty"`
+	ProfileVersion string `json:"profile_version"`
+	// Unverified marks a version outside the guaranteed range, or none.
+	Unverified bool                          `json:"unverified,omitempty"`
+	Items      map[CapabilityItem]Capability `json:"items"`
+}
+
+// Grade is item's grade; an item the profile does not declare is
+// unsupported.
+func (c Capabilities) Grade(item CapabilityItem) CapabilityGrade {
+	if got, ok := c.Items[item]; ok && got.Grade != "" {
+		return got.Grade
+	}
+	return GradeUnsupported
+}
+
+// Allows reports whether item is delivered at all, natively or by ws.
+func (c Capabilities) Allows(item CapabilityItem) bool {
+	return c.Grade(item) != GradeUnsupported
+}
+
+// Resolve resolves the profile for role at the harness version a session
+// reported. An empty or unreadable version, or one outside the guaranteed
+// range, resolves at the nearest bound (the newest for an unreadable one)
+// and is marked Unverified: the session still runs, loudly.
+func (p HarnessProfile) Resolve(role CatalogRole, version string) Capabilities {
+	at, unverified := p.Newest, true
+	if v, ok := parseHarnessVersion(version); ok {
+		oldest, _ := parseHarnessVersion(p.Oldest)
+		newest, _ := parseHarnessVersion(p.Newest)
+		switch {
+		case compareHarnessVersions(v, oldest) < 0:
+			at = p.Oldest
+		case compareHarnessVersions(v, newest) > 0:
+			at = p.Newest
+		default:
+			at, unverified = version, false
+		}
+	}
+	caps := Capabilities{Role: role, Version: version, ProfileVersion: at, Unverified: unverified, Items: map[CapabilityItem]Capability{}}
+	for _, item := range CatalogItems {
+		caps.Items[item] = Capability{Grade: GradeUnsupported}
+	}
+	resolved := map[CapabilityItem]bool{}
+	for _, e := range p.Entries {
+		if resolved[e.Item] || !e.applies(role, at) {
+			continue
+		}
+		resolved[e.Item] = true
+		caps.Items[e.Item] = Capability{Grade: e.Grade, Values: slices.Clone(e.Values)}
+	}
+	return caps
+}
+
+// applies reports whether e declares role at version.
+func (e CapabilityEntry) applies(role CatalogRole, version string) bool {
+	if e.Role != "" && e.Role != role {
+		return false
+	}
+	return versionInRange(version, e.Since, e.Until)
+}
+
+// versionInRange reports whether version lies in [since, until); an empty
+// bound is open. An unreadable version lies only in the fully open range.
+func versionInRange(version, since, until string) bool {
+	if since == "" && until == "" {
+		return true
+	}
+	v, ok := parseHarnessVersion(version)
+	if !ok {
+		return false
+	}
+	if lo, ok := parseHarnessVersion(since); since != "" && (!ok || compareHarnessVersions(v, lo) < 0) {
+		return false
+	}
+	if hi, ok := parseHarnessVersion(until); until != "" && (!ok || compareHarnessVersions(v, hi) >= 0) {
+		return false
+	}
+	return true
+}
+
+// parseHarnessVersion reads a harness version's dotted numeric core:
+// "2.1.326", "v1.5.2", or a version line such as "2.1.326 (Claude Code)".
+// A pre-release or build suffix ("-beta.1", "+abc") is ignored.
+func parseHarnessVersion(v string) ([]int, bool) {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexAny(v, " \t"); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	if v == "" {
+		return nil, false
+	}
+	parts := strings.Split(v, ".")
+	core := make([]int, len(parts))
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 {
+			return nil, false
+		}
+		core[i] = n
+	}
+	return core, true
+}
+
+// compareHarnessVersions orders two parsed cores; a missing component
+// counts as 0, so "2.1" equals "2.1.0".
+func compareHarnessVersions(a, b []int) int {
+	for i := range max(len(a), len(b)) {
+		var x, y int
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+// claudeSubagentTool is the native subagent tool a Claude worker profile
+// removes by leaving it out of --tools (its init may name it "Task",
+// claudeInitToolNames).
+const claudeSubagentTool = "Agent"
+
+// ClaudeCatalog is the reference profile: what the ws adapter delivers for
+// Claude Code today. The guaranteed range is seeded from the recorded
+// stream fixtures (testdata, claude_code_version).
+func ClaudeCatalog() *HarnessProfile {
+	return &HarnessProfile{
+		Oldest: "2.1.319",
+		Newest: "2.1.323",
+		Entries: []CapabilityEntry{
+			{Item: ItemSkillList, Grade: GradeUnsupported,
+				Source: "the init's skills field is not parsed (claudeInit)"},
+			{Item: ItemSkillInjection, Grade: GradeNative,
+				Source: "Claude Code's own skills: a lead's bundled plugin (claudeLeadPluginArgs), a worker profile's plugin directories with Skills set (claudeArgs)"},
+			{Item: ItemCompaction, Grade: GradeNative,
+				Source: "the dashboard's /compact reaches the harness as its typed line (processControls.runCommand); the mapper reads the compaction (claudeMapper)"},
+			{Item: ItemRewind, Grade: GradeUnsupported, Source: "no ws wiring"},
+			{Item: ItemToolRemoval, Role: RoleWorker, Grade: GradeNative, Values: []string{CatalogAnyValue},
+				Source: "--tools allowlist of the profile's built-in tools (claudeArgs)"},
+			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "a lead keeps the user's own tool setup (claudeLeadArgs)"},
+			{Item: ItemSubagentRemoval, Role: RoleWorker, Grade: GradeNative, Values: []string{claudeSubagentTool},
+				Source: "the subagent tool stays out of --tools unless the profile lists it (claudeArgs)"},
+			{Item: ItemSubagentRemoval, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "a lead keeps the user's own tool setup (claudeLeadArgs)"},
+			{Item: ItemModelEffort, Grade: GradeNative,
+				Source: "set_model and apply_flag_settings controls (claudeProcess.SetModel, SetEffort); choices from ClaudeBackend.Choices"},
+			{Item: ItemApproval, Role: RoleLead, Grade: GradeNative,
+				Source: "can_use_tool prompts and set_permission_mode; lead-only handles (claudeProcess.processControls)"},
+			{Item: ItemApproval, Role: RoleWorker, Grade: GradeUnsupported,
+				Source: "a worker runs in dontAsk (claudeArgs, checkClaudeInit)"},
+			{Item: ItemSteer, Role: RoleLead, Grade: GradeNative,
+				Source: "a user message the running turn takes up (claudeProcess.Steer; conv.steer for leads)"},
+			{Item: ItemSteer, Role: RoleWorker, Grade: GradeUnsupported,
+				Source: "no recoverable worker steer path: steerWorker serves Pi only and a Claude process sets no reports handle"},
+			{Item: ItemInterrupt, Grade: GradeNative,
+				Source: "the interrupt control request (claudeProcess.Interrupt, Runner.Interrupt)"},
+			{Item: ItemFollowUp, Grade: GradeSubstitute,
+				Source: "the ws inbox holds the message and the runner sends it when the turn ends (Runner.Send)"},
+			{Item: ItemResume, Grade: GradeNative,
+				Source: "--resume of the recorded session id (claudeArgs, claudeLeadArgs)"},
+			{Item: ItemReasoningStream, Grade: GradeUnsupported,
+				Source: "lead thinking lines are skipped (claudeRingSkip); no summary producer yet"},
+			{Item: ItemUsageQuery, Role: RoleLead, Grade: GradeNative,
+				Source: "the get_context_usage control (claudeMapper.askContextUsage, asked from leadInit)"},
+			{Item: ItemUsageQuery, Role: RoleWorker, Grade: GradeUnsupported,
+				Source: "a worker's usage comes only from its result lines; nothing asks"},
+		},
+	}
+}

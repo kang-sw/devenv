@@ -186,3 +186,20 @@ func TestAgentMCPPythonResolution(t *testing.T) {
 		})
 	}
 }
+
+// TestAgentRunnerCatalogs pins which daemon backends carry a capability
+// catalog: Claude, the reference profile; Pi stays handle-only until it
+// has a profile of its own.
+func TestAgentRunnerCatalogs(t *testing.T) {
+	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
+	defer holders.Close()
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	defer runner.Close()
+	regs := runner.BackendRegistrations()
+	if !reflect.DeepEqual(regs[wsagent.BackendClaude].Catalog, wsagent.ClaudeCatalog()) {
+		t.Errorf("claude catalog = %+v, want the reference profile", regs[wsagent.BackendClaude].Catalog)
+	}
+	if regs[wsagent.BackendPi].Catalog != nil {
+		t.Errorf("pi has a catalog profile; it stays handle-only until its own profile")
+	}
+}

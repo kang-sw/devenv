@@ -17,6 +17,10 @@ type BackendRegistration struct {
 	PermissionModes []string
 	// PermissionLevels advertises supported lead selection paths only.
 	PermissionLevels []PermissionLevel
+	// Catalog is the backend's capability catalog (catalog.go): a ceiling
+	// over the instance handles, never a replacement for them. Nil keeps
+	// the backend handle-only: no hiding, demotion, or version warning.
+	Catalog *HarnessProfile
 }
 
 // BackendRegistrations exposes the runner's admitted set to in-process config
