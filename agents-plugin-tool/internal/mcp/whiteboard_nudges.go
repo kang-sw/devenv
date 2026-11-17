@@ -22,10 +22,6 @@ import (
 
 const whiteboardReconcileInterval = 30 * time.Second
 
-// Board transactions can poke faster than discovery can enumerate all keys.
-// Retain their targets and share one discovery per second, including startup.
-const whiteboardNudgeDiscoveryInterval = time.Second
-
 // Ticket status and external or interrupted writes are not fully represented by
 // the session metadata stamp. Periodically revisit even unchanged boards.
 const whiteboardNudgeRecoveryInterval = 5 * time.Minute
@@ -52,6 +48,7 @@ type WhiteboardNudges struct {
 	mu           sync.Mutex
 	pending      map[nudgeTarget]bool
 	// Discovery is serialized by run; deliveryGate deliberately never uses it.
+	known       map[string]nudgeKeyIdentity // collision evidence retained between recovery scans
 	identities  map[string]nudgeIdentity
 	boardStamps map[nudgeTarget]os.FileInfo
 	stat        func(string) (os.FileInfo, error)
@@ -208,6 +205,7 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 	// and files whose metadata/read races never gain cached authority.
 	prior := n.identities
 	n.identities = map[string]nudgeIdentity{}
+	n.known = map[string]nudgeKeyIdentity{}
 	out := map[nudgeTarget]time.Time{}
 	associations := map[string]int{}
 	for key := range keys {
@@ -215,6 +213,7 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 		if !ok {
 			continue
 		}
+		n.known[key] = r
 		// Cache valid nonlead/delegate identities too: they dominate a
 		// representative key store, and may become leads on a later write.
 		if stamp != nil {
@@ -248,6 +247,46 @@ func nudgeSuppressCollisions(out map[nudgeTarget]time.Time, associations map[str
 			delete(out, t)
 		}
 	}
+}
+
+// discoverTarget checks only a poked identity and board. Collision checks use
+// the in-memory discovery evidence, never an enumeration of unrelated keys.
+func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) (os.FileInfo, bool) {
+	r, stamp, ok := n.discoverRecord(n.dirs(), t.key, n.identities[t.key])
+	if !ok {
+		delete(n.identities, t.key)
+		delete(n.known, t.key)
+		return nil, false
+	}
+	if n.known == nil {
+		n.known = map[string]nudgeKeyIdentity{}
+	}
+	n.known[t.key] = r
+	if stamp != nil {
+		n.identities[t.key] = *stamp
+	} else {
+		delete(n.identities, t.key)
+	}
+	if r.Scope != string(roleLead) || r.Parent != "" || r.Root != t.root {
+		return nil, false
+	}
+	for key, other := range n.known {
+		if key != t.key && other.Scope == string(roleLead) && other.Parent == "" && wsmailbox.ReplyID(key) == wsmailbox.ReplyID(t.key) {
+			return nil, false
+		}
+	}
+	stat := n.stat
+	if stat == nil {
+		stat = wsstate.Stat
+	}
+	for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
+		if info, err := stat(filepath.Join(whiteboardFolder(t.root, t.key).Dir, name)); err == nil {
+			return info, true
+		} else if !os.IsNotExist(err) {
+			return nil, false
+		}
+	}
+	return nil, false
 }
 
 func (n *WhiteboardNudges) deliveryGate(t nudgeTarget) func() bool {
@@ -337,7 +376,6 @@ func nudgeReconcile(boards map[nudgeTarget]time.Time, stamps map[nudgeTarget]os.
 func (n *WhiteboardNudges) run() {
 	defer close(n.exited)
 	scan := n.now()
-	var discoverAfter time.Time
 	boards := map[nudgeTarget]time.Time{}
 	stamps := map[nudgeTarget]os.FileInfo{}
 	timer := time.NewTimer(0)
@@ -362,29 +400,23 @@ func (n *WhiteboardNudges) run() {
 		n.pending = map[nudgeTarget]bool{}
 		n.mu.Unlock()
 		recovery := !now.Before(scan)
-		var pendingDiscovery time.Time
-		if recovery || len(pending) > 0 {
-			if now.Before(discoverAfter) {
-				n.mu.Lock()
-				for t := range pending {
-					n.pending[t] = true
+		if recovery {
+			found := n.discover()
+			boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, true)
+			scan = now.Add(whiteboardNudgeRecoveryInterval)
+		}
+		for t := range pending {
+			if recovery {
+				if _, ok := boards[t]; ok {
+					boards[t] = time.Time{}
 				}
-				n.mu.Unlock()
-				pendingDiscovery = discoverAfter
+				continue
+			}
+			if stamp, ok := n.discoverTarget(t); ok {
+				boards[t], stamps[t] = time.Time{}, stamp
 			} else {
-				found := n.discover()
-				discoverAfter = now.Add(whiteboardNudgeDiscoveryInterval)
-				// Safety recovery and explicit pokes share the same discovery
-				// deadline; a postponed recovery still performs full reconciliation.
-				boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, recovery)
-				if recovery {
-					scan = now.Add(whiteboardNudgeRecoveryInterval)
-				}
-				for t := range pending {
-					if _, ok := found[t]; ok {
-						boards[t] = time.Time{}
-					}
-				}
+				delete(boards, t)
+				delete(stamps, t)
 			}
 		}
 		targets := make([]nudgeTarget, 0, len(boards))
@@ -413,12 +445,6 @@ func (n *WhiteboardNudges) run() {
 			boards[t] = due
 		}
 		next := scan
-		if next.Before(discoverAfter) {
-			next = discoverAfter
-		}
-		if !pendingDiscovery.IsZero() && pendingDiscovery.Before(next) {
-			next = pendingDiscovery
-		}
 		for _, due := range boards {
 			if !due.IsZero() && due.Before(next) {
 				next = due
