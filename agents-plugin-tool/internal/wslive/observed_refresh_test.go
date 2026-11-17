@@ -2,7 +2,6 @@ package wslive
 
 import (
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,11 +21,13 @@ func TestObservedSweepDoesNotBlockInvalidationOrWarmReads(t *testing.T) {
 	var stats atomic.Int64
 	cache := ObservedCache{now: func() time.Time { return clock }, stat: func(path string) (os.FileInfo, error) {
 		stats.Add(1)
-		if filepath.Base(path) != ObservedDirName && block.CompareAndSwap(true, false) {
-			close(entered)
-			<-release // stands for AV blocking a record stat for tens of seconds
-		}
 		return os.Stat(path)
+	}, readDir: func(path string) ([]os.DirEntry, error) {
+		if block.CompareAndSwap(true, false) {
+			close(entered)
+			<-release // stands for AV blocking the sweep for tens of seconds
+		}
+		return os.ReadDir(path)
 	}}
 	first := cache.Load(dir)
 	clock = clock.Add(observedResweep)
@@ -36,7 +37,7 @@ func TestObservedSweepDoesNotBlockInvalidationOrWarmReads(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
-		t.Fatal("sweep did not reach the record stat")
+		t.Fatal("sweep did not reach the listing")
 	}
 	invalidated := make(chan struct{})
 	go func() { cache.Invalidate(dir); close(invalidated) }()

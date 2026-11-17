@@ -379,3 +379,82 @@ func TestWhiteboardNudgeCacheSmallWarmReads(t *testing.T) {
 		t.Fatalf("warm content reads=%d", reads)
 	}
 }
+
+// TestWhiteboardNudgeDiscoveryListedLegacyIdentity: a legacy-only key's
+// identity comes from discovery's listing. Before, a warm recovery pass made
+// two key stats per legacy-only key (failed split, legacy) and a cold one four
+// plus a failed split read; a capture's 5-minute pass over ~4,070 keys made
+// 6,670 key stats. Now a warm pass makes none for such keys, and a cold one
+// only the after-read check's two and one read.
+func TestWhiteboardNudgeDiscoveryListedLegacyIdentity(t *testing.T) {
+	n, target, splitPath := nudgeCacheFixture(t)
+	d := n.dirs()
+	const legacyKeys = 10
+	old := time.Now().Add(-time.Hour)
+	for i := 0; i < legacyKeys; i++ {
+		path := d.legacyPath(fmt.Sprintf("legacy-nudge-%02d", i))
+		nudgeWriteJSON(t, path, sessionRecord{sessionKeyRecord: sessionKeyRecord{SchemaVersion: 2, Scope: string(roleDelegate), Root: target.root}})
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var legacyStats, splitStats, legacyReads, splitReads int
+	n.stat = func(p string) (os.FileInfo, error) {
+		switch {
+		case strings.HasPrefix(filepath.Base(filepath.Dir(p)), "legacy-nudge-") || strings.HasPrefix(filepath.Base(p), "legacy-nudge-"):
+			legacyStats++
+		case p == splitPath:
+			splitStats++
+		}
+		return os.Stat(p)
+	}
+	n.read = func(p string, value func() any) ([]byte, any, error) {
+		if strings.Contains(p, "legacy-nudge-") {
+			legacyReads++
+		} else if p == splitPath {
+			splitReads++
+		}
+		return readRecordFile(p, value)
+	}
+	want := map[nudgeTarget]time.Time{target: {}}
+	if got := n.discover(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("cold: got %v, want %v", got, want)
+	}
+	if len(n.known) != legacyKeys+1 || len(n.identities) != legacyKeys+1 {
+		t.Fatalf("cold: known=%d cached=%d, want %d", len(n.known), len(n.identities), legacyKeys+1)
+	}
+	if legacyStats != 2*legacyKeys || legacyReads != legacyKeys {
+		t.Fatalf("cold: legacy stats=%d reads=%d, want %d and %d (was %d and %d)", legacyStats, legacyReads, 2*legacyKeys, legacyKeys, 4*legacyKeys, 2*legacyKeys)
+	}
+	if splitStats != 2 || splitReads != 1 {
+		t.Fatalf("cold: split stats=%d reads=%d, want 2 and 1", splitStats, splitReads)
+	}
+	legacyStats, splitStats, legacyReads, splitReads = 0, 0, 0, 0
+	if got := n.discover(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("warm: got %v, want %v", got, want)
+	}
+	if legacyStats != 0 || legacyReads != 0 || splitStats != 1 || splitReads != 0 {
+		t.Fatalf("warm: legacy stats=%d reads=%d split stats=%d reads=%d, want 0, 0, 1, 0 (legacy stats were %d)", legacyStats, legacyReads, splitStats, splitReads, 2*legacyKeys)
+	}
+	// A listed legacy change is still seen: an edit moves its listed stamp.
+	path := d.legacyPath("legacy-nudge-00")
+	nudgeWriteJSON(t, path, sessionRecord{sessionKeyRecord: sessionKeyRecord{SchemaVersion: 2, Scope: string(roleLead), Root: target.root, Parent: "x"}})
+	if err := os.Chtimes(path, old.Add(time.Minute), old.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	n.discover()
+	if n.known["legacy-nudge-00"].Parent != "x" || legacyReads != 1 {
+		t.Fatalf("listed legacy edit missed: reads=%d identity=%+v", legacyReads, n.known["legacy-nudge-00"])
+	}
+	// A split file created for a listed legacy key still takes precedence:
+	// its directory is listed, so the identity takes the stat path.
+	split := d.partPath("legacy-nudge-01", partKey)
+	nudgeWriteJSON(t, split, sessionKeyRecord{SchemaVersion: 2, Scope: string(roleLead), Root: target.root, Parent: "split"})
+	if err := os.Chtimes(split, old, old); err != nil {
+		t.Fatal(err)
+	}
+	n.discover()
+	if n.known["legacy-nudge-01"].Parent != "split" || n.identities["legacy-nudge-01"].path != split {
+		t.Fatalf("split did not shadow listed legacy: identity=%+v", n.identities["legacy-nudge-01"])
+	}
+}

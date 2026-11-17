@@ -127,12 +127,38 @@ func (n *WhiteboardNudges) discoveryIdentity(d sessionDirs, key string) (string,
 	return path, info, err
 }
 
+// nudgeListing is what discovery's two listings already say about a key.
+type nudgeListing struct {
+	split  bool        // sessions/ listed an entry named key, of any type
+	legacy os.DirEntry // keys/ entry of key's legacy file; nil when unlisted
+}
+
+// listedIdentity is discoveryIdentity from the listings when they settle it:
+// with no split entry listed, a regular legacy entry is the effective file and
+// its listed metadata is its stamp (free on Windows, one uncounted lstat
+// elsewhere). A recovery pass over a large key store otherwise made two path
+// stats per legacy-only key, a failed split stat and the legacy stat: under
+// on-access antivirus most of the pass's cost. Anything else, including a
+// split entry of any type and a non-regular legacy entry, takes the stat path.
+// A split file created after the listing is caught by the after-read check
+// when the key is reread; a key whose listed stamp still matches keeps its
+// legacy identity until the next poke (discoverTarget always stats) or pass.
+// That window is the pass's length, not the stat-to-use gap it was, and stays
+// within the recovery bound.
+func (n *WhiteboardNudges) listedIdentity(d sessionDirs, key string, l *nudgeListing) (string, os.FileInfo, error) {
+	if l != nil && !l.split && l.legacy != nil && l.legacy.Type().IsRegular() {
+		info, err := l.legacy.Info()
+		return d.legacyPath(key), info, err
+	}
+	return n.discoveryIdentity(d, key)
+}
+
 func nudgeSameIdentity(a, b os.FileInfo) bool {
 	return wsstate.SameFileMetadata(a, b)
 }
 
-func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudgeIdentity) (nudgeKeyIdentity, *nudgeIdentity, bool) {
-	path, info, err := n.discoveryIdentity(d, key)
+func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudgeIdentity, listed *nudgeListing) (nudgeKeyIdentity, *nudgeIdentity, bool) {
+	path, info, err := n.listedIdentity(d, key, listed)
 	if err != nil || !info.Mode().IsRegular() {
 		return nudgeKeyIdentity{}, nil, false
 	}
@@ -144,6 +170,18 @@ func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudge
 	read := n.read
 	if read == nil {
 		read = readRecordFile
+	}
+	if split := d.partPath(key, partKey); path != split {
+		// The identity already found no split file: read the legacy file
+		// directly rather than first failing a split read. A split file that
+		// appears meanwhile fails the after-read path check below.
+		base := read
+		read = func(p string, newValue func() any) ([]byte, any, error) {
+			if p == split {
+				return nil, nil, fs.ErrNotExist
+			}
+			return base(p, newValue)
+		}
 	}
 	r, _, err := loadRecordWith(d, key, partKey, nil, read)
 	if err != nil {
@@ -171,7 +209,14 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 		stat = wsstate.Stat
 	}
 	n.boardStamps = map[nudgeTarget]os.FileInfo{}
-	keys := map[string]bool{}
+	keys := map[string]*nudgeListing{}
+	splitOther := map[string]bool{}
+	listing := func(key string) *nudgeListing {
+		if keys[key] == nil {
+			keys[key] = &nudgeListing{}
+		}
+		return keys[key]
+	}
 	for i, dir := range []string{d.sessions, d.legacy} {
 		entries, err := wsstate.ReadDir(dir)
 		if err != nil {
@@ -186,6 +231,11 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 		}
 		for _, e := range entries {
 			key := e.Name()
+			if i == 0 && !e.IsDir() {
+				// Not a key source, but its stat (it may be a symlink to a
+				// key directory) still decides the identity.
+				splitOther[key] = true
+			}
 			if i == 0 && !e.IsDir() || i == 1 && e.IsDir() {
 				continue
 			}
@@ -197,8 +247,17 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 				}
 			}
 			if sessionKeyFilenamePattern.MatchString(key) {
-				keys[key] = true
+				if i == 0 {
+					listing(key).split = true
+				} else {
+					listing(key).legacy = e
+				}
 			}
+		}
+	}
+	for key := range splitOther {
+		if l := keys[key]; l != nil {
+			l.split = true
 		}
 	}
 	// Keep only currently discoverable, validated identities. Corrupt records
@@ -208,8 +267,8 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 	n.known = map[string]nudgeKeyIdentity{}
 	out := map[nudgeTarget]time.Time{}
 	associations := map[string]int{}
-	for key := range keys {
-		r, stamp, ok := n.discoverRecord(d, key, prior[key])
+	for key, listed := range keys {
+		r, stamp, ok := n.discoverRecord(d, key, prior[key], listed)
 		if !ok {
 			continue
 		}
@@ -252,7 +311,7 @@ func nudgeSuppressCollisions(out map[nudgeTarget]time.Time, associations map[str
 // discoverTarget checks only a poked identity and board. Collision checks use
 // the in-memory discovery evidence, never an enumeration of unrelated keys.
 func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) (os.FileInfo, bool) {
-	r, stamp, ok := n.discoverRecord(n.dirs(), t.key, n.identities[t.key])
+	r, stamp, ok := n.discoverRecord(n.dirs(), t.key, n.identities[t.key], nil)
 	if !ok {
 		delete(n.identities, t.key)
 		delete(n.known, t.key)
