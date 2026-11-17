@@ -178,8 +178,8 @@ Markdown up to the closing tag.
   `exec:<label>` (1–32 ASCII letters, digits, dots, underscores or hyphens).
   Each declaration replaces the whole list; omitting `on` or writing `on=""`
   clears it. Duplicates are dropped; invalid targets refuse the batch.
-  Leaving waiting or closing clears the list. If an older daemon refuses
-  `on` as an unknown attribute, retry the batch without `on`.
+  Leaving waiting or closing clears the list. If `on` is refused, retry
+  without it.
   Topic chips resolve when the target closes (reopening re-blocks); ticket
   chips resolve at done or dropped in this worktree, with missing tickets
   shown as unknown. `owner` resolves when the topic has no open policy or
@@ -277,9 +277,8 @@ Markdown up to the closing tag.
   title, class, or options, is not a re-ask; a title fix on an item the
   patch leaves settled stamps nothing.
 - `wb:close` requires an existing topic. To add a closing line, write a
-  `wb:log` before `<wb:close/>` in the same batch. If an older daemon refuses
-  `<wb:close/>` because `result` is missing, resend only the refused
-  `wb:close` with `result="<one sentence>"`. Closing withdraws every
+  `wb:log` before `<wb:close/>` in the same batch. If `<wb:close/>` is
+  refused, retry it as `<wb:close result="<one sentence>"/>`. Closing withdraws every
   item still `open`; an `assumed` item stays assumed. Put a batch's answers
   before its `wb:close`, since an answer after the close finds the item withdrawn. Adding an item
   or appending a panel or agent line reopens a closed topic without restoring withdrawn items. Server events alone do
