@@ -565,7 +565,9 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       const running = result.status ? false : isApplying(attempt.helper);
       result = readJSON(resultFile);
       const active = !result.status && (running === true || running === null && now() - attempt.startedAt < 180000);
-      if (active && attempt.target) return deferLaunch(attempt);
+      // Legacy attempts have no target, so do not defer this install or
+      // discard a stage that their still-running helper may be using.
+      if (active) return attempt.target ? deferLaunch(attempt) : false;
       if (result.status === 'success' && attempt.target && !attempt.deferred && isNewer(attempt.version, version)) {
         // Persist before launching the continuation, so an older copy cannot loop.
         writeState({ applyAttempt: { ...attempt, deferred: true } });

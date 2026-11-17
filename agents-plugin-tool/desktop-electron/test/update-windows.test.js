@@ -253,6 +253,22 @@ test('unknown helper ownership gets a bounded grace period before an abandoned a
   } finally { f.cleanup(); }
 });
 
+test('a live legacy targetless attempt leaves its stage and state untouched', () => {
+  for (const running of [true, null]) {
+    const f = fixture();
+    try {
+      const attempt = { version: '0.51.0', startedAt: 1000, helper: { pid: 42, created: '12345' } };
+      const stateFile = path.join(f.userData, 'update-state.json');
+      fs.writeFileSync(stateFile, JSON.stringify({ applyAttempt: attempt }));
+      assert.equal(f.make({ now: () => 2000, isApplying: () => running }).applyOnLaunch(), false);
+      assert.deepEqual(JSON.parse(fs.readFileSync(stateFile)).applyAttempt, attempt);
+      assert.equal(fs.existsSync(f.stage), true);
+      assert.deepEqual(f.detached, []);
+      assert.deepEqual(f.sent, []);
+    } finally { f.cleanup(); }
+  }
+});
+
 test('helper liveness validates PID and creation identity without signalling any process', () => {
   const helper = { pid: 42, created: '12345' };
   let called = false;
@@ -307,6 +323,41 @@ test('Windows helper swaps and rolls back marker-only folders without launching 
       assert.equal(failed.status, 1, failed.stderr || failed.error?.message);
       assert.match(JSON.parse(fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '')).message, /restored the previous app/);
       assert.equal(fs.readFileSync(path.join(f.install, 'marker'), 'utf8'), 'new');
+    } finally { f.cleanup(); }
+  });
+
+test('Windows bootstrap runs the marker-only reopen continuation',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = fixture();
+    try {
+      const script = path.join(f.userData, 'reopen.ps1');
+      const logFile = path.join(f.userData, 'reopen.log');
+      const marker = 'simulated reopen';
+      const original = u.helperScript('win32', true);
+      const safe = original
+        .replace('Start-Process -FilePath $exe -ArgumentList $argLine', `Add-Content -LiteralPath $Log -Value '${marker} args'`)
+        .replace('Start-Process -FilePath $exe', `Add-Content -LiteralPath $Log -Value '${marker} no args'`);
+      assert.notEqual(safe, original);
+      assert.doesNotMatch(safe, /Start-Process/);
+      fs.writeFileSync(script, safe);
+      const [command, args] = u.helperCommand('win32', script, {
+        pid: 2147483647, target: f.install, staging: f.staging, reopen: true,
+        helper: { pid: 2147483647, created: '0' }, logFile,
+        resultFile: path.join(f.userData, 'result.json'), args: ['--test argument'],
+      });
+      const helper = u.spawnDetached(command, args, logFile, 'win32');
+      let running = true;
+      for (let i = 0; i < 100 && running !== false; i++) {
+        running = u.windowsHelperRunning(helper);
+        if (running !== false) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.equal(running, false, 'marker-only continuation exited');
+      const log = fs.readFileSync(logFile, 'utf8');
+      assert.match(log, /reopen helper started/);
+      assert.match(log, /simulated reopen args/);
+      assert.match(log, /reopened /);
+      assert.equal(fs.readFileSync(path.join(f.install, 'marker'), 'utf8'), 'old');
+      assert.equal(fs.existsSync(f.stage), true);
     } finally { f.cleanup(); }
   });
 
