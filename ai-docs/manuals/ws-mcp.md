@@ -723,9 +723,11 @@ Pi steer at the next tool boundary; with no turn running, a new turn at once;
 a closed child resumes on the same session file, keeping its id, cwd, model,
 effort, and label; a missing session file is refused), `pi.list` (the caller's
 own children), `pi.stop` (ends the process and closes its descendants; the
-record stays resumable by `pi.send`), `pi.transcript`, and
+record stays resumable by `pi.send`; a child already closed answers as
+stopped), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
-send). The daemon mails each settled turn to the parent lead's reply-id
+send; on a closed child, its last reported turn when that turn took every
+message sent). The daemon mails each settled turn to the parent lead's reply-id
 queue with the display-only label `pi:<subagent id>` (no reply address) and
 wakes the mailbox waits; the first body line directs replies through `pi.send`,
 not `mailbox.send`. For other senderless system mail without a label,
@@ -831,7 +833,17 @@ owns the whole tree:
   settles before the restart sends the input the record kept for the next
   turn, so that next turn stays open.
 - **Close.** Closing a conversation closes its open descendants first,
-  deepest first. `pi.send` can reopen a closed Pi child alone on its
+  deepest first; closing a hosted lead also closes the Pi children it
+  spawned. A Pi child closes on its own once a turn settled done, its
+  report reached its parent, and nothing waits (no turn, background task,
+  or open descendant; no held, queued, or claimed input; no held turn):
+  checked after each step of its loop, including report delivery and the
+  idle timeout. A failed or interrupted child stays open, since a closed
+  row shows no failure. A daemon start closes an open record that already meets this
+  (unless a holder may still run its process), or whose conversation parent
+  is closed or gone, instead of serving it. A closed Pi child's directory
+  ages out after the registry retention, counted from its last row write.
+  `pi.send` can reopen a closed Pi child alone on its
   existing session file; descendants stay closed until sent to themselves. A process stop (the stop route, an idle stop, a settings
   change) does not cascade, and a child's report resumes the stopped
   parent. A report to a closed parent stays in the child's record.

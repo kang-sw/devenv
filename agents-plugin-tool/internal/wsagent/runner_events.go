@@ -745,11 +745,71 @@ func (c *conv) stopIdle() {
 // close ends the conversation's current lifetime. It marks it closed
 // first, under mu, so a Send either wrote before (and its message is
 // dropped below with the other held ones) or is refused.
-func (c *conv) close() {
-	c.update(func(rec *Record) {
-		rec.ClosedAt = c.r.opts.Now().UTC().Format(time.RFC3339)
-		c.closed = true
-	})
+func (c *conv) close() { c.closeIf(nil) }
+
+// closeIf is close when done (nil for always) holds in the same mu hold
+// that marks the conversation closed, and reports whether it closed. It
+// runs in the loop.
+func (c *conv) closeIf(done func() bool) bool {
+	c.wmu.Lock()
+	c.mu.Lock()
+	if done != nil && !done() {
+		c.mu.Unlock()
+		c.wmu.Unlock()
+		return false
+	}
+	c.rec.ClosedAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+	c.closed = true
+	rec := c.rec
+	c.mu.Unlock()
+	if err := writeRecord(c.dir, rec); err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: record write: %v\n", rec.ReplyID, err)
+	}
+	c.wmu.Unlock()
+	c.finishClose()
+	return true
+}
+
+// autoCloseDue reports whether a spawned Pi child has nothing left to do,
+// so it closes on its own: a turn of it settled done, no turn, replay,
+// background task, or descendant of it runs (idleNow, holdsReport), and
+// nothing waits for a next turn or for its parent (finished). Send reopens
+// it on its session file (resumePiChild). It runs in the loop.
+func (c *conv) autoCloseDue() bool {
+	if c.r.opts.keepFinished || c.closed || c.rec.Lead || c.rec.Parent == nil || c.rec.Backend != BackendPi || c.turn || c.wrapHold || c.holding {
+		return false
+	}
+	c.mu.Lock()
+	done := c.finished()
+	c.mu.Unlock()
+	return done && c.idleNow() && !c.holdsReport()
+}
+
+// finished reports that a turn of the conversation settled done and left
+// nothing behind: no turn open or held, no report its parent has not
+// taken, and no sent, held, queued, or claimed input. Under mu. A failed
+// or interrupted child stays open: a closed row shows no failure
+// (SpawnAgentEvent), and its parent may send it on.
+func (c *conv) finished() bool {
+	return c.settled.n > 0 && c.settled.Status == TurnDone && !c.rec.TurnOpen && c.rec.HeldTurn == nil && c.held == 0 &&
+		c.sends <= max(c.settled.mark, c.voided) &&
+		len(c.rec.PendingReports)+len(c.rec.Queued)+len(c.rec.Mail)+len(c.rec.Reports) == 0
+}
+
+// closeWhenDone has the runner close a finished Pi child (autoCloseDue)
+// off the loop: that close takes resumeMu and then runs in this loop
+// (act), so the loop never waits on it. The loop calls it after each step.
+func (c *conv) closeWhenDone() {
+	if c.autoClosing || !c.autoCloseDue() {
+		return
+	}
+	c.autoClosing = true
+	c.r.autoCloseLater(c.rec.ReplyID)
+}
+
+// finishClose is the rest of a close, once the conversation is marked
+// closed. It runs in the loop.
+func (c *conv) finishClose() {
 	c.stopProcess("")
 	if len(c.rec.Mail) > 0 || len(c.rec.Reports) > 0 {
 		c.update(func(rec *Record) { rec.Mail, rec.Reports = nil, nil })

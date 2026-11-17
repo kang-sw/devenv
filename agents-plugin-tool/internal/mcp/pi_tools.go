@@ -209,6 +209,13 @@ func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool stri
 	case "pi.stop":
 		st, err := s.pi.agents.CloseConversation(child)
 		if err != nil {
+			// A finished child closes on its own: a stop after that finds
+			// it as asked.
+			if cur, gerr := s.pi.agents.Get(child); gerr == nil && cur.Status == wsagent.StatusClosed {
+				st, err = cur, nil
+			}
+		}
+		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
 		if wantsJSON(args) {
