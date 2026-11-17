@@ -363,6 +363,46 @@ func TestClosingALeadClosesItsPiChildren(t *testing.T) {
 	}
 }
 
+// A lead close can finish its descendant snapshot while a ParentLead
+// spawn is still minting its key. Releasing that spawn only after the close
+// forces registration past the snapshot, without timing-dependent sleeps.
+func TestLeadCloseFencesConcurrentPiSpawn(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	lead := h.lead(BackendPi, LeadOptions{})
+	parent := ParentRef{Kind: ParentLead, ReplyID: lead.ID}
+	mint := h.opts.Keys.(*fakeKeys).gateMint(t, h.root)
+	type result struct {
+		st  State
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		st, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "small", Parent: &parent})
+		done <- result{st, err}
+	}()
+	mint.awaitEntered(t)
+	if _, err := h.runner.CloseConversation(lead.ID); err != nil {
+		t.Fatal(err)
+	}
+	mint.release()
+	select {
+	case got := <-done:
+		if got.err != errClosed {
+			t.Fatalf("spawn registered after lead close = %+v, %v; want errClosed", got.st, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("spawn did not finish after lead close")
+	}
+	for _, child := range h.runner.Children(parent) {
+		if child.Status != StatusClosed {
+			t.Fatalf("closed lead left a live Pi child: %+v", child)
+		}
+		if c := h.runner.conv(child.ID); c != nil {
+			t.Fatalf("closed lead left a child loop registered: %s", child.ID)
+		}
+	}
+}
+
 // A daemon start closes the Pi children an older daemon left open that
 // are finished or whose conversation parent is gone, and starts no loop
 // for them; any other restores as before.
