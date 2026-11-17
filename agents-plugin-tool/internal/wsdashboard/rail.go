@@ -2,8 +2,10 @@ package wsdashboard
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"reflect"
 	"strconv"
 	"sync"
@@ -75,13 +77,24 @@ func (d *Daemon) railBaseView(r pageReader) RailView {
 		seen[reg.ReplyID] = true
 		version := d.railInputVersion(s)
 		cached, have := d.railInputs.sessions[reg.ReplyID]
-		if !have || cached.version != version {
-			in := railInput{Snapshot: r.readSnapshot(reg.ReplyID), Repo: railRepoRoot(reg)}
+		// Explicit current-state queries (the hiring roster) retain their
+		// read-through contract; only presentation passes reuse these inputs.
+		if r.freshSnapshots || !have || cached.retry || cached.version != version {
+			if r.freshSnapshots {
+				r.snapshots.Invalidate(r.dir, reg.ReplyID)
+			}
+			snap, err := r.snapshots.snapshotResult(r.dir, reg.ReplyID)
+			retry := err != nil && !errors.Is(err, os.ErrNotExist)
+			if retry && have && !r.freshSnapshots {
+				snap = cached.input.Snapshot // retain last-good presentation
+			}
+			in := railInput{Snapshot: snap, Repo: railRepoRoot(reg)}
 			if in.Repo != "" {
 				in.Linked = worktreeMain(reg.Project) != ""
 			}
-			in.Message = d.railMsgs.last(reg.ReplyID, railRev(s.Rev, version.ring), wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
-			cached = cachedRailInput{version: version, input: in}
+			var messageOK bool
+			in.Message, messageOK = d.railMsgs.lastResult(reg.ReplyID, railRev(s.Rev, version.ring), wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
+			cached = cachedRailInput{version: version, input: in, retry: retry || !messageOK}
 			d.railInputs.sessions[reg.ReplyID] = cached
 			if d.railInputs.onRead != nil {
 				d.railInputs.onRead(reg.ReplyID)
@@ -132,6 +145,18 @@ type railInputCache struct {
 type cachedRailInput struct {
 	version railInputVersion
 	input   railInput
+	retry   bool
+}
+
+func (c *railInputCache) retryPending() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, in := range c.sessions {
+		if in.retry {
+			return true
+		}
+	}
+	return false
 }
 
 type railInputVersion struct {
@@ -199,6 +224,9 @@ func (d *Daemon) railSource(pages pageReader, lang, theme string) pageSource {
 		// layout's generation joins it, so a layout change (another
 		// process's write among them) is never skipped as unchanged.
 		stamp: func(refreshInputs) (string, bool) {
+			if d.railInputs.retryPending() {
+				return "", false // a refresh must retry failed inputs, even at the same revision
+			}
 			stamp, ok := pages.indexStamp()
 			_, gen := d.layout.current()
 			return stamp + "/" + strconv.FormatUint(gen, 10), ok

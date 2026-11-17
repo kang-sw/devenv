@@ -26,6 +26,7 @@ type railMessages struct {
 	sessions map[string]railMessageEntry
 	// reads counts the ring entry files read (a test seam).
 	reads int
+	list  func(string) ([]string, error) // test-only listing seam; nil uses RingNames
 }
 
 type railMessageEntry struct {
@@ -43,6 +44,13 @@ func newRailMessages() *railMessages {
 // and card entries are skipped; a reply still streaming is not in the ring
 // yet, so it shows once finished. A nil cache reads each time.
 func (c *railMessages) last(replyID string, rev uint64, dir string) railMessage {
+	msg, _ := c.lastResult(replyID, rev, dir)
+	return msg
+}
+
+// lastResult reports whether the read succeeded, so incremental callers keep
+// a failed listing or entry read eligible for a later pass without a new wake.
+func (c *railMessages) lastResult(replyID string, rev uint64, dir string) (railMessage, bool) {
 	var known railMessageEntry
 	var have bool
 	if c != nil {
@@ -50,15 +58,16 @@ func (c *railMessages) last(replyID string, rev uint64, dir string) railMessage 
 		known, have = c.sessions[replyID]
 		c.mu.Unlock()
 		if have && rev != 0 && known.rev == rev {
-			return known.msg
+			return known.msg, true
 		}
 	}
-	names, err := wslive.RingNames(dir)
+	list := wslive.RingNames
+	if c != nil && c.list != nil {
+		list = c.list
+	}
+	names, err := list(dir)
 	if err != nil {
-		if have {
-			return known.msg
-		}
-		return railMessage{}
+		return known.msg, false
 	}
 	newest := ""
 	if len(names) > 0 {
@@ -66,11 +75,16 @@ func (c *railMessages) last(replyID string, rev uint64, dir string) railMessage 
 	}
 	msg := known.msg
 	read := 0
+	complete := true
 	if !have || newest != known.newest {
 		for i := len(names) - 1; i >= 0 && len(names)-i <= railMessageScan; i-- {
 			read++
 			rec, ok := wslive.ReadRingEntry(dir, names[i])
-			if !ok || (rec.Kind != wslive.RingUser && rec.Kind != wslive.RingReply) {
+			if !ok {
+				complete = false
+				continue
+			}
+			if rec.Kind != wslive.RingUser && rec.Kind != wslive.RingReply {
 				continue
 			}
 			text := rec.Text
@@ -84,10 +98,12 @@ func (c *railMessages) last(replyID string, rev uint64, dir string) railMessage 
 	if c != nil {
 		c.mu.Lock()
 		c.reads += read
-		c.sessions[replyID] = railMessageEntry{rev: rev, newest: newest, msg: msg}
+		if complete {
+			c.sessions[replyID] = railMessageEntry{rev: rev, newest: newest, msg: msg}
+		}
 		c.mu.Unlock()
 	}
-	return msg
+	return msg, complete
 }
 
 // drop forgets a session.
