@@ -13,8 +13,10 @@
   // forces that part's layout and leaves layout dirty for the next read: on
   // a session switch that was ~120 full layouts (~730 ms) before the next
   // frame could load. So the first pass reads only panels whose parts reach
-  // the view. Such a panel starting above the view's bottom beats every
-  // panel in a part outside it; only when none does are all panels read.
+  // the view (and maximized panels, fixed outside their part's box). Such a
+  // panel starting above the view's bottom beats every panel in a part
+  // outside it. Otherwise only parts below the view can hold a better one:
+  // they are read by top, until one starts below the best panel found.
   function sessionBoardAnchors() {
     var w = window.wbHistory, records = [], seen = new Set();
     if (!w || !w.keep) return records;
@@ -24,24 +26,35 @@
         var h = w.keep(box.firstElementChild || box, { capture: false }), s = h.scroller;
         if (seen.has(s)) return;
         seen.add(s);
-        var view = h.viewport(), line = view.top + 1, reach = new Map();
-        function reaches(n) {
+        var view = h.viewport(), line = view.top + 1, sides = new Map(), below = [];
+        // side(n): 0 when every part around n reaches the view, else -1 or 1
+        // as the outermost part around n that does not reach it lies above
+        // or below it; no part inside that one is read.
+        function side(n) {
           var part = n.parentElement && n.parentElement.closest(BOARD_CV_PARTS);
-          if (!part || !box.contains(part)) return true;
-          if (!reach.has(part)) {
-            var r = reaches(part) && part.getBoundingClientRect();
-            reach.set(part, !!r && r.bottom > line && r.top < view.bottom);
+          if (!part || !box.contains(part)) return 0;
+          if (!sides.has(part)) {
+            var out = side(part), r = out ? null : part.getBoundingClientRect();
+            if (r && r.top >= view.bottom) below.push({ part: part, top: r.top });
+            sides.set(part, out || (r.bottom <= line ? -1 : r.top >= view.bottom ? 1 : 0));
           }
-          return reach.get(part);
+          return sides.get(part);
         }
-        function first(admit) {
-          return boardLivePanels(box, admit).filter(function (n) { return boardScroller(n) === s; })
+        function first(root, admit) {
+          return boardLivePanels(root, admit).filter(function (n) { return boardScroller(n) === s; })
             .map(function (n) { return { node: n, rect: n.getBoundingClientRect() }; })
             .filter(function (p) { return p.rect.height > 0 && p.rect.bottom > line; })
             .sort(function (a, b) { return a.rect.top - b.rect.top; })[0];
         }
-        var p = first(reaches);
-        if (!p || p.rect.top >= view.bottom) p = first();
+        var p = first(box, function (n) { return n.hasAttribute("data-max") || !side(n); });
+        if (!p || p.rect.top >= view.bottom) {
+          below.sort(function (a, b) { return a.top - b.top; }).some(function (b) {
+            if (p && b.top >= p.rect.top) return true;
+            var c = first(b.part);
+            if (c && (!p || c.rect.top < p.rect.top)) p = c;
+            return false;
+          });
+        }
         var topic = p && p.node.closest(".topic");
         records.push({ scroller: s === doc.scrollingElement ? "document" : s.id, top: s.scrollTop,
           topic: topic && topicKey(topic), key: p && boardPanelKey(p.node), offset: p ? p.rect.top - line : 0 });
