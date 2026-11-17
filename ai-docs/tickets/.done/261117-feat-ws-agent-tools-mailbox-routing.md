@@ -18,6 +18,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 10051ec5d388ebe3
 sage-review-completeness-reviewed: 10051ec5d388ebe3
+completed: 2026-11-18
 ---
 
 # ws/agent.* tools with unified mailbox routing
