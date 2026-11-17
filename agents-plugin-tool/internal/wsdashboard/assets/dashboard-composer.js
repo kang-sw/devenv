@@ -1307,8 +1307,10 @@
   // composer, in order, ahead of what was typed since; none showed as sent.
   var outbox = [], outboxPosting = false, outboxRows = null, OUTBOX_LINGER = 30000, OUTBOX_WAIT = 30000;
   function outboxUnsent() { return outbox.some(function (m) { return !m.acked; }); }
+  // A batch (sends the session read in one turn) carries its key on its
+  // .user-batch wrapper; the bubbles inside it carry none.
   function lastUserEntry() {
-    var us = q("#r-entries .msg.user[data-entry]");
+    var us = q("#r-entries .msg.user[data-entry], #r-entries .user-batch[data-entry]");
     return us.length ? us[us.length - 1].getAttribute("data-entry") : "";
   }
   // outboxRow is an unanswered send's place in the composer: its text on
