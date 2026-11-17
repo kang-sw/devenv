@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5999eed10b13ab32
 sage-review-completeness-reviewed: 5999eed10b13ab32
+completed: 2026-11-18
 ---
 
 # Inline notes on selected-text mentions
@@ -118,3 +119,8 @@ browser acceptance is claimed.
 - VERIFIED: ticket guardrails passed with a sage-freshness advisory. Accepted without rerunning design/completeness because this unit records the owner's acceptance boundary and historical evidence only; the source contract, frozen phase plan and review digests are unchanged. `git diff --check` passed; the product-source diff against the acceptance pin is empty.
 - VERIFIED: MAIN11:51 load throttle arrived after the heavy command had completed. No heavy command remained active; the sole read-only reviewer received the throttle. No follow-on heavy job or daemon action is authorized without an explicit owner slot grant.
 - INFERRED: Go plus clean lite satisfies Decision 6's merge-first return gate, not complete browser acceptance or live delivery. The original expected-five/actual-six assertion and failure are preserved, with no diagnosis/retry. Root lead still owns serialized integration after EXEC2's explicit 649 merged hash; no merge, release or runtime swap was performed. The ticket stays open with browser/session/draft/send acceptance gaps recorded above.
+
+
+## Resolution (2026-11-18)
+
+Merged under the owner's merge-first acceptance (670, 675 = a) in ec2320552. The recorded browser-acceptance gap was later closed: 289c02511 ran TestSelectionNoteBrowser once at the 1440/420 fixture widths and it passed.
