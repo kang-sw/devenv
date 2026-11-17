@@ -271,6 +271,39 @@ func TestHostedUsageWakesDoNotRereadClosedSnapshots(t *testing.T) {
 	}
 }
 
+// Pi sleep/deleted are dashboard presentation labels, not new reducer
+// statuses. Pin the projection consumed by both intake and hosted leads.
+func TestSpawnAgentEventLegacyStatusContract(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		st   State
+		want string
+	}{
+		{"closed", State{Status: StatusClosed}, wslive.StatusDone},
+		{"closed stale failure", State{Status: StatusClosed, Error: "old failure", Held: 1}, wslive.StatusDone},
+		{"idle", State{Status: StatusIdle}, wslive.StatusDone},
+		{"held", State{Status: StatusIdle, Held: 1}, wslive.StatusRunning},
+		{"running", State{Status: StatusRunning}, wslive.StatusRunning},
+		{"failed", State{Status: StatusIdle, Error: "failure"}, wslive.StatusFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.st.ID = "child"
+			ev := SpawnAgentEvent(tc.st, "child-key")
+			if ev.Status != tc.want || ev.AgentKind != wslive.AgentKindPi {
+				t.Fatalf("projection = %+v, want legacy status %q", ev, tc.want)
+			}
+			feed := wslive.NewState("lead-key")
+			if _, err := feed.Apply(ev, 100); err != nil {
+				t.Fatal(err)
+			}
+			rows := feed.Snapshot(100).Agents
+			if len(rows) != 1 || rows[0].Status != tc.want || rows[0].AgentKind != wslive.AgentKindPi {
+				t.Fatalf("snapshot = %+v", rows)
+			}
+		})
+	}
+}
+
 func strPtr(s string) *string { return &s }
 
 func TestSpawnLeadRejectsUnknownAndCyclicOwnership(t *testing.T) {

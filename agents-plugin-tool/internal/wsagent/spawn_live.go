@@ -8,7 +8,9 @@ import (
 )
 
 // SpawnAgentEvent projects a daemon conversation onto the ordinary subagent
-// feed. The prefix separates daemon ids from the harness's own ids.
+// feed. The prefix separates daemon ids from the harness's own ids. Keep
+// legacy reducer statuses here; the dashboard derives Pi sleep/deleted labels
+// at render time so older snapshot writers can still retain these rows.
 func SpawnAgentEvent(st State, key string) wslive.Event {
 	status := wslive.StatusDone
 	switch {

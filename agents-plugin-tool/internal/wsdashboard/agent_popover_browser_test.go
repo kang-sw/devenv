@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -67,6 +68,23 @@ func TestAgentBadgePopoverBrowser(t *testing.T) {
 			agent("a6", "worker-test", wslive.StatusFailed, "sonnet-5.5", 30000, batches(2, "Bash"), 0, 2, 200000),
 			child,
 		}}
+	// Keep the ordinary done class for old page CSS, but show Pi revival
+	// labels in the row and hover. Native review-a must still say done.
+	for i, id := range map[int]string{3: "sleepchild", 4: "deletedchild"} {
+		snap.Agents[i].AgentKind, snap.Agents[i].ReplyID = wslive.AgentKindPi, id
+		dir := SessionDir(f.dir, id)
+		if err := os.MkdirAll(filepath.Join(dir, "pi"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, AgentRecordFileName), []byte(`{"backend":"pi","closed_at":"2026-11-18"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if id == "sleepchild" {
+			if err := os.WriteFile(filepath.Join(dir, "pi", "session.jsonl"), []byte("session\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	f.d.snapshots.SetLive(f.dir, "livesession", snap)
 	f.d.broker.wake(liveDep("livesession"))
 	// The zero-running fixture keeps a working lead and one ended agent;

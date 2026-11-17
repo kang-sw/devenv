@@ -60,6 +60,16 @@ const fits = (s, what) => {
         outside: [...document.querySelectorAll('details[data-key^="agent-"]')].filter(d => !d.closest('#agpop')).length,
         peers: document.querySelectorAll('#agpop .peer').length }), rows);
       assert.deepEqual(loss, { missing: [], outside: 0, peers: rows.peers }, 'no row lost');
+      const statuses = await frame.evaluate(() => ['a3', 'a4', 'a5'].map(id => {
+        const row = document.querySelector(`#agpop details[data-key="agent-${id}"]`).closest('.agent');
+        return { legacyClass: row.classList.contains('done'), label: row.querySelector('.astatus')?.textContent || '',
+          hover: row.querySelector('template.shp-source').content.querySelector('.shp-hd .chip').textContent };
+      }));
+      assert.deepEqual(statuses, [
+        { legacyClass: true, label: '', hover: '완료' },
+        { legacyClass: true, label: '휴면', hover: '휴면' },
+        { legacyClass: true, label: '삭제됨', hover: '삭제됨' }
+      ], 'localized Pi sleep/deleted labels leave native done and old CSS intact');
       // Order: lead, running, ended, background, peers.
       const order = await frame.evaluate(() => {
         const sel = ['details[data-key="agent-lead"]', '.tgroup.run', '.tgroup.ended', '.tgroup.bg', '.pgroup'];
