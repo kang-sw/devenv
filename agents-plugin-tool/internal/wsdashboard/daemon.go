@@ -255,8 +255,9 @@ type Daemon struct {
 	// rail reads the session rail's worktree lists while a page shows the
 	// rail (railworktrees.go); railMsgs holds each session's last message
 	// for it (railmessages.go).
-	rail     *railLister
-	railMsgs *railMessages
+	rail       *railLister
+	railMsgs   *railMessages
+	railInputs railInputCache
 	// workspaces holds the stored workspaces, nil without them
 	// (workspaces.go); pathHost is the machine whose rules read a pasted
 	// folder path (workspacepath.go).
@@ -624,7 +625,8 @@ func (d *Daemon) sessionChanged(replyID string) {
 // any, wakes it again when it lands.
 func (d *Daemon) agentChanged(replyID, _ string) {
 	if d.index != nil {
-		d.index.Reread(replyID)
+		// The runner changes live stores, not ws-mcp's record/board/mailbox.
+		d.index.RereadLive(replyID)
 	}
 	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)

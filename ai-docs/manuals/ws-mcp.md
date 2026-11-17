@@ -280,12 +280,14 @@ moves the copy's `updatedAt`. A session whose directory the daemon does not
 serve stays on the file-and-nudge path. The daemon runs full registry
 safety discovery every five minutes, with targeted 30-second legacy
 liveness/recovery checks between scans. An ended session already applied
-is not re-read unless a nudge, resume, or retry requires it. A re-read
-compares a fingerprint taken from metadata (the
-session record, live-store and mailbox-history entry names, the ticket
-directories' file names, sizes, and modification times, the unread count,
-the contacts, the listening marker) and builds no panel; the board renders
-only when a page reads the changed session. Ring, drained-inbox, and
+is not re-read unless a nudge, resume, or retry requires it. Scheduled per-session re-reads are coalesced to at most one per second,
+with a trailing read. A runner write refreshes only the live-store fingerprint
+(snapshot and live directory entry names), retaining the last full read's
+record, board, tickets, mailbox history and contacts. A nudge, periodic safety
+refresh or board poke reads both parts. Known inbox-only changes on boardless
+sessions list only the inbox stores; unknown runner writes still list every
+live store. A re-read builds no panel; the board renders only when a page
+reads the changed session. Ring, drained-inbox, and
 mailbox-history entry files are parsed once per daemon and kept by name for
 the window the page shows. The small files every read and render re-reads
 (session snapshots, the session record's part files, the reply registry,
@@ -406,8 +408,15 @@ folder) and worktree. It is one shared render (region `rail`, keyed by
 language and theme, no reply-id) that each session stream sends beside its
 page with a broker subscription of its own, so a session's change renders
 the rail at most once for all open pages and no other session's page;
-unchanged visible rail inputs reuse the render
-(`internal/wsdashboard/rail.go:104-130`). Streams opt into row deltas
+unchanged visible rail inputs reuse the render. The daemon retains each
+session's snapshot, repository and last message in memory, refreshing only
+sessions whose index revision or named session/snapshot/ring generation moved.
+Explicit current-state queries such as the hiring roster still read through.
+Clock-derived liveness is recomputed from those retained inputs. A transient
+snapshot or ring read failure retains last-good presentation and keeps only
+that session eligible for retry on refresh, even without another wake.
+Rail passes are capped at one per second per shared language/theme view, with
+a trailing pass so the last wake is not lost (`internal/wsdashboard/rail.go`). Streams opt into row deltas
 with `railrows=1`: the first send on each connection is a full `region`
 (`name: "rail"`), even when `h` holds the current hash. Later `rail-rows`
 SSE events carry `{hash, order, rows: [{key, hash, html}]}`: the full row
