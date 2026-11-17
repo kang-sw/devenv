@@ -293,7 +293,7 @@
   function paletteRows(update) {
     // The board caps its initially rendered closed topics. Reuse its existing
     // show-more path so older hits are searchable and already mounted to jump to.
-    if (update) paletteClosed(update);
+    if (update) { paletteClosed(update); paletteHistory(update); }
     var rows = [];
     q("#rail .rs[data-rid]", framed ? shParentDoc() : doc).forEach(function (el) {
       var label = el.querySelector(".rid"), link = el.querySelector("a.rl");
@@ -372,12 +372,20 @@
     }
     capsuleTopicLoad.then(done);
   }
+  // Lazy board history leaves older entries out of the page; fetch them so
+  // the entry search stays complete.
+  function paletteHistory(update) {
+    var w = window.wbHistory;
+    if (!w || !w.hydrateAll) return;
+    w.hydrateAll(doc).then(function (n) { if (n) update(paletteRows()); });
+  }
   function paletteClosed(update) {
     var more = boardQ("button.closed-more[data-closed-next]")[0];
     if (!more || more.disabled) return;
     loadClosed(more).then(function (loaded) {
       if (!loaded) return;
       update(paletteRows());
+      paletteHistory(update);
       paletteClosed(update);
     });
   }

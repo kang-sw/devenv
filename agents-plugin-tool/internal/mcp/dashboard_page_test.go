@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -157,11 +158,11 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 // TestDashboardServedPageRendersTopicBodyInAFrame pins the served board's
 // migrated topic body: one sandboxed panel-frame placeholder per body (opaque origin, no
 // allow-same-origin, since the daemon's routes accept messages and steer
-// sessions), its text and inline HTML in the frame's document, a local image
-// inlined as a data: URL because the frame sends no cookie, an absolute image
-// outside the root left as path text marked for the host's relay (never its
-// bytes inlined) with the frame listing that image route URL, and no Now
-// slot. The pages written to disk carry no relay.
+// sessions), its text and inline HTML in the frame's document, every file
+// image left as path text marked for the host's relay (never its bytes
+// inlined, since the frame sends no cookie): a local one on the image route
+// and an absolute one outside the root alike, with the frame listing those
+// image route URLs, and no Now slot. The pages written to disk carry no relay.
 func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	now := time.Now()
@@ -194,7 +195,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 		docs[m[4]], entries[m[4]] = stdhtml.UnescapeString(m[7]), m[5]
 	}
 	rollout := docs["Rollout"]
-	for _, want := range []string{"본문 body-marker", "<details><summary>more</summary>raw</details>", `<img src="data:image/png;base64,`} {
+	for _, want := range []string{"본문 body-marker", "<details><summary>more</summary>raw</details>"} {
 		if !strings.Contains(rollout, want) {
 			t.Errorf("the Rollout frame document lacks %q:\n%.800s", want, rollout)
 		}
@@ -202,14 +203,22 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(rollout, `src="/s/`) {
 		t.Errorf("a frame image must be inlined or relayed, never loaded through the cookie-gated route")
 	}
+	// A local image carries its version, an outside one none.
+	info, err := os.Stat(filepath.Join(f.root, "shots", "a.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := "/s/" + reg.ReplyID + "/image?path=" + url.QueryEscape("shots/a.png") + "&v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "." + strconv.FormatInt(info.Size(), 36)
 	relay := "/s/" + reg.ReplyID + "/image?path=" + url.QueryEscape(outside)
-	if want := `<span class="img-text" data-relay="` + relay + `">away `; !strings.Contains(rollout, want) {
-		t.Errorf("the Rollout frame document lacks the relay marker %q:\n%.1200s", want, rollout)
+	for _, want := range []string{`<span class="img-text" data-relay="` + stdhtml.EscapeString(local) + `">shot `, `<span class="img-text" data-relay="` + relay + `">away `} {
+		if !strings.Contains(rollout, want) {
+			t.Errorf("the Rollout frame document lacks the relay marker %q:\n%.1200s", want, rollout)
+		}
 	}
-	if strings.Contains(rollout, base64.StdEncoding.EncodeToString([]byte("outside-bytes"))) || strings.Count(rollout, "data:image/png") != 1 {
-		t.Errorf("an image outside the root must never be inlined into the frame")
+	if strings.Contains(rollout, base64.StdEncoding.EncodeToString([]byte("outside-bytes"))) || strings.Contains(rollout, "data:image/") {
+		t.Errorf("a file image must never be inlined into the frame")
 	}
-	if want := `data-topic="Rollout" data-entry="` + entries["Rollout"] + `" data-relay="` + stdhtml.EscapeString(relay) + `" data-sandbox=`; !strings.Contains(html, want) {
+	if want := `data-topic="Rollout" data-entry="` + entries["Rollout"] + `" data-relay="` + stdhtml.EscapeString(local+" "+relay) + `" data-sandbox=`; !strings.Contains(html, want) {
 		t.Errorf("the Rollout frame lacks its relay list %q", want)
 	}
 	if strings.Contains(html, `data-topic="Body only" data-entry="`+entries["Body only"]+`" data-relay`) {
@@ -787,8 +796,8 @@ func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 	page := readPageOK(t, src, reg)
 	board := string(page.Board.Board)
 	live := strings.SplitN(board, `<template data-history-topic=`, 2)[0]
-	if !strings.Contains(live, `<button class="btn closed-more" data-closed-next="30"`) || strings.Contains(live, `title="c2"`) || !strings.Contains(board, `<template data-history-topic="c2">`) {
-		t.Errorf("the served board must cap live topics and retain inert navigation targets")
+	if !strings.Contains(live, `<button class="btn closed-more" data-closed-next="30"`) || strings.Contains(live, `title="c2"`) || !strings.Contains(board, `<template data-history-topic="c2" data-lazy></template>`) {
+		t.Errorf("the served board must cap live topics and retain lazy navigation targets")
 	}
 	html, ok := src.ReadClosedTopics(reg, "", 30, 30)
 	if !ok {

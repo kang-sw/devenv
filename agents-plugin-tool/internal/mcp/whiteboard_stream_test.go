@@ -176,10 +176,14 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 	restarted := startWhiteboardDaemonForTest(t, dir, newSource())
 	reconnected := openWhiteboardStreamForTest(t, restarted, f.replyID())
 	region := waitWhiteboardRegionForTest(t, reconnected, "board", "patched-item-marker")
-	for _, marker := range []string{"agent-line-marker", "panel-recap-marker", `data-panel="p1"`} {
+	for _, marker := range []string{"agent-line-marker", "panel-recap-marker"} {
 		if !strings.Contains(region.HTML, marker) {
 			t.Fatalf("restart lost committed stream marker %q", marker)
 		}
+	}
+	// The first batch's content panel is in the topic's lazy history.
+	if frags, ok := newSource().ReadTopicHistory(reg, "", []string{"stream"}, ""); !ok || len(frags) != 1 || !strings.Contains(string(frags[0].HTML), `data-panel="p1"`) {
+		t.Fatal(`restart lost committed stream marker data-panel="p1" from the topic's history`)
 	}
 	loaded, err := newSessionStore().readWhiteboard(f.key)
 	if err != nil {
@@ -199,7 +203,13 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
-	served := string(readPageOK(t, dashboardPageSource(t, nil), reg).Board.Board)
+	servedSrc := dashboardPageSource(t, nil)
+	served := string(readPageOK(t, servedSrc, reg).Board.Board)
+	// An earlier panel version's frame comes with the topic's lazy history.
+	history, _ := servedSrc.ReadTopicHistory(reg, "", []string{"versions"}, "")
+	if len(history) != 1 {
+		t.Fatalf("topic history = %+v", history)
+	}
 	file := f.fullPage(t)
 	// Panel-post system events remain durable, but the panel versions now
 	// represent them in the rendered stream. Pin the fixture independently
@@ -247,7 +257,7 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 					t.Errorf("%s omitted immutable panel-version anchor %s", name, entry.ID)
 				}
 				frame := `data-doc="entry:` + entry.ID + `" data-doc-key="entry:` + entry.ID + `" data-topic="versions" data-entry="` + entry.ID + `"`
-				if name == "dashboard" && !strings.Contains(html, frame) {
+				if name == "dashboard" && !strings.Contains(string(history[0].HTML), frame) {
 					t.Errorf("dashboard omitted distinct panel frame identity %s", frame)
 				}
 			}

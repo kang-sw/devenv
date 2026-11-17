@@ -3,6 +3,7 @@ package wswhiteboard
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsxmlcmd"
@@ -237,4 +238,25 @@ func (s *State) pruneLabels() {
 	if len(s.Labels) == 0 {
 		s.Labels = nil
 	}
+}
+
+// TargetTopic names the topic that holds a page target: an entry (eN), a
+// panel (pN), or an item (item-N); false when none does.
+func (s *State) TargetTopic(target string) (string, bool) {
+	if n, ok := strings.CutPrefix(target, "item-"); ok {
+		for _, item := range s.Items {
+			if strconv.Itoa(item.ID) == n {
+				return item.Topic, true
+			}
+		}
+		return "", false
+	}
+	for _, doc := range s.Topics {
+		for _, e := range doc.Entries {
+			if e.ID == target || e.Kind == EntryPanel && e.PanelID == target {
+				return doc.Name, true
+			}
+		}
+	}
+	return "", false
 }

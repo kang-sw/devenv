@@ -15,6 +15,15 @@
       return name + "." + (p ? p.hash : el.getAttribute("data-h"));
     }).concat(mode !== "index" ? ["mode." + modeHash] : []).join(",");
   }
+  // The board's lazy history (wswhiteboard stream.js) fetches the complete
+  // sections of the topics a "name=..." or "target=..." query names.
+  window.wbHistoryFetch = function (query) {
+    if (!rid || !window.fetch) return Promise.resolve([]);
+    return fetch("/s/" + rid + "/topic?" + query, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (res) { return res && Array.isArray(res.topics) ? res.topics : []; });
+  };
   // A deferred board swap lands still (no board motion), so the board never
   // moves under a just-blurred input.
   function swap(name, hash, html, still) {

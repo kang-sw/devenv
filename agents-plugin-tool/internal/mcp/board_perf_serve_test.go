@@ -53,7 +53,27 @@ func TestBoardPerfServe(t *testing.T) {
 	if open < 1 {
 		t.Fatal("WS_BOARD_PERF_SHAPE: the board needs at least one open topic")
 	}
+	// WS_BOARD_PERF_LOG_BATCH=n writes each topic in several batches: the
+	// body and first panel versions, then n log lines per batch, then the
+	// later versions, so the older batches fold into history gaps. Unset,
+	// each topic is one batch and every row stays live.
+	logBatch, _ := strconv.Atoi(os.Getenv("WS_BOARD_PERF_LOG_BATCH"))
 	f := newWhiteboardFixture(t)
+	apply := func(cmds string) {
+		if os.Getenv("WS_BOARD_PERF_FRAMED") == "" {
+			f.update(t, cmds)
+		} else if err := whiteboardFolder(f.root, f.key).Update(nil, func(s *wswhiteboard.State) error {
+			// Match the normal synthetic shape with a fixed authoring clock;
+			// daemon liveness still uses real time. Never rewrite stored logs.
+			_, problems := wswhiteboard.Apply(s, cmds, wswhiteboard.Env{Now: time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)})
+			if len(problems) != 0 {
+				return fmt.Errorf("fixture: %v", problems)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Panel IDs are numbered across the board in creation order.
 	nextPanel := 0
 	topic := func(name string, panels int, closeIt bool) {
@@ -69,6 +89,15 @@ func TestBoardPerfServe(t *testing.T) {
 		if name == "T00" {
 			b.WriteString(`<wb:add class="policy"><wb:title>Pick the rollout</wb:title><wb:option>Gradual</wb:option><wb:option>Immediate</wb:option></wb:add><wb:add class="technical"><wb:title>Use the shared helper</wb:title></wb:add>`)
 		}
+		cut := func() {
+			if logBatch <= 0 {
+				return
+			}
+			b.WriteString(`</wb:topic>`)
+			apply(b.String())
+			b.Reset()
+			fmt.Fprintf(&b, `<wb:topic name="%s">`, name)
+		}
 		ids := []int{}
 		for p := 0; p < panels; p++ {
 			nextPanel++
@@ -77,8 +106,12 @@ func TestBoardPerfServe(t *testing.T) {
 			b.WriteString(`</wb:panel>`)
 		}
 		for i := 0; i < lines; i++ {
+			if logBatch > 0 && i%logBatch == 0 {
+				cut()
+			}
 			fmt.Fprintf(&b, "<wb:log>%s line %03d: a compact **decision** note.</wb:log>", name, i)
 		}
+		cut()
 		for v := 1; v < versions; v++ {
 			for p, id := range ids {
 				fmt.Fprintf(&b, `<wb:panel id="p%d" recap="%s panel %d v%d">%s</wb:panel>`, id, name, p, v, panelBody(name, p, v))
@@ -88,18 +121,8 @@ func TestBoardPerfServe(t *testing.T) {
 			b.WriteString(`<wb:close result="Closed for the harness"/>`)
 		}
 		b.WriteString(`</wb:topic>`)
-		if os.Getenv("WS_BOARD_PERF_FRAMED") == "" {
-			f.update(t, b.String())
-		} else if err := whiteboardFolder(f.root, f.key).Update(nil, func(s *wswhiteboard.State) error {
-			// Match the normal synthetic shape with a fixed authoring clock;
-			// daemon liveness still uses real time. Never rewrite stored logs.
-			_, problems := wswhiteboard.Apply(s, b.String(), wswhiteboard.Env{Now: time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)})
-			if len(problems) != 0 {
-				return fmt.Errorf("fixture: %v", problems)
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
+		if cmds := b.String(); cmds != fmt.Sprintf(`<wb:topic name="%s"></wb:topic>`, name) {
+			apply(cmds)
 		}
 	}
 	for i := closed - 1; i >= 0; i-- {
