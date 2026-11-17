@@ -43,7 +43,7 @@ function fixture(store) {
   new Function('document', 'window', 'wsT', 'wsTn', 'fetch', FILES)(doc, win, wsT, wsT, fetchFS);
   new Function('document', 'window', MENTION)(doc, win);
   var owners = new Function('doc', 'window', 'root', 'live', 'fpane', 'chead', 'rid', 'post', 'toast', 'copyText', 'load', 'save', 'ctext',
-    'var filesTab, filesSheet;\n' + PAGE_FILES + '\nreturn { tab: filesTab, sheet: filesSheet };')(
+    'var filesTab, filesSheet, layoutMode = "tabs";\n' + PAGE_FILES + '\nreturn { tab: filesTab, sheet: filesSheet };')(
       doc, win, doc.documentElement, true, fpane, chead, 'session', (...a) => posts.push(a), () => {}, p => copies.push(p), load, save, ctext);
   var W = win.WsCards;
   W.mount(board, { key: 'ws.dashboard.cards.session', load, save, toolbar: { files: owners.sheet }, reveal: () => reveals.push(owners.sheet.el.hidden) });
@@ -95,8 +95,14 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
   p.W.register('other', { open() {} }); var other = p.W.open('other', {}); p.W.float(other);
   check('other kinds cannot float', other.el.hasAttribute('data-max'), false); other.close();
 
-  // The existing toolbar toggle still opens its own persistent sheet.
-  var toggle = p.W.toolbar().querySelector('.board-files'); toggle.click(); await settle();
+  // An owner can route to the left tab before the card framework maximizes.
+  var toggle = p.W.toolbar().querySelector('.board-files'), activate = p.owners.sheet.activate, activations = 0;
+  p.owners.sheet.activate = () => { activations++; return true; };
+  toggle.click(); await settle();
+  check('toolbar owner interception does not construct or maximize its sheet', [activations, p.owners.sheet.el.hidden, p.owners.sheet.el.hasAttribute('data-max'), toggle.getAttribute('aria-expanded'), p.owners.sheet.el.children.length], [1, true, false, 'false', 0]);
+  p.owners.sheet.activate = activate;
+  // The existing toolbar toggle still opens its own persistent sheet in tabs.
+  toggle.click(); await settle();
   check('toolbar sheet shares compact rows and footer without losing actions', [!!p.owners.sheet.el.querySelector('.fbar .ftabs'), !!p.owners.sheet.el.querySelector('.fsr .fseg'), p.owners.sheet.el.querySelector('.fopts').hidden, p.owners.sheet.el.querySelectorAll('.ffooter .fattachment button').length], [true, true, true, 2]);
   check('toolbar toggle keeps sheet behavior', [p.owners.sheet.el.hidden, p.owners.sheet.el.hasAttribute('data-max')], [false, true]);
   fire(p.owners.sheet.el.querySelector('.fentry'), 'dblclick'); await settle();
