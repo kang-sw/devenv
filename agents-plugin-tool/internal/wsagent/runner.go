@@ -447,7 +447,7 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	}
 	c.refreshHeld()
 	if rec.Lead {
-		_, _, _ = cachedPermissionSelection(dir)
+		_, _, _ = refreshPermissionSelection(dir)
 		r.summaryMu.Lock()
 		if r.summaryOwners == nil {
 			r.summaryOwners = map[string]*conv{}
@@ -861,6 +861,9 @@ func (r *Runner) Get(id string) (State, error) {
 	switch {
 	case open:
 		c.refreshHeld() // explicit API reads retain authoritative held counts
+		if c.record().Lead {
+			_, _, _ = refreshPermissionSelection(c.dir)
+		}
 		return c.state(), nil
 	case closed:
 		return st, nil

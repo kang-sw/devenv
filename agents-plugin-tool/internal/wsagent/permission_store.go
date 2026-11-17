@@ -37,6 +37,17 @@ func cachedPermissionSelection(dir string) (PermissionLevel, bool, error) {
 	return slot.level, slot.explicit, slot.err
 }
 
+// refreshPermissionSelection is for explicit API/admission reads, not spawn
+// projection. A new launch must never trust an earlier cached permission.
+func refreshPermissionSelection(dir string) (PermissionLevel, bool, error) {
+	slot := permissionSlot(dir)
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	slot.level, slot.explicit, slot.err = readPermissionSelection(dir)
+	slot.loaded = true
+	return slot.level, slot.explicit, slot.err
+}
+
 // readPermissionMembers distinguishes absence from an invalid existing selection.
 func readPermissionMembers(dir string) (map[string]json.RawMessage, PermissionLevel, bool, error) {
 	path := filepath.Join(dir, "permission.json")
