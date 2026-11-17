@@ -44,6 +44,11 @@ Delivery is four stages:
    reasoning, and `ws/agent.*` session lightweighting (the long-term cost answer
    from (06)).
 
+Working order (owner 2026-11-17 22:10, (70)=b, (69)): catalog -> Codex ->
+Antigravity -> single session holder -> exec, with Pi last; (70)=b moves the
+stage-3 Codex and Antigravity adapters ahead of the stage-2 single session
+holder and exec.
+
 Independent, not stage-bound: the mailbox in-memory-first store.
 
 ## Non-Scope
@@ -106,11 +111,11 @@ Stage 2 (hosted-first migration, reference implementation Claude):
 Stage 3 (tier-1 harnesses; each prerequisite: the catalog ticket):
 
 - `261115-feat-ws-hosted-codex-adapter-contract` - Codex first; range-based
-  catalog values and one hosted lead conversation. (799)=a is unconfirmed; the
-  Codex version/protocol is asked at stage-3 start (03).
+  catalog values and one hosted lead conversation. Protocol: the Codex
+  app-server (owner answered (03), 2026-11-17 22:10).
 - `261117-feat-ws-hosted-antigravity-adapter` - Antigravity after Codex; revives
   the dropped `261114-feat-ws-hosted-antigravity-acp-adapter` as a new stem;
-  account/access rechecked at stage-3 start.
+  account access confirmed (owner 2026-11-17 22:10).
 - Planned (not yet cut): the Pi hosted backend as a port of the Codex adapter and
   catalog profile (25), last.
 
@@ -172,17 +177,21 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
 - **Harness order (25).** Implementation and verification order is Claude, Codex,
   Antigravity, Pi. Pi is driven only with GPT models, so the Pi hosted backend is
   a port of the Codex adapter and catalog profile, not a separate Pi-first design.
-  Recorded as assumed-ok by the lead; the owner may veto.
-- **Codex and Antigravity are both tier-1 hosted harnesses (02).** (799)=a for
-  Codex was assumed while the owner was asleep and is not confirmed (03); the
-  Codex version/protocol is asked when stage 3 starts.
+  Recorded as assumed-ok by the lead; the owner may veto. The working order
+  across stages is catalog -> Codex -> Antigravity -> single session holder ->
+  exec, with Pi last ((70)=b, (69), 2026-11-17 22:10).
+- **Codex and Antigravity are both tier-1 hosted harnesses (02).** The Codex
+  protocol is the app-server (owner answered (03), 2026-11-17 22:10,
+  superseding the unconfirmed (799)=a); Antigravity account access is
+  confirmed (owner 2026-11-17 22:10).
 - **Capability catalog is the common interface (07), (08)=c, (20)-(22), (24).**
   Items are declared `native` / `ws-substitute` / `unsupported` plus a range, per
   `harness@version` with `since` / `until`. Admission conditions: headless JSON
   event streaming, and HTTP MCP server injection. Startup reads the version and
   lightly checks the init shape; out-of-range versions (above or below) run
   loudly with the nearest-version profile. Verification is per-version recorded
-  stream fixtures on remote w5090 (never local `go test`). Details live in
+  stream fixtures; fixtures and Go tests run locally on the macOS home machine
+  ((68), 2026-11-17 22:10). Details live in
   `261117-feat-ws-harness-capability-catalog`.
 - **MCP transport (24).** Hosted sessions connect by HTTP direct JSON-RPC with a
   per-session token (loopback only, re-issued per process start); no intermediary
@@ -190,12 +199,13 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   additive). Whether Pi supports HTTP MCP natively without the extension is
   verified first, because the Pi extension retirement premise depends on it.
 - **Delegation is always `ws/agent.*` (06)=a, (09)=a, (10)=c, (11), (12).**
-  `agent.spawn` / `agent.stop` / `agent.list`; no `wait`, `transcript` or
+  `agent.spawn` / `agent.interrupt` / `agent.list` / `agent.tiers` ((60)=a
+  removed `agent.stop`); no `wait`, `transcript` or
   `agent.send`; a single `mailbox.send`. Daemon-owned agent addresses route in
   memory. Relation is computed from lineage at delivery, not stored. Hire stays
-  separate; worker-profile caps apply; `pi.*` alias wording superseded: hidden now, handlers removed next minor (owner 19:16, (54)=b). No depth cap
-  (`MaxSpawnDepth` removed); a per-root-tree concurrent-agent cap config key
-  bounds runaway. Native subagents are removed in hosted sessions (leads and
+  separate; worker-profile caps apply; `pi.*` alias wording superseded: hidden now, handlers removed next minor (owner 19:16, (54)=b). Spawn tree
+  bounds ((72), owner 22:27, reversing (10)=c): depth cap 4, per-agent width
+  cap 99, no concurrent-agent cap; detail in the agent-tools ticket. Native subagents are removed in hosted sessions (leads and
   workers) (29)=ok.
 - **Single holder and exec (16), (17)=a, (18), (19)=a.** One PC-wide holder with
   one daemon connection serves conversations and exec jobs; exec output lives in
